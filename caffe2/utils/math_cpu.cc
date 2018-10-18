@@ -76,7 +76,7 @@ namespace math {
 // (transpose) if the argument TransA or TransB is set to CblasNoTrans or
 // CblasTrans, respectively, for each of A and B.
 template <>
-C10_EXPORT void Gemm<float, CPUContext>(
+void Gemm<float, CPUContext>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int M,
@@ -134,7 +134,7 @@ C10_EXPORT void Gemm<float, CPUContext>(
 }
 
 template <>
-C10_EXPORT void GemmEx<float, CPUContext>(
+void GemmEx<float, CPUContext>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int M,
@@ -206,7 +206,7 @@ C10_EXPORT void GemmEx<float, CPUContext>(
 }
 
 template <>
-C10_EXPORT void Gemv<float, CPUContext>(
+void Gemv<float, CPUContext>(
     const CBLAS_TRANSPOSE trans_A,
     const int M,
     const int N,
@@ -245,7 +245,7 @@ C10_EXPORT void Gemv<float, CPUContext>(
 
 #define CAFFE2_SPECIALIZED_DOT(T)                                        \
   template <>                                                            \
-  C10_EXPORT void Dot<T, CPUContext>(                                    \
+  void Dot<T, CPUContext>(                                    \
       const int N, const T* a, const T* b, T* y, CPUContext* context) {  \
     *y = ConstEigenVectorMap<T>(a, N).dot(ConstEigenVectorMap<T>(b, N)); \
   }
@@ -254,12 +254,12 @@ CAFFE2_SPECIALIZED_DOT(float)
 
 #define CAFFE2_SPECIALIZED_AXPY(T)                                          \
   template <>                                                               \
-  C10_EXPORT void Axpy<T, CPUContext>(                                      \
+  void Axpy<T, CPUContext>(                                      \
       const int N, const T alpha, const T* x, T* Y, CPUContext* context) {  \
     EigenVectorMap<T>(Y, N) += ConstEigenVectorMap<T>(x, N) * alpha;        \
   }                                                                         \
   template <>                                                               \
-  C10_EXPORT void Axpy<T, CPUContext>(                                      \
+  void Axpy<T, CPUContext>(                                      \
       const int N, const T* alpha, const T* x, T* Y, CPUContext* context) { \
     EigenVectorMap<T>(Y, N) += ConstEigenVectorMap<T>(x, N) * (*alpha);     \
   }
@@ -268,7 +268,7 @@ CAFFE2_SPECIALIZED_AXPY(float)
 
 #define CAFFE2_SPECIALIZED_AXPBY(T)                                     \
   template <>                                                           \
-  C10_EXPORT void Axpby<T, T, CPUContext>(                              \
+  void Axpby<T, T, CPUContext>(                              \
       const int N,                                                      \
       const T alpha,                                                    \
       const T* x,                                                       \
@@ -279,7 +279,7 @@ CAFFE2_SPECIALIZED_AXPY(float)
     y_arr = y_arr * beta + ConstEigenVectorArrayMap<T>(x, N) * alpha;   \
   }                                                                     \
   template <>                                                           \
-  C10_EXPORT void Axpby<T, T, CPUContext>(                              \
+  void Axpby<T, T, CPUContext>(                              \
       const int N,                                                      \
       const T* alpha,                                                   \
       const T* x,                                                       \
@@ -295,7 +295,7 @@ CAFFE2_SPECIALIZED_AXPBY(float)
 #else // CAFFE2_USE_EIGEN_FOR_BLAS
 
 template <>
-C10_EXPORT void Gemm<float, CPUContext>(
+void Gemm<float, CPUContext>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int M,
@@ -328,7 +328,7 @@ C10_EXPORT void Gemm<float, CPUContext>(
 }
 
 template <>
-C10_EXPORT void GemmEx<float, CPUContext>(
+void GemmEx<float, CPUContext>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int M,
@@ -361,7 +361,7 @@ C10_EXPORT void GemmEx<float, CPUContext>(
 }
 
 template <>
-C10_EXPORT void Gemv<float, CPUContext>(
+void Gemv<float, CPUContext>(
     const CBLAS_TRANSPOSE trans_A,
     const int M,
     const int N,
@@ -377,7 +377,7 @@ C10_EXPORT void Gemv<float, CPUContext>(
 
 #define CAFFE2_SPECIALIZED_SCALE(TAlpha, TData, prefix)          \
   template <>                                                    \
-  C10_EXPORT void Scale<TAlpha, TData, CPUContext>(              \
+  void Scale<TAlpha, TData, CPUContext>(              \
       const int n,                                               \
       const TAlpha alpha,                                        \
       const TData* x,                                            \
@@ -391,7 +391,7 @@ C10_EXPORT void Gemv<float, CPUContext>(
     }                                                            \
   }                                                              \
   template <>                                                    \
-  C10_EXPORT void Scale<TAlpha, TData, CPUContext>(              \
+  void Scale<TAlpha, TData, CPUContext>(              \
       const int n,                                               \
       const TAlpha* alpha,                                       \
       const TData* x,                                            \
@@ -411,7 +411,7 @@ CAFFE2_SPECIALIZED_SCALE(float, double, d)
 
 #define CAFFE2_SPECIALIZED_DOT(T, prefix)                       \
   template <>                                                   \
-  C10_EXPORT void Dot<T, CPUContext>(                           \
+  void Dot<T, CPUContext>(                           \
       const int N, const T* a, const T* b, T* y, CPUContext*) { \
     *y = cblas_##prefix##dot(N, a, 1, b, 1);                    \
   }
@@ -420,12 +420,12 @@ CAFFE2_SPECIALIZED_DOT(float, s)
 
 #define CAFFE2_SPECIALIZED_AXPY(T, prefix)                          \
   template <>                                                       \
-  C10_EXPORT void Axpy<T, CPUContext>(                              \
+  void Axpy<T, CPUContext>(                              \
       const int N, const T alpha, const T* x, T* y, CPUContext*) {  \
     cblas_##prefix##axpy(N, alpha, x, 1, y, 1);                     \
   }                                                                 \
   template <>                                                       \
-  C10_EXPORT void Axpy<T, CPUContext>(                              \
+  void Axpy<T, CPUContext>(                              \
       const int N, const T* alpha, const T* x, T* y, CPUContext*) { \
     cblas_##prefix##axpy(N, *alpha, x, 1, y, 1);                    \
   }
@@ -437,7 +437,7 @@ CAFFE2_SPECIALIZED_AXPY(float, s)
 #ifdef CAFFE2_USE_MKL
 #define CAFFE2_SPECIALIZED_AXPBY(T, prefix)              \
   template <>                                            \
-  C10_EXPORT void Axpby<T, T, CPUContext>(               \
+  void Axpby<T, T, CPUContext>(               \
       const int N,                                       \
       const T alpha,                                     \
       const T* x,                                        \
@@ -447,7 +447,7 @@ CAFFE2_SPECIALIZED_AXPY(float, s)
     cblas_##prefix##axpby(N, alpha, x, 1, beta, y, 1);   \
   }                                                      \
   template <>                                            \
-  C10_EXPORT void Axpby<T, T, CPUContext>(               \
+  void Axpby<T, T, CPUContext>(               \
       const int N,                                       \
       const T* alpha,                                    \
       const T* x,                                        \
@@ -459,7 +459,7 @@ CAFFE2_SPECIALIZED_AXPY(float, s)
 #else // CAFFE2_USE_MKL
 #define CAFFE2_SPECIALIZED_AXPBY(T, prefix)      \
   template <>                                    \
-  C10_EXPORT void Axpby<T, T, CPUContext>(       \
+  void Axpby<T, T, CPUContext>(       \
       const int N,                               \
       const T alpha,                             \
       const T* x,                                \
@@ -470,7 +470,7 @@ CAFFE2_SPECIALIZED_AXPY(float, s)
     cblas_##prefix##axpy(N, alpha, x, 1, y, 1);  \
   }                                              \
   template <>                                    \
-  C10_EXPORT void Axpby<T, T, CPUContext>(       \
+  void Axpby<T, T, CPUContext>(       \
       const int N,                               \
       const T* alpha,                            \
       const T* x,                                \
@@ -488,7 +488,7 @@ CAFFE2_SPECIALIZED_AXPBY(float, s)
 
 #define CAFFE2_SPECIALIZED_SCALE(TAlpha, TData)                        \
   template <>                                                          \
-  C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                    \
+  void Scale<TAlpha, TData, CPUContext>(                    \
       const int n,                                                     \
       const TAlpha alpha,                                              \
       const TData* x,                                                  \
@@ -498,7 +498,7 @@ CAFFE2_SPECIALIZED_AXPBY(float, s)
         ConstEigenVectorMap<TData>(x, n) * static_cast<TData>(alpha);  \
   }                                                                    \
   template <>                                                          \
-  C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                    \
+  void Scale<TAlpha, TData, CPUContext>(                    \
       const int n,                                                     \
       const TAlpha* alpha,                                             \
       const TData* x,                                                  \
@@ -517,7 +517,7 @@ CAFFE2_SPECIALIZED_SCALE(std::int64_t, std::int64_t)
 #undef CAFFE2_SPECIALIZED_SCALE
 
 template <>
-C10_EXPORT void GemmBatched<float, CPUContext>(
+void GemmBatched<float, CPUContext>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
@@ -563,7 +563,7 @@ C10_EXPORT void GemmBatched<float, CPUContext>(
 }
 
 template <>
-C10_EXPORT void GemmStridedBatched<float, CPUContext>(
+void GemmStridedBatched<float, CPUContext>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
@@ -634,7 +634,7 @@ C10_EXPORT void GemmStridedBatched<float, CPUContext>(
 
 #define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Funcname, OriginalFunc, ...) \
   template <>                                                          \
-  C10_EXPORT void Funcname<T, CPUContext>(                             \
+  void Funcname<T, CPUContext>(                             \
       const int N, const T* x, T* y, CPUContext*) {                    \
     OriginalFunc(N, x, y, ##__VA_ARGS__);                              \
   }
@@ -684,7 +684,7 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(double, Inv, vdInv)
 
 #define DELEGATE_SINCOS_FUNCTION(T, OriginalFunc)           \
   template <>                                               \
-  C10_EXPORT void SinCos<T, CPUContext>(                    \
+  void SinCos<T, CPUContext>(                    \
       const int N, const T* a, T* ys, T* yc, CPUContext*) { \
     OriginalFunc(N, a, ys, yc);                             \
   }
@@ -694,7 +694,7 @@ DELEGATE_SINCOS_FUNCTION(double, vdSinCos)
 
 #define DELEGATE_POWX_FUNCTION(T, OriginalFunc)          \
   template <>                                            \
-  C10_EXPORT void Powx<T, CPUContext>(                   \
+  void Powx<T, CPUContext>(                   \
       const int N, const T* a, T b, T* y, CPUContext*) { \
     OriginalFunc(N, a, b, y);                            \
   }
@@ -704,7 +704,7 @@ DELEGATE_POWX_FUNCTION(double, vdPowx)
 
 #define DELEGATE_SIMPLE_BINARY_FUNCTION(T, Func, FuncImpl)      \
   template <>                                                   \
-  C10_EXPORT void Func<T, CPUContext>(                          \
+  void Func<T, CPUContext>(                          \
       const int N, const T* A, const T* B, T* C, CPUContext*) { \
     FuncImpl(N, A, B, C);                                       \
   }
@@ -722,7 +722,7 @@ DELEGATE_SIMPLE_BINARY_FUNCTION(double, Div, vdDiv)
 
 #define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Funcname, expr)               \
   template <>                                                           \
-  C10_EXPORT void Funcname<T, CPUContext>(                              \
+  void Funcname<T, CPUContext>(                              \
       const int N, const T* x, T* y, CPUContext*) {                     \
     EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).expr(); \
   }
@@ -753,7 +753,7 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(double, Rsqrt, rsqrt)
 
 #define DELEGATE_SINCOS_FUNCTION(T)                                     \
   template <>                                                           \
-  C10_EXPORT void SinCos<T, CPUContext>(                                \
+  void SinCos<T, CPUContext>(                                \
       const int N, const T* x, T* ys, T* yc, CPUContext*) {             \
     EigenVectorMap<T>(ys, N) = ConstEigenVectorArrayMap<T>(x, N).sin(); \
     EigenVectorMap<T>(yc, N) = ConstEigenVectorArrayMap<T>(x, N).cos(); \
@@ -764,7 +764,7 @@ DELEGATE_SINCOS_FUNCTION(double)
 
 #define DELEGATE_TANH_FUNCTION(T)                                             \
   template <>                                                                 \
-  C10_EXPORT void Tanh<T, CPUContext>(                                        \
+  void Tanh<T, CPUContext>(                                        \
       const int N, const T* X, T* Y, CPUContext*) {                           \
     EigenVectorMap<T>(Y, N) = T(1) -                                          \
         ((ConstEigenVectorArrayMap<T>(X, N) * T(2)).exp() + T(1)).inverse() * \
@@ -776,7 +776,7 @@ DELEGATE_TANH_FUNCTION(double)
 
 #define DELEGATE_CBRT_FUNCTION(T)                                   \
   template <>                                                       \
-  C10_EXPORT void Cbrt<T, CPUContext>(                              \
+  void Cbrt<T, CPUContext>(                              \
       const int N, const T* X, T* Y, CPUContext*) {                 \
     std::transform(X, X + N, Y, [](const T x) { return cbrt(x); }); \
   }
@@ -786,7 +786,7 @@ DELEGATE_CBRT_FUNCTION(double)
 
 #define DELEGATE_POWX_FUNCTION(T)                                       \
   template <>                                                           \
-  C10_EXPORT void Powx<T, CPUContext>(                                  \
+  void Powx<T, CPUContext>(                                  \
       const int N, const T* a, const T b, T* y, CPUContext*) {          \
     EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(a, N).pow(b); \
   }
@@ -795,7 +795,7 @@ DELEGATE_POWX_FUNCTION(float)
 
 #define DELEGATE_SINH_FUNCTION(T)                                 \
   template <>                                                     \
-  C10_EXPORT void Sinh<T, CPUContext>(                            \
+  void Sinh<T, CPUContext>(                            \
       const int N, const T* X, T* Y, CPUContext*) {               \
     ConstEigenVectorArrayMap<T> X_arr(X, N);                      \
     EigenVectorMap<T>(Y, N) = (X_arr.exp() - (-X_arr).exp()) / 2; \
@@ -806,7 +806,7 @@ DELEGATE_SINH_FUNCTION(double)
 
 #define DELEGATE_COSH_FUNCTION(T)                                 \
   template <>                                                     \
-  C10_EXPORT void Cosh<T, CPUContext>(                            \
+  void Cosh<T, CPUContext>(                            \
       const int N, const T* X, T* Y, CPUContext*) {               \
     ConstEigenVectorArrayMap<T> X_arr(X, N);                      \
     EigenVectorMap<T>(Y, N) = (X_arr.exp() + (-X_arr).exp()) / 2; \
@@ -817,7 +817,7 @@ DELEGATE_COSH_FUNCTION(double)
 
 #define DELEGATE_INV_FUNCTION(T)                                           \
   template <>                                                              \
-  C10_EXPORT void Inv<T, CPUContext>(                                      \
+  void Inv<T, CPUContext>(                                      \
       const int N, const T* x, T* y, CPUContext*) {                        \
     EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).inverse(); \
   }
@@ -829,7 +829,7 @@ DELEGATE_INV_FUNCTION(double)
 
 #define DELEGATE_NEG_FUNCTION(T)                             \
   template <>                                                \
-  C10_EXPORT void Neg<T, CPUContext>(                        \
+  void Neg<T, CPUContext>(                        \
       const int N, const T* x, T* y, CPUContext*) {          \
     EigenVectorMap<T>(y, N) = -ConstEigenVectorMap<T>(x, N); \
   }
@@ -841,7 +841,7 @@ DELEGATE_NEG_FUNCTION(std::int64_t)
 
 #define DELEGATE_SIGN_FUNCTION(T)                                       \
   template <>                                                           \
-  C10_EXPORT void Sign<T, CPUContext>(                                  \
+  void Sign<T, CPUContext>(                                  \
       const int N, const T* x, T* y, CPUContext*) {                     \
     EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).sign(); \
   }
@@ -853,7 +853,7 @@ DELEGATE_SIGN_FUNCTION(std::int64_t)
 
 #define DELEGATE_ABS_FUNCTION(T)                                       \
   template <>                                                          \
-  C10_EXPORT void Abs<T, CPUContext>(                                  \
+  void Abs<T, CPUContext>(                                  \
       const int N, const T* x, T* y, CPUContext*) {                    \
     EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).abs(); \
   }
@@ -867,7 +867,7 @@ DELEGATE_ABS_FUNCTION(std::int64_t)
 
 #define DELEGATE_CUBE_FUNCTION(T)                                       \
   template <>                                                           \
-  C10_EXPORT void Cube<T, CPUContext>(                                  \
+  void Cube<T, CPUContext>(                                  \
       const int N, const T* X, T* Y, CPUContext*) {                     \
     EigenVectorMap<T>(Y, N) = ConstEigenVectorArrayMap<T>(X, N).cube(); \
   }
@@ -879,7 +879,7 @@ DELEGATE_CUBE_FUNCTION(std::int64_t)
 
 #define EIGEN_SIMPLE_BINARY_FUNCTION(T, Func, expr)             \
   template <>                                                   \
-  C10_EXPORT void Func<T, CPUContext>(                          \
+  void Func<T, CPUContext>(                          \
       const int N, const T* A, const T* B, T* C, CPUContext*) { \
     EigenVectorMap<T>(C, N) = ConstEigenVectorArrayMap<T>(A, N) \
         expr ConstEigenVectorArrayMap<T>(B, N);                 \
@@ -917,7 +917,7 @@ DEFINE_SIMPLE_BINARY_FUNCTION(Div, /)
 
 #define CAFFE2_SPECIALIZED_SET(T)                         \
   template <>                                             \
-  C10_EXPORT void Set<T, CPUContext>(                     \
+  void Set<T, CPUContext>(                     \
       const size_t N, const T alpha, T* Y, CPUContext*) { \
     if (N == 0) {                                         \
       return;                                             \
@@ -945,7 +945,7 @@ CAFFE2_SPECIALIZED_SET(uint16_t);
 
 #define CAFFE2_SPECIALIZED_REDUCEMIN(T)                \
   template <>                                          \
-  C10_EXPORT void ReduceMin<T, CPUContext>(            \
+  void ReduceMin<T, CPUContext>(            \
       const int N,                                     \
       const T* x,                                      \
       T* y,                                            \
@@ -958,7 +958,7 @@ CAFFE2_SPECIALIZED_REDUCEMIN(float)
 
 #define CAFFE2_SPECIALIZED_REDUCEMAX(T)                \
   template <>                                          \
-  C10_EXPORT void ReduceMax<T, CPUContext>(            \
+  void ReduceMax<T, CPUContext>(            \
       const int N,                                     \
       const T* x,                                      \
       T* y,                                            \
@@ -1004,7 +1004,7 @@ struct SquaredL2NormFunctor {
 
 #define DELEGATE_ROWWISE_REDUCE_FUNCTION(Func, EigenOp)                    \
   template <typename T>                                                    \
-  C10_EXPORT void Rowwise##Func(                                           \
+  void Rowwise##Func(                                           \
       const int rows, const int cols, const T alpha, const T* X, T* Y) {   \
     EigenVectorMap<T>(Y, rows) =                                           \
         ConstEigenMatrixMap<T>(X, cols, rows).colwise().EigenOp() * alpha; \
@@ -1019,7 +1019,7 @@ DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceL2, norm)
 
 #define DELEGATE_COLWISE_REDUCE_FUNCTION(Func, EigenOp)                    \
   template <typename T>                                                    \
-  C10_EXPORT void Colwise##Func(                                           \
+  void Colwise##Func(                                           \
       const int rows, const int cols, const T alpha, const T* X, T* Y) {   \
     EigenVectorMap<T>(Y, cols) =                                           \
         ConstEigenMatrixMap<T>(X, cols, rows).rowwise().EigenOp() * alpha; \
@@ -1033,7 +1033,7 @@ DELEGATE_COLWISE_REDUCE_FUNCTION(ReduceL2, norm)
 #undef DELEGATE_COLWISE_REDUCE_FUNCTION
 
 template <typename T>
-C10_EXPORT void BothEndsReduceMin(
+void BothEndsReduceMin(
     const int pre,
     const int mid,
     const int nxt,
@@ -1057,7 +1057,7 @@ C10_EXPORT void BothEndsReduceMin(
 }
 
 template <typename T>
-C10_EXPORT void BothEndsReduceMax(
+void BothEndsReduceMax(
     const int pre,
     const int mid,
     const int nxt,
@@ -1079,7 +1079,7 @@ C10_EXPORT void BothEndsReduceMax(
 }
 
 template <typename T>
-C10_EXPORT void BothEndsReduceSum(
+void BothEndsReduceSum(
     const int pre,
     const int mid,
     const int nxt,
@@ -1100,7 +1100,7 @@ C10_EXPORT void BothEndsReduceSum(
 }
 
 template <typename T>
-C10_EXPORT void BothEndsReduceMean(
+void BothEndsReduceMean(
     const int pre,
     const int mid,
     const int nxt,
@@ -1121,7 +1121,7 @@ C10_EXPORT void BothEndsReduceMean(
 }
 
 template <typename T>
-C10_EXPORT void BothEndsReduceL1(
+void BothEndsReduceL1(
     const int pre,
     const int mid,
     const int nxt,
@@ -1148,7 +1148,7 @@ C10_EXPORT void BothEndsReduceL1(
 }
 
 template <typename T>
-C10_EXPORT void BothEndsReduceL2(
+void BothEndsReduceL2(
     const int pre,
     const int mid,
     const int nxt,
@@ -1168,7 +1168,7 @@ C10_EXPORT void BothEndsReduceL2(
 }
 
 template <typename T, class Reducer>
-C10_EXPORT void ReduceTensor(
+void ReduceTensor(
     const int ndim,
     const int* X_dims,
     const int* Y_dims,
@@ -1196,7 +1196,7 @@ C10_EXPORT void ReduceTensor(
 
 #define DELEGATE_REDUCE_FUNCTION(T, Func, reducer, init, is_norm)              \
   template <>                                                                  \
-  C10_EXPORT void Func<T, CPUContext>(                                         \
+   void Func<T, CPUContext>(                                         \
       const int num_dims,                                                      \
       const int* dims,                                                         \
       const int num_axes,                                                      \
@@ -1338,7 +1338,7 @@ DELEGATE_REDUCE_FUNCTION(
 
 #define CAFFE2_SPECIALIZED_REDUCE_MEAN(T)                                      \
   template <>                                                                  \
-  C10_EXPORT void ReduceMean<T, CPUContext>(                                   \
+  void ReduceMean<T, CPUContext>(                                   \
       const int num_dims,                                                      \
       const int* dims,                                                         \
       const int num_axes,                                                      \
@@ -1405,7 +1405,7 @@ CAFFE2_SPECIALIZED_REDUCE_MEAN(double)
 
 #define CAFFE2_SPECIALIZED_REDUCE_L2(T)                                        \
   template <>                                                                  \
-  C10_EXPORT void ReduceL2<T, CPUContext>(                                     \
+  void ReduceL2<T, CPUContext>(                                     \
       const int num_dims,                                                      \
       const int* dims,                                                         \
       const int num_axes,                                                      \
@@ -1475,7 +1475,7 @@ CAFFE2_SPECIALIZED_REDUCE_L2(double)
 namespace {
 
 template <typename T>
-C10_EXPORT void BroadcastImpl(
+void BroadcastImpl(
     const int X_ndim,
     const int* X_dims,
     const int Y_ndim,
@@ -1508,7 +1508,7 @@ C10_EXPORT void BroadcastImpl(
 
 #define CAFFE2_SPECIALIZED_BROADCAST(T)                                     \
   template <>                                                               \
-  C10_EXPORT void Broadcast<T, CPUContext>(                                 \
+  void Broadcast<T, CPUContext>(                                 \
       const int X_ndim,                                                     \
       const int* X_dims,                                                    \
       const int Y_ndim,                                                     \
@@ -1528,7 +1528,7 @@ CAFFE2_SPECIALIZED_BROADCAST(double)
 namespace {
 
 template <typename T>
-C10_EXPORT void RowwiseMoments(
+void RowwiseMoments(
     const int rows,
     const int cols,
     const T* X,
@@ -1542,7 +1542,7 @@ C10_EXPORT void RowwiseMoments(
 }
 
 template <typename T>
-C10_EXPORT void ColwiseMoments(
+void ColwiseMoments(
     const int rows,
     const int cols,
     const T* X,
@@ -1564,7 +1564,7 @@ C10_EXPORT void ColwiseMoments(
 }
 
 template <typename T>
-C10_EXPORT void BothEndsMoments(
+void BothEndsMoments(
     const int pre,
     const int mid,
     const int nxt,
@@ -1589,7 +1589,7 @@ C10_EXPORT void BothEndsMoments(
 }
 
 template <typename T>
-C10_EXPORT void MomentsImpl(
+void MomentsImpl(
     const int num_dims,
     const int* dims,
     const int num_axes,
@@ -1656,7 +1656,7 @@ C10_EXPORT void MomentsImpl(
 
 #define CAFFE2_SPECIALIZED_MOMENTS(T)                                \
   template <>                                                        \
-  C10_EXPORT void Moments<T, CPUContext>(                            \
+  void Moments<T, CPUContext>(                            \
       const int num_dims,                                            \
       const int* dims,                                               \
       const int num_axes,                                            \
@@ -1687,7 +1687,7 @@ CAFFE2_SPECIALIZED_INV_STD(float)
 
 #define CAFFE2_SPECIALIZED_ROWWISEMAX(T)                         \
   template <>                                                    \
-  C10_EXPORT void RowwiseMax<T, CPUContext>(                     \
+  void RowwiseMax<T, CPUContext>(                     \
       const int N, const int D, const T* x, T* y, CPUContext*) { \
     EigenVectorMap<T>(y, N) =                                    \
         ConstEigenMatrixMap<T>(x, D, N).colwise().maxCoeff();    \
@@ -1697,7 +1697,7 @@ CAFFE2_SPECIALIZED_ROWWISEMAX(float)
 
 #define CAFFE2_SPECIALIZED_COLWISEMAX(T)                         \
   template <>                                                    \
-  C10_EXPORT void ColwiseMax<T, CPUContext>(                     \
+  void ColwiseMax<T, CPUContext>(                     \
       const int N, const int D, const T* x, T* y, CPUContext*) { \
     EigenVectorMap<T>(y, D) =                                    \
         ConstEigenMatrixMap<T>(x, D, N).rowwise().maxCoeff();    \
@@ -1707,7 +1707,7 @@ CAFFE2_SPECIALIZED_COLWISEMAX(float)
 
 #define CAFFE2_SPECIALIZED_ELEMWISEMAX(T)                                   \
   template <>                                                               \
-  C10_EXPORT void ElemwiseMax<T, CPUContext>(                               \
+  void ElemwiseMax<T, CPUContext>(                               \
       const int N, const T* x, const T* y, T* z, CPUContext* /*context*/) { \
     std::transform(x, x + N, y, z, [](const T& x_i, const T& y_i) {         \
       return std::max(x_i, y_i);                                            \
@@ -1718,7 +1718,7 @@ CAFFE2_SPECIALIZED_ELEMWISEMAX(float)
 
 #define CAFFE2_SPECIALIZED_MAXIMUM(T)                                          \
   template <>                                                                  \
-  C10_EXPORT void Maximum<T, CPUContext>(                                      \
+  void Maximum<T, CPUContext>(                                      \
       const int N, const float alpha, const T* x, T* y, CPUContext* context) { \
     std::transform(                                                            \
         x, x + N, y, [&alpha](const T& x_i) { return std::max(x_i, alpha); }); \
@@ -1731,7 +1731,7 @@ CAFFE2_SPECIALIZED_MAXIMUM(float)
 
 #define DELEGATE_EIGEN_2D_BROADCAST_1ST_BINARY_FUNCTION(T, Func, expr) \
   template <>                                                          \
-  C10_EXPORT void Rowwise##Func<T, CPUContext, true>(                  \
+  void Rowwise##Func<T, CPUContext, true>(                  \
       const int rows,                                                  \
       const int cols,                                                  \
       const T* A,                                                      \
@@ -1748,7 +1748,7 @@ CAFFE2_SPECIALIZED_MAXIMUM(float)
     }                                                                  \
   }                                                                    \
   template <>                                                          \
-  C10_EXPORT void Colwise##Func<T, CPUContext, true>(                  \
+  void Colwise##Func<T, CPUContext, true>(                  \
       const int rows,                                                  \
       const int cols,                                                  \
       const T* A,                                                      \
@@ -1768,7 +1768,7 @@ CAFFE2_SPECIALIZED_MAXIMUM(float)
 
 #define DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION(T, Func, expr) \
   template <>                                                          \
-  C10_EXPORT void Rowwise##Func<T, CPUContext, false>(                 \
+  void Rowwise##Func<T, CPUContext, false>(                 \
       const int rows,                                                  \
       const int cols,                                                  \
       const T* A,                                                      \
@@ -1785,7 +1785,7 @@ CAFFE2_SPECIALIZED_MAXIMUM(float)
     }                                                                  \
   }                                                                    \
   template <>                                                          \
-  C10_EXPORT void Colwise##Func<T, CPUContext, false>(                 \
+  void Colwise##Func<T, CPUContext, false>(                 \
       const int rows,                                                  \
       const int cols,                                                  \
       const T* A,                                                      \
@@ -1821,7 +1821,7 @@ DEFINE_EIGEN_2D_BROADCAST_BINARY_FUNCTION(Mul, *)
 
 #define DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(T)           \
   template <>                                               \
-  C10_EXPORT void RowwiseSub<T, CPUContext, true>(          \
+  void RowwiseSub<T, CPUContext, true>(          \
       const int rows,                                       \
       const int cols,                                       \
       const T* A,                                           \
@@ -1833,7 +1833,7 @@ DEFINE_EIGEN_2D_BROADCAST_BINARY_FUNCTION(Mul, *)
         ConstEigenVectorArrayMap<T>(A, cols);               \
   }                                                         \
   template <>                                               \
-  C10_EXPORT void ColwiseSub<T, CPUContext, true>(          \
+  void ColwiseSub<T, CPUContext, true>(          \
       const int rows,                                       \
       const int cols,                                       \
       const T* A,                                           \
@@ -1855,7 +1855,7 @@ DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(std::int64_t)
 
 #define DEFINE_EIGEN_2D_BROADCAST_DIV_FUNCTION(T)                  \
   template <>                                                      \
-  C10_EXPORT void RowwiseDiv<T, CPUContext, true>(                 \
+  void RowwiseDiv<T, CPUContext, true>(                 \
       const int rows,                                              \
       const int cols,                                              \
       const T* A,                                                  \
@@ -1867,7 +1867,7 @@ DEFINE_EIGEN_2D_BROADCAST_SUB_FUNCTION(std::int64_t)
         ConstEigenVectorArrayMap<T>(A, cols);                      \
   }                                                                \
   template <>                                                      \
-  C10_EXPORT void ColwiseDiv<T, CPUContext, true>(                 \
+  void ColwiseDiv<T, CPUContext, true>(                 \
       const int rows,                                              \
       const int cols,                                              \
       const T* A,                                                  \
@@ -1891,7 +1891,7 @@ DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION(std::int64_t, Div, /)
 #undef DELEGATE_EIGEN_2D_BROADCAST_2ND_BINARY_FUNCTION
 
 template <>
-C10_EXPORT void Not<bool, CPUContext>(
+void Not<bool, CPUContext>(
     const int N,
     const bool* x,
     bool* y,
@@ -1906,7 +1906,7 @@ C10_EXPORT void Not<bool, CPUContext>(
 
 #define CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH(T)             \
   template <>                                                   \
-  C10_EXPORT void AddStripedBatch(                              \
+  void AddStripedBatch(                              \
       const int N,                                              \
       const T* first,                                           \
       T* y,                                                     \
@@ -1924,7 +1924,7 @@ CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH(float);
 namespace {
 
 template <typename TIn, typename TOut, class BinaryOperator, bool kBroadcast1st>
-C10_EXPORT void RowwiseBinaryOp(
+void RowwiseBinaryOp(
     const int rows,
     const int cols,
     const BinaryOperator& op,
@@ -1942,7 +1942,7 @@ C10_EXPORT void RowwiseBinaryOp(
 }
 
 template <typename TIn, typename TOut, class BinaryOperator, bool kBroadcast1st>
-C10_EXPORT void ColwiseBinaryOp(
+void ColwiseBinaryOp(
     const int rows,
     const int cols,
     const BinaryOperator& op,
@@ -1960,7 +1960,7 @@ C10_EXPORT void ColwiseBinaryOp(
 }
 
 template <typename TIn, typename TOut, class BinaryOperator>
-C10_EXPORT void BroadcastBinaryOpImpl(
+void BroadcastBinaryOpImpl(
     const int ndim,
     const int* A_dims,
     const int* B_dims,
@@ -1984,7 +1984,7 @@ C10_EXPORT void BroadcastBinaryOpImpl(
 
 #define DELEGATE_1D_BINARY_FUNCTION(TIn, TOut, Func, Op)               \
   template <>                                                          \
-  C10_EXPORT void Func<TIn, CPUContext>(                               \
+  void Func<TIn, CPUContext>(                               \
       const int N, const TIn* A, const TIn* B, TOut* C, CPUContext*) { \
     std::transform(A, A + N, B, C, Op<TIn>());                         \
   }
@@ -2024,7 +2024,7 @@ DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #define DELEGATE_2D_BROADCAST_BINARY_FUNCTION(TIn, TOut, Func, Op)             \
   template <>                                                                  \
-  C10_EXPORT void Rowwise##Func<TIn, CPUContext, true>(                        \
+  void Rowwise##Func<TIn, CPUContext, true>(                        \
       const int rows,                                                          \
       const int cols,                                                          \
       const TIn* A,                                                            \
@@ -2034,7 +2034,7 @@ DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
     RowwiseBinaryOp<TIn, TOut, Op<TIn>, true>(rows, cols, Op<TIn>(), A, B, C); \
   }                                                                            \
   template <>                                                                  \
-  C10_EXPORT void Rowwise##Func<TIn, CPUContext, false>(                       \
+  void Rowwise##Func<TIn, CPUContext, false>(                       \
       const int rows,                                                          \
       const int cols,                                                          \
       const TIn* A,                                                            \
@@ -2045,7 +2045,7 @@ DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
         rows, cols, Op<TIn>(), A, B, C);                                       \
   }                                                                            \
   template <>                                                                  \
-  C10_EXPORT void Colwise##Func<TIn, CPUContext, true>(                        \
+  void Colwise##Func<TIn, CPUContext, true>(                        \
       const int rows,                                                          \
       const int cols,                                                          \
       const TIn* A,                                                            \
@@ -2055,7 +2055,7 @@ DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
     ColwiseBinaryOp<TIn, TOut, Op<TIn>, true>(rows, cols, Op<TIn>(), A, B, C); \
   }                                                                            \
   template <>                                                                  \
-  C10_EXPORT void Colwise##Func<TIn, CPUContext, false>(                       \
+  void Colwise##Func<TIn, CPUContext, false>(                       \
       const int rows,                                                          \
       const int cols,                                                          \
       const TIn* A,                                                            \
@@ -2101,7 +2101,7 @@ DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #define DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(T)    \
   template <>                                      \
-  C10_EXPORT void RowwiseDiv<T, CPUContext, true>( \
+  void RowwiseDiv<T, CPUContext, true>( \
       const int rows,                              \
       const int cols,                              \
       const T* A,                                  \
@@ -2112,7 +2112,7 @@ DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
         rows, cols, std::divides<T>(), A, B, C);   \
   }                                                \
   template <>                                      \
-  C10_EXPORT void ColwiseDiv<T, CPUContext, true>( \
+  void ColwiseDiv<T, CPUContext, true>( \
       const int rows,                              \
       const int cols,                              \
       const T* A,                                  \
@@ -2128,7 +2128,7 @@ DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int64_t)
 
 #define DELEGATE_BROADCAST_BINARY_FUNCTION(TIn, TOut, Func, Op)              \
   template <>                                                                \
-  C10_EXPORT void Func<TIn, CPUContext>(                                     \
+  void Func<TIn, CPUContext>(                                     \
       const int A_ndim,                                                      \
       const int* A_dims,                                                     \
       const int B_ndim,                                                      \
@@ -2271,7 +2271,7 @@ DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #define CAFFE2_RAND_UNIFORM_REAL(T)                                      \
   template <>                                                            \
-  C10_EXPORT void RandUniform<T, CPUContext>(                            \
+  void RandUniform<T, CPUContext>(                            \
       const size_t n, const T a, const T b, T* r, CPUContext* context) { \
     std::uniform_real_distribution<T> distribution(a, b);                \
     for (size_t i = 0; i < n; ++i) {                                     \
@@ -2284,7 +2284,7 @@ CAFFE2_RAND_UNIFORM_REAL(double);
 
 #define CAFFE2_RAND_UNIFORM_CHAR(T)                                        \
   template <>                                                              \
-  C10_EXPORT void RandUniform<T, CPUContext>(                              \
+  void RandUniform<T, CPUContext>(                              \
       const size_t n, const T a, const T b, T* r, CPUContext* context) {   \
     std::uniform_int_distribution<short> distribution((short)a, (short)b); \
     for (size_t i = 0; i < n; ++i) {                                       \
@@ -2297,7 +2297,7 @@ CAFFE2_RAND_UNIFORM_CHAR(uint8_t);
 
 #define CAFFE2_RAND_UNIFORM_INT(T)                                       \
   template <>                                                            \
-  C10_EXPORT void RandUniform<T, CPUContext>(                            \
+  void RandUniform<T, CPUContext>(                            \
       const size_t n, const T a, const T b, T* r, CPUContext* context) { \
     std::uniform_int_distribution<T> distribution(a, b);                 \
     for (size_t i = 0; i < n; ++i) {                                     \
@@ -2323,7 +2323,7 @@ CAFFE2_RAND_UNIFORM_INT(uint64_t);
 // each value.
 #define CAFFE2_RAND_FIXED_SUM(T)                                          \
   template <>                                                             \
-  C10_EXPORT void RandFixedSum<T, CPUContext>(                            \
+  void RandFixedSum<T, CPUContext>(                            \
       const size_t n,                                                     \
       const T a,                                                          \
       const T b,                                                          \
@@ -2422,7 +2422,7 @@ Ind_t generate_stack_distance(
 }
 
 template <class Type, class Val_t, class Ind_t, class Context_t, bool cdf_app>
-C10_EXPORT void generate_trace_lru(
+void generate_trace_lru(
     std::vector<Ind_t>& uni_ref,
     std::vector<Ind_t>& cum_val,
     std::vector<Val_t>& cum_dis,
@@ -2499,7 +2499,7 @@ C10_EXPORT void generate_trace_lru(
 // case we need to know the table id, to sample from the right distribution
 #define CAFFE2_RAND_SYNTHETIC_DATA(T)                                         \
   template <>                                                                 \
-  C10_EXPORT void RandSyntheticData<T, CPUContext>(                           \
+  void RandSyntheticData<T, CPUContext>(                           \
       const size_t n, const T a, const T b, T* r, CPUContext* context) {      \
     /* unique memory references */                                            \
     std::vector<int> mem_ref = {1, 2, 3, 4, 5, 6};                            \
@@ -2538,7 +2538,7 @@ CAFFE2_RAND_SYNTHETIC_DATA(uint64_t);
 
 #define CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE(T)                    \
   template <>                                                        \
-  C10_EXPORT void RandUniformUnique<T, CPUContext>(                  \
+  void RandUniformUnique<T, CPUContext>(                  \
       const size_t n,                                                \
       const T a,                                                     \
       const T b,                                                     \
@@ -2552,7 +2552,7 @@ CAFFE2_RAND_SYNTHETIC_DATA(uint64_t);
     if (m) {                                                         \
       avoid_set.insert(avoid, avoid + m);                            \
       CAFFE_ENFORCE_EQ(                                              \
-          m, avoid_set.size(), "AC10_EXPORT void should be unique"); \
+          m, avoid_set.size(), "Avoid should be unique"); \
     }                                                                \
     std::uniform_int_distribution<T> distribution(a, b);             \
     T v = 0;                                                         \
@@ -2570,7 +2570,7 @@ CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE(int64_t);
 #undef CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE
 
 template <>
-C10_EXPORT void RandGaussian<float, CPUContext>(
+void RandGaussian<float, CPUContext>(
     const size_t n,
     const float mean,
     const float std,
@@ -2584,7 +2584,7 @@ C10_EXPORT void RandGaussian<float, CPUContext>(
 
 #define CAFFE2_SPECIALIZED_SUM(T)            \
   template <>                                \
-  C10_EXPORT void Sum<T, CPUContext>(        \
+  void Sum<T, CPUContext>(        \
       const int N,                           \
       const T* x,                            \
       T* y,                                  \
@@ -2600,7 +2600,7 @@ CAFFE2_SPECIALIZED_SUM(int64_t);
 #undef CAFFE2_SPECIALIZED_SUM
 
 template <>
-C10_EXPORT void SumSqr<float, CPUContext>(
+void SumSqr<float, CPUContext>(
     const int N,
     const float* x,
     float* y,
@@ -2610,7 +2610,7 @@ C10_EXPORT void SumSqr<float, CPUContext>(
 }
 
 template <>
-C10_EXPORT void Select<float, CPUContext>(
+void Select<float, CPUContext>(
     const int N,
     const int D,
     const float* x,
@@ -2624,7 +2624,7 @@ C10_EXPORT void Select<float, CPUContext>(
 }
 
 template <>
-C10_EXPORT void CopyMatrix<CPUContext>(
+void CopyMatrix<CPUContext>(
     const size_t itemsize,
     const int M,
     const int N,
@@ -2667,7 +2667,7 @@ C10_EXPORT void CopyMatrix<CPUContext>(
 
 #define DELEGATE_COPY_MATRIX_FUNCTION(T, Func)  \
   template <>                                   \
-  C10_EXPORT void CopyMatrix<T, CPUContext>(    \
+  void CopyMatrix<T, CPUContext>(    \
       const int M,                              \
       const int N,                              \
       const T* A,                               \
@@ -2678,7 +2678,7 @@ C10_EXPORT void CopyMatrix<CPUContext>(
     Func('R', 'N', M, N, T(1), A, lda, B, ldb); \
   }                                             \
   template <>                                   \
-  C10_EXPORT void CopyMatrix<T, CPUContext>(    \
+  void CopyMatrix<T, CPUContext>(    \
       const int M,                              \
       const int N,                              \
       const T* A,                               \
@@ -2709,7 +2709,7 @@ DELEGATE_COPY_MATRIX_FUNCTION(double, mkl_domatcopy)
 
 #define CAFFE2_SPECIALIZED_COPY_MATRIX(T)                                \
   template <>                                                            \
-  C10_EXPORT void CopyMatrix<T, CPUContext>(                             \
+  void CopyMatrix<T, CPUContext>(                             \
       const int M,                                                       \
       const int N,                                                       \
       const T* A,                                                        \
@@ -2739,7 +2739,7 @@ DELEGATE_COPY_MATRIX_FUNCTION(double, mkl_domatcopy)
     }                                                                    \
   }                                                                      \
   template <>                                                            \
-  C10_EXPORT void CopyMatrix<T, CPUContext>(                             \
+  void CopyMatrix<T, CPUContext>(                             \
       const int M,                                                       \
       const int N,                                                       \
       const T* A,                                                        \
@@ -2775,7 +2775,7 @@ CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint16_t)
 namespace {
 
 template <typename T>
-C10_EXPORT void Im2ColZeroPaddingAndNoDilationNCHW(
+void Im2ColZeroPaddingAndNoDilationNCHW(
     const int C,
     const int H,
     const int W,
@@ -2822,7 +2822,7 @@ C10_EXPORT void Im2ColZeroPaddingAndNoDilationNCHW(
 }
 
 template <typename T>
-C10_EXPORT void Col2ImZeroPaddingAndNoDilationNCHW(
+void Col2ImZeroPaddingAndNoDilationNCHW(
     const int C,
     const int H,
     const int W,
@@ -2858,7 +2858,7 @@ C10_EXPORT void Col2ImZeroPaddingAndNoDilationNCHW(
 }
 
 template <typename T>
-C10_EXPORT void Im2ColZeroPaddingAndNoDilationNHWC(
+void Im2ColZeroPaddingAndNoDilationNHWC(
     const int C,
     const int H,
     const int W,
@@ -2883,7 +2883,7 @@ C10_EXPORT void Im2ColZeroPaddingAndNoDilationNHWC(
 }
 
 template <typename T>
-C10_EXPORT void Col2ImZeroPaddingAndNoDilationNHWC(
+void Col2ImZeroPaddingAndNoDilationNHWC(
     const int C,
     const int H,
     const int W,
@@ -2910,7 +2910,7 @@ C10_EXPORT void Col2ImZeroPaddingAndNoDilationNHWC(
 }
 
 template <typename T, bool kCol2Im>
-C10_EXPORT void Im2ColNdNCHWImpl(
+void Im2ColNdNCHWImpl(
     const int N,
     const int img_size,
     const int col_size,
@@ -3130,7 +3130,7 @@ void Im2Col3dNCHWImpl(
 } // namespace
 
 template <>
-C10_EXPORT void Im2ColNd<float, CPUContext, StorageOrder::NCHW>(
+void Im2ColNd<float, CPUContext, StorageOrder::NCHW>(
     const int N,
     const int img_size,
     const int col_size,
@@ -3187,7 +3187,7 @@ C10_EXPORT void Im2ColNd<float, CPUContext, StorageOrder::NCHW>(
 }
 
 template <>
-C10_EXPORT void Col2ImNd<float, CPUContext, StorageOrder::NCHW>(
+void Col2ImNd<float, CPUContext, StorageOrder::NCHW>(
     const int N,
     const int img_size,
     const int col_size,
@@ -3217,7 +3217,7 @@ C10_EXPORT void Col2ImNd<float, CPUContext, StorageOrder::NCHW>(
 }
 
 template <>
-C10_EXPORT void Im2Col<float, CPUContext, StorageOrder::NCHW>(
+void Im2Col<float, CPUContext, StorageOrder::NCHW>(
     const int C,
     const int H,
     const int W,
@@ -3283,7 +3283,7 @@ C10_EXPORT void Im2Col<float, CPUContext, StorageOrder::NCHW>(
 }
 
 template <>
-C10_EXPORT void Im2Col<float, CPUContext, StorageOrder::NHWC>(
+void Im2Col<float, CPUContext, StorageOrder::NHWC>(
     const int C,
     const int H,
     const int W,
@@ -3517,7 +3517,7 @@ C10_EXPORT void Im2ColNd<float, CPUContext, StorageOrder::NHWC>(
 }
 
 template <>
-C10_EXPORT void Col2Im<float, CPUContext, StorageOrder::NCHW>(
+void Col2Im<float, CPUContext, StorageOrder::NCHW>(
     const int C,
     const int H,
     const int W,
@@ -3584,7 +3584,7 @@ C10_EXPORT void Col2Im<float, CPUContext, StorageOrder::NCHW>(
 }
 
 template <>
-C10_EXPORT void Col2Im<float, CPUContext, StorageOrder::NHWC>(
+void Col2Im<float, CPUContext, StorageOrder::NHWC>(
     const int C,
     const int H,
     const int W,
@@ -3806,7 +3806,7 @@ C10_EXPORT void Col2ImNd<float, CPUContext, StorageOrder::NHWC>(
 }
 
 template <>
-C10_EXPORT void BiasCHW<float, CPUContext>(
+void BiasCHW<float, CPUContext>(
     const float* bias,
     const float* /*bias_multiplier*/,
     const int bias_channels,
@@ -3891,7 +3891,7 @@ C10_EXPORT void BiasCHW<float, CPUContext>(
 
 #define CAFFE2_SPECIALIZED_COPYVECTOR(T)                            \
   template <>                                                       \
-  C10_EXPORT void CopyVector<T, CPUContext>(                        \
+  void CopyVector<T, CPUContext>(                        \
       const int N, const T* src, T* dst, CPUContext* /*context*/) { \
     if (src != dst && N > 0) {                                      \
       memcpy(dst, src, sizeof(T) * N);                              \
@@ -4113,7 +4113,7 @@ void TransposeCPUImpl(
 
 #define CAFFE2_SPECIALIZED_TRANSPOSE(T)       \
   template <>                                 \
-  C10_EXPORT void Transpose<T, CPUContext>(   \
+  void Transpose<T, CPUContext>(   \
       const int ndim,                         \
       const int* dims,                        \
       const int* axes,                        \
