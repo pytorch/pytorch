@@ -174,7 +174,6 @@ namespace detail {
       default:
         AT_ERROR("Unsupported layout: ", options.layout());
     }
-    AT_ASSERT(0);
   }
 } // namespace detail
 
