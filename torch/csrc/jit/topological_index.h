@@ -38,20 +38,38 @@ struct TopologicalIndex {
   T output_;
 
   // Lower and upper bounds of the index. Inclusive range.
-  static constexpr topo_position_t lowerBound_ = 0;
-  static constexpr topo_position_t upperBound_ = UINT64_MAX;
+  const topo_position_t lowerBound_;
+  const topo_position_t upperBound_;
 
   // How far away to space nodes that are appended to the graph.
   // should be 2^n, where:
   //   - n is the maximum number of repeated insertions without a re-index
   //   - 2^(64-n) is the maximum number of appends to the end without reindex
-  static constexpr topo_position_t defaultInterval_ = 1099511627776ULL; // 2^40
+  const topo_position_t defaultInterval_;
 
   std::map<topo_position_t, T> positionToObj_;
 
  public:
-  // Constructor for tests only, so we can test boundary conditions
-  TopologicalIndex(T input, T output) : input_(input), output_(output) {
+  TopologicalIndex(T input, T output)
+      : TopologicalIndex(
+            input,
+            output,
+            0,
+            UINT64_MAX,
+            1099511627776ULL /* 2^40 */) {}
+
+  // This onstructor is for tests only, so we can test boundary conditions.
+  TopologicalIndex(
+      T input,
+      T output,
+      topo_position_t lowerBound,
+      topo_position_t upperBound,
+      topo_position_t defaultInterval)
+      : input_(input),
+        output_(output),
+        lowerBound_(lowerBound),
+        upperBound_(upperBound),
+        defaultInterval_(defaultInterval) {
     AT_ASSERT(upperBound_ > lowerBound_);
 
     setPos(input_, lowerBound_);

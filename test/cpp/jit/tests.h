@@ -1168,27 +1168,50 @@ void testSchemaParser() {
 }
 
 void testTopologicalIndex() {
-  Graph graph;
-  auto node1 = graph.create(prim::Undefined);
-  auto node2 = graph.create(prim::Undefined);
-  auto node3 = graph.create(prim::Undefined);
-  auto node4 = graph.create(prim::Undefined);
+  {
+    Graph graph;
+    auto node1 = graph.create(prim::Undefined);
+    auto node2 = graph.create(prim::Undefined);
+    auto node3 = graph.create(prim::Undefined);
+    auto node4 = graph.create(prim::Undefined);
 
-  graph.appendNode(node4);
-  graph.prependNode(node1);
-  node2->insertAfter(node1);
-  node3->insertBefore(node4);
+    graph.appendNode(node4);
+    graph.prependNode(node1);
+    node2->insertAfter(node1);
+    node3->insertBefore(node4);
 
-  // nodes should be in numerical order
-  ASSERT_TRUE(node1->isBefore(node2));
-  ASSERT_TRUE(node1->isBefore(node3));
-  ASSERT_TRUE(node1->isBefore(node4));
-  ASSERT_TRUE(node2->isAfter(node1));
-  ASSERT_TRUE(node2->isBefore(node3));
-  ASSERT_TRUE(node2->isBefore(node4));
-  ASSERT_FALSE(node3->isBefore(node1));
-  ASSERT_FALSE(node3->isBefore(node2));
-  ASSERT_FALSE(node3->isAfter(node4));
+    // nodes should be in numerical order
+    ASSERT_TRUE(node1->isBefore(node2));
+    ASSERT_TRUE(node1->isBefore(node3));
+    ASSERT_TRUE(node1->isBefore(node4));
+    ASSERT_TRUE(node2->isAfter(node1));
+    ASSERT_TRUE(node2->isBefore(node3));
+    ASSERT_TRUE(node2->isBefore(node4));
+    ASSERT_FALSE(node3->isBefore(node1));
+    ASSERT_FALSE(node3->isBefore(node2));
+    ASSERT_FALSE(node3->isAfter(node4));
+  }
+  {
+    // Induce reindexing to test that path
+    Graph graph;
+    auto node1 = graph.create(prim::Undefined);
+    auto node2 = graph.create(prim::Undefined);
+    auto node3 = graph.create(prim::Undefined);
+
+    node_topological_index index(
+        graph.block()->param_node(),
+        graph.block()->return_node(),
+        0, // lower bound
+        10, // upper bound
+        2); // default interval
+    index.insertAfter(graph.block()->param_node(), node1); // inserts at 2
+    index.insertAfter(graph.block()->param_node(), node2); // inserts at 1
+    index.insertAfter(node2, node3); // forces a reindex
+
+    ASSERT_TRUE(node2->isBefore(node1));
+    ASSERT_TRUE(node2->isBefore(node3));
+    ASSERT_TRUE(node1->isAfter(node3));
+  }
 }
 
 } // namespace
