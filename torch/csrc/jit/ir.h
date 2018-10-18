@@ -247,6 +247,7 @@ struct Node : public Attributes<Node> {
   friend const_graph_node_list;
   friend graph_node_list_iterator;
   friend const_graph_node_list_iterator;
+  friend node_topological_index;
 private:
   // each node but Return/Param
   // is associated with exactly one place in the node list...
@@ -279,6 +280,7 @@ private:
   // the schema.
   // note: mutable because schema_ is effectively a cache
   mutable const FunctionSchema* schema_;
+  topo_index_t topo_index_;
 protected:
   TORCH_API Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
@@ -469,6 +471,12 @@ public:
     // raw pointers are.
     return {blocks_.data(), blocks_.size()};
   }
+
+  // Is 'this' before 'n' in the topological order?
+  TORCH_API bool isBefore(Node * n) const;
+
+  // Is 'this' after 'n' in the topological order?
+  TORCH_API bool isAfter(Node * n) const;
 
   // Insert unattached 'this' node before 'n' in the topological order.
   // Returns this (for chaining).
@@ -728,7 +736,7 @@ private:
   Node * const output_;
   Node * const input_;
   Node * const owning_node_; // either the node that has this block or nullptr for root
-  TopologicalIndex topological_index_;
+  node_topological_index topological_index_;
 };
 
 struct Graph {

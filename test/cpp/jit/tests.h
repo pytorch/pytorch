@@ -1168,61 +1168,27 @@ void testSchemaParser() {
 }
 
 void testTopologicalIndex() {
-  { // create graph so we can make nodes
-    Graph graph;
-    auto head = graph.create(prim::Undefined);
-    auto tail = graph.create(prim::Undefined);
-    TopologicalIndex index(head, tail);
+  Graph graph;
+  auto node1 = graph.create(prim::Undefined);
+  auto node2 = graph.create(prim::Undefined);
+  auto node3 = graph.create(prim::Undefined);
+  auto node4 = graph.create(prim::Undefined);
 
-    // Can't insert twice
-    ASSERT_ANY_THROW(index.insertBefore(tail, tail));
-    auto node1 = graph.create(prim::Undefined);
-    auto node2 = graph.create(prim::Undefined);
-    auto node3 = graph.create(prim::Undefined);
+  graph.appendNode(node4);
+  graph.prependNode(node1);
+  node2->insertAfter(node1);
+  node3->insertBefore(node4);
 
-    index.insertBefore(tail, node1);
-    index.insertBefore(node1, node2);
-    index.insertAfter(node2, node3);
-
-    // node2 node3 node1 tail
-    for (auto node : {node3, node1, tail}) {
-      ASSERT_TRUE(index.isBefore(node2, node));
-      ASSERT_TRUE(index.isAfter(node, node2));
-    }
-    ASSERT_FALSE(index.isBefore(node1, node2));
-    ASSERT_TRUE(index.isAfter(node1, node2));
-    ASSERT_FALSE(index.isBefore(node1, node3));
-    ASSERT_TRUE(index.isBefore(node3, node1));
-
-    // erase an element
-    index.erase(node1);
-    ASSERT_TRUE(index.isBefore(node2, tail));
-    ASSERT_TRUE(index.isAfter(node3, node2));
-
-    // put it back in a different place
-    index.insertBefore(tail, node1);
-    ASSERT_TRUE(index.isBefore(node1, tail));
-    ASSERT_TRUE(index.isAfter(node1, node3));
-  }
-  {
-    // test some boundary conditions
-    Graph graph;
-    auto head = graph.create(prim::Undefined);
-    auto tail = graph.create(prim::Undefined);
-    TopologicalIndex index(head, tail, 2, -5, 10);
-
-    auto node1 = graph.create(prim::Undefined);
-    auto node2 = graph.create(prim::Undefined);
-    auto node3 = graph.create(prim::Undefined);
-
-    // Force a reindex by jumping off the end
-    index.insertBefore(tail, node1);
-    index.insertBefore(node1, node2);
-    index.insertBefore(node2, node3);
-
-    ASSERT_TRUE(index.isBefore(node3, tail));
-    ASSERT_TRUE(index.isAfter(node2, node3));
-  }
+  // nodes should be in numerical order
+  ASSERT_TRUE(node1->isBefore(node2));
+  ASSERT_TRUE(node1->isBefore(node3));
+  ASSERT_TRUE(node1->isBefore(node4));
+  ASSERT_TRUE(node2->isAfter(node1));
+  ASSERT_TRUE(node2->isBefore(node3));
+  ASSERT_TRUE(node2->isBefore(node4));
+  ASSERT_FALSE(node3->isBefore(node1));
+  ASSERT_FALSE(node3->isBefore(node2));
+  ASSERT_FALSE(node3->isAfter(node4));
 }
 
 } // namespace

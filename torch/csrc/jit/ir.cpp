@@ -774,6 +774,20 @@ Value* Node::insertOutput(size_t i) {
   return outputs_.at(i);
 }
 
+bool Node::isBefore(Node * n) const {
+  JIT_ASSERT(this != n);
+  JIT_ASSERT(this->owningBlock() == n->owningBlock());
+
+  return this->topo_index_ < n->topo_index_;
+}
+
+bool Node::isAfter(Node * n) const {
+  JIT_ASSERT(this != n);
+  JIT_ASSERT(this->owningBlock() == n->owningBlock());
+
+  return this->topo_index_ > n->topo_index_;
+}
+
 Node* Node::insertBefore(Node * n) {
   JIT_ASSERT(n->inBlockList());
   insertAfter(n->prev());
@@ -842,7 +856,6 @@ Value* Node::dropInput(size_t i) {
 
 void Node::removeFromList() {
   JIT_ASSERT(inBlockList());
-  this->owning_block_->topological_index_.erase(this);
   this->owning_block_ = nullptr;
   Node * next = this->next();
   Node * prev = this->prev();
