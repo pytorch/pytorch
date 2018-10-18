@@ -382,9 +382,8 @@ void addNomnigraphMethods(pybind11::module& m) {
   py::class_<nn::NNMatchGraph> nnMatchGraph(m, "NNMatchGraph");
   nnMatchGraph.def(py::init<>());
 
-  using MatchNodeType =
-      nom::Node<nom::matcher::MatchNode<nn::NNNodeMatchCriteria>>;
-  py::class_<MatchNodeType> nnMatchNode(m, "MatchNodeRef");
+  using MatchPredicateType = nom::Node<nn::NNMatchPredicate>;
+  py::class_<MatchPredicateType> nnMatchPredicate(m, "MatchPredicateRef");
 
   nnMatchGraph
       .def(
@@ -396,13 +395,12 @@ void addNomnigraphMethods(pybind11::module& m) {
           "createNode",
           [](nn::NNMatchGraph* g, GenericOperator& op, bool strict) {
             auto opName = op.getName();
-            auto match =
-                nn::NNNodeMatchCriteria([opName](NNGraph::NodeRef node) {
-                  NOM_REQUIRE_OR_RET_FALSE(nn::is<NeuralNetOperator>(node));
-                  auto nnOp = nn::get<NeuralNetOperator>(node);
-                  return opName == nnOp->getName();
-                });
-            auto node = nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(match);
+            auto match = [opName](NNGraph::NodeRef node) {
+              NOM_REQUIRE_OR_RET_FALSE(nn::is<NeuralNetOperator>(node));
+              auto nnOp = nn::get<NeuralNetOperator>(node);
+              return opName == nnOp->getName();
+            };
+            auto node = nn::NNMatchPredicate(match);
             if (!strict) {
               node.nonTerminal();
             }
@@ -414,7 +412,7 @@ void addNomnigraphMethods(pybind11::module& m) {
       .def(
           "createNode",
           [](nn::NNMatchGraph* g, nom::repr::Tensor& tensor, bool strict) {
-            auto node = nn::NNMatchNode(nn::matchTensor());
+            auto node = nn::NNMatchPredicate(nn::is<nom::repr::Tensor>);
             if (!strict) {
               node.nonTerminal();
             }
@@ -426,9 +424,8 @@ void addNomnigraphMethods(pybind11::module& m) {
       .def(
           "createNode",
           [](nn::NNMatchGraph* g, bool strict) {
-            auto match = nn::NNNodeMatchCriteria(
-                [](NNGraph::NodeRef node) { return true; });
-            auto node = nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(match);
+            auto match = [](NNGraph::NodeRef node) { return true; };
+            auto node = nn::NNMatchPredicate(match);
             if (!strict) {
               node.nonTerminal();
             }
@@ -444,8 +441,7 @@ void addNomnigraphMethods(pybind11::module& m) {
   m.def("matchSubgraph", [](NNGraph::NodeRef node, nn::NNMatchGraph* mg) {
     // Get root node or node in root cycle
     auto match_node = *nom::algorithm::tarjans(mg).back().getNodes().begin();
-    auto result =
-        nn::NNSubgraphMatcher::isSubgraphMatch(node, match_node, false);
+    auto result = mg->isSubgraphMatch(node, match_node, false);
     if (result.isMatch()) {
       return *result.getMatchedSubgraph();
     }
