@@ -7,7 +7,7 @@
 #include <limits>
 #include <sstream>
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 #include "c10/util/StringUtil.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/flags.h"
