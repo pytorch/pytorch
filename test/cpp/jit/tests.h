@@ -1190,6 +1190,13 @@ void testTopologicalIndex() {
     ASSERT_FALSE(node3->isBefore(node1));
     ASSERT_FALSE(node3->isBefore(node2));
     ASSERT_FALSE(node3->isAfter(node4));
+
+    // make sure things don't blow up on deletions
+    node2->destroy();
+    auto node2p = graph.create(prim::Undefined);
+    node2p->insertAfter(node1);
+    ASSERT_TRUE(node1->isBefore(node2p));
+    ASSERT_TRUE(node2p->isBefore(node3));
   }
   {
     // Induce reindexing to test that path

@@ -856,6 +856,7 @@ Value* Node::dropInput(size_t i) {
 
 void Node::removeFromList() {
   JIT_ASSERT(inBlockList());
+  this->owning_block_->topological_index_.erase(this);
   this->owning_block_ = nullptr;
   Node * next = this->next();
   Node * prev = this->prev();

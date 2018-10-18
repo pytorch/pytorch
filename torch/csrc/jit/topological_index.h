@@ -122,6 +122,12 @@ struct TopologicalIndex {
     }
   }
 
+  void erase(T toErase)  {
+    JIT_ASSERT(positionToObj_.count(toErase->topo_position_) != 0);
+    positionToObj_.erase(toErase->topo_position_);
+  }
+
+
  private:
   // update mappings of objs to the their topological index
   void setPos(T obj, topo_position_t pos) {
