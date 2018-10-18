@@ -778,14 +778,14 @@ bool Node::isBefore(Node * n) const {
   JIT_ASSERT(this != n);
   JIT_ASSERT(this->owningBlock() == n->owningBlock());
 
-  return this->topo_index_ < n->topo_index_;
+  return this->topo_position_ < n->topo_position_;
 }
 
 bool Node::isAfter(Node * n) const {
   JIT_ASSERT(this != n);
   JIT_ASSERT(this->owningBlock() == n->owningBlock());
 
-  return this->topo_index_ > n->topo_index_;
+  return this->topo_position_ > n->topo_position_;
 }
 
 Node* Node::insertBefore(Node * n) {

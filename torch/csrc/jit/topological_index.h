@@ -12,7 +12,7 @@ struct TopologicalIndex;
 
 struct Node;
 using node_topological_index = TopologicalIndex<Node*>;
-using topo_index_t = uint64_t;
+using topo_position_t = uint64_t;
 
 // Index to track a topological ordering of nodes. Owned by a block,
 // representing the nodes in the block.
@@ -22,7 +22,7 @@ using topo_index_t = uint64_t;
 // with node insertions/deletions by the owning block.
 //
 // The basic scheme is: nodes are assigned topological indices within a
-// 64-bit space. Appending a node moves assigns an index that's a big interval
+// 64-bit space. Appending a node moves assigns a position that's a big interval
 // higher than the last node, giving room for insertions in between. If we ever
 // run out of room, we rebuild the index.
 //
@@ -38,27 +38,27 @@ struct TopologicalIndex {
   T output_;
 
   // Lower and upper bounds of the index. Inclusive range.
-  static constexpr topo_index_t lowerBound_ = 0;
-  static constexpr topo_index_t upperBound_ = UINT64_MAX;
+  static constexpr topo_position_t lowerBound_ = 0;
+  static constexpr topo_position_t upperBound_ = UINT64_MAX;
 
   // How far away to space nodes that are appended to the graph.
   // should be 2^n, where:
   //   - n is the maximum number of repeated insertions without a re-index
   //   - 2^(64-n) is the maximum number of appends to the end without reindex
-  static constexpr topo_index_t defaultInterval_ = 1099511627776ULL; // 2^40
+  static constexpr topo_position_t defaultInterval_ = 1099511627776ULL; // 2^40
 
-  std::map<topo_index_t, T> indexToObj_;
+  std::map<topo_position_t, T> positionToObj_;
 
  public:
   // Constructor for tests only, so we can test boundary conditions
   TopologicalIndex(T input, T output) : input_(input), output_(output) {
     AT_ASSERT(upperBound_ > lowerBound_);
 
-    setIndex(input_, lowerBound_);
+    setPos(input_, lowerBound_);
 
     // Don't put the output node in the index, since that would prevent us from
     // appending efficiently. Instead just give it the max index for comparison
-    output_->topo_index_ = upperBound_;
+    output_->topo_position_ = upperBound_;
   }
 
   TopologicalIndex(const TopologicalIndex&) = delete;
@@ -71,60 +71,59 @@ struct TopologicalIndex {
       return insertAfter(input_, toInsert);
     }
 
-    auto indexIter = indexToObj_.find(insertPoint->topo_index_);
-    AT_ASSERT(indexIter != indexToObj_.end());
-    const auto insertIndex = indexIter->first;
+    auto indexIter = positionToObj_.find(insertPoint->topo_position_);
+    AT_ASSERT(indexIter != positionToObj_.end());
+    const auto insertPos = indexIter->first;
 
     // Are we the last node?
-    if (indexIter->second == indexToObj_.rbegin()->second) {
+    if (indexIter->second == positionToObj_.rbegin()->second) {
       // check if we're running off the end of the index
-      if (insertIndex >= (upperBound_ - defaultInterval_)) {
+      if (insertPos >= (upperBound_ - defaultInterval_)) {
         reIndex();
         return insertAfter(insertPoint, toInsert);
       }
 
       // Move down a suitably vast distance and add the node
-      const auto newIndex = insertPoint->topo_index_ + defaultInterval_;
-      setIndex(toInsert, newIndex);
+      const auto newIndex = insertPoint->topo_position_ + defaultInterval_;
+      setPos(toInsert, newIndex);
     } else {
       // We're between two nodes, so insert between them.
       indexIter++;
-      const topo_index_t nextIndex = indexIter->first;
+      const topo_position_t nextPos = indexIter->first;
 
       // Please mind integer overflow if changing this forumula
-      const topo_index_t indexBetween =
-          insertIndex + (nextIndex - insertIndex) / 2;
+      const topo_position_t posBetween = insertPos + (nextPos - insertPos) / 2;
 
-      if (indexToObj_.count(indexBetween) != 0) {
+      if (positionToObj_.count(posBetween) != 0) {
         // If we can't find a new spot, reindex and try again
         reIndex();
         return insertAfter(insertPoint, toInsert);
       }
 
-      setIndex(toInsert, indexBetween);
+      setPos(toInsert, posBetween);
     }
   }
 
  private:
   // update mappings of objs to the their topological index
-  void setIndex(T obj, topo_index_t index) {
-    indexToObj_[index] = obj;
-    obj->topo_index_ = index;
+  void setPos(T obj, topo_position_t pos) {
+    positionToObj_[pos] = obj;
+    obj->topo_position_ = pos;
   }
 
   // If we run out of space between nodes we need to rebuild the index and
   // "spread out" the nodes again.
   void reIndex() {
-    AT_ASSERT(upperBound_ / defaultInterval_ > indexToObj_.size());
-    std::map<topo_index_t, T> newIndexToObj;
+    AT_ASSERT(upperBound_ / defaultInterval_ > positionToObj_.size());
+    std::map<topo_position_t, T> newIndexToObj;
 
-    auto curIndex = lowerBound_;
-    for (const auto pr : indexToObj_) {
-      newIndexToObj[curIndex] = pr.second;
-      pr.second->topo_index_ = curIndex;
-      curIndex += defaultInterval_;
+    auto curPos = lowerBound_;
+    for (const auto pr : positionToObj_) {
+      newIndexToObj[curPos] = pr.second;
+      pr.second->topo_position_ = curPos;
+      curPos += defaultInterval_;
     }
-    indexToObj_.swap(newIndexToObj);
+    positionToObj_.swap(newIndexToObj);
   }
 };
 } // namespace jit
