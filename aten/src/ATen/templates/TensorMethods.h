@@ -71,6 +71,21 @@ inline Device Tensor::device() const {
   return Device(type().device_type(), type().is_cuda() ? get_device() : -1);
 }
 
+inline int64_t Tensor::get_device() const {
+  // NB: This gets called a lot so we special case it here instead of dispatching
+  // to a native function.
+  const auto& mytype = type();
+  if (!mytype.is_cuda()) {
+    return -1;
+  }
+  if (mytype.is_sparse()) {
+    return _values().get_device();
+  }
+  // TODO(rzou): Investigate caching device on TensorImpl.
+  // It'll probably be faster than having this indirection through Storage
+  return impl_->storage().unsafeGetStorageImpl()->device().index();
+}
+
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \
   inline T* Tensor::data() const {               \

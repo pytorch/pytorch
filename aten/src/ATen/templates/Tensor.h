@@ -166,6 +166,9 @@ public:
   /// Returns a `Tensor`'s device.
   Device device() const;
 
+  /// Returns a `Tensor`'s device index.
+  int64_t get_device() const;
+
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
   TensorOptions options() const;
