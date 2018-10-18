@@ -3,7 +3,7 @@
 #include <torch/csrc/utils/variadic.h>
 #include <torch/tensor.h>
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <functional>
 #include <iterator>

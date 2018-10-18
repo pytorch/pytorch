@@ -2,7 +2,7 @@
 
 #include <torch/tensor.h>
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <chrono>
 #include <condition_variable>
