@@ -113,7 +113,10 @@ private:
   ScopePtr parent_;
   Symbol name_;
   ScopePtr intrusive_from_this() {
-    c10::raw::intrusive_ptr::incref(this); // :(
+    c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
+                                           // from a raw `this` pointer
+                                           // so we need to bump the refcount
+                                           // to account for this ownership
     return c10::intrusive_ptr<Scope>::reclaim(this);
   }
 public:

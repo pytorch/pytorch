@@ -139,7 +139,7 @@ template <
 class C10_EXPORT intrusive_ptr final {
  private:
 //  the following static assert would be nice to have but it requires
-//  the target class T to be fully defined when intrusive_ptr<T> is instanciated
+//  the target class T to be fully defined when intrusive_ptr<T> is instantiated
 //  this is a problem for classes that contain pointers to themselves
 //  static_assert(
 //      std::is_base_of<intrusive_ptr_target, TTarget>::value,
