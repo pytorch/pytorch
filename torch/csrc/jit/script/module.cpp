@@ -41,6 +41,7 @@ c10::optional<std::vector<Value*>> try_emit_call_to(
     Graph& graph,
     SourceRange loc,
     Method& callee,
+    c10::optional<NamedValue> self,
     ArrayRef<NamedValue> args,
     ArrayRef<NamedValue> kwargs,
     std::stringstream& failure_messages,
@@ -56,7 +57,7 @@ c10::optional<std::vector<Value*>> try_emit_call_to(
 
   auto matched_schema = tryMatchSchema(
     callee.getSchema(),
-    loc, graph, args, kwargs, failure_messages, conv_tensors_to_nums);
+    loc, graph, self, args, kwargs, failure_messages, conv_tensors_to_nums);
   if(!matched_schema)
     return c10::nullopt;
 
@@ -78,6 +79,7 @@ std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, Array
           *graph(),
           loc,
           callee,
+          c10::nullopt,
           args,
           kwargs,
           failure_messages,

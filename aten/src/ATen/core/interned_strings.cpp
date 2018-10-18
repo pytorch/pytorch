@@ -7,11 +7,11 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "ATen/core/Error.h"
 #include "ATen/core/interned_strings_class.h"
+#include "c10/util/Exception.h"
 #include "c10/util/Optional.h"
 
-namespace torch { namespace jit {
+namespace c10 {
 
 Symbol InternedStrings::symbol(const std::string& s) {
   std::lock_guard<std::mutex> guard(mutex_);
@@ -117,4 +117,4 @@ Symbol Symbol::fromDomainAndUnqualString(const std::string & d, const std::strin
   return fromQualString(qualString);
 }
 
-}}
+} // namespace c10

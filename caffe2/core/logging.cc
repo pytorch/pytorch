@@ -39,7 +39,7 @@ void ThrowEnforceNotMet(
     const std::string& msg,
     const void* caller) {
   c10::Error e(file, line, condition, msg, (*GetFetchStackTrace())(), caller);
-  if (c10::FLAGS_caffe2_use_fatal_for_enforce) {
+  if (FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << e.msg_stack()[0];
   }
   throw e;
@@ -114,14 +114,14 @@ bool InitCaffeLogging(int* argc, char** argv) {
 void UpdateLoggingLevelsFromFlags() {
   // If caffe2_log_level is set and is lower than the min log level by glog,
   // we will transfer the caffe2_log_level setting to glog to override that.
-  FLAGS_minloglevel = std::min(c10::FLAGS_caffe2_log_level, FLAGS_minloglevel);
+  FLAGS_minloglevel = std::min(FLAGS_caffe2_log_level, FLAGS_minloglevel);
   // If caffe2_log_level is explicitly set, let's also turn on logtostderr.
-  if (c10::FLAGS_caffe2_log_level < google::GLOG_ERROR) {
+  if (FLAGS_caffe2_log_level < google::GLOG_ERROR) {
     FLAGS_logtostderr = 1;
   }
   // Also, transfer the caffe2_log_level verbose setting to glog.
-  if (c10::FLAGS_caffe2_log_level < 0) {
-    FLAGS_v = std::min(FLAGS_v, -c10::FLAGS_caffe2_log_level);
+  if (FLAGS_caffe2_log_level < 0) {
+    FLAGS_v = std::min(FLAGS_v, -FLAGS_caffe2_log_level);
   }
 }
 
@@ -154,10 +154,10 @@ bool InitCaffeLogging(int* argc, char** argv) {
               << std::endl;
     return false;
   }
-  if (c10::FLAGS_caffe2_log_level > FATAL) {
+  if (FLAGS_caffe2_log_level > FATAL) {
     std::cerr << "The log level of Caffe2 has to be no larger than FATAL("
               << FATAL << "). Capping it to FATAL." << std::endl;
-    c10::FLAGS_caffe2_log_level = FATAL;
+    FLAGS_caffe2_log_level = FATAL;
   }
   return true;
 }
@@ -166,12 +166,12 @@ void UpdateLoggingLevelsFromFlags() {
 }
 
 void ShowLogInfoToStderr() {
-  c10::FLAGS_caffe2_log_level = INFO;
+  FLAGS_caffe2_log_level = INFO;
 }
 
 MessageLogger::MessageLogger(const char *file, int line, int severity)
   : severity_(severity) {
-  if (severity_ < c10::FLAGS_caffe2_log_level) {
+  if (severity_ < FLAGS_caffe2_log_level) {
     // Nothing needs to be logged.
     return;
   }
@@ -203,7 +203,7 @@ MessageLogger::MessageLogger(const char *file, int line, int severity)
 
 // Output the contents of the stream to the proper channel on destruction.
 MessageLogger::~MessageLogger() {
-  if (severity_ < c10::FLAGS_caffe2_log_level) {
+  if (severity_ < FLAGS_caffe2_log_level) {
     // Nothing needs to be logged.
     return;
   }
@@ -226,7 +226,7 @@ MessageLogger::~MessageLogger() {
     __android_log_print(ANDROID_LOG_FATAL, tag_, "terminating.\n");
   }
 #else  // !ANDROID
-  if (severity_ >= c10::FLAGS_caffe2_log_level) {
+  if (severity_ >= FLAGS_caffe2_log_level) {
     // If not building on Android, log all output to std::cerr.
     std::cerr << stream_.str();
     // Simulating the glog default behavior: if the severity is above INFO,

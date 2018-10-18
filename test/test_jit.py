@@ -2815,6 +2815,12 @@ a")
         s = torch.rand(1)
         self.assertTrue(foo(s))
 
+        @torch.jit.script
+        def bar(a):
+            return a > float('-inf')
+        s = torch.rand(1)
+        self.assertTrue(foo(s))
+
     def test_add(self):
         def func(a, b):
             c = a + b
@@ -6221,6 +6227,12 @@ a")
 
         self.checkScript(fn, (torch.randn(3, 2, dtype=torch.float), torch.ones(3, 2, dtype=torch.float)))
 
+    def test_where_method(self):
+        def fn(x, y):
+            return x.where(x > 0.0, y)
+
+        self.checkScript(fn, (torch.randn(3, 2, dtype=torch.float), torch.ones(3, 2, dtype=torch.float)))
+
     def test_reassign_module_lhs(self):
         with self.assertRaisesRegex(RuntimeError, 'Cannot re-assign \'self\' because it has type value and self is'
                                     ' not a first-class value.  Only reassignments to first-class values are allowed'):
@@ -8117,8 +8129,10 @@ def the_method({}):
 
 
 def get_constant(x):
-    if x == inf or x == -inf:
+    if x == inf:
         return 'float(\'inf\')' if PY2 else 'math.inf'
+    if x == -inf:
+        return 'float(\'-inf\')' if PY2 else '-math.inf'
     return x
 
 

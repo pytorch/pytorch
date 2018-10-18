@@ -92,7 +92,7 @@ OPERATOR_SCHEMA(CTCGreedyDecoder)
         "VALUES",
         "Values vector, size (total_decoded_outputs). "
         "The vector stores the decoded classes")
-    .InheritOnnxSchema("CTCGreedyDecoder");
+    .InheritOnnxSchema();
 SHOULD_NOT_DO_GRADIENT(CTCGreedyDecoder);
 
 } // namespace caffe2

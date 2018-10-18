@@ -8,7 +8,7 @@
 #include "torch/csrc/autograd/variable_version.h"
 
 #include <ATen/ATen.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <list>
 #include <memory>

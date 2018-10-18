@@ -598,7 +598,7 @@ Z:
     .TensorInferenceFunction(TensorInferenceForDotProduct)
     .CostInferenceFunction(
         OpSchema::CostInferenceFunctionType(CostInferenceForDotProduct))
-    .InheritOnnxSchema("DotProduct");
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(DotProductGradient).NumInputs(3).NumOutputs(2);
 

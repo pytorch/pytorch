@@ -4,7 +4,7 @@
 
 #include <torch/csrc/autograd/generated/VariableType.h>
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 #include "c10/util/Optional.h"
 
 #include <algorithm>

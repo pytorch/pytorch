@@ -35,7 +35,7 @@ DAGNetBase::DAGNetBase(
   operator_nodes_ = dag_utils::prepareOperatorNodes(net_def, ws);
 
   execution_chains_ =
-      (c10::FLAGS_caffe2_disable_chaining
+      (FLAGS_caffe2_disable_chaining
            ? dag_utils::singleChains(operator_nodes_)
            : dag_utils::computeChains(operator_nodes_));
 
@@ -127,7 +127,7 @@ bool DAGNetBase::DoRunAsync() {
   }
   // Kickstart the job queue.
   for (auto& value : initial_frontier_) {
-    if (c10::FLAGS_caffe2_dag_net_collect_stats) {
+    if (FLAGS_caffe2_dag_net_collect_stats) {
       task_timers_[value]->Start();
     }
     job_queue_->Push(value);
@@ -213,7 +213,7 @@ void DAGNetBase::WorkerFunction() {
     if (!job_queue_->Pop(&idx)) {
       return;
     }
-    if (c10::FLAGS_caffe2_dag_net_collect_stats) {
+    if (FLAGS_caffe2_dag_net_collect_stats) {
       auto device_option =
           operator_nodes_[idx].operator_->event().GetDeviceOption();
       CAFFE_EVENT(
@@ -295,7 +295,7 @@ void DAGNetBase::WorkerFunction() {
       // Can't do this inline because it can race with another thread
       // calling NoMoreJobs(). So the lock needs to be held on push.
       for (const auto idx : chains_to_queue) {
-        if (c10::FLAGS_caffe2_dag_net_collect_stats) {
+        if (FLAGS_caffe2_dag_net_collect_stats) {
           task_timers_[idx]->Start();
         }
         job_queue_->Push(idx);
@@ -329,7 +329,7 @@ bool DAGNet::RunAt(int chain_id, const std::vector<int>& chain) {
       return false;
     }
   }
-  if (c10::FLAGS_caffe2_dag_net_collect_stats) {
+  if (FLAGS_caffe2_dag_net_collect_stats) {
     auto device_option =
         operator_nodes_[chain_id].operator_->event().GetDeviceOption();
     CAFFE_EVENT(

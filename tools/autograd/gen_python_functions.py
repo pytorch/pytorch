@@ -541,7 +541,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'name': 'dtype',
                 'type': 'const Type &',
                 'simple_type': 'Type',
-                'is_type_dispatched': True,
                 'python_default_init': py_default_dtype,
             }
             python_binding_arguments.append(dtype_arg)
@@ -763,11 +762,6 @@ def get_python_signature(declaration, include_out):
                 default = 'None'
         if arg.get('python_default_init') is not None:
             default = 'None'
-        if default is None and arg.get('is_type_dispatched', False):
-            # this is necessary because ATen does not have default_types; in this case,
-            # the type exists in the public API (at:: namespace), but not in the type interface;
-            # to match the PyTorch default_type API, we set the default to None.
-            default = get_type_default(declaration)
         if default is not None:
             param += '=' + str(default)
         return param

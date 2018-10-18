@@ -29,7 +29,7 @@ class NNModule(object):
                         serialized_device_map)
             # Default
             elif serialized_proto:
-                self._NNModule = C.NNModuleFromProtobuf(serialized_proto)
+                self._NNModule, self._OpList = C.NNModuleFromProtobuf(serialized_proto)
             else:
                 raise Exception(
                     "NNModule can be constructed with core.Net or caffe2_pb2.NetDef types"
@@ -40,6 +40,22 @@ class NNModule(object):
     @property
     def dataFlow(self):
         return self._NNModule.dataFlow()
+
+    @property
+    def controlFlow(self):
+        return self._NNModule.getExecutionOrder()
+
+    @property
+    def nodes(self):
+        return self._NNModule.dataFlow().nodes
+
+    @property
+    def operators(self):
+        return self._NNModule.dataFlow().operators
+
+    @property
+    def tensors(self):
+        return self._NNModule.dataFlow().tensors
 
     def convertToCaffe2Proto(self, old_proto=None):
         if not old_proto:
