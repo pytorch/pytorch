@@ -20,7 +20,7 @@
 
 namespace torch { namespace jit {
 
-TORCH_API FunctionSchema parseSchema(const std::string& schema);
+FunctionSchema parseSchema(const std::string& schema);
 
 using OperationCreator = std::function<Operation(Node*)>;
 
@@ -90,7 +90,7 @@ inline Operation getOperation(Node* node) {
   return getOperatorFor(node).getOperation(node);
 }
 
-TORCH_API void registerOperator(Operator&& op);
+void registerOperator(Operator&& op);
 
 // XXX: this function is meant to be used with string literals only!
 Operator& sig(const char *signature_literal);
