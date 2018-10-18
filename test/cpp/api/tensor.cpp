@@ -23,7 +23,7 @@ bool almost_equal(at::Tensor left, T right, T tolerance = 1e-4) {
       tensor.device().type() == at::Device((device_), (index_)).type());   \
   ASSERT_TRUE(                                                             \
       tensor.device().index() == at::Device((device_), (index_)).index()); \
-  ASSERT_EQ(tensor.scalar_type(), (type_));                                \
+  ASSERT_EQ(tensor.dtype(), (type_));                                  \
   ASSERT_TRUE(tensor.layout() == (layout_))
 
 TEST(TensorTest, ToDtype) {
@@ -103,31 +103,31 @@ TEST(TensorTest, ToDoesNotCopyWhenOptionsAreAllTheSame) {
 TEST(TensorTest, ContainsCorrectValueForSingleValue) {
   auto tensor = at::tensor(123);
   ASSERT_EQ(tensor.numel(), 1);
-  ASSERT_EQ(tensor.scalar_type(), at::kInt);
+  ASSERT_EQ(tensor.dtype(), at::kInt);
   ASSERT_EQ(tensor[0].item<int32_t>(), 123);
 
   tensor = at::tensor(123.456f);
   ASSERT_EQ(tensor.numel(), 1);
-  ASSERT_EQ(tensor.scalar_type(), at::kFloat);
+  ASSERT_EQ(tensor.dtype(), at::kFloat);
   ASSERT_TRUE(almost_equal(tensor[0], 123.456f));
 
   tensor = at::tensor(123.456);
   ASSERT_EQ(tensor.numel(), 1);
-  ASSERT_EQ(tensor.scalar_type(), at::kDouble);
+  ASSERT_EQ(tensor.dtype(), at::kDouble);
   ASSERT_TRUE(almost_equal(tensor[0], 123.456));
 }
 
 TEST(TensorTest, ContainsCorrectValuesForManyValues) {
   auto tensor = at::tensor({1, 2, 3});
   ASSERT_EQ(tensor.numel(), 3);
-  ASSERT_EQ(tensor.scalar_type(), at::kInt);
+  ASSERT_EQ(tensor.dtype(), at::kInt);
   ASSERT_TRUE(exactly_equal(tensor[0], 1));
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
   tensor = at::tensor({1.5, 2.25, 3.125});
   ASSERT_EQ(tensor.numel(), 3);
-  ASSERT_EQ(tensor.scalar_type(), at::kDouble);
+  ASSERT_EQ(tensor.dtype(), at::kDouble);
   ASSERT_TRUE(almost_equal(tensor[0], 1.5));
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
@@ -137,7 +137,7 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
   auto tensor = torch::tensor({1, 2, 3});
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
-  ASSERT_EQ(tensor.scalar_type(), at::kInt);
+  ASSERT_EQ(tensor.dtype(), at::kInt);
   ASSERT_TRUE(exactly_equal(tensor[0], 1));
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
@@ -145,7 +145,7 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
   tensor = torch::tensor({1.5, 2.25, 3.125});
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
-  ASSERT_EQ(tensor.scalar_type(), at::kDouble);
+  ASSERT_EQ(tensor.dtype(), at::kDouble);
   ASSERT_TRUE(almost_equal(tensor[0], 1.5));
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
@@ -155,7 +155,7 @@ TEST(TensorTest, ContainsCorrectValuesWhenConstructedFromVector) {
   std::vector<int> v = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
   auto tensor = at::tensor(v);
   ASSERT_EQ(tensor.numel(), v.size());
-  ASSERT_EQ(tensor.scalar_type(), at::kInt);
+  ASSERT_EQ(tensor.dtype(), at::kInt);
   for (size_t i = 0; i < v.size(); ++i) {
     ASSERT_TRUE(exactly_equal(tensor[i], v.at(i)));
   }
@@ -163,7 +163,7 @@ TEST(TensorTest, ContainsCorrectValuesWhenConstructedFromVector) {
   std::vector<float> w = {1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9, 10.0};
   tensor = at::tensor(w);
   ASSERT_EQ(tensor.numel(), w.size());
-  ASSERT_EQ(tensor.scalar_type(), at::kFloat);
+  ASSERT_EQ(tensor.dtype(), at::kFloat);
   for (size_t i = 0; i < w.size(); ++i) {
     ASSERT_TRUE(almost_equal(tensor[i], w.at(i)));
   }
@@ -172,12 +172,12 @@ TEST(TensorTest, ContainsCorrectValuesWhenConstructedFromVector) {
 TEST(TensorTest, UsesOptionsThatAreSupplied) {
   auto tensor = at::tensor(123, dtype(at::kFloat)) + 0.5;
   ASSERT_EQ(tensor.numel(), 1);
-  ASSERT_EQ(tensor.scalar_type(), at::kFloat);
+  ASSERT_EQ(tensor.dtype(), at::kFloat);
   ASSERT_TRUE(almost_equal(tensor[0], 123.5));
 
   tensor = at::tensor({1.1, 2.2, 3.3}, dtype(at::kInt));
   ASSERT_EQ(tensor.numel(), 3);
-  ASSERT_EQ(tensor.scalar_type(), at::kInt);
+  ASSERT_EQ(tensor.dtype(), at::kInt);
   ASSERT_EQ(tensor.layout(), at::kStrided);
   ASSERT_TRUE(exactly_equal(tensor[0], 1));
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
