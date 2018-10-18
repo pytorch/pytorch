@@ -31,15 +31,19 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
+        # See Note [Don't serialize hooks]
+        torch.utils.hooks.warn_if_has_hooks(self)
         args = (self.storage(),
                 self.storage_offset(),
                 tuple(self.size()),
                 self.stride(),
                 self.requires_grad,
-                self._backward_hooks)
+                OrderedDict())  # previously was self._backward_hooks
         return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):
+        # Warning: this method is NOT called when you torch.load() a tensor;
+        # that is managed by _rebuild_tensor_v2
         if not self.is_leaf:
             raise RuntimeError('__setstate__ can be only called on leaf Tensors')
         if len(state) == 4:
@@ -50,6 +54,8 @@ class Tensor(torch._C._TensorBase):
             # legacy serialization of Variable
             self.data = state[0]
             state = (state[3], state[4], state[2])
+        # The setting of _backward_hooks is expected to be a no-op.
+        # See Note [Don't serialize hooks]
         self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self):
@@ -141,7 +147,7 @@ class Tensor(torch._C._TensorBase):
 
         raise RuntimeError(trim(r"""reinforce() was removed.
             Use torch.distributions instead.
-            See http://pytorch.org/docs/master/distributions.html
+            See https://pytorch.org/docs/master/distributions.html
 
             Instead of:
 
@@ -422,6 +428,11 @@ class Tensor(torch._C._TensorBase):
         tensor_methods.remove('volatile')  # deprecated
         attrs = list(self.__dict__.keys())
         keys = tensor_methods + attrs
+
+        # property only available dense, cuda tensors
+        if (not self.is_cuda) or self.is_sparse:
+            keys.remove("__cuda_array_interface__")
+
         return sorted(keys)
 
     # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
@@ -440,5 +451,57 @@ class Tensor(torch._C._TensorBase):
             # Workaround, torch has no built-in bool tensor
             array = array.astype('uint8')
         return torch.from_numpy(array)
+
+    @property
+    def __cuda_array_interface__(self):
+        """Array view description for cuda tensors.
+
+        See:
+        https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
+        """
+
+        # raise AttributeError for unsupported tensors, so that
+        # hasattr(cpu_tensor, "__cuda_array_interface__") is False.
+        if not self.is_cuda:
+            raise AttributeError(
+                "Can't get __cuda_array_interface__ on non-CUDA tensor type: %s "
+                "If CUDA data is required use tensor.cuda() to copy tensor to device memory." %
+                self.type()
+            )
+
+        if self.is_sparse:
+            raise AttributeError(
+                "Can't get __cuda_array_interface__ on sparse type: %s "
+                "Use Tensor.to_dense() to convert to a dense tensor first." %
+                self.type()
+            )
+
+        # RuntimeError, matching tensor.__array__() behavior.
+        if self.requires_grad:
+            raise RuntimeError(
+                "Can't get __cuda_array_interface__ on Variable that requires grad. "
+                "If gradients aren't required, use var.detach() to get Variable that doesn't require grad."
+            )
+
+        # CUDA devices are little-endian and tensors are stored in native byte
+        # order. 1-byte entries are endian-agnostic.
+        typestr = {
+            torch.float16: "<f2",
+            torch.float32: "<f4",
+            torch.float64: "<f8",
+            torch.uint8: "|u1",
+            torch.int8: "|i1",
+            torch.int16: "<i2",
+            torch.int32: "<i4",
+            torch.int64: "<i8",
+        }[self.dtype]
+
+        itemsize = self.storage().element_size()
+
+        shape = self.shape
+        strides = tuple(s * itemsize for s in self.stride())
+        data = (self.data_ptr(), False)  # read-only is false
+
+        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=0)
 
     __module__ = 'torch'

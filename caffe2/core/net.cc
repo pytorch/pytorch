@@ -107,6 +107,7 @@ std::vector<NetObserverCreator>* GetNetObserverCreators() {
 const std::unordered_map<std::string, std::string>& defaultOverrides() {
   static const std::unordered_map<std::string, std::string> overrides = {
       {"dag", "async_scheduling"},
+      {"prof_dag", "async_scheduling"},
       {"async_dag", "async_scheduling"},
       {"async_polling", "async_scheduling"},
       {"async_simple", "simple"},
@@ -115,7 +116,7 @@ const std::unordered_map<std::string, std::string>& defaultOverrides() {
 }
 
 void checkExecutorOverride(std::string& net_type) {
-  auto executors = caffe2::split(',', c10::FLAGS_caffe2_override_executor);
+  auto executors = caffe2::split(',', FLAGS_caffe2_override_executor);
   CAFFE_ENFORCE(
       executors.size() % 2 == 0, "Invalid override executors flag value");
   std::unordered_map<std::string, std::string> overrides;

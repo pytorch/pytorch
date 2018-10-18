@@ -163,6 +163,13 @@ class CAFFE2_API OpSchema {
   OpSchema& InheritOnnxSchema(const std::string& onnx_schema_name);
 
   /**
+   * @brief Shortcut to InheritOnnxSchema(type_)
+   */
+  OpSchema& InheritOnnxSchema() {
+    return InheritOnnxSchema(type_);
+  }
+
+  /**
    * @brief Sets the tensor inference function to produce the same output as
    * the input.
    */

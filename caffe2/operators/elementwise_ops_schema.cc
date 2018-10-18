@@ -222,9 +222,9 @@ Performs element-wise binary {name} (with limited broadcast support).
 
 {extra}
 )DOC";
-    ReplaceAll(doc, "{name}", name);
-    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
-    ReplaceAll(doc, "{extra}", extra);
+    c10::ReplaceAll(doc, "{name}", name);
+    c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    c10::ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
     schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting");
     schema.Arg(
@@ -274,7 +274,7 @@ OPERATOR_SCHEMA(Add)
     .CostInferenceFunction(PointwiseCostInference<1>)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("addition", kAddExample))
-    .InheritOnnxSchema("Add");
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(AddGradient)
     .NumInputs(3)
     .NumOutputs(2)
@@ -287,7 +287,7 @@ OPERATOR_SCHEMA(Sub)
     .CostInferenceFunction(PointwiseCostInference<1>)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("subtraction", kSubExample))
-    .InheritOnnxSchema("Sub");
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(SubGradient)
     .NumInputs(3)
     .NumOutputs(2)
@@ -300,7 +300,7 @@ OPERATOR_SCHEMA(Mul)
     .CostInferenceFunction(PointwiseCostInference<1>)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("multiplication", kMulExample))
-    .InheritOnnxSchema("Mul");
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(MulGradient)
     .NumInputs(3)
     .NumOutputs(2)
@@ -313,7 +313,7 @@ OPERATOR_SCHEMA(Div)
     .CostInferenceFunction(PointwiseCostInference<1>)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("division", kDivExample))
-    .InheritOnnxSchema("Div");
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(DivGradient)
     .NumInputs(3, 4)
     .NumOutputs(2)
@@ -598,10 +598,10 @@ Performs element-wise {desc} comparison **{name}** (with limited broadcast suppo
 
 {extra}
 )DOC";
-    ReplaceAll(doc, "{name}", name);
-    ReplaceAll(doc, "{desc}", desc);
-    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
-    ReplaceAll(doc, "{extra}", extra);
+    c10::ReplaceAll(doc, "{name}", name);
+    c10::ReplaceAll(doc, "{desc}", desc);
+    c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    c10::ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
     schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
     schema.Arg(
@@ -804,9 +804,9 @@ Both input operands should be of type `bool`.
 
 {extra}
     )DOC";
-    ReplaceAll(doc, "{name}", name);
-    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
-    ReplaceAll(doc, "{extra}", extra);
+    c10::ReplaceAll(doc, "{name}", name);
+    c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    c10::ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
     schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
     schema.Arg(
@@ -843,8 +843,8 @@ std::function<void(OpSchema&)> BitwiseDocGenerator(const char* name) {
 Performs element-wise bitwise operation `{name}` (with limited broadcast support).
 Both input operands should be of type `bool`.
 {broadcast_doc})DOC";
-    ReplaceAll(doc, "{name}", name);
-    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    c10::ReplaceAll(doc, "{name}", name);
+    c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
     schema.SetDoc(doc);
     schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
     schema.Arg(
@@ -927,7 +927,7 @@ Y:
     )DOC")
     .Input(0, "X", "*(Tensor`<bool>`)* Input tensor.")
     .Output(0, "Y", "*(Tensor`<bool>`)* Negated output tensor.")
-    .InheritOnnxSchema("Not");
+    .InheritOnnxSchema();
 SHOULD_NOT_DO_GRADIENT(Not);
 
 OPERATOR_SCHEMA(Sign)

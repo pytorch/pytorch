@@ -113,7 +113,7 @@ Y:
     .Arg(
         "alpha",
         "*(type: float; default: 1.0)* Defines alpha parameter used in calculation.")
-    .InheritOnnxSchema("Elu");
+    .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(EluGradient)

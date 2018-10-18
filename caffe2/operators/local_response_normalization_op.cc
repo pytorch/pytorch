@@ -301,13 +301,13 @@ REGISTER_CPU_OPERATOR(LRN, LRNOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LRNGradient, LRNGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(LRN)
-  .NumInputs(1)
-  .NumOutputs(1, 2)
-  .SetDoc(R"DOC(
+    .NumInputs(1)
+    .NumOutputs(1, 2)
+    .SetDoc(R"DOC(
 
 `LRN` applies Local Response Normalization to an input blob. This operation performs
-a kind of "lateral inhibition" by normalizing over local input regions, where 
-normalization is applied across channels. This operator is typically used to 
+a kind of "lateral inhibition" by normalizing over local input regions, where
+normalization is applied across channels. This operator is typically used to
 normalize an unbounded activation (such as ReLU). The output shape is the same as
 the input shape. The `brew` module has a wrapper for this operator for use in a
 `ModelHelper` object.
@@ -393,7 +393,7 @@ X:
    [ 0.45961624]
    [-1.0201577 ]
    [ 0.62854475]
-   [-0.6395456 ]]]] 
+   [-0.6395456 ]]]]
 
 Y:
  [[[[ 0.5160766 ]
@@ -484,15 +484,19 @@ Y_scale:
 </details>
 
 )DOC")
-  .Arg("size", "*(type: int; default: 0)* Amount of neighboring channels to sum over for normalization")
-  .Arg("alpha", "*(type: float; default: 0)* Multiplicative (scaling) factor.")
-  .Arg("beta", "*(type: float; default: 0)* Exponent.")
-  .Arg("bias", "*(type: float; default: 1.0)* Additive factor.")
-  .Arg("order", "*(type: float; default: 'NCHW')* Order of blob dimensions.")
-  .Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor (ReLU output).")
-  .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
-  .Output(1, "Y_scale", "*(type: Tensor`<float>`)* Output scale.") 
-  .InheritOnnxSchema("LRN");
+    .Arg(
+        "size",
+        "*(type: int; default: 0)* Amount of neighboring channels to sum over for normalization")
+    .Arg(
+        "alpha",
+        "*(type: float; default: 0)* Multiplicative (scaling) factor.")
+    .Arg("beta", "*(type: float; default: 0)* Exponent.")
+    .Arg("bias", "*(type: float; default: 1.0)* Additive factor.")
+    .Arg("order", "*(type: float; default: 'NCHW')* Order of blob dimensions.")
+    .Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor (ReLU output).")
+    .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
+    .Output(1, "Y_scale", "*(type: Tensor`<float>`)* Output scale.")
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(LRNGradient).NumInputs(3).NumOutputs(1);
 
 class GetLRNGradient : public GradientMakerBase {

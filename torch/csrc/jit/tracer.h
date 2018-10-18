@@ -209,7 +209,8 @@ template <
          !std::is_convertible<torch::decay_t<T>, at::Tensor>::value)>>
 void addOutput(Node* node, T&&) {
   AT_ERROR(
-      "Found an unsupported argument type ", at::demangle_type<T>(),
+      "Found an unsupported argument type ",
+      c10::demangle_type<T>(),
       " in the JIT tracer. File a bug report.");
 }
 TORCH_API void addOutput(Node* node, const at::Tensor& tensor);

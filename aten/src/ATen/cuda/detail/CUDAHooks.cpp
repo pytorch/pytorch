@@ -3,11 +3,11 @@
 #include <ATen/CUDAGenerator.h>
 #include <ATen/Context.h>
 #include <ATen/RegisterCUDA.h>
-#include <ATen/core/Error.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
+#include <c10/util/Exception.h>
 
 #include "THC/THC.h"
 #include <THC/THCGeneral.hpp>

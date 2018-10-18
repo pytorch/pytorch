@@ -1,9 +1,9 @@
 #include <ATen/core/TensorImpl.h>
 
-#include <ATen/core/optional.h>
 #include <ATen/core/Backend.h>
-#include <ATen/core/WrapDimMinimal.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/WrapDimMinimal.h>
+#include "c10/util/Optional.h"
 
 #include <ATen/core/VariableHooksInterface.h>
 
