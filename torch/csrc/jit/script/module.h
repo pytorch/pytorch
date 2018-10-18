@@ -156,7 +156,12 @@ struct Method {
     return *this;
   }
 
-  const FunctionSchema& getSchema() const;
+  const FunctionSchema& getSchema() const {
+    if(schema == nullptr) {
+      schema.reset(new FunctionSchema(defaultSchemaFor(*this)));
+    }
+    return *schema;
+  }
 
   std::string pretty_print_schema() const {
     JIT_ASSERT(schema);
@@ -178,6 +183,23 @@ struct Method {
   }
 
 private:
+
+  static FunctionSchema defaultSchemaFor(const Method& method) {
+    std::vector<Argument> args;
+    std::vector<Argument> returns;
+    Graph& g = *method.graph();
+    size_t num_inputs = method.num_inputs();
+    for(size_t i = 0; i < num_inputs; ++i) {
+      const Value* v = g.inputs().at(i);
+      std::string name = v->hasUniqueName() ? v->uniqueName() : ("argument_"  + std::to_string(i));
+      args.push_back({std::move(name), unshapedType(g.inputs()[i]->type())});
+    }
+    for(size_t i = 0; i < g.outputs().size(); ++i) {
+      returns.push_back({"", unshapedType(g.outputs()[i]->type())});
+    }
+    return { method.name(), std::move(args), std::move(returns) };
+  }
+
   std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
   bool optimize;
