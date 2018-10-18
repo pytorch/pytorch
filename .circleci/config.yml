@@ -664,14 +664,14 @@ jobs:
         no_output_timeout: "1h"
         command: |
           set -e
-          if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
-            echo "Skipping doc push..."
-            exit 0
-          fi
+          # if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
+          #   echo "Skipping doc push..."
+          #   exit 0
+          # fi
           source /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           docker pull ${COMMIT_DOCKER_IMAGE}
-          id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           cat >/home/circleci/project/doc_push_script.sh <<EOL
           # =================== The following code will be executed inside Docker container ===================
