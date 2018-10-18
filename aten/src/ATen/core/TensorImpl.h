@@ -877,10 +877,13 @@ protected:
 
 // Note [TensorImpl size constraints]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Thinking of adding another field to Tensor?  Size matters.  In some
-// production systems at Facebook, we have 400M live tensors during a
-// training run.  Do the math: every 64-bit word you add to Tensor is
-// an extra 3.2 gigabytes in RAM.
+// Changed the size of TensorImpl?  If the size went down, good for
+// you!  Adjust the documentation below and the expected size.
+// Did it go up?  Read on...
+//
+// Struct size matters.  In some production systems at Facebook, we have
+// 400M live tensors during a training run.  Do the math: every 64-bit
+// word you add to Tensor is an extra 3.2 gigabytes in RAM.
 //
 // If you are a Facebook employee, you can check if the run in question
 // has tipped you over the point using the command here:
@@ -889,7 +892,9 @@ protected:
 // For reference, we OOMed at 160 bytes (20 words) per TensorImpl.
 // This is not counting overhead from strides out-of-line allocation, and
 // StorageImpl space.  We're currently comfortably under this number;
-// let's keep it that way.
+// let's keep it that way.  (One currently approved pending size
+// increase is inlining sizes and strides as small vectors, to reduce
+// dynamic allocations.)
 //
 // Our memory usage on 32-bit systems is suboptimal, but we're not checking
 // for it at the moment (to help avoid rage inducing cycles when the
@@ -911,6 +916,8 @@ protected:
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) == sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 12);
+              sizeof(TensorImpl) == sizeof(int64_t) * 12,
+              "You changed the size of TensorImpl on 64-bit arch."
+              "See Note [TensorImpl size constraints] on how to proceed.");
 
 } // namespace at
