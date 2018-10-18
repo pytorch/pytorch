@@ -51,18 +51,6 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
   }
 }
 
-std::ostream& printListToStream(std::ostream & out,
-    const std::string& delim, at::ArrayRef<c10::IValue> list) {
-  bool first = true;
-  for(const auto& ivalue: list) {
-    if(!first)
-      out << delim;
-    first = false;
-    out << ivalue;
-  }
-  return out;
-}
-
 RegisterOperators reg({
     Operator(
         prim::MemoryFence,
@@ -255,7 +243,13 @@ RegisterOperators reg({
         [](Node* node) {
           size_t num_inputs = node->inputs().size();
           return [num_inputs](Stack& stack) {
-            printListToStream(std::cout, " ", last(stack, num_inputs));
+            bool first = true;
+            for(const auto& ivalue: last(stack, num_inputs)) {
+              if(!first)
+                std::cout << " ";
+              first = false;
+              std::cout << ivalue;
+            }
             drop(stack, num_inputs);
             std::cout << std::endl;
             return 0;
@@ -264,14 +258,8 @@ RegisterOperators reg({
     Operator(
         prim::RaiseException,
         [](Node* node) -> Operation {
-          auto exception_name = node->s(attr::name);
-          size_t num_inputs = node->inputs().size();
-          return [exception_name, num_inputs](Stack& stack) {
-            std::stringstream exception;
-            exception << exception_name << ": ";
-            printListToStream(exception, ", ", last(stack, num_inputs));
-            drop(stack, num_inputs);
-            throw std::runtime_error(exception.str());
+          return [](Stack& stack) {
+            throw std::runtime_error(pop(stack).toString()->string());
             return 0;
           };
         }),

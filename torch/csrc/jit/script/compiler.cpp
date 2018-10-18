@@ -1302,8 +1302,7 @@ private:
   // a = Exception("hi")
   // raise a
   //
-  // We don't validate that the name of the Exception
-  // raise AnyName(3)
+  // We ignore the expression following raise
   //
   // NYI: add exception logic to control-flow nodes
   // if True:
@@ -1312,16 +1311,10 @@ private:
   //   raise Exception("Hi")
   // print(a)
   void emitRaise(const Raise& stmt) {
-    if (stmt.expr().kind() != TK_APPLY) {
-      throw ErrorReport(stmt) << "Invalid exception. Exceptions cannot "
-        "be constructed outside of a raise statement";
-    }
-    auto apply = Apply(stmt.expr());
-    auto exception_name = Var(apply.callee()).name().name();
-    auto inputs = getValues(apply.inputs(), true);
-    auto node = graph->insertNode(graph->create(prim::RaiseException, inputs, 0)
-                     ->setSourceLocation(std::make_shared<SourceRange>(stmt.range())));
-    node->s_(attr::name, exception_name);
+    const std::string exception = "Exception";
+    auto string_input = insertConstant(*graph, exception, stmt.range());
+    graph->insertNode(graph->create(prim::RaiseException, {string_input}, 0)
+                        ->setSourceLocation(std::make_shared<SourceRange>(stmt.range())));
   }
 
 

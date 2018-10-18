@@ -7535,7 +7535,7 @@ a")
         ''')
 
         cu.foo(torch.tensor(0))
-        with self.assertRaisesRegex(RuntimeError, "ValueError"):
+        with self.assertRaisesRegex(RuntimeError, "Exception"):
             cu.foo(torch.tensor(1))
 
         @torch.jit.script
@@ -7547,26 +7547,22 @@ a")
 
         foo(torch.tensor(0))
         # we don't currently validate the name of the exception
-        with self.assertRaisesRegex(RuntimeError, "ArbitraryError: 3, hi"):
+        with self.assertRaisesRegex(RuntimeError, "Exception"):
             foo(torch.tensor(1))
 
-        # assigning exceptions to variables unsupported
-        with self.assertRaisesRegex(NotSupportedError, "assigned to a variable"):
-            @torch.jit.script
-            def foo():
-                a = Exception()
-                raise a
+        @torch.jit.script
+        def foo():
+            a = Exception()
+            raise a
 
-        with self.assertRaisesRegex(NotSupportedError, "Unsupported exception"):
-            @torch.jit.script
-            def foo():
-                raise 3 + 4
+        # Exception() creates a python call
+        with self.assertRaisesRegex(RuntimeError, "expected value of type Tensor"):
+            foo()
 
-        with self.assertRaisesRegex(RuntimeError, "Invalid exception"):
-            cu = torch.jit.CompilationUnit('''
-                def foo():
-                    raise 3 + 4
-            ''')
+        # We don't validate the expr following raise
+        @torch.jit.script
+        def foo():
+            raise 3 + 4
 
         # no control flow analysis yet
         with self.assertRaisesRegex(RuntimeError, "undefined value a"):

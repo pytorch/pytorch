@@ -269,14 +269,8 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_Raise(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("raise"))
-        if isinstance(stmt.exc, ast.Name):
-            raise NotSupportedError(r, "Raising exceptions that have been "
-                                    "assigned to a variable is not supported")
-        elif not isinstance(stmt.exc, ast.Call):
-            raise NotSupportedError(r, "Unsupported exception. Exceptions cannot be "
-                                    "constructed outside of a raise statement")
-        call = ExprBuilder.build_Call(ctx, stmt.exc)
-        return Raise(r, call)
+        expr = build_expr(ctx, stmt.exc)
+        return Raise(r, expr)
 
     @staticmethod
     def build_AugAssign(ctx, stmt):
