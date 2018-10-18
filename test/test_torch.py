@@ -4713,7 +4713,7 @@ class TestTorch(TestCase):
         assert not matrices.is_contiguous()
         matrices_inverse = torch.inverse(matrices)
         expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
-        self.assertEqual(matrices_inverse, cast(expected_inv))
+        self.assertEqual(matrices_inverse, conv_fn(expected_inv))
 
     @skipIfNoLapack
     def test_inverse(self):
