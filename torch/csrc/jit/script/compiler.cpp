@@ -1312,6 +1312,10 @@ private:
   //   raise Exception("Hi")
   // print(a)
   void emitRaise(const Raise& stmt) {
+    if (stmt.expr().kind() != TK_APPLY) {
+      throw ErrorReport(stmt) << "Invalid exception. Exceptions cannot "
+        "be constructed outside of a raise statement";
+    }
     auto apply = Apply(stmt.expr());
     auto exception_name = Var(apply.callee()).name().name();
     auto inputs = getValues(apply.inputs(), true);

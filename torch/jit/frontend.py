@@ -272,6 +272,9 @@ class StmtBuilder(Builder):
         if isinstance(stmt.exc, ast.Name):
             raise NotSupportedError(r, "Raising exceptions that have been "
                                     "assigned to a variable is not supported")
+        elif not isinstance(stmt.exc, ast.Call):
+            raise NotSupportedError(r, "Unsupported exception. Exceptions cannot be "
+                                    "constructed outside of a raise statement")
         call = ExprBuilder.build_Call(ctx, stmt.exc)
         return Raise(r, call)
 

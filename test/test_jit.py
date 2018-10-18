@@ -1,4 +1,5 @@
 from __future__ import division
+
 import torch
 import torch.jit
 import torch.nn as nn
@@ -7529,7 +7530,7 @@ a")
         cu = torch.jit.CompilationUnit('''
             def foo(cond):
                 if bool(cond):
-                    raise ValueError()
+                    raise ValueError(3)
                 return 1
         ''')
 
@@ -7555,6 +7556,17 @@ a")
             def foo():
                 a = Exception()
                 raise a
+
+        with self.assertRaisesRegex(NotSupportedError, "Unsupported exception"):
+            @torch.jit.script
+            def foo():
+                raise 3 + 4
+
+        with self.assertRaisesRegex(RuntimeError, "Invalid exception"):
+            cu = torch.jit.CompilationUnit('''
+                def foo():
+                    raise 3 + 4
+            ''')
 
         # no control flow analysis yet
         with self.assertRaisesRegex(RuntimeError, "undefined value a"):
