@@ -297,9 +297,9 @@ struct C10_EXPORT
   }
 };
 
-template <typename T, typename N>
-inline bool is(N n) {
-  return is_impl<T, N>::impl(n);
+template <typename T>
+inline bool is(NNGraph::NodeRef n) {
+  return is_impl<T, NNGraph::NodeRef>::impl(n);
 }
 
 // This is just a way to fix issues when the dyn_cast<> implementation
@@ -433,82 +433,18 @@ CAFFE2_API void coalesceInsertedDataDependencies(repr::NNModule* m);
 template <NNGraph* G>
 struct C10_EXPORT NodeHelper {};
 
-struct NNNodeMatchCriteria {
-  std::function<bool(NNGraph::NodeRef)> predicate;
-  std::string debugString;
+using NNMatchGraph = nom::matcher::MatchGraph<NNGraph>;
+using NNMatchPredicate = nom::matcher::MatchPredicate<NNGraph>;
 
-  NNNodeMatchCriteria(
-      const std::function<bool(NNGraph::NodeRef)>& predicate,
-      const std::string& debugString = "No debug string specified")
-      : predicate(predicate), debugString(debugString){};
-
-  NNNodeMatchCriteria() = default;
-  NNNodeMatchCriteria(const NNNodeMatchCriteria&) = default;
-  NNNodeMatchCriteria& operator=(const NNNodeMatchCriteria&) = default;
-  NNNodeMatchCriteria(NNNodeMatchCriteria&&) = default;
-
-  NNNodeMatchCriteria andCriteria(const NNNodeMatchCriteria& other) {
-    auto thisPredicate = predicate;
-    auto otherPredicate = other.predicate;
-    return NNNodeMatchCriteria(
-        [thisPredicate, otherPredicate](NNGraph::NodeRef node) {
-          return thisPredicate(node) && otherPredicate(node);
-        },
-        debugString + " and " + other.debugString);
-  }
-};
-
-CAFFE2_API std::ostream& operator<<(
-    std::ostream& oss,
-    const NNNodeMatchCriteria& criteria);
-
-using NNMatchGraph = nom::matcher::MatchGraph<NNNodeMatchCriteria>;
-using NNMatchNode = nom::matcher::MatchNode<NNNodeMatchCriteria>;
-
-// Commonly used criteria.
+// Commonly used node predicate.
 
 // The node has a single output and the output has a single consumer.
-CAFFE2_API NNNodeMatchCriteria criteriaSingleOutputAndConsumer();
+CAFFE2_API bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef);
 // The node has a unique consumer (there may be multiple edges from output
 // to the single consumer).
-CAFFE2_API NNNodeMatchCriteria criteriaSingleConsumer();
+CAFFE2_API bool hasUniqueConsumer(NNGraph::NodeRef nodeRef);
 
-template <typename NodeType>
-NNNodeMatchCriteria matchOp(const std::string& debugString = "matchOp") {
-  return NNNodeMatchCriteria(
-      [](NNGraph::NodeRef nodeRef) { return is<NodeType>(nodeRef); },
-      debugString);
-}
-
-template <typename NodeType>
-NNNodeMatchCriteria matchOp(
-    const std::function<bool(const NodeType&)> predicate,
-    const std::string& debugString = "matchOpWithPredicate") {
-  return NNNodeMatchCriteria(
-      [predicate](NNGraph::NodeRef nodeRef) {
-        NOM_REQUIRE_OR_RET_FALSE(is<NodeType>(nodeRef));
-        NodeType* node = get<NodeType>(nodeRef);
-        return predicate(*node);
-      },
-      debugString);
-};
-
-CAFFE2_API NNNodeMatchCriteria
-matchTensor(const std::string& debugString = "matchTensor");
-
-CAFFE2_API NNMatchNode
-matchExternalTensorNode(const std::string& debugString = "matchExternalTensor");
-
-struct CAFFE2_API NNNodeMatch {
-  static bool isMatch(
-      const NNGraph::NodeRef& node,
-      const NNNodeMatchCriteria& criteria) {
-    return criteria.predicate(node);
-  }
-};
-
-using NNSubgraphMatcher =
-    nom::matcher::SubgraphMatcher<NNGraph, NNNodeMatchCriteria, NNNodeMatch>;
+CAFFE2_API NNMatchPredicate matchExternalTensorNode();
 
 } // namespace nn
 
