@@ -16,6 +16,8 @@
 #include <direct.h> // for _mkdir
 #endif
 
+#include "c10/util/StringUtil.h"
+
 #include "caffe2/utils/murmur_hash3.h"
 
 namespace caffe2 {
@@ -151,7 +153,8 @@ void FileStoreHandler::wait(
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start);
     if (timeout != kNoTimeout && elapsed > timeout) {
-      STORE_HANDLER_TIMEOUT("Wait timeout for name(s): ", Join(" ", names));
+      STORE_HANDLER_TIMEOUT(
+          "Wait timeout for name(s): ", c10::Join(" ", names));
     }
     /* sleep override */
     std::this_thread::sleep_for(std::chrono::milliseconds(10));

@@ -4,7 +4,7 @@
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <cmath>

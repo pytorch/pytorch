@@ -86,8 +86,7 @@ void applyOffsetAlias(
   dst->Resize(dims);
   CAFFE_ENFORCE(timestep == dst->size() / numDstTimesteps, "Invalid offset");
   dst->ShareExternalPointer(
-      src->template mutable_data<T>() + startDstTimestep * timestep,
-      dst->size());
+      src->template mutable_data<T>() + startDstTimestep * timestep);
 }
 
 template <typename T, class Context>
@@ -198,7 +197,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
     detail::AddApplyLinkOps(
         links_, timestep_, operator_def.device_option(), &stepNetDef_);
 
-    if (c10::FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
+    if (FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
       VLOG(1) << "Use RecurrentNetworkExecutor";
       auto recurrent_map = detail::GetRecurrentMapping(links_, false /* backward */);
       rnnExecutor_ =
@@ -434,7 +433,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         links_, timestep_, operator_def.device_option(), &stepNetDef_);
     AddParamGradientAccumulationOps(operator_def);
 
-    if (c10::FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
+    if (FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
       InitializeExecutor(operator_def);
     }
   }

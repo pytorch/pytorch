@@ -231,22 +231,23 @@ static std::vector<int64_t> getInputDependencies(Value* output) {
 }
 
 // See Note [Run-time shape checking code] for more explanation on the algorithm.
-at::optional<std::vector<int64_t>> FusionHandleImpl::canRunKernel(at::TensorList args) {
+c10::optional<std::vector<int64_t>> FusionHandleImpl::canRunKernel(
+    at::TensorList args) {
   AT_CHECK(args.size() == input_chunks.size(),
            "Expected ", input_chunks.size(), " arguments, but got ", args.size());
 
-  at::optional<std::vector<int64_t>> map_size;
+  c10::optional<std::vector<int64_t>> map_size;
   for (const auto & broadcast_group : input_broadcast_groups) {
     if (!map_size) {
       map_size = getMapSize(args, broadcast_group);
       if (!map_size) {
-        return at::nullopt;
+        return c10::nullopt;
       }
     } else {
       auto group_map_size = getMapSize(args, broadcast_group);
       // NB: this checks that group_map_size is defined AND equal to map_size
       if (map_size != group_map_size) {
-        return at::nullopt;
+        return c10::nullopt;
       }
     }
   }
@@ -260,7 +261,7 @@ std::unique_ptr<FusedKernel> FusionHandleImpl::compileSpec(
 
   agraph.input_desc = spec.descs();
   // XXX: this assumes that fused kernels only operate on floating-point values inside
-  at::optional<at::ScalarType> scalar_type;
+  c10::optional<at::ScalarType> scalar_type;
   for (TensorDesc& desc : agraph.input_desc) {
     if (isFloatingType(desc.scalar_type)) {
       scalar_type = desc.scalar_type;
@@ -350,9 +351,9 @@ void FusionHandleImpl::run(Stack& stack) {
   , std::make_move_iterator(outputs.end()));
 }
 
-at::optional<std::vector<int64_t>> FusionHandleImpl::getMapSize(
-  at::TensorList args
-, at::IntList arg_subset) {
+c10::optional<std::vector<int64_t>> FusionHandleImpl::getMapSize(
+    at::TensorList args,
+    at::IntList arg_subset) {
   int64_t dim_after_broadcast = 0;
   for (int64_t arg_idx : arg_subset) {
     dim_after_broadcast = std::max(dim_after_broadcast, args[arg_idx].dim());
@@ -371,20 +372,20 @@ at::optional<std::vector<int64_t>> FusionHandleImpl::getMapSize(
       try {
         map_size = at::infer_size(map_size, arg.sizes());
       } catch (std::exception& e) {
-        return at::nullopt;
+        return c10::nullopt;
       }
     } else {
       auto tensor_sizes = arg.sizes().vec();
       int64_t num_chunks = chunk_desc.nSubtensors;
       int64_t dim = at::maybe_wrap_dim(chunk_desc.dim, tensor_sizes.size());
       if (tensor_sizes[dim] % num_chunks != 0) {
-        return at::nullopt;
+        return c10::nullopt;
       }
       tensor_sizes[dim] /= num_chunks;
       try {
         map_size = at::infer_size(map_size, tensor_sizes);
       } catch (std::exception& e) {
-        return at::nullopt;
+        return c10::nullopt;
       }
     }
   }

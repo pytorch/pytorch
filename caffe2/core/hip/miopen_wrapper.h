@@ -123,9 +123,9 @@ class MIOPENWrapper
     void with_miopen_state(size_t state_idx, F&& f)
     {
         CAFFE_ENFORCE(state_idx < CAFFE2_COMPILE_TIME_MAX_MIOPEN_STATES, "Invalid state_idx");
-        auto& sync_state = miopen_states()[context_->hip_gpu_id()][state_idx];
+        auto& sync_state = miopen_states()[context_->device_id()][state_idx];
 
-        DeviceGuard dg(context_->hip_gpu_id());
+        DeviceGuard dg(context_->device_id());
 
         // We need to serialize execution on the MIOPENState as we can't
         // allow multiple threads to race through the cudaEventRecord
@@ -134,7 +134,7 @@ class MIOPENWrapper
         std::lock_guard<std::mutex> g(sync_state.mutex);
         if(!sync_state.state.get())
         {
-            sync_state.state.reset(new MIOPENState(context_->hip_gpu_id()));
+          sync_state.state.reset(new MIOPENState(context_->device_id()));
         }
         CHECK_NOTNULL(sync_state.state.get())->execute(context_->hip_stream(), f);
     }

@@ -620,7 +620,7 @@ struct CodeImpl {
   // It is also very useful for debugging interpreter problems to
   // keep this around.
   std::shared_ptr<Graph> graph;
-  at::optional<std::vector<GraphExecutor*>> grad_executors_;
+  c10::optional<std::vector<GraphExecutor*>> grad_executors_;
   PreprocessGraph preprocess;
 
   std::unordered_map<size_t, int> unique_to_reg; // map from unique of nodes to register in register table
