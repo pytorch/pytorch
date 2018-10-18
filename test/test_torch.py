@@ -4652,7 +4652,7 @@ class TestTorch(TestCase):
 
         # no batches: 2-D tensors
         matrix = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
-        matrix_inverse = torch.inverse(M)
+        matrix_inverse = torch.inverse(matrix)
         identity = conv_fn(torch.eye(5))
         self.assertEqual(identity, torch.mm(matrix, matrix_inverse), 1e-8, 'inverse value')
         self.assertEqual(identity, torch.mm(matrix_inverse, matrix), 1e-8, 'inverse value')
@@ -4660,7 +4660,7 @@ class TestTorch(TestCase):
         matrix_inverse_out = conv_fn(torch.empty(5, 5))
         torch.inverse(matrix, out=matrix_inverse_out)
         self.assertEqual(matrix_inverse_out, matrix_inverse, 0, 'inverse value in-place')
-        # second call, now that MII is transposed
+        # second call, now that matrix_inverse_out is transposed
         torch.inverse(matrix, out=matrix_inverse_out)
         self.assertEqual(matrix_inverse_out, matrix_inverse, 0, 'inverse value in-place')
 
@@ -4678,7 +4678,7 @@ class TestTorch(TestCase):
         expected_inv = torch.stack(expected_inv_list)
         matrices_inverse = torch.inverse(matrices)
         self.assertEqual(matrices_inverse, expected_inv)
-        
+
         # six batches (2 x 3)
         matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 2, 3))
         expected_inv_list = []
@@ -4687,7 +4687,7 @@ class TestTorch(TestCase):
         expected_inv = torch.stack(expected_inv_list).view(2, 3, 5, 5)
         matrices_inverse = torch.inverse(matrices)
         self.assertEqual(matrices_inverse, expected_inv)
-        
+
         # incorrect input test
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             torch.inverse(torch.randn(2, 3, 4, 3))
@@ -4695,7 +4695,7 @@ class TestTorch(TestCase):
         # correctness test
         matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 3))
         matrices_inverse = torch.inverse(matrices)
-        self.assertEqual(torch.matmul(matrices, matrices_inverse), identity.expand_as(M))
+        self.assertEqual(torch.matmul(matrices, matrices_inverse), identity.expand_as(matrices))
         self.assertEqual(torch.matmul(matrices_inverse, matrices), identity.expand_as(matrices))
 
         # torch.inverse with out and batches
