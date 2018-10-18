@@ -6,8 +6,8 @@
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 
-#include <caffe2/utils/Metaprogramming.h>
-#include <caffe2/utils/TypeList.h>
+#include <c10/util/Metaprogramming.h>
+#include <c10/util/TypeList.h>
 
 namespace torch { namespace jit {
 namespace detail {
@@ -62,7 +62,7 @@ Node* getTracedNode(
     const std::tuple<Types...>& tuple) {
   auto symbol = Symbol::fromQualString(schema.name);
   const auto& graph = tracer::getTracingState()->graph;
-  Node* node = graph->create(std::move(symbol), /*outputs=*/0);
+  Node* node = graph->create(std::move(symbol), /*num_outputs=*/0);
   tracer::recordSourceLocation(node);
 
   // Hack to call addInputs for the parameter pack in a sequenced fashion.
@@ -207,7 +207,7 @@ Operator createOperator(
     ArgumentTuple tuple;
     torch::jit::detail::callOperatorWithTuple(
         schema,
-        std::move(implementation),
+        std::move(implementation), // NOLINT(bugprone-move-forwarding-reference)
         stack,
         tuple,
         typename MakeIndices<std::tuple_size<ArgumentTuple>::value>::indices{});

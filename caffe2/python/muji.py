@@ -27,10 +27,9 @@ def OnGPU(gpu_id):
     device_option = caffe2_pb2.DeviceOption()
     if workspace.has_hip_support:
         device_option.device_type = caffe2_pb2.HIP  
-        device_option.hip_gpu_id = gpu_id
     else:
         device_option.device_type = caffe2_pb2.CUDA
-        device_option.cuda_gpu_id = gpu_id
+    device_option.device_id = gpu_id
     return device_option
 
 

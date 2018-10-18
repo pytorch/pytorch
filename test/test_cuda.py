@@ -1168,9 +1168,12 @@ class TestCuda(TestCase):
             torch.cuda.manual_seed(2)
             self.assertEqual(torch.cuda.initial_seed(), 2)
             x.uniform_()
+            a = torch.bernoulli(torch.full_like(x, 0.5))
             torch.cuda.manual_seed(2)
             y = x.clone().uniform_()
+            b = torch.bernoulli(torch.full_like(x, 0.5))
             self.assertEqual(x, y)
+            self.assertEqual(a, b)
             self.assertEqual(torch.cuda.initial_seed(), 2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
@@ -1472,6 +1475,9 @@ class TestCuda(TestCase):
     def test_matrix_power(self):
         TestTorch._test_matrix_power(self, conv_fn=lambda t: t.cuda())
 
+    def test_chain_matmul(self):
+        TestTorch._test_chain_matmul(self, cast=lambda t: t.cuda())
+
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_det_logdet_slogdet(self):
         TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
@@ -1559,17 +1565,6 @@ class TestCuda(TestCase):
         r = torch.multinomial(p, 1)
         self.assertNotEqual(r.min().item(), 0)
 
-        # multinomial without repeat but with less nonzero
-        # elements than draws
-        # the intention currently is to return 0 for those
-        # and match CPU behaviour, see issue #9062
-        p = torch.zeros(1, 5, device="cuda")
-        p[:, 1] = 1
-        r = torch.multinomial(p, 2, replacement=False)
-        expected = torch.zeros(1, 2, device="cuda", dtype=torch.long)
-        expected[:, 0] = 1
-        self.assertEqual(r, expected)
-
     @staticmethod
     def mute():
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
@@ -1586,7 +1581,7 @@ class TestCuda(TestCase):
     def _test_multinomial_invalid_probs_cuda(probs):
         try:
             with torch.random.fork_rng(devices=[0]):
-                torch.multinomial(probs.to('cuda'), 1)
+                torch.multinomial(probs.to('cuda'), 2)
                 torch.cuda.synchronize()
             return False  # Should not be reached
         except RuntimeError as e:
@@ -1600,10 +1595,11 @@ class TestCuda(TestCase):
                      but we need it for creating another process with CUDA")
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
-        self._spawn_method(test_method, torch.Tensor([0, -1]))
-        self._spawn_method(test_method, torch.Tensor([0, inf]))
-        self._spawn_method(test_method, torch.Tensor([0, -inf]))
-        self._spawn_method(test_method, torch.Tensor([0, nan]))
+        self._spawn_method(test_method, torch.Tensor([1, -1, 1]))
+        self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
+        self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
+        self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
+        self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
     @skipIfRocm
     def test_broadcast(self):
@@ -1829,6 +1825,10 @@ class TestCuda(TestCase):
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_symeig(self):
         TestTorch._test_symeig(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_svd_no_singularvectors(self):
+        TestTorch._test_svd_no_singularvectors(self, lambda t: t.cuda())
 
     def test_arange(self):
         for t in ['IntTensor', 'LongTensor', 'FloatTensor', 'DoubleTensor']:

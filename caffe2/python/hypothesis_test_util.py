@@ -260,7 +260,7 @@ _device_options_hip_or_gpu = [hip_do] if workspace.has_hip_support else [gpu_do]
 
 # Include device option for each GPU
 expanded_device_options = [cpu_do] + (
-    [caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA, cuda_gpu_id=i)
+    [caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA, device_id=i)
      for i in range(workspace.NumCudaDevices())]
     if workspace.has_gpu_support else [])
 

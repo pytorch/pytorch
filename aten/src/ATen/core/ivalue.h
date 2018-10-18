@@ -9,7 +9,7 @@
 
 #include <type_traits>
 
-namespace torch { namespace jit {
+namespace c10 {
 
 template <typename T>
 using Shared = c10::intrusive_ptr<T>;
@@ -561,5 +561,4 @@ inline const std::vector<IValue>& IValue::toGenericListRef() const {
   return toGenericList()->elements();
 }
 
-
-}}
+} // namespace c10

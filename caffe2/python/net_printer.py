@@ -268,7 +268,7 @@ def call(op, inputs=None, outputs=None, factor_prefixes=False):
 
 
 def format_device_option(dev_opt):
-    gpu_id = dev_opt.hip_gpu_id if workspace.has_hip_support else dev_opt.cuda_gpu_id
+    gpu_id = dev_opt.device_id
     if not dev_opt or not (
             dev_opt.device_type or gpu_id or dev_opt.node_name):
         return None

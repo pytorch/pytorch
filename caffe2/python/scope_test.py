@@ -12,16 +12,19 @@ import time
 
 SUCCESS_COUNT = 0
 
+def _gpu_device_type():
+    if workspace.has_hip_support:
+        _gpu_device_type = caffe2_pb2.HIP
+    else:
+        _gpu_device_type = caffe2_pb2.CUDA
+    return _gpu_device_type
 
 def thread_runner(idx, testobj):
     global SUCCESS_COUNT
     testobj.assertEquals(scope.CurrentNameScope(), "")
     testobj.assertEquals(scope.CurrentDeviceScope(), None)
     namescope = "namescope_{}".format(idx)
-    if workspace.has_hip_support:
-        dsc = core.DeviceOption(caffe2_pb2.HIP, hip_gpu_id=idx)
-    else:
-        dsc = core.DeviceOption(caffe2_pb2.CUDA, cuda_gpu_id=idx)
+    dsc = core.DeviceOption(_gpu_device_type(), idx)
     with scope.DeviceScope(dsc):
         with scope.NameScope(namescope):
             testobj.assertEquals(scope.CurrentNameScope(), namescope + "/")
@@ -61,10 +64,7 @@ class TestScope(unittest.TestCase):
     def testDevicescopeBasic(self):
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
-        if workspace.has_hip_support:
-            dsc = core.DeviceOption(caffe2_pb2.HIP, hip_gpu_id=9)
-        else:
-            dsc = core.DeviceOption(caffe2_pb2.CUDA, cuda_gpu_id=9)
+        dsc = core.DeviceOption(_gpu_device_type(), 9)
         with scope.DeviceScope(dsc):
             self.assertEquals(scope.CurrentDeviceScope(), dsc)
 
@@ -73,10 +73,7 @@ class TestScope(unittest.TestCase):
     def testEmptyDevicescopeBasic(self):
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
-        if workspace.has_hip_support:
-            dsc = core.DeviceOption(caffe2_pb2.HIP, hip_gpu_id=9)
-        else:
-            dsc = core.DeviceOption(caffe2_pb2.CUDA, cuda_gpu_id=9)
+        dsc = core.DeviceOption(_gpu_device_type(), 9)
         with scope.DeviceScope(dsc):
             self.assertEquals(scope.CurrentDeviceScope(), dsc)
             with scope.EmptyDeviceScope():
@@ -87,10 +84,7 @@ class TestScope(unittest.TestCase):
     def testDevicescopeAssertion(self):
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
-        if workspace.has_hip_support:
-            dsc = core.DeviceOption(caffe2_pb2.HIP, hip_gpu_id=9)
-        else:
-            dsc = core.DeviceOption(caffe2_pb2.CUDA, cuda_gpu_id=9)
+        dsc = core.DeviceOption(_gpu_device_type(), 9)
 
         try:
             with scope.DeviceScope(dsc):

@@ -2149,6 +2149,10 @@ class TestAutograd(TestCase):
         run_test((10, 10), torch.zeros(10, 10))
         run_test((10,), 0)
 
+    def test_pow_scalar_base(self):
+        a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
+        gradcheck(lambda a: torch.pow(2, a), (a,))
+
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
         # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
@@ -2171,6 +2175,21 @@ class TestAutograd(TestCase):
         gradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
         gradgradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
         gradgradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
+
+    @skipIfRocm
+    def test_chain_matmul(self):
+        def gen_matrices(p):
+            matrices = []
+            for (pi, pi_1) in zip(p[:-1], p[1:]):
+                matrices.append(torch.randn(pi, pi_1).requires_grad_())
+            return matrices
+
+        gradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5]))
+        gradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
+        gradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
+        gradgradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5]))
+        gradgradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
+        gradgradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
 
     def test_profiler(self):
         x = torch.randn(10, 10)
@@ -2547,8 +2566,15 @@ class TestAutograd(TestCase):
     def test_symeig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.symeig(A, eigenvectors=False)
-        with self.assertRaisesRegex(RuntimeError, 'backward without computing eigenvectors'):
+        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
+
+    @skipIfRocm
+    def test_svd_no_singularvectors(self):
+        A = torch.randn(2, 2, dtype=torch.float32, requires_grad=True)
+        u, s, v = torch.svd(A, compute_uv=False)
+        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
+            torch.autograd.backward([u, s, v], [torch.ones_like(u), torch.ones_like(s), torch.ones_like(v)])
 
     def test_no_grad_copy(self):
         # create autograd function that saves grad pointer as class static

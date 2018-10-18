@@ -9,7 +9,7 @@
 #include <ATen/core/TensorTypeId.h>
 #include <ATen/core/TensorTypeIdRegistration.h>
 #include <ATen/core/context_base.h>
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #include "c10/util/Flags.h"
 
@@ -65,7 +65,7 @@ inline int64_t size_from_dim_(int k, IntList dims) {
 
 // Product of all dims up to k (not including dims[k])
 inline int64_t size_to_dim_(int k, IntList dims) {
-  CAFFE_ENFORCE((unsigned)k <= dims.size());
+  AT_ASSERT((unsigned)k <= dims.size());
   int64_t r = 1;
   for (int i = 0; i < k; ++i) {
     r *= dims[i];
@@ -75,7 +75,7 @@ inline int64_t size_to_dim_(int k, IntList dims) {
 
 // Product of all dims between k and l (not including dims[k] and dims[l])
 inline int64_t size_between_dim_(int k, int l, IntList dims) {
-  CAFFE_ENFORCE((unsigned)l < dims.size());
+  AT_ASSERT((unsigned)l < dims.size());
   int64_t r = 1;
   if (k < l) {
     for (int i = k + 1; i < l; ++i) {
@@ -91,8 +91,8 @@ inline int64_t size_between_dim_(int k, int l, IntList dims) {
 
 // Wrap around axis_index if it is negative, s.t., -1 is the last dim
 inline int canonical_axis_index_(int axis_index, int ndims) {
-  CAFFE_ENFORCE_GE(axis_index, -ndims);
-  CAFFE_ENFORCE_LT(axis_index, ndims);
+  AT_ASSERT(axis_index >= -ndims);
+  AT_ASSERT(axis_index < ndims);
   if (axis_index < 0) {
     return axis_index + ndims;
   }
@@ -264,12 +264,12 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   template <typename T>
   inline T * data() const {
     AT_ASSERT(!is_variable());
-    CAFFE_ENFORCE_WITH_CALLER(
+    AT_ASSERTM(
         storage_.data() || numel_ == 0,
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
-    CAFFE_ENFORCE_WITH_CALLER(
+    AT_ASSERTM(
         storage_.IsType<T>(),
         "Tensor type mismatch, caller expects elements to be ",
         caffe2::TypeMeta::TypeName<T>(),
@@ -282,7 +282,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   inline void* data() const {
     AT_ASSERT(!is_variable());
-    CAFFE_ENFORCE_WITH_CALLER(storage_.data() || numel_ == 0);
+    AT_ASSERT(storage_.data() || numel_ == 0);
     return static_cast<void*>(
         static_cast<char*>(storage_.data()) +
         data_type_.itemsize() * storage_offset_);
@@ -412,17 +412,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * The static context of a tensor intuitively represents the device
-   * type of a tensor; e.g., a CPU tensor is associated with the
-   * GetCPUStaticContext().  This method replaces the former Context template
-   * parameter which was previously used to identify the device type
-   * of a tensor.
-   */
-  at::BaseStaticContext* GetStaticContext() const {
-    return ::caffe2::get_static_context(device_type());
-  }
-
-  /**
    * @brief Copies the data from a source tensor, with a contex provided to
    * carry out the underlying memcpy operation.  This method respects
    * caffe2_keep_on_shrink.
@@ -432,10 +421,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       return;
     }
     if (data_type_ != src.dtype()) {
-      CAFFE_ENFORCE_WITH_CALLER(
+      AT_ASSERTM(
           src.is_contiguous(),
           "Right now only copy of contiguous source Tensor is supported.");
-      storage_ = at::Storage(device_type(), src.dtype());
+      storage_ = at::Storage(GetDevice(), src.dtype());
       data_type_ = src.dtype();
     }
     if (src.numel() == -1) {
@@ -443,17 +432,17 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       numel_ = -1;
       strides_.reset();
       is_contiguous_ = true;
-      storage_ = at::Storage(device_type(), caffe2::TypeMeta());
+      storage_ = at::Storage(GetDevice(), caffe2::TypeMeta());
       data_type_ = caffe2::TypeMeta();
       return;
     }
     Resize(src.sizes());
     if (numel() > 0) {
       if (data_type_.copy()) {
-        CAFFE_ENFORCE(
+        AT_ASSERTM(
             device_type() == ::at::DeviceType::CPU,
             "In CopyFrom source and dest tensors must both be CPU for meta copy");
-        CAFFE_ENFORCE(
+        AT_ASSERTM(
             src.device_type() == ::at::DeviceType::CPU,
             "In CopyFrom source and dest tensors must both be CPU for meta copy");
         data_type_.copy()(src.data(), raw_mutable_data(data_type_), numel());
@@ -470,7 +459,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
                     raw_mutable_data(data_type_),
                     device_type());
           } else {
-            CAFFE_ENFORCE(
+            AT_ASSERTM(
                 context->device_type() == src.device_type(),
                 "Type for provided context does not match the type of source");
             context->CopyBytesToDevice(
@@ -500,10 +489,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * complexity.
    */
   void Extend(int64_t num, float growthPct, at::BaseContext* context) {
-    CAFFE_ENFORCE_GE_WITH_CALLER(sizes_.size(), 1u);
-    CAFFE_ENFORCE_GE_WITH_CALLER(
-        num, 0, "`num` must be non-negative for Extend");
-    CAFFE_ENFORCE_WITH_CALLER(
+    AT_ASSERT(sizes_.size() >= 1u);
+    AT_ASSERTM(num >= 0, "`num` must be non-negative for Extend");
+    AT_ASSERTM(
         is_contiguous_,
         "Right now Extend is only supported for contiguous Tensor.");
     auto newDims = sizes_;
@@ -530,7 +518,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     auto oldDims = sizes_;
     Resize(newCapacity);
     auto* newData = raw_mutable_data(data_type_);
-    CAFFE_ENFORCE(
+    AT_ASSERTM(
         context != nullptr, "Context must be provided to Extend the tensor");
     context->CopyItemsSameDevice(
         data_type_, oldSize, oldData.get(), newData);
@@ -547,13 +535,12 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <class T>
   void ReserveSpace(const T& outer_dim) {
-    CAFFE_ENFORCE_WITH_CALLER(
+    AT_ASSERTM(
         is_contiguous_,
         "Right now ReserveSpace is only supported for contiguous Tensor.");
-    CAFFE_ENFORCE(
+    AT_ASSERTM(
         numel_ != -1, "size should be initialized before calling ReserveSpace");
-    CAFFE_ENFORCE(
-        storage_.unique(), "Can't call ReserveSpace on shared storage.");
+    AT_ASSERTM(storage_.unique(), "Can't call ReserveSpace on shared storage.");
     auto newCapacity = sizes_;
     newCapacity[0] = outer_dim;
     auto newNumel = std::accumulate(
@@ -625,15 +612,15 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * This requires the total size of the tensor to remains constant.
    */
   inline void Reshape(const std::vector<int64_t>& dims) {
-    CAFFE_ENFORCE_WITH_CALLER(
+    AT_ASSERTM(
         is_contiguous_,
         "Right now Reshape is only supported for contiguous Tensor.");
     int64_t new_size = 1;
     for (auto d : dims) {
-      CAFFE_ENFORCE_GE_WITH_CALLER(d, 0);
+      AT_ASSERT(d >= 0);
       new_size *= d;
     }
-    CAFFE_ENFORCE_WITH_CALLER(
+    AT_ASSERTM(
         new_size == numel_,
         "New size and old size are not equal. You cannot use Reshape, "
         "but should use Resize."
@@ -653,7 +640,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void FreeMemory() {
     // We'll detach from the old Storage and create a new one
-    storage_ = at::Storage(storage_.device_type(), data_type_);
+    storage_ = at::Storage(storage_.device(), data_type_);
     storage_offset_ = 0;
   }
 
@@ -673,14 +660,13 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // Right now, we are assuming the device_type are the same, since it is
     // inherently the same in the non-templatized code. We should probably add
     // an ENFORCE here which might affect perf a little bit.
-    CAFFE_ENFORCE_EQ_WITH_CALLER(
-        src.numel_,
-        numel_,
+    AT_ASSERTM(
+        src.numel_ == numel_,
         "Size mismatch - did you call reshape before sharing the data?");
     // It is possible that the source tensor hasn't called mutable_data() yet,
     // in which case ShareData() doesn't make much sense since we don't really
     // know what to share yet.
-    CAFFE_ENFORCE_WITH_CALLER(
+    AT_ASSERTM(
         src.storage_.data() || src.numel_ == 0,
         "Source tensor has no content and has size > 0");
     // Finally, do sharing.
@@ -696,7 +682,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       at::DataPtr&& data_ptr,
       const caffe2::TypeMeta& data_type,
       size_t capacity) {
-    CAFFE_ENFORCE_WITH_CALLER(
+    AT_ASSERTM(
         data_type.id() != caffe2::TypeIdentifier::uninitialized(),
         "To share with a raw external pointer you need to pass in an "
         "initialized data_type(TypeMeta).");
@@ -704,7 +690,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       capacity = numel_ * data_type.itemsize();
     }
     if (storage_.unique()) {
-      CAFFE_ENFORCE_WITH_CALLER(
+      AT_ASSERTM(
           numel_ >= 0,
           "To share data with a raw pointer, you need to set shape first.");
       storage_.UniqueStorageShareExternalPointer(
@@ -736,7 +722,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     if (data_type_ == meta && (storage_.data() || numel_ == 0)) {
       return static_cast<void*>(static_cast<char*>(storage_.data()) + storage_offset_ * meta.itemsize());
     } else {
-      CAFFE_ENFORCE_WITH_CALLER(
+      AT_ASSERTM(
           numel_ >= 0,
           "Tensor is not initialized. You probably need to call Resize() "
           "before calling mutable_data()");
@@ -746,7 +732,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         storage_.set_dtype(meta);
       } else {
         if (data_type_ != meta) {
-          storage_ = at::Storage(storage_.device_type(), meta);
+          storage_ = at::Storage(storage_.device(), meta);
         }
       }
       data_type_ = meta;
@@ -762,28 +748,26 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       }
       const at::Allocator* allocator = storage_.allocator();
       // TODO: Get rid of StaticContext
-      CAFFE_ENFORCE(
+      AT_ASSERTM(
           allocator == nullptr,
-          "Allocator is not used within Caffe2 functions, please use StaticContext instead.");
+          "Allocator in storage_ is not used within Caffe2 functions. \
+           we are using global function to get the allocator based on device \
+           type.");
+      allocator = caffe2::GetAllocator(storage_.device_type());
       if (meta.ctor()) {
         // For types that need placement new, we will call it, as well as
         // making sure that when the data is freed, it calls the right
         // destruction procedure.
         auto size = numel_;
         auto dtor = data_type_.dtor();
-        auto data_ptr = GetStaticContext()->New(
-            numel_ * storage_.itemsize()); // Removing this can get rid of
-                                           // InefficientStdFunctionContext
+        auto data_ptr = allocator->allocate(numel_ * storage_.itemsize());
         storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
-            std::move(data_ptr),
-            dtor,
-            size,
-            at::Device(storage_.device_type())));
+            std::move(data_ptr), dtor, size, storage_.device()));
         data_type_.ctor()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
         storage_.set_data_ptr(
-            GetStaticContext()->New(numel_ * storage_.itemsize()));
+            allocator->allocate(numel_ * storage_.itemsize()));
       }
       storage_.set_numel(numel_);
       AT_ASSERT(storage_offset_ == 0); // because we just reallocated
