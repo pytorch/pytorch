@@ -20,6 +20,11 @@ from .._jit_internal import weak_script
 _VF = torch._C._VariableFunctions
 
 
+def _add_weak_docstr(fn, doc):
+    # return _add_docstr(fn, doc)
+    return torch._jit_internal.weak_script(_add_docstr(fn, doc))
+
+
 class _Reduction:
     # NB: Keep this class in sync with enums in THNN/Reduction.h
 
@@ -61,7 +66,7 @@ class _Reduction:
         return _Reduction.get_enum(_Reduction.legacy_get_string(size_average, reduce, emit_warning))
 
 
-conv1d = _add_docstr(torch.conv1d, r"""
+conv1d = _add_weak_docstr(torch.conv1d, r"""
 conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 1D convolution over an input signal composed of several input
@@ -91,7 +96,7 @@ Examples::
     >>> F.conv1d(inputs, filters)
 """)
 
-conv2d = _add_docstr(torch.conv2d, r"""
+conv2d = _add_weak_docstr(torch.conv2d, r"""
 conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 2D convolution over an input image composed of several input
@@ -122,7 +127,7 @@ Examples::
     >>> F.conv2d(inputs, filters, padding=1)
 """)  # noqa: E501
 
-conv3d = _add_docstr(torch.conv3d, r"""
+conv3d = _add_weak_docstr(torch.conv3d, r"""
 conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 3D convolution over an input image composed of several input
@@ -152,7 +157,7 @@ Examples::
     >>> F.conv3d(inputs, filters)
 """)  # noqa: E501
 
-conv_transpose1d = _add_docstr(torch.conv_transpose1d, r"""
+conv_transpose1d = _add_weak_docstr(torch.conv_transpose1d, r"""
 conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
 
 Applies a 1D transposed convolution operator over an input signal
@@ -185,7 +190,7 @@ Examples::
     >>> F.conv_transpose1d(inputs, weights)
 """)
 
-conv_transpose2d = _add_docstr(torch.conv_transpose2d, r"""
+conv_transpose2d = _add_weak_docstr(torch.conv_transpose2d, r"""
 conv_transpose2d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
 
 Applies a 2D transposed convolution operator over an input image
@@ -220,7 +225,7 @@ Examples::
     >>> F.conv_transpose2d(inputs, weights, padding=1)
 """)  # noqa: E501
 
-conv_transpose3d = _add_docstr(torch.conv_transpose3d, r"""
+conv_transpose3d = _add_weak_docstr(torch.conv_transpose3d, r"""
 conv_transpose3d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
 
 Applies a 3D transposed convolution operator over an input image
@@ -254,7 +259,7 @@ Examples::
     >>> F.conv_transpose3d(inputs, weights)
 """)  # noqa: E501
 
-conv_tbc = _add_docstr(torch.conv_tbc, r"""
+conv_tbc = _add_weak_docstr(torch.conv_tbc, r"""
 Applies a 1-dimensional sequence convolution over an input sequence.
 Input and output dimensions are (Time, Batch, Channels) - hence TBC.
 
@@ -267,7 +272,7 @@ Args:
 
 
 # Pooling
-avg_pool1d = _add_docstr(torch.avg_pool1d, r"""
+avg_pool1d = _add_weak_docstr(torch.avg_pool1d, r"""
 avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
 
 Applies a 1D average pooling over an input signal composed of several
@@ -297,7 +302,7 @@ Examples::
 """)
 
 
-avg_pool2d = _add_docstr(torch._C._nn.avg_pool2d, r"""
+avg_pool2d = _add_weak_docstr(torch._C._nn.avg_pool2d, r"""
 avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
 
 Applies 2D average-pooling operation in :math:`kH \times kW` regions by step size
@@ -320,7 +325,7 @@ Args:
         averaging calculation. Default: ``True``
 """)
 
-avg_pool3d = _add_docstr(torch._C._nn.avg_pool3d, r"""
+avg_pool3d = _add_weak_docstr(torch._C._nn.avg_pool3d, r"""
 avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
 
 Applies 3D average-pooling operation in :math:`kT \times kH \times kW` regions by step
@@ -562,7 +567,7 @@ def adaptive_max_pool3d(input, output_size, return_indices=False):
     return ret if return_indices else ret[0]
 
 
-adaptive_avg_pool1d = _add_docstr(torch.adaptive_avg_pool1d, r"""
+adaptive_avg_pool1d = _add_weak_docstr(torch.adaptive_avg_pool1d, r"""
 adaptive_avg_pool1d(input, output_size) -> Tensor
 
 Applies a 1D adaptive average pooling over an input signal composed of
@@ -702,7 +707,7 @@ def threshold(input, threshold, value, inplace=False):
     return torch._C._nn.threshold(input, threshold, value)
 
 
-threshold_ = _add_docstr(torch._C._nn.threshold_, r"""
+threshold_ = _add_weak_docstr(torch._C._nn.threshold_, r"""
 threshold_(input, threshold, value) -> Tensor
 
 In-place version of :func:`~threshold`.
@@ -720,7 +725,7 @@ def relu(input, inplace=False):
     return torch.relu(input)
 
 
-relu_ = _add_docstr(torch.relu_, r"""
+relu_ = _add_weak_docstr(torch.relu_, r"""
 relu_(input) -> Tensor
 
 In-place version of :func:`~relu`.
@@ -762,7 +767,7 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
     return torch._C._nn.hardtanh(input, min_val, max_val)
 
 
-hardtanh_ = _add_docstr(torch._C._nn.hardtanh_, r"""
+hardtanh_ = _add_weak_docstr(torch._C._nn.hardtanh_, r"""
 hardtanh_(input, min_val=-1., max_val=1.) -> Tensor
 
 In-place version of :func:`~hardtanh`.
@@ -790,7 +795,7 @@ def elu(input, alpha=1., inplace=False):
     return torch._C._nn.elu(input, alpha)
 
 
-elu_ = _add_docstr(torch._C._nn.elu_, r"""
+elu_ = _add_weak_docstr(torch._C._nn.elu_, r"""
 elu_(input, alpha=1.) -> Tensor
 
 In-place version of :func:`~elu`.
@@ -811,7 +816,7 @@ def selu(input, inplace=False):
         return torch.selu_(input)
     return torch.selu(input)
 
-selu_ = _add_docstr(torch.selu_, r"""
+selu_ = _add_weak_docstr(torch.selu_, r"""
 selu_(input) -> Tensor
 
 In-place version of :func:`~selu`.
@@ -830,7 +835,7 @@ def celu(input, alpha=1., inplace=False):
         return torch.celu_(input, alpha)
     return torch.celu(input, alpha)
 
-celu_ = _add_docstr(torch.celu_, r"""
+celu_ = _add_weak_docstr(torch.celu_, r"""
 celu_(input, alpha=1.) -> Tensor
 
 In-place version of :func:`~celu`.
@@ -851,7 +856,7 @@ def leaky_relu(input, negative_slope=0.01, inplace=False):
     return torch._C._nn.leaky_relu(input, negative_slope)
 
 
-leaky_relu_ = _add_docstr(torch._C._nn.leaky_relu_, r"""
+leaky_relu_ = _add_weak_docstr(torch._C._nn.leaky_relu_, r"""
 leaky_relu_(input, negative_slope=0.01) -> Tensor
 
 In-place version of :func:`~leaky_relu`.
@@ -882,13 +887,13 @@ def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
     return torch.rrelu(input, lower, upper, training)
 
 
-rrelu_ = _add_docstr(torch.rrelu_, r"""
+rrelu_ = _add_weak_docstr(torch.rrelu_, r"""
 rrelu_(input, lower=1./8, upper=1./3, training=False) -> Tensor
 
 In-place version of :func:`~rrelu`.
 """)
 
-logsigmoid = _add_docstr(torch._C._nn.log_sigmoid, r"""
+logsigmoid = _add_weak_docstr(torch._C._nn.log_sigmoid, r"""
 logsigmoid(input) -> Tensor
 
 Applies element-wise :math:`\text{LogSigmoid}(x) = \log \left(\frac{1}{1 + \exp(-x_i)}\right)`
@@ -930,7 +935,7 @@ def softsign(input):
     return input / (input.abs() + 1)
 
 
-softplus = _add_docstr(torch._C._nn.softplus, r"""
+softplus = _add_weak_docstr(torch._C._nn.softplus, r"""
 softplus(input, beta=1, threshold=20) -> Tensor
 """)
 
@@ -1093,7 +1098,7 @@ def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
         return input.log_softmax(dim, dtype=dtype)
 
 
-softshrink = _add_docstr(torch._C._nn.softshrink, r"""
+softshrink = _add_weak_docstr(torch._C._nn.softshrink, r"""
 softshrink(input, lambd=0.5) -> Tensor
 
 Applies the soft shrinkage function elementwise
@@ -1148,6 +1153,7 @@ def linear(input, weight, bias=None):
 
 
 def bilinear(input1, input2, weight, bias=None):
+    print("Being tested")
     return torch.bilinear(input1, input2, weight, bias)
 
 
@@ -1929,7 +1935,7 @@ def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=No
     return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, reduction)
 
 
-pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
+pixel_shuffle = _add_weak_docstr(torch.pixel_shuffle, r"""
 Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)` to a
 tensor of shape :math:`(C, H \times r, W \times r)`.
 
@@ -2316,7 +2322,7 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6, keepdim=False):
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 
-pdist = _add_docstr(torch.pdist, r"""
+pdist = _add_weak_docstr(torch.pdist, r"""
 pdist(input, p=2) -> Tensor
 
 Computes the p-norm distance between every pair of row vectors in the input.
