@@ -335,7 +335,7 @@ __global__ void batch_norm_backward_kernel(
 
 // TensorAccessor in which the last dimensions are collapsed or expanded as needed
 template <typename scalar_t, int64_t dim>
-static PackedTensorAccessor<scalar_t, dim> reshaped_packed_accessor(const Tensor& t) {
+static PackedTensorAccessor<scalar_t, dim> reshaped_packed_accessor(const Tensor& t, bool forward) {
   constexpr int too_small_feature_set = 16;  // this is the maximum feature dimension when we swap
   constexpr int few_planes = 256;
   // undefined...
@@ -365,7 +365,7 @@ static PackedTensorAccessor<scalar_t, dim> reshaped_packed_accessor(const Tensor
   }
   // evil trick to get adjusted 2d tensors to have large dimension last
   if (dim == 3 && sizes[0] > sizes[2] && sizes[2] < too_small_feature_set &&
-      sizes[1] <= few_planes) {
+      sizes[1] <= few_planes && forward) {
     std::swap(sizes[0], sizes[2]);
     std::swap(strides[0], strides[2]);
   }
@@ -393,14 +393,14 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
     save_mean_ = at::empty({0}, input_options);
     save_invstd_ = at::empty({0}, input_options);
   }
-  auto input = reshaped_packed_accessor<scalar_t, 3>(input_);
-  auto output = reshaped_packed_accessor<scalar_t, 3>(output_);
-  auto weight = reshaped_packed_accessor<scalar_t, 1>(weight_);
-  auto bias = reshaped_packed_accessor<scalar_t, 1>(bias_);
-  auto running_mean = reshaped_packed_accessor<scalar_t, 1>(running_mean_);
-  auto running_var = reshaped_packed_accessor<scalar_t, 1>(running_var_);
-  auto save_mean = reshaped_packed_accessor<accscalar_t, 1>(save_mean_);
-  auto save_invstd = reshaped_packed_accessor<accscalar_t, 1>(save_invstd_);
+  auto input = reshaped_packed_accessor<scalar_t, 3>(input_, true);
+  auto output = reshaped_packed_accessor<scalar_t, 3>(output_, true);
+  auto weight = reshaped_packed_accessor<scalar_t, 1>(weight_, true);
+  auto bias = reshaped_packed_accessor<scalar_t, 1>(bias_, true);
+  auto running_mean = reshaped_packed_accessor<scalar_t, 1>(running_mean_, true);
+  auto running_var = reshaped_packed_accessor<scalar_t, 1>(running_var_, true);
+  auto save_mean = reshaped_packed_accessor<accscalar_t, 1>(save_mean_, true);
+  auto save_invstd = reshaped_packed_accessor<accscalar_t, 1>(save_invstd_, true);
   auto stream = at::cuda::getCurrentCUDAStream();
 
   constexpr int max_blocks = 60000;
@@ -444,16 +444,16 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
     grad_bias_ = at::empty_like(weight_);
   }
 
-  auto grad_output = reshaped_packed_accessor<scalar_t, 3>(grad_out_);
-  auto input = reshaped_packed_accessor<scalar_t, 3>(input_);
-  auto grad_input = reshaped_packed_accessor<scalar_t, 3>(grad_input_);
-  auto weight = reshaped_packed_accessor<scalar_t, 1>(weight_);
-  auto grad_weight = reshaped_packed_accessor<scalar_t, 1>(grad_weight_);
-  auto grad_bias = reshaped_packed_accessor<scalar_t, 1>(grad_bias_);
-  auto running_mean = reshaped_packed_accessor<scalar_t, 1>(running_mean_);
-  auto running_var = reshaped_packed_accessor<scalar_t, 1>( running_var_);
-  auto save_mean = reshaped_packed_accessor<accscalar_t, 1>(save_mean_);
-  auto save_invstd = reshaped_packed_accessor<accscalar_t, 1>(save_invstd_);
+  auto grad_output = reshaped_packed_accessor<scalar_t, 3>(grad_out_, false);
+  auto input = reshaped_packed_accessor<scalar_t, 3>(input_, false);
+  auto grad_input = reshaped_packed_accessor<scalar_t, 3>(grad_input_, false);
+  auto weight = reshaped_packed_accessor<scalar_t, 1>(weight_, false);
+  auto grad_weight = reshaped_packed_accessor<scalar_t, 1>(grad_weight_, false);
+  auto grad_bias = reshaped_packed_accessor<scalar_t, 1>(grad_bias_, false);
+  auto running_mean = reshaped_packed_accessor<scalar_t, 1>(running_mean_, false);
+  auto running_var = reshaped_packed_accessor<scalar_t, 1>( running_var_, false);
+  auto save_mean = reshaped_packed_accessor<accscalar_t, 1>(save_mean_, false);
+  auto save_invstd = reshaped_packed_accessor<accscalar_t, 1>(save_invstd_, false);
 
   auto stream = at::cuda::getCurrentCUDAStream();
   dim3 blocks(input.size(1));
