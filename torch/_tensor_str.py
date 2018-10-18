@@ -73,11 +73,7 @@ class _Formatter(object):
         self.max_width = 1
 
         with torch.no_grad():
-            if len(tensor.size()) == 0:
-                # use tensor_view for 0-dim tensor iteration
-                tensor_view = tensor.view(tensor.nelement())
-            else:
-                tensor_view = tensor
+            tensor_view = tensor.reshape(-1)
 
         if not self.floating_dtype:
             for value in tensor_view:
