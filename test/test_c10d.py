@@ -12,13 +12,13 @@ from functools import wraps
 from collections import namedtuple
 
 import torch
-import common
+import common_utils as common
 from torch import nn
 import torch.nn.functional as F
 import torch.distributed as c10d
 from torch.nn.parallel import DistributedDataParallel
 
-from common import TestCase
+from common_utils import TestCase
 
 
 if not c10d.is_available():
