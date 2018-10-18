@@ -4,7 +4,7 @@ from torch.autograd import Variable, function
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.jit.annotations
-from torch._six import raise_from, with_metaclass
+from torch._six import raise_from, with_metaclass, get_function_from_type
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
 import builtins
@@ -1181,9 +1181,8 @@ def _get_weak_stubs(cls):
     returns the generated ScriptMethodStubs
     """
     stubs = []
-    for item in dir(cls):
-        method = getattr(cls, item)
-        func = getattr(method, "__func__", None)
+    for name in dir(cls):
+        func = get_function_from_type(cls, name)
         if func in weak_script_methods:
             entry = weak_script_methods[func]
             stub = script_method(entry["original_method"], entry["rcb"])

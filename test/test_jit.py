@@ -7458,7 +7458,6 @@ a")
             def __init__(self):
                 super(Passthrough, self).__init__()
                 self.weak = Weak()
-                self.strong = OtherStrong()
 
             @torch.jit.script_method
             def forward(self, x):
