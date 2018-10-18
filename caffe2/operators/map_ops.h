@@ -225,8 +225,8 @@ class MapSerializer : public BlobSerializerBase {
     BlobProto blob_proto;
     blob_proto.set_name(name);
     blob_proto.set_type(MapTypeTraits<KEY_T, VALUE_T>::MapTypeName());
-    blob_proto.set_content(SerializeAsString_EnforceCheck(tensor_protos));
-    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
+    blob_proto.set_content(tensor_protos.SerializeAsString());
+    acceptor(name, blob_proto.SerializeAsString());
   }
 };
 
