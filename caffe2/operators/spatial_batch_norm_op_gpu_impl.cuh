@@ -182,44 +182,47 @@ __global__ void ComputeScaleBiasGradientsAndFusedParamsCUDAKernel(
   __shared__ typename BlockReduce<T>::TempStorage ds_storage;
   __shared__ typename BlockReduce<T>::TempStorage db_storage;
   for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
+#if __CUDA_ARCH__ >= 350
+    const T scale_val = __ldg(scale + i);
+    const T mean_val = __ldg(mean + i);
+    const T rstd_val = __ldg(rstd + i);
+#else
+    const T scale_val = scale[i];
+    const T mean_val = mean[i];
+    const T rstd_val = rstd[i];
+#endif
     T ds_val = 0;
     T db_val = 0;
     for (int j = threadIdx.x; j < inner_size; j += blockDim.x) {
       const int index = kOrder == StorageOrder::NCHW
           ? (j / HxW * C + i) * HxW + j % HxW
           : j * C + i;
-      ds_val += dY[index] * (X[index] - mean[i]) * rstd[i];
+#if __CUDA_ARCH__ >= 350
+      ds_val += __ldg(dY + index) * (__ldg(X + index) - mean_val) * rstd_val;
+      db_val += __ldg(dY + index);
+#else
+      ds_val += dY[index] * (X[index] - mean_val) * rstd_val;
       db_val += dY[index];
+#endif
     }
     ds_val = BlockReduce<T>(ds_storage).Sum(ds_val);
     db_val = BlockReduce<T>(db_storage).Sum(db_val);
     if (threadIdx.x == 0) {
-#if __CUDA_ARCH__ >= 350
-      const T scale_x_rstd = __ldg(scale + i) * __ldg(rstd + i);
-      const T dscale_x_rstd = ds_val * __ldg(rstd + i);
+      const T scale_x_rstd = scale_val * rstd_val;
+      const T dscale_x_rstd = ds_val * rstd_val;
       dscale[i] = ds_val;
       dbias[i] = db_val;
       alpha[i] = scale_x_rstd;
       beta[i] = -scale_x_rstd * dscale_x_rstd * inv_nhw;
-      gamma[i] =
-          scale_x_rstd * (__ldg(mean + i) * dscale_x_rstd - db_val) * inv_nhw;
-#else
-      const T scale_x_rstd = scale[i] * rstd[i];
-      const T dscale_x_rstd = ds_val * rstd[i];
-      dscale[i] = ds_val;
-      dbias[i] = db_val;
-      alpha[i] = scale_x_rstd;
-      beta[i] = -scale_x_rstd * dscale_x_rstd * inv_nhw;
-      gamma[i] = scale_x_rstd * (mean[i] * dscale_x_rstd - db_val) * inv_nhw;
-#endif
+      gamma[i] = scale_x_rstd * (mean_val * dscale_x_rstd - db_val) * inv_nhw;
     }
     __syncthreads();
   }
 }
 
-template <typename T, StorageOrder kOrder>
-__global__ void ComputeXGradientCUDAKernel(
-    const int size,
+template <typename T>
+__global__ void ComputeXGradientNCHWCUDAKernel(
+    const int N,
     const int C,
     const int HxW,
     const T* dY,
@@ -228,14 +231,52 @@ __global__ void ComputeXGradientCUDAKernel(
     const T* beta,
     const T* gamma,
     T* dX) {
-  CUDA_1D_KERNEL_LOOP(i, size) {
-    const int c = kOrder == StorageOrder::NCHW ? i / HxW % C : i % C;
+  const int outer_size = N * C;
+  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
+    const int c = i % C;
 #if __CUDA_ARCH__ >= 350
-    dX[i] = __ldg(alpha + c) * __ldg(dY + i) + __ldg(beta + c) * __ldg(X + i) +
-        __ldg(gamma + c);
+    const T alpha_val = __ldg(alpha + c);
+    const T beta_val = __ldg(beta + c);
+    const T gamma_val = __ldg(gamma + c);
 #else
-    dX[i] = alpha[c] * dY[i] + beta[c] * X[i] + gamma[c];
+    const T alpha_val = alpha[c];
+    const T beta_val = beta[c];
+    const T gamma_val = gamma[c];
 #endif
+    for (int j = threadIdx.x; j < HxW; j += blockDim.x) {
+      const int index = i * HxW + j;
+#if __CUDA_ARCH__ >= 350
+      dX[index] = __ldg(dY + index) * alpha_val + __ldg(X + index) * beta_val +
+          gamma_val;
+#else
+      dX[index] = dY[index] * alpha_val + X[index] * beta_val + gamma_val;
+#endif
+    }
+  }
+}
+
+template <typename T>
+__global__ void ComputeXGradientNHWCCUDAKernel(
+    const int N,
+    const int C,
+    const int HxW,
+    const T* dY,
+    const T* X,
+    const T* alpha,
+    const T* beta,
+    const T* gamma,
+    T* dX) {
+  const int outer_size = N * HxW;
+  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
+    for (int j = threadIdx.x; j < C; j += blockDim.x) {
+      const int index = i * C + j;
+#if __CUDA_ARCH__ >= 350
+      dX[index] = __ldg(dY + index) * __ldg(alpha + j) +
+          __ldg(X + index) * __ldg(beta + j) + __ldg(gamma + j);
+#else
+      dX[index] = dY[index] * alpha[j] + X[index] * beta[j] + gamma[j];
+#endif
+    }
   }
 }
 
@@ -418,21 +459,18 @@ void SpatialBNGradientOp<CUDAContext>::ComputeXGradient(
     const T* beta,
     const T* gamma,
     T* dX) {
-  const int size = N * C * HxW;
   if (order_ == StorageOrder::NCHW) {
-    ComputeXGradientCUDAKernel<T, StorageOrder::NCHW>
-        <<<CAFFE_GET_BLOCKS(size),
+    ComputeXGradientNCHWCUDAKernel<T>
+        <<<std::min(N * C, CAFFE_MAXIMUM_NUM_BLOCKS),
            CAFFE_CUDA_NUM_THREADS,
            0,
-           context_.cuda_stream()>>>(
-            size, C, HxW, dY, X, alpha, beta, gamma, dX);
+           context_.cuda_stream()>>>(N, C, HxW, dY, X, alpha, beta, gamma, dX);
   } else {
-    ComputeXGradientCUDAKernel<T, StorageOrder::NHWC>
-        <<<CAFFE_GET_BLOCKS(size),
+    ComputeXGradientNHWCCUDAKernel<T>
+        <<<std::min(N * HxW, CAFFE_MAXIMUM_NUM_BLOCKS),
            CAFFE_CUDA_NUM_THREADS,
            0,
-           context_.cuda_stream()>>>(
-            size, C, HxW, dY, X, alpha, beta, gamma, dX);
+           context_.cuda_stream()>>>(N, C, HxW, dY, X, alpha, beta, gamma, dX);
   }
 }
 
