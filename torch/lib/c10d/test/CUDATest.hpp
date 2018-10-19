@@ -4,6 +4,7 @@
 #include <cuda_runtime.h>
 
 #include <c10d/CUDAUtils.hpp>
+#include <ATen/cuda/CUDAStream.h>
 
 namespace c10d {
 namespace test {
