@@ -23,21 +23,4 @@ CUDAEvent::~CUDAEvent() noexcept (false) {
   }
 }
 
-CUDAStream CUDAStream::create() {
-  CUDAStream stream;
-  stream.stream_ = THCStream_new();
-  return stream;
-}
-
-CUDAStream::~CUDAStream() {
-  if (stream_ != nullptr) {
-    THCStream_free(stream_);
-    stream_ = nullptr;
-  }
-}
-
-cudaStream_t CUDAStream::getStream() const {
-  return THCStream_stream(stream_);
-}
-
 } // namespace c10d

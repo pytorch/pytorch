@@ -9,9 +9,8 @@
 
 using namespace c10d::test;
 
-using c10d::CUDAStream;
+using at::cuda::CUDAStream;
 using c10d::ProcessGroup;
-using c10d::THCStreamGuard;
 
 template <typename T, typename... Args>
 std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
@@ -89,14 +88,14 @@ class AsyncInputIsOutputTest : public AsyncTest {
     streams_.resize(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
-      streams_[i] = CUDAStream::create();
+      streams_[i] = at::cuda::createCUDAStream();
     }
   }
 
-  std::vector<THCStreamGuard> createStreamGuard() {
-    std::vector<THCStreamGuard> guards;
+  std::vector<at::cuda::CUDAGuard> createStreamGuard() {
+    std::vector<at::cuda::CUDAGuard> guards;
     for (auto& stream : streams_) {
-      guards.push_back(std::move(THCStreamGuard(state_, stream)));
+      guards.push_back(std::move(at::cuda::CUDAGuard(stream)));
     }
     return guards;
   }

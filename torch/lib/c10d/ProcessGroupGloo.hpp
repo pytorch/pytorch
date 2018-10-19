@@ -15,6 +15,8 @@
 
 #include <torch/csrc/utils/hash.h>
 
+#include <ATen/cuda/CUDAStream.h>
+
 #ifdef USE_CUDA
 #include <c10d/CUDAUtils.hpp>
 #endif
@@ -119,7 +121,7 @@ struct AlgorithmEntry {
   // true, the caller can launch new CUDA kernels and they will be
   // correctly sequenced.
   //
-  std::vector<CUDAStream> streams;
+  std::vector<at::cuda::CUDAStream> streams;
   std::vector<CUDAEvent> events;
 #endif
 
