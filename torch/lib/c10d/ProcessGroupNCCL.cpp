@@ -398,8 +398,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     CUDAEvent& cudaEvent = work->cudaEvents_[i];
 
-    C10D_CUDA_CHECK(
-        cudaEventRecord(cudaEvent.getEvent(), ncclStream.stream()));
+    C10D_CUDA_CHECK(cudaEventRecord(cudaEvent.getEvent(), ncclStream.stream()));
   }
 
   return work;
@@ -449,8 +448,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     CUDAEvent& cudaEvent = work->cudaEvents_[i];
 
-    C10D_CUDA_CHECK(
-        cudaEventRecord(cudaEvent.getEvent(), ncclStream.stream()));
+    C10D_CUDA_CHECK(cudaEventRecord(cudaEvent.getEvent(), ncclStream.stream()));
   }
 
   return work;
@@ -502,8 +500,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     CUDAEvent& cudaEvent = work->cudaEvents_[i];
 
-    C10D_CUDA_CHECK(
-        cudaEventRecord(cudaEvent.getEvent(), ncclStream.stream()));
+    C10D_CUDA_CHECK(cudaEventRecord(cudaEvent.getEvent(), ncclStream.stream()));
   }
 
   return work;
@@ -579,8 +576,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     CUDAEvent& cudaEvent = work->cudaEvents_[i];
 
-    C10D_CUDA_CHECK(
-        cudaEventRecord(cudaEvent.getEvent(), ncclStream.stream()));
+    C10D_CUDA_CHECK(cudaEventRecord(cudaEvent.getEvent(), ncclStream.stream()));
   }
   return work;
 }

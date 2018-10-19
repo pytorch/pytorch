@@ -163,8 +163,7 @@ void testAllreduce(const std::string& path, const at::Backend b) {
   // Generate inputs
   std::vector<std::vector<at::Tensor>> inputs(size);
   for (auto i = 0; i < size; i++) {
-    auto tensor =
-        at::ones({16, 16}, b) * i;
+    auto tensor = at::ones({16, 16}, b) * i;
     inputs[i] = std::vector<at::Tensor>({tensor});
   }
 

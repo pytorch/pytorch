@@ -23,8 +23,7 @@ std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
 
   std::vector<std::thread> threads;
   for (auto i = 0; i < N; i++) {
-    threads.push_back(
-        std::thread([i, N, &tests] { tests[i].start(i, N); }));
+    threads.push_back(std::thread([i, N, &tests] { tests[i].start(i, N); }));
   }
 
   for (auto& thread : threads) {
@@ -72,11 +71,11 @@ class AsyncInputIsOutputTest : public AsyncTest {
         numTensors_(numTensors),
         numDevices_(cudaNumDevices()),
         state_(::at::globalContext().lazyInitCUDA()) {
-
     // Allocate inputs on available devices in a round robin fashion.
     inputs_.resize(numTensors_);
     for (auto i = 0; i < numTensors_; i++) {
-      inputs_[i] = at::empty({16, 16}, at::device({at::kCUDA, i % numDevices_}));
+      inputs_[i] =
+          at::empty({16, 16}, at::device({at::kCUDA, i % numDevices_}));
     }
 
     // Allocate a stream per device.

@@ -718,7 +718,7 @@ uint32_t checkTag(int32_t tag) {
   if (tag < 0) {
     throw std::runtime_error("Tag must be >= 0");
   }
-  return (uint32_t) tag;
+  return (uint32_t)tag;
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
@@ -793,9 +793,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier() {
   key.collectiveType = CollectiveType::BARRIER;
 
   auto entry = checkout(key);
-  entry->run = [=]() mutable {
-    entry->algorithm->run();
-  };
+  entry->run = [=]() mutable { entry->algorithm->run(); };
   return enqueue(entry);
 }
 
