@@ -99,12 +99,46 @@ void Method::ensure_defined() {
   }
 }
 
+void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
+  to_impl(device, dtype, non_blocking);
+}
+
+void Module::to(at::ScalarType dtype, bool non_blocking) {
+  to_impl(/*device=*/c10::nullopt, dtype, non_blocking);
+}
+
+void Module::to(at::Device device, bool non_blocking) {
+  to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
+}
+
 void Module::save(std::ostream& out) {
   ExportModule(*this, out);
 }
 
 void Module::save(const std::string& filename) {
   ExportModule(*this, filename);
+}
+
+void Module::to_impl(
+    c10::optional<at::Device> device,
+    c10::optional<at::ScalarType> dtype,
+    bool non_blocking) {
+  // First call `to()` on every child module.
+  for (auto& child : modules) {
+    child->module->to_impl(device, dtype, non_blocking);
+  }
+  // Then convert every of our parameters.
+  for (auto& parameter : parameters) {
+    // Need to access the `at::Tensor` as a `Variable` here.
+    autograd::Variable variable = *parameter->slot();
+    at::Tensor data = variable.data();
+    // Use the data's original device or dtype if not supplied here.
+    auto new_data = data.to(
+        device.value_or(data.device()),
+        dtype.value_or(data.dtype()),
+        non_blocking);
+    variable.set_data(new_data);
+  }
 }
 
 }}}

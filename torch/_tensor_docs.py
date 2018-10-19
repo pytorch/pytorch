@@ -1823,6 +1823,15 @@ to fit the new number of elements. If the number of elements is smaller, the
 underlying storage is not changed. Existing elements are preserved but any new
 memory is uninitialized.
 
+.. warning::
+
+    This is a low-level method. The storage is reinterpreted as C-contiguous,
+    ignoring the current strides (unless the target size equals the current
+    size, in which case the tensor is left unchanged). For most purposes, you
+    will instead want to use :meth:`~Tensor.view()`, which checks for
+    contiguity, or :meth:`~Tensor.reshape()`, which copies data if needed. To
+    change the size in-place with custom strides, see :meth:`~Tensor.set_()`.
+
 Args:
     sizes (torch.Size or int...): the desired size
 

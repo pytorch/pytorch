@@ -24,8 +24,8 @@ class _WeightedLoss(_Loss):
 
 
 class L1Loss(_Loss):
-    r"""Creates a criterion that measures the mean absolute value of the
-    element-wise difference between input `x` and target `y`:
+    r"""Creates a criterion that measures the mean absolute error (MAE) between each element in
+    the input `x` and target `y`.
 
     The loss can be described as:
 
@@ -361,8 +361,8 @@ class KLDivLoss(_Loss):
 
 
 class MSELoss(_Loss):
-    r"""Creates a criterion that measures the mean squared error between
-    `n` elements in the input `x` and target `y`.
+    r"""Creates a criterion that measures the mean squared error (squared L2 norm) between
+    each element in the input `x` and target `y`.
 
     The loss can be described as:
 

@@ -13,7 +13,7 @@ import tempfile
 
 import torch
 from torch.utils import cpp_extension
-from common import TEST_WITH_ROCM
+from common_utils import TEST_WITH_ROCM
 import torch.distributed as dist
 
 TESTS = [
