@@ -7,15 +7,15 @@ void THNN_(TemporalReplicationPadding_updateOutput)(
            THCTensor *input,
            THCTensor *output,
            int padL, int padR) {
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, input), 2,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, input), 2,
              "input tensor must fit into 32-bit index math");
 
   int planeDim = 0;
   int dimw = 1;
   int numBatch = 1;
 
-  int numInputDims = THCTensor_(nDimension)(state, input);
-  THCUNN_argCheck(state, numInputDims == 2 || numInputDims == 3, 2, input,
+  int numInputDims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
+  THCUNN_argCheck(state, !input->is_empty() && (numInputDims == 2 || numInputDims == 3), 2, input,
                   "2D or 3D (batch mode) tensor expected for input, but got: %s")
 
   if (numInputDims == 3) {
@@ -33,19 +33,19 @@ void THNN_(TemporalReplicationPadding_updateOutput)(
              " Calculated output W: %d",
              inputW, outputW);
 
-  THCDeviceTensor<real, 3> devInput;
-  THCDeviceTensor<real, 3> devOutput;
+  THCDeviceTensor<scalar_t, 3> devInput;
+  THCDeviceTensor<scalar_t, 3> devOutput;
 
   if (numInputDims == 2) {
     THCTensor_(resize2d)(state, output, numPlanes, outputW);
 
-    devInput = toDeviceTensor<real, 2>(state, input).upcastOuter<3>();
-    devOutput = toDeviceTensor<real, 2>(state, output).upcastOuter<3>();
+    devInput = toDeviceTensor<scalar_t, 2>(state, input).upcastOuter<3>();
+    devOutput = toDeviceTensor<scalar_t, 2>(state, output).upcastOuter<3>();
   } else {
     THCTensor_(resize3d)(state, output, numBatch, numPlanes, outputW);
 
-    devInput = toDeviceTensor<real, 3>(state, input);
-    devOutput = toDeviceTensor<real, 3>(state, output);
+    devInput = toDeviceTensor<scalar_t, 3>(state, input);
+    devOutput = toDeviceTensor<scalar_t, 3>(state, output);
   }
 
   int outputPlaneSize = devOutput.getSize(2);
@@ -66,20 +66,20 @@ void THNN_(TemporalReplicationPadding_updateGradInput)(
            THCTensor *gradInput,
            int padL, int padR) {
 
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, input), 2,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, input), 2,
                 "input tensor must fit into 32-bit index math");
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, gradOutput), 3,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, gradOutput), 3,
                 "output gradient tensor must fit into 32-bit index math");
 
   int planeDim = 0;
   int dimw = 1;
 
-  int numInputDims = THCTensor_(nDimension)(state, input);
+  int numInputDims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
   if (numInputDims == 3) {
     planeDim++;
     dimw++;
   }
-  int iwidth = input->size[dimw];
+  int iwidth = input->size(dimw);
   int owidth  = iwidth + padL + padR;
 
   THArgCheck(owidth == THCTensor_(size)(state, gradOutput, dimw), 3,
@@ -89,15 +89,15 @@ void THNN_(TemporalReplicationPadding_updateGradInput)(
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
 
-  THCDeviceTensor<real, 3> devGradInput;
-  THCDeviceTensor<real, 3> devGradOutput;
+  THCDeviceTensor<scalar_t, 3> devGradInput;
+  THCDeviceTensor<scalar_t, 3> devGradOutput;
 
   if (numInputDims == 2) {
-    devGradInput = toDeviceTensor<real, 2>(state, gradInput).upcastOuter<3>();
-    devGradOutput = toDeviceTensor<real, 2>(state, gradOutput).upcastOuter<3>();
+    devGradInput = toDeviceTensor<scalar_t, 2>(state, gradInput).upcastOuter<3>();
+    devGradOutput = toDeviceTensor<scalar_t, 2>(state, gradOutput).upcastOuter<3>();
   } else {
-    devGradInput = toDeviceTensor<real, 3>(state, gradInput);
-    devGradOutput = toDeviceTensor<real, 3>(state, gradOutput);
+    devGradInput = toDeviceTensor<scalar_t, 3>(state, gradInput);
+    devGradOutput = toDeviceTensor<scalar_t, 3>(state, gradOutput);
   }
 
   int outputPlaneSize = devGradOutput.getSize(2);

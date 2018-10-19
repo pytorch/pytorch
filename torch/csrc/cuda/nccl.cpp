@@ -1,17 +1,15 @@
 #include "nccl.h"
 #include "torch/csrc/cuda/device_set.h"
 #include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/utils/hash.h"
 
 #include <unordered_map>
 #include <sstream>
+#include <limits>
+#include <type_traits>
 #include <ATen/ATen.h>
 #include <THC/THC.h>
-
-// See Note [TH abstraction violation]
-//  - Used to access 'stream' member
-#include <THC/THCStream.hpp>
+#include <THC/THCStream.h>
 
 namespace torch { namespace cuda { namespace nccl {
 
@@ -30,10 +28,20 @@ struct NcclCommList {
   int ndevices;
   NcclCommList(const std::vector<int>& devices)
     : comms(new ncclComm_t[devices.size()]), ndevices(devices.size()) {
-    CHECK(ncclCommInitAll(comms.get(), devices.size(), devices.data()));
+    NCCL_CHECK(ncclCommInitAll(comms.get(), devices.size(), devices.data()));
   }
   NcclCommList(NcclCommList&& foo) = default;
   ~NcclCommList() {
+    /*
+     * TODO(T30279827) Temporarily disable calling ncclCommDestroy
+     * Calling ncclCommDestroy while program exiting is undefined
+     * according to Nvidia, and lead to segfault in NCCL 2
+     * (whether it is called before or after the CUDA runtime destructor).
+     * Temporarily disable it in destructor to avoid segfault.
+     * Following up with Nvidia for long term solution.
+     */
+    return;
+
     if (comms) {
       for (int i = 0; i < ndevices; i++) {
         int dummy_var;
@@ -66,7 +74,7 @@ ArrayRef<ncclComm_t> _get_communicators(TensorList inputs) {
 }
 
 ncclDataType_t _get_data_type(const Type& type) {
-  if (type.backend() != kCUDA) {
+  if (type.backend() != Backend::CUDA) {
     throw std::runtime_error("Unconvertible NCCL type");
   }
   switch (type.scalarType()) {
@@ -142,7 +150,7 @@ void _check_inputs(TensorList inputs, TensorList outputs, int input_multiplier, 
 } // namespace detail
 
 bool is_available(TensorList tensors) {
-#ifdef WITH_NCCL
+#ifdef USE_NCCL
   device_set devices;
   for (auto & tensor : tensors) {
     auto & type = tensor.type();
@@ -164,15 +172,37 @@ bool is_available(TensorList tensors) {
 std::uint64_t version() {
 #if defined(NCCL_MAJOR)
   return NCCL_MAJOR * 1000 + NCCL_MINOR * 100 + NCCL_PATCH;
-#elif defined(WITH_NCCL)
+#elif defined(USE_NCCL)
   return 1000;
 #else
   return 0;
 #endif
 }
 
+namespace {
+  // NCCL changed the numerical type used for count between NCCL1 and NCCL2.
+  // So we use the following struct, which gets the type of the second argument
+  // of T, if T is a function type, with ncclBcast, to get that type statically
+  // and programmatically.
+
+  template<typename T>
+  struct GetSecondArgType;
+
+  template<typename R, typename Arg0, typename Arg1, typename ...Args>
+  struct GetSecondArgType<R(Arg0, Arg1, Args...)> {
+    typedef typename std::decay<Arg1>::type type;
+  };
+
+  constexpr auto count_max = std::numeric_limits<GetSecondArgType<decltype(ncclBcast)>::type>::max();
+}
+
+size_t get_max_count() {
+  return count_max;
+}
+
+
 void broadcast(TensorList tensors, const stream_list& streams, const comm_list& user_comms) {
-#ifdef WITH_NCCL
+#ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   _check_inputs(tensors, tensors, 1, 1);
   ncclDataType_t data_type = _get_data_type(tensors[0].type());
@@ -180,13 +210,16 @@ void broadcast(TensorList tensors, const stream_list& streams, const comm_list& 
 
   std::lock_guard<std::mutex> free_mutex(*(THCCachingAllocator_getCudaFreeMutex()));
   const auto comms = user_comms.empty() ? _get_communicators(tensors) : ArrayRef<ncclComm_t>(user_comms);
-  AutoGPU gpu_guard;
+  at::DeviceGuard device_guard;
   AutoNcclGroup nccl_group_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
-    gpu_guard.setDevice(tensors[i].get_device());
+    device_guard.set_index(tensors[i].get_device());
     // TODO: use current stream
-    const auto stream = (streams.empty() || !streams[i]) ? NULL : streams[i]->stream;
-    CHECK(ncclBcast(tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream));
+    const auto stream = (streams.empty() || !streams[i]) ? nullptr : THCStream_stream(streams[i]);
+    AT_CHECK(static_cast<uint64_t>(numel) <= static_cast<uint64_t>(count_max),
+             "Broadcast tensor has ", numel, " elements, which exceeds the "
+             "maximum NCCL supports (", count_max, ")");
+    NCCL_CHECK(ncclBcast(tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream));
   }
 #else
   throw std::runtime_error("PyTorch built without NCCL support");

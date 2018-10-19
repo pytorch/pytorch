@@ -58,7 +58,7 @@ bool APMeterOp<float, CPUContext>::RunOnDevice() {
 
   const auto* Xdata = X.data<float>();
   const auto* labelData = label.data<int>();
-  auto* Ydata = Y->mutable_data<float>();
+  auto* Ydata = Y->template mutable_data<float>();
 
   BufferPredictions(Xdata, labelData, N, D);
 
@@ -116,7 +116,7 @@ per class for the average precision of that class.
     .Input(
         1,
         "labels",
-        "2-D tensor (Tensor<int>) of size (num_samples) "
+        "2-D tensor (Tensor<float>) of size (num_samples) "
         "containing true labels for each sample")
     .Output(
         0,

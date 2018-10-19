@@ -2,11 +2,13 @@ import torch
 from .module import Module
 from torch.nn.parameter import Parameter
 from .. import functional as F
+from .. import init
 
 
 # TODO: check contiguous in THNN
 # TODO: use separate backend functions?
 class _BatchNorm(Module):
+    _version = 2
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
@@ -41,8 +43,8 @@ class _BatchNorm(Module):
     def reset_parameters(self):
         self.reset_running_stats()
         if self.affine:
-            self.weight.data.uniform_()
-            self.bias.data.zero_()
+            init.uniform_(self.weight)
+            init.zeros_(self.bias)
 
     def _check_input_dim(self, input):
         raise NotImplementedError
@@ -68,22 +70,19 @@ class _BatchNorm(Module):
         return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
                'track_running_stats={track_running_stats}'.format(**self.__dict__)
 
-    def _load_from_state_dict(self,
-                              state_dict, prefix, strict,
+    def _load_from_state_dict(self, state_dict, prefix, metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        try:
-            version = state_dict._metadata[prefix[:-1]]['version']
-        except (AttributeError, KeyError):
-            version = None
+        version = metadata.get('version', None)
 
-        if version is None and self.track_running_stats:
+        if (version is None or version < 2) and self.track_running_stats:
+            # at version 2: added num_batches_tracked buffer
+            #               this should have a default value of 0
             num_batches_tracked_key = prefix + 'num_batches_tracked'
             if num_batches_tracked_key not in state_dict:
-                # Add the missing num_batches_tracked counter
                 state_dict[num_batches_tracked_key] = torch.tensor(0, dtype=torch.long)
 
         super(_BatchNorm, self)._load_from_state_dict(
-            state_dict, prefix, strict,
+            state_dict, prefix, metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
 
 
@@ -98,9 +97,10 @@ class BatchNorm1d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size).
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
-    By default, during training this layer keeps running estimates of its
+    Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
     evaluation. The running estimates are kept with a default :attr:`momentum`
     of 0.1.
@@ -169,9 +169,10 @@ class BatchNorm2d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size).
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
-    By default, during training this layer keeps running estimates of its
+    Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
     evaluation. The running estimates are kept with a default :attr:`momentum`
     of 0.1.
@@ -240,9 +241,10 @@ class BatchNorm3d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size).
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
-    By default, during training this layer keeps running estimates of its
+    Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
     evaluation. The running estimates are kept with a default :attr:`momentum`
     of 0.1.

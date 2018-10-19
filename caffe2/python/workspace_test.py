@@ -83,6 +83,15 @@ class TestWorkspace(unittest.TestCase):
             workspace.RunPlan(plan.Proto().SerializeToString()), True)
         self.assertEqual(workspace.HasBlob("testblob"), True)
 
+    def testRunPlanInBackground(self):
+        plan = core.Plan("test-plan")
+        plan.AddStep(core.ExecutionStep("test-step", self.net))
+        background_plan = workspace.RunPlanInBackground(plan)
+        while not background_plan.is_done():
+            pass
+        self.assertEqual(background_plan.is_succeeded(), True)
+        self.assertEqual(workspace.HasBlob("testblob"), True)
+
     def testConstructPlanFromSteps(self):
         step = core.ExecutionStep("test-step-as-plan", self.net)
         self.assertEqual(workspace.RunPlan(step), True)
@@ -188,6 +197,30 @@ class TestWorkspace(unittest.TestCase):
         self.assertEqual(fetched_back.shape, (2, 3, 4))
         self.assertEqual(fetched_back.dtype, np.bool)
         np.testing.assert_array_equal(fetched_back, data)
+
+    def testGetBlobSizeBytes(self):
+        for dtype in [np.float16, np.float32, np.float64, np.bool,
+                      np.int8, np.int16, np.int32, np.int64,
+                      np.uint8, np.uint16]:
+            data = np.random.randn(2, 3).astype(dtype)
+            self.assertTrue(workspace.FeedBlob("testblob_sizeBytes", data), True)
+            self.assertEqual(
+                workspace.GetBlobSizeBytes("testblob_sizeBytes"),
+                6 * np.dtype(dtype).itemsize)
+        strs1 = np.array([b'Hello World!', b'abcd'])
+        strs2 = np.array([b'element1', b'element2'])
+        strs1_len, strs2_len = 0, 0
+        for str in strs1:
+            strs1_len += len(str)
+        for str in strs2:
+            strs2_len += len(str)
+        self.assertTrue(workspace.FeedBlob("testblob_str1", strs1), True)
+        self.assertTrue(workspace.FeedBlob("testblob_str2", strs2), True)
+        # size of blob "testblob_str1" = size_str1 * meta_.itemsize() + strs1_len
+        # size of blob "testblob_str2" = size_str2 * meta_.itemsize() + strs2_len
+        self.assertEqual(
+            workspace.GetBlobSizeBytes("testblob_str1") -
+            workspace.GetBlobSizeBytes("testblob_str2"), strs1_len - strs2_len)
 
     def testFetchFeedBlobZeroDim(self):
         data = np.empty(shape=(2, 0, 3), dtype=np.float32)

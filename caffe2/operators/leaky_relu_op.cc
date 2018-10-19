@@ -1,5 +1,6 @@
 #include "caffe2/operators/leaky_relu_op.h"
 
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -103,13 +104,13 @@ Y:
 )DOC")
     .Input(0, "X", "Input tensor of data to be operated on.")
     .Output(0, "Y", "Output tensor, calculated as described above.");
-    
+
 OPERATOR_SCHEMA(LeakyReluGradient)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{1, 0}})
     .Arg("alpha", "Coefficient of leakage")
-    .InheritOnnxSchema("LeakyRelu");
+    .InheritOnnxSchema();
 
 class GetLeakyReluGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

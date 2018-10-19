@@ -14,6 +14,7 @@
 #endif
 
 #include <unordered_set>
+#include <memory> // for unique_ptr
 
 using namespace torch::autograd;
 
@@ -23,9 +24,7 @@ struct THPEngine {
 
 static torch::autograd::python::PythonEngine engine;
 
-// Here we add a method of Engine so that we can use Engine::get_default_engine
-// throughout the code in both NO_PYTHON builds and regular builds
-Engine& torch::autograd::Engine::get_default_engine() {
+static Engine& get_python_engine() {
   return engine;
 }
 
@@ -46,6 +45,10 @@ void PythonEngine::thread_on_exception(FunctionTask& task, std::exception& e) {
     python_err->persist();
   }
   Engine::thread_on_exception(task, e);
+}
+
+std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
+  return std::unique_ptr<AnomalyMetadata>(new PyAnomalyMetadata());
 }
 
 variable_list PythonEngine::execute(
@@ -136,7 +139,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     }
   }
 
-  edge_list output_edges;
+  std::vector<Edge> output_edges;
   if (inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     output_edges.reserve(num_inputs);
@@ -277,5 +280,6 @@ bool THPEngine_initModule(PyObject *module)
     return false;
   Py_INCREF(&THPEngineType);
   PyModule_AddObject(module, "_ImperativeEngine", (PyObject *)&THPEngineType);
+  set_default_engine_stub(get_python_engine);
   return true;
 }

@@ -25,15 +25,15 @@ bool DropoutOp<float, CUDAContext>::RunOnDevice() {
   Y->Resize(X.dims());
   if (is_test_) {
     if (Y != &X) {
-      context_.Copy<float, CUDAContext, CUDAContext>(
-          X.size(), X.data<float>(), Y->mutable_data<float>());
+      context_.CopySameDevice<float>(
+          X.size(), X.data<float>(), Y->template mutable_data<float>());
     }
     return true;
   } else {
     // We do a simple trick here: since curand cannot generate random
     // boolean numbers, we will generate into dY and write the result to
     // mask.
-    float* Ydata = Y->mutable_data<float>();
+    float* Ydata = Y->template mutable_data<float>();
     auto* mask = Output(1);
     mask->Resize(X.dims());
     CAFFE_ENFORCE(X.data<float>() != Ydata, "In-place GPU dropout is broken");
@@ -44,7 +44,11 @@ bool DropoutOp<float, CUDAContext>::RunOnDevice() {
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
-        X.size(), ratio_, X.data<float>(), Ydata, mask->mutable_data<bool>());
+        X.size(),
+        ratio_,
+        X.data<float>(),
+        Ydata,
+        mask->template mutable_data<bool>());
     return true;
   }
 }
@@ -69,8 +73,8 @@ bool DropoutGradientOp<float, CUDAContext>::RunOnDevice() {
   dX->Resize(dY.dims());
   if (is_test_) {
     if (dX != &dY) {
-      context_.Copy<float, CUDAContext, CUDAContext>(
-          dY.size(), dY.data<float>(), dX->mutable_data<float>());
+      context_.CopySameDevice<float>(
+          dY.size(), dY.data<float>(), dX->template mutable_data<float>());
     }
     return true;
   } else {
@@ -86,7 +90,7 @@ bool DropoutGradientOp<float, CUDAContext>::RunOnDevice() {
         dY.data<float>(),
         mask.data<bool>(),
         scale,
-        dX->mutable_data<float>());
+        dX->template mutable_data<float>());
     return true;
   }
 }

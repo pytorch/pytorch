@@ -1,5 +1,6 @@
 #include "caffe2/operators/softplus_op.h"
 
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -10,7 +11,7 @@ bool SoftplusOp<float, CPUContext>::RunOnDevice() {
   auto* Y = Output(0);
   Y->ResizeLike(X);
 
-  EigenVectorMap<float>(Y->mutable_data<float>(), X.size()) =
+  EigenVectorMap<float>(Y->template mutable_data<float>(), X.size()) =
       (ConstEigenVectorMap<float>(X.data<float>(), X.size()).array().exp() +
        1.0f)
           .log();
@@ -27,7 +28,7 @@ bool SoftplusGradientOp<float, CPUContext>::RunOnDevice() {
 
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   EigenVectorArrayMap<float> dXvec(dXdata, dX->size());
   ConstEigenVectorArrayMap<float> Yvec(Ydata, Y.size());
   ConstEigenVectorArrayMap<float> dYvec(dYdata, dY.size());
@@ -98,7 +99,7 @@ Y:
 )DOC")
     .Input(0, "X", "Input data blob to be operated on.")
     .Output(0, "Y", "Output data blob with same shape as input.")
-    .InheritOnnxSchema("Softplus");
+    .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(SoftplusGradient)

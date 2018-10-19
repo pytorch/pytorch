@@ -92,23 +92,23 @@ std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n) {
 }
 
 // Get all nodes tracked by CF graph
-std::unordered_set<repr::NNGraph::NodeRef> getTrackedNodes(
+static std::unordered_set<repr::NNGraph::NodeRef> getTrackedNodes(
     repr::NNCFGraph& cf) {
   std::unordered_set<repr::NNGraph::NodeRef> cfTrackedNodes;
   for (const auto& bbNode : cf.getMutableNodes()) {
-    auto bb = repr::nn::get<repr::BasicBlockType<repr::NNGraph>>(bbNode);
-    for (const auto node : bb->getInstructions()) {
+    auto& bb = bbNode->data();
+    for (const auto node : bb.getInstructions()) {
       cfTrackedNodes.insert(node);
     }
   }
   return cfTrackedNodes;
 }
 
-size_t coalesceInsertedDataDependenciesHelper(repr::NNModule* m) {
+static size_t coalesceInsertedDataDependenciesHelper(repr::NNModule* m) {
   auto cfTrackedNodes = getTrackedNodes(m->controlFlow);
 
   for (auto& bbNode : m->controlFlow.getMutableNodes()) {
-    auto bb = repr::nn::get<repr::BasicBlockType<repr::NNGraph>>(bbNode);
+    auto bb = bbNode->mutableData();
     // We mutate the instructions of the bb, so we copy here.
     // TODO make this an iterator and simply promote it on insertion.
     auto instrsCopy = bb->getInstructions();
@@ -148,13 +148,12 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
     }
   }
 
-  auto newBbNode = m->controlFlow.createNode(
-      util::make_unique<repr::BasicBlockType<repr::NNGraph>>());
+  auto newBbNode = m->controlFlow.createAnonymousFunction();
   auto sccs = algorithm::tarjans(&m->dataFlow);
   for (auto iter = sccs.rbegin(); iter != sccs.rend(); ++iter) {
     for (auto node : iter->getNodes()) {
       if (dfNodes.count(node)) {
-        auto currentBasicBlock = newBbNode->mutableData()->get();
+        auto currentBasicBlock = newBbNode->mutableData();
         currentBasicBlock->pushInstructionNode(node);
       }
     }
@@ -162,12 +161,12 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
 
   // Finally we reconcile any data dependency issues (if we can).
   for (auto& bbNode : m->controlFlow.getMutableNodes()) {
-    auto bb = bbNode->mutableData()->get();
+    auto bb = bbNode->mutableData();
     std::unordered_set<repr::NNGraph::NodeRef> seen;
-    for (auto instr_iter = bb->getInstructions().begin();
-         instr_iter != bb->getInstructions().end();
+    for (auto instr_iter = bb->getMutableInstructions()->begin();
+         instr_iter != bb->getMutableInstructions()->end();
          ++instr_iter) {
-      // This cannot be auto&, TODO figure out why
+      // This cannot be auto& because *iter is pure R-ref
       auto instr = *instr_iter;
       for (auto& output : getOutputs(instr)) {
         for (auto& consumer : getConsumers(output)) {
@@ -179,6 +178,31 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
       seen.insert(instr);
     }
   }
+}
+
+bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef) {
+  auto nodeOutputs = nn::getOutputs(nodeRef);
+  NOM_REQUIRE_OR_RET_FALSE(nodeOutputs.size() == 1);
+  auto nodeConsumers = nn::getConsumers(nodeOutputs.front());
+  return nodeConsumers.size() == 1;
+}
+
+bool hasUniqueConsumer(NNGraph::NodeRef nodeRef) {
+  auto nodeOutputs = nn::getOutputs(nodeRef);
+  NNGraph::NodeRef nodeConsumer = nullptr;
+  for (auto nodeOutput : nodeOutputs) {
+    for (auto consumer : nn::getConsumers(nodeOutput)) {
+      if (nodeConsumer && consumer && consumer != nodeConsumer) {
+        return false;
+      }
+      nodeConsumer = consumer;
+    }
+  }
+  return true;
+}
+
+NNMatchPredicate matchExternalTensorNode() {
+  return NNMatchPredicate(nn::is<Tensor>).nonTerminal().excludeFromSubgraph();
 }
 
 } // namespace nn

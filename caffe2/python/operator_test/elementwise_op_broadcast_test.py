@@ -11,10 +11,11 @@ import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 
 # TODO(jiayq): make them hypothesis tests for better coverage.
-class TestElementwiseBroadcast(hu.HypothesisTestCase):
+class TestElementwiseBroadcast(serial.SerializedTestCase):
     @given(**hu.gcs)
     def test_broadcast_Add(self, gc, dc):
         # Set broadcast and no axis, i.e. broadcasting last dimensions.
@@ -168,7 +169,7 @@ class TestElementwiseBroadcast(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, Y], [0])
         self.assertGradientChecks(gc, op, [X, Y], 1, [0])
 
-    @given(**hu.gcs)
+    @serial.given(**hu.gcs)
     def test_broadcast_powt(self, gc, dc):
         np.random.seed(101)
 
@@ -324,6 +325,16 @@ class TestElementwiseBroadcast(hu.HypothesisTestCase):
         out = workspace.FetchBlob("out")
         np.testing.assert_array_almost_equal(out, X + Y)
         self.assertDeviceChecks(dc, op, [X, Y], [0])
+
+    @given(**hu.gcs)
+    def test_sum_reduce_empty_blob(self, gc, dc):
+        net = core.Net('test')
+
+        with core.DeviceScope(gc):
+            net.GivenTensorFill([], ["X"], values=[], shape=[2, 0, 5])
+            net.GivenTensorFill([], ["Y"], values=[], shape=[2, 0])
+            net.SumReduceLike(["X", "Y"], "out", axis=0)
+            workspace.RunNetOnce(net)
 
     @given(**hu.gcs)
     def test_sum_reduce(self, gc, dc):

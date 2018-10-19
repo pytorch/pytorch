@@ -41,7 +41,7 @@ class GatherByKeyOp : public Operator<CPUContext> {
     const auto& in0Shape = Input(1).dims();
     CAFFE_ENFORCE_GE(in0Shape.size(), 1);
 
-    vector<TIndex> outShape(keysShape);
+    vector<int64_t> outShape(keysShape.vec());
     outShape.insert(outShape.end(), in0Shape.begin() + 1, in0Shape.end());
 
     CAFFE_ENFORCE_GE(outShape.size(), 1);
@@ -81,7 +81,7 @@ class GatherByKeyOp : public Operator<CPUContext> {
         if (currentShard != -1) {
           auto inStartOffset = inStartOffsets_[currentShard];
           auto numItems = i - outStartOffset;
-          context_.template CopyItems<CPUContext, CPUContext>(
+          context_.CopyItemsSameDevice(
               meta,
               numItems * blockSize,
               inputDatas_[currentShard] +
@@ -122,10 +122,10 @@ class PartitionOpBase : public Operator<CPUContext> {
     CAFFE_ENFORCE_GT(partitions, 0, "Invalid number of partitions");
 
     auto& main_input = Input(mainInputIndex);
-    TIndex size = main_input.size();
+    int64_t size = main_input.size();
     const Index* data = main_input.template data<Index>();
     counts_.assign(partitions, 0);
-    for (TIndex p = 0; p < size; p++) {
+    for (int64_t p = 0; p < size; p++) {
       int shard = moduloPartition(data[p], partitions);
       ++counts_[shard];
     }
@@ -158,7 +158,7 @@ class PartitionOpBase : public Operator<CPUContext> {
       block_sizes_[i] = input.size_from_dim(main_input.ndim());
       metas_[i] = input.meta();
       // shape = partition_size + suffix of input dims
-      vector<TIndex> shape(
+      vector<int64_t> shape(
           input.dims().begin() + main_input.ndim() - 1, input.dims().end());
       for (int j = 0; j < partitions; ++j) {
         int out_idx = i + j * inputSize;
@@ -170,9 +170,9 @@ class PartitionOpBase : public Operator<CPUContext> {
     }
 
     counts_.assign(partitions, 0);
-    for (TIndex p = 0; p < size; p++) {
+    for (int64_t p = 0; p < size; p++) {
       int shard = moduloPartition(data[p], partitions);
-      TIndex idx = counts_[shard]++;
+      int64_t idx = counts_[shard]++;
 
       // special case first input
       static_cast<Index*>(out_datas_[shard * inputSize + mainInputIndex])[idx] =
@@ -183,7 +183,7 @@ class PartitionOpBase : public Operator<CPUContext> {
         auto bs = block_sizes_[i];
         auto meta = metas_[i];
         // special case for small bs?
-        context_.template CopyItems<CPUContext, CPUContext>(
+        context_.CopyItemsSameDevice(
             meta,
             bs,
             static_cast<const char*>(raw_datas_[i]) + p * bs * meta.itemsize(),
@@ -196,8 +196,8 @@ class PartitionOpBase : public Operator<CPUContext> {
   bool pack_first_input_;
 
   // use member fields to reuse memory
-  vector<TIndex> counts_;
-  vector<TIndex> block_sizes_;
+  vector<int64_t> counts_;
+  vector<int64_t> block_sizes_;
   vector<TypeMeta> metas_;
   vector<const void*> raw_datas_;
   vector<void*> out_datas_;
@@ -221,7 +221,7 @@ class PartitionOp : public PartitionOpBase {
     return true;
   }
 
-  DISABLE_COPY_AND_ASSIGN(PartitionOp);
+  C10_DISABLE_COPY_AND_ASSIGN(PartitionOp);
 };
 
 class LengthsPartitionOp : public PartitionOpBase {
@@ -248,16 +248,31 @@ class LengthsPartitionOp : public PartitionOpBase {
         1,
         "Only 1-D tensors supported as a partitioning tensor for sharding");
 
+    if (partitions == 1) {
+      // Specialization when partitions == 1 which just becomes a copy.
+      for (int i = 0; i < InputSize(); ++i) {
+        auto& input = Input(i);
+        auto& output = *Output(i);
+        output.ResizeLike(input);
+        context_.CopyItemsSameDevice(
+            input.meta(),
+            input.size(),
+            input.raw_data(),
+            output.raw_mutable_data(input.meta()));
+      }
+      return true;
+    }
+
     // Apply sharding to all parameters except lengths
     ApplyPartition<Index>(true /* skipFirstArgument */);
 
     // Compute lengths after sharding
     auto& main_input = Input(1);
-    TIndex size = main_input.size();
+    int64_t size = main_input.size();
     const Index* data = main_input.template data<Index>();
 
     auto& length_input = Input(0);
-    TIndex elements = length_input.size();
+    int64_t elements = length_input.size();
     const int32_t* lengths_data = length_input.template data<int32_t>();
     out_length_.resize(partitions);
     for (int i = 0; i < partitions; ++i) {
@@ -287,7 +302,7 @@ class LengthsPartitionOp : public PartitionOpBase {
     return true;
   }
 
-  DISABLE_COPY_AND_ASSIGN(LengthsPartitionOp);
+  C10_DISABLE_COPY_AND_ASSIGN(LengthsPartitionOp);
 
   vector<int32_t*> out_length_;
 };

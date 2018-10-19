@@ -16,7 +16,7 @@
 namespace thd {
 namespace {
 
-constexpr int LISTEN_QUEUE_SIZE = 64;
+constexpr int LISTEN_QUEUE_SIZE = 1024;
 
 void setSocketNoDelay(int socket) {
   int flag = 1;

@@ -1,7 +1,3 @@
-from numbers import Number
-
-import math
-
 import torch
 from torch.distributions import constraints
 from torch.distributions.exponential import Exponential
@@ -18,8 +14,7 @@ class Pareto(TransformedDistribution):
 
         >>> m = Pareto(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Pareto distribution with scale=1 and alpha=1
-         1.5623
-        [torch.FloatTensor of size 1]
+        tensor([ 1.5623])
 
     Args:
         scale (float or Tensor): Scale parameter of the distribution
@@ -32,6 +27,12 @@ class Pareto(TransformedDistribution):
         base_dist = Exponential(self.alpha)
         transforms = [ExpTransform(), AffineTransform(loc=0, scale=self.scale)]
         super(Pareto, self).__init__(base_dist, transforms, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Pareto, _instance)
+        new.scale = self.scale.expand(batch_shape)
+        new.alpha = self.alpha.expand(batch_shape)
+        return super(Pareto, self).expand(batch_shape, _instance=new)
 
     @property
     def mean(self):

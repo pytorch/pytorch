@@ -1,18 +1,8 @@
 #include "caffe2/operators/transpose_op.h"
 
-#ifdef CAFFE2_USE_MKL
-#include "caffe2/mkl/operators/operator_fallback_mkl.h"
-#endif // CAFFE2_USE_MKL
-
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(Transpose, TransposeOp<CPUContext>);
-
-#ifdef CAFFE2_HAS_MKL_DNN
-// Registering in operator_fallback_mkl.cc results in a linker error in
-// in opt build related to DoRunWithType().
-REGISTER_MKL_OPERATOR(Transpose, mkl::MKLFallbackOp<TransposeOp<CPUContext>>);
-#endif // CAFFE2_HAS_MKL_DNN
 
 OPERATOR_SCHEMA(Transpose)
     .NumInputs(1)
@@ -49,17 +39,58 @@ OPERATOR_SCHEMA(Transpose)
       return out;
     })
     .SetDoc(R"DOC(
-Transpose the input tensor similar to numpy.transpose. For example, when
-axes=(1, 0, 2), given an input tensor of shape (1, 2, 3), the output shape
-will be (2, 1, 3).
+Transpose the input tensor by permuting the axes of the input according
+to the `axes` argument. Similar to numpy's
+[transpose](https://docs.scipy.org/doc/numpy/reference/generated/numpy.transpose.html)
+function.
+
+For example, when axes=(1, 0, 2), given an input tensor of shape
+(1, 2, 3), the output shape will be (2, 1, 3).
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/transpose_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Transpose",
+    ["X"],
+    ["Y"],
+    axes=(0,3,1,2)
+)
+
+x = np.random.rand(1,32,32,3)
+workspace.FeedBlob("X", x)
+print("X.shape (NHWC order):", workspace.FetchBlob("X").shape)
+workspace.RunOperatorOnce(op)
+print("Y.shape (NCHW order):", workspace.FetchBlob("Y").shape)
+```
+
+**Result**
+
+```
+X.shape (NHWC order): (1, 32, 32, 3)
+Y.shape (NCHW order): (1, 3, 32, 32)
+```
+
+</details>
+
 )DOC")
     .Arg(
         "axes",
-        "A list of integers. By default, reverse the dimensions, "
-        "otherwise permute the axes according to the values given.")
-    .Input(0, "data", "An input tensor.")
-    .Output(0, "transposed", "Transposed output.")
-    .InheritOnnxSchema("Transpose");
+        "*(type: Tuple(int))* Order to permute axes of input tensor. Reverses "
+        "the dimensions by default.")
+    .Input(0, "X", "*(type: Tensor)* Input tensor.")
+    .Output(0, "Y", "*(type: Tensor)* Transposed output.")
+    .InheritOnnxSchema();
 
 class GetTransposeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

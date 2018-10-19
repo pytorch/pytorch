@@ -1,8 +1,9 @@
 #include "THCUNN.h"
 #include "common.h"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include "THCThrustAllocator.cuh"
+#include "THCApply.cuh"
 
 #include <thrust/fill.h>
 #include <thrust/functional.h>

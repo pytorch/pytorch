@@ -4,4 +4,3 @@ from .auto import *
 from .normalization import *
 from .fold import *
 from .sparse import *
-from .rnnFusedPointwise import *

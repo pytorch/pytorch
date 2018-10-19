@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <iostream>
 #include <sstream>
 
 #include "caffe2/core/asan.h"
@@ -9,7 +10,7 @@
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_cuda_full_device_control,
     false,
     "If true, assume all the cudaSetDevice and cudaGetDevice calls will be "
@@ -146,7 +147,7 @@ int GetGPUIDForPointer(const void* ptr) {
   // Otherwise, there must be no error
   CUDA_ENFORCE(err);
 
-  if (attr.memoryType == cudaMemoryTypeHost) {
+  if (attr.CAFFE2_CUDA_PTRATTR_MEMTYPE == cudaMemoryTypeHost) {
     return -1;
   }
 

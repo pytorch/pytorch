@@ -4,7 +4,7 @@
 
 #include <unordered_map>
 
-#include "Store.hpp"
+#include <c10d/Store.hpp>
 
 namespace c10d {
 
@@ -22,9 +22,11 @@ class FileStore : public Store {
 
   bool check(const std::vector<std::string>& keys) override;
 
+  void wait(const std::vector<std::string>& keys) override;
+
   void wait(
       const std::vector<std::string>& keys,
-      const std::chrono::milliseconds& timeout = kDefaultTimeout) override;
+      const std::chrono::milliseconds& timeout) override;
 
  protected:
   std::string path_;

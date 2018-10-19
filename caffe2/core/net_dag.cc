@@ -9,15 +9,16 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/static_tracepoint.h"
 #include "caffe2/core/timer.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
+#include "caffe2/utils/thread_name.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_disable_chaining,
     false,
     "Disable chaining logic (some latent multi-device issues).");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_dag_net_collect_stats,
     false,
     "Collect time stats in DAG net");
@@ -51,7 +52,7 @@ DAGNetBase::DAGNetBase(
 
   // Figure out the initial frontier - this is the one we will feed into the job
   // queue to start a run.
-  for (int idx = 0; idx < operator_nodes_.size(); ++idx) {
+  for (size_t idx = 0; idx < operator_nodes_.size(); ++idx) {
     if (operator_nodes_[idx].parents_.size() == 0) {
       initial_frontier_.push_back(idx);
     }
@@ -66,15 +67,15 @@ DAGNetBase::DAGNetBase(
   }
   num_workers_ = num_workers;
 
-  for (int idx = 0; idx < operator_nodes_.size(); ++idx) {
+  for (size_t idx = 0; idx < operator_nodes_.size(); ++idx) {
     if (operator_nodes_[idx].is_chain_start_) {
       task_timers_[idx] = caffe2::make_unique<Timer>();
     }
   }
-  stats_.reserve(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
-  for (auto device_idx = 0;
-       device_idx < DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES;
-       ++device_idx) {
+  constexpr auto MAX_DEVICE_TYPES =
+      DeviceTypeProto::PROTO_COMPILE_TIME_MAX_DEVICE_TYPES;
+  stats_.reserve(MAX_DEVICE_TYPES);
+  for (auto device_idx = 0; device_idx < MAX_DEVICE_TYPES; ++device_idx) {
     stats_.emplace_back(
         "dag_net/stats/" + net_def->name() + "/" +
         caffe2::DeviceTypeName(device_idx));
@@ -112,11 +113,11 @@ bool DAGNetBase::DoRunAsync() {
     job_queue_ = caffe2::make_unique<SimpleQueue<int>>();
   }
   // Figure out number of workers to start.
-  auto num_workers_to_start = num_workers_ - workers_.size();
+  size_t num_workers_to_start = num_workers_ - workers_.size();
 
   // Ensure the number of workers matches the defined in case
   // any of the previously started threads terminated.
-  for (auto i = 0; i < num_workers_to_start; i++) {
+  for (size_t i = 0; i < num_workers_to_start; i++) {
     VLOG(1) << "Start worker #" << workers_.size();
     workers_.push_back(std::thread(&DAGNetBase::WorkerFunction, this));
   }
@@ -200,6 +201,8 @@ void DAGNetBase::HandleException(
 }
 
 void DAGNetBase::WorkerFunction() {
+  setThreadName("CaffeDAGNet");
+
   // WorkerFunctions() is an infinite loop until there are no more jobs to run.
   while (true) {
     int idx = 0;
@@ -239,7 +242,7 @@ void DAGNetBase::WorkerFunction() {
                           operator_nodes_[idx].operator_->debug_def());
       }
     } catch (std::exception& e) {
-      std::string exception_str = GetExceptionString(e);
+      std::string exception_str = c10::GetExceptionString(e);
       HandleException(idx, exception_str);
     } catch (...) {
       std::string exception_str = "Unknown exception";

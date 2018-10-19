@@ -35,6 +35,10 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
     const int D = X.size_from_dim(canonical_axis);
 
     Y->ResizeLike(X);
+    auto* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (dims_ != X.dims()) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           desc_,
@@ -44,7 +48,7 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
           D,
           1,
           1));
-      dims_ = X.dims();
+      dims_ = X.dims().vec();
     }
     CUDNN_ENFORCE(cudnnSoftmaxForward(
         cudnn_wrapper_.inline_cudnn_handle(),
@@ -55,19 +59,19 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
         X.template data<T>(),
         cudnnTypeWrapper<T>::kZero(),
         desc_,
-        Y->template mutable_data<T>()));
+        Y_data));
     return true;
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
  protected:
   CuDNNWrapper cudnn_wrapper_;
   int axis_;
   cudnnTensorDescriptor_t desc_;
-  vector<TIndex> dims_;
+  vector<int64_t> dims_;
 };
 
 
@@ -95,6 +99,10 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
 
     CHECK_EQ(Y.dims(), dY.dims());
     dX->ResizeLike(Y);
+    auto* dX_data = dX->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (dims_ != Y.dims()) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           desc_,
@@ -104,7 +112,7 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
           D,
           1,
           1));
-      dims_ = Y.dims();
+      dims_ = Y.dims().vec();
     }
     CUDNN_ENFORCE(cudnnSoftmaxBackward(
         cudnn_wrapper_.inline_cudnn_handle(),
@@ -117,19 +125,19 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
         dY.template data<T>(),
         cudnnTypeWrapper<T>::kZero(),
         desc_,
-        dX->template mutable_data<T>()));
+        dX_data));
     return true;
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
  protected:
   CuDNNWrapper cudnn_wrapper_;
   int axis_;
   cudnnTensorDescriptor_t desc_;
-  vector<TIndex> dims_;
+  vector<int64_t> dims_;
 };
 
 namespace {

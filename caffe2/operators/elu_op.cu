@@ -1,74 +1,91 @@
 #include "caffe2/operators/elu_op.h"
 
+#include <algorithm>
+#include <functional>
+
 #include "caffe2/core/context_gpu.h"
 
 namespace caffe2 {
 
 namespace {
+
+template <typename T>
+__global__ void EluCUDAKernel(const int N, const T alpha, const T* X, T* Y);
+
+template <>
 __global__ void
-elu_kernel(const int N, const float alpha, const float* x, float* y) {
+EluCUDAKernel<float>(const int N, const float alpha, const float* X, float* Y) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    if (x[i] > 0) {
-      y[i] = x[i];
-    } else {
-      y[i] = alpha * (__expf(x[i]) - 1);
-    }
+#if __CUDA_ARCH__ >= 350
+    Y[i] =
+        __ldg(X + i) < 0 ? alpha * (expf(__ldg(X + i)) - 1.0f) : __ldg(X + i);
+#else
+    Y[i] = X[i] < 0 ? alpha * (expf(X[i]) - 1.0f) : X[i];
+#endif
   }
 }
 
-__global__ void elu_gradient_kernel(
+template <typename T>
+__global__ void EluGradientCUDAKernel(
     const int N,
-    const float alpha,
-    const float* y,
-    const float* dy,
-    float* dx) {
+    const T alpha,
+    const T* dY,
+    const T* Y,
+    T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    if (y[i] > 0) {
-      dx[i] = dy[i];
-    } else {
-      dx[i] = dy[i] * (y[i] + alpha);
-    }
+#if __CUDA_ARCH__ >= 350
+    dX[i] = __ldg(Y + i) < 0 ? __ldg(dY + i) * (__ldg(Y + i) + alpha)
+                             : __ldg(dY + i);
+#else
+    dX[i] = Y[i] < 0 ? dY[i] * (Y[i] + alpha) : dY[i];
+#endif
   }
 }
+
 } // namespace
 
 template <>
-bool EluOp<float, CUDAContext>::RunOnDevice() {
-  auto& X = Input(0);
-  auto* Y = Output(0);
-  // Otherwise inplace gradient and Elu dosen't make sense.
-  CAFFE_ENFORCE_GE(alpha_, 0);
-  Y->ResizeLike(X);
-  const auto* Xdata = X.data<float>();
-  auto* Ydata = Y->mutable_data<float>();
-  elu_kernel<<<
-      CAFFE_GET_BLOCKS(X.size()),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(X.size(), alpha_, Xdata, Ydata);
+template <typename T>
+bool EluFunctor<CUDAContext>::
+operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
+  EluCUDAKernel<T>
+      <<<CAFFE_GET_BLOCKS(N),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(N, alpha, X, Y);
   return true;
 }
 
 template <>
-bool EluGradientOp<float, CUDAContext>::RunOnDevice() {
-  auto& Y = Input(0);
-  auto& dY = Input(1);
-  auto* dX = Output(0);
-  DCHECK_GT(Y.size(), 0);
-  DCHECK_EQ(dY.size(), Y.size());
-  dX->ResizeLike(Y);
-
-  const float* Ydata = Y.data<float>();
-  const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
-  elu_gradient_kernel<<<
-      CAFFE_GET_BLOCKS(Y.size()),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(Y.size(), alpha_, Ydata, dYdata, dXdata);
+template <typename T>
+bool EluGradientFunctor<CUDAContext>::Forward(
+    const std::vector<int>& Y_dims,
+    const std::vector<int>& /* dY_dims */,
+    const T* Y,
+    const T* dY,
+    T* dX,
+    CUDAContext* context) const {
+  const int size = std::accumulate(
+      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
+  EluGradientCUDAKernel<T>
+      <<<CAFFE_GET_BLOCKS(size),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(size, alpha, dY, Y, dX);
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(Elu, EluOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(EluGradient, EluGradientOp<float, CUDAContext>);
-}
+REGISTER_CUDA_OPERATOR(
+    Elu,
+    UnaryElementwiseWithArgsOp<
+        TensorTypes<float>,
+        CUDAContext,
+        EluFunctor<CUDAContext>>);
+REGISTER_CUDA_OPERATOR(
+    EluGradient,
+    BinaryElementwiseWithArgsOp<
+        TensorTypes<float>,
+        CUDAContext,
+        EluGradientFunctor<CUDAContext>>);
+
+} // namespace caffe2

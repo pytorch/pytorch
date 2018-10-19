@@ -1,15 +1,14 @@
 #include "DataLoader.h"
 
-// In cases like DataLoader, if a worker process die due to bus error/segfault
-// or just hang, the main process, if implemented with
-// multiprocessing.queue.SimpleQueue, will hang waiting for data. This is
-// difficult to avoid on PyTorch side as it can be caused by limited shm, or
-// other libraries users call in the workers. The following methods is an effort
-// to do our best provide some error message to users when such unfortunate
-// events happen.
+// In cases like DataLoader, if a worker process dies due to bus error/segfault
+// or just hang, the main process will hang waiting for data. This is difficult
+// to avoid on PyTorch side as it can be caused by limited shm, or other
+// libraries users call in the workers. The following methods is an effort to do
+// our best to provide some error message to users when such unfortunate events
+// happen.
 
 // TODO: The following don't work on Windows. Specifically, sigaction, waitid
-// calls ,and SIGCHLD handler. Currently, dummy implementations are provided
+// calls, and SIGCHLD handler. Currently, dummy implementations are provided
 // for Windows.
 
 #ifndef _WIN32
@@ -39,7 +38,7 @@ static void HANDLER_NAME(int sig, siginfo_t *info, void *ctx)                 \
   struct sigaction sa;                                                        \
   sa.sa_handler = SIG_DFL;                                                    \
   sa.sa_flags = 0;                                                            \
-  if (sigemptyset(&sa.sa_mask) != 0 || sigaction(SIGNAL, &sa, NULL) != 0) {   \
+  if (sigemptyset(&sa.sa_mask) != 0 || sigaction(SIGNAL, &sa, nullptr) != 0) {   \
     _exit(EXIT_FAILURE);                                                      \
   } else {                                                                    \
     raise(SIGNAL);                                                            \
@@ -63,6 +62,7 @@ static inline void setSignalHandler(int signal, void(*handler)(int, siginfo_t *,
 SIGNAL_HANDLER(SIGBUS, handler_SIGBUS, "ERROR: Unexpected bus error encountered in worker. "
   "This might be caused by insufficient shared memory (shm).\n");
 SIGNAL_HANDLER(SIGSEGV, handler_SIGSEGV, "ERROR: Unexpected segmentation fault encountered in worker.\n");
+SIGNAL_HANDLER(SIGFPE, handler_SIGFPE, "ERROR: Unexpected floating-point exception encountered in worker.\n");
 
 // When an error happend in DataLoader methods and Python starts to exit, the
 // error trace will keep the loader alive, and Python may kill the children
@@ -80,7 +80,7 @@ static void handler_SIGTERM(int sig, siginfo_t *info, void *ctx)
   struct sigaction sa;
   sa.sa_handler = SIG_DFL;
   sa.sa_flags = 0;
-  if (sigemptyset(&sa.sa_mask) != 0 || sigaction(SIGTERM, &sa, NULL) != 0) {
+  if (sigemptyset(&sa.sa_mask) != 0 || sigaction(SIGTERM, &sa, nullptr) != 0) {
     _exit(EXIT_FAILURE);
   } else {
     raise(SIGTERM);
@@ -89,9 +89,10 @@ static void handler_SIGTERM(int sig, siginfo_t *info, void *ctx)
 
 static PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *arg) {
   HANDLE_TH_ERRORS
-  setSignalHandler(SIGBUS, &handler_SIGBUS, NULL);
-  setSignalHandler(SIGSEGV, &handler_SIGSEGV, NULL);
-  setSignalHandler(SIGTERM, &handler_SIGTERM, NULL);
+  setSignalHandler(SIGBUS, &handler_SIGBUS, nullptr);
+  setSignalHandler(SIGSEGV, &handler_SIGSEGV, nullptr);
+  setSignalHandler(SIGTERM, &handler_SIGTERM, nullptr);
+  setSignalHandler(SIGFPE, &handler_SIGFPE, nullptr);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -120,7 +121,9 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
       if (infop.si_code == CLD_EXITED && infop.si_status != EXIT_SUCCESS) {  // exit with error
         std::ostringstream oss;
         oss << "DataLoader worker (pid " << worker_pid << ") exited "
-            << "unexpectedly with exit code " << infop.si_status << ".";
+            << "unexpectedly with exit code " << infop.si_status << ". "
+            << "Details are lost due to multiprocessing. Rerunning with "
+            << "num_workers=0 may give better error trace.";
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
         pid_set->clear();
@@ -128,7 +131,7 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
       }  else if (infop.si_code == CLD_KILLED || infop.si_code == CLD_DUMPED) {  // killed by signal
         std::ostringstream oss;
         oss << "DataLoader worker (pid " << worker_pid << ") is killed "
-            << "by signal: " << strsignal(infop.si_status) << ".";
+            << "by signal: " << strsignal(infop.si_status) << ". ";
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
         pid_set->clear();
@@ -208,9 +211,9 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *_ig
 #endif
 
 PyMethodDef DataLoaderMethods[] = {
-  {"_set_worker_signal_handlers",  (PyCFunction)THPModule_setWorkerSignalHandlers,  METH_NOARGS,   NULL},
-  {"_update_worker_pids",          (PyCFunction)THPModule_updateWorkerPIDs,         METH_VARARGS,  NULL},
-  {"_remove_worker_pids",          (PyCFunction)THPModule_removeWorkerPIDs,         METH_O,        NULL},
-  {"_error_if_any_worker_fails",   (PyCFunction)THPModule_errorIfAnyWorkerFails,    METH_NOARGS,   NULL},
-  {NULL, NULL, 0, NULL}
+  {"_set_worker_signal_handlers",  (PyCFunction)THPModule_setWorkerSignalHandlers,  METH_NOARGS,   nullptr},
+  {"_update_worker_pids",          (PyCFunction)THPModule_updateWorkerPIDs,         METH_VARARGS,  nullptr},
+  {"_remove_worker_pids",          (PyCFunction)THPModule_removeWorkerPIDs,         METH_O,        nullptr},
+  {"_error_if_any_worker_fails",   (PyCFunction)THPModule_errorIfAnyWorkerFails,    METH_NOARGS,   nullptr},
+  {nullptr, nullptr, 0, nullptr}
 };

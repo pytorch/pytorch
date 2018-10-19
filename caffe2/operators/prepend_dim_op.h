@@ -15,7 +15,7 @@ class PrependDimOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   PrependDimOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        dim_size_(OperatorBase::GetSingleArgument<int64_t>("dim_size", 0)) {
+        dim_size_(this->template GetSingleArgument<int64_t>("dim_size", 0)) {
     CAFFE_ENFORCE_GT(
         dim_size_, 0, "Argument dim_size must be greater than zero.");
   }
@@ -40,7 +40,7 @@ class PrependDimOp : public Operator<Context> {
 
     if (output != &input) {
       // If we are not doing in-place computation, a copy is needed.
-      context_.template CopyItems<Context, Context>(
+      context_.CopyItemsSameDevice(
           input.meta(),
           input.size(),
           input.raw_data(),
@@ -75,7 +75,7 @@ class MergeDimOp : public Operator<Context> {
 
     if (output != &input) {
       // If we are not doing in-place computation, a copy is needed.
-      context_.template CopyItems<Context, Context>(
+      context_.CopyItemsSameDevice(
           input.meta(),
           input.size(),
           input.raw_data(),

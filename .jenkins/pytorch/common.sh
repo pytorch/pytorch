@@ -64,6 +64,7 @@ trap_add cleanup EXIT
 if which sccache > /dev/null; then
   # Save sccache logs to file
   sccache --stop-server || true
+  rm ~/sccache_error.log || true
   SCCACHE_ERROR_LOG=~/sccache_error.log RUST_LOG=sccache::server=error sccache --start-server
 
   # Report sccache stats for easier debugging
@@ -112,8 +113,28 @@ else
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7.2 ]]; then
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
   BUILD_TEST_LIBTORCH=0
+fi
+
+# Use conda cmake in some CI build. Conda cmake will be newer than our supported
+# min version 3.5, so we only do it in two builds that we know should use conda.
+if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *cuda8-cudnn6-py2* ]] || \
+     [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py3* ]]; then
+    if ! which conda; then
+      echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
+      exit 1
+    else
+      conda install -q -y cmake
+    fi
+  else
+    if ! cmake --version | grep 'cmake version 3\.5'; then
+      echo "Expected ${BUILD_ENVIRONMENT} to have cmake version 3.5.* (min support version), but 'cmake --version' returns:"
+      cmake --version
+      exit 1
+    fi
+  fi
 fi

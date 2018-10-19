@@ -43,7 +43,8 @@ signature.
 
 **Argument types.** These types are permissible as ArgType:
 
-- `Tensor`.  A `Tensor` argument translates into a C++ argument of type `const Tensor&`.
+- `Tensor`.  A `Tensor` argument translates into a C++ argument of type `const Tensor&`
+  (except when the argument is "inplace"; in this case, it is simply `Tensor&`).
   A trailing `?`, as in `Tensor?`, indicates that the tensor argument is optional
   and may be omitted by passing an undefined tensor.  When a function takes multiple
   `Tensor` arguments, these tensors are assumed to be the same type (e.g.,
@@ -73,11 +74,24 @@ signature.
 - `std::array<bool,N>` (where N is `1-4`).  NB: you MUST NOT put a space after the comma, otherwise
   this argument will not parse correctly.  (If you decide to fix this, make sure you fix the
   argument parser both in ATen and in PyTorch.)
+- `TensorOptions`.  Tensor options provide information about how a
+  tensor should be constructed; it is most useful when you are writing a
+  factory function, where you have no `Tensor` inputs and thus
+  cannot otherwise determine how to construct a `Tensor`.
+- `*` is a special sentinel argument, which doesn't translate into an actual
+  argument, but indicates that in the Python bindings, any subsequent arguments
+  must be specified as keyword arguments (and cannot be provided positionally).
+
+Functions with no tensor inputs are called *factory functions*, and
+are handled specially by code generation.  If your function is behaving
+differently than another example, check first and see if one is a
+factory while another is not.
 
 **Return types.** These types are permissible as ReturnType:
 
 - `Tensor` and `TensorList`, which translate into the C++ types `Tensor` and `std::vector<Tensor>`,
-  respectively.
+  respectively (unless the operation is in-place, in which case the return type
+  is `Tensor&`.
 - A tuple of any number of `Tensor`, e.g., `(Tensor, Tensor)`, translating into
   the C++ `std::tuple<Tensor, Tensor>`.
 
@@ -90,7 +104,9 @@ bound to ATen (in practice, C++ and Python.)
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
 change (e.g., you will probably need to update `tools/autograd/derivatives.yaml` at
-least).
+least). In `native_functions.yaml`, if your function (usually functions named with 'out' affix) args
+include the result Tensor, you need to call the argument `Tensor result`. And if there are more
+than one result Tensors, you need to name the args `Tensor result0, Tensor result1, ...`.
 
 TODO: Do argument names affect Python keyword arguments?
 
@@ -126,12 +142,11 @@ list.  For example, given the declaration `where(BoolTensor cond, Tensor self, T
 this generates the function `at::where(cond, self, other)` and the method
 `self.where(cond, other)`.
 
-By default, ATen generates both function and method variants for a native function.
-Generally, the function variant is always useful; however, you may not wish
-to generate a method variant. Tensor operations as methods are appropriate for "core"
-Tensor operations (e.g., add, sub, etc.), but not for more complicated neural network
-layers (e.g., `conv2d`) and internal functions designed specifically for binding
-(e.g., `cudnn_convolution`).
+By default, ATen generates only the function variant for a native function.
+When should you also generate a method variant?  Tensor operations as methods
+are appropriate for "core" Tensor operations (e.g., add, sub, etc.), but not for
+more complicated neural network layers (e.g., `conv2d`) and internal functions
+designed specifically for binding (e.g., `cudnn_convolution`).
 
 ### `dispatch`
 
@@ -212,8 +227,9 @@ direct consequences on valid implementations:
 
 * Never create a `Tensor` directly (e.g., `at::CPU` or `at::CUDA`), as a
   caller will be expecting to get `Variable`s out if it passes `Variable`.
-  Instead, create tensors from the `type()` of one of the input tensors, e.g.,
-  `input.type().tensor()`  or `input.type().toScalarType(kByte)` if you need
+  Instead, create tensors using the `options()` of one of the input
+  tensors.  E.g., `at::empty(sizes, input.options())` or
+  `at::ones(input.options().dtype(kByte))`, if you need
   a different scalar type.
 
 * If you need to call other ATen functions, be sure to qualify the call
@@ -231,6 +247,44 @@ NB: There is one downside to following the `at::` qualification rule, which
 is that if you know that you will only ever be called with `Tensor`, a
 direct `at::native` call will be more efficient (as it avoids a dynamic
 dispatch).
+
+### How to handle broadcasting?
+
+Unlike our legacy TH bindings, ATen native functions do not automatically
+handle broadcasting; you will have to insert the necessary broadcasting
+calls yourself.
+
+When writing broadcasting code, we obey the convention that `op` is
+broadcasting, while `s_op` (with the `s_` prefix) is not broadcasting.  The
+relationship is best seen by an example of how you would implement broadcasting
+addition out of non-broadcasting addition:
+
+```
+#include <ATen/ExpandUtils.h>
+
+Tensor add(const Tensor& self, const Tensor& other) {
+  Tensor b_self, b_other;
+  std::tie(b_self, b_other) = expand_outplace(self, other, "add");
+  return s_add(b_self, b_other);
+}
+
+Tensor s_add(const Tensor& self, const Tensor& other) {
+  // non-broadcasting implementation of addition
+}
+```
+
+For inplace operations, the convention looks like this:
+
+```
+Tensor& add_(Tensor& self, const Tensor& other) {
+  Tensor b_other = expand_inplace(self, other, "add_");
+  return s_add_(self, b_other);
+}
+
+Tensor& s_add_(Tensor& self, const Tensor& other) {
+  // non-broadcasting implementation of inplace addition
+}
+```
 
 ### Undefined tensor conventions
 

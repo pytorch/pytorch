@@ -23,13 +23,13 @@ bool MomentsGradientOp<T, Context>::Compute(
   const T norm = static_cast<T>(dY_size) / static_cast<T>(dX_size);
   for (int dX_index = 0; dX_index < dX_size; ++dX_index) {
     const int dY_index =
-        math::internal::GetIndexFromDims(ndim, dY_dims.data(), index.data());
+        math::utils::GetIndexFromDims(ndim, dY_dims.data(), index.data());
     dX_data[dX_index] =
         (dmean_data[dY_index] +
          static_cast<T>(2) * (X_data[dX_index] - mean_data[dY_index]) *
              dvariance_data[dY_index]) *
         norm;
-    math::internal::IncreaseIndexInDims(ndim, dX_dims.data(), index.data());
+    math::utils::IncreaseIndexInDims(ndim, dX_dims.data(), index.data());
   }
   return true;
 }

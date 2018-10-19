@@ -13,7 +13,7 @@ static inline void THNN_(TemporalMaxPooling_shapeCheck)(
   int input_w;
   int input_n;
   int output_w;
-  int ndims = input->nDimension;
+  int ndims = input->dim();
 
   if (ndims == 3)
   {
@@ -25,14 +25,14 @@ static inline void THNN_(TemporalMaxPooling_shapeCheck)(
   THArgCheck(dW > 0, 6,
              "stride should be greater than zero, but got dW: %d", dW);
 
-  THCUNN_argCheck(state, input->nDimension == 2 || input->nDimension == 3, 2, input,
-                  "2D or 3D (batch mode) tensor expected for input, but got: %s");
-  THArgCheck(input->size[dimT] >= kW, 2,
+  THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 2 || input->dim() == 3), 2, input,
+                  "non-empty 2D or 3D (batch mode) tensor expected for input, but got: %s");
+  THArgCheck(input->size(dimT) >= kW, 2,
              "input sequence smaller than kernel size. Got: %d, Expected: %d",
-             input->size[dimT], kW);
+             input->size(dimT), kW);
 
-  input_w = input->size[dimT];
-  input_n = input->size[dimF];
+  input_w = input->size(dimT);
+  input_n = input->size(dimF);
   output_w = (input_w - kW) / dW + 1;
 
   if (gradOutput != NULL) {
@@ -61,33 +61,33 @@ void THNN_(TemporalMaxPooling_updateOutput)(
   int output_w;
   int nthreads;
 
-  real *input_data;
-  real *output_data;
+  scalar_t *input_data;
+  scalar_t *output_data;
   THCIndex_t *indices_data;
 
   THCUNN_assertSameGPU(state, 3, input, output, indices);
   THNN_(TemporalMaxPooling_shapeCheck)(state, input, NULL, NULL, kW, dW);
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     dimT = 1;
     dimF = 2;
-    batch = input->size[0];
+    batch = input->size(0);
   }
   input = THCTensor_(newContiguous)(state, input);
 
-  input_w = input->size[dimT];
-  input_n = input->size[dimF];
+  input_w = input->size(dimT);
+  input_n = input->size(dimF);
   output_w = (input_w - kW) / dW + 1;
 
-  if (input->nDimension == 2)
+  if (input->dim() == 2)
   {
-    THCTensor_(resize2d)(state, output, output_w, input->size[dimF]);
-    THCIndexTensor_(resize2d)(state, indices, output_w, input->size[dimF]);
+    THCTensor_(resize2d)(state, output, output_w, input->size(dimF));
+    THCIndexTensor_(resize2d)(state, indices, output_w, input->size(dimF));
   }
   else
   {
-    THCTensor_(resize3d)(state, output, batch, output_w, input->size[dimF]);
-    THCIndexTensor_(resize3d)(state, indices, batch, output_w, input->size[dimF]);
+    THCTensor_(resize3d)(state, output, batch, output_w, input->size(dimF));
+    THCIndexTensor_(resize3d)(state, indices, batch, output_w, input->size(dimF));
   }
 
   input_data = THCTensor_(data)(state, input);
@@ -133,8 +133,8 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
   int output_w;
   int nthreads;
 
-  real *gradInput_data;
-  real *gradOutput_data;
+  scalar_t *gradInput_data;
+  scalar_t *gradOutput_data;
   THCIndex_t *indices_data;
 
   THCUNN_assertSameGPU(state, 4, input, gradOutput, gradInput, indices);
@@ -142,16 +142,16 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     dimT = 1;
     dimF = 2;
-    batch = input->size[0];
+    batch = input->size(0);
   }
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
-  input_w = input->size[dimT];
-  input_n = input->size[dimF];
+  input_w = input->size(dimT);
+  input_n = input->size(dimF);
   output_w = (input_w - kW) / dW + 1;
 
   gradInput_data = THCTensor_(data)(state, gradInput);

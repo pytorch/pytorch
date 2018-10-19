@@ -1,6 +1,6 @@
 #include "THCTensorCopy.h"
 #include "THCTensor.hpp"
-#include "THCStream.hpp"
+#include "THCStream.h"
 #include "THCCachingHostAllocator.h"
 
 #include "generic/THCTensorCopy.cpp"

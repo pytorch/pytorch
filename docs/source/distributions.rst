@@ -131,6 +131,24 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`HalfCauchy`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.half_cauchy
+.. autoclass:: HalfCauchy
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`HalfNormal`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.half_normal
+.. autoclass:: HalfNormal
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Independent`
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -158,6 +176,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`LowRankMultivariateNormal`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.lowrank_multivariate_normal
+.. autoclass:: LowRankMultivariateNormal
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Multinomial`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -172,6 +199,15 @@ Probability distributions - torch.distributions
 
 .. currentmodule:: torch.distributions.multivariate_normal
 .. autoclass:: MultivariateNormal
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`NegativeBinomial`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.negative_binomial
+.. autoclass:: NegativeBinomial
     :members:
     :undoc-members:
     :show-inheritance:
@@ -253,6 +289,15 @@ Probability distributions - torch.distributions
 
 .. currentmodule:: torch.distributions.uniform
 .. autoclass:: Uniform
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    
+:hidden:`Weibull`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.weibull
+.. autoclass:: Weibull
     :members:
     :undoc-members:
     :show-inheritance:

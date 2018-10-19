@@ -1,47 +1,48 @@
+ # UBSAN triggers when compiling protobuf, so we need to disable it.
+set(UBSAN_FLAG "-fsanitize=undefined")
+
+macro(disable_ubsan)
+  if (CMAKE_C_FLAGS MATCHES ${UBSAN_FLAG} OR CMAKE_CXX_FLAGS MATCHES ${UBSAN_FLAG})
+    set(CAFFE2_UBSAN_ENABLED ON)
+    string(REPLACE ${UBSAN_FLAG} "" CMAKE_C_FLAGS ${CMAKE_C_FLAGS})
+    string(REPLACE ${UBSAN_FLAG} "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+  endif()
+endmacro()
+
+macro(enable_ubsan)
+  if (CAFFE2_UBSAN_ENABLED)
+    set(CMAKE_C_FLAGS "${UBSAN_FLAG} ${CMAKE_C_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${UBSAN_FLAG} ${CMAKE_CXX_FLAGS}")
+  endif()
+endmacro()
+
+if(NOT BUILD_ATEN_ONLY)
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
+  enable_ubsan()
+endif()
 endif()
 
 # ---[ Threads
-if(BUILD_CAFFE2)
-  include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
-  if (TARGET Threads::Threads)
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
-  else()
-    message(FATAL_ERROR
-        "Cannot find threading library. Caffe2 requires Threads to compile.")
-  endif()
+include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
+if (TARGET Threads::Threads)
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
+else()
+  message(FATAL_ERROR
+      "Cannot find threading library. Caffe2 requires Threads to compile.")
 endif()
 
 # ---[ protobuf
-if(BUILD_CAFFE2)
+if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(USE_LITE_PROTO)
     set(CAFFE2_USE_LITE_PROTO 1)
   endif()
 endif()
 
-# ---[ git: used to generate git build string.
-if(BUILD_CAFFE2)
-  find_package(Git)
-  if(GIT_FOUND)
-    execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-                    ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
-                    OUTPUT_VARIABLE CAFFE2_GIT_VERSION
-                    RESULT_VARIABLE __git_result)
-    if(NOT ${__git_result} EQUAL 0)
-      set(CAFFE2_GIT_VERSION "unknown")
-    endif()
-  else()
-    message(
-        WARNING
-        "Cannot find git, so Caffe2 won't have any git build info available")
-  endif()
-endif()
-
 # ---[ BLAS
-if(BUILD_ATEN)
+if(NOT BUILD_ATEN_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
 else()
   set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
@@ -54,12 +55,12 @@ if(BLAS STREQUAL "Eigen")
   set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
 elseif(BLAS STREQUAL "ATLAS")
   find_package(Atlas REQUIRED)
-  include_directories(${ATLAS_INCLUDE_DIRS})
+  include_directories(SYSTEM ${ATLAS_INCLUDE_DIRS})
   list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${ATLAS_LIBRARIES})
   list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS cblas)
 elseif(BLAS STREQUAL "OpenBLAS")
   find_package(OpenBLAS REQUIRED)
-  include_directories(${OpenBLAS_INCLUDE_DIR})
+  include_directories(SYSTEM ${OpenBLAS_INCLUDE_DIR})
   list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${OpenBLAS_LIB})
 elseif(BLAS STREQUAL "MKL")
   if(BLAS_SET_BY_USER)
@@ -67,9 +68,10 @@ elseif(BLAS STREQUAL "MKL")
   else()
     find_package(MKL QUIET)
   endif()
+  include(${CMAKE_CURRENT_LIST_DIR}/public/mkl.cmake)
   if(MKL_FOUND)
-    include_directories(${MKL_INCLUDE_DIR})
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${MKL_LIBRARIES})
+    include_directories(SYSTEM ${MKL_INCLUDE_DIR})
+    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
   else()
     message(WARNING "MKL could not be found. Defaulting to Eigen")
     set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
@@ -77,7 +79,7 @@ elseif(BLAS STREQUAL "MKL")
   endif()
 elseif(BLAS STREQUAL "vecLib")
   find_package(vecLib REQUIRED)
-  include_directories(${vecLib_INCLUDE_DIR})
+  include_directories(SYSTEM ${vecLib_INCLUDE_DIR})
   list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${vecLib_LINKER_LIBS})
 else()
   message(FATAL_ERROR "Unrecognized blas option:" ${BLAS})
@@ -97,7 +99,7 @@ if(USE_NNPACK)
       # ---[ NNPACK is being built together with Caffe2: explicitly specify dependency
       list(APPEND Caffe2_DEPENDENCY_LIBS nnpack)
     else()
-      include_directories(${NNPACK_INCLUDE_DIRS})
+      include_directories(SYSTEM ${NNPACK_INCLUDE_DIRS})
       list(APPEND Caffe2_DEPENDENCY_LIBS ${NNPACK_LIBRARIES})
     endif()
   else()
@@ -136,10 +138,7 @@ list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 # ---[ gflags
 if(USE_GFLAGS)
   include(${CMAKE_CURRENT_LIST_DIR}/public/gflags.cmake)
-  if (TARGET gflags)
-    set(CAFFE2_USE_GFLAGS 1)
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS gflags)
-  else()
+  if (NOT TARGET gflags)
     message(WARNING
         "gflags is not found. Caffe2 will build without gflags support but "
         "it is strongly recommended that you install gflags. Suppress this "
@@ -153,6 +152,7 @@ if(USE_GLOG)
   include(${CMAKE_CURRENT_LIST_DIR}/public/glog.cmake)
   if (TARGET glog::glog)
     set(CAFFE2_USE_GOOGLE_GLOG 1)
+    include_directories(SYSTEM ${GLOG_INCLUDE_DIR})
     list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS glog::glog)
   else()
     message(WARNING
@@ -166,21 +166,24 @@ endif()
 
 # ---[ Googletest and benchmark
 if(BUILD_TEST)
+  # Preserve build options.
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+
   # We will build gtest as static libs and embed it directly into the binary.
-  set(BUILD_SHARED_LIBS OFF)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
+
   # For gtest, we will simply embed it into our test binaries, so we won't
   # need to install it.
-  set(BUILD_GTEST ON)
-  set(INSTALL_GTEST OFF)
+  set(BUILD_GTEST ON CACHE BOOL "Build gtest" FORCE)
+  set(INSTALL_GTEST OFF CACHE BOOL "Install gtest." FORCE)
   # We currently don't need gmock right now.
-  set(BUILD_GMOCK OFF)
+  set(BUILD_GMOCK OFF CACHE BOOL "Build gmock." FORCE)
   # For Windows, we will check the runtime used is correctly passed in.
   if (NOT CAFFE2_USE_MSVC_STATIC_RUNTIME)
-    set(gtest_force_shared_crt ON)
+      set(gtest_force_shared_crt ON CACHE BOOL "force shared crt on gtest" FORCE)
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)
-  include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
+  include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
 
   # We will not need to test benchmark lib itself.
   set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "Disable benchmark testing as we don't need it.")
@@ -189,15 +192,15 @@ if(BUILD_TEST)
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark)
   include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark/include)
 
-  # Recover the build shared libs option.
-  set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
+  # Recover build options.
+  set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 endif()
 
 # ---[ LMDB
 if(USE_LMDB)
   find_package(LMDB)
   if(LMDB_FOUND)
-    include_directories(${LMDB_INCLUDE_DIR})
+    include_directories(SYSTEM ${LMDB_INCLUDE_DIR})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${LMDB_LIBRARIES})
   else()
     message(WARNING "Not compiling with LMDB. Suppress this warning with -DUSE_LMDB=OFF")
@@ -208,7 +211,7 @@ endif()
 if (USE_OPENCL)
   message(INFO "USING OPENCL")
   find_package(OpenCL REQUIRED)
-  include_directories(${OpenCL_INCLUDE_DIRS})
+  include_directories(SYSTEM ${OpenCL_INCLUDE_DIRS})
   include_directories(${CMAKE_CURRENT_LIST_DIR}/../caffe2/contrib/opencl)
   list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCL_LIBRARIES})
 endif()
@@ -219,9 +222,9 @@ if(USE_LEVELDB)
   find_package(LevelDB)
   find_package(Snappy)
   if(LEVELDB_FOUND AND SNAPPY_FOUND)
-    include_directories(${LevelDB_INCLUDE})
+    include_directories(SYSTEM ${LevelDB_INCLUDE})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${LevelDB_LIBRARIES})
-    include_directories(${Snappy_INCLUDE_DIR})
+    include_directories(SYSTEM ${Snappy_INCLUDE_DIR})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${Snappy_LIBRARIES})
   else()
     message(WARNING "Not compiling with LevelDB. Suppress this warning with -DUSE_LEVELDB=OFF")
@@ -237,7 +240,7 @@ if(USE_NUMA)
   else()
     find_package(Numa)
     if(NUMA_FOUND)
-      include_directories(${Numa_INCLUDE_DIR})
+      include_directories(SYSTEM ${Numa_INCLUDE_DIR})
       list(APPEND Caffe2_DEPENDENCY_LIBS ${Numa_LIBRARIES})
     else()
       message(WARNING "Not compiling with NUMA. Suppress this warning with -DUSE_NUMA=OFF")
@@ -250,7 +253,7 @@ endif()
 if(USE_ZMQ)
   find_package(ZMQ)
   if(ZMQ_FOUND)
-    include_directories(${ZMQ_INCLUDE_DIR})
+    include_directories(SYSTEM ${ZMQ_INCLUDE_DIR})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${ZMQ_LIBRARIES})
   else()
     message(WARNING "Not compiling with ZMQ. Suppress this warning with -DUSE_ZMQ=OFF")
@@ -262,7 +265,7 @@ endif()
 if(USE_REDIS)
   find_package(Hiredis)
   if(HIREDIS_FOUND)
-    include_directories(${Hiredis_INCLUDE})
+    include_directories(SYSTEM ${Hiredis_INCLUDE})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${Hiredis_LIBRARIES})
   else()
     message(WARNING "Not compiling with Redis. Suppress this warning with -DUSE_REDIS=OFF")
@@ -280,7 +283,7 @@ if(USE_OPENCV)
     find_package(OpenCV QUIET COMPONENTS core highgui imgproc)
   endif()
   if(OpenCV_FOUND)
-    include_directories(${OpenCV_INCLUDE_DIRS})
+    include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCV_LIBS})
     message(STATUS "OpenCV found (${OpenCV_CONFIG_PATH})")
   else()
@@ -294,7 +297,7 @@ if(USE_FFMPEG)
   find_package(FFmpeg REQUIRED)
   if (FFMPEG_FOUND)
     message("Found FFMPEG/LibAV libraries")
-    include_directories(${FFMPEG_INCLUDE_DIR})
+    include_directories(SYSTEM ${FFMPEG_INCLUDE_DIR})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${FFMPEG_LIBRARIES})
   else ()
     message("Not compiling with FFmpeg. Suppress this warning with -DUSE_FFMPEG=OFF")
@@ -302,28 +305,107 @@ if(USE_FFMPEG)
   endif ()
 endif()
 
+# ---[ Caffe2 depends on FP16 library for half-precision conversions
+if (NOT TARGET fp16)
+  if (NOT DEFINED FP16_SOURCE_DIR)
+    set(FP16_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/FP16" CACHE STRING "FP16 source directory")
+  endif()
+
+  set(FP16_BUILD_TESTS OFF CACHE BOOL "")
+  set(FP16_BUILD_BENCHMARKS OFF CACHE BOOL "")
+  add_subdirectory(
+    "${FP16_SOURCE_DIR}"
+    "${CONFU_DEPENDENCIES_BINARY_DIR}/FP16")
+endif()
+list(APPEND Caffe2_DEPENDENCY_LIBS fp16)
+
 # ---[ EIGEN
-if(BUILD_CAFFE2)
-  # Due to license considerations, we will only use the MPL2 parts of Eigen.
-  set(EIGEN_MPL2_ONLY 1)
+# Due to license considerations, we will only use the MPL2 parts of Eigen.
+set(EIGEN_MPL2_ONLY 1)
+if (USE_SYSTEM_EIGEN_INSTALL)
   find_package(Eigen3)
   if(EIGEN3_FOUND)
     message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
   else()
     message(STATUS "Did not find system Eigen. Using third party subdirectory.")
     set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
+    caffe2_update_option(USE_SYSTEM_EIGEN_INSTALL OFF)
   endif()
-  include_directories(${EIGEN3_INCLUDE_DIR})
+else()
+  message(STATUS "Using third party subdirectory Eigen.")
+  set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
 endif()
+include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
-  set(Python_ADDITIONAL_VERSIONS 2.8 2.7 2.6)
+  # If not given a Python installation, then use the current active Python
+  if(NOT DEFINED PYTHON_EXECUTABLE)
+    execute_process(
+      COMMAND "which" "python" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
+    if(${_exitcode} EQUAL 0)
+      if (NOT MSVC)
+        string(STRIP ${_py_exe} PYTHON_EXECUTABLE)
+      endif()
+      message(STATUS "Setting Python to ${PYTHON_EXECUTABLE}")
+    endif()
+  endif()
+
+  # Check that Python works
+  if(DEFINED PYTHON_EXECUTABLE)
+    execute_process(
+        COMMAND "${PYTHON_EXECUTABLE}" "--version"
+        RESULT_VARIABLE _exitcode)
+    if(NOT ${_exitcode} EQUAL 0)
+      message(FATAL_ERROR "The Python executable ${PYTHON_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
+    endif()
+  endif()
+
+  # Seed PYTHON_INCLUDE_DIR and PYTHON_LIBRARY to be consistent with the
+  # executable that we already found (if we didn't actually find an executable
+  # then these will just use "python", but at least they'll be consistent with
+  # each other).
+  if(NOT DEFINED PYTHON_INCLUDE_DIR)
+    # distutils.sysconfig, if it's installed, is more accurate than sysconfig,
+    # which sometimes outputs directories that do not exist
+    pycmd_no_exit(_py_inc _exitcode "from distutils import sysconfig; print(sysconfig.get_python_inc())")
+    if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
+      SET(PYTHON_INCLUDE_DIR "${_py_inc}")
+      message(STATUS "Setting Python's include dir to ${_py_inc} from distutils.sysconfig")
+    else()
+      pycmd_no_exit(_py_inc _exitcode "from sysconfig import get_paths; print(get_paths()['include'])")
+      if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
+        SET(PYTHON_INCLUDE_DIR "${_py_inc}")
+        message(STATUS "Setting Python's include dir to ${_py_inc} from sysconfig")
+      endif()
+    endif()
+  endif(NOT DEFINED PYTHON_INCLUDE_DIR)
+
+  if(NOT DEFINED PYTHON_LIBRARY)
+    pycmd_no_exit(_py_lib _exitcode "from sysconfig import get_paths; print(get_paths()['stdlib'])")
+    if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
+      SET(PYTHON_LIBRARY "${_py_lib}")
+      if (MSVC)
+        STRING(REPLACE "Lib" "libs" _py_static_lib ${_py_lib})
+        link_directories(${_py_static_lib})
+      endif()
+      message(STATUS "Setting Python's library to ${PYTHON_LIBRARY}")
+    endif()
+  endif(NOT DEFINED PYTHON_LIBRARY)
+
+  # These should fill in the rest of the variables, like versions, but resepct
+  # the variables we set above
+  set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5 2.8 2.7 2.6)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
-  find_package(NumPy REQUIRED)
-  if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND AND NUMPY_FOUND)
-    include_directories(${PYTHON_INCLUDE_DIR} ${NUMPY_INCLUDE_DIR})
+  find_package(NumPy)
+  if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
+    include_directories(SYSTEM ${PYTHON_INCLUDE_DIR})
+    caffe2_update_option(USE_NUMPY OFF)
+    if(NUMPY_FOUND)
+      caffe2_update_option(USE_NUMPY ON)
+      include_directories(SYSTEM ${NUMPY_INCLUDE_DIR})
+    endif()
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
   else()
@@ -333,11 +415,20 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-find_package(pybind11)
-if(pybind11_FOUND)
-  include_directories(${pybind11_INCLUDE_DIRS})
+find_package(pybind11 CONFIG)
+if((DEFINED pybind11_DIR) AND pybind11_DIR)
+  get_target_property(pybind11_INCLUDE_DIRS pybind11::pybind11 INTERFACE_INCLUDE_DIRECTORIES)
 else()
-  include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
+  find_package(pybind11)
+endif()
+
+if(pybind11_FOUND)
+    message(STATUS "System pybind11 found")
+    message(STATUS "pybind11l include dirs: " ${pybind11_INCLUDE_DIRS})
+    include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
+else()
+    message(STATUS "Using third_party/pybind11.")
+    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
 endif()
 
 # ---[ MPI
@@ -349,7 +440,7 @@ if(USE_MPI)
     message(STATUS "MPI include path: " ${MPI_CXX_INCLUDE_PATH})
     message(STATUS "MPI LINK flags path: " ${MPI_CXX_LINK_FLAGS})
     message(STATUS "MPI libraries: " ${MPI_CXX_LIBRARIES})
-    include_directories(${MPI_CXX_INCLUDE_PATH})
+    include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${MPI_CXX_LIBRARIES})
     set(CMAKE_EXE_LINKER_FLAGS ${MPI_CXX_LINK_FLAGS})
     find_program(OMPI_INFO
@@ -393,65 +484,118 @@ endif()
 
 # ---[ CUDA
 if(USE_CUDA)
+  # public/*.cmake uses CAFFE2_USE_*
+  set(CAFFE2_USE_CUDA ${USE_CUDA})
+  set(CAFFE2_USE_CUDNN ${USE_CUDNN})
+  set(CAFFE2_USE_NVRTC ${USE_NVRTC})
+  set(CAFFE2_USE_TENSORRT ${USE_TENSORRT})
   include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
-  if(CAFFE2_FOUND_CUDA)
+  if(CAFFE2_USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
     # caffe2::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
-    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-        caffe2::cuda caffe2::cufft caffe2::curand caffe2::nvrtc)
-    if(CAFFE2_FOUND_CUDNN)
-      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cufft caffe2::curand)
+    if(CAFFE2_USE_NVRTC)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
     else()
-      if(BUILD_CAFFE2)
-        # TODO: Get rid of special case for Caffe2 where we require
-        # CUDA *and* cuDNN to be installed.
-        message(WARNING
-            "Not compiling with CUDA since cuDNN is missing. Suppress "
-            "this warning with -DUSE_CUDA=OFF.")
-        caffe2_update_option(USE_CUDA OFF)
-        caffe2_update_option(USE_CUDNN OFF)
-      else()
-        message(WARNING
-            "Not compiling with cuDNN. Suppress this warning with "
-            "-DUSE_CUDNN=OFF.")
-        caffe2_update_option(USE_CUDNN OFF)
-      endif()
+      caffe2_update_option(USE_NVRTC OFF)
     endif()
-    if(USE_CUDA)
-      if(CAFFE2_STATIC_LINK_CUDA)
-        # When statically linking, this must be the order of the libraries
-        LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-            "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" caffe2::cublas)
-      else()
-        LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cublas)
-      endif()
-      if(USE_TENSORRT)
-        list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
-      endif()
+    if(CAFFE2_USE_CUDNN)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+    else()
+      caffe2_update_option(USE_CUDNN OFF)
+    endif()
+    if(CAFFE2_STATIC_LINK_CUDA)
+      # When statically linking, this must be the order of the libraries
+      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+          "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" caffe2::cublas)
+    else()
+      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cublas)
+    endif()
+    if(CAFFE2_USE_TENSORRT)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
+    else()
+      caffe2_update_option(USE_TENSORRT OFF)
     endif()
   else()
     message(WARNING
-        "Not compiling with CUDA. Suppress this warning with "
-        "-DUSE_CUDA=OFF.")
+      "Not compiling with CUDA. Suppress this warning with "
+      "-DUSE_CUDA=OFF.")
     caffe2_update_option(USE_CUDA OFF)
+    caffe2_update_option(USE_CUDNN OFF)
+    caffe2_update_option(USE_NVRTC OFF)
+    caffe2_update_option(USE_TENSORRT OFF)
+    set(CAFFE2_USE_CUDA OFF)
+    set(CAFFE2_USE_CUDNN OFF)
+    set(CAFFE2_USE_NVRTC OFF)
+    set(CAFFE2_USE_TENSORRT OFF)
+  endif()
+endif()
+
+# ---[ HIP
+if(NOT BUILD_ATEN_MOBILE)
+  include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
+  if(PYTORCH_FOUND_HIP)
+    message(INFO "Compiling with HIP for AMD.")
+    caffe2_update_option(USE_ROCM ON)
+
+    list(APPEND HIP_HIPCC_FLAGS -fPIC)
+    list(APPEND HIP_HIPCC_FLAGS -D__HIP_PLATFORM_HCC__=1)
+    list(APPEND HIP_HIPCC_FLAGS -DCUDA_HAS_FP16=1)
+    list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
+    list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-macro-redefined)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-inconsistent-missing-override)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-exceptions)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-shift-count-negative)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-shift-count-overflow)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-unused-command-line-argument)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-duplicate-decl-specifier)
+
+    set(Caffe2_HIP_INCLUDES
+      ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
+
+    # This is needed for library added by hip_add_library (same for hip_add_executable)
+    hip_include_directories(${Caffe2_HIP_INCLUDES})
+
+    set(Caffe2_HIP_DEPENDENCY_LIBS
+      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
+    # Additional libraries required by PyTorch AMD that aren't used by Caffe2 (not in Caffe2's docker image)
+    if(NOT BUILD_ATEN_MOBILE)
+      set(Caffe2_HIP_DEPENDENCY_LIBS ${Caffe2_HIP_DEPENDENCY_LIBS} ${hipsparse_LIBRARIES})
+    endif()
+    # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
+    list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
+      roc::rocblas)
+
+    # TODO: Currently pytorch hipify script uses a feature called
+    # "disabled_modules" that effectively ifdef out a file, but
+    # without doing extra processing in the callers, which results in
+    # some unresolved symbols in the shared lib
+    # (libcaffe2_hip.so). Remove this when all disabled_modules are
+    # eliminated.
+    set(CMAKE_EXE_LINKER_FLAGS "-Wl,--unresolved-symbols=ignore-in-shared-libs ${CMAKE_EXE_LINKER_FLAGS}")
+  else()
+    caffe2_update_option(USE_ROCM OFF)
   endif()
 endif()
 
 # ---[ ROCm
 if(USE_ROCM)
- include_directories(${HIP_PATH}/include)
- include_directories(${HIPBLAS_PATH}/include)
- include_directories(${HIPSPARSE_PATH}/include)
- include_directories(${HIPRNG_PATH}/include)
- linclude_directories(${THRUST_PATH})
+ include_directories(SYSTEM ${HIP_PATH}/include)
+ include_directories(SYSTEM ${ROCBLAS_PATH}/include)
+ include_directories(SYSTEM ${ROCFFT_PATH}/include)
+ include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
+ include_directories(SYSTEM ${HIPRAND_PATH}/include)
+ include_directories(SYSTEM ${ROCRAND_PATH}/include)
+ include_directories(SYSTEM ${THRUST_PATH})
 
  # load HIP cmake module and load platform id
  EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig -P OUTPUT_VARIABLE PLATFORM)
  EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig --cpp_config OUTPUT_VARIABLE HIP_CXX_FLAGS)
 
  # Link with HIPCC https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_porting_guide.md#linking-with-hipcc
- SET(CMAKE_CXX_LINK_EXECUTABLE ${HIP_HIPCC_EXECUTABLE})
+ # SET(CMAKE_CXX_LINK_EXECUTABLE ${HIP_HIPCC_EXECUTABLE})
 
  # Show message that we're using ROCm.
  MESSAGE(STATUS "ROCM TRUE:")
@@ -475,14 +619,12 @@ if(USE_NCCL)
 endif()
 
 # ---[ CUB
-if(BUILD_CAFFE2)
-  if(USE_CUDA)
-    find_package(CUB)
-    if(CUB_FOUND)
-      include_directories(${CUB_INCLUDE_DIRS})
-    else()
-      include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/cub)
-    endif()
+if(USE_CUDA)
+  find_package(CUB)
+  if(CUB_FOUND)
+    include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
+  else()
+    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/cub)
   endif()
 endif()
 
@@ -497,7 +639,7 @@ if(USE_GLOO)
     set(Gloo_USE_CUDA ${USE_CUDA})
     find_package(Gloo)
     if(Gloo_FOUND)
-      include_directories(${Gloo_INCLUDE_DIRS})
+      include_directories(SYSTEM ${Gloo_INCLUDE_DIRS})
       list(APPEND Caffe2_DEPENDENCY_LIBS gloo)
     else()
       set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
@@ -576,7 +718,7 @@ endif()
 if (USE_ACL)
   list(APPEND ARM_COMPUTE_INCLUDE_DIRS "third_party/ComputeLibrary/")
   list(APPEND ARM_COMPUTE_INCLUDE_DIRS "third_party/ComputeLibrary/include")
-  include_directories(${ARM_COMPUTE_INCLUDE_DIRS})
+  include_directories(SYSTEM ${ARM_COMPUTE_INCLUDE_DIRS})
   string (REPLACE ";" " -I" ANDROID_STL_INCLUDE_FLAGS "-I${ANDROID_STL_INCLUDE_DIRS}")
   set (ARM_COMPUTE_SRC_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/ComputeLibrary/")
   set (ARM_COMPUTE_LIB "${CMAKE_CURRENT_BINARY_DIR}/libarm_compute.a")
@@ -634,39 +776,51 @@ if (USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
-if (BUILD_ATEN)
-  if (BUILD_CAFFE2)
+if (NOT BUILD_ATEN_MOBILE AND BUILD_CAFFE2_OPS)
+  if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
     if (USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen)
     endif()
-    include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten/aten/src/ATen)
     include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
   endif()
 endif()
 
 if (USE_ZSTD)
   list(APPEND Caffe2_DEPENDENCY_LIBS libzstd_static)
-  include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/zstd/lib)
+  include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/zstd/lib)
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/zstd/build/cmake)
   set_property(TARGET libzstd_static PROPERTY POSITION_INDEPENDENT_CODE ON)
 endif()
 
 # ---[ Onnx
+if(NOT BUILD_ATEN_ONLY)
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  if (NOT DEFINED ONNX_NAMESPACE)
-    SET(ONNX_NAMESPACE "onnx_c2")
-  endif()
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
     set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
   endif()
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
   # We will build onnx as static libs and embed it directly into the binary.
   set(BUILD_SHARED_LIBS OFF)
+  if (MSVC AND BUILD_SHARED_LIBS)
+    # That also means we want to export all symbols from the shared
+    # library we are building
+    set(ONNX_BUILD_MAIN_LIB ON)
+  endif()
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
+  set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
+  # If linking local protobuf, make sure ONNX has the same protobuf
+  # patches as Caffe2 and Caffe proto. This forces some functions to
+  # not be inline and instead route back to the statically-linked protobuf.
+  if (CAFFE2_LINK_LOCAL_PROTOBUF)
+    set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
+  endif()
+  # Add op schemas in "ai.onnx.pytorch" domain
+  add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx)
+
   include_directories(${ONNX_INCLUDE_DIRS})
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DONNX_NAMESPACE=${ONNX_NAMESPACE}")
+  add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
   # In mobile build we care about code size, and so we need drop
   # everything (e.g. checker, optimizer) in onnx but the pb definition.
   if (ANDROID OR IOS)
@@ -675,8 +829,10 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     caffe2_interface_library(onnx onnx_library)
   endif()
   list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
+  list(APPEND Caffe2_DEPENDENCY_LIBS onnxifi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
+endif()
 endif()
 
 # --[ TensorRT integration with onnx-trt
@@ -692,11 +848,9 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # --[ ATen checks
-if (BUILD_ATEN)
+if (NOT BUILD_ATEN_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
-
-  add_definitions(-DTH_INDEX_BASE=0)
 
   # RPATH stuff
   # see https://cmake.org/Wiki/CMake_RPATH_handling
@@ -757,7 +911,6 @@ if (BUILD_ATEN)
   ############################################
   # Flags
   # When using MSVC
-
   # Detect CUDA architecture and get best NVCC flags
   # finding cuda must be first because other things depend on the result
   #
@@ -804,7 +957,7 @@ if (BUILD_ATEN)
   ENDIF()
 
   IF (CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
-    MESSAGE(STATUS "Found CUDA with FP16 support, compiling with torch.CudaHalfTensor")
+    MESSAGE(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
     LIST(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__")
     add_compile_options(-DCUDA_HAS_FP16=1)
   ELSE()
@@ -861,7 +1014,7 @@ if (BUILD_ATEN)
 
   FIND_PACKAGE(MAGMA)
   IF (USE_CUDA AND MAGMA_FOUND)
-    INCLUDE_DIRECTORIES(${MAGMA_INCLUDE_DIR})
+    INCLUDE_DIRECTORIES(SYSTEM ${MAGMA_INCLUDE_DIR})
     SET(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR};${CUDA_INCLUDE_DIRS}")
     INCLUDE(CheckPrototypeDefinition)
     check_prototype_definition(magma_get_sgeqrf_nb
@@ -950,36 +1103,17 @@ if (BUILD_ATEN)
     add_compile_options(-DUSE_GCC_GET_CPUID)
   ENDIF()
 
-  FIND_PACKAGE(SSE) # checks SSE, AVX and AVX2
-  IF (C_SSE2_FOUND)
-    MESSAGE(STATUS "SSE2 Found")
-    # TODO: Work out correct way to do this.  Note that C_SSE2_FLAGS is often
-    # empty, in which case it expands to " " flag which is bad
-    SET(CMAKE_C_FLAGS "${C_SSE2_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE2_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE2)
-  ENDIF()
-  IF (C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
-    SET(CMAKE_C_FLAGS "${C_SSE4_1_FLAGS} ${C_SSE4_2_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE4_1_FLAGS} ${C_SSE4_2_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE4_1 -DUSE_SSE4_2)
-  ENDIF()
-  IF (C_SSE3_FOUND)
-    MESSAGE(STATUS "SSE3 Found")
-    SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE3_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE3)
-  ENDIF()
+  FIND_PACKAGE(AVX) # checks AVX and AVX2
 
   # we don't set -mavx and -mavx2 flags globally, but only for specific files
   # however, we want to enable the AVX codepaths, so we still need to
   # add USE_AVX and USE_AVX2 macro defines
   IF (C_AVX_FOUND)
-    MESSAGE(STATUS "AVX Found")
+    MESSAGE(STATUS "AVX compiler support found")
     add_compile_options(-DUSE_AVX)
   ENDIF()
   IF (C_AVX2_FOUND)
-    MESSAGE(STATUS "AVX2 Found")
+    MESSAGE(STATUS "AVX2 compiler support found")
     add_compile_options(-DUSE_AVX2)
   ENDIF()
 
@@ -1074,7 +1208,7 @@ if (BUILD_ATEN)
         ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
         SET(AT_MKL_MT 1)
       ENDIF()
-      INCLUDE_DIRECTORIES(${BLAS_INCLUDE_DIR})  # include MKL headers
+      INCLUDE_DIRECTORIES(SYSTEM ${BLAS_INCLUDE_DIR})  # include MKL headers
       SET(AT_MKL_ENABLED 1)
     ENDIF()
   ENDIF()
@@ -1096,8 +1230,17 @@ if (BUILD_ATEN)
     MESSAGE(STATUS "CuDNN not found. Compiling without CuDNN support")
     set(AT_CUDNN_ENABLED 0)
   ELSE()
-    include_directories(${CUDNN_INCLUDE_DIRS})
+    include_directories(SYSTEM ${CUDNN_INCLUDE_DIRS})
     set(AT_CUDNN_ENABLED 1)
+  ENDIF()
+
+  IF (NOT USE_ROCM)
+    message("disabling ROCM because NOT USE_ROCM is set")
+    MESSAGE(STATUS "MIOpen not found. Compiling without MIOpen support")
+    set(AT_ROCM_ENABLED 0)
+  ELSE()
+    INCLUDE_DIRECTORIES(BEFORE ${MIOPEN_INCLUDE_DIRS})
+    set(AT_ROCM_ENABLED 1)
   ENDIF()
 
   if (NO_MKLDNN)
@@ -1109,7 +1252,7 @@ if (BUILD_ATEN)
       message(STATUS "MKLDNN not found. Compiling without MKLDNN support")
       set(AT_MKLDNN_ENABLED 0)
     else()
-      include_directories(${MKLDNN_INCLUDE_DIRS})
+      include_directories(SYSTEM ${MKLDNN_INCLUDE_DIRS})
       set(AT_MKLDNN_ENABLED 1)
     endif()
   endif()

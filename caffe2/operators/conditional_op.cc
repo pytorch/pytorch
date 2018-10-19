@@ -31,13 +31,13 @@ bool ConditionalOp<CPUContext>::RunOnDevice() {
   // perform conditional op along first dimension
   const auto* ptrT = (char*)dataT.raw_data();
   const auto* ptrF = (char*)dataF.raw_data();
-  for (TIndex i = 0; i < condition.size(); i++) {
+  for (int64_t i = 0; i < condition.size(); i++) {
     auto* dst = outPtr + i * innerSizeBytes;
     if (condPtr[i]) {
-      context_.template CopyItems<CPUContext, CPUContext>(
+      context_.CopyItemsSameDevice(
           dataT.meta(), innerSize, ptrT + i * innerSizeBytes, dst);
     } else {
-      context_.template CopyItems<CPUContext, CPUContext>(
+      context_.CopyItemsSameDevice(
           dataF.meta(), innerSize, ptrF + i * innerSizeBytes, dst);
     }
   }
@@ -57,7 +57,8 @@ have the exact same shape and type.
     .Input(0, "Condition", "Boolean tensor to select DataT or DataF")
     .Input(1, "DataT", "Data to use when True")
     .Input(2, "DataF", "Data to use when False")
-    .Output(0, "DataO", "Output data after applying ConditionalOp");
+    .Output(0, "DataO", "Output data after applying ConditionalOp")
+    .IdenticalTypeAndShapeOfInput(1);
 
 NO_GRADIENT(Conditional);
 

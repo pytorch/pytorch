@@ -25,6 +25,13 @@ import sys
 PY2 = sys.version_info[0] == 2
 PY3 = sys.version_info[0] == 3
 
+if PY2:
+    inf = float('inf')
+    nan = float('nan')
+else:
+    import math
+    inf = math.inf
+    nan = math.nan
 
 if PY2:
     string_classes = basestring
@@ -101,3 +108,10 @@ elif sys.version_info[:2] > (3, 2):
 else:
     def raise_from(value, from_value):
         raise value
+
+if PY2:
+    import collections
+    container_abcs = collections
+elif PY3:
+    import collections.abc
+    container_abcs = collections.abc

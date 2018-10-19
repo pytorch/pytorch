@@ -4,6 +4,8 @@
 
 #include <ATen/ATen.h>
 
+#include <cstddef>
+
 namespace torch { namespace utils {
 
 // Returns a tensor with the same data as `self` and the specified type and
@@ -21,9 +23,9 @@ namespace torch { namespace utils {
 // w.r.t the host if `self` is a CPU tensor in pinned memory and `type` is a
 // CUDA type. Note that copies between CUDA devices are always asynchronous
 // w.r.t the host.
-at::Tensor dispatch_type_conversion(const at::Tensor & self,
-                                    const at::Type & type,
-                                    at::optional<int> device=at::nullopt,
-                                    bool non_blocking=false);
-
+at::Tensor dispatch_type_conversion(
+    const at::Tensor& self,
+    const at::Type& type,
+    c10::optional<int32_t> device_index = c10::nullopt,
+    bool non_blocking = false);
 }} // namespace torch::utils

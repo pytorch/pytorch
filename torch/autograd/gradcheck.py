@@ -1,8 +1,9 @@
 import torch
-from collections import Iterable
+from torch._six import container_abcs
 import torch.testing
 import sys
 from itertools import product
+import warnings
 
 
 def zero_gradients(x):
@@ -10,7 +11,7 @@ def zero_gradients(x):
         if x.grad is not None:
             x.grad.detach_()
             x.grad.data.zero_()
-    elif isinstance(x, Iterable):
+    elif isinstance(x, container_abcs.Iterable):
         for elem in x:
             zero_gradients(elem)
 
@@ -21,8 +22,8 @@ def make_jacobian(input, num_out):
             return None
         if not input.requires_grad:
             return None
-        return torch.zeros(input.nelement(), num_out)
-    elif isinstance(input, Iterable):
+        return torch.zeros(input.nelement(), num_out, dtype=input.dtype)
+    elif isinstance(input, container_abcs.Iterable) and not isinstance(input, str):
         jacobians = list(filter(
             lambda x: x is not None, (make_jacobian(elem, num_out) for elem in input)))
         if not jacobians:
@@ -36,7 +37,7 @@ def iter_tensors(x, only_requiring_grad=False):
     if isinstance(x, torch.Tensor):
         if x.requires_grad or not only_requiring_grad:
             yield x
-    elif isinstance(x, Iterable):
+    elif isinstance(x, container_abcs.Iterable) and not isinstance(x, str):
         for elem in x:
             for result in iter_tensors(elem, only_requiring_grad):
                 yield result
@@ -125,34 +126,57 @@ def _differentiable_outputs(x):
 
 
 def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True):
-    """Check gradients computed via small finite differences
-       against analytical gradients
+    r"""Check gradients computed via small finite differences against analytical
+    gradients w.r.t. tensors in :attr:`inputs` that are of floating point type
+    and with ``requires_grad=True``.
 
-    The check between numerical and analytical has the same behaviour as
-    numpy.allclose https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html
-    meaning it check that
-        absolute(a - n) <= (atol + rtol * absolute(n))
-    is true for all elements of analytical jacobian a and numerical jacobian n.
+    The check between numerical and analytical gradients uses :func:`~torch.allclose`.
+
+    .. note::
+        The default values are designed for :attr:`input` of double precision.
+        This check will likely fail if :attr:`input` is of less precision, e.g.,
+        ``FloatTensor``.
+
+    .. warning::
+       If any checked tensor in :attr:`input` has overlapping memory, i.e.,
+       different indices pointing to the same memory address (e.g., from
+       :func:`torch.expand`), this check will likely fail because the numerical
+       gradients computed by point perturbation at such indices will change
+       values at all other indices that share the same memory address.
 
     Args:
-        func: Python function that takes Tensor inputs and returns
+        func (function): a Python function that takes Tensor inputs and returns
             a Tensor or a tuple of Tensors
-        inputs: tuple of Tensors
-        eps: perturbation for finite differences
-        atol: absolute tolerance
-        rtol: relative tolerance
-        raise_exception: bool indicating whether to raise an exception if
-            gradcheck fails. The exception gives more information about the
+        inputs (tuple of Tensor): inputs to the function
+        eps (float, optional): perturbation for finite differences
+        atol (float, optional): absolute tolerance
+        rtol (float, optional): relative tolerance
+        raise_exception (bool, optional): indicating whether to raise an exception if
+            the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
+
     Returns:
         True if all differences satisfy allclose condition
     """
     tupled_inputs = _as_tuple(inputs)
 
     # Make sure that gradients are saved for all inputs
+    any_input_requiring_grad = False
     for inp in tupled_inputs:
         if isinstance(inp, torch.Tensor):
+            if inp.requires_grad:
+                if inp.dtype != torch.float64:
+                    warnings.warn(
+                        'At least one of the inputs that requires gradient '
+                        'is not of double precision floating point. '
+                        'This check will likely fail if all the inputs are '
+                        'not of double precision floating point. ')
+                any_input_requiring_grad = True
             inp.retain_grad()
+    if not any_input_requiring_grad:
+        raise ValueError(
+            'gradcheck expects at least one input tensor to require gradient, '
+            'but none of the them have requires_grad=True.')
 
     output = _differentiable_outputs(func(*inputs))
 
@@ -176,7 +200,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
 
         for j, (a, n) in enumerate(zip(analytical, numerical)):
             if a.numel() != 0 or n.numel() != 0:
-                if not ((a - n).abs() <= (atol + rtol * n.abs())).all():
+                if not torch.allclose(a, n, rtol, atol):
                     return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
                                      'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
 
@@ -208,19 +232,31 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
 
 def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-3,
                   gen_non_contig_grad_outputs=False, raise_exception=True):
-    """Check gradients of gradients computed via small finite differences
-       against analytical gradients
-    This function checks that backpropagating through the gradients computed
-    to the given grad_outputs are correct.
+    r"""Check gradients of gradients computed via small finite differences
+    against analytical gradients w.r.t. tensors in :attr:`inputs` and
+    :attr:`grad_outputs` that are of floating point type and with
+    ``requires_grad=True``.
 
-    The check between numerical and analytical has the same behaviour as
-    numpy.allclose https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html
-    meaning it check that
-        absolute(a - n) <= (atol + rtol * absolute(n))
-    is true for all elements of analytical gradient a and numerical gradient n.
+    This function checks that backpropagating through the gradients computed
+    to the given :attr:`grad_outputs` are correct.
+
+    The check between numerical and analytical gradients uses :func:`~torch.allclose`.
+
+    .. note::
+        The default values are designed for :attr:`input` and
+        :attr:`grad_outputs` of double precision. This check will likely fail if
+        they are of less precision, e.g., ``FloatTensor``.
+
+    .. warning::
+       If any checked tensor in :attr:`input` and :attr:`grad_outputs` has
+       overlapping memory, i.e., different indices pointing to the same memory
+       address (e.g., from :func:`torch.expand`), this check will likely fail
+       because the numerical gradients computed by point perturbation at such
+       indices will change values at all other indices that share the same
+       memory address.
 
     Args:
-        func (function): Python function that takes Tensor inputs and returns
+        func (function): a Python function that takes Tensor inputs and returns
             a Tensor or a tuple of Tensors
         inputs (tuple of Tensor): inputs to the function
         grad_outputs (tuple of Tensor, optional): The gradients with respect to
@@ -231,13 +267,12 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         gen_non_contig_grad_outputs (bool, optional): if :attr:`grad_outputs` is
             ``None`` and :attr:`gen_non_contig_grad_outputs` is ``True``, the
             randomly generated gradient outputs are made to be noncontiguous
-        raise_exception: bool indicating whether to raise an exception if
-            gradcheck fails. The exception gives more information about the
+        raise_exception (bool, optional): indicating whether to raise an exception if
+            the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
 
     Returns:
-        True if all differences satisfy allclose condition. Raises an exception
-        otherwise.
+        True if all differences satisfy allclose condition
     """
     if grad_outputs is None:
         # If grad_outputs is not specified, create random Tensors of the same

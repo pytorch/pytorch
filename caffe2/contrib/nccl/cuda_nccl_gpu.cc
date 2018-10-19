@@ -48,9 +48,21 @@ class NCCLContext {
     }
     DeviceGuard g(master_gpu_id_);
     CUDA_ENFORCE(cudaEventDestroy(master_event_));
+
+    /*
+     * TODO(T30279827) Temporarily disable calling ncclCommDestroy
+     * Calling ncclCommDestroy while program exiting is undefined
+     * according to Nvidia, and will lead to segfault in NCCL 2
+     * (whether it is called before or after the CUDA runtime destructor).
+     * Temporarily disable it in destructor to avoid segfault.
+     * Following up with Nvidia for long term solution.
+     */
+
+    /*
     for (auto& comm : comms_) {
       ncclCommDestroy(comm);
     }
+    */
   }
 
   std::vector<int> devices_;
@@ -60,7 +72,7 @@ class NCCLContext {
   cudaEvent_t master_event_;
   std::vector<cudaEvent_t> events_;
 
-  DISABLE_COPY_AND_ASSIGN(NCCLContext);
+  C10_DISABLE_COPY_AND_ASSIGN(NCCLContext);
 };
 
 // We share the contexts across multiple operators, hence the
@@ -114,7 +126,7 @@ class ncclTypeWrapper<int> {
 
 #ifdef CAFFE_HAS_CUDA_FP16
 template <>
-class ncclTypeWrapper<float16> {
+class ncclTypeWrapper<at::Half> {
  public:
   static const ncclDataType_t type = ncclHalf;
 };
@@ -257,7 +269,7 @@ void NCCL<T>::AllGather(const NCCLExecution& ex) {
       ex,
       [n](const NCCLElement& ctx) {
         CAFFE_ENFORCE_NE(ctx.src, ctx.dst);
-        std::vector<TIndex> dims;
+        std::vector<int64_t> dims;
         dims.reserve(ctx.src->ndim() + 1);
         dims.push_back(n);
         for (auto d : ctx.src->dims()) {
@@ -295,7 +307,7 @@ void NCCL<T>::ReduceScatter(const NCCLExecution& ex) {
       [](const NCCLElement& ctx) {
         CAFFE_ENFORCE_NE(ctx.src, ctx.dst);
         const auto& srcDims = ctx.src->dims();
-        std::vector<TIndex> dstDims(srcDims.begin() + 1, srcDims.end());
+        std::vector<int64_t> dstDims(srcDims.begin() + 1, srcDims.end());
         ctx.dst->Resize(dstDims);
         ctx.dst->template mutable_data<T>();
       },
@@ -315,7 +327,7 @@ void NCCL<T>::ReduceScatter(const NCCLExecution& ex) {
 template class NCCL<float>;
 template class NCCL<int>;
 #ifdef CAFFE_HAS_CUDA_FP16
-template class NCCL<float16>;
+template class NCCL<at::Half>;
 #endif
 }
 }

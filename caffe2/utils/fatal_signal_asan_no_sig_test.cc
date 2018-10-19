@@ -14,6 +14,7 @@ namespace {
 void* dummy_thread(void*) {
   while (1) {
   }
+  return nullptr;
 }
 
 bool forkAndPipe(

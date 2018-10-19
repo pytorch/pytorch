@@ -64,8 +64,8 @@ class CudnnConvTransposeOpBase : public ConvTransposeUnpoolBase<CUDAContext> {
   }
 
  protected:
-  vector<TIndex> cudnn_input_dims_;
-  vector<TIndex> cudnn_filter_dims_;
+  vector<int64_t> cudnn_input_dims_;
+  vector<int64_t> cudnn_filter_dims_;
 
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t bottom_desc_;
@@ -191,7 +191,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
   if (input_changed || filter_changed) {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
-      cudnn_input_dims_ = X.dims();
+      cudnn_input_dims_ = X.dims().vec();
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           bottom_desc_,
           GetCudnnTensorFormat(order_),
@@ -202,7 +202,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
           W));
     }
     if (filter_changed) {
-      cudnn_filter_dims_ = filter.dims();
+      cudnn_filter_dims_ = filter.dims().vec();
       CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
           filter_desc_,
           cudnnTypeWrapper<T>::type,
@@ -421,7 +421,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
   if (input_changed || filter_changed) {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
-      cudnn_input_dims_ = X.dims();
+      cudnn_input_dims_ = X.dims().vec();
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           bottom_desc_,
           GetCudnnTensorFormat(order_),
@@ -432,7 +432,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
           W));
     }
     if (filter_changed) {
-      cudnn_filter_dims_ = filter.dims();
+      cudnn_filter_dims_ = filter.dims().vec();
       CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
           filter_desc_,
           cudnnTypeWrapper<T>::type,

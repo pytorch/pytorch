@@ -1,6 +1,5 @@
 import re
 import os
-from tools.shared.module_loader import import_module
 from .nested_dict import nested_dict
 
 
@@ -9,8 +8,11 @@ __all__ = [
     'split_name_params', 'write',
 ]
 
-
-CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
+try:
+    from src.ATen.code_template import CodeTemplate
+except ImportError:
+    from tools.shared.module_loader import import_module
+    CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
 
 try:
     # use faster C loader if available
@@ -42,6 +44,8 @@ def split_name_params(prototype):
 def uninplace_api_name(api_name):
     if api_name.endswith('_') and not api_name.endswith('__'):
         api_name = api_name[:-1]
+    if api_name.endswith('_out'):
+        api_name = api_name[:-4]
     return api_name
 
 

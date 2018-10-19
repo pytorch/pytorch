@@ -1,8 +1,8 @@
-#include <torch/torch.h>
+#include <torch/extension.h>
 
 struct Doubler {
   Doubler(int A, int B) {
-    tensor_ = at::ones(torch::CPU(at::kDouble), {A, B});
+    tensor_ = at::ones({A, B}, torch::CPU(at::kDouble));
     torch::set_requires_grad(tensor_, true);
   }
   at::Tensor forward() {

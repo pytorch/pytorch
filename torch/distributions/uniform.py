@@ -1,4 +1,3 @@
-import math
 from numbers import Number
 
 import torch
@@ -10,14 +9,13 @@ from torch.distributions.utils import broadcast_all
 class Uniform(Distribution):
     r"""
     Generates uniformly distributed random samples from the half-open interval
-    `[low, high)`.
+    ``[low, high)``.
 
     Example::
 
         >>> m = Uniform(torch.tensor([0.0]), torch.tensor([5.0]))
         >>> m.sample()  # uniformly distributed in the range [0.0, 5.0)
-         2.3418
-        [torch.FloatTensor of size 1]
+        tensor([ 2.3418])
 
     Args:
         low (float or Tensor): lower range (inclusive).
@@ -51,13 +49,22 @@ class Uniform(Distribution):
         if self._validate_args and not torch.lt(self.low, self.high).all():
             raise ValueError("Uniform is not defined when low>= high")
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Uniform, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.low = self.low.expand(batch_shape)
+        new.high = self.high.expand(batch_shape)
+        super(Uniform, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     @constraints.dependent_property
     def support(self):
         return constraints.interval(self.low, self.high)
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        rand = self.low.new(shape).uniform_()
+        rand = torch.rand(shape, dtype=self.low.dtype, device=self.low.device)
         return self.low + rand * (self.high - self.low)
 
     def log_prob(self, value):

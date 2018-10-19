@@ -1,5 +1,5 @@
 #include "THCUNN.h"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
 
@@ -18,10 +18,10 @@ struct hardtanhupdateOutput_functor
   {
     if (*input < min_val_)
       *output = min_val_;
-    else if (*input <= max_val_)
-      *output = *input;
-    else
+    else if (*input > max_val_)
       *output = max_val_;
+    else
+      *output = *input;
   }
 
   __device__ void operator()(T *input) const

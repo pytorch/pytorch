@@ -75,12 +75,23 @@ class AdagradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   AdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<T>("epsilon", 1e-5f)),
-        decay_(OperatorBase::GetSingleArgument<T>("decay", 1.0f)) {}
+        epsilon_(this->template GetSingleArgument<T>("epsilon", 1e-5f)),
+        decay_(this->template GetSingleArgument<T>("decay", 1.0f)) {}
 
   bool RunOnDevice() override {
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENT_1).size());
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(PARAM).size());
+    CAFFE_ENFORCE_EQ(
+        Input(GRAD).size(),
+        Input(MOMENT_1).size(),
+        "PARAM size: ",
+        Input(PARAM).size(),
+        ", GRAD size: ",
+        Input(GRAD).size(),
+        ", MOMENT_1 size: ",
+        Input(MOMENT_1).size(),
+        ", LR size: ",
+        Input(LR).size());
+
+    CAFFE_ENFORCE_EQ(Input(GRAD).size(), Input(PARAM).size());
     Output(OUTPUT_PARAM)->ResizeLike(Input(PARAM));
     Output(OUTPUT_MOMENT_1)->ResizeLike(Input(MOMENT_1));
     if (OutputSize() == 2) {
@@ -147,7 +158,7 @@ class SparseAdagradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
 
   bool RunOnDevice() override {
     // Enforce shapes
@@ -235,7 +246,7 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   RowWiseSparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
 
   bool RunOnDevice() override {
     // Enforce shapes

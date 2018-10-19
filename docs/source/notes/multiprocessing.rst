@@ -9,9 +9,13 @@ memory and will only send a handle to another process.
 
 .. note::
 
-    When a :class:`~torch.Tensor` is sent to another process, both
-    the :attr:`~torch.Tensor` data and :attr:`torch.Tensor.grad` are going to be
-    shared.
+    When a :class:`~torch.Tensor` is sent to another process, the
+    :class:`~torch.Tensor` data is shared. If :attr:`torch.Tensor.grad` is
+    not ``None``, it is also shared. After a :class:`~torch.Tensor` without
+    a :attr:`torch.Tensor.grad` field is sent to the other process, it
+    creates a standard process-specific ``.grad`` :class:`~torch.Tensor` that
+    is not automatically shared across all processes, unlike how the
+    :class:`~torch.Tensor`'s data has been shared.
 
 This allows to implement various training methods, like Hogwild, A3C, or any
 others that require asynchronous operation.

@@ -5,7 +5,7 @@
 namespace torch {
 namespace cuda {
 /// Returns the number of CUDA devices available.
-std::size_t device_count();
+size_t device_count();
 
 /// Returns true if at least one CUDA device is available.
 bool is_available();

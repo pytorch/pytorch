@@ -8,7 +8,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/static_tracepoint.h"
 #include "caffe2/core/timer.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
@@ -30,7 +30,7 @@ void prune(int node_idx, std::vector<OpGraphNode>& nodes) {
 
     // If the node has already been visited, pop curr out of
     // stack and clean up the ancestor table
-    CAFFE_ENFORCE(curr < ancestors.size(), "Out of bound access");
+    CAFFE_ENFORCE(curr < (int)ancestors.size(), "Out of bound access");
     if (ancestors[curr]) {
       ancestors[curr] = false;
       nodes_stack.pop();
@@ -93,7 +93,7 @@ std::vector<OpGraphNode> pruneOpNodeGraph(
     pruned.push_back(nd);
   }
 
-  for (int i = 0; i < pruned.size(); ++i) {
+  for (int i = 0; i < (int)pruned.size(); ++i) {
     if (pruned[i].parents_.size() == 0) {
       prune(i, pruned);
     }
@@ -107,7 +107,7 @@ std::vector<OpGraphNode> pruneOpNodeGraph(
 void updateOperatorNodes(
     std::vector<OperatorNode>& nodes,
     const ExecutionChains& chains) {
-  for (int i = 0; i < nodes.size(); ++i) {
+  for (int i = 0; i < (int)nodes.size(); ++i) {
     auto& node = nodes[i];
     if (chains.find(i) != chains.end()) {
       node.is_chain_start_ = true;
@@ -123,7 +123,7 @@ void updateOperatorNodes(
 ExecutionChains computeChains(std::vector<OperatorNode>& orig_nodes) {
   const std::vector<OpGraphNode> nodes = pruneOpNodeGraph(orig_nodes);
   vector<int> initial_frontier;
-  for (int idx = 0; idx < nodes.size(); ++idx) {
+  for (int idx = 0; idx < (int)nodes.size(); ++idx) {
     if (nodes[idx].parents_.size() == 0) {
       initial_frontier.push_back(idx);
     }
@@ -278,9 +278,91 @@ ExecutionChains computeChains(std::vector<OperatorNode>& orig_nodes) {
   return chains;
 }
 
+// Here chains are essentially groups, we used chain/group interchangeably
+ExecutionChains computeGroups(std::vector<OperatorNode>& orig_nodes) {
+  const std::vector<OpGraphNode> nodes = pruneOpNodeGraph(orig_nodes);
+  ExecutionChains chains;
+  std::vector<int> sync_frontier;
+  std::vector<int> async_frontier;
+
+  std::vector<int> in_degrees;
+  in_degrees.reserve(nodes.size());
+  std::transform(
+      nodes.begin(),
+      nodes.end(),
+      std::back_inserter(in_degrees),
+      [](const OpGraphNode& n) { return n.parents_.size(); });
+
+  // Screen out the primary root nodes
+  for (int idx = 0; idx < (int)nodes.size(); ++idx) {
+    if (in_degrees[idx] == 0) {
+      if (orig_nodes[idx].operator_->HasAsyncPart()) {
+        async_frontier.push_back(idx);
+      } else {
+        sync_frontier.push_back(idx);
+      }
+    }
+  }
+
+  // We check sync ops on the froniter first and then async ops. This gives us a
+  // head start to execute sync ops locally while waiting for async ops to
+  // finish.
+  std::queue<int> q;
+  while (!(async_frontier.empty() && sync_frontier.empty())) {
+    // Sync ops
+    for (const auto i : sync_frontier) {
+      q.push(i);
+    }
+    sync_frontier.clear();
+    std::vector<int> chain;
+    while (!q.empty()) {
+      int idx = q.front();
+      q.pop();
+      chain.push_back(idx);
+      for (int child : nodes[idx].children_) {
+        if (--in_degrees[child] == 0) {
+          if (orig_nodes[child].operator_->HasAsyncPart()) {
+            async_frontier.push_back(child);
+          } else {
+            q.push(child);
+          }
+        }
+      }
+    }
+    // add the whole group of continuous sync ops into one chain
+    if (!chain.empty()) {
+      chains.emplace(chain.front(), chain);
+    }
+
+    // Async ops
+    for (const auto i : async_frontier) {
+      q.push(i);
+    }
+    async_frontier.clear();
+    while (!q.empty()) {
+      int idx = q.front();
+      q.pop();
+      // Put each individual node as a new chain
+      chains[idx] = {idx};
+      for (int child : nodes[idx].children_) {
+        if (--in_degrees[child] == 0) {
+          if (orig_nodes[child].operator_->HasAsyncPart()) {
+            q.push(child);
+          } else {
+            sync_frontier.push_back(child);
+          }
+        }
+      }
+    }
+  }
+
+  updateOperatorNodes(orig_nodes, chains);
+  return chains;
+}
+
 ExecutionChains singleChains(std::vector<OperatorNode>& nodes) {
   ExecutionChains chains;
-  for (auto i = 0; i < nodes.size(); ++i) {
+  for (int i = 0; i < (int)nodes.size(); ++i) {
     chains[i] = {i};
   }
   updateOperatorNodes(nodes, chains);
@@ -362,7 +444,7 @@ std::vector<OperatorNode> prepareOperatorNodes(
 
   // Now, make sure that the parent list and the children list do not contain
   // duplicated items.
-  for (int i = 0; i < operator_nodes.size(); ++i) {
+  for (int i = 0; i < (int)operator_nodes.size(); ++i) {
     auto& node = operator_nodes[i];
     // Sort, remove duplicates, and delete self dependency.
     auto& p = node.parents_;
@@ -383,7 +465,7 @@ std::vector<OpGraphNode> prepareChainGraphNodes(
     const std::vector<dag_utils::OperatorNode>& operator_nodes,
     const std::vector<std::vector<int>>& execution_chains) {
   std::unordered_map<int, int> op_to_chain_idx;
-  for (int chain_idx = 0; chain_idx < execution_chains.size(); ++chain_idx) {
+  for (int chain_idx = 0; chain_idx < (int)execution_chains.size(); ++chain_idx) {
     const auto& chain_indices = execution_chains[chain_idx];
     for (const auto& chain_op_idx : chain_indices) {
       CAFFE_ENFORCE(!op_to_chain_idx.count(chain_op_idx));
@@ -392,7 +474,7 @@ std::vector<OpGraphNode> prepareChainGraphNodes(
   }
 
   std::vector<OpGraphNode> chain_nodes(execution_chains.size());
-  for (int op_idx = 0; op_idx < operator_nodes.size(); ++op_idx) {
+  for (int op_idx = 0; op_idx < (int)operator_nodes.size(); ++op_idx) {
     CAFFE_ENFORCE(op_to_chain_idx.count(op_idx));
     auto chain_idx = op_to_chain_idx[op_idx];
     auto& chain = chain_nodes[chain_idx];

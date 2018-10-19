@@ -20,11 +20,11 @@ class ReplaceNaNOp final : public Operator<Context> {
   }
 
   template <typename T>
-  void ReplaceNaN(const T& value, const TIndex size, const T* X, T* Y);
+  void ReplaceNaN(const T& value, const int64_t size, const T* X, T* Y);
 
   template <typename T>
   bool DoRunWithType() {
-    T value = OperatorBase::GetSingleArgument<T>("value", 0);
+    T value = this->template GetSingleArgument<T>("value", 0);
 
     auto& input = Input(0);
     auto* output = Output(0);

@@ -330,6 +330,9 @@ class TestSum(test_util.TestCase):
                 res, grad, grad_estimated = checker.CheckSimple(
                     op, [X1, X2], 0, [0])
                 self.assertTrue(res)
+                res, grad, grad_estimated = checker.CheckSimple(
+                    op, [X1, X2], 1, [0])
+                self.assertTrue(res)
 
 
 class TestMakeTwoClass(test_util.TestCase):
@@ -507,6 +510,7 @@ class TestIf(test_util.TestCase):
 
 
 class TestWhile(test_util.TestCase):
+    @unittest.skip("Skip flaky test.")
     def testWhile(self):
         with NetBuilder(_use_control_ops=True) as nb:
             ops.Copy(ops.Const(0), "i")

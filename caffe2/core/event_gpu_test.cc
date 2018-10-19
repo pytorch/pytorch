@@ -9,9 +9,9 @@ TEST(EventCUDATest, EventBasics) {
   if (!HasCudaGPU())
     return;
   DeviceOption device_cpu;
-  device_cpu.set_device_type(CPU);
+  device_cpu.set_device_type(PROTO_CPU);
   DeviceOption device_cuda;
-  device_cuda.set_device_type(CUDA);
+  device_cuda.set_device_type(PROTO_CUDA);
 
   CPUContext context_cpu(device_cpu);
   CUDAContext context_cuda(device_cuda);

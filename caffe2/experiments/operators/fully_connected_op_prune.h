@@ -1,3 +1,19 @@
+/**
+ * Copyright (c) 2016-present, Facebook, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #ifndef CAFFE2_OPERATORS_FULLY_CONNECTED_OP_PRUNE_H_
 #define CAFFE2_OPERATORS_FULLY_CONNECTED_OP_PRUNE_H_
 
@@ -13,8 +29,8 @@ namespace caffe2 {
       using Shape = std::array<int, N>;
 
     template<int N>
-      const std::vector<TIndex>& shape(Shape<N> vs) {
-        static thread_local std::vector<TIndex> cache;
+      const std::vector<int64_t>& shape(Shape<N> vs) {
+        static thread_local std::vector<int64_t> cache;
         cache.resize(vs.size());
         for (auto i = 0; i < vs.size(); ++i) {
           cache[i] = vs[i];
@@ -22,11 +38,11 @@ namespace caffe2 {
         return cache;
       }
 
-    inline const std::vector<TIndex>& shape(int i) {
+    inline const std::vector<int64_t>& shape(int i) {
       return shape<1>(Shape<1>({i}));
     }
 
-    inline const std::vector<TIndex>& shape(int i, int j) {
+    inline const std::vector<int64_t>& shape(int i, int j) {
       return shape<2>(Shape<2>({i, j}));
     }
 
@@ -161,19 +177,22 @@ namespace caffe2 {
               Y->template mutable_data<T>(), &context_);
           if (OutputSize() == 2){
             auto* Comp_rate = Output(1);
-            Comp_rate->Resize(vector<TIndex>());
+            Comp_rate->Resize(vector<int64_t>());
             T* comp_data = Comp_rate->template mutable_data<T>();
             math::Sum<T, Context>(
                 Mask.size(), Mask.template data<T>(), comp_data, &context_);
-            math::Scale<T, Context>(
-                1, static_cast<T>(1.) / Mask.size(), comp_data, comp_data,
+            math::Scale<float, T, Context>(
+                1,
+                static_cast<T>(1.) / Mask.size(),
+                comp_data,
+                comp_data,
                 &context_);
           }
           return true;
         }
 
       protected:
-        Tensor<Context> bias_multiplier_;
+       Tensor bias_multiplier_{Context::GetDeviceType()};
     };
 
   template <typename T, class Context, class Engine=DefaultEngine>
@@ -243,12 +262,15 @@ namespace caffe2 {
               0, dW->template mutable_data<T>(),
               &context_);
 
-          comp_r_buf_.Resize(vector<TIndex>());
+          comp_r_buf_.Resize(vector<int64_t>());
           T* comp_data = comp_r_buf_.template mutable_data<T>();
           math::Sum<T, Context>(
               Mask.size(), Mask.template data<T>(), comp_data, &context_);
-          math::Scale<T, Context>(
-              1, static_cast<T>(1.) / Mask.size(), comp_data, comp_data,
+          math::Scale<float, T, Context>(
+              1,
+              static_cast<T>(1.) / Mask.size(),
+              comp_data,
+              comp_data,
               &context_);
           // update W size window
           // Notice here we need to maintain state in OP.
@@ -327,9 +349,9 @@ namespace caffe2 {
         }
 
       protected:
-        Tensor<Context> bias_multiplier_;
-        Tensor<Context> sum_buffer_;
-        Tensor<Context> comp_r_buf_;
+       Tensor bias_multiplier_{Context::GetDeviceType()};
+       Tensor sum_buffer_{Context::GetDeviceType()};
+       Tensor comp_r_buf_{Context::GetDeviceType()};
     };
 
 }  // namespace caffe2

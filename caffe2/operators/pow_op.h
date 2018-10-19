@@ -5,9 +5,9 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/operators/elementwise_ops.h"
+#include "caffe2/operators/elementwise_ops_utils.h"
 #include "caffe2/utils/math.h"
-// definition of NumericTypes and SameTypeAsInput is in below header file
-#include "caffe2/operators/elementwise_op.h"
 
 namespace caffe2 {
 
@@ -103,7 +103,8 @@ class PowOp : public Operator<Context> {
             A.size(), Adata, Bdata, 0, Cdata, &context_);
       } else {
         size_t pre, n, post;
-        std::tie(pre, n, post) = calculate_broadcast_sizes(A, B, axis_);
+        std::tie(pre, n, post) =
+            elementwise_ops_utils::ComputeLegacyBroadcastSizes(A, B, axis_);
         if (post == 1) {
           functor_.template RunWithBroadcast<T, T, T>(
               Adata, Bdata, Cdata, pre, n, &context_);

@@ -1,4 +1,5 @@
 #include "caffe2/operators/layer_norm_op.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
@@ -27,7 +28,7 @@ bool LayerNormOp<CPUContext>::DoRunWithType<float>() {
   const int right = input.size_from_dim(canonical_axis);
 
   output->ResizeLike(input);
-  std::vector<TIndex> stats_dims(
+  std::vector<int64_t> stats_dims(
       input.dims().begin(), input.dims().begin() + canonical_axis);
   stats_dims.push_back(1);
   mean->Resize(stats_dims);

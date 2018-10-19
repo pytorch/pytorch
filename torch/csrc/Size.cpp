@@ -14,7 +14,7 @@ struct THPSize {
 
 PyObject * THPSize_New(const torch::autograd::Variable& var)
 {
-  if (!torch::jit::tracer::isTracing(var)) {
+  if (!torch::jit::tracer::isTracing()) {
     auto sizes = var.sizes();
     return THPSize_NewFromSizes(var.dim(), sizes.data());
   }
@@ -38,22 +38,23 @@ PyObject * THPSize_NewFromSizes(int dim, const int64_t *sizes)
   return self.release();
 }
 
-static bool isTracedVar(PyObject *item) {
+static bool isTracedZeroDimVar(PyObject *item) {
   if (!THPVariable_Check(item)) return false;
   auto & var = reinterpret_cast<THPVariable*>(item)->cdata;
-  return torch::jit::tracer::isTracing(var);
+  return var.dim() == 0 && torch::jit::tracer::getValueTrace(var);
 }
 
 static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
+  HANDLE_TH_ERRORS
   THPObjectPtr self(PyTuple_Type.tp_new(type, args, kwargs));
   if (self) {
     for (Py_ssize_t i = 0; i < PyTuple_Size(self); ++i) {
       PyObject *item = PyTuple_GET_ITEM(self.get(), i);
-      if (isTracedVar(item)) {
+      if (THPUtils_checkLong(item)) {
         continue;
       }
-      if (THPUtils_checkLong(item)) {
+      if (torch::jit::tracer::isTracing() && isTracedZeroDimVar(item)) {
         continue;
       }
       // item.__index__() works with 0-dim tensors and tensors with one element
@@ -72,6 +73,7 @@ static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kw
     }
   }
   return self.release();
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPSize_repr(THPSize *self)
@@ -95,9 +97,9 @@ template<typename FnType, FnType fn, typename ...Args>
 static PyObject* wrap_tuple_fn(Args ... args)
 {
   THPObjectPtr result((*fn)(std::forward<Args>(args)...));
-  if (!result) return NULL;
+  if (!result) return nullptr;
   if (PyTuple_Check(result.get())) {
-    return PyObject_CallFunctionObjArgs((PyObject*)&THPSizeType, result.get(), NULL);
+    return PyObject_CallFunctionObjArgs((PyObject*)&THPSizeType, result.get(), nullptr);
   }
   return result.release();
 }
@@ -135,9 +137,25 @@ static PyMappingMethods THPSize_as_mapping = {
     0
 };
 
+static PyObject *THPSize_numel(THPSize *self)
+{
+  HANDLE_TH_ERRORS
+  int64_t numel = 1;
+  for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
+    numel *= PyLong_AsLong(PyTuple_GET_ITEM(self, i));
+  }
+  return THPUtils_packInt64(numel);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyMethodDef THPSize_methods[] = {
+  {"numel",       (PyCFunction)THPSize_numel,       METH_NOARGS,  nullptr},
+  {nullptr}
+};
+
 
 PyTypeObject THPSizeType = {
-  PyVarObject_HEAD_INIT(NULL, 0)
+  PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.Size",                          /* tp_name */
   sizeof(THPSize),                       /* tp_basicsize */
   0,                                     /* tp_itemsize */
@@ -157,14 +175,14 @@ PyTypeObject THPSizeType = {
   0,                                     /* tp_setattro */
   0,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT,                    /* tp_flags */
-  NULL,                                  /* tp_doc */
+  nullptr,                               /* tp_doc */
   0,                                     /* tp_traverse */
   0,                                     /* tp_clear */
   0,                                     /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
   0,                                     /* tp_iter */
   0,                                     /* tp_iternext */
-  0,                                     /* tp_methods */
+  THPSize_methods,                       /* tp_methods */
   0,                                     /* tp_members */
   0,                                     /* tp_getset */
   &PyTuple_Type,                         /* tp_base */

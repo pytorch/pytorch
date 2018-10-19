@@ -10,18 +10,18 @@ void THNN_(HardTanh_updateOutput)(
           accreal max_val_,
           bool inplace)
 {
-  real min_val = TH_CONVERT_ACCREAL_TO_REAL(min_val_);
-  real max_val = TH_CONVERT_ACCREAL_TO_REAL(max_val_);
+  scalar_t min_val = TH_CONVERT_ACCREAL_TO_REAL(min_val_);
+  scalar_t max_val = TH_CONVERT_ACCREAL_TO_REAL(max_val_);
   if (inplace)
     THTensor_(set)(output, input);
   else
     THTensor_(resizeAs)(output, input);
 
-  if (input->nDimension == 1 || !THTensor_(isContiguous)(input) || !THTensor_(isContiguous)(output))
+  if (THTensor_nDimensionLegacyAll(input) == 1 || !THTensor_(isContiguous)(input) || !THTensor_(isContiguous)(output))
   {
     if (inplace)
     {
-      TH_TENSOR_APPLY(real, input,
+      TH_TENSOR_APPLY(scalar_t, input,
         if (*input_data < min_val)
           *input_data = min_val;
         else if (*input_data > max_val)
@@ -30,20 +30,20 @@ void THNN_(HardTanh_updateOutput)(
     }
     else
     {
-      TH_TENSOR_APPLY2(real, output, real, input,
+      TH_TENSOR_APPLY2(scalar_t, output, scalar_t, input,
         if (*input_data < min_val)
           *output_data = min_val;
-        else if (*input_data <= max_val)
-          *output_data = *input_data;
-        else
+        else if (*input_data > max_val)
           *output_data = max_val;
+        else
+          *output_data = *input_data;
       );
     }
   }
   else
   {
-    real* ptr_input  = THTensor_(data)(input);
-    real* ptr_output = THTensor_(data)(output);
+    scalar_t* ptr_input  = input->data<scalar_t>();
+    scalar_t* ptr_output = output->data<scalar_t>();
     ptrdiff_t i;
     ptrdiff_t n = THTensor_(nElement)(input);
 
@@ -79,8 +79,8 @@ void THNN_(HardTanh_updateGradInput)(
           accreal max_val_,
           bool inplace)
 {
-  real min_val = TH_CONVERT_ACCREAL_TO_REAL(min_val_);
-  real max_val = TH_CONVERT_ACCREAL_TO_REAL(max_val_);
+  scalar_t min_val = TH_CONVERT_ACCREAL_TO_REAL(min_val_);
+  scalar_t max_val = TH_CONVERT_ACCREAL_TO_REAL(max_val_);
 
   THNN_CHECK_NELEMENT(input, gradOutput);
   if (inplace)
@@ -88,20 +88,20 @@ void THNN_(HardTanh_updateGradInput)(
   else
     THTensor_(resizeAs)(gradInput, input);
 
-  if (input->nDimension == 1 ||
+  if (THTensor_nDimensionLegacyAll(input) == 1 ||
     !THTensor_(isContiguous)(input) ||
     !THTensor_(isContiguous)(gradOutput) ||
     !THTensor_(isContiguous)(gradInput))
   {
     if (inplace)
     {
-      TH_TENSOR_APPLY2(real, gradOutput, real, input,
+      TH_TENSOR_APPLY2(scalar_t, gradOutput, scalar_t, input,
         if (*input_data <= min_val || *input_data >= max_val)
           *gradOutput_data = 0;
       );
     }
     else
-      TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
+      TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, gradOutput, scalar_t, input,
         if (*input_data <= min_val || *input_data >= max_val)
           *gradInput_data = 0;
         else
@@ -110,9 +110,9 @@ void THNN_(HardTanh_updateGradInput)(
   }
   else
   {
-    real* ptr_gradOutput = THTensor_(data)(gradOutput);
-    real* ptr_gradInput  = THTensor_(data)(gradInput);
-    real* ptr_input      = THTensor_(data)(input);
+    scalar_t* ptr_gradOutput = gradOutput->data<scalar_t>();
+    scalar_t* ptr_gradInput  = gradInput->data<scalar_t>();
+    scalar_t* ptr_input      = input->data<scalar_t>();
     ptrdiff_t i;
     ptrdiff_t n = THTensor_(nElement)(input);
 

@@ -16,22 +16,22 @@
 namespace thd {
 namespace {
 
-inline std::uint32_t log2ceil(std::uint32_t value) {
-  std::uint32_t dim = 0;
+inline uint32_t log2ceil(uint32_t value) {
+  uint32_t dim = 0;
 #if defined(__GNUC__)
   if (value <= 1)
     return 0;
   dim = 32 - __builtin_clz(value - 1);
 #else
-  for (std::uint32_t size = 1; size < value; ++dim, size <<= 1) /* empty */;
+  for (uint32_t size = 1; size < value; ++dim, size <<= 1) /* empty */;
 #endif // defined(__GNUC__)
   return dim;
 }
 
 // Finds nearest power-of-two less than or equal to `value`.
 template<typename T>
-inline std::uint64_t pow2(T value) {
-  std::uint64_t pof2 = 1;
+inline uint64_t pow2(T value) {
+  uint64_t pof2 = 1;
   while (pof2 <= value) { pof2 <<= 1; }
   pof2 >>= 1;
   return pof2;
@@ -119,7 +119,7 @@ bool DataChannelTCP::initWorker() {
   send_value<port_type>(master.socket, _port); // send listening port to master
 
   // get all metadata of other processes in network
-  for (std::size_t i = 1; i < _processes.size(); ++i) {
+  for (size_t i = 1; i < _processes.size(); ++i) {
     rank_type p_rank = recv_value<rank_type>(master.socket);
     port_type p_port = recv_value<port_type>(master.socket);
     std::string p_address = recv_string(master.socket);
@@ -167,7 +167,7 @@ bool DataChannelTCP::initWorker() {
 
 bool DataChannelTCP::initMaster() {
   // wait for all workers to connect
-  for (std::size_t i = 1; i < _processes.size(); ++i) {
+  for (size_t i = 1; i < _processes.size(); ++i) {
     std::string p_address;
     int p_socket;
     std::tie(p_socket, p_address) = accept(_socket, _timeout);
@@ -385,7 +385,7 @@ void DataChannelTCP::allReduce(at::Tensor& data, THDReduceOp operation,
   if (!exists)
     return;
 
-  std::uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
+  uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
   auto tmp_tensor = data.clone();
 
   auto pof2 = pow2(group.size());
@@ -556,7 +556,7 @@ rank_type DataChannelTCP::receive(at::Tensor& data) {
     if (!this->_poll_events) {
       // cache poll events array, it will be reused in another `receive` calls
       this->_poll_events.reset(new struct pollfd[this->_processes.size()]);
-      for (std::size_t rank = 0; rank < this->_processes.size(); ++rank) {
+      for (size_t rank = 0; rank < this->_processes.size(); ++rank) {
         this->_poll_events[rank] = {
           .fd = this->_processes[rank].socket,
           .events = POLLIN
@@ -565,12 +565,12 @@ rank_type DataChannelTCP::receive(at::Tensor& data) {
     }
 
     // cleanup
-    for (std::size_t rank = 0; rank < this->_processes.size(); ++rank) {
+    for (size_t rank = 0; rank < this->_processes.size(); ++rank) {
       this->_poll_events[rank].revents = 0;
     }
 
     SYSCHECK(::poll(this->_poll_events.get(), this->_processes.size(), -1)) // infinite timeout
-    for (std::size_t rank = 0; rank < this->_processes.size(); ++rank) {
+    for (size_t rank = 0; rank < this->_processes.size(); ++rank) {
       if (this->_poll_events[rank].revents == 0)
         continue;
 
@@ -672,8 +672,8 @@ void DataChannelTCP::_send(const Scalar& data, rank_type dst_rank) {
     throw std::logic_error("cannot send scalar to process with same rank");
 
   // send size of scalar in bytes
-  std::uint64_t scalar_bytes = data.elementSize();
-  send_bytes<std::uint64_t>(process_dst.socket, &scalar_bytes, 1, true);
+  uint64_t scalar_bytes = data.elementSize();
+  send_bytes<uint64_t>(process_dst.socket, &scalar_bytes, 1, true);
 
   // send data (bytes)
   send_bytes<std::uint8_t>(
@@ -698,8 +698,8 @@ void DataChannelTCP::_send(const at::Tensor& data, rank_type dst_rank) {
     throw std::logic_error("tensor to send is not contiguous");
 
   // send size of tensor data in bytes
-  std::uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
-  send_bytes<std::uint64_t>(process_dst.socket, &tensor_bytes, 1, true);
+  uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
+  send_bytes<uint64_t>(process_dst.socket, &tensor_bytes, 1, true);
 
   // send data (bytes)
   send_bytes<std::uint8_t>(
@@ -721,10 +721,10 @@ void DataChannelTCP::_receive(Scalar& data, rank_type src_rank) {
     throw std::logic_error("cannot receive scalar from process with same rank");
 
   // get size of scalar in bytes
-  std::uint64_t scalar_bytes;
-  recv_bytes<std::uint64_t>(process_src.socket, &scalar_bytes, 1);
+  uint64_t scalar_bytes;
+  recv_bytes<uint64_t>(process_src.socket, &scalar_bytes, 1);
 
-  std::uint64_t actual_scalar_bytes = data.elementSize();
+  uint64_t actual_scalar_bytes = data.elementSize();
   if (actual_scalar_bytes == scalar_bytes) {
     recv_bytes<std::uint8_t>(
       process_src.socket,
@@ -754,10 +754,10 @@ void DataChannelTCP::_receive(const at::Tensor& data, rank_type src_rank) {
     throw std::logic_error("tensor to receive is not contiguous");
 
   // get size of tensor data in bytes
-  std::uint64_t tensor_bytes;
-  recv_bytes<std::uint64_t>(process_src.socket, &tensor_bytes, 1);
+  uint64_t tensor_bytes;
+  recv_bytes<uint64_t>(process_src.socket, &tensor_bytes, 1);
 
-  std::uint64_t actual_tensor_bytes = data.type().elementSizeInBytes() * data.numel();
+  uint64_t actual_tensor_bytes = data.type().elementSizeInBytes() * data.numel();
   if (actual_tensor_bytes == tensor_bytes) {
     recv_bytes<std::uint8_t>(
       process_src.socket,

@@ -22,6 +22,7 @@ requirements:
     - future
     - numpy {{ numpy }}
     - python
+    - setuptools
     - six
     # build section here
   run:
@@ -29,6 +30,7 @@ requirements:
     - numpy
     - protobuf
     - python
+    - setuptools
     - six
     # run section here
 

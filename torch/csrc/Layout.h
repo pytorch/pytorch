@@ -1,13 +1,16 @@
 #pragma once
 
 #include "torch/csrc/python_headers.h"
+
+#include <ATen/Layout.h>
+
 #include <string>
 
 const int LAYOUT_NAME_LEN = 64;
 
 struct THPLayout {
   PyObject_HEAD
-  bool is_strided;
+  at::Layout layout;
   char name[LAYOUT_NAME_LEN + 1];
 };
 
@@ -17,6 +20,6 @@ inline bool THPLayout_Check(PyObject *obj) {
   return Py_TYPE(obj) == &THPLayoutType;
 }
 
-PyObject * THPLayout_New(bool is_strided, const std::string& name);
+PyObject * THPLayout_New(at::Layout layout, const std::string& name);
 
 void THPLayout_init(PyObject *module);

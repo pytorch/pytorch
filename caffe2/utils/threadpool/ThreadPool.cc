@@ -4,25 +4,22 @@
 
 #include <cpuinfo.h>
 
-CAFFE2_DEFINE_bool(caffe2_threadpool_force_inline, false,
-                   "Force to always run jobs on the calling thread");
+C10_DEFINE_bool(
+    caffe2_threadpool_force_inline,
+    false,
+    "Force to always run jobs on the calling thread");
 
 // Whether or not threadpool caps apply to Android
-CAFFE2_DEFINE_int(caffe2_threadpool_android_cap, true, "");
+C10_DEFINE_int(caffe2_threadpool_android_cap, true, "");
 
 // Whether or not threadpool caps apply to iOS
-CAFFE2_DEFINE_int(caffe2_threadpool_ios_cap, true, "");
-
+C10_DEFINE_int(caffe2_threadpool_ios_cap, true, "");
 
 namespace caffe2 {
 
 // Default smallest amount of work that will be partitioned between
 // multiple threads; the runtime value is configurable
-#if CAFFE2_ANDROID
-constexpr size_t kDefaultMinWorkSize = 8;
-#else
-constexpr size_t kDefaultMinWorkSize = 80;
-#endif
+constexpr size_t kDefaultMinWorkSize = 1;
 
 std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
   CAFFE_ENFORCE(cpuinfo_initialize(), "cpuinfo initialization failed");
@@ -30,9 +27,9 @@ std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
 
   bool applyCap = false;
 #if CAFFE2_ANDROID
-  applyCap = caffe2::FLAGS_caffe2_threadpool_android_cap;
+  applyCap = FLAGS_caffe2_threadpool_android_cap;
 #elif CAFFE2_IOS
-  applyCap = caffe2::FLAGS_caffe2_threadpool_ios_cap;
+  applyCap = FLAGS_caffe2_threadpool_ios_cap;
 #endif
 
   if (applyCap) {
@@ -104,8 +101,7 @@ void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   // If there are no worker threads, or if the range is too small (too
   // little work), just run locally
   const bool runLocally = range < minWorkSize_ ||
-                          FLAGS_caffe2_threadpool_force_inline ||
-                          (numThreads_ == 0);
+      FLAGS_caffe2_threadpool_force_inline || (numThreads_ == 0);
   if (runLocally) {
     // Work is small enough to just run locally; multithread overhead
     // is too high

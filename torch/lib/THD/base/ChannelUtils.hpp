@@ -13,10 +13,10 @@
 #include <vector>
 
 
-inline void hash_combine(std::size_t& seed) { }
+inline void hash_combine(size_t& seed) { }
 
 template <typename T, typename... Rest>
-inline void hash_combine(std::size_t& seed, const T& v, Rest... rest) {
+inline void hash_combine(size_t& seed, const T& v, Rest... rest) {
   std::hash<T> hasher;
   seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   hash_combine(seed, rest...);
@@ -25,8 +25,8 @@ inline void hash_combine(std::size_t& seed, const T& v, Rest... rest) {
 #define MAKE_HASHABLE(type, ...)                                              \
   namespace std {                                                             \
     template<> struct hash<type> {                                            \
-      std::size_t operator()(const type &t) const {                           \
-        std::size_t ret = 0;                                                  \
+      size_t operator()(const type &t) const {                           \
+        size_t ret = 0;                                                  \
         hash_combine(ret, __VA_ARGS__);                                       \
         return ret;                                                           \
       }                                                                       \
@@ -66,9 +66,9 @@ MAKE_HASHABLE(::thd::DeviceType, static_cast<std::uint8_t>(t));
 
 namespace thd {
 
-using rank_type = std::uint32_t;
-using port_type = std::uint16_t;
-using size_type = std::uint64_t;
+using rank_type = uint32_t;
+using port_type = uint16_t;
+using size_type = uint64_t;
 
 #define SYSCHECK(expr) { \
   errno = 0; auto ___output = (expr); (void)___output;     \
@@ -76,9 +76,9 @@ using size_type = std::uint64_t;
 }
 
 template<typename T>
-void send_bytes(int socket, const T* buffer, std::size_t length, bool more_data = false)
+void send_bytes(int socket, const T* buffer, size_t length, bool more_data = false)
 {
-  std::size_t bytes_to_send = sizeof(T) * length;
+  size_t bytes_to_send = sizeof(T) * length;
   if (bytes_to_send == 0)
     return;
 
@@ -105,9 +105,9 @@ void send_bytes(int socket, const T* buffer, std::size_t length, bool more_data 
 
 
 template<typename T>
-void recv_bytes(int socket, T* buffer, std::size_t length)
+void recv_bytes(int socket, T* buffer, size_t length)
 {
-  std::size_t bytes_to_receive = sizeof(T) * length;
+  size_t bytes_to_receive = sizeof(T) * length;
   if (bytes_to_receive == 0)
     return;
 

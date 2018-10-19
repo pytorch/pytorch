@@ -18,7 +18,7 @@ class SparseToDenseMaskBase : public Operator<Context> {
   SparseToDenseMaskBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     std::vector<int64_t> mask =
-        OperatorBase::template GetRepeatedArgument<int64_t>("mask");
+        this->template GetRepeatedArgument<int64_t>("mask");
     featuresCount_ = mask.size();
 
     CAFFE_ENFORCE(!mask.empty(), "mask can't be empty");
@@ -64,10 +64,10 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseToDenseMaskOp(const OperatorDef& operator_def, Workspace* ws)
       : SparseToDenseMaskBase<Context>(operator_def, ws) {
-    returnPresenceMask_ = OperatorBase::template GetSingleArgument<bool>(
+    returnPresenceMask_ = this->template GetSingleArgument<bool>(
         "return_presence_mask", false);
     maxSkippedSparseIndices_ =
-        OperatorBase::template GetSingleArgument<int32_t>(
+        this->template GetSingleArgument<int32_t>(
             "max_skipped_indices", kMaxSkippedSparseIndices);
   }
 
@@ -93,7 +93,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
         static_cast<const char*>(sparse_values.raw_data());
     const void* default_val = default_value.raw_data();
 
-    TIndex block_size = default_value.size();
+    int64_t block_size = default_value.size();
     size_t block_nbytes = default_value.nbytes();
 
     const int cols = this->featuresCount_;
@@ -101,11 +101,11 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     int32_t sparse_indices_length = sparse_indices.dim32(0);
     const int32_t* lengths_vec = nullptr;
     auto* output = Output(OUTPUTVALUE);
-    Tensor<Context>* presence_mask = nullptr;
+    Tensor* presence_mask = nullptr;
     if (returnPresenceMask_) {
       presence_mask = Output(PRESENCEMASK);
     }
-    vector<TIndex> shape;
+    vector<int64_t> shape;
     if (InputSize() == 4) {
       auto& lengths = Input(LENGTHS);
       CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
@@ -132,7 +132,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     char* output_data =
         static_cast<char*>(output->raw_mutable_data(sparse_values.meta()));
     for (int i = 0; i < cols * rows; i++) {
-      context_.template CopyItems<Context, Context>(
+      context_.CopyItemsSameDevice(
           default_value.meta(),
           block_size,
           default_val,
@@ -159,7 +159,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
         }
         int idx = this->getFeatureIdx(sparse_index);
         if (idx != -1) {
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               sparse_values.meta(),
               block_size,
               sparse_values_vec + (offset + c) * block_nbytes,
@@ -204,7 +204,7 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
     CAFFE_ENFORCE_EQ(sparse_indices.ndim(), 1);
     auto& gradient_output = Input(GOUTPUT);
 
-    TIndex block_size = gradient_output.size_from_dim(1);
+    int64_t block_size = gradient_output.size_from_dim(1);
     size_t block_nbytes = gradient_output.itemsize() * block_size;
 
     const int cols = this->featuresCount_;
@@ -213,7 +213,7 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
     int32_t default_length = sparse_indices.dim32(0);
     const int32_t* lengths_vec = nullptr;
     auto* output = Output(GVALUES);
-    vector<TIndex> shape;
+    vector<int64_t> shape;
     if (InputSize() > LENGTHS) {
       // if the LENGTHS is set, the gradient_output has dim:
       // lengths * mask.size() * feature_dim
@@ -263,7 +263,7 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
         int idx = this->getFeatureIdx(sparse_indices_vec[offset + c]);
         if (idx != -1 && !gradient_used[idx]) {
           gradient_used[idx] = true;
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               gradient_output.meta(),
               block_size,
               gradient_output_vec + (r * cols + idx) * block_nbytes,

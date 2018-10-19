@@ -12,12 +12,15 @@
 #ifndef NOM_REPRESENTATIONS_NEURALNET_H
 #define NOM_REPRESENTATIONS_NEURALNET_H
 
+#include "caffe2/core/common.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Representations/Compiler.h"
 #include "nomnigraph/Representations/ControlFlow.h"
 #include "nomnigraph/Support/Casting.h"
 #include "nomnigraph/Support/Pointer.h"
+#include "nomnigraph/Transformations/SubgraphMatcher.h"
 
+#include <sstream>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -38,33 +41,23 @@ class NeuralNetData;
 /// a saved void* pointer for external use.  Derived classes
 /// add richer semantics to the annotation and it is encouraged
 /// to use them.
-class Annotation {
+class CAFFE2_API Annotation {
  public:
   enum class AnnotationKind { Generic, Caffe2 };
 
-  Annotation(AnnotationKind K) : Kind(K) {}
-  Annotation() : Kind(AnnotationKind::Generic) {}
+  Annotation(AnnotationKind kind) : kind_(kind) {}
+  Annotation() : kind_(AnnotationKind::Generic) {}
+  virtual ~Annotation() {}
 
   AnnotationKind getKind() const {
-    return Kind;
-  }
-
-  Annotation(const Annotation&) = delete;
-  Annotation& operator=(Annotation&) = delete;
-
-  void* getSaved() const {
-    return Saved;
-  }
-  void setSaved(void* saved) {
-    Saved = saved;
+    return kind_;
   }
 
  private:
-  const AnnotationKind Kind;
-  void* Saved = nullptr;
+  const AnnotationKind kind_;
 };
 
-class NeuralNetOperator : public Instruction {
+class CAFFE2_API NeuralNetOperator : public Instruction {
  public:
   /// Discriminator for LLVM-style RTTI (isa<>)
   enum class NNKind {
@@ -79,36 +72,38 @@ class NeuralNetOperator : public Instruction {
   enum class NNLayout { Undefined, NCHW, NHWC };
 
   NeuralNetOperator(NNKind K, Opcode I, NNLayout L)
-      : Instruction(I), Kind(K), Layout(L) {}
+      : Instruction(I), kind_(K), layout_(L) {}
   NeuralNetOperator(NNKind K, Opcode I)
-      : Instruction(I), Kind(K), Layout(NNLayout::Undefined) {}
-  NeuralNetOperator(NNKind K, NNLayout L) : Instruction(), Kind(K), Layout(L) {}
+      : Instruction(I), kind_(K), layout_(NNLayout::Undefined) {}
+  NeuralNetOperator(NNKind K, NNLayout L)
+      : Instruction(), kind_(K), layout_(L) {}
   NeuralNetOperator(NNKind K)
-      : Instruction(), Kind(K), Layout(NNLayout::Undefined) {}
+      : Instruction(), kind_(K), layout_(NNLayout::Undefined) {}
   NeuralNetOperator()
-      : Instruction(), Kind(NNKind::Undefined), Layout(NNLayout::Undefined) {}
+      : Instruction(), kind_(NNKind::Undefined), layout_(NNLayout::Undefined) {}
 
   NNKind getKind() const {
-    return Kind;
+    return kind_;
   }
 
   void setLayout(NNLayout L) {
-    Layout = L;
+    layout_ = L;
   }
 
   NNLayout getLayout() const {
-    return Layout;
+    return layout_;
   }
 
   void setAnnotation(std::unique_ptr<Annotation> extraAnnotation) {
-    ExtraAnnotation = std::move(extraAnnotation);
+    extraAnnotation_ = std::move(extraAnnotation);
   }
 
   const Annotation* getAnnotation() const {
-    return ExtraAnnotation.get();
+    return extraAnnotation_.get();
   }
+
   Annotation* getMutableAnnotation() {
-    return ExtraAnnotation.get();
+    return extraAnnotation_.get();
   }
 
   const std::string getName() const;
@@ -132,22 +127,22 @@ class NeuralNetOperator : public Instruction {
   NeuralNetOperator& operator=(NeuralNetOperator&) = delete;
 
  private:
-  const NNKind Kind;
-  NNLayout Layout; // Mutable attribute, much like a type cast
-  std::unique_ptr<Annotation> ExtraAnnotation;
+  const NNKind kind_;
+  NNLayout layout_; // Mutable attribute, much like a type cast
+  std::unique_ptr<Annotation> extraAnnotation_;
 };
 
-class NeuralNetData : public Data {
+class CAFFE2_API NeuralNetData : public Data {
  public:
   /// Discriminator for LLVM-style RTTI (isa<>)
   enum class NNDataKind { Generic, Tensor };
 
-  NeuralNetData(NNDataKind kind) : Kind(kind) {}
+  NeuralNetData(NNDataKind kind) : kind_(kind) {}
 
-  NeuralNetData() : Kind(NNDataKind::Generic) {}
+  NeuralNetData() : kind_(NNDataKind::Generic) {}
 
   NNDataKind getKind() const {
-    return Kind;
+    return kind_;
   }
 
   virtual NeuralNetData* clone() = 0;
@@ -157,11 +152,11 @@ class NeuralNetData : public Data {
   virtual ~NeuralNetData() = 0;
 
  private:
-  NNDataKind Kind;
-  size_t Version = 0;
+  NNDataKind kind_;
+  size_t version_ = 0;
 };
 
-class Tensor : public NeuralNetData {
+class CAFFE2_API Tensor : public NeuralNetData {
  public:
   enum class DataType { Generic, Float, Half, Int8 };
   enum class Layout { Generic, NCHW, NHWC };
@@ -197,10 +192,10 @@ class Tensor : public NeuralNetData {
 };
 
 #define NOMNIGRAPH_DEFINE_NN_RTTI(op)                                 \
-  static bool classof(const NeuralNetOperator* N) {                   \
+  static bool classof(const NeuralNetOperator* N) {        \
     return N->getKind() == NNKind::op;                                \
   }                                                                   \
-  static bool classof(const Value* N) {                               \
+  static bool classof(const Value* N) {                    \
     if (isa<NeuralNetOperator>(N)) {                                  \
       return dyn_cast<NeuralNetOperator>(N)->getKind() == NNKind::op; \
     }                                                                 \
@@ -209,21 +204,21 @@ class Tensor : public NeuralNetData {
 
 #include "nomnigraph/Generated/OpClasses.h"
 
-class While : public NeuralNetOperator {
+class CAFFE2_API While : public NeuralNetOperator {
  public:
   While() : NeuralNetOperator(NNKind::While, Opcode::Branch) {}
   NOMNIGRAPH_DEFINE_NN_RTTI(While);
   ~While() {}
 };
 
-class NNPhi : public NeuralNetOperator {
+class CAFFE2_API NNPhi : public NeuralNetOperator {
  public:
   NNPhi() : NeuralNetOperator(NNKind::NNPhi, Opcode::Phi) {}
   NOMNIGRAPH_DEFINE_NN_RTTI(NNPhi);
   ~NNPhi() {}
 };
 
-class GenericOperator : public NeuralNetOperator {
+class CAFFE2_API GenericOperator : public NeuralNetOperator {
  public:
   GenericOperator() : NeuralNetOperator(NNKind::GenericOperator) {}
   GenericOperator(std::string name)
@@ -245,9 +240,11 @@ using NNGraph = nom::Graph<std::unique_ptr<nom::repr::Value>>;
 using NNSubgraph = nom::Subgraph<std::unique_ptr<nom::repr::Value>>;
 using NNCFGraph = nom::repr::ControlFlowGraph<NNGraph>;
 
-struct NNModule {
+struct CAFFE2_API NNModule {
   NNGraph dataFlow;
   NNCFGraph controlFlow;
+  std::unordered_set<NNGraph::NodeRef> inputs;
+  std::unordered_set<NNGraph::NodeRef> outputs;
   NNModule(const NNModule&) = delete;
   NNModule(NNModule&&) = default;
   NNModule() {}
@@ -262,7 +259,7 @@ template <bool B, class T = void>
 using enable_if_t = typename std::enable_if<B, T>::type;
 
 template <typename T, typename U>
-struct inheritedFrom {
+struct C10_EXPORT inheritedFrom {
   static constexpr bool value =
       std::is_base_of<U, T>::value && !std::is_same<U, T>::value;
 };
@@ -270,14 +267,15 @@ struct inheritedFrom {
 // This is just a way to fix issues when the isa<> implementation
 // can't automatically downcast.
 template <typename T, typename N, typename = void>
-struct is_impl {
+struct C10_EXPORT is_impl {
   inline static bool impl(N n) {
     return isa<T>(n->data());
   }
 };
 
 template <typename T, typename N>
-struct is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
+struct C10_EXPORT
+    is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
   inline static bool impl(N n) {
     if (!isa<NeuralNetOperator>(n->data().get())) {
       return false;
@@ -288,7 +286,8 @@ struct is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
 };
 
 template <typename T, typename N>
-struct is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
+struct C10_EXPORT
+    is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
   inline static bool impl(N n) {
     if (!isa<NeuralNetData>(n->data().get())) {
       return false;
@@ -298,22 +297,23 @@ struct is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
   }
 };
 
-template <typename T, typename N>
-inline bool is(N n) {
-  return is_impl<T, N>::impl(n);
+template <typename T>
+inline bool is(NNGraph::NodeRef n) {
+  return is_impl<T, NNGraph::NodeRef>::impl(n);
 }
 
 // This is just a way to fix issues when the dyn_cast<> implementation
 // can't automatically downcast.
 template <typename T, typename N, typename = void>
-struct get_impl {
+struct C10_EXPORT get_impl {
   inline static T* impl(N n) {
     return dyn_cast<T>(n->data().get());
   }
 };
 
 template <typename T, typename N>
-struct get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
+struct C10_EXPORT
+    get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
   inline static T* impl(N n) {
     if (!is<T>(n)) {
       assert(0 && "Cannot get type from node");
@@ -325,7 +325,8 @@ struct get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
 };
 
 template <typename T, typename N>
-struct get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
+struct C10_EXPORT
+    get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
   inline static T* impl(N n) {
     if (!is<T>(n)) {
       assert(0 && "Cannot get type from node");
@@ -339,6 +340,23 @@ struct get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
 template <typename T, typename N>
 inline T* get(N n) {
   return get_impl<T, N>::impl(n);
+}
+
+template <typename T, typename G>
+std::vector<typename G::NodeRef> nodeIterator(G& g) {
+  std::vector<typename G::NodeRef> out;
+  for (auto node : g.getMutableNodes()) {
+    if (!is<T>(node)) {
+      continue;
+    }
+    out.emplace_back(node);
+  }
+  return out;
+}
+
+template <typename T>
+inline std::vector<NNGraph::NodeRef> filter(NNModule& nn) {
+  return nodeIterator<T>(nn.dataFlow);
 }
 
 template <typename T, typename G>
@@ -388,7 +406,6 @@ template <typename NewT, typename OldT>
 NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
   assert(is<OldT>(node) && "Cannot get type from node.");
 
-  auto* nnOp = get<NeuralNetOperator>(node);
   NeuralNetOperator* nnOpPtr =
       dyn_cast<NeuralNetOperator>(node->mutableData()->release());
 
@@ -402,20 +419,32 @@ NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
 }
 
 /// NeuralNetData specific helpers.
-bool hasProducer(NNGraph::NodeRef n);
-bool hasProducer(NNGraph::NodeRef n);
-NNGraph::NodeRef getProducer(NNGraph::NodeRef n);
-bool hasConsumer(NNGraph::NodeRef n);
-std::vector<NNGraph::NodeRef> getConsumers(NNGraph::NodeRef n);
+CAFFE2_API bool hasProducer(NNGraph::NodeRef n);
+CAFFE2_API NNGraph::NodeRef getProducer(NNGraph::NodeRef n);
+CAFFE2_API bool hasConsumer(NNGraph::NodeRef n);
+CAFFE2_API std::vector<NNGraph::NodeRef> getConsumers(NNGraph::NodeRef n);
 
-bool hasInputs(NNGraph::NodeRef n);
-std::vector<NNGraph::NodeRef> getInputs(NNGraph::NodeRef n);
-std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n);
+CAFFE2_API bool hasInputs(NNGraph::NodeRef n);
+CAFFE2_API std::vector<NNGraph::NodeRef> getInputs(NNGraph::NodeRef n);
+CAFFE2_API std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n);
 
-void coalesceInsertedDataDependencies(repr::NNModule* m);
+CAFFE2_API void coalesceInsertedDataDependencies(repr::NNModule* m);
 
 template <NNGraph* G>
-struct NodeHelper {};
+struct C10_EXPORT NodeHelper {};
+
+using NNMatchGraph = nom::matcher::MatchGraph<NNGraph>;
+using NNMatchPredicate = nom::matcher::MatchPredicate<NNGraph>;
+
+// Commonly used node predicate.
+
+// The node has a single output and the output has a single consumer.
+CAFFE2_API bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef);
+// The node has a unique consumer (there may be multiple edges from output
+// to the single consumer).
+CAFFE2_API bool hasUniqueConsumer(NNGraph::NodeRef nodeRef);
+
+CAFFE2_API NNMatchPredicate matchExternalTensorNode();
 
 } // namespace nn
 

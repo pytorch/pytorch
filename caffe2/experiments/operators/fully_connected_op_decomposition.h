@@ -1,3 +1,19 @@
+/**
+ * Copyright (c) 2016-present, Facebook, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #ifndef CAFFE2_OPERATORS_FULLY_CONNECTED_OP_DECOMPOSITION_H_
 #define CAFFE2_OPERATORS_FULLY_CONNECTED_OP_DECOMPOSITION_H_
 
@@ -84,8 +100,8 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
   }
 
  protected:
-  Tensor<Context> bias_multiplier_;
-  Tensor<Context> multi_buffer_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor multi_buffer_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context, class Engine=DefaultEngine>
@@ -191,10 +207,10 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
   }
 
  protected:
-  Tensor<Context> bias_multiplier_;
-  Tensor<Context> du_buffer_;
-  Tensor<Context> dv_buffer_;
-  Tensor<Context> dx_buffer_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor du_buffer_{Context::GetDeviceType()};
+  Tensor dv_buffer_{Context::GetDeviceType()};
+  Tensor dx_buffer_{Context::GetDeviceType()};
 };
 
 }  // namespace caffe2

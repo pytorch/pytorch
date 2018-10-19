@@ -10,8 +10,8 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
                          THCTensor *gradOutput,
                          THCTensor *weight,
                          int kW, int kH) {
-  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
-                  "3D or 4D input tensor expected but got: %s");
+  THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
+                  "non-empty 3D or 4D input tensor expected but got: %s");
 
   int nInputPlane = THCTensor_(size)(state, weight, 0);
 
@@ -19,15 +19,15 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
   int dimr = 1;
   int dimp = 0;
 
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     dimc++;
     dimr++;
     dimp++;
   }
 
-  int64_t nInputCols = input->size[dimc];
-  int64_t nInputRows = input->size[dimr];
-  THArgCheck(input->size[dimp] == nInputPlane, 2, "invalid number of input planes");
+  int64_t nInputCols = input->size(dimc);
+  int64_t nInputRows = input->size(dimr);
+  THArgCheck(input->size(dimp) == nInputPlane, 2, "invalid number of input planes");
   THArgCheck(nInputCols >= kW && nInputRows >= kH, 2, "input image smaller than kernel size");
 }
 
@@ -40,19 +40,19 @@ void THNN_(SpatialSubSampling_updateOutput)(
            int kW, int kH,
            int dW, int dH)
 {
-  real *weight_data = THCTensor_(data)(state, weight);
-  real *bias_data = THCTensor_(data)(state, bias);
-  real *output_data;
-  real *input_data;
+  scalar_t *weight_data = THCTensor_(data)(state, weight);
+  scalar_t *bias_data = THCTensor_(data)(state, bias);
+  scalar_t *output_data;
+  scalar_t *input_data;
 
   int nInputPlane = THCTensor_(size)(state, weight, 0);
 
   THCUNN_assertSameGPU(state, 4, input, output, weight, bias);
   THNN_(SpatialSubSampling_shapeCheck)(state, input, NULL, weight, kW, kH);
 
-  if (input->nDimension == 3) {
-    int64_t nInputCols = input->size[2];
-    int64_t nInputRows = input->size[1];
+  if (input->dim() == 3) {
+    int64_t nInputCols = input->size(2);
+    int64_t nInputRows = input->size(1);
     int64_t nOutputCols = (nInputCols - kW) / dW + 1;
     int64_t nOutputRows = (nInputRows - kH) / dH + 1;
 
@@ -69,14 +69,14 @@ void THNN_(SpatialSubSampling_updateOutput)(
     dim3 threads(32,8);
 
     // run subsample kernel
-    subsample<real, accreal> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
+    subsample<scalar_t, accreal> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
       input_data, output_data, weight_data, bias_data,
       nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW);
     THCudaCheck(cudaGetLastError());
   } else {
-    int64_t nInputCols = input->size[3];
-    int64_t nInputRows = input->size[2];
-    int64_t nbatch = input->size[0];
+    int64_t nInputCols = input->size(3);
+    int64_t nInputRows = input->size(2);
+    int64_t nbatch = input->size(0);
     int64_t nOutputCols = (nInputCols - kW) / dW + 1;
     int64_t nOutputRows = (nInputRows - kH) / dH + 1;
 
@@ -93,7 +93,7 @@ void THNN_(SpatialSubSampling_updateOutput)(
     dim3 threads(32,8);
 
     // run subsample kernel
-    subsample<real, accreal> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
+    subsample<scalar_t, accreal> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
       input_data, output_data, weight_data, bias_data,
       nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW);
     THCudaCheck(cudaGetLastError());
@@ -118,14 +118,14 @@ void THNN_(SpatialSubSampling_updateGradInput)(
 
   int nInputPlane = THCTensor_(size)(state, weight, 0);
 
-  if (input->nDimension == 3) {
-    int64_t nInputCols = input->size[2];
-    int64_t nInputRows = input->size[1];
+  if (input->dim() == 3) {
+    int64_t nInputCols = input->size(2);
+    int64_t nInputRows = input->size(1);
 
-    real *weight_data = THCTensor_(data)(state, weight);
+    scalar_t *weight_data = THCTensor_(data)(state, weight);
     gradOutput = THCTensor_(newContiguous)(state, gradOutput);
-    real *gradOutput_data = THCTensor_(data)(state, gradOutput);
-    real *gradInput_data;
+    scalar_t *gradOutput_data = THCTensor_(data)(state, gradOutput);
+    scalar_t *gradInput_data;
 
     THCTensor_(resizeAs)(state, gradInput, input);
     THCTensor_(zero)(state, gradInput);
@@ -149,14 +149,14 @@ void THNN_(SpatialSubSampling_updateGradInput)(
     }
     THCudaCheck(cudaGetLastError());
   } else {
-    int64_t nInputCols = input->size[3];
-    int64_t nInputRows = input->size[2];
-    int64_t nbatch = input->size[0];
+    int64_t nInputCols = input->size(3);
+    int64_t nInputRows = input->size(2);
+    int64_t nbatch = input->size(0);
 
-    real *weight_data = THCTensor_(data)(state, weight);
+    scalar_t *weight_data = THCTensor_(data)(state, weight);
     gradOutput = THCTensor_(newContiguous)(state, gradOutput);
-    real *gradOutput_data = THCTensor_(data)(state, gradOutput);
-    real *gradInput_data;
+    scalar_t *gradOutput_data = THCTensor_(data)(state, gradOutput);
+    scalar_t *gradInput_data;
 
     THCTensor_(resizeAs)(state, gradInput, input);
     THCTensor_(zero)(state, gradInput);
@@ -198,15 +198,15 @@ void THNN_(SpatialSubSampling_accGradParameters)(
 
   int nInputPlane = THCTensor_(size)(state, gradWeight, 0);
 
-  if (input->nDimension == 3) {
-    int64_t nInputCols = input->size[2];
-    int64_t nInputRows = input->size[1];
+  if (input->dim() == 3) {
+    int64_t nInputCols = input->size(2);
+    int64_t nInputRows = input->size(1);
 
-    real *gradWeight_data = THCTensor_(data)(state, gradWeight);
-    real *gradBias_data = THCTensor_(data)(state, gradBias);
+    scalar_t *gradWeight_data = THCTensor_(data)(state, gradWeight);
+    scalar_t *gradBias_data = THCTensor_(data)(state, gradBias);
     gradOutput = THCTensor_(newContiguous)(state, gradOutput);
-    real *gradOutput_data = THCTensor_(data)(state, gradOutput);
-    real *input_data;
+    scalar_t *gradOutput_data = THCTensor_(data)(state, gradOutput);
+    scalar_t *input_data;
 
     input = THCTensor_(newContiguous)(state, input);
     input_data = THCTensor_(data)(state, input);
@@ -216,20 +216,20 @@ void THNN_(SpatialSubSampling_accGradParameters)(
     dim3 threads(32,8);
 
     // run gradweight kernel
-    subgradweight<real, accreal> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
+    subgradweight<scalar_t, accreal> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
       input_data, gradOutput_data, gradWeight_data, gradBias_data,
       nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW, scale);
     THCudaCheck(cudaGetLastError());
   } else {
-    int64_t nInputCols = input->size[3];
-    int64_t nInputRows = input->size[2];
-    int64_t nbatch = input->size[0];
+    int64_t nInputCols = input->size(3);
+    int64_t nInputRows = input->size(2);
+    int64_t nbatch = input->size(0);
 
-    real *gradWeight_data = THCTensor_(data)(state, gradWeight);
-    real *gradBias_data = THCTensor_(data)(state, gradBias);
+    scalar_t *gradWeight_data = THCTensor_(data)(state, gradWeight);
+    scalar_t *gradBias_data = THCTensor_(data)(state, gradBias);
     gradOutput = THCTensor_(newContiguous)(state, gradOutput);
-    real *gradOutput_data = THCTensor_(data)(state, gradOutput);
-    real *input_data;
+    scalar_t *gradOutput_data = THCTensor_(data)(state, gradOutput);
+    scalar_t *input_data;
 
     input = THCTensor_(newContiguous)(state, input);
     input_data = THCTensor_(data)(state, input);
@@ -241,9 +241,9 @@ void THNN_(SpatialSubSampling_accGradParameters)(
     // run gradweight kernel
     int64_t sl;
     for (sl=0; sl<nbatch; sl++) {
-      subgradweight<real, accreal> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
-        input_data + sl*input->stride[0],
-        gradOutput_data + sl*gradOutput->stride[0],
+      subgradweight<scalar_t, accreal> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
+        input_data + sl*input->stride(0),
+        gradOutput_data + sl*gradOutput->stride(0),
         gradWeight_data, gradBias_data,
         nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW, scale);
     }

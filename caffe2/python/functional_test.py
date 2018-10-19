@@ -3,6 +3,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import unittest
+
 from caffe2.python import core
 from hypothesis import given
 import hypothesis.strategies as st
@@ -44,11 +46,11 @@ def _tensor_splits(draw, add_axis=False):
 
 
 class TestFunctional(hu.HypothesisTestCase):
-    @given(X=hu.tensor(), engine=st.sampled_from(["", "CUDNN"]))
-    def test_relu(self, X, engine):
+    @given(X=hu.tensor(), engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
+    def test_relu(self, X, engine, gc, dc):
         X += 0.02 * np.sign(X)
         X[X == 0.0] += 0.02
-        output = Functional.Relu(X)
+        output = Functional.Relu(X, device_option=gc)
         Y_l = output[0]
         Y_d = output["output_0"]
 
@@ -66,11 +68,11 @@ class TestFunctional(hu.HypothesisTestCase):
             Y_d, Y_ref, err_msg='Functional Relu result mismatch'
         )
 
-    @given(tensor_splits=_tensor_splits())
-    def test_concat(self, tensor_splits):
+    @given(tensor_splits=_tensor_splits(), **hu.gcs)
+    def test_concat(self, tensor_splits, gc, dc):
         # Input Size: 1 -> inf
         axis, _, splits = tensor_splits
-        concat_result, split_info = Functional.Concat(*splits, axis=axis)
+        concat_result, split_info = Functional.Concat(*splits, axis=axis, device_option=gc)
 
         concat_result_ref = np.concatenate(splits, axis=axis)
         split_info_ref = np.array([a.shape[axis] for a in splits])
@@ -87,8 +89,8 @@ class TestFunctional(hu.HypothesisTestCase):
             err_msg='Functional Concat split info mismatch'
         )
 
-    @given(tensor_splits=_tensor_splits(), split_as_arg=st.booleans())
-    def test_split(self, tensor_splits, split_as_arg):
+    @given(tensor_splits=_tensor_splits(), split_as_arg=st.booleans(), **hu.gcs)
+    def test_split(self, tensor_splits, split_as_arg, gc, dc):
         # Output Size: 1 - inf
         axis, split_info, splits = tensor_splits
 
@@ -100,7 +102,7 @@ class TestFunctional(hu.HypothesisTestCase):
         else:
             input_tensors = [np.concatenate(splits, axis=axis), split_info]
             kwargs = dict(axis=axis, num_output=len(splits))
-        result = Functional.Split(*input_tensors, **kwargs)
+        result = Functional.Split(*input_tensors, device_option=gc, **kwargs)
 
         def split_ref(input, split=split_info):
             s = np.cumsum([0] + list(split))
@@ -114,3 +116,7 @@ class TestFunctional(hu.HypothesisTestCase):
             np.testing.assert_array_equal(
                 result[i], ref, err_msg='Functional Relu result mismatch'
             )
+
+
+if __name__ == '__main__':
+    unittest.main()

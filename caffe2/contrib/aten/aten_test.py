@@ -11,13 +11,22 @@ import hypothesis.strategies as st
 import numpy as np
 
 
-dyndep.InitOpsLibrary('@/caffe2/caffe2/contrib/aten:aten_op')
-
-
 class TestATen(hu.HypothesisTestCase):
 
     @given(inputs=hu.tensors(n=2), **hu.gcs)
     def test_add(self, inputs, gc, dc):
+        op = core.CreateOperator(
+             "ATen",
+             ["X", "Y"],
+             ["Z"],
+             operator="add")
+
+        def ref(X, Y):
+            return [X + Y]
+        self.assertReferenceChecks(gc, op, inputs, ref)
+
+    @given(inputs=hu.tensors(n=2, dtype=np.float16), **hu.gcs_gpu_only)
+    def test_add_half(self, inputs, gc, dc):
         op = core.CreateOperator(
              "ATen",
              ["X", "Y"],
@@ -79,6 +88,26 @@ class TestATen(hu.HypothesisTestCase):
             return [np.ones([2, 4])]
 
         self.assertReferenceChecks(gc, op, [], ref)
+
+    @given(**hu.gcs)
+    def test_index_put(self, gc, dc):
+        op = core.CreateOperator(
+            "ATen",
+            ['self', 'indices', 'values'],
+            ["Z"],
+            operator="index_put")
+
+        def ref(self, indices, values):
+            self[indices] = values
+            return (self,)
+
+
+        tensor = np.random.randn(3, 3).astype(np.float32)
+        mask = np.array([[True, True, True], [True, False, False], [True, True, False]])
+        values = np.random.randn(6).astype(np.float32)
+
+        self.assertReferenceChecks(gc, op, [tensor, mask, values], ref)
+
 
 
 if __name__ == "__main__":
