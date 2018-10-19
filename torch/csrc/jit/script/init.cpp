@@ -34,14 +34,6 @@ namespace script {
 using ResolutionCallback = std::function<py::function(std::string)>;
 using FunctionDefaults = std::unordered_map<std::string, py::object>;
 
-// The visibility attribute is to avoid a warning about storing a field in the
-// struct that has a different visibility (from pybind) than the struct.
-#ifdef _WIN32
-#define VISIBILITY_HIDDEN
-#else
-#define VISIBILITY_HIDDEN __attribute__((visibility("hidden")))
-#endif
-
 static std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
 }
@@ -115,14 +107,8 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     auto schema = getSchema(inputs.size(), n_binders);
 
     std::stringstream failure_messages;
-    c10::optional<MatchedSchema> matched_schema = tryMatchSchema(
-        schema,
-        loc,
-        *m.graph(),
-        inputs_,
-        attributes,
-        failure_messages,
-        /*conv_tensor_to_num*/ true);
+    c10::optional<MatchedSchema> matched_schema =
+      tryMatchSchema(schema, loc, *m.graph(), c10::nullopt, inputs_, attributes, failure_messages, /*conv_tensor_to_num*/true);
     if (!matched_schema)
       throw ErrorReport(loc) << failure_messages.str();
 
@@ -532,11 +518,16 @@ void initJitScriptBindings(PyObject* module) {
           auto graph = tracer::createGraphByTracing(func, inputs, input_tuple.size());
           self.create_method(name, std::move(graph), std::move(parameters));
       })
-      .def("graph_for", [](Module& self, py::args args, py::kwargs kwargs) {
+      .def("graph_for", [](py::args args, py::kwargs kwargs) {
+        // [pybind11 varargs] note: old version of pybind11 have a bug that leaks memory
+        // when py::args is mixed with positional arguments
+        // https://github.com/pybind/pybind11/pull/1216
+        // we work around this by not mixing positional arguments with varargs
+        Module& self = py::cast<Module&>(args[0]);
         if (self.find_method("forward")) {
           Method & m = self.get_method("forward");
           return m.graph_for(
-              createStackForSchema(m.getSchema(), std::move(args), std::move(kwargs)));
+              createStackForSchema(m.getSchema(), tuple_slice(std::move(args), 1), std::move(kwargs)));
         }
         throw std::runtime_error("Attempted to call graph_for on a Module without a compiled forward()");
       })
@@ -553,29 +544,38 @@ void initJitScriptBindings(PyObject* module) {
           m.debugDisableAutodiffSubgraphInlining();
         }
       })
-      .def("forward", [](Module& self, py::args args, py::kwargs kwargs) {
+      .def("forward", [](py::args args, py::kwargs kwargs) {
         // We implement this in C++ to avoid incurring the pybind11 dispatch
         // overhead twice: once to call into the method lookup for "forward"
         // and once to actually invoke the method.
         //
         // There is a thin wrapper on top of this method in the C++ version of
         // ScriptModule.
-        return invokeScriptMethodFromPython(self.get_method("forward"), std::move(args), std::move(kwargs));
+
+        // see: [pybind11 varargs]
+        Module& self = py::cast<Module&>(args[0]);
+        return invokeScriptMethodFromPython(self.get_method("forward"), tuple_slice(std::move(args), 1), std::move(kwargs));
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
     .def("graph", [&](Method& self) {
       return self.graph();
     })
-    .def("__call__", invokeScriptMethodFromPython)
+    .def("__call__", [](py::args args, py::kwargs kwargs) {
+      // see: [pybind11 varargs]
+      Method& method = py::cast<Method&>(args[0]);
+      return invokeScriptMethodFromPython(method, tuple_slice(std::move(args), 1), std::move(kwargs));
+    })
     .def_property_readonly("graph", [](Method& m) {
       return m.graph();
     })
     .def("propagate_shapes", &Method::propagate_shapes)
     .def("propagate_and_assign_input_and_output_shapes", &Method::propagate_and_assign_input_and_output_shapes)
     .def("params", &Method::params)
-    .def("graph_for", [](Method& self, py::args args, py::kwargs kwargs) {
-      return self.graph_for(createStackForSchema(self.getSchema(), std::move(args), std::move(kwargs)));
+    .def("graph_for", [](py::args args, py::kwargs kwargs) {
+      // see: [pybind11 varargs]
+      Method& self = py::cast<Method&>(args[0]);
+      return self.graph_for(createStackForSchema(self.getSchema(), tuple_slice(std::move(args), 1), std::move(kwargs)));
     })
     .def("forward_schema", [](Method &self, Def &def, FunctionDefaults defaults, bool is_method) {
       self.setSchema(getSchemaWithDefaults(

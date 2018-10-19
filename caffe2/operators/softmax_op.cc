@@ -160,7 +160,7 @@ softmax: [[0.24422921 0.43525138 0.18582782 0.12303016 0.01166145]]
         0,
         "Y",
         "*(type: Tensor`<float>`)* The softmax normalized output tensor with the same shape as input tensor.")
-    .InheritOnnxSchema("Softmax");
+    .InheritOnnxSchema();
 
 // Input: Y, dY. Output: dX
 OPERATOR_SCHEMA(SoftmaxGradient).NumInputs(2).NumOutputs(1);

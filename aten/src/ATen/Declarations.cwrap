@@ -1,6 +1,6 @@
 [[
-  name: storageOffset
-  python_name: storage_offset
+  name: storage_offset
+  cname: storageOffset
   cpu_half: True
   device_guard: False
   return: long
@@ -8,8 +8,8 @@
     - THTensor* self
 ]]
 [[
-  name: nDimension
-  python_name: ndimension
+  name: ndimension
+  cname: nDimension
   cpu_half: True
   device_guard: False
   return: long
@@ -76,8 +76,8 @@
       - THTensor* value
 ]]
 [[
-  name: isContiguous
-  python_name: is_contiguous
+  name: is_contiguous
+  cname: isContiguous
   cpu_half: True
   device_guard: False
   return: bool
@@ -85,8 +85,8 @@
     - THTensor* self
 ]]
 [[
-  name: isSetTo
-  python_name: is_set_to
+  name: is_set_to
+  cname: isSetTo
   cpu_half: True
   device_guard: False
   return: bool
@@ -95,9 +95,8 @@
     - THTensor* tensor
 ]]
 [[
-  name: maskedFill_
+  name: masked_fill_
   cname: maskedFill
-  python_name: masked_fill_
   return: self
   options:
     - arguments:
@@ -113,9 +112,8 @@
       - THTensor* value
 ]]
 [[
-  name: maskedCopy_
+  name: masked_scatter_
   cname: maskedCopy
-  python_name: masked_scatter_
   return: self
   arguments:
     - arg: THTensor* self
@@ -124,8 +122,8 @@
     - THTensor* source
 ]]
 [[
-  name: maskedSelect
-  python_name: masked_select
+  name: masked_select
+  cname: maskedSelect
   variants:
     - method
     - function
@@ -169,8 +167,7 @@
       long_args: True
 ]]
 [[
-  name: resizeAs_
-  python_name: th_resize_as_
+  name: th_resize_as_
   cname: resizeAs
   variants:
     - function
@@ -181,8 +178,8 @@
     - THTensor* the_template
 ]]
 [[
-  name: indexSelect
-  python_name: index_select
+  name: index_select
+  cname: indexSelect
   variants:
     - method
     - function
@@ -236,8 +233,7 @@
       default: "false"
 ]]
 [[
-  name: indexAdd_
-  python_name: index_add_
+  name: index_add_
   cname: indexAdd
   return: argument 0
   arguments:
@@ -248,8 +244,7 @@
     - THTensor* source
 ]]
 [[
-  name: indexFill_
-  python_name: index_fill_
+  name: index_fill_
   cname: indexFill
   return: argument 0
   options:
@@ -1061,8 +1056,8 @@
           default: "false"
 ]]
 [[
-  name: getDevice
-  python_name: _th_get_device
+  name: _th_get_device
+  cname: getDevice
   device_guard: False
   variants:
     - function
@@ -1874,8 +1869,8 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - real base
-        - THTensor* self
+        - real self
+        - THTensor* exponent
 ]]
 [[
   name: pow_
@@ -3165,9 +3160,8 @@
       default: 1
 ]]
 [[
-  name: logNormal_
+  name: log_normal_
   cname: logNormal
-  python_name: log_normal_
   types:
     - floating_point
   backends:

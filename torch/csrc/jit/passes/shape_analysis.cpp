@@ -557,7 +557,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::pow(Tensor self, Scalar exponent) -> Tensor",
     "aten::fmod(Tensor self, Scalar other) -> Tensor",
     "aten::remainder(Tensor self, Scalar other) -> Tensor",
-    "aten::pow(Scalar base, Tensor self) -> Tensor",
+    "aten::pow(Scalar self, Tensor exponent) -> Tensor",
     "aten::__and__(Tensor self, Scalar other) -> Tensor",
     "aten::__or__(Tensor self, Scalar other) -> Tensor",
     "aten::__xor__(Tensor self, Scalar other) -> Tensor",

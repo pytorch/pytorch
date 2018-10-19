@@ -110,7 +110,7 @@ Y:
           CreateTensorShape(dst_sizes, data.data_type())};
     })
     .Output(0, "Y", "(*Tensor*): sliced output tensor")
-    .InheritOnnxSchema("Slice");
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(SliceGradient);
 

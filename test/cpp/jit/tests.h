@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <test/cpp/common/support.h>
 #else
-#include <ATen/Error.h>
+#include "c10/util/Exception.h"
 #define ASSERT_EQ(x, y) AT_ASSERT((x) == (y))
 #define ASSERT_NE(x, y) AT_ASSERT((x) != (y))
 #define ASSERT_TRUE AT_ASSERT

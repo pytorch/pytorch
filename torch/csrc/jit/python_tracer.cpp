@@ -7,7 +7,7 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 
 #include <sstream>
 

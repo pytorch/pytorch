@@ -16,7 +16,14 @@ namespace caffe2 {
 CAFFE2_API void injectDataEdgeIndicators(caffe2::NetDef* net);
 CAFFE2_API void removeDataEdgeIndicators(caffe2::NetDef* net);
 
-CAFFE2_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, bool strict = false);
+// Default conversion to a NNModule
+// Optionally strict -- which checks for various input and output conditions.
+// Optionally this function will update a vector that maps operators in the
+// netdef positionally to NodeRefs in the resultant NNModule.
+CAFFE2_API nom::repr::NNModule convertToNNModule(
+    caffe2::NetDef& net,
+    bool strict = false,
+    std::vector<nom::repr::NNGraph::NodeRef>* = nullptr);
 CAFFE2_API caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
 
 // Pass in an oldNet to copy all the attributes of that network.
@@ -32,8 +39,8 @@ CAFFE2_API caffe2::OperatorDef convertToOperatorDef(
     const nom::repr::NNGraph::NodeRef& instrNode);
 
 // If the annotation doesn't exist, attempt to add it
-CAFFE2_API Caffe2Annotation
-getOrAddCaffe2Annotation(nom::repr::NNGraph::NodeRef& instrNode);
+CAFFE2_API Caffe2Annotation* getOrAddCaffe2Annotation(
+    nom::repr::NNGraph::NodeRef& instrNode);
 
 class CAFFE2_API Converter {
  public:

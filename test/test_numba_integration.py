@@ -1,8 +1,8 @@
 import unittest
 import sys
 
-import common
-from common import TEST_NUMBA, TEST_NUMPY
+import common_utils as common
+from common_utils import TEST_NUMBA, TEST_NUMPY
 from common_cuda import TEST_NUMBA_CUDA, TEST_CUDA, TEST_MULTIGPU
 
 import torch

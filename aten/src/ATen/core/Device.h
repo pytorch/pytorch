@@ -3,7 +3,7 @@
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Backend.h>
 #include <ATen/core/DeviceType.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <cstddef>
 #include <functional>

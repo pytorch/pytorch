@@ -7,11 +7,26 @@
 #include "ATen/InferSize.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 #include "c10/util/Optional.h"
 
 namespace at {
 namespace native {
+
+Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
+  AT_CHECK(shape_tensor.dim() == 1);
+  std::vector<int64_t> shape;
+  auto accessor = shape_tensor.accessor<int64_t, 1>();
+  for (size_t i = 0; i < shape_tensor.numel(); ++i) {
+    shape.push_back(accessor[i]);
+  }
+  return self.reshape(IntList(shape));
+}
+
+Tensor _shape_as_tensor(const Tensor& self) {
+  auto options = TensorOptions(at::kLong).is_variable(self.options().is_variable());
+  return at::tensor(self.sizes(), options);
+}
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
@@ -152,16 +167,16 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
   int64_t allDim = self.dim();
   int64_t end = start+length;
   AT_CHECK(allDim > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  AT_CHECK(dim >= 0 && dim < allDim, 
+  AT_CHECK(dim >= 0 && dim < allDim,
     "Dimension ", dim, " out of range. Expecting 0 <= dim < ", allDim, ".");
   AT_CHECK(start >= 0 && length >= 0 && end <= self.size(dim),
     "Invalid range to narrow. range(start, start+length) must be a subset of range(0, ", self.size(dim), ").")
   LongTensor indices = self._indices();
   int64_t sparseDims = self._sparseDims();
-  
+
   std::vector<int64_t> newSizes = self.sizes().vec();
   newSizes[dim]=length;
-  
+
   Tensor newValues;
   LongTensor newIndices;
   if(dim < sparseDims){
