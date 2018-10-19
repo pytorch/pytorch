@@ -67,7 +67,7 @@ def AddImageInput(
         reader, ["data", "label"],
         batch_size=batch_size,
         output_type=dtype,
-        use_gpu_transform=True if model._device_type == 1 else False,
+        use_gpu_transform=True if model._device_type in {1, 6} else False,
         use_caffe_datum=True,
         mean_per_channel=mean_per_channel,
         std_per_channel=std_per_channel,
