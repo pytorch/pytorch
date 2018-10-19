@@ -9,6 +9,12 @@ import sys
 import subprocess
 import inspect
 
+try:
+    import mypy
+    HAVE_MYPY = True
+except ImportError:
+    HAVE_MYPY = False
+
 
 def get_examples_from_docstring(docstr):
     """
@@ -88,6 +94,7 @@ strings and puts them in one nonsensical module returned as a string.
 
 class TestTypeHints(TestCase):
     @unittest.skipIf(sys.version_info[0] == 2, "not type hints for Python 2")
+    @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_doc_examples(self):
         """run documentation examples through mypy.
 mypy can be picky about its environment, so we need
