@@ -3855,6 +3855,7 @@ a")
                 m = x if not z else y
             while x < y > z:
                 q = x
+            assert 1 == 1, "hello"
             return x
 
         ast = torch.jit.frontend.get_jit_ast(fn, is_method=False)
@@ -7591,6 +7592,26 @@ a")
                 else:
                     raise Exception("Hi")
                 return a
+
+    def test_assertions(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(cond):
+                assert bool(cond), "hi"
+                return 0
+        ''')
+
+        cu.foo(torch.tensor(1))
+        with self.assertRaisesRegex(torch.jit._Exception, "Exception"):
+            cu.foo(torch.tensor(0))
+
+        @torch.jit.script
+        def foo(cond):
+            assert bool(cond), "hi"
+
+        foo(torch.tensor(1))
+        # we don't currently validate the name of the exception
+        with self.assertRaisesRegex(torch.jit._Exception, "Exception"):
+            foo(torch.tensor(0))
 
     def test_weak_script_function(self):
         outer_var = 10
