@@ -15,6 +15,13 @@ if [ -x "$(command -v rsync)" ]; then
     SYNC_COMMAND="rsync -lptgoD"
 fi
 
+# We test the presence of cmake3 (for platforms like CentOS and Ubuntu 14.04)
+# and use that if so.
+CMAKE_COMMAND="cmake"
+if [[ -x "$(command -v cmake3)" ]]; then
+    CMAKE_COMMAND="cmake3"
+fi
+
 # Options for building only a subset of the libraries
 USE_CUDA=0
 USE_ROCM=0
@@ -87,7 +94,6 @@ TORCH_LIB_DIR="$BASE_DIR/torch/lib"
 INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
 
-CMAKE_VERSION=${CMAKE_VERSION:="cmake"}
 C_FLAGS=" -I\"$INSTALL_DIR/include\" \
   -I\"$INSTALL_DIR/include/TH\" -I\"$INSTALL_DIR/include/THC\" \
   -I\"$INSTALL_DIR/include/THS\" -I\"$INSTALL_DIR/include/THCS\" \
@@ -160,7 +166,7 @@ function build() {
       # TODO: The *_LIBRARIES cmake variables should eventually be
       # deprecated because we are using .cmake files to handle finding
       # installed libraries instead
-      ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
+      ${CMAKE_COMMAND} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
 		       ${CMAKE_GENERATOR} \
 		       -DTorch_FOUND="1" \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
@@ -224,7 +230,7 @@ function build_nccl() {
   mkdir -p build/nccl
   pushd build/nccl
   if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
-      ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
+      ${CMAKE_COMMAND} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
 		       ${CMAKE_GENERATOR} \
 		       -DCMAKE_BUILD_TYPE=Release \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
@@ -267,7 +273,7 @@ function build_caffe2() {
   fi
 
   if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
-      ${CMAKE_VERSION} $BASE_DIR \
+      ${CMAKE_COMMAND} $BASE_DIR \
 		       ${CMAKE_GENERATOR} \
 		       -DPYTHON_EXECUTABLE=$PYTORCH_PYTHON \
 		       -DPYTHON_LIBRARY="${PYTORCH_PYTHON_LIBRARY}" \
