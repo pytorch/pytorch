@@ -339,7 +339,7 @@ As such it is inteded to be used from a subprocess.
             if isinstance(fn, types.BuiltinFunctionType):
                 if fname in fns:
                     type_hints[fname] += generate_type_hints(fname, fns[fname])
-                elif fname not in type_hints and ("\n" in docstr or not fn.__qualname__.beginswith("PyCapsule")):
+                elif fname not in type_hints and ("\n" in docstr or not fn.__qualname__.startswith("PyCapsule")):
                     # if we have annotated them manually, assume that we can skip them here without worrying too much
                     # the second part (filter single line line docstring of PyCapsule functions)
                     # is intended to filter out pollution (e.g. merge_type_from_type_comment)
