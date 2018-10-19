@@ -879,7 +879,7 @@
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
 - func: index_copy_(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
-  variants: function, method
+  variants: method
 
 - func: index_copy(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
   variants: function, method
@@ -888,7 +888,7 @@
   variants: function, method
 
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
-  variants: function, method
+  variants: method
 
 - func: index_add(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
   variants: function, method
