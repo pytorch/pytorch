@@ -90,7 +90,7 @@ inline CAFFE2_API caffe2::DeviceOption DeviceToOption(
   switch (type) {
     case DeviceType::CPU:
       if (device.index() != -1) {
-        option.set_numa_node_id(device.index());
+        option.set_device_id(device.index());
       }
       break;
     case DeviceType::CUDA:
@@ -120,8 +120,8 @@ inline CAFFE2_API at::Device OptionToDevice(const caffe2::DeviceOption option) {
   int32_t id = -1;
   switch (type) {
     case caffe2::PROTO_CPU:
-      if (option.has_numa_node_id()) {
-        id = option.numa_node_id();
+      if (option.has_device_id()) {
+        id = option.device_id();
       }
       break;
     case caffe2::PROTO_CUDA:
