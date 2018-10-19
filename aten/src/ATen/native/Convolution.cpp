@@ -369,7 +369,6 @@ at::Tensor _convolution(
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_mkldnn(input)) {
-#if AT_MKLDNN_ENABLED()
     AT_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
              ") should be the same");
@@ -378,7 +377,6 @@ at::Tensor _convolution(
              ") should be the same");
 
     output = at::mkldnn_convolution(input, weight, bias, params.padding, params.stride, params.dilation, params.groups);
-#endif
   } else {
     if (params.groups == 1) {
       output = at::_convolution_nogroup(
