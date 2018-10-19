@@ -664,10 +664,10 @@ jobs:
         no_output_timeout: "1h"
         command: |
           set -e
-          # if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
-          #   echo "Skipping doc push..."
-          #   exit 0
-          # fi
+          if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
+            echo "Skipping doc push..."
+            exit 0
+          fi
           source /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           docker pull ${COMMIT_DOCKER_IMAGE}
