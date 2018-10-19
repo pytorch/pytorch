@@ -5209,9 +5209,9 @@ Args:
 Example::
 
     >>> x = torch.randn(2, 3)
-    >>> torch.empty_like(x, dtype=torch.double)
-    tensor([[6.9131e-310, 4.6633e-310, 6.9130e-310],
-            [4.6632e-310, 6.9131e-310, 6.9131e-310]], dtype=torch.float64)  # uninitialized memory
+    >>> torch.empty_like(x)
+    tensor([[0.0000e+00, 0.0000e+00, 2.7984e+23],
+            [4.5694e-41, 0.0000e+00, 0.0000e+00]])  # uninitialized memory
 """.format(**factory_like_common_args))
 
 add_docstr(torch.full,
