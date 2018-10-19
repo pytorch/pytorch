@@ -4,8 +4,8 @@
 #include <stdexcept>
 #include <string>
 
-#include "ATen/core/Error.h"
 #include "THP_export.h"
+#include "c10/util/Exception.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/object_ptr.h"
 

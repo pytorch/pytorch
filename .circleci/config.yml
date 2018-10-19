@@ -50,7 +50,7 @@ setup_ci_environment: &setup_ci_environment
   no_output_timeout: "1h"
   command: |
     set -e
-    sudo pip install awscli
+    sudo pip install awscli==1.16.35
 
     sudo apt-get update
     sudo apt-get remove linux-image-generic linux-headers-generic linux-generic

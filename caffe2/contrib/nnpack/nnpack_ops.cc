@@ -76,8 +76,8 @@ pthreadpool_t nnpack_threadpool() {
     enum nnp_status nnpack_status = nnp_initialize();
     CAFFE_ENFORCE(
         nnpack_status == nnp_status_success, "NNPack is not supported here!");
-    int num_threads = c10::FLAGS_caffe2_nnpack_num_threads;
-    if (c10::FLAGS_caffe2_nnpack_use_mkl_num_threads) {
+    int num_threads = FLAGS_caffe2_nnpack_num_threads;
+    if (FLAGS_caffe2_nnpack_use_mkl_num_threads) {
 #ifdef CAFFE2_USE_MKL
       num_threads = mkl_get_max_threads();
 #else

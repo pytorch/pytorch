@@ -16,7 +16,7 @@ import torch.distributed.deprecated as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from common import TestCase
+from common_utils import TestCase
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch.autograd import Variable
 

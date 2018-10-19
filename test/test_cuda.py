@@ -15,7 +15,7 @@ from torch import multiprocessing as mp
 from torch._six import inf, nan
 
 from test_torch import TestTorch
-from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
+from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_WITH_ROCM
 
 # We cannot import TEST_CUDA and TEST_MULTIGPU from common_cuda here,
