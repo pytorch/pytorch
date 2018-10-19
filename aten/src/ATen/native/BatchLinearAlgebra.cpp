@@ -106,7 +106,7 @@ static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 }
 
 // These utilities are specified in LinearAlgebraUtils.h
-LINALG_HELPER_2_ARGS(gesv, self, A, cpu)
+GENERATE_LINALG_HELPER_2_ARGS(gesv, self, A, cpu)
 
 // Supports arbitrary batch dimensions for self and A
 std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
@@ -185,7 +185,7 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
   }
 }
 
-LINALG_HELPER_1_ARGS(inverse, self, cpu)
+GENERATE_LINALG_HELPER_1_ARGS(inverse, self, cpu)
 
 Tensor inverse(const Tensor &self) {
   if (self.size(-1) == 0) {

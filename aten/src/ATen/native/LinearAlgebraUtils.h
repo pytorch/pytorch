@@ -87,7 +87,7 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
   }
 }
 
-#define LINALG_HELPER_1_ARGS(NAME, ARG, BACKEND) \
+#define GENERATE_LINALG_HELPER_1_ARGS(NAME, ARG, BACKEND) \
   Tensor _##NAME##_helper_##BACKEND(const Tensor& ARG) { \
     std::vector<int64_t> infos(batchCount(ARG), 0); \
     auto ARG##_working_copy = cloneBatchedColumnMajor(ARG); \
@@ -98,7 +98,7 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
     return ARG##_working_copy; \
   }
 
-#define LINALG_HELPER_2_ARGS(NAME, ARG1, ARG2, BACKEND) \
+#define GENERATE_LINALG_HELPER_2_ARGS(NAME, ARG1, ARG2, BACKEND) \
   std::tuple<Tensor, Tensor> _##NAME##_helper_##BACKEND(const Tensor& ARG1, const Tensor& ARG2) { \
     std::vector<int64_t> infos(batchCount(ARG1), 0); \
     auto ARG1##_working_copy = cloneBatchedColumnMajor(ARG1); \
