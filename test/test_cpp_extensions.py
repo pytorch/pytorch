@@ -13,7 +13,7 @@ except ImportError:
           "Run \'python run_test.py -i cpp_extensions\' for the \'test_cpp_extensions.py\' tests.")
     raise
 
-import common
+import common_utils as common
 
 from torch.utils.cpp_extension import CUDA_HOME
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None

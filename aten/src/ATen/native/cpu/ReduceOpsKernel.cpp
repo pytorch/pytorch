@@ -286,11 +286,15 @@ struct NormReduction {
         result += std::abs(data[k * stride] * data[k * stride] * data[k * stride]);
       }
       result = std::pow(result, 1.0/3);
-    } else if (std::isinf(pval)) {
+    } else if (pval == INFINITY) {
       for (int64_t k = 0; k < n; k++) {
         result = std::abs(data[k * stride]) > result ? std::abs(data[k * stride]) : result;
       }
-      result = result;
+    } else if (pval == -INFINITY) {
+      result = INFINITY;
+      for (int64_t k = 0; k < n; k++) {
+        result = std::abs(data[k * stride]) < result ? std::abs(data[k * stride]) : result;
+      }
     } else {
       for (int64_t k = 0; k < n; k++) {
         result += std::pow(std::abs(data[k * stride]), pval);

@@ -22,10 +22,9 @@ from torch._six import inf, nan, string_classes
 from itertools import product, combinations
 from functools import reduce
 from torch import multiprocessing as mp
-from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
+from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
-    IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
-    random_fullrank_matrix_distinct_singular_value
+    IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm
 from multiprocessing.reduction import ForkingPickler
 
 if TEST_NUMPY:
@@ -840,7 +839,7 @@ class TestTorch(TestCase):
         # full reduction
         x = torch.randn(5, device=device)
         xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, inf]:
+        for p in [0, 1, 2, 3, 4, inf, -inf]:
             res = x.norm(p).item()
             expected = np.linalg.norm(xn, p)
             self.assertEqual(res, expected, "full reduction failed for {}-norm".format(p))
@@ -848,7 +847,7 @@ class TestTorch(TestCase):
         # one dimension
         x = torch.randn(5, 5, device=device)
         xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, inf]:
+        for p in [0, 1, 2, 3, 4, inf, -inf]:
             res = x.norm(p, 1).cpu().numpy()
             expected = np.linalg.norm(xn, p, 1)
             self.assertEqual(res.shape, expected.shape)
@@ -4044,6 +4043,7 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_gesv_batched(self, cast):
+        from common_utils import random_fullrank_matrix_distinct_singular_value
         # test against gesv: one batch
         A = cast(random_fullrank_matrix_distinct_singular_value(5, 1))
         b = cast(torch.randn(1, 5, 10))
@@ -4096,7 +4096,7 @@ class TestTorch(TestCase):
             return
 
         from numpy.linalg import solve
-
+        from common_utils import random_fullrank_matrix_distinct_singular_value
         # test against numpy.linalg.solve
         A = cast(random_fullrank_matrix_distinct_singular_value(4, 2, 1, 3))
         b = cast(torch.randn(2, 1, 3, 4, 6))
@@ -4647,6 +4647,8 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_inverse(self, conv_fn):
+        from common import random_fullrank_matrix_distinct_singular_value
+
         # no batches: 2-D tensors
         matrix = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
         matrix_inverse = torch.inverse(matrix)
@@ -4777,6 +4779,7 @@ class TestTorch(TestCase):
 
         # Single matrix, but full rank
         # This is for negative powers
+        from common_utils import random_fullrank_matrix_distinct_singular_value
         M = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
         run_test(M, sign=-1)
 
@@ -5256,6 +5259,10 @@ class TestTorch(TestCase):
     def test_isfinite(self):
         x = torch.Tensor([1, inf, 2, -inf, nan, -10])
         self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 0, 1, 0, 0, 1]))
+
+    def test_isfinite_int(self):
+        x = torch.tensor([1, 2, 3])
+        self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 1, 1]))
 
     def test_isinf(self):
         x = torch.Tensor([1, inf, 2, -inf, nan])

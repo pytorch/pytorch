@@ -1,4 +1,4 @@
-from common import TestCase, run_tests, TEST_NUMPY
+from common_utils import TestCase, run_tests, TEST_NUMPY
 
 import torch
 import unittest

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/Error.h>
+#include "c10/util/Exception.h"
 
 #include <gtest/gtest.h>
 
