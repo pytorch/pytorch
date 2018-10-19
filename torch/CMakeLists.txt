@@ -467,3 +467,7 @@ install(FILES
     ${PROJECT_BINARY_DIR}/TorchConfigVersion.cmake
     ${PROJECT_BINARY_DIR}/TorchConfig.cmake
     DESTINATION share/cmake/Torch)
+
+if (USE_DISTRIBUTED)
+  add_subdirectory(${TORCH_SRC_DIR}/lib/THD)
+endif()
