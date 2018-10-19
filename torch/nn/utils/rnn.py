@@ -193,7 +193,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
         sequence.data, sequence.batch_sizes, batch_first, padding_value, max_seq_length)
 
 
-def pad_sequence(sequences, batch_first=False, padding_value=0):
+def pad_sequence(sequences, batch_first=False, padding_value=0, min_length=0):
     r"""Pad a list of variable length Tensors with zero
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
@@ -224,6 +224,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
         batch_first (bool, optional): output will be in ``B x T x *`` if True, or in
             ``T x B x *`` otherwise
         padding_value (float, optional): value for padded elements. Default: 0.
+        min_length (int, optional): always pad to at least this length. Default: 0.
 
     Returns:
         Tensor of size ``T x B x *`` if :attr:`batch_first` is ``False``.
@@ -234,7 +235,9 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     # in sequences are same and fetching those from sequences[0]
     max_size = sequences[0].size()
     trailing_dims = max_size[1:]
-    max_len = max([s.size(0) for s in sequences])
+    max_len = max((s.size(0) for s in sequences))
+    max_len = max(max_len, min_length)
+
     if batch_first:
         out_dims = (len(sequences), max_len) + trailing_dims
     else:
