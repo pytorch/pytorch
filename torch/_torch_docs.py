@@ -2408,7 +2408,8 @@ Returns the matrix raised to the power :attr:`n` for square matrices.
 For batch of matrices, each individual matrix is raised to the power :attr:`n`.
 
 If :attr:`n` is negative, then the inverse of the matrix (if invertible) is
-raised to the power :attr:`n`. If :attr:`n` is 0, then an identity matrix
+raised to the power :attr:`n`.  For a batch of matrices, the batched inverse
+(if invertible) is raised to the power :attr:`n`. If :attr:`n` is 0, then an identity matrix
 is returned.
 
 Args:
