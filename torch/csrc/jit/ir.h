@@ -161,7 +161,7 @@ using pyobj_list = std::vector<THPObjectPtr>;
 template<typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
-using topo_position_t = uint64_t;
+using topo_position_t = int64_t;
 
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);
@@ -616,8 +616,6 @@ private:
   TORCH_API void removeFromList();
   TORCH_API void lint() const;
 
-  // Assign this node a topological position, to facilitate fast isBefore() and
-  // isAfter() queries
   void assignTopoPosition();
 
 protected:

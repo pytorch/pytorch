@@ -1202,10 +1202,12 @@ void testTopologicalIndex() {
     Graph graph;
     std::map<size_t, Node*> nodes;
 
-    // Prepending to the graph a lot will trigger reindexing
+    auto anchor = graph.create(prim::Undefined);
+    graph.appendNode(anchor);
+    // Inserting to the same place a lot will trigger reindexing
     for (auto i = 0; i < 100; ++i) {
       auto n = graph.create(prim::Undefined);
-      graph.prependNode(n);
+      n->insertAfter(anchor);
       nodes[i] = n;
     }
 

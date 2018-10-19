@@ -21,8 +21,9 @@ namespace torch { namespace jit {
 // Constants relating to maintaining the topological index of nodes.
 //
 // Lower and upper bounds of the index. Inclusive range.
-static constexpr topo_position_t kLowerBound = 0;
-static constexpr topo_position_t kUpperBound = UINT64_MAX;
+static constexpr topo_position_t kLowerBound = INT64_MIN;
+static constexpr topo_position_t kUpperBound = INT64_MAX;
+static constexpr topo_position_t kMidPoint = 0;
 // How far away to space nodes that are appended to the graph.
 // should be 2^n, where:
 //   - n is the maximum number of repeated insertions without a re-index
@@ -697,12 +698,13 @@ bool Node::isNondeterministic() const {
 void Node::assignTopoPosition() {
   auto returnNode = owningBlock()->return_node();
   const auto prevPos = prev()->topo_position_;
+  const auto nextPos = next()->topo_position_;
 
   // Append to the end of the graph
   if (next() == returnNode) {
     if (next() == prev()) {
       // the node list is empty, assign the first position
-      topo_position_ = kLowerBound + kAppendInterval;
+      topo_position_ = kMidPoint;
       return;
     }
 
@@ -714,9 +716,19 @@ void Node::assignTopoPosition() {
 
     topo_position_ = prevPos + kAppendInterval;
 
-  // insert between two existing nodes
+    // Prepend to the graph
+  } else if (prev() == returnNode) {
+    // next() is the first element in the block list
+    if (nextPos <= (kLowerBound + kAppendInterval)) {
+      // we're running off the edge
+      owningBlock()->reIndexTopology();
+      return assignTopoPosition();
+    }
+
+    topo_position_ = nextPos - kAppendInterval;
+
+    // insert between two existing nodes
   } else {
-    const auto nextPos = next()->topo_position_;
     const auto posBetween = prevPos + (nextPos - prevPos) / 2;
     if (posBetween == prevPos) {
       // There was no room
