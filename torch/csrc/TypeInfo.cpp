@@ -96,11 +96,6 @@ PyObject* THPIInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
 
 PyObject* THPDTypeInfo_compare(THPDTypeInfo* a, THPDTypeInfo* b, int op) {
   switch (op) {
-    case Py_LT:
-    case Py_LE:
-    case Py_GT:
-    case Py_GE:
-      return Py_INCREF(Py_NotImplemented), Py_NotImplemented;
     case Py_EQ:
       if (a->type == b->type) {
         Py_RETURN_TRUE;
@@ -114,6 +109,7 @@ PyObject* THPDTypeInfo_compare(THPDTypeInfo* a, THPDTypeInfo* b, int op) {
         Py_RETURN_FALSE;
       }
   }
+  return Py_INCREF(Py_NotImplemented), Py_NotImplemented;
 }
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
