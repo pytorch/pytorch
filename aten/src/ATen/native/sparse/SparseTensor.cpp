@@ -75,9 +75,7 @@ SparseTensor new_sparse(const TensorOptions& options) {
 /*** Helper methods ***/
 
 /* Pointer-copy init */
-SparseTensor new_with_tensor_sparse(const LongTensor& indices_, const Tensor& values__) {
-  auto indices = indices_.contiguous();
-  auto values_ = values__.contiguous();
+SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& values_) {
   Tensor values;
   if (values_.dim() == 0) {
     // Mimic Numpy behavior here and treat it as a 1D tensor
@@ -159,9 +157,7 @@ SparseTensor new_with_size_sparse(IntList size, const TensorOptions& options) {
 // copy from CUDA to CPU. However, this function should ONLY be used where we know that the indices
 // are guaranteed to be within bounds.
 // NB: Got rid of the sizes == NULL case
-SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices_, const Tensor& values__, ArrayRef<int64_t> sizes) {
-  auto indices = indices_.contiguous();
-  auto values_ = values__.contiguous();
+SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices, const Tensor& values_, ArrayRef<int64_t> sizes) {
   Tensor values;
   if (values_.dim() == 0) {
     // Mimic Numpy behavior here and treat it as a 1D tensor
@@ -178,9 +174,7 @@ SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices_, 
 }
 
 // NB: Got rid of the sizes == NULL case
-SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices_, const Tensor& values__, ArrayRef<int64_t> sizes) {
-  auto indices = indices_.contiguous();
-  auto values_ = values__.contiguous();
+SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Tensor& values_, ArrayRef<int64_t> sizes) {
   Tensor values;
   if (values_.dim() == 0) {
     // Mimic Numpy behavior here and treat it as a 1D tensor
