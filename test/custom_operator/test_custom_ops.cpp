@@ -4,9 +4,24 @@
 
 #include <cassert>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <iostream>
+
+namespace helpers {
+template <typename Predicate>
+void check_all_parameters(
+    const torch::jit::script::Module& module,
+    Predicate predicate) {
+  for (const auto& parameter : module.get_parameters()) {
+    AT_ASSERT(predicate(*parameter->slot()));
+  }
+  for (const auto& child : module.get_modules()) {
+    check_all_parameters(*child->module, predicate);
+  }
+}
+} // namespace helpers
 
 void get_operator_from_registry_and_execute() {
   auto& ops = torch::jit::getAllOperatorsFor(
@@ -32,7 +47,7 @@ void get_operator_from_registry_and_execute() {
 }
 
 void load_serialized_module_with_custom_op_and_execute(
-    const char* path_to_exported_script_module) {
+    const std::string& path_to_exported_script_module) {
   std::shared_ptr<torch::jit::script::Module> module =
       torch::jit::load(path_to_exported_script_module);
   assert(module != nullptr);
@@ -45,7 +60,7 @@ void load_serialized_module_with_custom_op_and_execute(
 }
 
 void test_argument_checking_for_serialized_modules(
-    const char* path_to_exported_script_module) {
+    const std::string& path_to_exported_script_module) {
   std::shared_ptr<torch::jit::script::Module> module =
       torch::jit::load(path_to_exported_script_module);
   assert(module != nullptr);
@@ -80,13 +95,62 @@ void test_argument_checking_for_serialized_modules(
   }
 }
 
+void test_move_to_device(const std::string& path_to_exported_script_module) {
+  std::shared_ptr<torch::jit::script::Module> module =
+      torch::jit::load(path_to_exported_script_module);
+  AT_ASSERT(module != nullptr);
+
+  helpers::check_all_parameters(*module, [](const at::Tensor& tensor) {
+    return tensor.device().is_cpu();
+  });
+
+  module->to(at::kCUDA);
+
+  helpers::check_all_parameters(*module, [](const at::Tensor& tensor) {
+    return tensor.device().is_cuda();
+  });
+
+  module->to(at::kCPU);
+
+  helpers::check_all_parameters(*module, [](const at::Tensor& tensor) {
+    return tensor.device().is_cpu();
+  });
+}
+
+void test_move_to_dtype(const std::string& path_to_exported_script_module) {
+  std::shared_ptr<torch::jit::script::Module> module =
+      torch::jit::load(path_to_exported_script_module);
+  AT_ASSERT(module != nullptr);
+
+  module->to(at::kInt);
+
+  helpers::check_all_parameters(*module, [](const at::Tensor& tensor) {
+    return tensor.dtype() == at::kInt;
+  });
+
+  module->to(at::kDouble);
+
+  helpers::check_all_parameters(*module, [](const at::Tensor& tensor) {
+    return tensor.dtype() == at::kDouble;
+  });
+}
+
 int main(int argc, const char* argv[]) {
   if (argc != 2) {
     std::cerr << "usage: test_custom_ops <path-to-exported-script-module>\n";
     return -1;
   }
+  const std::string path_to_exported_script_module = argv[1];
+
   get_operator_from_registry_and_execute();
-  load_serialized_module_with_custom_op_and_execute(argv[1]);
-  test_argument_checking_for_serialized_modules(argv[1]);
+  load_serialized_module_with_custom_op_and_execute(
+      path_to_exported_script_module);
+  test_argument_checking_for_serialized_modules(path_to_exported_script_module);
+  test_move_to_dtype(path_to_exported_script_module);
+
+  if (at::globalContext().getNumGPUs() > 0) {
+    test_move_to_device(path_to_exported_script_module);
+  }
+
   std::cout << "ok\n";
 }

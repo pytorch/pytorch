@@ -48,4 +48,8 @@
 #endif
 #endif
 
+// Simply define the namespace, in case a dependent library want to refer to
+// the c10 namespace but not any nontrivial files.
+namespace c10 {} // namespace c10
+
 #endif // C10_MACROS_MACROS_H_

@@ -28,7 +28,7 @@ from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
-from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, TEST_WITH_ROCM, \
+from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, TEST_WITH_ROCM, \
     TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, download_file, PY3, PY34, to_gpu, \
     get_function_arglist, skipCUDAMemoryLeakCheckIf
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
@@ -705,6 +705,22 @@ class TestNN(NNTestCase):
         expected_grad = torch.ones(5, 5).mm(module.weight.data) * 2
         self.assertEqual(input.grad.data, expected_grad)
 
+    def test_to(self):
+        m = nn.Linear(3, 5)
+        self.assertIs(m, m.to('cpu'))
+        self.assertIs(m, m.to('cpu', dtype=torch.float32))
+        self.assertEqual(m.double(), m.to(torch.float64))
+        self.assertRaises(RuntimeError, lambda: m.to('cpu', copy=True))
+
+        if torch.cuda.is_available():
+            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
+                m2 = m.cuda(device=cuda)
+                self.assertIs(m2, m2.to(cuda))
+                self.assertEqual(m, m2.to('cpu'))
+                self.assertEqual(m2, m.to(cuda))
+                self.assertIs(m2, m2.to(dtype=torch.float32))
+                self.assertEqual(m2.double(), m2.to(dtype=torch.float64))
+
     def test_zero_grad(self):
         i = torch.randn(2, 5, requires_grad=True)
         module = nn.Linear(5, 5)
@@ -754,6 +770,13 @@ class TestNN(NNTestCase):
         module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2)
         input = torch.empty(1, 1, 4, 4)
         self.assertRaises(RuntimeError, lambda: module(input))
+
+        module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True)
+        input = torch.randn(1, 3, 1, 1)
+        with self.assertRaisesRegex(RuntimeError,
+                                    'Calculated padded input size per channel: \(1 x 1\). ' +
+                                    'Kernel size: \(10 x 10\). Kernel size can\'t be greater than actual input size'):
+            module(input)
 
     def test_invalid_conv3d(self):
         module = torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2)

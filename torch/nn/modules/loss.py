@@ -24,8 +24,8 @@ class _WeightedLoss(_Loss):
 
 
 class L1Loss(_Loss):
-    r"""Creates a criterion that measures the mean absolute value of the
-    element-wise difference between input `x` and target `y`:
+    r"""Creates a criterion that measures the mean absolute error (MAE) between each element in
+    the input `x` and target `y`.
 
     The loss can be described as:
 
@@ -185,10 +185,11 @@ class NLLLoss(_WeightedLoss):
         >>> loss = nn.NLLLoss()
         >>> # input is of size N x C x height x width
         >>> data = torch.randn(N, 16, 10, 10)
-        >>> m = nn.Conv2d(16, C, (3, 3))
+        >>> conv = nn.Conv2d(16, C, (3, 3))
+        >>> m = nn.LogSoftmax()
         >>> # each element in target has to have 0 <= value < C
         >>> target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
-        >>> output = loss(m(data), target)
+        >>> output = loss(m(conv(data)), target)
         >>> output.backward()
     """
 
@@ -360,8 +361,8 @@ class KLDivLoss(_Loss):
 
 
 class MSELoss(_Loss):
-    r"""Creates a criterion that measures the mean squared error between
-    `n` elements in the input `x` and target `y`.
+    r"""Creates a criterion that measures the mean squared error (squared L2 norm) between
+    each element in the input `x` and target `y`.
 
     The loss can be described as:
 

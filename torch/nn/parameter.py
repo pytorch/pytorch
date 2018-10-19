@@ -1,4 +1,5 @@
 import torch
+from collections import OrderedDict
 
 
 class Parameter(torch.Tensor):
@@ -28,7 +29,8 @@ class Parameter(torch.Tensor):
         return 'Parameter containing:\n' + super(Parameter, self).__repr__()
 
     def __reduce_ex__(self, proto):
+        # See Note [Don't serialize hooks]
         return (
             torch._utils._rebuild_parameter,
-            (self.data, self.requires_grad, self._backward_hooks)
+            (self.data, self.requires_grad, OrderedDict())
         )

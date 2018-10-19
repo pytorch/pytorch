@@ -15,7 +15,7 @@ import glob
 import os
 import shutil
 import sys
-import common
+import common_utils as common
 
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]

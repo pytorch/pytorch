@@ -1,6 +1,6 @@
 #include <ATen/Context.h>
-#include <ATen/core/Error.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/util/Exception.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
 
 #include <TH/THGeneral.h>

@@ -1,15 +1,14 @@
+#include <ATen/native/RNN.h>
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/InitialTensorOptions.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/core/Error.h>
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/native/RNN.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/TensorUtils.h>
+#include <ATen/cuda/Exceptions.h>
+#include <c10/util/Exception.h>
 
 #if !AT_CUDNN_ENABLED()
 
