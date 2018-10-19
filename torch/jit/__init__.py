@@ -1207,6 +1207,9 @@ def _make_strong(mod):
     """
     Converts a weak module into a subclass of ScriptModule
     """
+    if mod in _weak_modules:
+        return _weak_modules[mod]
+
     stubs = _weak_types.get(type(mod))["method_stubs"]
 
     if stubs is None:
