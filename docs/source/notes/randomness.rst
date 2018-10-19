@@ -21,6 +21,7 @@ CPU and CUDA)::
     import torch
     torch.manual_seed(0)
 
+
 There are some PyTorch functions that use CUDA functions that can be a source
 of non-determinism. One class of such CUDA functions are atomic operations,
 in particular :attr:`atomicAdd`, where the order of parallel additions to the
@@ -28,6 +29,7 @@ same value is undetermined and, for floating-point variables, a source of
 variance in the result. PyTorch functions that use :attr:`atomicAdd` in the forward
 include :meth:`torch.Tensor.index_add_`, :meth:`torch.Tensor.scatter_add_`,
 :meth:`torch.bincount`.
+
 A number of operations have backwards that use :attr:`atomicAdd`, in particular
 :meth:`torch.nn.functional.embedding_bag`,
 :meth:`torch.nn.functional.ctc_loss` and many forms of pooling, padding, and sampling.
