@@ -55,7 +55,6 @@
 
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/topological_index.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
 
@@ -1201,23 +1200,21 @@ void testTopologicalIndex() {
   {
     // Induce reindexing to test that path
     Graph graph;
-    auto node1 = graph.create(prim::Undefined);
-    auto node2 = graph.create(prim::Undefined);
-    auto node3 = graph.create(prim::Undefined);
+    std::map<size_t, Node*> nodes;
 
-    node_topological_index index(
-        graph.block()->param_node(),
-        graph.block()->return_node(),
-        0, // lower bound
-        10, // upper bound
-        2); // default interval
-    index.insertAfter(graph.block()->param_node(), node1); // inserts at 2
-    index.insertAfter(graph.block()->param_node(), node2); // inserts at 1
-    index.insertAfter(node2, node3); // forces a reindex
+    // Prepending to the graph a lot will trigger reindexing
+    for (auto i = 0; i < 100; ++i) {
+      auto n = graph.create(prim::Undefined);
+      graph.prependNode(n);
+      nodes[i] = n;
+    }
 
-    ASSERT_TRUE(node2->isBefore(node1));
-    ASSERT_TRUE(node2->isBefore(node3));
-    ASSERT_TRUE(node1->isAfter(node3));
+    // Nodes should be in reverse order
+    for (auto i = 0; i < 100; ++i) {
+      for (auto j = i + 1; j < 100; ++j) {
+        ASSERT_TRUE(nodes[i]->isAfter(nodes[j]));
+      }
+    }
   }
 }
 

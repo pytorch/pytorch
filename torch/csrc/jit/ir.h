@@ -13,7 +13,6 @@
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/type.h"
 #include "torch/csrc/jit/named_value.h"
-#include "torch/csrc/jit/topological_index.h"
 
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/utils/functional.h"
@@ -162,6 +161,7 @@ using pyobj_list = std::vector<THPObjectPtr>;
 template<typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
+using topo_position_t = uint64_t;
 
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);
@@ -247,7 +247,6 @@ struct Node : public Attributes<Node> {
   friend const_graph_node_list;
   friend graph_node_list_iterator;
   friend const_graph_node_list_iterator;
-  friend node_topological_index;
 private:
   // each node but Return/Param
   // is associated with exactly one place in the node list...
@@ -616,6 +615,11 @@ private:
 
   TORCH_API void removeFromList();
   TORCH_API void lint() const;
+
+  // Assign this node a topological position, to facilitate fast isBefore() and
+  // isAfter() queries
+  void assignTopoPosition();
+
 protected:
   // subclasses must override
   // this function is used by createClone to initialize a new version
@@ -716,6 +720,8 @@ struct Block {
   // in src to look up its corresponding value
   TORCH_API void cloneFrom(Block * src, std::function<Value*(Value*)> value_map);
 private:
+  void reIndexTopology();
+
   // should only be called in the constructor
   Node* initOutput(Node* p) {
     p->next() = p;
@@ -736,7 +742,6 @@ private:
   Node * const output_;
   Node * const input_;
   Node * const owning_node_; // either the node that has this block or nullptr for root
-  node_topological_index topological_index_;
 };
 
 struct Graph {
@@ -985,17 +990,6 @@ inline Graph * Value::owningGraph() {
 
 inline const Graph * Value::owningGraph() const {
   return node()->owningGraph();
-}
-
-inline Block::Block(Graph* graph_, Node* node_)
-    : graph_(graph_),
-      output_(initOutput(graph_->create(prim::Return, 0))),
-      input_(graph_->create(prim::Param, 0)),
-      owning_node_(node_),
-      topological_index_(input_, output_) {
-  graph_->all_blocks.emplace(this);
-  output_->owning_block_ = this;
-  input_->owning_block_ = this;
 }
 
 // Helper macros for constructing switch statements over Node types
