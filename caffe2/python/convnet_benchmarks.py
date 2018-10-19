@@ -638,7 +638,7 @@ def Inception_v2(order, cudnn_ws, model_path=""):
     if model_path == "":
         print("ERROR: please specify paths to init_net and predict_net protobufs for Inception_v2")
         exit(1)
-    device_opts = caffe2_pb2.DeviceOption(caffe2_pb2.HIP)
+    device_opts = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.HIP)
 
     INIT_NET_PB = os.path.join(model_path, "init_net.pb")
     PREDICT_NET_PB = os.path.join(model_path, "predict_net.pb")
