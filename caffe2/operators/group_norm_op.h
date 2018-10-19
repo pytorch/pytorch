@@ -89,6 +89,11 @@ class GroupNormOp final : public Operator<Context> {
       T* Y,
       T* mu,
       T* rsig) {
+    const int C = G * D;
+    scale_.Resize(N, C);
+    bias_.Resize(N, C);
+    T* scale_data = scale_.template mutable_data<T>();
+    T* bias_data = bias_.template mutable_data<T>();
     if (order_ == StorageOrder::NCHW) {
       const std::array<int, 2> dims = {N * G, D * HxW};
       const int axis = 1;
@@ -96,7 +101,8 @@ class GroupNormOp final : public Operator<Context> {
           2, dims.data(), 1, &axis, X, mu, rsig, &context_);
       math::InvStd<T, Context>(
           N * G, static_cast<T>(epsilon_), rsig, rsig, &context_);
-      GroupNormForwardNCHW(N, G, D, HxW, X, mu, rsig, gamma, beta, Y);
+      ComputeFusedParams(N, G, D, mu, rsig, gamma, beta, scale_data, bias_data);
+      GroupNormForwardNCHW(N, C, HxW, X, scale_data, bias_data, Y);
     } else {
       const std::array<int, 4> dims = {N, HxW, G, D};
       const std::array<int, 2> axes = {1, 3};
@@ -104,78 +110,77 @@ class GroupNormOp final : public Operator<Context> {
           4, dims.data(), 2, axes.data(), X, mu, rsig, &context_);
       math::InvStd<T, Context>(
           N * G, static_cast<T>(epsilon_), rsig, rsig, &context_);
-      GroupNormForwardNHWC(N, G, D, HxW, X, mu, rsig, gamma, beta, Y);
+      ComputeFusedParams(N, G, D, mu, rsig, gamma, beta, scale_data, bias_data);
+      GroupNormForwardNHWC(N, C, HxW, X, scale_data, bias_data, Y);
     }
     return true;
   }
 
-  void GroupNormForwardNCHW(
+  void ComputeFusedParams(
       const int N,
       const int G,
       const int D,
-      const int HxW,
-      const T* X,
       const T* mu,
       const T* rsig,
       const T* gamma,
       const T* beta,
-      T* Y) {
+      T* scale,
+      T* bias) {
     const int C = G * D;
-    EigenArrayMap<T>(Y, D * HxW, N * G) =
-        (ConstEigenArrayMap<T>(X, D * HxW, N * G).rowwise() -
-         ConstEigenVectorArrayMap<T>(mu, N * G).transpose())
-            .rowwise() *
-        ConstEigenVectorArrayMap<T>(rsig, N * G).transpose();
-    T* Y_ptr = Y;
-    const int stride = C * HxW;
-    ConstEigenVectorArrayMap<T> gamma_arr(gamma, C);
-    ConstEigenVectorArrayMap<T> beta_arr(beta, C);
+    ConstEigenArrayMap<float> gamma_arr(gamma, D, G);
+    ConstEigenArrayMap<float> beta_arr(beta, D, G);
     for (int i = 0; i < N; ++i) {
-      EigenArrayMap<T> Y_arr(Y_ptr, HxW, C);
-      Y_arr = (Y_arr.rowwise() * gamma_arr.transpose()).rowwise() +
-          beta_arr.transpose();
-      Y_ptr += stride;
+      EigenArrayMap<T> scale_arr(scale + i * C, D, G);
+      scale_arr = gamma_arr.rowwise() *
+          ConstEigenVectorArrayMap<T>(rsig + i * G, G).transpose();
+      EigenArrayMap<T>(bias + i * C, D, G) = beta_arr -
+          scale_arr.rowwise() *
+              ConstEigenVectorArrayMap<T>(mu + i * G, G).transpose();
     }
+  }
+
+  void GroupNormForwardNCHW(
+      const int N,
+      const int C,
+      const int HxW,
+      const T* X,
+      const T* scale,
+      const T* bias,
+      T* Y) {
+    EigenArrayMap<float>(Y, HxW, N * C) =
+        (ConstEigenArrayMap<float>(X, HxW, N * C).rowwise() *
+         ConstEigenVectorArrayMap<float>(scale, N * C).transpose())
+            .rowwise() +
+        ConstEigenVectorArrayMap<float>(bias, N * C).transpose();
   }
 
   void GroupNormForwardNHWC(
       const int N,
-      const int G,
-      const int D,
+      const int C,
       const int HxW,
       const T* X,
-      const T* mu,
-      const T* rsig,
-      const T* gamma,
-      const T* beta,
+      const T* scale,
+      const T* bias,
       T* Y) {
-    const int C = G * D;
-    const T* X_ptr = X;
-    T* Y_ptr = Y;
+    const int stride = HxW * C;
     for (int i = 0; i < N; ++i) {
-      for (int j = 0; j < HxW; ++j) {
-        EigenArrayMap<T>(Y_ptr, D, G) =
-            (ConstEigenArrayMap<T>(X_ptr, D, G).rowwise() -
-             ConstEigenVectorArrayMap<T>(mu + i * G, G).transpose())
-                .rowwise() *
-            ConstEigenVectorArrayMap<T>(rsig + i * G, G).transpose();
-        X_ptr += C;
-        Y_ptr += C;
-      }
+      EigenArrayMap<float>(Y + i * stride, C, HxW) =
+          (ConstEigenArrayMap<float>(X + i * stride, C, HxW).colwise() *
+           ConstEigenVectorArrayMap<float>(scale + i * C, C))
+              .colwise() +
+          ConstEigenVectorArrayMap<float>(bias + i * C, C);
     }
-    EigenArrayMap<T> Y_arr(Y, C, N * HxW);
-    Y_arr =
-        (Y_arr.colwise() * ConstEigenVectorArrayMap<T>(gamma, C)).colwise() +
-        ConstEigenVectorArrayMap<T>(beta, C);
   }
-
-  Tensor mu_{Context::GetDeviceType()};
-  Tensor rsig_{Context::GetDeviceType()};
 
   const int group_;
   const float epsilon_;
   const StorageOrder order_;
   const bool is_test_;
+
+  Tensor mu_{Context::GetDeviceType()};
+  Tensor rsig_{Context::GetDeviceType()};
+  Tensor scale_{Context::GetDeviceType()};
+  Tensor bias_{Context::GetDeviceType()};
 
   // Input: X, gamma, beta
   // Output: Y, mu, inv_sig
