@@ -331,7 +331,7 @@ class create_version_file(PytorchCommand):
 # All libraries that torch could depend on
 dep_libs = [
     'nccl', 'caffe2',
-    'libshm', 'libshm_windows', 'gloo', 'THD', 'c10d',
+    'libshm', 'libshm_windows', 'THD', 'c10d',
 ]
 
 missing_pydep = '''
@@ -467,7 +467,6 @@ class build_deps(PytorchCommand):
             libs += ['libshm']
         if USE_DISTRIBUTED:
             if IS_LINUX:
-                libs += ['gloo']
                 libs += ['c10d']
             libs += ['THD']
         build_libs(libs)
