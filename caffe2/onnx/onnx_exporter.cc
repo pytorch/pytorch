@@ -293,6 +293,7 @@ bool OnnxExporter::IsBlackListed(const caffe2::Argument& arg) {
   const static std::unordered_map<std::string, std::unordered_set<int64_t>>
       kBlackListInt = {{"cudnn_exhaustive_search", {0, 1}},
                        {"use_cudnn", {0, 1}},
+                       {"exhaustive_search", {0, 1}},
                        {"is_test", {0, 1}},
                        {"broadcast", {0, 1}}};
 

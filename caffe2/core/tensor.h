@@ -48,7 +48,6 @@ class CAFFE2_API Tensor final {
         at::detail::computeTensorTypeId(at::device(device).layout(at::kStrided)),
         /*is_variable=*/ false
       )) {
-    Resize(0);
   }
 
   /**
@@ -346,6 +345,13 @@ class CAFFE2_API Tensor final {
    * Returns the size (i.e. the number of items) of the tensor.
    */
   inline int64_t size() const {
+    return impl_->numel();
+  }
+
+  /**
+   * Returns the size (i.e. the number of items) of the tensor.
+   */
+  inline int64_t numel() const {
     return impl_->numel();
   }
 

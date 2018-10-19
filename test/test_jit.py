@@ -23,8 +23,8 @@ import numpy as np
 import tempfile
 import shutil
 import warnings
-from test_autograd import method_tests as autograd_method_tests
-from test_autograd import create_input, unpack_variables, \
+from common_methods_invocations import method_tests as autograd_method_tests
+from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
 import random
@@ -60,6 +60,7 @@ RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
+IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 
 
 def LSTMCellF(input, hx, cx, *params):
@@ -651,7 +652,7 @@ class TestJit(JitTestCase):
         ge = self.checkTrace(LSTMCellF, inputs)
         self.assertExpectedGraph(ge.graph_for(*inputs))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
     @enable_cpu_fuser
     def test_lstm_fusion_cpu(self):
@@ -1416,7 +1417,7 @@ class TestJit(JitTestCase):
     def test_ge_unoptimized(self):
         self.run_ge_tests(False, False)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_ge_optimized(self):
         self.run_ge_tests(True, False)
@@ -3336,7 +3337,7 @@ a")
             for fn in fns:
                 self.checkScript(fn, [tensor])
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @skipIfRocm
     @enable_cpu_fuser
     def test_chunk_fusion_correctness(self):
@@ -3736,7 +3737,7 @@ a")
 
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_scalar_fusion(self):
         def fn(x, y):
