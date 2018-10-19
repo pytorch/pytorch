@@ -68,6 +68,7 @@ IF(MPI_FOUND)
 ENDIF()
 
 IF(GLOO_FOUND)
+  error()
   ADD_DEFINITIONS(-DWITH_GLOO=1)
   MESSAGE(STATUS "Found Gloo, will compile with Gloo distributed backend")
   IF(USE_GLOO_IBVERBS)
