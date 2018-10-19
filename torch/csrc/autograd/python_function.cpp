@@ -575,9 +575,9 @@ static Node* _trace_pre_record(
   for (int i = 0; i < num_args; i++) {
     PyObject *arg_object = PyTuple_GET_ITEM(input_objects, i);
     if (THPVariable_Check(arg_object)) {
-      arg_types.push_back('t');
+      arg_types.push_back('d');
     } else {
-      arg_types.push_back('s');
+      arg_types.push_back('c');
       Py_INCREF(arg_object);
       scalar_args.emplace_back(arg_object);
     }
@@ -597,21 +597,34 @@ static void _trace_post_record(
     PyObject* op_obj,
     const variable_list& input_vars,
     PyObject *output_objects,
-    bool is_inplace) {
+    bool is_inplace,
+    bool unpack_output) {
   if (!jit::tracer::isTracing()) {
     return;
   }
 
+  node->i_(attr::inplace, is_inplace);
+
   // Isolate C variable ptrs in a vector
   int num_outputs = PyTuple_GET_SIZE(output_objects);
   variable_list output_vars(num_outputs);
+  auto graph = node->owningGraph();
+  node->addOutput();
+  if (!unpack_output) {
+    std::vector<TypePtr> tuple_values(num_outputs, DynamicType::get());
+    TypePtr tuple_type = TupleType::create(std::move(tuple_values));
+    node->output()->setType(tuple_type);
+    auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);
+    node = unpacked;
+  }
   for (int i = 0; i < num_outputs; ++i) {
     auto var = (THPVariable*)PyTuple_GET_ITEM(output_objects, i);
-    jit::tracer::addOutput(node, var->cdata);
+    Value* value = node->outputs()[i];
+    if (var->cdata.defined()) {
+      value->inferTypeFrom(var->cdata);
+      jit::tracer::setValueTrace(autograd::as_variable_ref(var->cdata), value);
+    }
   }
-
-  node->i_(attr::inplace, is_inplace);
-
 }
 
 PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const UnpackedInput& unpacked,
@@ -637,7 +650,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(grad_fn, inputs, raw_output, outputs, is_executable);
-  _trace_post_record(node, op_obj, unpacked.input_vars, outputs, is_inplace);
+  _trace_post_record(node, op_obj, unpacked.input_vars, outputs, is_inplace, unpack_output);
   if (is_executable) {
     _save_variables(grad_fn);
   } else {

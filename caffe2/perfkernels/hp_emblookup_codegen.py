@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 import argparse
 import sys
 
-sizeof = {'float': 4, 'float16': 2, 'uint8_t': 1}
+sizeof = {'float': 4, 'at::Half': 2, 'uint8_t': 1}
 
 
 def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
@@ -18,7 +18,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
                   _mm256_loadu_ps(ip + (%d)), vop%d);"
                                                        % (regid, regid, regid)
             )
-        elif InType == "float16":
+        elif InType == "at::Half":
             code.append(
                 "vop%d = _mm256_fmadd_ps(vwgt,  \
                    _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (%d)))), \
@@ -137,7 +137,7 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
                                  _mm256_fmadd_ps(vwgt,_mm256_loadu_ps(&ip[j]), _mm256_loadu_ps(&op[j])) \
                                    );"
             )
-        elif InType == "float16":
+        elif InType == "at::Half":
             code.append(
                 "_mm256_storeu_ps(&op[j], \
                    _mm256_fmadd_ps(vwgt, \
@@ -166,7 +166,7 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
     code.append(OutType + " *op = &out[rangeIndex * block_size];")
 
     # initialize to 0
-    code.append("TIndex j = 0;")
+    code.append("int64_t j = 0;")
     code.append("for(; j + 8 <= block_size; j += 8) {")
     code.append("_mm256_storeu_ps(op + j, _mm256_setzero_ps());")
     code.append("}")
@@ -228,12 +228,12 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
     code.extend(compute(InType, use_weights, isa))
     code.append("}")
     # leftover
-    if InType == "float16":
-        code.append("float16 vtmp1[8] CAFFE2_ALIGNED(64);")
+    if InType == "at::Half":
+        code.append("at::Half vtmp1[8] CAFFE2_ALIGNED(64);")
     code.append("for(; j < block_size; j++) {")
     if InType == "float":
         code.append("op[j] += wgt * ip[j];")
-    elif InType == "float16":
+    elif InType == "at::Half":
         code.append("vtmp1[0] = ip[j];")
         code.append("__m256 vtmp2 = _mm256_cvtph_ps(*((__m128i*)vtmp1));")
         code.append("op[j] += wgt * ((float*)(&vtmp2))[0];")
@@ -277,12 +277,12 @@ else:
     filename = "embedding_lookup_avx2.cc"
 fout = open(filename, 'w')
 
-options = [["int32_t", "float", "float"],
-           ["int64_t", "float", "float"],
-           ["int32_t", "float16", "float"],
-           ["int64_t", "float16", "float"],
-           ["int32_t", "uint8_t", "float"],
-           ["int64_t", "uint8_t", "float"]]
+options = [["int32_t", "int32_t", "float", "float", "float", "float"],
+           ["int64_t", "int64_t", "float", "float", "float", "float"],
+           ["int32_t", "int32_t", "half", "at::Half", "float", "float"],
+           ["int64_t", "int64_t", "half", "at::Half", "float", "float"],
+           ["int32_t", "int32_t", "uint8_t", "uint8_t", "float"],
+           ["int64_t", "int64_t", "uint8_t", "uint8_t", "float"]]
 
 code = []
 # includes
@@ -300,22 +300,22 @@ code.append("\n")
 
 code.append("namespace caffe2 {\n")
 for o in options:
-    [IndexType, InType, OutType] = o
+    [IndexTypeName, IndexType, InTypeName, InType, OutTypeName, OutType] = o
 
     prefix = 'Fused8BitRowwise' if opts.fused else ''
     code.append('template <bool IS_WEIGHT_POSITIONAL>')
     fn_base = '{}EmbeddingLookup_{}_{}_{}'.format(
-        prefix, IndexType, InType, OutType
+        prefix, IndexTypeName, InTypeName, OutTypeName
     )
     suffix = '__avx2_fma'
     fn = "static void " + fn_base + suffix
     code.append(fn + "(")
 
     args = []
-    args.append("const TIndex block_size,")
-    args.append("const TIndex output_size,")
-    args.append("const TIndex index_size,")
-    args.append("const TIndex data_size,")
+    args.append("const int64_t block_size,")
+    args.append("const int64_t output_size,")
+    args.append("const int64_t index_size,")
+    args.append("const int64_t data_size,")
     args.append("const " + InType + "* input,")
     args.append("const " + IndexType + "* indices,")
     args.append("const int* lengths,")

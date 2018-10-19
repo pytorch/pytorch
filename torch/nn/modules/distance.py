@@ -5,7 +5,7 @@ from .. import functional as F
 
 class PairwiseDistance(Module):
     r"""
-    Computes the batchwise pairwise distance between vectors :math:`v_1`,:math:`v_2` using the p-norm:
+    Computes the batchwise pairwise distance between vectors :math:`v_1`, :math:`v_2` using the p-norm:
 
     .. math ::
         \Vert x \Vert _p := \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}

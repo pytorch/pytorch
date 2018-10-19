@@ -3,10 +3,11 @@
 #include <torch/detail/ordered_dict.h>
 #include <torch/nn/cursor.h>
 #include <torch/nn/pimpl.h>
+#include <torch/serialize/archive.h>
 #include <torch/tensor.h>
 
 #include <ATen/ATen.h>
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #include <map>
 #include <memory>
@@ -14,12 +15,15 @@
 #include <type_traits>
 #include <unordered_map>
 
+// forward declarations confuse doxygen
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace torch {
 namespace detail {
 template <typename T>
 class CursorBase;
 } // namespace detail
 } // namespace torch
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 namespace torch {
 namespace nn {
@@ -28,7 +32,6 @@ namespace nn {
 ///
 /// \rst
 /// .. note::
-///
 ///   The design and implementation of this class is largely based on the Python
 ///   API. You may want to consult [its
 ///   documentation](https://pytorch.org/docs/master/nn.html#torch.nn.Module)
@@ -107,7 +110,7 @@ class Module {
   ///   easier-to-use polymorphic interface.
   /// \endrst
   virtual std::shared_ptr<Module> clone(
-      at::optional<Device> device = at::nullopt) const;
+      c10::optional<Device> device = c10::nullopt) const;
 
   /// Provides a means to traverse the `Module` tree.
   ///
@@ -206,29 +209,20 @@ class Module {
   /// Recursively zeros out the `grad` value of each registered parameter.
   virtual void zero_grad();
 
-  /// Serializes the `Module`.
-  template <class Archive>
-  void save(Archive& ar) const;
-
-  /// Deserializes the `Module`.
-  template <class Archive>
-  void load(Archive& ar);
-
   /// Attempts to cast this `Module` to the given `ModuleType`.
   ///
   /// This method is useful when calling `apply()` on a `ModuleCursor`.
   /// \rst
   /// .. code-block:: cpp
-  ///
-  /// void initialize_weights(nn::Module& module) {
-  ///   torch::NoGradGuard no_grad;
-  ///   if (auto* linear = module.as<nn::Linear>()) {
-  ///     linear->weight.normal_(0.0, 0.02);
+  ///   void initialize_weights(nn::Module& module) {
+  ///     torch::NoGradGuard no_grad;
+  ///     if (auto* linear = module.as<nn::Linear>()) {
+  ///       linear->weight.normal_(0.0, 0.02);
+  ///     }
   ///   }
-  /// }
   ///
-  /// MyModule module;
-  /// module->modules().apply(initialize_weights);
+  ///   MyModule module;
+  ///   module->modules().apply(initialize_weights);
   /// \endrst
   template <typename ModuleType>
   typename ModuleType::ContainedType* as() noexcept;
@@ -239,20 +233,26 @@ class Module {
   /// \rst
   /// .. code-block:: cpp
   ///
-  /// void initialize_weights(nn::Module& module) {
-  ///   torch::NoGradGuard no_grad;
-  ///   if (auto* linear = module.as<nn::Linear>()) {
-  ///     linear->weight.normal_(0.0, 0.02);
+  ///   void initialize_weights(nn::Module& module) {
+  ///     torch::NoGradGuard no_grad;
+  ///     if (auto* linear = module.as<nn::Linear>()) {
+  ///       linear->weight.normal_(0.0, 0.02);
+  ///     }
   ///   }
-  /// }
   ///
-  /// MyModule module;
-  /// module->modules().apply(initialize_weights);
+  ///   MyModule module;
+  ///   module->modules().apply(initialize_weights);
   /// \endrst
   template <
       typename ModuleType,
       typename = torch::detail::disable_if_module_holder_t<ModuleType>>
   ModuleType* as() noexcept;
+
+  /// Serializes the `Module` into the given `OutputArchive`.
+  virtual void save(serialize::OutputArchive& archive) const;
+
+  /// Deserializes the `Module` from the given `InputArchive`.
+  virtual void load(serialize::InputArchive& archive);
 
  protected:
   /// Registers a parameter with this `Module`.
@@ -262,10 +262,10 @@ class Module {
   /// methods such as `parameters()`, `clone()` or `to().`
   ///
   /// \rst
-  /// .. code-block: cpp
-  /// MyModule::MyModule() {
-  ///   weight_ = register_parameter("weight", torch::randn({A, B}));
-  /// }
+  /// .. code-block:: cpp
+  ///   MyModule::MyModule() {
+  ///     weight_ = register_parameter("weight", torch::randn({A, B}));
+  ///   }
   /// \endrst
   Tensor& register_parameter(
       std::string name,
@@ -279,10 +279,10 @@ class Module {
   /// to methods such as `buffers()`, `clone()` or `to().
   ///
   /// \rst
-  /// .. code-block: cpp
-  /// MyModule::MyModule() {
-  ///   mean_ = register_buffer("mean", torch::empty({num_features_}));
-  /// }
+  /// .. code-block:: cpp
+  ///   MyModule::MyModule() {
+  ///     mean_ = register_buffer("mean", torch::empty({num_features_}));
+  ///   }
   /// \endrst
   Tensor& register_buffer(std::string name, Tensor tensor);
 
@@ -292,10 +292,10 @@ class Module {
   /// `clone()` or `to()`.
   ///
   /// \rst
-  /// .. code-block: cpp
-  /// MyModule::MyModule() {
-  ///   submodule_ = register_module("linear", torch::nn::Linear(3, 4));
-  /// }
+  /// .. code-block:: cpp
+  ///   MyModule::MyModule() {
+  ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
+  ///   }
   /// \endrst
   template <typename ModuleType>
   std::shared_ptr<ModuleType> register_module(
@@ -310,10 +310,10 @@ class Module {
   /// `clone()` or `to()`.
   ///
   /// \rst
-  /// .. code-block: cpp
-  /// MyModule::MyModule() {
-  ///   submodule_ = register_module("linear", torch::nn::Linear(3, 4));
-  /// }
+  /// .. code-block:: cpp
+  ///   MyModule::MyModule() {
+  ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
+  ///   }
   /// \endrst
   template <typename ModuleType>
   std::shared_ptr<ModuleType> register_module(
@@ -334,7 +334,7 @@ class Module {
   // Private methods.
 
   /// Used in the implementation of `Cloneable`.
-  virtual void clone_(Module& other, at::optional<Device> device);
+  virtual void clone_(Module& other, c10::optional<Device> device);
 
   /// The implementation of the various `to()` methods.
   template <typename... Ts>
@@ -350,35 +350,13 @@ class Module {
   OrderedDict<std::shared_ptr<Module>> children_;
 
   /// The module's name (e.g. "LSTM").
-  mutable at::optional<std::string> name_;
+  mutable c10::optional<std::string> name_;
 
   /// Whether the module is in training mode.
   bool is_training_{true};
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ nn::Module ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-template <class Archive>
-void Module::save(Archive& ar) const {
-  auto params = parameters();
-  size_t size = params.size();
-  ar(size);
-  for (auto& p : params) {
-    ar(p.key, p.value);
-  }
-}
-
-template <class Archive>
-void Module::load(Archive& ar) {
-  auto params = parameters();
-  size_t size;
-  ar(size);
-  std::string name;
-  for (size_t i = 0; i < size; i++) {
-    ar(name);
-    ar(params[name]);
-  }
-}
 
 template <typename ModuleType>
 typename ModuleType::ContainedType* Module::as() noexcept {

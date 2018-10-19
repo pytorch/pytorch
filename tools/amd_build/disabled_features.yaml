@@ -151,13 +151,6 @@
       ]
     },
     {
-      "path": "aten/src/THC/THCGeneral.cpp",
-      "functions": [
-        "THC_float2half",
-        "THC_half2float"
-      ]
-    },
-    {
       "path": "aten/src/THCUNN/generic/SparseLinear.cu",
       "functions": [
         "THNN_(SparseLinear_updateOutput)",

@@ -38,16 +38,23 @@ ELSE()
   SET(ROCBLAS_PATH $ENV{ROCBLAS_PATH})
 ENDIF()
 
+# ROCSPARSE_PATH
+IF(NOT DEFINED ENV{ROCSPARSE_PATH})
+  SET(ROCSPARSE_PATH ${ROCM_PATH}/rocsparse)
+ELSE()
+  SET(ROCSPARSE_PATH $ENV{ROCSPARSE_PATH})
+ENDIF()
+
 # ROCFFT_PATH
 IF(NOT DEFINED ENV{ROCFFT_PATH})
-  SET(ROCBLAS_PATH ${ROCM_PATH}/rocfft)
+  SET(ROCFFT_PATH ${ROCM_PATH}/rocfft)
 ELSE()
   SET(ROCFFT_PATH $ENV{ROCFFT_PATH})
 ENDIF()
 
 # HIPSPARSE_PATH
 IF(NOT DEFINED ENV{HIPSPARSE_PATH})
-  SET(HIPSPARSE_PATH ${ROCM_PATH}/hcsparse)
+  SET(HIPSPARSE_PATH ${ROCM_PATH}/hipsparse)
 ELSE()
   SET(HIPSPARSE_PATH $ENV{HIPSPARSE_PATH})
 ENDIF()
@@ -76,6 +83,13 @@ ELSE()
   SET(ROCRAND_PATH $ENV{ROCRAND_PATH})
 ENDIF()
 
+# MIOPENGEMM
+IF(NOT DEFINED ENV{MIOPENGEMM_PATH})
+  SET(MIOPENGEMM_PATH ${ROCM_PATH}/miopengemm)
+ELSE()
+  SET(MIOPENGEMM_PATH $ENV{MIOPENGEMM_PATH})
+ENDIF()
+
 # MIOPEN_PATH
 IF(NOT DEFINED ENV{MIOPEN_PATH})
   SET(MIOPEN_PATH ${ROCM_PATH}/miopen)
@@ -89,11 +103,27 @@ set(CMAKE_MODULE_PATH ${HIP_PATH}/cmake ${CMAKE_MODULE_PATH})
 # Disable Asserts In Code (Can't use asserts on HIP stack.)
 ADD_DEFINITIONS(-DNDEBUG)
 
+macro(find_package_and_print_version PACKAGE_NAME)
+  find_package("${PACKAGE_NAME}" ${ARGN})
+  message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
+endmacro()
+
 # Find the HIP Package
-FIND_PACKAGE(HIP 1.0)
+find_package_and_print_version(HIP 1.0)
 
 IF(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
+
+  message("\n***** Library versions from dpkg *****\n")
+  execute_process(COMMAND dpkg -l COMMAND grep rocm-dev COMMAND awk "{print $2 \" VERSION: \" $3}")
+  execute_process(COMMAND dpkg -l COMMAND grep rocm-libs COMMAND awk "{print $2 \" VERSION: \" $3}")
+  execute_process(COMMAND dpkg -l COMMAND grep hsakmt-roct COMMAND awk "{print $2 \" VERSION: \" $3}")
+  execute_process(COMMAND dpkg -l COMMAND grep rocr-dev COMMAND awk "{print $2 \" VERSION: \" $3}")
+  execute_process(COMMAND dpkg -l COMMAND grep -w hcc COMMAND awk "{print $2 \" VERSION: \" $3}")
+  execute_process(COMMAND dpkg -l COMMAND grep hip_base COMMAND awk "{print $2 \" VERSION: \" $3}")
+  execute_process(COMMAND dpkg -l COMMAND grep hip_hcc COMMAND awk "{print $2 \" VERSION: \" $3}")
+
+  message("\n***** Library versions from cmake find_package *****\n")
 
   ### Remove setting of Flags when FindHIP.CMake PR #558 is accepted.###
   # https://github.com/ROCm-Developer-Tools/HIP/pull/558 #
@@ -111,17 +141,20 @@ IF(HIP_FOUND)
   set(rocrand_DIR ${ROCRAND_PATH}/lib/cmake/rocrand)
   set(hiprand_DIR ${HIPRAND_PATH}/lib/cmake/hiprand)
   set(rocblas_DIR ${ROCBLAS_PATH}/lib/cmake/rocblas)
+  set(miopengemm_DIR ${MIOPENGEMM_PATH}/lib/cmake/miopengemm)
   set(miopen_DIR ${MIOPEN_PATH}/lib/cmake/miopen)
-  set(rocblas_DIR ${ROCBLAS_PATH}/lib/cmake/rocblas)
   set(rocfft_DIR ${ROCFFT_PATH}/lib/cmake/rocfft)
   set(hipsparse_DIR ${HIPSPARSE_PATH}/lib/cmake/hipsparse)
+  set(rocsparse_DIR ${ROCSPARSE_PATH}/lib/cmake/rocsparse)
 
-  find_package(rocrand REQUIRED)
-  find_package(hiprand REQUIRED)
-  find_package(rocblas REQUIRED)
-  find_package(rocfft REQUIRED)
-  find_package(miopen REQUIRED)
-  #find_package(hipsparse REQUIRED)
+  find_package_and_print_version(rocrand REQUIRED)
+  find_package_and_print_version(hiprand REQUIRED)
+  find_package_and_print_version(rocblas REQUIRED)
+  find_package_and_print_version(miopen REQUIRED)
+  find_package_and_print_version(miopengemm REQUIRED)
+  find_package_and_print_version(rocfft REQUIRED)
+  #find_package_and_print_version(hipsparse REQUIRED)
+  find_package_and_print_version(rocsparse REQUIRED)
 
   # TODO: hip_hcc has an interface include flag "-hc" which is only
   # recognizable by hcc, but not gcc and clang. Right now in our
@@ -132,6 +165,7 @@ IF(HIP_FOUND)
   # however currently it's just the lib name
   FIND_LIBRARY(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
   FIND_LIBRARY(hiprand_LIBRARIES hiprand HINTS ${HIPRAND_PATH}/lib)
+  FIND_LIBRARY(rocsparse_LIBRARIES rocsparse HINTS ${ROCSPARSE_PATH}/lib)
   FIND_LIBRARY(hipsparse_LIBRARIES hipsparse HINTS ${HIPSPARSE_PATH}/lib)
 
 

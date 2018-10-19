@@ -1,11 +1,11 @@
-#include <catch.hpp>
+#include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
 
 #include <cmath>
 
-TEST_CASE("Tensor/AllocatesTensorOnTheCorrectDevice", "[multi-cuda]") {
+TEST(Tensor, AllocatesTensorOnTheCorrectDevice_MultiCUDA) {
   auto tensor = at::tensor({1, 2, 3}, at::device({at::kCUDA, 1}));
-  REQUIRE(tensor.device().type() == at::Device::Type::CUDA);
-  REQUIRE(tensor.device().index() == 1);
+  ASSERT_EQ(tensor.device().type(), at::Device::Type::CUDA);
+  ASSERT_EQ(tensor.device().index(), 1);
 }

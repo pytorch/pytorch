@@ -1,5 +1,5 @@
 #include "ATen/UndefinedType.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 
 namespace at {
 
@@ -7,6 +7,9 @@ UndefinedType::UndefinedType()
     : TypeDefault(UndefinedTensorId(), /*is_variable=*/false, /*is_undefined=*/true) {}
 ScalarType UndefinedType::scalarType() const {
   return ScalarType::Undefined;
+}
+caffe2::TypeMeta UndefinedType::typeMeta() const {
+  return scalarTypeToTypeMeta(scalarType());
 }
 Backend UndefinedType::backend() const {
   return Backend::Undefined;

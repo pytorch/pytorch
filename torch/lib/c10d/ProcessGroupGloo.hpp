@@ -15,14 +15,14 @@
 
 #include <torch/csrc/utils/hash.h>
 
+#ifdef USE_CUDA
 #include <c10d/CUDAUtils.hpp>
+#endif
+
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
-
-// Forward declaration
-struct THCState;
 
 namespace c10d {
 
@@ -95,6 +95,7 @@ struct AlgorithmEntry {
   std::vector<at::Tensor> dst;
   std::function<void()> run;
 
+#ifdef USE_CUDA
   // For CUDA tensors, the following happens:
   //
   // - Input tensor A is copied to persistent tensor B on the stream
@@ -120,6 +121,7 @@ struct AlgorithmEntry {
   //
   std::vector<CUDAStream> streams;
   std::vector<CUDAEvent> events;
+#endif
 
   // Used to synchronize between calling thread and worker threads.
   std::mutex m;
@@ -170,7 +172,7 @@ class ProcessGroupGloo : public ProcessGroup {
     explicit WorkGloo();
     virtual ~WorkGloo();
 
-    bool isCompleted() const override;
+    bool isCompleted() override;
     bool isSuccess() const override;
     void synchronize() override;
     bool wait() override;
@@ -189,6 +191,7 @@ class ProcessGroupGloo : public ProcessGroup {
     // is probably cheaper (this is highly speculative).
     std::unique_ptr<::gloo::Exception> ex_;
 
+#ifdef USE_CUDA
     // List of devices and events so that we can synchronize the
     // streams of the caller with the kernels that were launched
     // asynchronously to finish this operation.
@@ -208,8 +211,63 @@ class ProcessGroupGloo : public ProcessGroup {
     bool cuda_;
     std::vector<int> devices_;
     std::vector<CUDAEvent> events_;
+#endif
 
     friend class ProcessGroupGloo;
+  };
+
+  // For send and recv operations there is no need to pass them to the
+  // thread pool as they are entirely completed by the device thread.
+  // This work object is used to synchronize completion of the send or
+  // recv operation. It keeps a reference to the tensor it is
+  // operating on to prevent it from being deallocated while the
+  // operation is still in flight.
+  class SendWork : public ProcessGroup::Work {
+   public:
+    explicit SendWork(
+        at::Tensor& tensor,
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
+
+    virtual ~SendWork() = default;
+
+    bool isCompleted() override;
+
+    bool isSuccess() const override;
+
+    void synchronize() override;
+
+    bool wait() override;
+
+    const std::exception& exception() const override;
+
+   protected:
+    at::Tensor tensor_;
+    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
+  };
+
+  class RecvWork : public ProcessGroup::Work {
+   public:
+    explicit RecvWork(
+        at::Tensor& tensor,
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+        int* srcRank);
+
+    virtual ~RecvWork() = default;
+
+    bool isCompleted() override;
+
+    bool isSuccess() const override;
+
+    void synchronize() override;
+
+    bool wait() override;
+
+    const std::exception& exception() const override;
+
+   protected:
+    at::Tensor tensor_;
+    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
+    int* srcRank_;
   };
 
   struct Options {
@@ -264,15 +322,18 @@ class ProcessGroupGloo : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
-      int dstRank) override;
+      int dstRank,
+      int tag) override;
 
   std::shared_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
-      int srcRank) override;
+      int srcRank,
+      int tag) override;
 
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
-      int* srcRank) override;
+      int* srcRank,
+      int tag) override;
 
   std::shared_ptr<ProcessGroup::Work> barrier() override;
 
@@ -323,9 +384,6 @@ class ProcessGroupGloo : public ProcessGroup {
   std::mutex queueMutex_;
   std::condition_variable queueProduceCV_;
   std::condition_variable queueConsumeCV_;
-
-  // Store copy of pointer to THCState retrieved from ::at::globalContext().
-  THCState* thcState_;
 };
 
 } // namespace c10d

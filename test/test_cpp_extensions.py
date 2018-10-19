@@ -1,6 +1,7 @@
 import os
-import unittest
+import shutil
 import sys
+import unittest
 
 import torch
 import torch.utils.cpp_extension
@@ -12,7 +13,7 @@ except ImportError:
           "Run \'python run_test.py -i cpp_extensions\' for the \'test_cpp_extensions.py\' tests.")
     raise
 
-import common
+import common_utils as common
 
 from torch.utils.cpp_extension import CUDA_HOME
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
@@ -22,7 +23,16 @@ if TEST_CUDA:
     TEST_CUDNN = TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
 
 
+IS_WINDOWS = sys.platform == 'win32'
+
+
 class TestCppExtension(common.TestCase):
+    def setUp(self):
+        if sys.platform != 'win32':
+            default_build_root = torch.utils.cpp_extension.get_default_build_root()
+            if os.path.exists(default_build_root):
+                shutil.rmtree(default_build_root)
+
     def test_extension_function(self):
         x = torch.randn(4, 4)
         y = torch.randn(4, 4)
@@ -182,7 +192,7 @@ class TestCppExtension(common.TestCase):
         '''
 
         cpp_source2 = '''
-        #include <torch/torch.h>
+        #include <torch/extension.h>
         at::Tensor sin_add(at::Tensor x, at::Tensor y);
         PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           m.def("sin_add", &sin_add, "sin(x) + sin(y)");
@@ -258,7 +268,7 @@ class TestCppExtension(common.TestCase):
             cpp_sources=cpp_source,
             functions='tanh_add',
             extra_cflags=['-g\n\n', '-O0 -Wall'],
-            extra_include_paths=['       cpp_extensions\n', '../'],
+            extra_include_paths=['       cpp_extensions\n'],
             verbose=True)
 
         x = torch.zeros(100, dtype=torch.float32)
@@ -267,111 +277,116 @@ class TestCppExtension(common.TestCase):
         self.assertEqual(z, x.tanh() + y.tanh())
 
     def test_complex_registration(self):
-        cpp_source = '''
-        #include <ATen/detail/ComplexHooksInterface.h>
-        #include <ATen/detail/VariableHooksInterface.h>
-        #include <ATen/Type.h>
-        #include <ATen/CPUFloatType.h>
-
-        #include "ATen/TensorImpl.h"
-        #include "ATen/CPUGenerator.h"
-        #include "ATen/TensorImpl.h"
-        #include "ATen/Allocator.h"
-        #include "ATen/DeviceGuard.h"
-        #include "ATen/NativeFunctions.h"
-        #include "ATen/UndefinedTensor.h"
-        #include "ATen/Utils.h"
-        #include "ATen/WrapDimUtils.h"
-        #include "ATen/core/Half.h"
-        #include "ATen/core/optional.h"
-
-        #include <cstddef>
-        #include <functional>
-        #include <memory>
-        #include <utility>
-
-        #include "ATen/Config.h"
-
-        namespace at {
-
-        struct CPUComplexFloatType : public at::CPUTypeDefault {
-
-          CPUComplexFloatType()
-            : CPUTypeDefault(CPUTensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
-
-          ScalarType scalarType() const override;
-          Backend backend() const override;
-          const char * toString() const override;
-          size_t elementSizeInBytes() const override;
-          TypeID ID() const override;
-          Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const override;
-          Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const override;
-
-          Tensor tensor(IntList size) const override {
-            // TODO: Upstream this
-            int64_t numel = 1;
-            for (auto s : size) {
-              numel *= s;
-            }
-            Storage s{c10::make_intrusive<StorageImpl>(
-                scalarTypeToDataType(ScalarType::ComplexFloat),
-                numel,
-                getCPUAllocator(),
-                /* resizable */ true)};
-            Tensor t{c10::make_intrusive<TensorImpl, UndefinedTensor>(
-                std::move(s),
-                at::CPUTensorId(),
-                /* is_variable */ false)};
-            return t;
-          }
-        };
-
-        struct ComplexHooks : public at::ComplexHooksInterface {
-          ComplexHooks(ComplexHooksArgs) {}
-          void registerComplexTypes(Context* context) const override {
-            context->registerType(Backend::CPU, ScalarType::ComplexFloat, new CPUComplexFloatType());
-          }
-        };
-
-        ScalarType CPUComplexFloatType::scalarType() const {
-          return ScalarType::ComplexFloat;
-        }
-
-        Backend CPUComplexFloatType::backend() const {
-          return Backend::CPU;
-        }
-
-        const char * CPUComplexFloatType::toString() const {
-          return "CPUComplexFloatType";
-        }
-        TypeID CPUComplexFloatType::ID() const {
-          return TypeID::CPUComplexFloat;
-        }
-
-        size_t CPUComplexFloatType::elementSizeInBytes() const {
-          return sizeof(float);
-        }
-
-        Tensor & CPUComplexFloatType::s_copy_(Tensor & dst, const Tensor & src, bool non_blocking) const {
-          AT_ERROR("not yet supported");
-        }
-
-        Tensor & CPUComplexFloatType::_s_copy_from(const Tensor & src, Tensor & dst, bool non_blocking) const {
-          AT_ERROR("not yet supported");
-        }
-
-        REGISTER_COMPLEX_HOOKS(ComplexHooks);
-
-        } // namespace at
-        '''
-
-        module = torch.utils.cpp_extension.load_inline(
+        module = torch.utils.cpp_extension.load(
             name='complex_registration_extension',
-            cpp_sources=cpp_source,
-            functions=[],
+            sources='cpp_extensions/complex_registration_extension.cpp',
             verbose=True)
 
         torch.empty(2, 2, dtype=torch.complex64)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_half_support(self):
+        '''
+        Checks for an issue with operator< ambiguity for half when certain
+        THC headers are included.
+
+        See https://github.com/pytorch/pytorch/pull/10301#issuecomment-416773333
+        for the corresponding issue.
+        '''
+        cuda_source = '''
+        #include <THC/THCNumerics.cuh>
+
+        template<typename T, typename U>
+        __global__ void half_test_kernel(const T* input, U* output) {
+            if (input[0] < input[1] || input[0] >= input[1]) {
+                output[0] = 123;
+            }
+        }
+
+        at::Tensor half_test(at::Tensor input) {
+            auto output = at::empty(1, input.options().dtype(at::kFloat));
+            AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "half_test", [&] {
+                half_test_kernel<scalar_t><<<1, 1>>>(
+                    input.data<scalar_t>(),
+                    output.data<float>());
+            });
+            return output;
+        }
+        '''
+
+        module = torch.utils.cpp_extension.load_inline(
+            name='half_test_extension',
+            cpp_sources='at::Tensor half_test(at::Tensor input);',
+            cuda_sources=cuda_source,
+            functions=['half_test'],
+            verbose=True)
+
+        x = torch.randn(3, device='cuda', dtype=torch.half)
+        result = module.half_test(x)
+        self.assertEqual(result[0], 123)
+
+    def test_reload_jit_extension(self):
+        def compile(code):
+            return torch.utils.cpp_extension.load_inline(
+                name='reloaded_jit_extension',
+                cpp_sources=code,
+                functions='f',
+                verbose=True)
+
+        module = compile('int f() { return 123; }')
+        self.assertEqual(module.f(), 123)
+
+        module = compile('int f() { return 456; }')
+        self.assertEqual(module.f(), 456)
+        module = compile('int f() { return 456; }')
+        self.assertEqual(module.f(), 456)
+
+        module = compile('int f() { return 789; }')
+        self.assertEqual(module.f(), 789)
+
+    @unittest.skipIf(IS_WINDOWS, "C++ API not yet supported on Windows")
+    def test_cpp_api_extension(self):
+        here = os.path.abspath(__file__)
+        pytorch_root = os.path.dirname(os.path.dirname(here))
+        api_include = os.path.join(pytorch_root, 'torch', 'csrc', 'api', 'include')
+        module = torch.utils.cpp_extension.load(
+            name='cpp_api_extension',
+            sources='cpp_extensions/cpp_api_extension.cpp',
+            extra_include_paths=api_include,
+            extra_cflags=[] if IS_WINDOWS else ['-UTORCH_API_INCLUDE_EXTENSION_H'],
+            verbose=True)
+
+        net = module.Net(3, 5)
+
+        self.assertTrue(net.training)
+        net.eval()
+        self.assertFalse(net.training)
+        net.train()
+        self.assertTrue(net.training)
+        net.eval()
+
+        input = torch.randn(2, 3, dtype=torch.float32)
+        output = net.forward(input)
+        self.assertEqual(output, net.forward(input))
+        self.assertEqual(list(output.shape), [2, 5])
+
+        bias = net.get_bias()
+        self.assertEqual(list(bias.shape), [5])
+        net.set_bias(bias + 1)
+        self.assertEqual(net.get_bias(), bias + 1)
+        output2 = net.forward(input)
+
+        self.assertNotEqual(output + 1, output2)
+
+        self.assertEqual(len(net.parameters()), 4)
+
+        p = net.named_parameters()
+        self.assertEqual(type(p), dict)
+        self.assertEqual(len(p), 4)
+        self.assertIn('fc.weight', p)
+        self.assertIn('fc.bias', p)
+        self.assertIn('bn.weight', p)
+        self.assertIn('bn.bias', p)
 
 
 if __name__ == '__main__':

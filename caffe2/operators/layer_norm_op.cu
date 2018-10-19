@@ -92,7 +92,7 @@ bool LayerNormOp<CUDAContext>::DoRunWithType<float>() {
   const int right = input.size_from_dim(canonical_axis);
 
   output->ResizeLike(input);
-  std::vector<TIndex> stats_dims(
+  std::vector<int64_t> stats_dims(
       input.dims().begin(), input.dims().begin() + canonical_axis);
   stats_dims.push_back(1);
   mean->Resize(stats_dims);
@@ -106,7 +106,7 @@ bool LayerNormOp<CUDAContext>::DoRunWithType<float>() {
       segs.begin(),
       std::bind1st(std::multiplies<int>(), right));
 
-  seg_indices_.Resize(vector<size_t>{segs.size()});
+  seg_indices_.Resize(at::IntList{static_cast<int64_t>(segs.size())});
   context_.CopyBytesFromCPU(
       sizeof(int) * segs.size(),
       static_cast<void*>(segs.data()),
@@ -256,12 +256,12 @@ bool LayerNormGradientOp<CUDAContext>::DoRunWithType<float>() {
   const unsigned long right = norm_inputs.size_from_dim(canonical_axis);
 
   ginput->ResizeLike(norm_inputs);
-  std::vector<TIndex> stats_dims(
+  std::vector<int64_t> stats_dims(
       norm_inputs.dims().begin(), norm_inputs.dims().begin() + canonical_axis);
   stats_dims.push_back(1);
   dmean_.Resize(stats_dims);
   dstdev_.Resize(stats_dims);
-  gscratch_.Resize(std::vector<size_t>{left, right});
+  gscratch_.Resize(at::IntList{static_cast<int64_t>(left), static_cast<int64_t>(right)});
 
   std::vector<int> segs(left + 1);
   std::iota(segs.begin(), segs.end(), 0);

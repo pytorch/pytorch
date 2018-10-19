@@ -7,11 +7,14 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 from hypothesis import assume, given, settings, HealthCheck
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python.test_util import IN_CIRCLECI_FLAKY_ENV
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
+import unittest
 
 
-class TestFcOperator(hu.HypothesisTestCase):
+class TestFcOperator(serial.SerializedTestCase):
     def _run_test(self, n, m, k, transposed, multi_dim, dtype, engine, gc, dc):
         if dtype == np.float16:
             # fp16 only supported with CUDA
@@ -75,8 +78,9 @@ class TestFcOperator(hu.HypothesisTestCase):
             self.assertGradientChecks(gc, op, [X, W, b], i, [0],
                                       threshold=threshold, stepsize=stepsize)
 
+    @unittest.skipIf(IN_CIRCLECI_FLAKY_ENV, "FIXME: flaky test in CircleCI")
     @settings(max_examples=50, suppress_health_check=[HealthCheck.filter_too_much])
-    @given(n=st.integers(1, 5),
+    @serial.given(n=st.integers(1, 5),
            m=st.integers(0, 5),
            k=st.integers(1, 5),
            multi_dim=st.sampled_from([True, False]),

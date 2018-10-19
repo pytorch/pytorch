@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/InitialTensorOptions.h>
 #include <ATen/native/sparse/SparseUtils.h>
 
 #include <TH/THBlasUtils.h>
@@ -58,17 +59,17 @@ Tensor _values_sparse(const SparseTensor& self) {
  ******************************************************************************/
 
 /* Empty init */
-SparseTensor new_sparse(const SparseType& dtype) {
-  AT_ASSERT(!dtype.is_undefined());
-  AT_ASSERT(!dtype.is_variable());
-  AT_ASSERT(dtype.is_sparse());
+SparseTensor new_sparse(const TensorOptions& options) {
+  AT_ASSERT(!options.is_variable());
+  AT_ASSERT(options.layout() == kSparse);
   TensorTypeId type_id;
-  if (dtype.is_cuda()) {
+  if (options.device().is_cuda()) {
     type_id = SparseCUDATensorId();
   } else {
     type_id = SparseCPUTensorId();
   }
-  return SparseTensor(c10::make_intrusive<SparseTensorImpl>(type_id, dtype.scalarType()).release(), /* retain */ false);
+  return detail::make_tensor<SparseTensorImpl>(
+      type_id, scalarTypeToTypeMeta(options.dtype()));
 }
 
 /*** Helper methods ***/
@@ -98,7 +99,7 @@ SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& val
     computed_indices_sizes.add_(1); // len = max_index + 1
     LongTensor cpu_computed_indices_sizes;
     if (computed_indices_sizes.is_cuda()) {
-      cpu_computed_indices_sizes = at::CPU(kLong).tensor(computed_indices_sizes.sizes());
+      cpu_computed_indices_sizes = at::empty(computed_indices_sizes.sizes(), at::initialTensorOptions().dtype(kLong));
       cpu_computed_indices_sizes.copy_(computed_indices_sizes);
     } else {
       cpu_computed_indices_sizes = computed_indices_sizes;
@@ -121,8 +122,8 @@ SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& val
   return _new_with_dims_and_tensor_sparse(dtype, sparseDims, denseDims, computed_sizes, indices, values);
 }
 
-SparseTensor new_with_dims_and_size_sparse(const SparseType& dtype, int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
-  SparseTensor self = new_sparse(dtype);
+SparseTensor new_with_dims_and_size_sparse(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size, const TensorOptions& options) {
+  SparseTensor self = new_sparse(options);
   AT_CHECK(size.size() != 0,
     "cannot construct sparse tensor with 0 dimensions and no values; you must specify at least 1 dimension if you want to create a sparse tensor with no elements, \
 or you must provide a single-element `values` tensor (e.g. x = torch.sparse_coo_tensor(torch.zeros(0, 1), 12.3, [])) if you want to create a scalar sparse tensor");
@@ -130,8 +131,25 @@ or you must provide a single-element `values` tensor (e.g. x = torch.sparse_coo_
   return self;
 }
 
-SparseTensor new_with_size_sparse(const SparseType& dtype, ArrayRef<int64_t> size) {
-  return new_with_dims_and_size_sparse(dtype, size.size(), 0, size);
+Tensor empty_sparse(IntList size, const TensorOptions& options) {
+  AT_CHECK(size.size() != 0,
+    "cannot construct sparse tensor with 0 dimensions and no values; you must specify at least 1 dimension if you want to create a sparse tensor with no elements, \
+     or you must provide a single-element `values` tensor (e.g. x = torch.sparse_coo_tensor(torch.zeros(0, 1), 12.3, [])) if you want to create a scalar sparse tensor");
+  AT_ASSERT(!options.is_variable());
+  AT_ASSERT(options.layout() == kSparse);
+  TensorTypeId type_id;
+  if (options.device().type() == kCUDA) {
+    type_id = SparseCUDATensorId();
+  } else {
+    type_id = SparseCPUTensorId();
+  }
+  auto tensor = Tensor(c10::make_intrusive<SparseTensorImpl>(type_id, scalarTypeToTypeMeta(options.dtype())));
+  _get_sparse_impl(tensor)->resize_and_clear_(size.size(), 0, size);
+  return tensor;
+}
+
+SparseTensor new_with_size_sparse(IntList size, const TensorOptions& options) {
+  return new_with_dims_and_size_sparse(size.size(), 0, size, options);
 }
 
 // NOTE: new_with_tensor_and_size_unsafe_sparse() differs from new_with_tensor_and_size_sparse()
@@ -203,8 +221,8 @@ SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Te
 // NB: Deleted newWithSizeNd variants
 
 SparseTensor clone_sparse(const SparseTensor& self) {
-  SparseTensor other = new_with_dims_and_size_sparse(self.type(), self._sparseDims(), self._denseDims(), self.sizes());
-  _copy_into_sparse(other, _get_sparse_impl(self)->indices(), _get_sparse_impl(self)->values());
+  SparseTensor other = new_with_dims_and_size_sparse(self._sparseDims(), self._denseDims(), self.sizes(), self.options());
+  _copy_into_sparse(other, _get_sparse_impl(self)->indices(), _get_sparse_impl(self)->values(), true);
   _get_sparse_impl(other)->set_coalesced(self.is_coalesced());
   return other;
 }
@@ -243,11 +261,11 @@ Tensor sparse_to_dense(const SparseTensor& self) {
   return dst.add_(self);
 }
 
-SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src) {
+SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non_blocking) {
   if (isSameTensor(self, src)) return self;
   _get_sparse_impl(self)->resize_(src._sparseDims(), src._denseDims(), src.sizes());
   // NB: This seems to copy the underlying full indices/values buffer
-  _copy_into_sparse(self, _get_sparse_impl(src)->indices(), _get_sparse_impl(src)->values());
+  _copy_into_sparse(self, _get_sparse_impl(src)->indices(), _get_sparse_impl(src)->values(), non_blocking);
   _get_sparse_impl(self)->set_coalesced(src.is_coalesced());
   return self;
 }
@@ -257,11 +275,15 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(!self.is_variable());
   AT_ASSERT(self.is_sparse());
 
-  if (self._nnz() < 2) {
-    _get_sparse_impl(self)->set_coalesced(true);
-  }
   if (self.is_coalesced()) {
     return self;
+  }
+  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
+  // we should keep the original tensor intact and do coalesce on a copy of the tensor
+  if (self._nnz() < 2) {
+    SparseTensor dst = self.clone();
+    _get_sparse_impl(dst)->set_coalesced(true);
+    return dst;
   }
 
   LongTensor indices = self._indices();
@@ -279,11 +301,11 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
     factor *= self.size(d);
   }
 
-  SparseTensor dst = new_sparse(self.type());
+  SparseTensor dst = new_sparse(self.options());
   _get_sparse_impl(dst)->resize_(sparseDims, denseDims, self.sizes());
   // TODO: is there a more idiomatic way to do this?
-  LongTensor newIndices = indices.type().tensor(indices.sizes());
-  Tensor newValues = values.type().tensor(values.sizes());
+  LongTensor newIndices = at::empty(indices.sizes(), indices.options());
+  Tensor newValues = at::empty(values.sizes(), values.options());
   _alias_into_sparse(dst, newIndices, newValues);
 
   LongTensor indicesBuffer;
@@ -306,13 +328,17 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
           int64_t pos = indicesPermutationAccessor[j];
           int64_t curr = indicesBufferAccessor[j];
           if (curr == prev) {
-            THBlas_axpy<scalar_t>(blockSize, 1, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+            if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
+              THBlas_axpy<scalar_t>(blockSize, 1, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+            }
           } else {
             ++i;
             for (int64_t d = 0; d < sparseDims; d++) {
               newIndicesAccessor[d][i] = indicesAccessor[d][pos];
             }
-            THBlas_copy<scalar_t>(blockSize, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+            if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
+              THBlas_copy<scalar_t>(blockSize, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+            }
           }
           prev = curr;
         }
@@ -340,11 +366,15 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   int64_t sparseDims = mask._sparseDims();
   LongTensor mask_indices = mask._indices();
   Tensor mask_values = mask._values();
-  Tensor r_values = r._values().type().tensor(mask_values.sizes());
+  Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
   _alias_into_sparse(r, mask_indices.clone(), r_values);
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
   int64_t r_nnz = mask._nnz();
   _get_sparse_impl(r)->set_nnz_and_narrow(r_nnz);
+  if (t.numel() == 0) {  // if t is an empty tensor, there is no need to mask its elements
+    return r;
+  }
+
   // NB: Relies on mask._nnz() == 0 test above
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
 
@@ -380,7 +410,7 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
 }
 
 SparseTensor sparse_mask_cpu(const Tensor& t, SparseTensorRef mask) {
-  SparseTensor r = t.type().toSparse().tensor();
+  SparseTensor r = at::empty({0}, t.options().layout(kSparse));
   sparse_mask_out_cpu(r, t, mask.tref);
   return r;
 }

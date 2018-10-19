@@ -119,7 +119,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       // If the helper bias multiplier is not image size, reshape and fill it
       // with
       // one.
-      bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
+      bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
       math::Set<T, Context>(
           output_image_size,
           static_cast<T>(1),
@@ -274,9 +274,9 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   // The col buffer is stored in CHW order as well - kernel_dim, and the
   // height and width.
-  vector<TIndex> img_shape;
+  vector<int64_t> img_shape;
   img_shape.assign(X.dims().begin() + 1, X.dims().end());
-  vector<TIndex> col_buffer_shape;
+  vector<int64_t> col_buffer_shape;
   col_buffer_shape.push_back(C * kernel_dims_size);
   col_buffer_shape.insert(
       col_buffer_shape.end(), output_dims.begin(), output_dims.end());
@@ -301,7 +301,7 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     dbias->Resize(M);
     if (bias_multiplier_.size() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
+      bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
       math::Set<T, Context>(
           output_image_size,
           static_cast<T>(1),

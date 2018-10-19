@@ -16,10 +16,10 @@ template <typename Context, typename I_Type, typename O_Type>
 void FillTensor(
     caffe2::Workspace* ws,
     const std::string& name,
-    const std::vector<caffe2::TIndex>& shape,
+    const std::vector<int64_t>& shape,
     const std::vector<I_Type>& values) {
   auto* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(Context::GetDeviceType());
+  auto* tensor = BlobGetMutableTensor(blob, Context::GetDeviceType());
   tensor->Resize(shape);
   auto* mutable_data = tensor->template mutable_data<O_Type>();
   const O_Type* data = reinterpret_cast<const O_Type*>(values.data());

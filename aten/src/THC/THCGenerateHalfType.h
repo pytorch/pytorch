@@ -2,9 +2,9 @@
 #error "You must define THC_GENERIC_FILE before including THGenerateHalfType.h"
 #endif
 
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 
-#define scalar_t half
+#define scalar_t THHalf
 #define accreal float
 #define Real Half
 

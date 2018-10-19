@@ -25,6 +25,7 @@ TYPE_MAP = {
     'std::array<bool,2>': 'bool[2]',
     'std::array<bool,3>': 'bool[3]',
     'std::array<bool,4>': 'bool[4]',
+    'std::string': 'str',
     'Scalar': 'Scalar',
     'Tensor': 'Tensor',
     'TensorList': 'Tensor[]',
@@ -56,16 +57,18 @@ def jit_type_of(arg):
 # map from aten 'simple_type' to the function that will turn a tensor into
 # that type
 FROM_IVALUE = {
-    'Device': 'as_device({}.toIntList()->elements())',
+    'Device': '{}.to<at::Device>()',
     'IntList': '{}.toIntList()->elements()',
-    'Layout': 'static_cast<at::Layout>({}.toInt())',
+    'Layout': '{}.to<at::Layout>()',
     'Scalar': '{}.toScalar()',
-    'ScalarType': 'static_cast<at::ScalarType>({}.toInt())',
+    'ScalarType': '{}.to<at::ScalarType>()',
     'Tensor': '{}.toTensor()',
     'TensorList': '{}.toTensorList()->elements()',
-    'bool': 'bool({}.toInt())',
+    'bool': '{}.toBool()',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
+    'std::string': '{}.toString()->string()',
+    'Generator': 'nullptr',
     'std::array<bool,2>': 'as_bool_array<2>({}.toIntList()->elements())',
     'std::array<bool,3>': 'as_bool_array<3>({}.toIntList()->elements())',
     'std::array<bool,4>': 'as_bool_array<4>({}.toIntList()->elements())',
@@ -121,7 +124,7 @@ def is_magic_method(api_name):
     return api_name.startswith('__') and api_name.endswith('__')
 
 
-blacklisted_types = {'SparseTensorRef', 'Storage', 'ScalarType', 'optional<ScalarType>', 'std::string', 'void*'}
+blacklisted_types = {'SparseTensorRef', 'Storage', 'void*'}
 default_only_types = {'Generator'}
 
 
@@ -195,12 +198,9 @@ def gen_jit_dispatch(declarations, out, template_path):
 
         real_inputs = 0
         for arg in decl['arguments']:
-            if arg['simple_type'] in default_only_types:
-                arguments.append(arg['default'])
-            else:
-                value = '(std::move(peek(stack, {}, {})))'.format(real_inputs, num_inputs)
-                arguments.append(from_ivalue(arg, value))
-                real_inputs += 1
+            value = '(std::move(peek(stack, {}, {})))'.format(real_inputs, num_inputs)
+            arguments.append(from_ivalue(arg, value))
+            real_inputs += 1
 
         call = get_invocation(decl, arguments, num_inputs)
 
@@ -235,11 +235,7 @@ def gen_jit_dispatch(declarations, out, template_path):
         sorted_decls = sorted(jit_decls, key=lambda decl: decl['name'])
         grouped_decls = [list(g) for _, g in
                          groupby(sorted_decls, key=lambda decl: decl['name'])]
-        result = []
-        for group in grouped_decls:
-            sorted_decls = sorted(group, key=declkey)
-            result.extend(sorted_decls)
-        return result
+        return [sorted(g, key=declkey) for g in grouped_decls]
 
     # We need to add methods implemented manually in TensorImpl
     tensor_impl_methods = [{
@@ -274,16 +270,31 @@ def gen_jit_dispatch(declarations, out, template_path):
                 ])
                 decl['has_tensor_options'] = True
 
-    jit_decls = sort_decls(jit_decls)
-    for decl in jit_decls:
-        ops.append(OPERATOR.substitute(signature=signature(decl),
-                                       op=emit_decl_variant(decl)))
+    # Group and sort the generated snippets to ensure that the
+    # generation is deterministic
+    jit_decl_groups = sort_decls(jit_decls)
 
-    # Sort the generated snippets to ensure that the generation is deterministic
-    env = {
-        'constructors': ops,
-    }
-    write(out, 'register_aten_ops.cpp', REGISTER_ATEN_OPS_CPP, env)
+    # NOTE: see Note [Sharded File] at the top of the register_aten_ops.cpp
+    # template regarding sharding of the generated files.
+    #
+    # If you edit the number of shards here, you will also have to
+    # modify generate_code.py, torch/CMakeLists.txt, and the TARGETS
+    # files.
+    num_shards = 3
+    shards = [[] for _ in range(num_shards)]
+
+    # ops are assigned arbitrarily but stably to a file based on hash
+    for group in jit_decl_groups:
+        x = sum(ord(c) for c in group[0]['name']) % num_shards
+        for decl in group:
+            shards[x].append(OPERATOR.substitute(signature=signature(decl),
+                                                 op=emit_decl_variant(decl)))
+
+    for i, shard in enumerate(shards):
+        env = {
+            'constructors': shard,
+        }
+        write(out, 'register_aten_ops_%d.cpp' % i, REGISTER_ATEN_OPS_CPP, env)
 
     # NB: Operate on aten_decls, not jit_decls, because VariableType is
     # a client for these symbols as well
@@ -351,7 +362,7 @@ def main():
                         help='path to Declarations.yaml')
     parser.add_argument('out', metavar='OUT',
                         help='path to output directory')
-    parser.add_argument('template-path', metavar='TEMPLATE_PATH',
+    parser.add_argument('template_path', metavar='TEMPLATE_PATH',
                         help='path to templates directory')
     args = parser.parse_args()
     gen_jit_dispatch(args.declarations, args.out, args.template_path)

@@ -8,8 +8,8 @@ graph {
     attribute {
       name: "value"
       t {
-        data_type: DOUBLE
-        raw_data: "\000\000\000\000\000\000\360?"
+        data_type: INT64
+        raw_data: "\001\000\000\000\000\000\000\000"
       }
       type: TENSOR
     }
@@ -55,5 +55,5 @@ graph {
   }
 }
 opset_import {
-  version: 7
+  version: 9
 }

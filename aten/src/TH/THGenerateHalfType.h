@@ -5,8 +5,8 @@
 #include "THHalf.h"
 #define scalar_t THHalf
 #define accreal float
-#define TH_CONVERT_REAL_TO_ACCREAL(_val) TH_half2float(_val)
-#define TH_CONVERT_ACCREAL_TO_REAL(_val) TH_float2half(_val)
+#define TH_CONVERT_REAL_TO_ACCREAL(_val) (accreal)(_val)
+#define TH_CONVERT_ACCREAL_TO_REAL(_val) (scalar_t)(_val)
 #define Real Half
 #define THInf TH_HALF_BITS_TO_LITERAL(TH_HALF_INF)
 #define TH_REAL_IS_HALF

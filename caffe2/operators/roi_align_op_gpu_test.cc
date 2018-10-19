@@ -12,13 +12,13 @@ namespace {
 
 template <class Context>
 void AddConstInput(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const float value,
     const string& name,
     Context* context,
     Workspace* ws) {
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(Context::GetDeviceType());
+  auto* tensor = BlobGetMutableTensor(blob, Context::GetDeviceType());
   tensor->Resize(shape);
   math::Set<float, Context>(
       tensor->size(), value, tensor->template mutable_data<float>(), context);
@@ -27,19 +27,19 @@ void AddConstInput(
 
 template <class Context>
 void AddInput(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const vector<float>& values,
     const string& name,
     Workspace* ws);
 
 template <>
 void AddInput<CPUContext>(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const vector<float>& values,
     const string& name,
     Workspace* ws) {
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
       tensor->template mutable_data<float>(), tensor->size());
@@ -48,7 +48,7 @@ void AddInput<CPUContext>(
 
 template <>
 void AddInput<CUDAContext>(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const vector<float>& values,
     const string& name,
     Workspace* ws) {
@@ -57,7 +57,7 @@ void AddInput<CUDAContext>(
   tmp_vec.array() = utils::AsEArrXt(values);
 
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CUDA);
+  auto* tensor = BlobGetMutableTensor(blob, CUDA);
   tensor->CopyFrom(tmp);
 }
 
@@ -102,10 +102,10 @@ void CreateAndRun(
     vector<float> features(N * C * H * W);
     std::iota(features.begin(), features.end(), 0);
     // utils::AsEArrXt(features) /= features.size();
-    AddInput<Context>(vector<TIndex>{N, C, H, W}, features, "X", &ws);
+    AddInput<Context>(vector<int64_t>{N, C, H, W}, features, "X", &ws);
     const int n_rois = test_params.n_rois;
     const vector<float>& rois = test_params.rois_array;
-    AddInput<Context>(vector<TIndex>{n_rois, 5}, rois, "R", &ws);
+    AddInput<Context>(vector<int64_t>{n_rois, 5}, rois, "R", &ws);
   } else {
     const int N = 2;
     const int C = 3;
@@ -114,7 +114,7 @@ void CreateAndRun(
     vector<float> features(N * C * H * W);
     std::iota(features.begin(), features.end(), 0);
     // utils::AsEArrXt(features) /= features.size();
-    AddInput<Context>(vector<TIndex>{N, C, H, W}, features, "X", &ws);
+    AddInput<Context>(vector<int64_t>{N, C, H, W}, features, "X", &ws);
     vector<float> rois{0, 0,            0,            79,           59,
                        0, 0,            5.0005703f,   52.63237f,    43.69501495f,
                        0, 24.13628387f, 7.51243401f,  79,           46.06628418f,
@@ -124,7 +124,7 @@ void CreateAndRun(
                        0, 23.57396317f, 29.98791885f, 79,           59,
                        0, 0,            41.90219116f, 79,           59,
                        0, 0,            23.30098343f, 79,           59};
-    AddInput<Context>(vector<TIndex>{9, 5}, rois, "R", &ws);
+    AddInput<Context>(vector<int64_t>{9, 5}, rois, "R", &ws);
   }
 
   std::vector<unique_ptr<OperatorBase>> ops;

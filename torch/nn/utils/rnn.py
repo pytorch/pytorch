@@ -215,10 +215,9 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
         torch.Size([25, 3, 300])
 
     Note:
-        This function returns a Tensor of size ``T x B x *`` or ``B x T x *`` where `T` is the
-            length of the longest sequence.
-        Function assumes trailing dimensions and type of all the Tensors
-            in sequences are same.
+        This function returns a Tensor of size ``T x B x *`` or ``B x T x *``
+        where `T` is the length of the longest sequence. This function assumes
+        trailing dimensions and type of all the Tensors in sequences are same.
 
     Arguments:
         sequences (list[Tensor]): list of variable length sequences.
@@ -227,7 +226,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
         padding_value (float, optional): value for padded elements. Default: 0.
 
     Returns:
-        Tensor of size ``T x B x *`` if batch_first is False
+        Tensor of size ``T x B x *`` if :attr:`batch_first` is ``False``.
         Tensor of size ``B x T x *`` otherwise
     """
 

@@ -13,11 +13,11 @@ struct Argument {
   Argument(
       std::string name = "",
       TypePtr type = nullptr,
-      at::optional<int32_t> N = at::nullopt,
-      at::optional<IValue> default_value = at::nullopt,
+      c10::optional<int32_t> N = c10::nullopt,
+      c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false)
       : name(std::move(name)),
-        type(type? type : DynamicType::get()),
+        type(type ? type : DynamicType::get()),
         N(std::move(N)),
         default_value(std::move(default_value)),
         kwarg_only(kwarg_only) {}
@@ -28,9 +28,9 @@ struct Argument {
   // e.g. for int[3]: type = ListType::ofInts(), N = 3
   // If present, this will allow scalars to be broadcast to this length to
   // become a list.
-  at::optional<int32_t> N;
+  c10::optional<int32_t> N;
 
-  at::optional<IValue> default_value;
+  c10::optional<IValue> default_value;
   // is this only specifyable as a keyword argument?
   bool kwarg_only;
 };
@@ -46,7 +46,10 @@ struct FunctionSchema {
         arguments(std::move(arguments)),
         returns(std::move(returns)),
         is_vararg(is_vararg),
-        is_varret(is_varret) {}
+        is_varret(is_varret),
+        is_mutable(isMutable()) {
+    validate();
+  }
   FunctionSchema(
       Symbol name,
       std::vector<Argument> arguments,
@@ -58,7 +61,9 @@ struct FunctionSchema {
             std::move(std::move(arguments)),
             std::move(std::move(returns)),
             is_vararg,
-            is_varret) {}
+            is_varret) {
+    validate();
+  }
 
   const std::string name;
   const std::vector<Argument> arguments;
@@ -69,12 +74,31 @@ struct FunctionSchema {
   // arguments are not checked by schema
   const bool is_vararg;
   const bool is_varret;
-  at::optional<int> argumentIndexWithName(const std::string& name) const {
+  const bool is_mutable;
+
+  c10::optional<int> argumentIndexWithName(const std::string& name) const {
     for(size_t i = 0; i < arguments.size(); ++i) {
       if(name == arguments[i].name)
         return i;
     }
-    return at::nullopt;
+    return c10::nullopt;
+  }
+
+ private:
+  bool isMutable() const {
+    return std::any_of(
+        arguments.cbegin(), arguments.cend(), [](const Argument& arg) {
+          return arg.type == WorldType::get();
+        });
+  }
+
+  void validate() const {
+    if (is_mutable) {
+      // Mutable schemas should have a world token as the first argument
+      // and return.
+      JIT_ASSERT(arguments.at(0).type == WorldType::get());
+      JIT_ASSERT(returns.at(0).type == WorldType::get());
+    }
   }
 };
 

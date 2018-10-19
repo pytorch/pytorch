@@ -5,7 +5,7 @@ namespace python {
 
 namespace py = pybind11;
 
-CAFFE_DEFINE_REGISTRY(PybindAdditionRegistry, PybindAddition, py::module&);
+C10_DEFINE_REGISTRY(PybindAdditionRegistry, PybindAddition, py::module&);
 
 } // namespace python
 } // namespace caffe2

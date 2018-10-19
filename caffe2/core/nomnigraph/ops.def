@@ -72,3 +72,6 @@ CopyFromOpenCL
 NCHW2NHWC
 NHWC2NCHW
 
+Declare
+Export
+

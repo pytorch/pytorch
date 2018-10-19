@@ -8,16 +8,16 @@ namespace caffe2 {
 template <class Context>
 void fp16_momentum_sgd_update(
     int N,
-    const float16* g,
-    const float16* m,
-    float16* ng,
-    float16* nm,
+    const at::Half* g,
+    const at::Half* m,
+    at::Half* ng,
+    at::Half* nm,
     const float* lr,
     float momentum,
     bool nesterov,
     float weight_decay,
     bool fp32_update,
-    float16* param,
+    at::Half* param,
     Context* /*context*/) {}
 
 template <typename T, class Context>
@@ -37,8 +37,8 @@ class FP16MomentumSGDUpdateOp final : public Operator<Context> {
   bool RunOnDevice() override {
     auto device_type = Context::GetDeviceType();
     // Iter live on the CPU
-    CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor>(GRAD, device_type));
-    CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor>(MOMENTUM, device_type));
+    CAFFE_ENFORCE(OperatorBase::InputIsTensorType(GRAD, device_type));
+    CAFFE_ENFORCE(OperatorBase::InputIsTensorType(MOMENTUM, device_type));
     CAFFE_ENFORCE(Input(LR).size() == 1);
     CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENTUM).size());
     Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));

@@ -2,8 +2,7 @@
 #define THC_GENERIC_FILE "generic/THCTensorMath.cu"
 #else
 
-THC_API void
-THCTensor_(fill)(THCState* state, THCTensor *self_, scalar_t value)
+void THCTensor_(fill)(THCState* state, THCTensor *self_, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
 
@@ -15,8 +14,7 @@ THCTensor_(fill)(THCState* state, THCTensor *self_, scalar_t value)
   THCudaCheck(cudaGetLastError());
 }
 
-THC_API void
-THCTensor_(zero)(THCState *state, THCTensor *self_)
+void THCTensor_(zero)(THCState *state, THCTensor *self_)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   if (THCTensor_(isContiguous)(state, self_)) {
@@ -35,16 +33,14 @@ THCTensor_(zero)(THCState *state, THCTensor *self_)
   THCudaCheck(cudaGetLastError());
 }
 
-THC_API void
-THCTensor_(zerosLike)(THCState *state, THCTensor *r_, THCTensor *input)
+void THCTensor_(zerosLike)(THCState *state, THCTensor *r_, THCTensor *input)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
   THCTensor_(resizeAs)(state, r_, input);
   THCTensor_(zero)(state, r_);
 }
 
-THC_API void
-THCTensor_(onesLike)(THCState *state, THCTensor *r_, THCTensor *input)
+void THCTensor_(onesLike)(THCState *state, THCTensor *r_, THCTensor *input)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
   THCTensor_(resizeAs)(state, r_, input);

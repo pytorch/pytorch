@@ -29,19 +29,18 @@ OPERATOR_SCHEMA(IncrementByOne)
     .NumInputs(1).NumOutputs(1).AllowInplace({{0, 0}});
 
 REGISTER_CPU_OPERATOR(IncrementByOne, IncrementByOneOp);
-REGISTER_CUDA_OPERATOR(IncrementByOne,
-                       GPUFallbackOp<IncrementByOneOp>);
+REGISTER_CUDA_OPERATOR(IncrementByOne, GPUFallbackOp);
 
 TEST(OperatorFallbackTest, IncrementByOneOp) {
   OperatorDef op_def = CreateOperatorDef(
       "IncrementByOne", "", vector<string>{"X"},
       vector<string>{"X"});
   Workspace ws;
-  Tensor source_tensor(vector<TIndex>{2, 3}, CPU);
+  Tensor source_tensor(vector<int64_t>{2, 3}, CPU);
   for (int i = 0; i < 6; ++i) {
     source_tensor.mutable_data<float>()[i] = i;
   }
-  ws.CreateBlob("X")->GetMutableTensor(CPU)->CopyFrom(source_tensor);
+  BlobGetMutableTensor(ws.CreateBlob("X"), CPU)->CopyFrom(source_tensor);
   unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
   EXPECT_TRUE(op.get() != nullptr);
   EXPECT_TRUE(op->Run());
@@ -61,11 +60,11 @@ TEST(OperatorFallbackTest, GPUIncrementByOneOp) {
       vector<string>{"X"});
   op_def.mutable_device_option()->set_device_type(PROTO_CUDA);
   Workspace ws;
-  Tensor source_tensor(vector<TIndex>{2, 3}, CPU);
+  Tensor source_tensor(vector<int64_t>{2, 3}, CPU);
   for (int i = 0; i < 6; ++i) {
     source_tensor.mutable_data<float>()[i] = i;
   }
-  ws.CreateBlob("X")->GetMutableTensor(CUDA)->CopyFrom(source_tensor);
+  BlobGetMutableTensor(ws.CreateBlob("X"), CUDA)->CopyFrom(source_tensor);
   unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
   EXPECT_TRUE(op.get() != nullptr);
   EXPECT_TRUE(op->Run());

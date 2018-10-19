@@ -4,26 +4,27 @@ import tempfile
 import unittest
 
 import torch
+from torch import ops
 
-from model import Model
+from model import Model, get_custom_op_library_path
 
 
 class TestCustomOperators(unittest.TestCase):
     def setUp(self):
-        self.library_path = os.path.abspath('build/libcustom_ops.so')
-        torch.ops.load_library(self.library_path)
+        self.library_path = get_custom_op_library_path()
+        ops.load_library(self.library_path)
 
     def test_custom_library_is_loaded(self):
-        self.assertIn(self.library_path, torch.ops.loaded_libraries)
+        self.assertIn(self.library_path, ops.loaded_libraries)
 
     def test_calling_custom_op(self):
-        output = torch.ops.custom.op(torch.ones(5), 2.0, 3)
+        output = ops.custom.op(torch.ones(5), 2.0, 3)
         self.assertEqual(type(output), list)
         self.assertEqual(len(output), 3)
         for tensor in output:
             self.assertTrue(tensor.allclose(torch.ones(5) * 2))
 
-        output = torch.ops.custom.op_with_defaults(torch.ones(5))
+        output = ops.custom.op_with_defaults(torch.ones(5))
         self.assertEqual(type(output), list)
         self.assertEqual(len(output), 1)
         self.assertTrue(output[0].allclose(torch.ones(5)))

@@ -64,6 +64,8 @@ struct Parser {
       std::vector<Expr> exprs = { prefix };
       while(L.cur().kind != end) {
         L.expect(',');
+        if (L.cur().kind == end)
+          break;
         exprs.push_back(parseExp());
       }
       auto list = List<Expr>::create(prefix.range(), exprs);
@@ -177,7 +179,7 @@ struct Parser {
     int binary_prec;
     while (shared.isBinary(L.cur().kind, &binary_prec)) {
       if (binary_prec <= precedence) // not allowed to parse something which is
-        // not greater than 'precedenc'
+        // not greater than 'precedence'
         break;
 
       int kind = L.cur().kind;
@@ -263,8 +265,10 @@ struct Parser {
   StringLiteral parseStringLiteral() {
     auto range = L.cur().range;
     std::stringstream ss;
-    while(L.cur().kind == TK_STRINGLITERAL)
-      ss << parseString(L.cur().range, L.next().text());
+    while(L.cur().kind == TK_STRINGLITERAL) {
+      auto literal_range = L.cur().range;
+      ss << parseString(literal_range, L.next().text());
+    }
     return StringLiteral::create(range, ss.str());
   }
 
@@ -339,7 +343,8 @@ struct Parser {
     auto param_types = parseList('(', ',', ')', &Parser::parseBareTypeAnnotation);
     TreeRef return_type;
     if (L.nextIf(TK_ARROW)) {
-      return_type = Maybe<Expr>::create(L.cur().range, parseExp());
+      auto return_type_range = L.cur().range;
+      return_type = Maybe<Expr>::create(return_type_range, parseExp());
     } else {
       return_type = Maybe<Expr>::create(L.cur().range);
     }
@@ -397,9 +402,10 @@ struct Parser {
     }
     return list;
   }
-  TreeRef parseIf() {
+  TreeRef parseIf(bool expect_if=true) {
     auto r = L.cur().range;
-    L.expect(TK_IF);
+    if (expect_if)
+      L.expect(TK_IF);
     auto cond = parseExp();
     L.expect(':');
     auto true_branch = parseStatements();
@@ -407,6 +413,12 @@ struct Parser {
     if (L.nextIf(TK_ELSE)) {
       L.expect(':');
       false_branch = parseStatements();
+    } else if (L.nextIf(TK_ELIF)) {
+      // NB: this needs to be a separate statement, since the call to parseIf
+      // mutates the lexer state, and thus causes a heap-use-after-free in
+      // compilers which evaluate argument expressions LTR
+      auto range = L.cur().range;
+      false_branch = makeList(range, {parseIf(false)});
     }
     return If::create(r, Expr(cond), List<Stmt>(true_branch), List<Stmt>(false_branch));
   }
@@ -448,7 +460,8 @@ struct Parser {
     TreeRef return_type;
     if (L.nextIf(TK_ARROW)) {
       // Exactly one expression for return type annotation
-      return_type = Maybe<Expr>::create(L.cur().range, parseExp());
+      auto return_type_range = L.cur().range;
+      return_type = Maybe<Expr>::create(return_type_range, parseExp());
     } else {
       // Default to returning single tensor. TODO: better sentinel value?
       return_type = Maybe<Expr>::create(L.cur().range);

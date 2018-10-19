@@ -238,7 +238,7 @@ def create(all_types, backend):
         top_env['copy_includes'].append(
             '#include "ATen/{}.h"'.format(the_type['Type']))
     top_env['copy_includes'].append(
-        '#include "ATen/TensorImpl.h"')
+        '#include "ATen/core/TensorImpl.h"')
 
     # Code generation
     for the_type in all_types:

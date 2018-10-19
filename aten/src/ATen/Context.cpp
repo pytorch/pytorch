@@ -12,12 +12,10 @@
 
 #include "ATen/CPUGenerator.h"
 #include "ATen/RegisterCPU.h"
+#include "ATen/Tensor.h"
+#include <ATen/cpu/FlushDenormal.h>
 
 #include "TH/TH.h"  // for USE_LAPACK
-
-#ifdef USE_SSE3
-#include <pmmintrin.h>
-#endif
 
 namespace at {
 
@@ -93,33 +91,40 @@ bool Context::hasLAPACK() const {
 }
 
 bool Context::setFlushDenormal(bool on) {
-#ifdef USE_SSE3
-  // Setting flush-to-zero (FTZ) flag
-  _MM_SET_FLUSH_ZERO_MODE(on ? _MM_FLUSH_ZERO_ON
-                             : _MM_FLUSH_ZERO_OFF);
-
-  // Setting denormals-are-zero (DAZ) flag
-  _MM_SET_DENORMALS_ZERO_MODE(on ? _MM_DENORMALS_ZERO_ON
-                                 : _MM_DENORMALS_ZERO_OFF);
-  return true;
-#else
-  return false;
-#endif
+  return at::cpu::set_flush_denormal(on);
 }
 
-Type& getMaybeVariableType(TensorOptions options) {
-  return globalContext().getMaybeVariableType(
+TypeExtendedInterface& getType(TensorOptions options) {
+  return globalContext().getType(
             options.backend(), options.dtype(), options.is_variable());
 }
 
-Type& getMaybeVariableType(const TensorImpl* impl) {
+TypeExtendedInterface& getType(const TensorImpl* impl) {
   Backend backend = tensorTypeIdToBackend(impl->type_id());
-  return globalContext().getMaybeVariableType(
-            backend, impl->scalar_type(), impl->is_variable());
+  return globalContext().getType(
+            backend, dataTypeToScalarType(impl->dtype().id()), impl->is_variable());
+}
+
+TypeExtendedInterface& getType(const Tensor& t) {
+  return getType(t.unsafeGetTensorImpl());
 }
 
 Allocator* getCPUAllocator() {
   return getTHDefaultAllocator();
 }
+
+struct LegacyTypeInit : public LegacyTypeInitInterface {
+  LegacyTypeInit(LegacyTypeInitArgs) {}
+  void initCPU() const override {
+    globalContext();
+  }
+  void initCUDA() const override {
+    globalContext().lazyInitCUDA();
+  }
+  void initComplex() const override {
+    globalContext().lazyInitComplex();
+  }
+};
+REGISTER_LEGACY_TYPE_INIT(LegacyTypeInit);
 
 }

@@ -21,7 +21,7 @@ bool DiagonalFillOp<CPUContext>::FillWithType(Tensor* output) {
   math::Set<T, CPUContext>(output->size(), T(0), data, &context_);
   // then calculate step size for diagonal
   auto step = GetStepSize(output);
-  for (TIndex i = 0; i < output->size(); i += step) {
+  for (int64_t i = 0; i < output->size(); i += step) {
     math::Set<T, CPUContext>(1, value, data, &context_);
     data += step;
   }
@@ -83,7 +83,7 @@ message TensorProto {
     UINT16 = 8;  // uint16_t
     INT16 = 9;  // int16_t
     INT64 = 10;  // int64_t
-    FLOAT16 = 12;  // caffe2::__f16, caffe2::float16
+    FLOAT16 = 12;  // at::Half
     DOUBLE = 13;  // double
   }
 ```
@@ -349,7 +349,7 @@ OPERATOR_SCHEMA(UniformIntFill)
     .NumInputs({0, 1, 3})
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .TensorInferenceFunction(FillerTensorInference<>)
+    .TensorInferenceFunction(FillerTensorInference<TensorProto_DataType_INT32>)
     .SetDoc(R"DOC(
 Fill the output tensor with int32 samples from uniform distribution [`min`, `max`].
 

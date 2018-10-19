@@ -1,6 +1,7 @@
 #ifndef NOM_TESTS_TEST_UTIL_H
 #define NOM_TESTS_TEST_UTIL_H
 
+#include "caffe2/core/common.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Graph/Algorithms.h"
 #include "nomnigraph/Representations/NeuralNet.h"
@@ -101,9 +102,9 @@ class TestRandom {
  *      return labelMap;
  *    });
  */
-nom::Graph<std::string> createGraph();
+CAFFE2_API nom::Graph<std::string> createGraph();
 
-nom::Graph<std::string> createGraphWithCycle();
+CAFFE2_API nom::Graph<std::string> createGraphWithCycle();
 
 std::map<std::string, std::string> BBPrinter(typename nom::repr::NNCFGraph::NodeRef node);
 

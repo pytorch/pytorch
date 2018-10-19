@@ -143,7 +143,14 @@
   batch1: grad.bmm(batch2.transpose(1, 2)) * alpha
   batch2: batch1.transpose(1, 2).bmm(grad) * alpha
 
-- name: bernoulli(Tensor self, double p, Generator generator)
+- name: bernoulli(Tensor self, Generator generator)
+  self: zeros_like(grad)
+
+- name: bernoulli_(Tensor self, Tensor p, Generator generator)
+  self: zeros_like(grad)
+  p: zeros_like(p)
+
+- name: bernoulli_(Tensor self, double p, Generator generator)
   self: zeros_like(grad)
 
 - name: bmm(Tensor self, Tensor mat2)
@@ -552,6 +559,9 @@
   self: pow_backward_self(grad, self, exponent)
   exponent: pow_backward_exponent(grad, self, exponent)
 
+- name: pow(Scalar self, Tensor exponent)
+  exponent: pow_backward_exponent(grad, self, exponent)
+
 - name: _prod(Tensor self, int64_t dim, bool keepdim)
   self: prod_backward(grad, self, result, dim, keepdim)
 
@@ -683,8 +693,8 @@
 - name: _sum(Tensor self, IntList dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim)
 
-- name: svd(Tensor self, bool some)
-  self: svd_backward(grads, self, some, res1, res2, res3)  # resX are defined in Declarations.cwrap
+- name: svd(Tensor self, bool some, bool compute_uv)
+  self: svd_backward(grads, self, some, compute_uv, res1, res2, res3)  # resX are defined in Declarations.cwrap
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
   self: symeig_backward(grads, self, eigenvectors, upper, res1, res2)
@@ -762,15 +772,21 @@
   self: where(condition, grad, zeros_like(grad))
   other: where(condition, zeros_like(grad), grad)
 
+# weight_norm_cuda_interface_backward does not have an explicitly defined derivative, so if we do happen
+# to be running backward with create_graph=True, fall back to a backward function that uses
+# differentiable ops.
+- name: _weight_norm_cuda_interface(Tensor v, Tensor g, int64_t dim)
+  v, g: "GradMode::is_enabled() ? _weight_norm_differentiable_backward(grad.contiguous(), v, g, result1, dim) : _weight_norm_cuda_interface_backward(grad.contiguous(), v, g, result1, dim)"
+
 - name: zero_(Tensor self)
   self: zeros_like(grad)
 
-- name: _sparse_mask(Tensor self, SparseTensorRef mask)
-  self: not_implemented("_sparse_mask")
-  mask: not_implemented("_sparse_mask")
+- name: sparse_mask(Tensor self, SparseTensorRef mask)
+  self: not_implemented("sparse_mask")
+  mask: not_implemented("sparse_mask")
 
 - name: _standard_gamma(Tensor self, Generator generator)
-  self: grad * self._standard_gamma_grad(result)
+  self: grad * _standard_gamma_grad(self, result)
 
 - name: _standard_gamma_grad(Tensor self, Tensor output)
   self: not_implemented("_standard_gamma_grad")
@@ -781,6 +797,10 @@
 
 - name: binary_cross_entropy_forward(Tensor self, Tensor target, Tensor weight, int64_t reduction)
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)
+
+- name: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor weight, Tensor pos_weight, int64_t reduction)
+  self: binary_cross_entropy_with_logits_backward(grad, self, target, weight, pos_weight, reduction)
+  target: binary_cross_entropy_with_logits_target_backward(grad, self, target, weight, pos_weight, reduction)
 
 - name: embedding(Tensor weight, Tensor indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse)
   weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
@@ -850,11 +870,14 @@
 - name: log_sigmoid_forward(Tensor self)
   self: log_sigmoid_backward(grad, self, buffer)
 
-- name: log_softmax(Tensor self, int64_t dim)
-  self: log_softmax_backward_data(grad, result, dim, self)
+- name: _log_softmax(Tensor self, int64_t dim, bool half_to_float)
+  self: _log_softmax_backward_data(grad, result, dim, self)
 
-- name: prelu_forward(Tensor self, Tensor weight)
-  self, weight: prelu_backward(grad, self, weight, grad_input_mask)
+- name: prelu(Tensor self, Tensor weight)
+  self, weight: prelu_backward(grad, self, weight)
+
+- name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight)
+  grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight)
 
 - name: rrelu_with_noise_forward(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator)
   self: rrelu_with_noise_backward(grad, self, noise, lower, upper, training)
@@ -862,8 +885,8 @@
 - name: rrelu_with_noise_forward_(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator)
   self: rrelu_with_noise_backward(grad, output, noise, lower, upper, training)
 
-- name: softmax(Tensor self, int64_t dim)
-  self: softmax_backward_data(grad, result, dim, self)
+- name: _softmax(Tensor self, int64_t dim, bool half_to_float)
+  self: _softmax_backward_data(grad, result, dim, self)
 
 - name: softplus_forward(Tensor self, Scalar beta, Scalar threshold)
   self: softplus_backward(grad, self, beta, threshold, output)
@@ -1049,9 +1072,9 @@
   grad_output: log_sigmoid_backward(grad, self, buffer)
   self: log_sigmoid_double_backward(grad * grad_output, self)
 
-- name: log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self)
+- name: _log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self)
   grad_output: grad - (grad * output.exp()).sum(dim, true)
-  self: log_softmax_double_backward(grad, grad_output, dim, output)
+  self: log_softmax_double_backward(grad, grad_output, dim, output).type_as(self)
 
 - name: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope)
   grad_output: leaky_relu_backward(grad, self, negative_slope)
@@ -1080,9 +1103,6 @@
 - name: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor weight, int64_t reduction, int64_t ignore_index, Tensor total_weight)
   grad_output: nll_loss2d(grad, target, weight, reduction, ignore_index)
   self: zeros_like(grad)
-
-- name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight, std::array<bool,2> output_mask)
-  grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight, grad_input_mask)
 
 - name: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training)
   grad_output: rrelu_with_noise_backward(grad, self, noise, lower, upper, training)
@@ -1116,9 +1136,9 @@
   grad_output: softplus_backward(grad, self, beta, threshold, output)
   self: softplus_double_backward(grad * grad_output, self, beta, threshold)
 
-- name: softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self)
-  grad_output: softmax_backward_data(grad, output, dim, self)
-  self: softmax_double_backward(grad, grad_output, dim, output)
+- name: _softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self)
+  grad_output: _softmax_backward_data(grad, output, dim, self)
+  self: softmax_double_backward(grad, grad_output, dim, output).type_as(self)
 
 - name: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction)
   grad_output: soft_margin_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)

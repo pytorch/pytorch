@@ -36,7 +36,7 @@ class Float16ConstantFillOp : public Operator<CPUContext> {
   bool RunOnDevice() override;
 
  private:
-  vector<TIndex> shape_;
+  vector<int64_t> shape_;
 };
 
 class Float16UniformFillOp : public Operator<CPUContext> {
@@ -65,7 +65,7 @@ class Float16UniformFillOp : public Operator<CPUContext> {
   bool RunOnDevice() override;
 
  private:
-  vector<TIndex> shape_;
+  vector<int64_t> shape_;
   float min_;
   float max_;
 };
@@ -76,7 +76,7 @@ inline std::vector<TensorShape> Float16FillerTensorInference(
   vector<TensorShape> out(1);
   ArgumentHelper helper(def);
   out[0].set_data_type(static_cast<TensorProto_DataType>(
-      helper.GetSingleArgument<int>("dtype", TensorProto_DataType_FLOAT)));
+      helper.GetSingleArgument<int>("dtype", TensorProto_DataType_FLOAT16)));
   auto shape = helper.GetRepeatedArgument<int>("shape");
   for (int d : shape) {
     out[0].add_dims(d);

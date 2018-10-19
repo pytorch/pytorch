@@ -10,9 +10,10 @@
 #include "torch/csrc/jit/source_range.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/ArrayRef.h>
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #include <functional>
 #include <memory>
@@ -20,6 +21,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <ostream>
 
 // This file contains classes which assist in desugaring Python style
 // modules and their methods into flattened graphs which don't have any
@@ -84,6 +86,7 @@ struct Method {
 
   // defined here to keep details of member_input handling confined to this class
   std::vector<Value*> emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
+
   // if this isn't yet defined, run its method_creator function
   void ensure_defined();
 
@@ -112,7 +115,9 @@ struct Method {
     for (at::Tensor* inp : member_inputs) {
       stack.push_back(*inp);
     }
-    PropagateInputShapes(*retval, ArgumentSpec(with_grad, std::move(stack)));
+    const auto size = stack.size();
+    setInputTypes(*retval, ArgumentSpec(with_grad, std::move(stack), size));
+    PropagateInputShapes(*retval);
     return retval;
   }
 
@@ -122,7 +127,8 @@ struct Method {
       inputs.push_back(*inp);
     }
     if (propagate) {
-      PropagateInputShapes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs)));
+      setInputTypes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+      PropagateInputShapes(*retval);
     }
     JIT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i=0; i < retval->inputs().size(); ++i) {
@@ -161,6 +167,10 @@ struct Method {
 
   GraphExecutorState getDebugState() {
     return get_executor().getDebugState();
+  }
+
+  void debugDisableAutodiffSubgraphInlining() {
+    return get_executor().debugDisableAutodiffSubgraphInlining();
   }
 
   bool is_optimized() {
@@ -251,7 +261,7 @@ struct NamedParameter {
   NamedParameter(std::string name, at::Tensor tensor, bool is_buffer)
   : name(std::move(name))
   , is_buffer(is_buffer)
-  , parameter(new at::Tensor(std::move(tensor))) {}
+  , parameter(torch::make_unique<at::Tensor>(std::move(tensor))) {}
 
   const std::string name;
   bool is_buffer; // buffers are part of the module state but
@@ -352,9 +362,60 @@ struct Module {
     return nullptr;
   }
 
+  /// Recursively casts all parameters to the given `dtype` and `device`.
+  ///
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  void to(
+      at::Device device,
+      at::ScalarType dtype,
+      bool non_blocking = false);
+
+  /// Recursively casts all parameters to the given dtype.
+  ///
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  void to(at::ScalarType dtype, bool non_blocking = false);
+
+  /// Recursively moves all parameters to the given device.
+  ///
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  void to(at::Device device, bool non_blocking = false);
+
+  /// Run a method from this module.
+  ///
+  /// For example:
+  /// @code
+  ///   IValue output = module->run("relu_script", a, b);
+  /// @endcode
+  ///
+  /// To get a compile a module from a source string, see torch::jit::compile
+  ///
+  /// @param method_name The name of the method to run
+  /// @param args Arguments to be passed to the method
+  /// @return An IValue containing the return value (or values if it is a tuple)
+  /// from the method
+  template <typename... Types>
+  IValue run_method(const std::string& method_name, Types&&... args) {
+    return get_method(method_name)({IValue(std::forward<Types>(args))...});
+  }
+
+  void save(std::ostream& out);
+
   void save(const std::string& filename);
 
  private:
+   void to_impl(
+       at::optional<at::Device> device,
+       at::optional<at::ScalarType> dtype,
+       bool non_blocking);
 
   // invariant: to ensure member_inputs of Methods stay valid,
   // it is only legal to _add_ new modules and parameters.
@@ -366,4 +427,18 @@ struct Module {
   bool optimize;
 };
 
+// returns c10::nullopt and fills in failure_messages if the callee does not
+// match the functions schema
+c10::optional<std::vector<Value*>> try_emit_call_to(
+    Graph& graph,
+    SourceRange loc,
+    Method& callee,
+    c10::optional<NamedValue> self,
+    ArrayRef<NamedValue> args,
+    ArrayRef<NamedValue> kwargs,
+    std::stringstream& failure_messages,
+    // when callee uses no parameters (e.g. it is a function in a compilation
+    // unit, and not a method), then nullptr can be passed as caller.
+    Method* caller,
+    bool conv_tensors_to_nums);
 }}}

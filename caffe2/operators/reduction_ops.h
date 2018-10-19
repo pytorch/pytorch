@@ -24,7 +24,7 @@ class SumElementsOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto* sum = Output(0);
-    sum->Resize(vector<TIndex>());
+    sum->Resize(vector<int64_t>());
 
     T* data = sum->template mutable_data<T>();
 
@@ -58,7 +58,7 @@ class SumElementsIntOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto* sum = Output(0);
-    sum->Resize(vector<TIndex>());
+    sum->Resize(vector<int64_t>());
     T* data = sum->template mutable_data<T>();
     math::Sum<T, Context>(
         X.size(), X.template data<T>(), data, &context_, &scratch_);
@@ -105,7 +105,7 @@ class SumSqrElementsOp : public Operator<Context> {
     bool average = this->template GetSingleArgument<bool>("average", false);
     auto& X = Input(0);
     auto* sum = Output(0);
-    sum->Resize(vector<TIndex>());
+    sum->Resize(vector<int64_t>());
     math::SumSqr<T, Context>(
         X.size(),
         X.template data<T>(),

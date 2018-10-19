@@ -1,7 +1,5 @@
 #pragma once
 
-// ${generated_comment}
-
 #include "ATen/core/ATenGeneral.h"
 #include "ATen/core/Allocator.h"
 #include "ATen/core/Deprecated.h"
@@ -10,12 +8,13 @@
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/Tensor.h"
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Half.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
 #include "ATen/core/Reduction.h"
 #include "ATen/core/TensorOptions.h"
+
+#include "c10/util/Optional.h"
 
 #include <array>
 #include <cstddef>
@@ -36,6 +35,7 @@ class Context;
 struct Allocator;
 struct Generator;
 struct Storage;
+class Tensor;
 
 static inline void noop_deleter(void*) {}
 
@@ -49,12 +49,13 @@ enum class TypeID {
   NumOptions
 };
 
-struct AT_API Type {
+struct CAFFE2_API Type {
   explicit Type(TensorTypeId type_id, bool is_variable, bool is_undefined)
       : type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
 
   virtual ~Type() {}
   virtual ScalarType scalarType() const = 0;
+  virtual caffe2::TypeMeta typeMeta() const = 0;
   virtual Backend backend() const = 0;
   Layout layout() const noexcept { return layout_from_backend(backend()); }
   virtual bool is_cuda() const = 0;
@@ -99,10 +100,17 @@ struct AT_API Type {
     return backendToDeviceType(backend());
   }
 
-  virtual Tensor copy(const Tensor & src, bool non_blocking=false) const = 0;
+  virtual Tensor copy(const Tensor & src, bool non_blocking=false, optional<Device> to_device={}) const = 0;
   virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const = 0;
   virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const = 0;
   virtual Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const = 0;
+
+  virtual void backward(
+      Tensor& self,
+      c10::optional<Tensor> gradient,
+      bool keep_graph,
+      bool create_graph) const = 0;
+  virtual void set_data(Tensor & self, Tensor new_data) const = 0;
 
   virtual Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
   virtual Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
@@ -119,12 +127,10 @@ struct AT_API Type {
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.
   TensorOptions options(int32_t device_index = -1) const {
-    TensorOptions r;
-    r.dtype(scalarType());
-    r.device({backendToDeviceType(backend()), device_index});
-    r.layout(layout());
-    r.is_variable(is_variable());
-    return r;
+    return TensorOptions().dtype(scalarType())
+                          .device({backendToDeviceType(backend()), device_index})
+                          .layout(layout())
+                          .is_variable(is_variable());
   }
 
   operator TensorOptions() const {
@@ -138,23 +144,8 @@ protected:
   TensorTypeId type_id_;
   bool is_variable_;
   bool is_undefined_;
-
 };
 
-inline bool Tensor::is_variable() const noexcept {
-  return type().is_variable();
-}
-
-inline ScalarType Tensor::dtype() const noexcept {
-  return type().scalarType();
-}
-
-inline Layout Tensor::layout() const noexcept {
-  return type().layout();
-}
-
-inline Device Tensor::device() const {
-  return Device(type().device_type(), type().is_cuda() ? get_device() : -1);
-}
-
 } // namespace at
+
+#include "ATen/core/Tensor.h"

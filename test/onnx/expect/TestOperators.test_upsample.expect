@@ -8,7 +8,7 @@ graph {
     op_type: "Upsample"
     attribute {
       name: "mode"
-      s: "bilinear"
+      s: "linear"
       type: STRING
     }
     attribute {
@@ -67,5 +67,5 @@ graph {
   }
 }
 opset_import {
-  version: 7
+  version: 9
 }

@@ -16,7 +16,7 @@ DEFINE_DISPATCH(div_stub);
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
     if (!result.defined()) {
-      result = self.type().tensor();
+      result = at::empty({0}, self.options());
     }
     if (self.is_sparse()) {
       at::_sparse_add_out(result, self, other, alpha);
@@ -44,7 +44,7 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (self.is_sparse()) {
     if (!result.defined()) {
-      result = self.type().tensor();
+      result = at::empty({0}, self.options());
     }
     if (other.dim() != 0) {
       AT_ERROR("div(): sparse division only supports division by a scalar ",
@@ -69,7 +69,7 @@ Tensor& div_(Tensor& self, const Tensor& other) {
 Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (self.is_sparse() || other.is_sparse()) {
     if (!result.defined()) {
-      result = self.type().tensor();
+      result = at::empty({0}, self.options());
     }
     return at::_sparse_mul_out(result, self, other);
   }
@@ -90,7 +90,7 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
     if (!result.defined()) {
-      result = self.type().tensor();
+      result = at::empty({0}, self.options());
     }
     if (!self.sizes().equals(other.sizes())) {
       AT_ERROR("sizes do not match");

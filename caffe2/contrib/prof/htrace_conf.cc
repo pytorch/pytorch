@@ -4,10 +4,7 @@
 #include <algorithm>
 #include <ctime>
 
-CAFFE2_DEFINE_string(
-    caffe2_htrace_span_log_path,
-    "",
-    "Span log path for htrace");
+C10_DEFINE_string(caffe2_htrace_span_log_path, "", "Span log path for htrace");
 
 namespace caffe2 {
 

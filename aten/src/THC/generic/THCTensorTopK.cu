@@ -2,11 +2,11 @@
 #define THC_GENERIC_FILE "generic/THCTensorTopK.cu"
 #else
 
-THC_API void THCTensor_(topk)(THCState* state,
-                               THCTensor *topK,
-                               THCudaLongTensor *indices,
-                               THCTensor *input_,
-                               int64_t k, int dim, int dir, int sorted) {
+void THCTensor_(topk)(THCState* state,
+                      THCTensor *topK,
+                      THCudaLongTensor *indices,
+                      THCTensor *input_,
+                      int64_t k, int dim, int dir, int sorted) {
   THAssert(topK != NULL && indices != NULL && input_ != NULL);
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input_));
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
@@ -140,7 +140,12 @@ THC_API void THCTensor_(topk)(THCState* state,
   if (sorted) {
     // FIXME: the k/v inplace sort along slice only works for size <=
     // 2048 at the moment
+#ifdef __HIP_PLATFORM_HCC__
+    // TODO bitonicSortKVInPlace hangs on ROCm currently.
+    if (0) {
+#else
     if (sliceSize <= 2048) {
+#endif
       // This avoids any memory allocations and performs all sorting
       // work inplace along the slice
       THCTensor_(sortKeyValueInplace)(state, topK, indices, dim, dir);

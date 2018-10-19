@@ -130,24 +130,6 @@ void THVector_(divs_DEFAULT)(scalar_t *y, const scalar_t *x, const scalar_t c, c
     y[i] = x[i] / c;
 }
 
-#ifndef TH_REAL_IS_INT
-void THVector_(cvtFromInt_DEFAULT)(scalar_t *y, const int *x, const ptrdiff_t n)
-{
-  ptrdiff_t i = 0;
-
-  for(; i<n-4; i+=4)
-  {
-    y[i] = (scalar_t)x[i];
-    y[i+1] = (scalar_t)x[i+1];
-    y[i+2] = (scalar_t)x[i+2];
-    y[i+3] = (scalar_t)x[i+3];
-  }
-
-  for(; i < n; i++)
-    y[i] = (scalar_t)x[i];
-}
-#endif
-
 // Fills 16 normally distributed samples into data, interleaved with a
 // stride of 8, i.e. in order of ([0], [8]), ([1], [9]), ...
 static void THVector_(interleaved_normal_fill_16)(scalar_t *data,

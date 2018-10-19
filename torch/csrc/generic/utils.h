@@ -15,7 +15,7 @@ typedef class THPPointer<THWStorage>      THWStoragePtr;
 typedef class THPPointer<THWTensor>       THWTensorPtr;
 typedef class THPPointer<THPStorage>     THPStoragePtr;
 
-#if (!defined(THC_GENERIC_FILE) || defined(THC_REAL_IS_HALF)) && \
+#if (!defined(THC_GENERIC_FILE)) && \
     (!defined(THD_GENERIC_FILE))
 template<>
 struct THPUtils_typeTraits<scalar_t> {

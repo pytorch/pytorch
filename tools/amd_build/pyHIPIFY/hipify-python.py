@@ -32,7 +32,6 @@ import shutil
 import sys
 import os
 import yaml
-import ast
 
 from functools import reduce
 from enum import Enum
@@ -291,7 +290,7 @@ def add_dim3(kernel_string, cuda_kernel):
         elif c == ")":
             closure -= 1
         elif (c == "," or ind == len(kernel_string) - 1) and closure == 0:
-            arg_locs[count]['end'] = ind
+            arg_locs[count]['end'] = ind + (c != ",")
             count += 1
             if count < 2:
                 arg_locs[count]['start'] = ind + 1
@@ -507,9 +506,9 @@ def replace_math_functions(input_string):
         Plan is to remove this function once HIP supports std:: math function calls inside device code
     """
     output_string = input_string
-    output_string = re.sub("std::exp\(", "::exp(", output_string)
-    output_string = re.sub("std::log\(", "::log(", output_string)
-    output_string = re.sub("std::pow\(", "::pow(", output_string)
+    for func in MATH_TRANSPILATIONS:
+      output_string = output_string.replace(r'{}('.format(func), '{}('.format(MATH_TRANSPILATIONS[func]))
+
     return output_string
 
 
@@ -718,7 +717,7 @@ def get_hip_file_path(filepath, hipify_caffe2):
 def is_caffe2_gpu_file(filepath):
     filename = os.path.basename(filepath)
     _, ext = os.path.splitext(filename)
-    return 'gpu' in filename or ext in ['.cu', '.cuh']
+    return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
 
 def preprocessor(filepath, stats, hipify_caffe2):
@@ -764,10 +763,8 @@ def preprocessor(filepath, stats, hipify_caffe2):
         #    output_source = disable_asserts(output_source)
 
         # Replace std:: with non-std:: versions
-        output_source = replace_math_functions(output_source)
-
-        # Replace std:: with non-std:: versions
-        output_source = transpile_device_math(output_source)
+        if re.search(r"\.cu$", filepath) or re.search(r"\.cuh$", filepath):
+          output_source = replace_math_functions(output_source)
 
         # Replace __forceinline__ with inline
         output_source = replace_forceinline(output_source)
@@ -946,31 +943,6 @@ def disable_module(input_file):
         f.seek(0)
         f.write(disabled)
         f.truncate()
-
-
-def transpile_device_math(input_string):
-    """ Temporarily replace std:: invocations of math functions with non-std:: versions."""
-    # Extract device code positions
-    get_kernel_definitions = [k for k in re.finditer( r"(template[ ]*<(.*)>\n.*\n?)?(__global__|__device__) void[\n| ](\w+(\(.*\))?)\(", input_string)]
-
-    # Prepare output
-    output_string = input_string
-
-    # Iterate through each kernel definition
-    for kernel in get_kernel_definitions:
-        # Find the final paranthesis that closes this kernel function definition.
-        _, paranth_end = find_bracket_group(input_string, kernel.end() - 1)
-
-        # Replace all std:: math functions within range [start...ending]
-        selection = input_string[kernel.start():paranth_end + 1]
-        selection_transpiled = selection
-        for func in MATH_TRANSPILATIONS:
-            selection_transpiled = selection_transpiled.replace(func, MATH_TRANSPILATIONS[func])
-
-        # Perform replacements inside the output_string
-        output_string = output_string.replace(selection, selection_transpiled)
-
-    return output_string
 
 
 def extract_arguments(start, string):

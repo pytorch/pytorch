@@ -34,6 +34,10 @@ class TORCH_API SavedVariable {
     return data_.reset();
   }
 
+  void reset_grad_function() {
+    grad_fn_.reset();
+  }
+
  private:
   at::Tensor data_;
 

@@ -58,6 +58,13 @@ void THTensor_(copyCuda)(THCState *state, THTensor *self, struct THCTensor *src)
 
   {
     THTensor *selfc = THTensor_(newContiguous)(self);
+    int tensorDevice = THCTensor_(getDevice)(state, src);
+    int currentDevice;
+    THCudaCheck(cudaGetDevice(&currentDevice));
+
+    if (currentDevice != tensorDevice) {
+      THCudaCheck(cudaSetDevice(tensorDevice));
+    }
     src = THCTensor_(newContiguous)(state, src);
 
     cudaStream_t stream = THCState_getCurrentStream(state);
@@ -67,6 +74,10 @@ void THTensor_(copyCuda)(THCState *state, THTensor *self, struct THCTensor *src)
                                 cudaMemcpyDeviceToHost,
                                 stream));
     THCudaCheck(cudaStreamSynchronize(stream));
+
+    if (currentDevice != tensorDevice) {
+      THCudaCheck(cudaSetDevice(currentDevice));
+    }
 
     THCTensor_(free)(state, src);
     THTensor_(freeCopyTo)(selfc, self);

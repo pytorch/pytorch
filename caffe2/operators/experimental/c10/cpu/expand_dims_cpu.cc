@@ -34,7 +34,7 @@ void expand_dims_op_cpu_impl(
     return;
   }
 
-  auto newDims = input.dims();
+  auto newDims = input.dims().vec();
   CAFFE_ENFORCE_GE(
       input.dims().size() + state->dims.size(),
       state->dims.back() + 1,

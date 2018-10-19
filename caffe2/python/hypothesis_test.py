@@ -194,7 +194,6 @@ class TestOperators(hu.HypothesisTestCase):
         _test_binary("Mul", ref, filter_=not_overflow, test_gradient=True)(self)
         _test_binary_broadcast("Mul", ref, filter_=not_overflow)(self)
 
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     def test_div(self):
         def ref(x, y):
             return (x / y, )
@@ -1825,7 +1824,6 @@ class TestOperators(hu.HypothesisTestCase):
         out, = self.assertReferenceChecks(gc, op, [a], ref)
         self.assertEqual(dst, out.dtype)
 
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     @given(a=hu.tensor(),
            eps=st.floats(min_value=1e-4, max_value=1e-2),
            a_grad=hu.tensor(elements=st.floats(min_value=0.01, max_value=0.99)),
@@ -2229,7 +2227,7 @@ class TestOperators(hu.HypothesisTestCase):
            in_place=st.booleans(),
            **hu.gcs)
     def test_unsafe_coalesce(self, sizes, in_place, gc, dc):
-        gAlignment = 32
+        gAlignment = 64
         Xs = [np.random.randn(size)
               .astype(np.random.choice([np.float32, np.float64, np.uint8]))
               for size in sizes]

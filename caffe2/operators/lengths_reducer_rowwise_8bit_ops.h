@@ -39,7 +39,7 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
     auto* output = Output(0);
     auto* scale_bias = Input(SCALE_BIAS).template data<float>();
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    const TIndex outputSize = lengthsInput.dim(0);
+    const int64_t outputSize = lengthsInput.dim(0);
 
     auto& indicesInput = Input(INDICES);
     CAFFE_ENFORCE_EQ(
@@ -54,23 +54,23 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
         "the second dim of scale_bias has to be equal to 2");
     CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
     const IndexType* indices = indicesInput.template data<IndexType>();
-    TIndex dataToReduceSize = indicesInput.dim(0);
+    int64_t dataToReduceSize = indicesInput.dim(0);
 
     const int* lengths = lengthsInput.template data<int>();
-    vector<TIndex> shape = dataInput.dims();
+    vector<int64_t> shape = dataInput.dims().vec();
     shape[0] = outputSize;
     output->Resize(shape);
     const float* w = nullptr;
     if (USE_WEIGHTS) {
       w = Input(WEIGHTS).template data<float>();
     }
-    TIndex in_block_size = dataInput.size_from_dim(1);
+    int64_t in_block_size = dataInput.size_from_dim(1);
     OutDataT* out = output->template mutable_data<OutDataT>();
     const uint8_t* input_data = dataInput.template data<uint8_t>();
 
     // delegate work to perfkernel that branches based on architecture
-    const TIndex indices_size = indicesInput.size();
-    const TIndex N = dataInput.dim(0);
+    const int64_t indices_size = indicesInput.size();
+    const int64_t N = dataInput.dim(0);
     EmbeddingLookup(
         in_block_size,
         outputSize,
@@ -107,7 +107,7 @@ class FloatToRowwiseQuantized8BitsOp : public Operator<Context> {
     auto* scale_bias = Output(SCALE_BIAS);
     auto* input_data = input.template data<float>();
     output->ResizeLike(input);
-    vector<TIndex> scale_bias_dims = {input.dim(0), 2};
+    vector<int64_t> scale_bias_dims = {input.dim(0), 2};
     scale_bias->Resize(scale_bias_dims);
     auto* output_data = output->template mutable_data<uint8_t>();
     float* scale_bias_data = scale_bias->template mutable_data<float>();

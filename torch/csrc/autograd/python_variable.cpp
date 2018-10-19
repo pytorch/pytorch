@@ -22,6 +22,7 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/tensor_new.h"
+#include "torch/csrc/jit/tracer.h"
 
 #include <ATen/ATen.h>
 
@@ -125,6 +126,7 @@ static void THPVariable_dealloc(THPVariable* self)
 static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("torch.Tensor", jit::tracer::WARN_CONSTRUCTOR);
   auto& default_type = torch::tensors::get_default_tensor_type();
   auto tensor = torch::utils::legacy_tensor_ctor(default_type, args, kwargs);
   return THPVariable_NewWithVar(type, std::move(tensor));
@@ -235,9 +237,15 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
       "can't assign Variable as its own grad");
 
   auto& grad = ((THPVariable*)py_grad)->cdata;
-  auto& sparseType = var.type().toBackend(var.is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU);
+  bool gradIsSparse = false;
+  auto backend = var.is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU;
+  auto typeOpt = at::globalContext().getNonVariableTypeOpt(backend, var.type().scalarType());  
+  if (typeOpt) {
+       auto& sparseType = at::globalContext().getNonVariableType(backend, var.type().scalarType());
+       gradIsSparse = grad.type() == sparseType;
+  }
 
-  THPUtils_assertRet(-1, grad.type() == var.type() || grad.type() == sparseType,
+  THPUtils_assertRet(-1, grad.type() == var.type() || gradIsSparse,
       "assigned grad has data of a different type");
   if (var.type().is_cuda()) {
     THPUtils_assertRet(-1, grad.get_device() == var.get_device(),

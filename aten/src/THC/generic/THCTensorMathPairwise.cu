@@ -2,8 +2,7 @@
 #define THC_GENERIC_FILE "generic/THCTensorMathPairwise.cu"
 #else
 
-THC_API void
-THCTensor_(add)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
+void THCTensor_(add)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   if (self_ == src_) {
@@ -21,8 +20,7 @@ THCTensor_(add)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t val
   THCudaCheck(cudaGetLastError());
 }
 
-THC_API void
-THCTensor_(sub)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
+void THCTensor_(sub)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   if (self_ == src_) {
@@ -40,30 +38,17 @@ THCTensor_(sub)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t val
   THCudaCheck(cudaGetLastError());
 }
 
-THC_API void
-THCTensor_(add_scaled)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value, scalar_t alpha)
+void THCTensor_(add_scaled)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value, scalar_t alpha)
 {
-#ifdef THC_REAL_IS_HALF
-  auto v = THC_half2float(value) * THC_half2float(alpha);
-  THCTensor_(add)(state, self_, src_, THC_float2half(v));
-#else
   THCTensor_(add)(state, self_, src_, value * alpha);
-#endif
 }
 
-THC_API void
-THCTensor_(sub_scaled)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value, scalar_t alpha)
+void THCTensor_(sub_scaled)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value, scalar_t alpha)
 {
-#ifdef THC_REAL_IS_HALF
-  auto v = THC_half2float(value) * THC_half2float(alpha);
-  THCTensor_(sub)(state, self_, src_, THC_float2half(v));
-#else
   THCTensor_(sub)(state, self_, src_, value * alpha);
-#endif
 }
 
-THC_API void
-THCTensor_(mul)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
+void THCTensor_(mul)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   if (self_ == src_) {
@@ -81,8 +66,7 @@ THCTensor_(mul)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t val
   THCudaCheck(cudaGetLastError());
 }
 
-THC_API void
-THCTensor_(div)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
+void THCTensor_(div)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   THArgCheck(value != ScalarConvert<int, scalar_t>::to(0), 3, "divide by zero");
@@ -102,8 +86,7 @@ THCTensor_(div)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t val
   THCudaCheck(cudaGetLastError());
 }
 
-THC_API void
-THCTensor_(lshift)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
+void THCTensor_(lshift)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   THCTensor_(mul)(state, self_, src_, pow(2, value));
@@ -126,8 +109,7 @@ THCTensor_(lshift)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t 
 #endif
 }
 
-THC_API void
-THCTensor_(rshift)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
+void THCTensor_(rshift)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   THCTensor_(mul)(state, self_, src_, pow(2, -value));
@@ -150,8 +132,7 @@ THCTensor_(rshift)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t 
 #endif
 }
 
-THC_API void
-THCTensor_(fmod)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
+void THCTensor_(fmod)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   if (self_ == src_) {
@@ -169,8 +150,7 @@ THCTensor_(fmod)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t va
   THCudaCheck(cudaGetLastError());
 }
 
-THC_API void
-THCTensor_(remainder)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
+void THCTensor_(remainder)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   if (self_ == src_) {
@@ -245,7 +225,7 @@ void THCTensor_(triu)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
   THCudaCheck(cudaGetLastError());
 }
 
-THC_API int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
+int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   if (!THCTensor_(isSameSizeAs(state, self_, src_))) {
@@ -269,8 +249,7 @@ THC_API int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_
   return min != 0;
 }
 
-THC_API void
-THCTensor_(bitand)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
+void THCTensor_(bitand)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   return THError("bitand only supported for integer type tensors");
@@ -291,8 +270,7 @@ THCTensor_(bitand)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t 
 #endif
 }
 
-THC_API void
-THCTensor_(bitor)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
+void THCTensor_(bitor)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   return THError("bitor only supported for integer type tensors");
@@ -313,8 +291,7 @@ THCTensor_(bitor)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t v
 #endif
 }
 
-THC_API void
-THCTensor_(bitxor)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
+void THCTensor_(bitxor)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   return THError("bitxor only supported for integer type tensors");

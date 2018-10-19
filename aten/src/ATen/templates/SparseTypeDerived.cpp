@@ -11,11 +11,11 @@
 #include "ATen/Allocator.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/UndefinedTensor.h"
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/core/Half.h"
-#include "ATen/core/optional.h"
+#include "ATen/core/UndefinedTensorImpl.h"
+#include "c10/util/Optional.h"
 
 #include <cstddef>
 #include <functional>
@@ -31,6 +31,9 @@ ${Type}::${Type}()
   : ${DenseBackend}TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
+}
+caffe2::TypeMeta ${Type}::typeMeta() const {
+  return caffe2::TypeMeta::Make<${ScalarType}>();
 }
 Backend ${Type}::backend() const {
   return Backend::${Backend};

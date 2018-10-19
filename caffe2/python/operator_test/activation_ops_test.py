@@ -11,12 +11,13 @@ import hypothesis.strategies as st
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.mkl_test_util as mu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 import unittest
 
 
-class TestActivations(hu.HypothesisTestCase):
-    @given(X=hu.tensor(), in_place=st.booleans(),
+class TestActivations(serial.SerializedTestCase):
+    @serial.given(X=hu.tensor(), in_place=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]), **mu.gcs)
     def test_relu(self, X, in_place, engine, gc, dc):
         if gc == mu.mkl_do:
@@ -74,7 +75,7 @@ class TestActivations(hu.HypothesisTestCase):
             output_to_grad="X" if in_place else "Y",
             grad_reference=relu_grad_ref)
 
-    @given(X=hu.tensor(elements=st.floats(-3.0, 3.0)),
+    @serial.given(X=hu.tensor(elements=st.floats(-3.0, 3.0)),
            n=st.floats(min_value=0.5, max_value=2.0),
            in_place=st.booleans(), **hu.gcs)
     def test_relu_n(self, X, n, in_place, gc, dc):
@@ -100,7 +101,7 @@ class TestActivations(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=0.005)
 
-    @given(X=hu.tensor(),
+    @serial.given(X=hu.tensor(),
            alpha=st.floats(min_value=0.1, max_value=2.0),
            in_place=st.booleans(), engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
@@ -169,7 +170,7 @@ class TestActivations(hu.HypothesisTestCase):
             # Gradient check wrt W
             self.assertGradientChecks(gc, op, [X, W], 1, [0], stepsize=1e-2)
 
-    @given(X=hu.tensor(),
+    @serial.given(X=hu.tensor(),
            alpha=st.floats(min_value=0.1, max_value=2.0),
            inplace=st.booleans(),
            **hu.gcs)

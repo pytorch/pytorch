@@ -112,22 +112,16 @@ public:
     if (input.type().scalarType() == ScalarType::Half) {
       // cuFFT on half requires compute capability of at least SM_53
       auto dev_prop = at::cuda::getCurrentDeviceProperties();
-      if (dev_prop->major < 5 || (dev_prop->major == 5 && dev_prop->minor < 3)) {
-        std::ostringstream ss;
-        ss << "cuFFT doesn't support signals of half type with compute "
-           << "capability less than SM_53, but the device containing input half "
-           << "tensor only has SM_" << dev_prop->major << dev_prop->minor;
-        throw std::runtime_error(ss.str());
-      }
+      AT_CHECK(dev_prop->major >= 5 && !(dev_prop->major == 5 && dev_prop->minor < 3),
+               "cuFFT doesn't support signals of half type with compute "
+               "capability less than SM_53, but the device containing input half "
+               "tensor only has SM_", dev_prop->major, dev_prop->minor);
       for (int64_t i = 0; i < signal_ndim; i++) {
         auto signal_size = checked_signal_sizes[i];
-        if (!is_pow_of_two(signal_size)) {
-          std::ostringstream ss;
-          ss << "cuFFT doesn't support signals of half type with size at any "
-             << "dimension that is not a power of two, but got a signal size of "
-             << checked_signal_sizes;
-          throw std::runtime_error(ss.str());
-        }
+        AT_CHECK(is_pow_of_two(signal_size),
+                 "cuFFT doesn't support signals of half type with size at any ",
+                 "dimension that is not a power of two, but got a signal size of ",
+                 checked_signal_sizes);
       }
       clone_input |= input.stride(signal_ndim) != 1;
     }
@@ -152,7 +146,8 @@ public:
     // See NOTE [ cuFFT Embedded Strides ].
     //
     // TODO: Figure out why windows fails to compile
-    //         at::optional<std::vector<long long int>> inembed_opt = at::nullopt;
+    //         c10::optional<std::vector<long long int>> inembed_opt =
+    //         c10::nullopt;
     //       Then move the following to a helper function.
 #ifdef __HIP_PLATFORM_HCC__
     std::vector<int> inembed(signal_ndim);
@@ -212,7 +207,7 @@ public:
       } else if (!complex_input && complex_output) {
         exec_type = HIPFFT_R2C;
       } else {
-        throw std::runtime_error("hipFFT doesn't support r2r (float)");
+        AT_ERROR("hipFFT doesn't support r2r (float)");
       }
     } else if (input.type().scalarType() == ScalarType::Double) {
       if (complex_input && complex_output) {
@@ -222,13 +217,13 @@ public:
       } else if (!complex_input && complex_output) {
         exec_type = HIPFFT_D2Z;
       } else {
-        throw std::runtime_error("hipFFT doesn't support r2r (double)");
+        AT_ERROR("hipFFT doesn't support r2r (double)");
       }
     } else {
       std::ostringstream ss;
       ss << "hipFFT doesn't support tensor of type: "
          << at::toString(input.type().scalarType());
-      throw std::runtime_error(ss.str());
+      AT_ERROR(ss.str());
     }
 
 #else
@@ -249,7 +244,7 @@ public:
       std::ostringstream ss;
       ss << "cuFFT doesn't support tensor of type: "
          << at::toString(input.type().scalarType());
-      throw std::runtime_error(ss.str());
+      AT_ERROR(ss.str());
     }
 #endif
 
@@ -343,16 +338,16 @@ private:
   int64_t ws_size;
 };
 
-// NB: cuFFT allocates a starting plan array of size 1024. It should grow the
-//     array as more plans are created. However, a bug in cuFFT (at least
-//     present in CUDA 9.1) causes the cufftSetAutoAllocation call on the
-//     1024-th plan to fail with CUFFT_INVALID_PLAN. Therefore, we check that
-//     cache size is leq 1023. The initial plan array size is 1024 for
-//     CUDA 8.0 ~ 9.2 so setting this as a CUDA-version-agnostic constant should
-//     be fine for now.
-// TODO: When CUDA 10 comes out, check if the bug is fixed or if we need another
-//       number for CUDA 10.
-constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
+#if CUDA_VERSION < 10000
+  // Note that the max plan number for CUDA version < 10 has to be 1023
+  // due to a bug that fails on the 1024th plan
+  constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
+#else
+  // The max plan number chosen for CUDA version > 10 is arbitrary.
+  // This number puts a limit on how big of a plan cache should we maintain.
+  // Without this number, the plan cache can grow unconditionally.
+  constexpr int64_t CUFFT_MAX_PLAN_NUM = 4096;
+#endif
 static_assert(CUFFT_MAX_PLAN_NUM >= 0 && CUFFT_MAX_PLAN_NUM <= std::numeric_limits<size_t>::max(),
               "CUFFT_MAX_PLAN_NUM not in size_t range");
 
@@ -420,7 +415,6 @@ public:
 
   void resize(int64_t new_size) {
     _set_max_size(new_size);
-
     auto cur_size = _usage_list.size();
     if (cur_size > _max_size) {
       auto delete_it = _usage_list.end();

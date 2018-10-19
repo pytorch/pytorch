@@ -1,9 +1,9 @@
-#include <torch/op.h>
+#include <torch/script.h>
 
 #include <cstddef>
 #include <vector>
 
-std::vector<at::Tensor> custom_op(
+TORCH_API std::vector<at::Tensor> custom_op(
     at::Tensor tensor,
     double scalar,
     int64_t repeat);

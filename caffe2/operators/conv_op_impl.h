@@ -240,7 +240,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   }
   auto f = [&](Tensor* col_buffer) {
     col_buffer->Resize(
-        vector<TIndex>{Y->dim32(1), Y->dim32(2), kernel_h(), kernel_w(), C});
+        vector<int64_t>{Y->dim32(1), Y->dim32(2), kernel_h(), kernel_w(), C});
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     // Im2Col, followed by gemm.
     for (int image_id = 0; image_id < N; ++image_id) {
@@ -504,7 +504,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     dbias->Resize(M);
     if (bias_multiplier_.size() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
+      bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
       math::Set<T, Context>(
           output_image_size,
           static_cast<T>(1),
@@ -689,7 +689,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     math::Set<T, Context>(dbias->size(), 0, dbias_data, &context_);
     if (bias_multiplier_.size() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
+      bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
       math::Set<T, Context>(
           output_image_size,
           static_cast<T>(1),

@@ -3,6 +3,7 @@
 #include <cuda.h>
 #include <limits.h>
 #include <math.h>
+#include <float.h>
 
 // NumericLimits.cuh is a holder for numeric limits definitions of commonly used
 // types. This header is very specific to ROCm HIP and may be removed in the future.

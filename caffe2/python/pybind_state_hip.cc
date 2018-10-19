@@ -13,10 +13,10 @@
 namespace caffe2 {
 namespace python {
 
-REGISTER_HIP_OPERATOR(Python, GPUFallbackOp<PythonOp<CPUContext, false>>);
+REGISTER_HIP_OPERATOR(Python, GPUFallbackOp);
 REGISTER_HIP_OPERATOR(
     PythonGradient,
-    GPUFallbackOp<PythonGradientOp<CPUContext, false>>);
+    GPUFallbackOp);
 
 REGISTER_HIP_OPERATOR(PythonDLPack, PythonOp<HIPContext, true>);
 REGISTER_HIP_OPERATOR(PythonDLPackGradient, PythonGradientOp<HIPContext, true>);
@@ -74,7 +74,7 @@ void addHIPObjectMethods(py::module& m) {
           [](const DLPackWrapper<HIPContext>& t) { return t.tensor->dims(); })
       .def(
           "_reshape",
-          [](DLPackWrapper<HIPContext>* t, std::vector<TIndex> dims) {
+          [](DLPackWrapper<HIPContext>* t, std::vector<int64_t> dims) {
             t->tensor->Resize(dims);
           });
 }

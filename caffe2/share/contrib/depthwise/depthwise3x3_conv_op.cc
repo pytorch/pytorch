@@ -7,7 +7,7 @@
 #include <arm_neon.h>
 #endif
 
-CAFFE2_DEFINE_bool(caffe2_profile_depthwise, false, "");
+C10_DEFINE_bool(caffe2_profile_depthwise, false, "");
 
 namespace caffe2 {
 

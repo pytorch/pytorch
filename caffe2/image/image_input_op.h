@@ -249,13 +249,13 @@ ImageInputOp<Context>::ImageInputOp(
 
   // hard-coded PCA eigenvectors and eigenvalues, based on RBG channel order
   color_lighting_eigvecs_.push_back(
-    std::vector<float>{-144.7125, 183.396, 102.2295});
+    std::vector<float>{-144.7125f, 183.396f, 102.2295f});
   color_lighting_eigvecs_.push_back(
-    std::vector<float>{-148.104, -1.1475, -207.57});
+    std::vector<float>{-148.104f, -1.1475f, -207.57f});
   color_lighting_eigvecs_.push_back(
-    std::vector<float>{-148.818, -177.174, 107.1765});
+    std::vector<float>{-148.818f, -177.174f, 107.1765f});
 
-  color_lighting_eigvals_ = std::vector<float>{0.2175, 0.0188, 0.0045};
+  color_lighting_eigvals_ = std::vector<float>{0.2175f, 0.0188f, 0.0045f};
 
   CAFFE_ENFORCE_GT(batch_size_, 0, "Batch size should be nonnegative.");
   if (use_caffe_datum_) {
@@ -372,14 +372,14 @@ ImageInputOp<Context>::ImageInputOp(
     randgen_per_thread_.emplace_back(meta_randgen());
   }
   prefetched_image_.Resize(
-      TIndex(batch_size_),
-      TIndex(crop_),
-      TIndex(crop_),
-      TIndex(color_ ? 3 : 1));
+      int64_t(batch_size_),
+      int64_t(crop_),
+      int64_t(crop_),
+      int64_t(color_ ? 3 : 1));
   if (label_type_ != SINGLE_LABEL && label_type_ != SINGLE_LABEL_WEIGHTED) {
-    prefetched_label_.Resize(TIndex(batch_size_), TIndex(num_labels_));
+    prefetched_label_.Resize(int64_t(batch_size_), int64_t(num_labels_));
   } else {
-    prefetched_label_.Resize(vector<TIndex>(1, batch_size_));
+    prefetched_label_.Resize(vector<int64_t>(1, batch_size_));
   }
 
   for (int i = 0; i < additional_output_sizes.size(); ++i) {
@@ -387,7 +387,7 @@ ImageInputOp<Context>::ImageInputOp(
         Context::GetDeviceType());
     prefetched_additional_outputs_.emplace_back(CPU);
     prefetched_additional_outputs_[i].Resize(
-        TIndex(batch_size_), TIndex(additional_output_sizes[i]));
+        int64_t(batch_size_), int64_t(additional_output_sizes[i]));
   }
 }
 
@@ -465,8 +465,8 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
                 datum.data().size(),
                 CV_8UC1,
                 const_cast<char*>(datum.data().data())),
-            color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
-        if (src.rows == 0 or src.cols == 0) {
+            color_ ? cv::IMREAD_COLOR : cv::IMREAD_GRAYSCALE);
+        if (src.rows == 0 || src.cols == 0) {
           num_decode_errors_in_batch_++;
           src = cv::Mat::zeros(cv::Size(224, 224), CV_8UC3);
         }
@@ -540,8 +540,8 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
                 &encoded_size,
                 CV_8UC1,
                 const_cast<char*>(encoded_image_str.data())),
-            color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
-        if (src.rows == 0 or src.cols == 0) {
+            color_ ? cv::IMREAD_COLOR : cv::IMREAD_GRAYSCALE);
+        if (src.rows == 0 || src.cols == 0) {
           num_decode_errors_in_batch_++;
           src = cv::Mat::zeros(cv::Size(224, 224), CV_8UC3);
         }
@@ -681,7 +681,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
   if (out_c == src.channels()) {
     *img = src;
   } else {
-    cv::cvtColor(src, *img, (out_c == 1) ? CV_BGR2GRAY : CV_GRAY2BGR);
+    cv::cvtColor(src, *img, (out_c == 1) ? cv::COLOR_BGR2GRAY : cv::COLOR_GRAY2BGR);
   }
 
   // Note(Yangqing): I believe that the mat should be created continuous.
@@ -1264,7 +1264,7 @@ bool ImageInputOp<Context>::CopyPrefetched() {
                                               image_output, mean_gpu_,
                                               std_gpu_, &context_);
       } else if (output_type_ == TensorProto_DataType_FLOAT16) {
-        TransformOnGPU<uint8_t,float16,Context>(prefetched_image_on_device_,
+        TransformOnGPU<uint8_t,at::Half,Context>(prefetched_image_on_device_,
                                                 image_output, mean_gpu_,
                                                 std_gpu_, &context_);
       }  else {

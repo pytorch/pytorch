@@ -169,6 +169,12 @@ The following operators are supported:
 * ge
 * le
 * exp
+* sin
+* cos
+* tan
+* asin
+* acos
+* atan
 * permute
 * Conv
 * BatchNorm

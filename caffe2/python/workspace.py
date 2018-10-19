@@ -54,7 +54,7 @@ if has_gpu_support:
     GetDeviceProperties = C.get_device_properties
 else:
     NumCudaDevices = lambda: 0 # noqa
-    GetCuDNNVersion = lambda: 0 # noqa
+    GetCUDAVersion = lambda: 0 # noqa
     GetCuDNNVersion = lambda: 0 # noqa
     GetCudaPeerAccessPattern = lambda: np.array([]) # noqa
     GetDeviceProperties = lambda x: None # noqa

@@ -60,7 +60,7 @@ static THCTensor* THCTensor_(newColumnMajor)(THCState *state, THCTensor *self, T
 }
 
 
-THC_API void THCTensor_(gesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
+void THCTensor_(gesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a_->is_empty() && a_->dim() == 2, 1, "A should be (non-empty) 2 dimensional");
@@ -98,8 +98,8 @@ THC_API void THCTensor_(gesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
 #endif
 }
 
-THC_API void THCTensor_(trtrs)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_,
-                               const char *uplo, const char *trans, const char *diag)
+void THCTensor_(trtrs)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_,
+                       const char *uplo, const char *trans, const char *diag)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a_->is_empty() && a_->dim() == 2, 1, "A should be (non-empty) 2 dimensional");
@@ -135,7 +135,7 @@ THC_API void THCTensor_(trtrs)(THCState *state, THCTensor *rb_, THCTensor *ra_, 
 #endif
 }
 
-THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
+void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a_->is_empty() && a_->dim() == 2, 1, "A should be (non-empty) 2 dimensional");
@@ -182,7 +182,7 @@ THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
 #endif
 }
 
-THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a, const char *jobzs, const char *uplos)
+void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a, const char *jobzs, const char *uplos)
 {
 #ifdef USE_MAGMA
   int64_t n = THTensor_sizeLegacyNoScalars(a, 0);
@@ -247,7 +247,7 @@ THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
 #endif
 }
 
-THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a_, const char *jobvrs)
+void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a_, const char *jobvrs)
 {
 #ifdef USE_MAGMA
   THArgCheck(a_->dim() == 2, 3, "A should be 2 dimensional");
@@ -321,23 +321,26 @@ THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
 #endif
 }
 
-THC_API void THCTensor_(gesvd)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *a, const char *jobu)
+void THCTensor_(gesdd)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *a,
+                       const char *some, const char* compute_uv)
 {
 #ifdef USE_MAGMA
   THCTensor *ra_ = THCTensor_(new)(state);
-  THCTensor_(gesvd2)(state, ru_, rs_, rv_,  ra_, a, jobu);
+  THCTensor_(gesdd2)(state, ru_, rs_, rv_,  ra_, a, some, compute_uv);
   THCTensor_(free)(state, ra_);
 #else
-  THError(NoMagma(gesvd));
+  THError(NoMagma(gesdd));
 #endif
 }
 
-THC_API void THCTensor_(gesvd2)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *ra_, THCTensor *a, const char *jobus)
+void THCTensor_(gesdd2)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *ra_, THCTensor *a,
+                        const char *some, const char* compute_uv)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be non-empty 2 dimensional");
 
-  magma_vec_t jobz = jobus[0] == 'A' ? MagmaAllVec : jobus[0] == 'S' ? MagmaSomeVec : jobus[0] == 'O' ? MagmaOverwriteVec : MagmaNoVec;
+  char jobus = compute_uv[0] == 'N' ? 'N' : some[0];
+  magma_vec_t jobz = jobus == 'A' ? MagmaAllVec : jobus == 'S' ? MagmaSomeVec : jobus == 'O' ? MagmaOverwriteVec : MagmaNoVec;
 
   int iunused[1];
   int64_t m = a->size(0);
@@ -350,8 +353,12 @@ THC_API void THCTensor_(gesvd2)(THCState *state, THCTensor *ru_, THCTensor *rs_,
   THCTensor_(copyTensor2d)(state, a_data, a);
 
   scalar_t *rs_data = th_magma_malloc_pinned<scalar_t>(k);
-  scalar_t *ru_data = th_magma_malloc_pinned<scalar_t>(m * j);
-  scalar_t *rv_data = th_magma_malloc_pinned<scalar_t>(n * n);
+  scalar_t *ru_data = NULL;
+  scalar_t *rv_data = NULL;
+  if (jobz != MagmaNoVec) {
+    ru_data = th_magma_malloc_pinned<scalar_t>(m * j);
+    rv_data = th_magma_malloc_pinned<scalar_t>(n * n);
+  }
 
   scalar_t wkopt;
   int info;
@@ -377,26 +384,33 @@ THC_API void THCTensor_(gesvd2)(THCState *state, THCTensor *ru_, THCTensor *rs_,
   else if (info < 0)
     THError("MAGMA gesdd : Argument %d : illegal value", -info);
 
-  THCTensor_(copyArray2d)(state, rv_, rv_data, n, n);
-  THCTensor_(transpose)(state, rv_, NULL, 0, 1);
-  if (jobz != MagmaAllVec)
-    THCTensor_(narrow)(state, rv_, rv_, 1, 0, jv);
-  THCTensor_(copyArray2d)(state, ru_, ru_data, m, j);
   THCTensor_(copyArray1d)(state, rs_, rs_data, k);
-  THCTensor_(copyArray2d)(state, ra_, a_data,  m, n);
+  THCTensor_(copyArray2d)(state, ra_, a_data, m, n);
+  if (jobz != MagmaNoVec) {
+    THCTensor_(copyArray2d)(state, rv_, rv_data, n, n);
+    THCTensor_(transpose)(state, rv_, NULL, 0, 1);
+    if (jobz != MagmaAllVec)
+      THCTensor_(narrow)(state, rv_, rv_, 1, 0, jv);
+    THCTensor_(copyArray2d)(state, ru_, ru_data, m, j);
+    magma_free_pinned(rv_data);
+    magma_free_pinned(ru_data);
+  } else {
+    THCTensor_(resize2d)(state, rv_, n, n);
+    THCTensor_(zero)(state, rv_);
+    THCTensor_(resize2d)(state, ru_, m, m);
+    THCTensor_(zero)(state, ru_);
+  }
 
   magma_free_pinned(work_data);
   magma_free_pinned(iwork);
-  magma_free_pinned(rv_data);
-  magma_free_pinned(ru_data);
   magma_free_pinned(rs_data);
   magma_free_pinned(a_data);
 #else
-  THError(NoMagma(gesvd2));
+  THError(NoMagma(gesdd2));
 #endif
 }
 
-THC_API void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
+void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
 {
   THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be non-empty 2 dimensional");
   THArgCheck(a->size(0) == a->size(1), 2, "A should be square");
@@ -524,7 +538,7 @@ __global__ void THCTensor_(copyLowerSymmetric)(scalar_t *input, int n, int len)
   }
 }
 
-THC_API void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
+void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be non-empty 2 dimensional");
@@ -564,7 +578,7 @@ THC_API void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, co
 #endif
 }
 
-THC_API void THCTensor_(potrf)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
+void THCTensor_(potrf)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be (non-empty) 2 dimensional");
@@ -600,7 +614,7 @@ THC_API void THCTensor_(potrf)(THCState *state, THCTensor *ra_, THCTensor *a, co
 #endif
 }
 
-THC_API void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *b, THCTensor *a, const char *uplo)
+void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *b, THCTensor *a, const char *uplo)
 {
 #ifdef USE_MAGMA
   THArgCheck(a->size(0) == a->size(1), 2, "A should be square");
@@ -632,7 +646,7 @@ THC_API void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *b, TH
 #endif
 }
 
-THC_API void THCTensor_(geqrf)(THCState *state, THCTensor *ra_, THCTensor *rtau_, THCTensor *a_)
+void THCTensor_(geqrf)(THCState *state, THCTensor *ra_, THCTensor *rtau_, THCTensor *a_)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a_->is_empty() && a_->dim() == 2, 2, "A should be non-empty 2 dimensional");
@@ -669,7 +683,7 @@ THC_API void THCTensor_(geqrf)(THCState *state, THCTensor *ra_, THCTensor *rtau_
 #endif
 }
 
-THC_API void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THCTensor *a_)
+void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THCTensor *a_)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a_->is_empty() && a_->dim() == 2, 2, "A should be non-empty 2 dimensional");

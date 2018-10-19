@@ -3,17 +3,17 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 from hypothesis import assume, given
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core
-import caffe2.python.hypothesis_test_util as hu
-from caffe2.proto import caffe2_pb2
 import unittest
 
 
-class TestChannelBackpropStats(hu.HypothesisTestCase):
-    @given(
+class TestChannelBackpropStats(serial.SerializedTestCase):
+    @serial.given(
         size=st.integers(7, 10),
         inputChannels=st.integers(1, 10),
         batchSize=st.integers(1, 3),

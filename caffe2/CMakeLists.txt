@@ -32,9 +32,8 @@ if (NOT BUILD_ATEN_MOBILE)
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_SRCS})
-  # ATen tests use catch instead of gtest so keep separate for now
-  # list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
-  # list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
+  list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
+  list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
   list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
@@ -65,42 +64,41 @@ endif()
 # ---[ Caffe2 build
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
-# TODO(orionr): Enable all of this for Windows DLL when we
-# can figure out how to get it to build
-if (MSVC AND BUILD_SHARED_LIBS)
-add_subdirectory(utils)
-else()
-add_subdirectory(proto)
-add_subdirectory(contrib)
-add_subdirectory(core)
-add_subdirectory(utils)
-add_subdirectory(predictor)
-add_subdirectory(core/nomnigraph)
-add_subdirectory(core/dispatch)
-if (USE_NVRTC)
-  add_subdirectory(cuda_rtc)
-endif()
-add_subdirectory(db)
-add_subdirectory(distributed)
-# add_subdirectory(experiments) # note, we may remove this folder at some point
-add_subdirectory(ideep)
-add_subdirectory(image)
-add_subdirectory(video)
-add_subdirectory(mkl)
-add_subdirectory(mobile)
-add_subdirectory(mpi)
-add_subdirectory(observers)
-add_subdirectory(onnx)
-add_subdirectory(operators)
-add_subdirectory(operators/rnn)
-add_subdirectory(opt)
-add_subdirectory(perfkernels)
-add_subdirectory(python)
-add_subdirectory(queue)
-add_subdirectory(sgd)
-add_subdirectory(share)
-# add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
-add_subdirectory(transforms)
+
+if(NOT BUILD_ATEN_ONLY)
+  add_subdirectory(proto)
+  add_subdirectory(contrib)
+  add_subdirectory(core)
+  add_subdirectory(utils)
+  add_subdirectory(predictor)
+  add_subdirectory(core/nomnigraph)
+  add_subdirectory(core/nomscheduler)
+  add_subdirectory(core/dispatch)
+  if (USE_NVRTC)
+    add_subdirectory(cuda_rtc)
+  endif()
+  add_subdirectory(db)
+  add_subdirectory(distributed)
+  # add_subdirectory(experiments) # note, we may remove this folder at some point
+  add_subdirectory(ideep)
+  add_subdirectory(image)
+  add_subdirectory(video)
+  add_subdirectory(mobile)
+  add_subdirectory(mpi)
+  add_subdirectory(observers)
+  add_subdirectory(onnx)
+  if (BUILD_CAFFE2_OPS)
+    add_subdirectory(operators)
+    add_subdirectory(operators/rnn)
+  endif()
+  add_subdirectory(opt)
+  add_subdirectory(perfkernels)
+  add_subdirectory(python)
+  add_subdirectory(queue)
+  add_subdirectory(sgd)
+  add_subdirectory(share)
+  # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
+  add_subdirectory(transforms)
 endif()
 
 # Advanced: if we have white list specified, we will do intersections for all
@@ -166,59 +164,57 @@ if (FALSE)
 endif()
 
 # ---[ List of libraries to link with
-# TODO(orionr): Enable all of this for Windows DLL when we
-# can figure out how to get it to build
-if (NOT (MSVC AND BUILD_SHARED_LIBS))
-add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe2_PROTO>)
-add_dependencies(caffe2_protos Caffe2_PROTO)
-else()
-# Do not include caffe2 or caffe protos, but rather have it only be
-# a library to attach local protobuf.
-add_library(caffe2_protos STATIC utils/dummy.cpp)
+if(NOT BUILD_ATEN_ONLY)
+  add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe2_PROTO>)
+  add_dependencies(caffe2_protos Caffe2_PROTO)
+  # If we are going to link protobuf locally inside caffe2 libraries, what we will do is
+  # to create a helper static library that always contains libprotobuf source files, and
+  # link the caffe2 related dependent libraries to it.
+  target_include_directories(caffe2_protos INTERFACE $<INSTALL_INTERFACE:include>)
+  # Reason for this public dependency is as follows:
+  # (1) Strictly speaking, we should not expose any Protobuf related functions. We should
+  #     only use function interfaces wrapped with our own public API, and link protobuf
+  #     locally.
+  # (2) However, currently across the Caffe2 codebase, we have extensive use of protobuf
+  #     functionalities. For example, not only libcaffe2.so uses it, but also other
+  #     binaries such as python extensions etc. As a result, we will have to have a
+  #     transitive dependency to libprotobuf.
+  #
+  # Good thing is that, if we specify CAFFE2_LINK_LOCAL_PROTOBUF, then we do not need to
+  # separately deploy protobuf binaries - libcaffe2.so will contain all functionalities
+  # one needs. One can verify this via ldd.
+  #
+  # TODO item in the future includes:
+  # (1) Enable using lite protobuf
+  # (2) Properly define public API that do not directly depend on protobuf itself.
+  # (3) Expose the libprotobuf.a file for dependent libraries to link to.
+  #
+  # What it means for users/developers?
+  # (1) Users: nothing affecting the users, other than the fact that CAFFE2_LINK_LOCAL_PROTOBUF
+  #     avoids the need to deploy protobuf.
+  # (2) Developers: if one simply uses core caffe2 functionality without using protobuf,
+  #     nothing changes. If one has a dependent library that uses protobuf, then one needs to
+  #     have the right protobuf version as well as linking to libprotobuf.a.
+  target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
 endif()
-# If we are going to link protobuf locally inside caffe2 libraries, what we will do is
-# to create a helper static library that always contains libprotobuf source files, and
-# link the caffe2 related dependent libraries to it.
-target_include_directories(caffe2_protos INTERFACE $<INSTALL_INTERFACE:include>)
-# Reason for this public dependency is as follows:
-# (1) Strictly speaking, we should not expose any Protobuf related functions. We should
-#     only use function interfaces wrapped with our own public API, and link protobuf
-#     locally.
-# (2) However, currently across the Caffe2 codebase, we have extensive use of protobuf
-#     functionalities. For example, not only libcaffe2.so uses it, but also other
-#     binaries such as python extensions etc. As a result, we will have to have a
-#     transitive dependency to libprotobuf.
-#
-# Good thing is that, if we specify CAFFE2_LINK_LOCAL_PROTOBUF, then we do not need to
-# separately deploy protobuf binaries - libcaffe2.so will contain all functionalities
-# one needs. One can verify this via ldd.
-#
-# TODO item in the future includes:
-# (1) Enable using lite protobuf
-# (2) Properly define public API that do not directly depend on protobuf itself.
-# (3) Expose the libprotobuf.a file for dependent libraries to link to.
-#
-# What it means for users/developers?
-# (1) Users: nothing affecting the users, other than the fact that CAFFE2_LINK_LOCAL_PROTOBUF
-#     avoids the need to deploy protobuf.
-# (2) Developers: if one simply uses core caffe2 functionality without using protobuf,
-#     nothing changes. If one has a dependent library that uses protobuf, then one needs to
-#     have the right protobuf version as well as linking to libprotobuf.a.
-target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
 
 # Compile exposed libraries.
-list(APPEND Caffe2_CPU_SRCs $<TARGET_OBJECTS:c10>)
 add_library(caffe2 ${Caffe2_CPU_SRCS})
 if (NOT WIN32)
   target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
 endif()
-caffe2_interface_library(caffe2_protos caffe2_protos_whole)
-target_link_libraries(caffe2 PRIVATE caffe2_protos_whole)
-if (${CAFFE2_LINK_LOCAL_PROTOBUF})
-  target_link_libraries(caffe2 INTERFACE protobuf::libprotobuf)
-else()
-  target_link_libraries(caffe2 PUBLIC protobuf::libprotobuf)
+
+if(NOT BUILD_ATEN_ONLY)
+  caffe2_interface_library(caffe2_protos caffe2_protos_whole)
+  target_link_libraries(caffe2 PRIVATE caffe2_protos_whole)
+  if (${CAFFE2_LINK_LOCAL_PROTOBUF})
+    target_link_libraries(caffe2 INTERFACE protobuf::libprotobuf)
+  else()
+    target_link_libraries(caffe2 PUBLIC protobuf::libprotobuf)
+  endif()
 endif()
+
+target_link_libraries(caffe2 PUBLIC c10)
 target_link_libraries(caffe2 PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
@@ -304,6 +300,11 @@ if (MSVC AND NOT BUILD_SHARED_LIBS)
   # as the latter is not respected by nvcc
   target_compile_definitions(caffe2 PUBLIC "AT_CORE_STATIC_WINDOWS=1")
 endif()
+if (MSVC AND BUILD_SHARED_LIBS)
+  # ONNX is linked statically and needs to be exported from this library
+  # to be used externally. Make sure that references match the export.
+  target_compile_options(caffe2 PRIVATE "-DONNX_BUILD_MAIN_LIB")
+endif()
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
 install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)
@@ -341,7 +342,7 @@ if(USE_CUDA)
   # NB: This must be target_compile_definitions, not target_compile_options,
   # as the latter is not respected by nvcc
   if (MSVC)
-      target_compile_definitions(caffe2_gpu PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+    target_compile_definitions(caffe2_gpu PRIVATE "-DCAFFE2_CUDA_BUILD_MAIN_LIB")
   endif()
 
   # Set standard properties on the target
@@ -373,7 +374,7 @@ if(USE_ROCM)
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
-  set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${HIP_HIPCC_FLAGS})
+  target_compile_options(caffe2_hip PRIVATE ${HIP_HIPCC_FLAGS})
   target_link_libraries(caffe2_hip PUBLIC caffe2)
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
@@ -401,27 +402,32 @@ if ($ENV{WERROR})
 endif()
 
 # ---[ Test binaries.
-# TODO(orionr): Enable all of this for Windows DLL when we
-# can figure out how to get it to build
-if (NOT (MSVC AND BUILD_SHARED_LIBS))
 if (BUILD_TEST)
-  set(Caffe2_ALL_TEST_SRCS ${Caffe2_CPU_TEST_SRCS})
-  if (USE_CUDA)
-    list(APPEND Caffe2_ALL_TEST_SRCS ${Caffe2_GPU_TEST_SRCS})
-  endif()
-
-  foreach(test_src ${Caffe2_ALL_TEST_SRCS})
+  foreach(test_src ${Caffe2_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
     target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)
-    if (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 3.0)
-      target_compile_features(${test_name} PRIVATE cxx_range_for)
-    endif()
+    target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if (INSTALL_TEST)
       install(TARGETS ${test_name} DESTINATION test)
     endif()
   endforeach()
+
+  if (USE_CUDA)
+    foreach(test_src ${Caffe2_GPU_TEST_SRCS})
+      get_filename_component(test_name ${test_src} NAME_WE)
+      cuda_add_executable(${test_name} "${test_src}")
+      target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)
+      target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+      add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+      if (INSTALL_TEST)
+        install(TARGETS ${test_name} DESTINATION test)
+      endif()
+    endforeach()
+  endif()
 
   if(USE_ROCM)
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
@@ -429,46 +435,24 @@ if (BUILD_TEST)
       get_filename_component(test_name ${test_src} NAME_WE)
       hip_add_executable(${test_name} "${test_src}")
       target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)
-      if (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 3.0)
-        target_compile_features(${test_name} PRIVATE cxx_range_for)
-      endif()
+      target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if (INSTALL_TEST)
         install(TARGETS ${test_name} DESTINATION test)
       endif()
     endforeach()
   endif()
-endif()
-endif()
 
-set(__aten_test_dir "test/aten")
-if (NOT USE_ROCM)
-  foreach(test_src ${ATen_CPU_TEST_SRCS})
-    get_filename_component(test_name ${test_src} NAME_WE)
-    add_executable(${test_name} "${test_src}")
-    target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
-    target_include_directories(${test_name} SYSTEM PRIVATE ${Caffe2_DEPENDENCY_INCLUDE})
-    target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS})
-    add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
-    install(TARGETS ${test_name} DESTINATION ${__aten_test_dir})
-  endforeach()
-
-  if(USE_CUDA OR USE_ROCM)
-    foreach(test_src ${ATen_CUDA_TEST_SRCS})
-      get_filename_component(test_name ${test_src} NAME_WE)
-      torch_cuda_based_add_executable(${test_name} "${test_src}")
-      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
-      target_include_directories(${test_name} SYSTEM PRIVATE ${Caffe2_DEPENDENCY_INCLUDE})
-      target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS})
-      add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
-      install(TARGETS ${test_name} DESTINATION ${__aten_test_dir})
-    endforeach()
+  # For special tests that explicitly uses dependencies, we add them here
+  if (USE_MPI)
+    target_link_libraries(mpi_test ${MPI_CXX_LIBRARIES})
+    if (USE_CUDA)
+      target_link_libraries(mpi_gpu_test ${MPI_CXX_LIBRARIES})
+    endif()
   endif()
 endif()
 
-# TODO(orionr): Enable all of this for Windows DLL when we
-# can figure out how to get it to build
-if (NOT (MSVC AND BUILD_SHARED_LIBS))
 if (BUILD_PYTHON)
   # Python site-packages
   # Get canonical directory for python site packages (relative to install
@@ -525,6 +509,12 @@ if (BUILD_PYTHON)
   if (APPLE)
     set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
   endif()
+  if (WIN32)
+    set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
+  endif()
+  target_include_directories(caffe2_pybind11_state PRIVATE $<INSTALL_INTERFACE:include>)
+  target_include_directories(caffe2_pybind11_state PRIVATE ${Caffe2_CPU_INCLUDE})
+
   target_link_libraries(
       caffe2_pybind11_state caffe2_library)
   if (WIN32)
@@ -547,6 +537,11 @@ if (BUILD_PYTHON)
     if (APPLE)
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
     endif()
+    if (WIN32)
+      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
+    endif()
+    target_include_directories(caffe2_pybind11_state_gpu PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(caffe2_pybind11_state_gpu PRIVATE ${Caffe2_CPU_INCLUDE})
     target_link_libraries(
         caffe2_pybind11_state_gpu caffe2_library caffe2_gpu_library)
     if (WIN32)
@@ -564,12 +559,17 @@ if (BUILD_PYTHON)
   if(USE_ROCM)
     hip_add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINKER_LANGUAGE HIP)
-    set_target_properties(caffe2_pybind11_state_hip PROPERTIES COMPILE_FLAGS "${HIP_HIPCC_FLAGS} -fvisibility=hidden")
+    target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_HIPCC_FLAGS} -fvisibility=hidden)
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     if (APPLE)
       set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
     endif()
+    if (WIN32)
+      set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
+    endif()
+    target_include_directories(caffe2_pybind11_state_hip PRIVATE $<INSTALL_INTERFACE:include>)
+    target_include_directories(caffe2_pybind11_state_hip PRIVATE ${Caffe2_CPU_INCLUDE})
     target_link_libraries(
         caffe2_pybind11_state_hip caffe2_library caffe2_hip_library)
     if (WIN32)
@@ -656,7 +656,6 @@ if (BUILD_PYTHON)
   # Caffe2 proto files
   install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
           FILES_MATCHING PATTERN "*.py")
-endif()
 endif()
 
 # Finally, set the Caffe2_MAIN_LIBS variable in the parent scope.

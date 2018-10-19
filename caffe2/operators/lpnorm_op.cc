@@ -36,21 +36,22 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(dnorm.ndim(), 1);
   CAFFE_ENFORCE_EQ(dnorm.dim32(0), 1);
   dX->ResizeLike(X);
-  const float kEps = 1e-12f;
   const float size = average_ ? (float)X.size() : 1.0f;
   if (p_ == 1) {
-    // Todo: implement in eigen
-    for (int i = 0; i < X.size(); ++i) {
-      float temp = (X.data<float>())[i];
-      if (temp < -kEps) {
-        dX->template mutable_data<float>()[i] =
-            -(dnorm.data<float>())[0] / size;
-      } else if (temp > kEps) {
-        dX->template mutable_data<float>()[i] = (dnorm.data<float>())[0] / size;
-      } else {
-        dX->template mutable_data<float>()[i] = 0;
-      }
-    }
+    EigenVectorMap<float>(dX->template mutable_data<float>(), X.size())
+        .array() = ConstEigenVectorMap<float>(X.data<float>(), X.size())
+                       .array()
+                       .unaryExpr([](float x) {
+                         const float kEps = 1e-12f;
+                         if (x < -kEps) {
+                           return -1.0f;
+                         } else if (x > kEps) {
+                           return 1.0f;
+                         } else {
+                           return 0.0f;
+                         }
+                       }) *
+        ((dnorm.data<float>())[0] / size);
   } else if (p_ == 2) {
     EigenVectorMap<float>(dX->template mutable_data<float>(), X.size())
         .array() =
@@ -132,10 +133,10 @@ Y:
         "*(type: bool; default: False)* Whether we calculate norm or averaged_norm.The Lp_averaged_norm(x) is defined as Lp_averaged_norm(x) = LpNorm(x) / size(x)")
     .TensorInferenceFunction([](const OperatorDef& /* unused */,
                                 const vector<TensorShape>& in) {
-      std::vector<TIndex> output_dims(1);
+      std::vector<int64_t> output_dims(1);
       output_dims[0] = 1; // 1
       return vector<TensorShape>{
-          CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
+          CreateTensorShape(vector<int64_t>{output_dims}, in[0].data_type())};
     });
 
 OPERATOR_SCHEMA(LpNormGradient)

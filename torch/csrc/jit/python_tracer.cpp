@@ -7,7 +7,7 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 
 #include <sstream>
 
@@ -24,25 +24,21 @@ namespace torch { namespace jit { namespace tracer {
 std::string getPythonInterpreterStackTrace() {
   std::stringstream stack_trace;
   AutoGIL gil;
-  PyThreadState *tstate = PyThreadState_GET();
-  if (nullptr != tstate && nullptr != tstate->frame) {
-    PyFrameObject *frame = tstate->frame;
-
-    while (nullptr != frame) {
-      int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
-      std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
-      std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
-      stack_trace << filename << "(" << line << "): " << funcname << "\n";
-      frame = frame->f_back;
-    }
+  PyFrameObject *frame = PyEval_GetFrame();
+  while (nullptr != frame) {
+    int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
+    std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
+    std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
+    stack_trace << filename << "(" << line << "): " << funcname << "\n";
+    frame = frame->f_back;
   }
   return stack_trace.str();
 }
 
 std::shared_ptr<torch::jit::Graph> createGraphByTracing(
-        py::function func,
-        Stack trace_inputs,
-        at::optional<size_t> num_real_inputs) {
+    py::function func,
+    Stack trace_inputs,
+    c10::optional<size_t> num_real_inputs) {
   size_t num_func_inputs = num_real_inputs.value_or(trace_inputs.size());
   auto enter_info = tracer::enter(std::move(trace_inputs));
   try {

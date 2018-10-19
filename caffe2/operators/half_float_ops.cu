@@ -31,7 +31,7 @@ bool FloatToHalfOp<CUDAContext>::RunOnDevice() {
       context_.cuda_stream()>>>(
       X.size(),
       X.data<float>(),
-      reinterpret_cast<half*>(Y->template mutable_data<float16>()));
+      reinterpret_cast<half*>(Y->template mutable_data<at::Half>()));
   return true;
 }
 
@@ -46,7 +46,7 @@ bool HalfToFloatOp<CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       X.size(),
-      reinterpret_cast<const half*>(X.data<float16>()),
+      reinterpret_cast<const half*>(X.data<at::Half>()),
       Y->template mutable_data<float>());
   return true;
 }

@@ -5,10 +5,10 @@
 // In alignment with default sort on a c++ map, this function
 // will permute key and value tensors identically, and
 // in such a way that the 'key' tensor is ordered numerically
-THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
-                                           THCTensor* key,
-                                           THCudaLongTensor* value,
-                                           int dim, bool dir) {
+void THCTensor_(sortKeyValueInplace)(THCState* state,
+                                     THCTensor* key,
+                                     THCudaLongTensor* value,
+                                     int dim, bool dir) {
   THArgCheck(key->sizes().equals(value->sizes()), 2,
              "Key tensor must have same size as value tensor");
   int dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, value);
@@ -274,11 +274,11 @@ void THCTensor_(sortViaThrust)(THCState* state,
   THCudaLongTensor_freeCopyTo(state, trContigIndices, indices);
 }
 
-THC_API void THCTensor_(sort)(THCState* state,
-                               THCTensor *sorted,
-                               THCudaLongTensor *indices,
-                               THCTensor *input,
-                               int dim, int order) {
+void THCTensor_(sort)(THCState* state,
+                      THCTensor *sorted,
+                      THCudaLongTensor *indices,
+                      THCTensor *input,
+                      int dim, int order) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, sorted, input));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
   int64_t dims = THCTensor_(nDimensionLegacyNoScalars)(state, sorted);
@@ -309,7 +309,12 @@ THC_API void THCTensor_(sort)(THCState* state,
   int maxSliceSize = 2048;
 #endif
 
+#ifdef __HIP_PLATFORM_HCC__
+  // TODO bitonicSortKVInPlace hangs on ROCm currently.
+  if (0) {
+#else
   if (sliceSize <= maxSliceSize) {
+#endif
     // Fill `indices` (the values) with the
     // slice-relative index.
     THCudaLongTensor_fillSliceWithIndex(state, indices, dim);

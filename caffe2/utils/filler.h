@@ -18,8 +18,12 @@ class TensorFiller {
   void Fill(Tensor* tensor, Context* context) const {
     CAFFE_ENFORCE(context, "context is null");
     CAFFE_ENFORCE(tensor, "tensor is null");
-    auto min = static_cast<Type>(min_);
-    auto max = static_cast<Type>(max_);
+    auto min = (min_ < std::numeric_limits<Type>::min())
+        ? std::numeric_limits<Type>::min()
+        : static_cast<Type>(min_);
+    auto max = (max_ > std::numeric_limits<Type>::max())
+        ? std::numeric_limits<Type>::max()
+        : static_cast<Type>(max_);
     CAFFE_ENFORCE_LE(min, max);
 
     Tensor temp_tensor(shape_, Context::GetDeviceType());
@@ -86,19 +90,19 @@ class TensorFiller {
     return Min(0).Max(max_segment).Dist(FD_SYNTHETIC);
   }
 
-  TensorFiller& Shape(const std::vector<TIndex>& shape) {
+  TensorFiller& Shape(const std::vector<int64_t>& shape) {
     shape_ = shape;
     return *this;
   }
 
   template <class Type>
-  TensorFiller(const std::vector<TIndex>& shape, Type fixed_sum)
+  TensorFiller(const std::vector<int64_t>& shape, Type fixed_sum)
       : shape_(shape), dist_(FD_FIXEDSUM), fixed_sum_((double)fixed_sum) {}
 
-  TensorFiller(const std::vector<TIndex>& shape)
+  TensorFiller(const std::vector<int64_t>& shape)
       : shape_(shape), dist_(FD_UNIFORM), fixed_sum_(0) {}
 
-  TensorFiller() : TensorFiller(std::vector<TIndex>()) {}
+  TensorFiller() : TensorFiller(std::vector<int64_t>()) {}
 
   std::string DebugString() const {
     std::stringstream stream;
@@ -119,7 +123,7 @@ class TensorFiller {
   }
 
  private:
-  std::vector<TIndex> shape_;
+  std::vector<int64_t> shape_;
   // TODO: type is unknown until a user starts to fill data;
   // cast everything to double for now.
   double min_ = 0.0;

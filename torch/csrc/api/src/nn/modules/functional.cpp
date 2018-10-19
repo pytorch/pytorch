@@ -13,11 +13,11 @@ FunctionalImpl::FunctionalImpl(Function function)
 void FunctionalImpl::reset() {}
 
 Tensor FunctionalImpl::forward(Tensor input) {
-  return function_(input);
+  return function_(std::move(input));
 }
 
 Tensor FunctionalImpl::operator()(Tensor input) {
-  return forward(input);
+  return forward(std::move(input));
 }
 } // namespace nn
 } // namespace torch

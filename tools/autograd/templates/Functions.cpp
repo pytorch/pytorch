@@ -1,3 +1,10 @@
+// NB: Must be at the top of file to avoid including the deprecated "math.h".
+// https://stackoverflow.com/questions/6563810/m-pi-works-with-math-h-but-not-with-cmath-in-visual-studio
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <cmath>
+#endif
+
 #include "Functions.h"
 #include <ATen/Utils.h>
 #include <ATen/core/TensorOptions.h>
@@ -6,12 +13,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/Reduction.h>
 
-// define constants like M_PI and C keywords for MSVC
-#ifdef _MSC_VER
-#define _USE_MATH_DEFINES
 #include <ciso646>
-#endif
-#include <math.h>
 #include <algorithm>
 #include <numeric>
 
@@ -85,15 +87,15 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_
     return zeros_like(self);
   } else if (p == 1.0) {
     return self.sign() * grad;
-  } else if (p < 2.0) {
-    self_scaled = self.sign() * self.abs().pow(p - 1);
-    scale_v = grad / norm.pow(p - 1);
   } else if (p == 2.0) {
     self_scaled = self;
     scale_v = grad / norm;
-  } else if (p == INFINITY) {
+  } else if (std::isinf(p)) {
     self_scaled = self.sign() * (self.abs() == norm).toType(self.type());
     scale_v = grad.clone();
+  } else if (p < 2.0) {
+    self_scaled = self.sign() * self.abs().pow(p - 1);
+    scale_v = grad / norm.pow(p - 1);
   } else {
     self_scaled = self * self.abs().pow(p - 2);
     scale_v = grad / norm.pow(p - 1);
@@ -126,6 +128,10 @@ Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & expone
 
 Tensor pow_backward_exponent(Tensor grad, const Tensor & self, const Tensor & exponent) {
   return grad * self.pow(exponent) * self.log();
+}
+
+Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor & exponent) {
+  return grad * at::pow(base, exponent) * std::log(base.toDouble());
 }
 
 Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
@@ -219,7 +225,7 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
 
   Tensor zero_mask = (input == 0);
   Tensor slice_zero_count = zero_mask.sum(dim, true);
-  int64_t total_zeros = slice_zero_count.sum().toCLong();
+  int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
   if (total_zeros == 0) {
     return (grad * result) / input;
   } else {
@@ -321,7 +327,7 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
   }
 
   // Simple case with nonzero elements in the input
-  if ((input != 0).all().toCByte()) {
+  if ((input != 0).all().item<uint8_t>()) {
     Tensor result = at::cumprod(input, dim);
     return sum_scan_exclusive(result * grad, dim) / input;
   }
@@ -531,7 +537,7 @@ Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
     // Use autograd-friendly backward if double backward is required
     return grad * (mask.type_as(grad) * (1. / p1m));
   } else {
-    return grad._masked_scale(mask, 1. / p1m);
+    return at::_masked_scale(grad, mask, 1. / p1m);
   }
 }
 
@@ -731,6 +737,25 @@ Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, in
     return grad_output.mul(target.log().add_(1).sub_(self)).div_(target.numel()).masked_fill_(target == 0, 0.);
   }
   return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
+}
+
+Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_output, const Tensor& self, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
+  Tensor grad_target;
+  if (pos_weight.defined()) {
+    grad_target = (1. - self.sigmoid()).log_().sub_(pos_weight.mul(self.sigmoid().log_())).mul_(grad_output);
+  } else {
+    grad_target = self.mul(-grad_output);
+  }
+
+  if (weight.defined()) {
+    grad_target.mul_(weight);
+  }
+
+  if (reduction == Reduction::ElementwiseMean) {
+    grad_target.div_(target.numel());
+  }
+
+  return grad_target;
 }
 
 Tensor log_sigmoid_double_backward(const Tensor & grad, const Tensor & input) {
@@ -1362,7 +1387,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   auto storage = at::zeros({base_size}, grad.options());
 
   // prepare indices tensor if we will do index_add_ later
-  at::optional<at::Tensor> flatten_full_indices;
+  c10::optional<at::Tensor> flatten_full_indices;
   if (inp_maybe_overlap || out_maybe_overlap) {
     flatten_full_indices = at::arange(0, base_size, grad.options().dtype(at::kLong));
   }
@@ -1399,26 +1424,28 @@ std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self
 // each output separately; there is not all that much sharing
 // of computation going on here.
 std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
-    const Tensor & mb_ggI,
-    const Tensor & mb_ggW,
-    const Tensor & mb_gO,
-    const Tensor & input,
-    const Tensor & weight,
-    std::array<bool, 3> output_mask) {
+    const Tensor & grad_grad_input,
+    const Tensor & grad_grad_weight,
+    const Tensor & grad_out,
+    const Tensor & input_,
+    const Tensor & weight_) {
+
+    auto input = input_.contiguous();
+    auto weight = weight_.contiguous();
 
   // Zero-fill undefined grads (TODO: do this more efficiently)
-  auto ggI = mb_ggI.defined() ? mb_ggI : at::zeros_like(input);
-  auto ggW = mb_ggW.defined() ? mb_ggW : at::zeros_like(weight);
-  auto gO = mb_gO.defined() ? mb_gO : at::zeros_like(input);
+  auto ggI = grad_grad_input.defined() ? grad_grad_input.contiguous() : at::zeros_like(input);
+  auto ggW = grad_grad_weight.defined() ? grad_grad_weight.contiguous() : at::zeros_like(weight);
+  auto gO = grad_out.defined() ? grad_out.contiguous() : at::zeros_like(input);
 
   auto positive_mask = (input > 0).type_as(ggI);
   auto nonpositive_mask = (input <= 0).type_as(ggW);
 
   // Explanation: Let input be i, weight be w, grad_output be gO.
-  // f(i, w) = i  if i > 0
-  //         = wi if i <= 0
-  // df/di * gO  = gO      if i > 0      df/dw * g0 = 0      if i > 0
-  //             = g0 * w  if i <= 0                = g0 * i  if i <= 0
+  // f(i, w) = i      if i > 0
+  //         = w * i  if i <= 0
+  // gI = df/di * gO  = gO      if i > 0    gW = df/dw * gO = 0       if i > 0
+  //                  = gO * w  if i <= 0                   = gO * i  if i <= 0
   // The rest is taking derivatives of these wrt i, w, gO and summing/expanding properly.
 
   if (weight.numel() == 1) {
@@ -1462,7 +1489,7 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
       }
 
       Tensor ggO;
-      if (output_mask[0]) {
+      if (gO.requires_grad()) {
           // expand weight as input as in ggW/ggI above
           auto weight_expanded = weight;
           for (int64_t i = 0; i < dims_to_unsqueeze; i++) {
@@ -1481,7 +1508,11 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
 //
 // This makes no assumption on the signs of sigma.
 Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-          bool some, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
+          bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
+  AT_CHECK(compute_uv,
+           "svd_backward: Setting compute_uv to false in torch.svd doesn't compute singular matrices, ",
+           "and hence we cannot compute backward. Please use torch.svd(compute_uv=True)");
+
   auto m = self.size(0);
   auto n = self.size(1);
   auto k = sigma.size(0);
@@ -1561,15 +1592,14 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
+    AT_CHECK(eigenvectors,
+             "symeig_backward: Setting eigenvectors to false in torch.symeig doesn't compute eigenvectors ",
+             "and hence we cannot compute backward. Please use torch.symeig(eigenvectors=True)");
+
     auto glambda = grads[0];
     auto gv = grads[1];
 
     auto vt = v.t();
-
-    if (!eigenvectors) {
-        throw std::runtime_error(std::string("cannot compute backward without "
-                                             "computing eigenvectors in forward pass"));
-    }
 
     Tensor result;
     if (gv.defined()) {
@@ -1598,19 +1628,19 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
 // Invertible case is derived from Jacobi's formula, and also can be found at:
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
-  auto det_val = det.toCDouble();
+  auto det_val = det.item<double>();
   if (det_val != 0 /* invertible */) {
     return grad * det * self.inverse().t();
   } else /* otherwise det = \prod(sigma) = 0, use svd */ {
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();
     auto gsigma = prod_backward(grad, sigma, det);
-    return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   }
 }
 
 Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {
-  auto logdet_val = logdet.toCDouble();
+  auto logdet_val = logdet.item<double>();
   if (logdet_val != -INFINITY /* det != 0, invertible */) {
     return grad * self.inverse().t();
   } else /* otherwise det = \prod(sigma) = 0, use svd */ {
@@ -1618,7 +1648,7 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
     std::tie(u, sigma, v) = self.svd();
     // backward det = \sum log(sigma)
     auto gsigma = grad.div(sigma);
-    return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   }
 }
 
@@ -1626,7 +1656,7 @@ Tensor slogdet_backward(const std::vector<torch::autograd::Variable> &grads,
                         const Tensor& self,
                         const Tensor& signdet, const Tensor& logabsdet) {
   AT_ASSERTM(!grads[0].defined(), "slogdet's sign output should never have gradient");
-  auto signdet_val = signdet.toCDouble();
+  auto signdet_val = signdet.item<double>();
   if (signdet_val != 0 /* det != 0, invertible */) {
     return grads[1] * self.inverse().t();
   } else /* otherwise det = \prod(sigma) = 0, use svd */ {
@@ -1636,7 +1666,7 @@ Tensor slogdet_backward(const std::vector<torch::autograd::Variable> &grads,
     // so logabsdet = \sum log(abs(sigma))
     // but det = 0, so backward logabsdet = \sum log(sigma)
     auto gsigma = grads[1].div(sigma);
-    return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   }
 }
 

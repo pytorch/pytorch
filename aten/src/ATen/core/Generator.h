@@ -5,7 +5,7 @@
 
 namespace at {
 
-struct AT_API Generator {
+struct CAFFE2_API Generator {
   Generator() {};
   Generator(const Generator& other) = delete;
   Generator(Generator&& other) = delete;

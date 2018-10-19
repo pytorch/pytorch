@@ -27,7 +27,8 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/apply_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/stream_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_half_test.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_optional_test.cu)
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_optional_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_packedtensoraccessor_test.cu)
 if (CUDNN_FOUND)
   list(APPEND ATen_CUDA_TEST_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/cudnn_test.cpp)

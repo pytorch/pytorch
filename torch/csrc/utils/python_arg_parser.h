@@ -55,6 +55,7 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/autograd/variable.h"
 
 #include <ATen/ATen.h>
 
@@ -123,12 +124,12 @@ struct PythonArgs {
   inline at::Storage storage(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
-  inline at::optional<at::ScalarType> scalartypeOptional(int i);
+  inline c10::optional<at::ScalarType> scalartypeOptional(int i);
   inline const THPLayout& layout(int i);
   inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
-  inline at::optional<at::Device> deviceOptional(int i);
+  inline c10::optional<at::Device> deviceOptional(int i);
   inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
@@ -226,10 +227,14 @@ inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
   if (THPVariable_Check(args[i])) {
-    return ((THPVariable*)args[i])->cdata._local_scalar();
+    return at::_local_scalar(((THPVariable*)args[i])->cdata);
   }
   if (THPUtils_checkLong(args[i])) {
     return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+  }
+
+  if (PyComplex_Check(args[i])) {
+    return at::Scalar(THPUtils_unpackComplexDouble(args[i]));
   }
   return at::Scalar(THPUtils_unpackDouble(args[i]));
 }
@@ -291,11 +296,11 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
     try {
       // Elements of torch.Size are tensors during tracing, and we need to record extra
       // information before they are turned into an IntList
-      if (traceable && THPVariable_Check(obj)) {
+      if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
         auto & var = THPVariable_Unpack(obj);
         jit::tracer::ArgumentStash::stashIntListElem(
             signature.params[i].name, size, idx, var);
-        res[idx] = var.toCLong();
+        res[idx] = var.item<int64_t>();
         continue;
       } else {
         res[idx] = THPUtils_unpackIndex(obj);
@@ -323,8 +328,9 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
   return reinterpret_cast<THPDtype*>(args[i])->scalar_type;
 }
 
-inline at::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
-  if (!args[i]) return at::nullopt;
+inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
   return scalartype(i);
 }
 
@@ -379,8 +385,9 @@ inline at::Device PythonArgs::deviceWithDefault(int i, const at::Device& default
   return device(i);
 }
 
-inline at::optional<at::Device> PythonArgs::deviceOptional(int i) {
-  if (!args[i]) return at::nullopt;
+inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
   return device(i);
 }
 
@@ -429,7 +436,7 @@ inline at::Generator* PythonArgs::generator(int i) {
 }
 
 inline at::Storage PythonArgs::storage(int i) {
-  if (!args[i]) return nullptr;
+  if (!args[i]) return at::Storage();
   return createStorage(args[i]);
 }
 

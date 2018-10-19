@@ -7,35 +7,35 @@ Distributed communication package - torch.distributed
 .. automodule:: torch.distributed
 .. currentmodule:: torch.distributed
 
-Currently torch.distributed supports four backends, each with
+Currently torch.distributed supports three backends, each with
 different capabilities. The table below shows which functions are available
 for use with CPU / CUDA tensors.
 MPI supports cuda only if the implementation used to build PyTorch supports it.
 
 
-+------------+-----------+-----------+-----------+-----------+
-| Backend    | ``tcp``   | ``gloo``  | ``mpi``   | ``nccl``  |
-+------------+-----+-----+-----+-----+-----+-----+-----+-----+
-| Device     | CPU | GPU | CPU | GPU | CPU | GPU | CPU | GPU |
-+============+=====+=====+=====+=====+=====+=====+=====+=====+
-| send       | ✓   | ✘   | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
-+------------+-----+-----+-----+-----+-----+-----+-----+-----+
-| recv       | ✓   | ✘   | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
-+------------+-----+-----+-----+-----+-----+-----+-----+-----+
-| broadcast  | ✓   | ✘   | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+------------+-----+-----+-----+-----+-----+-----+-----+-----+
-| all_reduce | ✓   | ✘   | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+------------+-----+-----+-----+-----+-----+-----+-----+-----+
-| reduce     | ✓   | ✘   | ✘   | ✘   | ✓   | ?   | ✘   | ✓   |
-+------------+-----+-----+-----+-----+-----+-----+-----+-----+
-| all_gather | ✓   | ✘   | ✘   | ✘   | ✓   | ?   | ✘   | ✓   |
-+------------+-----+-----+-----+-----+-----+-----+-----+-----+
-| gather     | ✓   | ✘   | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
-+------------+-----+-----+-----+-----+-----+-----+-----+-----+
-| scatter    | ✓   | ✘   | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
-+------------+-----+-----+-----+-----+-----+-----+-----+-----+
-| barrier    | ✓   | ✘   | ✓   | ✓   | ✓   | ?   | ✘   | ✘   |
-+------------+-----+-----+-----+-----+-----+-----+-----+-----+
++------------+-----------+-----------+-----------+
+| Backend    | ``gloo``  | ``mpi``   | ``nccl``  |
++------------+-----+-----+-----+-----+-----+-----+
+| Device     | CPU | GPU | CPU | GPU | CPU | GPU |
++============+=====+=====+=====+=====+=====+=====+
+| send       | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
++------------+-----+-----+-----+-----+-----+-----+
+| recv       | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
++------------+-----+-----+-----+-----+-----+-----+
+| broadcast  | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
++------------+-----+-----+-----+-----+-----+-----+
+| all_reduce | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
++------------+-----+-----+-----+-----+-----+-----+
+| reduce     | ✘   | ✘   | ✓   | ?   | ✘   | ✓   |
++------------+-----+-----+-----+-----+-----+-----+
+| all_gather | ✘   | ✘   | ✓   | ?   | ✘   | ✓   |
++------------+-----+-----+-----+-----+-----+-----+
+| gather     | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
++------------+-----+-----+-----+-----+-----+-----+
+| scatter    | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
++------------+-----+-----+-----+-----+-----+-----+
+| barrier    | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
++------------+-----+-----+-----+-----+-----+-----+
 
 .. _distributed-basics:
 
@@ -79,6 +79,14 @@ joined.
 
 .. autofunction:: get_world_size
 
+.. autofunction:: is_initialized
+
+.. autofunction:: get_default_group
+
+.. autofunction:: is_mpi_available
+
+.. autofunction:: is_nccl_available
+
 --------------------------------------------------------------------------------
 
 Currently three initialization methods are supported:
@@ -91,10 +99,8 @@ reachable from all processes and a desired ``world_size``. The first way
 requires specifying an address that belongs to the rank 0 process. This
 initialization method requires that all processes have manually specified ranks.
 
-Alternatively, the address has to be a valid IP multicast address, in which case
-ranks can be assigned automatically. Multicast initialization also supports
-a ``group_name`` argument, which allows you to use the same address for multiple
-jobs, as long as they use different group names.
+Note that multicast address is not supported anymore in the latest distributed
+package. ``group_name`` is deprecated as well.
 
 ::
 
@@ -103,31 +109,40 @@ jobs, as long as they use different group names.
     # Use address of one of the machines
     dist.init_process_group(backend, init_method='tcp://10.1.1.20:23456', rank=args.rank, world_size=4)
 
-    # or a multicast address - rank will be assigned automatically if unspecified
-    dist.init_process_group(backend, init_method='tcp://[ff15:1e18:5d4c:4cf0:d02d:b659:53ba:b0a7]:23456',
-                            world_size=4)
-
 Shared file-system initialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Another initialization method makes use of a file system that is shared and
 visible from all machines in a group, along with a desired ``world_size``. The URL should start
 with ``file://`` and contain a path to a non-existent file (in an existing
-directory) on a shared file system. This initialization method also supports a
-``group_name`` argument, which allows you to use the same shared file path for
-multiple jobs, as long as they use different group names.
+directory) on a shared file system. File-system initialization will automatically
+create that file if it doesn't exist, but will not delete the file. Therefore, it
+is your responsibility to make sure that the file is cleaned up before the next
+init_process_group call on the same file path/name.
+
+Note that automatic rank assignment is not supported anymore in the latest
+distributed package and ``group_name`` is deprecated as well.
 
 .. warning::
     This method assumes that the file system supports locking using ``fcntl`` - most
     local systems and NFS support it.
 
+.. warning::
+    This method does not clean up and remove the file and it is your responsibility
+    to remove the file at the end of the training. This is especially important
+    if you plan to call init_process_group multiple times on the same file name.
+    In other words, if the file is not removed/cleaned up and you call
+    init_process_group again on that file, it is unexpected behavior and will cause
+    failures. The rule of thumb here is that, make sure that the file is non-existent or
+    empty everytime init_process_group is called.
+
 ::
 
     import torch.distributed as dist
 
-    # Rank will be assigned automatically if unspecified
+    # rank should always be specified
     dist.init_process_group(backend, init_method='file:///mnt/nfs/sharedfile',
-                            world_size=4, group_name=args.group)
+                            world_size=4, rank=args.rank)
 
 Environment variable initialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -174,13 +189,28 @@ as they should never be created manually, but they are guaranteed to support two
 * ``wait()`` - will block the process until the operation is finished.
   ``is_completed()`` is guaranteed to return True once it returns.
 
-When using the MPI backend, :func:`~torch.distributed.isend` and :func:`~torch.distributed.irecv`
-support non-overtaking, which has some guarantees on supporting message order. For more detail, see
-http://mpi-forum.org/docs/mpi-2.2/mpi22-report/node54.htm#Node54
-
 .. autofunction:: isend
 
 .. autofunction:: irecv
+
+Synchronous and asynchornous collective operations
+--------------------------------------------------
+Every collective operation function supports the following two kinds of operations:
+
+synchronous operation - the default mode, when ``async_op`` is set to False.
+when the function returns, it is guaranteed that
+the collective operation is performed (not necessarily completed if it's a CUDA op since all
+CUDA ops are asynchornous), and any further function calls depending on the data of the
+collective operation can be called. In the synchronous mode, the collective function does not
+return anything
+
+asynchornous operation - when ``async_op`` is set to True. The collective operation function
+returns a distributed request object. In general, you don't need to create it manually and it
+is guaranteed to support two methods:
+
+* ``is_completed()`` - returns True if the operation has finished
+* ``wait()`` - will block the process until the operation is finished.
+
 
 Collective functions
 --------------------
@@ -202,7 +232,7 @@ Collective functions
 Multi-GPU collective functions
 ------------------------------
 
-If you have more than one GPU on each node, when using the NCCL backend,
+If you have more than one GPU on each node, when using the NCCL and Gloo backend,
 :func:`~torch.distributed.broadcast_multigpu`
 :func:`~torch.distributed.all_reduce_multigpu`
 :func:`~torch.distributed.reduce_multigpu` and

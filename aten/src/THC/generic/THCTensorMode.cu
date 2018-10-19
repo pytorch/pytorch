@@ -2,13 +2,13 @@
 #define THC_GENERIC_FILE "generic/THCTensorMode.cu"
 #else
 
-THC_API void THCTensor_(calculateMode)(THCState *state,
-                                        THCTensor *values,
-                                        THCudaLongTensor *indices,
-                                        THCTensor *input,
-                                        THCudaLongStorage *sortBuffer,
-                                        int dimension,
-                                        THLongStorage *position) {
+void THCTensor_(calculateMode)(THCState *state,
+                               THCTensor *values,
+                               THCudaLongTensor *indices,
+                               THCTensor *input,
+                               THCudaLongStorage *sortBuffer,
+                               int dimension,
+                               THLongStorage *position) {
   THAssert(THCTensor_(isContiguous)(state, input));
 
   // Because the input is contiguous, we want to get a reference to the
@@ -129,14 +129,14 @@ THC_API void THCTensor_(calculateMode)(THCState *state,
 }
 
 // this probably could be a loop, not a recursive algorithm
-THC_API void THCTensor_(dimApplyMode)(THCState *state,
-                               THCTensor *values,
-                               THCudaLongTensor *indices,
-                               THCTensor *input,
-                               THCudaLongStorage *sortBuffer,
-                               int dimension,
-                               THLongStorage *position,
-                               int curDim) {
+void THCTensor_(dimApplyMode)(THCState *state,
+                              THCTensor *values,
+                              THCudaLongTensor *indices,
+                              THCTensor *input,
+                              THCudaLongStorage *sortBuffer,
+                              int dimension,
+                              THLongStorage *position,
+                              int curDim) {
   int64_t ndim = THCTensor_(nDimensionLegacyAll)(state, input);
 
   // Because we have transposed the Tensor, the data for the dimension we are mode'ing along
@@ -155,12 +155,12 @@ THC_API void THCTensor_(dimApplyMode)(THCState *state,
 #define MAX_GRID_SIZE  65535
 #define MAX_BLOCK_SIZE 1024
 
-THC_API void THCTensor_(mode)(THCState *state,
-                              THCTensor *values,
-                              THCudaLongTensor *indices,
-                              THCTensor *input,
-                              int dimension,
-                              int keepdim) {
+void THCTensor_(mode)(THCState *state,
+                      THCTensor *values,
+                      THCudaLongTensor *indices,
+                      THCTensor *input,
+                      int dimension,
+                      int keepdim) {
   THCTensor *transposed, *contiguous, *valuesTransposed;
   THLongStorage *position;
   THCudaLongStorage *sortBuffer;

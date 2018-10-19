@@ -27,7 +27,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   scale_->ResizeLike(X);
   float* scale_data = scale_->template mutable_data<float>();
   math::Set<float, CPUContext>(X.size(), bias_, scale_data, &context_);
-  Tensor padded_square(vector<TIndex>{C + size_ - 1, H, W}, CPU);
+  Tensor padded_square(vector<int64_t>{C + size_ - 1, H, W}, CPU);
   float* padded_square_data = padded_square.template mutable_data<float>();
   math::Set<float, CPUContext>(padded_square.size(), 0., padded_square_data,
                                &context_);
@@ -91,7 +91,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   scale_->ResizeLike(X);
   float* scale_data = scale_->template mutable_data<float>();
 
-  Tensor padded_square(vector<TIndex>(1, C + size_ - 1), CPU);
+  Tensor padded_square(vector<int64_t>(1, C + size_ - 1), CPU);
   float* padded_square_data = padded_square.template mutable_data<float>();
   math::Set<float, CPUContext>(padded_square.size(), 0., padded_square_data,
                                &context_);
@@ -146,7 +146,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
 
-  Tensor padded_ratio(vector<TIndex>{C + size_ - 1, H, W}, CPU);
+  Tensor padded_ratio(vector<int64_t>{C + size_ - 1, H, W}, CPU);
   float* padded_ratio_data = padded_ratio.template mutable_data<float>();
   // Compute scale(copied from LRNOp) - reusing padded_ratio
   math::Set<float, CPUContext>(X.size(), bias_, scale_data, &context_);
@@ -183,7 +183,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 
   math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
                                &context_);
-  Tensor accum_ratio(vector<TIndex>{H, W}, CPU);
+  Tensor accum_ratio(vector<int64_t>{H, W}, CPU);
   float* accum_ratio_data = accum_ratio.template mutable_data<float>();
 
   const float cache_ratio = 2. * alpha_ * beta_ / size_;
@@ -243,7 +243,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
     scale_ = &local_scale_tensor_;
   }
   scale_->ResizeLike(X);
-  Tensor padded_ratio(vector<TIndex>(1, C + size_ - 1), CPU);
+  Tensor padded_ratio(vector<int64_t>(1, C + size_ - 1), CPU);
   float* padded_ratio_data = padded_ratio.template mutable_data<float>();
   float* scale_data = scale_->template mutable_data<float>();
   // Compute scale(copied from LRNOp) - reusing padded_ratio
@@ -301,13 +301,13 @@ REGISTER_CPU_OPERATOR(LRN, LRNOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LRNGradient, LRNGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(LRN)
-  .NumInputs(1)
-  .NumOutputs(1, 2)
-  .SetDoc(R"DOC(
+    .NumInputs(1)
+    .NumOutputs(1, 2)
+    .SetDoc(R"DOC(
 
 `LRN` applies Local Response Normalization to an input blob. This operation performs
-a kind of "lateral inhibition" by normalizing over local input regions, where 
-normalization is applied across channels. This operator is typically used to 
+a kind of "lateral inhibition" by normalizing over local input regions, where
+normalization is applied across channels. This operator is typically used to
 normalize an unbounded activation (such as ReLU). The output shape is the same as
 the input shape. The `brew` module has a wrapper for this operator for use in a
 `ModelHelper` object.
@@ -393,7 +393,7 @@ X:
    [ 0.45961624]
    [-1.0201577 ]
    [ 0.62854475]
-   [-0.6395456 ]]]] 
+   [-0.6395456 ]]]]
 
 Y:
  [[[[ 0.5160766 ]
@@ -484,15 +484,19 @@ Y_scale:
 </details>
 
 )DOC")
-  .Arg("size", "*(type: int; default: 0)* Amount of neighboring channels to sum over for normalization")
-  .Arg("alpha", "*(type: float; default: 0)* Multiplicative (scaling) factor.")
-  .Arg("beta", "*(type: float; default: 0)* Exponent.")
-  .Arg("bias", "*(type: float; default: 1.0)* Additive factor.")
-  .Arg("order", "*(type: float; default: 'NCHW')* Order of blob dimensions.")
-  .Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor (ReLU output).")
-  .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
-  .Output(1, "Y_scale", "*(type: Tensor`<float>`)* Output scale.") 
-  .InheritOnnxSchema("LRN");
+    .Arg(
+        "size",
+        "*(type: int; default: 0)* Amount of neighboring channels to sum over for normalization")
+    .Arg(
+        "alpha",
+        "*(type: float; default: 0)* Multiplicative (scaling) factor.")
+    .Arg("beta", "*(type: float; default: 0)* Exponent.")
+    .Arg("bias", "*(type: float; default: 1.0)* Additive factor.")
+    .Arg("order", "*(type: float; default: 'NCHW')* Order of blob dimensions.")
+    .Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor (ReLU output).")
+    .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
+    .Output(1, "Y_scale", "*(type: Tensor`<float>`)* Output scale.")
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(LRNGradient).NumInputs(3).NumOutputs(1);
 
 class GetLRNGradient : public GradientMakerBase {

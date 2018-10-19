@@ -10,14 +10,14 @@ void enforceIsTensor(Workspace* ws, const std::string& name) {
   auto blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob does not exist: ", name);
   CAFFE_ENFORCE(
-      blob->template IsType<Tensor>(CPU), "Blob is not a CPU Tensor: ", name);
+      BlobIsTensorType(*blob, CPU), "Blob is not a CPU Tensor: ", name);
 }
 
 TensorCPU* getTensor(Workspace* ws, const std::string& name) {
   enforceIsTensor(ws, name);
   auto* blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob: ", name, " does not exist");
-  return blob->GetMutableTensor(CPU);
+  return BlobGetMutableTensor(blob, CPU);
 }
 
 void shareInputTensor(
@@ -60,7 +60,7 @@ Predictor::Predictor(PredictorConfig config) : config_(std::move(config)) {
   for (const auto& name : config_.predict_net->external_input()) {
     if (!initialized.count(name)) {
       auto* blob = config_.ws->CreateBlob(name);
-      blob->GetMutableTensor(CPU);
+      BlobGetMutableTensor(blob, CPU);
     }
   }
   CAFFE_ENFORCE(config_.ws->CreateNet(config_.predict_net));

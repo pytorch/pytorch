@@ -3,7 +3,7 @@
 ATen is a simple tensor library thats exposes the Tensor operations in Torch
 and PyTorch directly in C++11. The wrapper respects the semantics of operators
 in PyTorch, except minor details due to differences between C++ and Python in
-the way default arguments are handled. See the [documentation for tensors](http://pytorch.org/docs/tensors.html) in PyTorch for what these operations do.
+the way default arguments are handled. See the [documentation for tensors](https://pytorch.org/docs/tensors.html) in PyTorch for what these operations do.
 ATen's API is auto-generated from the same declarations PyTorch uses so the
 two APIs will track each other over time.
 
@@ -232,9 +232,12 @@ entry point for the script which does all this work is
 [`src/ATen/gen.py`](src/ATen/gen.py), which ingests
 [`src/ATen/Declarations.cwrap`](src/ATen/Declarations.cwrap),
 [`src/ATen/nn.yaml`](src/ATen/nn.yaml),
-[`src/ATen/native/native_functions.yaml`](src/ATen/native/native_functions.yaml) and the THNN/THCUNN headers and
+[`src/ATen/native/native_functions.yaml`](src/ATen/native/native_functions.yaml) and the THNN/THCUNN headers ([`src/THCUNN/generic/THCUNN.h`](src/THCUNN/generic/THCUNN.h), [`src/THNN/generic/THNN.h`](src/THCUNN/generic/THCUNN.h)) and
 produces all of the headers and wrapping code necessary to generate
-the ATen interface.
+the ATen interface. Be aware that the naming of function parameters in THNN/THCUNN header files (camelCase convention) must match those in the respective yaml files (snake_case convention), such that the parsing ([`src/ATen/nn_parse.py`](src/ATen/native_parse.py), [`src/ATen/native_parse.py`](src/ATen/nn_parse.py)) works.
+      
+      
+       
 
 If you need to understand how ATen understands a declaration after all
 of this processing occurs, it's helpful to look at the generated file

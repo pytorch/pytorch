@@ -11,7 +11,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
   sudo apt-get install -y --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
   # TODO: move this to Docker
   sudo apt-get update
   sudo apt-get install -y --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
@@ -59,6 +59,12 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   sudo apt-get install libc++1
   sudo apt-get install libc++abi1
 
+  # When hcc runs out of memory, it silently exits without stopping
+  # the build process, leaving undefined symbols in the shared lib
+  # which will cause undefined symbol errors when later running
+  # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
+  export MAX_JOBS=4
+
   python tools/amd_build/build_pytorch_amd.py
   python tools/amd_build/build_caffe2_amd.py
   USE_ROCM=1 python setup.py install --user
@@ -102,29 +108,12 @@ fi
 # Add the test binaries so that they won't be git clean'ed away
 git add -f build/bin
 
-# Testing ATen install
-if [[ "$BUILD_ENVIRONMENT" != *cuda* ]]; then
-  echo "Testing ATen install"
-  time tools/test_aten_install.sh
-fi
-
-# Test C FFI plugins
-# cffi install doesn't work for Python 3.7
-if [[ "$BUILD_ENVIRONMENT" != *pynightly* ]]; then
-  # TODO: Don't run this here
-  pip install cffi
-  git clone https://github.com/pytorch/extension-ffi.git
-  pushd extension-ffi/script
-  python build.py
-  popd
-fi
-
 # Test documentation build
 if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
   pushd docs
   # TODO: Don't run this here
   pip install -r requirements.txt || true
-  make html
+  LC_ALL=C make html
   popd
 fi
 
@@ -137,5 +126,15 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   mkdir -p ../cpp-build/caffe2
   pushd ../cpp-build/caffe2
   WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
+  popd
+
+  # Build custom operator tests.
+  CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+  CUSTOM_OP_TEST="$PWD/test/custom_operator"
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  mkdir "$CUSTOM_OP_BUILD"
+  pushd "$CUSTOM_OP_BUILD"
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake "$CUSTOM_OP_TEST"
+  make VERBOSE=1
   popd
 fi

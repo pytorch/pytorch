@@ -13,20 +13,20 @@ namespace torch {
 // when we create new tensors. We also provide a few accessors like requires_grad
 // that make it easier to get to varible information when we have a at::Tensor
 
-/// Returns a `Type` object for the given backend (e.g. `at::kCPU`) and
+/// Returns a `TypeExtendedInterface` object for the given backend (e.g. `at::kCPU`) and
 /// `ScalarType` (e.g. `at::kDouble`).
 /// TODO: Eliminate this function as much as possible
-THP_CLASS at::Type& getVariableType(at::Backend backend, at::ScalarType type);
+THP_CLASS at::TypeExtendedInterface& getVariableType(at::Backend backend, at::ScalarType type);
 
-/// Returns a `Type` object for the CPU backend and the given `ScalarType`
+/// Returns a `TypeExtendedInterface` object for the CPU backend and the given `ScalarType`
 /// (e.g. `at::kDouble`). Equivalent to `getVariableType(kCPU, type)`.
 /// TODO: Eliminate this function as much as possible
-THP_CLASS at::Type& CPU(at::ScalarType type);
+THP_CLASS at::TypeExtendedInterface& CPU(at::ScalarType type);
 
-/// Returns a `Type` object for the CUDA backend and the given `ScalarType`
+/// Returns a `TypeExtendedInterface` object for the CUDA backend and the given `ScalarType`
 /// (e.g. `at::kDouble`). Equivalent to `getVariableType(kCUDA, type)`.
 /// TODO: Eliminate this function as much as possible
-THP_CLASS at::Type& CUDA(at::ScalarType type);
+THP_CLASS at::TypeExtendedInterface& CUDA(at::ScalarType type);
 
 /// Sets the `requires_grad` property of the given `Tensor`.
 THP_CLASS void set_requires_grad(at::Tensor& tensor, bool requires_grad) noexcept;

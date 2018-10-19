@@ -22,9 +22,9 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 
-CAFFE2_DECLARE_string(caffe2_net_async_tracing_filepath);
-CAFFE2_DECLARE_string(caffe2_net_async_names_to_trace);
-CAFFE2_DECLARE_int(caffe2_net_async_tracing_nth);
+C10_DECLARE_string(caffe2_net_async_tracing_filepath);
+C10_DECLARE_string(caffe2_net_async_names_to_trace);
+C10_DECLARE_int(caffe2_net_async_tracing_nth);
 
 namespace caffe2 {
 namespace tracing {

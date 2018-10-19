@@ -1,4 +1,4 @@
-#include "catch.hpp"
+#include <gtest/gtest.h>
 
 #include <torch/tensor.h>
 
@@ -7,35 +7,37 @@
 #include <ATen/OptionsGuard.h>
 #include <ATen/core/TensorOptions.h>
 
-#include <vector>
 #include <string>
+#include <vector>
 
 using namespace at;
 
 // A macro so we don't lose location information when an assertion fails.
-#define REQUIRE_OPTIONS(device_, index_, type_, layout_)                    \
-  REQUIRE(options.device().type() == Device((device_), (index_)).type());   \
-  REQUIRE(options.device().index() == Device((device_), (index_)).index()); \
-  REQUIRE(options.dtype() == (type_));                                      \
-  REQUIRE(options.layout() == (layout_))
+#define REQUIRE_OPTIONS(device_, index_, type_, layout_)                      \
+  ASSERT_EQ(options.device().type(), Device((device_), (index_)).type()); \
+  ASSERT_TRUE(                                                                \
+      options.device().index() == Device((device_), (index_)).index());       \
+  ASSERT_EQ(options.dtype(), (type_));                                    \
+  ASSERT_TRUE(options.layout() == (layout_))
 
-#define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)            \
-  REQUIRE(tensor.device().type() == Device((device_), (index_)).type());   \
-  REQUIRE(tensor.device().index() == Device((device_), (index_)).index()); \
-  REQUIRE(tensor.type().scalarType() == (type_));                          \
-  REQUIRE(tensor.type().layout() == (layout_))
+#define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)                \
+  ASSERT_EQ(tensor.device().type(), Device((device_), (index_)).type());   \
+  ASSERT_EQ(tensor.device().index(), Device((device_), (index_)).index()); \
+  ASSERT_EQ(tensor.type().scalarType(), (type_));                          \
+  ASSERT_TRUE(tensor.type().layout() == (layout_))
 
-TEST_CASE("TensorOptions/DefaultsToTheRightValues") {
+TEST(TensorOptionsTest, DefaultsToTheRightValues) {
   TensorOptions options;
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
 }
 
-TEST_CASE("TensorOptions/ReturnsTheCorrectType") {
+TEST(TensorOptionsTest, ReturnsTheCorrectType) {
   auto options = TensorOptions().device(kCPU).dtype(kInt).layout(kSparse);
-  REQUIRE(at::getMaybeVariableType(options) == getNonVariableType(Backend::SparseCPU, kInt));
+  ASSERT_TRUE(
+      at::getType(options) == getNonVariableType(Backend::SparseCPU, kInt));
 }
 
-TEST_CASE("TensorOptions/UtilityFunctionsReturnTheRightTensorOptions") {
+TEST(TensorOptionsTest, UtilityFunctionsReturnTheRightTensorOptions) {
   auto options = dtype(kInt);
   REQUIRE_OPTIONS(kCPU, -1, kInt, kStrided);
 
@@ -52,7 +54,7 @@ TEST_CASE("TensorOptions/UtilityFunctionsReturnTheRightTensorOptions") {
   REQUIRE_OPTIONS(kCUDA, 3, kByte, kSparse);
 }
 
-TEST_CASE("TensorOptions/ConstructsWellFromCPUTypes") {
+TEST(TensorOptionsTest, ConstructsWellFromCPUTypes) {
   TensorOptions options;
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
 
@@ -69,7 +71,7 @@ TEST_CASE("TensorOptions/ConstructsWellFromCPUTypes") {
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
-TEST_CASE("TensorOptions/ConstructsWellFromCPUTensors") {
+TEST(TensorOptionsTest, ConstructsWellFromCPUTensors) {
   auto options = empty(5, kDouble).options();
   REQUIRE_OPTIONS(kCPU, -1, kDouble, kStrided);
 
@@ -77,37 +79,17 @@ TEST_CASE("TensorOptions/ConstructsWellFromCPUTensors") {
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
-TEST_CASE("TensorOptions/ConstructsWellFromVariables") {
+TEST(TensorOptionsTest, ConstructsWellFromVariables) {
   auto options = torch::empty(5).options();
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
-  REQUIRE(!options.requires_grad());
+  ASSERT_FALSE(options.requires_grad());
 
   options = torch::empty(5, at::requires_grad()).options();
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
-  REQUIRE(!options.requires_grad());
+  ASSERT_FALSE(options.requires_grad());
 }
 
-TEST_CASE("Device/ParsesCorrectlyFromString") {
-  Device device("cpu:0");
-  REQUIRE(device == Device(kCPU, 0));
-
-  device = Device("cpu");
-  REQUIRE(device == Device(kCPU));
-
-  device = Device("cuda:123");
-  REQUIRE(device == Device(kCUDA, 123));
-
-  device = Device("cuda");
-  REQUIRE(device == Device(kCUDA));
-
-  std::vector<std::string> badnesses = {
-      "", "cud:1", "cuda:", "cpu::1", ":1", "3", "tpu:4", "??"};
-  for (const auto& badness : badnesses) {
-    REQUIRE_THROWS(Device(badness));
-  }
-}
-
-TEST_CASE("OptionsGuard") {
+TEST(TensorOptionsTest, OptionsGuard) {
   Tensor tensor;
   {
     OptionsGuard guard(TensorOptions{});
@@ -132,5 +114,43 @@ TEST_CASE("OptionsGuard") {
     tensor = torch::empty({10});
   }
   REQUIRE_TENSOR_OPTIONS(kCPU, -1, kFloat, kStrided);
-  REQUIRE(tensor.requires_grad());
+  ASSERT_TRUE(tensor.requires_grad());
+}
+
+TEST(DeviceTest, ParsesCorrectlyFromString) {
+  Device device("cpu:0");
+  ASSERT_EQ(device, Device(DeviceType::CPU, 0));
+
+  device = Device("cpu");
+  ASSERT_EQ(device, Device(DeviceType::CPU));
+
+  device = Device("cuda:123");
+  ASSERT_EQ(device, Device(DeviceType::CUDA, 123));
+
+  device = Device("cuda");
+  ASSERT_EQ(device, Device(DeviceType::CUDA));
+
+  device = Device("mkldnn");
+  ASSERT_EQ(device, Device(DeviceType::MKLDNN));
+
+  device = Device("opengl");
+  ASSERT_EQ(device, Device(DeviceType::OPENGL));
+
+  device = Device("opencl");
+  ASSERT_EQ(device, Device(DeviceType::OPENCL));
+
+  device = Device("ideep");
+  ASSERT_EQ(device, Device(DeviceType::IDEEP));
+
+  device = Device("hip");
+  ASSERT_EQ(device, Device(DeviceType::HIP));
+
+  device = Device("hip:321");
+  ASSERT_EQ(device, Device(DeviceType::HIP, 321));
+
+  std::vector<std::string> badnesses = {
+      "", "cud:1", "cuda:", "cpu::1", ":1", "3", "tpu:4", "??"};
+  for (const auto& badness : badnesses) {
+    ASSERT_ANY_THROW({ Device d(badness); });
+  }
 }

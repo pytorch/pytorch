@@ -2,11 +2,14 @@
 
 // ${generated_comment}
 
+#include "ATen/core/SparseTensorRef.h"
+#include "ATen/DeviceGuard.h"
 #include "ATen/ExpandUtils.h"
+#include "ATen/Functions.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/core/Scalar.h"
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/Storage.h"
+#include "ATen/core/Storage.h"
 #include "ATen/Tensor.h"
 #include "ATen/core/TensorOptions.h"
 #include "ATen/DeviceGuard.h"
@@ -15,26 +18,40 @@ namespace at {
 
 Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   Tensor b_src;
-  std::tie(b_src) = expand_inplace(self, src, "copy");
+  if (is_sparse()) {
+    b_src = src;
+  } else {
+    std::tie(b_src) = expand_inplace(self, src, "copy");
+  }
   return s_copy_(self, b_src, non_blocking);
 }
 
-Tensor TypeDefault::copy(const Tensor & src, bool non_blocking) const {
-  // TODO(psag): have a DeviceGuard here
-  AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
-  if (is_sparse()) {
-    auto indices = src._indices();
-    auto values = src._values();
-    auto & this_dense = toBackend(is_cuda() ? Backend::CUDA : Backend::CPU);
-    auto & this_dense_idx = this_dense.toScalarType(ScalarType::Long);
-    auto indices_copy = this_dense_idx.copy(indices, non_blocking);
-    auto values_copy = this_dense.copy(values, non_blocking);
-    return _sparse_coo_tensor_unsafe(indices_copy, values_copy, src.sizes());
-  } else {
-    Tensor r = this->tensor(src.sizes());
-    r.copy_(src, non_blocking);
-    return r;
+Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device> to_device) const {
+  DeviceGuard device_guard;
+  if (to_device.has_value()) {
+    device_guard.set_index(to_device.value().index());
   }
+  AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
+  Tensor r;
+  if (is_sparse()) {
+    r = at::empty({0}, this->options());
+  } else {
+    r = at::empty(src.sizes(), this->options());
+  }
+  r.copy_(src, non_blocking);
+  return r;
+}
+
+void TypeDefault::backward(
+    Tensor& self,
+    c10::optional<Tensor> gradient,
+    bool keep_graph,
+    bool create_graph) const {
+  AT_ERROR("backward is not implemented for Tensor");
+}
+
+void TypeDefault::set_data(Tensor & self, Tensor new_data) const {
+  AT_ERROR("set_data is not implemented for Tensor");
 }
 
 Type & TypeDefault::toBackend(Backend b) const {
@@ -80,34 +97,38 @@ Tensor TypeDefault::tensorWithAllocator(IntList sizes, IntList strides, Allocato
 }
 
 Storage TypeDefault::storage(bool resizable) const {
-  return Storage(scalarType(), 0, allocator(), resizable);
+  return Storage(typeMeta(), 0, allocator(), resizable);
 }
 Storage TypeDefault::storage(size_t size, bool resizable) const {
-  return Storage(scalarType(), size, allocator(), resizable);
+  return Storage(typeMeta(), size, allocator(), resizable);
 }
 Storage TypeDefault::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
     return Storage(
-      scalarType(),
+      typeMeta(),
       InefficientStdFunctionContext::makeDataPtr(data, deleter, getDeviceFromPtr(data)),
       size,
       deleter);
 }
 Storage TypeDefault::storageWithAllocator(int64_t size, Allocator* allocator) const {
-    return Storage(scalarType(), size, allocator);
+    return Storage(typeMeta(), size, allocator);
 }
 Tensor TypeDefault::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  return Tensor(static_cast<TensorImpl*>(th_pointer), retain);
+  auto tensor_impl = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(static_cast<TensorImpl*>(th_pointer));
+  if (retain && tensor_impl.get() != UndefinedTensorImpl::singleton()) {
+    c10::raw::intrusive_ptr::incref(tensor_impl.get());
+  }
+  return Tensor(std::move(tensor_impl));
 }
 Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   if (retain && th_pointer) {
     c10::raw::intrusive_ptr::incref(static_cast<StorageImpl*>(th_pointer));
   }
-  return Storage(static_cast<StorageImpl*>(th_pointer));
+  return Storage(c10::intrusive_ptr<StorageImpl>::reclaim(static_cast<StorageImpl*>(th_pointer)));
 }
 
 
 Tensor TypeDefault::scalarTensor(Scalar s) const {
-  return tensor({}).fill_(s);
+  return at::empty({}, this->options()).fill_(s);
 }
 
 ${type_method_definitions}

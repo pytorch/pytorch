@@ -10,9 +10,9 @@
 #endif
 
 #include <ATen/ATen.h>
-#include <ATen/core/optional.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGuard.h>
+#include "c10/util/Optional.h"
 
 #include <cstddef>
 #include <vector>
@@ -47,7 +47,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
     tensors.push_back(tensor);
     for (auto device : devices.slice(1)) {
       _device_guard.set_index(device);
-      tensors.push_back(type.tensor(tensor.sizes()));
+      tensors.push_back(at::empty(tensor.sizes(), type.options()));
     }
     nccl::broadcast(tensors);
   } else {
@@ -72,6 +72,9 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
                    [&](const at::Tensor& t) { return t.get_device() == devices[0]; })) {
     throw std::runtime_error("all tensors must be on devices[0]");
   }
+#ifdef USE_NCCL
+  buffer_size = std::min(torch::cuda::nccl::get_max_count(), buffer_size);
+#endif
 
   tensor_list2d outputs(devices.size());
   outputs[0] = tensors.vec();
@@ -120,13 +123,13 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
 std::vector<at::Tensor> scatter(
     const at::Tensor& tensor,
     at::IntList devices,
-    const at::optional<std::vector<int64_t>>& chunk_sizes,
+    const c10::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
-    const at::optional<std::vector<at::cuda::CUDAStream>>& streams) {
+    const c10::optional<std::vector<at::cuda::CUDAStream>>& streams) {
   std::vector<at::Tensor> chunks;
   if (chunk_sizes) {
     const int64_t chunk_size_sum =
-        std::accumulate(chunk_sizes->begin(), chunk_sizes->end(), 0);
+        std::accumulate(chunk_sizes->begin(), chunk_sizes->end(), int64_t{0});
     AT_CHECK(
       chunk_size_sum == tensor.size(dim),
       "given chunk sizes don't sum up to the tensor's size ",
@@ -165,7 +168,7 @@ std::vector<at::Tensor> scatter(
 at::Tensor gather(
     at::TensorList tensors,
     int64_t dim,
-    at::optional<int32_t> destination_index) {
+    c10::optional<int32_t> destination_index) {
   AT_CHECK(!tensors.empty(), "Expected at least one tensor to gather from");
   at::Tensor result;
   int64_t total_size = 0;

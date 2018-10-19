@@ -16,6 +16,10 @@ int64_t current_device() {
   return cur_device;
 }
 
+void set_device(int64_t device) {
+  AT_CUDA_CHECK(cudaSetDevice((int)device));
+}
+
 cudaDeviceProp* getCurrentDeviceProperties() {
   return THCState_getCurrentDeviceProperties(at::globalContext().getTHCState());
 }
@@ -50,11 +54,13 @@ Allocator* getCUDADeviceAllocator() {
 }
 
 /* Handles */
-#ifndef __HIP_PLATFORM_HCC__
-  cusparseHandle_t getCurrentCUDASparseHandle() {
-    return THCState_getCurrentSparseHandle(at::globalContext().getTHCState());
-  }
-#endif
+cusparseHandle_t getCurrentCUDASparseHandle() {
+  return THCState_getCurrentSparseHandle(at::globalContext().getTHCState());
+}
+
+cublasHandle_t getCurrentCUDABlasHandle() {
+  return THCState_getCurrentBlasHandle(at::globalContext().getTHCState());
+}
 
 } // namespace cuda
 

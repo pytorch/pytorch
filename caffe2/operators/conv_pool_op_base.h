@@ -246,7 +246,7 @@ class ConvPoolOpBase : public Operator<Context> {
   // Helper function that is also called from OperatorSchema. Modified
   // kernel parameters and output output_dims and channel_first.
   static inline void InferOutputSize(
-      vector<TIndex> input_dims,
+      at::IntList input_dims,
       int /*output_channel*/,
       StorageOrder order,
       bool global_pooling,
@@ -259,7 +259,7 @@ class ConvPoolOpBase : public Operator<Context> {
       vector<int>& pads,
       bool& channel_first) {
     channel_first = false; // initialized to suppress compiler warning.
-    vector<TIndex> dims;
+    vector<int64_t> dims;
     switch (order) {
       case StorageOrder::NHWC:
         channel_first = false;
@@ -358,7 +358,7 @@ class ConvPoolOpBase : public Operator<Context> {
     if (bias_multiplier_->size() != size) {
       // If the helper bias multiplier is not image size, reshape and fill it
       // with one.
-      bias_multiplier_->Resize(std::vector<TIndex>{size});
+      bias_multiplier_->Resize(std::vector<int64_t>{size});
       math::Set<T, Context>(
           size,
           static_cast<T>(1),

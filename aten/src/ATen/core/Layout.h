@@ -1,12 +1,12 @@
 #pragma once
 
 #include <ATen/core/Backend.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <iostream>
 
 namespace at {
-enum class Layout { Strided, Sparse };
+enum class Layout : int8_t { Strided, Sparse };
 
 constexpr auto kStrided = Layout::Strided;
 constexpr auto kSparse = Layout::Sparse;

@@ -62,7 +62,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
       ++numOutputs;
     }
   }
-  std::vector<TIndex> outShape;
+  std::vector<int64_t> outShape;
   outShape.push_back(numOutputs);
   outShape.insert(outShape.end(), data.dims().begin() + 1, data.dims().end());
   dataOut->Resize(outShape);
@@ -81,11 +81,11 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   const auto innerSize = data.size_from_dim(1);
   const auto innerSizeBytes = innerSize * data.meta().itemsize();
 
-  TIndex lastStart = -1;
+  int64_t lastStart = -1;
   const auto* inPtr = (char*)data.raw_data();
-  TIndex outStart = 0;
+  int64_t outStart = 0;
 
-  for (TIndex i = 0;; ++i) {
+  for (int64_t i = 0;; ++i) {
     // mask was true and either a) became false, or b) sequence finished
     if (lastStart != -1 && ((i >= outerSize) || !maskPtr[i])) {
       const auto* src = inPtr + lastStart * innerSizeBytes;

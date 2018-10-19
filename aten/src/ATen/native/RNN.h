@@ -19,5 +19,19 @@ DECLARE_DISPATCH(rnn_packed_fn, gru_packed_cudnn_stub);
 DECLARE_DISPATCH(rnn_packed_fn, rnn_tanh_packed_cudnn_stub);
 DECLARE_DISPATCH(rnn_packed_fn, rnn_relu_packed_cudnn_stub);
 
-}} // namespace at::native
+inline void check_device(const Tensor& input, const TensorList& params, const TensorList& hiddens) {
+  auto input_device = input.device();
 
+  auto check_tensors = [&](const std::string& name, const Tensor& t) {
+    if (!t.defined()) return;
+    auto t_device = t.device();
+    AT_CHECK(input_device == t_device,
+             "Input and ", name, " tensors are not at the same device, found input tensor at ",
+             input_device, " and ", name, " tensor at ", t_device);
+  };
+
+  for (auto h : hiddens) check_tensors("hidden", h);
+  for (auto p : params) check_tensors("parameter", p);
+}
+
+}} // namespace at::native

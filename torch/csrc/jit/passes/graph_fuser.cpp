@@ -1,7 +1,7 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/fusion_compiler.h"
+#include "torch/csrc/jit/fusers/interface.h"
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/assertions.h"
 #include "ATen/ExpandUtils.h"
@@ -75,8 +75,8 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::type_as,
   aten::_sigmoid_backward,
   aten::_tanh_backward,
+  aten::clamp,
   // TODO support those
-  //aten::clamp,
   //aten::lerp,
   aten::rand_like,
 };
@@ -205,38 +205,32 @@ struct GraphFuser {
     if (!isSimpleMap(node)) return false;
 
     if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-          /*const=*/attr::alpha) ||
+          /*const_inputs=*/attr::alpha) ||
         node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-          /*const=*/{attr::other, attr::alpha}) ||
-        node->matches("aten::add(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+          /*const_inputs=*/{attr::other, attr::alpha}) ||
         node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-          /*const=*/attr::alpha) ||
+          /*const_inputs=*/attr::alpha) ||
         node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-          /*const=*/{attr::other, attr::alpha}) ||
-        node->matches("aten::sub(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::mul(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::mul(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::div(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other)) {
+          /*const_inputs=*/{attr::other, attr::alpha}) ||
+        node->matches("aten::mul(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
+        node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
+        node->matches("aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor", /*const_inputs=*/{attr::min, attr::max})) {
       auto inputs = tensorInputs(node);
       return haveSupportedType(inputs);
     }
     else if (
         node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::lt(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::lt(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::lt(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
         node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::le(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::le(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::le(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
+        node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::gt(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
         node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::ge(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::ge(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::ge(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
         node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::eq(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::eq(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::eq(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
         node->matches("aten::ne(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::ne(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::ne(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other)) {
+        node->matches("aten::ne(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other)) {
       // comparison operators produce Byte type, and it's ok, check only inputs
       auto inputs = tensorInputs(node);
       return haveSupportedType(inputs);
@@ -343,7 +337,7 @@ struct GraphFuser {
     // is that if we're compiling on CPU, the fusion compiler works.
     if (consumer_device.type() == DeviceType::CPU ||
         producer_device.type() == DeviceType::CPU) {
-      return sharedFusionCompiler().canCompileOnCPU();
+      return canFuseOnCPU();
     }
     return true;
   }
@@ -572,11 +566,11 @@ struct GraphFuser {
     return true;
   }
 
-  at::optional<Node*> findFusedChunk(Node * group, Value * input) {
+  c10::optional<Node*> findFusedChunk(Node* group, Value* input) {
     JIT_ASSERT(group->kind() == prim::FusionGroup);
     auto it = std::find(group->inputs().begin(), group->inputs().end(), input);
     if (it == group->inputs().end()) {
-      return at::nullopt;
+      return c10::nullopt;
     }
     size_t input_index = it - group->inputs().begin();
     auto & subgraph = getSubgraph(group);
@@ -587,7 +581,7 @@ struct GraphFuser {
       JIT_ASSERT(subgraph_input->uses().size() == 1);
       return node;
     }
-    return at::nullopt;
+    return c10::nullopt;
   }
 
   void fuseChunkByReusingExistingFusedChunk(
@@ -653,11 +647,8 @@ struct GraphFuser {
 
   graph_node_list::iterator scanNodeForChunks(Node * consumer) {
     if (consumer->kind() == prim::FusionGroup) {
-      auto stage_guard = block->owningGraph()->setStageTemporary(consumer->stage());
       auto inputs = sortReverseTopological(consumer->inputs());
       for(auto producer : inputs) {
-        // Don't fuse accross stage boundaries
-        if (producer->stage() != consumer->stage()) continue;
         if (!canFuseChunk(consumer, producer)) {
           continue;
         }
@@ -802,7 +793,6 @@ struct GraphFuser {
 
   // returns where to continue scanning, and whether any fusion was made
   std::pair<graph_node_list::iterator, bool> scanNode(Node * consumer) {
-    auto stage_guard = block->owningGraph()->setStageTemporary(consumer->stage());
     if(isFusableAsExitNode(consumer)) {
       auto consumer_inputs = consumer->kind() == aten::cat ?
         consumer->namedInput(attr::tensors)->node()->inputs() :
@@ -812,8 +802,6 @@ struct GraphFuser {
       // the f-a fusion before the f-(a+b) fusion first.
       auto inputs = sortReverseTopological(consumer_inputs);
       for(auto producer : inputs) {
-        // Don't fuse accross stage boundaries
-        if (producer->stage() != consumer->stage()) continue;
         // Don't fuse if producer must come from a FusionGroup exit node
         if (mustRemainAsFusionGroupOutput(producer)) continue;
         if(tryToMoveChunk(consumer,producer)) {
@@ -882,9 +870,14 @@ struct GraphFuser {
 } // anonymous namespace
 
 void FuseGraph(std::shared_ptr<Graph>& graph) {
+  // NYI on Windows
+  #ifndef _WIN32
+
   GraphFuser(graph->block()).run();
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
+
+  #endif
 }
 
 }}

@@ -14,7 +14,6 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/transform.h"
-#include "caffe2/mkl/mkl_utils.h"
 #include "caffe2/observers/runcnt_observer.h"
 #include "caffe2/observers/time_observer.h"
 #include "caffe2/onnx/backend.h"
@@ -30,6 +29,7 @@
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/python/pybind_state_registry.h"
 #include "caffe2/utils/cpuid.h"
+#include "caffe2/utils/proto_convert.h"
 #include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
@@ -52,12 +52,12 @@ static std::string gCurrentWorkspaceName;
 BlobFetcherBase::~BlobFetcherBase() {}
 BlobFeederBase::~BlobFeederBase() {}
 
-CAFFE_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY(
     BlobFetcherRegistry,
     TypeIdentifier,
     BlobFetcherBase,
     std::unique_ptr);
-CAFFE_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY(
     BlobFeederRegistry,
     caffe2::DeviceType,
     BlobFeederBase,
@@ -83,11 +83,12 @@ static_assert(
     "We make an assumption that int is always int32 for numpy "
     "type mapping.");
 int CaffeToNumpyType(const TypeMeta& meta) {
+#ifdef USE_NUMPY
   static std::map<TypeIdentifier, int> numpy_type_map{
       {TypeMeta::Id<bool>(), NPY_BOOL},
       {TypeMeta::Id<double>(), NPY_DOUBLE},
       {TypeMeta::Id<float>(), NPY_FLOAT},
-      {TypeMeta::Id<float16>(), NPY_FLOAT16},
+      {TypeMeta::Id<at::Half>(), NPY_FLOAT16},
       {TypeMeta::Id<int>(), NPY_INT},
       {TypeMeta::Id<int8_t>(), NPY_INT8},
       {TypeMeta::Id<int16_t>(), NPY_INT16},
@@ -99,14 +100,18 @@ int CaffeToNumpyType(const TypeMeta& meta) {
   };
   const auto it = numpy_type_map.find(meta.id());
   return it == numpy_type_map.end() ? -1 : it->second;
+#else
+  CAFFE_THROW("Caffe2 compiled without NumPy support.");
+#endif // USE_NUMPY
 }
 
 const TypeMeta& NumpyTypeToCaffe(int numpy_type) {
+#ifdef USE_NUMPY
   static std::map<int, TypeMeta> caffe_type_map{
       {NPY_BOOL, TypeMeta::Make<bool>()},
       {NPY_DOUBLE, TypeMeta::Make<double>()},
       {NPY_FLOAT, TypeMeta::Make<float>()},
-      {NPY_FLOAT16, TypeMeta::Make<float16>()},
+      {NPY_FLOAT16, TypeMeta::Make<at::Half>()},
       {NPY_INT, TypeMeta::Make<int>()},
       {NPY_INT8, TypeMeta::Make<int8_t>()},
       {NPY_INT16, TypeMeta::Make<int16_t>()},
@@ -125,6 +130,9 @@ const TypeMeta& NumpyTypeToCaffe(int numpy_type) {
   static TypeMeta unknown_type;
   const auto it = caffe_type_map.find(numpy_type);
   return it == caffe_type_map.end() ? unknown_type : it->second;
+#else
+  CAFFE_THROW("Caffe2 compiled without NumPy support.");
+#endif // USE_NUMPY
 }
 
 template <typename Registry>
@@ -308,12 +316,12 @@ void addObjectMethods(py::module& m) {
       .def(
           "serialize",
           [](const Blob& blob, const std::string& name) -> py::bytes {
-            return blob.Serialize(name);
+            return SerializeBlob(blob, name);
           })
       .def(
           "deserialize",
           [](Blob* blob, py::bytes serialized) {
-            blob->Deserialize(serialized);
+            DeserializeBlob(serialized, blob);
           })
       .def(
           "fetch",
@@ -327,7 +335,7 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "tensor",
-          [](Blob* blob) { return py::cast(blob->GetMutableTensor(CPU)); },
+          [](Blob* blob) { return py::cast(BlobGetMutableTensor(blob, CPU)); },
           py::return_value_policy::reference_internal)
       .def(
           "_feed",
@@ -340,16 +348,19 @@ void addObjectMethods(py::module& m) {
               CAFFE_ENFORCE(ParseProtoFromLargeString(
                   py::bytes(device_option).cast<std::string>(), &option));
             }
+#ifdef USE_NUMPY
             if (PyArray_Check(arg.ptr())) { // numpy array
-              PyArrayObject* array =
-                  reinterpret_cast<PyArrayObject*>(arg.ptr());
+              PyArrayObject* array
+                = reinterpret_cast<PyArrayObject*>(arg.ptr());
               auto feeder = CreateFeeder(option.device_type());
               CAFFE_ENFORCE(
                   feeder, "Unknown device type encountered in FeedBlob.");
               feeder->Feed(option, array, blob);
               return true;
             }
-
+#else
+            CAFFE_THROW("Caffe2 compiled without NumPy support.");
+#endif // USE_NUMPY
             if (PyBytes_Check(arg.ptr()) || PyUnicode_Check(arg.ptr())) {
               *blob->GetMutable<std::string>() = arg.cast<std::string>();
               return true;
@@ -387,11 +398,15 @@ void addObjectMethods(py::module& m) {
           "_shape",
           [](const DLPackWrapper<CPUContext>& t) {
             auto* tensor = t.tensor;
-            return tensor->dims();
+            // TODO: This is marginally less efficient than it could
+            // be, since we're doing an extra allocation we didn't
+            // need to do.  But I don't remember how to clue in
+            // pybind11 how to convert ArrayRef to vector.
+            return tensor->dims().vec();
           })
       .def(
           "_reshape",
-          [](DLPackWrapper<CPUContext>* t, std::vector<TIndex> dims) {
+          [](DLPackWrapper<CPUContext>* t, std::vector<int64_t> dims) {
             auto* tensor = t->tensor;
             tensor->Resize(dims);
           });
@@ -412,12 +427,16 @@ void addObjectMethods(py::module& m) {
       .def(
           "feed",
           [](TensorCPU* t, py::object obj) {
+#ifdef USE_NUMPY
             if (!PyArray_Check(obj.ptr())) {
               CAFFE_THROW(
                   "Unexpected type of argument -- expected numpy array");
             }
             TensorFeeder<CPUContext>().FeedTensor(
                 DeviceOption{}, reinterpret_cast<PyArrayObject*>(obj.ptr()), t);
+#else
+            CAFFE_THROW("Caffe2 compiled without NumPy support.");
+#endif // USE_NUMPY
           },
           "Copy data from given numpy array into this tensor.")
       .def(
@@ -429,7 +448,7 @@ void addObjectMethods(py::module& m) {
           "Copy data from this tensor into a new numpy array.")
       .def(
           "init",
-          [](Tensor* t, std::vector<TIndex> dims, int caffe_type) {
+          [](Tensor* t, std::vector<int64_t> dims, int caffe_type) {
             const auto& meta =
                 DataTypeToTypeMeta((TensorProto::DataType)caffe_type);
             CAFFE_ENFORCE(
@@ -441,8 +460,8 @@ void addObjectMethods(py::module& m) {
           "Initialize this tensor to given shape and data type. "
           "Fail if the given data type cannot be accessed from python.")
       .def_property_readonly(
-          "_shape", [](const TensorCPU& t) { return t.dims(); })
-      .def("_reshape", [](TensorCPU* t, std::vector<TIndex> dims) {
+          "_shape", [](const TensorCPU& t) { return t.dims().vec(); })
+      .def("_reshape", [](TensorCPU* t, std::vector<int64_t> dims) {
         t->Resize(dims);
       });
 
@@ -732,6 +751,7 @@ void addObjectMethods(py::module& m) {
               const auto& name = pair.first;
               const auto& input = pair.second;
               tensors_data.emplace(name, Tensor(CPU));
+#ifdef USE_NUMPY
               CAFFE_ENFORCE(
                   PyArray_Check(input.ptr()),
                   "Input must be of type numpy array.");
@@ -739,6 +759,9 @@ void addObjectMethods(py::module& m) {
                   reinterpret_cast<PyArrayObject*>(input.ptr());
               TensorFeeder<CPUContext>().FeedTensor(
                   DeviceOption(), array, &tensors_data.at(name));
+#else
+              CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
             }
             caffe2::Predictor::TensorList out;
             instance.RunMap(tensors_data, &out);
@@ -756,6 +779,7 @@ void addObjectMethods(py::module& m) {
             for (auto i = 0; i < inputs.size(); ++i) {
               tensors_data.emplace_back(caffe2::CPU);
             }
+#ifdef USE_NUMPY
             for (auto i = 0; i < inputs.size(); ++i) {
               auto input = inputs[i];
               CAFFE_ENFORCE(
@@ -766,6 +790,9 @@ void addObjectMethods(py::module& m) {
               TensorFeeder<CPUContext>().FeedTensor(
                   DeviceOption(), array, &(tensors_data[i]));
             }
+#else
+            CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
             std::vector<TensorCPU> out;
             instance.Run(tensors_data, &out);
             std::vector<py::object> pyout;
@@ -865,6 +892,7 @@ void addObjectMethods(py::module& m) {
             for (auto i = 0; i < inputs.size(); ++i) {
               tensors_data.emplace_back(CPU);
             }
+#ifdef USE_NUMPY
             for (auto i = 0; i < inputs.size(); ++i) {
               auto input = inputs[i];
               CAFFE_ENFORCE(
@@ -875,6 +903,9 @@ void addObjectMethods(py::module& m) {
               TensorFeeder<CPUContext>().FeedTensor(
                   DeviceOption(), array, &(tensors_data[i]));
             }
+#else
+            CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
             std::vector<TensorCPU> out;
             instance(tensors_data, &out);
             std::vector<py::object> pyout;
@@ -888,6 +919,7 @@ void addObjectMethods(py::module& m) {
           [](Predictor& instance, std::map<std::string, py::object> inputs)
               -> std::vector<py::object> {
             Predictor::TensorMap tensors_data;
+#ifdef USE_NUMPY
             for (const auto pair : inputs) {
               const auto& name = pair.first;
               const auto& input = pair.second;
@@ -900,6 +932,9 @@ void addObjectMethods(py::module& m) {
               TensorFeeder<CPUContext>().FeedTensor(
                   DeviceOption(), array, &tensors_data.at(name));
             }
+#else
+            CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
             Predictor::TensorList out;
             instance(tensors_data, &out);
             std::vector<py::object> pyout;
@@ -937,13 +972,9 @@ void addGlobalMethods(py::module& m) {
   m.attr("is_asan") = py::bool_(CAFFE2_ASAN_ENABLED);
   m.def("get_build_options", []() { return GetBuildOptions(); });
 
-  m.attr("has_mkldnn") = py::bool_(
-#ifdef CAFFE2_HAS_MKL_DNN
-      true
-#else // CAFFE2_HAS_MKL_DNN
-      false
-#endif // CAFFE2_HAS_MKL_DNN
-      );
+  // The old mkl backend has been removed permanently, but we
+  // keep this Python attribute for BC
+  m.attr("has_mkldnn") = py::bool_(false);
 
   m.attr("use_ideep") = py::bool_(
 #ifdef CAFFE2_USE_IDEEP
@@ -1189,8 +1220,7 @@ void addGlobalMethods(py::module& m) {
   m.def("run_operator_once", [](const py::bytes& op_def) {
     CAFFE_ENFORCE(gWorkspace);
     OperatorDef def;
-    CAFFE_ENFORCE(
-        ParseProtoFromLargeString(op_def.cast<std::string>(), &def));
+    CAFFE_ENFORCE(ParseProtoFromLargeString(op_def.cast<std::string>(), &def));
     py::gil_scoped_release g;
     CAFFE_ENFORCE(gWorkspace->RunOperatorOnce(def));
     return true;
@@ -1354,7 +1384,7 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "infer_shapes_and_types_from_map",
       [](const std::vector<py::bytes>& net_protos,
-         const std::map<std::string, std::vector<TIndex>> blob_dimensions) {
+         const std::map<std::string, std::vector<int64_t>> blob_dimensions) {
         // Parse protobuffers to NetDefs
         std::vector<std::unique_ptr<caffe2::NetDef>> nets;
         std::vector<caffe2::NetDef*> nets_ptr;
@@ -1374,7 +1404,7 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "infer_shapes_and_types_from_map",
       [](const std::vector<py::bytes>& net_protos,
-         const std::map<std::string, std::vector<TIndex>> blob_dimensions,
+         const std::map<std::string, std::vector<int64_t>> blob_dimensions,
          const std::map<std::string, int> int_blob_types) {
         // Parse protobuffers to NetDefs
         std::vector<std::unique_ptr<caffe2::NetDef>> nets;
@@ -1416,6 +1446,7 @@ void addGlobalMethods(py::module& m) {
               py::bytes(device_option).cast<std::string>(), &option));
         }
         auto* blob = gWorkspace->CreateBlob(name);
+#ifdef USE_NUMPY
         if (PyArray_Check(arg.ptr())) { // numpy array
           PyArrayObject* array = reinterpret_cast<PyArrayObject*>(arg.ptr());
           auto feeder = CreateFeeder(option.device_type());
@@ -1426,6 +1457,9 @@ void addGlobalMethods(py::module& m) {
           feeder->Feed(option, array, blob);
           return true;
         }
+#else
+        CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
         if (PyBytes_Check(arg.ptr()) || PyUnicode_Check(arg.ptr())) { // string
           *blob->GetMutable<std::string>() = arg.cast<std::string>();
           return true;
@@ -1443,14 +1477,14 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(gWorkspace);
     auto* blob = gWorkspace->GetBlob(name);
     CAFFE_ENFORCE(blob);
-    return py::bytes(blob->Serialize(name));
+    return py::bytes(SerializeBlob(*blob, name));
   });
   m.def(
       "deserialize_blob",
       [](const std::string& name, const py::bytes& serialized) {
         CAFFE_ENFORCE(gWorkspace);
         auto* blob = gWorkspace->CreateBlob(name);
-        blob->Deserialize(serialized.cast<std::string>());
+        DeserializeBlob(serialized.cast<std::string>(), blob);
       });
 
   // we support 2 possible signatures of python op: (inputs, outputs) or
@@ -1600,6 +1634,7 @@ void addGlobalMethods(py::module& m) {
       "onnxifi",
       [](const py::bytes& pred_net_str,
          const std::unordered_map<std::string, std::vector<int>>& shapes,
+         bool infer_shapes,
          bool debug_builder) -> py::bytes {
         caffe2::NetDef pred_net;
         CAFFE_ENFORCE(
@@ -1611,7 +1646,7 @@ void addGlobalMethods(py::module& m) {
           tensor_shapes.emplace(
               it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
         }
-        OnnxifiTransformer ts(debug_builder);
+        OnnxifiTransformer ts(infer_shapes, debug_builder);
         ts.Transform(GetCurrentWorkspace(), &pred_net, tensor_shapes);
         std::string pred_net_str2;
         pred_net.SerializeToString(&pred_net_str2);
@@ -1709,10 +1744,12 @@ void addGlobalMethods(py::module& m) {
 
   auto initialize = [&]() {
     // Initialization of the module
+#ifdef USE_NUMPY
     ([]() -> void {
       // import_array1() forces a void return value.
       import_array1();
     })();
+#endif // USE_NUMPY
     // Single threaded, so safe
     static bool initialized = false;
     if (initialized) {
