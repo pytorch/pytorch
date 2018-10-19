@@ -4053,7 +4053,7 @@ class TestTorch(TestCase):
         self.assertEqual(LU, LU_exp.unsqueeze(0))
 
         # test against gesv in a loop: four batches
-        A = cast(fullrank(5, 4))
+        A = cast(random_fullrank_matrix_distinct_singular_value(5, 4))
         b = cast(torch.randn(4, 5, 10))
 
         x_exp_list = list()
@@ -4647,7 +4647,7 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_inverse(self, conv_fn):
-        from common import random_fullrank_matrix_distinct_singular_value
+        from common_utils import random_fullrank_matrix_distinct_singular_value
 
         # no batches: 2-D tensors
         matrix = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
@@ -4777,7 +4777,6 @@ class TestTorch(TestCase):
         M = conv_fn(torch.randn(2, 3, 3, 3))
         run_test(M)
 
-        # Single matrix, but full rank
         # This is for negative powers
         from common_utils import random_fullrank_matrix_distinct_singular_value
         M = conv_fn(random_fullrank_matrix_distinct_singular_value(5))

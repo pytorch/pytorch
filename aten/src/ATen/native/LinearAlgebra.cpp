@@ -489,7 +489,6 @@ Tensor matrix_power(const Tensor& a, int64_t n) {
   if (n == 0) {
     return a.clone().copy_(at::eye(a.size(-2), a.options()).expand_as(a));
   } else if (n < 0) {
-    AT_CHECK(a.dim() == 2, "Negative powers for batch matrices are currently not supported");
     Tensor a_ = at::inverse(a);
     n *= -1;
     return at::native::matrix_power(a_, n);
