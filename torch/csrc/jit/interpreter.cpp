@@ -12,6 +12,7 @@
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/variable_tensor_functions.h"
+#include "torch/csrc/jit/script/jit_exception.h"
 
 #include <exception>
 #include <iostream>
@@ -649,6 +650,7 @@ struct InterpreterStateImpl {
     size_t pc = current_pc;
     auto & instructions = function->instructions;
     size_t last = instructions.size();
+    bool jit_exception_thrown = false;
     while(pc < last) {
         // std::cout << "executing " << pc << ": ";
         // function->dumpInstruction(std::cout, pc);
@@ -663,8 +665,14 @@ struct InterpreterStateImpl {
             // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
           }
           pc = new_pc;
-        } catch(std::exception & e) {
+        } catch(JITException & e) {
+          jit_exception_thrown = true;
           if(!instructions[pc].debug_location)
+            throw; // rethrow original exception
+          // throw a new exception with enhanced debugging information
+          instructions[pc].debug_location->wrapAndRethrowException(e, "operation failed in interpreter");
+        }  catch(std::exception & e) {
+          if(!instructions[pc].debug_location || jit_exception_thrown)
             throw; // rethrow original exception
           // throw a new exception with enhanced debugging information
           instructions[pc].debug_location->wrapAndRethrowException(e, "operation failed in interpreter");

@@ -7535,7 +7535,7 @@ a")
         ''')
 
         cu.foo(torch.tensor(0))
-        with self.assertRaisesRegex(RuntimeError, "Exception"):
+        with self.assertRaisesRegex(torch._C.JITException, "Exception"):
             cu.foo(torch.tensor(1))
 
         @torch.jit.script
@@ -7547,7 +7547,7 @@ a")
 
         foo(torch.tensor(0))
         # we don't currently validate the name of the exception
-        with self.assertRaisesRegex(RuntimeError, "Exception"):
+        with self.assertRaisesRegex(torch._C.JITException, "Exception"):
             foo(torch.tensor(1))
 
         @torch.jit.script

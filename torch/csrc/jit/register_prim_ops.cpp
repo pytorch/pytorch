@@ -8,6 +8,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/custom_operator.h"
+#include "torch/csrc/jit/script/jit_exception.h"
 
 #include "torch/csrc/variable_tensor_functions.h"
 
@@ -259,7 +260,7 @@ RegisterOperators reg({
         prim::RaiseException,
         [](Node* node) -> Operation {
           return [](Stack& stack) {
-            throw std::runtime_error(pop(stack).toString()->string());
+            throw JITException(pop(stack).toString()->string());
             return 0;
           };
         }),

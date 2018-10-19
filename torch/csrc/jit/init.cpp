@@ -36,6 +36,7 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/script/jit_exception.h"
 
 #include "caffe2/serialize/inline_container.h"
 
@@ -83,6 +84,8 @@ std::string runJITCPPTests();
 
 void initJITBindings(PyObject *module) {
   auto m = py::handle(module).cast<py::module>();
+
+  py::register_exception<JITException>(m, "JITException");
 
   py::class_<python::IODescriptor>(m, "IODescriptor");
 

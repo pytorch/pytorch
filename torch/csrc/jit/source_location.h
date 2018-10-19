@@ -5,6 +5,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "torch/csrc/jit/script/jit_exception.h"
+
 namespace torch { namespace jit {
 // SourceLocation represents source code-level debug information for a node.
 // It contains information about where a node got generated.
@@ -14,13 +16,22 @@ namespace torch { namespace jit {
 struct SourceLocation {
   virtual ~SourceLocation() = default;
   virtual void highlight(std::ostream & out) const = 0;
-  void wrapAndRethrowException(const std::exception & e, const std::string & additional = "") {
-    std::stringstream msg;
+
+  void wrapException(std::ostream& msg, const std::exception & e, const std::string & additional = "") {
     msg << "\n" << e.what() << ":\n";
     if(!additional.empty()) {
       msg << additional << ":\n";
     }
     highlight(msg);
+  }
+  void wrapAndRethrowException(const JITException & e, const std::string & additional = "") {
+    std::stringstream msg;
+    wrapException(msg, e, additional);
+    throw JITException(msg.str());
+  }
+  void wrapAndRethrowException(const std::exception & e, const std::string & additional = "") {
+    std::stringstream msg;
+    wrapException(msg, e, additional);
     throw std::runtime_error(msg.str());
   }
 };
