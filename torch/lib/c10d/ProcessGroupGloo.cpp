@@ -1,13 +1,13 @@
 #include "ProcessGroupGloo.hpp"
 
-#include <ATen/cuda/CUDAGuard.h>
-
 #include <gloo/allreduce_halving_doubling.h>
 #include <gloo/allreduce_ring_chunked.h>
 #include <gloo/barrier_all_to_one.h>
 #include <gloo/broadcast_one_to_all.h>
 
 #ifdef USE_CUDA
+#include <ATen/cuda/CUDAGuard.h>
+
 #include <gloo/cuda_allreduce_halving_doubling.h>
 #include <gloo/cuda_allreduce_ring_chunked.h>
 #include <gloo/cuda_broadcast_one_to_all.h>
