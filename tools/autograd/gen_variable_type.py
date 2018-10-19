@@ -135,7 +135,8 @@ torch::jit::Node* node = nullptr;
 std::shared_ptr<jit::tracer::TracingState> tracer_state;
 if (jit::tracer::isTracing()) {
   tracer_state = jit::tracer::getTracingState();
-  node = tracer_state->graph->create(jit::aten::${trace_name}, /*num_outputs=*/0);
+  const static auto op_name = jit::Symbol::fromQualString("aten::${trace_name}");
+  node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
   jit::tracer::recordSourceLocation(node);
   ${add_trace_inputs}
   tracer_state->graph->appendNode(node);

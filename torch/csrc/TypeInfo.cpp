@@ -7,7 +7,7 @@
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_strings.h"
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <structmember.h>
 #include <cstring>

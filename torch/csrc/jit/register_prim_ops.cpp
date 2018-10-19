@@ -171,13 +171,15 @@ RegisterOperators reg({
         [](Node* node) -> Operation {
           return [](Stack& stack) {
             auto s = pop(stack).toString();
-            if (s->string() != "inf") {
+            if (s->string() == "inf")
+              push(stack, std::numeric_limits<double>::infinity());
+            else if (s->string() == "-inf")
+              push(stack, -std::numeric_limits<double>::infinity());
+            else
               AT_ERROR(
-                  "Only 'inf' can be cast to a float, but got '",
+                  "Only 'inf' or '-inf' can be cast to a float, but got '",
                   s->string(),
                   "'");
-            }
-            push(stack, std::numeric_limits<double>::infinity());
             return 0;
           };
         }),

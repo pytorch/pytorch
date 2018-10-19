@@ -8,7 +8,7 @@
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <atomic>
 #include <condition_variable>
