@@ -16,7 +16,7 @@ use a fixed seed.
 PyTorch
 .......
 You can use :meth:`torch.manual_seed()` to seed the RNG for all devices (both
-CPU and CUDA)
+CPU and CUDA)::
 
     import torch
     torch.manual_seed(0)
