@@ -212,7 +212,6 @@ function build() {
 		       -DTHC_SO_VERSION=1 \
 		       -DTHNN_SO_VERSION=1 \
 		       -DTHCUNN_SO_VERSION=1 \
-		       -DTHD_SO_VERSION=1 \
 		       -DUSE_CUDA=$USE_CUDA \
 		       -DBUILD_EXAMPLES=OFF \
 		       -DBUILD_TEST=$BUILD_TEST \
@@ -308,6 +307,7 @@ function build_caffe2() {
 		       -DBUILD_CAFFE2_OPS=$BUILD_CAFFE2_OPS \
 		       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
 		       -DUSE_CUDA=$USE_CUDA \
+		       -DUSE_DISTRIBUTED=$USE_DISTRIBUTED \
 		       -DUSE_NUMPY=$USE_NUMPY \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \
@@ -332,6 +332,8 @@ function build_caffe2() {
 		       -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
 		       -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
 		       $GLOO_FLAGS \
+		       -DTHD_SO_VERSION=1 \
+		       $THD_FLAGS \
 		       ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
@@ -380,10 +382,6 @@ for arg in "$@"; do
         popd
     elif [[ "$arg" == "caffe2" ]]; then
         build_caffe2
-    elif [[ "$arg" == "THD" ]]; then
-        pushd "$TORCH_LIB_DIR"
-        build THD $THD_FLAGS
-        popd
     elif [[ "$arg" == "libshm" ]] || [[ "$arg" == "libshm_windows" ]]; then
         pushd "$TORCH_LIB_DIR"
         build $arg
