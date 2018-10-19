@@ -1,10 +1,10 @@
 #include "ATen/ATen.h"
-#include "ATen/Config.h"
 #include "ATen/CPUApplyUtils.h"
+#include "ATen/Config.h"
 #include "ATen/Dispatch.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 
 #include "ATen/CPUGenerator.h"
 #include "ATen/CheckGenerator.h"

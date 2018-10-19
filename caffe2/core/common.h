@@ -31,6 +31,10 @@
 
 namespace caffe2 {
 
+// Since C10 is the core library for caffe2 (and aten), we will simply reroute
+// all abstractions defined in c10 to be available in caffe2 as well.
+using namespace c10;
+
 // Note(Yangqing): NVCC does not play well with unordered_map on some platforms,
 // forcing us to use std::map instead of unordered_map. This may affect speed
 // in some cases, but in most of the computation code we do not access map very

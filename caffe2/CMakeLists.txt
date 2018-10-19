@@ -64,39 +64,42 @@ endif()
 # ---[ Caffe2 build
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
-add_subdirectory(proto)
-add_subdirectory(contrib)
-add_subdirectory(core)
-add_subdirectory(utils)
-add_subdirectory(predictor)
-add_subdirectory(core/nomnigraph)
-add_subdirectory(core/dispatch)
-if (USE_NVRTC)
-  add_subdirectory(cuda_rtc)
+
+if(NOT BUILD_ATEN_ONLY)
+  add_subdirectory(proto)
+  add_subdirectory(contrib)
+  add_subdirectory(core)
+  add_subdirectory(utils)
+  add_subdirectory(predictor)
+  add_subdirectory(core/nomnigraph)
+  add_subdirectory(core/nomscheduler)
+  add_subdirectory(core/dispatch)
+  if (USE_NVRTC)
+    add_subdirectory(cuda_rtc)
+  endif()
+  add_subdirectory(db)
+  add_subdirectory(distributed)
+  # add_subdirectory(experiments) # note, we may remove this folder at some point
+  add_subdirectory(ideep)
+  add_subdirectory(image)
+  add_subdirectory(video)
+  add_subdirectory(mobile)
+  add_subdirectory(mpi)
+  add_subdirectory(observers)
+  add_subdirectory(onnx)
+  if (BUILD_CAFFE2_OPS)
+    add_subdirectory(operators)
+    add_subdirectory(operators/rnn)
+  endif()
+  add_subdirectory(opt)
+  add_subdirectory(perfkernels)
+  add_subdirectory(python)
+  add_subdirectory(queue)
+  add_subdirectory(sgd)
+  add_subdirectory(share)
+  # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
+  add_subdirectory(transforms)
 endif()
-add_subdirectory(db)
-add_subdirectory(distributed)
-# add_subdirectory(experiments) # note, we may remove this folder at some point
-add_subdirectory(ideep)
-add_subdirectory(image)
-add_subdirectory(video)
-add_subdirectory(mkl)
-add_subdirectory(mobile)
-add_subdirectory(mpi)
-add_subdirectory(observers)
-add_subdirectory(onnx)
-if (BUILD_CAFFE2_OPS)
-  add_subdirectory(operators)
-  add_subdirectory(operators/rnn)
-endif()
-add_subdirectory(opt)
-add_subdirectory(perfkernels)
-add_subdirectory(python)
-add_subdirectory(queue)
-add_subdirectory(sgd)
-add_subdirectory(share)
-# add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
-add_subdirectory(transforms)
 
 # Advanced: if we have white list specified, we will do intersections for all
 # main lib srcs.
@@ -161,50 +164,56 @@ if (FALSE)
 endif()
 
 # ---[ List of libraries to link with
-add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe2_PROTO>)
-add_dependencies(caffe2_protos Caffe2_PROTO)
-# If we are going to link protobuf locally inside caffe2 libraries, what we will do is
-# to create a helper static library that always contains libprotobuf source files, and
-# link the caffe2 related dependent libraries to it.
-target_include_directories(caffe2_protos INTERFACE $<INSTALL_INTERFACE:include>)
-# Reason for this public dependency is as follows:
-# (1) Strictly speaking, we should not expose any Protobuf related functions. We should
-#     only use function interfaces wrapped with our own public API, and link protobuf
-#     locally.
-# (2) However, currently across the Caffe2 codebase, we have extensive use of protobuf
-#     functionalities. For example, not only libcaffe2.so uses it, but also other
-#     binaries such as python extensions etc. As a result, we will have to have a
-#     transitive dependency to libprotobuf.
-#
-# Good thing is that, if we specify CAFFE2_LINK_LOCAL_PROTOBUF, then we do not need to
-# separately deploy protobuf binaries - libcaffe2.so will contain all functionalities
-# one needs. One can verify this via ldd.
-#
-# TODO item in the future includes:
-# (1) Enable using lite protobuf
-# (2) Properly define public API that do not directly depend on protobuf itself.
-# (3) Expose the libprotobuf.a file for dependent libraries to link to.
-#
-# What it means for users/developers?
-# (1) Users: nothing affecting the users, other than the fact that CAFFE2_LINK_LOCAL_PROTOBUF
-#     avoids the need to deploy protobuf.
-# (2) Developers: if one simply uses core caffe2 functionality without using protobuf,
-#     nothing changes. If one has a dependent library that uses protobuf, then one needs to
-#     have the right protobuf version as well as linking to libprotobuf.a.
-target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
+if(NOT BUILD_ATEN_ONLY)
+  add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe2_PROTO>)
+  add_dependencies(caffe2_protos Caffe2_PROTO)
+  # If we are going to link protobuf locally inside caffe2 libraries, what we will do is
+  # to create a helper static library that always contains libprotobuf source files, and
+  # link the caffe2 related dependent libraries to it.
+  target_include_directories(caffe2_protos INTERFACE $<INSTALL_INTERFACE:include>)
+  # Reason for this public dependency is as follows:
+  # (1) Strictly speaking, we should not expose any Protobuf related functions. We should
+  #     only use function interfaces wrapped with our own public API, and link protobuf
+  #     locally.
+  # (2) However, currently across the Caffe2 codebase, we have extensive use of protobuf
+  #     functionalities. For example, not only libcaffe2.so uses it, but also other
+  #     binaries such as python extensions etc. As a result, we will have to have a
+  #     transitive dependency to libprotobuf.
+  #
+  # Good thing is that, if we specify CAFFE2_LINK_LOCAL_PROTOBUF, then we do not need to
+  # separately deploy protobuf binaries - libcaffe2.so will contain all functionalities
+  # one needs. One can verify this via ldd.
+  #
+  # TODO item in the future includes:
+  # (1) Enable using lite protobuf
+  # (2) Properly define public API that do not directly depend on protobuf itself.
+  # (3) Expose the libprotobuf.a file for dependent libraries to link to.
+  #
+  # What it means for users/developers?
+  # (1) Users: nothing affecting the users, other than the fact that CAFFE2_LINK_LOCAL_PROTOBUF
+  #     avoids the need to deploy protobuf.
+  # (2) Developers: if one simply uses core caffe2 functionality without using protobuf,
+  #     nothing changes. If one has a dependent library that uses protobuf, then one needs to
+  #     have the right protobuf version as well as linking to libprotobuf.a.
+  target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
+endif()
 
 # Compile exposed libraries.
 add_library(caffe2 ${Caffe2_CPU_SRCS})
 if (NOT WIN32)
   target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
 endif()
-caffe2_interface_library(caffe2_protos caffe2_protos_whole)
-target_link_libraries(caffe2 PRIVATE caffe2_protos_whole)
-if (${CAFFE2_LINK_LOCAL_PROTOBUF})
-  target_link_libraries(caffe2 INTERFACE protobuf::libprotobuf)
-else()
-  target_link_libraries(caffe2 PUBLIC protobuf::libprotobuf)
+
+if(NOT BUILD_ATEN_ONLY)
+  caffe2_interface_library(caffe2_protos caffe2_protos_whole)
+  target_link_libraries(caffe2 PRIVATE caffe2_protos_whole)
+  if (${CAFFE2_LINK_LOCAL_PROTOBUF})
+    target_link_libraries(caffe2 INTERFACE protobuf::libprotobuf)
+  else()
+    target_link_libraries(caffe2 PUBLIC protobuf::libprotobuf)
+  endif()
 endif()
+
 target_link_libraries(caffe2 PUBLIC c10)
 target_link_libraries(caffe2 PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
@@ -365,7 +374,7 @@ if(USE_ROCM)
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
-  set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${HIP_HIPCC_FLAGS})
+  target_compile_options(caffe2_hip PRIVATE ${HIP_HIPCC_FLAGS})
   target_link_libraries(caffe2_hip PUBLIC caffe2)
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
@@ -550,7 +559,7 @@ if (BUILD_PYTHON)
   if(USE_ROCM)
     hip_add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINKER_LANGUAGE HIP)
-    set_target_properties(caffe2_pybind11_state_hip PROPERTIES COMPILE_FLAGS "${HIP_HIPCC_FLAGS} -fvisibility=hidden")
+    target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_HIPCC_FLAGS} -fvisibility=hidden)
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     if (APPLE)

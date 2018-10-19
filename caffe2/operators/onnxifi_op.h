@@ -35,7 +35,7 @@ class OnnxifiOp final : public Operator<Context> {
       output_desc_.back().name = output.c_str();
 
       // For output, we try to get its output size hint
-      const std::string key = MakeString("output_size_hint_", output_idx);
+      const std::string key = c10::str("output_size_hint_", output_idx);
       auto output_size_hint = this->template GetRepeatedArgument<int>(key);
       if (!output_size_hint.empty()) {
         std::vector<int64_t> dims;

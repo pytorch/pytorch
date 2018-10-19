@@ -4,8 +4,9 @@
 #include "caffe2/core/storage.h"
 #include "caffe2/core/tensor_impl.h"
 
-#include <ATen/core/intrusive_ptr.h>
 #include <ATen/core/UndefinedTensorImpl.h>
+#include <ATen/core/intrusive_ptr.h>
+#include "ATen/core/TensorOptions.h"
 
 namespace caffe2 {
 
@@ -61,7 +62,10 @@ class CAFFE2_API Tensor final {
    * context_for_copy is required to have the same DeviceType as src
    */
   Tensor(const Tensor& src, BaseContext* context_for_copy, DeviceType type)
-      : Tensor(Storage(type)) {
+      : Tensor(
+            (context_for_copy && context_for_copy->device_type() == type)
+                ? Storage(context_for_copy->device())
+                : Storage(type)) {
     CopyFrom(src, context_for_copy);
   }
 
@@ -77,13 +81,14 @@ class CAFFE2_API Tensor final {
   /**
    * @brief Creates a tensor, and fills its contents with the given values.
    * The type of tensor will be decided by the context parameter
+   * `context` must be provided(non-null)
    */
   template <typename T>
   Tensor(
       const vector<int64_t>& dims,
       const vector<T>& values,
       BaseContext* context)
-      : Tensor(Storage(context->device_type(), TypeMeta::Make<T>())) {
+      : Tensor(Storage(context->device(), TypeMeta::Make<T>())) {
     Resize(dims);
     CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), size());
     context->CopyItemsFromCPU(
@@ -93,25 +98,22 @@ class CAFFE2_API Tensor final {
   /**
    * @brief Creates a scalar tensor, and fills its content with the given value.
    * The type of tensor will be decided by the context parameter
+   * `context` must be provided(non-null)
    */
   template <
       typename T,
       typename = typename std::enable_if<std::is_scalar<T>::value>::type>
   Tensor(const T& value, BaseContext* context)
-      : Tensor(Storage(context->device_type(), TypeMeta::Make<T>())) {
+      : Tensor(Storage(context->device(), TypeMeta::Make<T>())) {
     Resize(std::vector<int64_t>{});
     context->CopyItemsFromCPU(
         storage().dtype(), size(), &value, mutable_data<T>());
   }
 
   Tensor Clone() const {
-    Tensor x(GetDeviceType());
+    Tensor x(GetDevice());
     x.CopyFrom(*this);
     return x;
-  }
-
-  BaseStaticContext* GetStaticContext() const {
-    return impl_.get()->GetStaticContext();
   }
 
   DeviceType GetDeviceType() const {
@@ -326,6 +328,13 @@ class CAFFE2_API Tensor final {
   }
 
   /**
+   * Returns the size (i.e. the number of items) of the tensor.
+   */
+  inline int64_t numel() const {
+    return impl_->numel();
+  }
+
+  /**
    * Return the number of bytes each item takes in the tensor.
    */
   inline size_t itemsize() const {
@@ -420,12 +429,6 @@ class CAFFE2_API Tensor final {
     return impl_->size(i);
   }
 
-  inline void ExtractDeviceOption(DeviceOption* device) const {
-    auto* context = GetStaticContext();
-    CHECK(context);
-    context->ExtractDeviceOption(device, impl_->data());
-  }
-
   const Storage& storage() {
     return impl_->storage();
   }
@@ -462,6 +465,10 @@ void TensorVectorResize(
     std::vector<Tensor>& tensors,
     int size,
     DeviceType type);
+
+// Tensor factory function
+CAFFE2_API Tensor
+empty(const std::vector<int64_t>& dims, const at::TensorOptions& options);
 
 class CAFFE2_API TensorPrinter {
  public:

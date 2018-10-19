@@ -16,33 +16,33 @@ static Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non
                     .copy(self, non_blocking, options.device());
 }
 
-Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking) {
+Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy) {
   ensure_has_index(&device);
-  if (self.device() == device && self.dtype() == dtype) {
+  if (self.device() == device && self.dtype() == dtype && !copy) {
     return self;
   }
   return to_impl(self, self.options().device(device).dtype(dtype), non_blocking);
 }
 
-Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking) {
-  if (self.dtype() == dtype) {
+Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy) {
+  if (self.dtype() == dtype && !copy) {
     return self;
   }
   return to_impl(self, self.options().dtype(dtype), non_blocking);
 }
 
-Tensor to(const Tensor& self, Device device, bool non_blocking) {
+Tensor to(const Tensor& self, Device device, bool non_blocking, bool copy) {
   ensure_has_index(&device);
-  if (self.device() == device) {
+  if (self.device() == device && !copy) {
     return self;
   }
   return to_impl(self, self.options().device(device), non_blocking);
 }
 
-Tensor to(const Tensor& self, const Tensor& other, bool non_blocking) {
+Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy) {
   auto self_options = self.options();
   auto options = other.options();
-  if (self_options == options) {
+  if (self_options == options && !copy) {
     return self;
   }
   return to_impl(self, options, non_blocking);

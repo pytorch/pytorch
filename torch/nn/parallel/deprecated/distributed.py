@@ -7,6 +7,7 @@ import torch
 from torch.autograd import Variable
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors, \
     _take_tensors
+import torch.utils.hooks
 
 from torch.cuda.comm import broadcast_coalesced
 from torch.cuda import nccl
@@ -359,6 +360,7 @@ class DistributedDataParallel(Module):
             if not p.requires_grad:
                 continue
 
+            @torch.utils.hooks.unserializable_hook
             def allreduce_hook(*unused):
                 Variable._execution_engine.queue_callback(reduction_fn_nccl)
 

@@ -64,7 +64,7 @@ struct CAFFE2_API StoreHandlerNotAvailableException
 
 #define STORE_HANDLER_NOT_AVAILABLE(...)             \
   throw ::caffe2::StoreHandlerNotAvailableException( \
-      ::caffe2::MakeString("[", __FILE__, ":", __LINE__, "] ", __VA_ARGS__));
+      ::c10::str("[", __FILE__, ":", __LINE__, "] ", __VA_ARGS__));
 
 /*
  * Timeout accessing the store.
@@ -77,5 +77,5 @@ struct CAFFE2_API StoreHandlerTimeoutException : public std::runtime_error {
 
 #define STORE_HANDLER_TIMEOUT(...)              \
   throw ::caffe2::StoreHandlerTimeoutException( \
-      ::caffe2::MakeString("[", __FILE__, ":", __LINE__, "] ", __VA_ARGS__));
+      ::c10::str("[", __FILE__, ":", __LINE__, "] ", __VA_ARGS__));
 } // namespace caffe2

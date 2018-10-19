@@ -250,7 +250,6 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
             output_to_grad='xentropy',
             grad_reference=weighted_sigmoid_xentr_logit_grad_ref)
 
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     @given(n=st.integers(2, 10),
            b=st.integers(1, 5),
            **hu.gcs_cpu_only)

@@ -108,7 +108,7 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
 
 static Variable sequenceToVariable(const Type& type, PyObject* seq) {
   auto& idx_type = type.toScalarType(kLong);
-  return torch::utils::legacy_new_from_data(idx_type, at::nullopt, seq);
+  return torch::utils::legacy_new_from_data(idx_type, c10::nullopt, seq);
 }
 
 static Variable valueToTensor(const Type & type, PyObject* value) {
@@ -331,6 +331,10 @@ static void copy_to(Variable dst, const Variable& src) {
 
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   HANDLE_TH_ERRORS
+  if (py_value == nullptr) {
+    throw TypeError("Tensor does not support deleting items");
+  }
+
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   DeviceGuard device_guard(self_);
   auto value = valueToTensor(self_.type(), py_value);

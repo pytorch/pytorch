@@ -85,7 +85,7 @@ vector<int64_t> GetTensorInfo(
   CHECK(tc->unsafeGetTensorImpl());
   CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImpl());
   *capacity = tc->storage().capacity();
-  tc->ExtractDeviceOption(device);
+  ExtractDeviceOption(device, tc->GetDevice());
   return tc->dims().vec();
 }
 
@@ -115,6 +115,15 @@ void TensorVectorResize(
   for (auto i = 0; i < size; ++i) {
     tensors.emplace_back(type);
   }
+}
+
+Tensor empty(
+    const std::vector<int64_t>& dims,
+    const at::TensorOptions& options) {
+  // TODO: merge this with at::empty after Tensor is merged
+  auto tensor = Tensor(dims, options.device().type());
+  tensor.raw_mutable_data(scalarTypeToTypeMeta(options.dtype()));
+  return tensor;
 }
 
 namespace {

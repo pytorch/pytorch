@@ -120,8 +120,6 @@ class ThreadLocalHIPObjects {
   vector<miopenHandle_t> miopen_handles_[CAFFE2_COMPILE_TIME_MAX_HIP_GPUS];
 };
 
-BaseStaticContext* GetHIPStaticContext();
-
 class HIPContext final : public BaseContext {
  public:
   // The default HIP context constructor.
@@ -135,14 +133,6 @@ class HIPContext final : public BaseContext {
       HIPRAND_CHECK(hiprandDestroyGenerator(hiprand_generator_));
     }
     FinishDeviceComputation();
-  }
-
-  BaseStaticContext* GetStaticContext() const override {
-    return GetHIPStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetHIPStaticContext();
   }
 
   inline void SwitchToDevice(int stream_id) override {
@@ -169,7 +159,7 @@ class HIPContext final : public BaseContext {
     }
   }
 
-  inline int hip_gpu_id() const {
+  inline int device_id() const {
     return gpu_id_;
   }
 
@@ -207,7 +197,7 @@ class HIPContext final : public BaseContext {
   }
 
   static at::DataPtr New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+    return GetAllocator(HIP)->allocate(nbytes);
   }
 
   // Get a mutex to lock out hipMalloc / hipFree calls when
@@ -267,8 +257,12 @@ class HIPContext final : public BaseContext {
   }
 
   static bool IsStreamFree(const DeviceOption& option, int stream_id) {
-    auto stream = HIPContext::hip_stream(option.hip_gpu_id(), stream_id);
+    auto stream = HIPContext::hip_stream(option.device_id(), stream_id);
     return hipStreamQuery(stream) == hipSuccess;
+  }
+
+  at::Device device() const override {
+    return at::Device(HIP, gpu_id_);
   }
 
   DeviceType device_type() const override {
@@ -373,24 +367,6 @@ struct PinnedCPUAllocator final : public at::Allocator {
 
   DefaultCPUAllocator baseAllocator_;
 };
-
-class HIPStaticContext final : public BaseStaticContext {
- public:
-  at::DataPtr New(size_t nbytes) const override;
-
-  DeviceType GetDeviceType() override {
-    return HIP;
-  }
-
-  void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    device->set_device_type(TypeToProto(GetDeviceType()));
-    device->set_hip_gpu_id(GetGPUIDForPointer(data));
-  }
-
-};
-
-// Get the HIP Alloctor.
-CAFFE2_API at::Allocator* GetHIPAllocator();
 
 typedef Tensor TensorHIP;
 
