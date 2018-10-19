@@ -643,6 +643,88 @@ jobs:
 
           ((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/short-perf-test-gpu.sh') | docker exec -u jenkins -i "$id" bash) 2>&1 | ts
 
+  pytorch_doc_push:
+    environment:
+      JOB_BASE_NAME: pytorch-doc-push
+    resource_class: large
+    machine:
+      image: default
+    steps:
+    - run:
+        name: Prepare workspace
+        command: |
+          sudo mkdir -p /home/circleci/project/pytorch-ci-env
+          sudo chmod -R 777 /home/circleci/project/pytorch-ci-env
+    - attach_workspace:
+        at: /home/circleci/project/pytorch-ci-env
+    - run:
+        <<: *setup_ci_environment
+    - run:
+        name: Doc Push
+        no_output_timeout: "1h"
+        command: |
+          set -e
+          if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
+            echo "Skipping doc push..."
+            exit 0
+          fi
+          source /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
+          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+          docker pull ${COMMIT_DOCKER_IMAGE}
+          id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+
+          cat >/home/circleci/project/doc_push_script.sh <<EOL
+          # =================== The following code will be executed inside Docker container ===================
+          git clone https://yf225:${GITHUB_PYTORCHBOT_TOKEN}@github.com/pytorch/pytorch.github.io -b site
+          pushd pytorch.github.io
+
+          set -ex
+
+          export LC_ALL=C
+          export PATH=/opt/conda/bin:$PATH
+
+          rm -rf pytorch || true
+
+          # Get all the documentation sources, put them in one place
+          # TODO: These clones can race
+          git clone https://github.com/pytorch/pytorch
+          pushd pytorch
+          git clone https://github.com/pytorch/vision
+          pushd vision
+          conda install -y pillow
+          time python setup.py install
+          popd
+          pushd docs
+          rm -rf source/torchvision
+          cp -r ../vision/docs/source source/torchvision
+
+          # Build the docs
+          pip install -r requirements.txt || true
+          make html
+
+          # Move them into the docs repo
+          popd
+          popd
+          git rm -rf docs/master || true
+          mv pytorch/docs/build/html docs/master
+          find docs/master -name "*.html" -print0 | xargs -0 sed -i -E 's/master[[:blank:]]\\([[:digit:]]\\.[[:digit:]]\\.[[:xdigit:]]+\\+[[:xdigit:]]+[[:blank:]]\\)/<a href="http:\\/\\/pytorch.org\\/docs\\/versions.html">& \\&#x25BC<\\/a>/g'
+          git add docs/master || true
+          git status
+          git config user.email "soumith+bot@pytorch.org"
+          git config user.name "pytorchbot"
+          # If there aren't changes, don't make a commit; push is no-op
+          git commit -m "auto-generating sphinx docs" || true
+          git status
+          git push origin site
+
+          popd
+          # =================== The above code will be executed inside Docker container ===================
+          EOL
+          chmod +x /home/circleci/project/doc_push_script.sh
+          docker cp /home/circleci/project/doc_push_script.sh $id:/var/lib/jenkins/workspace/doc_push_script.sh
+
+          ((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh') | docker exec -u jenkins -i "$id" bash) 2>&1 | ts
+
   pytorch_macos_10_13_py3_build:
     macos:
       xcode: "9.0"
@@ -944,6 +1026,9 @@ workflows:
           requires:
             - pytorch_linux_xenial_cuda8_cudnn6_py3_build
       - pytorch_short_perf_test_gpu:
+          requires:
+            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      - pytorch_doc_push:
           requires:
             - pytorch_linux_xenial_cuda8_cudnn6_py3_build
       - pytorch_linux_xenial_cuda9_cudnn7_py2_build
