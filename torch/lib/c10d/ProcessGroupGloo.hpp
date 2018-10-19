@@ -15,10 +15,9 @@
 
 #include <torch/csrc/utils/hash.h>
 
-#include <ATen/cuda/CUDAStream.h>
-
 #ifdef USE_CUDA
 #include <c10d/CUDAUtils.hpp>
+#include <ATen/cuda/CUDAStream.h>
 #endif
 
 #include <c10d/ProcessGroup.hpp>
