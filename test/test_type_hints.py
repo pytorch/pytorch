@@ -87,6 +87,7 @@ strings and puts them in one nonsensical module returned as a string.
 
 
 class TestTypeHints(TestCase):
+    @unittest.skipIf(sys.version_info[0] == 2, "not type hints for Python 2")
     def test_doc_examples(self):
         """run documentation examples through mypy.
 mypy can be picky about its environment, so we need
@@ -105,9 +106,9 @@ into it"""
             try:
                 result = subprocess.run(['python3', '-mmypy', '--follow-imports',
                                          'silent', '--check-untyped-defs', 'test.py'],
-                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+                                        check=True)
             except subprocess.CalledProcessError as e:
-                raise AssertionError("mypy failed" + "\n\n" + e.output.decode())
+                raise AssertionError("mypy failed")
             os.chdir(curdir)
 
 if __name__ == '__main__':
