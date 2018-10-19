@@ -11,16 +11,18 @@
 #include <functional>
 #include <vector>
 #include <cmath>
-#include <array>
 #include <algorithm>
 #include <iterator>
 #include <utility>
 #include <type_traits>
+#include "c10/util/Array.h"
 
 #ifdef _MSC_VER
 #define SKA_NOINLINE(...) __declspec(noinline) __VA_ARGS__
+#define CONSTEXPR_IF_NOT_MSVC
 #else
 #define SKA_NOINLINE(...) __VA_ARGS__ __attribute__((noinline))
+#define CONSTEXPR_IF_NOT_MSVC constexpr
 #endif
 
 namespace ska
@@ -200,7 +202,7 @@ namespace ska
         template<typename T>
         struct sherwood_v3_entry_constexpr
         {
-            constexpr explicit sherwood_v3_entry_constexpr(int8_t distance_from_desired_ = -1, typename std::aligned_storage<sizeof(T), alignof(T)>::type bytes_ = {})
+            constexpr explicit sherwood_v3_entry_constexpr(int8_t distance_from_desired_, typename std::aligned_storage<sizeof(T), alignof(T)>::type bytes_)
                     : distance_from_desired(distance_from_desired_), bytes(bytes_) {}
 
             static constexpr sherwood_v3_entry_constexpr special_end_entry()
@@ -217,16 +219,16 @@ namespace ska
         template<typename T>
         struct EntryDefaultTable
         {
-            static constexpr std::array<const sherwood_v3_entry_constexpr<T>, min_lookups> table
+            static constexpr c10::guts::array<const sherwood_v3_entry_constexpr<T>, min_lookups> table
                     {{
-                            sherwood_v3_entry_constexpr<T>(),
-                            sherwood_v3_entry_constexpr<T>(),
-                            sherwood_v3_entry_constexpr<T>(),
-                            sherwood_v3_entry_constexpr<T>::special_end_entry()
+                            sherwood_v3_entry_constexpr<T>(-1, {}),
+                            sherwood_v3_entry_constexpr<T>(-1, {}),
+                            sherwood_v3_entry_constexpr<T>(-1, {}),
+                            sherwood_v3_entry_constexpr<T>(0, {})
                     }};
         };
         template<typename T>
-        constexpr std::array<const sherwood_v3_entry_constexpr<T>, min_lookups> EntryDefaultTable<T>::table;
+        constexpr c10::guts::array<const sherwood_v3_entry_constexpr<T>, min_lookups> EntryDefaultTable<T>::table;
 
         inline int8_t log2(uint64_t value)
         {
