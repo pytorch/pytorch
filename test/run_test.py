@@ -36,6 +36,7 @@ TESTS = [
     'thd_distributed',
     'torch',
     'type_info',
+    'type_hints',
     'utils',
 ]
 

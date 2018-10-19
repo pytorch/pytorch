@@ -130,7 +130,12 @@ def btrifact(A, info=None, pivot=True):
     return A.btrifact(info, pivot)
 
 
-@annotate(ret=Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]],
+# The return values can be None but if we annotate returns as optional,
+# the typecheck will not like them to be passed to other functions needing
+# tensors.
+# One improvement could be to have an overload that says without arguments,
+# we get tensors.
+@annotate(ret=Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
           LU_data=torch.Tensor, LU_pivots=torch.Tensor,
           unpack_data=bool, unpack_pivots=bool)
 def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
