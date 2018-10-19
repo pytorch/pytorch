@@ -25,13 +25,13 @@ in docstrings an returns a list of lines.
         if beginning:
             m = exampleline_re.match(l)
             if m:
-                beginning += m[1]
+                beginning += m.group(1)
             else:
                 beginning += l
         else:
             m = exampleline_re.match(l)
             if m:
-                beginning += m[1]
+                beginning += m.group(1)
         if beginning:
             complete = True
             try:
