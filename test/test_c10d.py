@@ -841,9 +841,10 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             any(torch.isinf(p.grad).any() for p in ddp_model.parameters())
         )
 
+    @skip_if_not_nccl
     def test_queue_reduction(self):
         # Set up process group.
-        store = c10d.TCPStore('localhost', self.port, self.is_master)
+        store = c10d.FileStore(self.file.name)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # Get this process' split of devices.

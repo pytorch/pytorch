@@ -4,7 +4,7 @@
 #include "torch/csrc/utils/hash.h"
 
 #include <ATen/ATen.h>
-#include <ATen/Error.h>
+#include <c10/util/Exception.h>
 
 #include <THC/THC.h>
 #include <THC/THCStream.h>
@@ -247,7 +247,7 @@ void broadcast(
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
     device_guard.set_index(tensors[i].get_device());
     const auto stream = (streams.empty() || !streams[i])
-        ?  THCState_getCurrentStream(thcState)
+        ? THCState_getCurrentStream(thcState)
         : THCStream_stream(streams[i]);
     AT_CHECK(
         static_cast<uint64_t>(numel) <= static_cast<uint64_t>(count_max),
@@ -270,8 +270,8 @@ void reduce(
     std::vector<at::Tensor>& outputs,
     int32_t root,
     int32_t op,
-    at::optional<std::vector<at::cuda::CUDAStream>> streams,
-    at::optional<std::vector<ncclComm_t>> comms) {
+    c10::optional<std::vector<at::cuda::CUDAStream>> streams,
+    c10::optional<std::vector<ncclComm_t>> comms) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   AT_CHECK(
@@ -318,8 +318,8 @@ void reduce(
     std::vector<at::Tensor>& inputs,
     int32_t root,
     int32_t op,
-    at::optional<std::vector<at::cuda::CUDAStream>> streams,
-    at::optional<std::vector<ncclComm_t>> comms) {
+    c10::optional<std::vector<at::cuda::CUDAStream>> streams,
+    c10::optional<std::vector<ncclComm_t>> comms) {
   reduce(inputs, /*outputs=*/inputs, root, op, streams, comms);
 }
 } // namespace nccl
