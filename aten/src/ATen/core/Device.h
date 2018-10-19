@@ -26,7 +26,7 @@ struct CAFFE2_API Device {
 
   /// Constructs a new `Device` from a `DeviceType` and an optional device
   /// index.
-  /* implicit */ Device(DeviceType type, int32_t index = -1)
+  /* implicit */ Device(DeviceType type, int16_t index = -1)
       : type_(type), index_(index) {
     AT_CHECK(
         index == -1 || index >= 0,
@@ -58,7 +58,7 @@ struct CAFFE2_API Device {
   }
 
   /// Sets the device index.
-  void set_index(int32_t index) {
+  void set_index(int16_t index) {
     index_ = index;
   }
 
@@ -68,7 +68,7 @@ struct CAFFE2_API Device {
   }
 
   /// Returns the optional index.
-  const int16_t& index() const noexcept {
+  int16_t index() const noexcept {
     return index_;
   }
 

@@ -118,7 +118,7 @@ TEST_F(ModuleTest, Conversion_MultiCUDA) {
   Linear module(128, 64);
   for (auto& parameter : module->parameters()) {
     ASSERT_EQ(parameter->device(), torch::Device(torch::kCPU));
-    ASSERT_EQ(parameter->scalar_type(), torch::kFloat32);
+    ASSERT_EQ(parameter->dtype(), torch::kFloat32);
   }
   {
     module->to({torch::kCUDA, 0});
@@ -141,13 +141,13 @@ TEST_F(ModuleTest, Conversion_MultiCUDA) {
   {
     module->to(torch::kInt32);
     for (auto& parameter : module->parameters()) {
-      ASSERT_EQ(parameter->scalar_type(), torch::kInt32);
+      ASSERT_EQ(parameter->dtype(), torch::kInt32);
     }
   }
   {
     module->to(torch::kFloat64);
     for (auto& parameter : module->parameters()) {
-      ASSERT_EQ(parameter->scalar_type(), torch::kFloat64);
+      ASSERT_EQ(parameter->dtype(), torch::kFloat64);
     }
   }
   {
@@ -157,7 +157,7 @@ TEST_F(ModuleTest, Conversion_MultiCUDA) {
       ASSERT_EQ(parameter->device().index(), 1);
     }
     for (auto& parameter : module->parameters()) {
-      ASSERT_EQ(parameter->scalar_type(), torch::kUInt8);
+      ASSERT_EQ(parameter->dtype(), torch::kUInt8);
     }
   }
 }

@@ -12,7 +12,6 @@
 
 namespace at {
 
-// Underlying type declared to be int32_t for consistency with protobufs.
 enum class DeviceType : int16_t {
   CPU = 0,
   CUDA = 1, // CUDA.

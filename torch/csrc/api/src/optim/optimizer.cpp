@@ -61,7 +61,7 @@ Tensor& OptimizerBase::buffer_at(std::vector<Tensor>& buffers, size_t index) {
   const auto& parameter = parameters_.at(index);
   const auto& buffer = buffers.at(index);
   if (buffer.device() != parameter.device() ||
-      buffer.scalar_type() != parameter.scalar_type()) {
+      buffer.dtype() != parameter.dtype()) {
     buffers[index] = buffer.to(parameter.device(), parameter.scalar_type());
   }
   return buffers[index];
