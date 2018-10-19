@@ -723,7 +723,7 @@ jobs:
           chmod +x /home/circleci/project/doc_push_script.sh
           docker cp /home/circleci/project/doc_push_script.sh $id:/var/lib/jenkins/workspace/doc_push_script.sh
 
-          ((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && doc_push_script.sh') | docker exec -u jenkins -i "$id" bash) 2>&1 | ts
+          ((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh') | docker exec -u jenkins -i "$id" bash) 2>&1 | ts
 
   pytorch_macos_10_13_py3_build:
     macos:
