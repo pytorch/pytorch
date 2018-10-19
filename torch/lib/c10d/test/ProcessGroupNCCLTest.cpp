@@ -7,6 +7,8 @@
 #include <c10d/test/CUDATest.hpp>
 #include <c10d/test/TestUtils.hpp>
 
+#include <ATen/cuda/CUDAStream.h>
+
 using namespace c10d::test;
 
 using at::cuda::CUDAStream;
