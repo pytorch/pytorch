@@ -7,6 +7,10 @@ install_ubuntu() {
     apt-get install -y wget
     apt-get install -y libopenblas-dev
 
+    # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
+    apt-get install libc++1
+    apt-get install libc++abi1
+
     DEB_ROCM_REPO=http://repo.radeon.com/rocm/misc/facebook/apt/.apt_1.9.white_rabbit/debian
     # Add rocm repository
     wget -qO - $DEB_ROCM_REPO/rocm.gpg.key | apt-key add -
@@ -42,8 +46,53 @@ install_ubuntu() {
 }
 
 install_centos() {
-    echo "Not implemented yet"
-    exit 1
+
+  yum update -y
+  yum install -y wget
+  yum install -y openblas-devel
+
+  yum install -y centos-release-scl
+  yum install -y devtoolset-7
+
+  echo "source scl_source enable devtoolset-7" >> /root/.bashrc
+
+  yum install -y epel-release
+  yum install -y dkms kernel-headers-`uname -r` kernel-devel-`uname -r`
+
+  echo "[ROCm]" > /etc/yum.repos.d/rocm.repo
+  echo "name=ROCm" >> /etc/yum.repos.d/rocm.repo
+  echo "baseurl=http://repo.radeon.com/rocm/misc/facebook/yum/.yum_1.9.white_rabbit/" >> /etc/yum.repos.d/rocm.repo
+  echo "enabled=1" >> /etc/yum.repos.d/rocm.repo
+  echo "gpgcheck=0" >> /etc/yum.repos.d/rocm.repo
+
+  yum update -y
+
+  yum install -y \
+                   rocm-dev \
+                   rocm-libs \
+                   rocm-utils \
+                   rocfft \
+                   miopen-hip \
+                   miopengemm \
+                   rocblas \
+                   rocm-profiler \
+                   cxlactivitylogger \
+                   rocsparse \
+                   hipsparse \
+                   rocrand
+
+
+  # Cleanup
+  yum clean all
+  rm -rf /var/cache/yum
+  rm -rf /var/lib/yum/yumdb
+  rm -rf /var/lib/yum/history
+
+  # Needed for now, will be replaced once hip-thrust is packaged for CentOS
+  git clone --recursive https://github.com/ROCmSoftwarePlatform/Thrust.git /data/Thrust
+  rm -rf /data/Thrust/thrust/system/cuda/detail/cub-hip
+  git clone --recursive https://github.com/ROCmSoftwarePlatform/cub-hip.git /data/Thrust/thrust/system/cuda/detail/cub-hip
+  ln -s /data/Thrust/thrust /opt/rocm/include/thrust
 }
  
 # Install Python packages depending on the base OS

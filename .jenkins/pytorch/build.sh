@@ -43,21 +43,23 @@ cmake --version
 pip install -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+
+  if [[ "$BUILD_ENVIRONMENT" == *centos* ]]; then
+    # These environment variables are not set on CI when we were running as the Jenkins user.
+    # The HIP Utility scripts require these environment variables to be set in order to run without error.
+    export LC_ALL=en_US.utf8
+    export LANG=en_US.utf8
+  else
+    export LANG=C.UTF-8
+    export LC_ALL=C.UTF-8
+  fi
+
   # This is necessary in order to cross compile (or else we'll have missing GPU device).
   export HCC_AMDGPU_TARGET=gfx900
-
-  # These environment variables are not set on CI when we were running as the Jenkins user.
-  # The HIP Utility scripts require these environment variables to be set in order to run without error.
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
 
   # This environment variable enabled HCC Optimizations that speed up the linking stage.
   # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
   export KMTHINLTO=1
-
-  # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
-  sudo apt-get install libc++1
-  sudo apt-get install libc++abi1
 
   # When hcc runs out of memory, it silently exits without stopping
   # the build process, leaving undefined symbols in the shared lib
