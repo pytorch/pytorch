@@ -286,7 +286,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
     return dst;
   }
 
-  LongTensor indices = self._indices().contiguous();
+  LongTensor indices = self._indices();
   Tensor values = self._values().contiguous();
   int64_t sparseDims = self._sparseDims();
   int64_t denseDims = self._denseDims();
@@ -364,9 +364,8 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   }
   int64_t dim = t.dim();
   int64_t sparseDims = mask._sparseDims();
-  LongTensor mask_indices = mask._indices().contiguous();
-  Tensor mask_values = mask._values().contiguous();
-
+  LongTensor mask_indices = mask._indices();
+  Tensor mask_values = mask._values();
   Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
   _alias_into_sparse(r, mask_indices.clone(), r_values);
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
