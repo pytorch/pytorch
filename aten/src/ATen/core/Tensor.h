@@ -72,7 +72,7 @@ public:
     impl_.reset();
   }
 
-  // The following overloads are very intriguing.  Consider the following
+  // The following overloads are very intruiging.  Consider the following
   // program:
   //
   //    x[1] = 3;
