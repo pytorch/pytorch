@@ -30,6 +30,7 @@ class TestDTypeInfo(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_finfo(self):
+        initial_default_type = torch.get_default_dtype()
         for dtype in [torch.float32, torch.float64]:
             x = torch.zeros((2, 2), dtype=dtype)
             xinfo = torch.finfo(x.dtype)
@@ -41,7 +42,8 @@ class TestDTypeInfo(TestCase):
             self.assertEqual(xinfo.tiny, xninfo.tiny)
             torch.set_default_dtype(dtype)
             self.assertEqual(torch.finfo(dtype), torch.finfo())
-
+        # Restore the default type to ensure that the test has no side effect
+        torch.set_default_dtype(initial_default_type)
 
 if __name__ == '__main__':
     run_tests()
