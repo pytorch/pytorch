@@ -443,6 +443,40 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     refresh_contiguous();
   }
 
+  // Like set_sizes_and_strides but assumes contiguous strides.`
+  //
+  // WARNING: This function does not check if the requested
+  // sizes/strides are in bounds for the storage that is allocated;
+  // this is the responsibility of the caller
+  void set_sizes_contiguous(at::IntList new_size) {
+    AT_ASSERT(!is_variable());
+    auto old_dim = sizes_.size();
+    auto new_dim = new_size.size();
+    sizes_ = new_size.vec();
+
+    // TODO(rzou): replace with update_to_contiguous_strides
+    // in #12845 when that lands.
+    {
+      if (old_dim != new_dim) {
+        strides_.reset(new int64_t[sizes_.size()]);
+      }
+      if (new_dim > 0) {
+        for (size_t d = new_dim - 1; ; d--) {
+          if (d == new_dim - 1) {
+            strides_[d] = 1;
+          } else {
+            // Keep stride monotonically increasing to match NumPy.
+            strides_[d] = std::max<int64_t>(sizes_[d+1], 1) * strides_[d+1];
+          }
+          if (d == 0) break;
+        }
+      }
+      is_contiguous_ = true;
+    }
+
+    refresh_numel();
+  }
+
   // WARNING: This function does not check if the requested
   // sizes/strides are in bounds for the storage that is allocated;
   // this is the responsibility of the caller
