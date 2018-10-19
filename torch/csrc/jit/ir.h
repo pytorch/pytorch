@@ -105,39 +105,51 @@ struct Use {
 // The trie never needs to shrink, it only grows until it is disposed
 // of when Graph is deallocated. Hence, pointers to scopes held by nodes
 // will always be valid as long as Graph is alive.
-struct Scope {
+struct Scope;
+using ScopePtr = c10::intrusive_ptr<Scope>;
+
+struct TORCH_API Scope : public c10::intrusive_ptr_target {
 private:
-  Scope* parent_;
+  ScopePtr parent_;
   Symbol name_;
-  std::vector<std::unique_ptr<Scope> > children_;
+  ScopePtr intrusive_from_this() {
+    c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
+                                           // from a raw `this` pointer
+                                           // so we need to bump the refcount
+                                           // to account for this ownership
+    return c10::intrusive_ptr<Scope>::reclaim(this);
+  }
 public:
   Scope() {
     name_ = Symbol::scope("");
-    parent_ = nullptr;
   }
-  Scope(Scope* parent, Symbol name) {
+  Scope(ScopePtr parent, Symbol name) {
     name_ = name;
     parent_ = parent;
   }
-  TORCH_API Scope* push(Symbol name);
+  ScopePtr push(Symbol name);
 
-  Scope* parent() {
-    if (parent_ == nullptr) {
+  ScopePtr parent() {
+    if (!parent_) {
       throw std::runtime_error("Cannot get parent from Scope with no parent");
     }
     return parent_;
   }
-  bool isRoot() {
-    return parent_ == nullptr;
+  bool isRoot() const {
+    return !parent_;
+  }
+  bool isBlank() const {
+    static const Symbol blank = Symbol::scope("");
+    return isRoot() && name() == blank;
   }
 
-  TORCH_API Scope* getRoot();
+  ScopePtr getRoot();
 
-  Symbol name() {
+  Symbol name() const {
     return name_;
   }
 
-  TORCH_API std::string namesFromRoot(const std::string& separator="/");
+  std::string namesFromRoot(const std::string& separator="/") const;
 };
 
 // the list types are intentionally simple, but we type-def
@@ -224,6 +236,7 @@ public:
   TORCH_API Value* copyMetadata(Value * from);
 };
 
+
 struct Node : public Attributes<Node> {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
@@ -258,7 +271,7 @@ private:
   Graph* graph_;
   Block* owning_block_;
   std::shared_ptr<SourceLocation> source_location_;
-  Scope* scope_;
+  ScopePtr scope_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially change
@@ -290,14 +303,14 @@ public:
   const Block * owningBlock() const {
     return owning_block_;
   }
-  Scope* scope() {
+  ScopePtr scope() {
     return scope_;
   }
-  void setScope(Scope* scope) {
+  void setScope(ScopePtr scope) {
     scope_ = scope;
   }
   std::string scopeName() const {
-    if (scope_ == nullptr) {
+    if (!scope_) {
       return "";
     }
     return scope_->namesFromRoot();
@@ -734,8 +747,7 @@ private:
 
   std::unordered_map<std::string, Value*> unique_names_;
 
-  std::shared_ptr<Scope> scope_root_;
-  Scope * current_scope_;
+  ScopePtr current_scope_;
 
   Block* const block_;
   // when insertNode() is called, the node is inserted before this node
@@ -744,14 +756,13 @@ private:
 
 public:
 
-  Graph(std::shared_ptr<Scope> scope_root)
+  Graph(ScopePtr scope_root)
   : next_unique_(0)
-  , scope_root_(std::move(scope_root))
-  , current_scope_(scope_root_.get())
+  , current_scope_(std::move(scope_root))
   , block_(new Block(this, nullptr))
   , insert_before_(return_node()) {}
 
-  Graph() : Graph(std::make_shared<Scope>()) {}
+  Graph() : Graph(c10::make_intrusive<Scope>()) {}
 
   at::ArrayRef<Value*> inputs() {
     return block_->inputs();
@@ -786,17 +797,11 @@ public:
   void pop_scope() {
     current_scope_ = current_scope_->parent();
   }
-  Scope * current_scope() {
+  ScopePtr current_scope() {
     return current_scope_;
   }
-  void set_current_scope(Scope* scope) {
-    if (scope->getRoot() != scope_root_.get()) {
-      throw std::runtime_error("trying to set a scope as current that does not belong to the Graph's scope trie");
-    }
+  void set_current_scope(ScopePtr scope) {
     current_scope_ = scope;
-  }
-  std::shared_ptr<Scope> scope_root() {
-    return scope_root_;
   }
   Value * addInput(std::string name="") {
     return block_->addInput(std::move(name));
@@ -936,7 +941,7 @@ private:
 };
 
 struct WithCurrentScope : public ResourceGuard {
-  WithCurrentScope(Graph & g, Scope* scope)
+  WithCurrentScope(Graph & g, ScopePtr scope)
   : ResourceGuard([&g, this]() {
     g.set_current_scope(prev_scope);
   })
@@ -944,7 +949,7 @@ struct WithCurrentScope : public ResourceGuard {
     g.set_current_scope(scope);
   }
 private:
-  Scope * prev_scope;
+  ScopePtr prev_scope;
 };
 
 inline Value::Value(Node * node_, size_t offset_)
