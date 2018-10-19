@@ -384,7 +384,8 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
 
           export IN_CIRCLECI=1
 
-          brew install moreutils
+          # moreutils installs a `parallel` executable by default, which conflicts with the executable from the `parallel` formulae
+          brew install moreutils --without-parallel
           brew install cmake
 
           # Reinitialize submodules
@@ -742,8 +743,8 @@ jobs:
             set -e
 
             export IN_CIRCLECI=1
-
-            brew install moreutils
+            # moreutils installs a `parallel` executable by default, which conflicts with the executable from the `parallel` formulae
+            brew install moreutils --without-parallel
 
             # Install sccache
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
@@ -758,8 +759,8 @@ jobs:
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh 2>&1 | ts
 
-            # TODO: need to share source files from build to test, when macOS builds are enabled
-
+            mkdir -p /Users/distiller/pytorch-ci-env/workspace
+            cp -r /Users/distiller/project/. /Users/distiller/pytorch-ci-env/workspace
       - persist_to_workspace:
           root: /Users/distiller/pytorch-ci-env
           paths:
@@ -786,7 +787,11 @@ jobs:
             # TODO: need to share source files from build to test, when macOS builds are enabled
             set -e
             export IN_CIRCLECI=1
-            brew install moreutils
+            # moreutils installs a `parallel` executable by default, which conflicts with the executable from the `parallel` formulae
+            brew install moreutils --without-parallel
+
+            cp -r /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
+
             chmod a+x .jenkins/pytorch/macos-test.sh
             .jenkins/pytorch/macos-test.sh 2>&1 | ts
 
@@ -808,7 +813,8 @@ jobs:
 
             export IN_CIRCLECI=1
 
-            brew install moreutils
+            # moreutils installs a `parallel` executable by default, which conflicts with the executable from the `parallel` formulae
+            brew install moreutils --without-parallel
 
             # Install CUDA 9.2
             sudo rm -rf ~/cuda_9.2.64_mac_installer.app || true
@@ -1044,11 +1050,11 @@ workflows:
           requires:
             - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
 
-      # - pytorch_macos_10_13_py3_build
-      # - pytorch_macos_10_13_py3_test:
-      #     requires:
-      #       - pytorch_macos_10_13_py3_build
-      # - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
+      - pytorch_macos_10_13_py3_build
+      - pytorch_macos_10_13_py3_test:
+          requires:
+            - pytorch_macos_10_13_py3_build
+      - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
 
       - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
       - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
@@ -1080,5 +1086,5 @@ workflows:
       - caffe2_py2_android_ubuntu16_04_build
       - caffe2_py2_cuda9_0_cudnn7_centos7_build
 
-      # - caffe2_py2_ios_macos10_13_build
-      # - caffe2_py2_system_macos10_13_build
+      - caffe2_py2_ios_macos10_13_build
+      - caffe2_py2_system_macos10_13_build
