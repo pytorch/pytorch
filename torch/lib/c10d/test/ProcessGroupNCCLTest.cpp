@@ -7,6 +7,7 @@
 #include <c10d/test/CUDATest.hpp>
 #include <c10d/test/TestUtils.hpp>
 
+#include <ATen/cuda/CUDAGuard.h>
 #include <ATen/cuda/CUDAStream.h>
 
 using namespace c10d::test;
@@ -76,7 +77,7 @@ class NCCLTest : public NCCLTestBase {
   std::vector<at::cuda::CUDAGuard> createStreamGuard() {
     std::vector<at::cuda::CUDAGuard> guards;
     for (auto& stream : streams_) {
-      guards.push_back(std::move(at::cuda::CUDAGuard(stream)));
+      guards.push_back(at::cuda::CUDAGuard(stream));
     }
     return guards;
   }

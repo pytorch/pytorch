@@ -1,5 +1,7 @@
 #include <gloo/transport/tcp/device.h>
 
+#include <ATen/cuda/CUDAGuard.h>
+
 #include <c10d/CUDAUtils.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
@@ -22,7 +24,7 @@ std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
   std::vector<std::thread> threads;
   for (auto i = 0; i < N; i++) {
     threads.push_back(
-        std::move(std::thread([i, N, &tests] { tests[i].start(i, N); })));
+        std::thread([i, N, &tests] { tests[i].start(i, N); }));
   }
 
   for (auto& thread : threads) {
@@ -95,7 +97,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
   std::vector<at::cuda::CUDAGuard> createStreamGuard() {
     std::vector<at::cuda::CUDAGuard> guards;
     for (auto& stream : streams_) {
-      guards.push_back(std::move(at::cuda::CUDAGuard(stream)));
+      guards.push_back(at::cuda::CUDAGuard(stream));
     }
     return guards;
   }
