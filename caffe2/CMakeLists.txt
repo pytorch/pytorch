@@ -64,6 +64,7 @@ endif()
 # ---[ Caffe2 build
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
+
 if(NOT BUILD_ATEN_ONLY)
   add_subdirectory(proto)
   add_subdirectory(contrib)
@@ -71,6 +72,7 @@ if(NOT BUILD_ATEN_ONLY)
   add_subdirectory(utils)
   add_subdirectory(predictor)
   add_subdirectory(core/nomnigraph)
+  add_subdirectory(core/nomscheduler)
   add_subdirectory(core/dispatch)
   if (USE_NVRTC)
     add_subdirectory(cuda_rtc)

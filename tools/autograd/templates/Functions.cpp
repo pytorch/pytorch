@@ -87,15 +87,15 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_
     return zeros_like(self);
   } else if (p == 1.0) {
     return self.sign() * grad;
-  } else if (p < 2.0) {
-    self_scaled = self.sign() * self.abs().pow(p - 1);
-    scale_v = grad / norm.pow(p - 1);
   } else if (p == 2.0) {
     self_scaled = self;
     scale_v = grad / norm;
-  } else if (p == INFINITY) {
+  } else if (std::isinf(p)) {
     self_scaled = self.sign() * (self.abs() == norm).toType(self.type());
     scale_v = grad.clone();
+  } else if (p < 2.0) {
+    self_scaled = self.sign() * self.abs().pow(p - 1);
+    scale_v = grad / norm.pow(p - 1);
   } else {
     self_scaled = self * self.abs().pow(p - 2);
     scale_v = grad / norm.pow(p - 1);

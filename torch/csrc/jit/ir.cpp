@@ -185,26 +185,25 @@ void Graph::dumpPretty() {
   PrettyPrint(std::cout, *this);
 }
 
-Scope* Scope::push(Symbol name) {
-  children_.push_back(std::unique_ptr<Scope>(new Scope(this, name)));
-  return children_.back().get();
+ScopePtr Scope::push(Symbol name) {
+  return c10::make_intrusive<Scope>(intrusive_from_this(), name);
 }
 
-Scope* Scope::getRoot() {
-  Scope* current = this;
+ScopePtr Scope::getRoot() {
+  ScopePtr current = intrusive_from_this();
   while (current->parent_) {
     current = current->parent_;
   }
   return current;
 }
 
-std::string Scope::namesFromRoot(const std::string& separator) {
+std::string Scope::namesFromRoot(const std::string& separator) const {
   // TODO: I think the answer is we shouldn't have used Symbol here
   std::string out = this->name_.toUnqualString();
   if (this->isRoot()) {
     return out;
   }
-  Scope* parent = this->parent_;
+  ScopePtr parent = this->parent_;
   while (!parent->isRoot()) {
     // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
     out = std::string(parent->name_.toUnqualString()) + separator + out;
@@ -698,11 +697,10 @@ void Node::destroy() {
 }
 
 void Node::cloneFrom(Node * s) {
-	setSourceLocation(s->getSourceLocation());
-	if (s->owningGraph()->scope_root_ == owningGraph()->scope_root_) {
-		scope_ = s->scope_;
-	}
-	copyAttributes(*s);
+  setSourceLocation(s->getSourceLocation());
+  if(s->scope_ && !s->scope_->isBlank())
+    scope_ = s->scope_;
+  copyAttributes(*s);
 }
 
 void Node::replaceAllUsesWith(Node * n) {
@@ -858,7 +856,7 @@ inline const SourceRange& fakeRange() {
 }
 
 Value* Graph::insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs) {
-  return script::emitBuiltinCall(fakeRange(), *this, opname, args, kwargs, /*required=*/true);
+  return script::emitBuiltinCall(fakeRange(), *this, opname, c10::nullopt, args, kwargs, /*required=*/true);
 }
 
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
@@ -888,7 +886,7 @@ Node * Graph::createNoneGenerator() {
 
 Node * Graph::createFusionGroup(int device) {
   auto n = create(prim::FusionGroup, 0);
-  n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));
+  n->g_(attr::Subgraph,std::make_shared<Graph>(current_scope()));
   n->i_(attr::device, device);
   return n;
 }

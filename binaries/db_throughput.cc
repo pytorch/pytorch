@@ -40,11 +40,11 @@ using caffe2::string;
 
 void TestThroughputWithDB() {
   std::unique_ptr<DB> in_db(caffe2::db::CreateDB(
-      c10::FLAGS_input_db_type, c10::FLAGS_input_db, caffe2::db::READ));
+      FLAGS_input_db_type, FLAGS_input_db, caffe2::db::READ));
   std::unique_ptr<Cursor> cursor(in_db->NewCursor());
-  for (int iter_id = 0; iter_id < c10::FLAGS_repeat; ++iter_id) {
+  for (int iter_id = 0; iter_id < FLAGS_repeat; ++iter_id) {
     caffe2::Timer timer;
-    for (int i = 0; i < c10::FLAGS_report_interval; ++i) {
+    for (int i = 0; i < FLAGS_report_interval; ++i) {
       string key = cursor->key();
       string value = cursor->value();
       //VLOG(1) << "Key " << key;
@@ -58,15 +58,15 @@ void TestThroughputWithDB() {
         "Iteration %03d, took %4.5f seconds, throughput %f items/sec.\n",
         iter_id,
         elapsed_seconds,
-        c10::FLAGS_report_interval / elapsed_seconds);
+        FLAGS_report_interval / elapsed_seconds);
   }
 }
 
 void TestThroughputWithReaderWorker(const DBReader* reader, int thread_id) {
   string key, value;
-  for (int iter_id = 0; iter_id < c10::FLAGS_repeat; ++iter_id) {
+  for (int iter_id = 0; iter_id < FLAGS_repeat; ++iter_id) {
     caffe2::Timer timer;
-    for (int i = 0; i < c10::FLAGS_report_interval; ++i) {
+    for (int i = 0; i < FLAGS_report_interval; ++i) {
       reader->Read(&key, &value);
     }
     double elapsed_seconds = timer.Seconds();
@@ -76,14 +76,14 @@ void TestThroughputWithReaderWorker(const DBReader* reader, int thread_id) {
         thread_id,
         iter_id,
         elapsed_seconds,
-        c10::FLAGS_report_interval / elapsed_seconds);
+        FLAGS_report_interval / elapsed_seconds);
   }
 }
 
 void TestThroughputWithReader() {
-  caffe2::db::DBReader reader(c10::FLAGS_input_db_type, c10::FLAGS_input_db);
+  caffe2::db::DBReader reader(FLAGS_input_db_type, FLAGS_input_db);
   std::vector<std::unique_ptr<std::thread>> reading_threads(
-      c10::FLAGS_num_read_threads);
+      FLAGS_num_read_threads);
   for (int i = 0; i < reading_threads.size(); ++i) {
     reading_threads[i].reset(new std::thread(
         TestThroughputWithReaderWorker, &reader, i));
@@ -95,7 +95,7 @@ void TestThroughputWithReader() {
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
-  if (c10::FLAGS_use_reader) {
+  if (FLAGS_use_reader) {
     TestThroughputWithReader();
   } else {
     TestThroughputWithDB();

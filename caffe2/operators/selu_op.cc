@@ -101,11 +101,15 @@ Y:
 </details>
 
 )DOC")
-    .Arg("alpha", "*(type: float; default: 1.673263~)* Alpha constant in equation.")
-    .Arg("scale", "*(type: float; default: 1.050700~; must be > 1.0)* Scale constant in equation.")
+    .Arg(
+        "alpha",
+        "*(type: float; default: 1.673263~)* Alpha constant in equation.")
+    .Arg(
+        "scale",
+        "*(type: float; default: 1.050700~; must be > 1.0)* Scale constant in equation.")
     .Input(0, "X", "Input tensor of data to be operated on.")
     .Output(0, "Y", "Output tensor with same shape as input.")
-    .InheritOnnxSchema("Selu");
+    .InheritOnnxSchema();
 
 // Input: Y, dY; output: dX
 OPERATOR_SCHEMA(SeluGradient)

@@ -29,7 +29,7 @@ class NNModule(object):
                         serialized_device_map)
             # Default
             elif serialized_proto:
-                self._NNModule = C.NNModuleFromProtobuf(serialized_proto)
+                self._NNModule, self._OpList = C.NNModuleFromProtobuf(serialized_proto)
             else:
                 raise Exception(
                     "NNModule can be constructed with core.Net or caffe2_pb2.NetDef types"

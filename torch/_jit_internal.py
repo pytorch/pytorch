@@ -6,7 +6,10 @@ circular dependency problems
 
 import weakref
 import inspect
-import builtins
+try:
+    import builtins  # py3
+except Exception:
+    import __builtin__ as builtins  # py2
 
 compiled_weak_fns = weakref.WeakKeyDictionary()
 COMPILATION_PENDING = object()
