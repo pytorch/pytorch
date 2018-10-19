@@ -216,6 +216,7 @@ void addNomnigraphMethods(pybind11::module& m) {
             return g->createNode(convertToNeuralNetOperator(op));
           },
           py::return_value_policy::reference_internal)
+      .def("deleteNode", &NNGraph::deleteNode)
       .def(
           "getMutableNodes",
           &NNGraph::getMutableNodes,
