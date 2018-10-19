@@ -1,6 +1,6 @@
 from __future__ import print_function
 import unittest
-from common import TestCase, run_tests, download_file
+from common_utils import TestCase, run_tests, download_file
 import tempfile
 import torch
 import re
