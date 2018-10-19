@@ -5205,9 +5205,15 @@ a")
             q = fn(x, x)
             return x
 
+        def fn_string(str, strpair):
+            # type: (str, Tuple[str, str]) -> Tuple[str, int, str, str]
+            str1, str2 = strpair
+            return str, 2, str1, str2
+
         x = torch.ones(2, 2)
         self.checkScript(fn_unpack, (x,), optimize=True)
         self.checkScript(fn_index, (x,), optimize=True)
+        self.checkScript(fn_string, ("1", ("3", "4")), optimize=True)
 
     def test_type_annotations_varargs(self):
         def fn_varargs(x, *args):

@@ -224,8 +224,10 @@ inline py::object toPyObject(IValue&& ivalue) {
     return py::cast(ivalue.toDouble());
   } else if (ivalue.isInt()) {
     return py::cast(ivalue.toInt());
-  }else if (ivalue.isBool()) {
+  } else if (ivalue.isBool()) {
     return py::cast(ivalue.toBool());
+  } else if (ivalue.isString()) {
+    return py::cast(ivalue.toStringRef());
   } else if (ivalue.isIntList()) {
     return py::cast(ivalue.toIntListRef());
   } else if (ivalue.isDoubleList()) {
