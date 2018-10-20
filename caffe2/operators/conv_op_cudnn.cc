@@ -166,7 +166,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
       size_t kernelDims,
       size_t dilationDims,
       cudnnConvolutionDescriptor_t copy) {
-    if (kernelDims == 2) {
+    if (kernelDims == 1 || kernelDims == 2) {
       cudnnConvolutionMode_t mode;
       cudnnDataType_t dataType;
       int pad_height = 0;
@@ -277,15 +277,15 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
 
   void SetConvDescFromArguments() {
 #if CUDNN_VERSION_MIN(6, 0, 0)
-    if (kernel_.size() == 2) {
+    if (kernel_.size() == 1 || kernel_.size() == 2) {
       CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
           conv_desc_,
           pad_t(),
-          pad_l(),
+          kernel_.size() == 1 ? 0 : pad_l(),
           stride_h(),
-          stride_w(),
+          kernel_.size() == 1 ? 1 : stride_w(),
           dilation_h(),
-          dilation_w(),
+          kernel_.size() == 1 ? 1 : dilation_w(),
           CUDNN_CROSS_CORRELATION,
           compute_type_));
     } else {
@@ -586,7 +586,7 @@ bool CudnnConvOp::DoRunWithType() {
     }
     if (filter_changed) {
       cudnn_filter_dims_ = filter.dims().vec();
-      if (kernel_.size() == 2) {
+      if (kernel_.size() == 1 || kernel_.size() == 2) {
 #if CUDNN_VERSION_MIN(7, 0, 0)
         const int MM = M;
 #else
@@ -599,7 +599,7 @@ bool CudnnConvOp::DoRunWithType() {
             MM,
             C / group_,
             kernel_h(),
-            kernel_w()));
+            kernel_.size() == 1 ? 1 : kernel_w()));
       } else {
         vector<int> dims(filter.dims().begin(), filter.dims().end());
 #if !CUDNN_VERSION_MIN(7, 0, 0)
@@ -616,7 +616,7 @@ bool CudnnConvOp::DoRunWithType() {
             dims.data()));
       }
       if (InputSize() == 3) {
-        if (kernel_.size() == 2) {
+        if (kernel_.size() == 1 || kernel_.size() == 2) {
           CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
               bias_desc_,
               GetCudnnTensorFormat(order_),
@@ -642,7 +642,7 @@ bool CudnnConvOp::DoRunWithType() {
     SetTensorNdDescriptorWithGroup<T_Y>(
         X.ndim(), top_desc_, N, M, H_out, W_out, D_out);
     // Set the output with descriptor useful for bias addition in one run.
-    if (kernel_.size() == 2) {
+    if (kernel_.size() == 1 || kernel_.size() == 2) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           top_desc_for_bias_,
           GetCudnnTensorFormat(order_),
@@ -942,7 +942,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
     }
     if (filter_changed) {
       cudnn_filter_dims_ = filter.dims().vec();
-      if (kernel_.size() == 2) {
+      if (kernel_.size() == 1 || kernel_.size() == 2) {
 #if CUDNN_VERSION_MIN(7, 0, 0)
         const int MM = M;
 #else
@@ -955,7 +955,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
             MM,
             C / group_,
             kernel_h(),
-            kernel_w()));
+            kernel_.size() == 1 ? 1 : kernel_w()));
       } else {
         vector<int> dims(filter.dims().begin(), filter.dims().end());
 #if !CUDNN_VERSION_MIN(7, 0, 0)
@@ -973,7 +973,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
             dims.data()));
       }
       if (!no_bias_) {
-        if (kernel_.size() == 2) {
+        if (kernel_.size() == 1 || kernel_.size() == 2) {
           CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
               bias_desc_,
               GetCudnnTensorFormat(order_),
@@ -999,7 +999,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
     SetTensorNdDescriptorWithGroup<T_DX>(
         X.ndim(), top_desc_, N, M, H_out, W_out, D_out);
     // Set the output with descriptor useful for bias addition in one run.
-    if (kernel_.size() == 2) {
+    if (kernel_.size() == 1 || kernel_.size() == 2) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           top_desc_for_bias_,
           GetCudnnTensorFormat(order_),
