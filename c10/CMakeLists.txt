@@ -39,6 +39,10 @@ if (${USE_GLOG})
     target_link_libraries(c10 PUBLIC glog::glog)
 endif()
 
+if (ANDROID)
+    target_link_libraries(c10 PRIVATE log)
+endif()
+
 target_include_directories(
     c10 PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../>
