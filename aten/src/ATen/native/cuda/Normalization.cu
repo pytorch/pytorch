@@ -190,16 +190,15 @@ __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
 
 template <typename scalar_t, typename accscalar_t, bool train>
 __global__ void batch_norm_transform_input_kernel(
-    const PackedTensorAccessor<scalar_t, 3> input,
-    PackedTensorAccessor<scalar_t, 3> output,
-    const PackedTensorAccessor<typename std::conditional<train, accscalar_t, scalar_t>::type, 1> mean_,
-    const PackedTensorAccessor<typename std::conditional<train, accscalar_t, scalar_t>::type, 1> var_or_invstd,
-    const PackedTensorAccessor<scalar_t, 1> weight,
-    const PackedTensorAccessor<scalar_t, 1> bias,
+    const PackedTensorAccessor<scalar_t, 3, RestrictPtrTraits> input,
+    PackedTensorAccessor<scalar_t, 3, RestrictPtrTraits> output,
+    const PackedTensorAccessor<typename std::conditional<train, accscalar_t, scalar_t>::type, 1, RestrictPtrTraits> mean_,
+    const PackedTensorAccessor<typename std::conditional<train, accscalar_t, scalar_t>::type, 1, RestrictPtrTraits> var_or_invstd,
+    const PackedTensorAccessor<scalar_t, 1, RestrictPtrTraits> weight,
+    const PackedTensorAccessor<scalar_t, 1, RestrictPtrTraits> bias,
     accscalar_t epsilon) {
 
-  int plane = blockIdx.y * blockDim.y + threadIdx.y;
-  int fstep = blockDim.x * gridDim.x;
+  int plane = blockIdx.x;
 
   if (plane >= input.size(1)) {
     return;
@@ -214,11 +213,15 @@ __global__ void batch_norm_transform_input_kernel(
   } else {
     invstd = static_cast<accscalar_t>(1) / device_sqrt(static_cast<accscalar_t>(var_or_invstd[plane]) + epsilon);
   }
-  for (int64_t batch = blockIdx.z; batch < input.size(0); batch += gridDim.z) {
-    auto o = output[batch][plane];
 
-    for (int64_t feature = threadIdx.x + blockDim.x * blockIdx.x; feature < input.size(2); feature += fstep) {
-      o[feature] = static_cast<scalar_t>(gamma * (input[batch][plane][feature] - mean) * invstd + beta);
+  int64_t bs = input.size(0);
+  int64_t fs = input.size(2);
+  int64_t bstep  = blockDim.y * gridDim.y;
+  for (int64_t batch = threadIdx.y + blockIdx.y * blockDim.y; batch < bs; batch += bstep) {
+    auto o = output[batch][plane];
+    auto i = input[batch][plane];
+    for (int64_t feature = threadIdx.x; feature < fs; feature += blockDim.x) {
+      o[feature] = static_cast<scalar_t>(gamma * (i[feature] - mean) * invstd + beta);
     }
   }
 }
@@ -226,37 +229,93 @@ __global__ void batch_norm_transform_input_kernel(
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void batch_norm_collect_statistics_kernel(
-    const PackedTensorAccessor<scalar_t, 3> input,
+    const PackedTensorAccessor<scalar_t, 3, RestrictPtrTraits> input,
     const accscalar_t epsilon,
     const accscalar_t momentum,
-    PackedTensorAccessor<scalar_t, 1> running_mean,
-    PackedTensorAccessor<scalar_t, 1> running_var,
-    PackedTensorAccessor<accscalar_t, 1> save_mean,
-    PackedTensorAccessor<accscalar_t, 1> save_invstd) {
+    PackedTensorAccessor<scalar_t, 1, RestrictPtrTraits> running_mean,
+    PackedTensorAccessor<scalar_t, 1, RestrictPtrTraits> running_var,
+    PackedTensorAccessor<accscalar_t, 1, RestrictPtrTraits> save_mean,
+    PackedTensorAccessor<accscalar_t, 1, RestrictPtrTraits> save_invstd) {
+
+  __shared__ int shared_n[2 * 2 * WARP_SIZE + WARP_SIZE];
 
   int plane = blockIdx.x;
   int N = input.size(0) * input.size(2);
 
-  accscalar_t norm = accscalar_t(1) / N;
-
   // Compute the mean and variance across (batch, x/y/z)
-  accscalar_t mean = reduce<accscalar_t>(SumOp<scalar_t, accscalar_t>(input), input, plane) * norm;
+  //accscalar_t mean = reduce<accscalar_t>(SumOp<scalar_t, accscalar_t>(input), input, plane) * norm;
+  //__syncthreads();
+  //accscalar_t varN = reduce<accscalar_t>(VarOp<scalar_t, accscalar_t>(mean, input), input, plane);
+  accscalar_t* shared_avg_var = (accscalar_t*) &shared_n[WARP_SIZE];
+
+  // first the reductions each thread does separately
+  accscalar_t avg = 0;
+  accscalar_t var_n = 0;
+  int n = 0;
+  for (int batch = 0; batch < input.size(0); ++batch) {
+    for (int x = threadIdx.x; x < input.size(2); x += blockDim.x) {
+      accscalar_t v = input[batch][plane][x];
+      accscalar_t d1 = v - avg;
+      n++;
+      avg += d1 / n;
+      var_n += d1 * (v - avg);
+    }
+  }
+
+  // first warpSum to get one value per thread to
+  // one value per warp
+  for (int i = 0; i < getMSB(WARP_SIZE); ++i) {
+    accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, WARP_SIZE);
+    int o_n = WARP_SHFL_XOR(n, 1 << i, WARP_SIZE);
+    if (n + o_n > 0) {
+      var_n += WARP_SHFL_XOR(var_n, 1 << i, WARP_SIZE) + ((avg - o_avg) * (avg - o_avg) * n * o_n) / (n + o_n);
+      avg = (n * avg + o_n * o_avg)/(n+o_n);
+      n += o_n;
+    }
+  }
+
+  // this writes each warps  item into shared memory
+  // there are at most WARP_SIZE items left because
+  // there are at most WARP_SIZE**2 threads at the beginning  
   __syncthreads();
-  accscalar_t varN = reduce<accscalar_t>(VarOp<scalar_t, accscalar_t>(mean, input), input, plane);
+  if (threadIdx.x % WARP_SIZE == 0) {
+    shared_n[threadIdx.x / WARP_SIZE] = n;
+    shared_avg_var[threadIdx.x / WARP_SIZE * 2] = avg;
+    shared_avg_var[threadIdx.x / WARP_SIZE * 2 + 1] = var_n;
+  }
+  __syncthreads();
+  // now have a second warpSum to reduce the intermediate values
+  // from shared memory to a single number. The very first
+  // thread writes it to shared memory.
+
+  if (threadIdx.x < WARP_SIZE) {
+    n = (threadIdx.x < blockDim.x / WARP_SIZE ? shared_n[threadIdx.x] : 0);
+    avg = (threadIdx.x < blockDim.x / WARP_SIZE ? shared_avg_var[2 * threadIdx.x] : 0);
+    var_n = (threadIdx.x < blockDim.x / WARP_SIZE ? shared_avg_var[2 * threadIdx.x + 1] : 0);
+  }
+  for (int i = 0; i < getMSB(WARP_SIZE); ++i) {
+    accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, WARP_SIZE);
+    int o_n = WARP_SHFL_XOR(n, 1 << i, WARP_SIZE);
+    if (n + o_n > 0) {
+      var_n += WARP_SHFL_XOR(var_n, 1 << i, WARP_SIZE) + ((avg - o_avg) * (avg - o_avg) * n * o_n) / (n + o_n);
+      avg = (n * avg + o_n * o_avg)/(n+o_n);
+      n += o_n;
+    }
+  }
 
   // Save the mean, variance, and moving averages
   if (threadIdx.x == 0) {
     accscalar_t invstd = 0;
-    if (varN != static_cast<accscalar_t>(0) || epsilon != static_cast<accscalar_t>(0)) {
-      invstd = static_cast<accscalar_t>(1) / device_sqrt(varN * norm + epsilon);
+    if (var_n != static_cast<accscalar_t>(0) || epsilon != static_cast<accscalar_t>(0)) {
+      invstd = static_cast<accscalar_t>(1) / device_sqrt(var_n / N + epsilon);
     }
-    save_mean[plane] = mean;
+    save_mean[plane] = avg;
     save_invstd[plane] = invstd;
     if (running_mean.data() != NULL) {
-      running_mean[plane] = static_cast<scalar_t>((1 - momentum) * running_mean[plane] + momentum * mean);
+      running_mean[plane] = static_cast<scalar_t>((1 - momentum) * running_mean[plane] + momentum * avg);
     }
     if (running_var.data() != NULL) {
-      accscalar_t unbiasedVar = varN / (N - 1);
+      accscalar_t unbiasedVar = var_n / (N - 1);
       running_var[plane] = static_cast<scalar_t>((1 - momentum) * running_var[plane] + momentum * unbiasedVar);
     }
   }
@@ -333,43 +392,13 @@ __global__ void batch_norm_backward_kernel(
   }
 }
 
-// TensorAccessor in which the last dimensions are collapsed or expanded as needed
-template <typename scalar_t, int64_t dim>
-static PackedTensorAccessor<scalar_t, dim> reshaped_packed_accessor(const Tensor& t, bool forward) {
-  constexpr int too_small_feature_set = 16;  // this is the maximum feature dimension when we swap
-  constexpr int few_planes = 256;
-  // undefined...
+template <typename scalar_t, int64_t dim, template <typename U> class PtrTraits = DefaultPtrTraits>
+  static PackedTensorAccessor<scalar_t, dim, PtrTraits> packed_accessor_or_dummy(const Tensor& t) {
   if (! t.defined()) {
     const std::vector<int64_t> zeros(dim);
-    return PackedTensorAccessor<scalar_t, dim>(nullptr, zeros.data(), zeros.data());
+    return PackedTensorAccessor<scalar_t, dim, PtrTraits>(nullptr, zeros.data(), zeros.data());
   }
-  int64_t in_dim = t.dim();
-  if (in_dim == dim && (dim < 3 || (t.size(0) < t.size(2)) || (t.size(2) >= too_small_feature_set))) { // easy, if we don't need the evil trick
-    return t.packed_accessor<scalar_t, dim>();
-  }
-
-  AT_CHECK(in_dim < dim || t.is_contiguous(), "need contiguous or <= 3d tensor");
-  std::vector<int64_t> sizes(dim);
-  std::vector<int64_t> strides(dim);
-  for (int i = 0; i < in_dim || i < dim; ++i) {
-    if (i < dim && i < in_dim) {
-      sizes[i] = t.size(i);
-      strides[i] = t.stride(i);
-    } else if (i < dim) {
-      sizes[i] = 1;
-      strides[i] = 0;
-    } else {
-      sizes[dim - 1] *= t.size(i);
-      strides[dim -1] = 1;
-    }
-  }
-  // evil trick to get adjusted 2d tensors to have large dimension last
-  if (dim == 3 && sizes[0] > sizes[2] && sizes[2] < too_small_feature_set &&
-      sizes[1] <= few_planes && forward) {
-    std::swap(sizes[0], sizes[2]);
-    std::swap(strides[0], strides[2]);
-  }
-  return PackedTensorAccessor<scalar_t, dim>(t.data<scalar_t>(), sizes.data(), strides.data());
+  return t.packed_accessor<scalar_t, dim, PtrTraits>();
 }
 
 template<typename scalar_t>
@@ -378,10 +407,19 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
 							    bool train, double momentum, double epsilon) {
 
   using accscalar_t = at::acc_type<scalar_t, true>;
-  Tensor output_= at::empty_like(input_);
   int64_t n_input = input_.size(1);
   Tensor save_mean_;
   Tensor save_invstd_;
+  auto dim = input_.dim() > 3;
+  auto input_cont = input_.reshape({input_.size(0), input_.size(1), -1});
+  auto bs = input_cont.size(0);
+  auto features = input_cont.size(2);
+  bool switch_axes =  train && bs > features && features < 16;
+  if (switch_axes) {
+    input_cont = input_cont.transpose(0, 2).contiguous();
+  }
+  Tensor output_cont = at::empty_like(input_cont);
+  auto input = input_cont.packed_accessor<scalar_t, 3, RestrictPtrTraits>();
   auto input_options = input_.options();
   if (input_options.dtype() == ScalarType::Half) {
     input_options = input_options.dtype(ScalarType::Float);
@@ -393,35 +431,34 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
     save_mean_ = at::empty({0}, input_options);
     save_invstd_ = at::empty({0}, input_options);
   }
-  auto input = reshaped_packed_accessor<scalar_t, 3>(input_, true);
-  auto output = reshaped_packed_accessor<scalar_t, 3>(output_, true);
-  auto weight = reshaped_packed_accessor<scalar_t, 1>(weight_, true);
-  auto bias = reshaped_packed_accessor<scalar_t, 1>(bias_, true);
-  auto running_mean = reshaped_packed_accessor<scalar_t, 1>(running_mean_, true);
-  auto running_var = reshaped_packed_accessor<scalar_t, 1>(running_var_, true);
-  auto save_mean = reshaped_packed_accessor<accscalar_t, 1>(save_mean_, true);
-  auto save_invstd = reshaped_packed_accessor<accscalar_t, 1>(save_invstd_, true);
+  auto output = output_cont.packed_accessor<scalar_t, 3, RestrictPtrTraits>();
+  auto weight = packed_accessor_or_dummy<scalar_t, 1, RestrictPtrTraits>(weight_);
+  auto bias = packed_accessor_or_dummy<scalar_t, 1, RestrictPtrTraits>(bias_);
+  auto running_mean = packed_accessor_or_dummy<scalar_t, 1, RestrictPtrTraits>(running_mean_);
+  auto running_var = packed_accessor_or_dummy<scalar_t, 1, RestrictPtrTraits>(running_var_);
+  auto save_mean = save_mean_.packed_accessor<accscalar_t, 1, RestrictPtrTraits>();
+  auto save_invstd = save_invstd_.packed_accessor<accscalar_t, 1, RestrictPtrTraits>();
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  constexpr int max_blocks = 60000;
-  int feature_threads = std::min(getNumThreads(input.size(2)), 128);
-  int plane_threads = MAX_BLOCK_SIZE / feature_threads;
-  int plane_blocks = std::min<int>((input.size(1)+plane_threads-1)/plane_threads, max_blocks);
-  int feature_blocks = std::min<int>((input.size(2)+feature_threads-1)/feature_threads, max_blocks / plane_blocks);
-  dim3 blocks(feature_blocks, plane_blocks);
-  dim3 threads(feature_threads, plane_threads);
+  dim3 blocks(input.size(1));
+  dim3 threads(getNumThreads(input.size(2)));
+  int tf = std::max<int>(getNumThreads(input.size(2)/4),
+			 std::min<int>(getNumThreads(input.size(2)), 128));
+  int tb = std::max<int>(128/tf, 1);
+  dim3 blocks_trans(input.size(1), std::max<int>(1, std::min<int>(1024/input.size(1),
+								  (input.size(0)+tb-1)/tb)));
+  dim3 threads_trans(tf, tb);
   if (!train) {
-    batch_norm_transform_input_kernel<scalar_t, accscalar_t, false> <<<blocks, threads, 0, stream>>>
+    batch_norm_transform_input_kernel<scalar_t, accscalar_t, false> <<<blocks_trans, threads_trans, 0, stream>>>
       (input, output, running_mean, running_var, weight, bias, epsilon);
   } else {
-    dim3 blocks_red(input.size(1));
-    dim3 threads_red(getNumThreads(input.size(2)));
-    batch_norm_collect_statistics_kernel<scalar_t, accscalar_t> <<<blocks_red, threads_red, 0, stream>>>
+    batch_norm_collect_statistics_kernel<scalar_t, accscalar_t> <<<blocks, threads, 0, stream>>>
       (input, epsilon, momentum, running_mean, running_var, save_mean, save_invstd);
-    batch_norm_transform_input_kernel<scalar_t, accscalar_t, true> <<<blocks, threads, 0, stream>>>
+    batch_norm_transform_input_kernel<scalar_t, accscalar_t, true> <<<blocks_trans, threads_trans, 0, stream>>>
       (input, output, save_mean, save_invstd, weight, bias, epsilon);
   }
   THCudaCheck(cudaGetLastError());
+  Tensor output_ = (switch_axes ? output_cont.transpose(0, 2): output_cont).view(input_.sizes());
   return std::make_tuple(output_, save_mean_, save_invstd_);
 }
 
@@ -432,10 +469,15 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
 
   using accscalar_t = at::acc_type<scalar_t, true>;
   Tensor grad_input_;
+  Tensor grad_input_cont;
   Tensor grad_weight_;
   Tensor grad_bias_;
+  auto input_cont = input_.reshape({input_.size(0), input_.size(1), -1});
+  auto grad_output_cont = grad_out_.reshape(input_cont.sizes());
+
   if (grad_input_mask[0]) {
     grad_input_ = at::empty_like(input_);
+    grad_input_cont = grad_input_.view(input_cont.sizes());
   }
   if (grad_input_mask[1]) {
     grad_weight_ = at::empty_like(weight_);
@@ -444,16 +486,16 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
     grad_bias_ = at::empty_like(weight_);
   }
 
-  auto grad_output = reshaped_packed_accessor<scalar_t, 3>(grad_out_, false);
-  auto input = reshaped_packed_accessor<scalar_t, 3>(input_, false);
-  auto grad_input = reshaped_packed_accessor<scalar_t, 3>(grad_input_, false);
-  auto weight = reshaped_packed_accessor<scalar_t, 1>(weight_, false);
-  auto grad_weight = reshaped_packed_accessor<scalar_t, 1>(grad_weight_, false);
-  auto grad_bias = reshaped_packed_accessor<scalar_t, 1>(grad_bias_, false);
-  auto running_mean = reshaped_packed_accessor<scalar_t, 1>(running_mean_, false);
-  auto running_var = reshaped_packed_accessor<scalar_t, 1>( running_var_, false);
-  auto save_mean = reshaped_packed_accessor<accscalar_t, 1>(save_mean_, false);
-  auto save_invstd = reshaped_packed_accessor<accscalar_t, 1>(save_invstd_, false);
+  auto input = input_cont.packed_accessor<scalar_t, 3>();
+  auto grad_output = grad_output_cont.packed_accessor<scalar_t, 3>();
+  auto grad_input = packed_accessor_or_dummy<scalar_t, 3>(grad_input_cont);
+  auto weight = packed_accessor_or_dummy<scalar_t, 1>(weight_);
+  auto grad_weight = packed_accessor_or_dummy<scalar_t, 1>(grad_weight_);
+  auto grad_bias = packed_accessor_or_dummy<scalar_t, 1>(grad_bias_);
+  auto running_mean = packed_accessor_or_dummy<scalar_t, 1>(running_mean_);
+  auto running_var = packed_accessor_or_dummy<scalar_t, 1>( running_var_);
+  auto save_mean = packed_accessor_or_dummy<accscalar_t, 1>(save_mean_);
+  auto save_invstd = packed_accessor_or_dummy<accscalar_t, 1>(save_invstd_);
 
   auto stream = at::cuda::getCurrentCUDAStream();
   dim3 blocks(input.size(1));
