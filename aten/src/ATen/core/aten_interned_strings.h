@@ -241,6 +241,7 @@ _(aten, clamp_max) \
 _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
+_(aten, constant_pad_nd) \
 _(aten, contiguous) \
 _(aten, conv1d) \
 _(aten, conv2d) \
