@@ -60,7 +60,6 @@ ENV PATH /opt/rocm/bin:$PATH
 ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
 ENV PATH /opt/rocm/opencl/bin:$PATH
-ENV THRUST_ROOT /data/Thrust
 ENV MIOPEN_DISABLE_CACHE 1
 ENV HIP_PLATFORM hcc
 
