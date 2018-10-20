@@ -264,6 +264,7 @@ Examples::
     return torch._C._VariableFunctions.einsum(equation, operands)
 
 
+@annotate(ret=torch.Tensor, tensor=torch.Tensor)
 def isfinite(tensor):
     r"""Returns a new tensor with boolean elements representing if each element is `Finite` or not.
 
@@ -290,6 +291,7 @@ def isfinite(tensor):
     return (tensor == tensor) & (tensor.abs() != inf)
 
 
+@annotate(ret=torch.Tensor, tensor=torch.Tensor)
 def isinf(tensor):
     r"""Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
 
@@ -439,6 +441,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
+@annotate(ret=torch.Tensor, tensor=torch.Tensor)
 def isnan(tensor):
     r"""Returns a new tensor with boolean elements representing if each element is `NaN` or not.
 
@@ -583,6 +586,7 @@ def argmin(input, dim=None, keepdim=False):
     return torch._argmin(input, dim, keepdim)
 
 
+@annotate(ret=torch.Tensor, a=torch.Tensor, b=torch.Tensor, dim=Union[int, List[int], Tuple[int, ...]])
 def tensordot(a, b, dims=2):
     r"""Returns a contraction of a and b over multiple dimensions.
 

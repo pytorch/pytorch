@@ -81,6 +81,8 @@ representing this argument in a type hint signature.
 
 
 def sig_for_ops(opname):
+    """sig_for_ops(opname : str) -> str
+returns signatures for operator special functions (__add__ etc.)"""
     binary_ops = {'add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'truediv',
                   'matmul',
                   'radd', 'rmul',                      # reverse arithmetic
