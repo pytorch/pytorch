@@ -7409,7 +7409,7 @@ class TestTorchMixin(object):
         self.assertEqual(torch.nn.Parameter, type(s['weight']))
         self.assertEqual(torch.nn.Parameter, type(s['bias']))
 
-        s2 = copy.deepcopy(s)
+        s2 = deepcopy(s)
         self.assertEqual(torch.nn.Parameter, type(s2['weight']))
         self.assertEqual(torch.nn.Parameter, type(s2['bias']))
 
