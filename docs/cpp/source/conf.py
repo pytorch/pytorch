@@ -35,9 +35,14 @@ needs_sphinx = '1.6'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    'sphinx.ext.intersphinx',
     'breathe',
     'exhale'
 ]
+
+intersphinx_mapping = {
+    'pytorch': ('https://pytorch.org/docs/master', None)
+}
 
 # Setup absolute paths for communicating with breathe / exhale where
 # items are expected / should be trimmed by.

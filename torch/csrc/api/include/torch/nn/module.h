@@ -33,9 +33,9 @@ namespace nn {
 /// \rst
 /// .. note::
 ///   The design and implementation of this class is largely based on the Python
-///   API. You may want to consult [its
-///   documentation](https://pytorch.org/docs/master/nn.html#torch.nn.Module)
-///   for further clarification on certain methods or behavior.
+///   API. You may want to consult the python documentation for
+///   :py:class:`pytorch:torch.nn.Module` for further clarification on certain
+///   methods or behavior.
 /// \endrst
 ///
 /// A `Module` is an abstraction over the implementation of some function or
