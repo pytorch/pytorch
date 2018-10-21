@@ -5,12 +5,9 @@ from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.jit.annotations
 from torch._six import raise_from, with_metaclass
+from .._jit_internal import createResolutionCallback, compiled_weak_fns, COMPILED, COMPILATION_PENDING
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
-try:
-    import builtins  # py3
-except Exception:
-    import __builtin__ as builtins  # py2
 import sys
 import warnings
 import itertools
@@ -19,7 +16,6 @@ import types
 import contextlib
 import os
 import functools
-import inspect
 import copy
 import numbers
 import collections
@@ -50,9 +46,6 @@ _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
-compiled_weak_fns = weakref.WeakKeyDictionary()
-COMPILATION_PENDING = object()
-COMPILED = object()
 
 
 @contextlib.contextmanager
@@ -581,50 +574,6 @@ def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=No
     return module
 
 
-def createResolutionCallback(frames_up=0):
-    """
-    Creates a function which, given a string variable name,
-    returns the value of the variable in the scope of the caller of
-    the function which called createResolutionCallback (by default).
-
-    This is used to enable access in-scope Python variables inside
-    TorchScript fragments.
-
-    frames_up is number of additional frames to go up on the stack.
-    The default value is 0, which correspond to the frame of the caller
-    of createResolutionCallback. Also for example, if frames_up is set
-    to 1, then the frame of the caller's caller of createResolutionCallback
-    will be taken.
-
-    For example, the following program prints 2::
-
-        def bar():
-            cb = createResolutionCallback(1)
-            print(cb("foo"))
-
-        def baz():
-            foo = 2
-            bar()
-
-        baz()
-    """
-    frame = inspect.stack()[1 + frames_up][0]
-    f_locals = frame.f_locals
-    f_globals = frame.f_globals
-
-    def env(key):
-        if key in f_locals:
-            return f_locals[key]
-        elif key in f_globals:
-            return f_globals[key]
-        elif hasattr(builtins, key):
-            return getattr(builtins, key)
-        else:
-            return None
-
-    return env
-
-
 class CompilationUnit(object):
     def __init__(self, lang=None, optimize=True, _frames_up=0):
         self.module = torch._C.ScriptModule()
@@ -640,15 +589,6 @@ class CompilationUnit(object):
 
     def __getattr__(self, attr):
         return self.module._get_method(attr)
-
-
-def weak_script(fn, _frames_up=0):
-    compiled_weak_fns[fn] = {
-        "status": COMPILATION_PENDING,
-        "compiled_fn": None,
-        "rcb": createResolutionCallback(_frames_up + 1)
-    }
-    return fn
 
 
 def _try_compile_weak_script(fn):
@@ -1230,6 +1170,15 @@ _builtin_table = None
 
 _modules_containing_builtins = (torch, torch.nn.functional)
 
+# These functions don't have aten ops but have been converted to weak script, so
+# don't add them as builtins
+# TODO: delete this list and remove torch.nn.functional from builtins list once
+# everything in it has been converted to weak script
+_builtin_blacklist = {
+    'tanhshrink',
+    'softsign',
+}
+
 
 # lazily built to ensure the correct initialization order
 def _get_builtin_table():
@@ -1241,7 +1190,7 @@ def _get_builtin_table():
     def register_all(mod):
         for name in dir(mod):
             v = getattr(mod, name)
-            if callable(v):
+            if callable(v) and name not in _builtin_blacklist:
                 _builtin_table[id(v)] = "aten::" + name
     for mod in _modules_containing_builtins:
         register_all(mod)
