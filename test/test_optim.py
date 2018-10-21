@@ -522,8 +522,8 @@ class TestLRScheduler(TestCase):
         power = 0.9
         self.opt.param_groups[0]['lr'] = 0.1
         self.opt.param_groups[1]['lr'] = 0.01
-        targets = [0.1 * (1.0 - (x % epochs) / epochs) ** power,
-                   0.01 * (1.0 - (x % epochs) / epochs) ** power for x in range(epochs)]
+        targets = [[0.1 * (1.0 - (x % epoch) / epochs) ** power for x in range(epochs)],
+                   [0.01 * (1.0 - (x % epoch) / epochs) ** power for x in range(epochs)]]
         scheduler = PolyLR(self.opt, max_epoch=5, power=power)
         self._test(scheduler, targets, epochs)
 
@@ -558,7 +558,7 @@ class TestLRScheduler(TestCase):
         scheduler_copy.load_state_dict(scheduler.state_dict())
         for key in scheduler.__dict__.keys():
             if key not in {'optimizer', 'is_better'}:
-                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)                
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
 
     def test_lambda_lr_state_dict_fn(self):
         scheduler = LambdaLR(self.opt, lr_lambda=lambda x: x)
