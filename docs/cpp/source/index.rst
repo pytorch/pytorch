@@ -41,7 +41,7 @@ look as follows:
   at::Tensor b = at::randn({2, 2});
   auto c = a + b.to(at::kInt);
 
-This ``Tensor`` class and all other symbols in ATen are found in the `at::`
+This ``Tensor`` class and all other symbols in ATen are found in the ``at::``
 namespace, documented
 `here <https://pytorch.org/cppdocs/api/namespace_at.html#namespace-at>`_.
 
@@ -90,7 +90,7 @@ frontend includes the following:
 - Entry points to the TorchScript JIT compiler;
 - Helpful utilities to facilitate interfacing with the ATen and Autograd APIs.
 
-See `this <https://pytorch.org/cppdocs/frontend.html>`_ document for a more
+See `this document <https://pytorch.org/cppdocs/frontend.html>`_ for a more
 detailed description of the C++ frontend. Relevant sections of the `torch::`
 namespace related to the C++ Frontend include `torch::nn
 <https://pytorch.org/cppdocs/api/namespace_torch__nn.html#namespace-torch-nn>`_,
@@ -151,7 +151,7 @@ does not add any new functionality to the PyTorch C++ API. Instead, it
 provides integration with Python setuptools as well as JIT compilation
 mechanisms that allow access to ATen, the autograd and other C++ APIs from
 Python. To learn more about the C++ extension API, see
-`this <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_ tutorial.
+`this tutorial <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_.
 
 Contents
 --------
