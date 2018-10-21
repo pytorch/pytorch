@@ -3,8 +3,8 @@
 #include <torch/data/detail/queue.h>
 #include <torch/tensor.h>
 
-#include <ATen/Error.h>
-#include <ATen/optional.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 #include <chrono>
 #include <utility>

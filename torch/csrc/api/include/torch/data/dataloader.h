@@ -11,8 +11,8 @@
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>
 
-#include <ATen/Error.h>
-#include <ATen/optional.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 #include <cstddef>
 #include <exception>
