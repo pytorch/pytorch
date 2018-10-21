@@ -449,6 +449,9 @@ void AsyncNetBase::finalizeEvents() {
     } else if (status == EventStatus::EVENT_INITIALIZED) {
       event(task_id).SetFinished();
     }
+    if (event(task_id).Query() != EventStatus::EVENT_SUCCESS) {
+      success_ = false;
+    }
   }
 }
 
