@@ -30,7 +30,7 @@ tensor(indices=tensor([], size=(0, 2)),
 # _indices
 tensor([], size=(0, 2), dtype=torch.int64)
 # _values
-tensor([0., 1.], dtype=torch.float32, grad_fn=<ValuesBackward1>)
+tensor([0., 1.], dtype=torch.float32)
 
 # shape: torch.Size([0])
 # nnz: 10
@@ -64,7 +64,7 @@ tensor(indices=tensor([], size=(0, 10)),
 # _indices
 tensor([], size=(0, 10), dtype=torch.int64)
 # _values
-tensor([], size=(10, 0), dtype=torch.float32, grad_fn=<ValuesBackward1>)
+tensor([], size=(10, 0), dtype=torch.float32)
 
 # shape: torch.Size([2])
 # nnz: 3
@@ -110,7 +110,7 @@ tensor([], size=(0, 3), dtype=torch.int64)
 # _values
 tensor([[0.0000, 0.3333],
         [0.6667, 1.0000],
-        [1.3333, 1.6667]], dtype=torch.float32, grad_fn=<ValuesBackward1>)
+        [1.3333, 1.6667]], dtype=torch.float32)
 
 # shape: torch.Size([100, 3])
 # nnz: 3
@@ -156,8 +156,7 @@ tensor([[0, 1, 2]])
 # _values
 tensor([[0.0000, 0.2222, 0.4444],
         [0.6667, 0.8889, 1.1111],
-        [1.3333, 1.5556, 1.7778]], dtype=torch.float32,
-       grad_fn=<ValuesBackward1>)
+        [1.3333, 1.5556, 1.7778]], dtype=torch.float32)
 
 # shape: torch.Size([100, 20, 3])
 # nnz: 0
@@ -191,7 +190,7 @@ tensor(indices=tensor([], size=(2, 0)),
 # _indices
 tensor([], size=(2, 0), dtype=torch.int64)
 # _values
-tensor([], size=(0, 3), dtype=torch.float32, grad_fn=<ValuesBackward1>)
+tensor([], size=(0, 3), dtype=torch.float32)
 
 # shape: torch.Size([10, 0, 3])
 # nnz: 3
@@ -225,7 +224,7 @@ tensor(indices=tensor([], size=(0, 3)),
 # _indices
 tensor([], size=(0, 3), dtype=torch.int64)
 # _values
-tensor([], size=(3, 10, 0, 3), dtype=torch.float32, grad_fn=<ValuesBackward1>)
+tensor([], size=(3, 10, 0, 3), dtype=torch.float32)
 
 # shape: torch.Size([10, 0, 3])
 # nnz: 0
@@ -259,4 +258,4 @@ tensor(indices=tensor([], size=(0, 0)),
 # _indices
 tensor([], size=(0, 0), dtype=torch.int64)
 # _values
-tensor([], size=(0, 10, 0, 3), dtype=torch.float32, grad_fn=<ValuesBackward1>)
+tensor([], size=(0, 10, 0, 3), dtype=torch.float32)
