@@ -169,6 +169,16 @@ class TestSparse(TestCase):
         self.assertEqual(x._indices().numel(), 0)
         self.assertEqual(x._values().numel(), 0)
 
+    @skipIfRocm
+    def test_coalecce(self):
+        for empty_i, empty_v, empty_nnz in itertools.product([True, False], repeat=3):
+            sparse_size = [] if empty_i else [2, 1]
+            dense_size = [1, 0, 2] if empty_v else [1, 2]
+            nnz = 0 if empty_nnz else 5
+
+            t, _, _ = self._gen_sparse(len(sparse_size), nnz, sparse_size + dense_size)
+            self.safeCoalesce(t)  # this tests correctness
+
     def test_ctor_size_checks(self):
         indices = self.IndexTensor([
             [0, 0, 0],
