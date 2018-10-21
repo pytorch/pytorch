@@ -146,6 +146,10 @@ needed to represent neural network models in Torch.
     ScriptModules, you can use this flag to force everything to run using native
     Python. This allows the use of tools like ``pdb`` to debug code.
 
+    :func:`torch.jit.enabled` can be used to locally enable/disable JIT, and to
+    query whether JIT is enabled.
+
+.. autofunction:: torch.jit.enabled
 
 Types
 ~~~~~
@@ -538,9 +542,9 @@ Debugging
 
 Disable JIT for Debugging
     If you want to disable all JIT modes (tracing and scripting) so you can
-    debug your program in raw Python, you can use the ``PYTORCH_JIT`` environment
-    variable. ``PYTORCH_JIT`` can be used to globally disable the
-    JIT by setting its value to ``0``. Given an example script::
+    debug your program in raw Python, you can set the ``PYTORCH_JIT`` environment
+    variable to ``0`` or use :func:`torch.jit.enabled` to disable the JIT.
+    Given an example script::
 
         @torch.jit.script
         def scripted_fn(x : torch.Tensor):
@@ -565,8 +569,11 @@ Disable JIT for Debugging
 
         $ PYTORCH_JIT=0 python disable_jit_example.py
 
-    and we will be able to step into the @script function as a normal Python
+    and we will be able to step into the ``@script`` function as a normal Python
     function.
+
+    Additionally, :func:`torch.jit.enabled` can be used to locally
+    enable/disable JIT, and to query whether JIT is enabled.
 
 
 Interpreting Graphs

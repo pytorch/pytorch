@@ -454,8 +454,10 @@ class TestJit(JitTestCase):
         self.assertEqual(fn(x, y), fn_traced(x, y))
 
     def test_disabled(self):
-        torch.jit._enabled = False
         try:
+            self.assertFalse(torch.jit.enabled(False))
+            self.assertFalse(torch.jit.enabled())
+
             def f(x, y):
                 return x + y
 
@@ -473,7 +475,8 @@ class TestJit(JitTestCase):
             # We need to or those two conditions to make it work with all versions of Python
             self.assertTrue(inspect.ismethod(MyModule.method) or inspect.isfunction(MyModule.method))
         finally:
-            torch.jit._enabled = True
+            self.assertTrue(torch.jit.enabled(True))
+            self.assertTrue(torch.jit.enabled())
 
     def test_train_eval(self):
         class Sub(nn.Module):
