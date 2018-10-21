@@ -149,7 +149,7 @@ template<typename scalar_t, typename Op, typename PTA>
 __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
   // first the reductions each thread does separately
   scalar_t sum = static_cast<scalar_t>(0);
-  for (int batch = 0; batch < tensor.size(0); ++batch) {
+  for (int batch = threadIdx.y; batch < tensor.size(0); batch += blockDim.y) {
     for (int x = threadIdx.x; x < tensor.size(2); x += blockDim.x) {
       sum += op(batch, plane, x);
     }
@@ -243,16 +243,18 @@ __global__ void batch_norm_collect_statistics_kernel(
   int N = input.size(0) * input.size(2);
 
   // Compute the mean and variance across (batch, x/y/z)
-  //accscalar_t mean = reduce<accscalar_t>(SumOp<scalar_t, accscalar_t>(input), input, plane) * norm;
-  //__syncthreads();
-  //accscalar_t varN = reduce<accscalar_t>(VarOp<scalar_t, accscalar_t>(mean, input), input, plane);
+  // this uses the Welford (in the for loop)/parallel algorithm (to sum across the block)
+  // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
+  // and the parallel algorithm on the same page.
+  // We use two shuffles to reduce across the entire block.
+  // https://devblogs.nvidia.com/faster-parallel-reductions-kepler/ has a description.
   accscalar_t* shared_avg_var = (accscalar_t*) &shared_n[WARP_SIZE];
 
   // first the reductions each thread does separately
   accscalar_t avg = 0;
   accscalar_t var_n = 0;
   int n = 0;
-  for (int batch = 0; batch < input.size(0); ++batch) {
+  for (int batch = threadIdx.y; batch < input.size(0); batch += blockDim.y) {
     for (int x = threadIdx.x; x < input.size(2); x += blockDim.x) {
       accscalar_t v = input[batch][plane][x];
       accscalar_t d1 = v - avg;
@@ -365,7 +367,7 @@ __global__ void batch_norm_backward_kernel(
   accscalar_t grad_scale = invstd * weight_val;
 
   if (grad_input.data() != NULL) {
-    for (int batch = 0; batch < grad_output.size(0); ++batch) {
+    for (int batch = threadIdx.y; batch < grad_output.size(0); batch += blockDim.y) {
       for (int x = threadIdx.x; x < grad_output.size(2); x += blockDim.x) {
         scalar_t go = grad_output[batch][plane][x];
         if (train) {
@@ -410,15 +412,11 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
   int64_t n_input = input_.size(1);
   Tensor save_mean_;
   Tensor save_invstd_;
-  auto dim = input_.dim() > 3;
-  auto input_cont = input_.reshape({input_.size(0), input_.size(1), -1});
+  auto input_cont = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
+  auto output_cont = at::empty_like(input_cont);
+
   auto bs = input_cont.size(0);
   auto features = input_cont.size(2);
-  bool switch_axes =  train && bs > features && features < 16;
-  if (switch_axes) {
-    input_cont = input_cont.transpose(0, 2).contiguous();
-  }
-  Tensor output_cont = at::empty_like(input_cont);
   auto input = input_cont.packed_accessor<scalar_t, 3, RestrictPtrTraits>();
   auto input_options = input_.options();
   if (input_options.dtype() == ScalarType::Half) {
@@ -440,8 +438,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
   auto save_invstd = save_invstd_.packed_accessor<accscalar_t, 1, RestrictPtrTraits>();
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  dim3 blocks(input.size(1));
-  dim3 threads(getNumThreads(input.size(2)));
+  // The input_transform kernel is pointwise, but we need to balance reading parameters (save_var/mean,
+  // weight/bias) - which we only do once and have a for loop afterwards - with having many threads and blocks
+  // and good occupancy. Quiet likely, we could go with even more blocks than 1024.
+  // The various planes are independent, so we use blocks for them.
   int tf = std::max<int>(getNumThreads(input.size(2)/4),
 			 std::min<int>(getNumThreads(input.size(2)), 128));
   int tb = std::max<int>(128/tf, 1);
@@ -452,14 +452,18 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
     batch_norm_transform_input_kernel<scalar_t, accscalar_t, false> <<<blocks_trans, threads_trans, 0, stream>>>
       (input, output, running_mean, running_var, weight, bias, epsilon);
   } else {
+    // for the reduction, we cannot use blocks for the batch dim, but if we have few threads in
+    // the feature dimension, we'll use some threads for blocks
+    dim3 blocks(input.size(1));
+    tf = getNumThreads(input.size(2));
+    dim3 threads(tf, std::max<int>(1, MAX_BLOCK_SIZE/tf));
     batch_norm_collect_statistics_kernel<scalar_t, accscalar_t> <<<blocks, threads, 0, stream>>>
       (input, epsilon, momentum, running_mean, running_var, save_mean, save_invstd);
     batch_norm_transform_input_kernel<scalar_t, accscalar_t, true> <<<blocks_trans, threads_trans, 0, stream>>>
       (input, output, save_mean, save_invstd, weight, bias, epsilon);
   }
   THCudaCheck(cudaGetLastError());
-  Tensor output_ = (switch_axes ? output_cont.transpose(0, 2): output_cont).view(input_.sizes());
-  return std::make_tuple(output_, save_mean_, save_invstd_);
+  return std::make_tuple(output_cont.view(input_.sizes()), save_mean_, save_invstd_);
 }
 
 template<typename scalar_t>
@@ -499,7 +503,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
 
   auto stream = at::cuda::getCurrentCUDAStream();
   dim3 blocks(input.size(1));
-  dim3 threads(getNumThreads(input.size(2)));
+  int tf = getNumThreads(input.size(2));
+  dim3 threads(tf, std::max<int>(1, MAX_BLOCK_SIZE/tf));
 
   batch_norm_backward_kernel<scalar_t,  accscalar_t> <<<blocks, threads, 0, stream>>>
     (input, grad_output, grad_input, grad_weight, grad_bias, weight, running_mean, running_var,
