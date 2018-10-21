@@ -173,14 +173,14 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
     "Dimension ", dim, " out of range. Expecting 0 <= dim < ", allDim, ".");
   AT_CHECK(start >= 0 && length >= 0 && end <= self.size(dim),
     "Invalid range to narrow. range(start, start+length) must be a subset of range(0, ", self.size(dim), ").")
-  LongTensor indices = self._indices();
+  Tensor indices = self._indices();
   int64_t sparse_dim = self.sparse_dim();
 
   std::vector<int64_t> new_sizes = self.sizes().vec();
   new_sizes[dim] = length;
 
   Tensor new_values;
-  LongTensor new_indices;
+  Tensor new_indices;
   if (dim < sparse_dim) {
     Tensor mask = (indices[dim] >= start).__and__((indices[dim] < end));
     new_indices = indices.masked_select(mask).view({sparse_dim, -1});
