@@ -19,11 +19,17 @@ fi
 # and use the newer of cmake and cmake3 if so.
 CMAKE_COMMAND="cmake"
 if [[ -x "$(command -v cmake3)" ]]; then
-    CMAKE_VERSION=$(cmake --version | grep 'cmake version' | awk '{print $NF}')
-    CMAKE3_VERSION=$(cmake3 --version | grep 'cmake version' | awk '{print $NF}')
-    CMAKE3_IS_NEWER=$($PYTORCH_PYTHON -c "from distutils.version import StrictVersion; print(1 if StrictVersion(\"${CMAKE3_VERSION}\") >= StrictVersion(\"${CMAKE_VERSION}\") else 0)")
+    if [[ -x "$(command -v cmake)" ]]; then
+        # have both cmake and cmake3, compare versions
+        CMAKE_VERSION=$(cmake --version | grep 'cmake version' | awk '{print $NF}')
+        CMAKE3_VERSION=$(cmake3 --version | grep 'cmake version' | awk '{print $NF}')
+        CMAKE3_IS_NEWER=$($PYTORCH_PYTHON -c "from distutils.version import StrictVersion; print(1 if StrictVersion(\"${CMAKE3_VERSION}\") >= StrictVersion(\"${CMAKE_VERSION}\") else 0)")
+    else
+        # don't have cmake
+        CMAKE3_IS_NEWER=1
+    fi
     if [[ $CMAKE3_IS_NEWER == "1" ]]; then
-      CMAKE_COMMAND="cmake3"
+        CMAKE_COMMAND="cmake3"
     fi
     unset CMAKE_VERSION CMAKE3_VERSION CMAKE3_IS_NEWER
 fi
