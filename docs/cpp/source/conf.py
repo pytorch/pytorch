@@ -88,6 +88,8 @@ exhale_args = {
     # Example of adding contents directives on custom kinds with custom title
     "contentsTitle": "Page Contents",
     "kindsWithContentsDirectives": ["class", "file", "namespace", "struct"],
+    # Exclude PIMPL files from class hierarchy tree and namespace pages.
+    "listingExclude": [r".*Impl$"],
     ############################################################################
     # Main library page layout example configuration.                          #
     ############################################################################
