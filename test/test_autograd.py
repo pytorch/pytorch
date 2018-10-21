@@ -579,7 +579,8 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
     def test_sparse_ctor_getter_backward(self):
-        def test(size, sparse_dim, nnz):
+        # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
+        def test(size, sparse_dim, nnz, device):
             v_size = [nnz] + list(size[sparse_dim:])
             i = torch.rand(sparse_dim, nnz)
             i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
@@ -587,38 +588,35 @@ class TestAutograd(TestCase):
 
             inp = torch.randn(v_size, requires_grad=True)
             other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True)[0]
+            other = other.to(device)
 
-            # Use .indices() and .values()
-            def fn1(v):
-                x = torch.sparse_coo_tensor(i, v, size)
+            def fn(v):
+                x = torch.sparse_coo_tensor(i, v, size, device=device)
                 y = (x + other).coalesce()
                 yv = y.values()
                 new_v = yv.tanh()
                 z = torch.sparse_coo_tensor(y.indices(), new_v, y.size())
                 return z.coalesce().values()
 
-            # Use ._indices() and ._values()
-            def fn2(v):
-                x = torch.sparse_coo_tensor(i, v, size)
-                y = (x + other)
-                yv = y._values()
-                new_v = yv.tanh()
-                z = torch.sparse_coo_tensor(y._indices(), new_v, y.size())
-                return z.coalesce()._values()
+            gradcheck(fn, (inp,))
+            # FIXME: make gradgradcheck work.
+            # gradgradcheck(fn, (inp,))
 
-            for fn in (fn1, fn2):
-                gradcheck(fn, (inp,))
-                # FIXME: make gradgradcheck work.
-                # gradgradcheck(fn, (inp,))
+            # assert that _values is non-differentiable
+            with self.assertRaisesRegex(RuntimeError, "does not have a grad_fn"):
+                other.detach().requires_grad_()._values().backward(torch.ones_like(other._values()))
 
-        for size in ([0, 10], [2, 0, 3]):
-            for sparse_dim in (0, 1, 2):
-                for nnz in (0, 10):
-                    if nnz > 0 and any(size[d] == 0 for d in range(sparse_dim)):
-                        # impossible combination because the sparse dims have
-                        # empty numel, but nnz > 0.
-                        continue
-                    test(size=size, sparse_dim=sparse_dim, nnz=nnz)
+        devices = ['cpu']
+
+        if torch.cuda.is_available():
+            devices.append('cuda')
+
+        for empty_i, empty_v, empty_nnz in product([True, False], repeat=3):
+            sparse_size = [] if empty_i else [2, 1]
+            dense_size = [1, 0, 2] if empty_v else [1, 2]
+            nnz = 0 if empty_nnz else 5
+            for device in devices:
+                test(sparse_size + dense_size, len(sparse_size), nnz, device)
 
     def test_multi_backward(self):
         x = torch.randn(5, 5, requires_grad=True)

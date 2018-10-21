@@ -291,6 +291,8 @@ class TestCase(expecttest.TestCase):
         self.assertLessEqual(max_err, prec, message)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu'):
+        # Assert not given impossible combination, where the sparse dims have
+        # empty numel, but nnz > 0 makes the indices containing values.
         assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
 
         v_size = [nnz] + list(size[sparse_dim:])

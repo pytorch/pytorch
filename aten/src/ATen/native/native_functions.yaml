@@ -1932,6 +1932,33 @@
 
 # NOTE [ Sparse: autograd and API ]
 #
+#
+# Sparse Tensor Constructors
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# The API entry points to sparse tensor construction should be
+# `sparse_coo tensor` and `_sparse_coo_tensor_unsafe`. Depending on whether the
+# indices and values tensors are given, they eventually dispatch to either
+# `sparse_coo_tensor_with_dims` or `sparse_coo_tensor_with_dims_and_tensors`.
+#
+# The autograd support for ctor is implement on `sparse_coo_tensor_with_dims_and_tensors`.
+#
+# The API methods `sparse_coo tensor` and `_sparse_coo_tensor_unsafe`
+# **must not** have specific type dispatches because otherwise codegen will
+# consider them as abstract methods (see Note [Abstract ATen methods]), dispatch
+# using **Tensor** type, and thus lose autograd tracking on the actual method
+# they dispatch to, e.g., `sparse_coo_tensor_with_dims_and_tensors`.
+#
+# The actual ctors `sparse_coo_tensor_with_dims` and `sparse_coo_tensor_with_dims_and_tensors`,
+# on the other hand, need to create `SparseTensorImpl` and know nothing about
+# how `VariableType`s work. So they need to be dispatched using Tensor types.
+# We thus put `requires_tensor=True` to ensure that `VariableType` will unwrap
+# the given variables and call with the Tensor type.
+#
+#
+# Sparse Methods API Design
+# ~~~~~~~~~~~~~~~~~~~~~~~~~
+#
 # Goals: 1. Flexible API for users to write custom sparse ops
 #        2. ctor and member accessor with autograd support
 #
@@ -1963,17 +1990,43 @@
 #   + `dense_dim()`: number of dense dimensions
 #   + `is_coalesced()`: whether the sparse tensor is coalesced
 #
-# `_indices` and `_values` should returns the raw indices and values dense
+# `_indices()` and `_values()` should returns the raw indices and values dense
 # tensors within a sparse tensor. They can be quite unsafe with inplace
-# operations like `t_`, and exposes uncoalesced indices and values. The public
-# recommended API is `indices` and `values`, both of which first check that the
-# tensor is coalesced and return views on those tensors.
+# operations like `t_()`, and exposes uncoalesced indices and values. The public
+# recommended API is `indices()` and `values()`, both of which first check that
+# the tensor is coalesced and return views on those tensors.
 #
-# Autograd support:
 #
-# Autograd is supported on `_values`, `values` and sparse tensor ctor with
-# indices and values tensors. E.g., `torch.sparse_coo_tensor(i, v).values().sum()`
-# is differentiable w.r.t. `v`.
+# Autograd Support
+# ~~~~~~~~~~~~~~~~
+#
+# Autograd is supported on `values()` and sparse tensor ctor with indices and
+# values tensors. E.g., `torch.sparse_coo_tensor(i, v).values().sum()` is
+# differentiable w.r.t. `v`.
+#
+# NB: The `values()` and `_values()` operators are special in that they are
+# layout-aware, i.e., the output depends not just on the data it represents, but
+# also on the input layout details (in this case, the `indices` tensor). See
+# NOTE [ as_strided Backward and layout-aware/agnostic autograd ] in Functions.cpp
+# for discussion on layout-aware vs layout-agnostic autograd. Since PyTorch ops
+# operate in the layout-agnostic mode, similar to `as_strided`, backward of
+# these two operators need to consider them in a layout-agnostic way:
+#   + `values()`:
+#     Input is coalesced.
+#     We just pretend having `input.indices()` as an additional argument
+#     `input_indices`, then forward is similar to
+#     `input.to(kStrided).index_select(input_indices)` regardless of the layout.
+#     Note that `values()` normally is layout-aware even if we constrain
+#     ourselves on sparse inputs since it may include all zeros values entries
+#     as "present" entries.
+#   + `_values()`:
+#     Input may be uncoalesced.
+#     It is not straightforward to construct a layout-agnostic version because
+#     duplicate indices entries may exist and additional parameterization is
+#     needed to distribute the value into different values entries. Furthermore,
+#     this op is intended to provide ways to write custom sparse ops, rather
+#     than being used in autograd graph, so it is marked as *non-differentiable*
+#     in derivatives.yaml.
 #
 # Before reading the following, see NOTE [ Autograd Variable Views ] in
 # variable.h for details on views that are tracked by autograd, and views that
@@ -1991,28 +2044,6 @@
 # the view relation is not tracked by autograd, but the version counter is still
 # shared. In other words, their outputs are non-differentiable views of the
 # sparse tensor.
-
-
-# NOTE [ Sparse tensor ctors ]
-#
-# The API entry points to sparse tensor construction should be
-# `sparse_coo tensor` and `_sparse_coo_tensor_unsafe`. Depending on whether the
-# indices and values tensors are given, they eventually dispatch to either
-# `sparse_coo_tensor_with_dims` or `sparse_coo_tensor_with_dims_and_tensors`.
-#
-# The autograd support for ctor is implement on `sparse_coo_tensor_with_dims_and_tensors`.
-#
-# The API methods `sparse_coo tensor` and `_sparse_coo_tensor_unsafe`
-# **must not** have specific type dispatches because otherwise codegen will
-# consider them as abstract methods (see Note [Abstract ATen methods]), dispatch
-# using **Tensor** type, and thus lose autograd tracking on the actual method
-# they dispatch to, e.g., `sparse_coo_tensor_with_dims_and_tensors`.
-#
-# The actual ctors `sparse_coo_tensor_with_dims` and `sparse_coo_tensor_with_dims_and_tensors`,
-# on the other hand, need to create `SparseTensorImpl` and know nothing about
-# how `VariableType`s work. So they need to be dispatched using Tensor types.
-# We thus put `requires_tensor=True` to ensure that `VariableType` will unwrap
-# the given variables and call with the Tensor type.
 
 
 # FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given

@@ -47,11 +47,9 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // For indices, a simple sort + unique suffices
   // For values, we use a custom kernel for segmented reduction (can't use Thrust due to indirection).
 
-  // TODO: I'm not sure if this could ever be non-contiguous
-  LongTensor values = self._values().contiguous();
+  Tensor values = self._values();
 
   int64_t sparse_dim = self.sparse_dim();
-  int64_t stride = values.stride(0);
 
   // indices will be modified by Thrust, so we have to clone or use new storage
   // here.
@@ -90,21 +88,26 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   newValues_size[0] = newNnz;
   Tensor newValues = at::empty(newValues_size, values.options());
 
-  dim3 grid(THCCeilDiv(newNnz, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
-  dim3 block(32, 4);
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
-      values.type(), "coalesce_sparse_cuda", [&] {
-        using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
-        apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
-          uniqueOffsets.data<int64_t>(),
-          origIndices.data<int64_t>(),
-          values.data<scalar_t>(),
-          newValues.data<scalar_t>(),
-          nnz,
-          newNnz,
-          stride
-        );
-      });
+  // If there is no values to copy, save running the kernel.
+  if (newValues.numel() > 0) {
+    values = values.contiguous();
+    int64_t stride = at::prod_intlist(values.sizes().slice(1));
+    dim3 grid(THCCeilDiv(newNnz, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
+    dim3 block(32, 4);
+    AT_DISPATCH_ALL_TYPES_AND_HALF(
+        values.type(), "coalesce_sparse_cuda", [&] {
+          using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
+          apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
+            uniqueOffsets.data<int64_t>(),
+            origIndices.data<int64_t>(),
+            values.data<scalar_t>(),
+            newValues.data<scalar_t>(),
+            nnz,
+            newNnz,
+            stride
+          );
+        });
+  }
 
 // this grid-strided version is slower but probably more flexible
   // to different sizes
