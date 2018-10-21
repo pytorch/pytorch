@@ -112,4 +112,6 @@ std::map<std::string, std::string> cfgEdgePrinter(typename nom::repr::NNCFGraph:
 
 std::map<std::string, std::string> NNPrinter(typename nom::repr::NNGraph::NodeRef node);
 
+CAFFE2_API nom::Graph<TestClass>::NodeRef createTestNode(
+    nom::Graph<TestClass>& g);
 #endif // NOM_TESTS_TEST_UTIL_H
