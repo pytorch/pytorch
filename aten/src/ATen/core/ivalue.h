@@ -266,6 +266,7 @@ struct CAFFE2_API IValue final {
   const std::vector<bool>& toBoolListRef() const;
   const std::vector<at::Tensor>& toTensorListRef() const;
   const std::vector<IValue>& toGenericListRef() const;
+  const std::string& toStringRef() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ConstantString> v);
@@ -459,6 +460,7 @@ DEFINE_TO(std::vector<double>, toDoubleListRef)
 DEFINE_TO(std::vector<bool>, toBoolListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
 DEFINE_TO(std::vector<IValue>, toGenericListRef)
+DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(World, toWorld)
 DEFINE_TO(IValue, toIValue)
 
@@ -559,6 +561,10 @@ inline const std::vector<bool>& IValue::toBoolListRef() const {
 
 inline const std::vector<IValue>& IValue::toGenericListRef() const {
   return toGenericList()->elements();
+}
+
+inline const std::string& IValue::toStringRef() const {
+  return toString()->string();
 }
 
 } // namespace c10

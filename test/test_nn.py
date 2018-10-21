@@ -28,7 +28,7 @@ from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
-from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, TEST_WITH_ROCM, \
+from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, TEST_WITH_ROCM, \
     TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, download_file, PY3, PY34, to_gpu, \
     get_function_arglist, skipCUDAMemoryLeakCheckIf
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
@@ -770,6 +770,13 @@ class TestNN(NNTestCase):
         module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2)
         input = torch.empty(1, 1, 4, 4)
         self.assertRaises(RuntimeError, lambda: module(input))
+
+        module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True)
+        input = torch.randn(1, 3, 1, 1)
+        with self.assertRaisesRegex(RuntimeError,
+                                    'Calculated padded input size per channel: \(1 x 1\). ' +
+                                    'Kernel size: \(10 x 10\). Kernel size can\'t be greater than actual input size'):
+            module(input)
 
     def test_invalid_conv3d(self):
         module = torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2)

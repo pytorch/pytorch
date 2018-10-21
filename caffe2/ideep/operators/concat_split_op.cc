@@ -38,7 +38,7 @@ class IDEEPConcatOp final : public IDEEPOperator {
             "Expect cpu tensor if not itensor");
         auto& tensor_cpu = OperatorBase::Input<Tensor>(i, CPU);
         CAFFE_ENFORCE(tensor_cpu.dims().size() == 0 ||
-                      tensor_cpu.size_from_dim(0) == 0,
+                      tensor_cpu.numel() == 0,
                       "Expect zero dim tensor");
       }
     }

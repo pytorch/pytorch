@@ -106,9 +106,11 @@ _(aten, _pdist_forward) \
 _(aten, _prod) \
 _(aten, _prodall) \
 _(aten, _range) \
+_(aten, _reshape_from_tensor) \
 _(aten, _round) \
 _(aten, _rsqrt) \
 _(aten, _s_where) \
+_(aten, _shape_as_tensor) \
 _(aten, _sigmoid) \
 _(aten, _sigmoid_backward) \
 _(aten, _sigmoid_forward) \

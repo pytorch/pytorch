@@ -22,7 +22,7 @@ from torch._six import inf, nan, string_classes
 from itertools import product, combinations
 from functools import reduce
 from torch import multiprocessing as mp
-from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
+from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm
 from multiprocessing.reduction import ForkingPickler
@@ -4043,7 +4043,7 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_gesv_batched(self, cast):
-        from common import random_fullrank_matrix_distinct_singular_value as fullrank
+        from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
         # test against gesv: one batch
         A = cast(fullrank(5, 1))
         b = cast(torch.randn(1, 5, 10))
@@ -4096,7 +4096,7 @@ class TestTorch(TestCase):
             return
 
         from numpy.linalg import solve
-        from common import random_fullrank_matrix_distinct_singular_value as fullrank
+        from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
 
         # test against numpy.linalg.solve
         A = cast(fullrank(4, 2, 1, 3))
@@ -4725,7 +4725,7 @@ class TestTorch(TestCase):
 
         # Single matrix, but full rank
         # This is for negative powers
-        from common import random_fullrank_matrix_distinct_singular_value
+        from common_utils import random_fullrank_matrix_distinct_singular_value
         M = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
         run_test(M)
         run_test(M, sign=-1)
