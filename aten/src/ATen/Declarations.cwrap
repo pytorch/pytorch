@@ -1,5 +1,5 @@
 [[
-  name: storage_offset
+  name: _th_storage_offset
   cname: storageOffset
   cpu_half: True
   device_guard: False
@@ -8,7 +8,7 @@
     - THTensor* self
 ]]
 [[
-  name: ndimension
+  name: _th_ndimension
   cname: nDimension
   cpu_half: True
   device_guard: False
@@ -17,7 +17,7 @@
     - THTensor* self
 ]]
 [[
-  name: resize_
+  name: _th_resize_
   return: self
   cname: resize
   cpu_half: True
@@ -28,7 +28,7 @@
     - CONSTANT {}
 ]]
 [[
-  name: set_
+  name: _th_set_
   cname: set
   cpu_half: True
   device_guard: False
@@ -76,7 +76,7 @@
       - THTensor* value
 ]]
 [[
-  name: is_contiguous
+  name: _th_is_contiguous
   cname: isContiguous
   cpu_half: True
   device_guard: False
@@ -85,7 +85,7 @@
     - THTensor* self
 ]]
 [[
-  name: is_set_to
+  name: _th_is_set_to
   cname: isSetTo
   cpu_half: True
   device_guard: False
@@ -95,7 +95,7 @@
     - THTensor* tensor
 ]]
 [[
-  name: masked_fill_
+  name: _th_masked_fill_
   cname: maskedFill
   return: self
   options:
@@ -112,7 +112,7 @@
       - THTensor* value
 ]]
 [[
-  name: masked_scatter_
+  name: _th_masked_scatter_
   cname: maskedCopy
   return: self
   arguments:
@@ -157,7 +157,7 @@
     - THTensor* self
 ]]
 [[
-  name: view
+  name: _th_view
   cname: newView
   device_guard: False
   return: THTensor*

@@ -250,20 +250,21 @@ public:
 
   //example
   //Tensor * add(Tensor & b);
-  int64_t storage_offset() const;
-  Tensor & resize_(IntList size);
-  Tensor & set_(Storage source);
-  Tensor & set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
-  Tensor & set_(const Tensor & source);
-  Tensor & set_();
-  bool is_contiguous() const;
-  bool is_set_to(const Tensor & tensor) const;
-  Tensor & masked_fill_(const Tensor & mask, Scalar value);
-  Tensor & masked_fill_(const Tensor & mask, const Tensor & value);
-  Tensor & masked_scatter_(const Tensor & mask, const Tensor & source);
+  int64_t _th_storage_offset() const;
+  int64_t _th_ndimension() const;
+  Tensor & _th_resize_(IntList size);
+  Tensor & _th_set_(Storage source);
+  Tensor & _th_set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
+  Tensor & _th_set_(const Tensor & source);
+  Tensor & _th_set_();
+  bool _th_is_contiguous() const;
+  bool _th_is_set_to(const Tensor & tensor) const;
+  Tensor & _th_masked_fill_(const Tensor & mask, Scalar value);
+  Tensor & _th_masked_fill_(const Tensor & mask, const Tensor & value);
+  Tensor & _th_masked_scatter_(const Tensor & mask, const Tensor & source);
   Tensor masked_select(const Tensor & mask) const;
   Tensor nonzero() const;
-  Tensor view(IntList size) const;
+  Tensor _th_view(IntList size) const;
   Tensor index_select(int64_t dim, const Tensor & index) const;
   Tensor take(const Tensor & index) const;
   Tensor & put_(const Tensor & index, const Tensor & source, bool accumulate=false);
@@ -640,6 +641,18 @@ public:
   Tensor to(Device device, bool non_blocking=false, bool copy=false) const;
   Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
   Scalar _local_scalar() const;
+  int64_t storage_offset() const;
+  Tensor & resize_(IntList size);
+  Tensor & set_(Storage source);
+  Tensor & set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
+  Tensor & set_(const Tensor & source);
+  Tensor & set_();
+  bool is_contiguous() const;
+  bool is_set_to(const Tensor & tensor) const;
+  Tensor & masked_fill_(const Tensor & mask, Scalar value);
+  Tensor & masked_fill_(const Tensor & mask, const Tensor & value);
+  Tensor & masked_scatter_(const Tensor & mask, const Tensor & source);
+  Tensor view(IntList size) const;
 
   template <typename F, typename... Args>
   auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {

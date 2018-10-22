@@ -561,7 +561,7 @@ def is_mutable_formal_argument(argument, option):
 def check_methods_do_not_start_with_underscore(name, is_method):
     if name in {'_local_scalar', '_values', '_indices', '_nnz', '_sparseDims', '_denseDims'}:
         return
-    if is_method and name.startswith('_') and not name.startswith('__'):
+    if is_method and name.startswith('_') and not name.startswith('__') and not name.startswith('_th_'):
         message = "Function '{}' starts with a single underscore and is ".format(name)
         message += "configured to have a method on Tensor. Functions that start with "
         message += " a single underscore should only be functions in the at:: "

@@ -53,38 +53,41 @@ inline void Tensor::set_data(Tensor new_data) {
 }
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
-inline int64_t Tensor::storage_offset() const {
-    return type().storage_offset(*this);
+inline int64_t Tensor::_th_storage_offset() const {
+    return type()._th_storage_offset(*this);
 }
-inline Tensor & Tensor::resize_(IntList size) {
-    return type().resize_(*this, size);
+inline int64_t Tensor::_th_ndimension() const {
+    return type()._th_ndimension(*this);
 }
-inline Tensor & Tensor::set_(Storage source) {
-    return type().set_(*this, source);
+inline Tensor & Tensor::_th_resize_(IntList size) {
+    return type()._th_resize_(*this, size);
 }
-inline Tensor & Tensor::set_(Storage source, int64_t storage_offset, IntList size, IntList stride) {
-    return type().set_(*this, source, storage_offset, size, stride);
+inline Tensor & Tensor::_th_set_(Storage source) {
+    return type()._th_set_(*this, source);
 }
-inline Tensor & Tensor::set_(const Tensor & source) {
-    return type().set_(*this, source);
+inline Tensor & Tensor::_th_set_(Storage source, int64_t storage_offset, IntList size, IntList stride) {
+    return type()._th_set_(*this, source, storage_offset, size, stride);
 }
-inline Tensor & Tensor::set_() {
-    return type().set_(*this);
+inline Tensor & Tensor::_th_set_(const Tensor & source) {
+    return type()._th_set_(*this, source);
 }
-inline bool Tensor::is_contiguous() const {
-    return type().is_contiguous(*this);
+inline Tensor & Tensor::_th_set_() {
+    return type()._th_set_(*this);
 }
-inline bool Tensor::is_set_to(const Tensor & tensor) const {
-    return type().is_set_to(*this, tensor);
+inline bool Tensor::_th_is_contiguous() const {
+    return type()._th_is_contiguous(*this);
 }
-inline Tensor & Tensor::masked_fill_(const Tensor & mask, Scalar value) {
-    return type().masked_fill_(*this, mask, value);
+inline bool Tensor::_th_is_set_to(const Tensor & tensor) const {
+    return type()._th_is_set_to(*this, tensor);
 }
-inline Tensor & Tensor::masked_fill_(const Tensor & mask, const Tensor & value) {
-    return type().masked_fill_(*this, mask, value);
+inline Tensor & Tensor::_th_masked_fill_(const Tensor & mask, Scalar value) {
+    return type()._th_masked_fill_(*this, mask, value);
 }
-inline Tensor & Tensor::masked_scatter_(const Tensor & mask, const Tensor & source) {
-    return type().masked_scatter_(*this, mask, source);
+inline Tensor & Tensor::_th_masked_fill_(const Tensor & mask, const Tensor & value) {
+    return type()._th_masked_fill_(*this, mask, value);
+}
+inline Tensor & Tensor::_th_masked_scatter_(const Tensor & mask, const Tensor & source) {
+    return type()._th_masked_scatter_(*this, mask, source);
 }
 inline Tensor Tensor::masked_select(const Tensor & mask) const {
     return type().masked_select(*this, mask);
@@ -92,8 +95,8 @@ inline Tensor Tensor::masked_select(const Tensor & mask) const {
 inline Tensor Tensor::nonzero() const {
     return type().nonzero(*this);
 }
-inline Tensor Tensor::view(IntList size) const {
-    return type().view(*this, size);
+inline Tensor Tensor::_th_view(IntList size) const {
+    return type()._th_view(*this, size);
 }
 inline Tensor Tensor::index_select(int64_t dim, const Tensor & index) const {
     return type().index_select(*this, dim, index);
@@ -1222,6 +1225,42 @@ inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) con
 }
 inline Scalar Tensor::_local_scalar() const {
     return type()._local_scalar(*this);
+}
+inline int64_t Tensor::storage_offset() const {
+    return type().storage_offset(*this);
+}
+inline Tensor & Tensor::resize_(IntList size) {
+    return type().resize_(*this, size);
+}
+inline Tensor & Tensor::set_(Storage source) {
+    return type().set_(*this, source);
+}
+inline Tensor & Tensor::set_(Storage source, int64_t storage_offset, IntList size, IntList stride) {
+    return type().set_(*this, source, storage_offset, size, stride);
+}
+inline Tensor & Tensor::set_(const Tensor & source) {
+    return type().set_(*this, source);
+}
+inline Tensor & Tensor::set_() {
+    return type().set_(*this);
+}
+inline bool Tensor::is_contiguous() const {
+    return type().is_contiguous(*this);
+}
+inline bool Tensor::is_set_to(const Tensor & tensor) const {
+    return type().is_set_to(*this, tensor);
+}
+inline Tensor & Tensor::masked_fill_(const Tensor & mask, Scalar value) {
+    return type().masked_fill_(*this, mask, value);
+}
+inline Tensor & Tensor::masked_fill_(const Tensor & mask, const Tensor & value) {
+    return type().masked_fill_(*this, mask, value);
+}
+inline Tensor & Tensor::masked_scatter_(const Tensor & mask, const Tensor & source) {
+    return type().masked_scatter_(*this, mask, source);
+}
+inline Tensor Tensor::view(IntList size) const {
+    return type().view(*this, size);
 }
 
 inline bool Tensor::is_variable() const noexcept {
