@@ -7,9 +7,9 @@ circular dependency problems
 import weakref
 import inspect
 try:
-    import builtins  # py3
+    import builtins  # PY3
 except Exception:
-    import __builtin__ as builtins  # py2
+    import __builtin__ as builtins  # PY2
 
 # Tracks standalone weak script functions
 _compiled_weak_fns = weakref.WeakKeyDictionary()
