@@ -360,9 +360,8 @@ class Tensor(torch._C._TensorBase):
 
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
-    __rsub__ = _C._TensorBase.__rsub__
-
     __pow__ = _C._TensorBase.pow
+    __rsub__ = _C._TensorBase.__rsub__
 
     def __format__(self, format_spec):
         if self.dim() == 0:
