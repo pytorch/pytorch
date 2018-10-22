@@ -594,7 +594,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
             &cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, scalar_t, Epilogue>,
             outer_size, dim_size, inner_size,
             grid, block, smem_size);
-    
+
         cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, scalar_t, Epilogue>
           <<<grid, block, smem_size, stream>>>(
             gI.data<scalar_t>(), output.data<scalar_t>(), grad.data<scalar_t>(),
@@ -605,7 +605,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
             &cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, accscalar_t, Epilogue>,
             outer_size, dim_size, inner_size,
             grid, block, smem_size);
-    
+
         cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, accscalar_t, Epilogue>
           <<<grid, block, smem_size, stream>>>(
             gI.data<scalar_t>(), output.data<accscalar_t>(), grad.data<accscalar_t>(),
