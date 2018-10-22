@@ -7444,7 +7444,7 @@ a")
 
     def test_weak_module(self):
 
-        @torch.jit.weak_module
+        @torch._jit_internal.weak_module
         class Weak(torch.nn.Module):
             __constants__ = ['number']
 
@@ -7455,7 +7455,7 @@ a")
             def python_op_in_weak_module(self, x):
                 return x + 123
 
-            @torch.jit.weak_script_method
+            @torch._jit_internal.weak_script_method
             def forward(self, x):
                 return 55 + self.number + self.python_op_in_weak_module(x)
 
@@ -7525,7 +7525,7 @@ a")
         weights2 = torch.randn(10, 10)
         bias2 = torch.randn(10)
 
-        @torch.jit.weak_module
+        @torch._jit_internal.weak_module
         class TestLinear(torch.nn.Module):
             def __init__(self, in_features, out_features):
                 super(TestLinear, self).__init__()
@@ -7543,7 +7543,7 @@ a")
                     bound = 1 / math.sqrt(fan_in)
                     torch.nn.init.uniform_(self.bias, -bound, bound)
 
-            @torch.jit.weak_script_method
+            @torch._jit_internal.weak_script_method
             def forward(self, input):
                 return F.linear(input, self.weight, self.bias) + self.counter
 
@@ -7578,7 +7578,7 @@ a")
         self.assertEqual(strong_mod(inp), expected_result)
 
     def test_weak_module_nested(self):
-        @torch.jit.weak_module
+        @torch._jit_internal.weak_module
         class OtherWeak(torch.nn.Module):
             __constants__ = ['constant']
 
@@ -7590,7 +7590,7 @@ a")
                 self.bias = torch.nn.Parameter(torch.ones(out_features))
                 self.constant = 3
 
-            @torch.jit.weak_script_method
+            @torch._jit_internal.weak_script_method
             def forward(self, x):
                 return x * x + self.constant + F.linear(x, self.weight, self.bias)
 
@@ -7603,7 +7603,7 @@ a")
             def forward(self, x):
                 return x + 27
 
-        @torch.jit.weak_module
+        @torch._jit_internal.weak_module
         class Weak(torch.nn.Module):
             def __init__(self, in_features, out_features):
                 super(Weak, self).__init__()
@@ -7614,7 +7614,7 @@ a")
                 self.weak_submodule = OtherWeak(10, 10)
                 self.strong_submodule = OtherStrong()
 
-            @torch.jit.weak_script_method
+            @torch._jit_internal.weak_script_method
             def forward(self, x):
                 return x + self.weak_submodule(x) + self.strong_submodule(x) \
                     + F.linear(x, self.weight, self.bias)
@@ -7640,13 +7640,13 @@ a")
         self.assertEqual(result, expected_result)
 
     def test_weak_module_submodule(self):
-        @torch.jit.weak_module
+        @torch._jit_internal.weak_module
         class Weak(torch.nn.Module):
             def __init__(self):
                 super(Weak, self).__init__()
                 self.param = torch.nn.Parameter(100 * torch.ones(5))
 
-            @torch.jit.weak_script_method
+            @torch._jit_internal.weak_script_method
             def forward(self, x):
                 return x + self.param
 
@@ -7686,7 +7686,7 @@ a")
             def forward(self, x):
                 return x + 100
 
-        @torch.jit.weak_module
+        @torch._jit_internal.weak_module
         class Weak(torch.nn.Module):
             def __init__(self, in_features, out_features):
                 super(Weak, self).__init__()
@@ -7694,7 +7694,7 @@ a")
                 self.register_buffer("buffer", torch.ones(out_features))
                 self.submodule = Submodule()
 
-            @torch.jit.weak_script_method
+            @torch._jit_internal.weak_script_method
             def forward(self, x):
                 return F.linear(x, self.weight) + self.buffer + self.submodule(x)
 

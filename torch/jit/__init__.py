@@ -5,7 +5,7 @@ from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.jit.annotations
 from torch._six import raise_from, with_metaclass, get_function_from_type
-from .._jit_internal import createResolutionCallback, compiled_weak_fns, COMPILED, COMPILATION_PENDING
+from .._jit_internal import createResolutionCallback, _compiled_weak_fns, _weak_script_methods, _weak_modules, _weak_types, COMPILED, COMPILATION_PENDING
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
@@ -46,14 +46,6 @@ _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
-# Tracks which methods should be converted to strong methods
-_weak_script_methods = weakref.WeakKeyDictionary()
-
-# Converted modules and their corresponding WeakScriptModuleProxy objects
-_weak_modules = weakref.WeakKeyDictionary()
-
-# Types that have been declared as weak modules
-_weak_types = weakref.WeakKeyDictionary()
 
 
 @contextlib.contextmanager
@@ -600,13 +592,13 @@ class CompilationUnit(object):
 
 
 def _try_compile_weak_script(fn):
-    entry = compiled_weak_fns.get(fn)
+    entry = _compiled_weak_fns.get(fn)
     if entry is None:
         return None
     if entry["status"] == COMPILATION_PENDING:
         compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
         del entry["rcb"]
-        compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
+        _compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
         entry["status"] = COMPILED
         return compiled_fn
     else:
@@ -654,15 +646,6 @@ def script_method(fn, _rcb=None):
         _rcb = createResolutionCallback(frames_up=2)
     ast = get_jit_ast(fn, is_method=True)
     return ScriptMethodStub(_rcb, ast, fn)
-
-
-def weak_script_method(fn):
-    if _enabled:
-        _weak_script_methods[fn] = {
-            "rcb": createResolutionCallback(frames_up=2),
-            "original_method": fn
-        }
-    return fn
 
 
 def _try_get_weak_module(mod):
@@ -1119,14 +1102,6 @@ if _enabled:
 
 else:
     ScriptModule = torch.nn.Module
-
-
-def weak_module(cls):
-    if _enabled:
-        _weak_types[cls] = {
-            "method_stubs": None
-        }
-    return cls
 
 
 def _get_weak_stubs(cls):
