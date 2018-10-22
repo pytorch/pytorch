@@ -100,6 +100,7 @@ namespace c10 {
   _(onnx, Not)                     \
   _(onnx, ATen)                    \
   FORALL_ATTR_BASE_SYMBOLS(_)      \
+  _(attr, FusionKey)               \
   _(attr, Subgraph)                \
   _(attr, ReverseSubgraph)         \
   _(attr, f_real_outputs)          \

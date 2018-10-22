@@ -334,7 +334,7 @@ struct CAFFE2_API IValue final {
   }
 
   // None
-  bool isNone() {
+  bool isNone() const {
     return Tag::None == tag;
   }
   std::string toNone() const {
@@ -349,7 +349,7 @@ struct CAFFE2_API IValue final {
       *this = s.toLong();
     }
   }
-  bool isScalar() {
+  bool isScalar() const {
     return isDouble() || isInt() || isBool();
   }
   at::Scalar toScalar() const {
