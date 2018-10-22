@@ -14,7 +14,7 @@ import torch.utils.data
 import torch.cuda
 import warnings
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-import torch.utils.hub as hub
+import torch.hub as hub
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
 from common import IS_WINDOWS, IS_PPC, skipIfRocm
