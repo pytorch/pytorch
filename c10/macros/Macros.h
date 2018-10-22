@@ -60,13 +60,23 @@ namespace c10 {} // namespace c10
 #endif
 
 // C10_LIKELY/C10_UNLIKELY
-// TODO: Define this to use the C++20 syntax... if we ever move to C++20 (haha)
+//
+// These macros provide parentheses, so you can use these macros as:
+//
+//    if C10_LIKELY(some_expr) {
+//      ...
+//    }
+//
+// NB: static_cast to boolean is mandatory in C++, because __builtin_expect
+// takes a long argument, which means you may trigger the wrong conversion
+// without it.
+//
 #if defined(__GNUC__) || defined(__ICL) || defined(__clang__)
-#define C10_LIKELY(expr)    __builtin_expect(!(expr), 0)
-#define C10_UNLIKELY(expr)  __builtin_expect((expr),  0)
+#define C10_LIKELY(expr)    (__builtin_expect(static_cast<bool>(expr), 1))
+#define C10_UNLIKELY(expr)  (__builtin_expect(static_cast<bool>(expr), 0))
 #else
-#define C10_LIKELY
-#define C10_UNLIKELY
+#define C10_LIKELY(expr)    (expr)
+#define C10_UNLIKELY(expr)  (expr)
 #endif
 
 #endif // C10_MACROS_MACROS_H_
