@@ -397,26 +397,16 @@ class TestHub(TestCase):
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
 
     @skipIfNoTorchVision
-    def test_load_multi_callables(self):
-        callables = ['wrapper1', 'wrapper2']
-        kwargs = [{'pretrained': True}, {'pretrained': True}]
-        hub_models = hub.load(
-            'ailzhang/vision:hub',
-            callables,
-            kwargs=kwargs)
-        for model in hub_models:
-            self.assertEqual(self.resnet18_pretrained, model.state_dict())
-
-    @skipIfNoTorchVision
-    def test_hub_cache(self):
-        hub_dir = os.path.expanduser('~/.torch/hub')
+    def test_set_dir(self):
+        temp_dir = tempfile.gettempdir()
+        hub.set_dir(temp_dir)
         hub_model = hub.load(
             'ailzhang/vision:hub',
             'wrapper1',
-            hub_dir=hub_dir,
-            cache=True)
+            pretrained=True)
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
-        self.assertTrue(os.path.exists(hub_dir))
+        assert os.path.exists(temp_dir + '/vision_hub')
+        shutil.rmtree(temp_dir + '/vision_hub')
 
 
 if __name__ == '__main__':
