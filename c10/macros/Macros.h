@@ -59,4 +59,14 @@ namespace c10 {} // namespace c10
 #define C10_NORETURN __attribute__((noreturn))
 #endif
 
+// C10_LIKELY/C10_UNLIKELY
+// TODO: Define this to use the C++20 syntax... if we ever move to C++20 (haha)
+#if defined(__GNUC__) || defined(__ICL) || defined(__clang__)
+#define C10_LIKELY(expr)    __builtin_expect(!(expr), 0)
+#define C10_UNLIKELY(expr)  __builtin_expect((expr),  0)
+#else
+#define C10_LIKELY
+#define C10_UNLIKELY
+#endif
+
 #endif // C10_MACROS_MACROS_H_
