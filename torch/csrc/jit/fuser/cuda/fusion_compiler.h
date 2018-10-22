@@ -1,21 +1,19 @@
-#include "torch/csrc/jit/fusers/Config.h"
-#if USE_CUDA_FUSER
 #pragma once
-
-#include "torch/csrc/jit/fusers/interface.h"
-#include "torch/csrc/jit/fusers/common/fusion_handle_impl.h"
-
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/utils/disallow_copy.h"
+#include "torch/csrc/jit/fuser/config.h"
+#if USE_CUDA_FUSER
 
 #include "ATen/ATen.h"
+#include "torch/csrc/utils/disallow_copy.h"
+#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/fuser/common/fusion_handle_impl.h"
 
 #include <memory>
 #include <vector>
 #include <unordered_map>
 #include <string>
 
-namespace torch { namespace jit { namespace cudafuser {
+namespace torch { namespace jit { namespace fuser { namespace cuda {
 
 struct CUDAFusionCompiler {
   TH_DISALLOW_COPY_AND_ASSIGN(CUDAFusionCompiler);
@@ -37,7 +35,8 @@ private:
 
 CUDAFusionCompiler& getFusionCompiler();
 
-} // namespace cudafuser
+} // namespace cuda
+} // namespace fuser
 } // namespace jit 
 } // namespace torch
 

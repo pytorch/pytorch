@@ -1,20 +1,18 @@
-#include "torch/csrc/jit/fusers/Config.h"
-#if USE_CPU_FUSER || USE_CUDA_FUSER
 #pragma once
-
-#include "torch/csrc/jit/fusers/common/annotated_graph.h"
-#include "torch/csrc/jit/fusers/common/tensor_desc.h"
-#include "torch/csrc/jit/fusers/common/partition_desc.h"
-
-#include "torch/csrc/utils/disallow_copy.h"
+#include "torch/csrc/jit/fuser/config.h"
+#if USE_CPU_FUSER || USE_CUDA_FUSER
 
 #include "ATen/ATen.h"
+#include "torch/csrc/utils/disallow_copy.h"
+#include "torch/csrc/jit/fuser/common/annotated_graph.h"
+#include "torch/csrc/jit/fuser/common/tensor_desc.h"
+#include "torch/csrc/jit/fuser/common/partition_desc.h"
 
 #include <string>
 #include <cstdint>
 #include <vector>
 
-namespace torch { namespace jit {
+namespace torch { namespace jit { namespace fuser {
 
 std::tuple<std::vector<PartitionDesc>, std::vector<PartitionDesc>, bool> emitCompilationUnit(
   std::ostream& out
@@ -82,6 +80,7 @@ protected:
   std::vector<PartitionDesc> chunk_desc;
 };
 
+} // namespace fuser
 } // namespace jit 
 } // namespace torch
 

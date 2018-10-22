@@ -1,11 +1,10 @@
-#include "torch/csrc/jit/fusers/cuda/fused_kernel.h"
-
-#include "torch/csrc/jit/resource_guard.h"
+#include "torch/csrc/jit/fuser/cuda/fused_kernel.h"
 
 #include "ATen/cuda/CUDAContext.h"
 #include "THC/THC.h"
 #include "THC/THCGenerator.hpp"
 #include "torch/csrc/cuda/cuda_check.h"
+#include "torch/csrc/jit/resource_guard.h"
 
 #include "nvrtc.h"
 #include "cuda.h"
@@ -17,7 +16,7 @@
 #include <vector>
 #include <algorithm>
 
-namespace torch { namespace jit { namespace cudafuser {
+namespace torch { namespace jit { namespace fuser { namespace cuda {
 
 void checkCUDAVersion(const cudaDeviceProp& prop) {
   if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
@@ -106,6 +105,7 @@ void CUDAFusedKernel::launch_raw(uint32_t numel, void** arguments) {
        nullptr));
 }
 
-} // namespace cudafuser
+} // namespace cuda
+} // namespace fuser
 } // namespace jit 
 } // namespace torch

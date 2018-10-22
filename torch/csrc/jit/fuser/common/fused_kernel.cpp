@@ -1,17 +1,15 @@
-#include "torch/csrc/jit/fusers/common/fused_kernel.h"
+#include "torch/csrc/jit/fuser/common/fused_kernel.h"
 
-#include "torch/csrc/jit/fusers/interface.h"
-#include "torch/csrc/jit/fusers/cpu/resource_strings.h"
-#include "torch/csrc/jit/fusers/cuda/resource_strings.h"
-#include "torch/csrc/jit/fusers/common/partition_desc.h"
-#include "torch/csrc/jit/fusers/common/tensor_desc.h"
-#include "torch/csrc/jit/fusers/common/tensor_info.h"
-
+#include "ATen/ATen.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/assertions.h"
-
-#include "ATen/ATen.h"
+#include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/fuser/cpu/resource_strings.h"
+#include "torch/csrc/jit/fuser/cuda/resource_strings.h"
+#include "torch/csrc/jit/fuser/common/partition_desc.h"
+#include "torch/csrc/jit/fuser/common/tensor_desc.h"
+#include "torch/csrc/jit/fuser/common/tensor_info.h"
 
 #if USE_CUDA_FUSER
   #include "THC/THCTensorRandom.h"
@@ -26,7 +24,7 @@
 #include <vector>
 #include <cmath>
 
-namespace torch { namespace jit {
+namespace torch { namespace jit { namespace fuser {
 
 // curDimIndex = linearId % sizes[i]; // % sizes[i] is not needed for d == 0, because we already guard for numel outside the index calculation
 // offset += curDimIndex*strides[i]; // *strides[i] is optional if list_is_cont becaause strides.back() == 1
@@ -538,15 +536,15 @@ std::tuple<
   // Includes half support if any half tensors are involved
   #if USE_CUDA_FUSER
     if (has_half_tensor) {
-      env.s("HalfHeader", cudafuser::half_support_literal);
+      env.s("HalfHeader", cuda::half_support_literal);
     } else {
       env.s("HalfHeader", "");
     }
 
     if (has_random) {
-      env.s("RandHeader", cudafuser::rand_support_literal);
-      env.s("RandParam", cudafuser::rand_param);
-      env.s("RandInit", cudafuser::rand_init);
+      env.s("RandHeader", cuda::rand_support_literal);
+      env.s("RandParam", cuda::rand_param);
+      env.s("RandInit", cuda::rand_init);
     } else {
       env.s("RandHeader", "");
       env.s("RandParam", "");
@@ -560,18 +558,19 @@ std::tuple<
   env.v("argument_loads", argument_loads);
   if (use_cuda) {
     #if USE_CUDA_FUSER
-      env.s("type_declarations", cudafuser::type_declarations_template.format(env));
-      out << cudafuser::cuda_compilation_unit_template.format(env);
+      env.s("type_declarations", cuda::type_declarations_template.format(env));
+      out << cuda::cuda_compilation_unit_template.format(env);
     #else
       throw std::runtime_error("CUDA Fusion requested but not supported.");
     #endif // USE_CUDA_FUSER
   } else {
-    env.s("type_declarations", cpufuser::type_declarations_template.format(env));
-    out << cpufuser::cpu_compilation_unit_template.format(env);
+    env.s("type_declarations", cpu::type_declarations_template.format(env));
+    out << cpu::cpu_compilation_unit_template.format(env);
   }
 
   return std::make_tuple(std::move(chunk_desc), std::move(concat_desc), has_random);
 }
 
+} // namespace fuser
 } // namespace jit
 } // namespace torch

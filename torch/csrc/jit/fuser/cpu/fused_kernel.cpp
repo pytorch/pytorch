@@ -1,12 +1,11 @@
-#include "torch/csrc/jit/fusers/cpu/fused_kernel.h"
-
-#include "torch/csrc/jit/fusers/cpu/fusion_compiler.h"
-#include "torch/csrc/jit/fusers/cpu/temp_file.h"
-#include "torch/csrc/jit/fusers/cpu/dynamic_library.h"
-#include "torch/csrc/jit/fusers/common/annotated_graph.h"
+#include "torch/csrc/jit/fuser/cpu/fused_kernel.h"
 
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/code_template.h"
+#include "torch/csrc/jit/fuser/cpu/fusion_compiler.h"
+#include "torch/csrc/jit/fuser/cpu/temp_file.h"
+#include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
+#include "torch/csrc/jit/fuser/common/annotated_graph.h"
 
 #include <sstream>
 #include <tuple>
@@ -15,7 +14,7 @@
 #include <string>
 
 
-namespace torch { namespace jit { namespace cpufuser {
+namespace torch { namespace jit { namespace fuser { namespace cpu {
 
 static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
 static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
@@ -90,6 +89,7 @@ CPUFusedKernel::CPUFusedKernel(
   #pragma GCC diagnostic pop
 }
 
-} // namespace cpufuser
+} // namespace cpu
+} // namespace fuser
 } // namespace jit
 } // namespace torch

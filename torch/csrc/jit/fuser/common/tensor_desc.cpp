@@ -1,8 +1,8 @@
-#include "torch/csrc/jit/fusers/common/tensor_desc.h"
+#include "torch/csrc/jit/fuser/common/tensor_desc.h"
 
 #include "torch/csrc/jit/assertions.h"
 
-namespace torch { namespace jit {
+namespace torch { namespace jit { namespace fuser {
 
 std::vector<bool> TensorDesc::findContiguous(
   const at::IntList& sizes
@@ -16,5 +16,6 @@ std::vector<bool> TensorDesc::findContiguous(
   return cont;
 }
 
+} // namespace fuser
 } // namespace jit 
 } // namespace torch

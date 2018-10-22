@@ -1,11 +1,9 @@
 #pragma once
 
+#include "ATen/ATen.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/stack.h"
-
-#include "torch/csrc/WindowsTorchApiMacro.h"
-
-#include "ATen/ATen.h"
 
 #include <memory>
 #include <vector>

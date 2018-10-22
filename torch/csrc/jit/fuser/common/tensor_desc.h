@@ -1,18 +1,16 @@
-#include "torch/csrc/jit/fusers/Config.h"
-#if USE_CPU_FUSER || USE_CUDA_FUSER
 #pragma once
-
-#include "torch/csrc/jit/type.h"
-
-#include "torch/csrc/utils/hash.h"
+#include "torch/csrc/jit/fuser/config.h"
+#if USE_CPU_FUSER || USE_CUDA_FUSER
 
 #include "ATen/ATen.h"
+#include "torch/csrc/utils/hash.h"
+#include "torch/csrc/jit/type.h"
 
 #include <vector>
 #include <iostream>
 #include <algorithm>
 
-namespace torch { namespace jit {
+namespace torch { namespace jit { namespace fuser {
 
 // type information needed by the compiler for input/outputs
 // contiguity[i] is true if the dim i is contiguous with dim i + 1.
@@ -77,6 +75,7 @@ inline std::ostream& operator<<(std::ostream& out, const TensorDesc& d) {
   return out;
 }
 
+} // namespace fuser
 } // namespace jit 
 } // namespace torch
 

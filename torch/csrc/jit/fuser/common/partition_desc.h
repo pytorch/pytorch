@@ -1,16 +1,15 @@
-#include "torch/csrc/jit/fusers/Config.h"
-#if USE_CPU_FUSER || USE_CUDA_FUSER
 #pragma once
-
-#include "torch/csrc/jit/fusers/common/tensor_desc.h"
+#include "torch/csrc/jit/fuser/config.h"
+#if USE_CPU_FUSER || USE_CUDA_FUSER
 
 #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/fuser/common/tensor_desc.h"
 
 #include <memory>
 #include <cstdint>
 #include <vector>
 
-namespace torch { namespace jit {
+namespace torch { namespace jit { namespace fuser {
 
 // Descriptor for chunk-ing an input tensor into subtensors
 // OR concat-ing an output tensor from subtensors
@@ -42,6 +41,7 @@ struct PartitionDesc {
   std::unique_ptr<TensorDesc> subtensorDesc; // descriptor for the subtensor, if it exists
 };
 
+} // namespace fuser
 } // namespace jit 
 } // namespace torch
 

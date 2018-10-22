@@ -1,20 +1,18 @@
-#include "torch/csrc/jit/fusers/cuda/fusion_compiler.h"
+#include "torch/csrc/jit/fuser/cuda/fusion_compiler.h"
 
-#include "torch/csrc/jit/fusers/interface.h"
-#include "torch/csrc/jit/fusers/common/fusion_handle_impl.h"
-
-#include "torch/csrc/jit/passes/shape_analysis.h" // EraseShapeInformation
 #include "torch/csrc/utils/functional.h" //fmap
-#include "torch/csrc/jit/ivalue.h" // IValue
-
 #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/ivalue.h" // IValue
+#include "torch/csrc/jit/passes/shape_analysis.h" // EraseShapeInformation
+#include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/fuser/common/fusion_handle_impl.h"
 
 #include <sstream>
 #include <string>
 #include <tuple>
 #include <cstdlib>
 
-namespace torch { namespace jit { namespace cudafuser {
+namespace torch { namespace jit { namespace fuser { namespace cuda {
 CUDAFusionCompiler& getFusionCompiler() {
   static CUDAFusionCompiler compiler;
   return compiler;
@@ -66,6 +64,7 @@ std::vector<at::Tensor> CUDAFusionCompiler::debugLaunchGraph(
   return fmap(stack, [](const IValue& iv) { return iv.toTensor(); });
 }
 
-} // namespace cudafuser
+} // namespace cuda
+} // namespace fuser
 } // namespace jit 
 } // namespace torch

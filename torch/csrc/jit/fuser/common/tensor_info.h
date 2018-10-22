@@ -1,10 +1,10 @@
-#include "torch/csrc/jit/fusers/Config.h"
-#if USE_CPU_FUSER || USE_CUDA_FUSER
 #pragma once
+#include "torch/csrc/jit/fuser/config.h"
+#if USE_CPU_FUSER || USE_CUDA_FUSER
 
 #include <cstdint>
 
-namespace torch { namespace jit {
+namespace torch { namespace jit { namespace fuser {
 
 // Host-side view of TensorInfo (that visivle for the kernel is defined above).
 // Note dims[0] - we need to dynamically allocate the dims.
@@ -19,6 +19,7 @@ struct TensorInfo {
   #pragma GCC diagnostic pop
 };
 
+} // namespace fuser
 } // namespace jit 
 } // namespace torch
 

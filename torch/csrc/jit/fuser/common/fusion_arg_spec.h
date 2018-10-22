@@ -1,18 +1,16 @@
-#include "torch/csrc/jit/fusers/Config.h"
-#if USE_CPU_FUSER || USE_CUDA_FUSER
 #pragma once
-
-#include "torch/csrc/jit/fusers/common/tensor_desc.h"
-
-#include "torch/csrc/utils/functional.h" // fmap
-#include "torch/csrc/utils/hash.h"
+#include "torch/csrc/jit/fuser/config.h"
+#if USE_CPU_FUSER || USE_CUDA_FUSER
 
 #include "ATen/ATen.h"
+#include "torch/csrc/utils/functional.h" // fmap
+#include "torch/csrc/utils/hash.h"
+#include "torch/csrc/jit/fuser/common/tensor_desc.h"
 
 #include <vector>
 #include <cstdint>
 
-namespace torch { namespace jit {
+namespace torch { namespace jit { namespace fuser {
 
 struct FusionArgSpec {
   FusionArgSpec(at::TensorList inputs)
@@ -40,6 +38,7 @@ private:
   size_t hash_code_;
 };
 
+} // namespace fuser
 } // namespace jit 
 } // namespace torch
 

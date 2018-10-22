@@ -1,21 +1,20 @@
-#include "torch/csrc/jit/fusers/Config.h"
-#if USE_CPU_FUSER
 #pragma once
-
-#include "torch/csrc/jit/fusers/cpu/fusion_compiler.h"
-#include "torch/csrc/jit/fusers/cpu/dynamic_library.h"
-#include "torch/csrc/jit/fusers/common/fused_kernel.h"
-#include "torch/csrc/jit/fusers/common/annotated_graph.h"
+#include "torch/csrc/jit/fuser/config.h"
+#if USE_CPU_FUSER
 
 #include "ATen/ATen.h"
+#include "torch/csrc/jit/fuser/cpu/fusion_compiler.h"
+#include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
+#include "torch/csrc/jit/fuser/common/fused_kernel.h"
+#include "torch/csrc/jit/fuser/common/annotated_graph.h"
 
 #include <string>
 #include <cstdint>
 #include <memory>
 
-namespace torch { namespace jit { namespace cpufuser {
+namespace torch { namespace jit { namespace fuser { namespace cpu {
 
-struct CPUFusedKernel : public ::torch::jit::FusedKernel {
+struct CPUFusedKernel : public ::torch::jit::fuser::FusedKernel {
   CPUFusedKernel(
     const std::string& name
   , AnnotatedGraph& agraph
@@ -38,7 +37,8 @@ protected:
   void (*kernel)(uint32_t, void**) = nullptr;
 };
 
-} // namespace cpufuser
+} // namespace cpu
+} // namespace fuser
 } // namespace jit 
 } // namespace torch
 
