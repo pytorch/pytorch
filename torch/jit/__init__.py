@@ -981,9 +981,9 @@ if _enabled:
                       sequence-to-sequence translation is a loop over the (varying) sequence
                       length of inputs.
 
-                    + In the returned ``ScriptModule, operations that have different behaviors
+                    + In the returned ``ScriptModule``, operations that have different behaviors
                       in ``training`` and ``eval`` modes will always behave as if it is in the
-                      mode it was in during tracing, no matter which module the ``ScriptModule``
+                      mode it was in during tracing, no matter which mode the ``ScriptModule``
                       is in.
 
                 In cases like these, tracing would not be appropriate and scripting is a better
