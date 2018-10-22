@@ -454,9 +454,12 @@ class TestJit(JitTestCase):
         self.assertEqual(fn(x, y), fn_traced(x, y))
 
     def test_disabled(self):
+        with self.assertRaisesRegex(RuntimeError, "at runtime is not supported"):
+            torch.jit.enabled = False
+
         torch.jit._enabled = False
         try:
-            self.assertFalse(torch.jit.is_enabled())
+            self.assertFalse(torch.jit.enabled)
 
             def f(x, y):
                 return x + y
@@ -476,7 +479,7 @@ class TestJit(JitTestCase):
             self.assertTrue(inspect.ismethod(MyModule.method) or inspect.isfunction(MyModule.method))
         finally:
             torch.jit._enabled = True
-            self.assertTrue(torch.jit.is_enabled())
+            self.assertTrue(torch.jit.enabled)
 
     def test_train_eval(self):
         class Sub(nn.Module):

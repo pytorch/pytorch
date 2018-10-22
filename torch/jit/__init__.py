@@ -55,13 +55,6 @@ _fork = torch._C.fork
 _wait = torch._C.wait
 
 
-def is_enabled():
-    r"""Returns whether JIT is enabled, i.e., whether the environment flag
-    ``PYTORCH_JIT`` is set.
-    """
-    return _enabled
-
-
 @contextlib.contextmanager
 def scope(scope_name):
     tracing_state = torch._C._get_tracing_state()
@@ -1403,3 +1396,46 @@ class _disable_tracing(object):
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
+
+
+# The magic here is to allow us to intercept code like this:
+#
+#   torch.jit.enabled = True
+
+class ContextProp(object):
+    def __init__(self, getter, setter, docstring=None):
+        self.getter = getter
+        self.setter = setter
+        if docstring is not None:
+            self.__doc__ = docstring
+
+    def __get__(self, obj, objtype):
+        return self.getter()
+
+    def __set__(self, obj, val):
+        self.setter(val)
+
+
+class JITModule(object):
+    def __init__(self, m):
+        self.__dict__ = m.__dict__
+        # You have to retain the old module, otherwise it will
+        # get GC'ed and a lot of things will break.  See:
+        # https://stackoverflow.com/questions/47540722/how-do-i-use-the-sys-modules-replacement-trick-in-init-py-on-python-2
+        self.__old_mod = m
+
+    @staticmethod
+    def __raise(ex):
+        raise ex
+
+    enabled = ContextProp(
+        lambda: _enabled,
+        lambda v: JITModule.__raise(RuntimeError("Changing the flag at runtime is not supported yet.")),
+        r"""Returns whether JIT is enabled, i.e., whether the environment flag
+        ``PYTORCH_JIT`` is set.
+        """,
+    )
+
+# This is the sys.modules replacement trick, see
+# https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
+sys.modules[__name__] = JITModule(sys.modules[__name__])
