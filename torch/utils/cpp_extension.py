@@ -781,6 +781,8 @@ def verify_ninja_availability():
             subprocess.check_call('ninja --version'.split(), stdout=devnull)
         except OSError:
             raise RuntimeError("Ninja is required to load C++ extensions")
+        else:
+            return True
 
 
 def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
