@@ -27,34 +27,31 @@ namespace data {
 namespace datasets {
 
 /// A dataset that can yield data only in batches.
-template <typename Self, typename Batch = std::vector<Example<>>>
+template <
+    typename Self,
+    typename Batch = std::vector<Example<>>,
+    typename Index = ArrayRef<size_t>>
 class BatchDataset {
  public:
   using SelfType = Self;
   using BatchType = Batch;
+  using IndexType = Index;
 
   virtual ~BatchDataset() = default;
 
-  /// Returns a batch of data.
-  ///
-  /// Typically the `ArrayRef` will point to a vector of individual index values
-  /// at which to index the dataset. However, some datasets may not support
-  /// random indexing and instead just require the batch size, so that they can
-  /// pull the next batch of data from some (potentially infinite) stream, for
-  /// example. In that case, you can have the `ArrayRef` be just a single
-  /// number.
-  virtual Batch get_batch(ArrayRef<size_t> indices) = 0;
+  /// Returns a batch of data given an index.
+  virtual Batch get_batch(Index index) = 0;
 
-  /// Returns the size of the dataset.
-  virtual size_t size() const = 0;
+  /// Returns the size of the dataset, or an empty optional if it is unsized.
+  virtual optional<size_t> size() const = 0;
 
-  /// Creates a `MapDataset` that applies the given `tranform` to this dataset.
+  /// Creates a `MapDataset` that applies the given `transform` to this dataset.
   template <typename TransformType>
   MapDataset<Self, TransformType> map(TransformType transform) & {
     return datasets::map(static_cast<Self&>(*this), std::move(transform));
   }
 
-  /// Creates a `MapDataset` that applies the given `tranform` to this dataset.
+  /// Creates a `MapDataset` that applies the given `transform` to this dataset.
   template <typename TransformType>
   MapDataset<Self, TransformType> map(TransformType transform) && {
     return datasets::map(
@@ -88,6 +85,9 @@ class Dataset : public BatchDataset<Self, std::vector<SingleExample>> {
     return batch;
   }
 };
+
+template <typename Self, typename Batch = std::vector<Example<>>>
+using StreamDataset = BatchDataset<Self, Batch, size_t>;
 } // namespace datasets
 } // namespace data
 } // namespace torch

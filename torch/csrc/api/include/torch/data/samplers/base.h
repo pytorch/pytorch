@@ -15,20 +15,22 @@ class InputArchive;
 namespace torch {
 namespace data {
 namespace samplers {
-
-/// A `Sampler` is an object that yields indices with which to index into a
+/// A `Sampler` is an object that yields an index with which to access a
 /// dataset.
+template <typename Index = std::vector<size_t>>
 class Sampler {
  public:
+  using IndexType = Index;
+
   virtual ~Sampler() = default;
 
   /// Resets the `Sampler`'s internal state.
   /// Typically called before a new epoch.
   virtual void reset() = 0;
 
-  /// Returns the next batch of indices if possible, or an empty optional if the
+  /// Returns the next index if possible, or an empty optional if the
   /// sampler is exhausted for this epoch.
-  virtual optional<std::vector<size_t>> next(size_t batch_size) = 0;
+  virtual optional<Index> next(size_t batch_size) = 0;
 
   /// Serializes the `Sampler` to the `archive`.
   virtual void save(serialize::OutputArchive& archive) const = 0;
@@ -38,14 +40,22 @@ class Sampler {
 };
 
 /// Serializes a `Sampler` into an `OutputArchive`.
+template <typename Index>
 serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
-    const Sampler& sampler);
+    const Sampler<Index>& sampler) {
+  sampler.save(archive);
+  return archive;
+}
 
 /// Deserializes a `Sampler` from an `InputArchive`.
+template <typename Index>
 serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
-    Sampler& sampler);
+    Sampler<Index>& sampler) {
+  sampler.load(archive);
+  return archive;
+}
 } // namespace samplers
 } // namespace data
 } // namespace torch
