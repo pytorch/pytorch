@@ -8510,7 +8510,12 @@ class TestCustomOperators(JitTestCase):
         @torch.jit.script
         def func(x):
             return torch.ops.aten.relu(x)
-        self.assertExpected(canonical(func.graph))
+        self.assertExpectedInline(canonical(func.graph), '''\
+graph(%x : Dynamic) {
+  %1 : Dynamic = aten::relu(%x)
+  return (%1);
+}
+''')
 
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
 # and we have to disable the failing tests here instead.
