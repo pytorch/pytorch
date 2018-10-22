@@ -1,6 +1,9 @@
 #include "torch/csrc/jit/fuser/interface.h"
 
 #include "torch/csrc/jit/fuser/config.h"
+#include "torch/csrc/jit/fuser/compiler.h"
+#include "torch/csrc/jit/fuser/executor.h"
+#include "torch/csrc/jit/fuser/fallback.h"
 
 #if USE_CPU_FUSER
   #include "torch/csrc/jit/fuser/cpu/interface.h"
@@ -23,20 +26,16 @@ bool cpu_fuser_enabled = false;
 // Pure virtual destructor definition
 FusionHandle::~FusionHandle() { }
 
-std::shared_ptr<FusionHandle> getFusionHandle(Node* fusion_group) {
-  const auto device = fusion_group->i(attr::device);
-  if (device == kCPUDevice) {
-    #if USE_CPU_FUSER
-      return fuser::cpu::getFusionHandle(fusion_group);
-    #endif
-    throw std::runtime_error("CPU fusion is not supported on this build.");
+void registerFusion(int64_t& key, const Node* fusion_group) {
+  fuser::registerFusion(key, fusion_group); 
+}
+
+void runFusion(const int64_t key, Stack& stack) {
+  try {
+    fuser::runFusion(key, stack);
+  } catch (...) {
+    fuser::runFallback(key, stack);
   }
-
-  #if USE_CUDA_FUSER
-    return fuser::cuda::getFusionHandle(fusion_group);
-  #endif // USE_CUDA_FUSER
-
-  throw std::runtime_error("CUDA fusion is not supported on this build.");
 }
 
 bool canFuseOnCPU() {

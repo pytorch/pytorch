@@ -7,6 +7,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/fuser/common/fusion_handle_impl.h"
+#include "torch/csrc/jit/fuser/kernel_spec.h"
 
 #include <memory>
 #include <vector>
@@ -22,7 +23,9 @@ struct CUDAFusionCompiler {
 
   ~CUDAFusionCompiler() = default;
 
-  std::shared_ptr<FusionHandle> getFusionHandle(Node* fusion_group);
+  std::shared_ptr<FusionHandle> getFusionHandle(
+    const KernelSpec& spec
+  , const int device);
   
   std::vector<at::Tensor> debugLaunchGraph(
     Graph& graph

@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <vector>
+#include <cstdint>
 
 namespace torch { namespace jit {
 
@@ -18,7 +19,8 @@ struct TORCH_API FusionHandle {
   virtual ~FusionHandle() = 0;
 };
 
-TORCH_API std::shared_ptr<FusionHandle> getFusionHandle(Node* fusion_group);
+TORCH_API void registerFusion(int64_t& key, const Node* fusion_group);
+TORCH_API void runFusion(const int64_t key, Stack& stack);  
 
 TORCH_API bool canFuseOnCPU();
 TORCH_API bool canFuseOnGPU();

@@ -140,26 +140,6 @@ namespace torch { namespace jit { namespace fuser {
 //          This shows the part until post-chunk-inputs. Extending it to pre-chunk-inputs
 //          is straightforward (needs a simple lemma for moving expands through chunks).
 
-// Register implementations of fused operators, so that we can reuse the fused graph
-// to generate fallback code.
-RegisterOperators reg_fused_operators({
-  Operator(
-    prim::FusedConcat,
-    [](Node* node) {
-      int64_t dim = node->i(attr::dim);
-      int64_t num_inputs = node->inputs().size();
-      return [dim, num_inputs](Stack& stack) {
-        auto result = at::cat(
-          fmap(last(stack, num_inputs), [](const IValue& i) { return i.toTensor(); }),
-          dim
-        );
-        drop(stack, num_inputs);
-        pack(stack, std::move(result));
-        return 0;
-      };
-    })
-});
-
 FusionHandleImpl::FusionHandleImpl(
   std::shared_ptr<Graph> _graph
 , int device)

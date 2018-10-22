@@ -5,6 +5,7 @@
 #include "ATen/ATen.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/fuser/kernel_spec.h"
 #include "torch/csrc/jit/fuser/cuda/fusion_compiler.h"
 
 #include <vector>
@@ -12,11 +13,13 @@
 
 namespace torch { namespace jit { namespace fuser { namespace cuda {
 
-inline std::shared_ptr<FusionHandle> getFusionHandle(Node* fusion_group) {
-  return getFusionCompiler().getFusionHandle(fusion_group);
+inline std::shared_ptr<FusionHandle> getFusionHandle(
+  const KernelSpec& spec
+, const int device) {
+  return getFusionCompiler().getFusionHandle(spec, device);
 }
 
-std::vector<at::Tensor> debugLaunchGraph(
+inline std::vector<at::Tensor> debugLaunchGraph(
   Graph& graph
 , int device
 , at::ArrayRef<at::Tensor> inputs) {

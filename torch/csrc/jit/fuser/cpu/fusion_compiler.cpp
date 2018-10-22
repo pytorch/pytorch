@@ -42,18 +42,16 @@ CPUFusionCompiler::CPUFusionCompiler() {
   config_.debug = debug_env && atoi(debug_env) != 0;
 }
 
-std::shared_ptr<FusionHandle> CPUFusionCompiler::getFusionHandle(Node* fusion_group) {
-  int device = fusion_group->i(attr::device);
-  JIT_ASSERT(device == kCPUDevice);
-  auto graph = fusion_group->g(attr::Subgraph)->copy();
-  EraseShapeInformation(*graph);
-  std::stringstream key;
-  key << "device " << device << "\n";
-  key << *graph << "\n";
-  std::string key_ = key.str();
-  auto it = cache_map.find(key_);
+std::shared_ptr<FusionHandle> CPUFusionCompiler::getFusionHandle(
+  const KernelSpec& spec) {
+  std::stringstream ss;
+  ss << *(spec.graph()) << "\n";
+  std::string key = ss.str();
+  auto it = cache_map.find(key);
   if (it == cache_map.end()) {
-    std::tie(it, std::ignore) = cache_map.emplace(key_, std::make_shared<FusionHandleImpl>(graph, device));
+    std::tie(it, std::ignore) = cache_map.emplace(
+      key
+    , std::make_shared<FusionHandleImpl>(spec.graph(), kCPUDevice));
   }
   return it->second;
 }
@@ -71,7 +69,11 @@ std::vector<at::Tensor> CPUFusionCompiler::debugLaunchGraph(
   for (size_t i = 0; i < graph.outputs().size(); ++i) {
     wrapper_graph->registerOutput(fusion_group->addOutput());
   }
-  auto cache = getFusionHandle(fusion_group);
+
+  auto graph_copy = fusion_group->g(attr::Subgraph)->copy();
+  EraseShapeInformation(*graph_copy);
+  KernelSpec spec{0, graph_copy};
+  auto cache = getFusionHandle(spec);
   Stack stack = fmap<IValue>(inputs);
   cache->run(stack);
   return fmap(stack, [](const IValue& iv) { return iv.toTensor(); });

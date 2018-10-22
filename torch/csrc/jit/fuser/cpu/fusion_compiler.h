@@ -6,6 +6,7 @@
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/fuser/kernel_spec.h"
 #include "torch/csrc/jit/fuser/common/fusion_handle_impl.h"
 
 #include <memory>
@@ -28,7 +29,9 @@ struct CPUFusionCompiler {
 
   ~CPUFusionCompiler() = default;
 
-  std::shared_ptr<FusionHandle> getFusionHandle(Node* fusion_group);
+  std::shared_ptr<FusionHandle> getFusionHandle(
+    const KernelSpec& spec
+  );
   
   std::vector<at::Tensor> debugLaunchGraph(
     Graph& graph

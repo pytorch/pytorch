@@ -62,10 +62,16 @@ RegisterOperators reg({
     Operator(
         prim::FusionGroup,
         [](Node* node) {
-          auto handle = getFusionHandle(node);
-          return [handle](Stack& stack) {
+          // Acquires FusionKey if not present
+          if (!node->hasAttribute(attr::FusionKey)) {
+            int64_t key;
+            registerFusion(key, node);
+            node->i_(attr::FusionKey, key);
+          }
+          const auto key = node->i(attr::FusionKey);
+          return [key](Stack& stack) {
             autograd::profiler::RecordFunction record("FusionGroup");
-            handle->run(stack);
+            runFusion(key, stack);
             return 0;
           };
         }),
