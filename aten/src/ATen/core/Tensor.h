@@ -161,7 +161,7 @@ public:
   Layout layout() const noexcept;
 
   /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.h
-  const caffe2::TypeMeta& dtype() const noexcept;
+  const caffe2::TypeMeta dtype() const noexcept;
 
   /// Returns a `Tensor`'s device.
   Device device() const;
