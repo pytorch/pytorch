@@ -578,6 +578,7 @@ class TestAutograd(TestCase):
         (sparse_fn1(x) + sparse_fn2(x)).sum().backward()
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
+    @skipIfRocm
     def test_sparse_ctor_getter_backward(self):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
         def test(size, sparse_dim, nnz, device):
