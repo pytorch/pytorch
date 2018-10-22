@@ -58,8 +58,12 @@ struct CAFFE2_API Type {
   virtual caffe2::TypeMeta typeMeta() const = 0;
   virtual Backend backend() const = 0;
   Layout layout() const noexcept { return layout_from_backend(backend()); }
-  virtual bool is_cuda() const = 0;
-  virtual bool is_sparse() const = 0;
+  bool is_cuda() const {
+    return backend() == Backend::CUDA || backend() == Backend::SparseCUDA;
+  }
+  bool is_sparse() const {
+    return backend() == Backend::SparseCPU || Backend() == Backend::SparseCUDA;
+  }
   virtual bool is_distributed() const = 0;
   bool is_variable() const noexcept { return is_variable_; }
   bool is_undefined() const noexcept { return is_undefined_; }

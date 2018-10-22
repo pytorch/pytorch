@@ -898,10 +898,6 @@
 - func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
   variants: function, method
 
-- func: is_cuda(Tensor self) -> bool
-  variants: function, method
-  device_guard: false
-
 - func: is_distributed(Tensor self) -> bool
   variants: function, method
   device_guard: false
@@ -923,10 +919,6 @@
   device_guard: false
 
 - func: is_signed(Tensor self) -> bool
-  variants: function, method
-  device_guard: false
-
-- func: is_sparse(Tensor self) -> bool
   variants: function, method
   device_guard: false
 

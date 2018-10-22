@@ -89,6 +89,26 @@ inline int64_t get_device(Tensor self) {
   return self.get_device();
 }
 
+inline bool Tensor::is_cuda() const {
+  // NB: avoids dispatch for perf reasons
+  const auto& tid = impl_->type_id();
+  return tid == CUDATensorId() || tid == SparseCUDATensorId();
+}
+
+inline bool is_cuda(Tensor self) {
+  return self.is_cuda();
+}
+
+inline bool Tensor::is_sparse() const {
+  // NB: avoids dispatch for perf reasons.
+  const auto& tid = impl_->type_id();
+  return tid == SparseCPUTensorId() || tid == SparseCUDATensorId();
+}
+
+inline bool is_sparse(Tensor self) {
+  return self.is_sparse();
+}
+
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \
   inline T* Tensor::data() const {               \

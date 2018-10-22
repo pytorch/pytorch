@@ -12,12 +12,6 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
 
   // Make sure overload resolution considers the nullary virtual method.
   // (A single argument overload is generated in the list.)
-  bool is_cuda() const override {
-    return backend() == Backend::CUDA || backend() == Backend::SparseCUDA;
-  }
-  bool is_sparse() const override {
-    return backend() == Backend::SparseCPU || backend() == Backend::SparseCUDA;
-  }
   bool is_distributed() const override {
     return false;
   }

@@ -782,9 +782,6 @@ inline Tensor Tensor::inverse() const {
 inline Tensor Tensor::isclose(const Tensor & other, double rtol, double atol, bool equal_nan) const {
     return type().isclose(*this, other, rtol, atol, equal_nan);
 }
-inline bool Tensor::is_cuda() const {
-    return type().is_cuda(*this);
-}
 inline bool Tensor::is_distributed() const {
     return type().is_distributed(*this);
 }
@@ -802,9 +799,6 @@ inline bool Tensor::is_same_size(const Tensor & other) const {
 }
 inline bool Tensor::is_signed() const {
     return type().is_signed(*this);
-}
-inline bool Tensor::is_sparse() const {
-    return type().is_sparse(*this);
 }
 inline std::tuple<Tensor,Tensor> Tensor::kthvalue(int64_t k, int64_t dim, bool keepdim) const {
     return type().kthvalue(*this, k, dim, keepdim);
@@ -1271,6 +1265,26 @@ inline int64_t Tensor::get_device() const {
 
 inline int64_t get_device(Tensor self) {
   return self.get_device();
+}
+
+inline bool Tensor::is_cuda() const {
+  // NB: avoids dispatch for perf reasons
+  const auto& tid = impl_->type_id();
+  return tid == CUDATensorId() || tid == SparseCUDATensorId();
+}
+
+inline bool is_cuda(Tensor self) {
+  return self.is_cuda();
+}
+
+inline bool Tensor::is_sparse() const {
+  // NB: avoids dispatch for perf reasons.
+  const auto& tid = impl_->type_id();
+  return tid == SparseCPUTensorId() || tid == SparseCUDATensorId();
+}
+
+inline bool is_sparse(Tensor self) {
+  return self.is_sparse();
 }
 
 #define DEFINE_CAST(T, name, _)                  \

@@ -2,6 +2,7 @@
 
 #include "ATen/core/ATenGeneral.h"
 #include "ATen/core/Allocator.h"
+//#include "ATen/core/Backend.h"
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/Generator.h"
 #include "ATen/core/Layout.h"
@@ -87,8 +88,12 @@ struct CAFFE2_API Type {
   virtual caffe2::TypeMeta typeMeta() const = 0;
   virtual Backend backend() const = 0;
   Layout layout() const noexcept { return layout_from_backend(backend()); }
-  virtual bool is_cuda() const = 0;
-  virtual bool is_sparse() const = 0;
+  bool is_cuda() const {
+    return backend() == Backend::CUDA || backend() == Backend::SparseCUDA;
+  }
+  bool is_sparse() const {
+    return backend() == Backend::SparseCPU || Backend() == Backend::SparseCUDA;
+  }
   virtual bool is_distributed() const = 0;
   bool is_variable() const noexcept { return is_variable_; }
   bool is_undefined() const noexcept { return is_undefined_; }
@@ -456,14 +461,12 @@ struct CAFFE2_API Type {
   virtual Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & values) const = 0;
   virtual Tensor inverse(const Tensor & self) const = 0;
   virtual Tensor isclose(const Tensor & self, const Tensor & other, double rtol, double atol, bool equal_nan) const = 0;
-  virtual bool is_cuda(const Tensor & self) const = 0;
   virtual bool is_distributed(const Tensor & self) const = 0;
   virtual bool is_floating_point(const Tensor & self) const = 0;
   virtual bool is_complex(const Tensor & self) const = 0;
   virtual bool is_nonzero(const Tensor & self) const = 0;
   virtual bool is_same_size(const Tensor & self, const Tensor & other) const = 0;
   virtual bool is_signed(const Tensor & self) const = 0;
-  virtual bool is_sparse(const Tensor & self) const = 0;
   virtual std::tuple<Tensor,Tensor> kthvalue(const Tensor & self, int64_t k, int64_t dim, bool keepdim) const = 0;
   virtual Tensor log(const Tensor & self) const = 0;
   virtual Tensor & log_(Tensor & self) const = 0;

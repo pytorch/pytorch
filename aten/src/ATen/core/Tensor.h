@@ -169,6 +169,12 @@ public:
   /// Returns a `Tensor`'s device index.
   int64_t get_device() const;
 
+  /// Returns if a `Tensor`'s has CUDA backend.
+  bool is_cuda() const;
+
+  /// Returns if a `Tensor`'s has sparse backend.
+  bool is_sparse() const;
+
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
   TensorOptions options() const;
@@ -496,14 +502,12 @@ public:
   Tensor & index_put_(TensorList indices, const Tensor & values);
   Tensor inverse() const;
   Tensor isclose(const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
-  bool is_cuda() const;
   bool is_distributed() const;
   bool is_floating_point() const;
   bool is_complex() const;
   bool is_nonzero() const;
   bool is_same_size(const Tensor & other) const;
   bool is_signed() const;
-  bool is_sparse() const;
   std::tuple<Tensor,Tensor> kthvalue(int64_t k, int64_t dim=-1, bool keepdim=false) const;
   Tensor log() const;
   Tensor & log_();
