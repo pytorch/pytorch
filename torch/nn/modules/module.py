@@ -20,27 +20,6 @@ def _addindent(s_, numSpaces):
     return s
 
 
-def _check_same_shape(base, new, caller_name):
-    if not isinstance(base, tuple):
-        base = (base,)
-        new = (new,)
-    if type(base) != type(new):
-        raise RuntimeError("{} returned invalid type {} "
-                           "expected {}".format(caller_name, type(new).__name__, type(base).__name__))
-    if not len(base) == len(new):
-        raise RuntimeError("{} return an incorrect number of "
-                           "results {}, expected {}".format(caller_name, len(new), len(base)))
-    for arg_index, (base_el, new_el) in enumerate(zip(base, new)):
-        if type(base_el) != type(new_el):
-            raise RuntimeError("{} returned invalid type for element {}: {}"
-                               ", expected {}".format(caller_name, arg_index, type(new_el).__name__,
-                                                      type(base_el).__name__))
-        if torch.is_tensor(base_el) and not base_el.size() == new_el.size():
-            raise RuntimeError("{} returned invalid size for element {}:"
-                               " expected {} got {}".format(caller_name, arg_index, base_el.size(),
-                                                            new_el.size()))
-
-
 def _get_prev_function(var):
     while not isinstance(var, torch.Tensor):
         if isinstance(var, dict):
@@ -520,15 +499,15 @@ class Module(object):
                                    "".format(i, position, self.__class__.__name__, type(element).__name__))
 
     def _get_backward_hooks(self):
-        backward_hooks = []
-        for user_hook in self._backward_hooks.values():
-            backward_hooks.append(hooks.BackwardHook(self, user_hook))
-        return backward_hooks
+        return [hooks.BackwardHook(self, user_hook) for user_hook in self._backward_hooks.values()]
 
     def __call__(self, *input, **kwargs):
         if len(self._backward_hooks) > 0:
             backward_hooks = self._get_backward_hooks()
 
+            if len(kwargs) > 0:
+                warning.warn("Backward hooks on {} will ignore keywords arguments.".format(
+                            self.__class__.__name__))
             self._validate_backward_hook_args("input", input)
             input = Noop.apply(*input)
 
@@ -540,7 +519,6 @@ class Module(object):
         for hook in self._forward_pre_hooks.values():
             hook_result = hook(self, input)
             if hook_result is not None:
-                _check_same_shape(input, hook_result, "forward pre hook '{}'".format(hook))
                 input = hook_result
         if torch._C._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
@@ -550,7 +528,6 @@ class Module(object):
         for hook in self._forward_hooks.values():
             hook_result = hook(self, input, result)
             if hook_result is not None:
-                _check_same_shape(result, hook_result, "forward hook '{}'".format(hook))
                 result = hook_result
 
         if len(self._backward_hooks) > 0:

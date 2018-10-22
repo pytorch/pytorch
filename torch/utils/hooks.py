@@ -39,7 +39,7 @@ class RemovableHandle(object):
         self.remove()
 
 
-class BackwardHook():
+class BackwardHook(object):
     def __init__(self, module, user_hook):
         self.grad_outputs = None
         self.user_hook = user_hook

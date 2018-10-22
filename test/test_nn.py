@@ -639,17 +639,29 @@ class TestNN(NNTestCase):
         test_bwd.remove()
 
     def test_hook_backward_size(self):
-        module = nn.Linear(5, 10)
-        input = torch.randn(5, 5, requires_grad=True)
+        # Make module with multiple operations in forward
+        # And different size for input and outputs
+        class MyModule(nn.Module):
+            def forward(self, arg1, arg2):
+                tmp = arg1.sum() * arg2
+                tmp = tmp + arg2.sum() * arg1.sum()
+                tmp = tmp.sum().view(1)
+                tmp = tmp.expand(8).contiguous()
+                return tmp
+
+        module = MyModule()
+        inp1 = torch.randn(5, 5, requires_grad=True)
+        inp2 = torch.randn(10, 10, requires_grad=True)
 
         def bw_hook(module, grad_input, grad_output):
-            self.assertEqual(len(grad_input), 1)
+            self.assertEqual(len(grad_input), 2)
             self.assertEqual(grad_input[0].size(), torch.Size([5, 5]))
+            self.assertEqual(grad_input[1].size(), torch.Size([10, 10]))
             self.assertEqual(len(grad_output), 1)
-            self.assertEqual(grad_output[0].size(), torch.Size([5, 10]))
+            self.assertEqual(grad_output[0].size(), torch.Size([8]))
 
         with module.register_backward_hook(bw_hook):
-            module(input).sum().backward()
+            module(inp1, inp2).sum().backward()
 
     def test_hook_cpp(self):
         counter = [0]
@@ -675,50 +687,11 @@ class TestNN(NNTestCase):
 
         input = torch.randn(5, 5, requires_grad=True)
 
-        def fw_fail1(self, input, output):
-            return 1
-
-        def fw_fail2(self, inputs, outputs):
-            return (1, 2, 3)
-
-        def fw_fail3(self, inputs, outputs):
-            return (inputs[0], 1)
-
-        def fw_fail4(self, inputs, outputs):
-            return inputs[0][:-1], None
-
         def bw_fail1(self, grad_input, grad_output):
             return grad_input[:-1]
 
         def bw_fail2(self, grad_input, grad_output):
             return grad_input + (torch.randn(2, 2),)
-
-        with module.register_forward_hook(fw_fail1):
-            with self.assertRaises(RuntimeError) as err:
-                module(input)
-            self.assertIn("fw_fail1", err.exception.args[0])
-            self.assertIn("invalid type", err.exception.args[0])
-            self.assertIn("int", err.exception.args[0])
-
-        with module_more_args.register_forward_hook(fw_fail2):
-            with self.assertRaises(RuntimeError) as err:
-                module_more_args(input, input)
-            self.assertIn("fw_fail2", err.exception.args[0])
-            self.assertIn("incorrect number of results 3", err.exception.args[0])
-            self.assertIn("expected 2", err.exception.args[0])
-
-        with module_more_args.register_forward_hook(fw_fail3):
-            with self.assertRaises(RuntimeError) as err:
-                module_more_args(input, input)
-            self.assertIn("fw_fail3", err.exception.args[0])
-            self.assertIn("invalid type for element 1", err.exception.args[0])
-
-        with module_more_args.register_forward_hook(fw_fail4):
-            with self.assertRaises(RuntimeError) as err:
-                module_more_args(input, input)
-            self.assertIn("fw_fail4", err.exception.args[0])
-            self.assertIn("invalid size for element 0", err.exception.args[0])
-            self.assertIn("expected torch.Size([5, 5])", err.exception.args[0])
 
         with module.register_backward_hook(bw_fail1):
             with self.assertRaises(RuntimeError) as err:
