@@ -105,7 +105,7 @@ private:
   }
 
   void create(const int64_t device) {
-    at::DeviceGuard device_guard{static_cast<int16_t>(device_)};
+    at::DeviceGuard device_guard{static_cast<int16_t>(device)};
     AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
 
     is_created_ = true;
