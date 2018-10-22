@@ -865,11 +865,6 @@ NCCL_LIB = os.path.join(lib_path, 'libnccl.so.2')
 C10D_LIB = os.path.join(lib_path, 'libc10d.a')
 
 # static library only
-if DEBUG:
-    PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobufd.a')
-else:
-    PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobuf.a')
-
 if IS_DARWIN:
     CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.dylib')]
     if USE_CUDA:
@@ -887,14 +882,10 @@ if IS_WINDOWS:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
     if USE_ROCM:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
-    if DEBUG:
-        PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobufd.lib')
-    else:
-        PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobuf.lib')
 
 main_compile_args = ['-D_THP_CORE', '-DONNX_NAMESPACE=' + ONNX_NAMESPACE]
 main_libraries = ['shm']
-main_link_args = CAFFE2_LIBS + [PROTOBUF_STATIC_LIB]
+main_link_args = CAFFE2_LIBS
 if IS_WINDOWS:
     main_link_args.append(os.path.join(lib_path, 'torch.lib'))
 elif IS_DARWIN:

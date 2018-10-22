@@ -252,6 +252,12 @@ class TestBindings(test_util.TestCase):
         for node in [x, y]:
             assert node.isTensor()
 
+    def test_delete_node(self):
+        nn = ng.NNModule()
+        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        nn.dataFlow.deleteNode(node)
+        assert len(nn.dataFlow.getMutableNodes()) == 0
+
     def test_annotation_basic(self):
         annot = ng.Annotation()
         annot.setDevice("woot")
@@ -267,6 +273,16 @@ class TestBindings(test_util.TestCase):
         node.setAnnotation(annot)
         new_annot = node.getAnnotation()
         assert new_annot.getDeviceType() == 7
+
+    def test_annotation_device_option(self):
+        nn = ng.NNModule()
+        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        d = caffe2_pb2.DeviceOption()
+        d.node_name = "test"
+        node.annotation.device_option = d
+        # access in a different way
+        d_2 = nn.controlFlow[0].annotation.device_option
+        assert d == d_2
 
     def test_distributed_annotations(self):
         nn = ng.NNModule()

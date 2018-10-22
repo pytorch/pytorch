@@ -15,9 +15,9 @@
 
 #pragma once
 
-#include <c10/util/C++17.h>
-#include <ATen/core/Error.h>
 #include <ATen/core/SmallVector.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
 
 #include <array>
 #include <iterator>

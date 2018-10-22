@@ -59,6 +59,10 @@
   dispatch:
      CUDA: masked_scale_cuda
 
+- func: _reshape_from_tensor(Tensor self, Tensor shape) -> Tensor
+
+- func: _shape_as_tensor(Tensor self) -> Tensor
+
 - func: dropout(Tensor input, double p, bool train) -> Tensor
 
 - func: dropout_(Tensor self, double p, bool train) -> Tensor

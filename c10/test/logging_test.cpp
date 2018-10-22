@@ -1,9 +1,13 @@
 #include <algorithm>
 
-#include "caffe2/core/logging.h"
 #include <gtest/gtest.h>
+#include "c10/util/Logging.h"
 
-namespace caffe2 {
+namespace c10_test {
+
+using std::set;
+using std::string;
+using std::vector;
 
 TEST(LoggingTest, TestEnforceTrue) {
   // This should just work.
@@ -12,14 +16,14 @@ TEST(LoggingTest, TestEnforceTrue) {
 
 TEST(LoggingTest, TestEnforceFalse) {
   bool kFalse = false;
-  std::swap(c10::FLAGS_caffe2_use_fatal_for_enforce, kFalse);
+  std::swap(FLAGS_caffe2_use_fatal_for_enforce, kFalse);
   try {
     CAFFE_ENFORCE(false, "This throws.");
     // This should never be triggered.
     ADD_FAILURE();
-  } catch (const EnforceNotMet&) {
+  } catch (const ::c10::Error&) {
   }
-  std::swap(c10::FLAGS_caffe2_use_fatal_for_enforce, kFalse);
+  std::swap(FLAGS_caffe2_use_fatal_for_enforce, kFalse);
 }
 
 TEST(LoggingTest, TestEnforceEquals) {
@@ -29,7 +33,7 @@ TEST(LoggingTest, TestEnforceEquals) {
     CAFFE_ENFORCE_THAT(Equals(++x, ++y));
     // This should never be triggered.
     ADD_FAILURE();
-  } catch (const EnforceNotMet& err) {
+  } catch (const ::c10::Error& err) {
     EXPECT_NE(err.msg().find("5 vs 6"), string::npos);
   }
 
@@ -45,11 +49,11 @@ TEST(LoggingTest, EnforceShowcase) {
   int one = 1;
   int two = 2;
   int three = 3;
-#define WRAP_AND_PRINT(exp)                     \
-  try {                                         \
-    exp;                                        \
-  } catch (const EnforceNotMet&) {              \
-    /* EnforceNotMet already does LOG(ERROR) */ \
+#define WRAP_AND_PRINT(exp)                    \
+  try {                                        \
+    exp;                                       \
+  } catch (const ::c10::Error&) {              \
+    /* ::c10::Error already does LOG(ERROR) */ \
   }
   WRAP_AND_PRINT(CAFFE_ENFORCE_EQ(one, two));
   WRAP_AND_PRINT(CAFFE_ENFORCE_NE(one * 2, two));
@@ -76,10 +80,10 @@ TEST(LoggingTest, Join) {
 #if GTEST_HAS_DEATH_TEST
 TEST(LoggingDeathTest, TestEnforceUsingFatal) {
   bool kTrue = true;
-  std::swap(c10::FLAGS_caffe2_use_fatal_for_enforce, kTrue);
+  std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
   EXPECT_DEATH(CAFFE_ENFORCE(false, "This goes fatal."), "");
-  std::swap(c10::FLAGS_caffe2_use_fatal_for_enforce, kTrue);
+  std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
 }
 #endif
 
-} // namespace caffe2
+} // namespace c10_test

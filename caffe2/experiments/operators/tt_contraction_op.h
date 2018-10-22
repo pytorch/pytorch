@@ -44,8 +44,8 @@ class TTContractionOp final : public Operator<Context> {
 
     CAFFE_ENFORCE(A.ndim() == 2, A.ndim());
 
-    int64_t A_size = A.size_from_dim(0);
-    int64_t B_size = B.size_from_dim(0);
+    int64_t A_size = A.numel();
+    int64_t B_size = B.numel();
 
     CAFFE_ENFORCE(
         K_ * M_ == A_size,
@@ -106,7 +106,7 @@ class TTContractionGradientOp final : public Operator<Context> {
     auto* dA = Output(0);
     auto* dB = Output(1);
 
-    int64_t G_size = G.size_from_dim(0);
+    int64_t G_size = G.numel();
     int64_t D_ = G_size / (M_ * N_);
 
     int64_t dB_size = D_ * K_ * N_;

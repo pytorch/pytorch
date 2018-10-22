@@ -7,7 +7,7 @@ from itertools import product
 import torch
 import torch.cuda
 from torch.nn.functional import _Reduction
-from common import TestCase, to_gpu, freeze_rng_state, is_iterable, TEST_WITH_ROCM
+from common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, TEST_WITH_ROCM
 from common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 import torch.backends.cudnn

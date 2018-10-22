@@ -321,7 +321,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
             activation_,
             nullptr /* activation parameter */,
             pool,
-            c10::FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
+            FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
         if (status == nnp_status_insufficient_buffer) {
           /* Query required workspace size, increase buffer, and try again */
           status = nnp_convolution_inference(
@@ -375,7 +375,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
                 activation_,
                 nullptr /* activation parameter */,
                 pool,
-                c10::FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
+                FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
           }
         }
 
@@ -383,7 +383,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
         CAFFE_ENFORCE(
             nnp_status_success == status,
             "NNPACK convolution computation returned error");
-        if (c10::FLAGS_caffe2_profile_nnpack) {
+        if (FLAGS_caffe2_profile_nnpack) {
           char buffer[1024];
           const double gmacs =
               double(

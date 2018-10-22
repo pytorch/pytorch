@@ -173,7 +173,7 @@ OPERATOR_SCHEMA(Conv)
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
         ConvPoolOpBase<CPUContext>::CostInferenceForConv))
     .FillUsing(ConvDocGenerator(""))
-    .InheritOnnxSchema("Conv");
+    .InheritOnnxSchema();
 
 REGISTER_CPU_OPERATOR(Conv1D, ConvOp<float, CPUContext>);
 

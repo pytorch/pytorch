@@ -51,17 +51,19 @@ class BlobTestFooSerializer : public BlobSerializerBase {
    * otherwise this function produces a fatal error.
    */
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(blob.IsType<BlobTestFoo>());
+    CAFFE_ENFORCE(typeMeta.Match<BlobTestFoo>());
 
     BlobProto blob_proto;
     blob_proto.set_name(name);
     blob_proto.set_type("BlobTestFoo");
     // For simplicity we will just serialize the 4-byte content as a string.
     blob_proto.set_content(std::string(
-        reinterpret_cast<const char*>(&(blob.Get<BlobTestFoo>().val)),
+        reinterpret_cast<const char*>(
+            &static_cast<const BlobTestFoo*>(pointer)->val),
         sizeof(int32_t)));
     acceptor(name, blob_proto.SerializeAsString());
   }
@@ -455,8 +457,8 @@ TYPED_TEST(TensorCPUTest, NoLongerSharesAfterFreeMemory) {
 
 TYPED_TEST(TensorCPUTest, KeepOnShrink) {
   // Set flags (defaults)
-  c10::FLAGS_caffe2_keep_on_shrink = true;
-  c10::FLAGS_caffe2_max_keep_on_shrink_memory = LLONG_MAX;
+  FLAGS_caffe2_keep_on_shrink = true;
+  FLAGS_caffe2_max_keep_on_shrink_memory = LLONG_MAX;
 
   vector<int> dims{2, 3, 5};
   Tensor tensor(dims, CPU);
@@ -486,8 +488,8 @@ TYPED_TEST(TensorCPUTest, KeepOnShrink) {
 
 TYPED_TEST(TensorCPUTest, MaxKeepOnShrink) {
   // Set flags
-  c10::FLAGS_caffe2_keep_on_shrink = true;
-  c10::FLAGS_caffe2_max_keep_on_shrink_memory = 8 * 4 * sizeof(TypeParam);
+  FLAGS_caffe2_keep_on_shrink = true;
+  FLAGS_caffe2_max_keep_on_shrink_memory = 8 * 4 * sizeof(TypeParam);
 
   vector<int> dims{1, 8, 8};
   Tensor tensor(dims, CPU);
@@ -507,7 +509,7 @@ TYPED_TEST(TensorCPUTest, MaxKeepOnShrink) {
   //EXPECT_NE(ptr, new_ptr);
 
   // Restore default flags
-  c10::FLAGS_caffe2_max_keep_on_shrink_memory = LLONG_MAX;
+  FLAGS_caffe2_max_keep_on_shrink_memory = LLONG_MAX;
 }
 
 TYPED_TEST(TensorCPUDeathTest, CannotAccessRawDataWhenEmpty) {
@@ -710,7 +712,7 @@ TEST(TensorTest, Half) {
   const TensorProto& tensor_proto = proto.tensor();
   EXPECT_EQ(
       tensor_proto.data_type(), TypeMetaToDataType(TypeMeta::Make<at::Half>()));
-  if (c10::FLAGS_caffe2_serialize_fp16_as_bytes) {
+  if (FLAGS_caffe2_serialize_fp16_as_bytes) {
     EXPECT_EQ(tensor_proto.byte_data().size(), 2 * kSize);
     for (int i = 0; i < kSize; ++i) {
       auto value = tensor->mutable_data<at::Half>()[i].x;
@@ -731,6 +733,15 @@ TEST(TensorTest, Half) {
   for (int i = 0; i < kSize; ++i) {
     EXPECT_EQ(new_tensor.data<at::Half>()[i].x, i % 10000);
   }
+}
+
+TEST(TensorTest, TensorFactory) {
+  Tensor a = empty({1, 2, 3}, at::device(CPU).dtype<float>());
+  EXPECT_NE(a.data<float>(), nullptr);
+  a.mutable_data<float>()[0] = 3.0;
+  Tensor b = empty({1, 2, 3}, at::device(CPU).dtype<int>());
+  EXPECT_NE(b.data<int>(), nullptr);
+  b.mutable_data<int>()[0] = 3;
 }
 
 TEST(QTensorTest, QTensorSerialization) {
@@ -850,8 +861,8 @@ TYPED_TEST_CASE(TypedTensorTest, TensorDataTypes);
 
 TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
   int64_t d1 = 2;
-  int64_t d2 = c10::FLAGS_caffe2_test_big_tensor_size
-      ? c10::FLAGS_caffe2_test_big_tensor_size / d1
+  int64_t d2 = FLAGS_caffe2_test_big_tensor_size
+      ? FLAGS_caffe2_test_big_tensor_size / d1
       : static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
   int64_t size = d1 * d2;
   string db_source = (string)std::tmpnam(nullptr);
@@ -942,11 +953,12 @@ class DummyTypeSerializer : public BlobSerializerBase {
   DummyTypeSerializer() {}
   ~DummyTypeSerializer() {}
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(blob.IsType<DummyType>());
-    const auto& container = blob.template Get<DummyType>();
+    CAFFE_ENFORCE(typeMeta.Match<DummyType>());
+    const auto& container = *static_cast<const DummyType*>(pointer);
     for (int k = 0; k < container.n_chunks; ++k) {
       std::string serialized_chunk = container.serialize(name, k);
       acceptor(c10::str(name, kChunkIdSeparator, k), serialized_chunk);
@@ -1024,8 +1036,8 @@ TEST(ContentChunks, Serialization) {
 
 TEST(CustomChunkSize, BigTensorSerialization) {
   int64_t d1 = 2;
-  int64_t d2 = c10::FLAGS_caffe2_test_big_tensor_size
-      ? c10::FLAGS_caffe2_test_big_tensor_size / d1
+  int64_t d2 = FLAGS_caffe2_test_big_tensor_size
+      ? FLAGS_caffe2_test_big_tensor_size / d1
       : static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
   int64_t size = d1 * d2;
 

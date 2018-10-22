@@ -561,6 +561,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     const FunctionSchema& schema,
     const SourceRange& loc,
     Graph& graph,
+    c10::optional<NamedValue> self,
     at::ArrayRef<NamedValue> raw_args,
     at::ArrayRef<NamedValue> kwargs,
     std::ostream& failure_messages,
@@ -596,11 +597,13 @@ c10::optional<MatchedSchema> tryMatchSchema(
 
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
-
   for (size_t schema_i = 0; schema_i < schema.arguments.size(); ++schema_i) {
     const auto& arg = schema.arguments[schema_i];
     c10::optional<NamedValue> v;
-    if (!arg.kwarg_only && schema_i < modifiedArgs.size()) {
+    if (arg.name == "self" && self) {
+      v = self;
+      self = c10::nullopt;
+    } else if (!arg.kwarg_only && used_args < modifiedArgs.size()) {
       // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
       if (arg.type->kind() == TypeKind::ListType && // the formal must be a list
           !arg.N && // it must not be a broadcasting list like int[3], otherwise
@@ -608,7 +611,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
           (schema_i + 1 == schema.arguments.size() ||
            schema.arguments[schema_i + 1]
                .kwarg_only)) { // must be the last position argument
-        auto actual_type = modifiedArgs[schema_i].value(graph)->type();
+        auto actual_type = modifiedArgs[used_args].value(graph)->type();
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(
                 actual_type,
@@ -618,7 +621,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
               elem_type,
               graph,
               loc,
-              at::ArrayRef<NamedValue>(modifiedArgs).slice(schema_i),
+              at::ArrayRef<NamedValue>(modifiedArgs).slice(used_args),
               err,
               convert_tensors_to_nums,
               type_env);
@@ -630,7 +633,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
         }
       }
 
-      v = modifiedArgs[schema_i];
+      v = modifiedArgs[used_args];
       used_args++;
     } else if (auto idx = findInputWithName(arg.name, kwargs)) {
       const NamedValue& nv = kwargs[*idx];
@@ -655,6 +658,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (!positional)
       return c10::nullopt;
     positional_inputs.push_back(positional);
+  }
+  // check for unused self argument
+  if(self != c10::nullopt) {
+    err() << "provided self argument not used in schema\n";
   }
 
   // check for unused positional arguments
@@ -721,6 +728,7 @@ Value* emitBuiltinCall(
   const SourceRange& loc,
   Graph& graph,
   Symbol name,
+  c10::optional<NamedValue> self,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
@@ -742,6 +750,7 @@ Value* emitBuiltinCall(
           op->schema(),
           loc,
           graph,
+          self,
           inputs,
           attributes,
           failure_messages,
@@ -756,6 +765,7 @@ Value* emitBuiltinCall(
               graph,
               loc,
               *method,
+              self,
               inputs,
               attributes,
               failure_messages,
@@ -789,15 +799,11 @@ static Value* ensureInt(const SourceRange& range, Value* v) {
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
     SourceRange loc,
     Method& m,
-    at::ArrayRef<NamedValue> inputs_,
+    at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  std::vector<NamedValue> inputs;
-  if (value)
-    inputs.push_back(*value);
-  inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
   return std::make_shared<SimpleValue>(emitBuiltinCall(
-      loc, *m.graph(), symbol, inputs, attributes, true));
+      loc, *m.graph(), symbol, self, inputs, attributes, true));
 }
 
 inline bool isSupportedListElementType(TypePtr type) {
@@ -1562,6 +1568,7 @@ private:
                    tree->range(),
                    *method.graph(),
                    kind,
+                   c10::nullopt,
                    named_values,
                    {},
                    /*required=*/true);
@@ -1662,7 +1669,7 @@ private:
       int64_t dim,
       Value* index) {
     return emitBuiltinCall(
-        loc, *graph, aten::select,
+        loc, *graph, aten::select, c10::nullopt,
         {input, graph->insertConstant(dim, loc), index}, {}, true);
   }
 
@@ -1691,7 +1698,7 @@ private:
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
     NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
+    return emitBuiltinCall(loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
 
   Value* emitIndex(
@@ -1700,7 +1707,7 @@ private:
       at::ArrayRef<Value*> indices) {
     auto* index = graph->insertNode(
         graph->createList(DynamicType::get(), indices))->output();
-    return emitBuiltinCall(loc, *graph, aten::index, {input, index}, {}, true);
+    return emitBuiltinCall(loc, *graph, aten::index, c10::nullopt,  {input, index}, {}, true);
   }
 
   // Emits multidimensional slicing with int and slice indices.
@@ -1819,7 +1826,7 @@ private:
       // if it's a list, emit a regular index selection op
       auto* idx = emitExpr(subscript.subscript_exprs()[0]);
       return emitBuiltinCall(
-                 loc, *graph, aten::select, {gatherable, idx}, {}, true);
+                 loc, *graph, aten::select, c10::nullopt, {gatherable, idx}, {}, true);
     } else {
       JIT_ASSERT(gatherable->type()->isSubtypeOf(DynamicType::get()));
       return emitMultidimSlicing(loc, gatherable, subscript);
@@ -1937,6 +1944,7 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
     {"int", IntType::get()},
     {"float", FloatType::get()},
     {"bool", BoolType::get()},
+    {"str", StringType::get()},
   };
   return map;
 }

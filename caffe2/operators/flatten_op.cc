@@ -77,10 +77,7 @@ Y: [[0.53432311 0.23734561 0.56481598 0.52152617 0.33662627 0.32472711
 </details>
 
 )DOC")
-    .Input(
-        0,
-        "X",
-        "*(type: Tensor)* Input Tensor of rank >= axis.")
+    .Input(0, "X", "*(type: Tensor)* Input Tensor of rank >= axis.")
     .Output(
         0,
         "Y",
@@ -92,7 +89,7 @@ Y: [[0.53432311 0.23734561 0.56481598 0.52152617 0.33662627 0.32472711
         "axis",
         "*(type: int; default: 1)* Indicates up to which input dimensions "
         "(exclusive) should be flattened to the outer dimension of the output.")
-    .InheritOnnxSchema("Flatten");
+    .InheritOnnxSchema();
 
 class GetFlattenGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

@@ -129,7 +129,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       Ydata += Y->size() / Y->dim32(0);
     }
   };
-  if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+  if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
     runWithSharedBuffer<Context>(ws_, f);
   } else {
     f(&col_buffer_);
@@ -237,7 +237,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       Ydata += Y->size() / Y->dim32(0);
     }
   };
-  if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+  if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
     runWithSharedBuffer<Context>(ws_, f);
   } else {
     f(&col_buffer_);
