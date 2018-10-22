@@ -759,7 +759,7 @@ void Gemm<float, HIPContext>(
       ? rocblas_operation_none
       : rocblas_operation_transpose;
   ROCBLAS_ENFORCE(rocblas_sgemm(
-      context->rocblas_handle(),
+      context->rocblashandle(),
       cuTransB,
       cuTransA,
       N,
@@ -803,7 +803,7 @@ void Gemm<at::Half, HIPContext>(
       : rocblas_operation_transpose;
   if (math_type == TensorProto_DataType_FLOAT) {
     ROCBLAS_CHECK(rocblas_sgemmEx(
-        context->rocblas_handle(),
+        context->rocblashandle(),
         cuTransB,
         cuTransA,
         N,
@@ -828,7 +828,7 @@ void Gemm<at::Half, HIPContext>(
 
     // call cublasHgemm
     ROCBLAS_CHECK(cublasHgemm(
-        context->rocblas_handle(),
+        context->rocblashandle(),
         cuTransB,
         cuTransA,
         N,
@@ -933,7 +933,7 @@ void GemmStridedBatched<float, HIPContext>(
       ? rocblas_operation_none
       : rocblas_operation_transpose;
   ROCBLAS_ENFORCE(rocblas_sgemm_strided_batched(
-      context->rocblas_handle(),
+      context->rocblashandle(),
       cuTransB,
       cuTransA,
       N,
@@ -1004,7 +1004,7 @@ void GemmStridedBatched<at::Half, HIPContext>(
     __half alpha_fp16 = at::Half(alpha);
     __half beta_fp16 = at::Half(beta);
     ROCBLAS_ENFORCE(cublasHgemmStridedBatched(
-        context->rocblas_handle(),
+        context->rocblashandle(),
         cuTransB,
         cuTransA,
         N,
@@ -1051,7 +1051,7 @@ void GemmEx<float, HIPContext>(
       ? rocblas_operation_none
       : rocblas_operation_transpose;
   ROCBLAS_ENFORCE(rocblas_sgemm(
-      context->rocblas_handle(),
+      context->rocblashandle(),
       cuTransB,
       cuTransA,
       N,
@@ -1083,7 +1083,7 @@ void Gemv<float, HIPContext>(
       ? rocblas_operation_transpose
       : rocblas_operation_none;
   ROCBLAS_ENFORCE(rocblas_sgemv(
-      context->rocblas_handle(),
+      context->rocblashandle(),
       cuTransA,
       N,
       M,
@@ -1170,7 +1170,7 @@ void Gemv<at::Half, HIPContext>(
 
   if (math_type == TensorProto_DataType_FLOAT) {
     ROCBLAS_CHECK(cublasSgemmEx(
-        context->rocblas_handle(),
+        context->rocblashandle(),
         cuTransA,
         rocblas_operation_none,
         m,
@@ -1192,7 +1192,7 @@ void Gemv<at::Half, HIPContext>(
     __half beta_fp16 = at::Half(beta);
 
     ROCBLAS_CHECK(cublasHgemm(
-        context->rocblas_handle(),
+        context->rocblashandle(),
         cuTransA,
         rocblas_operation_none,
         m,
@@ -1390,7 +1390,7 @@ void Dot<float, HIPContext>(
     HIPContext* context) {
   float result;
   ROCBLAS_ENFORCE(
-      rocblas_sdot(context->rocblas_handle(), n, a, 1, b, 1, &result));
+      rocblas_sdot(context->rocblashandle(), n, a, 1, b, 1, &result));
   context->CopyFromCPU<float>(1, &result, y);
 }
 
@@ -1406,7 +1406,7 @@ void Dot<at::Half, HIPContext>(
   at::Half result;
   // execute with 32-bit math
   ROCBLAS_CHECK(cublasDotEx(
-      context->rocblas_handle(),
+      context->rocblashandle(),
       n,
       a,
       CUDA_R_16F,
@@ -1879,7 +1879,7 @@ void Axpy<float, HIPContext>(
     float* Y,
     HIPContext* context) {
   ROCBLAS_ENFORCE(
-      rocblas_saxpy(context->rocblas_handle(), N, &alpha, X, 1, Y, 1));
+      rocblas_saxpy(context->rocblashandle(), N, &alpha, X, 1, Y, 1));
 }
 
 template <>
@@ -1891,7 +1891,7 @@ void Axpy<double, HIPContext>(
     HIPContext* context) {
   double alpha_d{alpha};
   ROCBLAS_ENFORCE(
-      rocblas_daxpy(context->rocblas_handle(), N, &alpha_d, X, 1, Y, 1));
+      rocblas_daxpy(context->rocblashandle(), N, &alpha_d, X, 1, Y, 1));
 }
 
 template <>
@@ -1904,7 +1904,7 @@ void Axpy<at::Half, HIPContext>(
   CAFFE_THROW("Unsupported math type");
 #if ROCBLAS_FP16
   ROCBLAS_CHECK(cublasAxpyEx(
-      context->rocblas_handle(),
+      context->rocblashandle(),
       N,
       &alpha,
       CUDA_R_16F,
