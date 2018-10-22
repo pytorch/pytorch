@@ -810,8 +810,6 @@
     CPU: embedding_dense_backward_cpu
     CUDA: embedding_dense_backward_cuda
 
-- func: embedding_dense_double_backward(Tensor grad, IndexTensor indices) -> Tensor
-
 - func: embedding_renorm_(Tensor(a!) self, IndexTensor indices, float max_norm, float norm_type) -> Tensor(a!)
   matches_jit_signature: True
   dispatch:
