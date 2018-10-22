@@ -114,6 +114,8 @@ def check_compiler_abi_compatibility(compiler):
     '''
     if not _is_binary_build():
         return True
+    if os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') in ['ON', '1', 'YES', 'TRUE', 'Y']:
+        return True
     try:
         check_cmd = '{}' if IS_WINDOWS else '{} --version'
         info = subprocess.check_output(

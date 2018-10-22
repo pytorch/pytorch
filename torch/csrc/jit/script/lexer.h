@@ -5,16 +5,11 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
-#ifdef _WIN32
-#include <locale.h>
-#else
-#include <xlocale.h>
-#endif
-
 #include <vector>
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/source_range.h"
 #include <torch/csrc/utils/memory.h>
+#include <locale.h>
 
 namespace torch {
 namespace jit {

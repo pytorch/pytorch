@@ -201,6 +201,14 @@ def unused(g):
     return g.op("prim::Undefined")
 
 
+def _shape_as_tensor(g, input):
+    return g.op('Shape', input)
+
+
+def _reshape_from_tensor(g, input, shape):
+    return g.op('Reshape', input, shape)
+
+
 def add(g, self, other, alpha=None):
     # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
     if alpha and _scalar(_maybe_get_scalar(alpha)) != 1:
