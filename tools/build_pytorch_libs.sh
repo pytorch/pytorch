@@ -127,15 +127,14 @@ else
     fi
 fi
 CPP_FLAGS=" -std=c++11 "
-GLOO_FLAGS="-DBUILD_TEST=OFF "
 THD_FLAGS=""
 NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
 if [[ $USE_CUDA -eq 1 ]]; then
-    GLOO_FLAGS+="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
+    GLOO_FLAGS+="-DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
 fi
 # Gloo infiniband support
 if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
-    GLOO_FLAGS+=" -DUSE_IBVERBS=1 -DBUILD_SHARED_LIBS=1"
+    GLOO_FLAGS+=" -DUSE_IBVERBS=1"
     THD_FLAGS="-DUSE_GLOO_IBVERBS=1"
 fi
 CWRAP_FILES="\
@@ -324,7 +323,9 @@ function build_caffe2() {
 		       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
 		       -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
 		       -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
-		       -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
+		       -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
+		       $GLOO_FLAGS \
+		       ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
@@ -369,10 +370,6 @@ for arg in "$@"; do
     if [[ "$arg" == "nccl" ]]; then
         pushd $THIRD_PARTY_DIR
         build_nccl
-        popd
-    elif [[ "$arg" == "gloo" ]]; then
-        pushd "$THIRD_PARTY_DIR"
-        build gloo $GLOO_FLAGS
         popd
     elif [[ "$arg" == "caffe2" ]]; then
         build_caffe2
