@@ -3584,6 +3584,12 @@ class TestNN(NNTestCase):
                 else:
                     self.assertRaises(ValueError, lambda: m(i, (h, w)))
 
+    def test_ConvTranspose3d_correct_output_size(self):
+        # Check that ConvTranspose3d can take a 5d output_size.
+        m = nn.ConvTranspose3d(2, 2, 2)
+        i = torch.rand(1, 2, 1, 1, 1)
+        out = m(i, output_size=(1, 2, 2, 2, 2))
+
     def _test_Conv2d_naive_groups(self, device="cpu", dtype=torch.float):
         # Check that grouped convolutions matches two half convolutions
         m = nn.Conv2d(4, 4, kernel_size=3, groups=2).to(device, dtype)
