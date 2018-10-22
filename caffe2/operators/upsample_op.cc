@@ -26,6 +26,15 @@ bool UpsampleBilinearOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   auto* Y = Output(0);
 
+  if (InputSize() == 2) {
+    const auto& scales = Input(1);
+    CAFFE_ENFORCE_EQ(scales.ndim(), 1);
+    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    const float* scales_data = scales.data<float>();
+    height_scale_ = scales_data[0];
+    width_scale_ = scales_data[1];
+  }
+
   const int batch_size = X.dim32(0);
   const int num_channels = X.dim32(1);
   const int input_height = X.dim32(2);
@@ -76,6 +85,15 @@ bool UpsampleBilinearGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& dY = Input(0);
   const auto& X = Input(1);
   auto* dX = Output(0);
+
+  if (InputSize() == 3) {
+    const auto& scales = Input(2);
+    CAFFE_ENFORCE_EQ(scales.ndim(), 1);
+    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    const float* scales_data = scales.data<float>();
+    height_scale_ = scales_data[0];
+    width_scale_ = scales_data[1];
+  }
 
   const auto inputDims = dY.dims();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
@@ -134,7 +152,7 @@ REGISTER_CPU_OPERATOR(
 
 // Input: X, output: Y
 OPERATOR_SCHEMA(UpsampleBilinear)
-    .NumInputs(1)
+    .NumInputs(1, 2)
     .NumOutputs(1)
     .Arg("width_scale", "Scale along width dimension")
     .Arg("height_scale", "Scale along height dimension")
@@ -146,11 +164,15 @@ output_width = floor(input_width * width_scale)
 output_height = floor(output_height * height_scale)
 )DOC")
     .Input(0, "X", "Input tensor")
+    .Input(
+        1,
+        "scales",
+        "1D, 2-element, Scales tensor, [height_scale, width_scale]")
     .Output(0, "Y", "Output tensor");
 
 // Input: dY, output: dX
 OPERATOR_SCHEMA(UpsampleBilinearGradient)
-    .NumInputs(2)
+    .NumInputs(2, 3)
     .NumOutputs(1)
     .Arg("width_scale", "Scale along width dimension")
     .Arg("height_scale", "Scale along height dimension");

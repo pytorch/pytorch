@@ -23,8 +23,8 @@ import numpy as np
 import tempfile
 import shutil
 import warnings
-from test_autograd import method_tests as autograd_method_tests
-from test_autograd import create_input, unpack_variables, \
+from common_methods_invocations import method_tests as autograd_method_tests
+from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
 import random
@@ -60,6 +60,7 @@ RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
+IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 
 
 def LSTMCellF(input, hx, cx, *params):
@@ -651,7 +652,7 @@ class TestJit(JitTestCase):
         ge = self.checkTrace(LSTMCellF, inputs)
         self.assertExpectedGraph(ge.graph_for(*inputs))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
     @enable_cpu_fuser
     def test_lstm_fusion_cpu(self):
@@ -1416,7 +1417,7 @@ class TestJit(JitTestCase):
     def test_ge_unoptimized(self):
         self.run_ge_tests(False, False)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_ge_optimized(self):
         self.run_ge_tests(True, False)
@@ -2004,7 +2005,7 @@ class TestJit(JitTestCase):
             torch.ones(1))
 
         @torch.jit.script
-        def hints(x, a=0.5, b=10):  # noqa: E999
+        def hints(x, a=0.5, b=10):
             # type: (Tensor, float, int) -> Tensor
             return x + a + b
 
@@ -3336,7 +3337,7 @@ a")
             for fn in fns:
                 self.checkScript(fn, [tensor])
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @skipIfRocm
     @enable_cpu_fuser
     def test_chunk_fusion_correctness(self):
@@ -3736,7 +3737,7 @@ a")
 
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_scalar_fusion(self):
         def fn(x, y):
@@ -5204,9 +5205,15 @@ a")
             q = fn(x, x)
             return x
 
+        def fn_string(str, strpair):
+            # type: (str, Tuple[str, str]) -> Tuple[str, int, str, str]
+            str1, str2 = strpair
+            return str, 2, str1, str2
+
         x = torch.ones(2, 2)
         self.checkScript(fn_unpack, (x,), optimize=True)
         self.checkScript(fn_index, (x,), optimize=True)
+        self.checkScript(fn_string, ("1", ("3", "4")), optimize=True)
 
     def test_type_annotations_varargs(self):
         def fn_varargs(x, *args):
@@ -7382,11 +7389,11 @@ a")
                 x = x + 3
             return x + 4 + inner(x)
 
-        @torch.jit.weak_script
+        @torch._jit_internal.weak_script
         def weak_script_fn_inner(x):
             return x + 6 + not_a_script_fn(x)
 
-        @torch.jit.weak_script
+        @torch._jit_internal.weak_script
         def weak_script_fn(x):
             return x + 5 + weak_script_fn_inner(x) + weak_script_fn_inner(x)
 
@@ -8068,8 +8075,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_affine_grid',
 
     # unknown builtin op
-    'test_nn_tanhshrink',
-    'test_nn_softsign',
     'test_nn_softmin',
     'test_nn_local_response_norm',
     'test_nn_poisson_nll_loss',

@@ -24,7 +24,7 @@ Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
 }
 
 Tensor _shape_as_tensor(const Tensor& self) {
-  auto options = self.options().dtype(at::kLong);
+  auto options = TensorOptions(at::kLong).is_variable(self.options().is_variable());
   return at::tensor(self.sizes(), options);
 }
 
