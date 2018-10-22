@@ -157,8 +157,6 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
     sudo sed -i 's/\ -I${dir}/\ $<$<BOOL:${dir}>:-I${dir}>/' /opt/rocm/hip/cmake/FindHIP.cmake
   fi
 
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
   export HCC_AMDGPU_TARGET=gfx900
 
   # The link time of libcaffe2_hip.so takes 40 minutes, according to

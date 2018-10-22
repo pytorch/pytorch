@@ -50,9 +50,6 @@ fi
 mkdir -p $TEST_DIR/{cpp,python}
 
 if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
-
   # Pin individual runs to specific gpu so that we can schedule
   # multiple jobs on machines that have multi-gpu.
   NUM_AMD_GPUS=$(/opt/rocm/bin/rocminfo | grep 'Device Type.*GPU' | wc -l)

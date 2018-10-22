@@ -22,6 +22,8 @@ ENV PATH /opt/rocm/hip/bin:$PATH
 ENV PATH /opt/rocm/opencl/bin:$PATH
 ENV MIOPEN_DISABLE_CACHE 1
 ENV HIP_PLATFORM hcc
+ENV LC_ALL en_US.utf8
+ENV LANG en_US.utf8
 
 # Install non-default CMake version
 ARG CMAKE_VERSION
