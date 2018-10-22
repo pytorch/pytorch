@@ -642,7 +642,7 @@ if(USE_GLOO)
       include_directories(SYSTEM ${Gloo_INCLUDE_DIRS})
       list(APPEND Caffe2_DEPENDENCY_LIBS gloo)
     else()
-      set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
+      set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
       set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
       # Temporarily override variables to avoid building Gloo tests/benchmarks
