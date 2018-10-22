@@ -1633,6 +1633,7 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "onnxifi",
       [](const py::bytes& pred_net_str,
+         const std::vector<std::string>& external_inputs,
          const std::unordered_map<std::string, std::vector<int>>& shapes,
          bool infer_shapes,
          bool debug_builder) -> py::bytes {
@@ -1647,7 +1648,8 @@ void addGlobalMethods(py::module& m) {
               it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
         }
         OnnxifiTransformer ts(infer_shapes, debug_builder);
-        ts.Transform(GetCurrentWorkspace(), &pred_net, tensor_shapes);
+        ts.Transform(
+            GetCurrentWorkspace(), &pred_net, external_inputs, tensor_shapes);
         std::string pred_net_str2;
         pred_net.SerializeToString(&pred_net_str2);
         return py::bytes(pred_net_str2);
