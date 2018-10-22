@@ -352,9 +352,6 @@ class Tensor(torch._C._TensorBase):
         else:
             return output
 
-    def __rsub__(self, other):
-        return torch.sub(other, self)
-
     def __rdiv__(self, other):
         if self.dtype.is_floating_point:
             return self.reciprocal() * other
@@ -363,6 +360,7 @@ class Tensor(torch._C._TensorBase):
 
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
+    __rsub__ = _C._TensorBase.__rsub__
 
     __pow__ = _C._TensorBase.pow
 
