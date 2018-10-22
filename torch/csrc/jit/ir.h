@@ -453,6 +453,9 @@ public:
 
   // Move 'this' (already in the graph) after 'n' in the topological order.
   //
+  // NOTE: Does not check that value dependencies are preserved, see
+  //   moveAfterTopologicallyValid
+  //
   // Given: %2 = f(%1)
   //        %3 = g(%1)
   // Execute: %2.moveAfter(%3)
@@ -461,7 +464,19 @@ public:
   //
   TORCH_API void moveAfter(Node * n);
 
+  // Move 'this' (already in the graph) after 'n' in the topological order.
+  //
+  // Tries to preserve value dependencies, so other nodes might be moved. The
+  // only guarantee is that in the new ordering, `this` is after `n`.
+  //
+  // Returns `false` if it's impossible to move `this` after `n` without
+  // violating dependencies, otherwise executes the move and returns `true`
+  TORCH_API bool moveAfterTopologicallyValid(Node * n);
+
   // Move a node 'n' (already in the graph) before 'this' in the topological order.
+  //
+  // NOTE: Does not check that value dependencies are preserved, see
+  //   moveBeforeTopologicallyValid
   //
   // Given: %2 = f(%1)
   //        %3 = g(%1)
@@ -469,6 +484,15 @@ public:
   // Result: %3 = g(%1)
   //         %2 = f(%1)
   TORCH_API void moveBefore(Node * n);
+
+  // Move 'this' (already in the graph) before 'n' in the topological order.
+  //
+  // Tries to preserve value dependencies, so other nodes might be moved. The
+  // only guarantee is that in the new ordering, `this` is before `n`
+  //
+  // Returns `false` if it's impossible to move `this` after `n` without
+  // violating dependencies, otherwise executes the move and returns `true`
+  TORCH_API bool moveBeforeTopologicallyValid(Node * n);
 
   // Remove the input at 'i' from this node.
   //
@@ -547,6 +571,19 @@ public:
 
   virtual ~Node() = default;
 private:
+  enum class MoveSide {
+    BEFORE,
+    AFTER
+  };
+  bool tryMove(Node* movePoint, MoveSide moveSide);
+  void move(Node* movePoint, MoveSide moveSide);
+
+  bool isDependent(const std::list<Node*>& nodes) const;
+
+  template<typename T>
+  bool producesFor(const T& nodes) const;
+  bool consumesFrom(const std::list<Node*>& nodes) const;
+
   std::pair<Value*, const Argument&> findInput(Symbol name);
   void findSchema() const;
   // Lookup iterator in use list of _input i_ that corresponds to its use of _this_

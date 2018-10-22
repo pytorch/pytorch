@@ -884,6 +884,175 @@ Node* Node::insertAfter(Node * n) {
   return this;
 }
 
+bool Node::moveAfterTopologicallyValid(Node* n) {
+  return tryMove(n, MoveSide::AFTER);
+}
+
+bool Node::moveBeforeTopologicallyValid(Node* n) {
+  return tryMove(n, MoveSide::BEFORE);
+}
+
+bool Node::isDependent(const std::list<Node*>& nodes) const {
+  if (nodes.empty()) {
+    return false;
+  }
+
+  if (this->isAfter(nodes.front())) {
+    return consumesFrom(nodes);
+  } else {
+    return producesFor(nodes);
+  }
+}
+
+// Try to move `this` before/after `movePoint` while preserving value
+// dependencies. Returns false iff such a move could not be made
+//
+// The basic approach is: have a "working set" that we are moving forward, one
+// node at a time. When we can't move past a node (because it depends on the
+// working set), then add it to the working set and keep moving until we hit
+// `moveAfter`.
+bool Node::tryMove(Node* movePoint, MoveSide moveSide) {
+  JIT_ASSERT(this->inBlockList() && movePoint->inBlockList());
+  JIT_ASSERT(this->owningBlock() == movePoint->owningBlock());
+  JIT_ASSERT(this != movePoint);
+
+  // 1. Move from `this` toward movePoint, building up the working set of
+  // dependencies
+  std::list<Node*> workingSet;
+  workingSet.push_back(this);
+
+  int direction;
+  if (this->isAfter(movePoint)) {
+    direction = kPrevDirection;
+  } else {
+    direction = kNextDirection;
+  }
+
+  auto curNode = this->next_in_graph[direction];
+  // Move forward one node at a time
+  while (curNode != movePoint) {
+    if (curNode->isDependent(workingSet)) {
+      // If we can't move past this node, add it to the working set
+      workingSet.push_back(curNode);
+    }
+    curNode = curNode->next_in_graph[direction];
+  }
+
+
+  // 2. Decide whether we can move it all to `movePoint`.
+
+  // Say we are moving directly before movePoint and `this` starts before
+  // movePoint in the graph. The move looks like
+  //
+  //  `this`              `this`           |
+  //  <dependencies>  ->  `movePoint`      | `this` and deps are split
+  //  `movePoint`         <dependencies>   |
+  //
+  // Contrast with the case where `this` starts AFTER movePoint:
+  //
+  //  `movePoint`         <dependencies>   |
+  //  <dependencies>  ->  `this`           | `this` and deps are together
+  //  `this`              `movePoint`      |
+  //
+  // In the first case, we need to split `this` off from its dependencies, so we
+  // can move the dependencies below `movePoint` and keep `this` above.
+  const bool splitThisAndDeps =
+      (moveSide == MoveSide::BEFORE && this->isBefore(movePoint)) ||
+      (moveSide == MoveSide::AFTER && this->isAfter(movePoint));
+
+  if (splitThisAndDeps) {
+    // remove `this` from dependencies to be moved past `movePoint`
+    workingSet.pop_front();
+  }
+
+  // Check if we can move the working set past the move point
+  if (movePoint->isDependent(workingSet)) {
+    // if we can't, then there are intermediate dependencies between the
+    // `this` and `movePoint`, so we can't do the move
+    return false;
+  }
+
+
+  // 3. Execute the move
+  JIT_ASSERT(curNode == movePoint);
+  if (splitThisAndDeps) {
+    // Move `this`
+    this->move(movePoint, moveSide);
+
+    // Then move all of its dependencies on the other side of `movePoint`
+    const auto reversed =
+        moveSide == MoveSide::BEFORE ? MoveSide::AFTER : MoveSide::BEFORE;
+    for (auto toMove : workingSet) {
+      toMove->move(curNode, reversed);
+      curNode = toMove;
+    }
+  } else {
+    // Just append/prepend everything to `movePoint`
+    for (auto toMove : workingSet) {
+      toMove->move(curNode, moveSide);
+      curNode = toMove;
+    }
+  }
+  return true;
+}
+
+// Helper function so we can generalize `tryMove`
+void Node::move(Node* movePoint, MoveSide moveSide) {
+  switch (moveSide) {
+    case MoveSide::BEFORE:
+      this->moveBefore(movePoint);
+      break;
+    case MoveSide::AFTER:
+      this->moveAfter(movePoint);
+      break;
+  }
+}
+
+// Does `this` output any values used by `nodes`?
+template <typename T>
+bool Node::producesFor(const T& nodes) const {
+  return std::any_of(nodes.begin(), nodes.end(), [&](const Node* node) {
+    return std::any_of(
+               node->inputs().cbegin(),
+               node->inputs().cend(),
+               [&](const Value* input) { return input->node() == this; }) ||
+        // Check inner blocks for any uses
+        std::any_of(
+               node->blocks().cbegin(),
+               node->blocks().cend(),
+               [&](const Block* block) {
+                 return producesFor(block->nodes());
+               });
+  });
+}
+
+static void buildInputSet(
+    const Node* node,
+    std::unordered_set<const Value*>& inputs) {
+  for (const auto input : node->inputs()) {
+    inputs.insert(input);
+  }
+
+  for (const auto block : node->blocks()) {
+    for (const auto node : block->nodes()) {
+      buildInputSet(node, inputs);
+    }
+  }
+}
+
+// Does `this` use any outputs of `nodes`?
+bool Node::consumesFrom(const std::list<Node*>& nodes) const {
+  std::unordered_set<const Value*> inputs;
+  buildInputSet(this, inputs);
+
+  return std::any_of(nodes.cbegin(), nodes.cend(), [&](const Node* node) {
+    return std::any_of(
+        node->outputs().cbegin(),
+        node->outputs().cend(),
+        [&](const Value* output) { return inputs.count(output) != 0; });
+  });
+}
+
 void Node::moveAfter(Node * n) {
   removeFromList();
   insertAfter(n);
