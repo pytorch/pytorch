@@ -21,6 +21,7 @@ import warnings
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/nccl:nccl_ops")
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops")
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops_gpu")
+dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops_hip")
 
 log = logging.getLogger("data_parallel_model")
 log.setLevel(logging.INFO)
