@@ -393,7 +393,7 @@ class TestHub(TestCase):
         hub_model = hub.load(
             'ailzhang/vision:hub',
             'wrapper1',
-            kwargs={'pretrained': True})
+            pretrained=True)
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
 
     @skipIfNoTorchVision

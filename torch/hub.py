@@ -65,23 +65,23 @@ def _download_url_to_file(url, filename):
         raise RuntimeError('Failed to download {}'.format(url))
 
 
-def _load_hubconf(module_name):
-    # Import the module
-    try:
-        m = importlib.import_module(module_name)
-    except Exception:
-        raise RuntimeError('Cannot load module {}'.format(module))
-    for key in HUB_INFO_KEYS:
-        if key not in dir(m):
-            print(dir(m))
-            raise RuntimeError('{} are required attributes in hub.py'.format(', '.join(HUB_INFO_KEYS)))
-    return getattr(m, KEY_ENTRYPOINTS), getattr(m, KEY_DEPENDENCIES), getattr(m, KEY_HELP)
+#def _load_hubconf(module_name):
+#    # Import the module
+#    try:
+#        m = importlib.import_module(module_name)
+#    except Exception:
+#        raise RuntimeError('Cannot load module {}'.format(module))
+#    for key in HUB_INFO_KEYS:
+#        if key not in dir(m):
+#            print(dir(m))
+#            raise RuntimeError('{} are required attributes in hub.py'.format(', '.join(HUB_INFO_KEYS)))
+#    return getattr(m, KEY_ENTRYPOINTS), getattr(m, KEY_DEPENDENCIES), getattr(m, KEY_HELP)
 
 
-def _check_type(value, T):
-    if not isinstance(value, T):
-        raise ValueError('Invalid type: {} should be an instance of {}'.format(value, T))
-    return value
+#def _check_type(value, T):
+#    if not isinstance(value, T):
+#        raise ValueError('Invalid type: {} should be an instance of {}'.format(value, T))
+#    return value
 
 
 def _load_and_execute_func(module_name, func_name, args=[], kwargs={}):
@@ -101,43 +101,31 @@ def _load_and_execute_func(module_name, func_name, args=[], kwargs={}):
     return func(*args, **kwargs)
 
 
-def _load_single_model(func_name, entrypoints, hub_dir, cache, args, kwargs):
-    entry = None
-    checkpoint = None
+def _load_single_model(func_name, hub_dir, cache, args, kwargs):
+    #entry = None
+    #checkpoint = None
 
-    for e in entrypoints:
-        if e[0] == func_name:
-            entry = e
-            break
-    if entry is None:
-        raise RuntimeError('Callable {} not found in hub entrypoints'.format(func_name))
+    #for e in entrypoints:
+    #    if e[0] == func_name:
+    #        entry = e
+    #        break
+    #if entry is None:
+    #    raise RuntimeError('Callable {} not found in hub entrypoints'.format(func_name))
 
-    num_fields = len(e)
-    if num_fields < 2 or num_fields > 3:
-        raise ValueError(
-            'Invalid entrypoint length: {}, expect (func_name, module_name, [checkpoint_url])'.format(num_fields))
-    elif num_fields == 3:
-        checkpoint = _check_type(e[2], str)
-    module_name = _check_type(e[1], str)
+    #num_fields = len(e)
+    #if num_fields < 2 or num_fields > 3:
+    #    raise ValueError(
+    #        'Invalid entrypoint length: {}, expect (func_name, module_name, [checkpoint_url])'.format(num_fields))
+    #elif num_fields == 3:
+    #    checkpoint = _check_type(e[2], str)
+    #module_name = _check_type(e[1], str)
 
-    model = _load_and_execute_func(module_name, func_name, args, kwargs)
+    model = _load_and_execute_func('hubconf', func_name, args, kwargs)
 
-    parts = urlparse(checkpoint)
-    filename = os.path.basename(parts.path)
-    cached_checkpoint = os.path.join(hub_dir, filename)
-    if not cache and os.path.exists(cached_checkpoint):
-        os.remove(cached_checkpoint)
-
-    if checkpoint is None:
-        print('No pretrained weights provided. Proceeding with random initialized weights...')
-    else:
-        model.load_state_dict(model_zoo.load_url(checkpoint, model_dir=hub_dir, progress=False))
-        if not cache:
-            os.remove(cached_checkpoint)
     return model
 
 
-def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
+def load(github, model, hub_dir=None, cache=False, *args, **kwargs):
     r"""
     Load a model from a github repo, with pretrained weights.
 
@@ -152,8 +140,8 @@ def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
             `~/.torch/hub` will be created and used as the fallback.
         cache: Optional, whether to delete the intermediate folder after loading the model.
             Default is `False`.
-        args: Optional, the corresponding args for callables in `model`.
-        kwargs: Optional, the corresponding kwargs for callables in `model`.
+        *args: Optional, the corresponding args for callables in `model`.
+        **kwargs: Optional, the corresponding kwargs for callables in `model`.
 
     Returns:
         a single model or a list of models with corresponding pretrained weights.
@@ -211,23 +199,23 @@ def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
             raise RuntimeError('Failed to extract/rename the repo')
 
     # Parse the hubconf.py in repo to get hub information
-    entrypoints, dependencies, help_msg = _load_hubconf('hubconf')
+    # entrypoints, dependencies, help_msg = _load_hubconf('hubconf')
 
     # Check dependent packages
-    missing_deps = [pkg for pkg in dependencies if not _module_exists(pkg)]
-    if len(missing_deps):
-        print('Package {} is required from repo author, but missing in your environment.'
-              .format(', '.join(missing_deps)))
+    # missing_deps = [pkg for pkg in dependencies if not _module_exists(pkg)]
+    # if len(missing_deps):
+        # print('Package {} is required from repo author, but missing in your environment.'
+              # .format(', '.join(missing_deps)))
 
     # Support loading multiple callables from the same repo at once.
-    if isinstance(model, list) or isinstance(model, tuple):
-        res = []
-        if (len(args) and len(model) != len(args)) or (len(kwargs) and len(kwargs) != len(model)):
-            raise ValueError('If not empty, args/kwargs should have the same length as model')
-        for func_name, arg, kwarg in zip(model, args, kwargs):
-            res.append(_load_single_model(func_name, entrypoints, hub_dir, cache, arg, kwarg))
-    elif isinstance(model, str):
-        res = _load_single_model(model, entrypoints, hub_dir, cache, args, kwargs)
+    # if isinstance(model, list) or isinstance(model, tuple):
+        # res = []
+        # if (len(args) and len(model) != len(args)) or (len(kwargs) and len(kwargs) != len(model)):
+            # raise ValueError('If not empty, args/kwargs should have the same length as model')
+        # for func_name, arg, kwarg in zip(model, args, kwargs):
+            # res.append(_load_single_model(func_name, entrypoints, hub_dir, cache, arg, kwarg))
+    if isinstance(model, str):
+        res = _load_single_model(model, hub_dir, cache, args, kwargs)
     else:
         raise ValueError('Invalid input: model should be a string or a list of strings')
 
