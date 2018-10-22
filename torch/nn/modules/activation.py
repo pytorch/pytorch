@@ -4,9 +4,12 @@ from torch.nn.parameter import Parameter
 
 from .module import Module
 from .. import functional as F
+from ..._jit_internal import weak_module, weak_script_method
 
 
 class Threshold(Module):
+    __constants__ = ['threshold', 'value', 'inplace']
+
     r"""Thresholds each element of the input Tensor
 
     Threshold is defined as:
@@ -81,6 +84,7 @@ class ReLU(Threshold):
         return inplace_str
 
 
+@torch._jit_internal.weak_module
 class RReLU(Module):
     r"""Applies the randomized leaky rectified liner unit function, element-wise,
     as described in the paper:
@@ -196,6 +200,7 @@ class Hardtanh(Module):
         )
 
 
+@torch._jit_internal.weak_module
 class ReLU6(Hardtanh):
     r"""Applies the element-wise function:
 
@@ -227,6 +232,7 @@ class ReLU6(Hardtanh):
         return inplace_str
 
 
+@torch._jit_internal.weak_module
 class Sigmoid(Module):
     r"""Applies the element-wise function:
 
@@ -248,10 +254,12 @@ class Sigmoid(Module):
         >>> output = m(input)
     """
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return torch.sigmoid(input)
 
 
+@torch._jit_internal.weak_module
 class Tanh(Module):
     r"""Applies the element-wise function:
 
@@ -272,10 +280,12 @@ class Tanh(Module):
         >>> output = m(input)
     """
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return torch.tanh(input)
 
 
+@torch._jit_internal.weak_module
 class ELU(Module):
     r"""Applies the element-wise function:
 
@@ -305,6 +315,7 @@ class ELU(Module):
         self.alpha = alpha
         self.inplace = inplace
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.elu(input, self.alpha, self.inplace)
 
@@ -313,6 +324,7 @@ class ELU(Module):
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
+@torch._jit_internal.weak_module
 class CELU(Module):
     r"""Applies the element-wise function:
 
@@ -347,6 +359,7 @@ class CELU(Module):
         self.alpha = alpha
         self.inplace = inplace
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.celu(input, self.alpha, self.inplace)
 
@@ -355,6 +368,7 @@ class CELU(Module):
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
+@torch._jit_internal.weak_module
 class SELU(Module):
     r"""Applied element-wise, as:
 
@@ -389,6 +403,7 @@ class SELU(Module):
         super(SELU, self).__init__()
         self.inplace = inplace
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.selu(input, self.inplace)
 
@@ -397,6 +412,7 @@ class SELU(Module):
         return inplace_str
 
 
+@torch._jit_internal.weak_module
 class GLU(Module):
     r"""Applies the gated linear unit function
     :math:`{GLU}(a, b)= a \otimes \sigma(b)` where :math:`a` is the first half
@@ -416,11 +432,13 @@ class GLU(Module):
         >>> input = torch.randn(4, 2)
         >>> output = m(input)
     """
+    __constants__ = ['dim']
 
     def __init__(self, dim=-1):
         super(GLU, self).__init__()
         self.dim = dim
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.glu(input, self.dim)
 
@@ -428,6 +446,7 @@ class GLU(Module):
         return 'dim={}'.format(self.dim)
 
 
+@torch._jit_internal.weak_module
 class Hardshrink(Module):
     r"""Applies the hard shrinkage function element-wise:
 
@@ -455,11 +474,13 @@ class Hardshrink(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['lambd']
 
     def __init__(self, lambd=0.5):
         super(Hardshrink, self).__init__()
         self.lambd = lambd
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.hardshrink(input, self.lambd)
 
@@ -467,6 +488,7 @@ class Hardshrink(Module):
         return '{}'.format(self.lambd)
 
 
+@torch._jit_internal.weak_module
 class LeakyReLU(Module):
     r"""Applies the element-wise function:
 
@@ -506,6 +528,7 @@ class LeakyReLU(Module):
         self.negative_slope = negative_slope
         self.inplace = inplace
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
@@ -537,6 +560,7 @@ class LogSigmoid(Module):
         return F.logsigmoid(input)
 
 
+@torch._jit_internal.weak_module
 class Softplus(Module):
     r"""Applies the element-wise function:
 
@@ -566,12 +590,14 @@ class Softplus(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['beta', 'threshold']
 
     def __init__(self, beta=1, threshold=20):
         super(Softplus, self).__init__()
         self.beta = beta
         self.threshold = threshold
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.softplus(input, self.beta, self.threshold)
 
@@ -579,6 +605,7 @@ class Softplus(Module):
         return 'beta={}, threshold={}'.format(self.beta, self.threshold)
 
 
+@torch._jit_internal.weak_module
 class Softshrink(Module):
     r"""Applies the soft shrinkage function elementwise:
 
@@ -606,11 +633,13 @@ class Softshrink(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['lambd']
 
     def __init__(self, lambd=0.5):
         super(Softshrink, self).__init__()
         self.lambd = lambd
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.softshrink(input, self.lambd)
 
@@ -618,6 +647,7 @@ class Softshrink(Module):
         return str(self.lambd)
 
 
+@torch._jit_internal.weak_module
 class PReLU(Module):
     r"""Applies the element-wise function:
 
@@ -674,6 +704,7 @@ class PReLU(Module):
         super(PReLU, self).__init__()
         self.weight = Parameter(torch.Tensor(num_parameters).fill_(init))
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.prelu(input, self.weight)
 
@@ -681,6 +712,7 @@ class PReLU(Module):
         return 'num_parameters={}'.format(self.num_parameters)
 
 
+@torch._jit_internal.weak_module
 class Softsign(Module):
     r"""Applies the element-wise function:
 
@@ -701,10 +733,12 @@ class Softsign(Module):
         >>> output = m(input)
     """
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.softsign(input)
 
 
+@torch._jit_internal.weak_module
 class Tanhshrink(Module):
     r"""Applies the element-wise function:
 
@@ -725,6 +759,7 @@ class Tanhshrink(Module):
         >>> output = m(input)
     """
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.tanhshrink(input)
 

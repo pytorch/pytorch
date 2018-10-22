@@ -1,0 +1,5 @@
+graph(%i0 : Dynamic) {
+  %1 : int = prim::Constant[value=-1]()
+  %2 : Dynamic = aten::glu(%i0, %1)
+  return (%2);
+}

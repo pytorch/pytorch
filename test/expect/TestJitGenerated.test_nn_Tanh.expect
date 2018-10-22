@@ -1,0 +1,4 @@
+graph(%i0 : Dynamic) {
+  %1 : Dynamic = aten::tanh(%i0)
+  return (%1);
+}

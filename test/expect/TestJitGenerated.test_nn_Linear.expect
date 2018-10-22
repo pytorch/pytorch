@@ -1,0 +1,6 @@
+graph(%i0 : Dynamic
+      %1 : Dynamic
+      %2 : Dynamic) {
+  %3 : Dynamic = aten::linear(%i0, %1, %2)
+  return (%3);
+}

@@ -1,0 +1,5 @@
+graph(%i0 : Dynamic
+      %1 : Dynamic) {
+  %2 : Dynamic = aten::prelu(%i0, %1)
+  return (%2);
+}

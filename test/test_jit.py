@@ -8419,6 +8419,11 @@ def the_method({}):
     return {}
 '''
 
+script_method_template = '''
+def forward(self, {}):
+    return {}
+'''
+
 
 def get_constant(x):
     if x == inf:
@@ -8841,6 +8846,27 @@ L = 20
 M = 10
 S = 5
 
+# (
+#     module name,
+#     constructor arguments,
+#     number of arguments for `forward()` (excluding `self`)
+# )
+nn_module_tests = [
+    ('Linear', (S, S), 1),
+    ('Bilinear', (S, S, S), 2),
+    ('Sigmoid', (), 1),
+    ('Tanh', (), 1),
+    ('GLU', (), 1),
+    ('Hardshrink', (), 1),
+    ('Softplus', (), 1),
+    ('Softshrink', (), 1),
+    ('PReLU', (), 1),
+    ('Softsign', (), 1),
+    ('Tanhshrink', (), 1),
+    ('PixelShuffle', (S,), 1),
+    ('PairwiseDistance', (), 2),
+]
+
 # NB: JIT script tests for all nn functional interfaces, script mode does
 # not support in_place operations yet, so no inplace operation tests added.
 # removed all the deprecated functions
@@ -9051,7 +9077,7 @@ def add_autograd_test(
         post_add_test(test_name, skipTestIf, do_test)
 
 
-def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x: x, kwargs=None):
+def add_nn_functional_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x: x, kwargs=None):
     test_name = 'test_nn_' + name
 
     def do_test(self, name=name, args=args, test_name=test_name):
@@ -9082,6 +9108,33 @@ def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x
     post_add_test(test_name, skipTestIf, do_test)
 
 
+def add_nn_module_test(module_name, constructor_args, num_args, skipTestIf=()):
+    def do_test(self):
+        # Construct a script method that passes arguments through to self.submodule
+        actuals = []
+        for i in range(num_args):
+            actuals.append("i{}".format(i))
+
+        call_args = ', '.join(actuals)
+        call = "self.submodule({})".format(call_args)
+        script = script_method_template.format(call_args, call)
+
+        # Create module to use the script method
+        nn_module = getattr(torch.nn, module_name)
+
+        class TheModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(TheModule, self).__init__()
+                self.submodule = nn_module(*constructor_args)
+
+        module = TheModule()
+        module.define(script)
+        self.assertExpectedGraph(module.graph)
+
+    test_name = 'test_nn_{}'.format(module_name)
+    post_add_test(test_name, skipTestIf, do_test)
+
+
 def post_add_test(test_name, skipTestIf, do_test):
     assert not hasattr(TestJitGenerated, test_name), 'Two tests have the same name: ' + test_name
 
@@ -9096,7 +9149,10 @@ for test in autograd_method_tests:
     add_autograd_test(*test)
 
 for test in nn_functional_tests:
-    add_nn_test(*test)
+    add_nn_functional_test(*test)
+
+for test in nn_module_tests:
+    add_nn_module_test(*test)
 
 if __name__ == '__main__':
     run_tests()

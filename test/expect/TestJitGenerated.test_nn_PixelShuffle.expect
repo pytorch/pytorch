@@ -1,0 +1,5 @@
+graph(%i0 : Dynamic) {
+  %1 : int = prim::Constant[value=5]()
+  %2 : Dynamic = aten::pixel_shuffle(%i0, %1)
+  return (%2);
+}

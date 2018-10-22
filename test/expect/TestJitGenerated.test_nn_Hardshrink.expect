@@ -1,0 +1,5 @@
+graph(%i0 : Dynamic) {
+  %1 : float = prim::Constant[value=0.5]()
+  %2 : Dynamic = aten::hardshrink(%i0, %1)
+  return (%2);
+}

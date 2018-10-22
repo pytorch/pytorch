@@ -1,0 +1,7 @@
+graph(%i0 : Dynamic
+      %i1 : Dynamic
+      %2 : Dynamic
+      %3 : Dynamic) {
+  %4 : Dynamic = aten::bilinear(%i0, %i1, %2, %3)
+  return (%4);
+}

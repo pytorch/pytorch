@@ -1388,6 +1388,7 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
     )
 
 
+@torch._jit_internal.weak_script
 def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
     r"""Applies Layer Normalization for last certain number of dimensions.
 
@@ -2320,10 +2321,12 @@ def pad(input, pad, mode='constant', value=0):
 
 # distance
 
-def pairwise_distance(x1, x2, p=2, eps=1e-6, keepdim=False):
+@torch._jit_internal.weak_script
+def pairwise_distance(x1, x2, p=2., eps=1e-6, keepdim=False):
     r"""
     See :class:`torch.nn.PairwiseDistance` for details
     """
+    # type: (Tensor, Tensor, float, float, bool) -> Tensor
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 
@@ -2375,6 +2378,7 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
         >>> output = F.cosine_similarity(input1, input2)
         >>> print(output)
     """
+
     w12 = torch.sum(x1 * x2, dim)
     w1 = torch.norm(x1, 2, dim)
     w2 = torch.norm(x2, 2, dim)
