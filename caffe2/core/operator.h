@@ -9,6 +9,7 @@
 #include <typeinfo>
 #include <vector>
 
+#include "c10/macros/Macros.h"
 #include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
@@ -857,6 +858,15 @@ C10_DECLARE_REGISTRY(
 
 #define REGISTER_CPU_OPERATOR_WITH_ENGINE(name, engine, ...) \
   C10_REGISTER_CLASS(CPUOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+
+// Use these macros to register gradient operators.  They can be automatically
+// excluded from builds that don't need them (e.g., mobile).
+#ifdef CAFFE2_NO_GRADIENT_OPS
+#define REGISTER_CPU_GRADIENT_OPERATOR(...) /* No gradients. */
+#else
+#define REGISTER_CPU_GRADIENT_OPERATOR(...) \
+  MACRO_EXPAND(REGISTER_CPU_OPERATOR(__VA_ARGS__))
+#endif
 
 C10_DECLARE_REGISTRY(
     CUDAOperatorRegistry,

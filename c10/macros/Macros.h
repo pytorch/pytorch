@@ -32,6 +32,8 @@
 #define CONCAT_IMPL(x, y) x##y
 #define MACRO_CONCAT(x, y) CONCAT_IMPL(x, y)
 
+#define MACRO_EXPAND(args) args
+
 /// C10_NODISCARD - Warn if a type or return value is discarded.
 #define C10_NODISCARD
 #if __cplusplus > 201402L && defined(__has_cpp_attribute)
