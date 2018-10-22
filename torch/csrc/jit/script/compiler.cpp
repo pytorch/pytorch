@@ -806,6 +806,56 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
       loc, *m.graph(), symbol, self, inputs, attributes, true));
 }
 
+std::shared_ptr<SugaredValue> ForkValue::call(
+    SourceRange loc,
+    Method& m,
+    const std::shared_ptr<SugaredValue> &forked,
+    NamedValue& input) {
+  auto inputs = toValues(*m.graph(), {input});
+  if (inputs.size() != 1 || inputs.at(0)->type()->kind() != TypeKind::TupleType) {
+    throw ErrorReport(loc) << "Expected a single tuple argument to fork()";
+  }
+  auto n = m.graph()->insertNode(m.graph()->create(prim::Fork, inputs, 1))
+              ->setSourceLocation(std::make_shared<SourceRange>(loc));
+  auto body_block = n->addBlock();
+
+  std::vector<NamedValue> block_inputs;
+  auto schema = forked->schema(loc, m);
+  for (auto &arg : schema.arguments) {
+    Value *v = body_block->addInput()->setType(arg.type);
+    block_inputs.emplace_back(v);
+  }
+  Value *node_output;
+  {
+    WithInsertPoint guard(body_block);
+    // TODO: this is an issue
+    auto fn_sugared_output = forked->call(loc, m, block_inputs, {}, 1);
+    auto fn_simple_output = fn_sugared_output->asValue(loc, m);
+    body_block->registerOutput(fn_simple_output);
+    node_output = n->output()->setType(FutureType::create(fn_simple_output->type()));
+  }
+  return std::make_shared<SimpleValue>(node_output);
+}
+
+std::shared_ptr<SugaredValue> WaitValue::call(
+    SourceRange loc,
+    Method& m,
+    at::ArrayRef<NamedValue> inputs_,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  if (inputs_.size() != 1) {
+    throw ErrorReport(loc) << "Expected a single argument of type Future to wait()";
+  }
+  if (n_binders != 1) {
+    throw ErrorReport(loc) << "Too few values to unpack. wait() expects a single return";
+  }
+  auto inputs = toValues(*m.graph(), inputs_);
+  auto n = m.graph()->insertNode(m.graph()->create(prim::Wait, inputs, 1))
+                    ->setSourceLocation(std::make_shared<SourceRange>(loc));
+  auto o = n->output()->setType(n->input()->type()->template cast<FutureType>()->getElementType());
+  return std::make_shared<SimpleValue>(o);
+}
+
 inline bool isSupportedListElementType(TypePtr type) {
   return type->isSubtypeOf(DynamicType::get()) ||
       type->isSubtypeOf(NumberType::get());
@@ -1499,11 +1549,27 @@ private:
 
   std::shared_ptr<SugaredValue> emitApplyExpr(Apply &apply, size_t n_binders) {
     auto sv = emitSugaredExpr(apply.callee(), 1);
-    auto inputs = getNamedValues(apply.inputs(), true);
     auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
       return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
     });
-    return sv->call(apply.callee().range(), method, inputs, attributes, n_binders);
+
+    auto loc = apply.callee().range();
+    if (sv->kind() == "fork") {
+      JIT_ASSERT(attributes.size() == 0);
+      JIT_ASSERT(n_binders == 1);
+      auto& trees = apply.inputs().tree()->trees();
+      if (trees.size() != 2) {
+        throw ErrorReport(loc) << "Expected a module and a single tuple argument to fork()";
+      }
+
+      auto sugared_expr = emitSugaredExpr(Expr(trees[0]), 1);
+      TreeList sliced_trees(trees.begin() + 1, trees.end());
+      auto& input = getNamedValues(sliced_trees, true)[0];
+      return static_cast<ForkValue*>(sv.get())->call(loc, method, sugared_expr, input);
+    } else {
+      auto inputs = getNamedValues(apply.inputs(), true);
+      return sv->call(loc, method, inputs, attributes, n_binders);
+    }
   }
 
   Value* emitExpr(Expr tree) {

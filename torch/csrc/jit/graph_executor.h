@@ -47,6 +47,18 @@ TORCH_API void runRequiredPasses(const std::shared_ptr<Graph>& g);
 
 namespace detail {
 
+struct NewCoroutine : public std::exception {
+  virtual const char* what() const noexcept {
+    return "NewCoroutine";
+  }
+};
+
+struct Yield : public std::exception {
+  virtual const char* what() const noexcept {
+    return "Yield";
+  }
+};
+
 GraphExecutor* getGradExecutor(Operation& op);
 
 } // namespace detail

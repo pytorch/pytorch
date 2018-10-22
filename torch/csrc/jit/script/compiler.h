@@ -81,6 +81,10 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 
+  virtual FunctionSchema schema(SourceRange loc, Method& caller) {
+    throw ErrorReport(loc) << kind() << " does not have a schema.";
+  }
+
   virtual ~SugaredValue() = default;
 };
 
@@ -142,6 +146,44 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   }
 };
 
+struct TORCH_API ForkValue : public SugaredValue {
+  ForkValue() {}
+
+  std::string kind() const override {
+    return "fork";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      SourceRange loc,
+      Method& m,
+      at::ArrayRef<NamedValue> attributes,
+      at::ArrayRef<NamedValue> inputs,
+      size_t n_binders) override {
+    throw ErrorReport(loc) << kind() << " cannot be called without given function";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      SourceRange loc,
+      Method& m,
+      const std::shared_ptr<SugaredValue> &forked,
+      NamedValue& input);
+};
+
+struct TORCH_API WaitValue : public SugaredValue {
+  WaitValue() {}
+
+  std::string kind() const override {
+    return "wait";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      SourceRange loc,
+      Method& m,
+      at::ArrayRef<NamedValue> attributes,
+      at::ArrayRef<NamedValue> inputs,
+      size_t n_binders) override;
+};
+
 using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>;
 
 inline std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m, const SourceRange& loc){
@@ -179,6 +221,9 @@ struct MethodValue : public SugaredValue {
   }
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     return std::make_shared<SimpleValue>(packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
+  }
+  FunctionSchema schema(SourceRange loc, Method &caller) override {
+    return method.getSchema();
   }
 private:
   std::shared_ptr<Module> module;

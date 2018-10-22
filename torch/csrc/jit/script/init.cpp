@@ -243,6 +243,10 @@ struct ModuleValue : public SugaredValue {
     return result;
   }
 
+  FunctionSchema schema(SourceRange loc, Method &caller) override {
+    return attr(loc, caller, "forward")->schema(loc, caller);
+  }
+
  private:
   std::shared_ptr<Module> module;
 };
@@ -297,6 +301,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
+  } else if (obj.is(py::module::import("torch.jit").attr("fork"))) {
+    return std::make_shared<ForkValue>();
+  } else if (obj.is(py::module::import("torch.jit").attr("wait"))) {
+    return std::make_shared<WaitValue>();
   }
 
   py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);

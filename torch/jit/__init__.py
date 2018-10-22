@@ -47,6 +47,9 @@ _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
 
+Future = torch._C.Future
+fork = torch._C.fork
+wait = torch._C.wait
 
 @contextlib.contextmanager
 def scope(scope_name):

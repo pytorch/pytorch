@@ -61,6 +61,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << t.expect<VarType>()->name();
   } else if(t.kind() == TypeKind::WorldType) {
     out << "World";
+  } else if(t.kind() == TypeKind::FutureType) {
+    auto elem = t.cast<FutureType>()->getElementType();
+    out << "Future[" << *elem << "]";
   } else {
     AT_ERROR("unknown type kind");
   }
