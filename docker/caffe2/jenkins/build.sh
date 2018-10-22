@@ -39,10 +39,8 @@ fi
 if [[ "$image" == *rocm* ]]; then
   ROCM_VERSION="$(echo "${image}" | perl -n -e'/rocm(\d+\.\d+\.\d+|nightly)/ && print $1')"
   DOCKERFILE="${OS}-rocm/Dockerfile"
-  if [[ "$image" == *centos* ]]; then
-    # newer cmake version needed
-    CMAKE_VERSION=3.6.3
-  fi
+  # newer cmake version needed
+  CMAKE_VERSION=3.6.3
 fi
 
 if [[ "$image" == *conda* ]]; then
