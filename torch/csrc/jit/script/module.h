@@ -11,6 +11,7 @@
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 #include <torch/csrc/utils/memory.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/core/ArrayRef.h>
 #include "c10/util/Optional.h"
@@ -390,7 +391,7 @@ struct Module {
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  void to(
+  TORCH_API void to(
       at::Device device,
       at::ScalarType dtype,
       bool non_blocking = false);
@@ -401,7 +402,7 @@ struct Module {
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  void to(at::ScalarType dtype, bool non_blocking = false);
+  TORCH_API void to(at::ScalarType dtype, bool non_blocking = false);
 
   /// Recursively moves all parameters to the given device.
   ///
@@ -409,7 +410,7 @@ struct Module {
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  void to(at::Device device, bool non_blocking = false);
+  TORCH_API void to(at::Device device, bool non_blocking = false);
 
   /// Run a method from this module.
   ///
