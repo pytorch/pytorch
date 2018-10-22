@@ -59,7 +59,7 @@ CAFFE2_API cudaDeviceProp* getDeviceProperties(int64_t device);
  * (defaulting to the current CUDA stream.)
  */
 CAFFE2_API CUDAStream
-getNewPooledStream(const bool isHighPriority = false, int64_t device = -1);
+getStreamFromPool(const bool isHighPriority = false, int64_t device = -1);
 
 CAFFE2_API CUDAStream getDefaultCUDAStream(int64_t device = -1);
 CAFFE2_API CUDAStream getCurrentCUDAStream(int64_t device = -1);
