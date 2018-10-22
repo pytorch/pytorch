@@ -36,6 +36,14 @@ void magmaGetrfBatched(
 }
 
 template<class scalar_t>
+void magmaGetrfSmallSquareBatched(
+    magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
+    magma_int_t** ipiv_array, magma_int_t* info_array, magma_int_t batchsize,
+    magma_queue_t queue) {
+  AT_ERROR("getrf only takes float or double Tensors");
+}
+
+template<class scalar_t>
 void magmaGetriBatched(
     magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t** ipiv_array, scalar_t** dinvA_array, magma_int_t lddia,
@@ -73,6 +81,22 @@ void magmaGetrfBatched<float>(
     magma_int_t** ipiv_array, magma_int_t* info_array, magma_int_t batchsize,
     magma_queue_t queue) {
     magma_sgetrf_batched(m, n, dA_array, ldda, ipiv_array, info_array, batchsize, queue);
+}
+
+template<>
+void magmaGetrfSmallSquareBatched<double>(
+    magma_int_t n, double** dA_array, magma_int_t ldda,
+    magma_int_t** ipiv_array, magma_int_t* info_array, magma_int_t batchsize,
+    magma_queue_t queue) {
+    magma_dgetrf_batched_smallsq_shfl(n, dA_array, ldda, ipiv_array, info_array, batchsize, queue);
+}
+
+template<>
+void magmaGetrfSmallSquareBatched<float>(
+    magma_int_t n, float** dA_array, magma_int_t ldda,
+    magma_int_t** ipiv_array, magma_int_t* info_array, magma_int_t batchsize,
+    magma_queue_t queue) {
+    magma_sgetrf_batched_smallsq_shfl(n, dA_array, ldda, ipiv_array, info_array, batchsize, queue);
 }
 
 template<>
@@ -130,13 +154,9 @@ AT_ERROR("gesv: MAGMA library not found in "
     ipiv_array[i] = &ipiv_data[i * n];
   }
 
-  magma_queue_t gesv_magma_queue = createMagmaQueue(b);
-
   magmaGesvBatched<scalar_t>(
       n, nrhs, A_array, n, ipiv_array, b_array, n,
-      info_array, batch_size, gesv_magma_queue);
-
-  destroyMagmaQueue(gesv_magma_queue);
+      info_array, batch_size, createMagmaQueue(b));
 
   for (int64_t i = 0; i < batch_size; i++) {
     infos[i] = info_array[i];
@@ -179,17 +199,19 @@ AT_ERROR("inverse: MAGMA library not found in "
     ipiv_array[i] = &ipiv_data[i * n];
   }
 
-  magma_queue_t inverse_magma_queue = createMagmaQueue(self);
-
-  magmaGetrfBatched<scalar_t>(
-    n, n, self_array, n, ipiv_array, info_array,
-    batch_size, inverse_magma_queue);
+  if (self.size(-2) <= 32) {
+    magmaGetrfSmallSquareBatched<scalar_t>(
+      n, self_array, n, ipiv_array, info_array,
+      batch_size, createMagmaQueue(self));
+  } else {
+    magmaGetrfBatched<scalar_t>(
+      n, n, self_array, n, ipiv_array, info_array,
+      batch_size, createMagmaQueue(self));
+  }
 
   magmaGetriBatched<scalar_t>(
     n, self_array, n, ipiv_array, self_inv_array,
-    n, info_array, batch_size, inverse_magma_queue);
-
-  destroyMagmaQueue(inverse_magma_queue);
+    n, info_array, batch_size, createMagmaQueue(self));
 
   for (int64_t i = 0; i < batch_size; i++) {
     infos[i] = info_array[i];
