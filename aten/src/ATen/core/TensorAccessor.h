@@ -33,16 +33,16 @@ public:
 
   AT_HOST_DEVICE TensorAccessorBase(PtrType data_, const int64_t * sizes_, const int64_t * strides_)
   : data_(data_), sizes_(sizes_), strides_(strides_) {}
-  AT_HOST inline IntList sizes() const {
+  AT_HOST IntList sizes() const {
     return IntList(sizes_,N);
   }
-  AT_HOST inline IntList strides() const {
+  AT_HOST IntList strides() const {
     return IntList(strides_,N);
   }
-  AT_HOST_DEVICE inline int64_t stride(int64_t i) const { return strides_[i]; }
-  AT_HOST_DEVICE inline int64_t size(int64_t i) const { return sizes_[i]; }
-  AT_HOST_DEVICE inline PtrType data() { return data_; }
-  AT_HOST_DEVICE inline const PtrType data() const { return data_; }
+  AT_HOST_DEVICE int64_t stride(int64_t i) const { return strides_[i]; }
+  AT_HOST_DEVICE int64_t size(int64_t i) const { return sizes_[i]; }
+  AT_HOST_DEVICE PtrType data() { return data_; }
+  AT_HOST_DEVICE const PtrType data() const { return data_; }
 protected:
   PtrType data_;
   const int64_t* sizes_;
@@ -61,11 +61,11 @@ public:
   AT_HOST_DEVICE TensorAccessor(PtrType data_, const int64_t * sizes_, const int64_t * strides_)
   : TensorAccessorBase<T,N>(data_,sizes_,strides_) {}
 
-  AT_HOST_DEVICE inline TensorAccessor<T,N-1> operator[](int64_t i) {
+  AT_HOST_DEVICE TensorAccessor<T,N-1> operator[](int64_t i) {
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i,this->sizes_+1,this->strides_+1);
   }
 
-  AT_HOST_DEVICE inline const TensorAccessor<T,N-1> operator[](int64_t i) const {
+  AT_HOST_DEVICE const TensorAccessor<T,N-1> operator[](int64_t i) const {
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i,this->sizes_+1,this->strides_+1);
   }
 };
@@ -77,10 +77,10 @@ public:
 
   AT_HOST_DEVICE TensorAccessor(PtrType data_, const int64_t * sizes_, const   int64_t * strides_)
   : TensorAccessorBase<T,1,PtrTraits>(data_,sizes_,strides_) {}
-  AT_HOST_DEVICE inline T & operator[](int64_t i) {
+  AT_HOST_DEVICE T & operator[](int64_t i) {
     return this->data_[this->strides_[0]*i];
   }
-  AT_HOST_DEVICE inline const T & operator[](int64_t i) const {
+  AT_HOST_DEVICE const T & operator[](int64_t i) const {
     return this->data_[this->strides_[0]*i];
   }
 };
@@ -104,10 +104,10 @@ public:
     std::copy(sizes_, sizes_ + N, std::begin(this->sizes_));
     std::copy(strides_, strides_ + N, std::begin(this->strides_));
   }
-  AT_HOST_DEVICE inline int64_t stride(int64_t i) const { return strides_[i]; }
-  AT_HOST_DEVICE inline int64_t size(int64_t i) const { return sizes_[i]; }
-  AT_HOST_DEVICE inline PtrType data() { return data_; }
-  AT_HOST_DEVICE inline const PtrType data() const { return data_; }
+  AT_HOST_DEVICE int64_t stride(int64_t i) const { return strides_[i]; }
+  AT_HOST_DEVICE int64_t size(int64_t i) const { return sizes_[i]; }
+  AT_HOST_DEVICE PtrType data() { return data_; }
+  AT_HOST_DEVICE const PtrType data() const { return data_; }
 protected:
   PtrType data_;
   int64_t sizes_[N];
@@ -122,13 +122,13 @@ public:
   AT_HOST PackedTensorAccessor(PtrType data_, const int64_t * sizes_, const   int64_t * strides_)
   : PackedTensorAccessorBase<T,N,PtrTraits>(data_, sizes_, strides_) {};
 
-  AT_DEVICE inline TensorAccessor<T,N-1> operator[](int64_t i) {
+  AT_DEVICE TensorAccessor<T,N-1> operator[](int64_t i) {
     int64_t* new_sizes = this->sizes_+1;
     int64_t* new_strides = this->strides_+1;
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i, new_sizes, new_strides);
   }
 
-  AT_DEVICE inline const TensorAccessor<T,N-1> operator[](int64_t i) const {
+  AT_DEVICE const TensorAccessor<T,N-1> operator[](int64_t i) const {
     const int64_t* new_sizes = this->sizes_+1;
     const int64_t* new_strides = this->strides_+1;
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i, new_sizes, new_strides);
@@ -142,10 +142,10 @@ public:
   AT_HOST PackedTensorAccessor(PtrType data_, const int64_t * sizes_, const   int64_t * strides_)
   : PackedTensorAccessorBase<T,1,PtrTraits>(data_, sizes_, strides_) {};
 
-  AT_DEVICE inline T & operator[](int64_t i) {
+  AT_DEVICE T & operator[](int64_t i) {
     return this->data_[this->strides_[0]*i];
   }
-  AT_DEVICE inline const T& operator[](int64_t i) const {
+  AT_DEVICE const T& operator[](int64_t i) const {
     return this->data_[this->strides_[0]*i];
   }
 };
