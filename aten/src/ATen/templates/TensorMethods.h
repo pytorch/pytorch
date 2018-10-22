@@ -74,15 +74,15 @@ inline Device Tensor::device() const {
 inline int64_t Tensor::get_device() const {
   // NB: This gets called a lot so we special case it here instead of dispatching
   // to a native function.
-  const auto& mytype = type();
-  if (!mytype.is_cuda()) {
+  const auto& tid = impl_->type_id();
+  if (tid == CUDATensorId()) {
+    // TODO: #12934 Investigate caching device on TensorImpl for performance
+    return impl_->storage().device().index();
+  } else if (tid == SparseCUDATensorId()) {
+    return _values().get_device();
+  } else {
     AT_ERROR("get_device is not implemented for type ", type());
   }
-  if (mytype.is_sparse()) {
-    return _values().get_device();
-  }
-  // TODO: #12934 Investigate caching device on TensorImpl for performance
-  return impl_->storage().device().index();
 }
 
 inline int64_t get_device(Tensor self) {
