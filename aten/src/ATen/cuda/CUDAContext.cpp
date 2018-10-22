@@ -29,10 +29,10 @@ cudaDeviceProp* getDeviceProperties(int64_t device) {
 }
 
 /* Streams */
-CUDAStream createCUDAStream(
+CUDAStream getNewPooledStream(
   const bool isHighPriority
 , int64_t device) {
-  return detail::CUDAStream_createStream(isHighPriority, device);
+  return detail::CUDAStream_getNewPooledStream(isHighPriority, device);
 }
 
 CUDAStream getDefaultCUDAStream(int64_t device) {
