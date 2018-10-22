@@ -121,29 +121,28 @@ Tensor sparse_coo_tensor(ArrayRef<int64_t> size, const TensorOptions& options) {
 
 /* Pointer-copy init */
 
-// helpers
+// helper
 namespace {
-  // Helper called in **every** sparse_coo_tensor ctor with indices and
-  // values tensors.
-  static inline Tensor argcheck_and_expand_values_if_needed(
-      const LongTensor& indices_, const Tensor& values_, const TensorOptions& options) {
-    // arg checking
-    AT_CHECK(!indices_.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices_.layout());
-    AT_CHECK(!values_.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values_.layout());
-    AT_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
-
+  static inline Tensor expand_values_if_needed(const Tensor& values) {
     // expand
-    if (values_.dim() == 0) {
+    if (values.dim() == 0) {
       // Mimic Numpy behavior here and treat it as a 1D tensor
-      return values_.expand({1});
+      return values.expand({1});
     } else {
-      return values_;
+      return values;
     }
   }
 }
 
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const TensorOptions& options) {
-  Tensor values = argcheck_and_expand_values_if_needed(indices, values_, options);
+  Tensor values = expand_values_if_needed(values_);
+
+  // arg checking
+  AT_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
+  // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
+  // but we need to ensure them in order to infer the shape.
+  AT_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
+  AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
 
   // If sizes are not given, it is inferred as max index of each dim.
   int64_t sparse_dim = indices.size(0);
@@ -185,8 +184,14 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const Ten
 
 // NB: Got rid of the sizes == NULL case
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, const TensorOptions& options) {
-  Tensor values = argcheck_and_expand_values_if_needed(indices, values_, options);
+  Tensor values = expand_values_if_needed(values_);
 
+  // arg checking
+  AT_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
+  // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
+  // but we need to ensure them in order to infer the shape.
+  AT_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
+  AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;
   AT_CHECK(size.size() == sparse_dim + dense_dim,
@@ -229,7 +234,10 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<
 // are guaranteed to be within bounds.
 // NB: Got rid of the size == NULL case
 Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, const TensorOptions& options) {
-  Tensor values = argcheck_and_expand_values_if_needed(indices, values_, options);
+  Tensor values = expand_values_if_needed(values_);
+
+  // arg checking
+  AT_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
 
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;

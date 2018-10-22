@@ -85,12 +85,15 @@ int64_t SparseTensorImpl::storage_offset() const {
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
   AT_ASSERT(!indices.is_variable() && !values.is_variable());  // They should be plain tensors!
 
+  AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
+  AT_CHECK(!values.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values.layout());
+
   AT_CHECK(values.type().toSparse() == type(), "values type must match sparse tensor type");
   AT_CHECK(indices.type().scalarType() == kLong, "indices must be an int64 tensor");
   AT_CHECK(indices.type().backend() == values.type().backend(), "backend of indices (", indices.type().backend(), ") must match backend of values (", values.type().backend(), ")");
   AT_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(), ") must match device of values (", values.get_device(), ")");
 
-  AT_CHECK(indices.dim() == 2, "indices must be nDim x nnz, but got: ", indices.sizes());
+  AT_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes());
   AT_CHECK(indices.size(1) == values.size(0), "indices and values must have same nnz, but got nnz from indices: ", indices.size(1), ", nnz from values: ", values.size(0));
   AT_CHECK(indices.size(0) == sparse_dim_, "indices has incorrect first dimension, expected ", sparse_dim_, ", got ", indices.size(0));
   AT_CHECK(values.dim() == dense_dim_ + 1, "values has incorrect number of dimensions, expected ", dense_dim_ + 1, ", got ", values.dim());
