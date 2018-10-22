@@ -7,13 +7,13 @@
 #include "ATen/ATen.h"
 #include "ATen/CPUGenerator.h"
 #include "ATen/CheckGenerator.h"
-#include "ATen/core/Deprecated.h"
 #include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/ScalarType.h"
+#include "ATen/core/Deprecated.h"
 #include "ATen/core/TensorOptions.h"
-#include "ATen/core/Error.h"
 #include "TH/THRandom.h"
+#include "c10/util/Exception.h"
 
 #include <algorithm>
 #include <cmath>
@@ -48,7 +48,7 @@ void window_function_checks(
       " is not implemented for sparse types, got: ",
       options);
   AT_CHECK(
-      at::isFloatingType(dataTypeToScalarType(options.dtype().id())),
+      at::isFloatingType(typeMetaToScalarType(options.dtype())),
       function_name,
       " expects floating point dtypes, got: ",
       options);

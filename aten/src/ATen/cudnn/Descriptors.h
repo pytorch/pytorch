@@ -256,7 +256,7 @@ struct AT_CUDA_API DropoutDescriptor
     size_t state_size;
     AT_CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
     AT_ASSERT(options.device().type() == kCUDA);
-    AT_ASSERT(dataTypeToScalarType(options.dtype().id()) == kByte);
+    AT_ASSERT(options.dtype() == kByte);
     state = at::empty({static_cast<int64_t>(state_size)}, options);
     AT_CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, dropout, state.data_ptr(), state_size, seed));
   }

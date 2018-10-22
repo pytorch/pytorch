@@ -254,11 +254,18 @@ def isfinite(tensor):
 
     Example::
 
-        >>> torch.isfinite(torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        >>> torch.isfinite(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
         tensor([ 1,  0,  1,  0,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):
         raise ValueError("The argument is not a tensor", str(tensor))
+
+    # Support int input, nan and inf are concepts in floating point numbers.
+    # Numpy uses type 'Object' when the int overflows long, but we don't
+    # have a similar concept. It's safe to assume any created LongTensor doesn't
+    # overflow and it's finite.
+    if not tensor.is_floating_point():
+        return torch.ones_like(tensor, dtype=torch.uint8)
     return (tensor == tensor) & (tensor.abs() != inf)
 
 
@@ -273,7 +280,7 @@ def isinf(tensor):
 
     Example::
 
-        >>> torch.isinf(torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
         tensor([ 0,  1,  0,  1,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):

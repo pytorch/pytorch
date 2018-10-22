@@ -107,7 +107,7 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
               if (!canSchedule(parent_id, child_id)) {
                 // we can't schedule a child because of this parent,
                 // check if parent supports callback
-                if (c10::FLAGS_caffe2_net_async_optimize_polling &&
+                if (FLAGS_caffe2_net_async_optimize_polling &&
                     parent_event.SupportsCallback()) {
                   parents_with_callback.push_back(parent_id);
                 } else {
@@ -252,7 +252,7 @@ bool AsyncSchedulingNet::RunAsync() {
 
     for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
       if (parents(task_id).empty()) {
-        schedule(task_id, c10::FLAGS_caffe2_net_async_run_root_tasks_inline);
+        schedule(task_id, FLAGS_caffe2_net_async_run_root_tasks_inline);
       }
     }
   } catch (const std::exception& e) {

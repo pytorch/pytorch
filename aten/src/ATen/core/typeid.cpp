@@ -1,5 +1,5 @@
 #include <ATen/core/typeid.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <atomic>
 
@@ -17,7 +17,7 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
   AT_ERROR(msg);
 }
 
-const TypeMetaData _typeMetaDataInstance_uninitialized_ = detail::TypeMetaData(0, nullptr, nullptr, nullptr, TypeIdentifier::uninitialized(), "nullptr (uninitialized)");
+const TypeMetaData _typeMetaDataInstance_uninitialized_ = detail::TypeMetaData(0, nullptr, nullptr, nullptr, nullptr, nullptr, TypeIdentifier::uninitialized(), "nullptr (uninitialized)");
 
 } // namespace detail
 

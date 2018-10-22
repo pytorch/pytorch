@@ -14,7 +14,7 @@ using namespace at;
   ASSERT_EQ(options.device().type(), Device((device_), (index_)).type()); \
   ASSERT_TRUE(                                                                \
       options.device().index() == Device((device_), (index_)).index());       \
-  ASSERT_EQ(dataTypeToScalarType(options.dtype().id()), (type_));             \
+  ASSERT_EQ(typeMetaToScalarType(options.dtype()), (type_));                  \
   ASSERT_TRUE(options.layout() == (layout_))
 
 #define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)                \

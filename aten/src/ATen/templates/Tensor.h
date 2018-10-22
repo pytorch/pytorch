@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ATen/core/Device.h"
-#include "ATen/core/Error.h"
 #include "ATen/core/Layout.h"
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
@@ -10,6 +9,7 @@
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/core/TensorImpl.h"
 #include "ATen/core/UndefinedTensorImpl.h"
+#include "c10/util/Exception.h"
 #include "c10/util/Optional.h"
 
 namespace at {
@@ -143,7 +143,7 @@ public:
     return impl_->type_id();
   }
   ScalarType scalar_type() const {
-    return dataTypeToScalarType(impl_->dtype().id());
+    return typeMetaToScalarType(impl_->dtype());
   }
   const Storage& storage() const {
     return impl_->storage();
@@ -161,7 +161,7 @@ public:
   Layout layout() const noexcept;
 
   /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.h
-  const caffe2::TypeMeta& dtype() const noexcept;
+  caffe2::TypeMeta dtype() const noexcept;
 
   /// Returns a `Tensor`'s device.
   Device device() const;

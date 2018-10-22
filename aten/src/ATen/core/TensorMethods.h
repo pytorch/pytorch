@@ -1228,7 +1228,7 @@ inline bool Tensor::is_variable() const noexcept {
   return type().is_variable();
 }
 
-inline const caffe2::TypeMeta& Tensor::dtype() const noexcept {
+inline caffe2::TypeMeta Tensor::dtype() const noexcept {
   return impl_->dtype();
 }
 
