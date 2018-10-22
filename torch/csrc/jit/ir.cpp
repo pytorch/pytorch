@@ -490,7 +490,6 @@ void Block::reIndexTopology() {
     curPos += kAppendInterval;
     node->topo_position_ = curPos;
   }
-  return_node()->topo_position_ = kUpperBound;
 }
 
 void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
@@ -711,7 +710,7 @@ void Node::assignTopoPosition() {
     if (prevPos >= (kUpperBound - kAppendInterval)) {
       // we're running off the edge
       owningBlock()->reIndexTopology();
-      return assignTopoPosition();
+      return;
     }
 
     topo_position_ = prevPos + kAppendInterval;
@@ -722,7 +721,7 @@ void Node::assignTopoPosition() {
     if (nextPos <= (kLowerBound + kAppendInterval)) {
       // we're running off the edge
       owningBlock()->reIndexTopology();
-      return assignTopoPosition();
+      return;
     }
 
     topo_position_ = nextPos - kAppendInterval;
@@ -733,7 +732,7 @@ void Node::assignTopoPosition() {
     if (posBetween == prevPos) {
       // There was no room
       owningBlock()->reIndexTopology();
-      return assignTopoPosition();
+      return;
     }
     topo_position_ = posBetween;
   }
