@@ -1149,20 +1149,18 @@ void testSchemaParser() {
                                             ->getElementType()
                                             ->expect<ListType>()
                                             ->getElementType()));
-  // futures
-  try {
-    parseSchema("at::what(Future(int) foo) -> ()");
-    ASSERT_TRUE(false);
-  } catch (script::ErrorReport& er) {
-    ASSERT_TRUE(
-        std::string(er.what()).find("Futures are not yet implemented") !=
-        std::string::npos);
-  }
+
   // named returns
   parseSchema("at::what(Tensor! i_will_be_written_to) -> ()");
   auto s3 = parseSchema("at::what() -> (Tensor the_return, Tensor the_return2)");
   ASSERT_TRUE(s3.returns().at(0).name() == "the_return");
   ASSERT_TRUE(s3.returns().at(1).name() == "the_return2");
+
+  // futures
+  auto s4 = parseSchema("at::what(Future(int) foo) -> ()");
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s4.arguments().at(0)
+                                          .type()->expect<FutureType>()
+                                          ->getElementType()));
 
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(t) foo) -> (Tensor(t))");

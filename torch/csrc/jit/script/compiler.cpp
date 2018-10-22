@@ -1479,11 +1479,25 @@ private:
 
   std::shared_ptr<SugaredValue> emitApplyExpr(Apply &apply, size_t n_binders) {
     auto sv = emitSugaredExpr(apply.callee(), 1);
-    auto inputs = getNamedValues(apply.inputs(), true);
     auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
       return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
     });
-    return sv->call(apply.callee().range(), method, inputs, attributes, n_binders);
+
+    auto loc = apply.callee().range();
+    if (auto fork_value = dynamic_cast<ForkValue*>(sv.get())) {
+      auto& trees = apply.inputs().tree()->trees();
+      if (trees.size() < 1) {
+        throw ErrorReport(loc) << "Expected at least one argument to fork()";
+      }
+
+      auto forked = emitSugaredExpr(Expr(trees[0]), 1);
+      TreeList sliced_trees(trees.begin() + 1, trees.end());
+      auto inputs = getNamedValues(sliced_trees, true);
+      return emitForkExpr(loc, forked, inputs, attributes);
+    } else {
+      auto inputs = getNamedValues(apply.inputs(), true);
+      return sv->call(loc, method, inputs, attributes, n_binders);
+    }
   }
 
   Value* emitExpr(Expr tree) {
@@ -1547,6 +1561,50 @@ private:
     op(stack);
     JIT_ASSERT(stack.size() == 1);
     return graph->insertConstant(stack[0], tree->range());
+  }
+
+  // This function extract a new graph from its original subgraph
+  std::shared_ptr<SugaredValue> emitForkExpr(
+      SourceRange loc,
+      const std::shared_ptr<SugaredValue> &forked,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes) {
+    // Build the fork node without inputs
+    auto fork_node = method.graph()->insertNode(method.graph()->create(prim::fork, 1))
+                ->setSourceLocation(std::make_shared<SourceRange>(loc));
+    auto body_block = fork_node->addBlock();
+
+    // Build a template of the graph to be executed
+    Value *node_output;
+    {
+      WithInsertPoint guard(body_block);
+      auto fn_sugared_output = forked->call(loc, method, inputs, attributes, 1);
+      auto fn_simple_output = fn_sugared_output->asValue(loc, method);
+      body_block->registerOutput(fn_simple_output);
+      node_output = fork_node->output()->setType(FutureType::create(fn_simple_output->type()));
+    }
+
+    // Fork a new graph from its orignal owning graph
+    auto forked_graph = std::make_shared<Graph>();
+
+    // Make sure we capture everything in the new graph.
+    // The uncaptured values will be added to the fork signature.
+    std::unordered_map<Value*, Value*> uncaptures_map;
+    auto env = [&](Value* v) -> Value* {
+      if (!uncaptures_map.count(v)) {
+        // Capture values for both graphs
+        uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
+        fork_node->addInput(v);
+      }
+      return uncaptures_map[v];
+    };
+    forked_graph->block()->cloneFrom(body_block, env);
+
+    // Separate the subgraph and clean up the orignal one
+    fork_node->g_(attr::Subgraph, forked_graph);
+    fork_node->eraseBlock(0);
+
+    return std::make_shared<SimpleValue>(node_output);
   }
 
   Value* emitSimpleExpr(
