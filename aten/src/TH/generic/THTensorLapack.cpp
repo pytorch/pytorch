@@ -464,7 +464,7 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   scalar_t *rv__data = NULL;
 
   rs__ = THTensor_(newContiguous)(rs_);
-  rs__data = rs__->data<scalar_t>();  
+  rs__data = rs__->data<scalar_t>();
   if (*compute_uv != 'N') {
     /* guard against someone passing a correct size, but wrong stride */
     ru__ = THTensor_(newTransposedContiguous)(ru_);

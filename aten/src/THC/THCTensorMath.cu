@@ -111,7 +111,7 @@ struct NonZeroOp
 
 template<typename T, typename accT = T>
 struct LinspaceOp {
-  __host__ __device__ LinspaceOp(accT start, accT step): 
+  __host__ __device__ LinspaceOp(accT start, accT step):
     start_(start), step_(step) { }
   __device__ __forceinline__ T operator()(ptrdiff_t index) {
     accT increment = THCNumerics<accT>::mul(step_, ScalarConvert<ptrdiff_t,accT>::to(index));
@@ -124,7 +124,7 @@ struct LinspaceOp {
 
 template<typename T, typename accT = T>
 struct LogspaceOp {
-  __host__ __device__ LogspaceOp(accT start, accT step): 
+  __host__ __device__ LogspaceOp(accT start, accT step):
     start_(start), step_(step) { }
   __device__ __forceinline__ T operator()(ptrdiff_t index) {
     accT increment = THCNumerics<accT>::mul(step_, ScalarConvert<ptrdiff_t,accT>::to(index));
