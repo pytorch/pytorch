@@ -55,21 +55,10 @@ _fork = torch._C.fork
 _wait = torch._C.wait
 
 
-def enabled(new_value=None):
-    r"""Returns whether JIT is enabled. If :attr:`new_value` is not ``None``,
-    enables/disables JIT basing on its value before returning.
-
-    The environment flag ``PYTORCH_JIT`` can also be used to enable/disable JIT.
-
-    Arguments:
-        new_value (bool, optional): If not ``None``, enables/disables JIT.
-                                    (Default: None)
+def is_enabled():
+    r"""Returns whether JIT is enabled, i.e., whether the environment flag
+    ``PYTORCH_JIT`` is set.
     """
-    global _enabled
-    if new_value is not None:
-        if not isinstance(new_value, bool):
-            raise ValueError("'new_value' should be a boolean, but got new_value={}".format(new_value))
-        _enabled = new_value
     return _enabled
 
 

@@ -453,10 +453,10 @@ class TestJit(JitTestCase):
 
         self.assertEqual(fn(x, y), fn_traced(x, y))
 
-    def test_set_enabled(self):
+    def test_disabled(self):
+        torch.jit._enabled = False
         try:
-            self.assertFalse(torch.jit.enabled(False))
-            self.assertFalse(torch.jit.enabled())
+            self.assertFalse(torch.jit.is_enabled())
 
             def f(x, y):
                 return x + y
@@ -475,11 +475,8 @@ class TestJit(JitTestCase):
             # We need to or those two conditions to make it work with all versions of Python
             self.assertTrue(inspect.ismethod(MyModule.method) or inspect.isfunction(MyModule.method))
         finally:
-            self.assertTrue(torch.jit.enabled(True))
-            self.assertTrue(torch.jit.enabled())
-
-        with self.assertRaisesRegex(ValueError, "should be a boolean"):
-            torch.jit.enabled(233)
+            torch.jit._enabled = True
+            self.assertTrue(torch.jit.is_enabled())
 
     def test_train_eval(self):
         class Sub(nn.Module):
