@@ -1260,14 +1260,13 @@ inline int64_t Tensor::get_device() const {
   // to a native function.
   const auto& mytype = type();
   if (!mytype.is_cuda()) {
-    return -1;
+    AT_ERROR("get_device is not implemented for type ", type());
   }
   if (mytype.is_sparse()) {
     return _values().get_device();
   }
-  // TODO(rzou): Investigate caching device on TensorImpl.
-  // It'll probably be faster than having this indirection through Storage
-  return impl_->storage().unsafeGetStorageImpl()->device().index();
+  // TODO: #12934 Investigate caching device on TensorImpl for performance
+  return impl_->storage().device().index();
 }
 
 inline int64_t get_device(Tensor self) {
