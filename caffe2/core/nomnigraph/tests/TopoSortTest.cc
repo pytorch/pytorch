@@ -12,7 +12,7 @@ TEST(TopoSort, Simple) {
   auto n1 = createTestNode(g);
   auto n2 = createTestNode(g);
   g.createEdge(n1, n2);
-  auto res = nom::algorithm::topoSort(&g);
+  auto res = nom::algorithm::topoSort(g);
   EXPECT_EQ(res.status, TopoSortT::Result::OK);
   EXPECT_EQ(res.nodes.size(), 2);
   EXPECT_EQ(res.nodes[0], n1);
@@ -29,7 +29,7 @@ TEST(TopoSort, DAG) {
   g.createEdge(n1, n3);
   g.createEdge(n2, n4);
   g.createEdge(n3, n4);
-  auto res = nom::algorithm::topoSort(&g);
+  auto res = nom::algorithm::topoSort(g);
   EXPECT_EQ(res.status, TopoSortT::Result::OK);
   EXPECT_EQ(res.nodes.size(), 4);
   auto i1 = std::find(res.nodes.begin(), res.nodes.end(), n1);
@@ -52,7 +52,7 @@ TEST(TopoSort, Cycle1) {
   auto n2 = createTestNode(g);
   g.createEdge(n1, n2);
   g.createEdge(n2, n1);
-  auto res = nom::algorithm::topoSort(&g);
+  auto res = nom::algorithm::topoSort(g);
   EXPECT_EQ(res.status, TopoSortT::Result::CYCLE);
   EXPECT_EQ(res.nodes.size(), 0);
 }
@@ -67,7 +67,7 @@ TEST(TopoSort, Cycle2) {
   g.createEdge(n2, n3);
   g.createEdge(n3, n4);
   g.createEdge(n4, n2);
-  auto res = nom::algorithm::topoSort(&g);
+  auto res = nom::algorithm::topoSort(g);
   EXPECT_EQ(res.status, TopoSortT::Result::CYCLE);
   EXPECT_EQ(res.nodes.size(), 0);
 }

@@ -15,9 +15,9 @@ namespace algorithm {
 template <typename GraphT>
 class TopoSort {
  private:
-  using NodeRefT = typename GraphT::NodeRef;
+  using NodeRefT = typename GraphT::ConstNodeRef;
 
-  GraphT* graph;
+  const GraphT& graph;
 
   /// \brief performs DFS from given node.
   //  Each node and edge is visited no more than once.
@@ -26,7 +26,7 @@ class TopoSort {
   bool dfs(
       NodeRefT node,
       std::unordered_map<NodeRefT, int>& status,
-      std::vector<NodeRefT>& nodes) {
+      std::vector<NodeRefT>& nodes) const {
     // mark as visiting
     status[node] = 1;
     for (const auto& outEdge : node->getOutEdges()) {
@@ -49,17 +49,17 @@ class TopoSort {
   }
 
  public:
-  TopoSort(GraphT* graph) : graph(graph) {}
+  TopoSort(const GraphT& graph) : graph(graph) {}
 
   struct Result {
     enum { OK, CYCLE } status;
     std::vector<NodeRefT> nodes;
   };
 
-  Result run() {
+  Result run() const {
     std::vector<NodeRefT> nodes;
     std::unordered_map<NodeRefT, int> status;
-    for (auto& node : graph->getMutableNodes()) {
+    for (NodeRefT node : graph.getNodes()) {
       if (!status[node]) {
         if (dfs(node, status, nodes)) {
           return {Result::CYCLE, {}};
@@ -74,7 +74,7 @@ class TopoSort {
 //// \brief A function wrapper to infer the graph template parameters.
 /// TODO change this to const GraphT& g
 template <typename GraphT>
-typename TopoSort<GraphT>::Result topoSort(GraphT* g) {
+typename TopoSort<GraphT>::Result topoSort(const GraphT& g) {
   TopoSort<GraphT> t(g);
   return t.run();
 }

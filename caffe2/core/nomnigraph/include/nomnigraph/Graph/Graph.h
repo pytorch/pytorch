@@ -225,6 +225,7 @@ class Graph {
   using SubgraphType = Subgraph<T, U...>;
   using NodeRef = Node<T, U...>*;
   using EdgeRef = Edge<T, U...>*;
+  using ConstNodeRef = const Node<T, U...>*;
 
   Graph() {
     DEBUG_PRINT("Creating instance of Graph: %p\n", this);
@@ -508,6 +509,14 @@ class Graph {
     std::vector<NodeRef> result;
     for (auto& n : nodes_) {
       DEBUG_PRINT("Adding node to mutable output (%p)\n", &n);
+      result.emplace_back(&n);
+    }
+    return result;
+  }
+
+  const std::vector<ConstNodeRef> getNodes() const {
+    std::vector<ConstNodeRef> result;
+    for (auto& n : nodes_) {
       result.emplace_back(&n);
     }
     return result;
