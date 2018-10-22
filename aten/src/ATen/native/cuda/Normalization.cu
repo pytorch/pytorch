@@ -113,19 +113,9 @@ struct GradOp {
 // Sum across all threads within a warp
 template <typename T>
 static __device__ __forceinline__ T warpSum(T val) {
-#if __CUDA_ARCH__ >= 300
   for (int i = 0; i < getMSB(WARP_SIZE); ++i) {
     val += WARP_SHFL_XOR(val, 1 << i, WARP_SIZE);
   }
-#else
-  __shared__ T values[MAX_BLOCK_SIZE];
-  values[threadIdx.x] = val;
-  __threadfence_block();
-  const int base = (threadIdx.x / WARP_SIZE) * WARP_SIZE;
-  for (int i = 1; i < WARP_SIZE; i++) {
-    val += values[base + ((i + threadIdx.x) % WARP_SIZE)];
-  }
-#endif
   return val;
 }
 
@@ -164,21 +154,22 @@ __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
   // there are at most WARP_SIZE**2 threads at the beginning
   __shared__ scalar_t shared[WARP_SIZE];
   __syncthreads();
-  if (threadIdx.x % WARP_SIZE == 0) {
-    shared[threadIdx.x / WARP_SIZE] = sum;
+  int tid = threadIdx.x + threadIdx.y * blockDim.x;
+  if (tid % WARP_SIZE == 0) {
+    shared[tid / WARP_SIZE] = sum;
   }
-  if (threadIdx.x >= blockDim.x / WARP_SIZE && threadIdx.x < WARP_SIZE) {
+  if (tid >= blockDim.x * blockDim.y / WARP_SIZE && tid < WARP_SIZE) {
     // zero out the other entries in shared
-    shared[threadIdx.x] = (scalar_t)0;
+    shared[tid] = (scalar_t)0;
   }
   __syncthreads();
   // now have a second warpSum to reduce the intermediate values
   // from shared memory to a single number. The very first
   // thread writes it to shared memory.
 
-  if (threadIdx.x / WARP_SIZE == 0) {
-    sum = warpSum(shared[threadIdx.x]);
-    if (threadIdx.x == 0) {
+  if (tid / WARP_SIZE == 0) {
+    sum = warpSum(shared[tid]);
+    if (tid == 0) {
       shared[0] = sum;
     }
   }
@@ -220,7 +211,8 @@ __global__ void batch_norm_transform_input_kernel(
   for (int64_t batch = threadIdx.y + blockIdx.y * blockDim.y; batch < bs; batch += bstep) {
     auto o = output[batch][plane];
     auto i = input[batch][plane];
-    for (int64_t feature = threadIdx.x; feature < fs; feature += blockDim.x) {
+    int64_t feature;
+    for (feature = threadIdx.x; feature < fs; feature += blockDim.x) {
       o[feature] = static_cast<scalar_t>(gamma * (i[feature] - mean) * invstd + beta);
     }
   }
@@ -241,6 +233,7 @@ __global__ void batch_norm_collect_statistics_kernel(
 
   int plane = blockIdx.x;
   int N = input.size(0) * input.size(2);
+  int tid = threadIdx.x + threadIdx.y * blockDim.x;
 
   // Compute the mean and variance across (batch, x/y/z)
   // this uses the Welford (in the for loop)/parallel algorithm (to sum across the block)
@@ -280,20 +273,20 @@ __global__ void batch_norm_collect_statistics_kernel(
   // there are at most WARP_SIZE items left because
   // there are at most WARP_SIZE**2 threads at the beginning  
   __syncthreads();
-  if (threadIdx.x % WARP_SIZE == 0) {
-    shared_n[threadIdx.x / WARP_SIZE] = n;
-    shared_avg_var[threadIdx.x / WARP_SIZE * 2] = avg;
-    shared_avg_var[threadIdx.x / WARP_SIZE * 2 + 1] = var_n;
+  if (tid % WARP_SIZE == 0) {
+    shared_n[tid / WARP_SIZE] = n;
+    shared_avg_var[tid / WARP_SIZE * 2] = avg;
+    shared_avg_var[tid / WARP_SIZE * 2 + 1] = var_n;
   }
   __syncthreads();
   // now have a second warpSum to reduce the intermediate values
   // from shared memory to a single number. The very first
   // thread writes it to shared memory.
 
-  if (threadIdx.x < WARP_SIZE) {
-    n = (threadIdx.x < blockDim.x / WARP_SIZE ? shared_n[threadIdx.x] : 0);
-    avg = (threadIdx.x < blockDim.x / WARP_SIZE ? shared_avg_var[2 * threadIdx.x] : 0);
-    var_n = (threadIdx.x < blockDim.x / WARP_SIZE ? shared_avg_var[2 * threadIdx.x + 1] : 0);
+  if (tid < WARP_SIZE) {
+    n = (tid < blockDim.x * blockDim.y / WARP_SIZE ? shared_n[tid] : 0);
+    avg = (tid < blockDim.x * blockDim.y  / WARP_SIZE ? shared_avg_var[2 * tid] : 0);
+    var_n = (tid < blockDim.x * blockDim.y  / WARP_SIZE ? shared_avg_var[2 * tid + 1] : 0);
   }
   for (int i = 0; i < getMSB(WARP_SIZE); ++i) {
     accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, WARP_SIZE);
@@ -306,7 +299,7 @@ __global__ void batch_norm_collect_statistics_kernel(
   }
 
   // Save the mean, variance, and moving averages
-  if (threadIdx.x == 0) {
+  if (tid == 0) {
     accscalar_t invstd = 0;
     if (var_n != static_cast<accscalar_t>(0) || epsilon != static_cast<accscalar_t>(0)) {
       invstd = static_cast<accscalar_t>(1) / device_sqrt(var_n / N + epsilon);
