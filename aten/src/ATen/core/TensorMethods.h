@@ -1270,6 +1270,10 @@ inline int64_t Tensor::get_device() const {
   return impl_->storage().unsafeGetStorageImpl()->device().index();
 }
 
+inline int64_t get_device(Tensor self) {
+  return self.get_device();
+}
+
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \
   inline T* Tensor::data() const {               \
