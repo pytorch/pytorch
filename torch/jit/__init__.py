@@ -1424,6 +1424,9 @@ class JITModule(object):
         # https://stackoverflow.com/questions/47540722/how-do-i-use-the-sys-modules-replacement-trick-in-init-py-on-python-2
         self.__old_mod = m
 
+    def __getattr__(self, name):
+        return getattr(self.__old_mod, name)
+
     @staticmethod
     def __raise(ex):
         raise ex
