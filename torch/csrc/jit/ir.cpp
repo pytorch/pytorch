@@ -486,7 +486,7 @@ Block::Block(Graph* graph_, Node* node_)
 void Block::reIndexTopology() {
   auto curPos = kLowerBound;
   for (auto node : nodes()) {
-    AT_ASSERT(curPos <= (kLowerBound - kAppendInterval));
+    AT_ASSERT(curPos <= (kUpperBound - kAppendInterval));
     curPos += kAppendInterval;
     node->topo_position_ = curPos;
   }
@@ -864,12 +864,13 @@ Value* Node::insertOutput(size_t i) {
 }
 
 bool Node::isBefore(Node * n) const {
+  if (this == n) {
+    return false;
+  }
   return !isAfter(n);
 }
 
 bool Node::isAfter(Node * n) const {
-  JIT_ASSERT(this != n);
-  JIT_ASSERT(this->topo_position_ != n->topo_position_);
   JIT_ASSERT(this->owningBlock() == n->owningBlock());
 
   return this->topo_position_ > n->topo_position_;

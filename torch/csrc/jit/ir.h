@@ -639,7 +639,7 @@ struct Block {
   friend struct Node;
   friend struct Graph;
   TH_DISALLOW_COPY_AND_ASSIGN(Block);
-  Block(Graph * graph_, Node * node_);
+  TORCH_API Block(Graph * graph_, Node * node_);
   at::ArrayRef<Value*> inputs() {
     return input_->outputs();
   }
