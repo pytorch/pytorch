@@ -525,8 +525,6 @@ class _DataLoaderIter(object):
 
         self.sample_iter = iter(self.batch_sampler)
 
-        base_seed = torch.LongTensor(1).random_().item()
-
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
             self.worker_queue_idx = 0
@@ -541,6 +539,9 @@ class _DataLoaderIter(object):
 
             self.index_queues = []
             self.workers = []
+
+            base_seed = torch.LongTensor(1).random_().item()
+
             for i in range(self.num_workers):
                 index_queue = multiprocessing.Queue()
                 index_queue.cancel_join_thread()
