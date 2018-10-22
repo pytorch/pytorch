@@ -207,12 +207,12 @@ __global__ void batch_norm_transform_input_kernel(
 
   int64_t bs = input.size(0);
   int64_t fs = input.size(2);
+
   int64_t bstep  = blockDim.y * gridDim.y;
   for (int64_t batch = threadIdx.y + blockIdx.y * blockDim.y; batch < bs; batch += bstep) {
     auto o = output[batch][plane];
     auto i = input[batch][plane];
-    int64_t feature;
-    for (feature = threadIdx.x; feature < fs; feature += blockDim.x) {
+    for (int64_t feature = threadIdx.x; feature < fs; feature += blockDim.x) {
       o[feature] = static_cast<scalar_t>(gamma * (i[feature] - mean) * invstd + beta);
     }
   }
@@ -436,9 +436,9 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
   // and good occupancy. Quiet likely, we could go with even more blocks than 1024.
   // The various planes are independent, so we use blocks for them.
   int tf = std::max<int>(getNumThreads(input.size(2)/4),
-			 std::min<int>(getNumThreads(input.size(2)), 128));
-  int tb = std::max<int>(128/tf, 1);
-  dim3 blocks_trans(input.size(1), std::max<int>(1, std::min<int>(1024/input.size(1),
+			 std::min<int>(getNumThreads(input.size(2)), 64));
+  int tb = std::max<int>(64/tf, 1);
+  dim3 blocks_trans(input.size(1), std::max<int>(1, std::min<int>((256*1024)/input.size(1),
 								  (input.size(0)+tb-1)/tb)));
   dim3 threads_trans(tf, tb);
   if (!train) {
