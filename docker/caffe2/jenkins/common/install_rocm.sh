@@ -45,16 +45,20 @@ install_ubuntu() {
     sed -i 's/find_dependency(hip)/find_dependency(HIP)/g' /opt/rocm/rocblas/lib/cmake/rocblas/rocblas-config.cmake
 }
 
+install_devtoolset() {
+  yum install -y centos-release-scl
+  yum install -y devtoolset-7
+
+  echo "source scl_source enable devtoolset-7" >> /root/.bashrc
+}
+
 install_centos() {
 
   yum update -y
   yum install -y wget
   yum install -y openblas-devel
 
-  yum install -y centos-release-scl
-  yum install -y devtoolset-7
-
-  echo "source scl_source enable devtoolset-7" >> /root/.bashrc
+  install_devtoolset
 
   yum install -y epel-release
   yum install -y dkms kernel-headers-`uname -r` kernel-devel-`uname -r`
