@@ -9042,6 +9042,14 @@ class TestTorch(TestCase):
         self.assertEqual(b.type(), b_copy.type())
         self.assertEqual(b.data.type(), b_copy.type())
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    def test_reverse_binary_ops_multiple_device(self):
+        self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to("cuda:1"))    # __radd__
+        self.assertEqual(2 - torch.tensor(3), 2 - torch.tensor(3).to("cuda:1"))    # __rsub__
+        self.assertEqual(2 * torch.tensor(3), 2 * torch.tensor(3).to("cuda:1"))    # __rmul__
+        self.assertEqual(2 / torch.tensor(3), 2 / torch.tensor(3).to("cuda:1"))    # __rtruediv__
+        self.assertEqual(2**torch.tensor(3), 2**torch.tensor(3).to("cuda:1"))      # __rpow__
+        self.assertEqual(2 // torch.tensor(3), 2 // torch.tensor(3).to("cuda:1"))  # __rfloordiv__
 
 # Functions to test negative dimension wrapping
 METHOD = 1
