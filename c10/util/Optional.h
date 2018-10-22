@@ -477,18 +477,6 @@ class optional : private OptionalBase<T> {
     return *this;
   }
 
-  //template <class U>
-  //auto operator=(U&& v) -> typename std::enable_if<
-      //std::is_same<typename std::decay<U>::type, T>::value,
-      //optional&>::type {
-    //if (initialized()) {
-      //contained_val() = std::forward<U>(v);
-    //} else {
-      //initialize(std::forward<U>(v));
-    //}
-    //return *this;
-  //}
-
   template<class U = T>
   auto operator=(U&& v) -> typename std::enable_if<
           std::is_constructible<T, U>::value
@@ -503,7 +491,6 @@ class optional : private OptionalBase<T> {
     }
     return *this;
   }
-
 
   template <class... Args>
   void emplace(Args&&... args) {
