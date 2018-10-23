@@ -350,6 +350,10 @@ class CAFFE2_API Tensor final {
     return impl_->numel() * itemsize();
   }
 
+  inline at::IntList sizes() const {
+    return impl_.get()->sizes();
+  }
+
   inline at::IntList dims() const {
     return impl_.get()->sizes();
   }
