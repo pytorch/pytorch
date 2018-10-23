@@ -171,3 +171,11 @@ Indices and tables
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
+
+Acknowledgements
+----------------
+
+This documentation website for the PyTorch C++ universe has been enabled by the
+`Exhale <https://github.com/svenevs/exhale/>`_ project and generous investment
+of time and effort by its maintainer, `svenevs <https://github.com/svenevs/>`_.
+We thank Stephen for his work and his help with the PyTorch C++ documentation.

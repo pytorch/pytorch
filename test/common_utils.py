@@ -27,6 +27,8 @@ from numbers import Number
 import __main__
 import errno
 
+import expecttest
+
 import torch
 import torch.cuda
 from torch._utils_internal import get_writable_path
@@ -44,7 +46,8 @@ parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 args, remaining = parser.parse_known_args()
 SEED = args.seed
-ACCEPT = args.accept
+if not expecttest.ACCEPT:
+    expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
@@ -241,7 +244,7 @@ class CudaMemoryLeakCheck():
                     self.name, after - before, i))
 
 
-class TestCase(unittest.TestCase):
+class TestCase(expecttest.TestCase):
     precision = 1e-5
     maxDiff = None
     _do_cuda_memory_leak_check = False
@@ -502,9 +505,9 @@ class TestCase(unittest.TestCase):
             return text
         # NB: we take __file__ from the module that defined the test
         # class, so we place the expect directory where the test script
-        # lives, NOT where test/common.py lives.  This doesn't matter in
+        # lives, NOT where test/common_utils.py lives.  This doesn't matter in
         # PyTorch where all test scripts are in the same directory as
-        # test/common.py, but it matters in onnx-pytorch
+        # test/common_utils.py, but it matters in onnx-pytorch
         module_id = self.__class__.__module__
         munged_id = remove_prefix(self.id(), module_id + ".")
         test_file = os.path.realpath(sys.modules[module_id].__file__)
@@ -530,7 +533,7 @@ class TestCase(unittest.TestCase):
         except IOError as e:
             if e.errno != errno.ENOENT:
                 raise
-            elif ACCEPT:
+            elif expecttest.ACCEPT:
                 return accept_output("output")
             else:
                 raise RuntimeError(
@@ -543,7 +546,7 @@ class TestCase(unittest.TestCase):
             expected = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', expected)
             s = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', s)
 
-        if ACCEPT:
+        if expecttest.ACCEPT:
             if expected != s:
                 return accept_output("updated output")
         else:

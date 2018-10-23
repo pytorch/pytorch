@@ -328,6 +328,13 @@ class CAFFE2_API Tensor final {
   }
 
   /**
+   * Returns the size (i.e. the number of items) of the tensor.
+   */
+  inline int64_t numel() const {
+    return impl_->numel();
+  }
+
+  /**
    * Return the number of bytes each item takes in the tensor.
    */
   inline size_t itemsize() const {

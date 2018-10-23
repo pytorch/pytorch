@@ -16,11 +16,11 @@ import warnings
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common import IS_WINDOWS, IS_PPC, skipIfRocm
+from common_utils import IS_WINDOWS, IS_PPC, skipIfRocm
 
 HAS_CUDA = torch.cuda.is_available()
 
-from common import TestCase, run_tests, download_file
+from common_utils import TestCase, run_tests, download_file
 
 
 class RandomDatasetMock(object):
@@ -211,7 +211,7 @@ class TestBottleneck(TestCase):
     def _run(self, command):
         """Returns (return-code, stdout, stderr)"""
         import subprocess
-        from common import PY3
+        from common_utils import PY3
 
         p = subprocess.Popen(command, stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, shell=True)

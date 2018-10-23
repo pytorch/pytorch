@@ -39,8 +39,8 @@ CAFFE2_API caffe2::OperatorDef convertToOperatorDef(
     const nom::repr::NNGraph::NodeRef& instrNode);
 
 // If the annotation doesn't exist, attempt to add it
-CAFFE2_API Caffe2Annotation
-getOrAddCaffe2Annotation(nom::repr::NNGraph::NodeRef& instrNode);
+CAFFE2_API Caffe2Annotation* getOrAddCaffe2Annotation(
+    nom::repr::NNGraph::NodeRef& instrNode);
 
 class CAFFE2_API Converter {
  public:

@@ -12,7 +12,7 @@ import torch.multiprocessing as mp
 import torch.utils.hooks
 from torch.autograd import Variable
 from torch.nn import Parameter
-from common import TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN
+from common_utils import TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN
 from multiprocessing.reduction import ForkingPickler
 
 

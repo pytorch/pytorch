@@ -6,14 +6,6 @@ set(Caffe2_CPU_PYTHON_SRCS
     "/pybind_state_registry.cc"
 )
 
-# ---[ MKL binding
-if(USE_MKL AND USE_MKLML)
-  set(Caffe2_CPU_PYTHON_SRCS
-      ${Caffe2_CPU_PYTHON_SRCS}
-      "/pybind_state_mkl.cc"
-  )
-endif()
-
 # ---[ GPU files
 set(Caffe2_GPU_PYTHON_SRCS
     ${Caffe2_CPU_PYTHON_SRCS}

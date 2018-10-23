@@ -331,7 +331,7 @@ class create_version_file(PytorchCommand):
 # All libraries that torch could depend on
 dep_libs = [
     'nccl', 'caffe2',
-    'libshm', 'libshm_windows', 'gloo', 'THD', 'c10d',
+    'libshm', 'libshm_windows', 'THD', 'c10d',
 ]
 
 missing_pydep = '''
@@ -467,7 +467,6 @@ class build_deps(PytorchCommand):
             libs += ['libshm']
         if USE_DISTRIBUTED:
             if IS_LINUX:
-                libs += ['gloo']
                 libs += ['c10d']
             libs += ['THD']
         build_libs(libs)
@@ -865,11 +864,6 @@ NCCL_LIB = os.path.join(lib_path, 'libnccl.so.2')
 C10D_LIB = os.path.join(lib_path, 'libc10d.a')
 
 # static library only
-if DEBUG:
-    PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobufd.a')
-else:
-    PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobuf.a')
-
 if IS_DARWIN:
     CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.dylib')]
     if USE_CUDA:
@@ -887,14 +881,10 @@ if IS_WINDOWS:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
     if USE_ROCM:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
-    if DEBUG:
-        PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobufd.lib')
-    else:
-        PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobuf.lib')
 
 main_compile_args = ['-D_THP_CORE', '-DONNX_NAMESPACE=' + ONNX_NAMESPACE]
 main_libraries = ['shm']
-main_link_args = CAFFE2_LIBS + [PROTOBUF_STATIC_LIB]
+main_link_args = CAFFE2_LIBS
 if IS_WINDOWS:
     main_link_args.append(os.path.join(lib_path, 'torch.lib'))
 elif IS_DARWIN:
@@ -1228,7 +1218,13 @@ if __name__ == '__main__':
                 'lib/include/torch/*.h',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/api/include/torch/*.h',
+                'lib/include/torch/csrc/api/include/torch/data/*.h',
+                'lib/include/torch/csrc/api/include/torch/data/datasets/*.h',
+                'lib/include/torch/csrc/api/include/torch/data/detail/*.h',
+                'lib/include/torch/csrc/api/include/torch/data/samplers/*.h',
+                'lib/include/torch/csrc/api/include/torch/data/transforms/*.h',
                 'lib/include/torch/csrc/api/include/torch/detail/*.h',
+                'lib/include/torch/csrc/api/include/torch/detail/ordered_dict.h',
                 'lib/include/torch/csrc/api/include/torch/nn/*.h',
                 'lib/include/torch/csrc/api/include/torch/nn/modules/*.h',
                 'lib/include/torch/csrc/api/include/torch/nn/parallel/*.h',
