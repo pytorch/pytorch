@@ -20,6 +20,7 @@ struct SchemaParser {
     }
     std::vector<Argument> arguments;
     std::vector<Argument> returns;
+    std::vector<std::string> writes;
     bool kwarg_only = false;
     size_t idx = 0;
     parseList('(', ',', ')', [&] {
@@ -27,7 +28,7 @@ struct SchemaParser {
         kwarg_only = true;
       } else {
         arguments.push_back(parseArgument(
-            idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only));
+            idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only, writes));
       }
     });
     idx = 0;
@@ -35,13 +36,14 @@ struct SchemaParser {
     if (L.cur().kind == '(') {
       parseList('(', ',', ')', [&] {
         returns.push_back(
-            parseArgument(idx++, /*is_return=*/true, /*kwarg_only=*/false));
+            parseArgument(idx++, /*is_return=*/true, /*kwarg_only=*/false, writes));
       });
     } else {
       returns.push_back(
-          parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
+          parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false, writes));
     }
-    return FunctionSchema { name, arguments, returns };
+    return FunctionSchema { name, std::move(arguments), std::move(returns),
+                            false, false, std::move(writes) };
   }
 
   std::vector<FunctionSchema> parseDeclarations() {
@@ -82,33 +84,45 @@ struct SchemaParser {
     }
     return it->second;
   }
-  TypePtr parseType() {
+  static void addToWrites(std::vector<std::string>& writes, const std::string& alias_set) {
+    auto it = std::find(writes.begin(), writes.end(), alias_set);
+    if(it == writes.end())
+      writes.push_back(alias_set);
+  }
+  TypePtr parseAliasAnnotation(TypePtr ptr, std::vector<std::string>& writes) {
+    std::string alias_set;
+    if(L.nextIf('(')) {
+      // optional 'alias set annotation'
+      alias_set = L.expect(TK_IDENT).text();
+      if(L.nextIf('!')) {
+        addToWrites(writes, alias_set);
+      }
+      L.expect(')');
+    } else if(L.nextIf('!')) {
+      alias_set = "$" + std::to_string(next_id++);
+      addToWrites(writes, alias_set);
+    }
+    if(alias_set == "")
+      return ptr;
+    return AnnotatedType::create(ptr, std::move(alias_set));
+  }
+  TypePtr parseType(std::vector<std::string>& writes) {
     TypePtr value;
     if (L.cur().kind == '(') {
       std::vector<TypePtr> types;
       parseList('(', ',', ')', [&]{
-        types.push_back(parseType());
+        types.push_back(parseType(writes));
       });
       value = TupleType::create(std::move(types));
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
       L.next(); // Future
       L.expect('(');
-      TypePtr subtype = parseType();
+      TypePtr subtype = parseType(writes);
       L.expect(')');
       throw ErrorReport(L.cur()) << "Futures are not yet implemented";
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
-      value = DynamicType::get();
-      auto range = L.next().range; // Tensor
-      if(L.nextIf('(')) {
-        // optional 'alias set annotation'
-        auto bt = parseBaseType();
-        if (bt->kind() != TypeKind::VarType) {
-          throw ErrorReport(range)
-              << "expected type variable but found " << bt->str();
-        }
-        L.expect(')');
-        // annotation itself is currently unused
-      }
+      L.next();
+      value = parseAliasAnnotation(DynamicType::get(), writes);
     } else {
       value = parseBaseType();
     }
@@ -116,7 +130,7 @@ struct SchemaParser {
       if(L.cur().kind == '[' && L.lookahead().kind == ']') {
         L.next(); // [
         L.next(); // ]
-        value = ListType::create(value);
+        value = parseAliasAnnotation(ListType::create(value), writes);
       } else if(L.nextIf('?')) {
         value = OptionalType::create(value);
       } else {
@@ -126,21 +140,19 @@ struct SchemaParser {
     return value;
   }
 
-  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
+  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only, std::vector<std::string>& writes) {
     Argument result;
-    auto type = parseType();
+    auto type = parseType(writes);
     c10::optional<int32_t> N;
     c10::optional<IValue> default_value;
+    c10::optional<std::string> alias_set;
     std::string name;
     if(L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
       type = ListType::create(type);
       N = std::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
-    }
-    if(L.nextIf('!')) {
-      // pass - currently ignored but will be used to annotate where we write to a
-      // tensor
+      type = parseAliasAnnotation(type, writes);
     }
     if(is_return) {
       // optionally named return values
@@ -276,6 +288,7 @@ struct SchemaParser {
       L.expect(end);
   }
   Lexer L;
+  size_t next_id;
 };
 
 } // namespace script
