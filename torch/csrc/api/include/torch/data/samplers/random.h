@@ -3,7 +3,7 @@
 #include <torch/data/samplers/base.h>
 #include <torch/tensor.h>
 
-#include "c10/util/Optional.h"
+#include <ATen/optional.h>
 
 #include <algorithm>
 #include <cstddef>

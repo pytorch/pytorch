@@ -1,7 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "ATen/ATen.h"
-#include "c10/util/Optional.h"
+#include "ATen/optional.h"
 
 #include <assert.h>
 

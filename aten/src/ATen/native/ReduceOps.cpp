@@ -21,34 +21,25 @@ DEFINE_DISPATCH(sum_kernel);
 DEFINE_DISPATCH(prod_kernel);
 DEFINE_DISPATCH(norm_kernel);
 
-static inline Tensor integer_upcast(
-    const Tensor& self,
-    c10::optional<ScalarType> dtype) {
+static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.type().scalarType();
   ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType) ? ScalarType::Long : scalarType);
   return self.toType(upcast_scalarType);
 }
 
-static inline Tensor cumsum(
-    const Tensor& self,
-    int64_t dim,
-    c10::optional<ScalarType> dtype) {
+static inline Tensor cumsum(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   return at::_cumsum(integer_upcast(self, dtype), dim);
 }
 
 Tensor cumsum(const Tensor& self, int64_t dim, ScalarType dtype) {
-  return at::native::cumsum(self, dim, c10::optional<ScalarType>(dtype));
+  return at::native::cumsum(self, dim, optional<ScalarType>(dtype));
 }
 
 Tensor cumsum(const Tensor& self, int64_t dim) {
   return at::native::cumsum(self, dim, c10::nullopt);
 }
 
-static inline Tensor& cumsum_out(
-    Tensor& result,
-    const Tensor& self,
-    int64_t dim,
-    c10::optional<ScalarType> dtype) {
+static inline Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   AT_CHECK(
       !dtype.has_value() || (result.type().scalarType() == dtype.value()),
@@ -61,34 +52,26 @@ static inline Tensor& cumsum_out(
 }
 
 Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
-  return at::native::cumsum_out(
-      result, self, dim, c10::optional<ScalarType>(dtype));
+  return at::native::cumsum_out(result, self, dim, optional<ScalarType>(dtype));
 }
 
 Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim) {
   return at::native::cumsum_out(result, self, dim, c10::nullopt);
 }
 
-static inline Tensor cumprod(
-    const Tensor& self,
-    int64_t dim,
-    c10::optional<ScalarType> dtype) {
+static inline Tensor cumprod(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   return at::_cumprod(integer_upcast(self, dtype), dim);
 }
 
 Tensor cumprod(const Tensor& self, int64_t dim, ScalarType dtype) {
-  return at::native::cumprod(self, dim, c10::optional<ScalarType>(dtype));
+  return at::native::cumprod(self, dim, optional<ScalarType>(dtype));
 }
 
 Tensor cumprod(const Tensor& self, int64_t dim) {
   return at::native::cumprod(self, dim, c10::nullopt);
 }
 
-static inline Tensor& cumprod_out(
-    Tensor& result,
-    const Tensor& self,
-    int64_t dim,
-    c10::optional<ScalarType> dtype) {
+static inline Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   AT_CHECK(
       !dtype.has_value() || (result.type().scalarType() == dtype.value()),
@@ -101,8 +84,7 @@ static inline Tensor& cumprod_out(
 }
 
 Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
-  return at::native::cumprod_out(
-      result, self, dim, c10::optional<ScalarType>(dtype));
+  return at::native::cumprod_out(result, self, dim, optional<ScalarType>(dtype));
 }
 
 Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim) {
@@ -111,7 +93,7 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim) {
 
 // ALL REDUCE #################################################################
 
-static inline Tensor mean(const Tensor& self, c10::optional<ScalarType> dtype) {
+static inline Tensor mean(const Tensor &self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.type().scalarType();
   AT_CHECK(
       at::isFloatingType(scalarType),
@@ -127,19 +109,19 @@ static inline Tensor mean(const Tensor& self, c10::optional<ScalarType> dtype) {
 }
 
 Tensor mean(const Tensor &self, ScalarType dtype) {
-  return at::native::mean(self, c10::optional<ScalarType>(dtype));
+  return at::native::mean(self, optional<ScalarType>(dtype));
 }
 
 Tensor mean(const Tensor &self) {
   return at::native::mean(self, c10::nullopt);
 }
 
-static inline Tensor sum(const Tensor& self, c10::optional<ScalarType> dtype) {
+static inline Tensor sum(const Tensor &self, optional<ScalarType> dtype) {
   return at::_sum(integer_upcast(self, dtype));
 }
 
 Tensor sum(const Tensor &self, ScalarType dtype) {
-  return at::native::sum(self, c10::optional<ScalarType>(dtype));
+  return at::native::sum(self, optional<ScalarType>(dtype));
 }
 
 Tensor sum(const Tensor &self) {
@@ -155,12 +137,12 @@ Tensor _sum_cpu(const Tensor& self) {
   return at::_sumall(self);
 }
 
-static inline Tensor prod(const Tensor& self, c10::optional<ScalarType> dtype) {
+static inline Tensor prod(const Tensor &self, optional<ScalarType> dtype) {
   return at::_prod(integer_upcast(self, dtype));
 }
 
 Tensor prod(const Tensor &self, ScalarType dtype) {
-  return at::native::prod(self, c10::optional<ScalarType>(dtype));
+  return at::native::prod(self, optional<ScalarType>(dtype));
 }
 
 Tensor prod(const Tensor &self) {
@@ -180,12 +162,8 @@ Tensor _prod_cpu(const Tensor &self) {
 
 // DIM REDUCE #################################################################
 
-static inline Tensor& mean_out(
-    Tensor& result,
-    const Tensor& self,
-    int64_t dim,
-    bool keepdim,
-    c10::optional<ScalarType> dtype) {
+static inline Tensor &mean_out(Tensor &result, const Tensor &self, int64_t dim,
+                 bool keepdim, optional<ScalarType> dtype) {
   ScalarType scalarType = result.type().scalarType();
   AT_CHECK(
       at::isFloatingType(scalarType),
@@ -218,12 +196,8 @@ Tensor& mean_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dty
   return at::native::mean_out(result, self, dim, false, dtype);
 }
 
-static inline Tensor& sum_out(
-    Tensor& result,
-    const Tensor& self,
-    IntList dim,
-    bool keepdim,
-    c10::optional<ScalarType> dtype) {
+static inline Tensor &sum_out(Tensor &result, const Tensor &self, IntList dim,
+                 bool keepdim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   AT_CHECK(
       !dtype.has_value() || (result.type().scalarType() == dtype.value()),
@@ -261,12 +235,8 @@ Tensor &_sum_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
   return at::_th_sum_out(result, self, dim, keepdim);
 }
 
-static inline Tensor& prod_out(
-    Tensor& result,
-    const Tensor& self,
-    int64_t dim,
-    bool keepdim,
-    c10::optional<ScalarType> dtype) {
+static inline Tensor &prod_out(Tensor &result, const Tensor &self, int64_t dim,
+                 bool keepdim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   AT_CHECK(
       !dtype.has_value() || (result.type().scalarType() == dtype.value()),
@@ -304,11 +274,7 @@ Tensor &_prod_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
   return at::_th_prod_out(result, self, dim, keepdim);
 }
 
-static inline Tensor mean(
-    const Tensor& self,
-    int64_t dim,
-    bool keepdim,
-    c10::optional<ScalarType> dtype) {
+static inline Tensor mean(const Tensor &self, int64_t dim, bool keepdim, optional<ScalarType> dtype) {
   ScalarType scalarType = self.type().scalarType();
   AT_CHECK(
       at::isFloatingType(scalarType),
@@ -340,11 +306,7 @@ Tensor mean(const Tensor& self, int64_t dim, ScalarType dtype) {
   return at::native::mean(self, dim, false, dtype);
 }
 
-static inline Tensor sum(
-    const Tensor& self,
-    IntList dim_,
-    bool keepdim,
-    c10::optional<ScalarType> dtype) {
+static inline Tensor sum(const Tensor &self, IntList dim_, bool keepdim, optional<ScalarType> dtype) {
   return at::_sum(integer_upcast(self, dtype), dim_, keepdim);
 }
 
@@ -366,11 +328,7 @@ Tensor _sum(const Tensor &self, int64_t dim_, bool keepdim) {
   return at::_sum_out(result, self, dim, keepdim);
 }
 
-static inline Tensor prod(
-    const Tensor& self,
-    int64_t dim_,
-    bool keepdim,
-    c10::optional<ScalarType> dtype) {
+static inline Tensor prod(const Tensor &self, int64_t dim_, bool keepdim, optional<ScalarType> dtype) {
   return at::_prod(integer_upcast(self, dtype), dim_, keepdim);
 }
 

@@ -546,7 +546,7 @@
   dispatch:
     CUDA: cudnn_grid_sampler_backward
 
-# FIXME: These could be combined as c10::optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: cumsum(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
@@ -557,7 +557,7 @@
 
 - func: cumsum_out(Tensor result, Tensor self, int64_t dim) -> Tensor
 
-# FIXME: These could be combined as c10::optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: cumprod(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
@@ -1025,7 +1025,7 @@
 
 - func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
 
-# FIXME: These could be combined as c10::optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: log_softmax(Tensor self, int64_t dim, ScalarType dtype) -> Tensor
   variants: function, method
 
@@ -1077,7 +1077,7 @@
 
 - func: max_pool3d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> Tensor
 
-# FIXME: These could be combined as c10::optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: mean(Tensor self, *, ScalarType dtype) -> Tensor
   variants: function, method
 
@@ -1460,7 +1460,7 @@
 - func: smm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
 
-# FIXME: These could be combined as c10::optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: softmax(Tensor self, int64_t dim, ScalarType dtype) -> Tensor
   variants: function, method
 
@@ -1558,7 +1558,7 @@
   variants: function, method
   device_guard: false
 
-# FIXME: These could be combined as c10::optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: sum(Tensor self, *, ScalarType dtype) -> Tensor
   variants: function, method
 
@@ -1617,7 +1617,7 @@
 
 - func: std_out(Tensor result, Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
 
-# FIXME: These could be combined as c10::optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: prod(Tensor self, *, ScalarType dtype) -> Tensor
   variants: function, method
 
