@@ -15,7 +15,7 @@ from torch import multiprocessing as mp
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
-from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm
+from common_utils import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm
 
 # We cannot import TEST_CUDA from common_cuda here, because if we do that,
 # the TEST_CUDNN line from common_cuda will be executed multiple times
@@ -649,8 +649,8 @@ class TestDataLoader(TestCase):
 
     @skipIfRocm
     def test_proper_exit(self):
-        r'''There might be ConnectionResetError or leaked semaphore warning
-        (due to dirty process exit), but they are all safe to ignore'''
+        (r'''There might be ConnectionResetError or leaked semaphore warning '''
+         r'''(due to dirty process exit), but they are all safe to ignore''')
 
         # TODO: test the case where the pin_memory_thread triggers an
         #       error/fatal signal. I haven't found out how to properly do that.

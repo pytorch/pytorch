@@ -11,7 +11,7 @@
 #include <omp.h>
 #endif
 
-namespace at { 
+namespace at {
 namespace native {
 
 // Staying faithful to the Python for now for clarity, look for optimizations later
@@ -30,26 +30,26 @@ Tensor norm_except_dim(const Tensor & v, int64_t pow, int64_t dim)
     output_size[v.dim() - 1] = v.size(v.dim() - 1);
     return v.contiguous().view({-1, v.size(v.dim() - 1)}).norm(pow, 0).view(output_size);
   } else {
-    // To consider: at::native::norm_except_dim is probably fine as well, 
-    // and would avoid an additional dynamic dispatch.  
+    // To consider: at::native::norm_except_dim is probably fine as well,
+    // and would avoid an additional dynamic dispatch.
     return at::norm_except_dim(v.transpose(0, dim), pow, 0).transpose(0, dim); // optimize?
   }
 }
 
 Tensor _weight_norm
-  (const Tensor & v_in, 
+  (const Tensor & v_in,
    const Tensor & g_in,
-   int64_t dim) 
+   int64_t dim)
 {
 
   AT_CHECK(
     v_in.device() == g_in.device(),
     "weight_norm: expected v_in and g_in to be on the same device, but v_in is "
-    "on ", v_in.device(), " and g_in is on ", g_in.device()); 
+    "on ", v_in.device(), " and g_in is on ", g_in.device());
 
   auto v = v_in.contiguous();
   auto g = g_in.contiguous();
-    
+
   bool can_use_fused = v.type().is_cuda() && (dim == 0 || dim == v.dim() - 1);
 
   if (can_use_fused) {
@@ -84,7 +84,7 @@ std::tuple<Tensor, Tensor> _weight_norm_differentiable_backward
 
   int64_t last_dim = saved_v.dim() - 1;
   int64_t last_size = saved_v.size(last_dim);
- 
+
   // Like weight_norm_fused_backward, weight_norm_differentiable_backward should only ever be called
   // through a WeightNormFusedBackward object, so we expect that dim == 0 || dim == saved_v.size(-1)
   AT_CHECK(dim == 0 || dim == last_dim, "Expected dim to be the first or last dimension");
@@ -102,13 +102,13 @@ std::tuple<Tensor, Tensor> _weight_norm_differentiable_backward
     bcast_size[0] = saved_v.size(0);
     auto per_dim_sums = (grad_w*saved_v).view({saved_v.size(0), -1}).sum(1).view(bcast_size);
     auto grad_v = (saved_g/norms)*(grad_w - saved_v*(per_dim_sums/(norms*norms)));
-    auto grad_g = per_dim_sums/norms; 
+    auto grad_g = per_dim_sums/norms;
     return std::tuple<Tensor, Tensor>{grad_v, grad_g};
   } else { // dim == last_dim
-    bcast_size[last_dim] = last_size; 
+    bcast_size[last_dim] = last_size;
     auto per_dim_sums = (grad_w*saved_v).view({-1, last_size}).sum(0).view(bcast_size);
     auto grad_v = (saved_g/norms)*(grad_w - saved_v*(per_dim_sums/(norms*norms)));
-    auto grad_g = per_dim_sums/norms; 
+    auto grad_g = per_dim_sums/norms;
     return std::tuple<Tensor, Tensor>{grad_v, grad_g};
   }
 }

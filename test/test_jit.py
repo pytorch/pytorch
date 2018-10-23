@@ -11,7 +11,7 @@ from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2
-from common import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, skipIfRocm, suppress_warnings
+from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, skipIfRocm, suppress_warnings
 from textwrap import dedent
 import os
 import io
@@ -23,8 +23,8 @@ import numpy as np
 import tempfile
 import shutil
 import warnings
-from test_autograd import method_tests as autograd_method_tests
-from test_autograd import create_input, unpack_variables, \
+from common_methods_invocations import method_tests as autograd_method_tests
+from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
 import random
@@ -60,6 +60,7 @@ RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
+IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 
 
 def LSTMCellF(input, hx, cx, *params):
@@ -651,7 +652,7 @@ class TestJit(JitTestCase):
         ge = self.checkTrace(LSTMCellF, inputs)
         self.assertExpectedGraph(ge.graph_for(*inputs))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
     @enable_cpu_fuser
     def test_lstm_fusion_cpu(self):
@@ -1416,7 +1417,7 @@ class TestJit(JitTestCase):
     def test_ge_unoptimized(self):
         self.run_ge_tests(False, False)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_ge_optimized(self):
         self.run_ge_tests(True, False)
@@ -2004,7 +2005,7 @@ class TestJit(JitTestCase):
             torch.ones(1))
 
         @torch.jit.script
-        def hints(x, a=0.5, b=10):  # noqa: E999
+        def hints(x, a=0.5, b=10):
             # type: (Tensor, float, int) -> Tensor
             return x + a + b
 
@@ -2710,6 +2711,54 @@ class TestScript(JitTestCase):
             return [[4]] + [[4, 5]]
         self.checkScript(foo, ())
 
+    def test_tensor_shape(self):
+        x = torch.empty(34, 56, 78)
+
+        def f(x):
+            return x.shape
+
+        self.checkScript(f, (x,))
+
+    def test_tensor_dtype(self):
+        x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
+        x_long = torch.empty(34, 56, 78, dtype=torch.long)
+        x_float32 = torch.empty(34, 56, 78, dtype=torch.float32)
+
+        @torch.jit.script
+        def byte(x):
+            return x.dtype == torch.uint8
+
+        @torch.jit.script
+        def long(x):
+            return x.dtype == torch.long
+
+        @torch.jit.script
+        def float32(x):
+            return x.dtype == torch.float32
+
+        self.assertTrue(byte(x_byte))
+        self.assertFalse(byte(x_long))
+        self.assertFalse(byte(x_float32))
+        self.assertFalse(long(x_byte))
+        self.assertTrue(long(x_long))
+        self.assertFalse(long(x_float32))
+        self.assertFalse(float32(x_byte))
+        self.assertFalse(float32(x_long))
+        self.assertTrue(float32(x_float32))
+
+    @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
+    def test_tensor_device(self):
+        cpu = torch.empty(34, 56, 78, device='cpu')
+        gpu = torch.empty(34, 56, 78, device='cuda')
+
+        @torch.jit.script
+        def same_device(x, y):
+            return x.device == y.device
+
+        self.assertTrue(same_device(cpu, cpu))
+        self.assertTrue(same_device(gpu, gpu))
+        self.assertFalse(same_device(cpu, gpu))
+
     def test_generic_list_errors(self):
         with self.assertRaisesRegex(RuntimeError, "previously matched to type"):
             @torch.jit.script
@@ -2764,6 +2813,12 @@ a")
         @torch.jit.script
         def foo(a):
             return a < float('inf')
+        s = torch.rand(1)
+        self.assertTrue(foo(s))
+
+        @torch.jit.script
+        def bar(a):
+            return a > float('-inf')
         s = torch.rand(1)
         self.assertTrue(foo(s))
 
@@ -3282,7 +3337,7 @@ a")
             for fn in fns:
                 self.checkScript(fn, [tensor])
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @skipIfRocm
     @enable_cpu_fuser
     def test_chunk_fusion_correctness(self):
@@ -3682,7 +3737,7 @@ a")
 
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_scalar_fusion(self):
         def fn(x, y):
@@ -5150,9 +5205,15 @@ a")
             q = fn(x, x)
             return x
 
+        def fn_string(str, strpair):
+            # type: (str, Tuple[str, str]) -> Tuple[str, int, str, str]
+            str1, str2 = strpair
+            return str, 2, str1, str2
+
         x = torch.ones(2, 2)
         self.checkScript(fn_unpack, (x,), optimize=True)
         self.checkScript(fn_index, (x,), optimize=True)
+        self.checkScript(fn_string, ("1", ("3", "4")), optimize=True)
 
     def test_type_annotations_varargs(self):
         def fn_varargs(x, *args):
@@ -6170,6 +6231,12 @@ a")
     def test_where(self):
         def fn(x, y):
             return torch.where(x > 0.0, x, y)
+
+        self.checkScript(fn, (torch.randn(3, 2, dtype=torch.float), torch.ones(3, 2, dtype=torch.float)))
+
+    def test_where_method(self):
+        def fn(x, y):
+            return x.where(x > 0.0, y)
 
         self.checkScript(fn, (torch.randn(3, 2, dtype=torch.float), torch.ones(3, 2, dtype=torch.float)))
 
@@ -7322,11 +7389,11 @@ a")
                 x = x + 3
             return x + 4 + inner(x)
 
-        @torch.jit.weak_script
+        @torch._jit_internal.weak_script
         def weak_script_fn_inner(x):
             return x + 6 + not_a_script_fn(x)
 
-        @torch.jit.weak_script
+        @torch._jit_internal.weak_script
         def weak_script_fn(x):
             return x + 5 + weak_script_fn_inner(x) + weak_script_fn_inner(x)
 
@@ -8008,8 +8075,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_affine_grid',
 
     # unknown builtin op
-    'test_nn_tanhshrink',
-    'test_nn_softsign',
     'test_nn_softmin',
     'test_nn_local_response_norm',
     'test_nn_poisson_nll_loss',
@@ -8069,8 +8134,10 @@ def the_method({}):
 
 
 def get_constant(x):
-    if x == inf or x == -inf:
+    if x == inf:
         return 'float(\'inf\')' if PY2 else 'math.inf'
+    if x == -inf:
+        return 'float(\'-inf\')' if PY2 else '-math.inf'
     return x
 
 
@@ -8414,9 +8481,9 @@ class TestCustomOperators(JitTestCase):
     def test_passing_one_positional_but_not_the_second(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "aten::log_softmax\(\) is missing value for argument 'dim'."
+            "aten::transpose\(\) is missing value for argument 'dim0'."
         ):
-            torch.ops.aten.log_softmax(torch.ones(5))
+            torch.ops.aten.transpose(torch.ones(5, 5))
 
     def test_passing_an_argument_both_as_positional_and_kwarg(self):
         with self.assertRaisesRegex(

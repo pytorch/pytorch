@@ -73,10 +73,16 @@ Max:
 </details>
 
 )DOC")
-    .Input(0, "X, Y, ...", "*(type: Tensor`<Ord>`)* List of input tensors with the same shape.")
-    .Output(0, "M", "*(type: Tensor`<Ord>`)* Output tensor with same dimensions as input(s)."
-    "Contains the maximum valued element at each location.")
-    .InheritOnnxSchema("Max");
+    .Input(
+        0,
+        "X, Y, ...",
+        "*(type: Tensor`<Ord>`)* List of input tensors with the same shape.")
+    .Output(
+        0,
+        "M",
+        "*(type: Tensor`<Ord>`)* Output tensor with same dimensions as input(s)."
+        "Contains the maximum valued element at each location.")
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(Min)
     .NumInputs(1, INT_MAX)
@@ -138,10 +144,16 @@ Min:
 </details>
 
 )DOC")
-    .Input(0, "X, Y, ...", "*(type: Tensor`<Ord>`)* List of input tensors with the same shape.")
-    .Output(0, "M", "*(type: Tensor`<Ord>`)* Output tensor with same dimensions as input(s)."
-"Contains the minimum valued element at each location.")
-    .InheritOnnxSchema("Min");
+    .Input(
+        0,
+        "X, Y, ...",
+        "*(type: Tensor`<Ord>`)* List of input tensors with the same shape.")
+    .Output(
+        0,
+        "M",
+        "*(type: Tensor`<Ord>`)* Output tensor with same dimensions as input(s)."
+        "Contains the minimum valued element at each location.")
+    .InheritOnnxSchema();
 
 template <typename T, class Context>
 bool MaxOp<T, Context>::Compute() {

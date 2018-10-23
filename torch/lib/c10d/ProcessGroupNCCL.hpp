@@ -8,6 +8,8 @@
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 
+#include <ATen/cuda/CUDAContext.h>
+
 // forward declaration
 struct THCState;
 
@@ -189,7 +191,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       devNCCLCommMap_;
 
   // The CUDA steams used by NCCL kernels
-  std::unordered_map<std::string, std::vector<CUDAStream>> ncclStreams_;
+  std::unordered_map<std::string, std::vector<at::cuda::CUDAStream>>
+      ncclStreams_;
 
   // The CUDA events used to sync NCCL streams
   std::unordered_map<std::string, std::vector<CUDAEvent>> ncclEvents_;

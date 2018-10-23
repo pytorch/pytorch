@@ -16,8 +16,8 @@ __global__ void waitClocks(const uint64_t count) {
 
 } // namespace
 
-void cudaSleep(CUDAStream& stream, uint64_t clocks) {
-  waitClocks<<<1, 1, 0, stream.getStream()>>>(clocks);
+void cudaSleep(at::cuda::CUDAStream& stream, uint64_t clocks) {
+  waitClocks<<<1, 1, 0, stream.stream()>>>(clocks);
 }
 
 int cudaNumDevices() {

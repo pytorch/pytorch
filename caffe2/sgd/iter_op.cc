@@ -8,10 +8,11 @@
 namespace caffe2 {
 
 void MutexSerializer::Serialize(
-    const Blob& blob,
+    const void* pointer,
+    TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor) {
-  CAFFE_ENFORCE(blob.IsType<std::unique_ptr<std::mutex>>());
+  CAFFE_ENFORCE(typeMeta.Match<std::unique_ptr<std::mutex>>());
   BlobProto blob_proto;
   blob_proto.set_name(name);
   blob_proto.set_type("std::unique_ptr<std::mutex>");

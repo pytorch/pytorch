@@ -79,9 +79,9 @@ void checkChainingAndRun(
   CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
   {
     net_def.set_num_workers(4);
-    auto old = c10::FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { c10::FLAGS_caffe2_disable_chaining = old; });
-    c10::FLAGS_caffe2_disable_chaining = false;
+    auto old = FLAGS_caffe2_disable_chaining;
+    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
+    FLAGS_caffe2_disable_chaining = false;
 
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());

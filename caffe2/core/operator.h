@@ -9,6 +9,7 @@
 #include <typeinfo>
 #include <vector>
 
+#include "c10/macros/Macros.h"
 #include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
@@ -122,7 +123,18 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     static_assert(
         std::is_same<T, Tensor>::value,
         "Output(int, DeviceType) is only available for Tensor");
+    // When you get a Tensor here it is not fully initialized
     return BlobGetMutableTensor(outputs_.at(idx), type);
+  }
+
+  inline Tensor* OutputTensor(
+      int idx,
+      const vector<int64_t>& dims,
+      const at::TensorOptions& options) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        options.device_opt() != c10::nullopt,
+        "device must be provided in option.");
+    return BlobGetMutableTensor(outputs_.at(idx), dims, options);
   }
 
   template <typename T>
@@ -451,6 +463,17 @@ class Operator : public OperatorBase {
       int idx,
       DeviceType type = Context::GetDeviceType()) {
     return OperatorBase::template Input<Tensor>(idx, type);
+  }
+
+  inline Tensor* Output(
+      int idx,
+      const vector<int64_t>& dims,
+      const at::TensorOptions& options) {
+    if (options.device_opt() == c10::nullopt) {
+      return OperatorBase::OutputTensor(
+          idx, dims, at::TensorOptions(options).device(context_.device()));
+    }
+    return OperatorBase::OutputTensor(idx, dims, options);
   }
 
   inline Tensor* Output(int idx, DeviceType type = Context::GetDeviceType()) {
@@ -836,6 +859,15 @@ C10_DECLARE_REGISTRY(
 #define REGISTER_CPU_OPERATOR_WITH_ENGINE(name, engine, ...) \
   C10_REGISTER_CLASS(CPUOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
+// Use these macros to register gradient operators.  They can be automatically
+// excluded from builds that don't need them (e.g., mobile).
+#ifdef CAFFE2_NO_GRADIENT_OPS
+#define REGISTER_CPU_GRADIENT_OPERATOR(...) /* No gradients. */
+#else
+#define REGISTER_CPU_GRADIENT_OPERATOR(...) \
+  MACRO_EXPAND(REGISTER_CPU_OPERATOR(__VA_ARGS__))
+#endif
+
 C10_DECLARE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
@@ -927,9 +959,9 @@ class CAFFE2_API UnsupportedOperatorFeature : public std::exception {
 // A helper macro that should ONLY be used in the operator constructor to check
 // if needed features are met. If not, throws the UnsupportedOperatorFeature
 // exception with the given message.
-#define OPERATOR_NEEDS_FEATURE(condition, ...)                           \
-  if (!(condition)) {                                                    \
-    throw UnsupportedOperatorFeature(::caffe2::MakeString(__VA_ARGS__)); \
+#define OPERATOR_NEEDS_FEATURE(condition, ...)                 \
+  if (!(condition)) {                                          \
+    throw UnsupportedOperatorFeature(::c10::str(__VA_ARGS__)); \
   }
 
 // Creates an operator with the given operator definition.

@@ -869,8 +869,8 @@ Y:
 std::function<void(OpSchema&)> AveragePoolDocGenerator(const char* dim) {
   return [=](OpSchema& schema) {
     string doc = "AveragePool{dim} {pool_doc}";
-    ReplaceAll(doc, "{dim}", dim);
-    ReplaceAll(doc, "{pool_doc}", kAveragePoolDoc);
+    c10::ReplaceAll(doc, "{dim}", dim);
+    c10::ReplaceAll(doc, "{pool_doc}", kAveragePoolDoc);
     schema.SetDoc(doc);
     schema.Input(
         0,
@@ -893,8 +893,8 @@ std::function<void(OpSchema&)> AveragePoolDocGenerator(const char* dim) {
 std::function<void(OpSchema&)> MaxPoolDocGenerator(const char* dim) {
   return [=](OpSchema& schema) {
     string doc = "MaxPool{dim} {pool_doc}";
-    ReplaceAll(doc, "{dim}", dim);
-    ReplaceAll(doc, "{pool_doc}", kMaxPoolDoc);
+    c10::ReplaceAll(doc, "{dim}", dim);
+    c10::ReplaceAll(doc, "{pool_doc}", kMaxPoolDoc);
     schema.SetDoc(doc);
     schema.Input(
         0,
@@ -922,7 +922,7 @@ OPERATOR_SCHEMA(AveragePool)
     .NumOutputs(1)
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
     .FillUsing(AveragePoolDocGenerator(""))
-    .InheritOnnxSchema("AveragePool");
+    .InheritOnnxSchema();
 
 REGISTER_CPU_OPERATOR(
     AveragePool1D,
@@ -964,7 +964,7 @@ OPERATOR_SCHEMA(MaxPool)
     .NumOutputs(1)
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
     .FillUsing(MaxPoolDocGenerator(""))
-    .InheritOnnxSchema("MaxPool");
+    .InheritOnnxSchema();
 
 REGISTER_CPU_OPERATOR(MaxPool1D, PoolOp<float, CPUContext, MaxPool<float>>);
 

@@ -59,6 +59,12 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   sudo apt-get install libc++1
   sudo apt-get install libc++abi1
 
+  # When hcc runs out of memory, it silently exits without stopping
+  # the build process, leaving undefined symbols in the shared lib
+  # which will cause undefined symbol errors when later running
+  # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
+  export MAX_JOBS=4
+
   python tools/amd_build/build_pytorch_amd.py
   python tools/amd_build/build_caffe2_amd.py
   USE_ROCM=1 python setup.py install --user
