@@ -12,6 +12,7 @@ namespace {
 TEST(PyTorchFileWriterAndReader, SaveAndLoad) {
   int64_t kFieldAlignment = 64L;
   // create a name for temporary file
+  // TODO to have different implementation for Windows and POXIS
   std::string tmp_name = std::tmpnam(nullptr);
 
   // write records through writers

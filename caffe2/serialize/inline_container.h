@@ -151,7 +151,7 @@ class PyTorchStreamReader final {
     }
     auto size = read64BitIntegerLittleEndian();
     seekToNextAlignmentBoundary();
-    auto ptr = malloc(size);
+    auto* ptr = malloc(size);
     at::DataPtr retval(ptr, ptr, free, at::kCPU);
 
     in_->read(static_cast<char*>(ptr), size);
@@ -315,9 +315,7 @@ class PyTorchStreamWriter final {
   }
 
   void writePad(const size_t num_bytes) {
-    static std::vector<char> pad_buffer(/*count=*/kFieldAlignment,
-                                        /*value=*/kPadValue);
-    out_->write(pad_buffer.data(), num_bytes);
+    out_->write(pad_buffer_.data(), num_bytes);
     cursor_ += num_bytes;
   }
 
