@@ -22,7 +22,7 @@ from torch._six import inf, nan, string_classes
 from itertools import product, combinations
 from functools import reduce
 from torch import multiprocessing as mp
-from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
+from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm
 from multiprocessing.reduction import ForkingPickler
@@ -839,7 +839,7 @@ class TestTorch(TestCase):
         # full reduction
         x = torch.randn(5, device=device)
         xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, inf]:
+        for p in [0, 1, 2, 3, 4, inf, -inf]:
             res = x.norm(p).item()
             expected = np.linalg.norm(xn, p)
             self.assertEqual(res, expected, "full reduction failed for {}-norm".format(p))
@@ -847,7 +847,7 @@ class TestTorch(TestCase):
         # one dimension
         x = torch.randn(5, 5, device=device)
         xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, inf]:
+        for p in [0, 1, 2, 3, 4, inf, -inf]:
             res = x.norm(p, 1).cpu().numpy()
             expected = np.linalg.norm(xn, p, 1)
             self.assertEqual(res.shape, expected.shape)
@@ -4032,7 +4032,7 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_gesv_batched(self, cast):
-        from common import random_fullrank_matrix_distinct_singular_value as fullrank
+        from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
         # test against gesv: one batch
         A = cast(fullrank(5, 1))
         b = cast(torch.randn(1, 5, 10))
@@ -4085,7 +4085,7 @@ class TestTorch(TestCase):
             return
 
         from numpy.linalg import solve
-        from common import random_fullrank_matrix_distinct_singular_value as fullrank
+        from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
 
         # test against numpy.linalg.solve
         A = cast(fullrank(4, 2, 1, 3))
@@ -4708,7 +4708,7 @@ class TestTorch(TestCase):
 
         # Single matrix, but full rank
         # This is for negative powers
-        from common import random_fullrank_matrix_distinct_singular_value
+        from common_utils import random_fullrank_matrix_distinct_singular_value
         M = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
         run_test(M)
         run_test(M, sign=-1)
@@ -5184,6 +5184,10 @@ class TestTorch(TestCase):
         x = torch.Tensor([1, inf, 2, -inf, nan, -10])
         self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 0, 1, 0, 0, 1]))
 
+    def test_isfinite_int(self):
+        x = torch.tensor([1, 2, 3])
+        self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 1, 1]))
+
     def test_isinf(self):
         x = torch.Tensor([1, inf, 2, -inf, nan])
         self.assertEqual(torch.isinf(x), torch.ByteTensor([0, 1, 0, 1, 0]))
@@ -5476,6 +5480,11 @@ class TestTorch(TestCase):
         self.assertRaises(IndexError, lambda: reference[0.0, :, 0.0:2.0])
         self.assertRaises(IndexError, lambda: reference[0.0, ..., 0.0:2.0])
         self.assertRaises(IndexError, lambda: reference[0.0, :, 0.0])
+
+        def delitem():
+            del reference[0]
+
+        self.assertRaises(TypeError, delitem)
 
     def test_index(self):
         self._test_index(self, lambda x: x)

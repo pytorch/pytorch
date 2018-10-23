@@ -594,11 +594,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       } else {
         reset_tensor = storage_.capacity() <
                 (storage_offset_ + numel_) * storage_.itemsize() ||
-            !c10::FLAGS_caffe2_keep_on_shrink ||
+            !FLAGS_caffe2_keep_on_shrink ||
             storage_.capacity() -
                     (storage_offset_ + numel_) * storage_.itemsize() >
-                static_cast<size_t>(
-                    c10::FLAGS_caffe2_max_keep_on_shrink_memory);
+                static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
       }
 
       if (reset_tensor && !is_init) {
@@ -726,7 +725,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
           numel_ >= 0,
           "Tensor is not initialized. You probably need to call Resize() "
           "before calling mutable_data()");
-      bool had_special_dtor = data_type_.dtor() != nullptr;
+      bool had_special_dtor = data_type_.placementDelete() != nullptr;
       storage_offset_ = 0;
       if (storage_.unique()) {
         storage_.set_dtype(meta);
@@ -741,7 +740,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       // a special destructor and the new data doesn't have a special
       // constructor.
       if (numel_ == 0 ||
-          (meta.ctor() == nullptr && !had_special_dtor &&
+          (meta.placementNew() == nullptr && !had_special_dtor &&
            storage_.numel() >= numel_)) {
         AT_ASSERT(storage_offset_ == 0); // because we just reallocated
         return storage_.data();
@@ -754,16 +753,16 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
            we are using global function to get the allocator based on device \
            type.");
       allocator = caffe2::GetAllocator(storage_.device_type());
-      if (meta.ctor()) {
+      if (meta.placementNew()) {
         // For types that need placement new, we will call it, as well as
         // making sure that when the data is freed, it calls the right
         // destruction procedure.
         auto size = numel_;
-        auto dtor = data_type_.dtor();
+        auto dtor = data_type_.placementDelete();
         auto data_ptr = allocator->allocate(numel_ * storage_.itemsize());
         storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
             std::move(data_ptr), dtor, size, storage_.device()));
-        data_type_.ctor()(storage_.data(), numel_);
+        data_type_.placementNew()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
         storage_.set_data_ptr(

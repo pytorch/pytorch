@@ -5,7 +5,7 @@ import itertools
 import functools
 import random
 import unittest
-from common import TestCase, run_tests, skipIfRocm
+from common_utils import TestCase, run_tests, skipIfRocm
 from common_cuda import TEST_CUDA
 from test_torch import TestTorch
 from numbers import Number

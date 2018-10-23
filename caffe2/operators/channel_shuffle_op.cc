@@ -142,7 +142,7 @@ OPERATOR_SCHEMA(ChannelShuffle)
     .IdenticalTypeAndShape()
     .NumInputs(1)
     .NumOutputs(1)
-    .InheritOnnxSchema("ChannelShuffle");
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(ChannelShuffleGradient)
     .IdenticalTypeAndShape()
     .NumInputs(1)

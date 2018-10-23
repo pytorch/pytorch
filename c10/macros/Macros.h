@@ -48,4 +48,15 @@
 #endif
 #endif
 
+// Simply define the namespace, in case a dependent library want to refer to
+// the c10 namespace but not any nontrivial files.
+namespace c10 {} // namespace c10
+
+// C10_NORETURN
+#if defined(_MSC_VER)
+#define C10_NORETURN __declspec(noreturn)
+#else
+#define C10_NORETURN __attribute__((noreturn))
+#endif
+
 #endif // C10_MACROS_MACROS_H_

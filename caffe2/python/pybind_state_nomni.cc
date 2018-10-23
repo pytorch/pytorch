@@ -97,7 +97,10 @@ void addNomnigraphMethods(pybind11::module& m) {
   m.def("NNModuleFromProtobuf", [](py::bytes def) {
     caffe2::NetDef proto;
     CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
-    return caffe2::convertToNNModule(proto);
+    std::vector<NNGraph::NodeRef> ns;
+    auto nn = caffe2::convertToNNModule(proto, false, &ns);
+    return std::pair<NNModule, std::vector<NNGraph::NodeRef>>(
+        std::move(nn), ns);
   });
 
   m.def(
@@ -213,6 +216,7 @@ void addNomnigraphMethods(pybind11::module& m) {
             return g->createNode(convertToNeuralNetOperator(op));
           },
           py::return_value_policy::reference_internal)
+      .def("deleteNode", &NNGraph::deleteNode)
       .def(
           "getMutableNodes",
           &NNGraph::getMutableNodes,
@@ -271,6 +275,13 @@ void addNomnigraphMethods(pybind11::module& m) {
     CAFFE_ENFORCE(nn::is<NeuralNetData>(n));
     return nn::getConsumers(n);
   };
+  auto setAnnotation = [](NNGraph::NodeRef n, Caffe2Annotation& annot) {
+    auto* nnOp = nn::get<NeuralNetOperator>(n);
+    nnOp->setAnnotation(nom::util::make_unique<Caffe2Annotation>(annot));
+  };
+  auto getAnnotation = [](NNGraph::NodeRef n) {
+    return getOrAddCaffe2Annotation(n);
+  };
 
   noderef
       .def(
@@ -304,26 +315,13 @@ void addNomnigraphMethods(pybind11::module& m) {
           "producer", getProducer, py::return_value_policy::reference)
       .def_property_readonly(
           "consumers", getConsumers, py::return_value_policy::reference)
+      .def("getAnnotation", getAnnotation, py::return_value_policy::reference)
+      .def("setAnnotation", setAnnotation)
       .def_property(
           "annotation",
-          [](NNGraph::NodeRef n) { return getOrAddCaffe2Annotation(n); },
-          [](NNGraph::NodeRef n, Caffe2Annotation annot) {
-            auto* nnOp = nn::get<NeuralNetOperator>(n);
-            nnOp->setAnnotation(
-                nom::util::make_unique<Caffe2Annotation>(annot));
-          },
-          py::return_value_policy::copy)
-      .def(
-          "getAnnotation",
-          [](NNGraph::NodeRef n) { return getOrAddCaffe2Annotation(n); },
-          py::return_value_policy::copy)
-      .def(
-          "setAnnotation",
-          [](NNGraph::NodeRef n, Caffe2Annotation annot) {
-            auto* nnOp = nn::get<NeuralNetOperator>(n);
-            nnOp->setAnnotation(
-                nom::util::make_unique<Caffe2Annotation>(annot));
-          })
+          getAnnotation,
+          setAnnotation,
+          py::return_value_policy::reference)
       .def(
           "getOperatorPredecessors",
           [](NNGraph::NodeRef n) {
@@ -379,9 +377,8 @@ void addNomnigraphMethods(pybind11::module& m) {
   py::class_<nn::NNMatchGraph> nnMatchGraph(m, "NNMatchGraph");
   nnMatchGraph.def(py::init<>());
 
-  using MatchNodeType =
-      nom::Node<nom::matcher::MatchNode<nn::NNNodeMatchCriteria>>;
-  py::class_<MatchNodeType> nnMatchNode(m, "MatchNodeRef");
+  using MatchPredicateType = nom::Node<nn::NNMatchPredicate>;
+  py::class_<MatchPredicateType> nnMatchPredicate(m, "MatchPredicateRef");
 
   nnMatchGraph
       .def(
@@ -393,13 +390,12 @@ void addNomnigraphMethods(pybind11::module& m) {
           "createNode",
           [](nn::NNMatchGraph* g, GenericOperator& op, bool strict) {
             auto opName = op.getName();
-            auto match =
-                nn::NNNodeMatchCriteria([opName](NNGraph::NodeRef node) {
-                  NOM_REQUIRE_OR_RET_FALSE(nn::is<NeuralNetOperator>(node));
-                  auto nnOp = nn::get<NeuralNetOperator>(node);
-                  return opName == nnOp->getName();
-                });
-            auto node = nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(match);
+            auto match = [opName](NNGraph::NodeRef node) {
+              NOM_REQUIRE_OR_RET_FALSE(nn::is<NeuralNetOperator>(node));
+              auto nnOp = nn::get<NeuralNetOperator>(node);
+              return opName == nnOp->getName();
+            };
+            auto node = nn::NNMatchPredicate(match);
             if (!strict) {
               node.nonTerminal();
             }
@@ -411,7 +407,7 @@ void addNomnigraphMethods(pybind11::module& m) {
       .def(
           "createNode",
           [](nn::NNMatchGraph* g, nom::repr::Tensor& tensor, bool strict) {
-            auto node = nn::NNMatchNode(nn::matchTensor());
+            auto node = nn::NNMatchPredicate(nn::is<nom::repr::Tensor>);
             if (!strict) {
               node.nonTerminal();
             }
@@ -423,9 +419,8 @@ void addNomnigraphMethods(pybind11::module& m) {
       .def(
           "createNode",
           [](nn::NNMatchGraph* g, bool strict) {
-            auto match = nn::NNNodeMatchCriteria(
-                [](NNGraph::NodeRef node) { return true; });
-            auto node = nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(match);
+            auto match = [](NNGraph::NodeRef node) { return true; };
+            auto node = nn::NNMatchPredicate(match);
             if (!strict) {
               node.nonTerminal();
             }
@@ -441,8 +436,7 @@ void addNomnigraphMethods(pybind11::module& m) {
   m.def("matchSubgraph", [](NNGraph::NodeRef node, nn::NNMatchGraph* mg) {
     // Get root node or node in root cycle
     auto match_node = *nom::algorithm::tarjans(mg).back().getNodes().begin();
-    auto result =
-        nn::NNSubgraphMatcher::isSubgraphMatch(node, match_node, false);
+    auto result = mg->isSubgraphMatch(node, match_node, false);
     if (result.isMatch()) {
       return *result.getMatchedSubgraph();
     }
@@ -467,7 +461,30 @@ void addNomnigraphMethods(pybind11::module& m) {
           &Caffe2Annotation::getLengthNode,
           py::return_value_policy::reference)
       .def("setComponentLevels", &Caffe2Annotation::setComponentLevels)
-      .def("getComponentLevels", &Caffe2Annotation::getComponentLevels);
+      .def("getComponentLevels", &Caffe2Annotation::getComponentLevels)
+      .def_property(
+          "device_option",
+          [](Caffe2Annotation& annot) {
+            auto DeviceOption = py::module::import("caffe2.proto.caffe2_pb2")
+                                    .attr("DeviceOption");
+            auto proto = annot.getDeviceOption();
+            std::string serialized_proto;
+            proto.SerializeToString(&serialized_proto);
+            auto py_device_opt = DeviceOption();
+            py_device_opt.attr("ParseFromString")(py::bytes(serialized_proto));
+            return py_device_opt;
+          },
+          [](Caffe2Annotation& annot, py::object& def) {
+            CAFFE_ENFORCE(
+                pybind11::hasattr(def, "SerializeToString"),
+                "convertToCaffe2Proto takes either no args",
+                "a NetDef");
+            auto str = def.attr("SerializeToString")();
+            caffe2::DeviceOption proto;
+            proto.ParseFromString(py::bytes(str));
+            annot.setDeviceOption(proto);
+          },
+          py::return_value_policy::reference);
 }
 
 REGISTER_PYBIND_ADDITION(addNomnigraphMethods);

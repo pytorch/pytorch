@@ -178,8 +178,8 @@ def GetOperatorCost(operator, blobs):
     return C.get_operator_cost(StringifyProto(operator), blobs)
 
 
-def RunOperatorOnce(operator, legacy_proto=True):
-    return C.run_operator_once(StringifyProto(operator), legacy_proto)
+def RunOperatorOnce(operator):
+    return C.run_operator_once(StringifyProto(operator))
 
 
 def RunOperatorsOnce(operators):

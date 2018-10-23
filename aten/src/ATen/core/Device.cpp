@@ -1,6 +1,6 @@
 #include <ATen/core/Device.h>
-#include <ATen/core/Error.h>
 #include <ATen/core/Macros.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <array>
