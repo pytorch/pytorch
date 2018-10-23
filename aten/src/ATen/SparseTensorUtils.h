@@ -31,7 +31,6 @@ inline bool check_device(ArrayRef<Tensor> ts) {
   if (ts.empty()) {
     return true;
   }
-  const Tensor& ref_t = ts.front();
   int64_t curDevice = current_device();
   for (const Tensor& t : ts) {
     if (t.get_device() != curDevice) return false;
@@ -81,29 +80,32 @@ inline Tensor new_values_with_size_of(const Tensor& values, int64_t nnz) {
 // tensor `t` of shape `full_size`. This returns the corresponding indices to
 // the flattened tensor `t.reshape( prod(full_size[:indices.size(0)]), -1 )`.
 // if forceClone is true, the result will forced to be a clone of self.
-inline LongTensor flatten_indices(const Tensor& indices, IntList full_size, bool forceClone = false) {
+// if force_clone is true, the result will forced to be a clone of self.
+inline LongTensor flatten_indices(const Tensor& indices, IntList full_size, bool force_clone = false) {
   int64_t sparse_dim = indices.size(0);
   if (sparse_dim == 1) {
-    if (forceClone) {
+    if (force_clone) {
       return indices.squeeze(0).clone();
     } else {
       return indices.squeeze(0);
     }
   } else {
-    std::vector<int64_t> indices_mult_cpu_vec(sparse_dim);
+    std::vector<int64_t> indices_mult_cpu_vec;
+    AT_ASSERT(indices_mult_cpu_vec.size() < 1000);
+    indices_mult_cpu_vec.reserve(sparse_dim);
     int64_t mult = 1;
     for (int64_t i = sparse_dim - 1; i >= 0; i--) {
       indices_mult_cpu_vec[i] = mult;
       mult *= full_size[i];
     }
-    auto indices_mult_cpu = indices.type().toBackend(/*Dense*/at::Backend::CPU)
-                                   .tensorFromBlob(indices_mult_cpu_vec.data(), /*size=*/{sparse_dim, 1});
-    auto indices_mult = indices_mult_cpu.to(indices.device(), /*non_blocking=*/true);
+    auto indices_mult_cpu = at::CPU(kLong).tensorFromBlob(indices_mult_cpu_vec.data(), /*size=*/{sparse_dim, 1});
+    // NB: must be blocking because this blob may be freed after this closure,
+    //     and non_blocking copy will see garbage.
+    auto indices_mult = indices_mult_cpu.to(indices.device(), /*non_blocking=*/false);
     // Ideally we want matmul but matmul is slow on CPU Long and not implemented
     // on CUDA Long. So mul is faster.
     return indices.mul(indices_mult).sum(0);
   }
-}
 
 
 }} // namespace at::sparse
