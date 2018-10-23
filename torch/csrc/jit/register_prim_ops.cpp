@@ -705,8 +705,8 @@ Operator(                                                                      \
     #op_name "(string a, string b) ->" #result,                                \
     [](Node* node) {                                                           \
       return [=](Stack& stack) {                                               \
-        auto b = pop(stack).toString()->string();                              \
-        auto a = pop(stack).toString()->string();                              \
+        auto b = pop(stack).toStringRef();                                     \
+        auto a = pop(stack).toStringRef();                                     \
         push(stack, string_op);                                                \
         return 0;                                                              \
     };                                                                         \
