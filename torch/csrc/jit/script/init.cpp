@@ -369,7 +369,7 @@ FunctionSchema getSchemaWithDefaults(
     const FunctionSchema schema,
     const Def& def) {
   std::vector<Argument> new_args;
-  for (auto& arg : schema.arguments) {
+  for (auto& arg : schema.arguments()) {
     auto it = default_args.find(arg.name());
     if (it != default_args.end()) {
       try {
@@ -387,11 +387,11 @@ FunctionSchema getSchemaWithDefaults(
   }
 
   return FunctionSchema(
-      schema.name,
+      schema.name(),
       new_args,
-      schema.returns,
-      schema.is_vararg,
-      schema.is_varret);
+      schema.returns(),
+      schema.is_vararg(),
+      schema.is_varret());
 }
 
 void initJitScriptBindings(PyObject* module) {

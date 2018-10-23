@@ -26,7 +26,7 @@ namespace onnx = ::ONNX_NAMESPACE;
 
 std::string getExportableSchemaStringForMethod(const script::Method& method) {
   const auto& schema = method.getSchema();
-  for (const auto& argument : schema.arguments) {
+  for (const auto& argument : schema.arguments()) {
     AT_CHECK(
         !argument.default_value(),
         "Default arguments in script graphs may currently not be exported.");

@@ -281,9 +281,9 @@ void initJITBindings(PyObject *module) {
   }, py::arg("qualified_name"));
 
   py::class_<FunctionSchema>(m, "FunctionSchema")
-  .def_property_readonly("name", [](FunctionSchema& self) { return self.name; })
-  .def_property_readonly("arguments", [](FunctionSchema& self) { return self.arguments; })
-  .def_property_readonly("returns", [](FunctionSchema& self) { return self.returns; });
+  .def_property_readonly("name", [](FunctionSchema& self) { return self.name(); })
+  .def_property_readonly("arguments", [](FunctionSchema& self) { return self.arguments(); })
+  .def_property_readonly("returns", [](FunctionSchema& self) { return self.returns(); });
   py::class_<Argument>(m, "Argument")
   .def_property_readonly("name", [](Argument& self) { return self.name(); })
   .def_property_readonly("type", [](Argument& self) { return self.type(); })

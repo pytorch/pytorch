@@ -283,28 +283,28 @@ namespace {
 std::string canonicalSchemaString(const FunctionSchema& schema) {
   std::ostringstream out;
 
-  out << schema.name;
+  out << schema.name();
   out << "(";
 
   bool seen_kwarg_only = false;
-  for(size_t i = 0; i < schema.arguments.size(); ++i) {
+  for(size_t i = 0; i < schema.arguments().size(); ++i) {
     if (i > 0) out << ", ";
-    if (schema.arguments[i].kwarg_only() && !seen_kwarg_only) {
+    if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
       out << "*, ";
       seen_kwarg_only = true;
     }
-    const auto & arg = schema.arguments[i];
+    const auto & arg = schema.arguments()[i];
     out << arg.type()->str() << " " << arg.name();
   }
 
   out << ") -> ";
-  if (schema.returns.size() == 1) {
-    out << schema.returns.at(0).type()->str();
-  } else if (schema.returns.size() > 1) {
+  if (schema.returns().size() == 1) {
+    out << schema.returns().at(0).type()->str();
+  } else if (schema.returns().size() > 1) {
     out << "(";
-    for (size_t i = 0; i < schema.returns.size(); ++i) {
+    for (size_t i = 0; i < schema.returns().size(); ++i) {
       if (i > 0) out << ", ";
-      out << schema.returns[i].type()->str();
+      out << schema.returns()[i].type()->str();
     }
     out << ")";
   }
@@ -333,7 +333,7 @@ private:
   // XXX - caller must be holding lock
   void registerPendingOperators() {
     for(auto op : to_register) {
-      Symbol sym = Symbol::fromQualString(op->schema().name);
+      Symbol sym = Symbol::fromQualString(op->schema().name());
       operators[sym].push_back(op);
       operators_by_sig[canonicalSchemaString(op->schema())] = op;
     }
@@ -403,11 +403,11 @@ FunctionSchema parseSchema(const std::string& schema) {
 
 bool Operator::matches(const Node* node) const {
   // wrong name
-  if (node->kind().toQualString() != schema().name) {
+  if (node->kind().toQualString() != schema().name()) {
     return false;
   }
   at::ArrayRef<const Value*> actuals = node->inputs();
-  const auto& formals = schema().arguments;
+  const auto& formals = schema().arguments();
 
   // not enough inputs
   if(actuals.size() < formals.size())
@@ -428,7 +428,7 @@ bool Operator::matches(const Node* node) const {
   }
 
   // too many inputs
-  if(!schema().is_vararg && actuals.size() != formals.size()) {
+  if(!schema().is_vararg() && actuals.size() != formals.size()) {
     // std::cout << "not all inputs used\n" << input_i << " " << inputs_size << "\n";
     return false;
   }
@@ -473,7 +473,7 @@ OperatorSet::OperatorSet(std::initializer_list<const char *> sig_literals) {
   auto & registry = getRegistry();
   for (const char * sig : sig_literals) {
     auto op = registry.lookupByLiteral(sig);
-    ops[Symbol::fromQualString(op->schema().name)].push_back(op);
+    ops[Symbol::fromQualString(op->schema().name())].push_back(op);
   }
 }
 

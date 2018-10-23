@@ -58,12 +58,12 @@ struct FunctionSchema {
       std::vector<Argument> returns,
       bool is_vararg = false,
       bool is_varret = false)
-      : name(std::move(name)),
-        arguments(std::move(arguments)),
-        returns(std::move(returns)),
-        is_vararg(is_vararg),
-        is_varret(is_varret),
-        is_mutable(isMutable()) {
+      : name_(std::move(name)),
+        arguments_(std::move(arguments)),
+        returns_(std::move(returns)),
+        is_vararg_(is_vararg),
+        is_varret_(is_varret),
+        is_mutable_(calcMutable()) {
     validate();
   }
   FunctionSchema(
@@ -80,40 +80,58 @@ struct FunctionSchema {
             is_varret) {
     validate();
   }
-
-  const std::string name;
-  const std::vector<Argument> arguments;
-  const std::vector<Argument> returns;
+private:
+  const std::string name_;
+  const std::vector<Argument> arguments_;
+  const std::vector<Argument> returns_;
   // if true then this schema takes an arbitrary number of additional arguments
   // after the argument specified in arguments
   // currently this is used primarily to represent 'primtive' operators whose
   // arguments are not checked by schema
-  const bool is_vararg;
-  const bool is_varret;
-  const bool is_mutable;
-
+  const bool is_vararg_;
+  const bool is_varret_;
+  const bool is_mutable_;
+public:
+  const std::string& name() const {
+    return name_;
+  }
+  const std::vector<Argument>& arguments() const {
+    return arguments_;
+  }
+  const std::vector<Argument>& returns() const {
+    return returns_;
+  }
+  bool is_vararg() const {
+    return is_vararg_;
+  }
+  bool is_varret() const {
+    return is_varret_;
+  }
+  bool is_mutable() const {
+    return is_mutable_;
+  }
   c10::optional<int> argumentIndexWithName(const std::string& name) const {
-    for(size_t i = 0; i < arguments.size(); ++i) {
-      if(name == arguments[i].name())
+    for(size_t i = 0; i < arguments().size(); ++i) {
+      if(name == arguments()[i].name())
         return i;
     }
     return c10::nullopt;
   }
 
  private:
-  bool isMutable() const {
+  bool calcMutable() const {
     return std::any_of(
-        arguments.cbegin(), arguments.cend(), [](const Argument& arg) {
+        arguments().cbegin(), arguments().cend(), [](const Argument& arg) {
           return arg.type() == WorldType::get();
         });
   }
 
   void validate() const {
-    if (is_mutable) {
+    if (is_mutable()) {
       // Mutable schemas should have a world token as the first argument
       // and return.
-      JIT_ASSERT(arguments.at(0).type() == WorldType::get());
-      JIT_ASSERT(returns.at(0).type() == WorldType::get());
+      JIT_ASSERT(arguments().at(0).type() == WorldType::get());
+      JIT_ASSERT(returns().at(0).type() == WorldType::get());
     }
   }
 };
@@ -127,27 +145,27 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   // eventually this should look almost identical to python arg parser, but
   // it is simpler for now to work directly on this schema
 
-  out << schema.name;
+  out << schema.name();
   out << "(";
 
   bool seen_kwarg_only = false;
-  for(size_t i = 0; i < schema.arguments.size(); ++i) {
+  for(size_t i = 0; i < schema.arguments().size(); ++i) {
     if (i > 0) out << ", ";
-    if (schema.arguments[i].kwarg_only() && !seen_kwarg_only) {
+    if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
       out << "*, ";
       seen_kwarg_only = true;
     }
-    out << schema.arguments[i];
+    out << schema.arguments()[i];
   }
 
   out << ") -> ";
-  if (schema.returns.size() == 1) {
-    out << schema.returns.at(0).type()->str();
-  } else if (schema.returns.size() > 1) {
+  if (schema.returns().size() == 1) {
+    out << schema.returns().at(0).type()->str();
+  } else if (schema.returns().size() > 1) {
     out << "(";
-    for (size_t i = 0; i < schema.returns.size(); ++i) {
+    for (size_t i = 0; i < schema.returns().size(); ++i) {
       if (i > 0) out << ", ";
-      out << schema.returns[i].type()->str();
+      out << schema.returns()[i].type()->str();
     }
     out << ")";
   }

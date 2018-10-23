@@ -71,9 +71,9 @@ c10::optional<std::vector<std::shared_ptr<T>>> gatherTensorTypes(Node* node) {
   std::vector<std::shared_ptr<T>> tensor_types;
 
   auto & schema = node->schema();
-  auto & args = schema.arguments;
+  auto & args = schema.arguments();
   // can't handle varargs primitives because we don't know what should be a Tensor
-  if (schema.is_vararg) {
+  if (schema.is_vararg()) {
     return c10::nullopt;
   }
   for (size_t i = 0; i < args.size(); ++i) {
