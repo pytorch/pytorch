@@ -10,21 +10,105 @@
 #include "torch/csrc/jit/fuser/kernel_spec.h"
 #include "torch/csrc/jit/fuser/compiler.h"
 
-#if USE_CUDA_FUSER
-  #include "torch/csrc/jit/fuser/cuda/interface.h"
-#endif // USE_CUDA_FUSER
-
-#if USE_CPU_FUSER
-  #include "torch/csrc/jit/fuser/cpu/interface.h"
-#endif // USE_CUDA_FUSER
-
 #include <vector>
 #include <tuple>
 #include <stdexcept>
 #include <algorithm>
 #include <map>
+#include <iostream> // TODO: remove, debugging only
 
 namespace torch { namespace jit { namespace fuser {
+
+static c10::optional<std::vector<int64_t>> getMapSize(
+  const KernelSpec& spec
+, at::TensorList args
+, at::IntList arg_subset) {
+  
+  int64_t dim_after_broadcast = 0;
+  for (const auto arg_idx : arg_subset) {
+    dim_after_broadcast = std::max(dim_after_broadcast, args[arg_idx].dim());
+  }
+  // TODO: this keeps reallocating map_size at every iteration, but we know
+  // exactly how much storage do we need, so this could be fixed in-place at
+  // every step. We're just missing a few functions for ATen, but the fix
+  // should be straightforward.
+  // Note: left unitialized since empty shape is broadcastable to any shape
+  std::vector<int64_t> map_size;
+  for (size_t i = 0; i < arg_subset.size(); ++i) {
+    auto& arg = args.at(arg_subset[i]);
+    auto& chunk_desc = spec.inputChunks().at(arg_subset[i]);
+    if (chunk_desc.nSubTensors() == 1) {
+      try {
+        map_size = at::infer_size(map_size, arg.sizes());
+      } catch (...) {
+        return c10::nullopt;
+      }
+    } else {
+      auto tensor_sizes = arg.sizes().vec();
+      const auto num_chunks = chunk_desc.nSubTensors();
+      const auto dim = at::maybe_wrap_dim(chunk_desc.dim(), tensor_sizes.size());
+      if (tensor_sizes[dim] % num_chunks != 0) {
+        return c10::nullopt;
+      }
+      tensor_sizes[dim] /= num_chunks;
+      try {
+        map_size = at::infer_size(map_size, tensor_sizes);
+      } catch (...) {
+        return c10::nullopt;
+      }
+    }
+  }
+
+  return {map_size};
+}
+
+static c10::optional<std::vector<int64_t>> canRunKernel(
+  const KernelSpec& spec
+, at::TensorList args) {
+  // Short-circuits on size mismath
+  AT_CHECK(args.size() == spec.inputChunks().size(),
+           "Expected ", spec.inputChunks().size(), " arguments, but got ", args.size());
+
+  c10::optional<std::vector<int64_t>> map_size;
+  for (const auto& broadcast_group : spec.inputBroadcastGroups()) {
+    if (!map_size) {
+      map_size = getMapSize(spec, args, broadcast_group);
+      if (!map_size) {
+        return c10::nullopt;
+      }
+    } else {
+      auto group_map_size = getMapSize(spec, args, broadcast_group);
+      // NB: this checks that group_map_size is defined AND equal to map_size
+      if (map_size != group_map_size) {
+        return c10::nullopt;
+      }
+    }
+  }
+
+  return map_size;
+}
+
+// Note: Arguments are mutated by this call, although map_size is restored
+// to its original value.
+static void expandArgs(
+  const KernelSpec& spec
+, std::vector<at::Tensor>& args
+, std::vector<int64_t>& map_size) {
+  for (size_t i = 0; i < args.size(); ++i) {
+    auto& arg = args[i];
+    const auto& pdesc = spec.inputChunks()[i];
+    if (pdesc.nSubTensors() == 1) {
+      if (arg.sizes().equals(map_size)) continue;
+      arg = arg.expand(map_size);
+    } else {
+      map_size.at(pdesc.dim()) *= pdesc.nSubTensors();
+      if (!arg.sizes().equals(map_size)) {
+        arg = arg.expand(map_size);
+      }
+      map_size.at(pdesc.dim()) /= pdesc.nSubTensors();
+    }
+  }
+}
 
 void runFusion(
   const int64_t key
@@ -57,19 +141,35 @@ void runFusion(
       throw std::runtime_error("Cannot fuse CUDA tensors on different devices.");
   }
 
-  if (device >= 0 && canFuseOnGPU()) {
-    #if USE_CUDA_FUSER
-      const auto handle = cuda::getFusionHandle(spec, device);
-      handle->run(stack);
-    #endif // USE_CUDA_FUSER
-  } else if (device == kCPUDevice && canFuseOnCPU()) {
-    const auto handle = cpu::getFusionHandle(spec);
-    handle->run(stack);
-  } else {
-    throw std::runtime_error("Fusion not enabled on requested device.");
-  }
+  const auto num_inputs = spec.graph()->inputs().size();
+  auto args = fmap(last(stack, num_inputs), [](const IValue& i) {
+    return i.toTensor();
+  });
 
+  auto maybe_map_size = canRunKernel(spec, args);
+  if (!maybe_map_size)
+    throw std::runtime_error("Incompatible map size preventing fusion.");
   
+  expandArgs(spec, args, *maybe_map_size);
+
+  // Retrieves the kernel, compiling if necessary
+  ArgSpec arg_spec{args};
+  auto maybe_kernel = spec.findKernel(arg_spec);
+  if (!maybe_kernel) {
+    const auto kernel = compileKernel(spec, arg_spec, *maybe_map_size, device);
+    spec.cacheKernel(arg_spec, kernel);
+  }
+  maybe_kernel = spec.findKernel(arg_spec);
+  if (!maybe_kernel)
+    throw std::runtime_error("Failed to find cached fused kernel.");
+
+  std::vector<at::Tensor> outputs;
+  (*maybe_kernel)->launch(args, outputs);
+  drop(stack, num_inputs);
+  stack.insert(
+    stack.end()
+  , std::make_move_iterator(outputs.begin())
+  , std::make_move_iterator(outputs.end()));
 }
 
 } // namespace fuser

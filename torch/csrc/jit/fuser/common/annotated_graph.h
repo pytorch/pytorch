@@ -10,11 +10,15 @@ namespace torch { namespace jit { namespace fuser {
 
 struct AnnotatedGraph {
   // short-term storage only, so it borrows Graph.
-  AnnotatedGraph(Graph& graph, int device)
-  : graph(&graph), device(device) {}
+  AnnotatedGraph(
+    Graph& _graph
+  , const int _device)
+  : graph{&_graph}
+  , device{_device} 
+  { }
   
-  Graph* graph = nullptr; // TODO: this should really be const
-  int device = kCPUDevice;
+  const Graph* graph = nullptr; // TODO: this should really be const
+  const int device = kCPUDevice;
   std::vector<TensorDesc> input_desc;
   std::vector<TensorDesc> output_desc;
 };

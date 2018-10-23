@@ -10,7 +10,7 @@ namespace torch { namespace jit { namespace fuser { namespace cuda {
 Correct code for this case is generated, however, nvrtc does not know how to handle int*_t integer types,
 so typedefs help it handle those cases*/
 
-auto type_declarations_template = CodeTemplate(R"(
+static auto type_declarations_template = CodeTemplate(R"(
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
 typedef short int  int16_t;
@@ -138,7 +138,7 @@ constexpr auto rand_init = R"(
   Philox rnd(seed, idx, offset);
 )";
 
-auto cuda_compilation_unit_template = CodeTemplate(R"(
+static auto cuda_compilation_unit_template = CodeTemplate(R"(
 ${type_declarations}
 
 extern "C" __global__

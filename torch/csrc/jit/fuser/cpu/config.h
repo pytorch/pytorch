@@ -3,27 +3,28 @@
 #if USE_CPU_FUSER
 
 #include "ATen/ATen.h"
+#include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/fuser/kernel_spec.h"
-#include "torch/csrc/jit/fuser/cpu/fusion_compiler.h"
 
-#include <vector>
 #include <memory>
+#include <vector>
+#include <unordered_map>
+#include <string>
 
 namespace torch { namespace jit { namespace fuser { namespace cpu {
 
-inline std::shared_ptr<FusionHandle> getFusionHandle(
-  const KernelSpec& spec) {
-  return getFusionCompiler().getFusionHandle(spec);
-}
+struct CompilerConfig {
+  CompilerConfig();
+  ~CompilerConfig() = default;
 
-inline std::vector<at::Tensor> debugLaunchGraph(
-  Graph& graph
-, int device
-, at::ArrayRef<at::Tensor> inputs) {
-  return getFusionCompiler().debugLaunchGraph(graph, device, inputs);
-}
+  std::string cxx = "g++"; // compiler location
+  bool debug = false; // emit debugging information about fusions
+  bool openmp = true;
+};
+
+CompilerConfig& getConfig();
 
 } // namespace cpu
 } // namespace fuser

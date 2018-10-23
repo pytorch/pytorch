@@ -2,7 +2,7 @@
 
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/fuser/cpu/fusion_compiler.h"
+#include "torch/csrc/jit/fuser/cpu/config.h"
 #include "torch/csrc/jit/fuser/cpu/temp_file.h"
 #include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
 #include "torch/csrc/jit/fuser/common/annotated_graph.h"
@@ -37,7 +37,7 @@ static const std::string compile_string =
   "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 
 static void runCompiler(
-  CPUFusionCompilerConfig& config
+  CompilerConfig& config
 , const std::string& cpp_file
 , const std::string& so_file) {
   TemplateEnv env;
@@ -68,7 +68,7 @@ static void disas(const std::string& so_file) {
 CPUFusedKernel::CPUFusedKernel(
   const std::string& name
 , AnnotatedGraph& agraph
-, CPUFusionCompilerConfig& config)
+, CompilerConfig& config)
 : FusedKernel(name, agraph) {
   TempFile so_file(so_template, 3);
   TempFile cpp_file(cpp_template, 4);

@@ -5,16 +5,6 @@
 #include "torch/csrc/jit/fuser/executor.h"
 #include "torch/csrc/jit/fuser/fallback.h"
 
-#if USE_CPU_FUSER
-  #include "torch/csrc/jit/fuser/cpu/interface.h"
-#endif // USE_CPU_FUSER
-
-#if USE_CUDA_FUSER
-  #include "torch/csrc/jit/fuser/cuda/interface.h"
-#endif // USE_CUDA_FUSER
-
-#include <stdexcept>
-
 namespace torch { namespace jit {
 
 namespace detail {
@@ -22,9 +12,6 @@ namespace detail {
 bool cpu_fuser_enabled = false;
 
 } // namespace detail
-
-// Pure virtual destructor definition
-FusionHandle::~FusionHandle() { }
 
 void registerFusion(int64_t& key, const Node* fusion_group) {
   fuser::registerFusion(key, fusion_group); 
@@ -62,18 +49,23 @@ std::vector<at::Tensor> debugLaunchGraph(
   Graph& graph
 , int device
 , at::ArrayRef<at::Tensor> inputs) {
-  if (device == kCPUDevice) {
-    #if USE_CPU_FUSER
-      return fuser::cpu::debugLaunchGraph(graph, device, inputs);
-    #endif // USE_CPU_FUSER
-    throw std::runtime_error("CPU fusion is not supported on this build.");
+  // Creates a fusion group node
+  auto wrapper_graph = std::make_shared<Graph>();
+  Node* fusion_group = wrapper_graph->insertNode(wrapper_graph->createFusionGroup(device));
+  fusion_group->g_(attr::Subgraph, graph.copy());
+  for (size_t i = 0; i < graph.inputs().size(); ++i) {
+    fusion_group->addInput(wrapper_graph->addInput());
+  }
+  for (size_t i = 0; i < graph.outputs().size(); ++i) {
+    wrapper_graph->registerOutput(fusion_group->addOutput());
   }
 
-  #if USE_CUDA_FUSER
-    return fuser::cuda::debugLaunchGraph(graph, device, inputs);
-  #endif // USE_CUDA_FUSER
-
-  throw std::runtime_error("CUDA fusion is not supported on this build.");
+  // Creates the stack, registers and runs the fusion
+  Stack stack = fmap<IValue>(inputs);
+  int64_t key;
+  fuser::registerFusion(key, fusion_group);
+  fuser::runFusion(key, stack);
+  return fmap(stack, [](const IValue& iv) { return iv.toTensor(); });
 }
 
 } // namespace jit

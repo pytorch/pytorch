@@ -3,7 +3,7 @@
 #if USE_CPU_FUSER
 
 #include "ATen/ATen.h"
-#include "torch/csrc/jit/fuser/cpu/fusion_compiler.h"
+#include "torch/csrc/jit/fuser/cpu/config.h"
 #include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
 #include "torch/csrc/jit/fuser/common/fused_kernel.h"
 #include "torch/csrc/jit/fuser/common/annotated_graph.h"
@@ -18,7 +18,7 @@ struct CPUFusedKernel : public ::torch::jit::fuser::FusedKernel {
   CPUFusedKernel(
     const std::string& name
   , AnnotatedGraph& agraph
-  , CPUFusionCompilerConfig& config);
+  , CompilerConfig& config);
 
 protected:
   virtual at::Backend backend() const override {

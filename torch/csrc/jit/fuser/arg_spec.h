@@ -12,20 +12,20 @@
 
 namespace torch { namespace jit { namespace fuser {
 
-struct FusionArgSpec {
-  FusionArgSpec(at::TensorList inputs)
+struct ArgSpec {
+  ArgSpec(at::TensorList inputs)
   : descs_(fmap<TensorDesc>(inputs))
   , hash_code_(torch::get_hash(inputs.size(), descs_)) {}
 
-  bool operator==(const FusionArgSpec& spec) const {
+  bool operator==(const ArgSpec& spec) const {
     return hash_code_ == spec.hash_code_ && descs_ == spec.descs_;
   }
 
-  bool operator!=(const FusionArgSpec& spec) const {
+  bool operator!=(const ArgSpec& spec) const {
     return !(*this == spec);
   }
 
-  static size_t hash(const FusionArgSpec& spec) {
+  static size_t hash(const ArgSpec& spec) {
     return spec.hash_code_;
   }
 

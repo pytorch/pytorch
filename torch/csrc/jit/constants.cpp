@@ -124,7 +124,7 @@ RegisterOperators reg({
       }),
 });
 
-c10::optional<IValue> toIValue(Value* v) {
+c10::optional<IValue> toIValue(const Value* v) {
   if(v->node()->kind() != prim::Constant)
     return c10::nullopt;
   // use implemenation of prim::Constant to compute the output IValue
