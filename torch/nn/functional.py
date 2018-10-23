@@ -1150,7 +1150,6 @@ def linear(input, weight, bias=None):
     return output
 
 
-@torch._jit_internal.weak_script
 def bilinear(input1, input2, weight, bias=None):
     return torch.bilinear(input1, input2, weight, bias)
 
@@ -1392,7 +1391,6 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
     )
 
 
-@torch._jit_internal.weak_script
 def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
     r"""Applies Layer Normalization for last certain number of dimensions.
 
@@ -2382,7 +2380,6 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
         >>> output = F.cosine_similarity(input1, input2)
         >>> print(output)
     """
-
     w12 = torch.sum(x1 * x2, dim)
     w1 = torch.norm(x1, 2, dim)
     w2 = torch.norm(x2, 2, dim)

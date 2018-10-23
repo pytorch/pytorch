@@ -9115,8 +9115,6 @@ def add_nn_functional_test(name, self_size, args, skipTestIf=(), output_process_
 def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
     def do_test(self):
         nn_module = getattr(torch.nn, module_name)
-        # print('constructor_args', constructor_args)
-        # print('call_args', call_args)
 
         # Construct a script module that passes arguments through
         # to self.submodule
@@ -9135,10 +9133,7 @@ def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
                     self.submodule = nn_module(*constructor_args)
 
             module = TheModule()
-            # print(script)
-            # print(args)
             module.define(script)
-            # print(module.graph)
 
             # Check there are no Python ops by exporting
             self.assertExportImport(module.graph, tensors)
@@ -9148,7 +9143,6 @@ def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
         # Check against Python module as reference
         args_variable, kwargs_variable = create_input(call_args)
         f_args_variable = deepcopy(unpack_variables(args_variable))
-        # print('f_args_variable', f_args_variable)
         reference = nn_module(*constructor_args)
 
         check_against_reference(self, create_module, reference, f_args_variable)

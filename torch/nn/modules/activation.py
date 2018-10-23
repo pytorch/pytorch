@@ -200,7 +200,6 @@ class Hardtanh(Module):
         )
 
 
-@torch._jit_internal.weak_module
 class ReLU6(Hardtanh):
     r"""Applies the element-wise function:
 
@@ -285,7 +284,6 @@ class Tanh(Module):
         return torch.tanh(input)
 
 
-@torch._jit_internal.weak_module
 class ELU(Module):
     r"""Applies the element-wise function:
 
@@ -315,7 +313,6 @@ class ELU(Module):
         self.alpha = alpha
         self.inplace = inplace
 
-    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.elu(input, self.alpha, self.inplace)
 
@@ -324,7 +321,6 @@ class ELU(Module):
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
-@torch._jit_internal.weak_module
 class CELU(Module):
     r"""Applies the element-wise function:
 
@@ -359,7 +355,6 @@ class CELU(Module):
         self.alpha = alpha
         self.inplace = inplace
 
-    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.celu(input, self.alpha, self.inplace)
 
@@ -368,7 +363,6 @@ class CELU(Module):
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
-@torch._jit_internal.weak_module
 class SELU(Module):
     r"""Applied element-wise, as:
 
@@ -403,7 +397,6 @@ class SELU(Module):
         super(SELU, self).__init__()
         self.inplace = inplace
 
-    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.selu(input, self.inplace)
 
@@ -431,7 +424,6 @@ class GLU(Module):
         >>> input = torch.randn(4, 2)
         >>> output = m(input)
     """
-    __constants__ = ['dim']
 
     def __init__(self, dim=-1):
         super(GLU, self).__init__()
@@ -486,7 +478,6 @@ class Hardshrink(Module):
         return '{}'.format(self.lambd)
 
 
-@torch._jit_internal.weak_module
 class LeakyReLU(Module):
     r"""Applies the element-wise function:
 
@@ -526,7 +517,6 @@ class LeakyReLU(Module):
         self.negative_slope = negative_slope
         self.inplace = inplace
 
-    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
@@ -587,7 +577,6 @@ class Softplus(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
-    __constants__ = ['beta', 'threshold']
 
     def __init__(self, beta=1, threshold=20):
         super(Softplus, self).__init__()
