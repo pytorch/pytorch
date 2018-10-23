@@ -404,7 +404,7 @@ class PyTorchFileWriter final {
     return stream_writer_.getCurrentSize();
   }
 
-  bool closed() {
+  bool closed() const {
     return stream_writer_.finalized();
   }
 
