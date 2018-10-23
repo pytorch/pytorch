@@ -353,7 +353,7 @@ class Tensor(torch._C._TensorBase):
             return output
 
     def __rsub__(self, other):
-        return torch.sub(other, self)
+        return _C._TensorBase.rsub(self, other)
 
     def __rdiv__(self, other):
         if self.dtype.is_floating_point:
