@@ -1,6 +1,7 @@
 #include "c10/util/Exception.h"
 #include "c10/util/Backtrace.h"
 #include "c10/util/Type.h"
+#include "c10/util/Logging.h"
 
 #include <iostream>
 #include <numeric>
@@ -24,7 +25,7 @@ Error::Error(SourceLocation source_location, const std::string& msg)
           str(" (",
               source_location,
               ")\n",
-              get_backtrace(/*frames_to_skip=*/2))) {}
+              (*GetFetchStackTrace())())) {}
 
 // Caffe2-style error message
 Error::Error(
