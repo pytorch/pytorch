@@ -26,7 +26,10 @@ Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking
   return s_copy_(self, b_src, non_blocking);
 }
 
-Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device> to_device) const {
+Tensor TypeDefault::copy(
+    const Tensor& src,
+    bool non_blocking,
+    c10::optional<Device> to_device) const {
   DeviceGuard device_guard;
   if (to_device.has_value()) {
     device_guard.set_index(to_device.value().index());
