@@ -583,8 +583,6 @@ struct CAFFE2_API Type {
   virtual Tensor & sub_(Tensor & self, const Tensor & other, Scalar alpha) const = 0;
   virtual Tensor sub(const Tensor & self, Scalar other, Scalar alpha) const = 0;
   virtual Tensor & sub_(Tensor & self, Scalar other, Scalar alpha) const = 0;
-  virtual Tensor rsub(const Tensor & self, const Tensor & other, Scalar alpha) const = 0;
-  virtual Tensor rsub(const Tensor & self, Scalar other, Scalar alpha) const = 0;
   virtual Tensor addmm(const Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & addmm_(Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & sparse_resize_(Tensor & self, IntList size, int64_t sparse_dim, int64_t dense_dim) const = 0;

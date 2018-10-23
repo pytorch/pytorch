@@ -1163,12 +1163,6 @@ inline Tensor Tensor::sub(Scalar other, Scalar alpha) const {
 inline Tensor & Tensor::sub_(Scalar other, Scalar alpha) {
     return type().sub_(*this, other, alpha);
 }
-inline Tensor Tensor::rsub(const Tensor & other, Scalar alpha) const {
-    return type().rsub(*this, other, alpha);
-}
-inline Tensor Tensor::rsub(Scalar other, Scalar alpha) const {
-    return type().rsub(*this, other, alpha);
-}
 inline Tensor Tensor::addmm(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const {
     return type().addmm(*this, mat1, mat2, beta, alpha);
 }
