@@ -1996,7 +1996,6 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
 
 Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const Tensor& indices, IntList values_shape) {
   // TODO: improve this backward by writing a kernel (maybe)
-  auto sparse_dim = indices.size(0);
   auto dense_grad = sparse_grad_out.is_sparse() ? sparse_grad_out.to_dense() : sparse_grad_out;
   auto full_size = sparse_grad_out.sizes();
   auto flattened_grad_shape = values_shape.vec();
