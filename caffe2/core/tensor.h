@@ -4,8 +4,9 @@
 #include "caffe2/core/storage.h"
 #include "caffe2/core/tensor_impl.h"
 
-#include <ATen/core/intrusive_ptr.h>
 #include <ATen/core/UndefinedTensorImpl.h>
+#include <ATen/core/intrusive_ptr.h>
+#include "ATen/core/TensorOptions.h"
 
 namespace caffe2 {
 
@@ -327,6 +328,13 @@ class CAFFE2_API Tensor final {
   }
 
   /**
+   * Returns the size (i.e. the number of items) of the tensor.
+   */
+  inline int64_t numel() const {
+    return impl_->numel();
+  }
+
+  /**
    * Return the number of bytes each item takes in the tensor.
    */
   inline size_t itemsize() const {
@@ -457,6 +465,10 @@ void TensorVectorResize(
     std::vector<Tensor>& tensors,
     int size,
     DeviceType type);
+
+// Tensor factory function
+CAFFE2_API Tensor
+empty(const std::vector<int64_t>& dims, const at::TensorOptions& options);
 
 class CAFFE2_API TensorPrinter {
  public:

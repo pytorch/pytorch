@@ -1,9 +1,9 @@
 #pragma once
 
+#include <ATen/core/DeviceType.h>
 #include <ATen/core/TensorTypeId.h>
 #include <ATen/core/TensorTypeIdRegistration.h>
-#include <ATen/core/Error.h>
-#include <ATen/core/DeviceType.h>
+#include <c10/util/Exception.h>
 
 #include <stdexcept>
 

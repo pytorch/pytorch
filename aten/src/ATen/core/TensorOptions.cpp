@@ -4,8 +4,7 @@
 #include <ATen/core/Layout.h>
 #include <ATen/core/OptionsGuard.h>
 #include <ATen/core/ScalarType.h>
-#include <ATen/core/optional.h>
-#include <ATen/core/ScalarType.h>
+#include "c10/util/Optional.h"
 
 #include <iostream>
 

@@ -24,6 +24,37 @@ inline bool BlobIsTensorType(const Blob& blob, DeviceType device_type) {
   return tensor && *tensor && tensor->GetDeviceType() == device_type;
 }
 
+inline Tensor* BlobGetMutableTensor(
+    Blob* blob,
+    const vector<int64_t>& dims,
+    const at::TensorOptions& options) {
+  if (blob->IsType<Tensor>()) {
+    Tensor* tensor = blob->GetMutable<Tensor>();
+    if (*tensor) {
+      if (tensor->GetDevice() == options.device()) {
+        if (tensor->dims() != dims) {
+          // Resize when the dims doesn't match
+          tensor->Resize(dims);
+        }
+        auto type_meta = at::scalarTypeToTypeMeta(options.dtype());
+        if (tensor->meta() == type_meta) {
+          tensor->raw_mutable_data();
+        } else {
+          // create a new Tensor when the data_type doesn't match
+          return blob->Reset<Tensor>(new Tensor(empty(dims, options)));
+        }
+        return tensor;
+      }
+      // create a new Tensor when device doesn't match
+    }
+  }
+
+  VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<Tensor>()
+          << " dims: " << dims;
+  // << " options: " << options; (operator<< for Options is in at:: now)
+  return blob->Reset<Tensor>(new Tensor(empty(dims, options)));
+}
+
 inline Tensor* BlobGetMutableTensor(Blob* blob, DeviceType device_type) {
   if (blob->IsType<Tensor>()) {
     Tensor* tensor = blob->GetMutable<Tensor>();

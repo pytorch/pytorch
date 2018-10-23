@@ -45,7 +45,7 @@ class FullyConnectedOp final : public Operator<Context> {
                                   : W.size_from_dim(canonical_axis_w);
 
     auto dimErrorString = [&]() {
-      return MakeString(
+      return c10::str(
           "Dimension mismatch: ",
           "X: ",
           X.dims(),
@@ -145,7 +145,6 @@ class FullyConnectedOp final : public Operator<Context> {
   // a vector object every time we run Run().
   vector<int64_t> Y_shape_cache_;
   Tensor bias_multiplier_{Context::GetDeviceType()};
-  ;
 
   bool float16_compute_;
 };
@@ -187,7 +186,7 @@ class FullyConnectedGradientOp : public Operator<Context> {
                                   : W.size_from_dim(canonical_axis_w);
 
     auto dimErrorString = [&]() {
-      return MakeString(
+      return c10::str(
           "Dimension mismatch: ",
           "X: ",
           X.dims(),

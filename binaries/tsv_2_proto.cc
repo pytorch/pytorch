@@ -29,8 +29,8 @@ C10_DEFINE_string(f_out, "", "The output data file name.");
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
-  std::ifstream f_in(c10::FLAGS_f_in);
-  std::ofstream f_out(c10::FLAGS_f_out);
+  std::ifstream f_in(FLAGS_f_in);
+  std::ofstream f_out(FLAGS_f_out);
   std::string line;
   caffe2::TensorProtos tensor_protos;
   while (std::getline(f_in, line)) {

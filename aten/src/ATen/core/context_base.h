@@ -8,8 +8,8 @@
 
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Allocator.h>
-#include <ATen/core/Error.h>
 #include <ATen/core/typeid.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
 namespace caffe2 {

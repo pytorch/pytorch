@@ -10,9 +10,10 @@
 #include "torch/csrc/jit/source_range.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/ArrayRef.h>
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #include <functional>
 #include <memory>
@@ -260,7 +261,7 @@ struct NamedParameter {
   NamedParameter(std::string name, at::Tensor tensor, bool is_buffer)
   : name(std::move(name))
   , is_buffer(is_buffer)
-  , parameter(new at::Tensor(std::move(tensor))) {}
+  , parameter(torch::make_unique<at::Tensor>(std::move(tensor))) {}
 
   const std::string name;
   bool is_buffer; // buffers are part of the module state but
@@ -361,6 +362,33 @@ struct Module {
     return nullptr;
   }
 
+  /// Recursively casts all parameters to the given `dtype` and `device`.
+  ///
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  void to(
+      at::Device device,
+      at::ScalarType dtype,
+      bool non_blocking = false);
+
+  /// Recursively casts all parameters to the given dtype.
+  ///
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  void to(at::ScalarType dtype, bool non_blocking = false);
+
+  /// Recursively moves all parameters to the given device.
+  ///
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  void to(at::Device device, bool non_blocking = false);
+
   /// Run a method from this module.
   ///
   /// For example:
@@ -384,6 +412,10 @@ struct Module {
   void save(const std::string& filename);
 
  private:
+   void to_impl(
+       at::optional<at::Device> device,
+       at::optional<at::ScalarType> dtype,
+       bool non_blocking);
 
   // invariant: to ensure member_inputs of Methods stay valid,
   // it is only legal to _add_ new modules and parameters.
@@ -395,18 +427,18 @@ struct Module {
   bool optimize;
 };
 
-// returns at::nullopt and fills in failure_messages if the callee does not
+// returns c10::nullopt and fills in failure_messages if the callee does not
 // match the functions schema
-at::optional<std::vector<Value*>> try_emit_call_to(
+c10::optional<std::vector<Value*>> try_emit_call_to(
     Graph& graph,
     SourceRange loc,
     Method& callee,
+    c10::optional<NamedValue> self,
     ArrayRef<NamedValue> args,
     ArrayRef<NamedValue> kwargs,
     std::stringstream& failure_messages,
-    // when callee uses no parameters (e.g. it is a function in a compilation unit,
-    // and not a method), then nullptr can be passed as caller.
+    // when callee uses no parameters (e.g. it is a function in a compilation
+    // unit, and not a method), then nullptr can be passed as caller.
     Method* caller,
     bool conv_tensors_to_nums);
-
 }}}
