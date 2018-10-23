@@ -6,7 +6,7 @@
 
 namespace torch { namespace jit { namespace fuser {
 
-// Host-side view of TensorInfo (that visivle for the kernel is defined above).
+// Host-side view of TensorInfo
 // Note dims[0] - we need to dynamically allocate the dims.
 struct TensorInfo {
   

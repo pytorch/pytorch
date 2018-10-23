@@ -209,7 +209,10 @@ std::tuple<
 , std::vector<PartitionDesc>
 , bool> generateKernel(
   const std::string& name
-, AnnotatedGraph& agraph
+, const Graph& graph
+, const int device
+, const std::vector<TensorDesc>& input_desc
+, const std::vector<TensorDesc>& output_desc
 , const bool use_cuda) {
   TemplateEnv env;
   env.s("kernelName", name);
@@ -232,20 +235,20 @@ std::tuple<
   };
 
   std::vector<PartitionDesc> chunk_desc;
-  std::vector<std::pair<const Value*,TensorDesc&>> flat_inputs;
+  std::vector<std::pair<const Value*, const TensorDesc&>> flat_inputs;
   {
     size_t input_index = 0;
-    for(const auto& p : agraph.graph->inputs()) {
+    for(const auto& p : graph.inputs()) {
       if (const Node* chunk = usedInFusedChunk(p)) {
         int64_t dim = chunk->i(attr::dim);
         int64_t chunks = chunk->i(attr::chunks);
-        chunk_desc.emplace_back(agraph.input_desc[input_index++], chunks, dim);
+        chunk_desc.emplace_back(input_desc[input_index++], chunks, dim);
         for (const auto* o : chunk->outputs()) {
           flat_inputs.emplace_back(o, *chunk_desc.back().subtensorDesc);
         }
       } else {
         chunk_desc.emplace_back();
-        flat_inputs.emplace_back(p, agraph.input_desc[input_index++]);
+        flat_inputs.emplace_back(p, input_desc[input_index++]);
       }
     }
     for (const auto& input : flat_inputs) {
@@ -254,17 +257,17 @@ std::tuple<
   }
 
   std::vector<PartitionDesc> concat_desc;
-  std::vector<std::pair<const Value*,TensorDesc>> flat_output_nodes;
+  std::vector<std::pair<const Value*, TensorDesc>> flat_output_nodes;
   {
     size_t i = 0;
-    for(const auto& o : agraph.graph->outputs()) {
-      auto& desc = agraph.output_desc[i++];
-      if(o->node()->kind() != prim::FusedConcat) {
+    for (const auto& o : graph.outputs()) {
+      const auto& desc = output_desc[i++];
+      if (o->node()->kind() != prim::FusedConcat) {
         emitFormal(o, desc);
         concat_desc.emplace_back();
         flat_output_nodes.emplace_back(o, desc);
       } else {
-        auto cat = o->node();
+        const auto cat = o->node();
         concat_desc.emplace_back(desc, cat->inputs().size(), cat->i(attr::dim));
         for(const auto& c : cat->inputs()) {
           emitFormal(c, *concat_desc.back().subtensorDesc);
@@ -278,7 +281,7 @@ std::tuple<
     bool has_half_tensor = false;
   #endif // USE_CUDA_FUSER
   size_t formal_count = 0;
-  for(auto input : flat_inputs) {
+  for (const auto input : flat_inputs) {
     auto p = input.first;
     env.s("node", valueName(p));
     env.d("formal", formal_count++);
@@ -302,7 +305,7 @@ std::tuple<
   }
 
   bool has_random = false;
-  for (const auto& n : agraph.graph->nodes()) {
+  for (const auto& n : graph.nodes()) {
     // FusedConcat nodes work by narrowing the output Tensors before the kernel runs
     if (n->kind() == prim::FusedConcat)
       continue;

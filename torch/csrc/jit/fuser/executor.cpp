@@ -110,6 +110,25 @@ static void expandArgs(
   }
 }
 
+// void launchFusion(
+//   const FusedKernel& fusion
+// , const int device
+// , const at::ArrayRef<at::Tensor>& inputs
+// , std::vector<at::Tensor>& outputs) {
+//   // Switches to device to run the fusion on
+//   at::DeviceGuard guard{device};
+     
+     // Allocates tensors for outputs
+//   auto& ref_type = inputs[0].type();
+//   outputs.reserve(output_desc_.size());
+//   for (const auto& od : output_desc_) {
+//     outputs.push_back(at::empty({0}, ref_type.options().dtype(od.scalar_type)));
+//   }
+
+      //TODO: launch_with_tensors here
+// }
+
+
 void runFusion(
   const int64_t key
 , Stack& stack) {
@@ -129,7 +148,7 @@ void runFusion(
 
   // Determines device to dispatch to
   // Acquires inputs from stack
-  const auto inputs = fmap(last(stack, spec.nInputs()), [](const IValue& i) {
+  auto inputs = fmap(last(stack, spec.nInputs()), [](const IValue& i) {
     return i.toTensor();
   });
   int32_t device = kCPUDevice;
@@ -141,19 +160,14 @@ void runFusion(
       throw std::runtime_error("Cannot fuse CUDA tensors on different devices.");
   }
 
-  const auto num_inputs = spec.graph()->inputs().size();
-  auto args = fmap(last(stack, num_inputs), [](const IValue& i) {
-    return i.toTensor();
-  });
-
-  auto maybe_map_size = canRunKernel(spec, args);
+  // Validates sizes and expands inputs as needed
+  auto maybe_map_size = canRunKernel(spec, inputs);
   if (!maybe_map_size)
     throw std::runtime_error("Incompatible map size preventing fusion.");
-  
-  expandArgs(spec, args, *maybe_map_size);
+  expandArgs(spec, inputs, *maybe_map_size);
 
   // Retrieves the kernel, compiling if necessary
-  ArgSpec arg_spec{args};
+  ArgSpec arg_spec{inputs};
   auto maybe_kernel = spec.findKernel(arg_spec);
   if (!maybe_kernel) {
     const auto kernel = compileKernel(spec, arg_spec, *maybe_map_size, device);
@@ -163,9 +177,10 @@ void runFusion(
   if (!maybe_kernel)
     throw std::runtime_error("Failed to find cached fused kernel.");
 
+  // Launches the kernel
   std::vector<at::Tensor> outputs;
-  (*maybe_kernel)->launch(args, outputs);
-  drop(stack, num_inputs);
+  (*maybe_kernel)->launch(inputs, outputs);
+  drop(stack, spec.nInputs());
   stack.insert(
     stack.end()
   , std::make_move_iterator(outputs.begin())

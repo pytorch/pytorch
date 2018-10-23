@@ -1,8 +1,9 @@
 #pragma once
 
+#include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/fuser/arg_spec.h"
-#include "torch/csrc/jit/fuser/common/annotated_graph.h"
 #include "torch/csrc/jit/fuser/common/partition_desc.h"
+#include "torch/csrc/jit/fuser/common/tensor_desc.h"
 
 #include <tuple>
 #include <vector>
@@ -17,7 +18,10 @@ std::tuple<
 , std::vector<PartitionDesc>
 , bool> generateKernel(
   const std::string& name
-, AnnotatedGraph& agraph
+, const Graph& graph
+, const int device
+, const std::vector<TensorDesc>& input_desc
+, const std::vector<TensorDesc>& output_desc
 , const bool use_cuda);
 
 } // namespace fuser

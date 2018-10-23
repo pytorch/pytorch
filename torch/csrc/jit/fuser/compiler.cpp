@@ -9,7 +9,6 @@
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/fuser/kernel_cache.h"
 #include "torch/csrc/jit/fuser/codegen.h"
-#include "torch/csrc/jit/fuser/common/annotated_graph.h"
 #include "torch/csrc/jit/fuser/common/tensor_desc.h"
 
 #if USE_CUDA_FUSER
@@ -133,12 +132,11 @@ std::shared_ptr<FusedKernel> compileKernel(
 , const ArgSpec& arg_spec
 , const std::vector<int64_t>& map_size
 , const int device) {
-  AnnotatedGraph agraph{*(spec.graph()), device};
-  agraph.input_desc = arg_spec.descs();
+  const std::vector<TensorDesc>& input_desc = arg_spec.descs();
 
   // Note: this assumes fused kernels only operate on floating point values
   c10::optional<at::ScalarType> scalar_type;
-  for (TensorDesc& desc : agraph.input_desc) {
+  for (const auto& desc : input_desc) {
     if (isFloatingType(desc.scalar_type)) {
       scalar_type = desc.scalar_type;
       break;
@@ -147,13 +145,14 @@ std::shared_ptr<FusedKernel> compileKernel(
   JIT_ASSERT(scalar_type);
 
   // Creates annotated graph
+  std::vector<TensorDesc> output_desc;
   for (const Value* output : (spec.graph())->outputs()) {
     std::vector<int64_t> sizes = map_size;
     if (output->node()->kind() == prim::FusedConcat) {
       sizes.at(output->node()->i(attr::dim)) *= output->node()->inputs().size();
     }
     auto type = CompleteTensorType::create(*scalar_type, device, sizes);
-    agraph.output_desc.emplace_back(std::move(type));
+    output_desc.emplace_back(std::move(type));
   }
 
   const std::string name = "kernel_" + std::to_string(next_kernel_id++);
@@ -162,7 +161,13 @@ std::shared_ptr<FusedKernel> compileKernel(
   std::vector<PartitionDesc> chunk_desc;
   std::vector<PartitionDesc> concat_desc;
   bool has_random;
-  std::tie(code, chunk_desc, concat_desc, has_random) = generateKernel(name, agraph, use_cuda);
+  std::tie(code, chunk_desc, concat_desc, has_random) = generateKernel(
+    name
+  , *(spec.graph())
+  , device
+  , input_desc
+  , output_desc
+  , use_cuda);
 
   std::shared_ptr<FusedKernel> fused_kernel;
   if (device != kCPUDevice) {
@@ -171,8 +176,8 @@ std::shared_ptr<FusedKernel> compileKernel(
         device
       , name
       , code
-      , agraph.input_desc
-      , agraph.output_desc
+      , input_desc
+      , output_desc
       , chunk_desc
       , concat_desc
       , has_random);
@@ -185,8 +190,8 @@ std::shared_ptr<FusedKernel> compileKernel(
         cpu::getConfig()
       , name
       , code
-      , agraph.input_desc
-      , agraph.output_desc
+      , input_desc
+      , output_desc
       , chunk_desc
       , concat_desc
       , has_random);
