@@ -1203,7 +1203,7 @@
     - THTensor* self
 ]]
 [[
-  name: digamma_
+  name: _th_digamma_
   types:
     - floating_point
   backends:
@@ -1233,7 +1233,7 @@
     - THTensor* self
 ]]
 [[
-  name: polygamma_
+  name: _th_polygamma_
   types:
     - floating_point
   backends:
@@ -1431,7 +1431,7 @@
     - THTensor* self
 ]]
 [[
-  name: erfinv_
+  name: _th_erfinv_
   types:
     - floating_point
   backends:
@@ -1544,7 +1544,7 @@
     - THTensor* self
 ]]
 [[
-  name: frac_
+  name: _th_frac_
   types:
     - floating_point
   backends:
@@ -1700,7 +1700,7 @@
     - real maxnorm
 ]]
 [[
-  name: renorm_
+  name: _th_renorm_
   types:
     - floating_point
   backends:
@@ -1755,7 +1755,7 @@
         - THTensor* self
 ]]
 [[
-  name: reciprocal_
+  name: _th_reciprocal_
   types:
     - floating_point
   backends:
@@ -1785,7 +1785,7 @@
         - THTensor* self
 ]]
 [[
-  name: neg_
+  name: _th_neg_
   backends:
     - CPU
     - CUDA
@@ -1873,7 +1873,7 @@
         - THTensor* exponent
 ]]
 [[
-  name: pow_
+  name: _th_pow_
   return: argument 0
   cname: pow
   options:
@@ -1910,7 +1910,7 @@
     - real weight
 ]]
 [[
-  name: lerp_
+  name: _th_lerp_
   types:
     - floating_point
   backends:
@@ -2080,7 +2080,7 @@
     - THTensor* self
 ]]
 [[
-  name: sign_
+  name: _th_sign_
   cname: sign
   return: self
   arguments:
@@ -2118,7 +2118,7 @@
         - THTensor* other
 ]]
 [[
-  name: fmod_
+  name: _th_fmod_
   return: argument 0
   options:
     - cname: fmod
@@ -2155,7 +2155,7 @@
         - arg: THTensor* other
 ]]
 [[
-  name: remainder_
+  name: _th_remainder_
   return: argument 0
   options:
     - cname: remainder
@@ -2494,7 +2494,7 @@
     - THTensor* batch2
 ]]
 [[
-  name: addbmm_
+  name: _th_addbmm_
   cname: addbmm
   return: self
   arguments:
@@ -2549,7 +2549,7 @@
     - THTensor* tensor2
 ]]
 [[
-  name: addcmul_
+  name: _th_addcmul_
   options:
     - cname: addcmul
       return: argument 0
@@ -2591,7 +2591,7 @@
     - THTensor* tensor2
 ]]
 [[
-  name: addcdiv_
+  name: _th_addcdiv_
   cname: addcdiv
   return: argument 0
   arguments:
@@ -3012,7 +3012,7 @@
     - THIntegerTensor* LU_pivots
 ]]
 [[
-  name: random_
+  name: _th_random_
   backends:
     - CPU
     - CUDA
@@ -3063,7 +3063,7 @@
       default: "false"
 ]]
 [[
-  name: uniform_
+  name: _th_uniform_
   types:
     - floating_point
   backends:
@@ -3122,7 +3122,7 @@
         - THTensor* std
 ]]
 [[
-  name: normal_
+  name: _th_normal_
   types:
     - floating_point
   backends:
@@ -3141,7 +3141,7 @@
       default: 1
 ]]
 [[
-  name: cauchy_
+  name: _th_cauchy_
   types:
     - floating_point
   backends:
@@ -3160,7 +3160,7 @@
       default: 1
 ]]
 [[
-  name: log_normal_
+  name: _th_log_normal_
   cname: logNormal
   types:
     - floating_point
@@ -3179,7 +3179,7 @@
       default: 2
 ]]
 [[
-  name: exponential_
+  name: _th_exponential_
   types:
     - floating_point
   backends:
@@ -3196,7 +3196,7 @@
       default: 1
 ]]
 [[
-  name: geometric_
+  name: _th_geometric_
   backends:
     - CPU
     - CUDA

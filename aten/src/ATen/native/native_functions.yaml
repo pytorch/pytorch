@@ -2225,3 +2225,86 @@
 
 - func: view(Tensor self, IntList size) -> Tensor
   variants: method
+
+- func: digamma_(Tensor self) -> Tensor
+  variants: method
+
+- func: polygamma_(Tensor self, int64_t n) -> Tensor
+  variants: method
+
+- func: erfinv_(Tensor self) -> Tensor
+  variants: method
+
+- func: frac_(Tensor self) -> Tensor
+  variants: method
+
+- func: renorm_(Tensor self, Scalar p, int64_t dim, Scalar maxnorm) -> Tensor
+  variants: method
+
+- func: reciprocal_(Tensor self) -> Tensor
+  variants: method
+
+- func: neg_(Tensor self) -> Tensor
+  variants: method
+
+- func: pow_(Tensor self, Scalar exponent) -> Tensor
+  variants: method
+
+- func: pow_(Tensor self, Tensor exponent) -> Tensor
+  variants: method
+
+- func: lerp_(Tensor self, Tensor end, Scalar weight) -> Tensor
+  variants: method
+
+- func: sign_(Tensor self) -> Tensor
+  variants: method
+
+- func: fmod_(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+- func: fmod_(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: remainder_(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+- func: remainder_(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: addbmm_(Tensor self, Tensor batch1, Tensor batch2, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: method
+
+- func: addcmul_(Tensor self, Tensor tensor1, Tensor tensor2, Scalar value=1) -> Tensor
+  variants: method
+
+- func: addcdiv_(Tensor self, Tensor tensor1, Tensor tensor2, Scalar value=1) -> Tensor
+  variants: method
+
+- func: random_(Tensor self, int64_t from, int64_t to, Generator * generator=nullptr) -> Tensor
+  variants: method
+
+- func: random_(Tensor self, int64_t to, Generator * generator=nullptr) -> Tensor
+  variants: method
+
+- func: random_(Tensor self, Generator * generator=nullptr) -> Tensor
+  variants: method
+
+- func: uniform_(Tensor self, double from=0, double to=1, Generator * generator=nullptr) -> Tensor
+  variants: method
+
+- func: normal_(Tensor self, double mean=0, double std=1, Generator * generator=nullptr) -> Tensor
+  variants: method
+
+- func: cauchy_(Tensor self, double median=0, double sigma=1, Generator * generator=nullptr) -> Tensor
+  variants: method
+
+- func: log_normal_(Tensor self, double mean=1, double std=2, Generator * generator=nullptr) -> Tensor
+  variants: method
+
+- func: exponential_(Tensor self, double lambd=1, Generator * generator=nullptr) -> Tensor
+  variants: method
+
+- func: geometric_(Tensor self, double p, Generator * generator=nullptr) -> Tensor
+  variants: method
+
+# wrappers for TH functions
