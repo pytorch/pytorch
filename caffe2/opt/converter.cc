@@ -45,11 +45,12 @@ std::vector<int> getDilations(std::map<std::string, caffe2::Argument> argMap) {
 }
 
 int getGroup(std::map<std::string, caffe2::Argument>& argMap) {
+  int group = 1;
   if (argMap.count("group")) {
     CAFFE_ENFORCE(argMap["group"].has_i() && "Invalid group argument");
-    return static_cast<int>(argMap["group"].i());
+    group = static_cast<int>(argMap["group"].i());
   }
-  return 1;
+  return group;
 }
 
 } // namespace
@@ -107,6 +108,10 @@ std::vector<int> getKernelShape(std::map<std::string, caffe2::Argument> argMap) 
     int kernelH = static_cast<int>(argMap["kernel_h"].i());
     int kernelW = static_cast<int>(argMap["kernel_w"].i());
     kernelShape = {kernelH, kernelW};
+  } else if (argMap.count("global_pooling")) {
+    CAFFE_ENFORCE(argMap["global_pooling"].has_i(), "Invalid kernel argument");
+    int global_pooling = static_cast<int>(argMap["global_pooling"].i());
+    CAFFE_ENFORCE(global_pooling == 1, "Invalid kernel argument");
   }
   return kernelShape;
 }
