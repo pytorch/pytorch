@@ -1,5 +1,7 @@
 #include <torch/script.h>
 
+#include "op.h"
+
 #include <cstddef>
 #include <vector>
 
