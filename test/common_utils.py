@@ -27,6 +27,8 @@ from numbers import Number
 import __main__
 import errno
 
+import expecttest
+
 import torch
 import torch.cuda
 from torch._utils_internal import get_writable_path
@@ -44,7 +46,8 @@ parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 args, remaining = parser.parse_known_args()
 SEED = args.seed
-ACCEPT = args.accept
+if not expecttest.ACCEPT:
+    expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
@@ -241,7 +244,7 @@ class CudaMemoryLeakCheck():
                     self.name, after - before, i))
 
 
-class TestCase(unittest.TestCase):
+class TestCase(expecttest.TestCase):
     precision = 1e-5
     maxDiff = None
     _do_cuda_memory_leak_check = False
@@ -530,7 +533,7 @@ class TestCase(unittest.TestCase):
         except IOError as e:
             if e.errno != errno.ENOENT:
                 raise
-            elif ACCEPT:
+            elif expecttest.ACCEPT:
                 return accept_output("output")
             else:
                 raise RuntimeError(
@@ -543,7 +546,7 @@ class TestCase(unittest.TestCase):
             expected = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', expected)
             s = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', s)
 
-        if ACCEPT:
+        if expecttest.ACCEPT:
             if expected != s:
                 return accept_output("updated output")
         else:

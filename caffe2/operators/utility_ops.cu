@@ -44,8 +44,6 @@ REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Sum, SumOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<CUDAContext>);
 
-REGISTER_CUDA_OPERATOR(UnsafeCoalesce, UnsafeCoalesceOp<CUDAContext>);
-
 CAFFE_KNOWN_TYPE(const float*);
 
 REGISTER_CUDA_OPERATOR(EnsureDense, EnsureDenseOp<CUDAContext>);

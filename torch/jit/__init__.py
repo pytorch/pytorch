@@ -5,7 +5,9 @@ from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.jit.annotations
 from torch._six import raise_from, with_metaclass, get_function_from_type
-from .._jit_internal import createResolutionCallback, _compiled_weak_fns, _weak_script_methods, _weak_modules, _weak_types, COMPILED, COMPILATION_PENDING
+from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
+    _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
+    COMPILATION_PENDING
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
@@ -916,9 +918,9 @@ if _enabled:
                 traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
 
             .. note::
-                Tracing a *function* will produce a ScriptModule with a single
+                Tracing a *function* will produce a ``ScriptModule`` with a single
                 ``forward`` method that implements that function, and that contains
-                no parameteres.
+                no parameters.
 
             Example::
 
@@ -929,13 +931,26 @@ if _enabled:
 
             .. note::
 
-                Since tracing only records operations on tensors, it will not record any
-                control-flow operations like if statements or loops. When this control-flow is
-                constant across your module, this is fine and it often just inlines
-                configuration decisions. But sometimes the control-flow is actually part of the
-                model itself. For instance, a beam search in sequence-to-sequence translation is
-                a loop over the (varying) sequence length of inputs. In this case tracing would
-                not be appropriate and the beam search should be written using scripting.
+                Tracing only records operations done when the given function is run on the given
+                tensors. Therefore, the returned ``ScriptModule`` will always run the same traced
+                graph on any input. This has some important implications when your module is
+                expected to run different sets of operations, depending on the input and/or the
+                module state. For example,
+
+                    + Tracing will not record any control-flow like if statements or loops. When
+                      this control-flow is constant across your module, this is fine and it often
+                      just inlines configuration decisions. But sometimes the control-flow is
+                      actually part of the model itself. For instance, a beam search in
+                      sequence-to-sequence translation is a loop over the (varying) sequence
+                      length of inputs.
+
+                    + In the returned ``ScriptModule``, operations that have different behaviors
+                      in ``training`` and ``eval`` modes will always behave as if it is in the
+                      mode it was in during tracing, no matter which mode the ``ScriptModule``
+                      is in.
+
+                In cases like these, tracing would not be appropriate and scripting is a better
+                choice.
 
         **Scripting:**
 

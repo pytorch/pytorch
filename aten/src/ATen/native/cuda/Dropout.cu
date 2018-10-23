@@ -51,7 +51,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
         idx,
         seeds.second,
         &state);
-  IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) * 
+  IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) *
         blockDim.x * gridDim.x * UNROLL;
   for (IndexType linearIndex = idx;
        linearIndex < rounded_size;
