@@ -175,7 +175,7 @@ class HIPContext final : public BaseContext {
     return hip_objects_.GetStream(gpu_id, stream_id);
   }
 
-  rocblas_handle rocblashandle() {
+  rocblas_handle rocblas_handle() {
     return hip_objects_.GetHandle(gpu_id_, stream_id_);
   }
 
