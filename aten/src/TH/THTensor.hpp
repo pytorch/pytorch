@@ -55,17 +55,17 @@ inline int THTensor_nDimensionLegacyNoScalars(const THTensor* tensor) {
   if (tensor->dim() == 0) {
     return 1;
   } else {
-    return tensor->dim();  
+    return tensor->dim();
   }
 }
 
 inline int THTensor_nDimensionLegacyAll(const THTensor* tensor) {
   if (tensor->is_empty()) {
-    return 0;  
+    return 0;
   } else if (tensor->dim() == 0) {
     return 1;
   } else {
-    return tensor->dim();  
+    return tensor->dim();
   }
 }
 
@@ -110,8 +110,10 @@ TH_API void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *siz
 
 TH_CPP_API void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride);
 TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_);
-TH_CPP_API at::optional<std::vector<int64_t>> THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride,
-                                                                      at::IntList newshape);
+TH_CPP_API c10::optional<std::vector<int64_t>> THTensor_compute_stride(
+    at::IntList oldshape,
+    at::IntList oldstride,
+    at::IntList newshape);
 
 #include "generic/THTensor.hpp"
 #include "THGenerateAllTypes.h"

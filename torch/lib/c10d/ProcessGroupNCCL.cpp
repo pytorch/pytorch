@@ -6,6 +6,8 @@
 #include <THC.h>
 #include <THC/THCGeneral.hpp>
 
+#include <ATen/cuda/CUDAGuard.h>
+
 #include <c10d/Utils.hpp>
 #include <c10d/private/CUDAUtils.hpp>
 
@@ -69,18 +71,18 @@ void syncStreams(
     THCState* thcState,
     const std::vector<at::Device>& devices,
     std::vector<CUDAEvent>& ncclEvents,
-    std::vector<CUDAStream>& ncclStreams) {
+    std::vector<at::cuda::CUDAStream>& ncclStreams) {
   at::DeviceGuard gpuGuard;
   for (size_t i = 0; i < devices.size(); ++i) {
     gpuGuard.set_index(devices[i].index());
     auto currentThcStream =
         THCState_getCurrentStreamOnDevice(thcState, devices[i].index());
-    CUDAStream& ncclStream = ncclStreams[i];
+    at::cuda::CUDAStream& ncclStream = ncclStreams[i];
     CUDAEvent& ncclEvent = ncclEvents[i];
 
     C10D_CUDA_CHECK(cudaEventRecord(ncclEvent.getEvent(), currentThcStream));
     C10D_CUDA_CHECK(
-        cudaStreamWaitEvent(ncclStream.getStream(), ncclEvent.getEvent(), 0));
+        cudaStreamWaitEvent(ncclStream.stream(), ncclEvent.getEvent(), 0));
   }
 }
 
@@ -241,7 +243,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   at::DeviceGuard gpuGuard;
 
   std::vector<CUDAEvent> eventVal;
-  std::vector<CUDAStream> streamVal;
+  std::vector<at::cuda::CUDAStream> streamVal;
 
   eventVal.resize(devices.size());
   streamVal.resize(devices.size());
@@ -258,7 +260,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
 
     // Also create the NCCL streams and events
-    streamVal[i] = CUDAStream::create();
+    streamVal[i] = at::cuda::createCUDAStream();
     // Event created using cudaEventDisableTiming flag and not
     // cudaEventBlockingSync flag will provide the best performance when used
     // with cudaStreamWaitEvent() and cudaEventQuery(). Since we here don't
@@ -377,7 +379,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
 
   for (size_t i = 0; i < tensors.size(); ++i) {
     gpuGuard.set_index(devices[i].index());
-    CUDAStream& ncclStream = ncclStreams_[key][i];
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
 
     C10D_NCCL_CHECK(ncclAllReduce(
         tensors[i].data_ptr(),
@@ -386,18 +388,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
         getNcclDataType(tensors[i].type().scalarType()),
         ncclOp[opts.reduceOp],
         ncclComms[i]->getNcclComm(),
-        ncclStream.getStream()));
+        ncclStream.stream()));
   }
 
   C10D_NCCL_CHECK(ncclGroupEnd());
 
   // Event should only be recorded after the ncclGroupEnd()
   for (size_t i = 0; i < tensors.size(); ++i) {
-    CUDAStream& ncclStream = ncclStreams_[key][i];
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     CUDAEvent& cudaEvent = work->cudaEvents_[i];
 
-    C10D_CUDA_CHECK(
-        cudaEventRecord(cudaEvent.getEvent(), ncclStream.getStream()));
+    C10D_CUDA_CHECK(cudaEventRecord(cudaEvent.getEvent(), ncclStream.stream()));
   }
 
   return work;
@@ -427,7 +428,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
 
   for (size_t i = 0; i < tensors.size(); ++i) {
     gpuGuard.set_index(devices[i].index());
-    CUDAStream& ncclStream = ncclStreams_[key][i];
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     // root rank of the the GPU
     int root = opts.rootRank * tensors.size() + opts.rootTensor;
 
@@ -437,18 +438,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
         getNcclDataType(tensors[i].type().scalarType()),
         root,
         ncclComms[i]->getNcclComm(),
-        ncclStream.getStream()));
+        ncclStream.stream()));
   }
 
   C10D_NCCL_CHECK(ncclGroupEnd());
 
   // Event should only be recorded after the ncclGroupEnd()
   for (size_t i = 0; i < tensors.size(); ++i) {
-    CUDAStream& ncclStream = ncclStreams_[key][i];
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     CUDAEvent& cudaEvent = work->cudaEvents_[i];
 
-    C10D_CUDA_CHECK(
-        cudaEventRecord(cudaEvent.getEvent(), ncclStream.getStream()));
+    C10D_CUDA_CHECK(cudaEventRecord(cudaEvent.getEvent(), ncclStream.stream()));
   }
 
   return work;
@@ -478,7 +478,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
 
   for (size_t i = 0; i < tensors.size(); ++i) {
     gpuGuard.set_index(devices[i].index());
-    CUDAStream& ncclStream = ncclStreams_[key][i];
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     // root rank of the the GPU
     int root = opts.rootRank * tensors.size() + opts.rootTensor;
 
@@ -490,18 +490,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
         ncclOp[opts.reduceOp],
         root,
         ncclComms[i]->getNcclComm(),
-        ncclStream.getStream()));
+        ncclStream.stream()));
   }
 
   C10D_NCCL_CHECK(ncclGroupEnd());
 
   // Event should only be recorded after the ncclGroupEnd()
   for (size_t i = 0; i < tensors.size(); ++i) {
-    CUDAStream& ncclStream = ncclStreams_[key][i];
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     CUDAEvent& cudaEvent = work->cudaEvents_[i];
 
-    C10D_CUDA_CHECK(
-        cudaEventRecord(cudaEvent.getEvent(), ncclStream.getStream()));
+    C10D_CUDA_CHECK(cudaEventRecord(cudaEvent.getEvent(), ncclStream.stream()));
   }
 
   return work;
@@ -550,7 +549,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
   for (size_t i = 0; i < inputTensors.size(); ++i) {
     gpuGuard.set_index(devices[i].index());
 
-    CUDAStream& ncclStream = ncclStreams_[key][i];
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
 
     C10D_NCCL_CHECK(ncclAllGather(
         inputTensors[i].data_ptr(),
@@ -558,15 +557,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
         inputTensors[i].numel(),
         getNcclDataType(inputTensors[i].type().scalarType()),
         ncclComms[i]->getNcclComm(),
-        ncclStream.getStream()));
+        ncclStream.stream()));
   }
 
   C10D_NCCL_CHECK(ncclGroupEnd());
 
   // Copy the flattened output tensors to the outputs
   for (size_t i = 0; i < outputTensors.size(); ++i) {
-    CUDAStream& ncclStream = ncclStreams_[key][i];
-    THCStreamGuard guard(thcState_, ncclStream);
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+    at::cuda::CUDAGuard guard(ncclStream);
     for (size_t j = 0; j < outputTensors[0].size(); ++j) {
       outputTensors[i][j].copy_(flattenOutputTensors[i][j], true);
     }
@@ -574,11 +573,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
 
   // Event should only be recorded after the ncclGroupEnd()
   for (size_t i = 0; i < inputTensors.size(); ++i) {
-    CUDAStream& ncclStream = ncclStreams_[key][i];
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     CUDAEvent& cudaEvent = work->cudaEvents_[i];
 
-    C10D_CUDA_CHECK(
-        cudaEventRecord(cudaEvent.getEvent(), ncclStream.getStream()));
+    C10D_CUDA_CHECK(cudaEventRecord(cudaEvent.getEvent(), ncclStream.stream()));
   }
   return work;
 }

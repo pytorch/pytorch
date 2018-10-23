@@ -124,10 +124,10 @@ static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
   Tensor S;
   if (!symmetric) {
     Tensor U, V;
-    std::tie(U, S, V) = self.svd();
+    std::tie(U, S, V) = self.svd(/*some=*/true, /*compute_uv=*/false);
   } else {
     Tensor eigvecs;
-    std::tie(S, eigvecs) = self.symeig();
+    std::tie(S, eigvecs) = self.symeig(/*eigenvectors=*/false);
     S = S.abs();
   }
   return S;
@@ -404,7 +404,10 @@ The behavior depends on the dimensionality of the Tensors as follows:
   must be broadcastable).  For example, if tensor1 is a (j x 1 x n x m) Tensor
   and tensor2 is a (k x m x p) Tensor, the returned tensor will be an (j x k x n x p) Tensor.
 */
-Tensor matmul(at::optional<Tensor> out_opt, const Tensor& tensor1, const Tensor& tensor2) {
+Tensor matmul(
+    c10::optional<Tensor> out_opt,
+    const Tensor& tensor1,
+    const Tensor& tensor2) {
   auto dim_tensor1 = tensor1.dim();
   auto dim_tensor2 = tensor2.dim();
   auto has_out = out_opt.has_value();
@@ -486,15 +489,14 @@ Tensor matmul(at::optional<Tensor> out_opt, const Tensor& tensor1, const Tensor&
 
  AT_ERROR("both arguments to matmul need to be at least 1D, but they are ",
           dim_tensor1, "D and ", dim_tensor2, "D");
-
 }
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
-  return at::native::matmul(at::nullopt, tensor1, tensor2);
+  return at::native::matmul(c10::nullopt, tensor1, tensor2);
 }
 
 Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor2) {
-  at::native::matmul(at::optional<Tensor>(result), tensor1, tensor2);
+  at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
   return result;
 }
 

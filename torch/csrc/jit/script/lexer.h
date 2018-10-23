@@ -9,6 +9,7 @@
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/source_range.h"
 #include <torch/csrc/utils/memory.h>
+#include <locale.h>
 
 namespace torch {
 namespace jit {
@@ -85,7 +86,7 @@ namespace script {
   _(TK_SLICE_EXPR, "slice expr", "")             \
   _(TK_TYPE_COMMENT, "type comment", "# type:")
 
-static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?";
+static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
@@ -146,6 +147,17 @@ struct SharedParserData {
     TC_FORALL_TOKEN_KINDS(ADD_CASE)
 #undef ADD_CASE
   }
+#ifdef _WIN32
+  double strtod_c(const char * str, char** end) {
+    static _locale_t loc = _create_locale(LC_ALL, "C");
+    return _strtod_l(str, end, loc);
+  }
+#else
+  double strtod_c(const char * str, char** end) {
+    static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
+    return strtod_l(str, end, loc);
+  }
+#endif
   // 1. skip whitespace
   // 2. handle comment or newline
   //
@@ -159,7 +171,7 @@ struct SharedParserData {
       return false;
     const char* startptr = str.c_str() + start;
     char* endptr;
-    std::strtod(startptr, &endptr);
+    strtod_c(startptr, &endptr);
     *len = endptr - startptr;
     return *len > 0;
   }

@@ -1,4 +1,3 @@
-#include <cmath>
 #include <limits>
 #include "caffe2/core/operator.h"
 #include "caffe2/core/stats.h"
@@ -39,15 +38,18 @@ struct TemplatePutOp : public Operator<CPUContext> {
         std::numeric_limits<int64_t>::max() / magnitude_expand_;
 
     if (bound_) {
-      if (input < -bound_value) {
+      if (isNan(input)) {
+        input = 0;
+      } else if (input < -bound_value) {
         input = -bound_value;
       } else if (input > bound_value) {
         input = bound_value;
       }
     } else {
       CAFFE_ENFORCE(
-          std::abs(static_cast<int64_t>(input)) <= bound_value,
+          std::abs(static_cast<int64_t>(input)) < bound_value,
           "Input value is too large for the given magnitude expansion!");
+      CAFFE_ENFORCE(!isNan(input), "Input value cannot be NaN!");
     }
 
     int64_t int_value = input * magnitude_expand_;
@@ -62,5 +64,17 @@ struct TemplatePutOp : public Operator<CPUContext> {
   const int64_t magnitude_expand_;
   const bool bound_;
   T stat_;
+
+  template <typename V>
+  bool isNan(V input) {
+    /*
+    Checks if given number of is NaN, while being permissive with different
+    implementations of the standard libraries between operating systems.
+
+    Uses the preperties of NaN, defined by IEEE.
+    https://www.gnu.org/software/libc/manual/html_node/Infinity-and-NaN.html
+    */
+    return input != input;
+  }
 };
 } // namespace caffe2

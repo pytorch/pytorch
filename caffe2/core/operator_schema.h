@@ -163,6 +163,13 @@ class CAFFE2_API OpSchema {
   OpSchema& InheritOnnxSchema(const std::string& onnx_schema_name);
 
   /**
+   * @brief Shortcut to InheritOnnxSchema(type_)
+   */
+  OpSchema& InheritOnnxSchema() {
+    return InheritOnnxSchema(type_);
+  }
+
+  /**
    * @brief Sets the tensor inference function to produce the same output as
    * the input.
    */
@@ -590,4 +597,16 @@ OpSchema::Cost PointwiseCostInference(
 
 #endif // CAFFE2_NO_OPERATOR_SCHEMA
 
+#ifdef CAFFE2_NO_GRADIENT_OPS
+
+#define GRADIENT_OPERATOR_SCHEMA(name)                              \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
+      1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
+
+#else
+
+#define GRADIENT_OPERATOR_SCHEMA(name) OPERATOR_SCHEMA(name)
+
+#endif
 #endif // CAFFE2_CORE_OPERATOR_SCHEMA_H_

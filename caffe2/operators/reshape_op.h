@@ -64,7 +64,7 @@ class ReshapeOp : public Operator<Context> {
     // Checks if the new shape is valid and fills in the missing dimension
     // specified by -1.
     // NOTE: At most one dimension can be -1.
-    auto total_size = input.size_from_dim(0);
+    auto total_size = input.numel();
     T size = 1;
     int unknown_idx = -1;
     for (int i = 0; i < actual_new_shape.size(); ++i) {

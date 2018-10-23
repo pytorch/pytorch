@@ -10,7 +10,7 @@
 #include "torch/csrc/autograd/variable_version.h"
 
 #include <ATen/ATen.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <list>
 #include <memory>
@@ -131,7 +131,7 @@ void Variable::Impl::detach_() {
 }
 
 void Variable::Impl::backward(
-    at::optional<Tensor> gradient,
+    c10::optional<Tensor> gradient,
     bool keep_graph,
     bool create_graph) {
   std::vector<Edge> edges;

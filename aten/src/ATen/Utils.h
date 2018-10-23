@@ -7,7 +7,7 @@
 #include <ATen/core/ScalarType.h>
 #include "ATen/Formatting.h"
 #include "ATen/core/ArrayRef.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 
 #include <algorithm>
 #include <sstream>
