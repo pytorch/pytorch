@@ -1,8 +1,0 @@
-graph(%i0 : Dynamic
-      %i1 : Dynamic) {
-  %2 : float = prim::Constant[value=2]()
-  %3 : float = prim::Constant[value=1e-06]()
-  %4 : bool = prim::Constant[value=0]()
-  %5 : Dynamic = aten::pairwise_distance(%i0, %i1, %2, %3, %4)
-  return (%5);
-}
