@@ -2226,25 +2226,25 @@
 - func: view(Tensor self, IntList size) -> Tensor
   variants: method
 
-- func: put_(Tensor self, const Tensor & index, const Tensor & source, bool accumulate=false) -> Tensor
+- func: put_(Tensor self, Tensor index, Tensor source, bool accumulate=false) -> Tensor
   variants: method
 
-- func: index_add_(Tensor self, int64_t dim, const Tensor & index, const Tensor & source) -> Tensor
+- func: index_add_(Tensor self, int64_t dim, Tensor index, Tensor source) -> Tensor
   variants: method
 
-- func: index_fill_(Tensor self, int64_t dim, const Tensor & index, Scalar value) -> Tensor
+- func: index_fill_(Tensor self, int64_t dim, Tensor index, Scalar value) -> Tensor
   variants: method
 
-- func: index_fill_(Tensor self, int64_t dim, const Tensor & index, const Tensor & value) -> Tensor
+- func: index_fill_(Tensor self, int64_t dim, Tensor index, Tensor value) -> Tensor
   variants: method
 
-- func: scatter_(Tensor self, int64_t dim, const Tensor & index, const Tensor & src) -> Tensor
+- func: scatter_(Tensor self, int64_t dim, Tensor index, Tensor src) -> Tensor
   variants: method
 
-- func: scatter_(Tensor self, int64_t dim, const Tensor & index, Scalar value) -> Tensor
+- func: scatter_(Tensor self, int64_t dim, Tensor index, Scalar value) -> Tensor
   variants: method
 
-- func: scatter_add_(Tensor self, int64_t dim, const Tensor & index, const Tensor & src) -> Tensor
+- func: scatter_add_(Tensor self, int64_t dim, Tensor index, Tensor src) -> Tensor
   variants: method
 
 - func: lt_(Tensor self, Scalar other) -> Tensor
@@ -2377,3 +2377,106 @@
   variants: method
 
 # wrappers for TH functions
+
+- func: diag_out(Tensor result, Tensor self, int64_t diagonal=0) -> Tensor
+
+- func: diag(Tensor self, int64_t diagonal=0) -> Tensor
+  variants: method, function
+
+- func: cross_out(Tensor result, Tensor self, Tensor other, int64_t dim=-1) -> Tensor
+
+- func: cross(Tensor self, Tensor other, int64_t dim=-1) -> Tensor
+  variants: method, function
+
+- func: triu_out(Tensor result, Tensor self, int64_t diagonal=0) -> Tensor
+
+- func: triu(Tensor self, int64_t diagonal=0) -> Tensor
+  variants: method, function
+
+- func: tril_out(Tensor result, Tensor self, int64_t diagonal=0) -> Tensor
+
+- func: tril(Tensor self, int64_t diagonal=0) -> Tensor
+  variants: method, function
+
+- func: trace(Tensor self) -> Tensor
+  variants: method, function
+
+- func: ne_out(Tensor result, Tensor self, Scalar other) -> Tensor
+
+- func: ne(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: ne_out(Tensor result, Tensor self, Tensor other) -> Tensor
+
+- func: ne(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: eq_out(Tensor result, Tensor self, Scalar other) -> Tensor
+
+- func: eq(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: eq_out(Tensor result, Tensor self, Tensor other) -> Tensor
+
+- func: eq(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: ge_out(Tensor result, Tensor self, Scalar other) -> Tensor
+
+- func: ge(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: ge_out(Tensor result, Tensor self, Tensor other) -> Tensor
+
+- func: ge(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: le_out(Tensor result, Tensor self, Scalar other) -> Tensor
+
+- func: le(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: le_out(Tensor result, Tensor self, Tensor other) -> Tensor
+
+- func: le(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: gt_out(Tensor result, Tensor self, Scalar other) -> Tensor
+
+- func: gt(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: gt_out(Tensor result, Tensor self, Tensor other) -> Tensor
+
+- func: gt(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: lt_out(Tensor result, Tensor self, Scalar other) -> Tensor
+
+- func: lt(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: lt_out(Tensor result, Tensor self, Tensor other) -> Tensor
+
+- func: lt(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: take_out(Tensor result, Tensor self, Tensor index) -> Tensor
+
+- func: take(Tensor self, Tensor index) -> Tensor
+  variants: method, function
+
+- func: index_select_out(Tensor result, Tensor self, int64_t dim, Tensor index) -> Tensor
+
+- func: index_select(Tensor self, int64_t dim, Tensor index) -> Tensor
+  variants: method, function
+
+- func: masked_select_out(Tensor result, Tensor self, Tensor mask) -> Tensor
+
+- func: masked_select(Tensor self, Tensor mask) -> Tensor
+  variants: method, function
+
+- func: nonzero_out(Tensor result, Tensor self) -> Tensor
+
+- func: nonzero(Tensor self) -> Tensor
+  variants: method, function

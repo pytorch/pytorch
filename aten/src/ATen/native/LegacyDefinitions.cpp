@@ -3,6 +3,8 @@
 
 namespace at { namespace native {
 
+// Methods
+
 int64_t storage_offset(const Tensor& self) {
   return self._th_storage_offset();
 }
@@ -253,6 +255,172 @@ Tensor & exponential_(Tensor& self, double lambd, Generator * generator) {
 
 Tensor & geometric_(Tensor& self, double p, Generator * generator) {
   return self._th_geometric_(p, generator);
+}
+
+// Functions
+
+Tensor & diag_out(Tensor & result, const Tensor & self, int64_t diagonal) {
+  return at::_th_diag_out(result, self, diagonal);
+}
+
+Tensor diag(const Tensor & self, int64_t diagonal) {
+  return at::_th_diag(self, diagonal);
+}
+
+Tensor & cross_out(Tensor & result, const Tensor & self, const Tensor & other, int64_t dim) {
+  return at::_th_cross_out(result, self, other, dim);
+}
+
+Tensor cross(const Tensor & self, const Tensor & other, int64_t dim) {
+  return at::_th_cross(self, other, dim);
+}
+
+Tensor & triu_out(Tensor & result, const Tensor & self, int64_t diagonal) {
+  return at::_th_triu_out(result, self, diagonal);
+}
+
+Tensor triu(const Tensor & self, int64_t diagonal) {
+  return at::_th_triu(self, diagonal);
+}
+
+Tensor & tril_out(Tensor & result, const Tensor & self, int64_t diagonal) {
+  return at::_th_tril_out(result, self, diagonal);
+}
+
+Tensor tril(const Tensor & self, int64_t diagonal) {
+  return at::_th_tril(self, diagonal);
+}
+
+Tensor trace(const Tensor & self) {
+  return at::_th_trace(self);
+}
+
+Tensor & ne_out(Tensor & result, const Tensor & self, Scalar other) {
+  return at::_th_ne_out(result, self, other);
+}
+
+Tensor ne(const Tensor & self, Scalar other) {
+  return at::_th_ne(self, other);
+}
+
+Tensor & ne_out(Tensor & result, const Tensor & self, const Tensor & other) {
+  return at::_th_ne_out(result, self, other);
+}
+
+Tensor ne(const Tensor & self, const Tensor & other) {
+  return at::_th_ne(self, other);
+}
+
+Tensor & eq_out(Tensor & result, const Tensor & self, Scalar other) {
+  return at::_th_eq_out(result, self, other);
+}
+
+Tensor eq(const Tensor & self, Scalar other) {
+  return at::_th_eq(self, other);
+}
+
+Tensor & eq_out(Tensor & result, const Tensor & self, const Tensor & other) {
+  return at::_th_eq_out(result, self, other);
+}
+
+Tensor eq(const Tensor & self, const Tensor & other) {
+  return at::_th_eq(self, other);
+}
+
+Tensor & ge_out(Tensor & result, const Tensor & self, Scalar other) {
+  return at::_th_ge_out(result, self, other);
+}
+
+Tensor ge(const Tensor & self, Scalar other) {
+  return at::_th_ge(self, other);
+}
+
+Tensor & ge_out(Tensor & result, const Tensor & self, const Tensor & other) {
+  return at::_th_ge_out(result, self, other);
+}
+
+Tensor ge(const Tensor & self, const Tensor & other) {
+  return at::_th_ge(self, other);
+}
+
+Tensor & le_out(Tensor & result, const Tensor & self, Scalar other) {
+  return at::_th_le_out(result, self, other);
+}
+
+Tensor le(const Tensor & self, Scalar other) {
+  return at::_th_le(self, other);
+}
+
+Tensor & le_out(Tensor & result, const Tensor & self, const Tensor & other) {
+  return at::_th_le_out(result, self, other);
+}
+
+Tensor le(const Tensor & self, const Tensor & other) {
+  return at::_th_le(self, other);
+}
+
+Tensor & gt_out(Tensor & result, const Tensor & self, Scalar other) {
+  return at::_th_gt_out(result, self, other);
+}
+
+Tensor gt(const Tensor & self, Scalar other) {
+  return at::_th_gt(self, other);
+}
+
+Tensor & gt_out(Tensor & result, const Tensor & self, const Tensor & other) {
+  return at::_th_gt_out(result, self, other);
+}
+
+Tensor gt(const Tensor & self, const Tensor & other) {
+  return at::_th_gt(self, other);
+}
+
+Tensor & lt_out(Tensor & result, const Tensor & self, Scalar other) {
+  return at::_th_lt_out(result, self, other);
+}
+
+Tensor lt(const Tensor & self, Scalar other) {
+  return at::_th_lt(self, other);
+}
+
+Tensor & lt_out(Tensor & result, const Tensor & self, const Tensor & other) {
+  return at::_th_lt_out(result, self, other);
+}
+
+Tensor lt(const Tensor & self, const Tensor & other) {
+  return at::_th_lt(self, other);
+}
+
+Tensor & take_out(Tensor & result, const Tensor & self, const Tensor & index) {
+  return at::_th_take_out(result, self, index);
+}
+
+Tensor take(const Tensor & self, const Tensor & index) {
+  return at::_th_take(self, index);
+}
+
+Tensor & index_select_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index) {
+  return at::_th_index_select_out(result, self, dim, index);
+}
+
+Tensor index_select(const Tensor & self, int64_t dim, const Tensor & index) {
+  return at::_th_index_select(self, dim, index);
+}
+
+Tensor & masked_select_out(Tensor & result, const Tensor & self, const Tensor & mask) {
+  return at::_th_masked_select_out(result, self, mask);
+}
+
+Tensor masked_select(const Tensor & self, const Tensor & mask) {
+  return at::_th_masked_select(self, mask);
+}
+
+Tensor & nonzero_out(Tensor & result, const Tensor & self) {
+  return at::_th_nonzero_out(result, self);
+}
+
+Tensor nonzero(const Tensor & self) {
+  return at::_th_nonzero(self);
 }
 
 }} // namespace at::native

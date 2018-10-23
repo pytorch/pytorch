@@ -122,7 +122,7 @@
     - THTensor* source
 ]]
 [[
-  name: masked_select
+  name: _th_masked_select
   cname: maskedSelect
   variants:
     - method
@@ -136,7 +136,8 @@
     - THBoolTensor* mask
 ]]
 [[
-  name: nonzero
+  name: _th_nonzero
+  cname: nonzero
   variants:
     - method
     - function
@@ -178,7 +179,7 @@
     - THTensor* the_template
 ]]
 [[
-  name: index_select
+  name: _th_index_select
   cname: indexSelect
   variants:
     - method
@@ -205,7 +206,7 @@
     - THTensor* source
 ]]
 [[
-  name: take
+  name: _th_take
   cname: take
   variants:
     - method
@@ -577,7 +578,7 @@
         - THTensor* other
 ]]
 [[
-  name: lt
+  name: _th_lt
   variants:
     - method
     - function
@@ -614,7 +615,7 @@
         - arg: THTensor* other
 ]]
 [[
-  name: gt
+  name: _th_gt
   variants:
     - method
     - function
@@ -651,7 +652,7 @@
         - THTensor* other
 ]]
 [[
-  name: le
+  name: _th_le
   variants:
     - method
     - function
@@ -688,7 +689,7 @@
         - THTensor* other
 ]]
 [[
-  name: ge
+  name: _th_ge
   variants:
     - method
     - function
@@ -725,7 +726,7 @@
         - THTensor* other
 ]]
 [[
-  name: eq
+  name: _th_eq
   variants:
     - method
     - function
@@ -762,7 +763,7 @@
         - THTensor* other
 ]]
 [[
-  name: ne
+  name: _th_ne
   variants:
     - method
     - function
@@ -2088,7 +2089,8 @@
     - THTensor* self
 ]]
 [[
-  name: trace
+  name: _th_trace
+  cname: trace
   variants:
     - method
     - function
@@ -2215,7 +2217,8 @@
     - arg: THTensor* tensor
 ]]
 [[
-  name: tril
+  name: _th_tril
+  cname: tril
   variants:
     - method
     - function
@@ -2238,7 +2241,8 @@
       default: 0
 ]]
 [[
-  name: triu
+  name: _th_triu
+  cname: triu
   variants:
     - method
     - function
@@ -2261,7 +2265,8 @@
       default: 0
 ]]
 [[
-  name: cross
+  name: _th_cross
+  cname: cross
   variants:
     - method
     - function
@@ -2275,7 +2280,7 @@
       default: -1
 ]]
 [[
-  name: diag
+  name: _th_diag
   variants:
     - method
     - function
