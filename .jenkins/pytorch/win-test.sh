@@ -53,7 +53,7 @@ call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\M
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     call conda install -y -q numpy mkl cffi pyyaml boto3
 )
-pip install ninja future
+pip install ninja future hypothesis
 
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
 
