@@ -7,7 +7,11 @@
 #include "THCTensorSort.cuh"
 #include "../THC/THCTensorMathReduce.cuh"
 
+#ifdef __HIP_PLATFORM_HCC__
+const int WARP_SIZE = 64;
+#else
 const int WARP_SIZE = 32;
+#endif
 
 template 
   <typename Dtype, 
