@@ -46,6 +46,16 @@ void ThrowEnforceNotMet(
   throw e;
 }
 
+// PyTorch-style error message
+// (This must be defined here for access to GetFetchStackTrace)
+Error::Error(SourceLocation source_location, const std::string& msg)
+    : Error(
+          msg,
+          str(" (",
+              source_location,
+              ")\n",
+              (*GetFetchStackTrace())())) {}
+
 } // namespace c10
 
 #if defined(C10_USE_GFLAGS) && defined(C10_USE_GLOG)

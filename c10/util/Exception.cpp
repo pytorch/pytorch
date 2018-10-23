@@ -19,13 +19,8 @@ Error::Error(
 }
 
 // PyTorch-style error message
-Error::Error(SourceLocation source_location, const std::string& msg)
-    : Error(
-          msg,
-          str(" (",
-              source_location,
-              ")\n",
-              (*GetFetchStackTrace())())) {}
+// Error::Error(SourceLocation source_location, const std::string& msg)
+// NB: This is defined in Logging.cpp for access to GetFetchStackTrace
 
 // Caffe2-style error message
 Error::Error(
