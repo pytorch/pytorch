@@ -668,8 +668,8 @@
   cpu_half: True
   device_guard: False
   dispatch:
-    CPU: resize__cpu
-    CUDA: resize__cuda
+    CPU: resize_cpu_
+    CUDA: resize_cuda_
 
 - func: empty_out(Tensor result, IntList size) -> Tensor
 

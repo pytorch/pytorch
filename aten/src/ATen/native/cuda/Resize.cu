@@ -1,33 +1,14 @@
 #include "ATen/ATen.h"
 #include "ATen/cuda/CUDAContext.h"
 
-#include "THC/THCTensor.hpp"
+#include "ATen/native/cuda/Resize.cuh"
 
 namespace at { namespace native {
 
-Tensor& resize__cuda(Tensor& self, IntList size) {
-  if (self.sizes() == size) {
-    return self;
-  }
-
-  const DeviceGuard device_guard(self);
+Tensor& resize_cuda_(Tensor& self, IntList size) {
   auto* self_ = self.unsafeGetTensorImpl();
-  self_->set_sizes_contiguous(size);
-  int totalSize = self_->numel();
-
-  if (totalSize + self_->storage_offset() > 0) {
-    if (!THTensor_getStoragePtr(self_)) {
-      AT_ERROR("Tensor: invalid null storage");
-    }
-    if (totalSize + self_->storage_offset() > self_->storage().numel()) {
-      THCStorage_resize(
-          globalContext().getTHCState(),
-          THTensor_getStoragePtr(self_),
-          totalSize + self_->storage_offset());
-    }
-  }
+  resize_impl_cuda_(self_, size, /*strides=*/c10::nullopt);
   self_->maybe_zero_dim(size.size() == 0);
-
   return self;
 }
 

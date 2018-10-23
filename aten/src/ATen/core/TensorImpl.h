@@ -490,13 +490,31 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         new_stride.size(),
         ")");
     auto old_dim = sizes_.size();
+    auto new_dim = new_size.size();
     sizes_ = new_size.vec();
-    if (old_dim != sizes_.size()) {
-      strides_.reset(new int64_t[sizes_.size()]);
+    if (old_dim != new_dim) {
+      strides_.reset(new int64_t[new_dim]);
     }
-    for (size_t i = 0; i < sizes_.size(); i++) {
-      strides_[i] = new_stride[i];
+
+    if (new_dim > 0) {
+      for (size_t dim = new_dim - 1; ; dim--) {
+        if (new_stride[dim] >= 0) {
+          strides_[dim] = new_stride[dim];
+        } else {
+          // XXX: This behavior is surprising and may need to be removed to
+          // support negative strides. Some pytorch functions rely on it:
+          // for example, torch.cat (run TestTorch.test_cat_empty).
+          if (dim == new_dim - 1) {
+            strides_[dim] = 1;
+          } else {
+            // Keep stride monotonically increasing to match NumPy.
+            strides_[dim] = std::max<int64_t>(sizes_[dim + 1], 1) * strides_[dim + 1];
+          }
+        }
+        if (dim == 0) break;
+      }
     }
+
     refresh_numel();
     refresh_contiguous();
   }

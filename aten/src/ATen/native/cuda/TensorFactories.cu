@@ -46,7 +46,7 @@ Tensor empty_cuda(IntList size, const TensorOptions& options) {
     scalarTypeToTypeMeta(options.dtype()), 0, cuda::getCUDADeviceAllocator(), true);
 
   auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId(), false);
-  resize__cuda(tensor, size); // avoid dispatch overhead
+  resize_cuda_(tensor, size); // avoid dispatch overhead
   return tensor;
 }
 
