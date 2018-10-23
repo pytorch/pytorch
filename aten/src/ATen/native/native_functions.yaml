@@ -2226,6 +2226,75 @@
 - func: view(Tensor self, IntList size) -> Tensor
   variants: method
 
+- func: put_(Tensor self, const Tensor & index, const Tensor & source, bool accumulate=false) -> Tensor
+  variants: method
+
+- func: index_add_(Tensor self, int64_t dim, const Tensor & index, const Tensor & source) -> Tensor
+  variants: method
+
+- func: index_fill_(Tensor self, int64_t dim, const Tensor & index, Scalar value) -> Tensor
+  variants: method
+
+- func: index_fill_(Tensor self, int64_t dim, const Tensor & index, const Tensor & value) -> Tensor
+  variants: method
+
+- func: scatter_(Tensor self, int64_t dim, const Tensor & index, const Tensor & src) -> Tensor
+  variants: method
+
+- func: scatter_(Tensor self, int64_t dim, const Tensor & index, Scalar value) -> Tensor
+  variants: method
+
+- func: scatter_add_(Tensor self, int64_t dim, const Tensor & index, const Tensor & src) -> Tensor
+  variants: method
+
+- func: lt_(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+- func: lt_(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: gt_(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+- func: gt_(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: le_(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+- func: le_(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: ge_(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+- func: ge_(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: eq_(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+- func: eq_(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: ne_(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+- func: ne_(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: lgamma_(Tensor self) -> Tensor
+  variants: method
+
+- func: atan2_(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: tril_(Tensor self, int64_t diagonal=0) -> Tensor
+  variants: method
+
+- func: triu_(Tensor self,  int64_t diagonal=0) -> Tensor
+  variants: method
+
 - func: digamma_(Tensor self) -> Tensor
   variants: method
 

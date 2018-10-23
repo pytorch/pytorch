@@ -55,6 +55,98 @@ Tensor view(const Tensor& self, IntList size) {
   return self._th_view(size);
 }
 
+Tensor & put_(Tensor& self, const Tensor & index, const Tensor & source, bool accumulate) {
+  return self._th_put_(index, source, accumulate);
+}
+
+Tensor & index_add_(Tensor& self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self._th_index_add_(dim, index, source);
+}
+
+Tensor & index_fill_(Tensor& self, int64_t dim, const Tensor & index, Scalar value) {
+  return self._th_index_fill_(dim, index, value);
+}
+
+Tensor & index_fill_(Tensor& self, int64_t dim, const Tensor & index, const Tensor & value) {
+  return self._th_index_fill_(dim, index, value);
+}
+
+Tensor & scatter_(Tensor& self, int64_t dim, const Tensor & index, const Tensor & src) {
+  return self._th_scatter_(dim, index, src);
+}
+
+Tensor & scatter_(Tensor& self, int64_t dim, const Tensor & index, Scalar value) {
+  return self._th_scatter_(dim, index, value);
+}
+
+Tensor & scatter_add_(Tensor& self, int64_t dim, const Tensor & index, const Tensor & src) {
+  return self.scatter_add_(dim, index, src);
+}
+
+Tensor & lt_(Tensor& self, Scalar other) {
+  return self._th_lt_(other);
+}
+
+Tensor & lt_(Tensor& self, const Tensor & other) {
+  return self._th_lt_(other);
+}
+
+Tensor & gt_(Tensor& self, Scalar other) {
+  return self._th_gt_(other);
+}
+
+Tensor & gt_(Tensor& self, const Tensor & other) {
+  return self._th_gt_(other);
+}
+
+Tensor & le_(Tensor& self, Scalar other) {
+  return self._th_le_(other);
+}
+
+Tensor & le_(Tensor& self, const Tensor & other) {
+  return self._th_le_(other);
+}
+
+Tensor & ge_(Tensor& self, Scalar other) {
+  return self._th_ge_(other);
+}
+
+Tensor & ge_(Tensor& self, const Tensor & other) {
+  return self._th_ge_(other);
+}
+
+Tensor & eq_(Tensor& self, Scalar other) {
+  return self._th_eq_(other);
+}
+
+Tensor & eq_(Tensor& self, const Tensor & other) {
+  return self._th_ge_(other);
+}
+
+Tensor & ne_(Tensor& self, Scalar other) {
+  return self._th_ne_(other);
+}
+
+Tensor & ne_(Tensor& self, const Tensor & other) {
+  return self._th_ne_(other);
+}
+
+Tensor & lgamma_(Tensor& self) {
+  return self._th_lgamma_();
+}
+
+Tensor & atan2_(Tensor& self, const Tensor & other) {
+  return self._th_atan2_(other);
+}
+
+Tensor & tril_(Tensor& self, int64_t diagonal) {
+  return self._th_tril_(diagonal);
+}
+
+Tensor & triu_(Tensor& self, int64_t diagonal) {
+  return self._th_triu_(diagonal);
+}
+
 Tensor & digamma_(Tensor& self) {
   return self._th_digamma_();
 }

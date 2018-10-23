@@ -104,29 +104,29 @@ inline Tensor Tensor::index_select(int64_t dim, const Tensor & index) const {
 inline Tensor Tensor::take(const Tensor & index) const {
     return type().take(*this, index);
 }
-inline Tensor & Tensor::put_(const Tensor & index, const Tensor & source, bool accumulate) {
-    return type().put_(*this, index, source, accumulate);
+inline Tensor & Tensor::_th_put_(const Tensor & index, const Tensor & source, bool accumulate) {
+    return type()._th_put_(*this, index, source, accumulate);
 }
-inline Tensor & Tensor::index_add_(int64_t dim, const Tensor & index, const Tensor & source) {
-    return type().index_add_(*this, dim, index, source);
+inline Tensor & Tensor::_th_index_add_(int64_t dim, const Tensor & index, const Tensor & source) {
+    return type()._th_index_add_(*this, dim, index, source);
 }
-inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, Scalar value) {
-    return type().index_fill_(*this, dim, index, value);
+inline Tensor & Tensor::_th_index_fill_(int64_t dim, const Tensor & index, Scalar value) {
+    return type()._th_index_fill_(*this, dim, index, value);
 }
-inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, const Tensor & value) {
-    return type().index_fill_(*this, dim, index, value);
+inline Tensor & Tensor::_th_index_fill_(int64_t dim, const Tensor & index, const Tensor & value) {
+    return type()._th_index_fill_(*this, dim, index, value);
 }
 inline Tensor Tensor::unfold(int64_t dimension, int64_t size, int64_t step) const {
     return type().unfold(*this, dimension, size, step);
 }
-inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, const Tensor & src) {
-    return type().scatter_(*this, dim, index, src);
+inline Tensor & Tensor::_th_scatter_(int64_t dim, const Tensor & index, const Tensor & src) {
+    return type()._th_scatter_(*this, dim, index, src);
 }
-inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, Scalar value) {
-    return type().scatter_(*this, dim, index, value);
+inline Tensor & Tensor::_th_scatter_(int64_t dim, const Tensor & index, Scalar value) {
+    return type()._th_scatter_(*this, dim, index, value);
 }
-inline Tensor & Tensor::scatter_add_(int64_t dim, const Tensor & index, const Tensor & src) {
-    return type().scatter_add_(*this, dim, index, src);
+inline Tensor & Tensor::_th_scatter_add_(int64_t dim, const Tensor & index, const Tensor & src) {
+    return type()._th_scatter_add_(*this, dim, index, src);
 }
 inline Tensor Tensor::gather(int64_t dim, const Tensor & index) const {
     return type().gather(*this, dim, index);
@@ -203,11 +203,11 @@ inline Tensor Tensor::lt(Scalar other) const {
 inline Tensor Tensor::lt(const Tensor & other) const {
     return type().lt(*this, other);
 }
-inline Tensor & Tensor::lt_(Scalar other) {
-    return type().lt_(*this, other);
+inline Tensor & Tensor::_th_lt_(Scalar other) {
+    return type()._th_lt_(*this, other);
 }
-inline Tensor & Tensor::lt_(const Tensor & other) {
-    return type().lt_(*this, other);
+inline Tensor & Tensor::_th_lt_(const Tensor & other) {
+    return type()._th_lt_(*this, other);
 }
 inline Tensor Tensor::gt(Scalar other) const {
     return type().gt(*this, other);
@@ -215,11 +215,11 @@ inline Tensor Tensor::gt(Scalar other) const {
 inline Tensor Tensor::gt(const Tensor & other) const {
     return type().gt(*this, other);
 }
-inline Tensor & Tensor::gt_(Scalar other) {
-    return type().gt_(*this, other);
+inline Tensor & Tensor::_th_gt_(Scalar other) {
+    return type()._th_gt_(*this, other);
 }
-inline Tensor & Tensor::gt_(const Tensor & other) {
-    return type().gt_(*this, other);
+inline Tensor & Tensor::_th_gt_(const Tensor & other) {
+    return type()._th_gt_(*this, other);
 }
 inline Tensor Tensor::le(Scalar other) const {
     return type().le(*this, other);
@@ -227,11 +227,11 @@ inline Tensor Tensor::le(Scalar other) const {
 inline Tensor Tensor::le(const Tensor & other) const {
     return type().le(*this, other);
 }
-inline Tensor & Tensor::le_(Scalar other) {
-    return type().le_(*this, other);
+inline Tensor & Tensor::_th_le_(Scalar other) {
+    return type()._th_le_(*this, other);
 }
-inline Tensor & Tensor::le_(const Tensor & other) {
-    return type().le_(*this, other);
+inline Tensor & Tensor::_th_le_(const Tensor & other) {
+    return type()._th_le_(*this, other);
 }
 inline Tensor Tensor::ge(Scalar other) const {
     return type().ge(*this, other);
@@ -239,11 +239,11 @@ inline Tensor Tensor::ge(Scalar other) const {
 inline Tensor Tensor::ge(const Tensor & other) const {
     return type().ge(*this, other);
 }
-inline Tensor & Tensor::ge_(Scalar other) {
-    return type().ge_(*this, other);
+inline Tensor & Tensor::_th_ge_(Scalar other) {
+    return type()._th_ge_(*this, other);
 }
-inline Tensor & Tensor::ge_(const Tensor & other) {
-    return type().ge_(*this, other);
+inline Tensor & Tensor::_th_ge_(const Tensor & other) {
+    return type()._th_ge_(*this, other);
 }
 inline Tensor Tensor::eq(Scalar other) const {
     return type().eq(*this, other);
@@ -251,11 +251,11 @@ inline Tensor Tensor::eq(Scalar other) const {
 inline Tensor Tensor::eq(const Tensor & other) const {
     return type().eq(*this, other);
 }
-inline Tensor & Tensor::eq_(Scalar other) {
-    return type().eq_(*this, other);
+inline Tensor & Tensor::_th_eq_(Scalar other) {
+    return type()._th_eq_(*this, other);
 }
-inline Tensor & Tensor::eq_(const Tensor & other) {
-    return type().eq_(*this, other);
+inline Tensor & Tensor::_th_eq_(const Tensor & other) {
+    return type()._th_eq_(*this, other);
 }
 inline Tensor Tensor::ne(Scalar other) const {
     return type().ne(*this, other);
@@ -263,11 +263,11 @@ inline Tensor Tensor::ne(Scalar other) const {
 inline Tensor Tensor::ne(const Tensor & other) const {
     return type().ne(*this, other);
 }
-inline Tensor & Tensor::ne_(Scalar other) {
-    return type().ne_(*this, other);
+inline Tensor & Tensor::_th_ne_(Scalar other) {
+    return type()._th_ne_(*this, other);
 }
-inline Tensor & Tensor::ne_(const Tensor & other) {
-    return type().ne_(*this, other);
+inline Tensor & Tensor::_th_ne_(const Tensor & other) {
+    return type()._th_ne_(*this, other);
 }
 inline Tensor Tensor::min(const Tensor & other) const {
     return type().min(*this, other);
@@ -299,8 +299,8 @@ inline Tensor Tensor::any() const {
 inline Tensor Tensor::lgamma() const {
     return type().lgamma(*this);
 }
-inline Tensor & Tensor::lgamma_() {
-    return type().lgamma_(*this);
+inline Tensor & Tensor::_th_lgamma_() {
+    return type()._th_lgamma_(*this);
 }
 inline Tensor Tensor::digamma() const {
     return type().digamma(*this);
@@ -350,8 +350,8 @@ inline Tensor & Tensor::_th_neg_() {
 inline Tensor Tensor::atan2(const Tensor & other) const {
     return type().atan2(*this, other);
 }
-inline Tensor & Tensor::atan2_(const Tensor & other) {
-    return type().atan2_(*this, other);
+inline Tensor & Tensor::_th_atan2_(const Tensor & other) {
+    return type()._th_atan2_(*this, other);
 }
 inline Tensor Tensor::pow(const Tensor & exponent) const {
     return type().pow(*this, exponent);
@@ -407,14 +407,14 @@ inline Tensor & Tensor::_th_remainder_(const Tensor & other) {
 inline Tensor Tensor::tril(int64_t diagonal) const {
     return type().tril(*this, diagonal);
 }
-inline Tensor & Tensor::tril_(int64_t diagonal) {
-    return type().tril_(*this, diagonal);
+inline Tensor & Tensor::_th_tril_(int64_t diagonal) {
+    return type()._th_tril_(*this, diagonal);
 }
 inline Tensor Tensor::triu(int64_t diagonal) const {
     return type().triu(*this, diagonal);
 }
-inline Tensor & Tensor::triu_(int64_t diagonal) {
-    return type().triu_(*this, diagonal);
+inline Tensor & Tensor::_th_triu_(int64_t diagonal) {
+    return type()._th_triu_(*this, diagonal);
 }
 inline Tensor Tensor::cross(const Tensor & other, int64_t dim) const {
     return type().cross(*this, other, dim);
@@ -1261,6 +1261,75 @@ inline Tensor & Tensor::masked_scatter_(const Tensor & mask, const Tensor & sour
 }
 inline Tensor Tensor::view(IntList size) const {
     return type().view(*this, size);
+}
+inline Tensor & Tensor::put_(const Tensor & index, const Tensor & source, bool accumulate) {
+    return type().put_(*this, index, source, accumulate);
+}
+inline Tensor & Tensor::index_add_(int64_t dim, const Tensor & index, const Tensor & source) {
+    return type().index_add_(*this, dim, index, source);
+}
+inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, Scalar value) {
+    return type().index_fill_(*this, dim, index, value);
+}
+inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, const Tensor & value) {
+    return type().index_fill_(*this, dim, index, value);
+}
+inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, const Tensor & src) {
+    return type().scatter_(*this, dim, index, src);
+}
+inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, Scalar value) {
+    return type().scatter_(*this, dim, index, value);
+}
+inline Tensor & Tensor::scatter_add_(int64_t dim, const Tensor & index, const Tensor & src) {
+    return type().scatter_add_(*this, dim, index, src);
+}
+inline Tensor & Tensor::lt_(Scalar other) {
+    return type().lt_(*this, other);
+}
+inline Tensor & Tensor::lt_(const Tensor & other) {
+    return type().lt_(*this, other);
+}
+inline Tensor & Tensor::gt_(Scalar other) {
+    return type().gt_(*this, other);
+}
+inline Tensor & Tensor::gt_(const Tensor & other) {
+    return type().gt_(*this, other);
+}
+inline Tensor & Tensor::le_(Scalar other) {
+    return type().le_(*this, other);
+}
+inline Tensor & Tensor::le_(const Tensor & other) {
+    return type().le_(*this, other);
+}
+inline Tensor & Tensor::ge_(Scalar other) {
+    return type().ge_(*this, other);
+}
+inline Tensor & Tensor::ge_(const Tensor & other) {
+    return type().ge_(*this, other);
+}
+inline Tensor & Tensor::eq_(Scalar other) {
+    return type().eq_(*this, other);
+}
+inline Tensor & Tensor::eq_(const Tensor & other) {
+    return type().eq_(*this, other);
+}
+inline Tensor & Tensor::ne_(Scalar other) {
+    return type().ne_(*this, other);
+}
+inline Tensor & Tensor::ne_(const Tensor & other) {
+    return type().ne_(*this, other);
+}
+inline Tensor & Tensor::lgamma_() {
+    return type().lgamma_(*this);
+}
+inline Tensor & Tensor::atan2_(const Tensor & other) {
+    return type().atan2_(*this, other);
+}
+inline Tensor & Tensor::tril_(int64_t diagonal) {
+    return type().tril_(*this, diagonal);
+}
+inline Tensor & Tensor::triu_(int64_t diagonal) {
+    return type().triu_(*this, diagonal);
 }
 inline Tensor & Tensor::digamma_() {
     return type().digamma_(*this);

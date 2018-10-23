@@ -219,7 +219,7 @@
     - THIndexTensor* index
 ]]
 [[
-  name: put_
+  name: _th_put_
   cname: put
   backends:
     - CPU
@@ -233,7 +233,7 @@
       default: "false"
 ]]
 [[
-  name: index_add_
+  name: _th_index_add_
   cname: indexAdd
   return: argument 0
   arguments:
@@ -244,7 +244,7 @@
     - THTensor* source
 ]]
 [[
-  name: index_fill_
+  name: _th_index_fill_
   cname: indexFill
   return: argument 0
   options:
@@ -317,7 +317,7 @@
         - CONSTANT 1
 ]]
 [[
-  name: scatter_
+  name: _th_scatter_
   return: argument 0
   options:
     - cname: scatter
@@ -336,7 +336,7 @@
         - real value
 ]]
 [[
-  name: scatter_add_
+  name: _th_scatter_add_
   return: argument 0
   cname: scatterAdd
   arguments:
@@ -598,7 +598,7 @@
         - THTensor* other
 ]]
 [[
-  name: lt_
+  name: _th_lt_
   return: self
   options:
     - cname: ltValueT
@@ -635,7 +635,7 @@
         - THTensor* other
 ]]
 [[
-  name: gt_
+  name: _th_gt_
   return: self
   options:
     - cname: gtValueT
@@ -672,7 +672,7 @@
         - THTensor* other
 ]]
 [[
-  name: le_
+  name: _th_le_
   return: self
   options:
     - cname: leValueT
@@ -709,7 +709,7 @@
         - THTensor* other
 ]]
 [[
-  name: ge_
+  name: _th_ge_
   return: self
   options:
     - cname: geValueT
@@ -746,7 +746,7 @@
         - THTensor* other
 ]]
 [[
-  name: eq_
+  name: _th_eq_
   return: self
   options:
     - cname: eqValueT
@@ -783,7 +783,7 @@
         - THTensor* other
 ]]
 [[
-  name: ne_
+  name: _th_ne_
   return: self
   options:
     - cname: neValueT
@@ -1174,7 +1174,7 @@
     - THTensor* self
 ]]
 [[
-  name: lgamma_
+  name: _th_lgamma_
   types:
     - floating_point
   backends:
@@ -1816,7 +1816,7 @@
     - THTensor* other
 ]]
 [[
-  name: atan2_
+  name: _th_atan2_
   types:
     - floating_point
   backends:
@@ -2228,7 +2228,7 @@
       default: 0
 ]]
 [[
-  name: tril_
+  name: _th_tril_
   cname: tril
   return: self
   arguments:
@@ -2251,7 +2251,7 @@
       default: 0
 ]]
 [[
-  name: triu_
+  name: _th_triu_
   cname: triu
   return: self
   arguments:
