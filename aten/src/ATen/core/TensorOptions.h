@@ -2,7 +2,7 @@
 
 #include <ATen/core/Backend.h>
 #include <ATen/core/DefaultTensorOptions.h>
-#include <ATen/core/Device.h>
+#include <c10/Device.h>
 #include <ATen/core/Layout.h>
 #include <ATen/core/ScalarType.h>
 #include <ATen/core/ScalarTypeUtils.h>

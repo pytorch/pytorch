@@ -9,6 +9,8 @@
 #include <ATen/core/TensorTypeId.h>
 #include <ATen/core/TensorTypeIdRegistration.h>
 #include <ATen/core/context_base.h>
+
+#include <c10/util/Exception.h>
 #include "c10/util/Optional.h"
 
 #include "c10/util/Flags.h"
