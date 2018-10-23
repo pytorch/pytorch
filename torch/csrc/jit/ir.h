@@ -161,6 +161,7 @@ using pyobj_list = std::vector<THPObjectPtr>;
 template<typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
+using topo_position_t = int64_t;
 
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);
@@ -278,6 +279,7 @@ private:
   // the schema.
   // note: mutable because schema_ is effectively a cache
   mutable const FunctionSchema* schema_;
+  topo_position_t topo_position_;
 protected:
   TORCH_API Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
@@ -469,6 +471,12 @@ public:
     return {blocks_.data(), blocks_.size()};
   }
 
+  // Is 'this' before 'n' in the topological order?
+  TORCH_API bool isBefore(Node * n) const;
+
+  // Is 'this' after 'n' in the topological order?
+  TORCH_API bool isAfter(Node * n) const;
+
   // Insert unattached 'this' node before 'n' in the topological order.
   // Returns this (for chaining).
   //
@@ -607,6 +615,9 @@ private:
 
   TORCH_API void removeFromList();
   TORCH_API void lint() const;
+
+  void assignTopoPosition();
+
 protected:
   // subclasses must override
   // this function is used by createClone to initialize a new version
@@ -628,7 +639,7 @@ struct Block {
   friend struct Node;
   friend struct Graph;
   TH_DISALLOW_COPY_AND_ASSIGN(Block);
-  Block(Graph * graph_, Node * node_);
+  TORCH_API Block(Graph * graph_, Node * node_);
   at::ArrayRef<Value*> inputs() {
     return input_->outputs();
   }
@@ -707,6 +718,8 @@ struct Block {
   // in src to look up its corresponding value
   TORCH_API void cloneFrom(Block * src, std::function<Value*(Value*)> value_map);
 private:
+  void reIndexTopology();
+
   // should only be called in the constructor
   Node* initOutput(Node* p) {
     p->next() = p;
@@ -975,16 +988,6 @@ inline Graph * Value::owningGraph() {
 
 inline const Graph * Value::owningGraph() const {
   return node()->owningGraph();
-}
-
-inline Block::Block(Graph* graph_, Node* node_)
-    : graph_(graph_),
-      output_(initOutput(graph_->create(prim::Return, 0))),
-      input_(graph_->create(prim::Param, 0)),
-      owning_node_(node_) {
-  graph_->all_blocks.emplace(this);
-  output_->owning_block_ = this;
-  input_->owning_block_ = this;
 }
 
 // Helper macros for constructing switch statements over Node types
