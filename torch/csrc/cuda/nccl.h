@@ -68,8 +68,8 @@ void reduce(
     std::vector<at::Tensor>& outputs,
     int32_t root = 0,
     int32_t op = ncclSum,
-    c10::optional<std::vector<at::cuda::CUDAStream>> streams = c10::nullopt,
-    c10::optional<std::vector<ncclComm_t>> user_comms = c10::nullopt);
+    at::optional<std::vector<at::cuda::CUDAStream>> streams = c10::nullopt,
+    at::optional<std::vector<ncclComm_t>> user_comms = c10::nullopt);
 
 void reduce(
     std::vector<at::Tensor>& inputs,

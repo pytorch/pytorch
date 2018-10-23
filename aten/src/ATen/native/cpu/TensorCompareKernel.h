@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
-#include <c10/util/Optional.h>
+#include <ATen/optional.h>
 
 namespace at { namespace native {
 
