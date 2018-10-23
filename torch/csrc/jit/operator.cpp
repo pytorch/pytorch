@@ -231,7 +231,7 @@ struct SchemaParser {
     L.expect(TK_NONE);
     return IValue();
   }
-  IValue parseDefaultValue(TypePtr arg_type, at::optional<int32_t> arg_N) {
+  IValue parseDefaultValue(TypePtr arg_type, c10::optional<int32_t> arg_N) {
     auto range = L.cur().range;
     switch(arg_type->kind()) {
       case TypeKind::DynamicType:
