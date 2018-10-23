@@ -117,9 +117,7 @@ void TensorVectorResize(
   }
 }
 
-Tensor empty(
-    const std::vector<int64_t>& dims,
-    const at::TensorOptions& options) {
+Tensor empty(at::IntList dims, at::TensorOptions options) {
   // TODO: merge this with at::empty after Tensor is merged
   auto tensor = Tensor(dims, options.device().type());
   tensor.raw_mutable_data(scalarTypeToTypeMeta(options.dtype()));
