@@ -1775,7 +1775,10 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='elementwis
             return d
         return torch.mean(d) if reduction == 'elementwise_mean' else torch.sum(d)
     else:
-        return lambd_optimized(input, target, _Reduction.get_enum(reduction))
+        expanded_shape = (input + target).shape()
+        expanded_input = input.expand_as(expanded_shape)
+        expanded_target = target.expand_as(expanded_shape)
+        return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
 def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
