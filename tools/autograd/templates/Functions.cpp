@@ -2012,7 +2012,7 @@ Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const T
 Tensor constant_pad_nd_backward(const Tensor& grad, IntList pad) {
   auto negated_pad = pad.vec();
   std::transform(negated_pad.cbegin(), negated_pad.cend(), negated_pad.begin(), std::negate<int64_t>());
-  return at::native::constant_pad_nd(grad, negated_pad, 0);
+  return at::constant_pad_nd(grad, negated_pad, 0);
 }
 
 } // anonymous namespace
