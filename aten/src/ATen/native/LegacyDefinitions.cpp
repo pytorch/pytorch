@@ -82,7 +82,7 @@ Tensor & scatter_(Tensor& self, int64_t dim, const Tensor & index, Scalar value)
 }
 
 Tensor & scatter_add_(Tensor& self, int64_t dim, const Tensor & index, const Tensor & src) {
-  return self.scatter_add_(dim, index, src);
+  return self._th_scatter_add_(dim, index, src);
 }
 
 Tensor & lt_(Tensor& self, Scalar other) {
