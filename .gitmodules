@@ -73,3 +73,6 @@
 [submodule "third_party/nccl/nccl"]
 	path = third_party/nccl/nccl
 	url = https://github.com/NVIDIA/nccl
+[submodule "third_party/QNNPACK"]
+	path = third_party/QNNPACK
+	url = https://github.com/pytorch/QNNPACK
