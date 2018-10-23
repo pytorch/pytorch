@@ -367,8 +367,10 @@ class JitTestCase(TestCase):
         graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
         m = torch.jit.ScriptModule()
         m._create_method_from_graph("forward", graph)
-        m_import = self.getExportImportCopy(m)
+        assertExportImportModule(m, inputs)
 
+    def assertExportImportModule(self, m, inputs):
+        m_import = self.getExportImportCopy(m)
         self.assertEqual(m.forward(*inputs), m_import.forward(*inputs))
 
 
@@ -9125,6 +9127,7 @@ def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
             call_args_str = ', '.join(actuals)
             call = "self.submodule({})".format(call_args_str)
             script = script_method_template.format(method_args, call)
+            print(script)
 
             # Create module to use the script method
             class TheModule(torch.jit.ScriptModule):
@@ -9136,7 +9139,7 @@ def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
             module.define(script)
 
             # Check there are no Python ops by exporting
-            self.assertExportImport(module.graph, tensors)
+            self.assertExportImportModule(module, tensors)
             create_module.last_graph = module.graph
             return module(*args)
 
