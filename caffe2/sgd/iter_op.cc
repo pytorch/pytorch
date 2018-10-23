@@ -17,7 +17,7 @@ void MutexSerializer::Serialize(
   blob_proto.set_name(name);
   blob_proto.set_type("std::unique_ptr<std::mutex>");
   blob_proto.set_content("");
-  acceptor(name, blob_proto.SerializeAsString());
+  acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
 }
 
 void MutexDeserializer::Deserialize(const BlobProto& /* unused */, Blob* blob) {
