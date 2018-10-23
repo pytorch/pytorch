@@ -103,13 +103,15 @@ __global__ void ROIPoolBackward(
     int c = (index / pooled_width / pooled_height) % channels;
     int n = index / pooled_width / pooled_height / channels;
 
+    
+    int top_offset = (n * channels + c) * pooled_height * pooled_width;
+    const T* offset_top_diff = top_diff + top_offset;
+    const int* offset_argmax_data = argmax_data + top_offset;
+    
     const T* offset_bottom_rois = bottom_rois + n * 5;
     int roi_batch_ind = offset_bottom_rois[0];
     int bottom_offset = (roi_batch_ind * channels + c) * height * width;
-    int top_offset = (n * channels + c) * pooled_height * pooled_width;
-    const T* offset_top_diff = top_diff + top_offset;
     T* offset_bottom_diff = bottom_diff + bottom_offset;
-    const int* offset_argmax_data = argmax_data + top_offset;
 
     int argmax = offset_argmax_data[ph * pooled_width + pw];
     if (argmax != -1) {
