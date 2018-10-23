@@ -853,12 +853,14 @@ class TestTorch(TestCase):
             self.assertEqual(res.shape, expected.shape)
             self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
 
-        # matrix norm
-        for p in ['fro', 'nuc']:
-            res = x.norm(p).cpu().numpy()
-            expected = np.linalg.norm(xn, p)
-            self.assertEqual(res.shape, expected.shape)
-            self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
+        # matrix norms need LAPACK, so on CUDA they need magma
+        if device != 'cuda' or (device == 'cuda' and torch.cuda.has_magma):
+            # matrix norm
+            for p in ['fro', 'nuc']:
+                res = x.norm(p).cpu().numpy()
+                expected = np.linalg.norm(xn, p)
+                self.assertEqual(res.shape, expected.shape)
+                self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_norm(self):
