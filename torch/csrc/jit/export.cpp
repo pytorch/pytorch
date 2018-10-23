@@ -1,12 +1,13 @@
 #include "torch/csrc/jit/export.h"
-#include "torch/csrc/jit/serialization.h"
 #include "torch/csrc/autograd/symbolic.h"
-#include "onnx/onnx_pb.h"
 #include "torch/csrc/onnx/onnx.h"
 
 #include "torch/csrc/utils/functional.h"
 #include <torch/csrc/jit/assertions.h>
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+
+#include "caffe2/serialize/inline_container.h"
+#include "onnx/onnx_pb.h"
 
 #include <ATen/ATen.h>
 #include "c10/util/Optional.h"
