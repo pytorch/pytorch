@@ -72,11 +72,9 @@ namespace torch { namespace jit {
 
 namespace {
 
-struct RecordTags {
-  enum {
-    STORAGE = 1,
-    FOOTER = 2,
-  };
+enum RecordTags {
+  STORAGE = 1,
+  FOOTER = 2,
 };
 
 // Common constants
@@ -95,11 +93,11 @@ constexpr uint8_t kPadValue = 0xEF;
 
 class PyTorchStreamReader final {
  public:
-  PyTorchStreamReader(std::istream& in) : in_(in) {
+  PyTorchStreamReader(std::istream* in) : in_(in) {
     // Store file size so we know when we're done reading because the f* APIs
     // don't do a good job of that
-    in_.seekg(0L, in_.end);
-    file_size_ = in_.tellg();
+    in_->seekg(0L, in_->end);
+    file_size_ = in_->tellg();
     readAndValidateFileFooter();
     // Do this now since we're reasonably sure this is actually a PyT file from
     // the header.
@@ -124,17 +122,17 @@ class PyTorchStreamReader final {
     }
     // Seek to the provided offset
     cursor_ = key;
-    in_.seekg(cursor_);
+    in_->seekg(cursor_);
     auto tag = read64BitIntegerLittleEndian();
     if (tag != RecordTags::STORAGE) {
       throw std::runtime_error("Attempted to read a record of non-storage type");
     }
     auto size = read64BitIntegerLittleEndian();
     seekToNextAlignmentBoundary();
-    auto ptr = malloc(size);
+    auto* ptr = malloc(size);
     at::DataPtr retval(ptr, ptr, free, at::kCPU);
 
-    in_.read((char*)ptr, size);
+    in_->read(static_cast<char*>(ptr), size);
     cursor_ += size;
     seekToNextAlignmentBoundary();
     return std::tuple<at::DataPtr, size_t>(std::move(retval), size);
@@ -156,18 +154,15 @@ class PyTorchStreamReader final {
     auto ptr = malloc(size);
     at::DataPtr retval(ptr, ptr, free, at::kCPU);
 
-    in_.read((char*)ptr, size);
+    in_->read(static_cast<char*>(ptr), size);
     cursor_ += size;
     seekToNextAlignmentBoundary();
     return std::tuple<at::DataPtr, int64_t, int64_t>(
         std::move(retval), key, size);
   }
 
-  bool hasNextRecord() {
-    if (cursor_ + kFieldAlignment * 2 < file_size_) {
-      return true;
-    }
-    return false;
+  bool hasNextRecord() const {
+    return cursor_ + kFieldAlignment * 2 < file_size_;
   }
 
   bool close() {
@@ -178,7 +173,7 @@ class PyTorchStreamReader final {
     return true;
   }
 
-  bool closed() {
+  bool closed() const {
     return closed_;
   }
 
@@ -186,7 +181,7 @@ class PyTorchStreamReader final {
   }
 
  private:
-  std::istream& in_;
+  std::istream* in_;
   size_t cursor_ = 0;
   size_t file_size_;
   size_t last_record_offset_;
@@ -196,8 +191,8 @@ class PyTorchStreamReader final {
   uint64_t read64BitIntegerLittleEndian() {
     uint64_t retval;
     // TODO endian swap on platforms that need it?
-    in_.read(reinterpret_cast<char*>(&retval), 8);
-    std::streamsize read_bytes = in_.gcount();
+    in_->read(reinterpret_cast<char*>(&retval), 8);
+    std::streamsize read_bytes = in_->gcount();
     if (read_bytes != 8) {
       std::ostringstream errmsg;
       errmsg << "Expected to read 8 bytes but got " << read_bytes;
@@ -212,29 +207,29 @@ class PyTorchStreamReader final {
         (cursor_ + kFieldAlignment) - (cursor_ % kFieldAlignment);
     size_t pad_amount = next_offset - cursor_;
     cursor_ += pad_amount;
-    in_.seekg(cursor_);
+    in_->seekg(cursor_);
   }
 
   // File format deserialization functions
   bool readAndValidateFileHeader() {
     // Validate magic number
     cursor_ = 0;
-    in_.seekg(cursor_);
+    in_->seekg(cursor_);
     uint64_t magic = read64BitIntegerLittleEndian();
     if (magic != kFileMagicNumber) {
-      throw std::runtime_error(
-          "Magic number mismatch in PyTorch file. File may"
-          " be corrupted or is not actually a PyTorch file.");
+      LOG(ERROR) << "Magic number mismatch in PyTorch file. File may"
+        << " be corrupted or is not actually a PyTorch file.";
+      return false;
     }
+    // magic number mismatch in PyTorch file.
     uint64_t file_format_version = read64BitIntegerLittleEndian();
     if (file_format_version > kMaxSupportedFileFormatVersion) {
-      std::ostringstream errmsg;
-      errmsg << "Attempted to read a PyTorch file with version "
-             << file_format_version
-             << " but the maximum supported version for reading is "
-             << kMaxSupportedFileFormatVersion
-             << ". Your PyTorch installation may be too old.";
-      throw std::runtime_error(errmsg.str());
+      LOG(ERROR) << "Attempted to read a PyTorch file with version "
+        << file_format_version
+        << " but the maximum supported version for reading is "
+        << kMaxSupportedFileFormatVersion
+        << ". Your PyTorch installation may be too old.";
+      return false;
     }
     seekToNextAlignmentBoundary();
     return true;
@@ -244,16 +239,18 @@ class PyTorchStreamReader final {
     // Seek to location of file footer. We've already validated that the file
     // length is a multiple of the alignment size
     cursor_ = file_size_ - kFieldAlignment;
-    in_.seekg(cursor_);
+    in_->seekg(cursor_);
     auto tag = read64BitIntegerLittleEndian();
     if (tag != RecordTags::FOOTER) {
-      throw std::runtime_error("File footer has wrong record type. Is this"
-                               " file corrupted?");
+      LOG(ERROR) << "File footer has wrong record type. Is this"
+        << " file corrupted?";
+      return false;
     }
     last_record_offset_ = read64BitIntegerLittleEndian();
     if (last_record_offset_ > file_size_) {
-      throw std::runtime_error("Offset of last record is higher than the size"
-                               " of the file! Is this file corrupted?");
+      LOG(ERROR) << "Offset of last record is higher than the size"
+        << " of the file! Is this file corrupted?";
+      return false;
     }
     return true;
   }
@@ -261,14 +258,14 @@ class PyTorchStreamReader final {
 
 class PyTorchStreamWriter final {
  public:
-  PyTorchStreamWriter(std::ostream& out) : out_(out) {
+  PyTorchStreamWriter(std::ostream* out) : out_(out) {
     writeFileHeader();
     // In the case that we do not write any records into this file, the last
     // record index written into the footer will point to the footer itself.
     last_record_idx_ = cursor_;
   }
 
-  uint64_t writeRecord(const char* data, size_t size) {
+  uint64_t writeRecord(const void* data, size_t size) {
     CAFFE_ENFORCE(!finalized_, "should not be finalized!");
     uint64_t record_offset = cursor_;
     last_record_idx_ = record_offset;
@@ -286,11 +283,11 @@ class PyTorchStreamWriter final {
     finalized_ = true;
   }
 
-  int64_t getCurrentSize() {
+  int64_t getCurrentSize() const {
     return static_cast<int64_t>(cursor_);
   }
 
-  bool finalized() {
+  bool finalized() const {
     return finalized_;
   }
 
@@ -301,22 +298,26 @@ class PyTorchStreamWriter final {
   }
 
  private:
-  std::ostream& out_;
+  std::ostream* out_;
   size_t cursor_ = 0;
   bool finalized_ = false;
   size_t last_record_idx_ = 0;
+  // TODO: move this to the .cc file
+  std::vector<char> pad_buffer_{
+    /*count=*/kFieldAlignment, /*value=*/kPadValue
+  };
 
   // Utility functions
   void write64BitIntegerLittleEndian(const uint64_t value) {
     // TODO endian swap on platforms that need it?
-    out_.write(reinterpret_cast<const char*>(&value), 8);
+    out_->write(reinterpret_cast<const char*>(&value), 8);
     cursor_ += 8u;
   }
 
   void writePad(const size_t num_bytes) {
     static std::vector<char> pad_buffer(/*count=*/kFieldAlignment,
                                         /*value=*/kPadValue);
-    out_.write(pad_buffer.data(), num_bytes);
+    out_->write(pad_buffer.data(), num_bytes);
     cursor_ += num_bytes;
   }
 
@@ -327,8 +328,8 @@ class PyTorchStreamWriter final {
     writePad(pad_amount);
   }
 
-  void writeBuffer(const char* data, size_t size) {
-    out_.write(data, size);
+  void writeBuffer(const void* data, size_t size) {
+    out_->write(static_cast<const char*>(data), size);
     cursor_ += size;
   }
 
@@ -349,9 +350,9 @@ class PyTorchStreamWriter final {
 class PyTorchFileReader final {
  public:
   PyTorchFileReader(const std::string& filename)
-      : in_(filename, std::ios_base::binary), stream_reader_(in_) {}
+      : in_(filename, std::ios_base::binary), stream_reader_(&in_) {}
 
-  bool hasNextRecord() {
+  bool hasNextRecord() const {
     return stream_reader_.hasNextRecord();
   }
 
@@ -372,7 +373,7 @@ class PyTorchFileReader final {
     return stream_reader_.close();
   }
 
-  bool closed() {
+  bool closed() const {
     return stream_reader_.closed();
   }
 
@@ -384,9 +385,9 @@ class PyTorchFileReader final {
 class PyTorchFileWriter final {
  public:
   PyTorchFileWriter(const std::string& filename)
-      : out_(filename, std::ios_base::binary), stream_writer_(out_) {}
+      : out_(filename, std::ios_base::binary), stream_writer_(&out_) {}
 
-  uint64_t writeRecord(const char* data, size_t size) {
+  uint64_t writeRecord(const void* data, size_t size) {
     CAFFE_ENFORCE(
         !stream_writer_.finalized(),
         "cannot write to a finalized stream writer.");
@@ -401,7 +402,7 @@ class PyTorchFileWriter final {
     out_.close();
   }
 
-  int64_t getCurrentSize() {
+  int64_t getCurrentSize() const {
     return stream_writer_.getCurrentSize();
   }
 
