@@ -858,6 +858,7 @@ In-place version of :func:`~leaky_relu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def prelu(input, weight):
     r"""prelu(input, weight) -> Tensor
 
@@ -897,6 +898,7 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 """)
 
 
+@torch._jit_internal.weak_script
 def hardshrink(input, lambd=0.5):
     r"""
     hardshrink(input, lambd=0.5) -> Tensor
@@ -905,6 +907,7 @@ def hardshrink(input, lambd=0.5):
 
     See :class:`~torch.nn.Hardshrink` for more details.
     """
+    # type: (Tensor, float) -> Tensor
     return torch.hardshrink(input, lambd)
 
 
@@ -1147,6 +1150,7 @@ def linear(input, weight, bias=None):
     return output
 
 
+@torch._jit_internal.weak_script
 def bilinear(input1, input2, weight, bias=None):
     return torch.bilinear(input1, input2, weight, bias)
 

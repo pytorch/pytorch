@@ -412,7 +412,6 @@ class SELU(Module):
         return inplace_str
 
 
-@torch._jit_internal.weak_module
 class GLU(Module):
     r"""Applies the gated linear unit function
     :math:`{GLU}(a, b)= a \otimes \sigma(b)` where :math:`a` is the first half
@@ -438,7 +437,6 @@ class GLU(Module):
         super(GLU, self).__init__()
         self.dim = dim
 
-    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.glu(input, self.dim)
 
@@ -560,7 +558,6 @@ class LogSigmoid(Module):
         return F.logsigmoid(input)
 
 
-@torch._jit_internal.weak_module
 class Softplus(Module):
     r"""Applies the element-wise function:
 
@@ -597,7 +594,6 @@ class Softplus(Module):
         self.beta = beta
         self.threshold = threshold
 
-    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.softplus(input, self.beta, self.threshold)
 

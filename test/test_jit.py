@@ -8420,7 +8420,7 @@ def the_method({}):
 '''
 
 script_method_template = '''
-def forward(self, {}):
+def forward({}):
     return {}
 '''
 
@@ -8433,23 +8433,28 @@ def get_constant(x):
     return x
 
 
+def get_script_args(args):
+    formals = []
+    tensors = []
+    actuals = []
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            name = 'i{}'.format(len(formals))
+            formals.append(name)
+            actuals.append(name)
+            tensors.append(arg)
+        else:
+            actuals.append(str(get_constant(arg)))
+    return (formals, tensors, actuals)
+
+
 # create a script function from (name, func_type, output_process_fn),
 # returns a function takes in (args, kwargs) and runs the compiled function and
 # then applies the post process fn to the outputs
 def create_script_fn(self, method_name, func_type, output_process_fn,
                      disable_autodiff_subgraph_inlining=False):
     def script_fn(*args, **kwargs):
-        formals = []
-        tensors = []
-        actuals = []
-        for arg in args:
-            if isinstance(arg, torch.Tensor):
-                name = 'i{}'.format(len(formals))
-                formals.append(name)
-                actuals.append(name)
-                tensors.append(arg)
-            else:
-                actuals.append(str(get_constant(arg)))
+        formals, tensors, actuals = get_script_args(args)
         kwargs_str = ''
         for k, v in kwargs.items():
             kwargs_str += ', ' + k + '=' + str(v)
@@ -8854,22 +8859,16 @@ S = 5
 # (
 #     module name,
 #     constructor arguments,
-#     number of arguments for `forward()` (excluding `self`)
+#     args (tuple represents shape of a tensor arg),
 # )
 nn_module_tests = [
-    ('Linear', (S, S), 1),
-    ('Bilinear', (S, S, S), 2),
-    ('Sigmoid', (), 1),
-    ('Tanh', (), 1),
-    ('GLU', (), 1),
-    ('Hardshrink', (), 1),
-    ('Softplus', (), 1),
-    ('Softshrink', (), 1),
-    ('PReLU', (), 1),
-    ('Softsign', (), 1),
-    ('Tanhshrink', (), 1),
-    ('PixelShuffle', (S,), 1),
-    ('PairwiseDistance', (), 2),
+    ('Sigmoid', (), ((S,),)),
+    ('PairwiseDistance', (), ((S, S), (S, S))),
+    ('Tanh', (), ((S,),)),
+    ('Hardshrink', (), ((S,),)),
+    ('PReLU', (), ((S,),)),
+    ('Softsign', (), ((S,),)),
+    ('Tanhshrink', (), ((S,),)),
 ]
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
@@ -9113,28 +9112,46 @@ def add_nn_functional_test(name, self_size, args, skipTestIf=(), output_process_
     post_add_test(test_name, skipTestIf, do_test)
 
 
-def add_nn_module_test(module_name, constructor_args, num_args, skipTestIf=()):
+def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
     def do_test(self):
-        # Construct a script method that passes arguments through to self.submodule
-        actuals = []
-        for i in range(num_args):
-            actuals.append("i{}".format(i))
-
-        call_args = ', '.join(actuals)
-        call = "self.submodule({})".format(call_args)
-        script = script_method_template.format(call_args, call)
-
-        # Create module to use the script method
         nn_module = getattr(torch.nn, module_name)
+        # print('constructor_args', constructor_args)
+        # print('call_args', call_args)
 
-        class TheModule(torch.jit.ScriptModule):
-            def __init__(self):
-                super(TheModule, self).__init__()
-                self.submodule = nn_module(*constructor_args)
+        # Construct a script module that passes arguments through
+        # to self.submodule
+        def create_module(*args, **kwargs):
+            formals, tensors, actuals = get_script_args(args)
 
-        module = TheModule()
-        module.define(script)
-        self.assertExpectedGraph(module.graph)
+            method_args = ', '.join(['self'] + actuals)
+            call_args_str = ', '.join(actuals)
+            call = "self.submodule({})".format(call_args_str)
+            script = script_method_template.format(method_args, call)
+
+            # Create module to use the script method
+            class TheModule(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(TheModule, self).__init__()
+                    self.submodule = nn_module(*constructor_args)
+
+            module = TheModule()
+            # print(script)
+            # print(args)
+            module.define(script)
+            # print(module.graph)
+
+            # Check there are no Python ops by exporting
+            self.assertExportImport(module.graph, tensors)
+            create_module.last_graph = module.graph
+            return module(*args)
+
+        # Check against Python module as reference
+        args_variable, kwargs_variable = create_input(call_args)
+        f_args_variable = deepcopy(unpack_variables(args_variable))
+        # print('f_args_variable', f_args_variable)
+        reference = nn_module(*constructor_args)
+
+        check_against_reference(self, create_module, reference, f_args_variable)
 
     test_name = 'test_nn_{}'.format(module_name)
     post_add_test(test_name, skipTestIf, do_test)

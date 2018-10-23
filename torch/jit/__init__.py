@@ -1304,8 +1304,9 @@ _modules_containing_builtins = (torch, torch.nn.functional)
 _builtin_blacklist = {
     'tanhshrink',
     'softsign',
-    'layer_norm',
     'pairwise_distance',
+    'prelu',
+    'hardshrink',
 }
 
 
