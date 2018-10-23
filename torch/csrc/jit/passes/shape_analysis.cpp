@@ -77,9 +77,9 @@ c10::optional<std::vector<std::shared_ptr<T>>> gatherTensorTypes(Node* node) {
     return c10::nullopt;
   }
   for (size_t i = 0; i < args.size(); ++i) {
-    if (args[i].type->isSubtypeOf(ListType::ofTensors())) {
+    if (args[i].type()->isSubtypeOf(ListType::ofTensors())) {
       return c10::nullopt;
-    } else if (args[i].type->isSubtypeOf(DynamicType::get())) {
+    } else if (args[i].type()->isSubtypeOf(DynamicType::get())) {
       if (auto type = node->input(i)->type()->cast<T>()) {
         tensor_types.push_back(type);
       } else {

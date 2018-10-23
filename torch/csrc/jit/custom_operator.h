@@ -67,7 +67,7 @@ Node* getTracedNode(
 
   // Hack to call addInputs for the parameter pack in a sequenced fashion.
   // https://stackoverflow.com/questions/12030538/calling-a-function-for-each-variadic-template-argument-and-an-array
-  int _[] = {(tracer::addInputs(node, schema.arguments[Is].name.c_str(), std::get<Is>(tuple)), 0)...};
+  int _[] = {(tracer::addInputs(node, schema.arguments[Is].name().c_str(), std::get<Is>(tuple)), 0)...};
   (void)_;
 
   graph->appendNode(node);
@@ -117,10 +117,10 @@ inline void checkArgumentVector(
       inferredSchema, " | Provided schema: ", providedSchema);
   for (size_t i = 0; i < provided.size(); ++i) {
     AT_CHECK(
-        provided[i].type->isSubtypeOf(inferred[i].type),
+        provided[i].type()->isSubtypeOf(inferred[i].type()),
         "Inferred type for ", what, " #", i, " was ",
-        *inferred[i].type, ", but the provided schema specified type ",
-        *provided[i].type, " for the ", what,
+        *inferred[i].type(), ", but the provided schema specified type ",
+        *provided[i].type(), " for the ", what,
         " in that position. Inferred schema: ",
         inferredSchema, " | Provided schema: ", providedSchema);
   }

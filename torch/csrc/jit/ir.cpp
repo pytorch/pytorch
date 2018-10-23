@@ -612,7 +612,7 @@ size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   auto name_str = name.toUnqualString();
   for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
     const Argument* arg = &the_schema.arguments[i];
-    if (arg->name == name_str) {
+    if (arg->name() == name_str) {
       return i;
     }
   }

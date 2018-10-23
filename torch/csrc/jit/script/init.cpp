@@ -370,16 +370,16 @@ FunctionSchema getSchemaWithDefaults(
     const Def& def) {
   std::vector<Argument> new_args;
   for (auto& arg : schema.arguments) {
-    auto it = default_args.find(arg.name);
+    auto it = default_args.find(arg.name());
     if (it != default_args.end()) {
       try {
-        IValue value = toIValue(it->second, arg.type);
+        IValue value = toIValue(it->second, arg.type());
         new_args.push_back(
-            Argument(arg.name, arg.type, arg.N, value, arg.kwarg_only));
+            Argument(arg.name(), arg.type(), arg.N(), value, arg.kwarg_only()));
       } catch (py::cast_error& e) {
         throw ErrorReport(def.range())
-            << "Expected a default value of type " << arg.type->str()
-            << " on parameter \"" << arg.name << "\"";
+            << "Expected a default value of type " << arg.type()->str()
+            << " on parameter \"" << arg.name() << "\"";
       }
     } else {
       new_args.push_back(arg);

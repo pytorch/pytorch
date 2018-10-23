@@ -16,23 +16,39 @@ struct Argument {
       c10::optional<int32_t> N = c10::nullopt,
       c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false)
-      : name(std::move(name)),
-        type(type ? type : DynamicType::get()),
-        N(std::move(N)),
-        default_value(std::move(default_value)),
-        kwarg_only(kwarg_only) {}
-  std::string name;
-  TypePtr type;
+      : name_(std::move(name)),
+        type_(type ? type : DynamicType::get()),
+        N_(std::move(N)),
+        default_value_(std::move(default_value)),
+        kwarg_only_(kwarg_only) {}
+  const std::string& name() const {
+    return name_;
+  }
+  const TypePtr& type() const {
+    return type_;
+  }
+  c10::optional<int32_t> N() const {
+    return N_;
+  }
+  c10::optional<IValue> default_value() const {
+    return default_value_;
+  }
+  bool kwarg_only() const {
+    return kwarg_only_;
+  }
+private:
+  std::string name_;
+  TypePtr type_;
 
   // for list types, an optional statically known length for the list
   // e.g. for int[3]: type = ListType::ofInts(), N = 3
   // If present, this will allow scalars to be broadcast to this length to
   // become a list.
-  c10::optional<int32_t> N;
+  c10::optional<int32_t> N_;
 
-  c10::optional<IValue> default_value;
+  c10::optional<IValue> default_value_;
   // is this only specifyable as a keyword argument?
-  bool kwarg_only;
+  bool kwarg_only_;
 };
 
 struct FunctionSchema {
@@ -78,7 +94,7 @@ struct FunctionSchema {
 
   c10::optional<int> argumentIndexWithName(const std::string& name) const {
     for(size_t i = 0; i < arguments.size(); ++i) {
-      if(name == arguments[i].name)
+      if(name == arguments[i].name())
         return i;
     }
     return c10::nullopt;
@@ -88,7 +104,7 @@ struct FunctionSchema {
   bool isMutable() const {
     return std::any_of(
         arguments.cbegin(), arguments.cend(), [](const Argument& arg) {
-          return arg.type == WorldType::get();
+          return arg.type() == WorldType::get();
         });
   }
 
@@ -96,15 +112,15 @@ struct FunctionSchema {
     if (is_mutable) {
       // Mutable schemas should have a world token as the first argument
       // and return.
-      JIT_ASSERT(arguments.at(0).type == WorldType::get());
-      JIT_ASSERT(returns.at(0).type == WorldType::get());
+      JIT_ASSERT(arguments.at(0).type() == WorldType::get());
+      JIT_ASSERT(returns.at(0).type() == WorldType::get());
     }
   }
 };
 
 // for debugging, make sure we can describe the call site
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
-  return out << arg.type->str() << " " << arg.name << (arg.default_value ? "=<default>" : "");
+  return out << arg.type()->str() << " " << arg.name() << (arg.default_value() ? "=<default>" : "");
 }
 
 inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
@@ -117,7 +133,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   bool seen_kwarg_only = false;
   for(size_t i = 0; i < schema.arguments.size(); ++i) {
     if (i > 0) out << ", ";
-    if (schema.arguments[i].kwarg_only && !seen_kwarg_only) {
+    if (schema.arguments[i].kwarg_only() && !seen_kwarg_only) {
       out << "*, ";
       seen_kwarg_only = true;
     }
@@ -126,12 +142,12 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
 
   out << ") -> ";
   if (schema.returns.size() == 1) {
-    out << schema.returns.at(0).type->str();
+    out << schema.returns.at(0).type()->str();
   } else if (schema.returns.size() > 1) {
     out << "(";
     for (size_t i = 0; i < schema.returns.size(); ++i) {
       if (i > 0) out << ", ";
-      out << schema.returns[i].type->str();
+      out << schema.returns[i].type()->str();
     }
     out << ")";
   }

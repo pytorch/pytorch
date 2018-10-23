@@ -225,17 +225,17 @@ private:
       const auto& argument = schema.arguments[pos];
       if (pos < inputs.size()) {
         const TypePtr inputType = inferTypeFrom(inputs[pos]);
-        AT_CHECK(inputType->isSubtypeOf(argument.type),
-              "Expected value of type ", *argument.type,
-              " for argument '", argument.name,
+        AT_CHECK(inputType->isSubtypeOf(argument.type()),
+              "Expected value of type ", *argument.type(),
+              " for argument '", argument.name(),
               "' in position ", pos,
               ", but instead got value of type ", *inputType,
               ". Declaration: ", schema);
-      } else if (argument.default_value) {
-        inputs.push_back(*argument.default_value);
+      } else if (argument.default_value()) {
+        inputs.push_back(*argument.default_value());
       } else {
         AT_ERROR(schema.name, "() is missing value for argument '",
-                argument.name, "'. Declaration: ", schema);
+                argument.name(), "'. Declaration: ", schema);
       }
     }
   }
