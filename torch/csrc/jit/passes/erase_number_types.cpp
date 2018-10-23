@@ -26,6 +26,8 @@ static void EraseNumberTypesOnBlock(Block* block) {
       case prim::BoolToTensor:
       case prim::TensorToNum:
       case prim::ImplicitTensorToNum:
+      case prim::None:
+      // remove prim None here as ONNX does not support it
       case prim::NumToTensor: {
         it->output()->replaceAllUsesWith(it->inputs()[0]);
         // Let DCE cleanup

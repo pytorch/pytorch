@@ -13,6 +13,11 @@
 // - Move to `c10` namespace.
 // - Remove macro use in line 478 because the nvcc device compiler cannot handle
 // it.
+// - revise constructor logic so that it is consistent with c++ 17 standard documented
+// here in (8): https://en.cppreference.com/w/cpp/utility/optional/optional, and
+// could be able to support initialization of optionals from convertible type U, also
+// remove two old constructors optional(const T&) and optional(T&&) as it could be
+// handled by the template<U=T> case with default template argument.
 
 #ifndef C10_UTIL_OPTIONAL_H_
 #define C10_UTIL_OPTIONAL_H_
@@ -399,10 +404,6 @@ class optional : private OptionalBase<T> {
     }
   }
 
-  constexpr optional(const T& v) : OptionalBase<T>(v) {}
-
-  constexpr optional(T&& v) : OptionalBase<T>(constexpr_move(v)) {}
-
   // see https://github.com/akrzemi1/Optional/issues/16
   // and https://en.cppreference.com/w/cpp/utility/optional/optional,
   // in constructor 8, the std::optional spec can allow initialization
@@ -410,7 +411,7 @@ class optional : private OptionalBase<T> {
   //
   // 8 - implicit move construct from value
   template<
-      class U = T,
+      typename U = T,
       TR2_OPTIONAL_REQUIRES(
           std::is_constructible<T, U&&>::value
           && !std::is_same<typename std::decay<U>::type, in_place_t>::value
@@ -422,7 +423,7 @@ class optional : private OptionalBase<T> {
 
   // 8 - explicit move construct from value
   template<
-      class U = T,
+      typename U = T,
       TR2_OPTIONAL_REQUIRES(
           std::is_constructible<T, U&&>::value
           && !std::is_same<typename std::decay<U>::type, in_place_t>::value
@@ -658,9 +659,7 @@ class optional<T&> {
 
   constexpr optional(T& v) noexcept : ref(detail_::static_addressof(v)) {}
 
-  optional(T&&) = delete;
-
-  template<typename U>
+  template<typename U = T>
   optional(U&&) = delete;
 
   constexpr optional(const optional& rhs) noexcept : ref(rhs.ref) {}
