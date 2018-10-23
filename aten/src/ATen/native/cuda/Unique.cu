@@ -11,8 +11,6 @@
 namespace at {
 namespace native{
 
-#ifndef __HIP_PLATFORM_HCC__
-
 namespace {
 template <typename scalar_t>
 __global__ void inverse_indices_kernel(
@@ -157,30 +155,20 @@ template <typename scalar_t>
   }
 } // namespace
 
-#endif
-
 std::tuple<Tensor, Tensor>
 _unique_cuda(const Tensor& self, const bool sorted, const bool return_inverse) {
-#ifndef __HIP_PLATFORM_HCC__
   return AT_DISPATCH_ALL_TYPES(self.type(), "unique", [&] {
     // The current CUDA implementation of unique always sort due to the
     // lack of hashtable implementation in thrust
     return _unique_cuda_template<scalar_t>(self, return_inverse);
   });
-#else
-  AT_ERROR("unique_cuda: HIP not supported");
-#endif
 }
 
 std::tuple<Tensor, Tensor>
 _unique_dim_cuda(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse) {
-  #ifndef __HIP_PLATFORM_HCC__
-    return AT_DISPATCH_ALL_TYPES(self.type(), "unique_dim", [&] {
-      return _unique_dim_cuda_template<scalar_t>(self, dim, return_inverse);
-    });
-  #else
-    AT_ERROR("unique_dim_cuda: HIP not supported");
-  #endif
+  return AT_DISPATCH_ALL_TYPES(self.type(), "unique_dim", [&] {
+    return _unique_dim_cuda_template<scalar_t>(self, dim, return_inverse);
+  });
 }
 
 }  // namespace native
