@@ -72,12 +72,11 @@ namespace nn {
 class Module {
  public:
   /// Tells the base `Module` about the name of the submodule.
-  explicit Module(std::string name);
-
-  /// Constructs the base module without immediate knowledge of the submodule's
-  /// name. The name of the submodule is inferred via RTTI the first time
+  /// If the `name` is empty, constructs the module without immediate knowledge
+  /// of the submodule's name. The name of the submodule is inferred via RTTI
+  /// (if possible) the first time
   /// `.name()` is invoked.
-  Module() = default;
+  explicit Module(std::string name = std::string());
 
   virtual ~Module() = default;
 
@@ -340,13 +339,13 @@ class Module {
   void to_impl(Ts&&... ts);
 
   /// The registered parameters of this `Module`.
-  OrderedDict<Tensor> parameters_{"Parameter"};
+  OrderedDict<Tensor> parameters_;
 
   /// The registered buffers of this `Module`.
-  OrderedDict<Tensor> buffers_{"Buffer"};
+  OrderedDict<Tensor> buffers_;
 
   /// The registered (direct) submodules of this `Module`.
-  OrderedDict<std::shared_ptr<Module>> children_{"Submodule"};
+  OrderedDict<std::shared_ptr<Module>> children_;
 
   /// The module's name (e.g. "LSTM").
   mutable c10::optional<std::string> name_;
