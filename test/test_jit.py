@@ -367,7 +367,7 @@ class JitTestCase(TestCase):
         graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
         m = torch.jit.ScriptModule()
         m._create_method_from_graph("forward", graph)
-        assertExportImportModule(m, inputs)
+        self.assertExportImportModule(m, inputs)
 
     def assertExportImportModule(self, m, inputs):
         m_import = self.getExportImportCopy(m)
