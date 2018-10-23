@@ -10,17 +10,35 @@ namespace at {
 namespace native {
 
 #ifdef USE_MAGMA
-static magma_queue_t createMagmaQueue(const Tensor& tensor) {
-  auto& context = at::globalContext();
-  magma_queue_t magma_queue;
-  magma_queue_create_from_cuda(
-      tensor.get_device(),
+
+// RAII for a MAGMA Queue
+struct MAGMAQueue {
+
+  // Default constructor, does nothing.
+  MAGMAQueue() = default;
+
+  // Constructor
+  explicit MAGMAQueue(int64_t device_id) {
+    auto& context = at::globalContext();
+    magma_queue_create_from_cuda(
+      device_id,
       at::cuda::getCurrentCUDAStream(),
-      THCState_getCurrentBlasHandle(context.getTHCState()),
-      THCState_getCurrentSparseHandle(context.getTHCState()),
-      &magma_queue);
-  return magma_queue;
-}
+      at::cuda::getCurrentCUDABlasHandle(),
+      at::cuda::getCurrentCUDASparseHandle(),
+      &magma_queue_);
+  }
+
+  // Getter
+  magma_queue_t get_queue() const { return magma_queue_; }
+
+  // Destructor
+  ~MAGMAQueue() {
+    magma_queue_destroy(magma_queue_);
+  }
+
+ private:
+  magma_queue_t magma_queue_;
+};
 
 static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
   auto result = static_cast<magma_int_t>(value);
