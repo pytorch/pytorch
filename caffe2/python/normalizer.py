@@ -37,6 +37,10 @@ class LayerNormalizer(Normalizer):
         self._use_layer_norm_op = use_layer_norm_op
 
     def _run(self, layer_model, param):
-        return layer_model.LayerNormalization(
-            param, epsilon=self._epsilon, use_layer_norm_op=self._use_layer_norm_op
-        )
+        # LayerNorm with dim = 1 is trivial and output constant 0
+        if param.dtype.shape[0] > 1:
+            return layer_model.LayerNormalization(
+                param, epsilon=self._epsilon, use_layer_norm_op=self._use_layer_norm_op
+            )
+        else:
+            return param

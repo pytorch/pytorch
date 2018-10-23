@@ -34,6 +34,7 @@ class LayerNormalization(ModelLayer):
         assert len(self.input_shape) >= 1, (
             "This layer supports only >= 2D tesnors")
         input_dims = self.input_shape[0]
+        assert input_dims > 1, "input dim ({}) too small, trivial layer norm"
 
         self.output_schema = schema.Scalar(
             (np.float32, self.input_shape),
