@@ -164,8 +164,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   explicit TensorImpl(at::Storage storage) : storage_(std::move(storage)), storage_offset_(0) {
     AT_ASSERT(storage_);
     data_type_ = storage_.dtype();
-    strides_.reset(new int64_t[1]);
-    strides_[0] = 1;
   }
 
   TensorImpl(const TensorImpl&) = default;
@@ -317,17 +315,15 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // assumes that old values are preserved
     auto old_dim = sizes_.size();
     sizes_.resize(ndim);
-    if (old_dim != sizes_.size()) {
-      auto new_strides = c10::guts::make_unique<int64_t[]>(ndim);
-      for (size_t i = 0; i < std::min(old_dim, static_cast<size_t>(ndim)); i++) {
-        new_strides[i] = strides_[i];
-      }
-      for (size_t i = old_dim; i < static_cast<size_t>(ndim); i++) {
-        // If ndim < old_dim, this loop never executes
-        new_strides[i] = 0;
-      }
-      strides_ = std::move(new_strides);
+    auto new_strides = c10::guts::make_unique<int64_t[]>(ndim);
+    for (size_t i = 0; i < std::min(old_dim, static_cast<size_t>(ndim)); i++) {
+      new_strides[i] = strides_[i];
     }
+    for (size_t i = old_dim; i < static_cast<size_t>(ndim); i++) {
+      // If ndim < old_dim, this loop never executes
+      new_strides[i] = 0;
+    }
+    strides_ = std::move(new_strides);
     refresh_numel();
     refresh_contiguous();
   }
@@ -339,6 +335,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   virtual void set_stride(int64_t dim, int64_t new_stride) {
+    AT_ASSERTM(strides_, "Caffe2 tensors don't have meaningful strides and "
+                         "cannot be used in PyTorch");
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
@@ -630,9 +628,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         " The old caffe2 mixes Reshape and Resize but this behavior has "
         "been changed. If you find this error, most likely you will need "
         "to change corresponding code from Reshape to Resize.");
-    auto old_dim = sizes_.size();
     sizes_ = dims;
-    update_to_contiguous_strides(old_dim);
+    update_to_contiguous_strides();
   }
 
   /**
@@ -802,14 +799,13 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
   bool SetDimsTemplate(at::ArrayRef<T> src) {
     auto old_numel = numel_;
-    auto old_dim = sizes_.size();
     sizes_.resize(src.size());
     int64_t new_numel = 1;
     for (size_t i = 0; i < src.size(); ++i) {
       new_numel *= src[i];
       sizes_[i] = src[i];
     }
-    update_to_contiguous_strides(old_dim);
+    update_to_contiguous_strides();
     numel_ = new_numel;
     return numel_ != old_numel;
   }
@@ -846,17 +842,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return SetDims(at::IntList{d0, d1, d2, d3});
   }
 
-  inline void update_to_contiguous_strides(int64_t old_dim) {
-    if (old_dim != sizes_.size()) {
-      strides_ = c10::guts::make_unique<int64_t[]>(sizes_.size());
-    }
-    if (dim() > 0) {
-      int last_idx = dim() - 1;
-      strides_[last_idx] = 1;
-      for (auto i = last_idx - 1; i >= 0; --i) {
-        strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
-      }
-    }
+  inline void update_to_contiguous_strides() {
+    strides_.reset();
     is_contiguous_ = true;
   }
 

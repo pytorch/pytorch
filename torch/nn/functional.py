@@ -1,4 +1,5 @@
 r"""Functional interface"""
+from __future__ import division
 
 import warnings
 import math
@@ -14,6 +15,7 @@ from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
+from .._jit_internal import weak_script
 
 _VF = torch._C._VariableFunctions
 
@@ -906,6 +908,7 @@ def hardshrink(input, lambd=0.5):
     return torch.hardshrink(input, lambd)
 
 
+@torch._jit_internal.weak_script
 def tanhshrink(input):
     r"""tanhshrink(input) -> Tensor
 
@@ -916,6 +919,7 @@ def tanhshrink(input):
     return input - input.tanh()
 
 
+@torch._jit_internal.weak_script
 def softsign(input):
     r"""softsign(input) -> Tensor
 
