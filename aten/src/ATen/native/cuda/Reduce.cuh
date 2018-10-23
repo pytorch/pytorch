@@ -194,7 +194,7 @@ __device__ Array<type_t, vt> load_memory(const type_t* in, int begin, int end, i
 }
 
 template <typename scalar_t, typename func_t>
-struct Reduction {
+struct ReduceOp {
   using traits = binary_function_traits<func_t>;
   using arg_t = typename traits::arg2_t;
 
@@ -214,8 +214,8 @@ struct Reduction {
   int* semaphores;
   bool accumulate;
 
-  Reduction(func_t op, ReduceConfig config, InputCalculator input_calc, OutputCalculator output_calc,
-            const void* src, void* dst, void* buffer, int* semaphores)
+  ReduceOp(func_t op, ReduceConfig config, InputCalculator input_calc, OutputCalculator output_calc,
+           const void* src, void* dst, void* buffer, int* semaphores)
     : op(op)
     , config(config)
     , input_calc(input_calc)
@@ -379,7 +379,7 @@ struct Reduction {
 };
 
 template<int nt, typename R>
-static void launch_reduction(const ReduceConfig& config, const R& reduction) {
+static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction) {
   dim3 block = config.block();
   dim3 grid = config.grid();
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -389,13 +389,13 @@ static void launch_reduction(const ReduceConfig& config, const R& reduction) {
 }
 
 template <typename scalar_t, typename func_t, typename ident_t=double>
-inline void gpu_reduction_kernel(TensorIterator& iter, const func_t& op, ident_t ident=0) {
+inline void gpu_reduce_kernel(TensorIterator& iter, const func_t& op, ident_t ident=0) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
   AT_ASSERT(iter.numel() > 0 && iter.ntensors() == 2);
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_reduction_kernel<scalar_t>(sub_iter, op);
+      gpu_reduce_kernel<scalar_t>(sub_iter, op);
     }
     return;
   }
@@ -460,7 +460,7 @@ inline void gpu_reduction_kernel(TensorIterator& iter, const func_t& op, ident_t
     auto stream = at::cuda::getCurrentCUDAStream();
     AT_CUDA_CHECK(cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(), stream));
   }
-  auto reduction = Reduction<scalar_t, func_t>(
+  auto reduce = ReduceOp<scalar_t, func_t>(
       op,
       config,
       input_calc,
@@ -469,10 +469,10 @@ inline void gpu_reduction_kernel(TensorIterator& iter, const func_t& op, ident_t
       out_data,
       buffer.get(),
       (int*)semaphores.get());
-  reduction.ident = ident;
-  reduction.accumulate = iter.should_accumulate();
+  reduce.ident = ident;
+  reduce.accumulate = iter.should_accumulate();
 
-  launch_reduction<ReduceConfig::NUM_THREADS>(config, reduction);
+  launch_reduce_kernel<ReduceConfig::NUM_THREADS>(config, reduce);
 }
 
 }} // namespace at::native

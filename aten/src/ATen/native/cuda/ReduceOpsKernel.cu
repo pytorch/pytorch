@@ -13,14 +13,14 @@ namespace at { namespace native {
 
 template <typename scalar_t, typename acc_t=scalar_t>
 void sum_kernel_impl(TensorIterator& iter) {
-  gpu_reduction_kernel<scalar_t>(iter, []GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
+  gpu_reduce_kernel<scalar_t>(iter, []GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
     return a + b;
   });
 }
 
 template <typename scalar_t, typename acc_t=scalar_t>
 void prod_kernel_impl(TensorIterator& iter) {
-  gpu_reduction_kernel<scalar_t>(iter, []GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
+  gpu_reduce_kernel<scalar_t>(iter, []GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
     return a * b;
   }, 1);
 }
