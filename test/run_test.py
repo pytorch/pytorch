@@ -25,6 +25,7 @@ TESTS = [
     'dataloader',
     'distributed',
     'distributions',
+    'expecttest',
     'indexing',
     'jit',
     'multiprocessing',
