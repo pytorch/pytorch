@@ -26,7 +26,7 @@ __global__ void inverse_indices_kernel(
 
     for (int64_t i = idx; i < num_inp * num_out; i += stride) {
       if (input_data[i / num_out] == output_data[i % num_out]){
-        inverse_indices_data[i / num_out] = i % num_out;   
+        inverse_indices_data[i / num_out] = i % num_out;
       }
     }
   }
@@ -65,7 +65,7 @@ template <typename scalar_t>
         input_data, output_data, inverse_indices_data, num_inp, num_out);
     }
 
-    THCudaCheck(cudaGetLastError());   
+    THCudaCheck(cudaGetLastError());
     return std::tuple<Tensor, Tensor>(output, inverse_indices);
 
   }
@@ -108,7 +108,7 @@ template <typename scalar_t>
     Tensor input_sorted = input_flat.index_select(0, indices);
 
     // get unique tensors
-    scalar_t* input_sorted_ptr = input_sorted.data<scalar_t>();    
+    scalar_t* input_sorted_ptr = input_sorted.data<scalar_t>();
     Tensor input_sorted_indices = at::arange(0, input_sorted.size(0), self.type().toScalarType(kLong));
     int64_t* input_sorted_indices_ptr = input_sorted_indices.data<int64_t>();
     auto last = thrust::unique(policy, input_sorted_indices_ptr, input_sorted_indices_ptr + input_sorted_indices.numel(),
@@ -140,7 +140,7 @@ template <typename scalar_t>
       mask[0] = 1;
       for (int i = 0; i < input_sorted.size(0) - 1; ++i) {
         if (!at::equal(input_sorted[i], input_sorted[i+1])) {
-          mask[i+1] = 1; 
+          mask[i+1] = 1;
         } else {
           mask[i+1] = 0;
         }
@@ -152,7 +152,7 @@ template <typename scalar_t>
       }
     }
 
-    THCudaCheck(cudaGetLastError());  
+    THCudaCheck(cudaGetLastError());
     return std::tuple<Tensor, Tensor>(output, inverse_indices);
   }
 } // namespace

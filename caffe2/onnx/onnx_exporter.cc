@@ -89,7 +89,7 @@ TensorProto CreateOnnxShapeTensor(
 }
 
 std::string SsaName(const std::string& n, int version) {
-  return MakeString(n, "_", version);
+  return c10::str(n, "_", version);
 }
 } // namespace
 
@@ -283,8 +283,7 @@ void OnnxExporter::CopyCaffe2ArgToOnnxAttr(
     attr->mutable_strings()->CopyFrom(arg.strings());
     attr->set_type(AttributeProto::STRINGS);
   } else {
-    CAFFE_THROW(
-        caffe2::MakeString("Unsupported Caffe2 argument: ", arg.name()));
+    CAFFE_THROW(c10::str("Unsupported Caffe2 argument: ", arg.name()));
   }
 }
 
@@ -294,6 +293,7 @@ bool OnnxExporter::IsBlackListed(const caffe2::Argument& arg) {
   const static std::unordered_map<std::string, std::unordered_set<int64_t>>
       kBlackListInt = {{"cudnn_exhaustive_search", {0, 1}},
                        {"use_cudnn", {0, 1}},
+                       {"exhaustive_search", {0, 1}},
                        {"is_test", {0, 1}},
                        {"broadcast", {0, 1}}};
 
@@ -934,7 +934,7 @@ void OnnxExporter::InitOpToTensorProto(
     }
   } else {
     CAFFE_THROW(
-        MakeString("Cannot convert C2 op ", op.type(), "to ONNX TensorProto"));
+        c10::str("Cannot convert C2 op ", op.type(), "to ONNX TensorProto"));
   }
 }
 

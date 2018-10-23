@@ -11,27 +11,74 @@ package caffe2;
 //     is mainly for backward compability purposes but we may consider using
 //     those in the future.
 
+// ExternalDataProto stores the pointer to the content of TensorProto
+// the content are stored in the raw format as little endian
+message ExternalDataProto {
+  // type of the external storage type, can be the following:
+  enum SourceType {
+    // the container defined in torch/csrc/jit/serialization.h is used,
+    // and record_id is the tag to help the runtime identify the data
+    // this type of storage is set as DEFAULT and recommended for external
+    // data storage
+    INLINE_CONTAINER = 0;
+    // use external file to store the data, and record_id is the POSIX relative path
+    // to the file. this (simple) file is only for the data, and the data is stored
+    // as little endian in the file
+    SIMPLE_FILE = 1;
+  }
+  optional SourceType source_type = 1 [default = INLINE_CONTAINER];
+  // used together with type
+  optional string record_id = 2;
+  // the offset of the starting point, the content may be shared between
+  // multiple tensors
+  optional int64 offset = 3;
+  // the strides of the content
+  repeated int64 strides = 4;
+}
+
 // TensorProto stores serialized Tensor objects.
 message TensorProto {
   // The dimensions in the tensor.
   repeated int64 dims = 1;
+
+  // Data type
   enum DataType {
     UNDEFINED = 0;
-    FLOAT = 1;  // float
-    INT32 = 2;  // int
-    BYTE = 3;  // BYTE, when deserialized, is going to be restored as uint8.
-    STRING = 4;  // string
-    // Less-commonly used data types.
-    BOOL = 5;  // bool
-    UINT8 = 6;  // uint8_t
-    INT8 = 7;  // int8_t
-    UINT16 = 8;  // uint16_t
-    INT16 = 9;  // int16_t
-    INT64 = 10;  // int64_t
+
+    // Basic types
+    FLOAT = 1;     // float
+    INT32 = 2;     // int
+    BYTE = 3;      // byte, when deserialized, is going to be restored as uint8
+    STRING = 4;    // string
+
+    // Less-commonly used data types
+    BOOL = 5;      // bool
+    UINT8 = 6;     // uint8_t
+    INT8 = 7;      // int8_t
+    UINT16 = 8;    // uint16_t
+    INT16 = 9;     // int16_t
+    INT64 = 10;    // int64_t
     FLOAT16 = 12;  // at::Half
-    DOUBLE = 13;  // double
+    DOUBLE = 13;   // double
   }
   optional DataType data_type = 2 [default = FLOAT];
+
+  // data storage
+  enum StorageType {
+    // the content is stored in typed field, for example, if the data_type is
+    // FLOAT, float_data is used to store the content.
+    TYPED = 1;
+    // the content is serialized in field raw_data as little-endian
+    RAW = 2;
+    // the pointer to the content is stored in field external_data
+    // the content is serialized as little-endian
+    EXTERNAL = 3;
+    // When StorageType is NO_CONTENT, we use TensorProto to store only type
+    // and shape information. Reuse TensorProto to store type and shape
+    // because we can just have one proto, not having another ValueInfoProto
+    NO_CONTENT = 4;
+  }
+  optional StorageType storage_type = 12 [default = TYPED];
   // For float
   repeated float float_data = 3 [packed = true];
   // For int32, uint8, int8, uint16, int16, bool, and float16
@@ -46,6 +93,11 @@ message TensorProto {
   repeated double double_data = 9 [packed = true];
   // For int64
   repeated int64 int64_data = 10 [packed = true];
+  // store the raw data, contents are serialized as little-endian
+  optional bytes raw_data = 13;
+  // store the pointer to the data
+  optional ExternalDataProto external_data = 14;
+
   // Optionally, a name for the tensor.
   optional string name = 7;
 
@@ -53,6 +105,7 @@ message TensorProto {
   // it was serialized from. This is useful in cases like snapshotting a whole
   // workspace in a multi-GPU environment.
   optional DeviceOption device_detail = 8;
+
   // When loading from chunks this is going to indicate where to put data in the
   // full array. When not used full data have to be present
   message Segment {
@@ -86,7 +139,6 @@ message TensorShape {
   repeated int32 unknown_dims = 3;
   optional bool unknown_shape = 4 [default = false];
   optional string name = 5;
-
 }
 
 message TensorShapes {
@@ -97,13 +149,17 @@ message TensorShapes {
 // values, or repeated float, int and string arrays.
 message Argument {
   optional string name = 1;
+
   optional float f = 2;
   optional int64 i = 3;
   optional bytes s = 4;
+  optional TensorProto t = 10;
   optional NetDef n = 8;
+
   repeated float floats = 5;
   repeated int64 ints = 6;
   repeated bytes strings = 7;
+  repeated TensorProto tensors = 11;
   repeated NetDef nets = 9;
 }
 
@@ -141,10 +197,12 @@ message DeviceOption {
   // [general] What node this op should execute on.
   // Used for net transformation purposes. Must be empty at execution time.
   optional string node_name = 4;
-  // [CPU and Linux specific] NUMA node id
-  optional int32 numa_node_id = 5;
   // [general] Extra information passed, not used at execution time currently.
   repeated string extra_info = 6;
+
+  // The following fields have been deprecated, do not reuse them.
+  // // [CPU and Linux specific] NUMA node id
+  // optional int32 numa_node_id = 5;
 }
 
 // Operator Definition.
@@ -155,6 +213,7 @@ message OperatorDef {
   // the operator type. This is needed to create the object from the operator
   // registry.
   optional string type = 4;
+  // arg is for the argument defined in operator schema
   repeated Argument arg = 5;
 
   // The device option that the operator should run under.
@@ -184,6 +243,26 @@ message OperatorDef {
   // This is an optional string with no assumed characteristics as
   // operators can be constructed in any language.
   optional string debug_info = 10;
+
+  // the domain of the operator to help runtime distinguish which operator
+  // library this OperatorDef refers to. For example, both caffe2 and aten
+  // has `Add` operator, with domain, we can easily decide which operator
+  // to execute. to support multiple operator libs, we use domain to
+  // distinguish which operator lib we refer to:
+  //   - "caffe2" means this uses Caffe2 operator library
+  //   - "aten" means this uses ATen operator library
+  //   - "c10" is for the fused library
+  //   - if the domain is missing or empty, we use "caffe2", this is for
+  //     legacy models, new serializer should always export an OperatorDef
+  //     with domain and op_version
+  optional string domain = 11;
+  // each operator is has its own version number.
+  // operator version information
+  // each time, we change the API or semantics of the operator,
+  // we bump the version for the operator.
+  // the runtime system should check the op_version of each OperatorDef
+  // and decide it should reject or accept the model
+  optional int64 op_version = 12;
 }
 
 // Network definition.

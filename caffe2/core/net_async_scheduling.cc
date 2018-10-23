@@ -6,6 +6,10 @@ C10_DEFINE_bool(
     caffe2_net_async_optimize_polling,
     true,
     "Use event callbacks whenever possible instead of polling");
+C10_DEFINE_bool(
+    caffe2_net_async_run_root_tasks_inline,
+    false,
+    "Run root tasks in current thread instread of scheduling to threadpool");
 
 namespace caffe2 {
 
@@ -61,6 +65,16 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
       }
     }
 
+    if (report_stats_) {
+      auto last_op_id = lastTaskOpId(task_id);
+      auto* last_op = lastTaskOp(task_id);
+      if (last_op->device_option().device_type() == PROTO_CPU &&
+          last_op->HasAsyncPart()) {
+        last_op->event().SetCallback(
+            [this, last_op_id] { counters_.AddPerOpAsyncEndTime(last_op_id); });
+      }
+    }
+
     for (auto child_id : children(task_id)) {
       int parent_count = updateParentCount(child_id);
       if (parent_count == 0) {
@@ -93,7 +107,7 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
               if (!canSchedule(parent_id, child_id)) {
                 // we can't schedule a child because of this parent,
                 // check if parent supports callback
-                if (c10::FLAGS_caffe2_net_async_optimize_polling &&
+                if (FLAGS_caffe2_net_async_optimize_polling &&
                     parent_event.SupportsCallback()) {
                   parents_with_callback.push_back(parent_id);
                 } else {
@@ -209,6 +223,9 @@ void AsyncSchedulingNet::finishRun() {
   std::unique_lock<std::mutex> lock(running_mutex_);
   // wait for scheduled ops and make sure all events are marked as finished
   finalizeEvents();
+  if (report_stats_) {
+    counters_.ReportRunEnd();
+  }
   // notify observers and waiters
   StopAllObservers();
   running_ = false;
@@ -217,20 +234,25 @@ void AsyncSchedulingNet::finishRun() {
 
 bool AsyncSchedulingNet::RunAsync() {
   try {
-    std::unique_lock<std::mutex> lock(running_mutex_);
-    if (running_) {
-      LOG(ERROR) << "Detected concurrent runs";
-      return false;
-    }
-    running_ = true;
-    reset();
+    {
+      std::unique_lock<std::mutex> lock(running_mutex_);
+      if (running_) {
+        LOG(ERROR) << "Detected concurrent runs";
+        return false;
+      }
+      running_ = true;
+      reset();
 
-    StartAllObservers();
-    tracing::startIter(tracer_);
+      StartAllObservers();
+      tracing::startIter(tracer_);
+      if (report_stats_) {
+        counters_.ReportRunStart();
+      }
+    }
 
     for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
       if (parents(task_id).empty()) {
-        schedule(task_id);
+        schedule(task_id, FLAGS_caffe2_net_async_run_root_tasks_inline);
       }
     }
   } catch (const std::exception& e) {

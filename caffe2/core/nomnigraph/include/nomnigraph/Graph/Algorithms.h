@@ -19,6 +19,7 @@
 #include "nomnigraph/Graph/BinaryMatchImpl.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Graph/TarjansImpl.h"
+#include "nomnigraph/Graph/TopoSort.h"
 
 namespace nom {
 namespace algorithm {

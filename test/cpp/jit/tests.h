@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <test/cpp/common/support.h>
 #else
-#include <ATen/Error.h>
+#include "c10/util/Exception.h"
 #define ASSERT_EQ(x, y) AT_ASSERT((x) == (y))
 #define ASSERT_NE(x, y) AT_ASSERT((x) != (y))
 #define ASSERT_TRUE AT_ASSERT
@@ -16,6 +16,15 @@
   } catch (const std::exception& e) {                                    \
     ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
   }
+#define ASSERT_ANY_THROW(statement)                                      \
+  bool threw = false;                                                    \
+  try {                                                                  \
+    (void)statement;                                                     \
+  } catch (const std::exception& e) {                                    \
+    threw = true;                                                        \
+  }                                                                      \
+  ASSERT_TRUE(threw);                                                    \
+
 #endif // defined(USE_GTEST)
 
 #include "torch/csrc/autograd/variable.h"
@@ -849,7 +858,7 @@ const auto cf_examples = R"JIT(
 void testControlFlow() {
   script::Module cu;
   script::defineMethodsInModule(
-      cu, cf_examples, torch::jit::script::nativeResolver, nullptr);
+      cu, cf_examples, script::nativeResolver, nullptr);
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
     auto graph = cu.get_method(name).graph();
     Code code(graph);
@@ -1120,6 +1129,97 @@ void testCustomOperators() {
     tracer::abandon();
   }
 }
+
+// test a few features that are not directly used in schemas yet
+void testSchemaParser() {
+  // nested arrays
+  auto s = parseSchema("at::what(int[][4] foo) -> ()");
+  ASSERT_TRUE(s.arguments.at(0).N == 4);
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments.at(0)
+                                              .type->expect<ListType>()
+                                              ->getElementType()
+                                              ->expect<ListType>()
+                                              ->getElementType()));
+  auto s2 = parseSchema("at::what(int[][] foo) -> ()");
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments.at(0)
+                                            .type->expect<ListType>()
+                                            ->getElementType()
+                                            ->expect<ListType>()
+                                            ->getElementType()));
+  // futures
+  try {
+    parseSchema("at::what(Future(int) foo) -> ()");
+    ASSERT_TRUE(false);
+  } catch (script::ErrorReport& er) {
+    ASSERT_TRUE(
+        std::string(er.what()).find("Futures are not yet implemented") !=
+        std::string::npos);
+  }
+  // named returns
+  parseSchema("at::what(Tensor! i_will_be_written_to) -> ()");
+  auto s3 = parseSchema("at::what() -> (Tensor the_return, Tensor the_return2)");
+  ASSERT_TRUE(s3.returns.at(0).name == "the_return");
+  ASSERT_TRUE(s3.returns.at(1).name == "the_return2");
+
+  // test tensor with annotated alias sets
+  parseSchema("at::what(Tensor(t) foo) -> (Tensor(t))");
+
+}
+
+void testTopologicalIndex() {
+  {
+    Graph graph;
+    auto node1 = graph.create(prim::Undefined);
+    auto node2 = graph.create(prim::Undefined);
+    auto node3 = graph.create(prim::Undefined);
+    auto node4 = graph.create(prim::Undefined);
+
+    graph.appendNode(node4);
+    graph.prependNode(node1);
+    node2->insertAfter(node1);
+    node3->insertBefore(node4);
+
+    // nodes should be in numerical order
+    ASSERT_TRUE(node1->isBefore(node2));
+    ASSERT_TRUE(node1->isBefore(node3));
+    ASSERT_TRUE(node1->isBefore(node4));
+    ASSERT_TRUE(node2->isAfter(node1));
+    ASSERT_TRUE(node2->isBefore(node3));
+    ASSERT_TRUE(node2->isBefore(node4));
+    ASSERT_FALSE(node3->isBefore(node1));
+    ASSERT_FALSE(node3->isBefore(node2));
+    ASSERT_FALSE(node3->isAfter(node4));
+
+    // make sure things don't blow up on deletions
+    node2->destroy();
+    auto node2p = graph.create(prim::Undefined);
+    node2p->insertAfter(node1);
+    ASSERT_TRUE(node1->isBefore(node2p));
+    ASSERT_TRUE(node2p->isBefore(node3));
+  }
+  {
+    // Induce reindexing to test that path
+    Graph graph;
+    std::map<size_t, Node*> nodes;
+
+    auto anchor = graph.create(prim::Undefined);
+    graph.appendNode(anchor);
+    // Inserting to the same place a lot will trigger reindexing
+    for (auto i = 0; i < 100; ++i) {
+      auto n = graph.create(prim::Undefined);
+      n->insertAfter(anchor);
+      nodes[i] = n;
+    }
+
+    // Nodes should be in reverse order
+    for (auto i = 0; i < 100; ++i) {
+      for (auto j = i + 1; j < 100; ++j) {
+        ASSERT_TRUE(nodes[i]->isAfter(nodes[j]));
+      }
+    }
+  }
+}
+
 } // namespace
 } // namespace jit
 } // namespace torch

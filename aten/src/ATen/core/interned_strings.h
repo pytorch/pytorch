@@ -8,7 +8,7 @@
 #include <ATen/core/aten_interned_strings.h>
 #include <ATen/core/Macros.h>
 
-namespace torch { namespace jit {
+namespace c10 {
 
 #if !AT_MOBILE
 #define FORALL_NS_SYMBOLS(_)       \
@@ -55,6 +55,9 @@ namespace torch { namespace jit {
   _(prim, IntToFloat)              \
   _(prim, FloatToInt)              \
   _(prim, StringToFloat)           \
+  _(prim, TensorDevice)            \
+  _(prim, TensorDType)             \
+  _(prim, TensorShape)             \
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
   _(prim, AnyDefined)              \
@@ -154,9 +157,8 @@ namespace torch { namespace jit {
 //  1. Symbol namespace is split up into namespaces.
 //
 //  2. The intended access pattern for built-in symbols is onnx::MatMul
-//  in the torch::jit namespace (this is a Symbol).
+//  in the c10 namespace (this is a Symbol).
 //
-
 
 // Built-in constant definition strategy:
 // - Enum is the most convenient way to generate a contiguous sequence
@@ -264,16 +266,16 @@ inline bool Symbol::is_aten() const { return ns() == namespaces::aten; }
 inline bool Symbol::is_prim() const { return ns() == namespaces::prim; }
 inline bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
 
-}} // namespace torch::jit
+} // namespace c10
 
 // make symbol behave like an integer in hash tables
 namespace std {
-  template<>
-  struct hash<torch::jit::Symbol> {
-    size_t operator()(torch::jit::Symbol s) const {
-      return std::hash<uint32_t>()(static_cast<uint32_t>(s));
-    }
-  };
+template <>
+struct hash<c10::Symbol> {
+  size_t operator()(c10::Symbol s) const {
+    return std::hash<uint32_t>()(static_cast<uint32_t>(s));
+  }
+};
 }
 
 

@@ -4,7 +4,7 @@ import torch
 import torch.cuda.nccl as nccl
 import torch.cuda
 
-from common import TestCase, run_tests, IS_WINDOWS
+from common_utils import TestCase, run_tests, IS_WINDOWS
 from common_cuda import TEST_CUDA, TEST_MULTIGPU
 
 

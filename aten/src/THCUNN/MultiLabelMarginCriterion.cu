@@ -96,7 +96,7 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
   Dtype *gradInput_k = gradInput + k*dim;
   THCIndex_t *target_k = target + k*dim;
   Dtype *istarget_k = istarget + k*dim;
- 
+
   Dtype *gradOutput_k = gradOutput;
   if (!reduce) {
     gradOutput_k += k;

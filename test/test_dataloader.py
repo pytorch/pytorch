@@ -15,7 +15,7 @@ from torch import multiprocessing as mp
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
-from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm
+from common_utils import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm
 
 # We cannot import TEST_CUDA from common_cuda here, because if we do that,
 # the TEST_CUDNN line from common_cuda will be executed multiple times
@@ -29,7 +29,7 @@ if not NO_MULTIPROCESSING_SPAWN:
     mp = mp.get_context(method='spawn')
 
 
-JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 6.5
+JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 8.5
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -305,17 +305,17 @@ def _test_proper_exit(use_workers, pin_memory, exit_method, hold_iter_reference,
     if exit_method == 'worker_error' or exit_method == 'worker_kill':
         assert use_workers is True
 
-    ds = TestProperExitDataset(16, setup_event if exit_method == 'worker_error' else None)
+    ds = TestProperExitDataset(10, setup_event if exit_method == 'worker_error' else None)
 
     loader = DataLoader(ds, batch_size=2, shuffle=False,
                         num_workers=num_workers, pin_memory=pin_memory)
+    error_it = 4
+    assert len(loader) > error_it
+
     it = iter(loader)
     if use_workers:
         for i, w in enumerate(it.workers):
             worker_pids[i] = w.pid
-
-    error_it = 4
-    assert len(loader) > error_it
 
     def kill_pid(pid):
         if IS_WINDOWS:
@@ -417,6 +417,7 @@ class TestDataLoader(TestCase):
         self.assertEqual(len(dataloader_shuffle), 5)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_sequential_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
         for input, target in loader:
@@ -575,6 +576,7 @@ class TestDataLoader(TestCase):
         self._test_batch_sampler(num_workers=4)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
         for input, target in loader:
@@ -647,8 +649,8 @@ class TestDataLoader(TestCase):
 
     @skipIfRocm
     def test_proper_exit(self):
-        r'''There might be ConnectionResetError or leaked semaphore warning
-        (due to dirty process exit), but they are all safe to ignore'''
+        (r'''There might be ConnectionResetError or leaked semaphore warning '''
+         r'''(due to dirty process exit), but they are all safe to ignore''')
 
         # TODO: test the case where the pin_memory_thread triggers an
         #       error/fatal signal. I haven't found out how to properly do that.
@@ -809,6 +811,7 @@ class TestStringDataLoader(TestCase):
         self.dataset = StringDataset()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
         for batch_ndx, (s, n) in enumerate(loader):
@@ -852,6 +855,7 @@ class TestDictDataLoader(TestCase):
             self.assertEqual(n[1], idx + 1)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
         for batch_ndx, sample in enumerate(loader):

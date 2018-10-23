@@ -201,6 +201,14 @@ def unused(g):
     return g.op("prim::Undefined")
 
 
+def _shape_as_tensor(g, input):
+    return g.op('Shape', input)
+
+
+def _reshape_from_tensor(g, input, shape):
+    return g.op('Reshape', input, shape)
+
+
 def add(g, self, other, alpha=None):
     # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
     if alpha and _scalar(_maybe_get_scalar(alpha)) != 1:
@@ -578,6 +586,18 @@ avg_pool3d = _avg_pool('avg_pool3d', _triple)
 
 
 @parse_args('v', 'is')
+def adaptive_avg_pool2d(g, input, output_size):
+    assert output_size == [1, 1], "Only output_size=[1, 1] is supported"
+    return g.op("GlobalAveragePool", input)
+
+
+@parse_args('v', 'is')
+def adaptive_max_pool2d(g, input, output_size):
+    assert output_size == [1, 1], "Only output_size=[1, 1] is supported"
+    return g.op("GlobalMaxPool", input), None
+
+
+@parse_args('v', 'is')
 def reflection_pad(g, input, padding):
     from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "reflect"
@@ -618,7 +638,7 @@ def upsample_bilinear2d(g, input, output_size, align_corners):
     width_scale = float(output_size[-1]) / input.type().sizes()[-1]
     return g.op("Upsample", input,
                 scales_f=[1., 1., height_scale, width_scale],
-                mode_s="bilinear")
+                mode_s="linear")
 
 
 def gt(g, input, other):
@@ -1049,16 +1069,16 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 def to(g, self, *args):
     # ONNX doesn't have a concept of a device, so we ignore device casts
-    if len(args) == 2:
+    if len(args) == 3:
         if args[0].type().isSubtypeOf(ListType.ofInts()):
-            # aten::to(Tensor, Device, bool)
+            # aten::to(Tensor, Device, bool, bool)
             return self
         else:
-            # aten::to(Tensor, ScalarType, bool)
+            # aten::to(Tensor, ScalarType, bool, bool)
             dtype = _get_const(args[0], 'i', 'dtype')
             return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
-    elif len(args) == 3:
-        # aten::to(Tensor, Device, ScalarType, bool)
+    elif len(args) == 4:
+        # aten::to(Tensor, Device, ScalarType, bool, bool)
         dtype = _get_const(args[1], 'i', 'dtype')
         return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
     else:
@@ -1076,6 +1096,20 @@ def repeat(g, self, repeats):
         if diff_dims > 0:
             self = view(g, self, [1] * diff_dims + sizes)
     return g.op("Tile", self, repeats)
+
+
+@parse_args('v', 'i')
+def pixel_shuffle(g, self, upscale_factor):
+    dims = self.type().sizes()
+    if len(dims) != 4:
+        return _unimplemented("pixel_shuffle", "only support 4d input")
+    output_channel = dims[1] // upscale_factor // upscale_factor
+    after_view = view(g, self, [-1, upscale_factor, upscale_factor,
+                                output_channel, dims[2], dims[3]])
+    after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
+    return view(g, after_transpose,
+                [-1, output_channel, dims[2] * upscale_factor, dims[3] *
+                 upscale_factor])
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
@@ -1249,6 +1283,10 @@ def _dim_arange(g, like, dim):
 
 def detach(g, input):
     # Erase aten::detach nodes because ONNX is inference only
+    return input
+
+
+def contiguous(g, input):
     return input
 
 
