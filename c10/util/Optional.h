@@ -1031,12 +1031,6 @@ struct hash<c10::optional<T&>> {
 };
 } // namespace std
 
-// TODO: remove at::optional when done moving files
-namespace at {
-template <class T>
-using optional = c10::optional<T>;
-}
-
 #undef TR2_OPTIONAL_REQUIRES
 #undef TR2_OPTIONAL_ASSERTED_EXPRESSION
 

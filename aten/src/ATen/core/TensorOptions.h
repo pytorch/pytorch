@@ -117,7 +117,8 @@ struct CAFFE2_API TensorOptions {
 
   /// Return a copy of `TensorOptions` with `device` set to the given one, or
   /// cleared if `device` is `nullopt`.
-  C10_NODISCARD TensorOptions device(optional<Device> device) const noexcept {
+  C10_NODISCARD TensorOptions device(c10::optional<Device> device) const
+      noexcept {
     TensorOptions r = *this;
     r.set_device(device);
     return r;
@@ -140,7 +141,8 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Return a copy of `TensorOptions` with `dtype` set to the given one.
-  C10_NODISCARD TensorOptions dtype(optional<ScalarType> dtype) const noexcept {
+  C10_NODISCARD TensorOptions dtype(c10::optional<ScalarType> dtype) const
+      noexcept {
     TensorOptions r = *this;
     r.set_dtype(dtype);
     return r;
@@ -156,21 +158,24 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Sets the layout of the `TensorOptions`.
-  C10_NODISCARD TensorOptions layout(optional<Layout> layout) const noexcept {
+  C10_NODISCARD TensorOptions layout(c10::optional<Layout> layout) const
+      noexcept {
     TensorOptions r = *this;
     r.set_layout(layout);
     return r;
   }
 
   /// Sets the `requires_grad` property of the `TensorOptions`.
-  C10_NODISCARD TensorOptions requires_grad(optional<bool> requires_grad) const noexcept {
+  C10_NODISCARD TensorOptions
+  requires_grad(c10::optional<bool> requires_grad) const noexcept {
     TensorOptions r = *this;
     r.set_requires_grad(requires_grad);
     return r;
   }
 
   /// Sets the `is_variable` property on the `TensorOptions`.
-  C10_NODISCARD TensorOptions is_variable(optional<bool> is_variable) const noexcept {
+  C10_NODISCARD TensorOptions is_variable(c10::optional<bool> is_variable) const
+      noexcept {
     TensorOptions r = *this;
     r.set_is_variable(is_variable);
     return r;
@@ -183,7 +188,7 @@ struct CAFFE2_API TensorOptions {
 
   /// Returns the device of the `TensorOptions`, or `c10::nullopt` if
   /// device is not specified.
-  optional<Device> device_opt() const noexcept {
+  c10::optional<Device> device_opt() const noexcept {
     return has_device_ ? c10::make_optional(device_) : c10::nullopt;
   }
 
@@ -199,7 +204,7 @@ struct CAFFE2_API TensorOptions {
 
   /// Returns the dtype of the `TensorOptions`, or `c10::nullopt` if
   /// device is not specified.
-  optional<ScalarType> dtype_opt() const noexcept {
+  c10::optional<ScalarType> dtype_opt() const noexcept {
     return has_dtype_ ? c10::make_optional(dtype_) : c10::nullopt;
   }
 
@@ -210,7 +215,7 @@ struct CAFFE2_API TensorOptions {
 
   /// Returns the layout of the `TensorOptions`, or `c10::nullopt` if
   /// layout is not specified.
-  optional<Layout> layout_opt() const noexcept {
+  c10::optional<Layout> layout_opt() const noexcept {
     return has_layout_ ? c10::make_optional(layout_) : c10::nullopt;
   }
 
@@ -221,7 +226,7 @@ struct CAFFE2_API TensorOptions {
 
   /// Returns the `requires_grad` property of the `TensorOptions`, or
   /// `c10::nullopt` if `requires_grad` is not specified.
-  optional<bool> requires_grad_opt() const noexcept {
+  c10::optional<bool> requires_grad_opt() const noexcept {
     return has_requires_grad_ ? c10::make_optional(requires_grad_)
                               : c10::nullopt;
   }
@@ -233,7 +238,7 @@ struct CAFFE2_API TensorOptions {
 
   /// Returns the `is_variable` property of the `TensorOptions`, or
   /// `c10::nullopt` if `is_variable` is not specified.
-  optional<bool> is_variable_opt() const noexcept {
+  c10::optional<bool> is_variable_opt() const noexcept {
     return has_is_variable_ ? c10::make_optional(is_variable_) : c10::nullopt;
   }
 
@@ -263,7 +268,7 @@ struct CAFFE2_API TensorOptions {
   // on temporaries.)
 
   /// Mutably set the device of `TensorOptions`.
-  void set_device(optional<Device> device) & noexcept {
+  void set_device(c10::optional<Device> device) & noexcept {
     if (device) {
       device_ = *device;
       has_device_ = true;
@@ -273,7 +278,7 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Mutably set the dtype of `TensorOptions`.
-  void set_dtype(optional<ScalarType> dtype) & noexcept {
+  void set_dtype(c10::optional<ScalarType> dtype) & noexcept {
     if (dtype) {
       dtype_ = *dtype;
       has_dtype_ = true;
@@ -283,7 +288,7 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Mutably set the layout of `TensorOptions`.
-  void set_layout(optional<Layout> layout) & noexcept {
+  void set_layout(c10::optional<Layout> layout) & noexcept {
     if (layout) {
       layout_ = *layout;
       has_layout_ = true;
@@ -293,7 +298,7 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Mutably set the `requires_grad` property of `TensorOptions`.
-  void set_requires_grad(optional<bool> requires_grad) & noexcept {
+  void set_requires_grad(c10::optional<bool> requires_grad) & noexcept {
     if (requires_grad) {
       requires_grad_ = *requires_grad;
       has_requires_grad_ = true;
@@ -303,7 +308,7 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Mutably set the `is_variable` property of `TensorOptions`.
-  void set_is_variable(optional<bool> is_variable) & noexcept {
+  void set_is_variable(c10::optional<bool> is_variable) & noexcept {
     if (is_variable) {
       is_variable_ = *is_variable;
       has_is_variable_ = true;
