@@ -645,6 +645,14 @@ class optional : private OptionalBase<T> {
   }
 };
 
+
+// XXX: please refrain from using optional<T&>, since it is being against with
+// the optional standard in c++ 17, see the debate and the details here:
+// http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2012/n3406#rationale.refs
+// if you need it, consider using optional<std::reference_wrapper<T>> or * pointer
+//
+// we leave the implementation here in case we want to reconsider using it in the
+// future if it becomes a definitely necessary case.
 template <class T>
 class optional<T&> {
   static_assert(!std::is_same<T, nullopt_t>::value, "bad T");
@@ -657,7 +665,15 @@ class optional<T&> {
 
   constexpr optional(nullopt_t) noexcept : ref(nullptr) {}
 
-  constexpr optional(T& v) noexcept : ref(detail_::static_addressof(v)) {}
+  template<
+    typename U = T,
+    TR2_OPTIONAL_REQUIRES(
+        std::is_constructible<T, U&&>::value
+        && !std::is_same<typename std::decay<U>::type, in_place_t>::value
+        && !std::is_same<typename std::decay<U>::type, optional<T>>
+        )
+      >
+  constexpr optional(U& u) noexcept : ref(detail_::static_addressof(u)) {}
 
   template<typename U = T>
   optional(U&&) = delete;
