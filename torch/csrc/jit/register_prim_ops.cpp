@@ -702,7 +702,7 @@ RegisterOperators reg2({
 
 #define DEFINE_STRING_OP(op_name, string_op, result)                           \
 Operator(                                                                      \
-    #op_name "(string a, string b) ->" #result,                                \
+    #op_name "(str a, str b) ->" #result,                                \
     [](Node* node) {                                                           \
       return [=](Stack& stack) {                                               \
         auto b = pop(stack).toStringRef();                                     \
@@ -714,7 +714,7 @@ Operator(                                                                      \
 
   DEFINE_STRING_OP(aten::eq, a == b, bool)
   DEFINE_STRING_OP(aten::ne, a != b, bool)
-  DEFINE_STRING_OP(aten::add, a + b, string)
+  DEFINE_STRING_OP(aten::add, a + b, str)
 
 
 #define CREATE_LIST_OPS(decl_type, c_type) \
