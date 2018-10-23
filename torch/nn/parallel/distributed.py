@@ -138,8 +138,6 @@ class DistributedDataParallel(Module):
         self.output_device = _get_device_index(output_device, True)
         self.broadcast_buffers = broadcast_buffers
 
-        self.allreduce_opts = dist.AllreduceOptions()
-
         MB = 1024 * 1024
 
         # used for intra-node param sync and inter-node sync as well
@@ -207,25 +205,38 @@ class DistributedDataParallel(Module):
         self.next_bucket = len(self.bucket_sizes) - 1
         self.ready_buckets_not_reduced = set()
         self.reduction_works = [None for _ in range(len(self.bucket_sizes))]
-
         self.devs_ready = [0 for _ in range(len(self.bucket_sizes))]
-
-        # default stream tracking to launch nccl reduce kernels
-        self.default_streams = []
-        for dev_id in self.device_ids:
-            with torch.cuda.device(dev_id):
-                self.default_streams.append(torch.cuda.current_stream())
-
         self._register_grad_hooks()
 
     def __getstate__(self):
+        self._check_default_group()
         attrs = copy.copy(self.__dict__)
-        del attrs['_grad_accs']
+        del attrs['process_group'], \
+            attrs['allreduce_opts'], \
+            attrs['default_streams'], \
+            attrs['_grad_accs']
         return attrs
 
     def __setstate__(self, state):
+        # If serializable, then the process group should be the default one
+        self.process_group = dist.get_default_group()
         super(DistributedDataParallel, self).__setstate__(state)
         self._register_grad_hooks()
+
+    def _check_default_group(self):
+        pickle_not_supported = False
+        try:
+            if self.process_group != dist.get_default_group():
+                pickle_not_supported = True
+        except RuntimeError:
+            pickle_not_supported = True
+
+        if pickle_not_supported:
+            raise RuntimeError("DDP Pickling/Unpickling are only supported "
+                               "when using DDP with the default process "
+                               "group. That is, when you have called "
+                               "init_process_group and have not passed "
+                               "process_group argument to DDP constructor")
 
     def forward(self, *inputs, **kwargs):
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
@@ -279,6 +290,15 @@ class DistributedDataParallel(Module):
 
     def _register_grad_hooks(self):
         self._grad_accs = []  # need to keep them in scope
+
+        # default stream tracking to launch nccl reduce kernels
+        self.default_streams = []
+        for dev_id in self.device_ids:
+            with torch.cuda.device(dev_id):
+                self.default_streams.append(torch.cuda.current_stream())
+
+        self.allreduce_opts = dist.AllreduceOptions()
+
         for device_idx, module in enumerate(self._module_copies):
             for p in module.parameters():
                 if p.requires_grad:
