@@ -18,6 +18,17 @@
 #include <string>
 
 namespace torch { namespace jit {
+// Constants relating to maintaining the topological index of nodes.
+//
+// Lower and upper bounds of the index. Inclusive range.
+static constexpr topo_position_t kLowerBound = INT64_MIN;
+static constexpr topo_position_t kUpperBound = INT64_MAX;
+static constexpr topo_position_t kMidPoint = 0;
+// How far away to space nodes that are appended to the graph.
+// should be 2^n, where:
+//   - n is the maximum number of repeated insertions without a re-index
+//   - 2^(64-n) is the maximum number of appends to the end without reindex
+static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 
 // Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
 constexpr Symbol PythonOp::Kind;
@@ -460,6 +471,27 @@ void LintGraph(std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 
+Block::Block(Graph* graph_, Node* node_)
+    : graph_(graph_),
+      output_(initOutput(graph_->create(prim::Return, 0))),
+      input_(graph_->create(prim::Param, 0)),
+      owning_node_(node_) {
+  graph_->all_blocks.emplace(this);
+  output_->owning_block_ = this;
+  output_->topo_position_ = kUpperBound;
+  input_->owning_block_ = this;
+  input_->topo_position_ = kLowerBound;
+}
+
+void Block::reIndexTopology() {
+  auto curPos = kLowerBound;
+  for (auto node : nodes()) {
+    AT_ASSERT(curPos <= (kUpperBound - kAppendInterval));
+    curPos += kAppendInterval;
+    node->topo_position_ = curPos;
+  }
+}
+
 void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   std::unordered_map<Value*, Value*> local_map;
   auto env = [&](Value * v) {
@@ -650,6 +682,62 @@ bool Node::isNondeterministic() const {
   return true;
 }
 
+// Assign this node a topological position, to facilitate fast isBefore() and
+// isAfter() queries. Must be called right after a node is inserted into the
+// node list.
+//
+// The basic scheme is: assign every node a position (uint64_t).  The common
+// case (appending to the end of the graph) is made more efficient by advancing
+// a fixed interval past the previous node and placing `this` there. Otherwise,
+// assign `this` a position at the midpoint between its prev() and next()
+// nodes.
+//
+// If we ever run out of space (by, e.g. inserting too much in place), we
+// reindex by spreading out all the nodes again.
+void Node::assignTopoPosition() {
+  auto returnNode = owningBlock()->return_node();
+  const auto prevPos = prev()->topo_position_;
+  const auto nextPos = next()->topo_position_;
+
+  // Append to the end of the graph
+  if (next() == returnNode) {
+    if (next() == prev()) {
+      // the node list is empty, assign the first position
+      topo_position_ = kMidPoint;
+      return;
+    }
+
+    if (prevPos >= (kUpperBound - kAppendInterval)) {
+      // we're running off the edge
+      owningBlock()->reIndexTopology();
+      return;
+    }
+
+    topo_position_ = prevPos + kAppendInterval;
+
+    // Prepend to the graph
+  } else if (prev() == returnNode) {
+    // next() is the first element in the block list
+    if (nextPos <= (kLowerBound + kAppendInterval)) {
+      // we're running off the edge
+      owningBlock()->reIndexTopology();
+      return;
+    }
+
+    topo_position_ = nextPos - kAppendInterval;
+
+    // insert between two existing nodes
+  } else {
+    const auto posBetween = prevPos + (nextPos - prevPos) / 2;
+    if (posBetween == prevPos) {
+      // There was no room
+      owningBlock()->reIndexTopology();
+      return;
+    }
+    topo_position_ = posBetween;
+  }
+}
+
 Node::Node(Graph * graph_, NodeKind kind_) :
   kind_(kind_),
   graph_(graph_),
@@ -774,6 +862,19 @@ Value* Node::insertOutput(size_t i) {
   return outputs_.at(i);
 }
 
+bool Node::isBefore(Node * n) const {
+  if (this == n) {
+    return false;
+  }
+  return !isAfter(n);
+}
+
+bool Node::isAfter(Node * n) const {
+  JIT_ASSERT(this->owningBlock() == n->owningBlock());
+
+  return this->topo_position_ > n->topo_position_;
+}
+
 Node* Node::insertBefore(Node * n) {
   JIT_ASSERT(n->inBlockList());
   insertAfter(n->prev());
@@ -789,6 +890,7 @@ Node* Node::insertAfter(Node * n) {
   this->prev() = n;
   this->next() = next;
   next->prev() = this;
+  assignTopoPosition();
   return this;
 }
 
