@@ -82,7 +82,7 @@ struct AT_CUDA_API CUDAStream {
   // Constructors
   /* implicit */ CUDAStream(CUDAStreamInternals* internals_in)
     : internals_{internals_in} {
-    AT_ASSERT(internals_in);
+    C10_ASSERT(internals_in);
   }
 
   // Returns true if the CUDAStream is not null.
