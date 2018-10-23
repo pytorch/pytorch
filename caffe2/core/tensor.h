@@ -184,7 +184,7 @@ class CAFFE2_API Tensor final {
         src_tensor.is_contiguous(),
         "Right now ResizeLike is only supported for contiguous Tensor.");
     if (impl_ != src_tensor.impl_) {
-      impl_.get()->Resize(src_tensor.dims());
+      impl_.get()->Resize(src_tensor.sizes());
     }
   }
 
