@@ -1786,10 +1786,10 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='ele
     See :class:`~torch.nn.SmoothL1Loss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
-    else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch._C._nn.smooth_l1_loss(input, target, reduction)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
+    return _pointwise_loss(
+        lambda a, b: torch.where(torch.abs(a - b) < 1, 0.5 * (torch.abs(a - b)) ** 2, torch.abs(a - b) - 0.5),
+        torch._C._nn.smooth_l1_loss, input, target, reduction)
 
 
 def l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
