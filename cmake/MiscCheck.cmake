@@ -199,6 +199,7 @@ endif()
 # totally necessary, and only add when you see fit. If it is needed due to
 # a third party library (like Protobuf), mention it in the comment as
 # "THIRD_PARTY_NAME related"
+# From https://docs.microsoft.com/en-us/cpp/error-messages/compiler-warnings/
 if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
   add_compile_options(
       ##########################################
@@ -228,6 +229,22 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
               # Eigen related.
       /wd4805 # (1): Unsafe mix of types in gtest/gtest.h. Gtest related.
       ##########################################
+      # These are directly ATen related. However, several are covered by
+      # the above now. We leave them here for documentation purposes only.
+      #/wd4267 # Conversion from 'size_t' to 'type', possible loss of data.
+      /wd4522 # (3): 'class' : multiple assignment operators specified
+      /wd4838 # (1): conversion from 'type_1' to 'type_2' requires a
+              #      narrowing conversion
+      #/wd4305 # 'identifier' : truncation from 'type1' to 'type2'
+      #/wd4244 # Conversion from 'type1' to 'type2', possible loss of data.
+      /wd4190 # (1): 'identifier1' has C-linkage specified, but returns UDT
+              #      'identifier2' which is incompatible with C
+      /wd4101 # (3): 'identifier' : unreferenced local variable
+      #/wd4996 # (3): Use of deprecated POSIX functions. Since we develop
+      #        #      mainly on Linux, this is ignored.
+      /wd4275 # (2): non - DLL-interface classkey 'identifier' used as
+              #      base for DLL-interface classkey 'identifier'
+      ##########################################
       # These are directly Caffe2 related. However, several are covered by
       # protobuf now. We leave them here for documentation purposes only.
       ##########################################
@@ -242,6 +259,10 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
               #      caffe2 FLAGS_* definition using dllimport in header and
               #      dllexport in cc file. The strategy is copied from gflags.
   )
+
+  # Make sure windef.h does not define max/min macros.
+  # Required by ATen among others.
+  add_definitions("/DNOMINMAX")
 
   # Exception handing for compiler warining C4530, see
   # https://msdn.microsoft.com/en-us/library/2axwkyt4.aspx
