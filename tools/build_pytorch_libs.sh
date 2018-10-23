@@ -21,17 +21,17 @@ CMAKE_COMMAND="cmake"
 if [[ -x "$(command -v cmake3)" ]]; then
     if [[ -x "$(command -v cmake)" ]]; then
         # have both cmake and cmake3, compare versions
-        CMAKE_VERSION=$(cmake --version | grep 'cmake version' | awk '{print $NF}')
-        CMAKE3_VERSION=$(cmake3 --version | grep 'cmake3 version' | awk '{print $NF}')
-        CMAKE3_IS_NEWER=$($PYTORCH_PYTHON -c "from distutils.version import StrictVersion; print(1 if StrictVersion(\"${CMAKE3_VERSION}\") >= StrictVersion(\"${CMAKE_VERSION}\") else 0)")
+        CMAKE_VERSION=$(cmake --version | grep 'cmake\d* version' | awk '{print $NF}')
+        CMAKE3_VERSION=$(cmake3 --version | grep 'cmake\d* version' | awk '{print $NF}')
+        CMAKE3_NEEDED=$($PYTORCH_PYTHON -c "from distutils.version import StrictVersion; print(1 if StrictVersion(\"${CMAKE_VERSION}\") < StrictVersion(\"3.5.0\") and StrictVersion(\"${CMAKE3_VERSION}\") > StrictVersion(\"${CMAKE_VERSION}\") else 0)")
     else
         # don't have cmake
-        CMAKE3_IS_NEWER=1
+        CMAKE3_NEEDED=1
     fi
-    if [[ $CMAKE3_IS_NEWER == "1" ]]; then
+    if [[ $CMAKE3_NEEDED == "1" ]]; then
         CMAKE_COMMAND="cmake3"
     fi
-    unset CMAKE_VERSION CMAKE3_VERSION CMAKE3_IS_NEWER
+    unset CMAKE_VERSION CMAKE3_VERSION CMAKE3_NEEDED
 fi
 
 # Options for building only a subset of the libraries
