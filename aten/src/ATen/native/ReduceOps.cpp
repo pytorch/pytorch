@@ -192,14 +192,6 @@ Tensor mean(const Tensor &self) {
 
 static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarType> dtype,
                             bool promote_integers=false) {
-  if (dtype.has_value() && result.defined()) {
-    AT_CHECK(result.type().scalarType() == dtype.value(),
-      "provided dtype '",
-      at::toString(dtype.value()),
-      "' must match dtype of result '",
-      at::toString(result.type().scalarType()),
-      "'.");
-  }
   if (dtype.has_value()) {
     return dtype.value();
   } else if (result.defined()) {
