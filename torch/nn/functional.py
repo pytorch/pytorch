@@ -1775,9 +1775,7 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='elementwis
             return d
         return torch.mean(d) if reduction == 'elementwise_mean' else torch.sum(d)
     else:
-        expanded_shape = (input + target).shape()
-        expanded_input = input.expand_as(expanded_shape)
-        expanded_target = target.expand_as(expanded_shape)
+        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
         return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
