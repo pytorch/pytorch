@@ -123,7 +123,7 @@ Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor rsub(const Tensor& self, const Tensor& other, Scalar alpha) {
-  return native::sub(other, self, alpha);
+  return at::sub(other, self, alpha);
 }
 
 // These are still needed because we don't have C++ conversions from number
@@ -169,7 +169,7 @@ Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
 }
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
-  return native::rsub(self, scalar_tensor(other), alpha);
+  return at::rsub(self, scalar_tensor(other), alpha);
 }
 
 }
