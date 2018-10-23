@@ -259,6 +259,7 @@ struct SchemaParser {
       default:
         throw ErrorReport(range) << "unexpected type, file a bug report";
     }
+    return IValue(); // silence warnings
   }
 
   void parseList(int begin, int sep, int end, std::function<void()> callback) {
