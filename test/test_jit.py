@@ -2033,6 +2033,17 @@ class TestJit(JitTestCase):
         t = Test()
         self.assertEqual(t(torch.ones(1)), torch.ones(1) + 4)
 
+    def test_warnings(self):
+        import warnings
+
+        @torch.jit.script
+        def fn(x):
+            if bool(x < 2):
+                warnings.warn("x is less than 2")
+            return x
+
+        self.assertExpectedGraph(fn.graph)
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
