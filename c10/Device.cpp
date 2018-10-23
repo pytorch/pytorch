@@ -73,7 +73,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
   }
   std::string device_index = device_string.substr(index + 1);
   try {
-    index_ = stoi(device_index);
+    index_ = c10::stoi(device_index);
   } catch (const std::exception&) {
     AT_ERROR(
         "Could not parse device index '",

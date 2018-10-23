@@ -29,17 +29,3 @@
 #else
 #define AT_MOBILE 0
 #endif // ANDROID / IOS / MACOS
-
-namespace at {
-inline int stoi(const std::string& str) {
-#if defined(__ANDROID__)
-  std::stringstream ss;
-  int n = 0;
-  ss << str;
-  ss >> n;
-  return n;
-#else
-  return std::stoi(str);
-#endif // defined(__ANDROID__)
-}
-} // namespace at
