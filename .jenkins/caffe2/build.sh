@@ -241,11 +241,18 @@ fi
 # Update Valgrind
 ###############################################################################
 if [[ "$BUILD_ENVIRONMENT" == *-xenial-* ]]; then
-  sudo apt-get update
-  sudo apt-get install -qq software-properties-common python-software-properties
-  sudo add-apt-repository ppa:ibmpackages/valgrind
-  sudo apt-get update -qq
-  sudo apt-get install -qq valgrind
+  sudo apt-get remove -qq valgrind
+  mkdir valgrind_build && cd valgrind_build
+  wget http://valgrind.org/downloads/valgrind-3.14.0.tar.bz2
+  tar -xjf valgrind-3.14.0.tar.bz2
+  cd valgrind-3.14.0
+  ./configure --prefix=/usr/local
+  make
+  sudo make install
+  ccache --clear
+  cd ../../
+  rm -rf valgrind_build
+  alias valgrind="/usr/local/bin/valgrind"
 fi
 ###############################################################################
 # Install ONNX
