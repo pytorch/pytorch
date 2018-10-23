@@ -14,11 +14,16 @@
 
 namespace torch { namespace jit { namespace fuser { namespace cpu {
 
-struct CPUFusedKernel : public ::torch::jit::fuser::FusedKernel {
-  CPUFusedKernel(
-    const std::string& name
-  , AnnotatedGraph& agraph
-  , CompilerConfig& config);
+struct FusedKernelCPU : public ::torch::jit::fuser::FusedKernel {
+  FusedKernelCPU(
+    CompilerConfig& config
+  , const std::string& _name
+  , const std::string& _code
+  , const std::vector<TensorDesc> _input_desc
+  , const std::vector<TensorDesc> _output_desc
+  , const std::vector<PartitionDesc> _chunk_desc
+  , const std::vector<PartitionDesc> _concat_desc
+  , const bool _has_random);
 
 protected:
   virtual at::Backend backend() const override {

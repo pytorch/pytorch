@@ -204,11 +204,11 @@ static void emitIndexingFor(
 
 // TODO: handle cases where we need to generate > 2^32 element tensors
 std::tuple<
-  std::vector<PartitionDesc>
+  std::string
+, std::vector<PartitionDesc>
 , std::vector<PartitionDesc>
 , bool> generateKernel(
-  std::ostream& out
-, const std::string& name
+  const std::string& name
 , AnnotatedGraph& agraph
 , const bool use_cuda) {
   TemplateEnv env;
@@ -360,19 +360,24 @@ std::tuple<
   env.s("kernelBody", body.str());
   env.v("formals", formals);
   env.v("argument_loads", argument_loads);
+  std::string code_string;
   if (use_cuda) {
     #if USE_CUDA_FUSER
       env.s("type_declarations", cuda::type_declarations_template.format(env));
-      out << cuda::cuda_compilation_unit_template.format(env);
+      code_string = cuda::cuda_compilation_unit_template.format(env);
     #else
       throw std::runtime_error("CUDA Fusion requested but not supported.");
     #endif // USE_CUDA_FUSER
   } else {
-    env.s("type_declarations", cpu::type_declarations_template.format(env));
-    out << cpu::cpu_compilation_unit_template.format(env);
+    #if USE_CPU_FUSER
+      env.s("type_declarations", cpu::type_declarations_template.format(env));
+      code_string = cpu::cpu_compilation_unit_template.format(env);
+    #else
+      throw std::runtime_error("CPU Fusion requested but not supported");
+    #endif // USE_CPU_FUSER
   }
 
-  return std::make_tuple(std::move(chunk_desc), std::move(concat_desc), has_random);
+  return std::make_tuple(code_string, std::move(chunk_desc), std::move(concat_desc), has_random);
 }
 
 } // namespace fuser

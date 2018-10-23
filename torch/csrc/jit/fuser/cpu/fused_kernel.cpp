@@ -8,10 +8,10 @@
 #include "torch/csrc/jit/fuser/common/annotated_graph.h"
 
 #include <sstream>
-#include <tuple>
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <stdexcept>
 
 
 namespace torch { namespace jit { namespace fuser { namespace cpu {
@@ -43,8 +43,8 @@ static void runCompiler(
   TemplateEnv env;
   env.s("cxx", config.cxx);
   env.s("fopenmp", config.openmp ? "-fopenmp" : "");
-  env.s("cpp_file",cpp_file);
-  env.s("so_file",so_file);
+  env.s("cpp_file", cpp_file);
+  env.s("so_file", so_file);
   std::string result = format(compile_string, env);
   int r = system(result.c_str());
   if (config.openmp && r != 0) {
@@ -52,7 +52,7 @@ static void runCompiler(
     config.openmp = false; // disable for future compiles
     return runCompiler(config, cpp_file, so_file);
   }
-  JIT_ASSERTM(r == 0, "Failed to compile a fused CPU kernel");
+  throw std::runtime_error("Failed to compile a fused CPU kernel.");
 }
 
 static const std::string disas_string =
@@ -65,27 +65,25 @@ static void disas(const std::string& so_file) {
   JIT_ASSERT(r == 0);
 }
 
-CPUFusedKernel::CPUFusedKernel(
-  const std::string& name
-, AnnotatedGraph& agraph
-, CompilerConfig& config)
-: FusedKernel(name, agraph) {
+FusedKernelCPU::FusedKernelCPU(
+  CompilerConfig& config
+, const std::string& _name
+, const std::string& _code
+, const std::vector<TensorDesc> _input_desc
+, const std::vector<TensorDesc> _output_desc
+, const std::vector<PartitionDesc> _chunk_desc
+, const std::vector<PartitionDesc> _concat_desc
+, const bool _has_random)
+: FusedKernel{_name, _code, _input_desc, _output_desc, _chunk_desc, _concat_desc, _has_random} {
   TempFile so_file(so_template, 3);
   TempFile cpp_file(cpp_template, 4);
-
-  std::stringstream cu;
-  std::tie(chunk_desc, concat_desc, has_random) = emitCompilationUnit(cu, name, agraph, false);
-  JIT_ASSERT(!has_random);
-  compilation_unit = cu.str();
-  cpp_file.write(compilation_unit);
+  cpp_file.write(code_);
   cpp_file.sync();
   runCompiler(config, cpp_file.name(), so_file.name());
-  if (config.debug) {
-    disas(so_file.name());
-  }
+  if (config.debug) disas(so_file.name());
   so_lib.reset(new DynamicLibrary(so_file.name().c_str()));
   #pragma GCC diagnostic ignored "-Wpedantic"
-    kernel = reinterpret_cast<void(*)(uint32_t, void**)>(so_lib->sym(name.c_str()));
+    kernel = reinterpret_cast<void(*)(uint32_t, void**)>(so_lib->sym(name_.c_str()));
   #pragma GCC diagnostic pop
 }
 

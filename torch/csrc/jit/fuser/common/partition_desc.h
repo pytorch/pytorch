@@ -16,10 +16,15 @@ namespace torch { namespace jit { namespace fuser {
 struct PartitionDesc {
   
   PartitionDesc()
-  : nSubtensors(1), dim(0) {}
+  : nSubtensors(1)
+  , dim(0) {}
 
-  PartitionDesc(const TensorDesc& desc, size_t nSubtensors, size_t dim)
-  : nSubtensors(nSubtensors), dim(dim) {
+  PartitionDesc(
+    const TensorDesc& desc
+  , size_t nSubtensors
+  , size_t dim)
+  : nSubtensors(nSubtensors)
+  , dim(dim) {
     JIT_ASSERT(nSubtensors > 1);
     std::vector<bool> cont = desc.contiguity;
     if(dim > 0) {
@@ -38,7 +43,7 @@ struct PartitionDesc {
 
   size_t nSubtensors; // == 1 for tensors that should not be operated on via chunk/cat
   size_t dim; // dimension along which the chunk/concat occurs
-  std::unique_ptr<TensorDesc> subtensorDesc; // descriptor for the subtensor, if it exists
+  std::shared_ptr<TensorDesc> subtensorDesc; // descriptor for the subtensor, if it exists
 };
 
 } // namespace fuser

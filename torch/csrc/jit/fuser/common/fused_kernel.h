@@ -14,21 +14,25 @@
 
 namespace torch { namespace jit { namespace fuser {
 
-std::tuple<std::vector<PartitionDesc>, std::vector<PartitionDesc>, bool> emitCompilationUnit(
-  std::ostream& out
-, const std::string& name
-, AnnotatedGraph& agraph
-, bool use_cuda);
-
 struct FusedKernel {
   TH_DISALLOW_COPY_AND_ASSIGN(FusedKernel);
 
   FusedKernel(
-    const std::string& name
-  , AnnotatedGraph& agraph)
-  : name{name}
-  , input_desc{agraph.input_desc}
-  , output_desc{agraph.output_desc} { }
+    const std::string& _name
+  , const std::string& _code
+  , const std::vector<TensorDesc>& _input_desc
+  , const std::vector<TensorDesc>& _output_desc
+  , const std::vector<PartitionDesc>& _chunk_desc
+  , const std::vector<PartitionDesc>& _concat_desc
+  , const bool _has_random)
+  : name_{_name}
+  , code_{_code}
+  , input_desc_{_input_desc}
+  , output_desc_{_output_desc}
+  , chunk_desc_{_chunk_desc}
+  , concat_desc_{_concat_desc}
+  , has_random_{_has_random}
+  { }
 
   virtual ~FusedKernel() = default;
 
@@ -41,12 +45,24 @@ struct FusedKernel {
   void launch(
     at::ArrayRef<at::Tensor> inputs
   , std::vector<at::Tensor>& outputs);
-  
-  const std::vector<TensorDesc>& outputDescriptors() const {
-    return output_desc;
-  }
 
 protected:
+  const std::string name_;
+  const std::string code_;
+  const std::vector<TensorDesc> input_desc_;
+  const std::vector<TensorDesc> output_desc_;
+  
+  // same size as input_desc, describes whether an
+  // input should be broken into subtensors (chunks)
+  // to be consumed by the fusion group
+  const std::vector<PartitionDesc> chunk_desc_;
+
+  // same size as output_desc, describes whether
+  // an output is actually a concatenation of
+  // many subtensors that the fusion group produces
+  const std::vector<PartitionDesc> concat_desc_;
+
+  const bool has_random_;
 
   virtual at::Backend backend() const = 0;
 
@@ -60,24 +76,7 @@ protected:
   // launch_with_tensors handles packing at::Tensors into this arguments array.
   // CPU code uses the same convension so that launch_with_tensors can be shared.
   virtual void launch_raw(uint32_t numel, void** arguments) = 0;
-
   virtual uint64_t get_rand_offset(uint32_t numel) = 0;
-  bool has_random;
-  std::string name;
-  // We keep these around for debugging
-  std::string compilation_unit;
-  std::vector<TensorDesc> input_desc;
-  std::vector<TensorDesc> output_desc;
-
-  // same size as output_desc, describes whether
-  // an output is actually a concatenation of
-  // many subtensors that the fusion group produces
-  std::vector<PartitionDesc> concat_desc;
-
-  // same size as input_desc, describes whether an
-  // input should be broken into subtensors (chunks)
-  // to be consumed by the fusion group
-  std::vector<PartitionDesc> chunk_desc;
 };
 
 } // namespace fuser

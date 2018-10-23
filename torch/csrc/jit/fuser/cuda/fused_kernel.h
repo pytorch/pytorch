@@ -16,10 +16,18 @@
 
 namespace torch { namespace jit { namespace fuser { namespace cuda {
 
-struct CUDAFusedKernel : public ::torch::jit::fuser::FusedKernel {
-  CUDAFusedKernel(const std::string& name, AnnotatedGraph& agraph);
+struct FusedKernelCUDA : public ::torch::jit::fuser::FusedKernel {
+  FusedKernelCUDA(
+    const int _device
+  , const std::string& _name
+  , const std::string& _code
+  , const std::vector<TensorDesc> _input_desc
+  , const std::vector<TensorDesc> _output_desc
+  , const std::vector<PartitionDesc> _chunk_desc
+  , const std::vector<PartitionDesc> _concat_desc
+  , const bool _has_random);
 
-  virtual ~CUDAFusedKernel() override {
+  virtual ~FusedKernelCUDA() override {
     cuModuleUnload(module);
   }
 
@@ -45,7 +53,7 @@ protected:
 
   // we record prop/device so if they are availiable for launch heuristics
   // querying at launch is too slow for device properties.
-  int device;
+  const int device_;
   cudaDeviceProp prop;
   int blockSize = 128;
   int maxBlocks;

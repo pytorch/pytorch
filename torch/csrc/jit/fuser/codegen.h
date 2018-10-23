@@ -12,13 +12,13 @@
 namespace torch { namespace jit { namespace fuser {
 
 std::tuple<
-  std::vector<PartitionDesc>
+  std::string
+, std::vector<PartitionDesc>
 , std::vector<PartitionDesc>
 , bool> generateKernel(
-  std::ostream& out
-, const std::string& name
+  const std::string& name
 , AnnotatedGraph& agraph
-, const bool is_cuda);
+, const bool use_cuda);
 
 } // namespace fuser
 } // namespace jit

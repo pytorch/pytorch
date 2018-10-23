@@ -8,6 +8,7 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/fuser/kernel_cache.h"
+#include "torch/csrc/jit/fuser/codegen.h"
 #include "torch/csrc/jit/fuser/common/annotated_graph.h"
 #include "torch/csrc/jit/fuser/common/tensor_desc.h"
 
@@ -28,6 +29,7 @@
 #include <atomic>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 
 namespace torch { namespace jit { namespace fuser {
 
@@ -144,6 +146,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   }
   JIT_ASSERT(scalar_type);
 
+  // Creates annotated graph
   for (const Value* output : (spec.graph())->outputs()) {
     std::vector<int64_t> sizes = map_size;
     if (output->node()->kind() == prim::FusedConcat) {
@@ -153,19 +156,43 @@ std::shared_ptr<FusedKernel> compileKernel(
     agraph.output_desc.emplace_back(std::move(type));
   }
 
-  std::string name = "kernel_" + std::to_string(next_kernel_id++);
+  const std::string name = "kernel_" + std::to_string(next_kernel_id++);
+  const bool use_cuda = (device >= 0);
+  std::string code;
+  std::vector<PartitionDesc> chunk_desc;
+  std::vector<PartitionDesc> concat_desc;
+  bool has_random;
+  std::tie(code, chunk_desc, concat_desc, has_random) = generateKernel(name, agraph, use_cuda);
+
   std::shared_ptr<FusedKernel> fused_kernel;
   if (device != kCPUDevice) {
     #if USE_CUDA_FUSER
-      fused_kernel = std::make_shared<cuda::CUDAFusedKernel>(name, agraph);
+      fused_kernel = std::make_shared<cuda::FusedKernelCUDA>(
+        device
+      , name
+      , code
+      , agraph.input_desc
+      , agraph.output_desc
+      , chunk_desc
+      , concat_desc
+      , has_random);
     #else
       throw std::runtime_error("CUDA Fusion is not supported on this build.");
     #endif // USE_CUDA_FUSER
   } else {
-    fused_kernel = std::make_shared<cpu::CPUFusedKernel>(
-      name
-    , agraph
-    , cpu::getConfig());
+    #if USE_CPU_FUSER
+      fused_kernel = std::make_shared<cpu::FusedKernelCPU>(
+        cpu::getConfig()
+      , name
+      , code
+      , agraph.input_desc
+      , agraph.output_desc
+      , chunk_desc
+      , concat_desc
+      , has_random);
+    #else
+      throw std::runtime_error("CPU Fusion is not supported on this build.");
+    #endif // USE_CPU_FUSER
   }
 
   return fused_kernel;
