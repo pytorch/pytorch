@@ -373,12 +373,11 @@ RegisterOperators reg({
         [](Node* node) {
           int64_t beg_ind = node->i(attr::beg);
           int64_t end_ind = node->i(attr::end);
-          int64_t step = node->i(attr::step);
           return [=](Stack& stack) {
             auto t = pop(stack).toTuple();
             const auto & elems = t->elements();
             std::vector<IValue> output_elems;
-            for (size_t i = beg_ind; i < end_ind; i += step) {
+            for (int64_t i = beg_ind; i < end_ind; ++i) {
               output_elems.push_back(elems.at(i));
             }
             push(stack, Tuple::create(std::move(output_elems)));

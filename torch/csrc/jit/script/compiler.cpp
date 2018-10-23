@@ -395,25 +395,6 @@ Value* packOutputs(Graph& g, at::ArrayRef<Value*> values) {
   return g.insertNode(g.createTuple(values))->output();
 }
 
-c10::optional<std::vector<int64_t>> getIntListAttribute(
-    c10::optional<int32_t> N,
-    Value* input) {
-  auto list = constant_as<Shared<jit::IntList>>(input);
-  if(list)
-    return list.value()->elements();
-
-  // broadcast IntList[3] with value 4 -> {4, 4, 4}
-  if(!N)
-    return c10::nullopt;
-
-  auto r = constant_as<int64_t>(input);
-  if(!r)
-    return c10::nullopt;
-
-  // broadcast to attribute size
-  return std::vector<int64_t>(*N, *r);
-}
-
 at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   // small peephole optimization to ensure IntList attributes can still turn
   // into constants e.g. in x.expand([3, 4])
@@ -1546,13 +1527,16 @@ private:
   Value * emitNegate(const TreeRef& tree) {
     const auto& inputs = tree->trees();
     auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+
     auto neg_val = emitBuiltinCall(
                tree->range(),
                *method.graph(),
                aten::neg,
+               c10::nullopt,
                named_values,
                {},
                /*required=*/true);
+
     // constant fold the input if possible
     auto maybe_constant_input = toIValue(neg_val->node()->input());
     if (!maybe_constant_input) {
@@ -1582,9 +1566,21 @@ private:
       case '/':
       case '+':
       case '-':
-      case '%':
+      case '%': {
+        const auto& inputs = tree->trees();
+        auto kind = getNodeKind(tree->kind(), inputs.size());
+        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+        return emitBuiltinCall(
+                   tree->range(),
+                   *method.graph(),
+                   kind,
+                   c10::nullopt,
+                   named_values,
+                   {},
+                   /*required=*/true);
+      }
       case TK_UNARY_MINUS: {
-        return emitNegative(tree);
+        return emitNegate(tree);
       }
       case TK_AND:
       case TK_OR: {
@@ -1710,14 +1706,14 @@ private:
     if (has_end) {
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
-    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
     if (input->type()->cast<TupleType>()) {
       if (has_end) {
-        return emitTupleSlice(loc, args[0], args[1], /*end*/args[2], step);
+        return emitTupleSlice(loc, args[0], args[1], /*end*/args[2]);
       } else {
-        return emitTupleSlice(loc, args[0], args[1], c10::nullopt, step);
+        return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
       }
     }
+    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
     return emitBuiltinCall(loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
 
@@ -1861,8 +1857,7 @@ private:
     }
     return adj_index;
   }
-
-  Value* emitTupleIndex(const SourceRange& loc,
+   Value* emitTupleIndex(const SourceRange& loc,
       Value * tuple_val,
       Value * idx_val) {
     auto tuple_typ = tuple_val->type()->cast<TupleType>();
@@ -1887,6 +1882,7 @@ private:
     // slicing does not throw out of bounds errors
     end = std::min(std::max((int64_t)0, end), tuple_len);
     beg = std::min(std::max((int64_t)0, beg), tuple_len);
+
     return graph->insertNode(
         graph->createTupleSlice(tuple_val.value(*graph), beg, end))->output();
   }

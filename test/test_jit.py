@@ -6946,44 +6946,55 @@ a")
         self.assertExpectedGraph(test_index_put.graph)
 
     def test_tuple_indexing(self):
-        @torch.jit.script
         def tuple_index(a):
-            if a:
+            if bool(a):
                 b = (1, 2)
             else:
                 b = (0, 2)
             return b[-2], b[1]
 
-        self.assertExpectedGraph(tuple_index.graph)
-        self.assertEqual(tuple_index(torch.tensor([1])), (1, 2))
-        self.run_pass('lower_all_tuples', tuple_index.graph)
-        self.assertEqual(tuple_index(torch.tensor([1])), (1, 2))
+        self.checkScript(tuple_index, (torch.tensor([1]),))
+        self.checkScript(tuple_index, (torch.tensor([1]),), optimize=True)
+        tuple_comp = torch.jit.script(tuple_index)
+        self.assertExpectedGraph(tuple_comp.graph)
+        self.run_pass('lower_all_tuples', tuple_comp.graph)
+        m = torch.jit.ScriptModule()
+        m._create_method_from_graph("forward", tuple_comp.graph)
+        self.assertEqual(m(torch.tensor(1)), (1, 2))
 
-        with self.assertRaisesRegex(RuntimeError, "Indexing on tuples only supported with integer constants:"):
+        with self.assertRaisesRegex(RuntimeError, "tuple indices must be integer constants"):
             @torch.jit.script
             def test_non_constant_input(a):
-                if a:
+                if bool(a):
                     b = 1
                 else:
                     b = 0
                 c = (0, 1)
                 return c[b]
 
-        with self.assertRaisesRegex(RuntimeError, "Tuple index out of range."):
-            @torch.jit.script
-            def test_indexing_out_of_bounds_pos():
-                c = (1,)
-                return c[1]
+        def test_indexing_float():
+            c = (1, 2)
+            return c[0.1]
+        self.checkScriptRaisesRegex(test_indexing_float, (), Exception,
+                                    "tuple indices must")
 
-        with self.assertRaisesRegex(RuntimeError, "Tuple index out of range."):
-            @torch.jit.script
-            def test_indexing_out_of_bounds_neg():
-                c = (1,)
-                return c[-3]
+        def test_indexing_out_of_bounds_pos():
+            c = (1, 2)
+            return c[2]
+
+        self.checkScriptRaisesRegex(test_indexing_out_of_bounds_pos, (), Exception,
+                                    "out of range")
+
+        def test_indexing_out_of_bounds_neg():
+            c = (1, 2)
+            return c[-3]
+
+        self.checkScriptRaisesRegex(test_indexing_out_of_bounds_pos, (), Exception,
+                                    "out of range")
 
     def test_tuple_slicing(self):
         def tuple_slice(a):
-            if a:
+            if bool(a):
                 b = (1, 2, 3, 4)
             else:
                 b = (4, 3, 2, 1)
@@ -6992,17 +7003,22 @@ a")
             e = c[1:-1]
             return e
 
-        self.checkScript(tuple_slice, torch.tensor([1]))
+        self.checkScript(tuple_slice, (torch.tensor([1]),), optimize=True)
         tuple_comp = torch.jit.script(tuple_slice)
         self.assertExpectedGraph(tuple_comp.graph)
         self.run_pass('lower_all_tuples', tuple_comp.graph)
-        self.assertEqual(tuple_comp(torch.tensor([1])), (2, 3))
+        self.assertTrue('Tuple' not in str(tuple_comp.graph))
+        m = torch.jit.ScriptModule()
+        m._create_method_from_graph("forward", tuple_comp.graph)
+        self.assertEqual(m(torch.tensor(1)), (2, 3))
 
-        with self.assertRaisesRegex(RuntimeError, "Tuple index out of range."):
-            @torch.jit.script
-            def test_indexing_end_out_of_bounds():
-                c = (1,)
-                return c[0:2]
+        @torch.jit.script
+        def test_indexing_end_out_of_bounds():
+            c = (1, 2)
+            return c[2:10]
+
+        # output is None in script and () in python
+        self.assertEqual(test_indexing_end_out_of_bounds(), None)
 
     def test_indexing_error(self):
         with self.assertRaisesRegex(RuntimeError, "Indexing only supported on lists, tensors, and tuples"):
