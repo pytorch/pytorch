@@ -70,3 +70,6 @@
 [submodule "third_party/nccl/nccl"]
 	path = third_party/nccl/nccl
 	url = https://github.com/NVIDIA/nccl
+[submodule "third_party/gloo"]
+	path = third_party/gloo
+	url = https://github.com/petrex/gloo.git
