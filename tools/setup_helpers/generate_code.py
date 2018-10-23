@@ -84,12 +84,6 @@ def generate_code(ninja_global=None,
     from tools.autograd.gen_autograd import gen_autograd
     from tools.jit.gen_jit_dispatch import gen_jit_dispatch
 
-    from tools.nnwrap import generate_wrappers as generate_nn_wrappers
-
-    # Build THNN/THCUNN.cwrap and then THNN/THCUNN.cpp. These are primarily
-    # used by the legacy NN bindings.
-    generate_nn_wrappers(nn_path, install_dir, 'tools/cwrap/plugins/templates')
-
     # Build ATen based Variable classes
     autograd_gen_dir = install_dir or 'torch/csrc/autograd/generated'
     jit_gen_dir = install_dir or 'torch/csrc/jit/generated'
