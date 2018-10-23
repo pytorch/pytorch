@@ -112,7 +112,7 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
     is_input_.push_back(is_input);
     if (!is_input) {
       // For output, we try to get its output size hint
-      const std::string key = MakeString("output_size_hint_", output_idx);
+      const std::string key = c10::str("output_size_hint_", output_idx);
       auto output_size_hint = OperatorBase::GetRepeatedArgument<int>(key);
       if (!output_size_hint.empty()) {
         std::vector<int64_t> dims;
@@ -161,7 +161,7 @@ bool TensorRTOp::RunOnDevice() {
   size_t N = 0;
   for (int i = 0; i < InputSize(); ++i) {
     const auto& input_tensor = Input(i);
-    const auto& tensor_dims = input_tensor.dims();
+    const auto tensor_dims = input_tensor.dims();
     CAFFE_ENFORCE(!tensor_dims.empty(), "Input tensor cannot be empty");
     if (i == 0) {
       N = tensor_dims.front();
@@ -198,7 +198,7 @@ bool TensorRTOp::RunOnDevice() {
         // input, check input dimensions
         const auto& input_tensor = Input(input_idx++);
         const float* input_data = input_tensor.data<float>();
-        const auto& tensor_dims = input_tensor.dims();
+        const auto tensor_dims = input_tensor.dims();
         auto chw = CheckDims(dims, tensor_dims);
         bindings.push_back((void*)(input_data + offset * chw));
       } else {

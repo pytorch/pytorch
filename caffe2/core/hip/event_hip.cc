@@ -8,25 +8,24 @@ namespace caffe2 {
 
 struct HipEventWrapper
 {
-    explicit HipEventWrapper(const DeviceOption& option)
-        : hip_stream_(nullptr),
-          hip_gpu_id_(option.hip_gpu_id()),
-          status_(EventStatus::EVENT_INITIALIZED)
-    {
-      CAFFE_ENFORCE(option.device_type(), PROTO_HIP);
-      DeviceGuard g(hip_gpu_id_);
-      HIP_ENFORCE(hipEventCreate(
-          &hip_event_ /*, hipEventDefault | hipEventDisableTiming*/));
-    }
+  explicit HipEventWrapper(const DeviceOption& option)
+      : hip_stream_(nullptr),
+        device_id_(option.device_id()),
+        status_(EventStatus::EVENT_INITIALIZED) {
+    CAFFE_ENFORCE(option.device_type(), PROTO_HIP);
+    DeviceGuard g(device_id_);
+    HIP_ENFORCE(hipEventCreate(
+        &hip_event_ /*, hipEventDefault | hipEventDisableTiming*/));
+  }
     ~HipEventWrapper()
     {
-        DeviceGuard g(hip_gpu_id_);
-        HIP_CHECK(hipEventDestroy(hip_event_));
+      DeviceGuard g(device_id_);
+      HIP_CHECK(hipEventDestroy(hip_event_));
     }
 
     hipEvent_t hip_event_;
     hipStream_t hip_stream_;
-    int hip_gpu_id_;
+    int device_id_;
 
     std::atomic<int> status_;
     std::mutex mutex_recorded_;
@@ -67,11 +66,14 @@ void EventRecordHIP(Event* event, const void* context, const char* err_msg)
             // correct.
             // TODO(jiayq): move the enforce logic to the caller?
             const auto& current_device = CaffeHipGetDevice();
-            CAFFE_ENFORCE_EQ(current_device,
-                             wrapper->hip_gpu_id_,
-                             "When you call EventRecordHIP, your current device should be the same "
-                             "as the device specified by the event.");
-            CAFFE_ENFORCE_EQ(current_device, static_cast<const HIPContext*>(context)->hip_gpu_id());
+            CAFFE_ENFORCE_EQ(
+                current_device,
+                wrapper->device_id_,
+                "When you call EventRecordHIP, your current device should be the same "
+                "as the device specified by the event.");
+            CAFFE_ENFORCE_EQ(
+                current_device,
+                static_cast<const HIPContext*>(context)->device_id());
             HIP_ENFORCE(hipEventRecord(wrapper->hip_event_,
                                        static_cast<const HIPContext*>(context)->hip_stream()));
             wrapper->hip_stream_ = static_cast<const HIPContext*>(context)->hip_stream();
@@ -100,7 +102,7 @@ void EventFinishHIP(const Event* event)
     if(wrapper->status_ == EventStatus::EVENT_SCHEDULED)
     {
         // ok, even if event is already completed and status was not yet updated
-        DeviceGuard g(wrapper->hip_gpu_id_);
+        DeviceGuard g(wrapper->device_id_);
         auto hipResult = hipEventSynchronize(wrapper->hip_event_);
         if(hipResult == hipSuccess)
         {
@@ -138,7 +140,7 @@ void EventWaitHIPHIP(const Event* event, void* context)
         {
             // CAFFE_ENFORCE_EQ(
             //    CaffeCudaGetDevice(),
-            //    static_cast<const CUDAContext*>(context)->cuda_gpu_id());
+            //    static_cast<const CUDAContext*>(context)->device_id());
             HIP_CHECK(hipStreamWaitEvent(context_stream, wrapper->hip_event_, 0));
         }
     }

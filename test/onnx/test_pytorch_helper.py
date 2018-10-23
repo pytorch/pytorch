@@ -45,7 +45,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
         torch_model = SuperResolutionNet(upscale_factor=3)
 
-        fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        fake_input = torch.randn(1, 1, 224, 224, requires_grad=True)
 
         # use ModelHelper to create a C2 net
         helper = ModelHelper(name="test_model")

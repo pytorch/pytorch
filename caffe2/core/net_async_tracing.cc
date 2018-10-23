@@ -19,21 +19,21 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
-CAFFE2_DEFINE_string(
+C10_DEFINE_string(
     caffe2_net_async_tracing_filepath,
     "/tmp",
     "Path to save tracing information");
 
-CAFFE2_DEFINE_string(
+C10_DEFINE_string(
     caffe2_net_async_names_to_trace,
     "",
     "Comma-separated list of net names to trace");
 
-CAFFE2_DEFINE_int(caffe2_net_async_tracing_nth, 100, "Trace every Nth batch");
+C10_DEFINE_int(caffe2_net_async_tracing_nth, 100, "Trace every Nth batch");
 
 // For every Nth iterations, we will dump the tracing results to a json file
 // The file is appended with the iteration number.
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_net_async_tracing_dumping_nth,
     10000,
     "Dump profiling result file every Nth batch");
@@ -216,10 +216,10 @@ void Tracer::renameThreads() {
       continue;
     }
     auto* op = net_->GetOperators().at(event.op_id_);
-    if (!op->device_option().has_numa_node_id()) {
+    if (!op->device_option().has_device_id()) {
       continue;
     }
-    int numa_node_id = op->device_option().numa_node_id();
+    int numa_node_id = op->device_option().device_id();
     CAFFE_ENFORCE_GE(numa_node_id, 0, "Invalid NUMA node id: ", numa_node_id);
     long tid = hasher(event.tid_);
 

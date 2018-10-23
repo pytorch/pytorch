@@ -72,7 +72,7 @@ void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar
       <<<grid, threads, 0, THCState_getCurrentStream(state)>>>
       (THCTensor_(data)(state, data), scalar_cast<accreal>(value), size, scalar_cast<accreal>(maxnorm));
 
-    cudaError errcode = cudaGetLastError();
+    cudaError_t errcode = cudaGetLastError();
     if(errcode != cudaSuccess)
       THError(cudaGetErrorString(errcode));
   }
@@ -199,6 +199,13 @@ void THCTensor_(norm)(THCState *state, THCTensor* self, THCTensor* src, scalar_t
                         thrust::identity<accreal>{},
                         scalar_cast<accreal>(0),
                         dimension, keepdim);
+  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(-INFINITY))) {
+    THC_reduceDim<scalar_t>(state, self, src,
+                        TensorNormOp<accreal, 1>{value},
+                        ReduceMin<accreal>{},
+                        thrust::identity<accreal>{},
+                        scalar_cast<accreal>(INFINITY),
+                        dimension, keepdim);
   } else {
     THC_reduceDim<scalar_t>(state, self, src,
                         TensorNormOp<accreal, -1>{value},
@@ -241,6 +248,12 @@ accreal THCTensor_(normall)(THCState *state, THCTensor *self, scalar_t _value)
                         TensorNormOp<accreal, 1>{value},
                         ReduceMax<accreal>{},
                         scalar_cast<accreal>(0),
+                        &result, 0);
+  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(-INFINITY))) {
+    THC_reduceAll<scalar_t>(state, self,
+                        TensorNormOp<accreal, 1>{value},
+                        ReduceMin<accreal>{},
+                        scalar_cast<accreal>(INFINITY),
                         &result, 0);
   } else {
     THC_reduceAll<scalar_t>(state, self,

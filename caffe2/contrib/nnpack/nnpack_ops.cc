@@ -13,11 +13,13 @@
 #include "caffe2/utils/math.h"
 #include "nnpack.h"
 
-CAFFE2_DEFINE_int(
-    caffe2_nnpack_num_threads, 1,
+C10_DEFINE_int(
+    caffe2_nnpack_num_threads,
+    1,
     "The number of nnpack pthreadpool threads.");
-CAFFE2_DEFINE_bool(
-    caffe2_nnpack_use_mkl_num_threads, true,
+C10_DEFINE_bool(
+    caffe2_nnpack_use_mkl_num_threads,
+    true,
     "If MKL is built, this sets nnpack to use the same number of threads as "
     "MKL does. This overrides caffe2_nnpack_num_threads if set.");
 

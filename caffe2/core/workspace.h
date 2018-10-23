@@ -11,14 +11,14 @@
 #include <unordered_set>
 #include <vector>
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/core/net.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/signal_handler.h"
 #include "caffe2/utils/threadpool/ThreadPool.h"
 
-CAFFE2_DECLARE_bool(caffe2_print_blob_sizes_at_exit);
+C10_DECLARE_bool(caffe2_print_blob_sizes_at_exit);
 
 namespace caffe2 {
 

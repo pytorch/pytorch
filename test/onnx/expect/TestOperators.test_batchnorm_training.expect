@@ -30,7 +30,7 @@ graph {
     dims: 2
     data_type: FLOAT
     name: "1"
-    raw_data: "\330=\221>|\037(?"
+    raw_data: "\340e\355<\246\305\315>"
   }
   initializer {
     dims: 2

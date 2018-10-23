@@ -22,8 +22,6 @@ def parse_default(s):
         return '{}'
     elif re.match(r'{.*}', s):
         return s
-    elif s == 'nullopt':
-        return s
     try:
         return int(s)
     except Exception:

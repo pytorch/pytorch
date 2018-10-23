@@ -23,10 +23,10 @@
 // NB: We don't use Registry for this, because we don't want to
 // pay for a hash table lookup every time we do an operation.
 
-#include <ATen/core/VariableHooksInterface.h>
 #include <ATen/core/Backend.h>
 #include <ATen/core/ScalarType.h>
-#include <ATen/core/Error.h>
+#include <ATen/core/VariableHooksInterface.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 
@@ -43,8 +43,12 @@ struct CAFFE2_API LegacyTypeInitInterface {
   }
 };
 struct CAFFE2_API LegacyTypeInitArgs {};
-AT_DECLARE_REGISTRY(LegacyTypeInitRegistry, LegacyTypeInitInterface, LegacyTypeInitArgs);
-#define REGISTER_LEGACY_TYPE_INIT(clsname) AT_REGISTER_CLASS(LegacyTypeInitRegistry, clsname, clsname)
+C10_DECLARE_REGISTRY(
+    LegacyTypeInitRegistry,
+    LegacyTypeInitInterface,
+    LegacyTypeInitArgs);
+#define REGISTER_LEGACY_TYPE_INIT(clsname) \
+  C10_REGISTER_CLASS(LegacyTypeInitRegistry, clsname, clsname)
 
 CAFFE2_API const LegacyTypeInitInterface& getLegacyTypeInit();
 

@@ -19,8 +19,8 @@
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/utils/proto_utils.h"
 
-CAFFE2_DEFINE_string(init_net, "", "The given path to the init protobuffer.");
-CAFFE2_DEFINE_string(
+C10_DEFINE_string(init_net, "", "The given path to the init protobuffer.");
+C10_DEFINE_string(
     predict_net,
     "",
     "The given path to the predict protobuffer.");

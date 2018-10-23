@@ -44,6 +44,12 @@ __device__ __forceinline__ unsigned int ACTIVE_MASK()
 #endif
 }
 
+#if defined(__HIP_PLATFORM_HCC__)
+__device__ __forceinline__ unsigned long long int WARP_BALLOT(int predicate)
+{
+   return __ballot(predicate);
+}
+#else
 __device__ __forceinline__ unsigned int WARP_BALLOT(int predicate, unsigned int mask = 0xffffffff)
 {
 #if CUDA_VERSION >= 9000
@@ -52,6 +58,7 @@ __device__ __forceinline__ unsigned int WARP_BALLOT(int predicate, unsigned int 
     return __ballot(predicate);
 #endif
 }
+#endif
 
 #ifdef __HIP_PLATFORM_HCC__
 //To handle ambiguity, add a type double version.

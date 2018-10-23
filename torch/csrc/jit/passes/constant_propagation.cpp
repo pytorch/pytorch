@@ -17,6 +17,8 @@ std::unordered_set<Symbol> skip_list = {
   prim::Loop, //TODO: handle Loop
   prim::Print,
   prim::PythonOp, //may have side effects
+  prim::LoadWorld,
+  prim::StoreWorld,
   //all the rand functions from native_functions.yaml
   aten::rand,
   aten::rand_like,
@@ -86,7 +88,7 @@ void inlineIf(Block *body, Node * n) {
 }
 
 bool isTrueConstant(Value *val) {
-  at::optional<bool> maybe_value = constant_as<bool>(val);
+  c10::optional<bool> maybe_value = constant_as<bool>(val);
   JIT_ASSERT(maybe_value);
   return *maybe_value;
 }

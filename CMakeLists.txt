@@ -5,10 +5,14 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
+set(CMAKE_INSTALL_MESSAGE NEVER)
+
 set(CMAKE_CXX_STANDARD 11)
 if (NOT MSVC)
   set(CMAKE_C_STANDARD 11)
 endif()
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # One variable that determines whether the current cmake process is being run
 # with the main Caffe2 library. This is useful for building modules - if
@@ -55,6 +59,7 @@ include(CMakeDependentOption)
 option(BUILD_TORCH "Build Torch" OFF)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 option(BUILD_ATEN_MOBILE "Build ATen for Android and iOS" OFF)
+option(BUILD_ATEN_ONLY "Build only a subset focused on ATen only" OFF)
 option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
@@ -90,13 +95,13 @@ option(USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 option(USE_NCCL "Use NCCL" ON)
 option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
-option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
 option(USE_NUMA "Use NUMA (only available on Linux)" ON)
 cmake_dependent_option(
     USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on." OFF
     "USE_CUDA" OFF)
+option(USE_NUMPY "Use NumPy" ON)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
 option(USE_OPENCV "Use OpenCV" ON)
@@ -131,6 +136,23 @@ SET(ONNX_NAMESPACE "onnx_c2" CACHE STRING "onnx namespace")
 
 if (ANDROID OR IOS)
   set(BUILD_ATEN_MOBILE ON)
+endif()
+
+if (BUILD_ATEN_ONLY)
+  set(BUILD_CAFFE2_OPS OFF)
+  set(BUILD_PYTHON OFF)
+  set(USE_NUMA OFF)
+  set(USE_LEVELDB OFF)
+  set(USE_GFLAGS OFF)
+  set(USE_GLOG OFF)
+  set(USE_NCCL OFF)
+  set(USE_NNPACK OFF)
+  set(USE_NUMPY OFF)
+  set(USE_OPENCV OFF)
+  set(USE_IDEEP OFF)
+  set(USE_MKLML OFF)
+  set(USE_DISTRIBUTED OFF)
+  set(USE_LMDB OFF)
 endif()
 
 # ---[ Utils
@@ -272,6 +294,10 @@ if (APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-braces")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++14-extensions")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-constexpr-not-const")
+endif()
+
+if (EMSCRIPTEN)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-implicit-function-declaration -DEMSCRIPTEN -s DISABLE_EXCEPTION_CATCHING=0")
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0.0)

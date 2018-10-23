@@ -3,7 +3,6 @@ import torch.nn.functional as F
 from torch._six import inf
 from operator import mul
 from functools import reduce
-from collections import Iterable
 import math
 
 __all__ = [
@@ -12,6 +11,7 @@ __all__ = [
     'argsort',
     'btrifact',
     'btriunpack',
+    'chain_matmul',
     'einsum',
     'broadcast_tensors',
     'isfinite',
@@ -254,11 +254,18 @@ def isfinite(tensor):
 
     Example::
 
-        >>> torch.isfinite(torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        >>> torch.isfinite(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
         tensor([ 1,  0,  1,  0,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):
         raise ValueError("The argument is not a tensor", str(tensor))
+
+    # Support int input, nan and inf are concepts in floating point numbers.
+    # Numpy uses type 'Object' when the int overflows long, but we don't
+    # have a similar concept. It's safe to assume any created LongTensor doesn't
+    # overflow and it's finite.
+    if not tensor.is_floating_point():
+        return torch.ones_like(tensor, dtype=torch.uint8)
     return (tensor == tensor) & (tensor.abs() != inf)
 
 
@@ -273,7 +280,7 @@ def isinf(tensor):
 
     Example::
 
-        >>> torch.isinf(torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
         tensor([ 0,  1,  0,  1,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):
@@ -439,6 +446,8 @@ def unique(input, sorted=False, return_inverse=False, dim=None):
             before returning as output.
         return_inverse (bool): Whether to also return the indices for where
             elements in the original input ended up in the returned unique list.
+        dim (int): the dimension to apply unique. If ``None``, the unique of the
+            flattened input is returned. default: ``None``
 
     Returns:
         (Tensor, Tensor (optional)): A tensor or a tuple of tensors containing
@@ -646,8 +655,9 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None):
 
     Args:
         input (Tensor): the input tensor
-        p ({int, float, inf, -inf, 'fro', 'nuc'}): the order of norm
+        p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
             The following norms can be calculated:
+
             =====  ============================  ==========================
             ord    matrix norm                   vector norm
             =====  ============================  ==========================
@@ -656,20 +666,22 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None):
             'nuc'  nuclear norm                  --
             Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
             =====  ============================  ==========================
-        dim ({int, 2-tuple of ints, 2-list of ints}, optional): If it is an int,
-        vector norm will be calculated, if it is 2-tuple of ints, matrix norm
-        will be calculated. If the value is None, matrix norm will be calculated
-        when the input tensor only has two dimensions, vector norm will be
-        calculated when the input tensor only has one dimension. If the input
-        tensor has more than two dimensions, the vector norm will be applied to
-        last dimension.
-        keepdim (bool): whether the output tensors have :attr:`dim`
-            retained or not. Ignored if attr:`dim`=``None`` and
-            :attr:`out`=``None``.
+
+        dim (int, 2-tuple of ints, 2-list of ints, optional): If it is an int,
+            vector norm will be calculated, if it is 2-tuple of ints, matrix norm
+            will be calculated. If the value is None, matrix norm will be calculated
+            when the input tensor only has two dimensions, vector norm will be
+            calculated when the input tensor only has one dimension. If the input
+            tensor has more than two dimensions, the vector norm will be applied to
+            last dimension.
+        keepdim (bool, optional): whether the output tensors have :attr:`dim`
+            retained or not. Ignored if :attr:`dim` = ``None`` and
+            :attr:`out` = ``None``. Default: ``False``
         out (Tensor, optional): the output tensor. Ignored if
-        attr:`dim`=``None`` and :attr:`out`=``None``.
+            :attr:`dim` = ``None`` and :attr:`out` = ``None``.
 
     Example::
+
         >>> import torch
         >>> a = torch.arange(9, dtype= torch.float) - 4
         >>> b = a.reshape((3, 3))
@@ -717,3 +729,35 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None):
         if out is None:
             return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim)
     return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, out=out)
+
+
+def chain_matmul(*matrices):
+    r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
+    using the matrix chain order algorithm which selects the order in which incurs the lowest cost in terms
+    of arithmetic operations (`[CLRS]`_). Note that since this is a function to compute the product, :math:`N`
+    needs to be greater than or equal to 2; if equal to 2 then a trivial matrix-matrix product is returned.
+    If :math:`N` is 1, then this is a no-op - the original matrix is returned as is.
+
+
+    Args:
+        matrices (Tensors...): a sequence of 2 or more 2-D tensors whose product is to be determined.
+
+
+    Returns:
+        Tensor: if the :math:`i^{th}` tensor was of dimensions :math:`p_{i} \times p_{i + 1}`, then the product
+        would be of dimensions :math:`p_{1} \times p_{N + 1}`.
+
+    Example::
+
+        >>> a = torch.randn(3, 4)
+        >>> b = torch.randn(4, 5)
+        >>> c = torch.randn(5, 6)
+        >>> d = torch.randn(6, 7)
+        >>> torch.chain_matmul(a, b, c, d)
+        tensor([[ -2.3375,  -3.9790,  -4.1119,  -6.6577,   9.5609, -11.5095,  -3.2614],
+                [ 21.4038,   3.3378,  -8.4982,  -5.2457, -10.2561,  -2.4684,   2.7163],
+                [ -0.9647,  -5.8917,  -2.3213,  -5.2284,  12.8615, -12.2816,  -2.5095]])
+
+    .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
+    """
+    return torch._C._VariableFunctions.chain_matmul(matrices)

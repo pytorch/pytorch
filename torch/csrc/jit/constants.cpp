@@ -6,10 +6,7 @@
 namespace torch { namespace jit {
 
 // IValue -> Constant node
-Value* insertConstant(
-    Graph& g,
-    IValue val,
-    at::optional<SourceRange> loc) {
+Value* insertConstant(Graph& g, IValue val, c10::optional<SourceRange> loc) {
   Node * n = g.create(prim::Constant);
   if(val.isTensor()) {
     at::Tensor ref = std::move(val).toTensor();
@@ -27,6 +24,13 @@ Value* insertConstant(
   } else if(val.isDouble()) {
     n->f_(attr::value, val.toDouble());
     n->output()->setType(FloatType::get());
+  } else if (val.isBool()) {
+    n->i_(attr::value, val.toBool());
+    n->output()->setType(BoolType::get());
+  } else if (val.isBoolList()) {
+    auto bool_list = val.toBoolList()->elements();
+    n->is_(attr::value, std::vector<int64_t>(bool_list.begin(), bool_list.end()));
+    n->output()->setType(ListType::ofBools());
   } else if(val.isIntList()) {
     n->is_(attr::value, val.toIntList()->elements());
     n->output()->setType(ListType::ofInts());
@@ -42,6 +46,8 @@ Value* insertConstant(
     n->destroy();
     n = g.create(prim::None);
     n->output()->setType(NoneType::get());
+  } else if(val.isWorld()) {
+    n->output()->setType(WorldType::get());
   } else {
     throw constant_not_supported_error("Unsupported value kind: " + val.tagKind());
   }
@@ -60,6 +66,12 @@ RegisterOperators reg({
           auto t = autograd::make_variable(node->t(attr::value));
           return [t](Stack& stack) {
             stack.push_back(t);
+            return 0;
+          };
+        } else if (type->isSubtypeOf(BoolType::get())) {
+          bool b = node->i(attr::value);
+          return [b](Stack& stack) {
+            push(stack, b);
             return 0;
           };
         } else if (
@@ -84,6 +96,12 @@ RegisterOperators reg({
             push(stack, is);
             return 0;
           };
+        } else if(type->isSubtypeOf(ListType::ofBools())) {
+          auto bs = node->is(attr::value);
+          return [bs](Stack& stack) {
+            push(stack, bs);
+            return 0;
+          };
         } else if(type->isSubtypeOf(ListType::ofTensors())) {
           auto ts = fmap(node->ts(attr::value), [](const at::Tensor & t) -> at::Tensor {
             return autograd::make_variable(t);
@@ -106,14 +124,13 @@ RegisterOperators reg({
       }),
 });
 
-at::optional<IValue> toIValue(Value* v) {
+c10::optional<IValue> toIValue(Value* v) {
   if(v->node()->kind() != prim::Constant)
-    return at::nullopt;
+    return c10::nullopt;
   // use implemenation of prim::Constant to compute the output IValue
   auto op = getOperation(v->node());
   Stack stack;
   op(stack);
   return stack.back();
 }
-
 }}

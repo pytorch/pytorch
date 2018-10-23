@@ -6,17 +6,17 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/utils/proto_utils.h"
 
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_tensor_chunk_size,
     1000000,
     "Chunk size to split tensor data into");
 
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_max_tensor_serializer_threads,
     16,
     "Maximal number of threads that can be used for tensor serialization");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_serialize_fp16_as_bytes,
     false,
     "Serialize FLOAT16 tensors using byte_data field");
@@ -37,15 +37,16 @@ class StringSerializer : public BlobSerializerBase {
    * otherwise this function produces a fatal error.
    */
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(blob.IsType<std::string>());
+    CAFFE_ENFORCE(typeMeta.Match<std::string>());
 
     BlobProto blob_proto;
     blob_proto.set_name(name);
     blob_proto.set_type("std::string");
-    blob_proto.set_content(blob.template Get<std::string>());
+    blob_proto.set_content(*static_cast<const std::string*>(pointer));
     acceptor(name, blob_proto.SerializeAsString());
   }
 };
@@ -61,44 +62,62 @@ class StringDeserializer : public BlobDeserializerBase {
   }
 };
 
-// The blob serialization member function implementation.
+namespace {
 void SerializeBlob(
-    const Blob& blob,
+    const void* pointer,
+    TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
     int chunk_size) {
   std::unique_ptr<BlobSerializerBase> serializer(
-      CreateSerializer(blob.meta().id()));
-  CAFFE_ENFORCE(serializer, "No known serializer for ", blob.meta().name());
-  serializer->SerializeWithChunkSize(blob, name, acceptor, chunk_size);
+      CreateSerializer(typeMeta.id()));
+  CAFFE_ENFORCE(serializer, "No known serializer for ", typeMeta.name());
+  serializer->SerializeWithChunkSize(
+      pointer, typeMeta, name, acceptor, chunk_size);
 }
 
-// The blob serialization member function implementation.
-std::string SerializeBlob(const Blob& blob, const string& name) {
+std::string
+SerializeBlob(const void* pointer, TypeMeta typeMeta, const string& name) {
   std::string data;
   BlobSerializerBase::SerializationAcceptor acceptor =
       [&data](const std::string&, const std::string& blob_str) {
         DCHECK(data.empty()); // should be called once with kNoChunking
         data = blob_str;
       };
-  SerializeBlob(blob, name, acceptor, kNoChunking);
+  SerializeBlob(pointer, typeMeta, name, acceptor, kNoChunking);
   return data;
 }
+} // namespace
 
-void TensorSerializer::Serialize(
-    const Blob& blob,
-    const string& name,
-    BlobSerializerBase::SerializationAcceptor acceptor) {
-  this->SerializeWithChunkSize(blob, name, acceptor, kDefaultChunkSize);
-}
-
-void TensorSerializer::SerializeWithChunkSize(
+void SerializeBlob(
     const Blob& blob,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
     int chunk_size) {
-  CAFFE_ENFORCE(blob.IsType<Tensor>());
-  const auto& tensor = blob.template Get<Tensor>();
+  SerializeBlob(blob.GetRaw(), blob.meta(), name, acceptor, chunk_size);
+}
+
+std::string SerializeBlob(const Blob& blob, const string& name) {
+  return SerializeBlob(blob.GetRaw(), blob.meta(), name);
+}
+
+void TensorSerializer::Serialize(
+    const void* pointer,
+    TypeMeta typeMeta,
+    const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor) {
+  this->SerializeWithChunkSize(
+      pointer, typeMeta, name, acceptor, kDefaultChunkSize);
+}
+
+void TensorSerializer::SerializeWithChunkSize(
+    const void* pointer,
+    TypeMeta typeMeta,
+    const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor,
+    int chunk_size) {
+  CAFFE_ENFORCE(typeMeta.Match<Tensor>());
+  const auto& tensor = *static_cast<const Tensor*>(pointer);
   if (chunk_size == kNoChunking) {
     chunk_size = tensor.size() + 1; // to account for empty tensors
   } else if (chunk_size == kDefaultChunkSize) {
@@ -114,7 +133,7 @@ void TensorSerializer::SerializeWithChunkSize(
     this->Serialize(
         tensor, name, blob_proto.mutable_tensor(), chunkStart, chunk_size);
     acceptor(
-        MakeString(name, kChunkIdSeparator, chunkStart / chunk_size),
+        c10::str(name, kChunkIdSeparator, chunkStart / chunk_size),
         blob_proto.SerializeAsString());
   };
 
@@ -196,7 +215,7 @@ void TensorSerializer::Serialize(
   const TensorProto::DataType data_type = TypeMetaToDataType(input.meta());
   proto.set_data_type(data_type);
   StoreDeviceDetail(input, &proto);
-  auto uniq_ptr = input.GetStaticContext()->CreateContext();
+  auto uniq_ptr = CreateContext(input.GetDevice());
   // A lot of copypaste is error prone. Should we create a macro for this?
   switch (data_type) {
     case TensorProto_DataType_FLOAT:
@@ -301,12 +320,10 @@ void TensorSerializer::Serialize(
       break;
     case TensorProto_DataType_UNDEFINED: {
       proto.mutable_string_data()->Reserve(chunkSize);
-      Blob temp_blob;
       const char* raw_data = static_cast<const char*>(input.raw_data());
       for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
-        temp_blob.ShareExternal(
-            const_cast<char*>(raw_data + i * input.itemsize()), input.meta());
-        proto.add_string_data(SerializeBlob(temp_blob, ""));
+        proto.add_string_data(
+            SerializeBlob(raw_data + i * input.itemsize(), input.meta(), ""));
       }
     } break;
       // Note: we intentially do not provide "default:" so if any new data types
@@ -319,16 +336,16 @@ int GetGPUIDForPointer(const void* ptr);
 void TensorSerializer::StoreDeviceDetail(
     const Tensor& input,
     TensorProto* proto) {
-  input.ExtractDeviceOption(proto->mutable_device_detail());
+  ExtractDeviceOption(proto->mutable_device_detail(), input.GetDevice());
 }
 // The actual serialization registry objects.
-CAFFE_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY(
     BlobSerializerRegistry,
     TypeIdentifier,
     BlobSerializerBase,
     std::unique_ptr);
 
-CAFFE_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
+C10_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
 
 void DeserializeBlob(const string& content, Blob* result) {
   BlobProto blob_proto;
@@ -371,8 +388,7 @@ void TensorDeserializer::Deserialize(const BlobProto& blob_proto, Blob* blob) {
 void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
   // We create a local context for deserializing. Since Caffe2 contexts are
   // usually lightweight, this should not involve too much overhead.
-  auto uniq_ptr =
-      tensor->GetStaticContext()->CreateContext(proto.device_detail());
+  auto uniq_ptr = CreateContext(OptionToDevice(proto.device_detail()));
   auto context = uniq_ptr.get();
   context->SwitchToDevice(0);
   vector<int64_t> dims;
@@ -521,7 +537,8 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
                 (i + chunkBegin) * temp_blob.meta().itemsize(),
             1);
       }
-    }
+    } break;
+      // Note: we intentially do not provide "default:" so if any new data types
   }
   context->FinishDeviceComputation();
 }

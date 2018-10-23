@@ -4,6 +4,7 @@ import torch.distributed as dist
 from torch.nn.modules import Module
 from collections import defaultdict
 from torch.autograd import Variable
+import torch.utils.hooks
 
 
 class DistributedDataParallelCPU(Module):
@@ -91,6 +92,7 @@ class DistributedDataParallelCPU(Module):
                         buf.copy_(synced)
 
         for param in list(self.module.parameters()):
+            @torch.utils.hooks.unserializable_hook
             def allreduce_hook(*unused):
                 Variable._execution_engine.queue_callback(allreduce_params)
 

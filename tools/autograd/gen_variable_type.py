@@ -29,9 +29,10 @@ from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS, HARDCODED_DIFFERENTIABLE_OUTPUTS
 from .gen_autograd_functions import uses_single_grad
 
+
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'contiguous', 'resize_', 'resize_as_', 'detach', 'detach_',
+    'resize_', 'resize_as_', 'detach', 'detach_',
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -92,6 +93,9 @@ ${return_type} VariableType::${method_prefix_derived}${api_name}(${type_method_f
 UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
+UNPACK_OPTIONS = CodeTemplate("""\
+auto ${arg_name}_ = TensorOptions(${arg_name}).is_variable(false);""")
+
 DECLARE_GRAD_FN = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
 """)
@@ -131,7 +135,8 @@ torch::jit::Node* node = nullptr;
 std::shared_ptr<jit::tracer::TracingState> tracer_state;
 if (jit::tracer::isTracing()) {
   tracer_state = jit::tracer::getTracingState();
-  node = tracer_state->graph->create(jit::aten::${trace_name}, /*outputs=*/0);
+  const static auto op_name = jit::Symbol::fromQualString("aten::${trace_name}");
+  node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
   jit::tracer::recordSourceLocation(node);
   ${add_trace_inputs}
   tracer_state->graph->appendNode(node);
@@ -144,7 +149,7 @@ INPLACE_GUARD = CodeTemplate("""\
 jit::tracer::ensureUnique("${name}", ${mutable_input});
 """)
 
-ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${input}", ${input});""")
+ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${name}", ${input});""")
 
 POST_RECORD_TRACE = CodeTemplate("""\
 if (tracer_state) {
@@ -152,6 +157,18 @@ if (tracer_state) {
   ${record_trace_outputs}
 }
 """)
+
+
+FACTORY_FUNCTION_NAMES = None
+
+
+def find_factory_functions(declarations):
+    global FACTORY_FUNCTION_NAMES
+    FACTORY_FUNCTION_NAMES = set()
+
+    for declaration in declarations:
+        if any(arg['simple_type'] == 'TensorOptions' for arg in declaration['arguments']):
+            FACTORY_FUNCTION_NAMES.add(declaration['api_name'])
 
 
 def should_trace(declaration):
@@ -185,17 +202,30 @@ def record_trace_outputs(declaration):
 
 def format_trace(declaration):
     local = {}
+    local['trace_name'] = trace_name = uninplace_api_name(declaration['api_name'])
 
-    add_trace_inputs = []
-    for argument in declaration['arguments']:
-        add_trace_inputs.append(ADD_TRACE_INPUT.substitute(input=argument['name']))
-    local['add_trace_inputs'] = '\n'.join(add_trace_inputs)
-    local['inplace_guard'] = ''
+    # *_out functions take the result as a first argument, but since we're
+    # going to de-inplace the call, we need to remove it from the argument list
+    trace_inputs = declaration['arguments']
+    if declaration['name'].endswith('_out'):
+        trace_inputs = trace_inputs[1:]
+    trace_input_spec = [(i['name'], i['name']) for i in trace_inputs]
+
+    # factories are a bit special because their out-of-place overloads
+    # take an extra TensorOptions argument, which is missing in the _out function
+    has_factory_name = trace_name in FACTORY_FUNCTION_NAMES
+    is_out_overload = any(arg['name'] == 'result' for arg in declaration['arguments'])
+    if has_factory_name and is_out_overload:
+        trace_input_spec.append(('result', 'result.options()'))
+
+    local['add_trace_inputs'] = \
+        '\n'.join(ADD_TRACE_INPUT.substitute(name=name, input=value) for name, value in trace_input_spec)
+
     # Record inplace operations as out-of-place operations (e.g.,
     # not add_ but add)
     # TODO: Add a proper concept of side effects to the IR, and
     # properly record inplace operations.
-    local['trace_name'] = uninplace_api_name(declaration['api_name'])
+    local['inplace_guard'] = ''
     if local['trace_name'] != declaration['api_name']:
         local['inplace_guard'] = INPLACE_GUARD.substitute(name=declaration['api_name'],
                                                           mutable_input=declaration['arguments'][0]['name'])
@@ -215,6 +245,29 @@ def gen_variable_type(out, aten_declarations, template_path):
     compute the output. The grad_fn is attached to differentiable functions.
     """
 
+    # WARNING: this function call modifies global mutable state
+    find_factory_functions(aten_declarations)
+
+    aten_declarations = list(sorted(aten_declarations, key=lambda decl: decl['name']))
+
+    gen_variable_type_shard(out, aten_declarations, template_path, None, True)
+
+    # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
+    # template regarding sharding of the generated files.
+    num_shards = 5
+    shards = [[] for _ in range(num_shards)]
+
+    # functions are assigned arbitrarily but stably to a file based on hash
+    for decl in aten_declarations:
+        x = sum(ord(c) for c in decl['name']) % num_shards
+        shards[x].append(decl)
+
+    for i, shard in enumerate(shards):
+        gen_variable_type_shard(out, shard, template_path, '_%d' % i, False)
+    gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False)
+
+
+def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
     VARIABLE_TYPE_CPP = CodeTemplate.from_file(template_path + '/VariableType.cpp')
 
@@ -222,9 +275,11 @@ def gen_variable_type(out, aten_declarations, template_path):
     type_definitions = []
 
     for declaration in aten_declarations:
-        # Factory methods shall not appear in `VariableType` at all, since they
-        # don't dispatch via `Type`.
-        if any(arg['simple_type'] == 'TensorOptions' for arg in declaration['arguments']):
+        # Factory methods usually do not appear in `VariableType` at all, since they
+        # don't dispatch via `Type`; except in the case where the implementation is 'abstract'
+        # in which case they do!
+        if (not declaration['abstract'] and
+                any(arg['simple_type'] == 'TensorOptions' for arg in declaration['arguments'])):
             continue
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
@@ -234,8 +289,10 @@ def gen_variable_type(out, aten_declarations, template_path):
         'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
     }
-    write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
-    write(out, 'VariableType.cpp', VARIABLE_TYPE_CPP, env)
+    if header:
+        write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
+    else:
+        write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
 
 
 def emit_method_definition(declaration):
@@ -260,6 +317,8 @@ def emit_body(declaration):
 
     # These exclude things like BoolTensor, int64_t, and Scalar
     def is_differentiable(arg):
+        if 'TensorOptions' in arg['type']:
+            return False
         if 'Tensor' not in arg['type']:
             return False
         if arg['dynamic_type'] in {'IndexTensor', 'BoolTensor'}:
@@ -505,24 +564,28 @@ def unpack_args(env, declaration):
     body = []
     unpacked_args = []
     for i, arg in enumerate(declaration['arguments']):
-        # these arguments are skipped from the Type method.
-        if arg.get('is_type_dispatched'):
-            continue
         if not requires_unpack(arg):
             unpacked_args.append(arg['name'])
             continue
 
         dynamic_type = arg['dynamic_type']
-        is_nullable = arg.get('is_nullable', False)
-        ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensorRef']
-        suffix = '_opt' if is_nullable else ''
+        if 'TensorOptions' not in dynamic_type:
+            is_nullable = arg.get('is_nullable', False)
+            ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensorRef']
+            suffix = '_opt' if is_nullable else ''
 
-        body.append(UNPACK_TENSOR.substitute(
-            arg_name=arg['name'],
-            arg_pos=i,
-            suffix=suffix,
-            ref='&' if ref else '',
-        ))
+            body.append(UNPACK_TENSOR.substitute(
+                arg_name=arg['name'],
+                arg_pos=i,
+                suffix=suffix,
+                ref='&' if ref else '',
+            ))
+        else:
+            # Okay, we are abusing the definition of 'unpack' here a bit,
+            # although it's stll getting the non-variable from the variable
+            # (in this case via TensorOptions rather than Variable/Tensor).
+            body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
+
         unpacked_args.append(arg['name'] + '_')
 
     env['unpacked_args'] = unpacked_args
@@ -549,8 +612,7 @@ def dispatch_strategy(declaration):
           get dispatched back to VariableType (which will ensure that they
           are differentiable.)
     """
-    if (declaration['abstract'] or declaration['derivative'] is not None or
-            any(arg.get('is_type_dispatched') for arg in declaration['arguments'])):
+    if (declaration['abstract'] or declaration['derivative'] is not None):
         # If the function is abstract (not implemented on at::Type), we must
         # call the implementation on the derived type with unpacked tensors.
 

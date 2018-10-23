@@ -9,7 +9,7 @@
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
 
-CAFFE2_DECLARE_bool(caffe2_rnn_executor);
+C10_DECLARE_bool(caffe2_rnn_executor);
 
 namespace caffe2 {
 namespace detail {
@@ -76,7 +76,7 @@ void applyOffsetAlias(
   auto* dst =
       BlobGetMutableTensor(ws->GetBlob(oc.dst), Context::GetDeviceType());
   auto timestep = src->size() / src->dim(0);
-  auto dims = src->dims();
+  auto dims = src->dims().vec();
   const int32_t startDstTimestep =
       oc.offset >= 0 ? oc.offset : src->dim(0) + oc.offset;
   const int32_t numDstTimesteps = src->dim(0) - startDstTimestep;
@@ -86,8 +86,7 @@ void applyOffsetAlias(
   dst->Resize(dims);
   CAFFE_ENFORCE(timestep == dst->size() / numDstTimesteps, "Invalid offset");
   dst->ShareExternalPointer(
-      src->template mutable_data<T>() + startDstTimestep * timestep,
-      dst->size());
+      src->template mutable_data<T>() + startDstTimestep * timestep);
 }
 
 template <typename T, class Context>
@@ -905,7 +904,7 @@ class RNNApplyLinkOp : public Operator<Context> {
     const int64_t externalTimestepSize = external.size() / external.dim(0);
     auto* externalData = external_out->template mutable_data<T>() +
         (t + offset_) * externalTimestepSize;
-    auto internalDims = external_out->dims();
+    auto internalDims = external_out->dims().vec();
     internalDims[0] = window_;
 
     internal_out->Resize(internalDims);

@@ -7,8 +7,10 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/passes/annotate_effects.h"
 #include "torch/csrc/jit/passes/batch_mm.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/erase_number_types.h"
@@ -55,7 +57,7 @@ struct ExecutionPlan {
     , graph(std::move(graph)) {}
 
   void run(Stack& stack) const {
-    return InterpreterState(code).runOneStage(stack);
+    return InterpreterState(code).run(stack);
   }
 
   operator bool() const {
@@ -169,7 +171,7 @@ struct DifferentiableGraphOp {
     }
 
     detachVariables(stack);
-    InterpreterState(f).runOneStage(stack);
+    InterpreterState(f).run(stack);
 
     {
       auto outputs = last(stack, num_outputs);
@@ -443,6 +445,7 @@ private:
   void runOptimization(std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
+    ConstantPooling(graph);
     UnrollLoops(graph);
     PeepholeOptimize(graph);
     CheckInplace(graph);

@@ -94,10 +94,14 @@ Y: [[45. 20. 59. 60. 48.]
 </details>
 
 )DOC")
-    .Arg("min", "*(type: float)* Minimum value, under which element is "
-    "replaced by min (default=*numeric_limits::lowest()*).")
-    .Arg("max", "*(type: float)* Maximum value, under which element is "
-    "replaced by max (default=*numeric_limits::max()*).")
+    .Arg(
+        "min",
+        "*(type: float)* Minimum value, under which element is "
+        "replaced by min (default=*numeric_limits::lowest()*).")
+    .Arg(
+        "max",
+        "*(type: float)* Maximum value, under which element is "
+        "replaced by max (default=*numeric_limits::max()*).")
     .Input(
         0,
         "X",
@@ -107,7 +111,7 @@ Y: [[45. 20. 59. 60. 48.]
         0,
         "Y",
         "*(Tensor`<float>`)* Output tensor clipped within range [`min`, `max`].")
-    .InheritOnnxSchema("Clip");
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(ClipGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
 

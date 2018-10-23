@@ -19,6 +19,11 @@ class CAFFE2_API Caffe2Annotation : public nom::repr::Annotation {
   const caffe2::OperatorDef& getOperatorDef() const;
   caffe2::OperatorDef* getMutableOperatorDef();
 
+  void setDeviceOption(const caffe2::DeviceOption& opDef);
+  bool hasDeviceOption() const;
+  const caffe2::DeviceOption& getDeviceOption() const;
+  caffe2::DeviceOption* getMutableDeviceOption();
+
   // Distributed annotations
   void setDevice(std::string device);
   const std::string getDevice() const;

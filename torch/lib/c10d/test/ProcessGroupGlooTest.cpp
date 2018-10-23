@@ -34,10 +34,10 @@ class SignalTest {
   // Arms test to send signal to PID when the semaphore unlocks. This
   // happens as soon as the first collective completes successfully.
   void arm(int pid, int signal) {
-    arm_ = std::move(std::thread([=] {
+    arm_ = std::thread([=] {
       sem_.wait();
       kill(pid, signal);
-    }));
+    });
   }
 
   std::shared_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
@@ -66,7 +66,7 @@ class SignalTest {
       sem_.post();
     }
 
-    return std::move(work);
+    return work;
   }
 
  protected:
@@ -97,19 +97,19 @@ class CollectiveTest {
       int num) {
     std::vector<CollectiveTest> tests;
     for (auto i = 0; i < num; i++) {
-      tests.push_back(std::move(CollectiveTest(path)));
+      tests.push_back(CollectiveTest(path));
     }
 
     std::vector<std::thread> threads;
     for (auto i = 0; i < num; i++) {
-      threads.push_back(std::move(
-          std::thread([i, &tests] { tests[i].start(i, tests.size()); })));
+      threads.push_back(
+          std::thread([i, &tests] { tests[i].start(i, tests.size()); }));
     }
     for (auto& thread : threads) {
       thread.join();
     }
 
-    return std::move(tests);
+    return tests;
   }
 
   CollectiveTest(const std::string& path) : path_(path) {}
@@ -151,7 +151,7 @@ std::vector<std::vector<at::Tensor>> copyTensors(
     for (size_t j = 0; j < input.size(); j++) {
       output[j] = input[j].cpu();
     }
-    outputs[i] = std::move(output);
+    outputs[i] = output;
   }
   return outputs;
 }
@@ -163,8 +163,7 @@ void testAllreduce(const std::string& path, const at::Backend b) {
   // Generate inputs
   std::vector<std::vector<at::Tensor>> inputs(size);
   for (auto i = 0; i < size; i++) {
-    auto tensor =
-        at::ones({16, 16}, b) * i;
+    auto tensor = at::ones({16, 16}, b) * i;
     inputs[i] = std::vector<at::Tensor>({tensor});
   }
 

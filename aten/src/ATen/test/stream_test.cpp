@@ -1,5 +1,4 @@
-#define CATCH_CONFIG_MAIN
-#include "catch_utils.hpp"
+#include "gtest/gtest.h"
 
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/CUDAGuard.h"
@@ -11,12 +10,23 @@
 #include <thread>
 #include <unordered_set>
 
+#define ASSERT_EQ_CUDA(X, Y) \
+  {                          \
+    bool isTRUE = X == Y;    \
+    ASSERT_TRUE(isTRUE);     \
+  }
+
+#define ASSERT_NE_CUDA(X, Y) \
+  {                          \
+    bool isFALSE = X == Y;   \
+    ASSERT_FALSE(isFALSE);   \
+  }
+
 /*
-Tests related to ATen streams.
-*/
-CATCH_TEST_CASE(
-    "Copying and Moving Streams",
-    "Verifies streams are live through copying and moving") {
+   Tests related to ATen streams.
+   */
+// Verifies streams are live through copying and moving
+TEST(TestStream, CopyAndMoveTest) {
   int32_t device = -1;
   cudaStream_t cuda_stream;
 
@@ -29,14 +39,14 @@ CATCH_TEST_CASE(
 
     copyStream = s;
 
-    CATCH_REQUIRE(copyStream.internals() == s.internals());
-    CATCH_REQUIRE(copyStream.device() == device);
-    CATCH_REQUIRE(copyStream.stream() == cuda_stream);
+    ASSERT_EQ_CUDA(copyStream.internals(), s.internals());
+    ASSERT_EQ_CUDA(copyStream.device(), device);
+    ASSERT_EQ_CUDA(copyStream.stream(), cuda_stream);
   }
 
-  CATCH_REQUIRE(copyStream.internals());
-  CATCH_REQUIRE(copyStream.device() == device);
-  CATCH_REQUIRE(copyStream.stream() == cuda_stream);
+  ASSERT_TRUE(copyStream.internals());
+  ASSERT_EQ_CUDA(copyStream.device(), device);
+  ASSERT_EQ_CUDA(copyStream.stream(), cuda_stream);
 
   // Tests that moving works as expected and preserves the stream
   at::cuda::CUDAStream moveStream;
@@ -47,43 +57,43 @@ CATCH_TEST_CASE(
 
     moveStream = std::move(s);
 
-    CATCH_REQUIRE(moveStream.device() == device);
-    CATCH_REQUIRE(moveStream.stream() == cuda_stream);
+    ASSERT_EQ_CUDA(moveStream.device(), device);
+    ASSERT_EQ_CUDA(moveStream.stream(), cuda_stream);
   }
 
-  CATCH_REQUIRE(moveStream.internals());
-  CATCH_REQUIRE(moveStream.device() == device);
-  CATCH_REQUIRE(moveStream.stream() == cuda_stream);
+  ASSERT_TRUE(moveStream.internals());
+  ASSERT_EQ_CUDA(moveStream.device(), device);
+  ASSERT_EQ_CUDA(moveStream.stream(), cuda_stream);
 }
 
-CATCH_TEST_CASE("Getting and Setting Streams", "Verifies streams are set properly") {
+// Verifies streams are set properly
+TEST(TestStream, GetAndSetTest) {
   at::cuda::CUDAStream myStream = at::cuda::createCUDAStream();
 
   // Sets and gets
   at::cuda::setCurrentCUDAStream(myStream);
   at::cuda::CUDAStream curStream = at::cuda::getCurrentCUDAStream();
 
-  CATCH_REQUIRE(myStream == curStream);
+  ASSERT_EQ_CUDA(myStream, curStream);
 
   // Gets, sets, and gets default stream
   at::cuda::CUDAStream defaultStream = at::cuda::getDefaultCUDAStream();
   at::cuda::setCurrentCUDAStream(defaultStream);
   curStream = at::cuda::getCurrentCUDAStream();
 
-  CATCH_REQUIRE(defaultStream != myStream);
-  CATCH_REQUIRE(curStream == defaultStream);
+  ASSERT_NE_CUDA(defaultStream, myStream);
+  ASSERT_EQ_CUDA(curStream, defaultStream);
 }
 
 void thread_fun(at::cuda::CUDAStream& cur_thread_stream) {
   auto new_stream = at::cuda::createCUDAStream();
   at::cuda::setCurrentCUDAStream(new_stream);
   cur_thread_stream = at::cuda::getCurrentCUDAStream();
-  CATCH_REQUIRE(cur_thread_stream == new_stream);
+  ASSERT_EQ_CUDA(cur_thread_stream, new_stream);
 }
 
-CATCH_TEST_CASE(
-    "Multithread Getting and Setting",
-    "Ensures streams are thread local") {
+// Ensures streams are thread local
+TEST(TestStream, MultithreadGetAndSetTest) {
   at::cuda::CUDAStream s0, s1;
 
   std::thread t0{thread_fun, std::ref(s0)};
@@ -94,25 +104,25 @@ CATCH_TEST_CASE(
   at::cuda::CUDAStream cur_stream = at::cuda::getCurrentCUDAStream();
   at::cuda::CUDAStream default_stream = at::cuda::getDefaultCUDAStream();
 
-  CATCH_REQUIRE(cur_stream == default_stream);
-  CATCH_REQUIRE(cur_stream != s0);
-  CATCH_REQUIRE(cur_stream != s1);
-  CATCH_REQUIRE(s0 != s1);
+  ASSERT_EQ_CUDA(cur_stream, default_stream);
+  ASSERT_NE_CUDA(cur_stream, s0);
+  ASSERT_NE_CUDA(cur_stream, s1);
+  ASSERT_NE_CUDA(s0, s1);
 }
 
-CATCH_TEST_CASE("CUDAGuard") {
+// CUDA Guard
+TEST(TestStream, CUDAGuardTest) {
   if (at::cuda::getNumGPUs() < 2) {
     return;
   }
 
   // -- begin setup
 
-  CATCH_REQUIRE(at::cuda::current_device() == 0);
+  ASSERT_EQ_CUDA(at::cuda::current_device(), 0);
   std::vector<at::cuda::CUDAStream> streams0 = {
-      at::cuda::getDefaultCUDAStream(),
-      at::cuda::createCUDAStream()};
-  CATCH_REQUIRE(streams0[0].device() == 0);
-  CATCH_REQUIRE(streams0[1].device() == 0);
+      at::cuda::getDefaultCUDAStream(), at::cuda::createCUDAStream()};
+  ASSERT_EQ_CUDA(streams0[0].device(), 0);
+  ASSERT_EQ_CUDA(streams0[1].device(), 0);
   at::cuda::setCurrentCUDAStream(streams0[0]);
 
   std::vector<at::cuda::CUDAStream> streams1;
@@ -121,47 +131,46 @@ CATCH_TEST_CASE("CUDAGuard") {
     streams1.push_back(at::cuda::getDefaultCUDAStream());
     streams1.push_back(at::cuda::createCUDAStream());
   }
-  CATCH_REQUIRE(streams1[0].device() == 1);
-  CATCH_REQUIRE(streams1[1].device() == 1);
+  ASSERT_EQ_CUDA(streams1[0].device(), 1);
+  ASSERT_EQ_CUDA(streams1[1].device(), 1);
   at::cuda::setCurrentCUDAStream(streams1[0]);
 
-  CATCH_REQUIRE(at::cuda::current_device() == 0);
+  ASSERT_EQ_CUDA(at::cuda::current_device(), 0);
 
   // -- end setup
 
   // Test that all original streams are recorded.
   {
     at::cuda::CUDAGuard guard;
-    CATCH_REQUIRE(guard.original_streams().empty());
+    ASSERT_TRUE(guard.original_streams().empty());
     guard.set_stream(streams0[0]);
-    CATCH_REQUIRE(
-        guard.original_streams().size() == at::cuda::getNumGPUs());
-    CATCH_REQUIRE(guard.original_streams()[0] == streams0[0]);
-    CATCH_REQUIRE(guard.original_streams()[1] == streams1[0]);
+    ASSERT_EQ_CUDA(guard.original_streams().size(), at::cuda::getNumGPUs());
+    ASSERT_EQ_CUDA(guard.original_streams()[0], streams0[0]);
+    ASSERT_EQ_CUDA(guard.original_streams()[1], streams1[0]);
   }
 
   // Setting a stream changes the current device and the stream on that device
   {
     at::cuda::CUDAGuard guard(streams1[1]);
-    CATCH_REQUIRE(guard.last_device() == 1);
-    CATCH_REQUIRE(at::cuda::current_device() == 1);
-    CATCH_REQUIRE(at::cuda::getCurrentCUDAStream(1) == streams1[1]);
+    ASSERT_EQ_CUDA(guard.last_device(), 1);
+    ASSERT_EQ_CUDA(at::cuda::current_device(), 1);
+    ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(1), streams1[1]);
   }
 
   // Device and stream are now reset
-  CATCH_REQUIRE(at::cuda::current_device() == 0);
-  CATCH_REQUIRE(at::cuda::getCurrentCUDAStream(1) == streams1[0]);
+  ASSERT_EQ_CUDA(at::cuda::current_device(), 0);
+  ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(1), streams1[0]);
 
   // Setting only the device changes only the current device and not the stream
   {
     at::cuda::CUDAGuard guard(/*device=*/1);
-    CATCH_REQUIRE(guard.last_device() == 1);
-    CATCH_REQUIRE(at::cuda::current_device() == 1);
-    CATCH_REQUIRE(at::cuda::getCurrentCUDAStream(1) == streams1[0]);
+    ASSERT_EQ_CUDA(guard.last_device(), 1);
+    ASSERT_EQ_CUDA(at::cuda::current_device(), 1);
+    ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(1), streams1[0]);
   }
 
-  CATCH_REQUIRE(at::cuda::current_device() == 0);
-  CATCH_REQUIRE(at::cuda::getCurrentCUDAStream(0) == streams0[0]);
+  ASSERT_EQ_CUDA(at::cuda::current_device(), 0);
+  ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(0), streams0[0]);
 
   // Setting the stream first, and then the device, first changes the devices
   // back, and then resets the stream on the initial device.
@@ -171,12 +180,13 @@ CATCH_TEST_CASE("CUDAGuard") {
     guard.set_device(1);
   }
 
-  CATCH_REQUIRE(at::cuda::current_device() == 0);
-  CATCH_REQUIRE(at::cuda::getCurrentCUDAStream(0) == streams0[0]);
-  CATCH_REQUIRE(at::cuda::getCurrentCUDAStream(1) == streams1[0]);
+  ASSERT_EQ_CUDA(at::cuda::current_device(), 0);
+  ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(0), streams0[0]);
+  ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(1), streams1[0]);
 }
 
-CATCH_TEST_CASE("CUDAGuardIsMovable") {
+// CUDAGuardIsMovable
+TEST(TestStream, CUDAGuardMovableTest) {
   if (at::cuda::getNumGPUs() < 2) {
     return;
   }
@@ -185,17 +195,18 @@ CATCH_TEST_CASE("CUDAGuardIsMovable") {
   at::cuda::CUDAGuard first(stream);
   first.set_device(1);
   at::cuda::CUDAGuard second(std::move(first));
-  CATCH_REQUIRE(second.original_streams().size() == device_count);
-  CATCH_REQUIRE(second.original_device() == 0);
-  CATCH_REQUIRE(second.last_device() == 1);
+  ASSERT_EQ_CUDA(second.original_streams().size(), device_count);
+  ASSERT_EQ_CUDA(second.original_device(), 0);
+  ASSERT_EQ_CUDA(second.last_device(), 1);
   at::cuda::CUDAGuard third;
   third = std::move(second);
-  CATCH_REQUIRE(third.original_streams().size() == device_count);
-  CATCH_REQUIRE(third.original_device() == 0);
-  CATCH_REQUIRE(third.last_device() == 1);
+  ASSERT_EQ_CUDA(third.original_streams().size(), device_count);
+  ASSERT_EQ_CUDA(third.original_device(), 0);
+  ASSERT_EQ_CUDA(third.last_device(), 1);
 }
 
-CATCH_TEST_CASE("Streampool Round Robin") {
+// Streampool Round Robin
+TEST(TestStream, StreamPoolTest) {
   std::vector<at::cuda::CUDAStream> streams{};
   for (int i = 0; i < 200; ++i) {
     streams.emplace_back(at::cuda::detail::CUDAStream_createStream());
@@ -206,14 +217,17 @@ CATCH_TEST_CASE("Streampool Round Robin") {
   for (auto i = decltype(streams.size()){0}; i < streams.size(); ++i) {
     cudaStream_t cuda_stream = streams[i];
     auto result_pair = stream_set.insert(cuda_stream);
-    if (!result_pair.second) hasDuplicates = true;
+    if (!result_pair.second)
+      hasDuplicates = true;
   }
 
-  CATCH_REQUIRE(hasDuplicates);
+  ASSERT_TRUE(hasDuplicates);
 }
 
-CATCH_TEST_CASE("Multi-GPU") {
-  if (at::cuda::getNumGPUs() < 2) return;
+// Multi-GPU
+TEST(TestStream, MultiGPUTest) {
+  if (at::cuda::getNumGPUs() < 2)
+    return;
 
   at::cuda::CUDAStream s0 = at::cuda::createCUDAStream(true, 0);
   at::cuda::CUDAStream s1 = at::cuda::createCUDAStream(false, 1);
@@ -221,17 +235,18 @@ CATCH_TEST_CASE("Multi-GPU") {
   at::cuda::setCurrentCUDAStream(s0);
   at::cuda::setCurrentCUDAStream(s1);
 
-  CATCH_REQUIRE(s0 == at::cuda::getCurrentCUDAStream());
+  ASSERT_EQ_CUDA(s0, at::cuda::getCurrentCUDAStream());
 
   at::DeviceGuard device_guard{1};
-  CATCH_REQUIRE(s1 == at::cuda::getCurrentCUDAStream());
+  ASSERT_EQ_CUDA(s1, at::cuda::getCurrentCUDAStream());
 }
 
-CATCH_TEST_CASE("CUDAEvent Syncs") {
+// CUDAEvent Syncs
+TEST(TestStream, CUDAEventSyncTest) {
   const auto stream = at::cuda::createCUDAStream();
   at::cuda::CUDAEvent event;
 
-  CATCH_REQUIRE(!event.happened());
+  ASSERT_FALSE(event.happened());
 
   event.recordOnce(stream);
 
@@ -242,11 +257,13 @@ CATCH_TEST_CASE("CUDAEvent Syncs") {
   wait_stream1.synchronize_with(event);
 
   cudaStreamSynchronize(wait_stream0);
-  CATCH_REQUIRE(event.happened());
+  ASSERT_TRUE(event.happened());
 }
 
-CATCH_TEST_CASE("Cross-Device Events") {
-  if (at::cuda::getNumGPUs() < 2) return;
+// Cross-Device Events
+TEST(TestStream, CrossDeviceTest) {
+  if (at::cuda::getNumGPUs() < 2)
+    return;
 
   const auto stream0 = at::cuda::createCUDAStream();
   at::cuda::CUDAEvent event0;
@@ -257,13 +274,13 @@ CATCH_TEST_CASE("Cross-Device Events") {
 
   event0.record(stream0);
   event1.record(stream1);
-  
+
   event0 = std::move(event1);
-  
-  CATCH_REQUIRE(event0.device() == 1);
+
+  ASSERT_EQ_CUDA(event0.device(), 1);
 
   stream0.synchronize_with(event0);
-  
+
   cudaStreamSynchronize(stream0);
-  CATCH_REQUIRE(event0.happened());
+  ASSERT_TRUE(event0.happened());
 }

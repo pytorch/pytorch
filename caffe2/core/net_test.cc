@@ -7,7 +7,7 @@
 
 #include <google/protobuf/text_format.h>
 
-CAFFE2_DECLARE_bool(caffe2_disable_chaining);
+C10_DECLARE_bool(caffe2_disable_chaining);
 
 namespace caffe2 {
 
@@ -147,7 +147,7 @@ void checkChainingAndRun(
   ws.CreateBlob("in");
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
   {
     net_def.set_num_workers(4);
     auto old = FLAGS_caffe2_disable_chaining;
@@ -168,7 +168,7 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
   net_def.set_num_workers(4);
 
   // Create all external inputs
@@ -568,7 +568,7 @@ TEST(NetTest, DISABLED_FailingOperator) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     net_def.set_num_workers(4);
@@ -627,7 +627,7 @@ TEST(NetTest, OperatorWithExecutorHelper) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   Workspace ws;
   net_def.set_num_workers(kTestPoolSize);
@@ -656,7 +656,7 @@ TEST(NetTest, DISABLED_OperatorWithDisabledEvent) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -680,7 +680,7 @@ TEST(NetTest, ExecutorOverride) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     Workspace ws;
@@ -704,7 +704,7 @@ TEST(NetTest, AsyncEmptyNet) {
   Workspace ws;
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -738,7 +738,7 @@ TEST(NetTest, DISABLED_RunAsyncFailure) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -761,7 +761,7 @@ TEST(NetTest, NoTypeNet) {
   Workspace ws;
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -806,12 +806,50 @@ TEST(NetTest, PendingOpsAndNetFailure) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   Workspace ws;
   std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
 
   // net is not stuck and returns false
+  ASSERT_FALSE(net->Run());
+}
+
+class SetFinishErrorOp final : public Operator<CPUContext> {
+ public:
+  SetFinishErrorOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    event().SetFinished("error");
+    return true;
+  }
+
+  bool HasAsyncPart() const override {
+    return true;
+  }
+};
+
+REGISTER_CPU_OPERATOR(SetFinishErrorOp, SetFinishErrorOp);
+
+OPERATOR_SCHEMA(SetFinishErrorOp);
+
+TEST(NetTest, SetFinishErrorOpTest) {
+  const auto spec = R"DOC(
+        name: "example"
+        type: "async_scheduling"
+        op {
+          type: "SetFinishErrorOp"
+        }
+)DOC";
+
+  NetDef net_def;
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
+
+  Workspace ws;
+  std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+
+  // net run returns false
   ASSERT_FALSE(net->Run());
 }
 

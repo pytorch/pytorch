@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include "torch/csrc/jit/attributes.h"
@@ -69,10 +68,11 @@ struct Use {
   : user(user), offset(offset) {}
   Node * user;
   size_t offset;
+
+  bool operator==(const Use & b) {
+    return user == b.user && offset == b.offset;
+  }
 };
-static inline bool operator==(const Use & a, const Use & b) {
-  return a.user == b.user && a.offset == b.offset;
-}
 
 // Note [User node does not uniquely identify use]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -105,57 +105,51 @@ static inline bool operator==(const Use & a, const Use & b) {
 // The trie never needs to shrink, it only grows until it is disposed
 // of when Graph is deallocated. Hence, pointers to scopes held by nodes
 // will always be valid as long as Graph is alive.
-struct Scope {
+struct Scope;
+using ScopePtr = c10::intrusive_ptr<Scope>;
+
+struct TORCH_API Scope : public c10::intrusive_ptr_target {
 private:
-  Scope* parent_;
+  ScopePtr parent_;
   Symbol name_;
-  std::vector<std::unique_ptr<Scope> > children_;
+  ScopePtr intrusive_from_this() {
+    c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
+                                           // from a raw `this` pointer
+                                           // so we need to bump the refcount
+                                           // to account for this ownership
+    return c10::intrusive_ptr<Scope>::reclaim(this);
+  }
 public:
   Scope() {
     name_ = Symbol::scope("");
-    parent_ = nullptr;
   }
-  Scope(Scope* parent, Symbol name) {
+  Scope(ScopePtr parent, Symbol name) {
     name_ = name;
     parent_ = parent;
   }
-  Scope* push(Symbol name) {
-    children_.push_back(std::unique_ptr<Scope>(new Scope(this, name)));
-    return children_.back().get();
-  }
-  Scope* parent() {
-    if (parent_ == nullptr) {
+  ScopePtr push(Symbol name);
+
+  ScopePtr parent() {
+    if (!parent_) {
       throw std::runtime_error("Cannot get parent from Scope with no parent");
     }
     return parent_;
   }
-  bool isRoot() {
-    return parent_ == nullptr;
+  bool isRoot() const {
+    return !parent_;
   }
-  Scope* getRoot() {
-    Scope* current = this;
-    while (current->parent_) {
-      current = current->parent_;
-    }
-    return current;
+  bool isBlank() const {
+    static const Symbol blank = Symbol::scope("");
+    return isRoot() && name() == blank;
   }
-  Symbol name() {
+
+  ScopePtr getRoot();
+
+  Symbol name() const {
     return name_;
   }
-  std::string namesFromRoot(const std::string& separator="/") {
-    // TODO: I think the answer is we shouldn't have used Symbol here
-    std::string out = this->name_.toUnqualString();
-    if (this->isRoot()) {
-      return out;
-    }
-    Scope* parent = this->parent_;
-    while (!parent->isRoot()) {
-      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-      out = std::string(parent->name_.toUnqualString()) + separator + out;
-      parent = parent->parent_;
-    }
-    return out;
-  }
+
+  std::string namesFromRoot(const std::string& separator="/") const;
 };
 
 // the list types are intentionally simple, but we type-def
@@ -167,6 +161,7 @@ using pyobj_list = std::vector<THPObjectPtr>;
 template<typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
+using topo_position_t = int64_t;
 
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);
@@ -177,7 +172,6 @@ private:
   Node * node_;
   size_t offset_;
   size_t unique_ = 0;          // unique id
-  size_t stage_ = 0;           // 0-forward, 1-backward, 2-double-backward,...
   use_list uses_;
   std::string unique_name_;
   TypePtr type_;
@@ -208,13 +202,6 @@ public:
       return unique_name_;
     return std::to_string(unique());
   }
-  Value* setStage(size_t s) {
-    stage_ = s;
-    return this;
-  }
-  size_t stage() const {
-    return stage_;
-  }
   Node* node() {
     return node_;
   }
@@ -234,9 +221,9 @@ public:
     return uses_;
   }
 
-  void replaceFirstUseWith(Value * newValue);
+  TORCH_API void replaceFirstUseWith(Value * newValue);
 
-  // Replaces all uses of this node with 'newValue'.
+  // Replaces all uses of this value with 'newValue'.
   //
   // Given:   %3 = f(%1, %2)
   //          %4 = g(%3)
@@ -245,16 +232,11 @@ public:
   // Result:  %3 = f(%1, %2)
   //          %4 = g(%6)
   //          %5 = h(%6, %6)
-  void replaceAllUsesWith(Value * newValue);
+  TORCH_API void replaceAllUsesWith(Value * newValue);
 
-  Value* copyMetadata(Value * from) {
-    setType(from->type());
-    if (from->hasUniqueName())
-      setUniqueName(from->uniqueName());
-    return this;
-  }
-
+  TORCH_API Value* copyMetadata(Value * from);
 };
+
 
 struct Node : public Attributes<Node> {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
@@ -290,16 +272,16 @@ private:
   Graph* graph_;
   Block* owning_block_;
   std::shared_ptr<SourceLocation> source_location_;
-  size_t stage_;
-  Scope* scope_;
+  ScopePtr scope_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially change
   // the schema.
   // note: mutable because schema_ is effectively a cache
   mutable const FunctionSchema* schema_;
+  topo_position_t topo_position_;
 protected:
-  Node(Graph * graph_, NodeKind kind_); //defined after graph
+  TORCH_API Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
   NodeKind kind() const {
     return kind_;
@@ -320,21 +302,17 @@ public:
   Block * owningBlock() {
     return owning_block_;
   }
-  size_t stage() const {
-    return stage_;
+  const Block * owningBlock() const {
+    return owning_block_;
   }
-  Node* setStage(size_t s) {
-    stage_ = s;
-    return this;
-  }
-  Scope* scope() {
+  ScopePtr scope() {
     return scope_;
   }
-  void setScope(Scope* scope) {
+  void setScope(ScopePtr scope) {
     scope_ = scope;
   }
   std::string scopeName() const {
-    if (scope_ == nullptr) {
+    if (!scope_) {
       return "";
     }
     return scope_->namesFromRoot();
@@ -377,13 +355,9 @@ public:
     }
     return false;
   }
-  void replaceAllUsesWith(Node * n) {
-    JIT_ASSERT(outputs().size() == n->outputs().size());
-    size_t nOutputs = outputs().size();
-    for(size_t i = 0; i < nOutputs; i++) {
-      outputs()[i]->replaceAllUsesWith(n->outputs()[i]);
-    }
-  }
+
+  TORCH_API void replaceAllUsesWith(Node * n);
+
   // lots of things like chunk have a single input or single output, so we have a
   // helper to make accessing it easier
   Value * input() {
@@ -405,15 +379,14 @@ public:
 
   Value* namedInput(Symbol name) const;
 
-  at::optional<IValue> get(Symbol name) const;
+  c10::optional<IValue> get(Symbol name) const;
 
-  template<typename T>
-  at::optional<T> get(Symbol name) const {
+  template <typename T>
+  c10::optional<T> get(Symbol name) const {
     if(auto v = get(name))
       return v->template to<T>();
-    return at::nullopt;
+    return c10::nullopt;
   }
-
 
   // Returns true if the value of input name is statically known
   bool is_constant(Symbol name) const {
@@ -442,34 +415,11 @@ public:
   // Given:   %3 = f(%1, %2)
   // Execute: %3.addInput(%4)
   // Result:  %3 = f(%1, %2, %4)
-  Value* addInput(Value * node) {
-    JIT_ASSERT(graph_ == node->owningGraph());
-    schema_ = nullptr;
-    node->uses_.emplace_back(this, inputs_.size());
-    inputs_.push_back(node);
-    return node;
-  }
+  TORCH_API Value* addInput(Value * value);
 
-  // Add 'node' as an input to 'this' at the specified position in the
-  // arguments. Returns the added node for ease of chaining.
-  Value* insertInput(size_t i, Value* node) {
-    JIT_ASSERT(graph_ == node->owningGraph());
-    schema_ = nullptr;
-    // First we update the offsets for all existing inputs that will reside
-    // after the one we're inserting. Concretely, these are the inputs at
-    // indices [i, # input). Since we're inserting one input before all of
-    // these inputs, increment their use offsets for this Node by 1
-    for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
-      // See Note [User node does not uniquely identify use]
-      auto use = findUseForInput(use_itr);
-      use->offset += 1;
-    }
-    // Insert the actual input at the specified index
-    inputs_.insert(inputs_.begin() + i, node);
-    // Register the new use of the value we're inserted as an input.
-    node->uses_.emplace_back(this, i);
-    return node;
-  }
+  // Add 'value' as an input to 'this' at the specified position in the
+  // arguments. Returns the added value for ease of chaining.
+  TORCH_API Value* insertInput(size_t i, Value* value);
 
   // Replace the input of 'this' at position 'i' with
   // 'newValue', returning the old node.
@@ -477,14 +427,7 @@ public:
   // Given:   %3 = f(%1, %2)
   // Execute: %3.replaceInput(1, %4)
   // Result:  %3 = f(%1, %4)
-  Value * replaceInput(size_t i, Value * newValue) {
-    JIT_ASSERT(newValue->owningGraph() == graph_);
-    schema_ = nullptr;
-    Value * old = dropInput(i);
-    inputs_[i] = newValue;
-    newValue->uses_.emplace_back(this, i);
-    return old;
-  }
+  TORCH_API Value * replaceInput(size_t i, Value * newValue);
 
   // Replace all occurrences of 'from' in the inputs of this
   // node with 'to'. Corresponds to llvm's replaceUsesOfWith.
@@ -492,37 +435,16 @@ public:
   // Given:   %3 = f(%1, %2, %1)
   // Execute: %3.replaceInputWith(%1, %4)
   // Result:  %3 = f(%4, %2, %4)
-  void replaceInputWith(Value * from, Value * to) {
-    JIT_ASSERT(from->owningGraph() == graph_);
-    JIT_ASSERT(to->owningGraph() == graph_);
-    schema_ = nullptr;
-    size_t i = 0;
-    for(auto input : inputs()) {
-      if(input == from)
-        replaceInput(i, to);
-      i++;
-    }
-  }
+  TORCH_API void replaceInputWith(Value * from, Value * to);
 
-  Value* addOutput() {
-    outputs_.push_back(new Value(this, outputs_.size()));
-    schema_ = nullptr;
-    return outputs_.back();
-  }
+  TORCH_API Value* addOutput();
 
-  Value* insertOutput(size_t i) {
-    schema_ = nullptr;
-    outputs_.insert(outputs_.begin() + i, new Value(this, i));
-    for (size_t itr = i + 1; itr < outputs_.size(); ++itr) {
-      outputs_[itr]->setOffset(outputs_[itr]->offset() + 1);
-    }
-    return outputs_.at(i);
-  }
+  TORCH_API Value* insertOutput(size_t i);
 
-  void eraseOutput(size_t i);
+  TORCH_API void eraseOutput(size_t i);
 
-  Block * addBlock();
-  void eraseBlock(size_t i);
+  TORCH_API Block * addBlock();
+  TORCH_API void eraseBlock(size_t i);
 
   // Each Node can have a list of subblocks. These are used to define structured
   // nested control flow operators such as If and Loop.
@@ -549,7 +471,13 @@ public:
     return {blocks_.data(), blocks_.size()};
   }
 
-  // Insert unattached 'this' node after 'n' in the topological order.
+  // Is 'this' before 'n' in the topological order?
+  TORCH_API bool isBefore(Node * n) const;
+
+  // Is 'this' after 'n' in the topological order?
+  TORCH_API bool isAfter(Node * n) const;
+
+  // Insert unattached 'this' node before 'n' in the topological order.
   // Returns this (for chaining).
   //
   // Given:   %3 = f(%1, %2)
@@ -559,11 +487,7 @@ public:
   // Result:  %3 = f(%1, %2)
   //          %5 = h(%1)
   //          %4 = g(%3)
-  Node* insertBefore(Node * n) {
-    JIT_ASSERT(n->inBlockList());
-    insertAfter(n->prev());
-    return this;
-  }
+  TORCH_API Node* insertBefore(Node * n);
 
   // Insert unattached 'this' node after 'n' in the topological order.
   // Returns this (for chaining).
@@ -575,17 +499,7 @@ public:
   // Result:  %3 = f(%1, %2)
   //          %4 = g(%3)
   //          %5 = h(%1)
-  Node* insertAfter(Node * n) {
-    JIT_ASSERT(!inBlockList() && n->inBlockList());
-    JIT_ASSERT(n->owningBlock());
-    this->owning_block_ = n->owningBlock();
-    Node * next = n->next();
-    n->next() = this;
-    this->prev() = n;
-    this->next() = next;
-    next->prev() = this;
-    return this;
-  }
+  TORCH_API Node* insertAfter(Node * n);
 
   // Move 'this' (already in the graph) after 'n' in the topological order.
   //
@@ -595,10 +509,7 @@ public:
   // Result: %3 = g(%1)
   //         %2 = f(%1)
   //
-  void moveAfter(Node * n) {
-    removeFromList();
-    insertAfter(n);
-  }
+  TORCH_API void moveAfter(Node * n);
 
   // Move a node 'n' (already in the graph) before 'this' in the topological order.
   //
@@ -607,10 +518,7 @@ public:
   // Execute: %3.moveBefore(%2)
   // Result: %3 = g(%1)
   //         %2 = f(%1)
-  void moveBefore(Node * n) {
-    removeFromList();
-    insertBefore(n);
-  }
+  TORCH_API void moveBefore(Node * n);
 
   // Remove the input at 'i' from this node.
   //
@@ -620,36 +528,29 @@ public:
   // Given: %3 = f(%1, %2)
   // Execute: %3.removeInput(1)
   // Result: %3 = f(%1)
-  void removeInput(size_t i) {
-    schema_ = nullptr;
-    dropInput(i);
-    // everything after this input shifts left,
-    // so we need to update their use offsets to match
-    for(size_t j = i+1; j < inputs_.size(); j++) {
-      auto it = findUseForInput(j);
-      it->offset--;
-    }
-    inputs_.erase(inputs_.begin() + i);
-  }
+  TORCH_API void removeInput(size_t i);
 
   // Remove all inputs from a node.
   //
   // Given: %3 = f(%1, %2)
   // Execute: %3.removeAllInputs()
   // Result: %3 = f()
-  void removeAllInputs() {
-    schema_ = nullptr;
-    for(size_t i = 0; i < inputs().size(); ++i)
-      dropInput(i);
-    inputs_.clear();
-  }
+  TORCH_API void removeAllInputs();
 
   // iterators of the node list starting at this node
   // useful for resuming a search starting at this node
-  graph_node_list_iterator iterator();
-  graph_node_list_iterator reverseIterator();
-  const_graph_node_list_iterator iterator() const;
-  const_graph_node_list_iterator reverseIterator() const;
+  inline graph_node_list_iterator iterator() {
+    return {this, 0};
+  }
+  inline graph_node_list_iterator reverseIterator() {
+    return iterator().reverse();
+  }
+  inline const_graph_node_list_iterator iterator() const {
+    return {this, 0};
+  }
+  inline const_graph_node_list_iterator reverseIterator() const {
+    return iterator().reverse();
+  }
 
   // Remove 'this' from the instruction list and deallocate it.
   //
@@ -659,7 +560,7 @@ public:
   //        %3 = g(%1)
   // Execute: %2.destroy()
   // Result: %3 = g(%1)
-  void destroy();
+  TORCH_API void destroy();
 
   // Dynamically cast this node to the subclass indicated by the
   // template variable, returning nullptr if the cast is invalid..
@@ -698,26 +599,12 @@ private:
   std::pair<Value*, const Argument&> findInput(Symbol name);
   void findSchema() const;
   // Lookup iterator in use list of _input i_ that corresponds to its use of _this_
-  use_list::iterator findUseForInput(size_t i) {
-    auto & input_uses = inputs_[i]->uses_;
-    // O(N) on the use list, but unless we get nodes with +100 uses
-    // vector traversal still is probably faster than linked list
-    auto use_it = std::find(input_uses.begin(), input_uses.end(), Use(this, i));
-    JIT_ASSERT(use_it != input_uses.end());
-    return use_it;
-  }
+  TORCH_API use_list::iterator findUseForInput(size_t i);
 
   // remove the use of input i, this sets input i to nullptr, but
   // is only used internally to Node before setting it to a new value
   // or erasing the entry from the list.
-  Value* dropInput(size_t i) {
-    JIT_ASSERT(i < inputs_.size());
-    auto input_node = inputs_[i];
-    auto use_it = findUseForInput(i);
-    input_node->uses_.erase(use_it);
-    inputs_[i] = nullptr;
-    return input_node;
-  }
+  TORCH_API Value* dropInput(size_t i);
 
   bool inBlockList() const {
     if(next() == nullptr) {
@@ -725,17 +612,12 @@ private:
     }
     return next() != nullptr;
   }
-  void removeFromList() {
-    JIT_ASSERT(inBlockList());
-    this->owning_block_ = nullptr;
-    Node * next = this->next();
-    Node * prev = this->prev();
-    prev->next() = next;
-    next->prev() = prev;
-    this->next() = nullptr;
-    this->prev() = nullptr;
-  }
-  void lint() const;
+
+  TORCH_API void removeFromList();
+  TORCH_API void lint() const;
+
+  void assignTopoPosition();
+
 protected:
   // subclasses must override
   // this function is used by createClone to initialize a new version
@@ -750,16 +632,14 @@ protected:
   // 'this' will be allocated with s->allocNewInstance(g) so it should have
   // the same concrete type as 's'
   //
-  // NB: This does NOT clone stages.  You're expected to set the stage correctly
-  // if you are going to preserve it.
-  virtual void cloneFrom(Node * s);
+  TORCH_API virtual void cloneFrom(Node * s);
 };
 
 struct Block {
   friend struct Node;
   friend struct Graph;
   TH_DISALLOW_COPY_AND_ASSIGN(Block);
-  Block(Graph * graph_, Node * node_);
+  TORCH_API Block(Graph * graph_, Node * node_);
   at::ArrayRef<Value*> inputs() {
     return input_->outputs();
   }
@@ -804,8 +684,8 @@ struct Block {
   void eraseInput(size_t i) {
     input_->eraseOutput(i);
   }
-  size_t registerOutput(Value * n) {
-    output_->addInput(n);
+  size_t registerOutput(Value * v) {
+    output_->addInput(v);
     return outputs().size() - 1;
   }
   size_t insertOutput(size_t i, Value* n) {
@@ -838,11 +718,12 @@ struct Block {
   // in src to look up its corresponding value
   TORCH_API void cloneFrom(Block * src, std::function<Value*(Value*)> value_map);
 private:
+  void reIndexTopology();
+
   // should only be called in the constructor
   Node* initOutput(Node* p) {
     p->next() = p;
     p->prev() = p;
-    p->setStage(std::numeric_limits<size_t>::max());
     return p;
   }
 
@@ -879,10 +760,7 @@ private:
 
   std::unordered_map<std::string, Value*> unique_names_;
 
-  size_t new_node_stage_;
-
-  std::shared_ptr<Scope> scope_root_;
-  Scope * current_scope_;
+  ScopePtr current_scope_;
 
   Block* const block_;
   // when insertNode() is called, the node is inserted before this node
@@ -891,15 +769,13 @@ private:
 
 public:
 
-  Graph(std::shared_ptr<Scope> scope_root)
+  Graph(ScopePtr scope_root)
   : next_unique_(0)
-  , new_node_stage_(0)
-  , scope_root_(std::move(scope_root))
-  , current_scope_(scope_root_.get())
+  , current_scope_(std::move(scope_root))
   , block_(new Block(this, nullptr))
   , insert_before_(return_node()) {}
 
-  Graph() : Graph(std::make_shared<Scope>()) {}
+  Graph() : Graph(c10::make_intrusive<Scope>()) {}
 
   at::ArrayRef<Value*> inputs() {
     return block_->inputs();
@@ -934,17 +810,11 @@ public:
   void pop_scope() {
     current_scope_ = current_scope_->parent();
   }
-  Scope * current_scope() {
+  ScopePtr current_scope() {
     return current_scope_;
   }
-  void set_current_scope(Scope* scope) {
-    if (scope->getRoot() != scope_root_.get()) {
-      throw std::runtime_error("trying to set a scope as current that does not belong to the Graph's scope trie");
-    }
+  void set_current_scope(ScopePtr scope) {
     current_scope_ = scope;
-  }
-  std::shared_ptr<Scope> scope_root() {
-    return scope_root_;
   }
   Value * addInput(std::string name="") {
     return block_->addInput(std::move(name));
@@ -958,20 +828,6 @@ public:
   void eraseOutput(size_t i) {
     block_->eraseOutput(i);
   }
-  void advanceStage() {
-    new_node_stage_++;
-  }
-  void setStage(size_t new_stage) {
-    new_node_stage_ = new_stage;
-  }
-  size_t stage() const {
-    return new_node_stage_;
-  }
-  ResourceGuard setStageTemporary(size_t s) {
-    auto prev_stage = new_node_stage_;
-    new_node_stage_ = s;
-    return ResourceGuard([prev_stage, this]() { this->new_node_stage_ = prev_stage; });
-  }
   const std::unordered_map<std::string, Value*>& uniqueNames() const {
     return unique_names_;
   }
@@ -980,101 +836,24 @@ public:
     return block_->registerOutput(n);
   }
 
-  Node * create(NodeKind kind, size_t num_outputs=1) {
-    // NB: Node constructor adds node to all_nodes
-    auto n = new Node(this, kind);
-    for(size_t i = 0; i < num_outputs; i++)
-      n->addOutput();
-    return n;
-  }
+  TORCH_API Node * create(NodeKind kind, size_t num_outputs=1);
+  TORCH_API Node * create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs=1);
 
-  Node * create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs=1) {
-    auto n = create(kind, num_outputs);
-    for(auto i : inputs)
-      n->addInput(i);
-    return n;
-  }
-
-  Node * createUndefined() {
-    return create(prim::Undefined);
-  }
-  Node * createNoneGenerator() {
-    auto n = create(prim::NoneGenerator);
-    n->output()->setType(GeneratorType::get());
-    return n;
-  }
-  Node * createFusionGroup(int device) {
-    auto n = create(prim::FusionGroup, 0);
-    n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));
-    n->i_(attr::device, device);
-    return n;
-  }
-  Node* createTuple(at::ArrayRef<Value*> values) {
-    auto types = fmap(values, [](Value* v) { return v->type(); });
-    auto tt = TupleType::create(std::move(types));
-    auto n = create(prim::TupleConstruct, values);
-    n->output()->setType(tt);
-    return n;
-  }
-  Node* createTupleUnpack(Value * v) {
-    TupleTypePtr tt = v->type()->expect<TupleType>();
-    auto n = create(prim::TupleUnpack, {v}, 0);
-    for(auto & element : tt->elements()) {
-      n->addOutput()->setType(element);
-    }
-    return n;
-  }
-  Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
-    auto n = create(prim::ListConstruct, values);
-    for(const auto & v : values) {
-      JIT_ASSERT(v->type()->isSubtypeOf(elem_type));
-    }
-    n->output()->setType(ListType::create(elem_type));
-    return n;
-  }
-  Node * createListUnpack(Value *v, size_t size) {
-    ListTypePtr list_type = v->type()->expect<ListType>();
-    TypePtr elem_type = list_type->getElementType();
-    auto n = create(prim::ListUnpack, {v}, 0);
-    for (size_t i = 0; i < size; ++i) {
-      n->addOutput()->setType(elem_type);
-    }
-    return n;
-  }
-  Node* createNumToTensor(Value* value) {
-    auto typ = value->type();
-    Node * result = create(prim::NumToTensor, {value});
-    result->output()->setType(CompleteTensorType::fromNumberType(typ));
-    return result;
-  }
-  Node* createTensorToNum(const TypePtr& type, Value* value) {
-    auto* result = create(prim::TensorToNum, {value});
-    result->output()->setType(type);
-    return result;
-  }
-  Node* createImplicitTensorToNum(const TypePtr& type, Value* value) {
-    auto* result = create(prim::ImplicitTensorToNum, {value});
-    result->output()->setType(type);
-    return result;
-  }
-  Node* createIntToFloat(Value* value) {
-    JIT_ASSERT(*value->type() == *IntType::get());
-    auto* result = create(prim::IntToFloat, {value});
-    result->output()->setType(FloatType::get());
-    return result;
-  }
-  Node* createFloatToInt(Value* value) {
-    JIT_ASSERT(*value->type() == *FloatType::get());
-    auto* result = create(prim::FloatToInt, {value});
-    result->output()->setType(IntType::get());
-    return result;
-  }
-  Node* createStringToFloat(Value* value) {
-    JIT_ASSERT(*value->type() == *StringType::get());
-    auto* result = create(prim::StringToFloat, {value});
-    result->output()->setType(FloatType::get());
-    return result;
-  }
+  TORCH_API Node* createUndefined();
+  TORCH_API Node* createNoneGenerator();
+  TORCH_API Node* createFusionGroup(int device);
+  TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
+  TORCH_API Node* createTupleUnpack(Value * v);
+  TORCH_API Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values);
+  TORCH_API Node * createListUnpack(Value *v, size_t size);
+  TORCH_API Node* createNumToTensor(Value* value);
+  TORCH_API Node* createBoolToTensor(Value* value);
+  TORCH_API Node* createTensorToNum(const TypePtr& type, Value* value);
+  TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
+  TORCH_API Node* createTensorToBool(Value* value);
+  TORCH_API Node* createIntToFloat(Value* value);
+  TORCH_API Node* createFloatToInt(Value* value);
+  TORCH_API Node* createStringToFloat(Value* value);
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
@@ -1083,29 +862,14 @@ public:
   // use node_map to translate inputs of n to inputs of the cloned node
   // if copy_blocks is false, it will not recursively clone the nested blocks
   // this node contains.
-  Node * createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks=true) {
-    //n can be from a different graph
-    Node * r = n->allocNewInstance(this);
-    for(auto o : n->outputs()) {
-      r->addOutput()->copyMetadata(o);
-    }
-    r->cloneFrom(n);
-    for(auto i : n->inputs()) {
-      r->addInput(value_map(i));
-    }
-    if(copy_blocks) {
-      for(auto b : n->blocks()) {
-        r->addBlock()->cloneFrom(b, value_map);
-      }
-    }
-    return r;
-  }
+  TORCH_API Node * createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks=true);
 
-  Value* insertConstant(
+  TORCH_API Value* insertConstant(
       IValue val,
-      at::optional<SourceRange> loc = at::nullopt) {
-    return jit::insertConstant(*this, std::move(val), loc);
-  }
+      c10::optional<SourceRange> loc = c10::nullopt);
+
+  TORCH_API Value* insertDummyWorld();
+
 
   // schema-driven insert
   // this inserts a node into the graph with inputs determined from args and kwargs using Python
@@ -1157,20 +921,9 @@ public:
   // for use in debugger
   TORCH_API void dump() const;
 
-  ~Graph() {
-    for (const Node * n : all_nodes)
-      delete n;
-    for (const Value * v : all_values)
-      delete v;
-    for (const Block * b : all_blocks)
-      delete b;
-  }
+  TORCH_API ~Graph();
 
-  std::string toString() const {
-    std::ostringstream oss;
-    oss << *this;
-    return oss.str();
-  }
+  TORCH_API std::string toString() const;
 
   friend TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
 
@@ -1181,25 +934,9 @@ public:
 
 private:
 
-  void freeNode(Node * n) {
-    auto it = all_nodes.find(n);
-    JIT_ASSERT(it != all_nodes.end());
-    delete *it;
-    all_nodes.erase(it);
-  }
-  void freeValue(Value * v) {
-    v->setUniqueName("");
-    auto it = all_values.find(v);
-    JIT_ASSERT(it != all_values.end());
-    delete *it;
-    all_values.erase(it);
-  }
-  void freeBlock(Block * b) {
-    auto it = all_blocks.find(b);
-    JIT_ASSERT(it != all_blocks.end());
-    delete *it;
-    all_blocks.erase(it);
-  }
+  TORCH_API void freeNode(Node * n);
+  TORCH_API void freeValue(Value * v);
+  TORCH_API void freeBlock(Block * b);
 };
 
 struct WithInsertPoint : public ResourceGuard {
@@ -1217,7 +954,7 @@ private:
 };
 
 struct WithCurrentScope : public ResourceGuard {
-  WithCurrentScope(Graph & g, Scope* scope)
+  WithCurrentScope(Graph & g, ScopePtr scope)
   : ResourceGuard([&g, this]() {
     g.set_current_scope(prev_scope);
   })
@@ -1225,14 +962,13 @@ struct WithCurrentScope : public ResourceGuard {
     g.set_current_scope(scope);
   }
 private:
-  Scope * prev_scope;
+  ScopePtr prev_scope;
 };
 
 inline Value::Value(Node * node_, size_t offset_)
 : node_(node_),
   offset_(offset_),
   unique_(node_->graph_->next_unique_++),
-  stage_(node_->graph_->new_node_stage_),
   type_(DynamicType::get()) {
   node_->graph_->all_values.emplace(this);
 }
@@ -1254,99 +990,6 @@ inline const Graph * Value::owningGraph() const {
   return node()->owningGraph();
 }
 
-inline void Value::replaceFirstUseWith(Value * newValue) {
-  JIT_ASSERT(owningGraph() == newValue->owningGraph());
-  auto u = uses()[0];
-  u.user->inputs_[u.offset] = newValue;
-  newValue->uses_.push_back(u);
-  uses_.erase(uses_.begin());
-}
-
-inline void Value::replaceAllUsesWith(Value * newValue) {
-  while (!uses().empty()) {
-    replaceFirstUseWith(newValue);
-  }
-}
-
-inline Node::Node(Graph * graph_, NodeKind kind_) :
-  kind_(kind_),
-  graph_(graph_),
-  owning_block_(nullptr),
-  stage_(graph_->new_node_stage_),
-  scope_(graph_->current_scope_),
-  schema_(nullptr) {
-  graph_->all_nodes.emplace(this);
-}
-
-inline void Node::eraseOutput(size_t i) {
-  JIT_ASSERT(i < outputs_.size());
-  JIT_ASSERT(outputs_[i]->uses().empty());
-  schema_ = nullptr;
-  Value * n = outputs_[i];
-  outputs_.erase(outputs_.begin() + i);
-  owningGraph()->freeValue(n);
-  for(size_t j = i; j < outputs_.size(); j++) {
-    outputs_[j]->offset_--;
-  }
-}
-
-inline Block * Node::addBlock() {
-  schema_ = nullptr;
-  blocks_.push_back(new Block(owningGraph(), this));
-  return blocks_.back();
-}
-
-inline void Node::eraseBlock(size_t i) {
-  JIT_ASSERT(i < blocks_.size());
-  schema_ = nullptr;
-  Block * n = blocks_[i];
-  blocks_.erase(blocks_.begin() + i);
-  n->destroy();
-}
-
-inline void Node::destroy() {
-  while(!outputs().empty())
-    eraseOutput(outputs().size() - 1);
-  while(!blocks().empty())
-    eraseBlock(blocks().size() - 1);
-  removeAllInputs();
-  if(inBlockList())
-    removeFromList();
-  graph_->freeNode(this);
-}
-
-inline void Node::cloneFrom(Node * s) {
-	setSourceLocation(s->getSourceLocation());
-	if (s->owningGraph()->scope_root_ == owningGraph()->scope_root_) {
-		scope_ = s->scope_;
-	}
-	copyAttributes(*s);
-}
-
-inline Block::Block(Graph * graph_, Node * node_)
-: graph_(graph_)
-, output_(initOutput(graph_->create(prim::Return, 0)))
-, input_(graph_->create(prim::Param,0))
-, owning_node_(node_) {
-  graph_->all_blocks.emplace(this);
-  output_->owning_block_ = this;
-  input_->owning_block_ = this;
-}
-
-inline void Block::destroy() {
-  // we cannot destroy the output because it is used as the sentinel
-  // for the nodes() list and has to remain valid for the loop
-  output_->removeAllInputs();
-  for(auto it = this->nodes().reverse().begin(),
-      end = this->nodes().reverse().end();
-      it != end; ++it) {
-    it.destroyCurrent();
-  }
-  output_->destroy();
-  input_->destroy();
-  graph_->freeBlock(this);
-}
-
 // Helper macros for constructing switch statements over Node types
 // instead of heavy-weight visitors
 // read 'between' these defines to see how they turn into a big switch
@@ -1361,15 +1004,18 @@ inline void Block::destroy() {
 #define IR_IFM_CONST(x,Kind) GENERIC_IF(const,prim::Kind,x,Kind)
 #define IR_ELSEIFM_CONST(Kind) GENERIC_ELSEIF(const,prim::Kind,Kind)
 
-#define IR_IF(x, Kind) \
-  auto && __match_key = x; \
-  switch(__match_key->kind()) { \
-    case ::torch::jit::prim::Kind: { \
-      auto * value = __match_key; (void) value;
-#define IR_ELSEIF(Kind) \
-    } break; \
-    case ::torch::jit::prim::Kind: { \
-      auto * value = __match_key; (void) value;
+#define IR_IF(x, Kind)           \
+  auto&& __match_key = x;        \
+  switch (__match_key->kind()) { \
+    case ::c10::prim::Kind: {    \
+      auto* value = __match_key; \
+      (void)value;
+#define IR_ELSEIF(Kind)        \
+  }                            \
+  break;                       \
+  case ::c10::prim::Kind: {    \
+    auto* value = __match_key; \
+    (void)value;
 
 #define IR_ELSE() GENERIC_ELSE()
 #define IR_END() GENERIC_END()
@@ -1422,13 +1068,11 @@ struct PythonOp : public Node {
   // recover the autograd.Function instance, if this PythonOp's function
   // was originally SomeFunction.apply
   // used in ONNX for discovering symbolics
-  virtual at::optional<THPObjectPtr> autogradFunction() const = 0;
-
+  virtual c10::optional<THPObjectPtr> autogradFunction() const = 0;
 };
 // patched in when python bindings are loaded
 TORCH_API PythonOp* allocPythonOp(Graph* g);
 TORCH_API void setAllocPythonOp(PythonOp* (*v)(Graph* g));
-
 inline Node* Graph::createPythonOp(
     THPObjectPtr&& pyobj,
     const std::string& cconv,
@@ -1438,19 +1082,6 @@ inline Node* Graph::createPythonOp(
       std::move(pyobj),
       cconv,
       std::move(scalar_args));
-}
-
-inline graph_node_list_iterator Node::iterator() {
-  return {this, 0};
-}
-inline graph_node_list_iterator Node::reverseIterator() {
-  return iterator().reverse();
-}
-inline const_graph_node_list_iterator Node::iterator() const {
-  return {this, 0};
-}
-inline const_graph_node_list_iterator Node::reverseIterator() const {
-  return iterator().reverse();
 }
 
 TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);

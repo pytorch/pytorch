@@ -15,6 +15,25 @@ if [ -x "$(command -v rsync)" ]; then
     SYNC_COMMAND="rsync -lptgoD"
 fi
 
+# We test the presence of cmake3 (for platforms like CentOS and Ubuntu 14.04)
+# and use the newer of cmake and cmake3 if so.
+CMAKE_COMMAND="cmake"
+if [[ -x "$(command -v cmake3)" ]]; then
+    if [[ -x "$(command -v cmake)" ]]; then
+        # have both cmake and cmake3, compare versions
+        CMAKE_VERSION=$(cmake --version | grep 'cmake version' | awk '{print $NF}')
+        CMAKE3_VERSION=$(cmake3 --version | grep 'cmake version' | awk '{print $NF}')
+        CMAKE3_IS_NEWER=$($PYTORCH_PYTHON -c "from distutils.version import StrictVersion; print(1 if StrictVersion(\"${CMAKE3_VERSION}\") >= StrictVersion(\"${CMAKE_VERSION}\") else 0)")
+    else
+        # don't have cmake
+        CMAKE3_IS_NEWER=1
+    fi
+    if [[ $CMAKE3_IS_NEWER == "1" ]]; then
+        CMAKE_COMMAND="cmake3"
+    fi
+    unset CMAKE_VERSION CMAKE3_VERSION CMAKE3_IS_NEWER
+fi
+
 # Options for building only a subset of the libraries
 USE_CUDA=0
 USE_ROCM=0
@@ -87,7 +106,6 @@ TORCH_LIB_DIR="$BASE_DIR/torch/lib"
 INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
 
-CMAKE_VERSION=${CMAKE_VERSION:="cmake"}
 C_FLAGS=" -I\"$INSTALL_DIR/include\" \
   -I\"$INSTALL_DIR/include/TH\" -I\"$INSTALL_DIR/include/THC\" \
   -I\"$INSTALL_DIR/include/THS\" -I\"$INSTALL_DIR/include/THCS\" \
@@ -109,15 +127,14 @@ else
     fi
 fi
 CPP_FLAGS=" -std=c++11 "
-GLOO_FLAGS="-DBUILD_TEST=OFF "
 THD_FLAGS=""
 NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
 if [[ $USE_CUDA -eq 1 ]]; then
-    GLOO_FLAGS+="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
+    GLOO_FLAGS+="-DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
 fi
 # Gloo infiniband support
 if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
-    GLOO_FLAGS+=" -DUSE_IBVERBS=1 -DBUILD_SHARED_LIBS=1"
+    GLOO_FLAGS+=" -DUSE_IBVERBS=1"
     THD_FLAGS="-DUSE_GLOO_IBVERBS=1"
 fi
 CWRAP_FILES="\
@@ -160,9 +177,8 @@ function build() {
       # TODO: The *_LIBRARIES cmake variables should eventually be
       # deprecated because we are using .cmake files to handle finding
       # installed libraries instead
-      ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
+      ${CMAKE_COMMAND} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
 		       ${CMAKE_GENERATOR} \
-		       -DCMAKE_INSTALL_MESSAGE="LAZY" \
 		       -DTorch_FOUND="1" \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
 		       -DCMAKE_C_FLAGS="$BUILD_C_FLAGS $USER_CFLAGS" \
@@ -177,6 +193,7 @@ function build() {
 		       -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
 		       -DTH_LIB_PATH="$INSTALL_DIR/lib" \
 		       -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
+		       -DC10_LIBRARIES="$INSTALL_DIR/lib/libc10$LD_POSTFIX" \
 		       -DCAFFE2_LIBRARIES="$INSTALL_DIR/lib/libcaffe2$LD_POSTFIX" \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DTHNN_LIBRARIES="$INSTALL_DIR/lib/libTHNN$LD_POSTFIX" \
@@ -197,7 +214,7 @@ function build() {
 		       -DCMAKE_DEBUG_POSTFIX="" \
 		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
 		       ${@:2} \
-		       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ${CMAKE_ARGS[@]}
+		       ${CMAKE_ARGS[@]}
   fi
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
   popd
@@ -224,9 +241,8 @@ function build_nccl() {
   mkdir -p build/nccl
   pushd build/nccl
   if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
-      ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
+      ${CMAKE_COMMAND} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
 		       ${CMAKE_GENERATOR} \
-		       -DCMAKE_INSTALL_MESSAGE="LAZY" \
 		       -DCMAKE_BUILD_TYPE=Release \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
 		       -DCMAKE_C_FLAGS="$C_FLAGS $USER_CFLAGS" \
@@ -238,10 +254,10 @@ function build_nccl() {
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
   mkdir -p ${INSTALL_DIR}/lib
   find lib -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "${INSTALL_DIR}/lib/"
-  if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
-    ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
-  fi
   popd
+  if [ -f "./nccl/nccl/src/nccl.h" ]; then
+    rm ./nccl/nccl/src/nccl.h
+  fi
 }
 
 # purposefully not using build() because we need Caffe2 to build the same
@@ -268,10 +284,11 @@ function build_caffe2() {
   fi
 
   if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
-      ${CMAKE_VERSION} $BASE_DIR \
+      ${CMAKE_COMMAND} $BASE_DIR \
 		       ${CMAKE_GENERATOR} \
-		       -DCMAKE_INSTALL_MESSAGE="LAZY" \
 		       -DPYTHON_EXECUTABLE=$PYTORCH_PYTHON \
+		       -DPYTHON_LIBRARY="${PYTORCH_PYTHON_LIBRARY}" \
+		       -DPYTHON_INCLUDE_DIR="${PYTORCH_PYTHON_INCLUDE_DIR}" \
 		       -DBUILDING_WITH_TORCH_LIBS=ON \
 		       -DTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION" \
 		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
@@ -284,12 +301,14 @@ function build_caffe2() {
 		       -DBUILD_CAFFE2_OPS=$BUILD_CAFFE2_OPS \
 		       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
 		       -DUSE_CUDA=$USE_CUDA \
+		       -DUSE_NUMPY=$USE_NUMPY \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \
 		       -DUSE_NNPACK=$USE_NNPACK \
 		       -DUSE_LEVELDB=$USE_LEVELDB \
 		       -DUSE_LMDB=$USE_LMDB \
 		       -DUSE_OPENCV=$USE_OPENCV \
+		       -DUSE_FFMPEG=$USE_FFMPEG \
 		       -DUSE_GLOG=OFF \
 		       -DUSE_GFLAGS=OFF \
 		       -DUSE_SYSTEM_EIGEN_INSTALL=OFF \
@@ -301,18 +320,19 @@ function build_caffe2() {
 		       -DMKLDNN_LIB_DIR=$MKLDNN_LIB_DIR \
 		       -DMKLDNN_LIBRARY=$MKLDNN_LIBRARY \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-		       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
 		       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
 		       -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
 		       -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
-		       -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
+		       -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
+		       $GLOO_FLAGS \
+		       ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
   fi
 
   # This is needed by the aten tests built with caffe2
-  if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.1" ]; then
+  if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.2" ]; then
       # $SYNC_COMMAND root/torch/lib/tmp_install/libnccl root/build/lib/libnccl
       find "${INSTALL_DIR}/lib" -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "lib/"
   fi
@@ -350,10 +370,6 @@ for arg in "$@"; do
     if [[ "$arg" == "nccl" ]]; then
         pushd $THIRD_PARTY_DIR
         build_nccl
-        popd
-    elif [[ "$arg" == "gloo" ]]; then
-        pushd "$THIRD_PARTY_DIR"
-        build gloo $GLOO_FLAGS
         popd
     elif [[ "$arg" == "caffe2" ]]; then
         build_caffe2

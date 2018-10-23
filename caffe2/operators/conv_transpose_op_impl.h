@@ -11,7 +11,7 @@
 #include "caffe2/operators/conv_transpose_unpool_op_base.h"
 #include "caffe2/utils/math.h"
 
-CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
+C10_DECLARE_bool(caffe2_force_shared_col_buffer);
 
 namespace caffe2 {
 

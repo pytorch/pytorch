@@ -8,7 +8,9 @@ import numpy as np
 from caffe2.python import core, workspace
 
 import unittest
+import os
 
+IN_CIRCLECI_FLAKY_ENV = "IN_CIRCLECI" in os.environ and "py2-gcc4.8-ubuntu14.04" in os.environ.get("BUILD_ENVIRONMENT", "")
 
 def rand_array(*dims):
     # np.random.rand() returns float instead of 0-dim array, that's why need to
@@ -28,6 +30,10 @@ def randBlobFloat32(name, *dims, **kwargs):
 def randBlobsFloat32(names, *dims, **kwargs):
     for name in names:
         randBlobFloat32(name, *dims, **kwargs)
+
+
+def numOps(net):
+    return len(net.Proto().op)
 
 
 def str_compare(a, b, encoding="utf8"):

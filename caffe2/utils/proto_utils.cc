@@ -26,27 +26,13 @@ C10_EXPORT std::string DeviceTypeName(const int32_t& d) {
 }
 
 C10_EXPORT int DeviceId(const DeviceOption& option) {
-  switch (option.device_type()) {
-    case PROTO_CPU:
-      return option.numa_node_id();
-    case PROTO_CUDA:
-      return option.cuda_gpu_id();
-    case PROTO_MKLDNN:
-      return option.numa_node_id();
-    case PROTO_HIP:
-      return option.hip_gpu_id();
-    default:
-      CAFFE_THROW("Unknown device id for device type: ", option.device_type());
-  }
+  return option.device_id();
 }
 
 C10_EXPORT bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
   return (
       lhs.device_type() == rhs.device_type() &&
-      lhs.cuda_gpu_id() == rhs.cuda_gpu_id() &&
-      lhs.hip_gpu_id() == rhs.hip_gpu_id() &&
-      lhs.node_name() == rhs.node_name() &&
-      lhs.numa_node_id() == rhs.numa_node_id());
+      lhs.device_id() == rhs.device_id() && lhs.node_name() == rhs.node_name());
 }
 
 C10_EXPORT bool ReadStringFromFile(const char* filename, string* str) {
@@ -149,7 +135,22 @@ using ::google::protobuf::Message;
 
 namespace TextFormat {
 C10_EXPORT bool ParseFromString(const string& spec, Message* proto) {
-  return ::google::protobuf::TextFormat::ParseFromString(spec, proto);
+  string bc_spec = spec;
+
+  {
+    auto num_replaced = c10::ReplaceAll(bc_spec, "cuda_gpu_id", "device_id");
+    if (num_replaced) {
+      LOG(ERROR) << "Your model was serialized in Protobuf TextFormat and "
+                 << "it has "
+                 << num_replaced
+                 << " places using the deprecated field name 'cuda_gpu_id'!\n"
+                 << spec
+                 << "\nPlease re-export your model in Protobuf binary format "
+                 << "to make it backward compatible for field renaming.";
+    }
+  }
+
+  return ::google::protobuf::TextFormat::ParseFromString(std::move(bc_spec), proto);
 }
 } // namespace TextFormat
 

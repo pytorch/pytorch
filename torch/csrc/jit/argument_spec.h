@@ -61,7 +61,6 @@ static_assert(sizeof(ArgumentInfo) == sizeof(ArgumentInfo::plain_data_type),
 struct ArgumentSpec {
   ArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs, size_t num_flat_inputs) {
     hash_code = num_flat_inputs;
-
     args.resize(num_flat_inputs);
     size_t offset = 0;
     for (size_t i = 0; i < inputs.size(); ++i) {

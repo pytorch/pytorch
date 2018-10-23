@@ -57,7 +57,7 @@ void testHelper(const std::string prefix = "") {
   const auto numIterations = 100;
   c10d::test::Semaphore sem1, sem2;
   for (auto i = 0; i < numThreads; i++) {
-    threads.push_back(std::move(std::thread([&] {
+    threads.push_back(std::thread([&] {
       c10d::FileStore fileStore(path);
       c10d::PrefixStore store(prefix, fileStore);
       sem1.post();
@@ -65,7 +65,7 @@ void testHelper(const std::string prefix = "") {
       for (auto j = 0; j < numIterations; j++) {
         store.add("counter", 1);
       }
-    })));
+    }));
   }
   sem1.wait(numThreads);
   sem2.post(numThreads);

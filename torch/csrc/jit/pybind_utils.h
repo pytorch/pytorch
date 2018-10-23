@@ -9,13 +9,21 @@
 #include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/utils/auto_gil.h"
 
-#include <ATen/Error.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <cstddef>
 #include <string>
 #include <utility>
 #include <vector>
+
+// The visibility attribute is to avoid a warning about storing a field in the
+// struct that has a different visibility (from pybind) than the struct.
+#ifdef _WIN32
+#define VISIBILITY_HIDDEN
+#else
+#define VISIBILITY_HIDDEN __attribute__((visibility("hidden")))
+#endif
 
 namespace torch { namespace jit {
 namespace detail {
@@ -37,8 +45,13 @@ inline void findErrorInKwargs(
             arguments.begin(),
             arguments.end(),
             [&key](const Argument& argument) { return argument.name == key; })) {
-        throw std::runtime_error(at::str("Unknown keyword argument '", key, "' for operator '",
-        schema.name, "'. Schema: ", schema));
+      throw std::runtime_error(c10::str(
+          "Unknown keyword argument '",
+          key,
+          "' for operator '",
+          schema.name,
+          "'. Schema: ",
+          schema));
     }
   }
   // If there are unconsumed kwargs but none of them were unknown, the first
@@ -46,9 +59,12 @@ inline void findErrorInKwargs(
   for (const auto& argument : arguments) {
     if (kwargs.contains(argument.name.c_str())) {
       AT_ASSERT(!argument.default_value);
-      throw std::runtime_error(at::str(
-          "Argument '", argument.name, "' specified both as positional and ",
-          "keyword argument. Schema: ", schema));
+      throw std::runtime_error(c10::str(
+          "Argument '",
+          argument.name,
+          "' specified both as positional and ",
+          "keyword argument. Schema: ",
+          schema));
     }
   }
 }
@@ -86,7 +102,7 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   for(auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }
-  return ConstantList<IValue>::create(std::move(elems));
+  return List<IValue>::create(std::move(elems));
 }
 
 inline IValue toIValue(py::handle obj, const TypePtr& type) {
@@ -107,6 +123,8 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
         return py::cast<int64_t>(obj);
       case TypeKind::NoneType:
         return {};
+      case TypeKind::BoolType:
+        return py::cast<bool>(obj);
       case TypeKind::TupleType: {
         if(!PyTuple_Check(obj.ptr()))
           throw py::cast_error(); // note: the py::cast does not throw cast_error
@@ -140,8 +158,11 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
             return createGenericList(obj, elem_type);
         }
       }
+      case TypeKind::WorldType:
+        AT_ERROR("World arguments should not be passed in by users");
       case TypeKind::NumberType:
       case TypeKind::GeneratorType:
+      case TypeKind::VarType:
         break;
     }
   AT_ERROR("Missing cases in toIValue for type: ", type->str(), "! File a bug report.");
@@ -155,14 +176,21 @@ inline IValue argumentToIValue(
   try {
     return toIValue(object, argument.type);
   } catch (const py::cast_error& error) {
-    throw std::runtime_error(at::str(
-        schema.name, "() expected value of type ", argument.type->str(),
-        " for argument '", argument.name,
-        "' in position ", argumentPosition,
+    throw std::runtime_error(c10::str(
+        schema.name,
+        "() expected value of type ",
+        argument.type->str(),
+        " for argument '",
+        argument.name,
+        "' in position ",
+        argumentPosition,
         ", but instead got value of type ",
-        py::str(object.get_type().attr("__name__")), ".",
-        "\nValue: ", py::repr(object),
-        "\nDeclaration: ", schema));
+        py::str(object.get_type().attr("__name__")),
+        ".",
+        "\nValue: ",
+        py::repr(object),
+        "\nDeclaration: ",
+        schema));
   }
 }
 
@@ -172,11 +200,14 @@ inline IValue returnToIValue(
   try {
     return toIValue(object, type);
   } catch (const py::cast_error& error) {
-    throw std::runtime_error(at::str(
-        " expected value of type ", type->str(),
+    throw std::runtime_error(c10::str(
+        " expected value of type ",
+        type->str(),
         " for return value but instead got value of type ",
-        py::str(object.get_type().attr("__name__")), ".",
-          "\nValue: ", py::repr(object)));
+        py::str(object.get_type().attr("__name__")),
+        ".",
+        "\nValue: ",
+        py::repr(object)));
   }
 }
 
@@ -193,12 +224,26 @@ inline py::object toPyObject(IValue&& ivalue) {
     return py::cast(ivalue.toDouble());
   } else if (ivalue.isInt()) {
     return py::cast(ivalue.toInt());
+  } else if (ivalue.isBool()) {
+    return py::cast(ivalue.toBool());
+  } else if (ivalue.isString()) {
+    return py::cast(ivalue.toStringRef());
   } else if (ivalue.isIntList()) {
     return py::cast(ivalue.toIntListRef());
   } else if (ivalue.isDoubleList()) {
     return py::cast(ivalue.toDoubleListRef());
+  } else if (ivalue.isBoolList()) {
+    return py::cast(ivalue.toBoolListRef());
   } else if (ivalue.isTensorList()) {
     return py::cast(ivalue.toTensorListRef());
+  } else if (ivalue.isGenericList()) {
+    auto list = ivalue.toGenericList();
+    const auto & elements = list->elements();
+    py::list t { elements.size() };
+    for (size_t i = 0; i < elements.size(); ++i) {
+      t[i] = toPyObject(IValue{elements[i]});
+    }
+    return t;
   } else if (ivalue.isTuple()) {
     auto tuple = ivalue.toTuple();
     const auto & elements = tuple->elements();
@@ -212,12 +257,37 @@ inline py::object toPyObject(IValue&& ivalue) {
   }
 }
 
+struct VISIBILITY_HIDDEN tuple_slice {
+  /*implicit*/ tuple_slice(py::tuple tup_)
+  : tup(std::move(tup_)), b(0), e(tup.size()) {}
+  tuple_slice(py::tuple tup_, int64_t b_)
+  : tup(std::move(tup_)), b(b_), e(tup.size()) {}
+  tuple_slice(py::tuple tup_, int64_t b_, int64_t e_)
+  : tup(std::move(tup_)), b(b_), e(e_) {}
+  py::detail::tuple_iterator begin() const {
+    return {tup, b};
+  }
+  py::detail::tuple_iterator end() const {
+    return {tup, e};
+  }
+  size_t size() const {
+    return e - b;
+  }
+  py::detail::tuple_accessor operator[](size_t index) const {
+    return {tup, b + index};
+  }
+private:
+  py::tuple tup;
+  int64_t b;
+  int64_t e;
+};
+
 inline Stack createStackForSchema(
     const FunctionSchema& schema,
-    py::args args,
+    tuple_slice args,
     py::kwargs kwargs = py::kwargs()) {
   if(args.size() + kwargs.size() > schema.arguments.size()) {
-    throw std::runtime_error(at::str(
+    throw std::runtime_error(c10::str(
         schema.name, "() expected at most ", schema.arguments.size(),
         " argument(s) but received ",
         args.size() + kwargs.size(), " argument(s). Declaration: ", schema));
@@ -243,9 +313,12 @@ inline Stack createStackForSchema(
     } else if (arg.default_value) {
       push(stack, *arg.default_value);
     } else {
-      throw std::runtime_error(at::str(
-          schema.name, "() is missing value for argument '", arg.name,
-          "'. Declaration: ", schema));
+      throw std::runtime_error(c10::str(
+          schema.name,
+          "() is missing value for argument '",
+          arg.name,
+          "'. Declaration: ",
+          schema));
     }
   }
 
@@ -292,7 +365,7 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(const py::tuple& tuple, at::Ar
 
 inline py::object invokeScriptMethodFromPython(
     script::Method& method,
-    py::args args, py::kwargs kwargs) {
+    tuple_slice args, py::kwargs kwargs) {
   auto stack = createStackForSchema(method.getSchema(), std::move(args), std::move(kwargs));
   {
     AutoNoGIL no_gil_guard;

@@ -1,5 +1,4 @@
-#define CATCH_CONFIG_MAIN
-#include "catch_utils.hpp"
+#include "gtest/gtest.h"
 
 #include "ATen/ATen.h"
 
@@ -10,53 +9,55 @@
 using at::Tensor;
 using at::WeakTensor;
 
-CATCH_TEST_CASE( "Weak pointer tests", "" ) {
-  CATCH_SECTION("gets invalidated") {
-    Tensor a = at::ones({2, 2});
+// Weak pointer tests
+// gets invalidated
+TEST(TestWeakPointer, WeakPointerGetsInvalidated) {
+  Tensor a = at::ones({2, 2});
+  WeakTensor b = a;
+  a.reset();
+  ASSERT_FALSE(b.lock().defined());
+}
+
+// can successfully lock
+TEST(TestWeakPointer, WeakPointerLock) {
+  Tensor a = at::ones({2, 2});
+  WeakTensor b = a;
+  auto c = b.lock();
+  ASSERT_TRUE(c.defined());
+
+  a.reset();
+  ASSERT_TRUE(b.lock().defined());
+  c.reset();
+  ASSERT_FALSE(b.lock().defined());
+}
+
+// updates refcounts correctly
+TEST(TestWeakPointer, WeakUpdatesRefcountsTest) {
+  Tensor a = at::ones({2, 2});
+  ASSERT_EQ(a.use_count(), 1);
+  ASSERT_EQ(a.weak_use_count(), 1);
+  {
     WeakTensor b = a;
-    a.reset();
-    CATCH_REQUIRE_FALSE(b.lock().defined());
+    ASSERT_EQ(a.use_count(), 1);
+    ASSERT_EQ(a.weak_use_count(), 2);
   }
-
-  CATCH_SECTION("can successfully lock") {
-    Tensor a = at::ones({2, 2});
+  ASSERT_EQ(a.use_count(), 1);
+  ASSERT_EQ(a.weak_use_count(), 1);
+  {
     WeakTensor b = a;
-    auto c = b.lock();
-    CATCH_REQUIRE(c.defined());
-
-    a.reset();
-    CATCH_REQUIRE(b.lock().defined());
-    c.reset();
-    CATCH_REQUIRE_FALSE(b.lock().defined());
+    ASSERT_EQ(a.use_count(), 1);
+    auto locked = b.lock();
+    ASSERT_TRUE(locked.defined());
+    ASSERT_EQ(a.use_count(), 2);
   }
-
-  CATCH_SECTION("updates refcounts correctly") {
-    Tensor a = at::ones({2, 2});
-    CATCH_REQUIRE(a.use_count() == 1);
-    CATCH_REQUIRE(a.weak_use_count() == 1);
-    {
-      WeakTensor b = a;
-      CATCH_REQUIRE(a.use_count() == 1);
-      CATCH_REQUIRE(a.weak_use_count() == 2);
-    }
-    CATCH_REQUIRE(a.use_count() == 1);
-    CATCH_REQUIRE(a.weak_use_count() == 1);
-    {
-      WeakTensor b = a;
-      CATCH_REQUIRE(a.use_count() == 1);
-      auto locked = b.lock();
-      CATCH_REQUIRE(locked.defined());
-      CATCH_REQUIRE(a.use_count() == 2);
-    }
-    CATCH_REQUIRE(a.use_count() == 1);
-    CATCH_REQUIRE(a.weak_use_count() == 1);
-    {
-      WeakTensor b = a;
-      CATCH_REQUIRE(a.use_count() == 1);
-      CATCH_REQUIRE(a.weak_use_count() == 2);
-      a.reset();
-      CATCH_REQUIRE(b.use_count() == 0);
-      CATCH_REQUIRE(b.weak_use_count() == 1);
-    }
+  ASSERT_EQ(a.use_count(), 1);
+  ASSERT_EQ(a.weak_use_count(), 1);
+  {
+    WeakTensor b = a;
+    ASSERT_EQ(a.use_count(), 1);
+    ASSERT_EQ(a.weak_use_count(), 2);
+    a.reset();
+    ASSERT_EQ(b.use_count(), 0);
+    ASSERT_EQ(b.weak_use_count(), 1);
   }
 }

@@ -13,9 +13,9 @@
 #include "caffe2/core/types.h"
 #include "caffe2/utils/simple_queue.h"
 
-CAFFE2_DECLARE_int(caffe2_tensor_chunk_size);
-CAFFE2_DECLARE_int(caffe2_max_tensor_serializer_threads);
-CAFFE2_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
+C10_DECLARE_int(caffe2_tensor_chunk_size);
+C10_DECLARE_int(caffe2_max_tensor_serializer_threads);
+C10_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
 
 namespace caffe2 {
 
@@ -70,11 +70,13 @@ class CAFFE2_API TensorSerializer : public BlobSerializerBase {
    * otherwise this function produces a fatal error.
    */
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override;
   void SerializeWithChunkSize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor,
       int chunk_size) override;

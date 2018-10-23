@@ -35,31 +35,52 @@ class BatchGatherOp final : public Operator<Context> {
     auto block_size = data.size_from_dim(2);
     auto block_bytesize = block_size * data.meta().itemsize();
     auto N = indices.size();
-    auto data_batch_bytesize = data.size_from_dim(1) * data.meta().itemsize();
-    auto gathered_batch_bytesize =
-        N * data.size_from_dim(2) * data.meta().itemsize();
+    auto data_batch_size = data.size_from_dim(1);
+    auto gathered_batch_size = N * data.size_from_dim(2);
+    auto data_batch_bytesize = data_batch_size * data.meta().itemsize();
+    auto gathered_batch_bytesize = gathered_batch_size * data.meta().itemsize();
     const TInd* idxs = indices.template data<TInd>();
     auto src_base = static_cast<const char*>(data.raw_data());
     auto out = static_cast<char*>(output->raw_mutable_data(data.meta()));
 
-    for (auto batch = 0; batch < data.dim(0); ++batch) {
-      for (auto i = 0; i < N; ++i) {
-        auto idx = idxs[i];
-        CAFFE_ENFORCE(
-            0 <= idx && idx < data.dim(1),
-            "INDICES element is out of DATA bounds, id=",
-            idx,
-            " data_dim=",
-            data.dim(1));
-        auto src =
-            src_base + idx * block_bytesize + batch * data_batch_bytesize;
-        auto dst = out + i * block_bytesize + batch * gathered_batch_bytesize;
-        context_.CopyItemsSameDevice(data.meta(), block_size, src, dst);
+    for (auto i = 0; i < N; ++i) {
+      auto idx = idxs[i];
+      CAFFE_ENFORCE(
+          0 <= idx && idx < data.dim(1),
+          "INDICES element is out of DATA bounds, id=",
+          idx,
+          " data_dim=",
+          data.dim(1));
+    }
+
+    if (data.template IsType<float>() && block_size == 1) {
+      auto src = data.template data<float>();
+      auto dst = output->template mutable_data<float>();
+
+      for (auto batch = 0; batch < data.dim(0); ++batch) {
+        auto src_batch_base = src + batch * data_batch_size;
+        auto out_batch_base = dst + batch * gathered_batch_size;
+
+        for (auto i = 0; i < N; ++i) {
+          auto idx = idxs[i];
+          out_batch_base[i] = src_batch_base[idx];
+        }
+      }
+    } else {
+      for (auto batch = 0; batch < data.dim(0); ++batch) {
+        auto src_batch_base = src_base + batch * data_batch_bytesize;
+        auto out_batch_base = out + batch * gathered_batch_bytesize;
+
+        for (auto i = 0; i < N; ++i) {
+          auto idx = idxs[i];
+          auto src = src_batch_base + idx * block_bytesize;
+          auto dst = out_batch_base + i * block_bytesize;
+          context_.CopyItemsSameDevice(data.meta(), block_size, src, dst);
+        }
       }
     }
     return true;
   }
-
   INPUT_TAGS(DATA, INDICES);
 };
 
@@ -108,21 +129,32 @@ class BatchGatherGradientOp final : public Operator<Context> {
     auto gathered_batch_size = N * data.size_from_dim(2);
     const TInd* idxs = indices.template data<TInd>();
 
+    for (auto i = 0; i < N; ++i) {
+      auto idx = idxs[i];
+      CAFFE_ENFORCE(
+          0 <= idx && idx < data.dim(1),
+          "INDICES element is out of DATA bounds, id=",
+          idx,
+          " data_dim=",
+          data.dim(1));
+    }
+
     for (auto batch = 0; batch < grad.dim(0); ++batch) {
+      auto src_batch_base = grad_data + batch * gathered_batch_size;
+      auto out_batch_base = out_data + batch * data_batch_size;
+
       for (auto i = 0; i < N; ++i) {
         auto idx = idxs[i];
-        CAFFE_ENFORCE(
-            0 <= idx && idx < data.dim(1),
-            "INDICES element is out of DATA bounds, id=",
-            idx,
-            " data_dim=",
-            data.dim(1));
-        math::Add(
-            block_size,
-            out_data + idx * block_size + batch * data_batch_size,
-            grad_data + i * block_size + batch * gathered_batch_size,
-            out_data + idx * block_size + batch * data_batch_size,
-            &context_);
+        if (block_size == 1) {
+          out_batch_base[idx * block_size] += src_batch_base[i * block_size];
+        } else {
+          math::Add(
+              block_size,
+              out_batch_base + idx * block_size,
+              src_batch_base + i * block_size,
+              out_batch_base + idx * block_size,
+              &context_);
+        }
       }
     }
     return true;

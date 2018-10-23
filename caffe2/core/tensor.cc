@@ -4,9 +4,7 @@
 
 namespace caffe2 {
 
-CAFFE_DEFINE_KNOWN_TYPE(Tensor);
-
-UndefinedTensorImpl UndefinedTensorImpl::singleton_;
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(12, Tensor);
 
 TensorPrinter::TensorPrinter(
     const std::string& tensor_name,
@@ -87,8 +85,8 @@ vector<int64_t> GetTensorInfo(
   CHECK(tc->unsafeGetTensorImpl());
   CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImpl());
   *capacity = tc->storage().capacity();
-  tc->ExtractDeviceOption(device);
-  return tc->dims();
+  ExtractDeviceOption(device, tc->GetDevice());
+  return tc->dims().vec();
 }
 
 // since we only have one tensor, probably need to remove this at some point?
@@ -117,6 +115,15 @@ void TensorVectorResize(
   for (auto i = 0; i < size; ++i) {
     tensors.emplace_back(type);
   }
+}
+
+Tensor empty(
+    const std::vector<int64_t>& dims,
+    const at::TensorOptions& options) {
+  // TODO: merge this with at::empty after Tensor is merged
+  auto tensor = Tensor(dims, options.device().type());
+  tensor.raw_mutable_data(scalarTypeToTypeMeta(options.dtype()));
+  return tensor;
 }
 
 namespace {

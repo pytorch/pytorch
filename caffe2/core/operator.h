@@ -9,13 +9,14 @@
 #include <typeinfo>
 #include <vector>
 
+#include "c10/macros/Macros.h"
+#include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator_gradient.h"
 #include "caffe2/core/operator_schema.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
@@ -122,7 +123,18 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     static_assert(
         std::is_same<T, Tensor>::value,
         "Output(int, DeviceType) is only available for Tensor");
+    // When you get a Tensor here it is not fully initialized
     return BlobGetMutableTensor(outputs_.at(idx), type);
+  }
+
+  inline Tensor* OutputTensor(
+      int idx,
+      const vector<int64_t>& dims,
+      const at::TensorOptions& options) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        options.device_opt() != c10::nullopt,
+        "device must be provided in option.");
+    return BlobGetMutableTensor(outputs_.at(idx), dims, options);
   }
 
   template <typename T>
@@ -453,6 +465,17 @@ class Operator : public OperatorBase {
     return OperatorBase::template Input<Tensor>(idx, type);
   }
 
+  inline Tensor* Output(
+      int idx,
+      const vector<int64_t>& dims,
+      const at::TensorOptions& options) {
+    if (options.device_opt() == c10::nullopt) {
+      return OperatorBase::OutputTensor(
+          idx, dims, at::TensorOptions(options).device(context_.device()));
+    }
+    return OperatorBase::OutputTensor(idx, dims, options);
+  }
+
   inline Tensor* Output(int idx, DeviceType type = Context::GetDeviceType()) {
     return OperatorBase::template Output<Tensor>(idx, type);
   }
@@ -705,7 +728,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
   }
 };
 
-#define CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(                                 \
+#define C10_DEFINE_TENSOR_TYPES_DISPATCHER(                                    \
     TensorTypes, DoRunWithType, DoRunWithOtherType)                            \
   template <typename FirstType, typename... Types, typename... ExtraArgs>      \
   struct DispatchHelper<TensorTypes<FirstType, Types...>, ExtraArgs...> {      \
@@ -763,28 +786,28 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
       return call<Op>(op, blob.meta());                                        \
     }                                                                          \
   };
-CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(
+C10_DEFINE_TENSOR_TYPES_DISPATCHER(
     TensorTypes,
     DoRunWithType,
     DoRunWithOtherType)
-CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(
+C10_DEFINE_TENSOR_TYPES_DISPATCHER(
     TensorTypes2,
     DoRunWithType2,
     DoRunWithOtherType2)
-#undef CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER
+#undef C10_DEFINE_TENSOR_TYPES_DISPATCHER
 
 // The device type registry. This works in two phases:
 // (1) gDeviceTypeRegistry() maps the device types values to the actual operator
 //     registry function.
 // (2) Then, one can call the operator registry function to further create the
 //     operators.
-typedef Registry<
+typedef c10::Registry<
     std::string,
     std::unique_ptr<OperatorBase>,
     const OperatorDef&,
     Workspace*>
     OperatorRegistry;
-typedef Registry<
+typedef c10::Registry<
     std::string,
     std::unique_ptr<OperatorBase>,
     const OperatorDef&,
@@ -806,7 +829,7 @@ struct CAFFE2_API DeviceTypeRegisterer {
 
 #define CAFFE_REGISTER_DEVICE_TYPE(type, registry_function) \
   namespace {                                               \
-  static DeviceTypeRegisterer CAFFE_ANONYMOUS_VARIABLE(     \
+  static DeviceTypeRegisterer C10_ANONYMOUS_VARIABLE(       \
       DeviceType)(type, &registry_function);                \
   }
 
@@ -817,69 +840,76 @@ struct CAFFE2_API DeviceTypeRegisterer {
 // not depend on specific cuda or cudnn libraries. This means that we will be
 // able to compile it even when there is no cuda available - we simply do not
 // link any cuda or cudnn operators.
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     CPUOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 #define REGISTER_CPU_OPERATOR_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR(name, ...)                           \
   C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CPU##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
   }                                                                \
-  CAFFE_REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(CPUOperatorRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(CPUOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_CPU_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  CAFFE_REGISTER_CLASS(CPUOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+  C10_REGISTER_CLASS(CPUOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
-CAFFE_DECLARE_REGISTRY(
+// Use these macros to register gradient operators.  They can be automatically
+// excluded from builds that don't need them (e.g., mobile).
+#ifdef CAFFE2_NO_GRADIENT_OPS
+#define REGISTER_CPU_GRADIENT_OPERATOR(...) /* No gradients. */
+#else
+#define REGISTER_CPU_GRADIENT_OPERATOR(...) \
+  MACRO_EXPAND(REGISTER_CPU_OPERATOR(__VA_ARGS__))
+#endif
+
+C10_DECLARE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 #define REGISTER_CUDA_OPERATOR_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR(name, ...)                           \
   C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();   \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CUDA##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
   }                                                                 \
-  CAFFE_REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(CUDAOperatorRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(CUDAOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_CUDA_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  CAFFE_REGISTER_CLASS(                                       \
-      CUDAOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+  C10_REGISTER_CLASS(CUDAOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 // Macros for cudnn since we use it often
 #define REGISTER_CUDNN_OPERATOR(name, ...) \
   REGISTER_CUDA_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__)
 
 // Macros for HIP operators
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     HIPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 #define REGISTER_HIP_OPERATOR_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(HIPOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(HIPOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_HIP_OPERATOR(name, ...)                           \
   C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_HIP##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
   }                                                                \
-  CAFFE_REGISTER_CLASS(HIPOperatorRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(HIPOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_HIP_OPERATOR_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(HIPOperatorRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(HIPOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_HIP_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  CAFFE_REGISTER_CLASS(                                       \
-      HIPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+  C10_REGISTER_CLASS(HIPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 #define REGISTER_MIOPEN_OPERATOR(name, ...) \
   REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__)
@@ -929,9 +959,9 @@ class CAFFE2_API UnsupportedOperatorFeature : public std::exception {
 // A helper macro that should ONLY be used in the operator constructor to check
 // if needed features are met. If not, throws the UnsupportedOperatorFeature
 // exception with the given message.
-#define OPERATOR_NEEDS_FEATURE(condition, ...)                           \
-  if (!(condition)) {                                                    \
-    throw UnsupportedOperatorFeature(::caffe2::MakeString(__VA_ARGS__)); \
+#define OPERATOR_NEEDS_FEATURE(condition, ...)                 \
+  if (!(condition)) {                                          \
+    throw UnsupportedOperatorFeature(::c10::str(__VA_ARGS__)); \
   }
 
 // Creates an operator with the given operator definition.

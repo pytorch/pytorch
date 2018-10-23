@@ -3,7 +3,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 
-CAFFE2_DECLARE_bool(caffe2_dag_net_collect_stats);
+C10_DECLARE_bool(caffe2_dag_net_collect_stats);
 
 namespace caffe2 {
 

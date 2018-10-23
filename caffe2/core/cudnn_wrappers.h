@@ -24,8 +24,7 @@ struct CuDNNWorkspace {
   void* get(size_t nbytes) {
     if (nbytes_ < nbytes) {
       reset();
-      auto data_and_deleter = CUDAContext::New(nbytes);
-      data_ = {data_and_deleter.first, data_and_deleter.second};
+      data_ = CUDAContext::New(nbytes);
       nbytes_ = nbytes;
     }
     CAFFE_ENFORCE_GE(nbytes_, nbytes);
@@ -33,12 +32,12 @@ struct CuDNNWorkspace {
   }
 
   void reset() {
-    data_ = nullptr;
+    data_.clear();
     nbytes_ = 0;
   }
 
  private:
-  std::unique_ptr<void, MemoryDeleter> data_{nullptr, NoDelete};
+  at::DataPtr data_{nullptr, nullptr, &NoDelete, at::Device(CUDA)};
   size_t nbytes_{0};
 };
 
@@ -122,9 +121,9 @@ class CuDNNWrapper {
   void with_cudnn_state(size_t state_idx, F&& f) {
     CAFFE_ENFORCE(
         state_idx < CAFFE2_COMPILE_TIME_MAX_CUDNN_STATES, "Invalid state_idx");
-    auto& sync_state = cudnn_states()[context_->cuda_gpu_id()][state_idx];
+    auto& sync_state = cudnn_states()[context_->device_id()][state_idx];
 
-    DeviceGuard dg(context_->cuda_gpu_id());
+    DeviceGuard dg(context_->device_id());
 
     // We need to serialize execution on the CuDNNState as we can't
     // allow multiple threads to race through the cudaEventRecord
@@ -132,7 +131,7 @@ class CuDNNWrapper {
     // execution)
     std::lock_guard<std::mutex> g(sync_state.mutex);
     if (!sync_state.state.get()) {
-      sync_state.state.reset(new CuDNNState(context_->cuda_gpu_id()));
+      sync_state.state.reset(new CuDNNState(context_->device_id()));
     }
     CHECK_NOTNULL(sync_state.state.get())->execute(context_->cuda_stream(), f);
   }

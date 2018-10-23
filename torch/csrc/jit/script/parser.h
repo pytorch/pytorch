@@ -64,6 +64,8 @@ struct Parser {
       std::vector<Expr> exprs = { prefix };
       while(L.cur().kind != end) {
         L.expect(',');
+        if (L.cur().kind == end)
+          break;
         exprs.push_back(parseExp());
       }
       auto list = List<Expr>::create(prefix.range(), exprs);

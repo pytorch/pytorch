@@ -3,6 +3,7 @@
 #include <mutex>
 
 #include <gtest/gtest.h>
+#include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/common.h"
@@ -11,16 +12,15 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/qtensor.h"
 #include "caffe2/core/qtensor_serialization.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
-CAFFE2_DEFINE_int64(caffe2_test_big_tensor_size, 100000000, "");
-CAFFE2_DECLARE_int(caffe2_tensor_chunk_size);
-CAFFE2_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
+C10_DEFINE_int64(caffe2_test_big_tensor_size, 100000000, "");
+C10_DECLARE_int(caffe2_tensor_chunk_size);
+C10_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
 
 namespace caffe2 {
 using namespace ::caffe2::db;
@@ -51,17 +51,19 @@ class BlobTestFooSerializer : public BlobSerializerBase {
    * otherwise this function produces a fatal error.
    */
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(blob.IsType<BlobTestFoo>());
+    CAFFE_ENFORCE(typeMeta.Match<BlobTestFoo>());
 
     BlobProto blob_proto;
     blob_proto.set_name(name);
     blob_proto.set_type("BlobTestFoo");
     // For simplicity we will just serialize the 4-byte content as a string.
     blob_proto.set_content(std::string(
-        reinterpret_cast<const char*>(&(blob.Get<BlobTestFoo>().val)),
+        reinterpret_cast<const char*>(
+            &static_cast<const BlobTestFoo*>(pointer)->val),
         sizeof(int32_t)));
     acceptor(name, blob_proto.SerializeAsString());
   }
@@ -733,6 +735,15 @@ TEST(TensorTest, Half) {
   }
 }
 
+TEST(TensorTest, TensorFactory) {
+  Tensor a = empty({1, 2, 3}, at::device(CPU).dtype<float>());
+  EXPECT_NE(a.data<float>(), nullptr);
+  a.mutable_data<float>()[0] = 3.0;
+  Tensor b = empty({1, 2, 3}, at::device(CPU).dtype<int>());
+  EXPECT_NE(b.data<int>(), nullptr);
+  b.mutable_data<int>()[0] = 3;
+}
+
 TEST(QTensorTest, QTensorSerialization) {
   Blob blob;
   QTensor<CPUContext>* qtensor = blob.GetMutable<QTensor<CPUContext>>();
@@ -942,14 +953,15 @@ class DummyTypeSerializer : public BlobSerializerBase {
   DummyTypeSerializer() {}
   ~DummyTypeSerializer() {}
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(blob.IsType<DummyType>());
-    const auto& container = blob.template Get<DummyType>();
+    CAFFE_ENFORCE(typeMeta.Match<DummyType>());
+    const auto& container = *static_cast<const DummyType*>(pointer);
     for (int k = 0; k < container.n_chunks; ++k) {
       std::string serialized_chunk = container.serialize(name, k);
-      acceptor(MakeString(name, kChunkIdSeparator, k), serialized_chunk);
+      acceptor(c10::str(name, kChunkIdSeparator, k), serialized_chunk);
     }
   }
 };
@@ -967,7 +979,7 @@ CAFFE_KNOWN_TYPE(DummyType);
 
 namespace {
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DummyType>()), DummyTypeSerializer);
-CAFFE_REGISTER_TYPED_CLASS(
+C10_REGISTER_TYPED_CLASS(
     BlobDeserializerRegistry,
     "DummyType",
     DummyTypeDeserializer);

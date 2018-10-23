@@ -1,13 +1,14 @@
+#include <ATen/core/Allocator.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/typeid.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_report_cpu_memory_usage,
     false,
     "If set, print out detailed memory usage");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_cpu_allocator_do_zero_fill,
     true,
     "If set, do memory zerofilling when allocating on CPU");
@@ -16,16 +17,20 @@ namespace caffe2 {
 
 void NoDelete(void*) {}
 
-static std::unique_ptr<CPUAllocator> g_cpu_allocator(new DefaultCPUAllocator());
-CPUAllocator* GetCPUAllocator() {
-  return g_cpu_allocator.get();
+at::Allocator* GetCPUAllocator() {
+  return GetAllocator(CPU);
 }
 
-void SetCPUAllocator(CPUAllocator* alloc) {
-  g_cpu_allocator.reset(alloc);
+void SetCPUAllocator(at::Allocator* alloc) {
+  SetAllocator(CPU, alloc);
 }
 
-MemoryAllocationReporter CPUStaticContext::reporter_;
+// Global default CPU Allocator
+static DefaultCPUAllocator g_cpu_alloc;
+
+REGISTER_ALLOCATOR(CPU, &g_cpu_alloc);
+
+MemoryAllocationReporter DefaultCPUAllocator::reporter_;
 
 void MemoryAllocationReporter::New(void* ptr, size_t nbytes) {
   std::lock_guard<std::mutex> guard(mutex_);

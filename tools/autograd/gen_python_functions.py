@@ -28,7 +28,8 @@ SKIP_PYTHON_BINDINGS = [
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
     'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice', 'randint(_out)?',
     '_local_scalar', '_local_scalar_dense',
-    'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to'
+    'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to',
+    'copy_sparse_to_sparse_'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -330,7 +331,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             elif dispatch_type == 'Tensor &':
                 dispatch_type = 'Tensor'
             elif dispatch_type == 'const Device &':
-                dispatch_type = 'at::optional<int32_t>'
+                dispatch_type = 'c10::optional<int32_t>'
             formal = '{} {}'.format(dispatch_type, name)
             return expr, formal
 
@@ -540,7 +541,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'name': 'dtype',
                 'type': 'const Type &',
                 'simple_type': 'Type',
-                'is_type_dispatched': True,
                 'python_default_init': py_default_dtype,
             }
             python_binding_arguments.append(dtype_arg)
@@ -762,11 +762,6 @@ def get_python_signature(declaration, include_out):
                 default = 'None'
         if arg.get('python_default_init') is not None:
             default = 'None'
-        if default is None and arg.get('is_type_dispatched', False):
-            # this is necessary because ATen does not have default_types; in this case,
-            # the type exists in the public API (at:: namespace), but not in the type interface;
-            # to match the PyTorch default_type API, we set the default to None.
-            default = get_type_default(declaration)
         if default is not None:
             param += '=' + str(default)
         return param

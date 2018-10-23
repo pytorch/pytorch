@@ -31,7 +31,7 @@ def _grad_input_padding(grad_output, input_size, stride, padding, kernel_size):
     return tuple(input_size[d] - min_sizes[d] for d in range(k))
 
 
-def conv1d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1, bias=None):
+def conv1d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1):
     r"""
     Computes the gradient of conv1d with respect to the input of the convolution.
     This is same as the 1D transposed convolution operator under the hood but requires
@@ -45,7 +45,6 @@ def conv1d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
-        bias: optional bias tensor (out_channels). Default: None
 
     Examples::
 
@@ -69,11 +68,11 @@ def conv1d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
                                              padding, kernel_size)
 
     return torch.conv_transpose1d(
-        grad_output, weight, bias, stride, padding, grad_input_padding, groups,
+        grad_output, weight, None, stride, padding, grad_input_padding, groups,
         dilation)
 
 
-def conv1d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1, bias=None):
+def conv1d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1):
     r"""
     Computes the gradient of conv1d with respect to the weight of the convolution.
 
@@ -85,7 +84,6 @@ def conv1d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
-        bias: optional bias tensor (out_channels). Default: None
 
     Examples::
 
@@ -111,7 +109,7 @@ def conv1d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
     input = input.contiguous().view(1, input.shape[0] * input.shape[1],
                                     input.shape[2])
 
-    grad_weight = torch.conv1d(input, grad_output, bias, dilation, padding,
+    grad_weight = torch.conv1d(input, grad_output, None, dilation, padding,
                                stride, in_channels * min_batch)
 
     grad_weight = grad_weight.contiguous().view(
@@ -122,7 +120,7 @@ def conv1d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
             0, 1).narrow(2, 0, weight_size[2])
 
 
-def conv2d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1, bias=None):
+def conv2d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1):
     r"""
     Computes the gradient of conv2d with respect to the input of the convolution.
     This is same as the 2D transposed convolution operator under the hood but requires
@@ -136,7 +134,6 @@ def conv2d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
-        bias: optional bias tensor (out_channels). Default: None
 
     Examples::
 
@@ -160,11 +157,11 @@ def conv2d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
                                              padding, kernel_size)
 
     return torch.conv_transpose2d(
-        grad_output, weight, bias, stride, padding, grad_input_padding, groups,
+        grad_output, weight, None, stride, padding, grad_input_padding, groups,
         dilation)
 
 
-def conv2d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1, bias=None):
+def conv2d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1):
     r"""
     Computes the gradient of conv2d with respect to the weight of the convolution.
 
@@ -176,7 +173,6 @@ def conv2d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
-        bias: optional bias tensor (out_channels). Default: None
 
     Examples::
 
@@ -204,7 +200,7 @@ def conv2d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
     input = input.contiguous().view(1, input.shape[0] * input.shape[1],
                                     input.shape[2], input.shape[3])
 
-    grad_weight = torch.conv2d(input, grad_output, bias, dilation, padding,
+    grad_weight = torch.conv2d(input, grad_output, None, dilation, padding,
                                stride, in_channels * min_batch)
 
     grad_weight = grad_weight.contiguous().view(
@@ -217,7 +213,7 @@ def conv2d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
             2, 0, weight_size[2]).narrow(3, 0, weight_size[3])
 
 
-def conv3d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1, bias=None):
+def conv3d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1):
     r"""
     Computes the gradient of conv3d with respect to the input of the convolution.
     This is same as the 3D transposed convolution operator under the hood but requires
@@ -231,7 +227,6 @@ def conv3d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
-        bias: optional bias tensor (out_channels). Default: None
 
     Examples::
 
@@ -255,11 +250,11 @@ def conv3d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
                                              padding, kernel_size)
 
     return torch.conv_transpose3d(
-        grad_output, weight, bias, stride, padding, grad_input_padding, groups,
+        grad_output, weight, None, stride, padding, grad_input_padding, groups,
         dilation)
 
 
-def conv3d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1, bias=None):
+def conv3d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1):
     r"""
     Computes the gradient of conv3d with respect to the weight of the convolution.
 
@@ -271,7 +266,6 @@ def conv3d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
-        bias: optional bias tensor (out_channels). Default: None
 
     Examples::
 
@@ -299,7 +293,7 @@ def conv3d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
                                     input.shape[2], input.shape[3],
                                     input.shape[4])
 
-    grad_weight = torch.conv3d(input, grad_output, bias, dilation, padding,
+    grad_weight = torch.conv3d(input, grad_output, None, dilation, padding,
                                stride, in_channels * min_batch)
 
     grad_weight = grad_weight.contiguous().view(

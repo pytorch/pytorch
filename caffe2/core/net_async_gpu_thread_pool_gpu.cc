@@ -2,13 +2,13 @@
 
 #include "caffe2/core/context_gpu.h"
 
-CAFFE2_DEFINE_int(caffe2_threads_per_gpu, 1, "Number of CPU threads per GPU");
+C10_DEFINE_int(caffe2_threads_per_gpu, 1, "Number of CPU threads per GPU");
 
 namespace caffe2 {
 
-CAFFE_REGISTER_CREATOR(ThreadPoolRegistry, CUDA, GetAsyncNetGPUThreadPool);
+C10_REGISTER_CREATOR(ThreadPoolRegistry, CUDA, GetAsyncNetGPUThreadPool);
 
-std::shared_ptr<TaskThreadPool>
+std::shared_ptr<TaskThreadPoolBase>
 GetAsyncNetGPUThreadPool(int gpu_id, int pool_size, bool create_new) {
   // For GPU, use per device thread pools of predefined constant size
   if (pool_size != FLAGS_caffe2_threads_per_gpu) {

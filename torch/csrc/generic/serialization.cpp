@@ -2,8 +2,6 @@
 #define TH_GENERIC_FILE "generic/serialization.cpp"
 #else
 
-#define SYSCHECK(call) { ssize_t __result = call; if (__result < 0) throw std::system_error((int) __result, std::system_category()); }
-
 template <class io>
 void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
 {
@@ -16,23 +14,10 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
   data = (scalar_t*)cpu_data.get();
   THCudaCheck(cudaMemcpy(data, THWStorage_(data)(LIBRARY_STATE self), size * sizeof(scalar_t), cudaMemcpyDeviceToHost));
 #endif
-  ssize_t result = doWrite(fd, &size, sizeof(int64_t));
-  if (result != sizeof(int64_t))
-    throw std::system_error(result, std::system_category());
+  doWrite(fd, &size, sizeof(int64_t));
   // fast track for bytes and little endian
   if (sizeof(scalar_t) == 1 || THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN) {
-    char *bytes = (char *) data;
-    int64_t remaining = sizeof(scalar_t) * size;
-    while (remaining > 0) {
-      // we write and read in 1GB blocks to avoid bugs on some OSes
-      ssize_t result = doWrite(fd, bytes, THMin(remaining, 1073741824));
-      if (result < 0)
-        throw std::system_error(result, std::system_category());
-      bytes += result;
-      remaining -= result;
-    }
-    if (remaining != 0)
-      throw std::system_error(result, std::system_category());
+    doWrite(fd, data, sizeof(scalar_t) * size);
   } else {
     int64_t buffer_size = std::min(size, (int64_t)5000);
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(scalar_t)]);
@@ -54,7 +39,7 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
             THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       }
-      SYSCHECK(doWrite(fd, le_buffer.get(), to_convert * sizeof(scalar_t)));
+      doWrite(fd, le_buffer.get(), to_convert * sizeof(scalar_t));
     }
   }
 }
@@ -67,11 +52,7 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
 {
   scalar_t *data;
   int64_t size;
-  ssize_t result = doRead(file, &size, sizeof(int64_t));
-  if (result == 0)
-    throw std::runtime_error("unexpected EOF. The file might be corrupted.");
-  if (result != sizeof(int64_t))
-    throw std::system_error(result, std::system_category());
+  doRead(file, &size, sizeof(int64_t));
   THWStoragePtr storage;
   if (_storage == nullptr) {
     storage = THWStorage_(newWithSize)(LIBRARY_STATE size);
@@ -91,20 +72,7 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
 
   // fast track for bytes and little endian
   if (sizeof(scalar_t) == 1 || THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN) {
-    char *bytes = (char *) data;
-    int64_t remaining = sizeof(scalar_t) * THWStorage_(size)(LIBRARY_STATE storage);
-    while (remaining > 0) {
-      // we write and read in 1GB blocks to avoid bugs on some OSes
-      ssize_t result = doRead(file, bytes, THMin(remaining, 1073741824));
-      if (result == 0) // 0 means EOF, which is also an error
-        throw std::runtime_error("unexpected EOF. The file might be corrupted.");
-      if (result < 0)
-        throw std::system_error(result, std::system_category());
-      bytes += result;
-      remaining -= result;
-    }
-    if (remaining != 0)
-      throw std::system_error(result, std::system_category());
+    doRead(file, data, sizeof(scalar_t) * THWStorage_(size)(LIBRARY_STATE storage));
   } else {
     int64_t buffer_size = std::min(size, (int64_t)5000);
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(scalar_t)]);
@@ -112,7 +80,7 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
 
     for (int64_t i = 0; i < size; i += buffer_size) {
       size_t to_convert = std::min(size - i, buffer_size);
-      SYSCHECK(doRead(file, le_buffer.get(), sizeof(scalar_t) * to_convert));
+      doRead(file, le_buffer.get(), sizeof(scalar_t) * to_convert);
 
       if (sizeof(scalar_t) == 2) {
         THP_decodeInt16Buffer((int16_t*)data + i,
@@ -141,7 +109,5 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
 
 template THWStorage* THPStorage_(readFileRaw<int>)(int fd, THWStorage* storage);
 template THWStorage* THPStorage_(readFileRaw<PyObject*>)(PyObject* fd, THWStorage* storage);
-
-#undef SYSCHECK
 
 #endif

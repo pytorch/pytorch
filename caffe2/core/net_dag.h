@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
@@ -16,7 +17,6 @@
 #include "caffe2/core/net_dag_utils.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator_schema.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/timer.h"

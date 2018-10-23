@@ -2,10 +2,10 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/SmallVector.h>
-#include <ATen/core/optional.h>
 #include <ATen/core/Range.h>
 #include <ATen/detail/ScalarTypeConversions.h>
 #include <bitset>
+#include "c10/util/Optional.h"
 
 // TensorIterator is a helper class for element-wise operations, such as
 // arithmetic, comparisions, and trigonometric functions. It handles

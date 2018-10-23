@@ -1,5 +1,4 @@
-#define CATCH_CONFIG_MAIN
-#include "catch_utils.hpp"
+#include "gtest/gtest.h"
 
 #include "ATen/ATen.h"
 #include "test_seed.h"
@@ -10,9 +9,10 @@
 
 using namespace at;
 
-__global__ void test_tensor_packed_accessor_kernel(PackedTensorAccessor<float,1,RestrictPtrTraits> resa,
-						   PackedTensorAccessor<float,2,RestrictPtrTraits> t1a,
-						   PackedTensorAccessor<float,1,RestrictPtrTraits> t2a){
+__global__ void test_tensor_packed_accessor_kernel(
+    PackedTensorAccessor<float, 1, RestrictPtrTraits> resa,
+    PackedTensorAccessor<float, 2, RestrictPtrTraits> t1a,
+    PackedTensorAccessor<float, 1, RestrictPtrTraits> t2a) {
   for (int64_t i = 0; i < resa.size(0); i++) {
     float val = 0.0f;
     for (int64_t j = 0; j < t1a.size(1); j++) {
@@ -22,7 +22,8 @@ __global__ void test_tensor_packed_accessor_kernel(PackedTensorAccessor<float,1,
   }
 }
 
-CATCH_TEST_CASE( "test PackedTensorAccessor and Tensor.packed_accessor", "[cuda]" ) {
+// test PackedTensorAccessor and Tensor.packed_accessor
+TEST(PackedtensoraccessorTest, PackedtensoraccessorTestCUDA) {
   manual_seed(123, at::kCPU);
   manual_seed(123, at::kCUDA);
 
@@ -35,12 +36,13 @@ CATCH_TEST_CASE( "test PackedTensorAccessor and Tensor.packed_accessor", "[cuda]
   auto resa = res.packed_accessor<float, 1, RestrictPtrTraits>();
 
   auto stream = at::cuda::getCurrentCUDAStream();
-  
+
   test_tensor_packed_accessor_kernel<<<1, 1, 0, stream>>>(resa, t1a, t2a);
   cudaError_t err = cudaDeviceSynchronize();
-  CATCH_REQUIRE(err == cudaSuccess);
+  bool isEQ = err == cudaSuccess;
+  ASSERT_TRUE(isEQ);
 
   auto expected = mv(t1, t2);
 
-  CATCH_REQUIRE(res.allclose(expected));
+  ASSERT_TRUE(res.allclose(expected));
 }

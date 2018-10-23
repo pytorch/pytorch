@@ -59,6 +59,12 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   sudo apt-get install libc++1
   sudo apt-get install libc++abi1
 
+  # When hcc runs out of memory, it silently exits without stopping
+  # the build process, leaving undefined symbols in the shared lib
+  # which will cause undefined symbol errors when later running
+  # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
+  export MAX_JOBS=4
+
   python tools/amd_build/build_pytorch_amd.py
   python tools/amd_build/build_caffe2_amd.py
   USE_ROCM=1 python setup.py install --user
@@ -101,17 +107,6 @@ fi
 
 # Add the test binaries so that they won't be git clean'ed away
 git add -f build/bin
-
-# Test C FFI plugins
-# cffi install doesn't work for Python 3.7
-if [[ "$BUILD_ENVIRONMENT" != *pynightly* ]]; then
-  # TODO: Don't run this here
-  pip install cffi
-  git clone https://github.com/pytorch/extension-ffi.git
-  pushd extension-ffi/script
-  python build.py
-  popd
-fi
 
 # Test documentation build
 if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
