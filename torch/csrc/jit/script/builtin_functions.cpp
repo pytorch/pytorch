@@ -29,9 +29,8 @@ def div(a : ${Scalar}, b : Tensor) -> Tensor:
 )SCRIPT");
 
 auto python_builtins_source = R"SCRIPT(
-def warn(string: str) -> int:
+def warn(string: str):
   print(string)
-  return 0
 )SCRIPT";
 
 struct BuiltinFunctionRegistry {
