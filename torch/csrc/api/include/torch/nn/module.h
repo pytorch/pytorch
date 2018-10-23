@@ -7,7 +7,6 @@
 #include <torch/tensor.h>
 
 #include <ATen/ATen.h>
-#include "c10/util/Optional.h"
 
 #include <map>
 #include <memory>
@@ -341,13 +340,13 @@ class Module {
   void to_impl(Ts&&... ts);
 
   /// The registered parameters of this `Module`.
-  OrderedDict<Tensor> parameters_;
+  OrderedDict<Tensor> parameters_{"Parameter"};
 
   /// The registered buffers of this `Module`.
-  OrderedDict<Tensor> buffers_;
+  OrderedDict<Tensor> buffers_{"Buffer"};
 
   /// The registered (direct) submodules of this `Module`.
-  OrderedDict<std::shared_ptr<Module>> children_;
+  OrderedDict<std::shared_ptr<Module>> children_{"Submodule"};
 
   /// The module's name (e.g. "LSTM").
   mutable c10::optional<std::string> name_;
@@ -374,6 +373,12 @@ template <typename ModuleType>
 std::shared_ptr<ModuleType> Module::register_module(
     std::string name,
     std::shared_ptr<ModuleType> module) {
+  AT_CHECK(!name.empty(), "Submodule name must not be empty");
+  AT_CHECK(
+      name.find('.') == std::string::npos,
+      "Submodule name must not contain a dot (got '",
+      name,
+      "')");
   auto& base_module = children_.insert(std::move(name), std::move(module));
   return std::dynamic_pointer_cast<ModuleType>(base_module);
 }

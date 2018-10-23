@@ -75,6 +75,74 @@ TEST_F(ModuleTest, ZeroGradWithUndefined) {
   ASSERT_EQ(module.x.grad().sum().item<float>(), 0);
 }
 
+TEST_F(ModuleTest, RegisterModuleThrowsForEmptyOrDottedName) {
+  struct TestModel : public torch::nn::Module {
+    using torch::nn::Module::register_module;
+  };
+  ASSERT_THROWS_WITH(
+      TestModel{}.register_module("name.with.dot", torch::nn::Linear(3, 4)),
+      "Submodule name must not contain a dot (got 'name.with.dot')");
+  ASSERT_THROWS_WITH(
+      TestModel{}.register_module("", torch::nn::Linear(3, 4)),
+      "Submodule name must not be empty");
+}
+
+TEST_F(ModuleTest, RegisterModuleThrowsForDuplicateModuleName) {
+  struct TestModel : public torch::nn::Module {
+    using torch::nn::Module::register_module;
+  };
+  TestModel model;
+  model.register_module("linear", torch::nn::Linear(3, 4));
+  ASSERT_THROWS_WITH(
+      model.register_module("linear", torch::nn::Linear(3, 4)),
+      "Submodule 'linear' already defined");
+}
+
+TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
+  struct TestModel : public torch::nn::Module {
+    using torch::nn::Module::register_parameter;
+  };
+  ASSERT_THROWS_WITH(
+      TestModel{}.register_parameter("name.with.dot", torch::ones(5)),
+      "Parameter name must not contain a dot (got 'name.with.dot')");
+  ASSERT_THROWS_WITH(
+      TestModel{}.register_parameter("", torch::ones(5)),
+      "Parameter name must not be empty");
+}
+
+TEST_F(ModuleTest, RegisterParameterThrowsForDuplicateModuleName) {
+  struct TestModel : public torch::nn::Module {
+    using torch::nn::Module::register_parameter;
+  };
+  TestModel model;
+  model.register_parameter("p", torch::ones(5));
+  ASSERT_THROWS_WITH(
+      model.register_parameter("p", torch::ones(5)),
+      "Parameter 'p' already defined");
+}
+
+TEST_F(ModuleTest, RegisterBufferThrowsForEmptyOrDottedName) {
+  struct TestModel : public torch::nn::Module {
+    using torch::nn::Module::register_buffer;
+  };
+  ASSERT_THROWS_WITH(
+      TestModel{}.register_buffer("name.with.dot", torch::ones(5)),
+      "Buffer name must not contain a dot (got 'name.with.dot')");
+  ASSERT_THROWS_WITH(
+      TestModel{}.register_buffer("", torch::ones(5)),
+      "Buffer name must not be empty");
+}
+
+TEST_F(ModuleTest, RegisterBufferThrowsForDuplicateModuleName) {
+  struct TestModel : public torch::nn::Module {
+    using torch::nn::Module::register_buffer;
+  };
+  TestModel model;
+  model.register_buffer("p", torch::ones(5));
+  ASSERT_THROWS_WITH(
+      model.register_buffer("p", torch::ones(5)), "Buffer 'p' already defined");
+}
+
 TEST_F(ModuleTest, CanGetName) {
   // CHECK instead of REQUIRE because demangling may fail.
   AGIUnit agi;

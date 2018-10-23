@@ -156,11 +156,23 @@ Tensor& Module::register_parameter(
     std::string name,
     Tensor tensor,
     bool requires_grad) {
+  AT_CHECK(!name.empty(), "Parameter name must not be empty");
+  AT_CHECK(
+      name.find('.') == std::string::npos,
+      "Parameter name must not contain a dot (got '",
+      name,
+      "')");
   tensor.set_requires_grad(requires_grad);
   return parameters_.insert(std::move(name), std::move(tensor));
 }
 
 Tensor& Module::register_buffer(std::string name, Tensor tensor) {
+  AT_CHECK(!name.empty(), "Buffer name must not be empty");
+  AT_CHECK(
+      name.find('.') == std::string::npos,
+      "Buffer name must not contain a dot (got '",
+      name,
+      "')");
   return buffers_.insert(std::move(name), std::move(tensor));
 }
 
