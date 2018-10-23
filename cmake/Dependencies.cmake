@@ -108,6 +108,20 @@ if(USE_NNPACK)
   endif()
 endif()
 
+# ---[ Caffe2 Int8 Ops, use gemmlowp
+if(USE_GEMMLOWP)
+  set(CAFFE2_THIRD_PARTY_ROOT ${PROJECT_SOURCE_DIR}/third_party)
+
+  # Directories for gemmlowp dependencies submoduled in Caffe2
+  set(GEMMLOWP_INCLUDE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp" CACHE STRING "gemmlowp include directory")
+  set(GEMMLOWP_FOUND TRUE)
+  include_directories(SYSTEM ${GEMMLOWP_INCLUDE_DIR})
+  if(NOT GEMMLOWP_FOUND)
+    message(WARNING "Not compiling with GEMMLOWP. Suppress this warning with -DUSE_GEMMLOWP=OFF")
+    caffe2_update_option(USE_GEMMLOWP OFF)
+  endif()
+endif()
+
 # ---[ Caffe2 uses cpuinfo library in the thread pool
 if (NOT TARGET cpuinfo)
   if (NOT DEFINED CPUINFO_SOURCE_DIR)

@@ -177,6 +177,7 @@ from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_LIB_DIR, \
 from tools.setup_helpers.mkldnn import (USE_MKLDNN, MKLDNN_LIBRARY,
                                         MKLDNN_LIB_DIR, MKLDNN_INCLUDE_DIR)
 from tools.setup_helpers.nnpack import USE_NNPACK
+from tools.setup_helpers.gemmlowp import USE_GEMMLOWP
 from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
@@ -383,6 +384,8 @@ def build_libs(libs):
         build_libs_cmd += ['--use-rocm']
     if USE_NNPACK:
         build_libs_cmd += ['--use-nnpack']
+    if USE_GEMMLOWP:
+        build_libs_cmd += ['--use-gemmlowp']
     if USE_CUDNN:
         my_env["CUDNN_LIB_DIR"] = CUDNN_LIB_DIR
         my_env["CUDNN_LIBRARY"] = CUDNN_LIBRARY

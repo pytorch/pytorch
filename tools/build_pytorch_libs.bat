@@ -40,6 +40,15 @@ IF "%~1"=="--use-nnpack" (
   set /a USE_NNPACK=0
 )
 
+IF "%~1"=="--use-gemmlowp" (
+  set /a NO_GEMMLOWP=0
+  set /a USE_GEMMLOWP=1
+  shift
+) ELSE (
+  set /a NO_GEMMLOWP=1
+  set /a USE_GEMMLOWP=0
+)
+
 IF "%~1"=="--use-mkldnn" (
   set /a NO_MKLDNN=0
   shift
@@ -155,6 +164,7 @@ goto:eof
                   -DBUILD_EXAMPLES=OFF ^
                   -DBUILD_TEST=%BUILD_TEST% ^
                   -DNO_NNPACK=%NO_NNPACK% ^
+                  -DNO_GEMMLOWP=%NO_GEMMLOWP% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
   %MAKE_COMMAND%

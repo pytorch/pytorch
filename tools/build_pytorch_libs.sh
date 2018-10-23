@@ -45,6 +45,7 @@ fi
 USE_CUDA=0
 USE_ROCM=0
 USE_NNPACK=0
+USE_GEMMLOWP=0
 USE_MKLDNN=0
 USE_GLOO_IBVERBS=0
 CAFFE2_STATIC_LINK_CUDA=0
@@ -62,6 +63,9 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-nnpack)
           USE_NNPACK=1
+          ;;
+      --use-gemmlowp)
+          USE_GEMMLOWP=1
           ;;
       --use-mkldnn)
           USE_MKLDNN=1
@@ -216,6 +220,7 @@ function build() {
 		       -DBUILD_EXAMPLES=OFF \
 		       -DBUILD_TEST=$BUILD_TEST \
 		       -DNO_NNPACK=$((1-$USE_NNPACK)) \
+		       -DNO_GEMMLOWP=$((1-$USE_GEMMLOWP)) \
 		       -DNCCL_EXTERNAL=1 \
 		       -DCMAKE_DEBUG_POSTFIX="" \
 		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
@@ -312,6 +317,7 @@ function build_caffe2() {
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \
 		       -DUSE_NNPACK=$USE_NNPACK \
+		       -DUSE_GEMMLOWP=$USE_GEMMLOWP \
 		       -DUSE_LEVELDB=$USE_LEVELDB \
 		       -DUSE_LMDB=$USE_LMDB \
 		       -DUSE_OPENCV=$USE_OPENCV \
