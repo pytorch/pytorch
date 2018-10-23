@@ -1,7 +1,7 @@
 #include "ATen/cuda/CUDAContext.h"
 #include "THC/THCGeneral.hpp"
 
-namespace at { namespace cuda { 
+namespace at { namespace cuda {
 
 /* Device info */
 int64_t getNumGPUs() {

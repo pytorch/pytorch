@@ -170,29 +170,19 @@ inline void _PlacementNewNotDefault(void* /*ptr*/, size_t /*n*/) {
 
 template<
     typename T,
-    c10::guts::enable_if_t<
-        std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr>
+    c10::guts::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
-  return nullptr;
+  return
+    (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+    ? nullptr
+    : &_PlacementNew<T>;
 }
 
-template <
+template<
     typename T,
-    c10::guts::enable_if_t<
-        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
-        std::is_default_constructible<T>::value
-    >* = nullptr>
+    c10::guts::enable_if_t<!std::is_default_constructible<T>::value>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
-  return &_PlacementNew<T>;
-}
-
-template <
-    typename T,
-    c10::guts::enable_if_t<
-        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
-        !std::is_default_constructible<T>::value
-    >* = nullptr>
-inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
+  static_assert(!std::is_fundamental<T>::value && !std::is_pointer<T>::value, "this should have picked the other SFINAE case");
   return &_PlacementNewNotDefault<T>;
 }
 
@@ -246,29 +236,21 @@ inline void _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
 
 template<
     typename T,
-    c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr
+    c10::guts::enable_if_t<std::is_copy_assignable<T>::value>* = nullptr
     >
 inline constexpr TypeMetaData::Copy* _PickCopy() {
-  return nullptr;
+  return
+    (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+    ? nullptr
+    : &_Copy<T>;
 }
 
-template <
+template<
     typename T,
-    c10::guts::enable_if_t<
-        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
-        std::is_copy_assignable<T>::value
-    >* = nullptr>
+    c10::guts::enable_if_t<!std::is_copy_assignable<T>::value>* = nullptr
+    >
 inline constexpr TypeMetaData::Copy* _PickCopy() {
-  return &_Copy<T>;
-}
-
-template <
-    typename T,
-    c10::guts::enable_if_t<
-        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
-        !std::is_copy_assignable<T>::value
-    >* = nullptr>
-inline constexpr TypeMetaData::Copy* _PickCopy() {
+  static_assert(!std::is_fundamental<T>::value && !std::is_pointer<T>::value, "this should have picked the other SFINAE case");
   return &_CopyNotAllowed<T>;
 }
 
@@ -283,20 +265,12 @@ inline void _PlacementDelete(void* ptr, size_t n) {
   }
 }
 
-template<
-    typename T,
-    c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr
-    >
+template <typename T>
 inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
-  return nullptr;
-}
-
-template<
-    typename T,
-    c10::guts::enable_if_t<!(std::is_fundamental<T>::value || std::is_pointer<T>::value)>* = nullptr
-    >
-inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
-  return &_PlacementDelete<T>;
+  return
+    (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+    ? nullptr
+    : &_PlacementDelete<T>;
 }
 
 template <typename T>

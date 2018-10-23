@@ -60,6 +60,7 @@ class Caffe2Frontend(object):
     _blacklist_caffe2_args = {
         'order': {b'NCHW'},
         'cudnn_exhaustive_search': {0, 1},
+        'exhaustive_search': {0, 1},
         'use_cudnn': {0, 1},
     }
 
