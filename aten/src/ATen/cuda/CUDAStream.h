@@ -80,9 +80,10 @@ AT_CUDA_API int64_t CUDAStream_device(CUDAStreamInternals*);
 struct AT_CUDA_API CUDAStream {
 
   // Constructors
-  CUDAStream() = default;
   /* implicit */ CUDAStream(CUDAStreamInternals* internals_in)
-  : internals_{internals_in} { }
+    : internals_{internals_in} {
+    AT_ASSERT(internals_in);
+  }
 
   // Returns true if the CUDAStream is not null.
   explicit operator bool() const noexcept { return internals_ != nullptr; }
