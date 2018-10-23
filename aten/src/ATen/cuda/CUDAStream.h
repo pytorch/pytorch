@@ -6,6 +6,7 @@
 #include "cuda_runtime_api.h"
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
+#include <c10/util/Exception.h>
 
 /*
 * A CUDAStream interface. See CUDAStream.cpp for implementation details.
@@ -82,7 +83,7 @@ struct AT_CUDA_API CUDAStream {
   // Constructors
   /* implicit */ CUDAStream(CUDAStreamInternals* internals_in)
     : internals_{internals_in} {
-    C10_ASSERT(internals_in);
+    AT_ASSERT(internals_in);
   }
 
   // Returns true if the CUDAStream is not null.
