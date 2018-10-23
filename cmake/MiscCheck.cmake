@@ -37,6 +37,51 @@ if(EXISTS "/etc/os-release")
   endif()
 endif()
 
+# ---[ Check that our programs run.  This is different from the native CMake
+# compiler check, which just tests if the program compiles and links.  This is
+# important because with ASAN you might need to help the compiled library find
+# some dynamic libraries.
+cmake_push_check_state(RESET)
+CHECK_C_SOURCE_RUNS("
+int main() { return 0; }
+" COMPILER_WORKS)
+if (NOT COMPILER_WORKS)
+  # Force cmake to retest next time around
+  unset(COMPILER_WORKS CACHE)
+  message(FATAL_ERROR
+      "Could not run a simple program built with your compiler. "
+      "If you are trying to use -fsanitize=address, make sure "
+      "libasan is properly installed on your system (you can confirm "
+      "if the problem is this by attempting to build and run a "
+      "small program.)")
+endif()
+
+# ---[ Check if certain std functions are supported. Sometimes
+# _GLIBCXX_USE_C99 macro is not defined and some functions are missing.
+cmake_push_check_state(RESET)
+set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+CHECK_CXX_SOURCE_COMPILES("
+#include <cmath>
+#include <string>
+
+int main() {
+  int a = std::isinf(3.0);
+  int b = std::isnan(0.0);
+  std::string s = std::to_string(1);
+
+  return 0;
+  }" SUPPORT_GLIBCXX_USE_C99)
+if (NOT SUPPORT_GLIBCXX_USE_C99)
+  # Force cmake to retest next time around
+  unset(SUPPORT_GLIBCXX_USE_C99 CACHE)
+  message(FATAL_ERROR
+      "The C++ compiler does not support required functions. "
+      "This is very likely due to a known bug in GCC 5 "
+      "(and maybe other versions) on Ubuntu 17.10 and newer. "
+      "For more information, see: "
+      "https://github.com/pytorch/pytorch/issues/5229")
+endif()
+
 # ---[ Check if std::exception_ptr is supported.
 cmake_push_check_state(RESET)
 set(CMAKE_REQUIRED_FLAGS "-std=c++11")
