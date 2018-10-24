@@ -648,8 +648,8 @@ class Module(object):
 
                 if input_param.shape != param.shape:
                     # local shape should match the one in checkpoint
-                    error_msgs.append('size mismatch for {}: copying a param of {} from checkpoint, '
-                                      'where the shape is {} in current model.'
+                    error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
+                                      'the shape in current model is {}.'
                                       .format(key, input_param.shape, param.shape))
                     continue
 

@@ -13,7 +13,7 @@ import tempfile
 
 import torch
 from torch.utils import cpp_extension
-from common import TEST_WITH_ROCM
+from common_utils import TEST_WITH_ROCM
 import torch.distributed as dist
 
 TESTS = [
@@ -25,6 +25,7 @@ TESTS = [
     'dataloader',
     'distributed',
     'distributions',
+    'expecttest',
     'indexing',
     'jit',
     'multiprocessing',
@@ -35,6 +36,7 @@ TESTS = [
     'sparse',
     'thd_distributed',
     'torch',
+    'type_info',
     'utils',
 ]
 

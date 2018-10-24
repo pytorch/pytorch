@@ -7,19 +7,23 @@
 #include "THCTensorSort.cuh"
 #include "../THC/THCTensorMathReduce.cuh"
 
+#ifdef __HIP_PLATFORM_HCC__
+const int WARP_SIZE = 64;
+#else
 const int WARP_SIZE = 32;
+#endif
 
-template 
-  <typename Dtype, 
+template
+  <typename Dtype,
    typename Acctype>
 __global__ void cunn_LookupTable_accGradParametersKernelByFeature
-  (int64_t *indices, 
-   Dtype *grad, 
-   Dtype *grad_weight, 
-   Dtype scale, 
+  (int64_t *indices,
+   Dtype *grad,
+   Dtype *grad_weight,
+   Dtype scale,
    ptrdiff_t n,
-   int64_t stride, 
-   int padding_idx) 
+   int64_t stride,
+   int padding_idx)
 {
   extern __shared__ char buf[];
   Acctype* smem = (Acctype*)buf;
@@ -36,33 +40,33 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature
     int tid = threadIdx.x + threadIdx.y*blockDim.x;
     if(batch_start + tid < n)
       indices_batch[tid] = (int)(indices[batch_start + tid] - TH_INDEX_BASE);
-    
+
     // Loop over the batch of <= 1024 loaded indices in chunks of blockDim.y = 32
     for(int chunk_start = batch_start; chunk_start < n; chunk_start += blockDim.y)
     {
-      // This does double duty:  it makes sure indices_batch is ready, and it makes sure match-group 
+      // This does double duty:  it makes sure indices_batch is ready, and it makes sure match-group
       // leaders are done with their accumulates before other warps start loading again.
-      __syncthreads();  
-  
-      int n_this_chunk = (n - chunk_start) < blockDim.y ? (n - chunk_start) : blockDim.y; 
+      __syncthreads();
 
-      int src_row = chunk_start + threadIdx.y; 
+      int n_this_chunk = (n - chunk_start) < blockDim.y ? (n - chunk_start) : blockDim.y;
+
+      int src_row = chunk_start + threadIdx.y;
       int dst_row = indices_batch[src_row - batch_start]; // This warp's target row in grad_weight
-      
+
       // All warps load their smem segments with incoming grad data
       if(src_row < n && f < s && dst_row != padding_idx - TH_INDEX_BASE)
         my_s[threadIdx.x] =  ScalarConvert<Dtype, Acctype>::to(scale*grad[src_row*stride + f]);
-     
+
       __syncthreads();
-    
+
       // To ensure determinism, we can't just have each warp add its grad data to its dst_row.
       // We need to check if any other warps pulled grad data targeting dst_row.
-      // If so, we elect the first warp in each matching group as the leader. 
+      // If so, we elect the first warp in each matching group as the leader.
       // Each leader warp serializes the accumulates targeting dst_row in shared memory,
       // then finishes by adding the accumulated buffer to dst_row in grad_weight.
       if(dst_row != padding_idx - TH_INDEX_BASE && src_row < n) // Per-warp exit condition
       {
-        int match_found_this_thread = 
+        int match_found_this_thread =
           (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
         if(threadIdx.x >= n_this_chunk)
           match_found_this_thread = 0;
@@ -72,7 +76,7 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature
 
         if(threadIdx.y == first_remaining_peer) // Nominate lowest-indexed warp as the leader
         {
-          matchmask ^= (1 << first_remaining_peer);   
+          matchmask ^= (1 << first_remaining_peer);
           while(matchmask)
           {
             first_remaining_peer = __ffs(matchmask) - 1;
@@ -185,10 +189,10 @@ struct FastPow<DType, AccType, 2>
 /* Calculate norms of the rows of weight_ptr given by idx_ptr and capture them in norms */
 template <typename DType, typename AccType, typename IndexType, int Norm>
 __global__
-void calculate_norms_and_renorm(DType *weights, 
-                                THCIndex_t *indices, 
+void calculate_norms_and_renorm(DType *weights,
+                                THCIndex_t *indices,
                                 AccType normType,
-                                AccType maxNorm, 
+                                AccType maxNorm,
                                 IndexType dim)
 {
   // Some casting hacks since dynamic shared memory and templates don't work together:
@@ -208,7 +212,7 @@ void calculate_norms_and_renorm(DType *weights,
         (sdata, blockDim.x, v, ReduceAdd<AccType>(), accZero);
 
   if (tid == 0) {
-    sdata[0] = std::pow(v, 
+    sdata[0] = std::pow(v,
         THCNumerics<AccType>::div(ScalarConvert<int, AccType>::to(1), normType)
     );
   }

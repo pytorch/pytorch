@@ -448,8 +448,14 @@ class DataParallelModelTest(TestCase):
         self.assertEqual(transform.call_count, 1)
 
     @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
-    def test_multi_device_bn_op_level(self, seed, batch_size):
+    def test_multi_device_bn_op_level_cpu(self, seed, batch_size):
         self._bn_check_op_level("cpu", seed, batch_size)
+
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
+    @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
+    @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
+    def test_multi_device_bn_op_level_gpu(self, seed, batch_size):
+        self._bn_check_op_level("gpu", seed, batch_size)
 
     def _bn_check_op_level(self, device_type, seed, batch_size):
         '''
@@ -458,7 +464,7 @@ class DataParallelModelTest(TestCase):
         operator. We compare values produced with our manually calculated
         batch normalization values and gradients.
         '''
-        devices = [0, 1, 2]
+        devices = [0, 1]
         epsilon = 1e-3
         tolerance = 1e-3
 
@@ -529,7 +535,11 @@ class DataParallelModelTest(TestCase):
                 workspace.FeedBlob("{}_{}/data".format(device_type, device), data)
 
         def add_model_ops(model, loss_scale):
-            model.Tanh("data", "tanh")
+            if device_type == "gpu":
+                model.CopyCPUToGPU("data", "device_data")
+                model.Tanh("device_data", "tanh")
+            else:
+                model.Tanh("data", "tanh")
             model.SpatialBN("tanh", "bn_out", 1, epsilon=epsilon, is_test=False)
             model.Sqr("bn_out", "sqr")
             loss = model.SumElements("sqr", "loss")
@@ -574,6 +584,14 @@ class DataParallelModelTest(TestCase):
         if batch_size % 2 == 1:
             batch_size += 1
         self._test_multi_device_bn_net_lvl("cpu", seed, batch_size)
+
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
+    @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
+    @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
+    def test_multi_device_bn_net_lvl_gpu(self, seed, batch_size):
+        if batch_size % 2 == 1:
+            batch_size += 1
+        self._test_multi_device_bn_net_lvl("gpu", seed, batch_size)
 
     def _test_multi_device_bn_net_lvl(self, device_type, seed, batch_size):
         '''
@@ -628,7 +646,11 @@ class DataParallelModelTest(TestCase):
                 workspace.FeedBlob("{}_1/data".format(device_type), data[half:])
 
             def add_model_ops(model, loss_scale):
-                model.Tanh("data", "tanh")
+                if device_type == "gpu":
+                    model.CopyCPUToGPU("data", "device_data")
+                    model.Tanh("device_data", "tanh")
+                else:
+                    model.Tanh("data", "tanh")
                 model.SpatialBN("tanh", "bn_out", 1, epsilon=epsilon, is_test=False)
                 model.Sqr("bn_out", "sqr")
                 loss = model.SumElements("sqr", "loss")

@@ -5,7 +5,9 @@
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(FC, FullyConnectedOp<CPUContext>);
-REGISTER_CPU_OPERATOR(FCGradient, FullyConnectedGradientOp<CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    FCGradient,
+    FullyConnectedGradientOp<CPUContext>);
 
 REGISTER_CPU_OPERATOR(
     FCTransposed,
@@ -13,7 +15,7 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         DefaultEngine,
         false /* don't transpose weight */>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_GRADIENT_OPERATOR(
     FCTransposedGradient,
     FullyConnectedGradientOp<
         CPUContext,
@@ -155,7 +157,7 @@ OPERATOR_SCHEMA(FCTransposed)
 Same as FC, but weight matrix is supposed to be already pretransposed.
 FCTransposed stands for calling blass with no noTrans, noTrans
 )DOC")
-    .InheritOnnxSchema("FCTransposed");
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(FC)
     .NumInputs(3)
@@ -255,13 +257,13 @@ Y:
         "Ouput blob containing a 2D output matrix of shape $(M,N)$, where $M$ is the batch size and $N$ is the number of nodes in the layer. The ouput is calculated as $Y=XW^T+b$.")
     .InheritOnnxSchema("Gemm");
 
-OPERATOR_SCHEMA(FCGradient)
+GRADIENT_OPERATOR_SCHEMA(FCGradient)
     .NumInputs(3)
     .NumOutputs(2, 3)
     .TensorInferenceFunction(std::bind(FCGradientShapeInference, _1, _2, false))
     .CostInferenceFunction(
         std::bind(CostInferenceForFCGradient, _1, _2, false));
-OPERATOR_SCHEMA(FCTransposedGradient)
+GRADIENT_OPERATOR_SCHEMA(FCTransposedGradient)
     .NumInputs(3)
     .NumOutputs(2, 3)
     .TensorInferenceFunction(std::bind(FCGradientShapeInference, _1, _2, false))

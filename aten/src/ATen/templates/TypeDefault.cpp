@@ -13,13 +13,17 @@
 #include "ATen/Tensor.h"
 #include "ATen/core/TensorOptions.h"
 #include "ATen/DeviceGuard.h"
+#include "ATen/SparseTensorUtils.h"
 
 namespace at {
 
 Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   Tensor b_src;
-  if (is_sparse()) b_src = src;
-  else std::tie(b_src) = expand_inplace(self, src, "copy");
+  if (is_sparse()) {
+    b_src = src;
+  } else {
+    std::tie(b_src) = expand_inplace(self, src, "copy");
+  }
   return s_copy_(self, b_src, non_blocking);
 }
 
@@ -30,13 +34,20 @@ Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device>
   }
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   Tensor r;
-  if (is_sparse()) r = this->native_tensor({0});
-  else r = at::empty(src.sizes(), this->options());
+  if (is_sparse()) {
+    r = at::empty({0}, this->options());
+  } else {
+    r = at::empty(src.sizes(), this->options());
+  }
   r.copy_(src, non_blocking);
   return r;
 }
 
-void TypeDefault::backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+void TypeDefault::backward(
+    Tensor& self,
+    c10::optional<Tensor> gradient,
+    bool keep_graph,
+    bool create_graph) const {
   AT_ERROR("backward is not implemented for Tensor");
 }
 

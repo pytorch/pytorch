@@ -179,13 +179,11 @@ constexpr struct in_place_t{} in_place{};
 
 
 // 20.5.7, Disengaged state indicator
-struct nullopt_t
-{
+struct c10::nullopt_t {
   struct init{};
-  constexpr explicit nullopt_t(init){}
+  constexpr explicit c10::nullopt_t(init) {}
 };
-constexpr nullopt_t nullopt{nullopt_t::init()};
-
+constexpr c10::nullopt_t c10::nullopt{c10::nullopt_t::init()};
 
 // 20.5.8, class bad_optional_access
 class bad_optional_access : public std::logic_error {
@@ -282,7 +280,9 @@ using OptionalBase = typename std::conditional<
 template <class T>
 class optional : private OptionalBase<T>
 {
-  static_assert( !std::is_same<typename std::decay<T>::type, nullopt_t>::value, "bad T" );
+  static_assert(
+      !std::is_same<typename std::decay<T>::type, c10::nullopt_t>::value,
+      "bad T");
   static_assert( !std::is_same<typename std::decay<T>::type, in_place_t>::value, "bad T" );
 
 
@@ -330,7 +330,7 @@ public:
 
   // 20.5.5.1, constructors
   constexpr optional() noexcept : OptionalBase<T>()  {};
-  constexpr optional(nullopt_t) noexcept : OptionalBase<T>() {};
+  constexpr optional(c10::nullopt_t) noexcept : OptionalBase<T>(){};
 
   optional(const optional& rhs)
   : OptionalBase<T>()
@@ -366,8 +366,7 @@ public:
   ~optional() = default;
 
   // 20.5.4.3, assignment
-  optional& operator=(nullopt_t) noexcept
-  {
+  optional& operator=(c10::nullopt_t) noexcept {
     clear();
     return *this;
   }
@@ -538,7 +537,7 @@ public:
 template <class T>
 class optional<T&>
 {
-  static_assert( !std::is_same<T, nullopt_t>::value, "bad T" );
+  static_assert(!std::is_same<T, c10::nullopt_t>::value, "bad T");
   static_assert( !std::is_same<T, in_place_t>::value, "bad T" );
   T* ref;
 
@@ -547,7 +546,7 @@ public:
   // 20.5.5.1, construction/destruction
   constexpr optional() noexcept : ref(nullptr) {}
 
-  constexpr optional(nullopt_t) noexcept : ref(nullptr) {}
+  constexpr optional(c10::nullopt_t) noexcept : ref(nullptr) {}
 
   constexpr optional(T& v) noexcept : ref(detail_::static_addressof(v)) {}
 
@@ -562,7 +561,7 @@ public:
   ~optional() = default;
 
   // 20.5.5.2, mutation
-  optional& operator=(nullopt_t) noexcept {
+  optional& operator=(c10::nullopt_t) noexcept {
     ref = nullptr;
     return *this;
   }
@@ -680,69 +679,66 @@ template <class T> constexpr bool operator>=(const optional<T>& x, const optiona
   return !(x < y);
 }
 
-
-// 20.5.9, Comparison with nullopt
-template <class T> constexpr bool operator==(const optional<T>& x, nullopt_t) noexcept
-{
+// 20.5.9, Comparison with c10::nullopt
+template <class T>
+constexpr bool operator==(const optional<T>& x, c10::nullopt_t) noexcept {
   return (!x);
 }
 
-template <class T> constexpr bool operator==(nullopt_t, const optional<T>& x) noexcept
-{
+template <class T>
+constexpr bool operator==(c10::nullopt_t, const optional<T>& x) noexcept {
   return (!x);
 }
 
-template <class T> constexpr bool operator!=(const optional<T>& x, nullopt_t) noexcept
-{
+template <class T>
+constexpr bool operator!=(const optional<T>& x, c10::nullopt_t) noexcept {
   return bool(x);
 }
 
-template <class T> constexpr bool operator!=(nullopt_t, const optional<T>& x) noexcept
-{
+template <class T>
+constexpr bool operator!=(c10::nullopt_t, const optional<T>& x) noexcept {
   return bool(x);
 }
 
-template <class T> constexpr bool operator<(const optional<T>&, nullopt_t) noexcept
-{
+template <class T>
+constexpr bool operator<(const optional<T>&, c10::nullopt_t) noexcept {
   return false;
 }
 
-template <class T> constexpr bool operator<(nullopt_t, const optional<T>& x) noexcept
-{
+template <class T>
+constexpr bool operator<(c10::nullopt_t, const optional<T>& x) noexcept {
   return bool(x);
 }
 
-template <class T> constexpr bool operator<=(const optional<T>& x, nullopt_t) noexcept
-{
+template <class T>
+constexpr bool operator<=(const optional<T>& x, c10::nullopt_t) noexcept {
   return (!x);
 }
 
-template <class T> constexpr bool operator<=(nullopt_t, const optional<T>&) noexcept
-{
+template <class T>
+constexpr bool operator<=(c10::nullopt_t, const optional<T>&) noexcept {
   return true;
 }
 
-template <class T> constexpr bool operator>(const optional<T>& x, nullopt_t) noexcept
-{
+template <class T>
+constexpr bool operator>(const optional<T>& x, c10::nullopt_t) noexcept {
   return bool(x);
 }
 
-template <class T> constexpr bool operator>(nullopt_t, const optional<T>&) noexcept
-{
+template <class T>
+constexpr bool operator>(c10::nullopt_t, const optional<T>&) noexcept {
   return false;
 }
 
-template <class T> constexpr bool operator>=(const optional<T>&, nullopt_t) noexcept
-{
+template <class T>
+constexpr bool operator>=(const optional<T>&, c10::nullopt_t) noexcept {
   return true;
 }
 
-template <class T> constexpr bool operator>=(nullopt_t, const optional<T>& x) noexcept
-{
+template <class T>
+constexpr bool operator>=(c10::nullopt_t, const optional<T>& x) noexcept {
   return (!x);
 }
-
-
 
 // 20.5.10, Comparison with T
 template <class T> constexpr bool operator==(const optional<T>& x, const T& v)

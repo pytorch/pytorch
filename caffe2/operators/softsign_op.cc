@@ -106,7 +106,7 @@ Y:
 )DOC")
     .Input(0, "input", "Input data blob to be operated on.")
     .Output(0, "output", "Output data blob with same shape as input")
-    .InheritOnnxSchema("Softsign");
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(SoftsignGradient)
     .NumInputs(2)

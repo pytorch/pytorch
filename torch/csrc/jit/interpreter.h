@@ -1,12 +1,15 @@
 #pragma once
 #include <memory>
 #include <vector>
-#include "ATen/core/optional.h"
+#include "c10/util/Optional.h"
 
 #include "torch/csrc/WindowsTorchApiMacro.h"
 
 namespace at {
   class Tensor;
+}
+namespace c10 {
+struct IValue;
 }
 namespace torch { namespace jit {
 
@@ -20,8 +23,7 @@ struct CodeImpl;
 struct InterpreterStateImpl;
 struct Graph;
 struct Node;
-struct IValue;
-using Stack = std::vector<IValue>;
+using Stack = std::vector<c10::IValue>;
 
 struct TORCH_API Code {
   Code()

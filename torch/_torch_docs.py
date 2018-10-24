@@ -17,7 +17,7 @@ def parse_kwargs(desc):
     }
     """
     # Split on exactly 4 spaces after a newline
-    regx = re.compile("\n\s{4}(?!\s)")
+    regx = re.compile(r"\n\s{4}(?!\s)")
     kwargs = [section.strip() for section in regx.split(desc)]
     kwargs = [section for section in kwargs if len(section) > 0]
     return {desc.split(' ')[0]: desc for desc in kwargs}
@@ -649,6 +649,8 @@ tensor of size 0. If :attr:`minlength` is specified, the number of bins is at le
 ``out[n] += weights[i]`` if :attr:`weights` is specified else
 ``out[n] += 1``.
 
+.. include:: cuda_deterministic.rst
+
 Arguments:
     input (Tensor): 1-d int tensor
     weights (Tensor): optional, weight for each value in the input tensor.
@@ -740,7 +742,7 @@ Arguments:
 
 add_docstr(torch.cat,
            r"""
-cat(seq, dim=0, out=None) -> Tensor
+cat(tensors, dim=0, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
 All tensors must either have the same shape (except in the concatenating
@@ -752,7 +754,7 @@ and :func:`torch.chunk`.
 :func:`torch.cat` can be best understood via examples.
 
 Args:
-    seq (sequence of Tensors): any python sequence of tensors of the same type.
+    tensors (sequence of Tensors): any python sequence of tensors of the same type.
         Non-empty tensors provided must have the same shape, except in the
         cat dimension.
     dim (int, optional): the dimension over which the tensors are concatenated
@@ -1022,7 +1024,7 @@ Example::
 
 add_docstr(torch.cumsum,
            r"""
-cumsum(input, dim, out=None) -> Tensor
+cumsum(input, dim, out=None, dtype=None) -> Tensor
 
 Returns the cumulative sum of elements of :attr:`input` in the dimension
 :attr:`dim`.
@@ -1472,7 +1474,7 @@ Args:
 
 Example::
 
-    >>> torch.exp(torch.tensor([0, math.log(2)]))
+    >>> torch.exp(torch.tensor([0, math.log(2.)]))
     tensor([ 1.,  2.])
 """)
 
@@ -1496,7 +1498,7 @@ Args:
 
 Example::
 
-    >>> torch.expm1(torch.tensor([0, math.log(2)]))
+    >>> torch.expm1(torch.tensor([0, math.log(2.)]))
     tensor([ 0.,  1.])
 """)
 
@@ -4211,36 +4213,48 @@ Args:
 
 Example::
 
-    >>> i = torch.LongTensor([[0, 1, 1],
-                              [2, 0, 2]])
-    >>> v = torch.FloatTensor([3, 4, 5])
-    >>> torch.sparse_coo_tensor(i, v, torch.Size([2,4]))
-    torch.sparse.FloatTensor of size (2,4) with indices:
-    tensor([[ 0,  1,  1],
-            [ 2,  0,  2]])
-    and values:
-    tensor([ 3.,  4.,  5.])
+    >>> i = torch.tensor([[0, 1, 1],
+                          [2, 0, 2]])
+    >>> v = torch.tensor([3, 4, 5], dtype=torch.float32)
+    >>> torch.sparse_coo_tensor(i, v, [2, 4])
+    tensor(indices=tensor([[0, 1, 1],
+                           [2, 0, 2]]),
+           values=tensor([3., 4., 5.]),
+           size=(2, 4), nnz=3, layout=torch.sparse_coo)
 
     >>> torch.sparse_coo_tensor(i, v)  # Shape inference
-    torch.sparse.FloatTensor of size (2,3) with indices:
-    tensor([[ 0,  1,  1],
-            [ 2,  0,  2]])
-    and values:
-    tensor([ 3.,  4.,  5.])
+    tensor(indices=tensor([[0, 1, 1],
+                           [2, 0, 2]]),
+           values=tensor([3., 4., 5.]),
+           size=(2, 3), nnz=3, layout=torch.sparse_coo)
 
-    >>> torch.sparse_coo_tensor(i, v, torch.Size([2,4]), dtype=torch.float64,
+    >>> torch.sparse_coo_tensor(i, v, [2, 4],
+                                dtype=torch.float64,
                                 device=torch.device('cuda:0'))
-    torch.cuda.sparse.DoubleTensor of size (2,4) with indices:
-    tensor([[ 0,  1,  1],
-            [ 2,  0,  2]], device='cuda:0')
-    and values:
-    tensor([ 3.,  4.,  5.], dtype=torch.float64, device='cuda:0')
+    tensor(indices=tensor([[0, 1, 1],
+                           [2, 0, 2]]),
+           values=tensor([3., 4., 5.]),
+           device='cuda:0', size=(2, 4), nnz=3, dtype=torch.float64,
+           layout=torch.sparse_coo)
 
-    >>> torch.sparse_coo_tensor([], [], torch.Size([])) # Create an empty tensor (of size (0,))
-    torch.sparse.FloatTensor of size () with indices:
-    tensor([], dtype=torch.int64)
-    and values:
-    tensor([])
+    # Create an empty sparse tensor with the following invariants:
+    #   1. sparse_dim + dense_dim = len(SparseTensor.shape)
+    #   2. SparseTensor._indices().shape = (sparse_dim, nnz)
+    #   3. SparseTensor._values().shape = (nnz, SparseTensor.shape[sparse_dim:])
+    #
+    # For instance, to create an empty sparse tensor with nnz = 0, dense_dim = 0 and
+    # sparse_dim = 1 (hence indices is a 2D tensor of shape = (1, 0))
+    >>> S = torch.sparse_coo_tensor(torch.empty([1, 0]), [], [1])
+    tensor(indices=tensor([], size=(1, 0)),
+           values=tensor([], size=(0,)),
+           size=(1,), nnz=0, layout=torch.sparse_coo)
+
+    # and to create an empty sparse tensor with nnz = 0, dense_dim = 1 and
+    # sparse_dim = 1
+    >>> S = torch.sparse_coo_tensor(torch.empty([1, 0]), torch.empty([0, 2]), [1, 2])
+    tensor(indices=tensor([], size=(1, 0)),
+           values=tensor([], size=(0, 2)),
+           size=(1, 2), nnz=0, layout=torch.sparse_coo)
 
 .. _torch.sparse: https://pytorch.org/docs/stable/sparse.html
 """)
@@ -4412,7 +4426,7 @@ Example::
 
 add_docstr(torch.svd,
            r"""
-svd(input, some=True, out=None) -> (Tensor, Tensor, Tensor)
+svd(input, some=True, compute_uv=True, out=None) -> (Tensor, Tensor, Tensor)
 
 `U, S, V = torch.svd(A)` returns the singular value decomposition of a
 real matrix `A` of size `(n x m)` such that :math:`A = USV^T`.
@@ -4426,6 +4440,9 @@ of size :math:`\min(n, m)` containing the non-negative diagonal entries.
 
 If :attr:`some` is ``True`` (default), the returned `U` and `V` matrices will
 contain only :math:`min(n, m)` orthonormal columns.
+
+If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
+of shape :math:`(n \times n)` and :math:`(m \times m)` respectively. :attr:`some` will be ignored here.
 
 .. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
           algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
@@ -4444,6 +4461,9 @@ contain only :math:`min(n, m)` orthonormal columns.
 .. note:: When :attr:`some` = ``False``, the gradients on ``U[:, min(n, m):]``
           and ``V[:, min(n, m):]`` will be ignored in backward as those vectors
           can be arbitrary bases of the subspaces.
+
+.. note:: When :attr:`compute_uv` = ``False``, backward cannot be performed since ``U`` and ``V``
+          from the forward pass is required for the backward operation.
 
 Args:
     input (Tensor): the input 2-D tensor
@@ -5188,8 +5208,7 @@ Args:
 
 Example::
 
-    >>> input = torch.empty((2,3), dtype=torch.int64)
-    >>> input.new(input.size())
+    >>> torch.empty((2,3), dtype=torch.int64)
     tensor([[ 9.4064e+13,  2.8000e+01,  9.3493e+13],
             [ 7.5751e+18,  7.1428e+18,  7.5955e+18]])
 """.format(**factory_like_common_args))
@@ -5438,10 +5457,11 @@ The inverse of this function is :func:`~torch.ifft`.
     repeatedly running FFT methods on tensors of same geometry with same
     same configuration.
 
-    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
-    controls the capacity of this cache. Some cuFFT plans may allocate GPU
-    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
-    the number of plans currently in cache, and
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
+    4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
+    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
+    use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
+    plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
 
 .. warning::
@@ -5538,10 +5558,11 @@ The inverse of this function is :func:`~torch.fft`.
     repeatedly running FFT methods on tensors of same geometry with same
     same configuration.
 
-    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
-    controls the capacity of this cache. Some cuFFT plans may allocate GPU
-    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
-    the number of plans currently in cache, and
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
+    4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
+    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
+    use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
+    plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
 
 .. warning::
@@ -5627,10 +5648,11 @@ The inverse of this function is :func:`~torch.irfft`.
     repeatedly running FFT methods on tensors of same geometry with same
     same configuration.
 
-    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
-    controls the capacity of this cache. Some cuFFT plans may allocate GPU
-    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
-    the number of plans currently in cache, and
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
+    4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
+    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
+    use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
+    plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
 
 .. warning::
@@ -5708,10 +5730,11 @@ The inverse of this function is :func:`~torch.rfft`.
     repeatedly running FFT methods on tensors of same geometry with same
     same configuration.
 
-    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
-    controls the capacity of this cache. Some cuFFT plans may allocate GPU
-    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
-    the number of plans currently in cache, and
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
+    4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
+    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
+    use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
+    plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
 
 .. warning::

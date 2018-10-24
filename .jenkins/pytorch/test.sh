@@ -32,6 +32,9 @@ python ./configure.py --bootstrap
 export PATH="$PWD:$PATH"
 popd
 
+# TODO: move this to Docker
+pip install hypothesis
+
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
@@ -159,19 +162,20 @@ test_custom_script_ops() {
 }
 
 if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
+  test_torchvision
   test_python_nn
   test_python_all_except_nn
   test_aten
-  test_torchvision
   test_libtorch
   test_custom_script_ops
 else
   if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+    test_torchvision
     test_python_nn
   elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+    test_torchvision
     test_python_all_except_nn
     test_aten
-    test_torchvision
     test_libtorch
     test_custom_script_ops
   fi
