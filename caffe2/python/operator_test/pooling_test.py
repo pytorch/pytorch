@@ -11,7 +11,6 @@ import unittest
 from caffe2.python import core, workspace
 import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.proto import caffe2_pb2
 
 class TestPooling(hu.HypothesisTestCase):
     # CUDNN does NOT support different padding values and we skip it
