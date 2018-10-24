@@ -245,10 +245,51 @@ struct CAFFE2_API NNModule {
   NNCFGraph controlFlow;
   std::unordered_set<NNGraph::NodeRef> inputs;
   std::unordered_set<NNGraph::NodeRef> outputs;
+
   NNModule(const NNModule&) = delete;
   NNModule(NNModule&&) = default;
   NNModule() {}
+
+  /* Repalce subgraph sg by node, using the order of
+   * node_inputs and node_outputs to determine how to link
+   * them to the node.  node_inputs *must* enumerate all the
+   * inputs to the subgraph (NeuralNetData that do not
+   * have producers inside the subgraph).  Same for node_outputs
+   *
+   * New output names may be created in the case that an inputs
+   * and an output have the same name (to avoid in place ops).
+   * This may cause issues with external_output -- be sure to check
+   * after running this function (and perhaps inserting a copy/alias op).
+   **/
+  void replaceSubgraph(
+      const NNGraph::SubgraphType& subgraph,
+      const NNGraph::NodeRef& node,
+      const std::vector<NNGraph::NodeRef>& node_inputs,
+      const std::vector<NNGraph::NodeRef>& node_outputs);
+
+  void deleteSubgraph(const NNGraph::SubgraphType& subgraph);
+  NNGraph::NodeRef createUniqueDataNode(const std::string& s = "_unique");
+
+  // Simple wrapper of replaceSubgraph where the node is created for you.
+  // Returns a NodeRef to the node containing the operator that was created
+  template <typename T, typename... Args>
+  NNGraph::NodeRef replaceSubgraphWithOperator(
+      const NNGraph::SubgraphType&,
+      const std::vector<NNGraph::NodeRef>&,
+      const std::vector<NNGraph::NodeRef>&,
+      Args...);
 };
+
+template <typename T, typename... Args>
+NNGraph::NodeRef NNModule::replaceSubgraphWithOperator(
+    const NNGraph::SubgraphType& sg,
+    const std::vector<NNGraph::NodeRef>& subgraph_inputs,
+    const std::vector<NNGraph::NodeRef>& subgraph_outputs,
+    Args... args) {
+  auto node = dataFlow.createNode(util::make_unique<T>(args...));
+  replaceSubgraph(sg, node, subgraph_inputs, subgraph_outputs);
+  return node;
+}
 
 // Although these seem generic, they make subtle assumptions
 // about the structure of the graph that is 100% valid for NNModule graphs
@@ -427,6 +468,9 @@ CAFFE2_API std::vector<NNGraph::NodeRef> getConsumers(NNGraph::NodeRef n);
 CAFFE2_API bool hasInputs(NNGraph::NodeRef n);
 CAFFE2_API std::vector<NNGraph::NodeRef> getInputs(NNGraph::NodeRef n);
 CAFFE2_API std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n);
+
+CAFFE2_API std::set<NNGraph::NodeRef> getInputs(const NNSubgraph& sg);
+CAFFE2_API std::set<NNGraph::NodeRef> getOutputs(const NNSubgraph& sg);
 
 // Get the name of the node regardless of underlying type.
 CAFFE2_API std::string getName(NNGraph::NodeRef n);
