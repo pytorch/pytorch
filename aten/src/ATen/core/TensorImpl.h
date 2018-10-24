@@ -402,10 +402,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   int64_t get_device() const {
-    // NB: This method is not virtual and avoid dispatches in the common case for perf.
+    // NB: This method is not virtual and tries to avoid dispatches in the common case for perf.
     const auto& tid = type_id();
     if (tid == CUDATensorId()) {
-      return storage_.device().index();
+      // TODO: #12934 investigate caching device on TensorImpl to avoid this vdispatch.
+      return storage().device().index();
     }
     return get_device_slow();
   }
@@ -776,7 +777,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   bool compute_contiguous() const;
 
   virtual int64_t get_device_slow() const {
-    AT_ERROR("get_device is not implemented for type ", type());
+    AT_ERROR(
+        "get_device is not implemented for tensors with ",
+        toString(tensorTypeIdToBackend(type_id())),
+        " backend");
   }
 
  protected:
