@@ -57,6 +57,24 @@ class NNModule(object):
     def tensors(self):
         return self._NNModule.dataFlow().tensors
 
+    def createNode(self, val):
+        return self._NNModule.dataFlow().createNode(val)
+
+    def deleteNode(self, node):
+        return self._NNModule.dataFlow().deleteNode(node)
+
+    def createEdge(self, a, b):
+        return self._NNModule.dataFlow().createEdge(a, b)
+
+    def deleteEdge(self, a, b=None):
+        if b:
+            self._NNModule.dataFlow().deleteEdge(a, b)
+        else:
+            self._NNModule.dataFlow().deleteEdge(a)
+
+    def replaceNode(self, old_node, new_node):
+        return self._NNModule.dataFlow().replaceNode(old_node, new_node)
+
     def convertToCaffe2Proto(self, old_proto=None):
         if not old_proto:
             old_proto = caffe2_pb2.NetDef()
