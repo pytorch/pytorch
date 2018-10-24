@@ -87,7 +87,7 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x1L;
 
 // Writer-specific constants
 constexpr uint64_t kFileFormatVersion = 0x1L;
-constexpr uint8_t kPadValue = 0xEF;
+constexpr char kPadValue = -17; // 0xEF
 
 }  // namespace
 
@@ -259,6 +259,7 @@ class PyTorchStreamReader final {
 class PyTorchStreamWriter final {
  public:
   PyTorchStreamWriter(std::ostream* out) : out_(out) {
+    pad_buffer_.resize(kFieldAlignment, kPadValue);
     writeFileHeader();
     // In the case that we do not write any records into this file, the last
     // record index written into the footer will point to the footer itself.
@@ -303,9 +304,7 @@ class PyTorchStreamWriter final {
   bool finalized_ = false;
   size_t last_record_idx_ = 0;
   // TODO: move this to the .cc file
-  std::vector<char> pad_buffer_{
-    /*count=*/kFieldAlignment, /*value=*/kPadValue
-  };
+  std::vector<char> pad_buffer_;
 
   // Utility functions
   void write64BitIntegerLittleEndian(const uint64_t value) {
