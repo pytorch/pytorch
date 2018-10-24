@@ -345,7 +345,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return !event_;
   }
 
-  virtual void FinishDeviceComputation() {
+  // Internal API invoked by observers. Normal callers shouldn't invoke it.
+  virtual void SyncDeviceBarrierForObservers() {
     CAFFE_NOT_IMPLEMENTED;
   }
 
@@ -613,7 +614,7 @@ class Operator : public OperatorBase {
     return HasAsyncPart() && context_.SupportsAsyncScheduling();
   }
 
-  void FinishDeviceComputation() override {
+  void SyncDeviceBarrierForObservers() override {
     context_.FinishDeviceComputation();
   }
 
