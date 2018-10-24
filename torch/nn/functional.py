@@ -1783,6 +1783,11 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='elementwis
         return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
+def _smooth_l1_loss(input, target):
+    t = torch.abs(input - target)
+    return torch.where(t < 1, 0.5 * t ** 2, t - 0.5)
+
+
 def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
     r"""Function that uses a squared term if the absolute
     element-wise error falls below 1 and an L1 term otherwise.
@@ -1792,7 +1797,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='ele
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     return _pointwise_loss(
-        lambda a, b: torch.where(torch.abs(a - b) < 1, 0.5 * (torch.abs(a - b)) ** 2, torch.abs(a - b) - 0.5),
+        _smooth_l1_loss,
         torch._C._nn.smooth_l1_loss, input, target, reduction)
 
 
