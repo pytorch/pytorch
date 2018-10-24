@@ -409,7 +409,7 @@ static inline bool isIntUsedAsIntList(
     const Argument& arg) {
   // Look for int[N]
   return value->type()->kind() == TypeKind::IntType &&
-         *arg.type == *ListType::ofInts() && arg.N;
+         *arg.type() == *ListType::ofInts() && arg.N();
 }
 
 inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
@@ -445,16 +445,16 @@ Value* tryMatchArgument(
   // also allow single ints to be passed in their place.
   // the single int is then repeated to the length of the list
   if (isIntUsedAsIntList(value, arg)) {
-    std::vector<Value*> repeated(*arg.N, value);
+    std::vector<Value*> repeated(*arg.N(), value);
     value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
   }
 
   TypePtr concrete_type;
   try {
-    concrete_type = matchTypeVariables(arg.type, value->type(), type_env);
+    concrete_type = matchTypeVariables(arg.type(), value->type(), type_env);
   } catch(TypeMatchError& e) {
     err() << "could not match type " << value->type()->str() << " to "
-          << arg.type->str() << " in argument '" << arg.name << "': " << e.what() << "\n"
+          << arg.type()->str() << " in argument '" << arg.name() << "': " << e.what() << "\n"
           << named_value.locOr(loc);
     return nullptr;
   }
@@ -486,7 +486,7 @@ Value* tryMatchArgument(
   }
 
   if(!value->type()->isSubtypeOf(concrete_type)) {
-    err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name << "' but found "
+    err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name() << "' but found "
           << value->type()->str() << "\n"
           << named_value.locOr(loc);
     return nullptr;
@@ -562,7 +562,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
   // NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
   // necessary to enforce linearization on effectful ops.
   std::vector<NamedValue> modifiedArgs(raw_args.begin(), raw_args.end());
-  if (schema.is_mutable) {
+  if (schema.is_mutable()) {
     // Add a dummy world token to be matched against
     const auto worldToken = graph.insertDummyWorld();
     modifiedArgs.insert(modifiedArgs.begin(), worldToken);
@@ -578,26 +578,26 @@ c10::optional<MatchedSchema> tryMatchSchema(
 
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
-  for (size_t schema_i = 0; schema_i < schema.arguments.size(); ++schema_i) {
-    const auto& arg = schema.arguments[schema_i];
+  for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
+    const auto& arg = schema.arguments()[schema_i];
     c10::optional<NamedValue> v;
-    if (arg.name == "self" && self) {
+    if (arg.name() == "self" && self) {
       v = self;
       self = c10::nullopt;
-    } else if (!arg.kwarg_only && used_args < modifiedArgs.size()) {
+    } else if (!arg.kwarg_only() && used_args < modifiedArgs.size()) {
       // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
-      if (arg.type->kind() == TypeKind::ListType && // the formal must be a list
-          !arg.N && // it must not be a broadcasting list like int[3], otherwise
+      if (arg.type()->kind() == TypeKind::ListType && // the formal must be a list
+          !arg.N() && // it must not be a broadcasting list like int[3], otherwise
                     // a single int is a valid input
-          (schema_i + 1 == schema.arguments.size() ||
-           schema.arguments[schema_i + 1]
-               .kwarg_only)) { // must be the last position argument
+          (schema_i + 1 == schema.arguments().size() ||
+           schema.arguments()[schema_i + 1]
+               .kwarg_only())) { // must be the last position argument
         auto actual_type = modifiedArgs[used_args].value(graph)->type();
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(
                 actual_type,
-                arg.type)) { // and the actual should not be a list already
-          auto elem_type = arg.type->expect<ListType>()->getElementType();
+                arg.type())) { // and the actual should not be a list already
+          auto elem_type = arg.type()->expect<ListType>()->getElementType();
           Value* list = tryCreateList(
               elem_type,
               graph,
@@ -616,7 +616,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
 
       v = modifiedArgs[used_args];
       used_args++;
-    } else if (auto idx = findInputWithName(arg.name, kwargs)) {
+    } else if (auto idx = findInputWithName(arg.name(), kwargs)) {
       const NamedValue& nv = kwargs[*idx];
       if (used_kwarg[*idx]) {
         err() << "argument " << nv.name()
@@ -626,10 +626,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
       }
       used_kwarg[*idx] = true;
       v = nv;
-    } else if (arg.default_value) {
-      v = NamedValue(*arg.default_value);
+    } else if (arg.default_value()) {
+      v = NamedValue(*arg.default_value());
     } else {
-      err() << "argument " << schema.arguments[schema_i].name
+      err() << "argument " << schema.arguments()[schema_i].name()
             << " not provided.\n"
             << loc;
       return c10::nullopt;
@@ -664,8 +664,8 @@ c10::optional<MatchedSchema> tryMatchSchema(
       return c10::nullopt;
     }
   }
-  auto return_types = fmap(schema.returns, [&](const Argument& r) {
-    return evalTypeVariables(r.type, type_env);
+  auto return_types = fmap(schema.returns(), [&](const Argument& r) {
+    return evalTypeVariables(r.type(), type_env);
   });
   return MatchedSchema{std::move(positional_inputs), std::move(return_types)};
 }
@@ -819,7 +819,7 @@ struct to_ir {
       throw ErrorReport(def.decl().params().range()) << "methods must have a self argument";
     }
     auto expected_annotation_size = self ? def.decl().params().size() - 1 : def.decl().params().size();
-    if (schema.arguments.size() != expected_annotation_size) {
+    if (schema.arguments().size() != expected_annotation_size) {
       throw ErrorReport(def.decl().params().range()) << "Number of type annotations for"
         << " function parameters (" << arguments.size() << ")"
         << " does not match the number of parameters on the function ("
@@ -839,8 +839,8 @@ struct to_ir {
       environment_stack->setVar((*it).ident().range(), name, new_input);
 
       // Record the type for the schema and set the Type on the Value*
-      arguments.push_back(schema.arguments.at(arg_annotation_idx++));
-      new_input->setType(arguments.back().type);
+      arguments.push_back(schema.arguments().at(arg_annotation_idx++));
+      new_input->setType(arguments.back().type());
     }
     // body
     auto stmts = def.statements();
@@ -866,9 +866,9 @@ struct to_ir {
           results = createTupleUnpack(result).vec();
         }
       }
-      if (!schema.is_varret && schema.returns.size() != results.size()) {
+      if (!schema.is_varret() && schema.returns().size() != results.size()) {
         throw ErrorReport(def.range()) << "Number of type annotations for function"
-          << " return (" << schema.returns.size() << ") does not match"
+          << " return (" << schema.returns().size() << ") does not match"
           << " the number of returns from the function (" << results.size() << ")!";
       }
       auto range = return_stmt.range();
@@ -876,8 +876,8 @@ struct to_ir {
       for (auto& r : results) {
         graph->registerOutput(r);
         TypePtr type = DynamicType::get();
-        if (!schema.is_varret) {
-          type = schema.returns.at(return_type_idx).type;
+        if (!schema.is_varret()) {
+          type = schema.returns().at(return_type_idx).type();
           if (!r->type()->isSubtypeOf(type)) {
             throw ErrorReport(return_stmt.range()) << "Return value at position "
               << return_type_idx << " was annotated as having type " << type->str()
