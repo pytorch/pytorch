@@ -3,6 +3,9 @@
 
 #include "ATen/Config.h"
 
+static const int MIOPEN_DIM_MAX = 4;
+static const bool MIOPEN_ENABLED = getenv("DISABLE_MIOPEN") == NULL;
+
 namespace at { namespace native {
 
 struct ConvParams {
@@ -120,9 +123,17 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
 }
 
 auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
-  if (!detail::getCUDAHooks().compiledWithMIOpen() || !input.type().is_cuda() || !cudnn_enabled)
-    return false;
-  return true;
+
+  return ((input.type().scalarType() == at::kFloat) || (input.type().scalarType() == at::kHalf))
+         && detail::getCUDAHooks().compiledWithMIOpen()
+         && input.type().is_cuda()
+         && input.dim() <= MIOPEN_DIM_MAX
+         && MIOPEN_ENABLED
+         && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
+         && !transposed
+         && (dilation.at(0) == dilation.at(1)) //MIOpen currently does not support assymetric dilation values.
+         && (stride.at(0) == stride.at(1)) //Line 549 & 635 (swapping stride and dilation values) leads to assymetric dilation values.
+         ;
 }
 
 auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {

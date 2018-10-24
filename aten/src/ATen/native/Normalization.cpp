@@ -7,6 +7,9 @@
 
 #include <vector>
 
+static const int MIOPEN_DIM_MAX = 4;
+static const bool MIOPEN_ENABLED = getenv("DISABLE_MIOPEN") == NULL;
+
 namespace at { namespace native {
 
 namespace {
@@ -67,18 +70,21 @@ Tensor batch_norm(
   }
 
   bool use_miopen = (input.type().is_cuda()
-               && (input.type().scalarType() != at::kHalf
-                 || weight.type().scalarType() == at::kFloat)
+               && input.dim() <= MIOPEN_DIM_MAX
+               && input.type().scalarType() != at::kDouble
+               && (input.type().scalarType() == weight.type().scalarType())
                && weight.defined() && bias.defined()
                && ((running_mean.defined() && running_var.defined())
                  || (!running_mean.defined() && !running_var.defined() && training))
                && detail::getCUDAHooks().compiledWithMIOpen()
+               && MIOPEN_ENABLED
                );
 
   if (use_miopen) {
     return std::get<0>(at::miopen_batch_norm(
-                        input, weight, bias,
-                        running_mean, running_var,
+                        input.contiguous(), weight.contiguous(), bias.contiguous(),
+                        running_mean.defined() ? running_mean.contiguous() : running_mean,
+                        running_var.defined() ? running_var.contiguous() : running_var,
                         training, momentum, eps));
   }
 
