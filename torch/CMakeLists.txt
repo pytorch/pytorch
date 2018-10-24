@@ -185,9 +185,10 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/pretty_print.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/fuser/cache.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fuser/kernel_cache.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
@@ -208,10 +209,6 @@ if (NOT WIN32)
   SET(USE_CPU_FUSER 1)
 
   list(APPEND TORCH_SRCS
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/tensor_desc.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/fusion_handle_impl.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/fused_kernel.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fusion_compiler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
   )
 endif()
@@ -221,7 +218,6 @@ if (USE_CUDA AND NOT USE_ROCM AND NOT WIN32)
   SET(USE_CUDA_FUSER 1)
 
   list(APPEND TORCH_SRCS
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fusion_compiler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
   )
 
