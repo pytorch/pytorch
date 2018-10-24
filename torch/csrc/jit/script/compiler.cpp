@@ -1440,8 +1440,6 @@ private:
     }
   }
 
-
-
   std::vector<NamedValue> getNamedValues(
       TreeList trees,
       bool maybe_unpack) {
@@ -1455,12 +1453,24 @@ private:
               tree->range(), entry->asValue(starred.range(), method)));
         }
       } else {
-        values.push_back(NamedValue(
-            tree->range(), emitExpr(Expr(tree))));
+          auto sugared = emitSugaredExpr(Expr(tree), 1);
+          auto expr = Expr(tree);
+
+          if (sugared->isTuple()) {
+            auto tuple = sugared->asTuple(tree->range(), method);
+            for (auto entry : tuple) {
+              auto value = getValue(entry, expr);
+              values.push_back(NamedValue(tree->range(), value));
+            }
+          } else {
+            values.push_back(NamedValue(
+                tree->range(), getValue(sugared, expr)));
+          }
       }
     }
     return values;
   }
+
   std::vector<NamedValue> getNamedValues(
       List<Expr> trees,
       bool maybe_unpack) {
@@ -1487,8 +1497,12 @@ private:
     return sv->call(apply.callee().range(), method, inputs, attributes, n_binders);
   }
 
+  Value* getValue(std::shared_ptr<SugaredValue> val, Expr tree) {
+    return val->asValue(tree.range(), method);
+  }
+
   Value* emitExpr(Expr tree) {
-    return emitSugaredExpr(tree, 1)->asValue(tree.range(), method);
+    return getValue(emitSugaredExpr(tree, 1), tree);
   }
 
   NodeKind reverseComparision(NodeKind kind) {

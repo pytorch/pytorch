@@ -176,6 +176,10 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
     }
     return result;
   }
+
+  bool isTuple() override {
+    return true;
+  }
 };
 
 // defines how modules/methods behave inside the script subset.

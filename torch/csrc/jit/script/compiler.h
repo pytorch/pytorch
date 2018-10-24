@@ -55,6 +55,11 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
   }
 
+  // single value by default
+  virtual bool isTuple() {
+    return false;
+  }
+
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(
     SourceRange loc,
