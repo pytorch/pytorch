@@ -1861,7 +1861,7 @@ private:
   Value* emitTupleSlice(const SourceRange& loc,
       const NamedValue& tuple_val,
       const NamedValue& beg_val,
-      const at::optional<NamedValue&> end_val) {
+      const at::optional<NamedValue>& end_val) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
     int64_t beg = getTupleIndexVal(loc, tuple_type, beg_val.value(*graph), /*allow_out_of_bounds*/true);
     int64_t end;

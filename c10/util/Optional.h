@@ -655,6 +655,11 @@ class optional : private OptionalBase<T> {
 // future if it becomes a definitely necessary case.
 template <class T>
 class optional<T&> {
+  // add this assert to prevent user from using optional reference as indicated above
+  static_assert(sizeof(T) == 0, "optional references is ill-formed, \
+    consider use optional of a std::reference_wrapper of type T to \
+    hold a reference if you really need to");
+
   static_assert(!std::is_same<T, nullopt_t>::value, "bad T");
   static_assert(!std::is_same<T, in_place_t>::value, "bad T");
   T* ref;
@@ -665,14 +670,7 @@ class optional<T&> {
 
   constexpr optional(nullopt_t) noexcept : ref(nullptr) {}
 
-  template<
-    typename U = T,
-    TR2_OPTIONAL_REQUIRES(
-        std::is_constructible<T, U&&>::value
-        && !std::is_same<typename std::decay<U>::type, in_place_t>::value
-        && !std::is_same<typename std::decay<U>::type, optional<T>>
-        )
-      >
+  template<typename U = T>
   constexpr optional(U& u) noexcept : ref(detail_::static_addressof(u)) {}
 
   template<typename U = T>
