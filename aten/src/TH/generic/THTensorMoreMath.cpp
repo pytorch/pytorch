@@ -1290,14 +1290,6 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
   }
 }
 
-void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension)
-{
-  THTensor* inputs[2];
-  inputs[0] = ta;
-  inputs[1] = tb;
-  THTensor_(catArray)(r_, inputs, 2, dimension);
-}
-
 void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension);
 inline void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension)
 {
@@ -1318,7 +1310,7 @@ inline void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second,
   }
 }
 
-void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int dimension)
+void THTensor_(cat)(THTensor *result, THTensor **inputs, int numInputs, int dimension)
 {
   // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
