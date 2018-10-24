@@ -149,7 +149,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return outputs_.at(idx);
   }
 
-  // Check whether output j is an alias of input i
+  // Check whether output j is an alias of input i by comparing Blob pointers,
+  // note this does not check if the two Blobs points to the same Tensor, or if
+  // the Tensor pointers point to the same TensorImpl, or if the Storages alias
   inline bool IsInputOutputAlias(int i, int j) {
     return inputs_.at(i) == outputs_.at(j);
   }

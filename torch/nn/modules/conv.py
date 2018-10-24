@@ -459,7 +459,7 @@ class _ConvTransposeMixin(object):
         output_size = list(output_size)
         k = input.dim() - 2
         if len(output_size) == k + 2:
-            output_size = output_size[-2:]
+            output_size = output_size[2:]
         if len(output_size) != k:
             raise ValueError(
                 "output_size must have {} or {} elements (got {})"

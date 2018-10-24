@@ -153,7 +153,7 @@ Tensor empty_like(const Tensor& self) {
 Tensor empty_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
     auto res = at::empty({0}, options); // to be resized
-    res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
+    res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
     return res;
   }
   return at::empty(self.sizes(), options);
@@ -525,7 +525,7 @@ Tensor zeros_like(const Tensor& self) {
 Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
     auto res = at::empty({0}, options); // to be resized
-    res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
+    res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
     return res;
   }
   return native::zeros(self.sizes(), options);
