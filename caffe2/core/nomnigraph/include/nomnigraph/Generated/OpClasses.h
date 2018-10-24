@@ -639,13 +639,23 @@ class ChannelShuffle : public NeuralNetOperator {
 
 class Add : public NeuralNetOperator {
  public:
-  Add() : NeuralNetOperator(NNKind::Add) {}
+  Add(int broadcast = 0)
+      : NeuralNetOperator(NNKind::Add), broadcast_(broadcast) {}
 
   ~Add() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(Add);
 
+  int getBroadcast() const {
+    return broadcast_;
+  }
+
+  void setBroadcast(int broadcast) {
+    broadcast_ = broadcast;
+  }
+
  private:
+  int broadcast_;
 };
 
 class Reshape : public NeuralNetOperator {
