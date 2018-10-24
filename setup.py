@@ -571,23 +571,6 @@ class develop(setuptools.command.develop.develop):
             print(" > pip install ninja")
 
 
-def monkey_patch_THD_link_flags():
-    '''
-    THD's dynamic link deps are not determined until after build_deps is run
-    So, we need to monkey-patch them in later
-    '''
-    # read tmp_install_path/THD_deps.txt for THD's dynamic linkage deps
-    with open(tmp_install_path + '/THD_deps.txt', 'r') as f:
-        thd_deps_ = f.read()
-    thd_deps = []
-    # remove empty lines
-    for l in thd_deps_.split(';'):
-        if l != '':
-            thd_deps.append(l)
-
-    C.extra_link_args += thd_deps
-
-
 def monkey_patch_C10D_inc_flags():
     '''
     C10D's include deps are not determined until after build c10d is run, so
@@ -639,7 +622,6 @@ class build_ext(build_ext_parent):
             print('-- Not using NCCL')
         if USE_DISTRIBUTED:
             print('-- Building with THD distributed package ')
-            monkey_patch_THD_link_flags()
             if IS_LINUX:
                 print('-- Building with c10d distributed package ')
                 monkey_patch_C10D_inc_flags()
@@ -862,6 +844,7 @@ if USE_ROCM:
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.2')
 C10D_LIB = os.path.join(lib_path, 'libc10d.a')
+GLOO_CUDA_LIB = os.path.join(lib_path, 'libgloo_cuda.a')
 
 # static library only
 if IS_DARWIN:
@@ -973,9 +956,10 @@ if USE_DISTRIBUTED:
     if IS_LINUX:
         extra_compile_args.append('-DUSE_C10D')
         main_sources.append('torch/csrc/distributed/c10d/init.cpp')
+        main_link_args.append(C10D_LIB)
         if USE_CUDA:
             main_sources.append('torch/csrc/distributed/c10d/ddp.cpp')
-        main_link_args.append(C10D_LIB)
+            main_link_args.append(GLOO_CUDA_LIB)
 
 if USE_CUDA:
     nvtoolext_lib_name = None
