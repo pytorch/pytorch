@@ -73,6 +73,3 @@
 [submodule "third_party/nccl/nccl"]
 	path = third_party/nccl/nccl
 	url = https://github.com/NVIDIA/nccl
-[submodule "third_party/gemmlowp/gemmlowp"]
-	path = third_party/gemmlowp/gemmlowp
-	url = https://github.com/google/gemmlowp.git
