@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/core/Device.h"
+#include "c10/Device.h"
 #include "ATen/core/Layout.h"
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
