@@ -3288,7 +3288,7 @@
 
 [[
   name: _cat
-  cname: cat
+  cname: catArray
   variants: [function]
   return: self
   arguments:
