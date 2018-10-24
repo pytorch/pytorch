@@ -75,3 +75,6 @@ NHWC2NCHW
 Declare
 Export
 
+GatherRanges
+Slice
+MergeIdLists
