@@ -82,13 +82,13 @@ class MIOPENActivationOp final : public MIOPENActivationOpBase {
           data_desc_, miopenTypeWrapper<T>::type, X.dim32(0), C, H, W));
     }
     MIOPEN_ENFORCE(miopenActivationForward(
-        miopen_wrapper_.inline_miopen_handle(),
-        act_desc_,
-        &alpha_,
-        data_desc_,
+        this->miopen_wrapper_.inline_miopen_handle(),
+        this->act_desc_,
+        miopenTypeWrapper<T>::kOne(),
+        this->data_desc_,
         X.template data<T>(),
-        &beta_,
-        data_desc_,
+        miopenTypeWrapper<T>::kZero(),
+        this->data_desc_,
         Y->template mutable_data<T>()));
     return true;
   }
@@ -138,17 +138,17 @@ class MIOPENActivationGradientOp final : public MIOPENActivationOpBase {
           data_desc_, miopenTypeWrapper<T>::type, Y.dim32(0), C, H, W));
     }
     MIOPEN_ENFORCE(miopenActivationBackward(
-        miopen_wrapper_.inline_miopen_handle(),
-        act_desc_,
-        &alpha_,
-        data_desc_,
+        this->miopen_wrapper_.inline_miopen_handle(),
+        this->act_desc_,
+        miopenTypeWrapper<T>::kOne(),
+        this->data_desc_,
         Y.template data<T>(),
-        data_desc_,
+        this->data_desc_,
         dY.template data<T>(),
-        data_desc_,
+        this->data_desc_,
         Y.template data<T>(),
-        &beta_,
-        data_desc_,
+        miopenTypeWrapper<T>::kZero(),
+        this->data_desc_,
         dX->template mutable_data<T>()));
     return true;
   }
