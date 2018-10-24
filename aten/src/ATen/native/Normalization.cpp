@@ -8,7 +8,7 @@
 #include <vector>
 
 static const int MIOPEN_DIM_MAX = 4;
-static const bool MIOPEN_ENABLED = getenv("DISABLE_MIOPEN") != NULL;
+static const bool MIOPEN_ENABLED = getenv("DISABLE_MIOPEN") == NULL;
 
 namespace at { namespace native {
 
@@ -82,8 +82,9 @@ Tensor batch_norm(
 
   if (use_miopen) {
     return std::get<0>(at::miopen_batch_norm(
-                        input, weight, bias,
-                        running_mean, running_var,
+                        input.contiguous(), weight.contiguous(), bias.contiguous(),
+                        running_mean.defined() ? running_mean.contiguous() : running_mean,
+                        running_var.defined() ? running_var.contiguous() : running_var,
                         training, momentum, eps));
   }
 
