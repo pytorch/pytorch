@@ -1,11 +1,17 @@
 #pragma once
 
 #include <torch/data/samplers/base.h>
-#include <torch/serialize/archive.h>
 #include <torch/tensor.h>
 
 #include <cstddef>
 #include <vector>
+
+namespace torch {
+namespace serialize {
+class OutputArchive;
+class InputArchive;
+} // namespace serialize
+} // namespace torch
 
 namespace torch {
 namespace data {

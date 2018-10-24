@@ -52,7 +52,6 @@ TEST(DataTest, TransformCallsGetApplyCorrectly) {
   ASSERT_EQ(batch, expected);
 }
 
-
 struct InfiniteStreamDataset
     : datasets::StreamDataset<InfiniteStreamDataset, std::vector<int>> {
   std::vector<int> get_batch(size_t batch_size) override {
@@ -241,7 +240,6 @@ TEST(DataTest, RandomSamplerReturnsIndicesInCorrectRange) {
     ASSERT_LT(i, 10);
   }
 
-
   indices = sampler.next(2).value();
   for (auto i : indices) {
     ASSERT_GE(i, 0);
@@ -267,7 +265,6 @@ TEST(DataTest, RandomSamplerResetsWell) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
-<<<<<<< HEAD
 TEST(DataTest, SavingAndLoadingRandomSamplerYieldsSameSequence) {
   {
     samplers::RandomSampler a(10);
@@ -296,7 +293,8 @@ TEST(DataTest, SavingAndLoadingRandomSamplerYieldsSameSequence) {
     ASSERT_EQ(b_sequence.size(), 7);
     ASSERT_EQ(a.next(10).value(), b_sequence);
   }
-=======
+}
+
 TEST(DataTest, StreamSamplerReturnsTheBatchSizeAndThenRemainder) {
   samplers::StreamSampler sampler(/*epoch_size=*/100);
   ASSERT_EQ(sampler.next(10).value(), 10);
@@ -313,7 +311,6 @@ TEST(DataTest, StreamSamplerResetsWell) {
   sampler.reset();
   ASSERT_EQ(sampler.next(5).value().size(), 5);
   ASSERT_FALSE(sampler.next(2).has_value());
->>>>>>> Remove size() from BatchDataset and templatize IndexType
 }
 
 TEST(DataTest, TensorDatasetConstructsFromSingleTensor) {
@@ -558,7 +555,7 @@ struct TestIndexDataset
   }
   std::vector<int> get_batch(TestIndex index) override {
     std::vector<int> batch;
-    for (size_t i : index.index) {
+    for (auto i : index.index) {
       batch.push_back(index.offset + data.at(i));
     }
     return batch;
@@ -570,25 +567,34 @@ struct TestIndexDataset
 };
 
 struct TestIndexSampler : public samplers::Sampler<TestIndex> {
-  void reset() {}
+  explicit TestIndexSampler(size_t size) : size_(size) {}
+  void reset() override {}
   torch::optional<TestIndex> next(size_t batch_size) override {
+    if (index_ >= size_) {
+      return torch::nullopt;
+    }
     std::vector<size_t> indices(batch_size);
     std::iota(indices.begin(), indices.end(), size_t(0));
+    index_ += batch_size;
     return TestIndex(batch_size, std::move(indices));
   }
+  void save(torch::serialize::OutputArchive& archive) const override {}
+  void load(torch::serialize::InputArchive& archive) override {}
+  size_t index_ = 0;
+  size_t size_;
 };
 
 TEST(DataTest, CanUseCustomTypeAsIndexType) {
   const size_t kBatchSize = 10;
   auto data_loader = torch::data::make_data_loader(
-      TestIndexDataset(123),
-      /*batch_size=*/kBatchSize,
-      TestIndexSampler{});
+      TestIndexDataset(23), kBatchSize, TestIndexSampler(23));
 
+  size_t i = 0;
   for (auto batch : *data_loader) {
-    for (int i = 0; i < kBatchSize; ++i) {
-      ASSERT_EQ(batch.at(i), kBatchSize + i);
+    for (int j = 0; j < kBatchSize; ++j) {
+      ASSERT_EQ(batch.at(j), 10 + j);
     }
+    i += 1;
   }
 }
 

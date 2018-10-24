@@ -1,4 +1,5 @@
 #include <torch/data/samplers/random.h>
+#include <torch/serialize/archive.h>
 #include <torch/tensor.h>
 
 #include <algorithm>

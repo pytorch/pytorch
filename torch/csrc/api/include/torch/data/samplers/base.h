@@ -38,24 +38,6 @@ class Sampler {
   /// Deserializes the `Sampler` from the `archive`.
   virtual void load(serialize::InputArchive& archive) = 0;
 };
-
-/// Serializes a `Sampler` into an `OutputArchive`.
-template <typename Index>
-serialize::OutputArchive& operator<<(
-    serialize::OutputArchive& archive,
-    const Sampler<Index>& sampler) {
-  sampler.save(archive);
-  return archive;
-}
-
-/// Deserializes a `Sampler` from an `InputArchive`.
-template <typename Index>
-serialize::InputArchive& operator>>(
-    serialize::InputArchive& archive,
-    Sampler<Index>& sampler) {
-  sampler.load(archive);
-  return archive;
-}
 } // namespace samplers
 } // namespace data
 } // namespace torch

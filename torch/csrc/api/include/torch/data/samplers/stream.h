@@ -7,6 +7,13 @@
 #include <cstddef>
 
 namespace torch {
+namespace serialize {
+class InputArchive;
+class OutputArchive;
+} // namespace serialize
+} // namespace torch
+
+namespace torch {
 namespace data {
 namespace samplers {
 
@@ -38,6 +45,12 @@ class StreamSampler : public Sampler<BatchSize> {
   /// the difference between the `epoch_size` and the current index. If the
   /// `epoch_size` has been reached, returns an empty optional.
   optional<BatchSize> next(size_t batch_size) override;
+
+  /// Serializes the `StreamSampler` to the `archive`.
+  void save(serialize::OutputArchive& archive) const override;
+
+  /// Deserializes the `StreamSampler` from the `archive`.
+  void load(serialize::InputArchive& archive) override;;
 
  private:
   size_t index_{0};

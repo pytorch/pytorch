@@ -1,4 +1,5 @@
 #include <torch/data/samplers/stream.h>
+#include <torch/serialize/archive.h>
 #include <torch/tensor.h>
 
 #include <c10/util/Exception.h>
@@ -34,6 +35,23 @@ optional<BatchSize> StreamSampler::next(size_t batch_size) {
   index_ += batch_size;
   return BatchSize(batch_size);
 }
+
+void StreamSampler::save(serialize::OutputArchive& archive) const {
+  archive.write(
+      "index",
+      torch::tensor(static_cast<int64_t>(index_), torch::kInt64),
+      /*is_buffer=*/true);
+}
+
+void StreamSampler::load(serialize::InputArchive& archive) {
+  auto tensor = torch::empty(1, torch::kInt64);
+  archive.read(
+      "index",
+      tensor,
+      /*is_buffer=*/true);
+  index_ = tensor.item<int64_t>();
+}
+
 } // namespace samplers
 } // namespace data
 } // namespace torch
