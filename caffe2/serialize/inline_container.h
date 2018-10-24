@@ -231,7 +231,6 @@ class PyTorchStreamReader final {
 class PyTorchStreamWriter final {
  public:
   PyTorchStreamWriter(std::ostream* out) : out_(out) {
-    pad_buffer_.resize(kFieldAlignment, kPadValue);
     writeFileHeader();
     // In the case that we do not write any records into this file, the last
     // record index written into the footer will point to the footer itself.
@@ -275,8 +274,6 @@ class PyTorchStreamWriter final {
   size_t cursor_ = 0;
   bool finalized_ = false;
   size_t last_record_idx_ = 0;
-  // TODO: move this to the .cc file
-  std::vector<char> pad_buffer_;
 
   // Utility functions
   void write64BitIntegerLittleEndian(const uint64_t value) {
@@ -286,6 +283,9 @@ class PyTorchStreamWriter final {
   }
 
   void writePad(const size_t num_bytes) {
+    // TODO: move this buffer to the .cc file
+    static std::vector<char> pad_buffer_(
+        kFieldAlignment, kPadValue);
     out_->write(pad_buffer_.data(), num_bytes);
     cursor_ += num_bytes;
   }
