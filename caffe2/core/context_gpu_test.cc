@@ -37,7 +37,7 @@ TEST(CUDAContextTest, TestSetGetDeviceWithoutCaffeMode) {
 
 TEST(CUDAContextTest, TestSetGetDeviceWithCaffeMode) {
   // For a while, set full device control to be true.
-  c10::FLAGS_caffe2_cuda_full_device_control = true;
+  FLAGS_caffe2_cuda_full_device_control = true;
   for (int i = 0; i < NumCudaDevices(); ++i) {
     CaffeCudaSetDevice(i);
     EXPECT_EQ(CaffeCudaGetDevice(), i);
@@ -46,7 +46,7 @@ TEST(CUDAContextTest, TestSetGetDeviceWithCaffeMode) {
     CaffeCudaSetDevice(i);
     EXPECT_EQ(CaffeCudaGetDevice(), i);
   }
-  c10::FLAGS_caffe2_cuda_full_device_control = false;
+  FLAGS_caffe2_cuda_full_device_control = false;
 }
 
 TEST(CUDAContextTest, MemoryPoolAllocateDealloc) {

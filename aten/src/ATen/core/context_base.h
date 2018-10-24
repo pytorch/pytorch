@@ -8,8 +8,8 @@
 
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Allocator.h>
-#include <ATen/core/Error.h>
 #include <ATen/core/typeid.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
 namespace caffe2 {
@@ -178,5 +178,6 @@ inline std::unique_ptr<at::BaseContext> CreateContext(
 namespace caffe2 {
 
 using at::BaseContext;
+using at::CreateContext;
 
 } // namespace caffe2

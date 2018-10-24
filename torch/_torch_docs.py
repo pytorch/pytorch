@@ -17,7 +17,7 @@ def parse_kwargs(desc):
     }
     """
     # Split on exactly 4 spaces after a newline
-    regx = re.compile("\n\s{4}(?!\s)")
+    regx = re.compile(r"\n\s{4}(?!\s)")
     kwargs = [section.strip() for section in regx.split(desc)]
     kwargs = [section for section in kwargs if len(section) > 0]
     return {desc.split(' ')[0]: desc for desc in kwargs}
@@ -4243,7 +4243,7 @@ Example::
     #   3. SparseTensor._values().shape = (nnz, SparseTensor.shape[sparse_dim:])
     #
     # For instance, to create an empty sparse tensor with nnz = 0, dense_dim = 0 and
-    # sparse_dim = 1 (hence indices is a 2D tensor of shape = (1‚ 0))
+    # sparse_dim = 1 (hence indices is a 2D tensor of shape = (1, 0))
     >>> S = torch.sparse_coo_tensor(torch.empty([1, 0]), [], [1])
     tensor(indices=tensor([], size=(1, 0)),
            values=tensor([], size=(0,)),

@@ -46,6 +46,7 @@ static bool isTracedZeroDimVar(PyObject *item) {
 
 static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
+  HANDLE_TH_ERRORS
   THPObjectPtr self(PyTuple_Type.tp_new(type, args, kwargs));
   if (self) {
     for (Py_ssize_t i = 0; i < PyTuple_Size(self); ++i) {
@@ -72,6 +73,7 @@ static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kw
     }
   }
   return self.release();
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPSize_repr(THPSize *self)

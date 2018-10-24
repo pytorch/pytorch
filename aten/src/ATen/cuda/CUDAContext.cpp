@@ -1,7 +1,7 @@
 #include "ATen/cuda/CUDAContext.h"
 #include "THC/THCGeneral.hpp"
 
-namespace at { namespace cuda { 
+namespace at { namespace cuda {
 
 /* Device info */
 int64_t getNumGPUs() {
@@ -29,10 +29,10 @@ cudaDeviceProp* getDeviceProperties(int64_t device) {
 }
 
 /* Streams */
-CUDAStream createCUDAStream(
+CUDAStream getStreamFromPool(
   const bool isHighPriority
 , int64_t device) {
-  return detail::CUDAStream_createStream(isHighPriority, device);
+  return detail::CUDAStream_getStreamFromPool(isHighPriority, device);
 }
 
 CUDAStream getDefaultCUDAStream(int64_t device) {

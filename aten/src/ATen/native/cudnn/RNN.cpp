@@ -1,15 +1,14 @@
+#include <ATen/native/RNN.h>
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/InitialTensorOptions.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/core/Error.h>
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/native/RNN.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/TensorUtils.h>
+#include <ATen/cuda/Exceptions.h>
+#include <c10/util/Exception.h>
 
 #if !AT_CUDNN_ENABLED()
 
@@ -550,7 +549,7 @@ namespace {
   void _copyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to) {
     _viewOrCopyParams(params_from, params_to, true);
   }
-  
+
   void _viewParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to) {
     _viewOrCopyParams(params_from, params_to, false);
   }
@@ -583,7 +582,7 @@ namespace {
       cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
       const int64_t bsize = tensors.mini_batch;
       if (prop->major == 7 && rnn.datatype == CUDNN_DATA_HALF && !tensors.is_input_packed()) {
-          if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && rnn.num_directions() == 1 && 
+          if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && rnn.num_directions() == 1 &&
                   rnn.hidden_size % 128 == 0 && tensors.input_size % 128 == 0){
               //technically, batch size should be multiple of 8, but there are quite a few multiple-of-8 batchsizes that give bad perf,
               //weed them out

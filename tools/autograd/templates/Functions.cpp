@@ -10,6 +10,7 @@
 #include <ATen/core/TensorOptions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/SparseTensorUtils.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/Reduction.h>
 
@@ -87,15 +88,15 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_
     return zeros_like(self);
   } else if (p == 1.0) {
     return self.sign() * grad;
-  } else if (p < 2.0) {
-    self_scaled = self.sign() * self.abs().pow(p - 1);
-    scale_v = grad / norm.pow(p - 1);
   } else if (p == 2.0) {
     self_scaled = self;
     scale_v = grad / norm;
-  } else if (p == INFINITY) {
+  } else if (std::isinf(p)) {
     self_scaled = self.sign() * (self.abs() == norm).toType(self.type());
     scale_v = grad.clone();
+  } else if (p < 2.0) {
+    self_scaled = self.sign() * self.abs().pow(p - 1);
+    scale_v = grad / norm.pow(p - 1);
   } else {
     self_scaled = self * self.abs().pow(p - 2);
     scale_v = grad / norm.pow(p - 1);
@@ -874,15 +875,15 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 }
 
 
-// NOTE [ as_strided Backward ]
+// NOTE [ as_strided Backward and layout-aware/agnostic autograd ]
 //
 // `storage_offset` is ignored for simplicity in this note. If you just want the
 // full algorithm without explanation, scroll down to bottom of this note.
 //
 // Implementing the backward of as_strided is tricky because you have to deal
-// with mappings that maps one memory location to multiple indices, i.e., the
-// output tensor indices pointing to **overlapping** memory addresses. This can
-// happen in all in all sorts of weird cases. For example,
+// with mappings that map one memory location to multiple indices, i.e., the
+// output tensor has multiple indices pointing to **overlapping** memory
+// addresses. This can happen in all in all sorts of weird cases. For example,
 //
 //   x = torch.randn(15)
 //   x.as_strided([3, 3], [1, 0])  # "expand" case
@@ -891,7 +892,7 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //                                 # res[0, 1] points to 0*3 + 1*6 = 6
 //
 // Here is the general strategy we apply in implementing as_strided backward:
-//   0. ??? (optimizaiont step. we will talk about this later)
+//   0. ??? (optimization step. we will talk about this later)
 //   1. Create some underlying flattened tensor as if it is the base tensor
 //      representing the contiguous memory storage for both input and output.
 //   2. Use the output geometry to scatter (or index_add) the gradients into
@@ -902,7 +903,7 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //
 // In step (2), if the output tensor does't have overlapping memory, we can
 // safely scatter (`storage.as_strided(output_geometry).copy_(grad)`);
-// otherwise, we must use `index_add` as gradient at different indices may need
+// otherwise, we must use `index_add` as gradients at different indices may need
 // to be summed to a single location.
 //
 // For example, in this case:
@@ -933,10 +934,10 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //   x = t.expand(3, 3)            # input with overlapping memory
 //                                 # size   [3, 3]
 //                                 # stride [0, 1]
-//   y = x.as_strided([3], [1])    # contiguous output
-//                                 # size   [3]
+//   y = x.as_strided([1], [1])    # contiguous output
+//                                 # size   [1]
 //                                 # stride [1]
-//   y.backward()  # step (1): contiguous storagte tensor `s` of size 3, which
+//   y.backward()  # step (1): contiguous storage tensor `s` of size 3, which
 //                             is large enough to be used as underlying storage
 //                             for `x` and `y`.
 //                               s = [ 0, 0, 0]
@@ -969,17 +970,17 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 // In the above computation of numerical gradients, they only match the
 // analytical results because strides and memory locations are considered in the
 // forward pass, i.e., this op (including both forward and backward) is
-// stride-aware.
+// layout-aware.
 //
-// However, most (probably all) other ops (forward and backward) are
-// stride-agnostic. E.g.,
+// However, in PyTorch, most (probably all) other ops (forward and backward) are
+// layout-agnostic. E.g.,
 //
 //   t = torch.randn(1)
 //   x = t.expand(2)
 //   y = x.sum()
 //   y.backward()
 //
-// Stride-agnostic autograd (as it is currently in PyTorch) will give you
+// Layout-agnostic autograd (as it is currently in PyTorch) will give you
 //
 //   gy = 1
 //   gx = [ 1, 1]  # SumBackward:    torch.ones_like(x)
@@ -989,28 +990,30 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 // (the other will also change by `delta`), `y` will change by `2 * delta`. So
 // the gradients, if strides are taken into consideration, should be 2.
 //
-// Stride-aware autograd should give you
+// Layout-aware autograd should give you
 //
 //   gy = 1
 //   gx = [ 2, 2]  # Because the backward considers the fact that the input `x`
 //                 # is already expanded.
-//   gt = [ 2]     # Stride-aware backward of expand is just a slicing because
+//   gt = [ 2]     # Layout-aware backward of expand is just a slicing because
 //                 # the previous backward should have already taken care of
 //                 # strides and made sure that gradients are the same along the
 //                 # expanded dimension.
 //
 // As shown above, these two types are not compatible. Therefore, we must either
-// make as_strided stride-agnostic, or make all other ops stride-aware.
+// make as_strided layout-agnostic, or make all other ops layout-aware.
 //
-// It is unrealisitc to support stride-aware autograd (at least in the current
-// structure), because it would mean
+// It is difficult to support layout-aware autograd (at least in the current
+// codebase structure), because it would mean
 //   1. storing tensor geometries of every input tensor for backward
 //   2. depending on input geometry, the gradient computed from backward change
 //   3. ideally enforcing gradient of T to always have same strides as T
 // (although these two methods only differ when it comes to overlapping memory)
 //
-// To formulate `as_strided(input, size, stride)` in a stride-agnostic way, we
-// consider `input.stride()` as a separate independent arguement `input_stride`:
+// Therefore, we must formulate `as_strided` in a layout-agnostic way, i.e.,
+// giving the same output regardless of the input layout. We consider
+// `input.stride()` as a separate independent fixed argument `input_stride`.
+// Then, `as_strided(input, size, stride)` can be thought of as:
 //   1. "Scatter" each value of `input` into a "storage" using storage location
 //      computed from the value's index in `input`, `input.size()` and
 //      `input_stride`, but if N values end up in the same location, the value
@@ -1020,7 +1023,9 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //        Denote the set of all input indices that pointing to the same storage
 //        location `storage[n]` as `S(n)`, i.e.,
 //
-//            S(n) = { index : index @ input_stride == n, index is valid given input.size() }
+//            S(n) = { index : <index, input_stride> == n, index is valid given input.size() },
+//
+//        where `<x, y>` is the dot product between `x` and `y`.
 //
 //        Then, the process is:
 //
@@ -1028,7 +1033,9 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //
 //        Note that all values in `S(n)` are the same (they point to the same
 //        memory location anyways, so this step doesn't change anything, but
-//        effectively avoids using `input.stride()`.
+//        effectively avoids having the denpendency on the layout of `input`.
+//        I.e., the result holds fixed regardless of the layout of `input`, as
+//        long as `input_stride` is fixed.
 //
 //      NOTE: for forward pass, we can equivalently simply selet any one of
 //            `S(n)` as `storage[n]`. However, cosnidering this as an average
@@ -1038,7 +1045,7 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //   2. As usual, return the as_strided view of `storage` using required output
 //      `size` and `stride`.
 //
-// To backward through this stride-agnostic version, we simply add the following
+// To backward through this layout-agnostic version, we simply add the following
 // step:
 //   .... (scatter gradients into the storage tensor using output geometry)
 //   3. For all storage location n, `storage[n] /= |S(n)|`.
@@ -1311,13 +1318,13 @@ static inline int64_t _min_storage_size(IntList sizes, IntList strides, int64_t 
   return storage_size;
 }
 
-// See NOTE [ as_strided Backward ] for explanation
+// See NOTE [ as_strided Backward and layout-aware/agnostic autograd ] for explanation
 Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, int64_t storage_offset) {
   // For output geometry,
   //   check for size 0 dimensions,
   //   skip size 1 dimensions,
   //   reduce grad on expanded dims (stride=0, size>1)
-  // Step (0)     for the algorithm in NOTE [ as_strided Backward ]
+  // Step (0)     for the algorithm in NOTE [ as_strided Backward and layout-aware/agnostic autograd ]
   // Step (0)~(1) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
   //              on output geometry
   auto odim = grad.dim();
@@ -1368,7 +1375,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
 
 
   // Rest of this function implements
-  // Step (1)~(4) for the algorithm in NOTE [ as_strided Backward ]
+  // Step (1)~(4) for the algorithm in NOTE [ as_strided Backward and layout-aware/agnostic autograd ]
   // TODO: Raise if not all output values are visible in input geometry.
   //       Technically speaking, if you treat those values as constants, not
   //       raising is fine, and mathematically correct. However, these values
@@ -1964,8 +1971,8 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 }
 
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
-						       IntList expand1, IntList expand2, IntList expand3,
-						       IntList sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask) {
+                                                       IntList expand1, IntList expand2, IntList expand3,
+                                                       IntList sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask) {
   Tensor grad_i1, grad_i2, grad_i3;
   if (grad_mask[0])
     grad_i1 = at::_trilinear(grad_out, i2, i3, sumdim, expand2, expand3, expand1);
@@ -1985,6 +1992,17 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
       "or report a bug if you think this is an error.");
   }
   return grad / (self + 1);
+}
+
+Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const Tensor& indices, IntList values_shape) {
+  // TODO: improve this backward by writing a kernel (maybe)
+  auto dense_grad = sparse_grad_out.is_sparse() ? sparse_grad_out.to_dense() : sparse_grad_out;
+  auto full_size = sparse_grad_out.sizes();
+  auto flattened_grad_shape = values_shape.vec();
+  flattened_grad_shape[0] = at::prod_intlist(full_size.slice(0, indices.size(0)));
+  auto flattened_dense_grad = dense_grad.view(flattened_grad_shape);
+  auto flattened_indices = at::sparse::flatten_indices(indices, full_size);
+  return flattened_dense_grad.index_select(0, flattened_indices);
 }
 
 } // anonymous namespace

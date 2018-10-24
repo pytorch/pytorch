@@ -171,13 +171,15 @@ RegisterOperators reg({
         [](Node* node) -> Operation {
           return [](Stack& stack) {
             auto s = pop(stack).toString();
-            if (s->string() != "inf") {
+            if (s->string() == "inf")
+              push(stack, std::numeric_limits<double>::infinity());
+            else if (s->string() == "-inf")
+              push(stack, -std::numeric_limits<double>::infinity());
+            else
               AT_ERROR(
-                  "Only 'inf' can be cast to a float, but got '",
+                  "Only 'inf' or '-inf' can be cast to a float, but got '",
                   s->string(),
                   "'");
-            }
-            push(stack, std::numeric_limits<double>::infinity());
             return 0;
           };
         }),
@@ -366,6 +368,34 @@ RegisterOperators reg({
             return 0;
           };
         }),
+    Operator(
+        prim::TupleSlice,
+        [](Node* node) {
+          int64_t beg_ind = node->i(attr::beg);
+          int64_t end_ind = node->i(attr::end);
+          return [=](Stack& stack) {
+            auto t = pop(stack).toTuple();
+            const auto & elems = t->elements();
+            std::vector<IValue> output_elems;
+            for (int64_t i = beg_ind; i < end_ind; ++i) {
+              output_elems.push_back(elems.at(i));
+            }
+            push(stack, Tuple::create(std::move(output_elems)));
+            return 0;
+          };
+        }),
+    Operator(
+      prim::TupleIndex,
+      [](Node* node) {
+        auto index = node->i(attr::index);
+        return [=](Stack& stack) {
+          auto tup = pop(stack).toTuple();
+          const auto & elems = tup->elements();
+          // index is normalized to be positive at compile time
+          stack.push_back(elems.at(index));
+          return 0;
+        };
+      }),
     Operator(
         prim::TupleConstruct,
         [](Node* node) {

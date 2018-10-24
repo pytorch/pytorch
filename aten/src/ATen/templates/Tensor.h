@@ -1,7 +1,6 @@
 #pragma once
 
-#include "ATen/core/Device.h"
-#include "ATen/core/Error.h"
+#include "c10/Device.h"
 #include "ATen/core/Layout.h"
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
@@ -10,6 +9,7 @@
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/core/TensorImpl.h"
 #include "ATen/core/UndefinedTensorImpl.h"
+#include "c10/util/Exception.h"
 #include "c10/util/Optional.h"
 
 namespace at {

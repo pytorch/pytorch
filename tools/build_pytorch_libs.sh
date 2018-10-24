@@ -15,6 +15,25 @@ if [ -x "$(command -v rsync)" ]; then
     SYNC_COMMAND="rsync -lptgoD"
 fi
 
+# We test the presence of cmake3 (for platforms like CentOS and Ubuntu 14.04)
+# and use the newer of cmake and cmake3 if so.
+CMAKE_COMMAND="cmake"
+if [[ -x "$(command -v cmake3)" ]]; then
+    if [[ -x "$(command -v cmake)" ]]; then
+        # have both cmake and cmake3, compare versions
+        CMAKE_VERSION=$(cmake --version | grep 'cmake version' | awk '{print $NF}')
+        CMAKE3_VERSION=$(cmake3 --version | grep 'cmake version' | awk '{print $NF}')
+        CMAKE3_IS_NEWER=$($PYTORCH_PYTHON -c "from distutils.version import StrictVersion; print(1 if StrictVersion(\"${CMAKE3_VERSION}\") >= StrictVersion(\"${CMAKE_VERSION}\") else 0)")
+    else
+        # don't have cmake
+        CMAKE3_IS_NEWER=1
+    fi
+    if [[ $CMAKE3_IS_NEWER == "1" ]]; then
+        CMAKE_COMMAND="cmake3"
+    fi
+    unset CMAKE_VERSION CMAKE3_VERSION CMAKE3_IS_NEWER
+fi
+
 # Options for building only a subset of the libraries
 USE_CUDA=0
 USE_ROCM=0
@@ -87,7 +106,6 @@ TORCH_LIB_DIR="$BASE_DIR/torch/lib"
 INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
 
-CMAKE_VERSION=${CMAKE_VERSION:="cmake"}
 C_FLAGS=" -I\"$INSTALL_DIR/include\" \
   -I\"$INSTALL_DIR/include/TH\" -I\"$INSTALL_DIR/include/THC\" \
   -I\"$INSTALL_DIR/include/THS\" -I\"$INSTALL_DIR/include/THCS\" \
@@ -109,15 +127,14 @@ else
     fi
 fi
 CPP_FLAGS=" -std=c++11 "
-GLOO_FLAGS="-DBUILD_TEST=OFF "
 THD_FLAGS=""
 NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
 if [[ $USE_CUDA -eq 1 ]]; then
-    GLOO_FLAGS+="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
+    GLOO_FLAGS+="-DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
 fi
 # Gloo infiniband support
 if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
-    GLOO_FLAGS+=" -DUSE_IBVERBS=1 -DBUILD_SHARED_LIBS=1"
+    GLOO_FLAGS+=" -DUSE_IBVERBS=1"
     THD_FLAGS="-DUSE_GLOO_IBVERBS=1"
 fi
 CWRAP_FILES="\
@@ -160,7 +177,7 @@ function build() {
       # TODO: The *_LIBRARIES cmake variables should eventually be
       # deprecated because we are using .cmake files to handle finding
       # installed libraries instead
-      ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
+      ${CMAKE_COMMAND} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
 		       ${CMAKE_GENERATOR} \
 		       -DTorch_FOUND="1" \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
@@ -224,7 +241,7 @@ function build_nccl() {
   mkdir -p build/nccl
   pushd build/nccl
   if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
-      ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
+      ${CMAKE_COMMAND} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
 		       ${CMAKE_GENERATOR} \
 		       -DCMAKE_BUILD_TYPE=Release \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
@@ -267,7 +284,7 @@ function build_caffe2() {
   fi
 
   if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
-      ${CMAKE_VERSION} $BASE_DIR \
+      ${CMAKE_COMMAND} $BASE_DIR \
 		       ${CMAKE_GENERATOR} \
 		       -DPYTHON_EXECUTABLE=$PYTORCH_PYTHON \
 		       -DPYTHON_LIBRARY="${PYTORCH_PYTHON_LIBRARY}" \
@@ -306,7 +323,9 @@ function build_caffe2() {
 		       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
 		       -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
 		       -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
-		       -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
+		       -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
+		       $GLOO_FLAGS \
+		       ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
@@ -351,10 +370,6 @@ for arg in "$@"; do
     if [[ "$arg" == "nccl" ]]; then
         pushd $THIRD_PARTY_DIR
         build_nccl
-        popd
-    elif [[ "$arg" == "gloo" ]]; then
-        pushd "$THIRD_PARTY_DIR"
-        build gloo $GLOO_FLAGS
         popd
     elif [[ "$arg" == "caffe2" ]]; then
         build_caffe2

@@ -40,6 +40,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_dynamic_slice.*'  # MeanVarianceNormalization is experimental and not supported.
                      '|test_constantlike.*'  # Needs implementation
                      '|test_eyelike.*'  # Needs implementation
+                     '|test_maxunpool.*'  # Needs implementation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
