@@ -531,7 +531,7 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
     entry->events.reserve(key.devices.size());
     for (size_t i = 0; i < key.devices.size(); i++) {
       deviceGuard.set_index(key.devices[i]);
-      entry->streams.push_back(at::cuda::createCUDAStream());
+      entry->streams.push_back(at::cuda::getStreamFromPool());
       entry->events.push_back(CUDAEvent::create());
     }
   }
