@@ -1,8 +1,7 @@
 #pragma once
 
-#include <ATen/core/ATenGeneral.h>
-#include <ATen/core/Backend.h>
-#include <ATen/core/DeviceType.h>
+#include <c10/DeviceType.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
 #include <cstddef>
@@ -10,7 +9,14 @@
 #include <iosfwd>
 #include <string>
 
-namespace at {
+namespace c10 {
+
+/// An index representing a specific device; e.g., the 1 in GPU 1.
+/// A DeviceIndex is not independently meaningful without knowing
+/// the DeviceType it is associated; try to use Device rather than
+/// DeviceIndex directly.
+using DeviceIndex = int32_t;
+
 /// Represents a a compute device on which a tensor is located. A device is
 /// uniquely identified by a type, which specifies the type of machine it is
 /// (e.g. CPU or CUDA GPU), and a device index or ordinal, which identifies the
@@ -21,12 +27,12 @@ namespace at {
 /// 1. A negative index represents the current device, a non-negative index
 /// represents a specific, concrete device,
 /// 2. When the device type is CPU, the device index must be zero.
-struct CAFFE2_API Device {
-  using Type = at::DeviceType;
+struct C10_API Device {
+  using Type = DeviceType;
 
   /// Constructs a new `Device` from a `DeviceType` and an optional device
   /// index.
-  /* implicit */ Device(DeviceType type, int32_t index = -1)
+  /* implicit */ Device(DeviceType type, DeviceIndex index = -1)
       : type_(type), index_(index) {
     AT_CHECK(
         index == -1 || index >= 0,
@@ -58,7 +64,7 @@ struct CAFFE2_API Device {
   }
 
   /// Sets the device index.
-  void set_index(int32_t index) {
+  void set_index(DeviceIndex index) {
     index_ = index;
   }
 
@@ -68,7 +74,7 @@ struct CAFFE2_API Device {
   }
 
   /// Returns the optional index.
-  const int32_t& index() const noexcept {
+  DeviceIndex index() const noexcept {
     return index_;
   }
 
@@ -89,19 +95,19 @@ struct CAFFE2_API Device {
 
  private:
   DeviceType type_;
-  int32_t index_ = -1;
+  DeviceIndex index_ = -1;
 };
 
-CAFFE2_API std::ostream& operator<<(
+C10_API std::ostream& operator<<(
     std::ostream& stream,
-    const at::Device& device);
+    const Device& device);
 
-} // namespace at
+} // namespace c10
 
 namespace std {
 template <>
-struct hash<at::Device> {
-  size_t operator()(const at::Device& device) const noexcept {
+struct hash<c10::Device> {
+  size_t operator()(c10::Device device) const noexcept {
     size_t hash_val = static_cast<size_t>(device.index() + 1);
     if (device.is_cuda()) {
       hash_val += 2;
@@ -110,3 +116,8 @@ struct hash<at::Device> {
   }
 };
 } // namespace std
+
+// TODO: Remove when we add global namespace include
+namespace at {
+using c10::Device;
+}
