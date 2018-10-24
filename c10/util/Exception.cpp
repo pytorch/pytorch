@@ -38,7 +38,8 @@ Error::Error(
               "] ",
               condition,
               ". ",
-              msg),
+              msg,
+              "\n"),
           backtrace,
           caller) {}
 

@@ -28,6 +28,9 @@ max         float   The largest representable number.
 tiny        float   The smallest positive representable number.
 =========   =====   ========================================
 
+.. note::
+  The constructor of :class:`torch.finfo` can be called without argument, in which case the class is created for the pytorch default dtype (as returned by ``torch.get_default_dtype()``).   
+
 
 .. _iinfo-doc:
 

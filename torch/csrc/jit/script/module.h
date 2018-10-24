@@ -11,6 +11,7 @@
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 #include <torch/csrc/utils/memory.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/core/ArrayRef.h>
 #include "c10/util/Optional.h"
@@ -156,7 +157,12 @@ struct Method {
     return *this;
   }
 
-  const FunctionSchema& getSchema() const;
+  const FunctionSchema& getSchema() const {
+    if(schema == nullptr) {
+      schema.reset(new FunctionSchema(defaultSchemaFor(*this)));
+    }
+    return *schema;
+  }
 
   std::string pretty_print_schema() const {
     JIT_ASSERT(schema);
@@ -178,6 +184,23 @@ struct Method {
   }
 
 private:
+
+  static FunctionSchema defaultSchemaFor(const Method& method) {
+    std::vector<Argument> args;
+    std::vector<Argument> returns;
+    Graph& g = *method.graph();
+    size_t num_inputs = method.num_inputs();
+    for(size_t i = 0; i < num_inputs; ++i) {
+      const Value* v = g.inputs().at(i);
+      std::string name = v->hasUniqueName() ? v->uniqueName() : ("argument_"  + std::to_string(i));
+      args.push_back({std::move(name), unshapedType(g.inputs()[i]->type())});
+    }
+    for(size_t i = 0; i < g.outputs().size(); ++i) {
+      returns.push_back({"", unshapedType(g.outputs()[i]->type())});
+    }
+    return { method.name(), std::move(args), std::move(returns) };
+  }
+
   std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
   bool optimize;
@@ -368,7 +391,7 @@ struct Module {
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  void to(
+  TORCH_API void to(
       at::Device device,
       at::ScalarType dtype,
       bool non_blocking = false);
@@ -379,7 +402,7 @@ struct Module {
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  void to(at::ScalarType dtype, bool non_blocking = false);
+  TORCH_API void to(at::ScalarType dtype, bool non_blocking = false);
 
   /// Recursively moves all parameters to the given device.
   ///
@@ -387,7 +410,7 @@ struct Module {
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  void to(at::Device device, bool non_blocking = false);
+  TORCH_API void to(at::Device device, bool non_blocking = false);
 
   /// Run a method from this module.
   ///

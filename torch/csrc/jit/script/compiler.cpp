@@ -395,25 +395,6 @@ Value* packOutputs(Graph& g, at::ArrayRef<Value*> values) {
   return g.insertNode(g.createTuple(values))->output();
 }
 
-c10::optional<std::vector<int64_t>> getIntListAttribute(
-    c10::optional<int32_t> N,
-    Value* input) {
-  auto list = constant_as<Shared<jit::IntList>>(input);
-  if(list)
-    return list.value()->elements();
-
-  // broadcast IntList[3] with value 4 -> {4, 4, 4}
-  if(!N)
-    return c10::nullopt;
-
-  auto r = constant_as<int64_t>(input);
-  if(!r)
-    return c10::nullopt;
-
-  // broadcast to attribute size
-  return std::vector<int64_t>(*N, *r);
-}
-
 at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   // small peephole optimization to ensure IntList attributes can still turn
   // into constants e.g. in x.expand([3, 4])
@@ -1543,6 +1524,32 @@ private:
     }
   }
 
+  Value * emitNegate(const TreeRef& tree) {
+    const auto& inputs = tree->trees();
+    auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+
+    auto neg_val = emitBuiltinCall(
+               tree->range(),
+               *method.graph(),
+               aten::neg,
+               c10::nullopt,
+               named_values,
+               {},
+               /*required=*/true);
+
+    // constant fold the input if possible
+    auto maybe_constant_input = toIValue(neg_val->node()->input());
+    if (!maybe_constant_input) {
+      return neg_val;
+    }
+    auto op = getOperation(neg_val->node());
+    Stack stack;
+    stack.push_back(*maybe_constant_input);
+    op(stack);
+    JIT_ASSERT(stack.size() == 1);
+    return graph->insertConstant(stack[0], tree->range());
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree) {
     switch (tree->kind()) {
@@ -1559,8 +1566,7 @@ private:
       case '/':
       case '+':
       case '-':
-      case '%':
-      case TK_UNARY_MINUS: {
+      case '%': {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
@@ -1572,6 +1578,9 @@ private:
                    named_values,
                    {},
                    /*required=*/true);
+      }
+      case TK_UNARY_MINUS: {
+        return emitNegate(tree);
       }
       case TK_AND:
       case TK_OR: {
@@ -1697,6 +1706,13 @@ private:
     if (has_end) {
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
+    if (input->type()->cast<TupleType>()) {
+      if (has_end) {
+        return emitTupleSlice(loc, args[0], args[1], /*end*/args[2]);
+      } else {
+        return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
+      }
+    }
     NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
     return emitBuiltinCall(loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
@@ -1816,6 +1832,62 @@ private:
     return emitSlice(loc, sliceable, maybe_dim, slice_exp);
   }
 
+  int64_t getTupleIndexVal(const SourceRange& loc,
+    const TupleTypePtr& tuple_type,
+      Value * idx_val,
+      bool allow_out_of_bounds) {
+     int64_t index;
+    at::optional<IValue> ivalue = toIValue(idx_val);
+    if (ivalue && ivalue->isInt()) {
+      index = ivalue->to<int64_t>();
+    } else {
+      throw ErrorReport(loc)
+        << "tuple indices must be integer constants";
+    }
+     // set index to be positive to simplify logic in runtime
+    int64_t adj_index = index;
+    int64_t tuple_len = tuple_type->elements().size();
+    if (index < 0) {
+      adj_index = tuple_len + index;
+    }
+    if (!allow_out_of_bounds && (adj_index >= tuple_len || adj_index < 0)) {
+      throw ErrorReport(loc)
+        << "Tuple index out of range. Tuple is length " << tuple_len
+        << " and index is " << index;
+    }
+    return adj_index;
+  }
+   Value* emitTupleIndex(const SourceRange& loc,
+      Value * tuple_val,
+      Value * idx_val) {
+    auto tuple_typ = tuple_val->type()->cast<TupleType>();
+    auto adj_index = getTupleIndexVal(loc, tuple_typ, idx_val, /*allow_out_of_bounds*/false);
+    return graph->insertNode(
+        graph->createTupleIndex(tuple_val, adj_index))->output();
+  }
+
+  Value* emitTupleSlice(const SourceRange& loc,
+      const NamedValue& tuple_val,
+      const NamedValue& beg_val,
+      const at::optional<NamedValue&> end_val) {
+    auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
+    int64_t beg = getTupleIndexVal(loc, tuple_type, beg_val.value(*graph), /*allow_out_of_bounds*/true);
+    int64_t end;
+    int64_t tuple_len = tuple_type->elements().size();
+    if (end_val) {
+      end = getTupleIndexVal(loc, tuple_type, end_val->value(*graph), true);
+    } else {
+      end = tuple_len;
+    }
+    // slicing does not throw out of bounds errors
+    end = std::min(std::max((int64_t)0, end), tuple_len);
+    beg = std::min(std::max((int64_t)0, beg), tuple_len);
+
+    return graph->insertNode(
+        graph->createTupleSlice(tuple_val.value(*graph), beg, end))->output();
+  }
+
+
   // Desugars gather syntactic sugar foo[i]
   Value* emitBasicGather(const Subscript& subscript) {
     const auto& loc = subscript.range();
@@ -1827,9 +1899,14 @@ private:
       auto* idx = emitExpr(subscript.subscript_exprs()[0]);
       return emitBuiltinCall(
                  loc, *graph, aten::select, c10::nullopt, {gatherable, idx}, {}, true);
-    } else {
-      JIT_ASSERT(gatherable->type()->isSubtypeOf(DynamicType::get()));
+    } else if (gatherable->type()->isSubtypeOf(DynamicType::get())) {
       return emitMultidimSlicing(loc, gatherable, subscript);
+    } else if (auto tuple_type = gatherable->type()->cast<TupleType>()) {
+      auto* idx = emitExpr(subscript.subscript_exprs()[0]);
+      return emitTupleIndex(loc, gatherable, idx);
+    } else {
+      throw ErrorReport(loc)
+        << "Indexing only supported on lists, tensors, and tuples.";
     }
   }
 };

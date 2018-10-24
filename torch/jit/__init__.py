@@ -4,8 +4,10 @@ from torch.autograd import Variable, function
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.jit.annotations
-from torch._six import raise_from, with_metaclass
-from .._jit_internal import createResolutionCallback, compiled_weak_fns, COMPILED, COMPILATION_PENDING
+from torch._six import raise_from, with_metaclass, get_function_from_type
+from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
+    _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
+    COMPILATION_PENDING
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
@@ -592,13 +594,13 @@ class CompilationUnit(object):
 
 
 def _try_compile_weak_script(fn):
-    entry = compiled_weak_fns.get(fn)
+    entry = _compiled_weak_fns.get(fn)
     if entry is None:
         return None
     if entry["status"] == COMPILATION_PENDING:
         compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
         del entry["rcb"]
-        compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
+        _compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
         entry["status"] = COMPILED
         return compiled_fn
     else:
@@ -627,7 +629,7 @@ def script(fn, optimize=True, _frames_up=0, _rcb=None):
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
 
-def script_method(fn):
+def script_method(fn, _rcb=None):
     if not _enabled:
         return fn
     # NOTE: we need to traverse two frames here because the meta-class frame
@@ -642,9 +644,26 @@ def script_method(fn):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
-    rcb = createResolutionCallback(frames_up=2)
+    if _rcb is None:
+        _rcb = createResolutionCallback(frames_up=2)
     ast = get_jit_ast(fn, is_method=True)
-    return ScriptMethodStub(rcb, ast, fn)
+    return ScriptMethodStub(_rcb, ast, fn)
+
+
+def _try_get_weak_module(mod):
+    """
+    Get the WeakScriptModuleProxy corresponding to mod if it exists
+    """
+    if not isinstance(mod, Module):
+        return None
+    return _weak_modules.get(mod)
+
+
+def _is_weak_type(cls):
+    """
+    Check if a type has been annotated with `weak_module`
+    """
+    return cls in _weak_types
 
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
@@ -817,6 +836,13 @@ def _get_valid_constant(v):
         "  2. a value of type {{{}}}\n".format(constants) +
         "  3. a list or tuple of (2)\n")
 
+
+def _create_methods_from_stubs(self, stubs):
+    defs = [m.def_ for m in stubs]
+    rcbs = [m.resolution_callback for m in stubs]
+    defaults = [get_default_args(m.original_method) for m in stubs]
+    self._create_methods(defs, rcbs, defaults)
+
 # For each user-defined class that subclasses ScriptModule this meta-class,
 # (1) finds all the methods annotated with @script_method
 # in a ScriptModule and removes them from the class attributes, and
@@ -854,10 +880,7 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
             original_init(self, *args, **kwargs)
-            defs = [m.def_ for m in methods]
-            rcbs = [m.resolution_callback for m in methods]
-            defaults = [get_default_args(m.original_method) for m in methods]
-            self._create_methods(defs, rcbs, defaults)
+            _create_methods_from_stubs(self, methods)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
@@ -1011,6 +1034,9 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
+                if isinstance(value, Module) and _is_weak_type(type(value)):
+                    # Compile weak script module
+                    value = _make_strong(value)
                 return super(ScriptModule, self).__setattr__(attr, value)
             if hasattr(self, attr):
                 raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
@@ -1039,8 +1065,96 @@ if _enabled:
             # we add 1 to get to the proper surrounding scope.
             rcb = createResolutionCallback(frames_up=1)
             self._define(lang, rcb, True)
+
+    class WeakScriptModuleProxy(ScriptModule):
+        def __init__(self, original, stubs):
+            # Guards behavior of __setattr__ and __getattr__ so ScriptModule
+            # __init__ can run correctly
+            self.__dict__['_initialized'] = False
+            super(WeakScriptModuleProxy, self).__init__()
+
+            # Copy constants
+            self.__dict__["_original"] = weakref.ref(original)
+            self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
+
+            # Copy Parameters / Modules / Buffers
+            for name in dir(original):
+                item = getattr(original, name)
+                if isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
+                    ScriptModule.__setattr__(self, name, item)
+            for name in original._buffers:
+                self.register_buffer(name, original._buffers[name])
+
+            self.__dict__["_initialized"] = True
+            _create_methods_from_stubs(self, stubs)
+
+        def __getattr__(self, attr):
+            # Try to get the attribute directly, if that fails, fall back to the
+            # weak module itself
+            try:
+                return ScriptModule.__getattr__(self, attr)
+            except AttributeError:
+                if self.__dict__["_initialized"]:
+                    return getattr(self.__dict__["_original"](), attr)
+                else:
+                    # Only fall back to original once __init__() is done
+                    raise AttributeError("Weak module has no attribute '{}'"
+                                         .format(attr))
+
+        def __setattr__(self, attr, value):
+            # Once constructed, no new properties can be set
+
+            if not self.__dict__["_initialized"]:
+                # If constructing, don't fall back to original module
+                return ScriptModule.__setattr__(self, attr, value)
+
+            if hasattr(self, attr):
+                return ScriptModule.__setattr__(self, attr, value)
+            else:
+                raise AttributeError("Cannot set new attribute '{}' on "
+                                     "weak script module once it has been "
+                                     "created".format(attr))
+
 else:
     ScriptModule = torch.nn.Module
+
+
+def _get_weak_stubs(cls):
+    """
+    Calls script_method for each method on the type of the object passed in and
+    returns the generated ScriptMethodStubs
+    """
+    stubs = []
+    for name in dir(cls):
+        func = get_function_from_type(cls, name)
+        if func in _weak_script_methods:
+            entry = _weak_script_methods[func]
+            stub = script_method(entry["original_method"], entry["rcb"])
+            stubs.append(stub)
+    return stubs
+
+
+def _make_strong(mod):
+    """
+    Converts a weak module into a subclass of ScriptModule
+    """
+    if mod in _weak_modules:
+        return _weak_modules[mod]
+
+    stubs = _weak_types.get(type(mod))["method_stubs"]
+
+    if stubs is None:
+        # Generate stubs and and store on _weak_types in case this type is
+        # used again
+        stubs = _get_weak_stubs(type(mod))
+        _weak_types[type(mod)]["method_stubs"] = stubs
+
+    # Create proxy with stubs
+    proxy = WeakScriptModuleProxy(mod, stubs)
+
+    _weak_modules[mod] = proxy
+
+    return proxy
 
 
 def _get_methods(cls):
