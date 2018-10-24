@@ -6,6 +6,7 @@ import warnings
 from torch.version import cuda
 from contextlib import contextmanager
 from subprocess import Popen, PIPE
+from ..._jit_internal import weak_module, weak_script_method
 
 # Write:
 #
@@ -455,7 +456,10 @@ class ContextProp(object):
                                "after disable_global_flags; please use flags() context manager instead")
 
 
+@torch._jit_internal.weak_module
 class CudnnModule(object):
+    __constants__ = ['enabled']
+
     def __init__(self, m):
         self.__dict__ = m.__dict__
         # You have to retain the old module, otherwise it will

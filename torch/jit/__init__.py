@@ -654,9 +654,12 @@ def _try_get_weak_module(mod):
     """
     Get the WeakScriptModuleProxy corresponding to mod if it exists
     """
-    if not isinstance(mod, Module):
-        return None
-    return _weak_modules.get(mod)
+    entry = _weak_modules.get(mod)
+    if entry is not None:
+        return entry
+    if type(mod) in _weak_types:
+        return _make_strong(mod)
+    return None
 
 
 def _is_weak_type(cls):
@@ -1082,7 +1085,7 @@ if _enabled:
                 item = getattr(original, name)
                 if isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
                     ScriptModule.__setattr__(self, name, item)
-            for name in original._buffers:
+            for name in getattr(original, '_buffers', []):
                 self.register_buffer(name, original._buffers[name])
 
             self.__dict__["_initialized"] = True
