@@ -1,6 +1,7 @@
 #include "c10/util/Exception.h"
 #include "c10/util/Backtrace.h"
 #include "c10/util/Type.h"
+#include "c10/util/Logging.h"
 
 #include <iostream>
 #include <numeric>
@@ -18,13 +19,8 @@ Error::Error(
 }
 
 // PyTorch-style error message
-Error::Error(SourceLocation source_location, const std::string& msg)
-    : Error(
-          msg,
-          str(" (",
-              source_location,
-              ")\n",
-              get_backtrace(/*frames_to_skip=*/2))) {}
+// Error::Error(SourceLocation source_location, const std::string& msg)
+// NB: This is defined in Logging.cpp for access to GetFetchStackTrace
 
 // Caffe2-style error message
 Error::Error(
@@ -42,7 +38,8 @@ Error::Error(
               "] ",
               condition,
               ". ",
-              msg),
+              msg,
+              "\n"),
           backtrace,
           caller) {}
 
