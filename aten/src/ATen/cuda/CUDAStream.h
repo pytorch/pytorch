@@ -61,7 +61,7 @@ namespace detail {
 // Pointer-based API (for internal use)
 AT_CUDA_API CUDAStreamInternals* CUDAStream_getDefaultStream(int64_t device = -1);
 
-AT_CUDA_API CUDAStreamInternals* CUDAStream_createStream(
+AT_CUDA_API CUDAStreamInternals* CUDAStream_getStreamFromPool(
   const bool isHighPriority = false
 , int64_t device = -1);
 
