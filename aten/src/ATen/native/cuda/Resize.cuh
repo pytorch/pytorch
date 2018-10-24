@@ -49,7 +49,7 @@ inline TensorImpl* resize_impl_cuda_(
     self->set_sizes_contiguous(size);
     storage_size = self->numel();
   }
-  maybe_resize_storage_cuda(self, self->numel());
+  maybe_resize_storage_cuda(self, storage_size);
 
   return self;
 }
