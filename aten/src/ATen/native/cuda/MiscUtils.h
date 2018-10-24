@@ -14,8 +14,9 @@ namespace native {
 // RAII for a MAGMA Queue
 struct MAGMAQueue {
 
-  // Default constructor, does nothing.
-  MAGMAQueue() = default;
+  // Default constructor without a device will cause
+  // destroying a queue which has not been initialized.
+  MAGMAQueue() = delete;
 
   // Constructor
   explicit MAGMAQueue(int64_t device_id) {
