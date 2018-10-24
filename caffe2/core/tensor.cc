@@ -45,7 +45,7 @@ std::string TensorPrinter::MetaStr(const Tensor& tensor) {
   std::stringstream meta_stream;
   meta_stream << "Tensor " << tensor_name_ << " of type "
               << tensor.meta().name() << ". Dims: (";
-  for (const auto dim : tensor.dims()) {
+  for (const auto dim : tensor.sizes()) {
     meta_stream << dim << ",";
   }
   meta_stream << "): ";
@@ -86,7 +86,7 @@ vector<int64_t> GetTensorInfo(
   CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImpl());
   *capacity = tc->storage().capacity();
   ExtractDeviceOption(device, tc->GetDevice());
-  return tc->dims().vec();
+  return tc->sizes().vec();
 }
 
 // since we only have one tensor, probably need to remove this at some point?

@@ -184,7 +184,7 @@ class CAFFE2_API Tensor final {
         src_tensor.is_contiguous(),
         "Right now ResizeLike is only supported for contiguous Tensor.");
     if (impl_ != src_tensor.impl_) {
-      impl_.get()->Resize(src_tensor.dims());
+      impl_.get()->Resize(src_tensor.sizes());
     }
   }
 
@@ -348,6 +348,10 @@ class CAFFE2_API Tensor final {
    */
   inline size_t nbytes() const {
     return impl_->numel() * itemsize();
+  }
+
+  inline at::IntList sizes() const {
+    return impl_.get()->sizes();
   }
 
   inline at::IntList dims() const {
