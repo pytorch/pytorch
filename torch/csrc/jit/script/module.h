@@ -216,26 +216,26 @@ private:
     const auto& schema = getSchema();
     // Do we have more inputs than the schema accepts?
     AT_CHECK(
-        inputs.size() <= schema.arguments.size(),
-        "Expected at most ", schema.arguments.size(),
-        " argument(s) for operator '", schema.name, "', but received ",
+        inputs.size() <= schema.arguments().size(),
+        "Expected at most ", schema.arguments().size(),
+        " argument(s) for operator '", schema.name(), "', but received ",
         inputs.size(), " argument(s). Declaration: ", schema);
 
-    for (size_t pos = 0; pos < schema.arguments.size(); ++pos) {
-      const auto& argument = schema.arguments[pos];
+    for (size_t pos = 0; pos < schema.arguments().size(); ++pos) {
+      const auto& argument = schema.arguments()[pos];
       if (pos < inputs.size()) {
         const TypePtr inputType = inferTypeFrom(inputs[pos]);
-        AT_CHECK(inputType->isSubtypeOf(argument.type),
-              "Expected value of type ", *argument.type,
-              " for argument '", argument.name,
+        AT_CHECK(inputType->isSubtypeOf(argument.type()),
+              "Expected value of type ", *argument.type(),
+              " for argument '", argument.name(),
               "' in position ", pos,
               ", but instead got value of type ", *inputType,
               ". Declaration: ", schema);
-      } else if (argument.default_value) {
-        inputs.push_back(*argument.default_value);
+      } else if (argument.default_value()) {
+        inputs.push_back(*argument.default_value());
       } else {
-        AT_ERROR(schema.name, "() is missing value for argument '",
-                argument.name, "'. Declaration: ", schema);
+        AT_ERROR(schema.name(), "() is missing value for argument '",
+                argument.name(), "'. Declaration: ", schema);
       }
     }
   }
