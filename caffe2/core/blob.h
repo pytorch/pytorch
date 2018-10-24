@@ -32,7 +32,7 @@ inline Tensor* BlobGetMutableTensor(
     Tensor* tensor = blob->GetMutable<Tensor>();
     if (*tensor) {
       if (tensor->GetDevice() == options.device()) {
-        if (tensor->dims() != dims) {
+        if (tensor->sizes() != dims) {
           // Resize when the dims doesn't match
           tensor->Resize(dims);
         }
