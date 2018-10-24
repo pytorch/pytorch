@@ -9,7 +9,7 @@
 #include "torch/csrc/jit/fuser/kernel_cache.h"
 #include "torch/csrc/jit/fuser/kernel_spec.h"
 #include "torch/csrc/jit/fuser/compiler.h"
-#include "torch/csrc/jit/fuser/common/tensor_info.h"
+#include "torch/csrc/jit/fuser/tensor_info.h"
 
 #include <vector>
 #include <tuple>
@@ -129,8 +129,8 @@ static std::vector<int64_t> computeMapSize(
 , const PartitionDesc& chunkDesc) {
   std::vector<int64_t> sizes(tensor.sizes().begin(), tensor.sizes().end());
   // Should have been checked in graph fuser
-  JIT_ASSERT(sizes[chunkDesc.dim] % chunkDesc.nSubtensors == 0);
-  sizes[chunkDesc.dim] /= chunkDesc.nSubtensors;
+  JIT_ASSERT(sizes[chunkDesc.dim()] % chunkDesc.nSubTensors() == 0);
+  sizes[chunkDesc.dim()] /= chunkDesc.nSubTensors();
   return sizes;
 }
 
@@ -172,21 +172,21 @@ void launchFusion(
      
   // Allocates tensors for outputs
   auto& ref_type = inputs[0].type();
-  outputs.reserve(fusion.output_desc_.size());
-  for (const auto& od : fusion.output_desc_) {
+  outputs.reserve(fusion.outputDesc().size());
+  for (const auto& od : fusion.outputDesc()) {
     outputs.push_back(at::empty({0}, ref_type.options().dtype(od.scalar_type)));
   }
 
   // Fails if fusion and given inputs disagree
-  JIT_ASSERT(inputs.size() == fusion.input_desc_.size());
+  JIT_ASSERT(inputs.size() == fusion.inputDesc().size());
 
   // Computes number of flattened inputs and outputs
   size_t flat_inputs_size = 0;
   size_t flat_outputs_size = 0;
-  for (const auto& c : fusion.chunk_desc_)
-    flat_inputs_size += c.nSubtensors;
-  for (const auto& c : fusion.concat_desc_)
-    flat_outputs_size += c.nSubtensors;
+  for (const auto& c : fusion.chunkDesc())
+    flat_inputs_size += c.nSubTensors();
+  for (const auto& c : fusion.concatDesc())
+    flat_outputs_size += c.nSubTensors();
   
   // Fails if the elements of the first (any) tensor are not expressable as 
   // a 32-bit integer.
@@ -198,17 +198,17 @@ void launchFusion(
   at::IntList map_size;
   uint32_t numel;
   std::vector<int64_t> keep_alive_size;
-  if (fusion.chunk_desc_[0].isNoop()) {
+  if (fusion.chunkDesc()[0].isNoop()) {
     map_size = inputs[0].sizes();
     numel = inputs[0].numel();
   } else {
-    keep_alive_size = computeMapSize(inputs[0], fusion.chunk_desc_[0]);
+    keep_alive_size = computeMapSize(inputs[0], fusion.chunkDesc()[0]);
     map_size = keep_alive_size;
     numel = computeNumel(map_size);
   }
 
   // Computes the storage needed to store TensorInfo structs for inputs and outputs.
-  size_t uncompressedDim = fusion.input_desc_.at(0).contiguity.size();
+  size_t uncompressedDim = fusion.inputDesc().at(0).contiguity.size();
   size_t maxPossibleTensorInfoSize = sizeof(TensorInfo) + 2 * sizeof(uint32_t) * uncompressedDim;
   size_t maxPossibleBufferSize = maxPossibleTensorInfoSize * (flat_inputs_size + flat_outputs_size);
   std::vector<char> buffer(maxPossibleBufferSize);
@@ -245,40 +245,40 @@ void launchFusion(
   };
 
   // Adds (flattened) input arguments
-  for (size_t i = 0; i < fusion.input_desc_.size(); ++i) {
-    const auto& chunk = fusion.chunk_desc_[i];
+  for (size_t i = 0; i < fusion.inputDesc().size(); ++i) {
+    const auto& chunk = fusion.chunkDesc()[i];
     const at::Tensor& tensor = inputs[i];
     if (chunk.isNoop()) {
-      addTensorInfo(fusion.input_desc_[i], tensor);
+      addTensorInfo(fusion.inputDesc()[i], tensor);
     } else {
-      size_t chunk_offset = map_size[chunk.dim] * tensor.stride(chunk.dim) * elementSize(tensor.type().scalarType());
+      size_t chunk_offset = map_size[chunk.dim()] * tensor.stride(chunk.dim()) * elementSize(tensor.type().scalarType());
       char* data_ptr = reinterpret_cast<char*>(tensor.data_ptr());
-      for (size_t chunks = 0; chunks < chunk.nSubtensors; ++chunks) {
-        addTensorInfoRaw(*chunk.subtensorDesc, data_ptr, map_size, tensor.strides());
+      for (size_t chunks = 0; chunks < chunk.nSubTensors(); ++chunks) {
+        addTensorInfoRaw(*chunk.subTensorDesc(), data_ptr, map_size, tensor.strides());
         data_ptr += chunk_offset;
       }
     }
   }
 
   // Adds (flattened) output arguments
-  for (size_t i = 0; i < fusion.output_desc_.size(); ++i) {
-    const auto& c = fusion.concat_desc_[i];
+  for (size_t i = 0; i < fusion.outputDesc().size(); ++i) {
+    const auto& c = fusion.concatDesc()[i];
     auto& o = outputs[i];
     if (c.isNoop()) {
       o.resize_(map_size);
-      addTensorInfo(fusion.output_desc_[i], outputs[i]);
+      addTensorInfo(fusion.outputDesc()[i], outputs[i]);
     } else {
-      size_t small_size = map_size[c.dim];
+      size_t small_size = map_size[c.dim()];
       std::vector<int64_t> concat_size(map_size.begin(), map_size.end());
-      concat_size[c.dim] = small_size * c.nSubtensors;
+      concat_size[c.dim()] = small_size * c.nSubTensors();
       o.resize_(concat_size);
       size_t offset = 0;
-      for (size_t j = 0; j < c.nSubtensors; ++j) {
+      for (size_t j = 0; j < c.nSubTensors(); ++j) {
         // because the concatenated_output stays live, the underlying data
         // in this view remains live through the end of this function
         // so there is not need to hold onto this tensor
-        const auto view = o.narrow(c.dim, offset, small_size);
-        addTensorInfo(*c.subtensorDesc, view);
+        const auto view = o.narrow(c.dim(), offset, small_size);
+        addTensorInfo(*c.subTensorDesc(), view);
         offset += small_size;
       }
     }

@@ -9,7 +9,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/fuser/arg_spec.h"
-#include "torch/csrc/jit/fuser/common/fused_kernel.h"
+#include "torch/csrc/jit/fuser/fused_kernel.h"
 
 #include <memory>
 #include <cstdint>

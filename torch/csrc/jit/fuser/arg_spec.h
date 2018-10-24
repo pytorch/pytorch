@@ -1,11 +1,9 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
-#if USE_CPU_FUSER || USE_CUDA_FUSER
 
 #include "ATen/ATen.h"
 #include "torch/csrc/utils/functional.h" // fmap
 #include "torch/csrc/utils/hash.h"
-#include "torch/csrc/jit/fuser/common/tensor_desc.h"
+#include "torch/csrc/jit/fuser/tensor_desc.h"
 
 #include <vector>
 #include <cstdint>
@@ -15,7 +13,8 @@ namespace torch { namespace jit { namespace fuser {
 struct ArgSpec {
   ArgSpec(at::TensorList inputs)
   : descs_(fmap<TensorDesc>(inputs))
-  , hash_code_(torch::get_hash(inputs.size(), descs_)) {}
+  , hash_code_{torch::get_hash(inputs.size(), descs_)} 
+  { }
 
   bool operator==(const ArgSpec& spec) const {
     return hash_code_ == spec.hash_code_ && descs_ == spec.descs_;
@@ -41,5 +40,3 @@ private:
 } // namespace fuser
 } // namespace jit 
 } // namespace torch
-
-#endif // USE_CPU_FUSER || USE_CUDA_FUSER

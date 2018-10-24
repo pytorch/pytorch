@@ -2,8 +2,8 @@
 
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/fuser/arg_spec.h"
-#include "torch/csrc/jit/fuser/common/partition_desc.h"
-#include "torch/csrc/jit/fuser/common/tensor_desc.h"
+#include "torch/csrc/jit/fuser/partition_desc.h"
+#include "torch/csrc/jit/fuser/tensor_desc.h"
 
 #include <tuple>
 #include <vector>

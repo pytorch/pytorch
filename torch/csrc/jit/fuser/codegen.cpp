@@ -6,8 +6,7 @@
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/fuser/config.h"
 #include "torch/csrc/jit/fuser/interface.h"
-#include "torch/csrc/jit/fuser/common/tensor_desc.h"
-#include "torch/csrc/jit/fuser/common/tensor_info.h"
+#include "torch/csrc/jit/fuser/tensor_info.h"
 
 #if USE_CUDA_FUSER
   #include "torch/csrc/jit/fuser/cuda/resource_strings.h"
@@ -244,7 +243,7 @@ std::tuple<
         int64_t chunks = chunk->i(attr::chunks);
         chunk_desc.emplace_back(input_desc[input_index++], chunks, dim);
         for (const auto* o : chunk->outputs()) {
-          flat_inputs.emplace_back(o, *chunk_desc.back().subtensorDesc);
+          flat_inputs.emplace_back(o, *chunk_desc.back().subTensorDesc());
         }
       } else {
         chunk_desc.emplace_back();
@@ -270,7 +269,7 @@ std::tuple<
         const auto cat = o->node();
         concat_desc.emplace_back(desc, cat->inputs().size(), cat->i(attr::dim));
         for(const auto& c : cat->inputs()) {
-          emitFormal(c, *concat_desc.back().subtensorDesc);
+          emitFormal(c, *concat_desc.back().subTensorDesc());
           flat_output_nodes.emplace_back(c, desc);
         }
       }

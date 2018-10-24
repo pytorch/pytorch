@@ -9,7 +9,7 @@
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/fuser/kernel_cache.h"
 #include "torch/csrc/jit/fuser/codegen.h"
-#include "torch/csrc/jit/fuser/common/tensor_desc.h"
+#include "torch/csrc/jit/fuser/tensor_desc.h"
 
 #if USE_CUDA_FUSER
   #include "torch/csrc/jit/fuser/cuda/fused_kernel.h"

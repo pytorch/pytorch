@@ -1,11 +1,9 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
-#if USE_CPU_FUSER || USE_CUDA_FUSER
 
 #include "ATen/ATen.h"
 #include "torch/csrc/utils/disallow_copy.h"
-#include "torch/csrc/jit/fuser/common/tensor_desc.h"
-#include "torch/csrc/jit/fuser/common/partition_desc.h"
+#include "torch/csrc/jit/fuser/tensor_desc.h"
+#include "torch/csrc/jit/fuser/partition_desc.h"
 
 #include <string>
 #include <cstdint>
@@ -50,6 +48,17 @@ struct FusedKernel {
   , std::vector<void*>& arguments) const = 0;
   virtual at::Backend backend() const = 0;
 
+  // Getters
+  const std::string& name() const { return name_; }
+  const std::string& code() const { return code_; }
+  const std::vector<TensorDesc>& inputDesc() const { return input_desc_; }
+  const std::vector<TensorDesc>& outputDesc() const { return output_desc_; }
+  const std::vector<PartitionDesc>& chunkDesc() const { return chunk_desc_; }
+  const std::vector<PartitionDesc>& concatDesc() const { return concat_desc_; }
+  bool hasRandom() const { return has_random_; } 
+
+
+protected:
   const std::string name_;
   const std::string code_;
   const std::vector<TensorDesc> input_desc_;
@@ -71,5 +80,3 @@ struct FusedKernel {
 } // namespace fuser
 } // namespace jit 
 } // namespace torch
-
-#endif // USE_CPU_FUSER || USE_CUDA_FUSER

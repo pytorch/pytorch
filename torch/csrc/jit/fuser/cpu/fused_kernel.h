@@ -5,7 +5,7 @@
 #include "ATen/ATen.h"
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
-#include "torch/csrc/jit/fuser/common/fused_kernel.h"
+#include "torch/csrc/jit/fuser/fused_kernel.h"
 
 #include <string>
 #include <cstdint>

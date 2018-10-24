@@ -3,7 +3,7 @@
 #if USE_CUDA_FUSER
 
 #include "ATen/ATen.h"
-#include "torch/csrc/jit/fuser/common/fused_kernel.h"
+#include "torch/csrc/jit/fuser/fused_kernel.h"
 
 #include "nvrtc.h"
 #include "cuda.h"

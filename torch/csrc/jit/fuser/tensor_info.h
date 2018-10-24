@@ -1,6 +1,4 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
-#if USE_CPU_FUSER || USE_CUDA_FUSER
 
 #include <cstdint>
 
@@ -22,5 +20,3 @@ struct TensorInfo {
 } // namespace fuser
 } // namespace jit 
 } // namespace torch
-
-#endif // USE_CPU_FUSER || USE_CUDA_FUSER
