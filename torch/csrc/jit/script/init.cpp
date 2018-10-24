@@ -283,6 +283,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
      return std::make_shared<ConstantPythonTupleValue>(obj);
     }
   }
+
+  auto weak_obj =
+      py::module::import("torch.jit").attr("_try_get_weak_module")(obj);
+  if (!weak_obj.is_none()) {
+    obj = weak_obj;
+  }
   if (py::isinstance<Module>(obj)) {
     auto mod = py::cast<std::shared_ptr<Module>>(obj);
     // In the case that this Python object is not a submodule, inline *ONLY

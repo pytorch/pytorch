@@ -7,8 +7,10 @@
 #include "torch/csrc/cuda/THCP.h"
 #include "torch/csrc/cuda/nccl.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/utils/functional.h"
 
 #include <nccl.h>
+
 #include <sstream>
 #include <unordered_map>
 
@@ -129,29 +131,12 @@ PyObject * THCPModule_nccl_reduce(PyObject *self, PyObject *args) {
 
   std::vector<at::Tensor> inputs = extract_tensors(_inputs);
   std::vector<at::Tensor> outputs = extract_tensors(_outputs);
-  std::vector<THCStream*> streams = unpack_streams(_streams, inputs.size());
+  std::vector<THCStream*> thc_streams = unpack_streams(_streams, inputs.size());
+  std::vector<at::cuda::CUDAStream> streams = fmap<at::cuda::CUDAStream>(thc_streams);
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  THPUtils_assert(root >= 0 && (size_t)root < inputs.size(), "invalid root");
-
   with_no_gil([&]{
-    _check_inputs(inputs, outputs, 1, 1);
-    size_t len = inputs.size();
-
-    ncclDataType_t data_type = _get_data_type(inputs[0].type());
-
-    int64_t count = inputs[0].numel();
-    std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
-    auto comms = user_comms.empty() ? _get_communicators(inputs) : ArrayRef<ncclComm_t>(user_comms);
-    at::DeviceGuard device_guard;
-    AutoNcclGroup nccl_group_guard;
-    for (size_t i = 0; i < len; i++) {
-      int device = inputs[i].get_device();
-      device_guard.set_index(device);
-      auto stream = (streams[i] == nullptr) ? nullptr : THCStream_stream(streams[i]);
-      NCCL_CHECK(ncclReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
-           count, data_type, (ncclRedOp_t) op, root, comms[i], stream));
-    }
+    torch::cuda::nccl::reduce(inputs, outputs, root, op, streams, user_comms);
   });
 
   Py_RETURN_NONE;

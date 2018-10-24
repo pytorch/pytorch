@@ -17,7 +17,7 @@
 #endif
 
 /*
-Reductions that (only) operate on accumulate types. 
+Reductions that (only) operate on accumulate types.
 */
 
 template <typename T>
@@ -104,9 +104,9 @@ inline __device__ T THCMax(const T a, const T b) {
 }
 
 template<typename T, typename AccT>
-__global__ void THCTensor_kernel_renorm(T *data, 
-                                        const AccT value, 
-                                        const ptrdiff_t size, 
+__global__ void THCTensor_kernel_renorm(T *data,
+                                        const AccT value,
+                                        const ptrdiff_t size,
                                         const AccT maxnorm) {
   __shared__ AccT buffer[32];
   int64_t tx = threadIdx.x;
@@ -136,7 +136,7 @@ __global__ void THCTensor_kernel_renorm(T *data,
     // get norm of axis
     for (ptrdiff_t i = tx; i < size; i += step) {
       const AccT val = scalar_cast<AccT>(row[i]);
-      buffer[tx] = THCNumerics<AccT>::add( 
+      buffer[tx] = THCNumerics<AccT>::add(
         buffer[tx],
         THCNumerics<AccT>::pow(THCNumerics<AccT>::abs(val), value)
       );
@@ -172,7 +172,7 @@ struct TensorNonZeroOp {
   __host__ __device__ T operator()(const T lhs) const {
     const T zero = scalar_cast<T>(0);
     if (THCNumerics<T>::eq(lhs, zero)) return zero;
-      
+
     return scalar_cast<T>(1);
   }
 };
@@ -203,7 +203,7 @@ struct ThrustTensorDistOp {
     const AccT x = scalar_cast<AccT>(_x);
     const AccT y = scalar_cast<AccT>(_y);
     return THCNumerics<AccT>::pow(
-      THCNumerics<AccT>::abs(THCNumerics<AccT>::sub(x, y)), 
+      THCNumerics<AccT>::abs(THCNumerics<AccT>::sub(x, y)),
       exponent);
   }
 
@@ -215,8 +215,8 @@ struct ThrustTensorDistOp {
 // Given the sum of values and the sum of squares, compute the variance or standard deviation.
 template<typename T, bool flag, bool apply_sqrt>
 __forceinline__ __device__ T THCTensor_computeVar(
-  T sum, 
-  T sum2, 
+  T sum,
+  T sum2,
   const unsigned row_size) {
 
   T rs2 = scalar_cast<T>(row_size);
@@ -240,7 +240,7 @@ __forceinline__ __device__ T THCTensor_computeVar(
 
   if (apply_sqrt)
     return THCNumerics<T>::sqrt(sum2);
-  
+
   return sum2;
 }
 
@@ -390,10 +390,10 @@ __global__ void THCTensor_kernel_varInnermostDim(T *tgt, T *src_, unsigned num_r
      * true sum.
      */
     for (unsigned lane_mask = 8; lane_mask > 0; lane_mask >>= 1) {
-      local_sum = THCNumerics<AccT>::add(local_sum, 
+      local_sum = THCNumerics<AccT>::add(local_sum,
           WARP_SHFL_XOR((row < num_rows) ? local_sum : acc_zero, lane_mask, 16));
     }
-    AccT true_mean = THCNumerics<AccT>::div(local_sum, 
+    AccT true_mean = THCNumerics<AccT>::div(local_sum,
       scalar_cast<AccT>(row_size));
 
     /*
@@ -416,7 +416,7 @@ __global__ void THCTensor_kernel_varInnermostDim(T *tgt, T *src_, unsigned num_r
      * the total sum, which is equal to the M2 for the entire input row.
      */
     for (unsigned s = 8; s >= 1; s >>= 1) {
-      adjusted_M2 = THCNumerics<AccT>::add(adjusted_M2, 
+      adjusted_M2 = THCNumerics<AccT>::add(adjusted_M2,
           WARP_SHFL_DOWN((row < num_rows) ? adjusted_M2 : acc_zero, s, 16));
     }
 
