@@ -178,5 +178,6 @@ inline std::unique_ptr<at::BaseContext> CreateContext(
 namespace caffe2 {
 
 using at::BaseContext;
+using at::CreateContext;
 
 } // namespace caffe2

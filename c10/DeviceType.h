@@ -5,12 +5,12 @@
 // ATen/core (which would require a lot more build system hacking.)
 // If you modify me, keep me synchronized with that file.
 
-#include <ATen/core/Macros.h>
+#include <c10/macros/Macros.h>
 
 #include <ostream>
 #include <functional>
 
-namespace at {
+namespace c10 {
 
 // Underlying type declared to be int32_t for consistency with protobufs.
 enum class DeviceType : int32_t {
@@ -26,18 +26,24 @@ enum class DeviceType : int32_t {
   ONLY_FOR_TEST = 20901701, // This device type is only for test.
 };
 
-CAFFE2_API std::string DeviceTypeName(
-    at::DeviceType d,
+C10_API std::string DeviceTypeName(
+    DeviceType d,
     bool lower_case = false);
 
-CAFFE2_API std::ostream& operator<<(std::ostream& stream, at::DeviceType type);
+C10_API std::ostream& operator<<(std::ostream& stream, DeviceType type);
 
 } // namespace at
 
 namespace std {
-template <> struct hash<at::DeviceType> {
-  std::size_t operator()(const at::DeviceType &k) const {
+template <> struct hash<c10::DeviceType> {
+  std::size_t operator()(c10::DeviceType k) const {
     return std::hash<int>()(static_cast<int>(k));
   }
 };
 } // namespace std
+
+// TODO: Remove me when we get a global c10 namespace using in at
+namespace at {
+using c10::DeviceType;
+using c10::DeviceTypeName;
+}

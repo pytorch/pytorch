@@ -47,13 +47,13 @@ def find_cuda_version(cuda_home):
         candidate_names = [os.path.basename(c) for c in candidate_names]
 
     # suppose version is MAJOR.MINOR.PATCH, all numbers
-    version_regex = re.compile('[0-9]+\.[0-9]+\.[0-9]+')
+    version_regex = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+')
     candidates = [c.group() for c in map(version_regex.search, candidate_names) if c]
     if len(candidates) > 0:
         # normally only one will be retrieved, take the first result
         return candidates[0]
     # if no candidates were found, try MAJOR.MINOR
-    version_regex = re.compile('[0-9]+\.[0-9]+')
+    version_regex = re.compile(r'[0-9]+\.[0-9]+')
     candidates = [c.group() for c in map(version_regex.search, candidate_names) if c]
     if len(candidates) > 0:
         return candidates[0]
