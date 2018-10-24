@@ -31,7 +31,7 @@ TEST(TestStream, CopyAndMoveTest) {
   cudaStream_t cuda_stream;
 
   // Tests that copying works as expected and preserves the stream
-  at::cuda::CUDAStream copyStream = at::cuda::createCUDAStream();
+  at::cuda::CUDAStream copyStream = at::cuda::getStreamFromPool();
   {
     auto s = at::cuda::getStreamFromPool();
     device = s.device();
@@ -49,7 +49,7 @@ TEST(TestStream, CopyAndMoveTest) {
   ASSERT_EQ_CUDA(copyStream.stream(), cuda_stream);
 
   // Tests that moving works as expected and preserves the stream
-  at::cuda::CUDAStream moveStream = at::cuda::createCUDAStream();
+  at::cuda::CUDAStream moveStream = at::cuda::getStreamFromPool();
   {
     auto s = at::cuda::getStreamFromPool();
     device = s.device();
