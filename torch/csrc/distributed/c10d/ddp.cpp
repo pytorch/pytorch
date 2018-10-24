@@ -125,7 +125,7 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
   for (size_t devIdx = 0; devIdx < devices.size(); ++devIdx) {
     at::DeviceGuard guard(devices[devIdx]);
     events[devIdx].record();
-    workerStreams.push_back(at::cuda::createCUDAStream(false, devices[devIdx]));
+    workerStreams.push_back(at::cuda::getStreamFromPool(false, devices[devIdx]));
     // Let the worker stream to wait for the default stream
     events[devIdx].block(workerStreams.back());
   }
@@ -162,7 +162,7 @@ void syncReduction(
   // Creating a separate CUDA stream to allow memory copy
   // and intra-node reduce to be operated on this worker stream to
   // improve performance
-  at::cuda::CUDAStream workerStream = at::cuda::createCUDAStream();
+  at::cuda::CUDAStream workerStream = at::cuda::getStreamFromPool();
   at::cuda::CUDAGuard cudaGuard = at::cuda::CUDAGuard(workerStream);
 
   // Let the worker stream wait on the reduction stream
