@@ -471,8 +471,7 @@ void TensorVectorResize(
     DeviceType type);
 
 // Tensor factory function
-CAFFE2_API Tensor
-empty(const std::vector<int64_t>& dims, const at::TensorOptions& options);
+CAFFE2_API Tensor empty(at::IntList dims, at::TensorOptions options);
 
 class CAFFE2_API TensorPrinter {
  public:
