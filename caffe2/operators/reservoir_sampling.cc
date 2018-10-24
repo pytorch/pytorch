@@ -39,12 +39,12 @@ class ReservoirSamplingOp final : public Operator<Context> {
       }
     }
 
-    auto num_entries = input.dims()[0];
+    auto num_entries = input.sizes()[0];
 
     if (!output_initialized) {
       // IMPORTANT: Force the output to have the right type before reserving,
       // so that the output gets the right capacity
-      auto dims = input.dims().vec();
+      auto dims = input.sizes().vec();
       dims[0] = 0;
       output->Resize(dims);
       output->raw_mutable_data(input.meta());
