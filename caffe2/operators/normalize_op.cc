@@ -66,10 +66,10 @@ Given a matrix, apply L2-normalization along the specified dimension.
 )DOC")
     .IdenticalTypeAndShape();
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_GRADIENT_OPERATOR(
     NormalizeGradient,
     NormalizeGradientOp<float, CPUContext>);
-OPERATOR_SCHEMA(NormalizeGradient)
+GRADIENT_OPERATOR_SCHEMA(NormalizeGradient)
     .NumInputs(2)
     .NumOutputs(1)
     .Arg("axis", "axis to normalize");

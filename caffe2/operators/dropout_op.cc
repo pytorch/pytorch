@@ -58,7 +58,9 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(Dropout, DropoutOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(DropoutGrad, DropoutGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    DropoutGrad,
+    DropoutGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Dropout)
     .NumInputs(1)
@@ -160,7 +162,7 @@ mask: [[False False False  True  True]
         "nonzero, this output is not filled.")
     .InheritOnnxSchema();
 
-OPERATOR_SCHEMA(DropoutGrad)
+GRADIENT_OPERATOR_SCHEMA(DropoutGrad)
     .NumInputs(1, 2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}});
