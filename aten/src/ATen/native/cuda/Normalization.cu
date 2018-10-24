@@ -444,7 +444,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
 								  (input.size(0)+tb-1)/tb)));
   dim3 threads_trans(tf, tb);
   if (!train) {
-    batch_norm_transform_input_kernel<scalar_t, accscalar_t, false> <<<blocks_trans, threads_trans, 0, stream>>>
+    batch_norm_transform_input_kernel<scalar_t, accscalar_t, false, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
       (input, output, running_mean, running_var, weight, bias, epsilon);
   } else {
     // for the reduction, we cannot use blocks for the batch dim, but if we have few threads in
@@ -452,9 +452,9 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
     dim3 blocks(input.size(1));
     tf = getNumThreads(input.size(2));
     dim3 threads(tf, std::max<int>(1, MAX_BLOCK_SIZE/tf));
-    batch_norm_collect_statistics_kernel<scalar_t, accscalar_t> <<<blocks, threads, 0, stream>>>
+    batch_norm_collect_statistics_kernel<scalar_t, accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
       (input, epsilon, momentum, running_mean, running_var, save_mean, save_invstd);
-    batch_norm_transform_input_kernel<scalar_t, accscalar_t, true> <<<blocks_trans, threads_trans, 0, stream>>>
+    batch_norm_transform_input_kernel<scalar_t, accscalar_t, true, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
       (input, output, save_mean, save_invstd, weight, bias, epsilon);
   }
   THCudaCheck(cudaGetLastError());
@@ -501,7 +501,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
   int tf = getNumThreads(input.size(2));
   dim3 threads(tf, std::max<int>(1, MAX_BLOCK_SIZE/tf));
 
-  batch_norm_backward_kernel<scalar_t,  accscalar_t> <<<blocks, threads, 0, stream>>>
+  batch_norm_backward_kernel<scalar_t,  accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
     (input, grad_output, grad_input, grad_weight, grad_bias, weight, running_mean, running_var,
      save_mean, save_invstd, train, epsilon);
   THCudaCheck(cudaGetLastError());
