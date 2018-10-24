@@ -83,7 +83,6 @@ if [[ "$BUILD_ENVIRONMENT" == *-xenial-* ]]; then
   ./configure --prefix=/usr/local
   make
   sudo make install
-  ccache --clear
   cd ../../
   rm -rf valgrind_build
   alias valgrind="/usr/local/bin/valgrind"
