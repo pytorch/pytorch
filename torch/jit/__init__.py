@@ -654,11 +654,12 @@ def _try_get_weak_module(mod):
     """
     Get the WeakScriptModuleProxy corresponding to mod if it exists
     """
-    entry = _weak_modules.get(mod)
-    if entry is not None:
-        return entry
+    if mod in _weak_modules:
+        return _weak_modules.get(mod)
+
     if type(mod) in _weak_types:
         return _make_strong(mod)
+
     return None
 
 
