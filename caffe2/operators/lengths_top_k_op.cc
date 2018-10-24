@@ -21,25 +21,25 @@ bool LengthsTopKOp<T, Context>::RunOnDevice() {
   int* output_topk_indices_data =
       output_topk_indices->template mutable_data<int>();
 
-  auto cmp = [](std::pair<T, TIndex>& lhs, std::pair<T, TIndex>& rhs) {
+  auto cmp = [](std::pair<T, int64_t>& lhs, std::pair<T, int64_t>& rhs) {
     return lhs.first > rhs.first ||
         (lhs.first == rhs.first && lhs.second < rhs.second);
   };
 
   // Sort preserving indices
   int next_index = 0;
-  for (TIndex i = 0; i < N; ++i) {
+  for (int64_t i = 0; i < N; ++i) {
     // Build a min-heap, the heap element is pair of (value, idx)
     // the top of the heap is the smallest value
     std::priority_queue<
-        std::pair<T, TIndex>,
-        std::vector<std::pair<T, TIndex>>,
+        std::pair<T, int64_t>,
+        std::vector<std::pair<T, int64_t>>,
         decltype(cmp)>
         p_queue(cmp);
 
     // Maintain the size of heap to be less or equal to k_, so the
     // heap will hold the k_ largest values
-    for (TIndex j = 0; j < input_len[i]; ++j) {
+    for (int64_t j = 0; j < input_len[i]; ++j) {
       const auto value = X_data[next_index++];
       if (p_queue.size() < k_ || value > p_queue.top().first) {
         p_queue.push(std::make_pair(value, j));
@@ -50,7 +50,7 @@ bool LengthsTopKOp<T, Context>::RunOnDevice() {
     }
 
     int last_index = p_queue.size();
-    for (TIndex j = 0; j < k_; ++j) {
+    for (int64_t j = 0; j < k_; ++j) {
       if (p_queue.size() > 0) {
         auto& pqElem = p_queue.top();
         output_topk_values_data[i * k_ + last_index - j - 1] = pqElem.first;

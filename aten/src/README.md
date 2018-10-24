@@ -82,7 +82,7 @@ it into the correct form:
     kernel = k_;
   }
   ...
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(kernel);
 ```
 
 In this case, we have (redundantly) called `retain` on `k_`, so that we can

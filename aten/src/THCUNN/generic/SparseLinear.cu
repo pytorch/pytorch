@@ -46,7 +46,7 @@ void THNN_(SparseLinear_updateOutput)(
   THArgCheck(THNN_(checkSize1D)(bias, outDim), 5, "bias size wrong");
 
   weight = THCTensor_(newContiguous)(state, weight);
-  
+
   int64_t batchnum = THCTensor_(size)(state, output, 0);
   int64_t nnz = THCTensor_(size)(state, input, 0);
 
@@ -87,7 +87,7 @@ void THNN_(SparseLinear_updateOutput)(
   }
 
   // output = W * x
-  real one = ScalarConvert<int, real>::to(1);
+  scalar_t one = ScalarConvert<int, scalar_t>::to(1);
   cusparseMatDescr_t descr = 0;
   cusparseCreateMatDescr(&descr);
   cusparseSetMatType(descr,CUSPARSE_MATRIX_TYPE_GENERAL);
@@ -186,7 +186,7 @@ void THNN_(SparseLinear_accGradParameters)(
   THCTensor_(copy)(state, buf, tgradOutput);
   THCTensor_(free)(state, tgradOutput);
 
-  real one = ScalarConvert<int, real>::to(1);
+  scalar_t one = ScalarConvert<int, scalar_t>::to(1);
   cusparseMatDescr_t descr = 0;
   cusparseCreateMatDescr(&descr);
   cusparseSetMatType(descr,CUSPARSE_MATRIX_TYPE_GENERAL);

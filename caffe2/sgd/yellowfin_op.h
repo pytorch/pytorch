@@ -126,7 +126,7 @@ CAFFE2_YF_READ_INPUT(SCALARS_MEMORY, scalars_memory)
 CAFFE2_YF_READ_INPUT(GRAD, grad)
 #undef CAFFE2_YF_READ_OUTPUT
 
-CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor>(ITER, CPU));
+CAFFE_ENFORCE(OperatorBase::InputIsTensorType(ITER, CPU));
 CAFFE_ENFORCE_EQ(lr_avg_tensor.size(), 1);
 CAFFE_ENFORCE_EQ(mu_avg_tensor.size(), 1);
 CAFFE_ENFORCE_EQ(param_tensor.ndim(), moment_tensor.ndim());

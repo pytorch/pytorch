@@ -42,24 +42,24 @@ op = core.CreateOperator(
     stride=2
 )
 
-# Create X: (N,C,H,W)
+// Create X: (N,C,H,W)
 data = np.random.randn(1,1,8,8).astype(np.float32)
 print("Data shape: ",data.shape)
 
-# Create W: (M,C,Kh,Kw)
+// Create W: (M,C,Kh,Kw)
 filters = np.random.randn(3,1,5,5).astype(np.float32)
 print("Filter shape: ",filters.shape)
 
-# Create b: M
+// Create b: M
 bias = np.array([1.,1.,1.]).astype(np.float32)
 print("Bias shape: ",bias.shape)
 
-# Put the inputs into the workspace
+// Put the inputs into the workspace
 workspace.FeedBlob("X", data)
 workspace.FeedBlob("filter", filters)
 workspace.FeedBlob("bias", bias)
 
-# Run the operator
+// Run the operator
 workspace.RunOperatorOnce(op)
 print("Y:\n", workspace.FetchBlob("Y"))
 
@@ -97,8 +97,8 @@ std::function<void(OpSchema&)> ConvDocGenerator(const char* dim) {
     string doc = R"DOC(
 The convolution operator consumes an input vector, a {dim}filter blob
 and a bias blob and computes the output. {conv_doc})DOC";
-    ReplaceAll(doc, "{dim}", dim);
-    ReplaceAll(doc, "{conv_doc}", kConvDoc);
+    c10::ReplaceAll(doc, "{dim}", dim);
+    c10::ReplaceAll(doc, "{conv_doc}", kConvDoc);
     schema.SetDoc(doc);
     schema.Input(
         0,
@@ -173,7 +173,7 @@ OPERATOR_SCHEMA(Conv)
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
         ConvPoolOpBase<CPUContext>::CostInferenceForConv))
     .FillUsing(ConvDocGenerator(""))
-    .InheritOnnxSchema("Conv");
+    .InheritOnnxSchema();
 
 REGISTER_CPU_OPERATOR(Conv1D, ConvOp<float, CPUContext>);
 

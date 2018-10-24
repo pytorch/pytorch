@@ -108,3 +108,19 @@ elif sys.version_info[:2] > (3, 2):
 else:
     def raise_from(value, from_value):
         raise value
+
+if PY2:
+    import collections
+    container_abcs = collections
+elif PY3:
+    import collections.abc
+    container_abcs = collections.abc
+
+# Gets a function from the name of a method on a type
+if PY2:
+    def get_function_from_type(cls, name):
+        method = getattr(cls, name, None)
+        return getattr(method, "__func__", None)
+elif PY3:
+    def get_function_from_type(cls, name):
+        return getattr(cls, name, None)

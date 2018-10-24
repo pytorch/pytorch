@@ -31,7 +31,7 @@ class ExpandDimsOp : public Operator<Context> {
       return true;
     }
 
-    auto newDims = input.dims();
+    auto newDims = input.dims().vec();
     CAFFE_ENFORCE_GE(
         input.dims().size() + dims_.size(),
         dims_.back() + 1,
@@ -85,7 +85,7 @@ class SqueezeOp : public Operator<Context> {
   }
 
   static std::vector<int> ComputeDims(
-      std::vector<TIndex> inputDims,
+      at::IntList inputDims,
       std::vector<int> dims) {
     int j = 0;
     std::vector<int> newDims;
@@ -112,7 +112,7 @@ class SqueezeOp : public Operator<Context> {
   vector<int> dims_;
 
  public:
-  AT_DISABLE_COPY_AND_ASSIGN(SqueezeOp);
+  C10_DISABLE_COPY_AND_ASSIGN(SqueezeOp);
 };
 } // namespace caffe2
 #endif // CAFFE2_OPERATORS_EXPAND_SQUEEZE_DIMS_OP_H_

@@ -44,11 +44,12 @@ void GenerateStylizedImage(std::vector<float>& originalImage,
   caffe2::Tensor input(caffe2::CPU);
   input.Resize(dims);
   input.ShareExternalPointer(originalImage.data());
-  caffe2::Predictor::TensorVector input_vec{&input};
-  caffe2::Predictor::TensorVector output_vec;
-  p.run(input_vec, &output_vec);
+  caffe2::Predictor::TensorList input_vec;
+  input_vec.emplace_back(std::move(input));
+  caffe2::Predictor::TensorList output_vec;
+  p(input_vec, &output_vec);
   assert(output_vec.size() == 1);
-  caffe2::TensorCPU* output = output_vec.front();
+  caffe2::TensorCPU* output = &output_vec.front();
   // output is our styled image
   float* outputArray = output->mutable_data<float>();
   dataOut.assign(outputArray, outputArray + output->size());

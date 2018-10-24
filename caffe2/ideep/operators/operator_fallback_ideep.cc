@@ -32,6 +32,8 @@
 #include <caffe2/operators/tanh_op.h>
 #include <caffe2/operators/transpose_op.h>
 #include <caffe2/operators/utility_ops.h>
+#include <caffe2/operators/affine_channel_op.h>
+#include <caffe2/operators/stop_gradient.h>
 #include <caffe2/sgd/adam_op.h>
 #include <caffe2/sgd/iter_op.h>
 #include <caffe2/sgd/learning_rate_op.h>
@@ -116,6 +118,12 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     BBoxTransform,
     IDEEPFallbackOp<BBoxTransformOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    AffineChannel,
+    IDEEPFallbackOp<AffineChannelOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    StopGradient,
+    IDEEPFallbackOp<StopGradientOp<CPUContext>>);
 
 REGISTER_IDEEP_OPERATOR(
     PadImage,

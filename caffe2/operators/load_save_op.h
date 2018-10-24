@@ -298,7 +298,7 @@ class LoadOp final : public Operator<Context> {
       // different GPU.
       blob->Reset();
     }
-    blob->Deserialize(proto);
+    DeserializeBlob(proto, blob);
     if (proto.has_content_num_chunks()) {
       if (!blob_states.count(key)) {
         blob_states[key] = BlobState(proto.content_num_chunks());
@@ -471,7 +471,7 @@ class SaveOp final : public Operator<Context> {
 
     const vector<const Blob*>& inputs = OperatorBase::Inputs();
     for (int i = 0; i < inputs.size(); ++i) {
-      inputs[i]->Serialize(blob_names_[i], acceptor);
+      SerializeBlob(*inputs[i], blob_names_[i], acceptor);
     }
     out_db->Close();
     return true;

@@ -3,28 +3,28 @@ from .. import functional as F
 
 
 class PixelShuffle(Module):
-    r"""Rearranges elements in a Tensor of shape :math:`(*, r^2C, H, W)` to a
-    tensor of shape :math:`(C, rH, rW)`.
+    r"""Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)`
+    to a tensor of shape :math:`(C, H \times r, W \times r)`.
 
     This is useful for implementing efficient sub-pixel convolution
     with a stride of :math:`1/r`.
 
     Look at the paper:
     `Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network`_
-    by Shi et. al (2016) for more details
+    by Shi et. al (2016) for more details.
 
     Args:
         upscale_factor (int): factor to increase spatial resolution by
 
     Shape:
-        - Input: :math:`(N, C * \text{upscale\_factor}^2, H, W)`
-        - Output: :math:`(N, C, H * \text{upscale\_factor}, W * \text{upscale\_factor})`
+        - Input: :math:`(N, C \times \text{upscale_factor}^2, H, W)`
+        - Output: :math:`(N, C, H \times \text{upscale_factor}, W \times \text{upscale_factor})`
 
     Examples::
 
-        >>> ps = nn.PixelShuffle(3)
-        >>> input = torch.tensor(1, 9, 4, 4)
-        >>> output = ps(input)
+        >>> pixel_shuffle = nn.PixelShuffle(3)
+        >>> input = torch.randn(1, 9, 4, 4)
+        >>> output = pixel_shuffle(input)
         >>> print(output.size())
         torch.Size([1, 1, 12, 12])
 

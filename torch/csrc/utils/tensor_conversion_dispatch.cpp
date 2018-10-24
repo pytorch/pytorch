@@ -12,9 +12,9 @@
 namespace torch { namespace utils {
 
 at::Tensor dispatch_type_conversion(
-    const at::Tensor & self,
-    const at::Type & type,
-    at::optional<int32_t> device_index,
+    const at::Tensor& self,
+    const at::Type& type,
+    c10::optional<int32_t> device_index,
     bool non_blocking) {
   if (type.is_cuda()) {
     torch::utils::cuda_lazy_init();
@@ -42,12 +42,11 @@ at::Tensor dispatch_type_conversion(
   switch (type.scalarType()) {
 #define DEFINE_CAST_DISPATCH(_1, n, _2)   \
   case at::ScalarType::n: {               \
-    return self._cast_##n(non_blocking); \
+    return at::_cast_##n(self, non_blocking); \
   } break;
     AT_FORALL_SCALAR_TYPES(DEFINE_CAST_DISPATCH)
 #undef DEFINE_CAST_DISPATCH
     default: { return self.toType(type, non_blocking); } break;
   }
 }
-
 }} // namespace torch::utils

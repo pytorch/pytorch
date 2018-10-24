@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 #include <ATen/ATen.h>
@@ -37,7 +38,7 @@ class ProcessGroup {
     virtual ~Work();
 
     // Checks if request has completed. Non-blocking operation.
-    virtual bool isCompleted() const = 0;
+    virtual bool isCompleted() = 0;
 
     // Returns if the work completed successfully.
     // If false, the exception function can be called to get details.
@@ -114,17 +115,22 @@ class ProcessGroup {
 
   virtual std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
-      int dstRank) = 0;
+      int dstRank,
+      int tag) = 0;
 
   virtual std::shared_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
-      int srcRank) = 0;
+      int srcRank,
+      int tag) = 0;
 
   virtual std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
-      int* srcRank) = 0;
+      int* srcRank,
+      int tag) = 0;
 
   virtual std::shared_ptr<ProcessGroup::Work> barrier() = 0;
+
+  virtual std::unordered_map<int, int> getGroupRank() = 0;
 
  protected:
   const int rank_;

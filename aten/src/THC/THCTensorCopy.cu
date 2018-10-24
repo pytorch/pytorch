@@ -1,5 +1,5 @@
 #include "THCApply.cuh"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCNumerics.cuh"
 #include "THCTensorCopy.hpp"
 #include <type_traits>
@@ -46,8 +46,8 @@ void THC_copyTensor(THCState* state, THCTensor* dst, THCTensor* src) {
   // contiguous).
   // -AND: both tensors have the same type.
   bool sameType = std::is_same<ScalarTypeDst, ScalarTypeSrc>::value;
-  bool srcContig = THCTensor_isContiguous(state, src);
-  bool dstContig = THCTensor_isContiguous(state, dst);
+  bool srcContig = src->is_contiguous();
+  bool dstContig = dst->is_contiguous();
   bool memcpyEligible =
     ((srcContig && dstContig) || (totalElements == 1)) && sameType;
 
@@ -136,8 +136,7 @@ void THC_copyTensor(THCState* state, THCTensor* dst, THCTensor* src) {
       } else {
         // Types are different
         // Copy into the new format, contiguous, on the source device
-        srcContig = THCTensor_new(state,
-                                  at::CTypeToScalarType<ScalarTypeDst>::to());
+        srcContig = THCTensor_new(state, caffe2::TypeMeta::Make<ScalarTypeDst>());
         THCTensor_resizeAs(state, srcContig, dst);
 
         bool succ =

@@ -20,13 +20,26 @@ struct SchemaParser {
     }
     std::vector<Argument> arguments;
     std::vector<Argument> returns;
-    kwarg_only = false;
-    parseList('(', ',', ')', arguments, &SchemaParser::parseArgument);
+    bool kwarg_only = false;
+    size_t idx = 0;
+    parseList('(', ',', ')', [&] {
+      if(L.nextIf('*')) {
+        kwarg_only = true;
+      } else {
+        arguments.push_back(parseArgument(
+            idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only));
+      }
+    });
+    idx = 0;
     L.expect(TK_ARROW);
-    if(L.cur().kind == '(') {
-      parseList('(', ',', ')', returns, &SchemaParser::parseReturn);
+    if (L.cur().kind == '(') {
+      parseList('(', ',', ')', [&] {
+        returns.push_back(
+            parseArgument(idx++, /*is_return=*/true, /*kwarg_only=*/false));
+      });
     } else {
-      parseReturn(returns);
+      returns.push_back(
+          parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
     }
     return FunctionSchema { name, arguments, returns };
   }
@@ -45,56 +58,104 @@ struct SchemaParser {
   }
   TypePtr parseBaseType() {
     static std::unordered_map<std::string, TypePtr> type_map = {
-      {"Tensor", DynamicType::get() },
-      {"Generator", DynamicType::get() },
+      {"Generator", GeneratorType::get() },
       {"ScalarType", IntType::get() },
       {"Layout", IntType::get() },
       {"Device", ListType::ofInts() },
       {"Scalar", NumberType::get() },
+      {"str", StringType::get() },
       {"float", FloatType::get() },
       {"int", IntType::get() },
-      {"bool", IntType::get() }, // TODO: add separate bool type
+      {"bool", BoolType::get() },
+      {"World", WorldType::get() },
     };
     auto tok = L.expect(TK_IDENT);
     auto text = tok.text();
     auto it = type_map.find(text);
-    if(it == type_map.end())
+    if(it == type_map.end()) {
+      if(text.size() > 0 && islower(text[0])) {
+        // lower case identifiers that are not otherwise valid types
+        // are treated as type variables
+        return VarType::create(text);
+      }
       throw ErrorReport(tok.range) << "unknown type specifier";
+    }
     return it->second;
   }
-  void parseType(Argument& arg) {
-    arg.type = parseBaseType();
-    if(L.nextIf('[')) {
-      arg.type = ListType::create(arg.type);
-      if(L.cur().kind == TK_NUMBER) {
-        arg.N = std::stoll(L.next().text());
+  TypePtr parseType() {
+    TypePtr value;
+    if (L.cur().kind == '(') {
+      std::vector<TypePtr> types;
+      parseList('(', ',', ')', [&]{
+        types.push_back(parseType());
+      });
+      value = TupleType::create(std::move(types));
+    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
+      L.next(); // Future
+      L.expect('(');
+      TypePtr subtype = parseType();
+      L.expect(')');
+      throw ErrorReport(L.cur()) << "Futures are not yet implemented";
+    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
+      value = DynamicType::get();
+      auto range = L.next().range; // Tensor
+      if(L.nextIf('(')) {
+        // optional 'alias set annotation'
+        auto bt = parseBaseType();
+        if (bt->kind() != TypeKind::VarType) {
+          throw ErrorReport(range)
+              << "expected type variable but found " << bt->str();
+        }
+        L.expect(')');
+        // annotation itself is currently unused
       }
+    } else {
+      value = parseBaseType();
+    }
+    while(true) {
+      if(L.cur().kind == '[' && L.lookahead().kind == ']') {
+        L.next(); // [
+        L.next(); // ]
+        value = ListType::create(value);
+      } else if(L.nextIf('?')) {
+        // pass - currently ignored but optional types would go here when implemented
+      } else {
+        break;
+      }
+    }
+    return value;
+  }
+
+  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
+    Argument result;
+    auto type = parseType();
+    c10::optional<int32_t> N;
+    c10::optional<IValue> default_value;
+    std::string name;
+    if(L.nextIf('[')) {
+      // note: an array with a size hint can only occur at the Argument level
+      type = ListType::create(type);
+      N = std::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
     }
-  }
-
-  void parseArgument(std::vector<Argument>& arguments) {
-    // varargs
-    if(L.nextIf('*')) {
-      kwarg_only = true;
-      return;
+    if(L.nextIf('!')) {
+      // pass - currently ignored but will be used to annotate where we write to a
+      // tensor
     }
-    Argument arg;
-    parseType(arg);
-
-    // nullability is ignored for now, since the JIT never cares about it
-    L.nextIf('?');
-    arg.name = L.expect(TK_IDENT).text();
-    if(L.nextIf('=')) {
-      parseDefaultValue(arg);
+    if(is_return) {
+      // optionally named return values
+      if(L.cur().kind == TK_IDENT) {
+        name = L.next().text();
+      } else {
+        name = "ret" + std::to_string(idx);
+      }
+    } else {
+      name = L.expect(TK_IDENT).text();
+      if(L.nextIf('=')) {
+        default_value = parseDefaultValue(type, N);
+      }
     }
-    arg.kwarg_only = kwarg_only;
-    arguments.push_back(std::move(arg));
-  }
-  void parseReturn(std::vector<Argument>& args) {
-    Argument arg("ret" + std::to_string(args.size()));
-    parseType(arg);
-    args.push_back(std::move(arg));
+    return Argument(std::move(name), std::move(type), N, std::move(default_value), !is_return && kwarg_only);
   }
   IValue parseSingleConstant(TypeKind kind) {
     switch(L.cur().kind) {
@@ -146,6 +207,10 @@ struct SchemaParser {
           return fmap(vs, [](IValue v) {
             return v.toInt();
           });
+        case TypeKind::BoolType:
+          return fmap(vs, [](IValue v) {
+            return v.toBool();
+          });
         default:
           throw ErrorReport(range) << "lists are only supported for float or int types.";
       }
@@ -166,49 +231,50 @@ struct SchemaParser {
     L.expect(TK_NONE);
     return IValue();
   }
-  void parseDefaultValue(Argument& arg) {
+  IValue parseDefaultValue(TypePtr arg_type, c10::optional<int32_t> arg_N) {
     auto range = L.cur().range;
-    switch(arg.type->kind()) {
-      case TypeKind::DynamicType: {
-        arg.default_value = parseTensorDefault(range);
+    switch(arg_type->kind()) {
+      case TypeKind::DynamicType:
+      case TypeKind::GeneratorType: {
+        return parseTensorDefault(range);
       }  break;
       case TypeKind::NumberType:
       case TypeKind::IntType:
+      case TypeKind::BoolType:
       case TypeKind::FloatType:
-        arg.default_value = parseSingleConstant(arg.type->kind());
+        return parseSingleConstant(arg_type->kind());
         break;
       case TypeKind::ListType: {
-        auto elem_kind = arg.type->cast<ListType>()->getElementType();
+        auto elem_kind = arg_type->cast<ListType>()->getElementType();
         if(L.cur().kind == TK_IDENT) {
-          arg.default_value = parseTensorDefault(range);
-        } else if(arg.N && L.cur().kind != '[') {
+          return parseTensorDefault(range);
+        } else if(arg_N && L.cur().kind != '[') {
           IValue v = parseSingleConstant(elem_kind->kind());
-          std::vector<IValue> repeated(*arg.N, v);
-          arg.default_value = convertToList(elem_kind->kind(), range, repeated);
+          std::vector<IValue> repeated(*arg_N, v);
+          return convertToList(elem_kind->kind(), range, repeated);
         } else {
-          arg.default_value = parseConstantList(elem_kind->kind());
+          return parseConstantList(elem_kind->kind());
         }
       } break;
       default:
         throw ErrorReport(range) << "unexpected type, file a bug report";
     }
+    return IValue(); // silence warnings
   }
 
-  template<typename T>
-  void parseList(int begin, int sep, int end, std::vector<T>& result, void (SchemaParser::*parse)(std::vector<T>&)) {
+  void parseList(int begin, int sep, int end, std::function<void()> callback) {
     auto r = L.cur().range;
     if (begin != TK_NOTHING)
       L.expect(begin);
     if (L.cur().kind != end) {
       do {
-        (this->*parse)(result);
+        callback();
       } while (L.nextIf(sep));
     }
     if (end != TK_NOTHING)
       L.expect(end);
   }
   Lexer L;
-  bool kwarg_only;
 };
 
 } // namespace script
@@ -218,28 +284,28 @@ namespace {
 std::string canonicalSchemaString(const FunctionSchema& schema) {
   std::ostringstream out;
 
-  out << schema.name;
+  out << schema.name();
   out << "(";
 
   bool seen_kwarg_only = false;
-  for(size_t i = 0; i < schema.arguments.size(); ++i) {
+  for(size_t i = 0; i < schema.arguments().size(); ++i) {
     if (i > 0) out << ", ";
-    if (schema.arguments[i].kwarg_only && !seen_kwarg_only) {
+    if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
       out << "*, ";
       seen_kwarg_only = true;
     }
-    const auto & arg = schema.arguments[i];
-    out << arg.type->str() << " " << arg.name;
+    const auto & arg = schema.arguments()[i];
+    out << arg.type()->str() << " " << arg.name();
   }
 
   out << ") -> ";
-  if (schema.returns.size() == 1) {
-    out << schema.returns.at(0).type->str();
-  } else if (schema.returns.size() > 1) {
+  if (schema.returns().size() == 1) {
+    out << schema.returns().at(0).type()->str();
+  } else if (schema.returns().size() > 1) {
     out << "(";
-    for (size_t i = 0; i < schema.returns.size(); ++i) {
+    for (size_t i = 0; i < schema.returns().size(); ++i) {
       if (i > 0) out << ", ";
-      out << schema.returns[i].type->str();
+      out << schema.returns()[i].type()->str();
     }
     out << ")";
   }
@@ -268,7 +334,7 @@ private:
   // XXX - caller must be holding lock
   void registerPendingOperators() {
     for(auto op : to_register) {
-      Symbol sym = Symbol::fromQualString(op->schema().name);
+      Symbol sym = Symbol::fromQualString(op->schema().name());
       operators[sym].push_back(op);
       operators_by_sig[canonicalSchemaString(op->schema())] = op;
     }
@@ -338,25 +404,32 @@ FunctionSchema parseSchema(const std::string& schema) {
 
 bool Operator::matches(const Node* node) const {
   // wrong name
-  if (node->kind().toQualString() != schema().name) {
+  if (node->kind().toQualString() != schema().name()) {
     return false;
   }
   at::ArrayRef<const Value*> actuals = node->inputs();
-  const auto& formals = schema().arguments;
+  const auto& formals = schema().arguments();
 
   // not enough inputs
   if(actuals.size() < formals.size())
     return false;
 
+
+  TypeEnv type_env;
   for(size_t i = 0; i < formals.size(); ++i) {
-    // mismatched input type
-    if (!actuals[i]->type()->isSubtypeOf(formals[i].type)) {
+    try {
+      TypePtr formal = matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
+      // mismatched input type
+      if (!actuals[i]->type()->isSubtypeOf(formal)) {
+        return false;
+      }
+    } catch(TypeMatchError& err) {
       return false;
     }
   }
 
   // too many inputs
-  if(!schema().is_vararg && actuals.size() != formals.size()) {
+  if(!schema().is_vararg() && actuals.size() != formals.size()) {
     // std::cout << "not all inputs used\n" << input_i << " " << inputs_size << "\n";
     return false;
   }
@@ -401,11 +474,11 @@ OperatorSet::OperatorSet(std::initializer_list<const char *> sig_literals) {
   auto & registry = getRegistry();
   for (const char * sig : sig_literals) {
     auto op = registry.lookupByLiteral(sig);
-    ops[Symbol::fromQualString(op->schema().name)].push_back(op);
+    ops[Symbol::fromQualString(op->schema().name())].push_back(op);
   }
 }
 
-Operator* OperatorSet::find(Node *n) {
+Operator* OperatorSet::find(const Node *n) const  {
   auto it = ops.find(n->kind());
   if (it == ops.end()) {
     return nullptr;

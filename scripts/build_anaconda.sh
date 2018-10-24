@@ -16,7 +16,7 @@
 #                      [<flags forwarded to cmake>]...
 #
 # Parameters can also be passed through the BUILD_ENVIRONMENT environment
-# variable, e.g. 
+# variable, e.g.
 #  BUILD_ENVIRONMENT=conda2-cuda8.0-cudnn7-gcc4.8 ./scripts/build_anaconda.sh
 # - Parameters parsed from the BUILD_ENVIRONMENT will be overridden by command
 #   line parameters.
@@ -312,13 +312,12 @@ if [[ -n $integrated ]]; then
   if [[ -n $cuda_ver ]]; then
     # Removed until https://github.com/conda/conda/issues/7245 is resolved
     #append_to_section 'features' features:
-    #append_to_section 'features' "  - $cuda_feature_name" 
+    #append_to_section 'features' "  - $cuda_feature_name"
     append_to_section 'build' "- magma-$cuda_feature_name"
     #append_to_section 'features' '  - nccl2'
     #add_package $cuda_feature_name
     conda_channel+=('-c pytorch')
 
-    caffe2_cmake_args+=("-DUSE_ATEN=ON")
   fi
 fi
 

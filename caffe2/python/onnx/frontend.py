@@ -12,11 +12,11 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import itertools
-import collections
 import logging
 import re
 
 from caffe2.python import core as caffe2_core
+from caffe2.python.compatibility import container_abcs
 from caffe2.proto import caffe2_legacy_pb2
 from enum import Enum
 from onnx import (defs, checker, helper, numpy_helper, mapping,
@@ -38,7 +38,7 @@ class Caffe2Frontend(object):
     # ONNX makes a BC breaking change to semantics of operators, having this set
     # to an accurate number will prevent our models form exporting.  However,
     # we should strive to keep this up-to-date as much as possible.
-    target_opset_version = 8
+    target_opset_version = 9
 
     _renamed_operators = {
         'SpatialBN': 'BatchNormalization',
@@ -60,6 +60,7 @@ class Caffe2Frontend(object):
     _blacklist_caffe2_args = {
         'order': {b'NCHW'},
         'cudnn_exhaustive_search': {0, 1},
+        'exhaustive_search': {0, 1},
         'use_cudnn': {0, 1},
     }
 
@@ -156,7 +157,7 @@ class Caffe2Frontend(object):
         const_tensors = []
         if isinstance(nodes, tuple):
             nodes, const_tensors = nodes
-        if not isinstance(nodes, collections.Iterable):
+        if not isinstance(nodes, container_abcs.Iterable):
             nodes = [nodes]
         return nodes, const_tensors
 

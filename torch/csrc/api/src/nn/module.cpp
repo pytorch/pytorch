@@ -4,8 +4,8 @@
 
 #include <torch/csrc/autograd/generated/VariableType.h>
 
-#include <ATen/core/Error.h>
-#include <ATen/core/optional.h>
+#include <c10/util/Exception.h>
+#include "c10/util/Optional.h"
 
 #include <algorithm>
 #include <map>
@@ -30,12 +30,12 @@ const std::string& Module::name() const noexcept {
   // to by this typeid represents the class that is being constructed or
   // destroyed even if it is not the most-derived class.
   if (!name_.has_value()) {
-    name_ = at::demangle(typeid(*this).name());
+    name_ = c10::demangle(typeid(*this).name());
   }
   return *name_;
 }
 
-std::shared_ptr<Module> Module::clone(at::optional<Device> device) const {
+std::shared_ptr<Module> Module::clone(c10::optional<Device> device) const {
   AT_ERROR(
       "clone() has not been implemented for ",
       name(),
@@ -119,6 +119,39 @@ void Module::zero_grad() {
   }
 }
 
+void Module::save(serialize::OutputArchive& archive) const {
+  for (const auto& parameter : parameters_) {
+    archive.write(parameter.key, parameter.value);
+  }
+  for (const auto& buffer : buffers_) {
+    archive.write(buffer.key, buffer.value, /*is_buffer=*/true);
+  }
+  for (const auto& child : children_) {
+    serialize::OutputArchive child_archive;
+    child.value->save(child_archive);
+    archive.write(child.key, child_archive);
+  }
+}
+
+void Module::load(serialize::InputArchive& archive) {
+  for (auto& parameter : parameters_) {
+    archive.read(parameter.key, parameter.value);
+  }
+  for (auto& buffer : buffers_) {
+    archive.read(buffer.key, buffer.value, /*is_buffer=*/true);
+  }
+  for (const auto& child : children_) {
+    // Modules that have no state at all (parameters or buffers) are currently
+    // not stored in Protobuf at all, so we can just skip them.
+    if (!child.value->parameters_.is_empty() ||
+        !child.value->buffers_.is_empty()) {
+      serialize::InputArchive child_archive;
+      archive.read(child.key, child_archive);
+      child.value->load(child_archive);
+    }
+  }
+}
+
 Tensor& Module::register_parameter(
     std::string name,
     Tensor tensor,
@@ -131,6 +164,6 @@ Tensor& Module::register_buffer(std::string name, Tensor tensor) {
   return buffers_.insert(std::move(name), std::move(tensor));
 }
 
-void Module::clone_(Module& other, at::optional<Device> device) {}
+void Module::clone_(Module& other, c10::optional<Device> device) {}
 } // namespace nn
 } // namespace torch

@@ -10,11 +10,12 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/utils/tensor_types.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 
 using namespace at;
 using namespace torch;
 
-PyObject *THPGeneratorClass = NULL;
+PyObject *THPGeneratorClass = nullptr;
 
 PyObject * THPGenerator_New()
 {
@@ -22,9 +23,9 @@ PyObject * THPGenerator_New()
   if (!args) {
     PyErr_SetString(PyExc_RuntimeError, "Could not create a new generator object - "
         "failed to allocate argument tuple");
-    return NULL;
+    return nullptr;
   }
-  PyObject *result = PyObject_Call((PyObject*)THPGeneratorClass, args, NULL);
+  PyObject *result = PyObject_Call((PyObject*)THPGeneratorClass, args, nullptr);
   Py_DECREF(args);
   return result;
 }
@@ -52,7 +53,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   HANDLE_TH_ERRORS
   if ((args && PyTuple_Size(args) != 0) || kwargs) {
     THPUtils_setError("torch.Generator constructor doesn't accept any arguments");
-    return NULL;
+    return nullptr;
   }
   THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
   // having to pick a specific type rather than just a backend here is strange,
@@ -68,7 +69,7 @@ static PyObject * THPGenerator_getState(THPGenerator *self)
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
   THGenerator *generator = THPGenerator_TH_CData(self);
-  Variable var = VariableType::getType(CPU(kByte))->tensor();
+  Variable var = torch::empty({0}, at::device(at::kCPU).dtype(at::kByte));
   THByteTensor_getRNGState(generator, (THByteTensor*)(var.data().unsafeGetTensorImpl()));
   return THPVariable_Wrap(std::move(var));
   END_HANDLE_TH_ERRORS
@@ -120,21 +121,21 @@ static PyObject * THPGenerator_initialSeed(THPGenerator *self)
 }
 
 static PyMethodDef THPGenerator_methods[] = {
-  {"get_state",       (PyCFunction)THPGenerator_getState,       METH_NOARGS,  NULL},
-  {"set_state",       (PyCFunction)THPGenerator_setState,       METH_O,       NULL},
-  {"manual_seed",     (PyCFunction)THPGenerator_manualSeed,     METH_O,       NULL},
-  {"seed",            (PyCFunction)THPGenerator_seed,           METH_NOARGS,  NULL},
-  {"initial_seed",    (PyCFunction)THPGenerator_initialSeed,    METH_NOARGS,  NULL},
-  {NULL}
+  {"get_state",       (PyCFunction)THPGenerator_getState,       METH_NOARGS,  nullptr},
+  {"set_state",       (PyCFunction)THPGenerator_setState,       METH_O,       nullptr},
+  {"manual_seed",     (PyCFunction)THPGenerator_manualSeed,     METH_O,       nullptr},
+  {"seed",            (PyCFunction)THPGenerator_seed,           METH_NOARGS,  nullptr},
+  {"initial_seed",    (PyCFunction)THPGenerator_initialSeed,    METH_NOARGS,  nullptr},
+  {nullptr}
 };
 
 static struct PyMemberDef THPGenerator_members[] = {
-  {(char*)"_cdata", T_ULONGLONG, offsetof(THPGenerator, cdata), READONLY, NULL},
-  {NULL}
+  {(char*)"_cdata", T_ULONGLONG, offsetof(THPGenerator, cdata), READONLY, nullptr},
+  {nullptr}
 };
 
 PyTypeObject THPGeneratorType = {
-  PyVarObject_HEAD_INIT(NULL, 0)
+  PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C.Generator",                  /* tp_name */
   sizeof(THPGenerator),                  /* tp_basicsize */
   0,                                     /* tp_itemsize */
@@ -154,7 +155,7 @@ PyTypeObject THPGeneratorType = {
   0,                                     /* tp_setattro */
   0,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-  NULL,                                  /* tp_doc */
+  nullptr,                                  /* tp_doc */
   0,                                     /* tp_traverse */
   0,                                     /* tp_clear */
   0,                                     /* tp_richcompare */

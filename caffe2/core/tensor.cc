@@ -1,22 +1,10 @@
 #include "caffe2/core/tensor.h"
 
 #include "caffe2/core/blob_stats.h"
-#include "caffe2/core/flags.h"
-
-CAFFE2_DEFINE_bool(
-    caffe2_keep_on_shrink,
-    true,
-    "If set, keeps memory when a tensor is shrinking its size.");
-
-CAFFE2_DEFINE_int64(
-    caffe2_max_keep_on_shrink_memory,
-    LLONG_MAX,
-    "The maximum memory in bytes to keep on shrink, if the difference between "
-    "tensor sizes is bigger than this then tensor will be reset.");
 
 namespace caffe2 {
 
-CAFFE_DEFINE_KNOWN_TYPE(Tensor);
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(12, Tensor);
 
 TensorPrinter::TensorPrinter(
     const std::string& tensor_name,
@@ -87,14 +75,18 @@ void RegisterTypeCallFunction(TypeIdentifier id, TypeCall c) {
 
 int GetGPUIDForPointer(const void* ptr);
 
-vector<TIndex> GetTensorInfo(
+vector<int64_t> GetTensorInfo(
     const void* c,
     size_t* capacity,
     DeviceOption* device) {
+  CHECK(capacity);
   const Tensor* tc = static_cast<const Tensor*>(c);
-  *capacity = tc->capacity_nbytes();
-  tc->ExtractDeviceOption(device);
-  return tc->dims();
+  CHECK(tc);
+  CHECK(tc->unsafeGetTensorImpl());
+  CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImpl());
+  *capacity = tc->storage().capacity();
+  ExtractDeviceOption(device, tc->GetDevice());
+  return tc->dims().vec();
 }
 
 // since we only have one tensor, probably need to remove this at some point?
@@ -123,6 +115,15 @@ void TensorVectorResize(
   for (auto i = 0; i < size; ++i) {
     tensors.emplace_back(type);
   }
+}
+
+Tensor empty(
+    const std::vector<int64_t>& dims,
+    const at::TensorOptions& options) {
+  // TODO: merge this with at::empty after Tensor is merged
+  auto tensor = Tensor(dims, options.device().type());
+  tensor.raw_mutable_data(scalarTypeToTypeMeta(options.dtype()));
+  return tensor;
 }
 
 namespace {

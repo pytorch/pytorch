@@ -19,6 +19,7 @@ namespace native {
 
 DEFINE_DISPATCH(sum_kernel);
 DEFINE_DISPATCH(prod_kernel);
+DEFINE_DISPATCH(norm_kernel);
 
 static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.type().scalarType();
@@ -35,7 +36,7 @@ Tensor cumsum(const Tensor& self, int64_t dim, ScalarType dtype) {
 }
 
 Tensor cumsum(const Tensor& self, int64_t dim) {
-  return at::native::cumsum(self, dim, nullopt);
+  return at::native::cumsum(self, dim, c10::nullopt);
 }
 
 static inline Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
@@ -55,7 +56,7 @@ Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType d
 }
 
 Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim) {
-  return at::native::cumsum_out(result, self, dim, nullopt);
+  return at::native::cumsum_out(result, self, dim, c10::nullopt);
 }
 
 static inline Tensor cumprod(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
@@ -67,7 +68,7 @@ Tensor cumprod(const Tensor& self, int64_t dim, ScalarType dtype) {
 }
 
 Tensor cumprod(const Tensor& self, int64_t dim) {
-  return at::native::cumprod(self, dim, nullopt);
+  return at::native::cumprod(self, dim, c10::nullopt);
 }
 
 static inline Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
@@ -87,7 +88,7 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType 
 }
 
 Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim) {
-  return at::native::cumprod_out(result, self, dim, nullopt);
+  return at::native::cumprod_out(result, self, dim, c10::nullopt);
 }
 
 // ALL REDUCE #################################################################
@@ -112,7 +113,7 @@ Tensor mean(const Tensor &self, ScalarType dtype) {
 }
 
 Tensor mean(const Tensor &self) {
-  return at::native::mean(self, nullopt);
+  return at::native::mean(self, c10::nullopt);
 }
 
 static inline Tensor sum(const Tensor &self, optional<ScalarType> dtype) {
@@ -124,16 +125,16 @@ Tensor sum(const Tensor &self, ScalarType dtype) {
 }
 
 Tensor sum(const Tensor &self) {
-  return at::native::sum(self, nullopt);
+  return at::native::sum(self, c10::nullopt);
 }
 
 Tensor _sum_cpu(const Tensor& self) {
   if (self.is_contiguous()) {
     Tensor result = at::empty({}, self.type());
-    sum_kernel(kCPU, result, self, at::nullopt);
+    sum_kernel(kCPU, result, self, c10::nullopt);
     return result;
   }
-  return self._sumall();
+  return at::_sumall(self);
 }
 
 static inline Tensor prod(const Tensor &self, optional<ScalarType> dtype) {
@@ -145,16 +146,16 @@ Tensor prod(const Tensor &self, ScalarType dtype) {
 }
 
 Tensor prod(const Tensor &self) {
-  return at::native::prod(self, nullopt);
+  return at::native::prod(self, c10::nullopt);
 }
 
 Tensor _prod_cpu(const Tensor &self) {
   if (self.is_contiguous()) {
     Tensor result = at::empty({}, self.type());
-    prod_kernel(kCPU, result, self, at::nullopt);
+    prod_kernel(kCPU, result, self, c10::nullopt);
     return result;
   }
-  return self._prodall();
+  return at::_prodall(self);
 }
 
 // \ALL REDUCE ################################################################
@@ -184,10 +185,11 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, int64_t dim,
 }
 
 Tensor& mean_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
-  return at::native::mean_out(result, self, dim, keepdim, at::optional<ScalarType>(dtype));
+  return at::native::mean_out(
+      result, self, dim, keepdim, c10::optional<ScalarType>(dtype));
 }
 Tensor& mean_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim) {
-  return at::native::mean_out(result, self, dim, keepdim, nullopt);
+  return at::native::mean_out(result, self, dim, keepdim, c10::nullopt);
 }
 
 Tensor& mean_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
@@ -208,10 +210,11 @@ static inline Tensor &sum_out(Tensor &result, const Tensor &self, IntList dim,
 }
 
 Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
-  return at::native::sum_out(result, self, dim, keepdim, at::optional<ScalarType>(dtype));
+  return at::native::sum_out(
+      result, self, dim, keepdim, c10::optional<ScalarType>(dtype));
 }
 Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim) {
-  return at::native::sum_out(result, self, dim, keepdim, nullopt);
+  return at::native::sum_out(result, self, dim, keepdim, c10::nullopt);
 }
 
 Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, ScalarType dtype) {
@@ -246,10 +249,11 @@ static inline Tensor &prod_out(Tensor &result, const Tensor &self, int64_t dim,
 }
 
 Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
-  return at::native::prod_out(result, self, dim, keepdim, at::optional<ScalarType>(dtype));
+  return at::native::prod_out(
+      result, self, dim, keepdim, c10::optional<ScalarType>(dtype));
 }
 Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim) {
-  return at::native::prod_out(result, self, dim, keepdim, nullopt);
+  return at::native::prod_out(result, self, dim, keepdim, c10::nullopt);
 }
 
 Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
@@ -291,11 +295,11 @@ static inline Tensor mean(const Tensor &self, int64_t dim, bool keepdim, optiona
 }
 
 Tensor mean(const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
-  return at::native::mean(self, dim, keepdim, at::optional<ScalarType>(dtype));
+  return at::native::mean(self, dim, keepdim, c10::optional<ScalarType>(dtype));
 }
 
 Tensor mean(const Tensor& self, int64_t dim, bool keepdim) {
-  return at::native::mean(self, dim, keepdim, nullopt);
+  return at::native::mean(self, dim, keepdim, c10::nullopt);
 }
 
 Tensor mean(const Tensor& self, int64_t dim, ScalarType dtype) {
@@ -307,11 +311,11 @@ static inline Tensor sum(const Tensor &self, IntList dim_, bool keepdim, optiona
 }
 
 Tensor sum(const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
-  return at::native::sum(self, dim, keepdim, at::optional<ScalarType>(dtype));
+  return at::native::sum(self, dim, keepdim, c10::optional<ScalarType>(dtype));
 }
 
 Tensor sum(const Tensor& self, IntList dim, bool keepdim) {
-  return at::native::sum(self, dim, keepdim, nullopt);
+  return at::native::sum(self, dim, keepdim, c10::nullopt);
 }
 
 Tensor sum(const Tensor& self, IntList dim, ScalarType dtype) {
@@ -320,7 +324,7 @@ Tensor sum(const Tensor& self, IntList dim, ScalarType dtype) {
 
 Tensor _sum(const Tensor &self, int64_t dim_, bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::_sum_out(result, self, dim, keepdim);
 }
 
@@ -329,11 +333,11 @@ static inline Tensor prod(const Tensor &self, int64_t dim_, bool keepdim, option
 }
 
 Tensor prod(const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
-  return at::native::prod(self, dim, keepdim, at::optional<ScalarType>(dtype));
+  return at::native::prod(self, dim, keepdim, c10::optional<ScalarType>(dtype));
 }
 
 Tensor prod(const Tensor& self, int64_t dim, bool keepdim) {
-  return at::native::prod(self, dim, keepdim, nullopt);
+  return at::native::prod(self, dim, keepdim, c10::nullopt);
 }
 
 Tensor prod(const Tensor& self, int64_t dim, ScalarType dtype) {
@@ -342,7 +346,7 @@ Tensor prod(const Tensor& self, int64_t dim, ScalarType dtype) {
 
 Tensor _prod(const Tensor &self, int64_t dim_, bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::_prod_out(result, self, dim, keepdim);
 }
 
@@ -364,7 +368,7 @@ Tensor& logsumexp_out(Tensor& result, const Tensor &self, int64_t dim_, bool kee
 
 Tensor logsumexp(const Tensor &self, int64_t dim_, bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::logsumexp_out(result, self, dim, keepdim);
 }
 
@@ -584,12 +588,23 @@ Tensor& _sum_out(Tensor &result, const Tensor &self, IntList dims, bool keepdim)
   return reduce_multi_associative_out<_sum, _sum_out>(result, self, dims, keepdim);
 }
 
-Tensor norm(const Tensor& self, Scalar p, int64_t dim, bool keepdim) {
-  Tensor result = self.type().tensor();
-  return at::native::norm_out(result, self, p, dim, keepdim);
+Tensor& _norm_out_cpu(Tensor& result, const Tensor& self, Scalar p, int64_t dim_, bool keepdim) {
+  int64_t dim = maybe_wrap_dim(dim_, self.dim());
+  if (_dimreduce_return_trivial(result, self, 0, dim, keepdim))
+    return result;
+  if (self.is_contiguous() && result.is_contiguous()) {
+    _dimreduce_setup(result, self, dim);
+    norm_kernel(kCPU, result, self, p, dim);
+    if (!keepdim) {
+      result.squeeze_(dim);
+    }
+    return result;
+  } else {
+    return at::_th_norm_out(result, self, p, dim, keepdim);
+  }
 }
 
-Tensor &norm_out(Tensor &result, const Tensor &self, Scalar p, int64_t dim, bool keepdim) {
+Tensor& norm_out(Tensor &result, const Tensor &self, Scalar p, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "norm only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "norm only supports floating-point dtypes");
@@ -597,12 +612,46 @@ Tensor &norm_out(Tensor &result, const Tensor &self, Scalar p, int64_t dim, bool
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
     return result;
   } else {
-    return at::_th_norm_out(result, self, p, dim, keepdim);
+    if (self.is_cuda()) {
+      return at::_th_norm_out(result, self, p, dim, keepdim);
+    } else {
+      return _norm_out_cpu(result, self, p, dim, keepdim);
+    }
   }
 }
 
+Tensor _norm(const Tensor &self, Scalar p) {
+  if (self.type().is_sparse()) {
+    return at::native_norm(self, p);
+  } else {
+    AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+             "norm only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+    AT_CHECK(at::isFloatingType(self.type().scalarType()), "norm only supports floating-point dtypes");
+    if (self.is_cuda()) {
+      return at::th_norm(self, p);
+    } else {
+      if (self.is_contiguous()) {
+        Tensor result = CPU(kFloat).scalarTensor(0).toType(self.type());
+        norm_kernel(kCPU, result, self, p, c10::nullopt);
+        return result;
+      } else {
+        return at::th_norm(self, p);
+      }
+    }
+  }
+}
+
+Tensor norm(const Tensor& self, Scalar p, int64_t dim, bool keepdim) {
+  Tensor result = at::empty({0}, self.options());
+  return at::native::norm_out(result, self, p, dim, keepdim);
+}
+
+Tensor norm(const Tensor& self, Scalar p) {
+  return at::native::_norm(self, p);
+}
+
 Tensor all(const Tensor& self, int64_t dim, bool keepdim) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::all_out(result, self, dim, keepdim);
 }
 
@@ -619,7 +668,7 @@ Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
 }
 
 Tensor any(const Tensor& self, int64_t dim, bool keepdim) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::any_out(result, self, dim, keepdim);
 }
 
@@ -644,7 +693,7 @@ Tensor var(const Tensor& self, bool unbiased) {
 }
 
 Tensor var(const Tensor& self, int64_t dim, bool unbiased, bool keepdim) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::var_out(result, self, dim, unbiased, keepdim);
 }
 
@@ -669,7 +718,7 @@ Tensor std(const Tensor& self, bool unbiased) {
 }
 
 Tensor std(const Tensor& self, int64_t dim, bool unbiased, bool keepdim) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::std_out(result, self, dim, unbiased, keepdim);
 }
 

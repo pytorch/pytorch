@@ -258,22 +258,6 @@ class ModelHelper(object):
         ))
         return self._param_info_deprecated[-1]
 
-    # This method is deprecated, use get_param_info method
-    def param_info(self, grad_type=None, id=None):
-        logging.info("param_info method is DEPRECATED")
-        self._update_param_info_deprecated()
-        if id is not None:
-            assert grad_type is None
-            info = self._param_info_deprecated[id]
-            assert info.param_id == id
-            return info
-        elif grad_type is not None:
-            return [
-                info for info in self._param_info_deprecated
-                if info.grad_type() == grad_type]
-        else:
-            return self._param_info_deprecated
-
     def AddParameter(self, param, tags=None):
         assert isinstance(param, core.BlobReference)
         tags = self._normalize_tags(tags)
@@ -481,6 +465,9 @@ class ModelHelper(object):
         for op in new_net.Proto().op:
             op.debug_info = op.debug_info + "/param_init_net"
         new_net.AppendNet(self.net)
+        # keep the execution optimization
+        if self.net.Proto().HasField("type"):
+            new_net.Proto().type = self.net.Proto().type
         return new_net
 
     def ConstructInitTrainNetfromNet(self, net):
@@ -609,7 +596,7 @@ def ExtractPredictorNet(
                             rename_list(step_op.output)
                             if device is not None:
                                 step_op.device_option.device_type = device.device_type
-                                step_op.device_option.cuda_gpu_id = device.cuda_gpu_id
+                                step_op.device_option.device_id = device.device_id
 
                         rename_list(arg.n.external_input)
                         rename_list(arg.n.external_output)
@@ -623,7 +610,7 @@ def ExtractPredictorNet(
 
             if device is not None:
                 op.device_option.device_type = device.device_type
-                op.device_option.cuda_gpu_id = device.cuda_gpu_id
+                op.device_option.device_id = device.device_id
             validate_op(op)
             predict_proto.op.extend([op])
             known_blobs.update(op.output)

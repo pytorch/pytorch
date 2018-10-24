@@ -55,14 +55,6 @@ IF "%~1"=="--use-gloo-ibverbs" (
   set /a USE_GLOO_IBVERBS=0
 )
 
-IF "%~1"=="--use-distributed-mw" (
-  set /a USE_DISTRIBUTED_MW=1
-  echo Warning: distributed mw is enabled but build is not yet implemented 1>&2
-  shift
-) ELSE (
-  set /a USE_DISTRIBUTED_MW=0
-)
-
 set BUILD_TYPE=Release
 IF "%DEBUG%"=="1" (
   set BUILD_TYPE=Debug
@@ -71,8 +63,9 @@ IF "%REL_WITH_DEB_INFO%"=="1" (
   set BUILD_TYPE=RelWithDebInfo
 )
 
+:: sccache will fail if all cores are used for compiling
 IF NOT DEFINED MAX_JOBS (
-  set MAX_JOBS=%NUMBER_OF_PROCESSORS%
+  set /a MAX_JOBS=%NUMBER_OF_PROCESSORS% - 1
 )
 
 IF NOT DEFINED BUILD_SHARED_LIBS (
@@ -151,6 +144,7 @@ goto:eof
                   -DTHS_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
                   -DTHC_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
                   -DTHCS_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
+                  -DC10_LIBRARIES="%INSTALL_DIR%/lib/c10.lib" ^
                   -DCAFFE2_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
                   -DTHNN_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
                   -DTHCUNN_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
@@ -159,8 +153,9 @@ goto:eof
                   -DTHNN_SO_VERSION=1 ^
                   -DTHCUNN_SO_VERSION=1 ^
                   -DUSE_CUDA=%USE_CUDA% ^
+                  -DBUILD_EXAMPLES=OFF ^
+                  -DBUILD_TEST=%BUILD_TEST% ^
                   -DNO_NNPACK=%NO_NNPACK% ^
-                  -Dnanopb_BUILD_GENERATOR=0 ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
   %MAKE_COMMAND%
@@ -178,17 +173,27 @@ goto:eof
   cd build
   cmake .. %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
-                  -DBUILD_CAFFE2=OFF ^
+                  -DTORCH_BUILD_VERSION="%PYTORCH_BUILD_VERSION%" ^
                   -DBUILD_TORCH="%BUILD_TORCH%" ^
                   -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
                   -DNO_API=ON ^
                   -DBUILD_SHARED_LIBS="%BUILD_SHARED_LIBS%" ^
-                  -DBUILD_ATEN=ON ^
-                  -DBUILD_PYTHON=OFF ^
-                  -DBUILD_BINARY=OFF ^
+                  -DBUILD_PYTHON=%BUILD_PYTHON% ^
+                  -DBUILD_BINARY=%BUILD_BINARY% ^
+                  -DBUILD_TEST=%BUILD_TEST% ^
+                  -DINSTALL_TEST=%INSTALL_TEST% ^
+                  -DBUILD_CAFFE2_OPS=%BUILD_CAFFE2_OPS% ^
                   -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
                   -DUSE_CUDA=%USE_CUDA% ^
+                  -DUSE_NUMPY=%USE_NUMPY% ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
+                  -DUSE_LEVELDB=%USE_LEVELDB% ^
+                  -DUSE_LMDB=%USE_LMDB% ^
+                  -DUSE_OPENCV=%USE_OPENCV% ^
+                  -DUSE_FFMPEG=%USE_FFMPEG% ^
+                  -DUSE_GLOG=OFF ^
+                  -DUSE_GFLAGS=OFF ^
+                  -DUSE_SYSTEM_EIGEN_INSTALL=OFF ^
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
                   -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^
@@ -198,7 +203,6 @@ goto:eof
                   -DMKLDNN_LIBRARY="%MKLDNN_LIBRARY%" ^
                   -DATEN_NO_CONTRIB=1 ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
-                  -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ^
                   -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
                   -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^

@@ -95,10 +95,10 @@ void BlobToTensorProto(
   }
 
   // Set values
-  if (blob->template IsType<Tensor>(CPU)) {
+  if (BlobIsTensorType(*blob, CPU)) {
     const auto& cpu_tensor = blob->template Get<TensorCPU>();
     CPUTensorToTensorProto(cpu_tensor, t);
-  } else if (blob->template IsType<Tensor>(CUDA)) {
+  } else if (BlobIsTensorType(*blob, CUDA)) {
     const auto& cuda_tensor = blob->template Get<TensorCUDA>();
     const auto cpu_tensor = TensorCPU(cuda_tensor, context);
     context->FinishDeviceComputation();
@@ -188,7 +188,7 @@ void TensorRTTransformer::AddTrtOptions(
     if (it != output_size_hints.end()) {
       const auto& dims = it->second;
       auto* output_size_hint_arg = op->add_arg();
-      output_size_hint_arg->set_name(MakeString("output_size_hint_", i));
+      output_size_hint_arg->set_name(c10::str("output_size_hint_", i));
       for (const auto& d : dims) {
         output_size_hint_arg->add_ints(d);
       }

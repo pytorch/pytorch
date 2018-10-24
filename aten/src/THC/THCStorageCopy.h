@@ -3,7 +3,7 @@
 
 #include "THCStorage.h"
 #include "THCGeneral.h"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 
 #include "generic/THCStorageCopy.h"
 #include "THCGenerateAllTypes.h"

@@ -1,4 +1,5 @@
 import torch
+from collections import OrderedDict
 
 
 class Parameter(torch.Tensor):
@@ -18,6 +19,7 @@ class Parameter(torch.Tensor):
         requires_grad (bool, optional): if the parameter requires gradient. See
             :ref:`excluding-subgraphs` for more details. Default: `True`
     """
+
     def __new__(cls, data=None, requires_grad=True):
         if data is None:
             data = torch.Tensor()
@@ -27,4 +29,8 @@ class Parameter(torch.Tensor):
         return 'Parameter containing:\n' + super(Parameter, self).__repr__()
 
     def __reduce_ex__(self, proto):
-        return Parameter, (super(Parameter, self), self.requires_grad)
+        # See Note [Don't serialize hooks]
+        return (
+            torch._utils._rebuild_parameter,
+            (self.data, self.requires_grad, OrderedDict())
+        )

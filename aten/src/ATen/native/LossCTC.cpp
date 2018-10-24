@@ -287,7 +287,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       for (int64_t c = 0; c < num_labels; c++) {
         scalar_t& res = grad_a[t][c];
         scalar_t lp = log_probs_a[t][c];
-        res = std::exp(lp)-std::exp(res + nll - lp) * gr;
+        res = (std::exp(lp)-std::exp(res + nll - lp)) * gr;
       }
     }
     // zero the remainder
@@ -364,8 +364,8 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntList input_le
 
 // Convenience function accepting Tensors
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction) {
-  Tensor ilc = input_lengths.toType(kLong).toBackend(kCPU).contiguous();
-  Tensor tlc = target_lengths.toType(kLong).toBackend(kCPU).contiguous();
+  Tensor ilc = input_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
+  Tensor tlc = target_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
   IntList il(ilc.data<int64_t>(), ilc.numel());
   IntList tl(tlc.data<int64_t>(), tlc.numel());
   return at::native::ctc_loss(log_probs, targets, il, tl, BLANK, reduction);

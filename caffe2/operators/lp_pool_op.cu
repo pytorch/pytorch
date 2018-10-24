@@ -21,18 +21,20 @@ inline __device__ float cuda_pow<float>(float x, float y) {
   return powf(x, y);
 }
 template <>
-inline __device__ double cuda_pow<double>(double x, double y) {
-  return pow(x, y);
-}
-
-template <>
 inline __device__ float cuda_abs(float x) {
   return fabsf(x);
 }
-template <>
-inline __device__ double cuda_abs(double x) {
-  return fabs(x);
-}
+
+// Only <float> specification is used currently. To avoid warnings, the <double>
+// specification is commented.
+// template <>
+// inline __device__ double cuda_pow<double>(double x, double y) {
+//   return pow(x, y);
+// }
+// template <>
+// inline __device__ double cuda_abs(double x) {
+//   return fabs(x);
+// }
 }
 
 namespace {

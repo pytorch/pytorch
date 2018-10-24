@@ -30,10 +30,6 @@ class DotGenerator {
   std::string convert(NodePrinter nodePrinter, EdgePrinter edgePrinter) {
     std::ostringstream output;
     output << "digraph G {\n\
-      bgcolor=\"#ffffff00\"\n\
-      color=white\n\
-      node[fontcolor=white,color=white];\n\
-      edge[fontcolor=white,color=white];\n\
       ";
     for (const auto& node : g_->getMutableNodes()) {
       output << (uint64_t)node; // dot doesn't like hex

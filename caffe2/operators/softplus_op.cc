@@ -99,7 +99,7 @@ Y:
 )DOC")
     .Input(0, "X", "Input data blob to be operated on.")
     .Output(0, "Y", "Output data blob with same shape as input.")
-    .InheritOnnxSchema("Softplus");
+    .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(SoftplusGradient)

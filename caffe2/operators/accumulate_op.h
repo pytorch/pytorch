@@ -25,7 +25,7 @@ class AccumulateOp final : public Operator<Context> {
       math::Set<T, Context>(
           output->size(), 0, output->template mutable_data<T>(), &context_);
     }
-    math::Axpby<T, Context>(
+    math::Axpby<T, T, Context>(
         input.size(),
         static_cast<T>(1),
         input.template data<T>(),

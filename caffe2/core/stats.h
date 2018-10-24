@@ -40,7 +40,7 @@ struct CAFFE2_API ExportedStatValue {
 using ExportedStatList = std::vector<ExportedStatValue>;
 using ExportedStatMap = std::unordered_map<std::string, int64_t>;
 
-ExportedStatMap toMap(const ExportedStatList& stats);
+CAFFE2_API ExportedStatMap toMap(const ExportedStatList& stats);
 
 /**
  * @brief Holds a map of atomic counters keyed by name.
@@ -350,8 +350,8 @@ _ScopeGuard<T> ScopeGuard(T f) {
         ##__VA_ARGS__);                                             \
   }
 
-#define CAFFE_DURATION(stats, field, ...)                \
-  if (auto g = detail::ScopeGuard([&](int64_t nanos) {   \
-        CAFFE_EVENT(stats, field, nanos, ##__VA_ARGS__); \
+#define CAFFE_DURATION(stats, field, ...)                        \
+  if (auto g = ::caffe2::detail::ScopeGuard([&](int64_t nanos) { \
+        CAFFE_EVENT(stats, field, nanos, ##__VA_ARGS__);         \
       }))
 } // namespace caffe2

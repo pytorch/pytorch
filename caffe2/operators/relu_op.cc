@@ -105,7 +105,7 @@ op = core.CreateOperator(
   ["Y"]
   )
 
-workspace.FeedBlob("X", np.random.randn(4, 4).astype(np.float32)) # NCHW
+workspace.FeedBlob("X", np.random.randn(4, 4).astype(np.float32)) // NCHW
 print("X:\n", workspace.FetchBlob("X"), "\n")
 
 workspace.RunOperatorOnce(op)
@@ -137,7 +137,7 @@ Y:
 )DOC")
     .Input(0, "X", "1D input tensor")
     .Output(0, "Y", "1D output tensor with same shape as input")
-    .InheritOnnxSchema("Relu");
+    .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(ReluGradient)

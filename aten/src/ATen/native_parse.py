@@ -22,8 +22,6 @@ def parse_default(s):
         return '{}'
     elif re.match(r'{.*}', s):
         return s
-    elif s == 'nullopt':
-        return s
     try:
         return int(s)
     except Exception:
@@ -46,7 +44,7 @@ def parse_arguments(args, func_decl, func_name, func_return):
     arguments = []
     python_default_inits = func_decl.get('python_default_init', {})
     is_out_fn = func_name.endswith('_out')
-    if is_out_fn and func_decl.get('variants', []) not in ['function', ['function']]:
+    if is_out_fn and func_decl.get('variants', []) not in [[], 'function', ['function']]:
         raise RuntimeError("Native functions suffixed with _out MUST be declared with only the function variant; "
                            "e.g., variants: function; otherwise you will tickle a Python argument binding bug "
                            "(which usually manifests itself as the result variable being undefined.) "
@@ -130,7 +128,8 @@ def run(paths):
                 arguments = parse_arguments(arguments, func, declaration['name'], return_type)
                 output_arguments = [x for x in arguments if x.get('output')]
                 declaration['return'] = return_type if len(output_arguments) == 0 else output_arguments
-                declaration['variants'] = func.get('variants', ['method', 'function'])
+                declaration['variants'] = func.get('variants', ['function'])
+                declaration['requires_tensor'] = func.get('requires_tensor', False)
                 declaration['cpu_half'] = func.get('cpu_half', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)

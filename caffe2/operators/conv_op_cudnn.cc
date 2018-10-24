@@ -255,19 +255,19 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
   cudnnDataType_t DetermineComputeTypeFromInput(const T& X) {
     const cudaDeviceProp& prop = GetDeviceProperty(0);
     cudnnDataType_t computeType = CUDNN_DATA_FLOAT;
-    if (X.template IsType<float16>()) {
+    if (X.template IsType<at::Half>()) {
       if (float16_compute_ && prop.major >= 6) {
         VLOG(1) << "CUDNN Convolution: float16_compute specified and "
-                << "supported, input data is float16 - using float16 "
+                << "supported, input data is Half - using Half "
                 << "compute.";
         computeType = CUDNN_DATA_HALF;
       } else if (float16_compute_) {
         VLOG(1) << "CUDNN Convolution: float16_compute specified but"
-                << "not supported, input data is float16 - using float32 "
+                << "not supported, input data is Half - using float32 "
                 << "compute.";
       } else {
         VLOG(1) << "CUDNN Convolution: float16_compute not specified but "
-                << "input data is float16 - using float32 compute.";
+                << "input data is Half - using float32 compute.";
       }
     } else {
       VLOG(1) << "CUDNN Convolution: using float32 compute.";
@@ -411,8 +411,8 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
     }
   }
 
-  vector<TIndex> cudnn_input_dims_;
-  vector<TIndex> cudnn_filter_dims_;
+  vector<int64_t> cudnn_input_dims_;
+  vector<int64_t> cudnn_filter_dims_;
 
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t bottom_desc_;
@@ -580,12 +580,12 @@ bool CudnnConvOp::DoRunWithType() {
   if (input_changed || filter_changed) {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
-      cudnn_input_dims_ = X.dims();
+      cudnn_input_dims_ = X.dims().vec();
       SetTensorNdDescriptorWithGroup<T_X>(
           X.ndim(), bottom_desc_, N, C, H, W, D);
     }
     if (filter_changed) {
-      cudnn_filter_dims_ = filter.dims();
+      cudnn_filter_dims_ = filter.dims().vec();
       if (kernel_.size() == 2) {
 #if CUDNN_VERSION_MIN(7, 0, 0)
         const int MM = M;
@@ -837,14 +837,14 @@ bool CudnnConvOp::RunOnDevice() {
         float, // W
         float, // B
         float>(); // Y
-  } else if (Input(0).IsType<float16>()) {
+  } else if (Input(0).IsType<at::Half>()) {
     return DoRunWithType<
-        float16, // X
-        float16, // W
-        float16, // B
-        float16>(); // Y
+        at::Half, // X
+        at::Half, // W
+        at::Half, // B
+        at::Half>(); // Y
   } else {
-    LOG(FATAL) << "Only float (32bit) and float16 are supported by "
+    LOG(FATAL) << "Only float (32bit) and Half are supported by "
                << "cudnn convolution, but input " << debug_def().input(0)
                << " has [" << Input(0).meta().name() << "]";
   }
@@ -936,12 +936,12 @@ bool CudnnConvGradientOp::DoRunWithType() {
   if (input_changed || filter_changed) {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
-      cudnn_input_dims_ = X.dims();
+      cudnn_input_dims_ = X.dims().vec();
       SetTensorNdDescriptorWithGroup<T_X>(
           X.ndim(), bottom_desc_, N, C, H, W, D);
     }
     if (filter_changed) {
-      cudnn_filter_dims_ = filter.dims();
+      cudnn_filter_dims_ = filter.dims().vec();
       if (kernel_.size() == 2) {
 #if CUDNN_VERSION_MIN(7, 0, 0)
         const int MM = M;
@@ -1355,15 +1355,15 @@ bool CudnnConvGradientOp::RunOnDevice() {
         float, // dX
         float, // dW
         float>(); // db
-  } else if (Input(0).IsType<float16>()) {
+  } else if (Input(0).IsType<at::Half>()) {
     return DoRunWithType<
-        float16, //  X
-        float16, // dY
-        float16, //  W
-        float16, //  b
-        float16, // dX
-        float16, // dW
-        float16>(); // db
+        at::Half, //  X
+        at::Half, // dY
+        at::Half, //  W
+        at::Half, //  b
+        at::Half, // dX
+        at::Half, // dW
+        at::Half>(); // db
   } else {
     LOG(FATAL) << "Unsupported input types";
   }

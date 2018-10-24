@@ -15,9 +15,9 @@ Node* preRecordPythonTrace(
     pyobj_list scalar_args);
 
 std::shared_ptr<Graph> createGraphByTracing(
-        py::function func,
-        autograd::variable_list inputs,
-        size_t num_inputs);
+    py::function func,
+    Stack inputs,
+    c10::optional<size_t> num_real_inputs = {});
 } // namespace tracer
 
 }} // namespace torch::jit

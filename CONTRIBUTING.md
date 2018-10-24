@@ -23,7 +23,7 @@ If you are not familiar with creating a Pull Request, here are some guides:
 
 To develop PyTorch on your machine, here are some tips:
 
-1. Uninstall all existing pytorch installs
+1. Uninstall all existing PyTorch installs:
 ```
 conda uninstall pytorch
 pip uninstall torch
@@ -75,6 +75,88 @@ You do not need to repeatedly install after modifying python files.
 In case you want to reinstall, make sure that you uninstall pytorch first by running `pip uninstall torch`
 and `python setup.py clean`. Then you can install in `build develop` mode again.
 
+## Codebase structure
+
+* [c10](c10) - Core library files that work everywhere, both server
+  and mobile.  We are slowly moving pieces from ATen/core here.
+  This library is intended only to contain essential functionality,
+  and appropriate to use in settings where binary size matters.  (But
+  you'll have a lot of missing functionality if you try to use it
+  directly.)
+* [aten](aten) - C++ tensor library for PyTorch (no autograd support)
+  * src
+    * [TH](aten/src/TH)
+      [THC](aten/src/THC)
+      [THNN](aten/src/THNN)
+      [THCUNN](aten/src/THCUNN) - Legacy library code from the original
+      Torch.  Try not to add things here; we're slowly porting these to
+      native.
+      * generic - Contains actual implementations of operators,
+        parametrized over `scalar_t`.  Files here get compiled N times
+        per supported scalar type in PyTorch.
+    * ATen
+      * [core](aten/src/ATen/core) - Core functionality of ATen.  This
+        is migrating to top-level c10 folder.
+      * [native](aten/src/ATen/native) - Modern implementations of
+        operators.  If you want to write a new operator, here is where
+        it should go.  Most CPU operators go in the top level directory,
+        except for operators which need to be compiled specially; see
+        cpu below.
+        * [cpu](aten/src/ATen/native/cpu) - Not actually CPU
+          implementations of operators, but specifically implementations
+          which are compiled with processor-specific instructions, like
+          AVX.  See the README for more details.
+        * [cuda](aten/src/ATen/native/cuda) - CUDA implementations of
+          operators.
+        * [sparse](aten/src/ATen/native/sparse) - CPU and CUDA
+          implementations of COO sparse tensor operations
+        * [mkl](aten/src/ATen/native/mkl) [mkldnn](aten/src/ATen/native/mkldnn)
+          [miopen](aten/src/ATen/native/miopen) [cudnn](aten/src/ATen/native/cudnn)
+          - implementations of operators which simply bind to some
+            backend library.
+* [torch](torch) - The actual PyTorch library.  Everything that is not
+  in csrc is Python modules, following the PyTorch Python frontend
+  module structure.
+  * [csrc](torch/csrc) - C++ files composing the PyTorch library.  Files
+    in this directory tree are a mix of Python binding code, and C++
+    heavy lifting.  Consult `setup.py` for the canonical list of Python
+    binding files; conventionally, they are often prefixed with
+    `python_`.
+    * [jit](torch/csrc/jit) - Compiler and frontend for TorchScript JIT
+      frontend.
+    * [autograd](torch/csrc/autograd) - Implementation of reverse-mode automatic
+      differentation
+    * [api](torch/csrc/api) - The PyTorch C++ frontend.
+    * [distributed](torch/csrc/distributed) - Distributed training
+      support for PyTorch.
+* [tools](tools) - Code generation scripts for the PyTorch library
+  * [autograd](tools/autograd) - Code generation for autograd.  This
+    includes definitions of all our derivatives.
+  * [jit](tools/jit) - Code generation for JIT
+  * [amd_build](tools/amd_build) - HIPify scripts, for transpiling CUDA
+    into AMD HIP.
+* [test](tests) - Python unit tests for PyTorch Python frontend
+  * [test_torch.py](test/test_torch.py) - Basic tests for PyTorch
+    functionality
+  * [test_autograd.py](test/test_autograd.py) - Tests for non-NN
+    automatic differentiation support
+  * [test_nn.py](test/test_nn.py) - Tests for NN operators and
+    their automatic differentiation
+  * [test_jit.py](test/test_jit.py) - Tests for the JIT compiler
+    and TorchScript
+  * ...
+  * [cpp](test/cpp) - C++ unit tests for PyTorch C++ frontend
+  * [expect](test/expect) - Automatically generated "expect" files
+    which are used to compare against expected output.
+  * [onnx](test/onnx) - Tests for ONNX export functionality,
+    using both PyTorch and Caffe2.
+* [caffe2](caffe2) - The Caffe2 library.
+  * [core](caffe2/core) - Core files of Caffe2, e.g., tensor, workspace,
+    blobs, etc.
+  * [operators](caffe2/operators) - Operators of Caffe2
+  * [python](caffe2/python) - Python bindings to Caffe2
+  * ...
+
 ## Unit testing
 
 PyTorch's testing is located under `test/`. Run the entire test suite with
@@ -104,6 +186,18 @@ PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/late
 for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
 fit into Jupyter documentation popups.
 
+For C++ documentation (https://pytorch.org/cppdocs), we use
+[Doxygen](http://www.doxygen.nl/) and then convert it to
+[Sphinx](http://www.sphinx-doc.org/) via
+[Breathe](https://github.com/michaeljones/breathe) and
+[Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
+reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
+information on the documentation syntax. To build the documentation locally,
+`cd` into `docs/cpp` and then `make html`.
+
+We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
+commands. To run this check locally, run `./check-doxygen.sh` from inside
+`docs/cpp`.
 
 ## Managing multiple build trees
 
@@ -182,6 +276,8 @@ information for the code in `torch/csrc`. More information at:
 Python `setuptools` is pretty dumb, and always rebuilds every C file in a
 project.  If you install the ninja build system with `pip install ninja`,
 then PyTorch will use it to track dependencies correctly.
+If pytorch was already built, you will need to run `python setup.py clean` once
+after installing ninja for builds to succeed.
 
 #### Use CCache
 
@@ -248,9 +344,9 @@ than Linux, which are worth keeping in mind when fixing these problems.
 1. Symbols are NOT exported by default on Windows; instead, you have to explicitly
    mark a symbol as exported/imported in a header file with `__declspec(dllexport)` /
    `__declspec(dllimport)`.  We have codified this pattern into a set of macros
-   which follow the convention `*_API`, e.g., `AT_API` inside ATen. (Every separate
-   shared library needs a unique macro name, because symbol visibility is on a per
-   shared library basis.)
+   which follow the convention `*_API`, e.g., `CAFFE2_API` inside Caffe2 and ATen.
+   (Every separate shared library needs a unique macro name, because symbol visibility
+   is on a per shared library basis. See c10/macros/Macros.h for more details.)
 
    The upshot is if you see an "unresolved external" error in your Windows build, this
    is probably because you forgot to mark a function with `*_API`.  However, there is
@@ -267,8 +363,7 @@ than Linux, which are worth keeping in mind when fixing these problems.
 3. If you have a Windows box (we have a few on EC2 which you can request access to) and
    you want to run the build, the easiest way is to just run `.jenkins/pytorch/win-build.sh`.
    If you need to rebuild, run `REBUILD=1 .jenkins/pytorch/win-build.sh` (this will avoid
-   blowing away your Conda environment.)  I recommend opening `cmd.exe`, and then running
-   `bash` to work in a bash shell (which will make various Linux commands available.)
+   blowing away your Conda environment.)
 
 Even if you don't know anything about MSVC, you can use cmake to build simple programs on
 Windows; this can be helpful if you want to learn more about some peculiar linking behavior
@@ -293,6 +388,83 @@ cd build
 cmake ..
 cmake --build .
 ```
+
+### Known MSVC (and MSVC with NVCC) bugs
+
+The PyTorch codebase sometimes likes to use exciting C++ features, and
+these exciting features lead to exciting bugs in Windows compilers.
+To add insult to injury, the error messages will often not tell you
+which line of code actually induced the erroring template instantiation.
+
+I've found the most effective way to debug these problems is to
+carefully read over diffs, keeping in mind known bugs in MSVC/NVCC.
+Here are a few well known pitfalls and workarounds:
+
+* This is not actually a bug per se, but in general, code generated by MSVC
+  is more sensitive to memory errors; you may have written some code
+  that does a use-after-free or stack overflows; on Linux the code
+  might work, but on Windows your program will crash.  ASAN may not
+  catch all of these problems: stay vigilant to the possibility that
+  your crash is due to a real memory problem.
+
+* (NVCC) `c10::optional` does not work when used from device code.  Don't use
+  it from kernels.  Upstream issue: https://github.com/akrzemi1/Optional/issues/58
+  and our local issue #10329.
+
+* `constexpr` generally works less well on MSVC.
+
+  * The idiom `static_assert(f() == f())` to test if `f` is constexpr
+    does not work; you'll get "error C2131: expression did not evaluate
+    to a constant".  Don't use these asserts on Windows.
+    (Example: `aten/src/ATen/core/intrusive_ptr.h`)
+
+* (NVCC) Code you access inside a `static_assert` will eagerly be
+  evaluated as if it were device code, and so you might get an error
+  that the code is "not accessible".
+
+```
+class A {
+  static A singleton_;
+  static constexpr inline A* singleton() {
+    return &singleton_;
+  }
+};
+static_assert(std::is_same(A*, decltype(A::singelton()))::value, "hmm");
+```
+
+* The compiler will run out of heap if you attempt to compile files that
+  are too large.  Splitting such files into separate files helps.
+  (Example: `THTensorMath`, `THTensorMoreMath`, `THTensorEvenMoreMath`.)
+
+### Running Clang-Tidy
+
+[Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
+linter and static analysis tool based on the clang compiler. We run clang-tidy
+in our CI to make sure that new C++ code is safe, sane and efficient. See our
+[.travis.yml](https://github.com/pytorch/pytorch/blob/master/.travis.yml) file
+for the simple commands we use for this.
+
+To run clang-tidy locally, follow these steps:
+
+1. Install clang-tidy. First, check if you already have clang-tidy by simply
+writing `clang-tidy` in your terminal. If you don't yet have clang-tidy, you
+should be able to install it easily with your package manager, e.g. by writing
+`apt-get install clang-tidy` on Ubuntu. See https://apt.llvm.org for details on
+how to install the latest version. Note that newer versions of clang-tidy will
+have more checks than older versions. In our CI, we run clang-tidy-6.0.
+
+2. Use our driver script to run clang-tidy over any changes relative to some
+   git revision (you may want to replace `HEAD~1` with `HEAD` to pick up
+   uncommitted changes). Changes are picked up based on a `git diff` with the
+   given revision:
+  ```sh
+  $ python tools/clang_tidy.py -d build -p torch/csrc -r HEAD~1
+  ```
+
+Above, it is assumed you are in the PyTorch root folder. `path/to/build` should
+be the path to where you built PyTorch from source, e.g. `build` in the PyTorch
+root folder if you used `setup.py build`. You can use `-c <clang-tidy-binary>`
+to change the clang-tidy this script uses.
 
 ## Caffe2 notes
 

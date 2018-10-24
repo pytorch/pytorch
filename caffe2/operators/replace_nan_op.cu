@@ -6,7 +6,7 @@ namespace caffe2 {
 namespace {
 template <typename T>
 __global__ void
-replace_nan_kernel(const T value, const TIndex size, const T* X, T* Y) {
+replace_nan_kernel(const T value, const int64_t size, const T* X, T* Y) {
   CUDA_1D_KERNEL_LOOP(i, size) {
     if (isnan(X[i])) {
       Y[i] = value;
@@ -21,7 +21,7 @@ template <>
 template <typename T>
 void ReplaceNaNOp<CUDAContext>::ReplaceNaN(
     const T& value,
-    const TIndex size,
+    const int64_t size,
     const T* X,
     T* Y) {
   replace_nan_kernel<<<

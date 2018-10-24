@@ -16,7 +16,7 @@ DEFINE_DISPATCH(div_stub);
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
     if (!result.defined()) {
-      result = self.type().tensor();
+      result = at::empty({0}, self.options());
     }
     if (self.is_sparse()) {
       at::_sparse_add_out(result, self, other, alpha);
@@ -28,7 +28,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     AT_ERROR("add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
   }
   auto iter = TensorIterator::binary_op(result, self, other);
-  add_stub(iter->backend(), *iter, alpha);
+  add_stub(iter->device_type(), *iter, alpha);
   return result;
 }
 
@@ -44,16 +44,16 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (self.is_sparse()) {
     if (!result.defined()) {
-      result = self.type().tensor();
+      result = at::empty({0}, self.options());
     }
     if (other.dim() != 0) {
       AT_ERROR("div(): sparse division only supports division by a scalar ",
         "(got shape ", other.sizes(), " for argument 'other')");
     }
-    return at::_sparse_div_out(result, self, Scalar(other));
+    return at::_sparse_div_zerodim_out(result, self, other);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
-  div_stub(iter->backend(), *iter);
+  div_stub(iter->device_type(), *iter);
   return result;
 }
 
@@ -69,12 +69,12 @@ Tensor& div_(Tensor& self, const Tensor& other) {
 Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (self.is_sparse() || other.is_sparse()) {
     if (!result.defined()) {
-      result = self.type().tensor();
+      result = at::empty({0}, self.options());
     }
     return at::_sparse_mul_out(result, self, other);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
-  mul_stub(iter->backend(), *iter);
+  mul_stub(iter->device_type(), *iter);
   return result;
 }
 
@@ -90,7 +90,7 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
     if (!result.defined()) {
-      result = self.type().tensor();
+      result = at::empty({0}, self.options());
     }
     if (!self.sizes().equals(other.sizes())) {
       AT_ERROR("sizes do not match");
@@ -105,7 +105,7 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     AT_ERROR("sub(sparse, dense) is not supported. Use sub(dense, sparse) instead.");
   }
   auto iter = TensorIterator::binary_op(result, self, other);
-  sub_stub(iter->backend(), *iter, alpha);
+  sub_stub(iter->device_type(), *iter, alpha);
   return result;
 }
 
@@ -123,8 +123,8 @@ Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
 // to Python.
 
 static Tensor scalar_tensor(Scalar scalar) {
-  auto tensor = scalar.toTensor();
-  tensor.get()->set_wrapped_number(true);
+  auto tensor = scalar_to_tensor(scalar);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
 }
 

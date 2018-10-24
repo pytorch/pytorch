@@ -37,9 +37,9 @@ class BatchMatMulOp final : public Operator<Context> {
     auto* Y = Output(0);
 
     auto ndims_A = A.ndim();
-    auto dims_A = A.dims();
+    auto dims_A = A.dims().vec();
     auto ndims_B = B.ndim();
-    auto dims_B = B.dims();
+    auto dims_B = B.dims().vec();
 
     auto noBroadcastErrorMsg = [](size_t dim1, size_t dim2) {
       std::stringstream ss;
@@ -175,7 +175,7 @@ class BatchMatMulOp final : public Operator<Context> {
       // Calculate output tensor shapes [B..., (M), (N)]
       // Batch dimensions will be broadcasted out to those of the longer tensor
       // A or B. Either M or N are optional if A or B, respectively are 1-D.
-      std::vector<TIndex> new_dims;
+      std::vector<int64_t> new_dims;
       if (ndims_A >= ndims_B) {
         new_dims.assign(dims_A.begin(), dims_A.end() - 2);
       } else {

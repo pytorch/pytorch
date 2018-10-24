@@ -60,7 +60,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
     }
 
     if (!output_initialized) {
-      auto dims = input.dims();
+      auto dims = input.dims().vec();
       dims[0] = 0;
       output->Resize(dims);
       // pass meta to output

@@ -23,7 +23,7 @@ void test(int given_num_threads) {
 }
 
 int main() {
-  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::kCPU);
 
   test(-1);
   std::thread t1(test, -1);

@@ -8,7 +8,7 @@
 #include "torch/csrc/utils/pybind.h"
 
 #include <ATen/Device.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <cstring>
 #include <limits>
@@ -173,7 +173,7 @@ static struct PyGetSetDef THPDevice_properties[] = {
 
 static PyMethodDef THPDevice_methods[] = {
   {"__reduce__", (PyCFunction)THPDevice_reduce, METH_NOARGS, nullptr},
-  {NULL}  /* Sentinel */
+  {nullptr}  /* Sentinel */
 };
 
 PyTypeObject THPDeviceType = {

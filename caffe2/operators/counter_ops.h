@@ -9,7 +9,7 @@
 
 namespace caffe2 {
 template <typename T>
-class Counter {
+class CAFFE2_API Counter {
  public:
   explicit Counter(T count) : count_(count) {}
   bool countDown() {

@@ -93,20 +93,20 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(
   int outputH = inputH + ptop + pbottom;
   int outputW  = inputW + pleft + pright;
 
-  THCDeviceTensor<real, 5> devInput;
-  THCDeviceTensor<real, 5> devOutput;
+  THCDeviceTensor<scalar_t, 5> devInput;
+  THCDeviceTensor<scalar_t, 5> devOutput;
 
   if (numInputDims == 4) {
     THCTensor_(resize4d)(state, output, numPlanes, outputD, outputH, outputW);
 
-    devInput = toDeviceTensor<real, 4>(state, input).upcastOuter<5>();
-    devOutput = toDeviceTensor<real, 4>(state, output).upcastOuter<5>();
+    devInput = toDeviceTensor<scalar_t, 4>(state, input).upcastOuter<5>();
+    devOutput = toDeviceTensor<scalar_t, 4>(state, output).upcastOuter<5>();
   } else {
     THCTensor_(resize5d)(state, output, numBatch, numPlanes, outputD, outputH,
                           outputW);
 
-    devInput = toDeviceTensor<real, 5>(state, input);
-    devOutput = toDeviceTensor<real, 5>(state, output);
+    devInput = toDeviceTensor<scalar_t, 5>(state, input);
+    devOutput = toDeviceTensor<scalar_t, 5>(state, output);
   }
 
   int outputPlaneSize = devOutput.getSize(2) * devOutput.getSize(3) *
@@ -116,7 +116,7 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(
             devOutput.getSize(0));
   dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
-  VolumetricReplicationPadding_updateOutput<real><<<gridSize, blockSize, 0, THCState_getCurrentStream(state)>>>(
+  VolumetricReplicationPadding_updateOutput<scalar_t><<<gridSize, blockSize, 0, THCState_getCurrentStream(state)>>>(
     devInput, devOutput, pfront, pback, ptop, pbottom, pleft, pright);
 }
 
@@ -148,16 +148,16 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
 
-  THCDeviceTensor<real, 5> devGradInput;
-  THCDeviceTensor<real, 5> devGradOutput;
+  THCDeviceTensor<scalar_t, 5> devGradInput;
+  THCDeviceTensor<scalar_t, 5> devGradOutput;
 
   if (numInputDims == 4) {
-    devGradInput = toDeviceTensor<real, 4>(state, gradInput).upcastOuter<5>();
+    devGradInput = toDeviceTensor<scalar_t, 4>(state, gradInput).upcastOuter<5>();
     devGradOutput =
-        toDeviceTensor<real, 4>(state, gradOutput).upcastOuter<5>();
+        toDeviceTensor<scalar_t, 4>(state, gradOutput).upcastOuter<5>();
   } else {
-    devGradInput = toDeviceTensor<real, 5>(state, gradInput);
-    devGradOutput = toDeviceTensor<real, 5>(state, gradOutput);
+    devGradInput = toDeviceTensor<scalar_t, 5>(state, gradInput);
+    devGradOutput = toDeviceTensor<scalar_t, 5>(state, gradOutput);
   }
 
   int outputPlaneSize = devGradOutput.getSize(2) * devGradOutput.getSize(3) *

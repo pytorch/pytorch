@@ -5,6 +5,8 @@ from __future__ import unicode_literals
 
 import numpy as np
 import struct
+import unittest
+import os
 
 from hypothesis import given, example
 import hypothesis.strategies as st
@@ -14,12 +16,11 @@ import caffe2.python.hypothesis_test_util as hu
 
 np.set_printoptions(precision=6)
 
-
 class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
     @given(X=hu.tensor(min_dim=2, max_dim=2,
                         min_value=1, max_value=17),  # only matrix is supported
            bitwidth_=st.sampled_from([1, 2, 4, 8]),
-           random_=st.sampled_from([True, False]),
+           random_=st.booleans(),
            **hu.gcs)
     @example(X=np.array([[0., 0., 0., 0.264019]]).astype(np.float32),
             bitwidth_=2,
@@ -28,7 +29,7 @@ class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
     def test_rand_quantization(self, X, bitwidth_, random_, gc, dc):
 
         # python reference of encoder
-        def rand_quantization_ref(X):
+        def quantization_ref(X):
             in_shape = X.shape
             data_per_byte = 8 // bitwidth_
             output_cols = 10 + in_shape[1] // data_per_byte
@@ -104,15 +105,15 @@ class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
         Y = workspace.FetchBlob("Y")
         print("Y:\n{}\n".format(Y))
 
-        pY = rand_quantization_ref(X)[0]
+        pY = quantization_ref(X)[0]
         pdecX = dec_ref(Y)[0]
 
         # The equality check of encoded floating values in bytes may occasionally fail
         # because of precision.
         # Refer to the format of floating values here:
         #   https://en.wikipedia.org/wiki/Single-precision_floating-point_format
-        ## self.assertReferenceChecks(gc, op, [X], rand_quantization_ref)
-        # Instead of using the above assertReferenceChecks, we
+        # Instead of using self.assertReferenceChecks(gc, op, [X], quantization_ref),
+        # we do the following
         if not random_:
             for r in range(Y.shape[0]):
                 # compare min
@@ -123,8 +124,8 @@ class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
                 np.testing.assert_almost_equal(
                     struct.unpack('f', Y[r][6:10])[0],
                     struct.unpack('f', pY[r][6:10])[0])
-            np.testing.assert_array_equal(Y[:][0:2], pY[:][0:2])
-            np.testing.assert_array_equal(Y[:][10:], pY[:][10:])
+            np.testing.assert_array_equal(Y[:, 0:2], pY[:, 0:2])
+            np.testing.assert_array_equal(Y[:, 10:], pY[:, 10:])
 
         # check decoded floating values are within error thresholds
         workspace.RunOperatorOnce(dec_op)
@@ -142,6 +143,25 @@ class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
         np.testing.assert_array_less(
             np.absolute(err),
             err_thre)
+
+        # test the expectation of stochastic quantized values
+        # are near to the floating values
+        # Warning: it can fail the unit test with small probability
+        test_stochastic_quantization = True
+        if random_ and test_stochastic_quantization:
+            X_sum = np.zeros_like(X)
+            test_times = 2000
+            for _ in range(test_times):
+                workspace.RunOperatorOnce(enc_op)
+                workspace.RunOperatorOnce(dec_op)
+                X_sum += workspace.FetchBlob("decX")
+            X_avg = X_sum / test_times
+            print("X_avg:\n{}".format(X_avg))
+            print("X    :\n{}".format(X))
+            np.testing.assert_array_less(
+                np.absolute(X_avg - X),
+                5e-2 * get_allowed_errors(X) + 1e-4
+            )
 
         # Check over multiple devices -- CUDA implementation is pending
         # self.assertDeviceChecks(dc, op, [X], [0])

@@ -11,8 +11,8 @@ __host__ void THCTensor_(scanThrust)(
     BinaryFunction binary_op)
 {
   THCThrustAllocator thrustAlloc(state);
-  thrust::device_ptr<real> src_data(THCTensor_(data)(state, src));
-  thrust::device_ptr<real> dst_data(THCTensor_(data)(state, dst));
+  thrust::device_ptr<scalar_t> src_data(THCTensor_(data)(state, src));
+  thrust::device_ptr<scalar_t> dst_data(THCTensor_(data)(state, dst));
   ptrdiff_t size = THCTensor_(nElement)(state, src);
   thrust::inclusive_scan(
 #if CUDA_VERSION >= 7000
@@ -26,7 +26,7 @@ __host__ void THCTensor_(scanThrust)(
 template<class BinaryOp>
 __host__ void THCTensor_(scanOuterDim)(THCState *state, THCTensor *tgt,
                                        THCTensor *src, int dimension,
-                                       real init, BinaryOp binary_op)
+                                       scalar_t init, BinaryOp binary_op)
 {
   unsigned ndim = THCTensor_(nDimensionLegacyAll)(state, src);
   // Treat all outer dimensions (i.e. dim < dimension) as one.
@@ -45,7 +45,7 @@ __host__ void THCTensor_(scanOuterDim)(THCState *state, THCTensor *tgt,
   unsigned maxGridDim = 1024;
   dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, THCCeilDiv(num_irows, threads.x)));
 
-  THCTensor_kernel_scanOuterDim<real><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+  THCTensor_kernel_scanOuterDim<scalar_t><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
     THCTensor_(data)(state, tgt), THCTensor_(data)(state, src),
     num_orows, num_irows, row_size, init, binary_op);
 
@@ -54,7 +54,7 @@ __host__ void THCTensor_(scanOuterDim)(THCState *state, THCTensor *tgt,
 
 template<class BinaryFunction>
 __host__ void THCTensor_(scanInnermostDim)(THCState *state, THCTensor *tgt,
-                                           THCTensor *src, real init,
+                                           THCTensor *src, scalar_t init,
                                            BinaryFunction binary_op)
 {
   unsigned ndim = THCTensor_(nDimensionLegacyAll)(state, src);
@@ -68,7 +68,7 @@ __host__ void THCTensor_(scanInnermostDim)(THCState *state, THCTensor *tgt,
   dim3 threads(16, 32);
   dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
 
-  THCTensor_kernel_scanInnermostDim<real, 16, 32><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+  THCTensor_kernel_scanInnermostDim<scalar_t, 16, 32><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
     THCTensor_(data)(state, tgt), THCTensor_(data)(state, src), num_rows, row_size, init, binary_op);
 
   THCudaCheck(cudaGetLastError());
@@ -76,7 +76,7 @@ __host__ void THCTensor_(scanInnermostDim)(THCState *state, THCTensor *tgt,
 
 template<class BinaryFunction>
 void THCTensor_(scanDim)(THCState *state, THCTensor *self_, THCTensor *src,
-                         int dimension, real init, BinaryFunction binary_op)
+                         int dimension, scalar_t init, BinaryFunction binary_op)
 {
   // "init" must be the identity element for binary_op
   int ndim = THCTensor_(nDimensionLegacyNoScalars)(state, src);
@@ -109,14 +109,14 @@ void THCTensor_(cumsum)(THCState *state, THCTensor *self, THCTensor *src, int di
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   return THCTensor_(scanDim)(state, self, src, dimension,
-                             ScalarConvert<float, real>::to(0.0), AddOp<real>());
+                             ScalarConvert<float, scalar_t>::to(0.0), AddOp<scalar_t>());
 }
 
 void THCTensor_(cumprod)(THCState *state, THCTensor *self, THCTensor *src, int dimension)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   return THCTensor_(scanDim)(state, self, src, dimension,
-                             ScalarConvert<float, real>::to(1.0), MulOp<real>());
+                             ScalarConvert<float, scalar_t>::to(1.0), MulOp<scalar_t>());
 }
 
 #endif

@@ -9,8 +9,8 @@ class NegativeBinomial(Distribution):
     r"""
     Creates a Negative Binomial distribution, i.e. distribution
     of the number of independent identical Bernoulli trials
-    needed before `total_count` failures are achieved. The probability
-    of success of each Bernoulli trial is `probs`.
+    needed before :attr:`total_count` failures are achieved. The probability
+    of success of each Bernoulli trial is :attr:`probs`.
 
     Args:
         total_count (float or Tensor): non-negative number of negative Bernoulli
@@ -20,7 +20,8 @@ class NegativeBinomial(Distribution):
         logits (Tensor): Event log-odds for probabilities of success
     """
     arg_constraints = {'total_count': constraints.greater_than_eq(0),
-                       'probs': constraints.half_open_interval(0., 1.)}
+                       'probs': constraints.half_open_interval(0., 1.),
+                       'logits': constraints.real}
     support = constraints.nonnegative_integer
 
     def __init__(self, total_count, probs=None, logits=None, validate_args=None):
@@ -36,6 +37,20 @@ class NegativeBinomial(Distribution):
         self._param = self.probs if probs is not None else self.logits
         batch_shape = self._param.size()
         super(NegativeBinomial, self).__init__(batch_shape, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(NegativeBinomial, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.total_count = self.total_count.expand(batch_shape)
+        if 'probs' in self.__dict__:
+            new.probs = self.probs.expand(batch_shape)
+            new._param = new.probs
+        else:
+            new.logits = self.logits.expand(batch_shape)
+            new._param = new.logits
+        super(NegativeBinomial, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)

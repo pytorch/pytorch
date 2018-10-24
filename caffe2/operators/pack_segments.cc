@@ -27,7 +27,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   // Find the length of the longest sequence.
   const T* l = lengths.template data<T>();
   T max_length = 0;
-  TIndex total_length = 0;
+  int64_t total_length = 0;
   for (T i = 0; i < lengths.dim(0); ++i) {
     max_length = std::max(max_length, l[i]);
     total_length += l[i];
@@ -50,7 +50,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
       " is equal to the first data dimension ",
       data.dim(0));
 
-  auto shape = data.dims(); // Shape of output is batch_size x max_len x ...
+  auto shape = data.dims().vec(); // Shape of output is batch_size x max_len x ...
   shape[0] = max_length;
   shape.insert(shape.begin(), lengths.size());
   output->Resize(shape);
@@ -61,7 +61,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   bool* presence_mask_data = nullptr;
   if (return_presence_mask_) {
     // Shape of presence is batch_size x max_len
-    std::vector<caffe2::TIndex> presence_shape{lengths.size(), max_length};
+    std::vector<int64_t> presence_shape{lengths.size(), max_length};
     presence_mask->Resize(presence_shape);
     presence_mask_data = presence_mask->template mutable_data<bool>();
   }
@@ -86,8 +86,8 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   auto block_size = data.size_from_dim(1);
   auto block_bytesize = data.itemsize() * block_size;
   const auto* d = static_cast<const char*>(data.raw_data());
-  TIndex start = 0;
-  for (TIndex i = 0; i < lengths.dim(0); ++i) {
+  int64_t start = 0;
+  for (int64_t i = 0; i < lengths.dim(0); ++i) {
     context_.CopyItemsSameDevice(
         data.meta(),
         l[i] * block_size,
@@ -127,9 +127,9 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   }
   const T* l = lengths.template data<T>();
 
-  TIndex total_l = std::accumulate(l, l + lengths.dim(0), (TIndex)0);
+  int64_t total_l = std::accumulate(l, l + lengths.dim(0), (int64_t)0);
 
-  auto shape = data.dims();
+  auto shape = data.dims().vec();
   CAFFE_ENFORCE_EQ(
       shape[0], lengths.dim(0), "LENGTH should match DATA in dimension 0");
   shape.erase(shape.begin());
@@ -143,8 +143,8 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   auto block_size = data.size_from_dim(2);
   auto block_bytesize = data.itemsize() * block_size;
   const auto* d = static_cast<const char*>(data.raw_data());
-  TIndex start = 0;
-  for (TIndex i = 0; i < lengths.dim(0); ++i) {
+  int64_t start = 0;
+  for (int64_t i = 0; i < lengths.dim(0); ++i) {
     context_.CopyItemsSameDevice(
         data.meta(),
         l[i] * block_size,

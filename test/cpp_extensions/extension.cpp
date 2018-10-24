@@ -1,4 +1,4 @@
-#include <torch/torch.h>
+#include <torch/extension.h>
 
 at::Tensor sigmoid_add(at::Tensor x, at::Tensor y) {
   return x.sigmoid() + y.sigmoid();
@@ -20,7 +20,7 @@ struct MatrixMultiplier {
   at::Tensor tensor_;
 };
 
-bool function_taking_optional(at::optional<at::Tensor> tensor) {
+bool function_taking_optional(c10::optional<at::Tensor> tensor) {
   return tensor.has_value();
 }
 

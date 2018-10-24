@@ -37,7 +37,7 @@ print("DATA:\n",data)
 inds = np.array([[0, 1],[1, 2]])
 print("INDICES:\n",inds)
 
-# Feed X into workspace
+// Feed X into workspace
 workspace.FeedBlob("DATA", data.astype(np.float32))
 workspace.FeedBlob("INDICES", inds.astype(np.int32))
 

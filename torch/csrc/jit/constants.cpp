@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/autograd/variable.h"
 
 namespace torch { namespace jit {
@@ -8,11 +9,17 @@ namespace torch { namespace jit {
 Value* insertConstant(
     Graph& g,
     IValue val,
-    at::optional<SourceRange> loc) {
+    c10::optional<SourceRange> loc,
+    c10::optional<ScopePtr> scope) {
   Node * n = g.create(prim::Constant);
   if(val.isTensor()) {
     at::Tensor ref = std::move(val).toTensor();
-    JIT_ASSERT(ref.defined());
+    if(!ref.defined()) {
+      throw constant_not_supported_error("undefined tensors cannot become constants");
+    }
+    if (ref.is_variable()) {
+      ref = autograd::Variable(ref).data();
+    }
     n->output()->inferTypeFrom(ref); // note: before t_ because of std::move(ref)
     n->t_(attr::value, std::move(ref));
   } else if(val.isInt()) {
@@ -21,6 +28,13 @@ Value* insertConstant(
   } else if(val.isDouble()) {
     n->f_(attr::value, val.toDouble());
     n->output()->setType(FloatType::get());
+  } else if (val.isBool()) {
+    n->i_(attr::value, val.toBool());
+    n->output()->setType(BoolType::get());
+  } else if (val.isBoolList()) {
+    auto bool_list = val.toBoolList()->elements();
+    n->is_(attr::value, std::vector<int64_t>(bool_list.begin(), bool_list.end()));
+    n->output()->setType(ListType::ofBools());
   } else if(val.isIntList()) {
     n->is_(attr::value, val.toIntList()->elements());
     n->output()->setType(ListType::ofInts());
@@ -30,13 +44,21 @@ Value* insertConstant(
     }));
     n->output()->setType(ListType::ofTensors());
   } else if(val.isString()) {
-    n->s_(attr::string, val.toString()->string());
+    n->s_(attr::value, val.toString()->string());
     n->output()->setType(StringType::get());
+  } else if(val.isNone()) {
+    n->destroy();
+    n = g.create(prim::None);
+    n->output()->setType(NoneType::get());
+  } else if(val.isWorld()) {
+    n->output()->setType(WorldType::get());
   } else {
-    throw std::runtime_error("Unsupported value kind: " + val.tagKind());
+    throw constant_not_supported_error("Unsupported value kind: " + val.tagKind());
   }
   if(loc)
     n->setSourceLocation(std::make_shared<SourceRange>(*loc));
+  if(scope)
+    n->setScope(*scope);
   return g.insertNode(n)->output();
 }
 
@@ -50,6 +72,12 @@ RegisterOperators reg({
           auto t = autograd::make_variable(node->t(attr::value));
           return [t](Stack& stack) {
             stack.push_back(t);
+            return 0;
+          };
+        } else if (type->isSubtypeOf(BoolType::get())) {
+          bool b = node->i(attr::value);
+          return [b](Stack& stack) {
+            push(stack, b);
             return 0;
           };
         } else if (
@@ -74,6 +102,12 @@ RegisterOperators reg({
             push(stack, is);
             return 0;
           };
+        } else if(type->isSubtypeOf(ListType::ofBools())) {
+          auto bs = node->is(attr::value);
+          return [bs](Stack& stack) {
+            push(stack, bs);
+            return 0;
+          };
         } else if(type->isSubtypeOf(ListType::ofTensors())) {
           auto ts = fmap(node->ts(attr::value), [](const at::Tensor & t) -> at::Tensor {
             return autograd::make_variable(t);
@@ -83,7 +117,7 @@ RegisterOperators reg({
             return 0;
           };
         } else if (type == StringType::get()) {
-          auto s = node->s(attr::string);
+          auto s = node->s(attr::value);
           return [s](Stack& stack) {
             push(stack, s);
             return 0;
@@ -96,14 +130,13 @@ RegisterOperators reg({
       }),
 });
 
-at::optional<IValue> toIValue(Value* v) {
+c10::optional<IValue> toIValue(Value* v) {
   if(v->node()->kind() != prim::Constant)
-    return at::nullopt;
+    return c10::nullopt;
   // use implemenation of prim::Constant to compute the output IValue
   auto op = getOperation(v->node());
   Stack stack;
   op(stack);
   return stack.back();
 }
-
 }}

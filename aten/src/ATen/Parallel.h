@@ -27,7 +27,7 @@ inline void parallel_for(
     const int64_t grain_size,
     const F& f) {
 #ifdef _OPENMP
-#pragma omp parallel if ((end - begin) >= grain_size)
+#pragma omp parallel if (!omp_in_parallel() && ((end - begin) >= grain_size))
   {
     int64_t num_threads = omp_get_num_threads();
     int64_t tid = omp_get_thread_num();

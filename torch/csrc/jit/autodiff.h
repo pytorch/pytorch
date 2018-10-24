@@ -85,9 +85,7 @@ struct Gradient {
   //   - Interpret df
   //   - Wrap outputs of df into Variables (that don't require grad)
 };
-// XXX: When calling this function, graph should have complete type information.
-// Use the shape analysis pass to fill in the gaps if it doesn't.
-TORCH_API Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& requires_grad);
+TORCH_API Gradient differentiate(std::shared_ptr<Graph>& graph);
 
 // can we take a derivative of this node symbolically?
 TORCH_API bool isDifferentiable(Node * n);

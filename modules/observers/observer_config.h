@@ -1,5 +1,6 @@
 #pragma once
 
+#include "observers/macros.h"
 #include "observers/net_observer_reporter.h"
 
 #include "caffe2/core/common.h"

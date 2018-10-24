@@ -16,7 +16,7 @@ static constexpr int64_t kMaxBodySize = 16;
 static constexpr int64_t kMaxBodyRepeats = 64;
 
 bool isTrueConstant(Value *val) {
-  at::optional<bool> maybe_value = constant_as<bool>(val);
+  c10::optional<bool> maybe_value = constant_as<bool>(val);
   return maybe_value && *maybe_value;
 }
 
@@ -188,7 +188,7 @@ void unroll(Node *loop) {
 
   // Change the iteration counts of both loops
   Value* iter_count = loop->inputs().at(0);
-  Value* unrolled_iter_count = graph->insert(aten::div, {iter_count, kUnrollFactor});
+  Value* unrolled_iter_count = graph->insert(aten::floordiv, {iter_count, kUnrollFactor});
   loop->replaceInput(0, unrolled_iter_count);
   loop_epilogue->replaceInput(0, graph->insert(aten::sub, {iter_count, graph->insert(aten::mul,{unrolled_iter_count , kUnrollFactor})}));
 }

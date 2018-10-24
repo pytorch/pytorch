@@ -38,7 +38,7 @@ class CuDNNLRNOp final : public Operator<CUDAContext> {
   cudnnTensorDescriptor_t data_desc_;
   cudnnLRNDescriptor_t norm_desc_;
 
-  vector<TIndex> cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   const int size_;
   const float alpha_;
@@ -80,7 +80,7 @@ class CuDNNLRNGradientOp final : public Operator<CUDAContext> {
   cudnnTensorDescriptor_t data_desc_;
   cudnnLRNDescriptor_t norm_desc_;
 
-  vector<TIndex> cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   const int size_;
   const float alpha_;
@@ -99,7 +99,7 @@ bool CuDNNLRNOp::DoRunWithType() {
   // Reshape tensor descriptors if necessary
   if (X.dims() != cudnn_input_dims_) {
     VLOG(1) << "Setting descriptors";
-    cudnn_input_dims_ = X.dims();
+    cudnn_input_dims_ = X.dims().vec();
     int C = 1, H = 1, W = 1;
     // Normal 4-dimensional tensors for images.
     C = X.dim32(1);
@@ -138,8 +138,8 @@ bool CuDNNLRNOp::RunOnDevice() {
 
   if (X.IsType<float>()) {
     return DoRunWithType<float, float>();
-  } else if (X.IsType<float16>()) {
-    return DoRunWithType<float16, float>();
+  } else if (X.IsType<at::Half>()) {
+    return DoRunWithType<at::Half, float>();
   } else {
     CAFFE_THROW("Unsupported input type");
   }
@@ -155,7 +155,7 @@ bool CuDNNLRNGradientOp::DoRunWithType() {
 
   if (dY.dims() != cudnn_input_dims_) {
     VLOG(1) << "Setting descriptors";
-    cudnn_input_dims_ = dY.dims();
+    cudnn_input_dims_ = dY.dims().vec();
     int C = 1, H = 1, W = 1;
     // Normal 4-dimensional tensors for images.
     C = dY.dim32(1);
@@ -200,8 +200,8 @@ bool CuDNNLRNGradientOp::RunOnDevice() {
 
   if (dY.IsType<float>()) {
     return DoRunWithType<float, float>();
-  } else if (dY.IsType<float16>()) {
-    return DoRunWithType<float16, float>();
+  } else if (dY.IsType<at::Half>()) {
+    return DoRunWithType<at::Half, float>();
   } else {
     CAFFE_THROW("Unsupported input type");
   }
