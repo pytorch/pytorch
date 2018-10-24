@@ -91,6 +91,65 @@ std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n) {
   return out;
 }
 
+std::string getName(NNGraph::NodeRef n) {
+  if (is<NeuralNetData>(n)) {
+    return nn::get<NeuralNetData>(n)->getName();
+  } else if (is<NeuralNetOperator>(n)) {
+    return nn::get<NeuralNetOperator>(n)->getName();
+  }
+  return "Unknown";
+}
+
+void deleteSubgraph(NNModule* nn, NNGraph::SubgraphType& sg) {
+  nn->dataFlow.deleteNodes(sg.getNodes());
+}
+
+void replaceProducer(
+    NNGraph::NodeRef tensorNode,
+    NNGraph::NodeRef newProducer) {
+  assert(
+      is<NeuralNetData>(tensorNode) &&
+      "First argument must contain NeuralNetData");
+  auto inEdges = tensorNode->getInEdges();
+  assert(
+      inEdges.size() == 1 && "Tensor node passed in does not have a producer");
+  auto edge = inEdges.at(0);
+  auto prevProducer = edge->tail();
+  prevProducer->removeOutEdge(edge);
+  edge->setTail(newProducer);
+  newProducer->addOutEdge(edge);
+}
+
+void replaceAllUsesWith(
+    NNGraph::NodeRef oldTensorNode,
+    NNGraph::NodeRef newTensorNode) {
+  const auto edges = oldTensorNode->getOutEdges();
+  for (const auto& edge : edges) {
+    edge->setTail(newTensorNode);
+    oldTensorNode->removeOutEdge(edge);
+    newTensorNode->addOutEdge(edge);
+  }
+}
+
+void replaceAsConsumer(
+    NNGraph::NodeRef oldConsumer,
+    NNGraph::NodeRef newConsumer) {
+  const auto edges = oldConsumer->getInEdges();
+  for (const auto& edge : edges) {
+    edge->setHead(newConsumer);
+    oldConsumer->removeInEdge(edge);
+    newConsumer->addInEdge(edge);
+  }
+}
+
+NNGraph::NodeRef
+createOutput(NNModule* nn, NNGraph::NodeRef producer, std::string name) {
+  auto outputNode =
+      nn->dataFlow.createNode(util::make_unique<nom::repr::Tensor>(name));
+  nn->dataFlow.createEdge(producer, outputNode);
+  return outputNode;
+}
+
 // Get all nodes tracked by CF graph
 static std::unordered_set<repr::NNGraph::NodeRef> getTrackedNodes(
     repr::NNCFGraph& cf) {

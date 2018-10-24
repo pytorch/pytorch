@@ -16,7 +16,7 @@
 #include <cuda.h>
 #endif
 
-#if !defined(__CUDACC__) && !defined(CAFFE2_USE_MINIMAL_GOOGLE_GLOG)
+#if !defined(__CUDACC__) && !defined(C10_USE_MINIMAL_GLOG)
 #include <glog/stl_logging.h>
 
 // Old versions of glog don't declare this using declaration, so help
@@ -26,7 +26,7 @@ namespace std {
 using ::operator<<;
 }
 
-#else // !defined(__CUDACC__) && !defined(CAFFE2_USE_MINIMAL_GOOGLE_GLOG)
+#else // !defined(__CUDACC__) && !defined(C10_USE_MINIMAL_GLOG)
 
 // In the cudacc compiler scenario, we will simply ignore the container
 // printout feature. Basically we need to register a fake overload for

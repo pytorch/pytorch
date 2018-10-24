@@ -2230,7 +2230,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("HasCudaGPU" , ("HasHipGPU", API_CAFFE2)),
     ("__expf" , ("expf", API_CAFFE2)),
     ("CUBLAS_ENFORCE" , ("ROCBLAS_ENFORCE", API_CAFFE2)),
-    ("cublas_handle" , ("rocblas_handle", API_CAFFE2)),
+    ("cublas_handle" , ("rocblashandle", API_CAFFE2)),
     ("CURAND_ENFORCE" ,("HIPRAND_ENFORCE", API_CAFFE2)),
     ("curandGenerateUniform" , ("hiprandGenerateUniform", API_CAFFE2)),
     ("curand_generator" , ("hiprand_generator", API_CAFFE2)),

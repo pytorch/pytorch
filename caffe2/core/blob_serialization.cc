@@ -47,7 +47,7 @@ class StringSerializer : public BlobSerializerBase {
     blob_proto.set_name(name);
     blob_proto.set_type("std::string");
     blob_proto.set_content(*static_cast<const std::string*>(pointer));
-    acceptor(name, blob_proto.SerializeAsString());
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 };
 
@@ -134,7 +134,7 @@ void TensorSerializer::SerializeWithChunkSize(
         tensor, name, blob_proto.mutable_tensor(), chunkStart, chunk_size);
     acceptor(
         c10::str(name, kChunkIdSeparator, chunkStart / chunk_size),
-        blob_proto.SerializeAsString());
+        SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   };
 
 #ifndef __ANDROID__
@@ -542,6 +542,25 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
   }
   context->FinishDeviceComputation();
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// Serialization Helpers
+////////////////////////////////////////////////////////////////////////////////
+
+std::string SerializeAsString_EnforceCheck(
+    const google::protobuf::MessageLite& msg,
+    const char* error_location) {
+  std::string serialize_output;
+  bool result = msg.SerializeToString(&serialize_output);
+  if (!error_location) {
+    CAFFE_ENFORCE(result, "protobuf::SerializeToString failed");
+  } else {
+    CAFFE_ENFORCE(result,
+        "protobuf::SerializeToString failed for ", error_location);
+  }
+  return serialize_output;
+}
+
 
 namespace {
 // Serialize Tensor
