@@ -20,7 +20,7 @@ def _glu_old_input(draw):
     # The axis dimension must be divisible by two
     axis_dim = 2 * draw(st.integers(min_value=1, max_value=2))
     dims.insert(axis, axis_dim)
-    X = draw(arrays(dims, np.float32, None))
+    X = draw(st.arrays(dims, np.float32, None))
     return (X, axis)
 
 
