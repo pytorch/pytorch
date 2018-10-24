@@ -381,7 +381,7 @@ class IndexSerializer : public BlobSerializerBase {
     os << base->maxElements() << " " << base->isFrozen();
     blob_proto.set_content(os.str());
 
-    acceptor(name, blob_proto.SerializeAsString());
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 
  private:

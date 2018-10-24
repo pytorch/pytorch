@@ -182,7 +182,15 @@ void addNomnigraphMethods(pybind11::module& m) {
                 "Edges must exist between NeuralNetOperator and NeuralNetData");
             g->createEdge(a, b);
           })
-
+      .def("deleteEdge", &NNGraph::deleteEdge)
+      .def(
+          "deleteEdge",
+          [](NNGraph* g, NNGraph::NodeRef a, NNGraph::NodeRef b) {
+            auto edge = g->getEdgeIfExists(a, b);
+            if (edge) {
+              g->deleteEdge(edge);
+            }
+          })
       .def(
           "createNode",
           [](NNGraph* g, GenericOperator& op) {
@@ -217,6 +225,11 @@ void addNomnigraphMethods(pybind11::module& m) {
           },
           py::return_value_policy::reference_internal)
       .def("deleteNode", &NNGraph::deleteNode)
+      .def(
+          "replaceNode",
+          [](NNGraph* g, NNGraph::NodeRef old_node, NNGraph::NodeRef new_node) {
+            g->replaceNode(old_node, new_node);
+          })
       .def(
           "getMutableNodes",
           &NNGraph::getMutableNodes,
