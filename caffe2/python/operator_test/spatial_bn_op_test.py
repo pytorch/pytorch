@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import brew, core, workspace
+import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python.model_helper import ModelHelper
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -13,11 +14,6 @@ from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
 import unittest
-
-
-def _run_in_hip(gc, dc):
-    return (gc.device_type == caffe2_pb2.HIP) or (
-        caffe2_pb2.HIP in {d.device_type for d in dc})
 
 
 class TestSpatialBN(serial.SerializedTestCase):
@@ -35,7 +31,7 @@ class TestSpatialBN(serial.SerializedTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, engine, gc, dc):
         # Currently MIOPEN SpatialBN only supports 2D
-        if _run_in_hip(gc, dc) and engine != "":
+        if hiputl.run_in_hip(gc, dc) and engine != "":
             return
         op = core.CreateOperator(
             "SpatialBN",
@@ -86,7 +82,7 @@ class TestSpatialBN(serial.SerializedTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, engine, gc, dc):
         # Currently MIOPEN SpatialBN only supports 2D
-        if _run_in_hip(gc, dc) and engine != "":
+        if hiputl.run_in_hip(gc, dc) and engine != "":
             return
         op = core.CreateOperator(
             "SpatialBN",
@@ -133,7 +129,7 @@ class TestSpatialBN(serial.SerializedTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, engine, gc, dc):
         # Currently HIP SpatialBN only supports NCHW
-        if _run_in_hip(gc, dc) and (order != 'NCHW'):
+        if hiputl.run_in_hip(gc, dc) and (order != 'NCHW'):
             return
 
         op = core.CreateOperator(
@@ -183,7 +179,7 @@ class TestSpatialBN(serial.SerializedTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             momentum, inplace, engine, gc, dc):
         # Currently HIP SpatialBN only supports NCHW
-        if _run_in_hip(gc, dc) and (order != 'NCHW'):
+        if hiputl.run_in_hip(gc, dc) and (order != 'NCHW'):
             return
 
         op = core.CreateOperator(
@@ -224,7 +220,7 @@ class TestSpatialBN(serial.SerializedTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             momentum, engine, gc, dc):
         # Currently HIP SpatialBN only supports NCHW
-        if _run_in_hip(gc, dc) and (order != 'NCHW'):
+        if hiputl.run_in_hip(gc, dc) and (order != 'NCHW'):
             return
 
         op = core.CreateOperator(
@@ -264,7 +260,7 @@ class TestSpatialBN(serial.SerializedTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             momentum, engine, gc, dc):
         # Currently MIOPEN SpatialBN only supports 2D
-        if _run_in_hip(gc, dc) and engine != "":
+        if hiputl.run_in_hip(gc, dc) and engine != "":
             return
         op = core.CreateOperator(
             "SpatialBN",

@@ -8,14 +8,11 @@ import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
+import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
 
 import unittest
 import os
-
-def _run_in_hip(gc, dc):
-    return (gc.device_type == caffe2_pb2.HIP) or (
-        caffe2_pb2.HIP in {d.device_type for d in dc})
 
 class TestGroupConvolution(hu.HypothesisTestCase):
 
@@ -40,7 +37,7 @@ class TestGroupConvolution(hu.HypothesisTestCase):
             order, engine, use_bias, gc, dc):
         assume(size >= kernel)
 
-        if _run_in_hip(gc, dc):
+        if hiputl.run_in_hip(gc, dc):
             if order == "NHWC":
                 assume(group == 1 and engine != "CUDNN")
         else:

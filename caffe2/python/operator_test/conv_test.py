@@ -11,6 +11,7 @@ import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import brew, core, workspace
+import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python.model_helper import ModelHelper
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -18,10 +19,6 @@ import caffe2.python._import_c_extension as C
 
 import unittest
 import os
-
-def _run_in_hip(gc, dc):
-    return (gc.device_type == caffe2_pb2.HIP) or (
-        caffe2_pb2.HIP in {d.device_type for d in dc})
 
 def _cudnn_supports(
         dilation=False,
@@ -216,7 +213,7 @@ class TestConvolution(serial.SerializedTestCase):
         dkernel = dilation * (kernel - 1) + 1
 
         if engine == 'CUDNN':
-            if _run_in_hip(gc, dc):
+            if hiputl.run_in_hip(gc, dc):
                 assume((order == "NCHW") and not (dilation > 1 and group > 1))
             else:
                 assume(_cudnn_supports(dilation=(dilation > 1),
@@ -467,7 +464,7 @@ class TestConvolution(serial.SerializedTestCase):
 
         for order in ["NCHW", "NHWC"]:
             engine_list = ['']
-            if _run_in_hip(gc, dc):
+            if hiputl.run_in_hip(gc, dc):
                 if order == 'NCHW':
                     engine_list.append('MIOPEN')
             else:
@@ -659,7 +656,7 @@ class TestConvolution(serial.SerializedTestCase):
     def test_1x1_conv(self, op_type, N, G, DX, DY, H, W, use_bias, order,
                       force_algo_fwd, force_algo_dgrad,
                       force_algo_wgrad, gc, dc):
-        if _run_in_hip(gc, dc):
+        if hiputl.run_in_hip(gc, dc):
             assume(order == "NCHW")
         if order == "NHWC":
             G = 1
