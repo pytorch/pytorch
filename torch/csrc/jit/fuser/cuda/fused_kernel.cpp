@@ -2,9 +2,13 @@
 
 #include "ATen/cuda/CUDAContext.h"
 #include "THC/THC.h"
-#include "THC/THCGenerator.hpp"
 #include "torch/csrc/cuda/cuda_check.h"
 #include "torch/csrc/jit/resource_guard.h"
+
+// Note: unclear why this forward declaration is necessary
+#include "THC/THCTensorRandom.h"
+#include "THC/THCGenerator.hpp"
+THCGenerator* THCRandom_getGenerator(THCState* state);
 
 #include "nvrtc.h"
 #include "cuda.h"
@@ -45,7 +49,6 @@ FusedKernelCUDA::FusedKernelCUDA(
   TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
   checkCUDAVersion(prop);
 
-  
   nvrtcProgram program;
   TORCH_NVRTC_CHECK(nvrtcCreateProgram(
     &program
@@ -91,30 +94,50 @@ FusedKernelCUDA::FusedKernelCUDA(
   maxBlocks *= prop.multiProcessorCount;
 }
 
-void FusedKernelCUDA::launch_raw(uint32_t numel, void** arguments) {
-  int numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
+static int ceilDiv(const int a, const int b) {
+  return (a + b - 1) / b;
+}
 
-     //std::cout << "maxBlocks = " << maxBlocks << " needed blocks: " << ceilDiv(numel,blockSize)
-     //          << " numblocks =  " << numBlocks;
+static uint64_t get_rand_offset(
+  const uint32_t numel
+, const int maxBlocks
+, const int blockSize) {
+  const auto numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
+  return 4 * (ceil(numel / (4.0 * blockSize * numBlocks)) + 1);
+}
 
-     // it is possible that this is the first cuda call on this thread
-     // so make sure we initialize the Driver API's context
-     // cudaFree(0) accomplishes this.
-     CUcontext pctx = 0;
-     TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));
-     if (!pctx) {
-        std::unique_lock<std::mutex> cudaFreeMutexLock(
-            *(THCCachingAllocator_getCudaFreeMutex()));
-        cudaFree(0);
-     }
-     auto stream = at::cuda::getCurrentCUDAStream();
-     TORCH_CU_CHECK(cuLaunchKernel(
-       function,
-       numBlocks, 1, 1,
-       blockSize, 1, 1,
-       0, stream,
-       arguments,
-       nullptr));
+void FusedKernelCUDA::launch_raw(
+  const uint32_t numel
+, std::vector<void*> arguments) const {
+  // Adds random state to arguments if necessary
+  if (has_random_) {
+    auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
+    uint64_t offset =
+        gen_->state.philox_seed_offset.fetch_add(get_rand_offset(numel, maxBlocks, blockSize));
+    arguments.push_back(&gen_->state.initial_seed);
+    arguments.push_back(&offset);
+  }
+
+  const auto numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
+
+  // it is possible that this is the first cuda call on this thread
+  // so make sure we initialize the Driver API's context
+  // cudaFree(0) accomplishes this.
+  CUcontext pctx = 0;
+  TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));
+  if (!pctx) {
+    std::unique_lock<std::mutex> cudaFreeMutexLock(
+        *(THCCachingAllocator_getCudaFreeMutex()));
+    cudaFree(0);
+  }
+  auto stream = at::cuda::getCurrentCUDAStream();
+  TORCH_CU_CHECK(cuLaunchKernel(
+    function,
+    numBlocks, 1, 1,
+    blockSize, 1, 1,
+    0, stream,
+    arguments.data(),
+    nullptr));
 }
 
 } // namespace cuda

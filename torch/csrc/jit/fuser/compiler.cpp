@@ -144,7 +144,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   }
   JIT_ASSERT(scalar_type);
 
-  // Creates annotated graph
+  // Creates output descriptions
   std::vector<TensorDesc> output_desc;
   for (const Value* output : (spec.graph())->outputs()) {
     std::vector<int64_t> sizes = map_size;

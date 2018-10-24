@@ -5,7 +5,6 @@
 #include "torch/csrc/jit/fuser/cpu/config.h"
 #include "torch/csrc/jit/fuser/cpu/temp_file.h"
 #include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
-#include "torch/csrc/jit/fuser/common/annotated_graph.h"
 
 #include <sstream>
 #include <cstdlib>

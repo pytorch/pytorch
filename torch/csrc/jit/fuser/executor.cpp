@@ -9,6 +9,7 @@
 #include "torch/csrc/jit/fuser/kernel_cache.h"
 #include "torch/csrc/jit/fuser/kernel_spec.h"
 #include "torch/csrc/jit/fuser/compiler.h"
+#include "torch/csrc/jit/fuser/common/tensor_info.h"
 
 #include <vector>
 #include <tuple>
@@ -110,23 +111,177 @@ static void expandArgs(
   }
 }
 
-// void launchFusion(
-//   const FusedKernel& fusion
-// , const int device
-// , const at::ArrayRef<at::Tensor>& inputs
-// , std::vector<at::Tensor>& outputs) {
-//   // Switches to device to run the fusion on
-//   at::DeviceGuard guard{device};
-     
-     // Allocates tensors for outputs
-//   auto& ref_type = inputs[0].type();
-//   outputs.reserve(output_desc_.size());
-//   for (const auto& od : output_desc_) {
-//     outputs.push_back(at::empty({0}, ref_type.options().dtype(od.scalar_type)));
-//   }
+// Note: assumes that inputs are 32-bit addressable
+static uint32_t computeNumel(const at::ArrayRef<int64_t>& sizes) {
+  uint32_t result = 1;
 
-      //TODO: launch_with_tensors here
-// }
+  // Short-circuits if scalar tensor
+  if (sizes.size() == 0) return 1;
+  
+  for (const auto& size : sizes) 
+    result *= size;
+  return result;
+}
+
+// Note: Assumes that after at::chunk, all inputs are the same size
+static std::vector<int64_t> computeMapSize(
+  const at::Tensor& tensor
+, const PartitionDesc& chunkDesc) {
+  std::vector<int64_t> sizes(tensor.sizes().begin(), tensor.sizes().end());
+  // Should have been checked in graph fuser
+  JIT_ASSERT(sizes[chunkDesc.dim] % chunkDesc.nSubtensors == 0);
+  sizes[chunkDesc.dim] /= chunkDesc.nSubtensors;
+  return sizes;
+}
+
+// Tries to compress sizes and strides according to cont. Emits the result t
+// c_sizes, c_strides and throws an error on failure (if can't compress)
+static void compressContiguous(
+  const at::IntList& sizes
+, const at::IntList& strides
+, const std::vector<bool>& cont
+, uint32_t* c_sizes
+, uint32_t* c_strides) {
+  size_t compressed_dims = 0;
+  size_t cur = 0;
+  size_t ndim = sizes.size();
+  while (cur < ndim) {
+    size_t total_size = sizes[cur];
+    cur++;
+    while (cont[cur-1] && cur < ndim) {
+      JIT_ASSERT(strides[cur-1] == sizes[cur]*strides[cur]);
+      total_size *= sizes[cur];
+      cur++;
+    }
+    c_sizes[compressed_dims] = total_size;
+    c_strides[compressed_dims] = strides[cur-1];
+    compressed_dims++;
+  }
+  if (ndim > 0) {
+    JIT_ASSERT(!cont.back() || strides.back() == 1);
+  }
+}
+
+void launchFusion(
+  const FusedKernel& fusion
+, const int device
+, const at::ArrayRef<at::Tensor>& inputs
+, std::vector<at::Tensor>& outputs) {
+  // Switches to device to run the fusion on
+  at::DeviceGuard guard{device};
+     
+  // Allocates tensors for outputs
+  auto& ref_type = inputs[0].type();
+  outputs.reserve(fusion.output_desc_.size());
+  for (const auto& od : fusion.output_desc_) {
+    outputs.push_back(at::empty({0}, ref_type.options().dtype(od.scalar_type)));
+  }
+
+  // Fails if fusion and given inputs disagree
+  JIT_ASSERT(inputs.size() == fusion.input_desc_.size());
+
+  // Computes number of flattened inputs and outputs
+  size_t flat_inputs_size = 0;
+  size_t flat_outputs_size = 0;
+  for (const auto& c : fusion.chunk_desc_)
+    flat_inputs_size += c.nSubtensors;
+  for (const auto& c : fusion.concat_desc_)
+    flat_outputs_size += c.nSubtensors;
+  
+  // Fails if the elements of the first (any) tensor are not expressable as 
+  // a 32-bit integer.
+  // Note: this code assumes that inputs are 32-bit addressable
+  // Note: this code assumes that all inputs are of the same size
+  JIT_ASSERT(inputs[0].numel() <= std::numeric_limits<uint32_t>::max());
+
+  // Computes map_size, numel from the first input
+  at::IntList map_size;
+  uint32_t numel;
+  std::vector<int64_t> keep_alive_size;
+  if (fusion.chunk_desc_[0].isNoop()) {
+    map_size = inputs[0].sizes();
+    numel = inputs[0].numel();
+  } else {
+    keep_alive_size = computeMapSize(inputs[0], fusion.chunk_desc_[0]);
+    map_size = keep_alive_size;
+    numel = computeNumel(map_size);
+  }
+
+  // Computes the storage needed to store TensorInfo structs for inputs and outputs.
+  size_t uncompressedDim = fusion.input_desc_.at(0).contiguity.size();
+  size_t maxPossibleTensorInfoSize = sizeof(TensorInfo) + 2 * sizeof(uint32_t) * uncompressedDim;
+  size_t maxPossibleBufferSize = maxPossibleTensorInfoSize * (flat_inputs_size + flat_outputs_size);
+  std::vector<char> buffer(maxPossibleBufferSize);
+  char* buffer_next = buffer.data();
+
+  // A vector of arguments to the kernel (numel, *input_desc_s, *output_desc_s)
+  std::vector<void*> arguments;
+  arguments.reserve(3 + flat_inputs_size + flat_outputs_size);
+  auto addTensorInfoRaw = [&](
+    const TensorDesc& desc
+  , void* data_ptr
+  , at::IntList sizes
+  , at::IntList strides) {
+    const auto nDim = desc.nDim(); // NOTE: this is the compressed dim
+    JIT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
+    auto ti = reinterpret_cast<TensorInfo*>(buffer_next);
+    ti->data = data_ptr;
+    compressContiguous(
+      sizes
+    , strides
+    , desc.contiguity
+    , ti->sizes(nDim)
+    , ti->strides(nDim));
+    buffer_next += maxPossibleTensorInfoSize;
+    arguments.push_back(ti);
+  };
+
+  // Asserts that t's dims can be compressed in the same way as in desc
+  // (that's what the kernel assumes), and appends it to the arguments vector.
+  auto addTensorInfo = [&](const TensorDesc& desc, const at::Tensor& t) {
+    addTensorInfoRaw(desc, t.data_ptr(), t.sizes(), t.strides());
+  };
+
+  arguments.push_back(&numel);
+  for (size_t i = 0; i < fusion.input_desc_.size(); ++i) {
+    const auto& chunk = fusion.chunk_desc_[i];
+    const at::Tensor& tensor = inputs[i];
+    if (chunk.isNoop()) {
+      addTensorInfo(fusion.input_desc_[i], tensor);
+    } else {
+      size_t chunk_offset = map_size[chunk.dim] * tensor.stride(chunk.dim) * elementSize(tensor.type().scalarType());
+      char* data_ptr = reinterpret_cast<char*>(tensor.data_ptr());
+      for (size_t chunks = 0; chunks < chunk.nSubtensors; ++chunks) {
+        addTensorInfoRaw(*chunk.subtensorDesc, data_ptr, map_size, tensor.strides());
+        data_ptr += chunk_offset;
+      }
+    }
+  }
+  for (size_t i = 0; i < fusion.output_desc_.size(); ++i) {
+    const auto& c = fusion.concat_desc_[i];
+    auto& o = outputs[i];
+    if (c.isNoop()) {
+      o.resize_(map_size);
+      addTensorInfo(fusion.output_desc_[i], outputs[i]);
+    } else {
+      size_t small_size = map_size[c.dim];
+      std::vector<int64_t> concat_size(map_size.begin(), map_size.end());
+      concat_size[c.dim] = small_size * c.nSubtensors;
+      o.resize_(concat_size);
+      size_t offset = 0;
+      for (size_t j = 0; j < c.nSubtensors; ++j) {
+        // because the concatenated_output stays live, the underlying data
+        // in this view remains live through the end of this function
+        // so there is not need to hold onto this tensor
+        const auto view = o.narrow(c.dim, offset, small_size);
+        addTensorInfo(*c.subtensorDesc, view);
+        offset += small_size;
+      }
+    }
+  }
+
+  fusion.launch_raw(numel, arguments);
+}
 
 
 void runFusion(
@@ -177,9 +332,11 @@ void runFusion(
   if (!maybe_kernel)
     throw std::runtime_error("Failed to find cached fused kernel.");
 
-  // Launches the kernel
+  // Launches fusion
   std::vector<at::Tensor> outputs;
-  (*maybe_kernel)->launch(inputs, outputs);
+  launchFusion(*(*maybe_kernel), device, inputs, outputs);
+
+  // Updates stack
   drop(stack, spec.nInputs());
   stack.insert(
     stack.end()

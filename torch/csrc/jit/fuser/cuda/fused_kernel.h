@@ -4,7 +4,6 @@
 
 #include "ATen/ATen.h"
 #include "torch/csrc/jit/fuser/common/fused_kernel.h"
-#include "torch/csrc/jit/fuser/common/annotated_graph.h"
 
 #include "nvrtc.h"
 #include "cuda.h"
@@ -31,22 +30,15 @@ struct FusedKernelCUDA : public ::torch::jit::fuser::FusedKernel {
     cuModuleUnload(module);
   }
 
-protected:
+  virtual void launch_raw(
+    const uint32_t numel
+  , std::vector<void*> arguments) const override;
+
   virtual at::Backend backend() const override {
     return at::Backend::CUDA;
   }
 
-  int ceilDiv(int a, int b) {
-    return (a + b - 1) / b;
-  }
-
-  virtual uint64_t get_rand_offset(uint32_t numel) override {
-     int numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
-     return 4 * (ceil(numel / (4.0 * blockSize * numBlocks)) + 1);
-  }
-
-  virtual void launch_raw(uint32_t numel, void ** arguments) override;
-
+private:
   std::vector<char> ptx;
   CUmodule module;
   CUfunction function;

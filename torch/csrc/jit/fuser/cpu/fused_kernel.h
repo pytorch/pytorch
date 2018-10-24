@@ -6,7 +6,6 @@
 #include "torch/csrc/jit/fuser/cpu/config.h"
 #include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
 #include "torch/csrc/jit/fuser/common/fused_kernel.h"
-#include "torch/csrc/jit/fuser/common/annotated_graph.h"
 
 #include <string>
 #include <cstdint>
@@ -25,19 +24,17 @@ struct FusedKernelCPU : public ::torch::jit::fuser::FusedKernel {
   , const std::vector<PartitionDesc> _concat_desc
   , const bool _has_random);
 
-protected:
   virtual at::Backend backend() const override {
     return at::Backend::CPU;
   }
 
-  virtual uint64_t get_rand_offset(uint32_t numel) override {
-    return numel;
+  virtual void launch_raw(
+    const uint32_t numel
+  , std::vector<void*> arguments) const override {
+    kernel(numel, arguments.data());
   }
 
-  virtual void launch_raw(uint32_t numel, void** arguments) override {
-    kernel(numel, arguments);
-  }
-
+private:
   std::unique_ptr<DynamicLibrary> so_lib;
   void (*kernel)(uint32_t, void**) = nullptr;
 };
