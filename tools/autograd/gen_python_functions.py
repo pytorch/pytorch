@@ -19,8 +19,7 @@ except ImportError:
 SKIP_PYTHON_BINDINGS = [
     'alias', 'contiguous', 'is_cuda', 'is_sparse', 'size', 'stride',
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
-    '.*_forward_out', '_unsafe_view', 'tensor',
-    'sparse_coo_tensor', 'th_sparse_coo_tensor', 'native_sparse_coo_tensor',
+    '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_sparse_add.*', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
     'index',

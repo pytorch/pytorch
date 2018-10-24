@@ -28,7 +28,7 @@ void get_operator_from_registry_and_execute() {
   AT_ASSERT(ops.size() == 1);
 
   auto& op = ops.front();
-  AT_ASSERT(op->schema().name == "custom::op");
+  AT_ASSERT(op->schema().name() == "custom::op");
 
   torch::jit::Stack stack;
   torch::jit::push(stack, torch::ones(5), 2.0, 3);
