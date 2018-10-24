@@ -353,7 +353,7 @@ __global__ void batch_norm_backward_kernel(
   // 2. DotProduct(input - mean, grad_output)
   GradOp<scalar_t, accscalar_t, PackedTensorAccessor<scalar_t, 3, DefaultPtrTraits, index_t>> g(mean, input, grad_output);
   Float2<scalar_t, accscalar_t> res = reduce<Float2<scalar_t, accscalar_t>, GradOp<scalar_t, accscalar_t,
-										   PackedTensorAccessor<scalar_t, 3, DefaultPtrTraits, index_t>>>(g, grad_output, plane);
+                                                                                   PackedTensorAccessor<scalar_t, 3, DefaultPtrTraits, index_t>>>(g, grad_output, plane);
   accscalar_t grad_output_sum = res.v1;
   accscalar_t dot_p = res.v2;
 
@@ -400,8 +400,8 @@ static PackedTensorAccessor<scalar_t, dim, PtrTraits, index_t> packed_accessor_o
 
 template<typename scalar_t, typename index_t>
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_, const Tensor& weight_, const Tensor& bias_,
-							    const Tensor& running_mean_, const Tensor& running_var_,
-							    bool train, double momentum, double epsilon) {
+                                                            const Tensor& running_mean_, const Tensor& running_var_,
+                                                            bool train, double momentum, double epsilon) {
 
   using accscalar_t = at::acc_type<scalar_t, true>;
   int64_t n_input = input_.size(1);
@@ -438,10 +438,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
   // and good occupancy. Quiet likely, we could go with even more blocks than 1024.
   // The various planes are independent, so we use blocks for them.
   int tf = std::max<int>(getNumThreads(input.size(2)/4),
-			 std::min<int>(getNumThreads(input.size(2)), 64));
+                         std::min<int>(getNumThreads(input.size(2)), 64));
   int tb = std::max<int>(64/tf, 1);
   dim3 blocks_trans(input.size(1), std::max<int>(1, std::min<int>((256*1024)/input.size(1),
-								  (input.size(0)+tb-1)/tb)));
+                                                                  (input.size(0)+tb-1)/tb)));
   dim3 threads_trans(tf, tb);
   if (!train) {
     batch_norm_transform_input_kernel<scalar_t, accscalar_t, false, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
@@ -463,8 +463,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
 
 template<typename scalar_t, typename index_t>
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tensor& grad_out_, const Tensor& input_, const Tensor& weight_,
-								     const Tensor& running_mean_, const Tensor& running_var_, const Tensor& save_mean_, const Tensor& save_invstd_,
-								     bool train, double epsilon, std::array<bool,3> grad_input_mask) {
+                                                                     const Tensor& running_mean_, const Tensor& running_var_, const Tensor& save_mean_, const Tensor& save_invstd_,
+                                                                     bool train, double epsilon, std::array<bool,3> grad_input_mask) {
 
   using accscalar_t = at::acc_type<scalar_t, true>;
   Tensor grad_input_;
@@ -512,23 +512,23 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
 } // anonymous namespace
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const Tensor& weight, const Tensor& bias,
-						   const Tensor& running_mean, const Tensor& running_var, bool train, double momentum, double epsilon) {
+                                                   const Tensor& running_mean, const Tensor& running_var, bool train, double momentum, double epsilon) {
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "batch_norm", [&] {
       if (cuda::detail::canUse32BitIndexMath(self)) {
-	return batch_norm_cuda_template<scalar_t, int32_t>(self, weight, bias, running_mean, running_var, train, momentum, epsilon);
+        return batch_norm_cuda_template<scalar_t, int32_t>(self, weight, bias, running_mean, running_var, train, momentum, epsilon);
       } else {
-	return batch_norm_cuda_template<scalar_t, int64_t>(self, weight, bias, running_mean, running_var, train, momentum, epsilon);
+        return batch_norm_cuda_template<scalar_t, int64_t>(self, weight, bias, running_mean, running_var, train, momentum, epsilon);
       }
     });
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_out, const Tensor& self, const Tensor& weight, const Tensor& running_mean, const Tensor& running_var,
-							    const Tensor& save_mean, const Tensor& save_invstd, bool train, double epsilon, std::array<bool,3> grad_input_mask) {
+                                                            const Tensor& save_mean, const Tensor& save_invstd, bool train, double epsilon, std::array<bool,3> grad_input_mask) {
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "batch_norm_backward", [&] {
       if (cuda::detail::canUse32BitIndexMath(self)) {
-	return batch_norm_backward_cuda_template<scalar_t, int32_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, epsilon, grad_input_mask);
+        return batch_norm_backward_cuda_template<scalar_t, int32_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, epsilon, grad_input_mask);
       } else {
-	return batch_norm_backward_cuda_template<scalar_t, int64_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, epsilon, grad_input_mask);
+        return batch_norm_backward_cuda_template<scalar_t, int64_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, epsilon, grad_input_mask);
       }
     });
 }
