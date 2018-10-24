@@ -45,6 +45,8 @@ namespace c10 {
   _(prim, Starred)                 \
   _(prim, TupleConstruct)          \
   _(prim, TupleUnpack)             \
+  _(prim, TupleIndex)              \
+  _(prim, TupleSlice)              \
   _(prim, ListConstruct)           \
   _(prim, ListUnpack)              \
   _(prim, BoolToTensor)            \
@@ -122,7 +124,8 @@ namespace c10 {
   _(attr, transB)                  \
   _(attr, name)                    \
   _(attr, a)                       \
-  _(attr, b)
+  _(attr, b)                       \
+  _(attr, beg)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
@@ -277,5 +280,3 @@ struct hash<c10::Symbol> {
   }
 };
 }
-
-
