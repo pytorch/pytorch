@@ -13,25 +13,30 @@ import numpy as np
 import unittest
 
 
+@st.composite
+def _glu_old_input(draw):
+    dims = draw(st.lists(st.integers(min_value=1, max_value=5), min_size=1, max_size=3))
+    axis = draw(st.integers(min_value=0, max_value=len(dims)))
+    # The axis dimension must be divisible by two
+    axis_dim = 2 * draw(st.integers(min_value=1, max_value=2))
+    dims.insert(axis, axis_dim)
+    X = draw(hu.arrays(dims, np.float32, None))
+    return (X, axis)
+
+
 class TestGlu(serial.SerializedTestCase):
-    # Suppress filter_too_much health check.
-    # Reproduce by commenting @settings and uncommenting @seed.
-    # @seed(302934307671667531413257853548643485645)
-    @settings(suppress_health_check=[HealthCheck.filter_too_much])
     @serial.given(
-        X=hu.tensor(),
-        axis=st.integers(min_value=0, max_value=3),
+        X_axis=_glu_old_input(),
         **hu.gcs
     )
-    def test_glu_old(self, X, axis, gc, dc):
+    def test_glu_old(self, X_axis, gc, dc):
+        X, axis = X_axis
+
         def glu_ref(X):
             x1, x2 = np.split(X, [X.shape[axis] // 2], axis=axis)
             Y = x1 * (1. / (1. + np.exp(-x2)))
             return [Y]
 
-        # Test only valid tensors.
-        assume(axis < X.ndim)
-        assume(X.shape[axis] % 2 == 0)
         op = core.CreateOperator("Glu", ["X"], ["Y"], dim=axis)
         self.assertReferenceChecks(gc, op, [X], glu_ref)
 
