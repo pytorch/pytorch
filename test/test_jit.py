@@ -3403,7 +3403,7 @@ a")
             if True:
                 x = [1, 2, 3]
             return
-        with self.assertRaisesRegex(RuntimeError, "previously has type Tensor\[\]"):
+        with self.assertRaisesRegex(RuntimeError, r"previously has type Tensor\[\]"):
             self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
@@ -5967,7 +5967,7 @@ a")
             def f4(a):
                 torch.cat(a)
 
-        with self.assertRaisesRegex(RuntimeError, 'argument \'tensors\' but found int\[\]'):
+        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but found int\[\]'):
             @torch.jit.script
             def f5(a):
                 torch.cat([3])
@@ -6295,7 +6295,7 @@ a")
                     return x
 
     def test_for_range_no_arg(self):
-        with self.assertRaisesRegex(RuntimeError, 'range\(\) expects 1 argument but got 0'):
+        with self.assertRaisesRegex(RuntimeError, r'range\(\) expects 1 argument but got 0'):
             @torch.jit.script
             def range_no_arg(x):
                 for i in range():
@@ -8836,21 +8836,21 @@ class TestCustomOperators(JitTestCase):
     def test_passing_too_many_args(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "aten::relu\(\) expected at most 1 argument\(s\) but received 2 argument\(s\)"
+            r"aten::relu\(\) expected at most 1 argument\(s\) but received 2 argument\(s\)"
         ):
             torch.ops.aten.relu(1, 2)
 
     def test_passing_too_few_args(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "aten::relu\(\) is missing value for argument 'self'."
+            r"aten::relu\(\) is missing value for argument 'self'."
         ):
             torch.ops.aten.relu()
 
     def test_passing_one_positional_but_not_the_second(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "aten::transpose\(\) is missing value for argument 'dim0'."
+            r"aten::transpose\(\) is missing value for argument 'dim0'."
         ):
             torch.ops.aten.transpose(torch.ones(5, 5))
 
