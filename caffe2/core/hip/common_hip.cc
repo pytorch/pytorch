@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <sstream>
+#include <iostream>
 
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
