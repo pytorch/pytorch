@@ -254,7 +254,9 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(PRelu, PReluOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(PReluGradient, PReluGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    PReluGradient,
+    PReluGradientOp<float, CPUContext>);
 
 // Input: X, Slope, output: Y
 OPERATOR_SCHEMA(PRelu)
@@ -335,7 +337,7 @@ Y:
     .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
-OPERATOR_SCHEMA(PReluGradient).NumInputs(4).NumOutputs(2).SetDoc(R"DOC(
+GRADIENT_OPERATOR_SCHEMA(PReluGradient).NumInputs(4).NumOutputs(2).SetDoc(R"DOC(
 
 PReluGradient takes both Y and dY and uses this to update dX and dW according
 to the chain rule and derivatives of the rectified linear function.
