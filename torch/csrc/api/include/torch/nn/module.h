@@ -72,11 +72,12 @@ namespace nn {
 class Module {
  public:
   /// Tells the base `Module` about the name of the submodule.
-  /// If the `name` is empty, constructs the module without immediate knowledge
-  /// of the submodule's name. The name of the submodule is inferred via RTTI
-  /// (if possible) the first time
-  /// `.name()` is invoked.
-  explicit Module(std::string name = std::string());
+  explicit Module(std::string name);
+
+  /// Constructs the module without immediate knowledge of the submodule's name.
+  /// The name of the submodule is inferred via RTTI (if possible) the first
+  /// time `.name()` is invoked.
+  Module();
 
   virtual ~Module() = default;
 
