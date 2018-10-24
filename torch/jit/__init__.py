@@ -652,7 +652,8 @@ def script_method(fn, _rcb=None):
 
 def _try_get_weak_module(mod):
     """
-    Get the WeakScriptModuleProxy corresponding to mod if it exists
+    Get the WeakScriptModuleProxy corresponding to mod if it exists or generate
+    it if mod's type is a weak module type
     """
     if mod in _weak_modules:
         return _weak_modules.get(mod)
