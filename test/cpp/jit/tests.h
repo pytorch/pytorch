@@ -16,6 +16,15 @@
   } catch (const std::exception& e) {                                    \
     ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
   }
+#define ASSERT_ANY_THROW(statement)                                      \
+  bool threw = false;                                                    \
+  try {                                                                  \
+    (void)statement;                                                     \
+  } catch (const std::exception& e) {                                    \
+    threw = true;                                                        \
+  }                                                                      \
+  ASSERT_TRUE(threw);                                                    \
+
 #endif // defined(USE_GTEST)
 
 #include "torch/csrc/autograd/variable.h"
@@ -930,15 +939,15 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::bar");
+    ASSERT_EQ(op->schema().name(), "foo::bar");
 
-    ASSERT_EQ(op->schema().arguments.size(), 2);
-    ASSERT_EQ(op->schema().arguments[0].name, "_0");
-    ASSERT_EQ(op->schema().arguments[0].type->kind(), TypeKind::FloatType);
-    ASSERT_EQ(op->schema().arguments[1].name, "_1");
-    ASSERT_EQ(op->schema().arguments[1].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().arguments().size(), 2);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "_0");
+    ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
+    ASSERT_EQ(op->schema().arguments()[1].name(), "_1");
+    ASSERT_EQ(op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
 
-    ASSERT_EQ(op->schema().returns[0].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -958,16 +967,16 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::bar_with_schema");
+    ASSERT_EQ(op->schema().name(), "foo::bar_with_schema");
 
-    ASSERT_EQ(op->schema().arguments.size(), 2);
-    ASSERT_EQ(op->schema().arguments[0].name, "a");
-    ASSERT_EQ(op->schema().arguments[0].type->kind(), TypeKind::FloatType);
-    ASSERT_EQ(op->schema().arguments[1].name, "b");
-    ASSERT_EQ(op->schema().arguments[1].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().arguments().size(), 2);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "a");
+    ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
+    ASSERT_EQ(op->schema().arguments()[1].name(), "b");
+    ASSERT_EQ(op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
 
-    ASSERT_EQ(op->schema().returns.size(), 1);
-    ASSERT_EQ(op->schema().returns[0].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().returns().size(), 1);
+    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -989,22 +998,22 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::lists");
+    ASSERT_EQ(op->schema().name(), "foo::lists");
 
-    ASSERT_EQ(op->schema().arguments.size(), 3);
-    ASSERT_EQ(op->schema().arguments[0].name, "ints");
+    ASSERT_EQ(op->schema().arguments().size(), 3);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "ints");
     ASSERT_TRUE(
-        op->schema().arguments[0].type->isSubtypeOf(ListType::ofInts()));
-    ASSERT_EQ(op->schema().arguments[1].name, "floats");
+        op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofInts()));
+    ASSERT_EQ(op->schema().arguments()[1].name(), "floats");
     ASSERT_TRUE(
-        op->schema().arguments[1].type->isSubtypeOf(ListType::ofFloats()));
-    ASSERT_EQ(op->schema().arguments[2].name, "tensors");
+        op->schema().arguments()[1].type()->isSubtypeOf(ListType::ofFloats()));
+    ASSERT_EQ(op->schema().arguments()[2].name(), "tensors");
     ASSERT_TRUE(
-        op->schema().arguments[2].type->isSubtypeOf(ListType::ofTensors()));
+        op->schema().arguments()[2].type()->isSubtypeOf(ListType::ofTensors()));
 
-    ASSERT_EQ(op->schema().returns.size(), 1);
+    ASSERT_EQ(op->schema().returns().size(), 1);
     ASSERT_TRUE(
-        op->schema().returns[0].type->isSubtypeOf(ListType::ofFloats()));
+        op->schema().returns()[0].type()->isSubtypeOf(ListType::ofFloats()));
 
     Stack stack;
     push(stack, std::vector<int64_t>{1, 2});
@@ -1027,16 +1036,16 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::lists2");
+    ASSERT_EQ(op->schema().name(), "foo::lists2");
 
-    ASSERT_EQ(op->schema().arguments.size(), 1);
-    ASSERT_EQ(op->schema().arguments[0].name, "tensors");
+    ASSERT_EQ(op->schema().arguments().size(), 1);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "tensors");
     ASSERT_TRUE(
-        op->schema().arguments[0].type->isSubtypeOf(ListType::ofTensors()));
+        op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
-    ASSERT_EQ(op->schema().returns.size(), 1);
+    ASSERT_EQ(op->schema().returns().size(), 1);
     ASSERT_TRUE(
-        op->schema().returns[0].type->isSubtypeOf(ListType::ofTensors()));
+        op->schema().returns()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
     Stack stack;
     push(stack, std::vector<at::Tensor>{autograd::make_variable(at::ones(5))});
@@ -1125,15 +1134,15 @@ void testCustomOperators() {
 void testSchemaParser() {
   // nested arrays
   auto s = parseSchema("at::what(int[][4] foo) -> ()");
-  ASSERT_TRUE(s.arguments.at(0).N == 4);
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments.at(0)
-                                              .type->expect<ListType>()
+  ASSERT_TRUE(s.arguments().at(0).N() == 4);
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments().at(0)
+                                              .type()->expect<ListType>()
                                               ->getElementType()
                                               ->expect<ListType>()
                                               ->getElementType()));
   auto s2 = parseSchema("at::what(int[][] foo) -> ()");
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments.at(0)
-                                            .type->expect<ListType>()
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments().at(0)
+                                            .type()->expect<ListType>()
                                             ->getElementType()
                                             ->expect<ListType>()
                                             ->getElementType()));
@@ -1149,12 +1158,66 @@ void testSchemaParser() {
   // named returns
   parseSchema("at::what(Tensor! i_will_be_written_to) -> ()");
   auto s3 = parseSchema("at::what() -> (Tensor the_return, Tensor the_return2)");
-  ASSERT_TRUE(s3.returns.at(0).name == "the_return");
-  ASSERT_TRUE(s3.returns.at(1).name == "the_return2");
+  ASSERT_TRUE(s3.returns().at(0).name() == "the_return");
+  ASSERT_TRUE(s3.returns().at(1).name() == "the_return2");
 
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(t) foo) -> (Tensor(t))");
 
+}
+
+void testTopologicalIndex() {
+  {
+    Graph graph;
+    auto node1 = graph.create(prim::Undefined);
+    auto node2 = graph.create(prim::Undefined);
+    auto node3 = graph.create(prim::Undefined);
+    auto node4 = graph.create(prim::Undefined);
+
+    graph.appendNode(node4);
+    graph.prependNode(node1);
+    node2->insertAfter(node1);
+    node3->insertBefore(node4);
+
+    // nodes should be in numerical order
+    ASSERT_TRUE(node1->isBefore(node2));
+    ASSERT_TRUE(node1->isBefore(node3));
+    ASSERT_TRUE(node1->isBefore(node4));
+    ASSERT_TRUE(node2->isAfter(node1));
+    ASSERT_TRUE(node2->isBefore(node3));
+    ASSERT_TRUE(node2->isBefore(node4));
+    ASSERT_FALSE(node3->isBefore(node1));
+    ASSERT_FALSE(node3->isBefore(node2));
+    ASSERT_FALSE(node3->isAfter(node4));
+
+    // make sure things don't blow up on deletions
+    node2->destroy();
+    auto node2p = graph.create(prim::Undefined);
+    node2p->insertAfter(node1);
+    ASSERT_TRUE(node1->isBefore(node2p));
+    ASSERT_TRUE(node2p->isBefore(node3));
+  }
+  {
+    // Induce reindexing to test that path
+    Graph graph;
+    std::map<size_t, Node*> nodes;
+
+    auto anchor = graph.create(prim::Undefined);
+    graph.appendNode(anchor);
+    // Inserting to the same place a lot will trigger reindexing
+    for (auto i = 0; i < 100; ++i) {
+      auto n = graph.create(prim::Undefined);
+      n->insertAfter(anchor);
+      nodes[i] = n;
+    }
+
+    // Nodes should be in reverse order
+    for (auto i = 0; i < 100; ++i) {
+      for (auto j = i + 1; j < 100; ++j) {
+        ASSERT_TRUE(nodes[i]->isAfter(nodes[j]));
+      }
+    }
+  }
 }
 
 } // namespace

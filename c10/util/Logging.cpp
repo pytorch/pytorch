@@ -1,5 +1,5 @@
-#include "caffe2/core/logging.h"
-#include "caffe2/core/flags.h"
+#include "c10/util/Logging.h"
+#include "c10/util/Flags.h"
 
 #include <algorithm>
 #include <cstring>
@@ -14,7 +14,7 @@ C10_DEFINE_bool(
     "If set true, when CAFFE_ENFORCE is not met, abort instead "
     "of throwing an exception.");
 
-namespace caffe2 {
+namespace c10 {
 namespace enforce_detail {
 /* implicit */ EnforceFailMessage::EnforceFailMessage(std::string&& msg) {
   msg_ = new std::string(std::move(msg));
@@ -45,9 +45,9 @@ void ThrowEnforceNotMet(
   throw e;
 }
 
-}  // namespace caffe2
+} // namespace c10
 
-#ifdef C10_USE_GFLAGS
+#if defined(C10_USE_GFLAGS) && defined(C10_USE_GLOG)
 // When GLOG depends on GFLAGS, these variables are being defined in GLOG
 // directly via the GFLAGS definition, so we will use DECLARE_* to declare
 // them, and use them in Caffe2.
@@ -57,25 +57,28 @@ DECLARE_int32(minloglevel);
 DECLARE_int32(v);
 // GLOG's logtostderr value
 DECLARE_bool(logtostderr);
-#elif !CAFFE2_MOBILE && !__APPLE__ && !defined(_WIN32)
-// Declare our own versions of the above flags so we don't error out
-// when they are passed into Caffe2.
-C10_DEFINE_int(minloglevel, 0, "Equivalent to glog minloglevel");
-C10_DEFINE_int(v, 0, "Equivalent to glog verbose");
-C10_DEFINE_bool(logtostderr, false, "Equivalent to glog logtostderr");
-#endif // C10_USE_GFLAGS
+#endif // defined(C10_USE_GFLAGS) && defined(C10_USE_GLOG)
 
-#ifdef CAFFE2_USE_GOOGLE_GLOG
+#if !defined(C10_USE_GLOG)
+// This backward compatibility flags are in order to deal with cases where
+// Caffe2 are not built with glog, but some init flags still pass in these
+// flags. They may go away in the future.
+C10_DEFINE_int32(minloglevel, 0, "Equivalent to glog minloglevel");
+C10_DEFINE_int32(v, 0, "Equivalent to glog verbose");
+C10_DEFINE_bool(logtostderr, false, "Equivalent to glog logtostderr");
+#endif // !defined(c10_USE_GLOG)
+
+#ifdef C10_USE_GLOG
 
 // Provide easy access to the above variables, regardless whether GLOG is
 // dependent on GFLAGS or not. Note that the namespace (fLI, fLB) is actually
 // consistent between GLOG and GFLAGS, so we can do the below declaration
 // consistently.
-namespace caffe2 {
+namespace c10 {
+using fLB::FLAGS_logtostderr;
 using fLI::FLAGS_minloglevel;
 using fLI::FLAGS_v;
-using fLB::FLAGS_logtostderr;
-}  // namespace caffe2
+} // namespace c10
 
 C10_DEFINE_int(
     caffe2_log_level,
@@ -89,13 +92,13 @@ C10_DEFINE_int(
 namespace google {
 namespace glog_internal_namespace_ {
 bool IsGoogleLoggingInitialized();
-}  // namespace glog_internal_namespace_
-}  // namespace google
+} // namespace glog_internal_namespace_
+} // namespace google
 
-
-namespace caffe2 {
+namespace c10 {
 bool InitCaffeLogging(int* argc, char** argv) {
-  if (*argc == 0) return true;
+  if (*argc == 0)
+    return true;
 #if !defined(_MSC_VER)
   // This trick can only be used on UNIX platforms
   if (!::google::glog_internal_namespace_::IsGoogleLoggingInitialized())
@@ -103,7 +106,7 @@ bool InitCaffeLogging(int* argc, char** argv) {
   {
     ::google::InitGoogleLogging(argv[0]);
 #if !defined(_MSC_VER)
-  // This is never defined on Windows
+    // This is never defined on Windows
     ::google::InstallFailureSignalHandler();
 #endif
   }
@@ -129,9 +132,9 @@ void ShowLogInfoToStderr() {
   FLAGS_logtostderr = 1;
   FLAGS_minloglevel = std::min(FLAGS_minloglevel, google::GLOG_INFO);
 }
-}  // namespace caffe2
+} // namespace c10
 
-#else  // !CAFFE2_USE_GOOGLE_GLOG
+#else // !C10_USE_GLOG
 
 #ifdef ANDROID
 #include <android/log.h>
@@ -142,11 +145,12 @@ C10_DEFINE_int(
     ERROR,
     "The minimum log level that caffe2 will output.");
 
-namespace caffe2 {
+namespace c10 {
 bool InitCaffeLogging(int* argc, char** argv) {
   // When doing InitCaffeLogging, we will assume that caffe's flag paser has
   // already finished.
-  if (*argc == 0) return true;
+  if (*argc == 0)
+    return true;
   if (!c10::CommandLineFlagsHasBeenParsed()) {
     std::cerr << "InitCaffeLogging() has to be called after "
                  "c10::ParseCommandLineFlags. Modify your program to make sure "
@@ -162,24 +166,23 @@ bool InitCaffeLogging(int* argc, char** argv) {
   return true;
 }
 
-void UpdateLoggingLevelsFromFlags() {
-}
+void UpdateLoggingLevelsFromFlags() {}
 
 void ShowLogInfoToStderr() {
   FLAGS_caffe2_log_level = INFO;
 }
 
-MessageLogger::MessageLogger(const char *file, int line, int severity)
-  : severity_(severity) {
+MessageLogger::MessageLogger(const char* file, int line, int severity)
+    : severity_(severity) {
   if (severity_ < FLAGS_caffe2_log_level) {
     // Nothing needs to be logged.
     return;
   }
 #ifdef ANDROID
   tag_ = "native";
-#else  // !ANDROID
+#else // !ANDROID
   tag_ = "";
-#endif  // ANDROID
+#endif // ANDROID
   /*
   time_t rawtime;
   struct tm * timeinfo;
@@ -210,12 +213,12 @@ MessageLogger::~MessageLogger() {
   stream_ << "\n";
 #ifdef ANDROID
   static const int android_log_levels[] = {
-      ANDROID_LOG_FATAL,    // LOG_FATAL
-      ANDROID_LOG_ERROR,    // LOG_ERROR
-      ANDROID_LOG_WARN,     // LOG_WARNING
-      ANDROID_LOG_INFO,     // LOG_INFO
-      ANDROID_LOG_DEBUG,    // VLOG(1)
-      ANDROID_LOG_VERBOSE,  // VLOG(2) .. VLOG(N)
+      ANDROID_LOG_FATAL, // LOG_FATAL
+      ANDROID_LOG_ERROR, // LOG_ERROR
+      ANDROID_LOG_WARN, // LOG_WARNING
+      ANDROID_LOG_INFO, // LOG_INFO
+      ANDROID_LOG_DEBUG, // VLOG(1)
+      ANDROID_LOG_VERBOSE, // VLOG(2) .. VLOG(N)
   };
   int android_level_index = FATAL - std::min(FATAL, severity_);
   int level = android_log_levels[std::min(android_level_index, 5)];
@@ -225,7 +228,7 @@ MessageLogger::~MessageLogger() {
   if (severity_ == FATAL) {
     __android_log_print(ANDROID_LOG_FATAL, tag_, "terminating.\n");
   }
-#else  // !ANDROID
+#else // !ANDROID
   if (severity_ >= FLAGS_caffe2_log_level) {
     // If not building on Android, log all output to std::cerr.
     std::cerr << stream_.str();
@@ -236,12 +239,12 @@ MessageLogger::~MessageLogger() {
       std::cerr << std::flush;
     }
   }
-#endif  // ANDROID
+#endif // ANDROID
   if (severity_ == FATAL) {
     DealWithFatal();
   }
 }
 
-}  // namespace caffe2
+} // namespace c10
 
-#endif  // !CAFFE2_USE_GOOGLE_GLOG
+#endif // !C10_USE_GLOG
