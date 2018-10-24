@@ -42,7 +42,7 @@ cmake --version
 # TODO: Don't run this...
 pip install -r requirements.txt || true
 
-if [["$BUILD_ENVIRONMENT" == *rocm* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # This is necessary in order to cross compile (or else we'll have missing GPU device).
   export HCC_AMDGPU_TARGET=gfx900
 
