@@ -169,10 +169,10 @@ public:
   /// Returns a `Tensor`'s device index.
   int64_t get_device() const;
 
-  /// Returns if a `Tensor`'s has CUDA backend.
+  /// Returns if a `Tensor` has CUDA backend.
   bool is_cuda() const;
 
-  /// Returns if a `Tensor`'s has sparse backend.
+  /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in

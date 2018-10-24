@@ -2,7 +2,6 @@
 
 #include "ATen/core/ATenGeneral.h"
 #include "ATen/core/Allocator.h"
-//#include "ATen/core/Backend.h"
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/Generator.h"
 #include "ATen/core/Layout.h"
@@ -88,12 +87,8 @@ struct CAFFE2_API Type {
   virtual caffe2::TypeMeta typeMeta() const = 0;
   virtual Backend backend() const = 0;
   Layout layout() const noexcept { return layout_from_backend(backend()); }
-  bool is_cuda() const {
-    return backend() == Backend::CUDA || backend() == Backend::SparseCUDA;
-  }
-  bool is_sparse() const {
-    return backend() == Backend::SparseCPU || Backend() == Backend::SparseCUDA;
-  }
+  bool is_cuda() const;
+  bool is_sparse() const;
   virtual bool is_distributed() const = 0;
   bool is_variable() const noexcept { return is_variable_; }
   bool is_undefined() const noexcept { return is_undefined_; }

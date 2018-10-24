@@ -72,17 +72,8 @@ inline Device Tensor::device() const {
 }
 
 inline int64_t Tensor::get_device() const {
-  // NB: This gets called a lot so we special case it here instead of dispatching
-  // to a native function.
-  const auto& tid = impl_->type_id();
-  if (tid == CUDATensorId()) {
-    // TODO: #12934 Investigate caching device on TensorImpl for performance
-    return impl_->storage().device().index();
-  } else if (tid == SparseCUDATensorId()) {
-    return _values().get_device();
-  } else {
-    AT_ERROR("get_device is not implemented for type ", type());
-  }
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->get_device();
 }
 
 inline int64_t get_device(Tensor self) {
@@ -90,9 +81,8 @@ inline int64_t get_device(Tensor self) {
 }
 
 inline bool Tensor::is_cuda() const {
-  // NB: avoids dispatch for perf reasons
-  const auto& tid = impl_->type_id();
-  return tid == CUDATensorId() || tid == SparseCUDATensorId();
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_cuda();
 }
 
 inline bool is_cuda(Tensor self) {
@@ -100,9 +90,8 @@ inline bool is_cuda(Tensor self) {
 }
 
 inline bool Tensor::is_sparse() const {
-  // NB: avoids dispatch for perf reasons.
-  const auto& tid = impl_->type_id();
-  return tid == SparseCPUTensorId() || tid == SparseCUDATensorId();
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_sparse();
 }
 
 inline bool is_sparse(Tensor self) {

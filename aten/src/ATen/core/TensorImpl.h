@@ -389,6 +389,27 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_;
   }
 
+  bool is_sparse() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    const auto& tid = type_id();
+    return tid == SparseCPUTensorId() || tid == SparseCUDATensorId();
+  }
+
+  bool is_cuda() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    const auto& tid = type_id();
+    return tid == CUDATensorId() || tid == SparseCUDATensorId();
+  }
+
+  int64_t get_device() const {
+    // NB: This method is not virtual and avoid dispatches in the common case for perf.
+    const auto& tid = type_id();
+    if (tid == CUDATensorId()) {
+      return storage_.device().index();
+    }
+    return get_device_slow();
+  }
+
   /**
    * If `condition_when_zero_dim` is true, and the tensor is a 1-dim, 1-size
    * tensor, reshape the tensor into a 0-dim tensor (scalar).
@@ -743,6 +764,35 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
    */
   bool is_variable() const { return is_variable_; };
+
+ private:
+  int64_t compute_numel() const {
+    int64_t n = 1;
+    for (auto s : sizes()) {
+      n *= s;
+    }
+    return n;
+  }
+  bool compute_contiguous() const;
+
+  virtual int64_t get_device_slow() const {
+    AT_ERROR("get_device is not implemented for type ", type());
+  }
+
+ protected:
+  void refresh_numel() {
+    AT_ASSERT(!is_variable());
+    numel_ = compute_numel();
+  }
+  void refresh_contiguous() {
+    AT_ASSERT(!is_variable());
+    is_contiguous_ = compute_contiguous();
+  }
+
+ private:
+  TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable);
+
+ public:
 
   /**
    * The device type of a Tensor, e.g., DeviceType::CPU or DeviceType::CUDA.
