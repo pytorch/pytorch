@@ -53,15 +53,6 @@ THCTensor_(numel)(THCState *state, THCTensor *t)
   return THCTensor_(nElement)(state, t);
 }
 
-void THCTensor_(cat)(THCState *state, THCTensor *result,
-		     THCTensor *ta, THCTensor *tb, int dimension)
-{
-  THCTensor* inputs[2];
-  inputs[0] = ta;
-  inputs[1] = tb;
-  THCTensor_(catArray)(state, result, inputs, 2, dimension);
-}
-
 void THCTensor_(check_shape_except_dim)(THCState *state,
     THCTensor *first, THCTensor *second, int dimension);
 inline void THCTensor_(check_shape_except_dim)(THCState *state,
@@ -84,7 +75,7 @@ inline void THCTensor_(check_shape_except_dim)(THCState *state,
   }
 }
 
-void THCTensor_(catArray)(THCState *state, THCTensor *result,
+void THCTensor_(cat)(THCState *state, THCTensor *result,
 			  THCTensor **inputs, int numInputs, int dimension)
 {
   // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
