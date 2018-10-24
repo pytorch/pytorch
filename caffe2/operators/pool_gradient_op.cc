@@ -83,7 +83,7 @@ bool PoolGradientOp<T, Context, PoolType>::RunOnDeviceWithOrderNCHW() {
   int height = X.dim32(2);
   int width = kernel_.size() > 1 ? X.dim32(3) : 1;
   int depth = kernel_.size() > 2 ? X.dim32(4) : 1;
-  vector<int> dims(X.dims().begin() + 2, X.dims().end());
+  vector<int> dims(X.sizes().begin() + 2, X.sizes().end());
   ConvPoolOpBase<CPUContext>::ComputePads(dims);
   int pooled_height = dY.dim32(2);
   int pooled_width = kernel_.size() > 1 ? dY.dim32(3) : 1;
@@ -218,7 +218,7 @@ bool PoolGradientOp<T, Context, PoolType>::RunOnDeviceWithOrderNHWC() {
   int height = X.dim32(1);
   int width = kernel_.size() > 1 ? X.dim32(2) : 1;
   int depth = kernel_.size() > 2 ? X.dim32(3) : 1;
-  vector<int> dims(X.dims().begin() + 1, X.dims().end() - 1);
+  vector<int> dims(X.sizes().begin() + 1, X.sizes().end() - 1);
   ConvPoolOpBase<CPUContext>::ComputePads(dims);
   int pooled_height = dY.dim32(1);
   int pooled_width = kernel_.size() > 1 ? dY.dim32(2) : 1;
