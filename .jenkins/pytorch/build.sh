@@ -19,6 +19,12 @@ if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == 
   sudo mkdir -p /var/run/sshd
 fi
 
+  ###############################################################################
+    # Update Valgrind
+	  ###############################################################################
+	    if [[ "$BUILD_ENVIRONMENT" == *-xenial-* ]]; then
+			    sudo apt-get remove -
+
 if [[ "$BUILD_ENVIRONMENT" == "pytorch-linux-xenial-py3-clang5-asan" ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" $*
 fi
@@ -40,9 +46,7 @@ echo "CMake version:"
 cmake --version
 
 # TODO: Don't run this...
-pip install -r requirements.txt || true
-
-if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+if [[i"$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # This is necessary in order to cross compile (or else we'll have missing GPU device).
   export HCC_AMDGPU_TARGET=gfx900
 
@@ -70,6 +74,26 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   USE_ROCM=1 python setup.py install --user
   exit 0
 fi
+
+###############################################################################
+# Update Valgrind
+###############################################################################
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-* ]]; then
+  sudo apt-get remove -qq valgrind
+  mkdir valgrind_build && cd valgrind_build
+  wget http://valgrind.org/downloads/valgrind-3.14.0.tar.bz2
+  tar -xjf valgrind-3.14.0.tar.bz2
+  cd valgrind-3.14.0
+  ./configure --prefix=/usr/local
+  make
+  sudo make install
+  ccache --clear
+  cd ../../
+  rm -rf valgrind_build
+  alias valgrind="/usr/local/bin/valgrind"
+  valgrind --version
+fi
+
 
 # TODO: Don't install this here
 if ! which conda; then
