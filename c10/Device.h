@@ -11,6 +11,12 @@
 
 namespace c10 {
 
+/// An index representing a specific device; e.g., the 1 in GPU 1.
+/// A DeviceIndex is not independently meaningful without knowing
+/// the DeviceType it is associated; try to use Device rather than
+/// DeviceIndex directly.
+using DeviceIndex = int32_t;
+
 /// Represents a a compute device on which a tensor is located. A device is
 /// uniquely identified by a type, which specifies the type of machine it is
 /// (e.g. CPU or CUDA GPU), and a device index or ordinal, which identifies the
@@ -26,7 +32,7 @@ struct C10_API Device {
 
   /// Constructs a new `Device` from a `DeviceType` and an optional device
   /// index.
-  /* implicit */ Device(DeviceType type, int32_t index = -1)
+  /* implicit */ Device(DeviceType type, DeviceIndex index = -1)
       : type_(type), index_(index) {
     AT_CHECK(
         index == -1 || index >= 0,
@@ -58,7 +64,7 @@ struct C10_API Device {
   }
 
   /// Sets the device index.
-  void set_index(int32_t index) {
+  void set_index(DeviceIndex index) {
     index_ = index;
   }
 
@@ -68,7 +74,7 @@ struct C10_API Device {
   }
 
   /// Returns the optional index.
-  const int32_t& index() const noexcept {
+  DeviceIndex index() const noexcept {
     return index_;
   }
 
@@ -89,7 +95,7 @@ struct C10_API Device {
 
  private:
   DeviceType type_;
-  int32_t index_ = -1;
+  DeviceIndex index_ = -1;
 };
 
 C10_API std::ostream& operator<<(
