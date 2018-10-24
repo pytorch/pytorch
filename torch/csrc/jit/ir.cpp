@@ -196,33 +196,6 @@ void Graph::dumpPretty() {
   PrettyPrint(std::cout, *this);
 }
 
-ScopePtr Scope::push(Symbol name) {
-  return c10::make_intrusive<Scope>(intrusive_from_this(), name);
-}
-
-ScopePtr Scope::getRoot() {
-  ScopePtr current = intrusive_from_this();
-  while (current->parent_) {
-    current = current->parent_;
-  }
-  return current;
-}
-
-std::string Scope::namesFromRoot(const std::string& separator) const {
-  // TODO: I think the answer is we shouldn't have used Symbol here
-  std::string out = this->name_.toUnqualString();
-  if (this->isRoot()) {
-    return out;
-  }
-  ScopePtr parent = this->parent_;
-  while (!parent->isRoot()) {
-    // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-    out = std::string(parent->name_.toUnqualString()) + separator + out;
-    parent = parent->parent_;
-  }
-  return out;
-}
-
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
@@ -1010,6 +983,28 @@ Node* Graph::createTupleUnpack(Value * v) {
   return n;
 }
 
+Node* Graph::createTupleIndex(Value * tup, int64_t index) {
+  auto n = create(prim::TupleIndex, {tup});
+  n->i_(attr::index, index);
+  auto tuple_type = tup->type()->expect<TupleType>();
+  n->output()->setType(tuple_type->elements().at(index));
+  return n;
+}
+
+Node* Graph::createTupleSlice(Value * tup, int64_t beg, int64_t end) {
+  auto n = create(prim::TupleSlice, {tup});
+  auto tuple_type = tup->type()->expect<TupleType>();
+  n->i_(attr::beg, beg);
+  n->i_(attr::end, end);
+  std::vector<TypePtr> output_types;
+  for (auto i = beg; i < end; ++i) {
+    output_types.push_back(tuple_type->elements().at(i));
+  }
+  auto tt = TupleType::create(std::move(output_types));
+  n->output()->setType(tt);
+  return n;
+}
+
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for(const auto & v : values) {
@@ -1103,8 +1098,9 @@ Node* Graph::createClone(Node * n, std::function<Value*(Value*)> value_map, bool
 
 Value* Graph::insertConstant(
     IValue val,
-    c10::optional<SourceRange> loc) {
-  return jit::insertConstant(*this, std::move(val), loc);
+    c10::optional<SourceRange> loc,
+    c10::optional<ScopePtr> scope) {
+  return jit::insertConstant(*this, std::move(val), loc, scope);
 }
 
 Value* Graph::insertDummyWorld() {
