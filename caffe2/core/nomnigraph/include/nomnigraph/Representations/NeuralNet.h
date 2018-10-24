@@ -428,33 +428,6 @@ CAFFE2_API bool hasInputs(NNGraph::NodeRef n);
 CAFFE2_API std::vector<NNGraph::NodeRef> getInputs(NNGraph::NodeRef n);
 CAFFE2_API std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n);
 
-// Get the name of the node regardless of underlying type.
-CAFFE2_API std::string getName(NNGraph::NodeRef n);
-
-CAFFE2_API void deleteSubgraph(NNModule* nn, NNGraph::SubgraphType& sg);
-
-// Replace the producer of the first argument with the second argument
-CAFFE2_API void replaceProducer(
-    NNGraph::NodeRef tensorNode,
-    NNGraph::NodeRef newProducer);
-// Set all consumers of first argument to consume the second argument
-CAFFE2_API void replaceAllUsesWith(
-    NNGraph::NodeRef oldTensorNode,
-    NNGraph::NodeRef newTensorNode);
-// Set the second argument to consume the inputs of the first argument
-CAFFE2_API void replaceAsConsumer(
-    NNGraph::NodeRef oldConsumer,
-    NNGraph::NodeRef newConsumer);
-
-// Create an output tensor node
-CAFFE2_API NNGraph::NodeRef
-createOutput(NNModule* nn, NNGraph::NodeRef producer, std::string name);
-// Create an operator
-template <typename T, typename... Args>
-CAFFE2_API NNGraph::NodeRef createOperator(NNModule* nn, Args... args) {
-  return nn->dataFlow.createNode(util::make_unique<T>(args...));
-}
-
 CAFFE2_API void coalesceInsertedDataDependencies(repr::NNModule* m);
 
 template <NNGraph* G>
