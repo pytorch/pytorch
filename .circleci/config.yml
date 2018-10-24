@@ -1050,11 +1050,11 @@ workflows:
           requires:
             - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
 
-      - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_py3_test:
-          requires:
-            - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
+      # - pytorch_macos_10_13_py3_build
+      # - pytorch_macos_10_13_py3_test:
+      #     requires:
+      #       - pytorch_macos_10_13_py3_build
+      # - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
 
       - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
       - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
@@ -1086,5 +1086,5 @@ workflows:
       - caffe2_py2_android_ubuntu16_04_build
       - caffe2_py2_cuda9_0_cudnn7_centos7_build
 
-      - caffe2_py2_ios_macos10_13_build
-      - caffe2_py2_system_macos10_13_build
+      # - caffe2_py2_ios_macos10_13_build
+      # - caffe2_py2_system_macos10_13_build
