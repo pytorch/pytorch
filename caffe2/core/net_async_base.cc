@@ -158,8 +158,8 @@ TaskThreadPoolBase* AsyncNetBase::pool(const DeviceOption& device_option) {
   };
   if (cpu_types.find(device_option.device_type()) != cpu_types.end()) {
     auto numa_node_id = -1;
-    if (device_option.has_numa_node_id()) {
-      numa_node_id = device_option.numa_node_id();
+    if (device_option.has_device_id()) {
+      numa_node_id = device_option.device_id();
       CAFFE_ENFORCE_GE(numa_node_id, 0, "Invalid NUMA node id: ", numa_node_id);
     }
     CAFFE_ENFORCE_LT(
@@ -448,6 +448,9 @@ void AsyncNetBase::finalizeEvents() {
       event(task_id).Finish();
     } else if (status == EventStatus::EVENT_INITIALIZED) {
       event(task_id).SetFinished();
+    }
+    if (event(task_id).Query() != EventStatus::EVENT_SUCCESS) {
+      success_ = false;
     }
   }
 }

@@ -3266,7 +3266,9 @@
   name: alias
   return: THTensor*
   cpu_half: True
-  variants: [function]
+  variants:
+    - method
+    - function
   options:
     - cname: newWithTensor
       arguments:

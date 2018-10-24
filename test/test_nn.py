@@ -774,8 +774,8 @@ class TestNN(NNTestCase):
         module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True)
         input = torch.randn(1, 3, 1, 1)
         with self.assertRaisesRegex(RuntimeError,
-                                    'Calculated padded input size per channel: \(1 x 1\). ' +
-                                    'Kernel size: \(10 x 10\). Kernel size can\'t be greater than actual input size'):
+                                    r'Calculated padded input size per channel: \(1 x 1\). ' +
+                                    r'Kernel size: \(10 x 10\). Kernel size can\'t be greater than actual input size'):
             module(input)
 
     def test_invalid_conv3d(self):
@@ -3583,6 +3583,12 @@ class TestNN(NNTestCase):
                     self.assertEqual(output.size()[2:], (h, w))
                 else:
                     self.assertRaises(ValueError, lambda: m(i, (h, w)))
+
+    def test_ConvTranspose3d_correct_output_size(self):
+        # Check that ConvTranspose3d can take a 5d output_size.
+        m = nn.ConvTranspose3d(2, 2, 2)
+        i = torch.rand(1, 2, 1, 1, 1)
+        out = m(i, output_size=(1, 2, 2, 2, 2))
 
     def _test_Conv2d_naive_groups(self, device="cpu", dtype=torch.float):
         # Check that grouped convolutions matches two half convolutions

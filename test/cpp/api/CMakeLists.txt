@@ -3,6 +3,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${TORCH_API_TEST_DIR}/any.cpp
   ${TORCH_API_TEST_DIR}/cursor.cpp
+  ${TORCH_API_TEST_DIR}/dataloader.cpp
   ${TORCH_API_TEST_DIR}/expanding-array.cpp
   ${TORCH_API_TEST_DIR}/integration.cpp
   ${TORCH_API_TEST_DIR}/jit.cpp
@@ -45,7 +46,7 @@ if (NOT MSVC)
       # Clang has an unfixed bug leading to spurious missing braces
       # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
       -Wno-missing-braces)
-else()
+  else()
     target_compile_options(test_api PRIVATE
       # Considered to be flaky.  See the discussion at
       # https://github.com/pytorch/pytorch/pull/9608
