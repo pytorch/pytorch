@@ -7,11 +7,22 @@ circular dependency problems
 import weakref
 import inspect
 try:
-    import builtins  # py3
+    import builtins  # PY3
 except Exception:
-    import __builtin__ as builtins  # py2
+    import __builtin__ as builtins  # PY2
 
-compiled_weak_fns = weakref.WeakKeyDictionary()
+# Tracks standalone weak script functions
+_compiled_weak_fns = weakref.WeakKeyDictionary()
+
+# Tracks which methods should be converted to strong methods
+_weak_script_methods = weakref.WeakKeyDictionary()
+
+# Converted modules and their corresponding WeakScriptModuleProxy objects
+_weak_modules = weakref.WeakKeyDictionary()
+
+# Types that have been declared as weak modules
+_weak_types = weakref.WeakKeyDictionary()
+
 COMPILATION_PENDING = object()
 COMPILED = object()
 
@@ -67,9 +78,24 @@ def weak_script(fn, _frames_up=0):
     inlined in the graph. When not used in a script function, the weak script
     annotation has no effect.
     """
-    compiled_weak_fns[fn] = {
+    _compiled_weak_fns[fn] = {
         "status": COMPILATION_PENDING,
         "compiled_fn": None,
         "rcb": createResolutionCallback(_frames_up + 1)
+    }
+    return fn
+
+
+def weak_module(cls):
+    _weak_types[cls] = {
+        "method_stubs": None
+    }
+    return cls
+
+
+def weak_script_method(fn):
+    _weak_script_methods[fn] = {
+        "rcb": createResolutionCallback(frames_up=2),
+        "original_method": fn
     }
     return fn

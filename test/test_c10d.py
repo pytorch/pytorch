@@ -740,9 +740,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             tensors = torch.zeros(10, device=device).chunk(5)
 
         c10d._dist_broadcast_coalesced(
+            process_group,
             tensors,
-            buffer_size=10,
-            process_group=process_group)
+            buffer_size=10)
 
         if not self.is_master:
             self.assertEqual(tensors, target)
@@ -840,6 +840,34 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self.assertFalse(
             any(torch.isinf(p.grad).any() for p in ddp_model.parameters())
         )
+
+    @skip_if_not_nccl
+    def test_queue_reduction(self):
+        # Set up process group.
+        store = c10d.FileStore(self.file.name)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        # Get this process' split of devices.
+        devices = gpus_for_rank(self.world_size)[self.rank]
+        grads_batch = [(torch.ones(10, device=torch.device('cuda', d)) *
+                       (self.rank + 1)).chunk(5)
+                       for d in devices]
+
+        work, local_grad_sum = c10d._queue_reduction(process_group,
+                                                     grads_batch,
+                                                     devices)
+        # The first return value should be the allreduce work item.
+        self.assertTrue(isinstance(work, c10d.Work))
+        # The second return value will be the finished allreduced gradients.
+        self.assertTrue(isinstance(local_grad_sum, torch.Tensor))
+
+        # Wait for the allreduce to finish.
+        work.wait()
+
+        # The expected result of the allreduce should be the average
+        self.assertEqual(local_grad_sum,
+                         torch.ones(10) * (self.world_size + 1) / 2.0)
+
 
 if __name__ == '__main__':
     assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
