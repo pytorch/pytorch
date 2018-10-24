@@ -47,7 +47,7 @@ struct FusedKernel {
   // CPU code uses the same convension so that launch_with_tensors can be shared.
   virtual void launch_raw(
     const uint32_t numel
-  , std::vector<void*> arguments) const = 0;
+  , std::vector<void*>& arguments) const = 0;
   virtual at::Backend backend() const = 0;
 
   const std::string name_;

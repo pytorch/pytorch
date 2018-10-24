@@ -3,7 +3,7 @@
 #if USE_CPU_FUSER
 
 #include "ATen/ATen.h"
-#include "torch/csrc/jit/fuser/cpu/config.h"
+#include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
 #include "torch/csrc/jit/fuser/common/fused_kernel.h"
 
@@ -15,8 +15,7 @@ namespace torch { namespace jit { namespace fuser { namespace cpu {
 
 struct FusedKernelCPU : public ::torch::jit::fuser::FusedKernel {
   FusedKernelCPU(
-    CompilerConfig& config
-  , const std::string& _name
+    const std::string& _name
   , const std::string& _code
   , const std::vector<TensorDesc> _input_desc
   , const std::vector<TensorDesc> _output_desc
@@ -30,7 +29,7 @@ struct FusedKernelCPU : public ::torch::jit::fuser::FusedKernel {
 
   virtual void launch_raw(
     const uint32_t numel
-  , std::vector<void*> arguments) const override {
+  , std::vector<void*>& arguments) const override {
     kernel(numel, arguments.data());
   }
 

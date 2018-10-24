@@ -2,7 +2,6 @@
 
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/fuser/cpu/config.h"
 #include "torch/csrc/jit/fuser/cpu/temp_file.h"
 #include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
 
@@ -17,6 +16,41 @@ namespace torch { namespace jit { namespace fuser { namespace cpu {
 
 static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
 static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
+static const std::string check_exists_string = "which '${program}' > /dev/null";
+
+static bool programExists(const std::string& program) {
+  TemplateEnv env;
+  env.s("program", program);
+  std::string cmd = format(check_exists_string, env);
+  return (system(cmd.c_str()) == 0);
+}
+
+struct CompilerConfig {
+  CompilerConfig() {
+    const char* cxx_env = getenv("CXX");
+    if (cxx_env != nullptr) {
+      cxx = cxx_env;
+    }
+
+    if (!programExists(cxx)) {
+      cxx = "";
+    }
+    
+    const char* debug_env = getenv("PYTORCH_FUSION_DEBUG");
+    debug = debug_env && atoi(debug_env) != 0;
+  }
+
+  ~CompilerConfig() = default;
+
+  std::string cxx = "g++"; // compiler location
+  bool debug = false; // emit debugging information about fusions
+  bool openmp = true;
+};
+
+static CompilerConfig& getConfig() {
+  static CompilerConfig config;
+  return config;
+}
 
 // NB: -march=native not supported on PPC64 g++.  It's a bit annoying
 // to do a configure-style test to decide whether or not the g++
@@ -36,9 +70,9 @@ static const std::string compile_string =
   "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 
 static void runCompiler(
-  CompilerConfig& config
-, const std::string& cpp_file
+  const std::string& cpp_file
 , const std::string& so_file) {
+  auto& config = getConfig();
   TemplateEnv env;
   env.s("cxx", config.cxx);
   env.s("fopenmp", config.openmp ? "-fopenmp" : "");
@@ -49,7 +83,7 @@ static void runCompiler(
   if (config.openmp && r != 0) {
     std::cerr << "warning: pytorch jit fuser failed to compile with openmp, trying without it...\n";
     config.openmp = false; // disable for future compiles
-    return runCompiler(config, cpp_file, so_file);
+    return runCompiler(cpp_file, so_file);
   }
   throw std::runtime_error("Failed to compile a fused CPU kernel.");
 }
@@ -65,8 +99,7 @@ static void disas(const std::string& so_file) {
 }
 
 FusedKernelCPU::FusedKernelCPU(
-  CompilerConfig& config
-, const std::string& _name
+  const std::string& _name
 , const std::string& _code
 , const std::vector<TensorDesc> _input_desc
 , const std::vector<TensorDesc> _output_desc
@@ -74,11 +107,12 @@ FusedKernelCPU::FusedKernelCPU(
 , const std::vector<PartitionDesc> _concat_desc
 , const bool _has_random)
 : FusedKernel{_name, _code, _input_desc, _output_desc, _chunk_desc, _concat_desc, _has_random} {
+  auto& config = getConfig();
   TempFile so_file(so_template, 3);
   TempFile cpp_file(cpp_template, 4);
   cpp_file.write(code_);
   cpp_file.sync();
-  runCompiler(config, cpp_file.name(), so_file.name());
+  runCompiler(cpp_file.name(), so_file.name());
   if (config.debug) disas(so_file.name());
   so_lib.reset(new DynamicLibrary(so_file.name().c_str()));
   #pragma GCC diagnostic ignored "-Wpedantic"

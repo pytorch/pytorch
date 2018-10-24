@@ -17,7 +17,6 @@
 
 #if USE_CPU_FUSER
   #include "torch/csrc/jit/fuser/cpu/fused_kernel.h"
-  #include "torch/csrc/jit/fuser/cpu/config.h"
 #endif // USE_CUDA_FUSER
 
 #include <iostream>
@@ -187,8 +186,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   } else {
     #if USE_CPU_FUSER
       fused_kernel = std::make_shared<cpu::FusedKernelCPU>(
-        cpu::getConfig()
-      , name
+        name
       , code
       , input_desc
       , output_desc

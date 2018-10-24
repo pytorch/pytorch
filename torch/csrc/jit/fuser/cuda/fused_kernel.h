@@ -32,7 +32,7 @@ struct FusedKernelCUDA : public ::torch::jit::fuser::FusedKernel {
 
   virtual void launch_raw(
     const uint32_t numel
-  , std::vector<void*> arguments) const override;
+  , std::vector<void*>& arguments) const override;
 
   virtual at::Backend backend() const override {
     return at::Backend::CUDA;

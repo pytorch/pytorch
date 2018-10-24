@@ -217,6 +217,8 @@ void launchFusion(
   // A vector of arguments to the kernel (numel, *input_desc_s, *output_desc_s)
   std::vector<void*> arguments;
   arguments.reserve(3 + flat_inputs_size + flat_outputs_size);
+  arguments.push_back(&numel);
+
   auto addTensorInfoRaw = [&](
     const TensorDesc& desc
   , void* data_ptr
@@ -242,7 +244,7 @@ void launchFusion(
     addTensorInfoRaw(desc, t.data_ptr(), t.sizes(), t.strides());
   };
 
-  arguments.push_back(&numel);
+  // Adds (flattened) input arguments
   for (size_t i = 0; i < fusion.input_desc_.size(); ++i) {
     const auto& chunk = fusion.chunk_desc_[i];
     const at::Tensor& tensor = inputs[i];
@@ -257,6 +259,8 @@ void launchFusion(
       }
     }
   }
+
+  // Adds (flattened) output arguments
   for (size_t i = 0; i < fusion.output_desc_.size(); ++i) {
     const auto& c = fusion.concat_desc_[i];
     auto& o = outputs[i];
