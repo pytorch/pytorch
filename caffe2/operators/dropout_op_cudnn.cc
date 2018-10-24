@@ -135,7 +135,7 @@ bool CuDNNDropoutOp::DoRunWithType() {
   auto* Y = Output(0);
 
   auto size_prod = 1;
-  for (auto dim : X.dims()) {
+  for (auto dim : X.sizes()) {
     size_prod *= dim;
   }
   // now actually run the computation
@@ -148,10 +148,10 @@ bool CuDNNDropoutOp::DoRunWithType() {
   } else {
     auto* mask = Output(1);
     // Reshape tensor descriptors if necessary
-    if (X.dims() != cudnn_input_dims_ && !is_test_) {
+    if (X.sizes() != cudnn_input_dims_ && !is_test_) {
       CAFFE_ENFORCE(scratch_blob_);
       Tensor* states = BlobGetMutableTensor(scratch_blob_, CUDA);
-      cudnn_input_dims_ = X.dims().vec();
+      cudnn_input_dims_ = X.sizes().vec();
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           data_desc_,
           GetCudnnTensorFormat(StorageOrder::NCHW),
@@ -222,7 +222,7 @@ bool CuDNNDropoutGradientOp::DoRunWithType() {
   auto* dX = Output(0);
 
   auto size_prod = 1;
-  for (auto dim : dY.dims()) {
+  for (auto dim : dY.sizes()) {
     size_prod *= dim;
   }
 
@@ -243,8 +243,8 @@ bool CuDNNDropoutGradientOp::DoRunWithType() {
     states_initialized_ = true;
   }
 
-  if (dY.dims() != cudnn_input_dims_) {
-    cudnn_input_dims_ = dY.dims().vec();
+  if (dY.sizes() != cudnn_input_dims_) {
+    cudnn_input_dims_ = dY.sizes().vec();
     CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
         data_desc_,
         GetCudnnTensorFormat(StorageOrder::NCHW),
@@ -257,7 +257,6 @@ bool CuDNNDropoutGradientOp::DoRunWithType() {
     // get the reserve space we need
     CUDNN_ENFORCE(cudnnDropoutGetReserveSpaceSize(
         data_desc_, &reserve_space_size_in_bytes_));
-
   }
 
   // run the computation
