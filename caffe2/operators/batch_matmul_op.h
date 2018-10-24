@@ -37,9 +37,9 @@ class BatchMatMulOp final : public Operator<Context> {
     auto* Y = Output(0);
 
     auto ndims_A = A.ndim();
-    auto dims_A = A.dims().vec();
+    auto dims_A = A.sizes().vec();
     auto ndims_B = B.ndim();
-    auto dims_B = B.dims().vec();
+    auto dims_B = B.sizes().vec();
 
     auto noBroadcastErrorMsg = [](size_t dim1, size_t dim2) {
       std::stringstream ss;
