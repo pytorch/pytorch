@@ -151,8 +151,9 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(ResizeNearest, ResizeNearestOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(ResizeNearestGradient,
-                      ResizeNearestGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    ResizeNearestGradient,
+    ResizeNearestGradientOp<float, CPUContext>);
 
 // Input: X, output: Y
 OPERATOR_SCHEMA(ResizeNearest)
@@ -176,7 +177,7 @@ output_height = floor(output_height * height_scale)
     .InheritOnnxSchema("Upsample");
 
 // Input: dY, output: dX
-OPERATOR_SCHEMA(ResizeNearestGradient)
+GRADIENT_OPERATOR_SCHEMA(ResizeNearestGradient)
     .NumInputs(2, 3)
     .NumOutputs(1)
     .Arg("width_scale", "Scale along width dimension")
