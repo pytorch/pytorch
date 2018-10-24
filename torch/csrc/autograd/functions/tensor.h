@@ -22,6 +22,10 @@ struct CopyBackwards : public Function {
 // Performs grad[idx] = fn(grad[idx]), but out-of-place. The slicing operation
 // grad[idx] is defined by the relative sizes, strides, and offset of base and
 // view.
+// When an in-place operation is done on a differentiable view, the base's
+// grad_fn is updated to become a `CopySlice` wrapping the backward of the
+// in-place operation.
+// See NOTE [ Autograd View Variables ].
 struct CopySlices : public Function {
   CopySlices(
       const Variable& base_var,

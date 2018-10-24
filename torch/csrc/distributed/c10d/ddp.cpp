@@ -3,12 +3,16 @@
 #include <torch/csrc/cuda/comm.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
+#include <torch/csrc/cuda/nccl.h>
+
 #include <c10d/ProcessGroup.hpp>
 
 #include <ATen/ATen.h>
 
 #include <cstddef>
 #include <memory>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace c10d {
@@ -30,9 +34,9 @@ void copyBroadcastTensorsToReplicas(
 } // namespace
 
 void distBroadcastCoalesced(
+    ProcessGroup& processGroup,
     std::vector<at::Tensor>& tensors,
-    int64_t bufferSize,
-    ProcessGroup& processGroup) {
+    int64_t bufferSize) {
   auto tensorGroups = torch::utils::take_tensors(tensors, bufferSize);
   // We store single-element vectors in `flatTensors` because
   // `ProcessGroup::broadcast` takes a reference to a vector, which must be
@@ -91,7 +95,7 @@ void syncParams(
 
   if (broadcastBuffers && !bufferData[0].empty()) {
     // Do an inter-node sync first.
-    distBroadcastCoalesced(bufferData[0], broadcastBucketSize, processGroup);
+    distBroadcastCoalesced(processGroup, bufferData[0], broadcastBucketSize);
     // Then an intra-node sync if we have more than one device.
     if (devices.size() > 1) {
       auto result = torch::cuda::broadcast_coalesced(
@@ -101,4 +105,31 @@ void syncParams(
   }
 }
 
+std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
+    ProcessGroup& processGroup,
+    std::vector<std::vector<at::Tensor>>& gradsBatch,
+    const std::vector<int64_t>& devices) {
+  AT_ASSERT(!gradsBatch.empty());
+  AT_ASSERT(!devices.empty());
+
+  // TODO: create a copy stream to do the async memory copy and
+  // Intra node reduction with profiler perf work
+  std::vector<at::Tensor> gradsBatchCoalesced;
+  for (size_t devIdx = 0; devIdx < devices.size(); ++devIdx) {
+    at::DeviceGuard guard(devices[devIdx]);
+    gradsBatchCoalesced.push_back(
+        torch::utils::flatten_dense_tensors(gradsBatch[devIdx]));
+  }
+
+  if (devices.size() > 1) {
+    torch::cuda::nccl::reduce(gradsBatchCoalesced, 0);
+  }
+
+  gradsBatchCoalesced[0] /= processGroup.getSize();
+
+  std::vector<at::Tensor> allreduceInput = {gradsBatchCoalesced[0]};
+  auto reductionWork = processGroup.allreduce(allreduceInput);
+
+  return std::make_tuple(reductionWork, gradsBatchCoalesced[0]);
+}
 } // namespace c10d

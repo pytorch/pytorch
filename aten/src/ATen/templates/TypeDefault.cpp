@@ -13,6 +13,7 @@
 #include "ATen/Tensor.h"
 #include "ATen/core/TensorOptions.h"
 #include "ATen/DeviceGuard.h"
+#include "ATen/SparseTensorUtils.h"
 
 namespace at {
 

@@ -252,6 +252,12 @@ class TestBindings(test_util.TestCase):
         for node in [x, y]:
             assert node.isTensor()
 
+    def test_delete_node(self):
+        nn = ng.NNModule()
+        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        nn.dataFlow.deleteNode(node)
+        assert len(nn.dataFlow.getMutableNodes()) == 0
+
     def test_annotation_basic(self):
         annot = ng.Annotation()
         annot.setDevice("woot")

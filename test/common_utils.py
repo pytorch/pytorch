@@ -27,6 +27,8 @@ from numbers import Number
 import __main__
 import errno
 
+import expecttest
+
 import torch
 import torch.cuda
 from torch._utils_internal import get_writable_path
@@ -44,7 +46,8 @@ parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 args, remaining = parser.parse_known_args()
 SEED = args.seed
-ACCEPT = args.accept
+if not expecttest.ACCEPT:
+    expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
@@ -241,7 +244,7 @@ class CudaMemoryLeakCheck():
                     self.name, after - before, i))
 
 
-class TestCase(unittest.TestCase):
+class TestCase(expecttest.TestCase):
     precision = 1e-5
     maxDiff = None
     _do_cuda_memory_leak_check = False
@@ -286,6 +289,33 @@ class TestCase(unittest.TestCase):
         for index in iter_indices(x):
             max_err = max(max_err, abs(x[index] - y[index]))
         self.assertLessEqual(max_err, prec, message)
+
+    def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu'):
+        # Assert not given impossible combination, where the sparse dims have
+        # empty numel, but nnz > 0 makes the indices containing values.
+        assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
+
+        v_size = [nnz] + list(size[sparse_dim:])
+        v = torch.randn(*v_size, device=device)
+        i = torch.rand(sparse_dim, nnz, device=device)
+        i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
+        i = i.to(torch.long)
+        if is_uncoalesced:
+            v = torch.cat([v, torch.randn_like(v)], 0)
+            i = torch.cat([i, i], 1)
+
+        x = torch.sparse_coo_tensor(i, v, torch.Size(size))
+
+        if not is_uncoalesced:
+            x = x.coalesce()
+        else:
+            # FIXME: `x` is a sparse view of `v`. Currently rebase_history for
+            #        sparse views is not implemented, so this workaround is
+            #        needed for inplace operations done on `x`, e.g., copy_().
+            #        Remove after implementing something equivalent to CopySlice
+            #        for sparse views.
+            x = x.detach()
+        return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
         r = self.safeCoalesce(t)
@@ -530,7 +560,7 @@ class TestCase(unittest.TestCase):
         except IOError as e:
             if e.errno != errno.ENOENT:
                 raise
-            elif ACCEPT:
+            elif expecttest.ACCEPT:
                 return accept_output("output")
             else:
                 raise RuntimeError(
@@ -543,7 +573,7 @@ class TestCase(unittest.TestCase):
             expected = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', expected)
             s = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', s)
 
-        if ACCEPT:
+        if expecttest.ACCEPT:
             if expected != s:
                 return accept_output("updated output")
         else:

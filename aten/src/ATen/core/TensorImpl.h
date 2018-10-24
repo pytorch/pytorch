@@ -10,6 +10,8 @@
 #include <ATen/core/TensorTypeId.h>
 #include <ATen/core/TensorTypeIdRegistration.h>
 #include <ATen/core/context_base.h>
+
+#include <c10/util/Exception.h>
 #include "c10/util/Optional.h"
 
 #include "c10/util/Flags.h"
@@ -947,7 +949,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return SetDims(at::IntList{d0, d1, d2, d3});
   }
 
-  inline void update_to_contiguous_strides(int64_t old_dim) {
+  inline void update_to_contiguous_strides(size_t old_dim) {
     if (old_dim != sizes_.size()) {
       strides_ = c10::guts::make_unique<int64_t[]>(sizes_.size());
     }
