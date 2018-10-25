@@ -771,15 +771,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_variable() const { return is_variable_; };
 
  private:
-  int64_t compute_numel() const {
-    int64_t n = 1;
-    for (auto s : sizes()) {
-      n *= s;
-    }
-    return n;
-  }
-  bool compute_contiguous() const;
-
   // As an optimization, get_device handles the typical CUDA Tensor case and
   // calls get_device_slow if the tensor stores its device somewhere else
   // (VariableImpl, SparseTensorImpl). This methods does a virtual dispatch
@@ -790,19 +781,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         toString(tensorTypeIdToBackend(type_id())),
         " backend");
   }
-
- protected:
-  void refresh_numel() {
-    AT_ASSERT(!is_variable());
-    numel_ = compute_numel();
-  }
-  void refresh_contiguous() {
-    AT_ASSERT(!is_variable());
-    is_contiguous_ = compute_contiguous();
-  }
-
- private:
-  TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable);
 
  public:
 
