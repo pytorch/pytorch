@@ -411,6 +411,7 @@ def build_libs(libs):
     my_env["USE_LMDB"] = "ON" if USE_LMDB else "OFF"
     my_env["USE_OPENCV"] = "ON" if USE_OPENCV else "OFF"
     my_env["USE_FFMPEG"] = "ON" if USE_FFMPEG else "OFF"
+    my_env["USE_DISTRIBUTED"] = "ON" if USE_DISTRIBUTED else "OFF"
 
     try:
         os.mkdir('build')
@@ -468,7 +469,6 @@ class build_deps(PytorchCommand):
         if USE_DISTRIBUTED:
             if IS_LINUX:
                 libs += ['c10d']
-            libs += ['THD']
         build_libs(libs)
 
         # Use copies instead of symbolic files.
