@@ -8105,67 +8105,137 @@ class TestTorch(TestCase):
         # test big integer
         x = torch.tensor(2341234123412341)
         self.assertEqual(x.__repr__(), str(x))
-        self.assertExpected(str(x), subname='bigint')
+        self.assertExpectedInline(str(x), '''tensor(2341234123412341)''')
 
         # test scientific notation
         x = torch.tensor([1e28, 1e-28])
         self.assertEqual(x.__repr__(), str(x))
-        self.assertExpected(str(x), subname='scimode')
+        self.assertExpectedInline(str(x), '''tensor([1.0000e+28, 1.0000e-28])''')
 
         # test no leading space if all elements positive
         x = torch.tensor([1, 2])
         self.assertEqual(x.__repr__(), str(x))
-        self.assertExpected(str(x), subname='posint')
+        self.assertExpectedInline(str(x), '''tensor([1, 2])''')
 
         # test for leading space if there are negative elements
         x = torch.tensor([1, -2])
         self.assertEqual(x.__repr__(), str(x))
-        self.assertExpected(str(x), subname='negint')
+        self.assertExpectedInline(str(x), '''tensor([ 1, -2])''')
 
         # test inf and nan
         x = torch.tensor([4, inf, 1.5, -inf, 0, nan, 1])
         self.assertEqual(x.__repr__(), str(x))
-        self.assertExpected(str(x), subname='nonfinite')
+        self.assertExpectedInline(str(x), '''tensor([4.0000,    inf, 1.5000,   -inf, 0.0000,    nan, 1.0000])''')
 
         # test dtype
         torch.set_default_dtype(torch.float)
         x = torch.tensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309], dtype=torch.float64)
         self.assertEqual(x.__repr__(), str(x))
-        self.assertExpected(str(x), subname='dtype')
+        expected_str = '''\
+tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
+                inf], dtype=torch.float64)'''
+        self.assertExpectedInline(str(x), expected_str)
 
         # test changing default dtype
         torch.set_default_dtype(torch.float64)
         self.assertEqual(x.__repr__(), str(x))
-        self.assertExpected(str(x), subname='default_dtype')
+        expected_str = '''\
+tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
+                inf])'''
+        self.assertExpectedInline(str(x), expected_str)
 
         # test summary
         x = torch.zeros(10000)
         self.assertEqual(x.__repr__(), str(x))
-        self.assertExpected(str(x), subname='summary')
+        self.assertExpectedInline(str(x), '''tensor([0., 0., 0.,  ..., 0., 0., 0.])''')
 
         # test device
         if torch.cuda.is_available():
             x = torch.tensor([123], device='cuda:0')
             self.assertEqual(x.__repr__(), str(x))
-            self.assertExpected(str(x), subname='device')
+            self.assertExpectedInline(str(x), '''tensor([123], device='cuda:0')''')
 
             # test changing default to cuda
             torch.set_default_tensor_type(torch.cuda.FloatTensor)
             self.assertEqual(x.__repr__(), str(x))
-            self.assertExpected(str(x), subname='default_device')
+            self.assertExpectedInline(str(x), '''tensor([123])''')
         torch.set_default_tensor_type(default_type)
 
         # test integral floats and requires_grad
         x = torch.tensor([123.], requires_grad=True)
         self.assertEqual(x.__repr__(), str(x))
-        self.assertExpected(str(x), subname='requires_grad')
+        self.assertExpectedInline(str(x), '''tensor([123.], requires_grad=True)''')
 
         # test non-contiguous print
         # sliced tensor should have > PRINT_OPTS.threshold elements
         x = torch.ones(100, 2, 2, 10)
         y = x.as_strided(size=(100, 2, 10), stride=(2 * 2 * 10, 2 * 10, 1))
         self.assertEqual(str(y), y.__repr__())
-        self.assertExpected(str(y), subname='non_contiguous')
+        expected_str = '''\
+tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
+         [1., 1., 1.,  ..., 1., 1., 1.]],
+
+        [[1., 1., 1.,  ..., 1., 1., 1.],
+         [1., 1., 1.,  ..., 1., 1., 1.]],
+
+        [[1., 1., 1.,  ..., 1., 1., 1.],
+         [1., 1., 1.,  ..., 1., 1., 1.]],
+
+        ...,
+
+        [[1., 1., 1.,  ..., 1., 1., 1.],
+         [1., 1., 1.,  ..., 1., 1., 1.]],
+
+        [[1., 1., 1.,  ..., 1., 1., 1.],
+         [1., 1., 1.,  ..., 1., 1., 1.]],
+
+        [[1., 1., 1.,  ..., 1., 1., 1.],
+         [1., 1., 1.,  ..., 1., 1., 1.]]])\
+'''
+
+        self.assertExpectedInline(str(y), expected_str)
+
+        # test print 0-dim tensor: there's no 0-dim in Numpy, we match arrayprint style
+        x = torch.tensor(0.00002)
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor(2.0000e-05)''')
+
+        # [Numpy] test print float in sci_mode when min < 0.0001.
+        x = torch.tensor([0.00002])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([2.0000e-05])''')
+
+        # [Numpy] test print float in sci_mode when max > 1e8.
+        # TODO: Pytorch uses fixed precision to print, while Numpy uses dragon4_scientific
+        # to do automatic trimming and padding.
+        x = torch.tensor([123456789.])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([1.2346e+08])''')
+
+        # [Numpy] test print float in sci_mode when max / min > 1000.
+        x = torch.tensor([0.01, 11])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([1.0000e-02, 1.1000e+01])''')
+
+        # [Numpy] test print int max / min > 1000, no sci_mode
+        x = torch.tensor([1, 1010])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([   1, 1010])''')
+
+        # [Numpy] test print int > 1e8, no sci_mode
+        x = torch.tensor([1000000000])  # 1e9
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([1000000000])''')
+
+        # [Numpy] test printing float in int_mode
+        x = torch.tensor([1., 1000.])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([   1., 1000.])''')
+
+        # [Numpy] test printing float in int_mode in sci format when max / min > 1000.
+        x = torch.tensor([1., 1010.])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([1.0000e+00, 1.0100e+03])''')
 
     def test_sizeof(self):
         sizeof_empty = torch.randn(0).storage().__sizeof__()

@@ -50,7 +50,8 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
       " is equal to the first data dimension ",
       data.dim(0));
 
-  auto shape = data.dims().vec(); // Shape of output is batch_size x max_len x ...
+  auto shape =
+      data.sizes().vec(); // Shape of output is batch_size x max_len x ...
   shape[0] = max_length;
   shape.insert(shape.begin(), lengths.size());
   output->Resize(shape);
@@ -129,7 +130,7 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
 
   int64_t total_l = std::accumulate(l, l + lengths.dim(0), (int64_t)0);
 
-  auto shape = data.dims().vec();
+  auto shape = data.sizes().vec();
   CAFFE_ENFORCE_EQ(
       shape[0], lengths.dim(0), "LENGTH should match DATA in dimension 0");
   shape.erase(shape.begin());
