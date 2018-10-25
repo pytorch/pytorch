@@ -30,8 +30,7 @@ _(GeneratorType) \
 _(BoolType) \
 _(OptionalType) \
 _(VarType) \
-_(WorldType) \
-_(AnnotatedType)
+_(WorldType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -796,33 +795,6 @@ private:
   : Type(TypeKind::VarType), name_(name_) {}
   std::string name_;
 };
-
-// used in FunctionSchema to keep track of alias information
-// value->type() should never contain this kind of type.
-struct AnnotatedType;
-using AnnotatedTypePtr = std::shared_ptr<AnnotatedType>;
-struct TORCH_API AnnotatedType : public SingleElementType<TypeKind::AnnotatedType, AnnotatedType> {
-  friend struct Type;
-  using SingleElementType::SingleElementType;
-  template<typename ... T>
-  static AnnotatedTypePtr create(TypePtr base, std::string alias_set) {
-    return AnnotatedTypePtr(new AnnotatedType(std::move(base), std::move(alias_set))); // NOLINT(modernize-make-shared)
-  }
-  std::string str() const override {
-    std::stringstream ss;
-    ss << getElementType()->str() << "(" << alias_set << ")";
-    return ss.str();
-  }
-  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
-    return create(contained_types.at(0), alias_set);
-  }
-private:
-  AnnotatedType(TypePtr base, std::string alias_set)
-  : SingleElementType(std::move(base))
-  , alias_set(alias_set) {}
-  std::string alias_set;
-};
-
 
 TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
 // what is the type, ignoring extra size/shape information?

@@ -3,6 +3,7 @@
 
 #include "torch/csrc/jit/type.h"
 #include "torch/csrc/jit/ivalue.h"
+#include "torch/csrc/jit/alias_info.h"
 
 namespace torch { namespace jit {
 
@@ -16,10 +17,10 @@ struct Argument {
       TypePtr type = nullptr,
       c10::optional<int32_t> N = c10::nullopt,
       c10::optional<IValue> default_value = c10::nullopt,
-      bool kwarg_only = false)
+      bool kwarg_only = false,
+      c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
-        annotated_type_(type ? type : DynamicType::get()),
-        type_(getUnannotatedType(annotated_type_)),
+        type_(type ? type : DynamicType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
         kwarg_only_(kwarg_only) {}
@@ -28,10 +29,6 @@ struct Argument {
   }
   TypePtr type() const {
     return type_;
-  }
-  // type with possible additional aliasing information added
-  TypePtr annotatedType() const {
-    return annotated_type_;
   }
   c10::optional<int32_t> N() const {
     return N_;
@@ -42,17 +39,20 @@ struct Argument {
   bool kwarg_only() const {
     return kwarg_only_;
   }
-private:
-  static TypePtr getUnannotatedType(TypePtr typ) {
-    if(typ->kind() == TypeKind::AnnotatedType) {
-      auto elem = typ->expect<AnnotatedType>()->getElementType();
-      return getUnannotatedType(elem);
+  const AliasInfo& alias_info() const {
+    if(!alias_info_) {
+      alias_info_ = createBlankAliasInfo(type_);
     }
-    return typ->withContained(fmap(typ->containedTypes(), getUnannotatedType));
+    return *alias_info_;
+  }
+private:
+  static AliasInfo createBlankAliasInfo(TypePtr typ) {
+    auto contained = fmap(typ->containedTypes(), createBlankAliasInfo);
+    return AliasInfo({}, std::move(contained));
   }
   std::string name_;
-  TypePtr annotated_type_;
   TypePtr type_;
+  mutable c10::optional<AliasInfo> alias_info_;
   // for list types, an optional statically known length for the list
   // e.g. for int[3]: type = ListType::ofInts(), N = 3
   // If present, this will allow scalars to be broadcast to this length to
@@ -71,7 +71,7 @@ struct FunctionSchema {
       std::vector<Argument> returns,
       bool is_vararg = false,
       bool is_varret = false,
-      std::vector<std::string> writes = {})
+      std::vector<Symbol> writes = {})
       : name_(std::move(name)),
         arguments_(std::move(arguments)),
         returns_(std::move(returns)),
@@ -107,7 +107,7 @@ private:
   const bool is_varret_;
 
   // set of alias sets in Arguments that are written to by this op
-  const std::vector<std::string> writes_;
+  const std::vector<Symbol> writes_;
 public:
   const std::string& name() const {
     return name_;
@@ -118,7 +118,7 @@ public:
   const std::vector<Argument>& returns() const {
     return returns_;
   }
-  const std::vector<std::string>& writes() const {
+  const std::vector<Symbol>& writes() const {
     return writes_;
   }
   bool is_vararg() const {
