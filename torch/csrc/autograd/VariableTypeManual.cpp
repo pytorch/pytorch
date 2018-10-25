@@ -1,3 +1,4 @@
+#include "c10/util/Optional.h"
 #include "torch/csrc/autograd/VariableTypeUtils.h"
 
 using namespace at;
