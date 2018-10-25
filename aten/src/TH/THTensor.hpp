@@ -55,17 +55,17 @@ inline int THTensor_nDimensionLegacyNoScalars(const THTensor* tensor) {
   if (tensor->dim() == 0) {
     return 1;
   } else {
-    return tensor->dim();  
+    return tensor->dim();
   }
 }
 
 inline int THTensor_nDimensionLegacyAll(const THTensor* tensor) {
   if (tensor->is_empty()) {
-    return 0;  
+    return 0;
   } else if (tensor->dim() == 0) {
     return 1;
   } else {
-    return tensor->dim();  
+    return tensor->dim();
   }
 }
 

@@ -31,15 +31,15 @@ class MeanOp final : public Operator<Context> {
 
     // Dimension checking
     for (int i = 1; i < InputSize(); ++i) {
-      if (output->dims() != Input(i).dims()) {
+      if (output->sizes() != Input(i).sizes()) {
         CAFFE_THROW(
             "Check failed: output->dims() == Input(i).dims().",
             "Description: Input #",
             i,
             ", input dimension:",
-            Input(i).dims(),
+            Input(i).sizes(),
             " should match output dimension: ",
-            output->dims());
+            output->sizes());
       }
     }
 

@@ -39,7 +39,7 @@ class NumpyTileOp : public Operator<Context> {
     // output tensor.
     Tensor *src = &buffer, *dst = output;
     src->CopyFrom(input);
-    vector<int64_t> output_dims(input.dims().vec());
+    vector<int64_t> output_dims(input.sizes().vec());
     for (size_t i = 0; i < repeats.size(); ++i) {
       if (repeats_data[i] == 1) {
         continue;

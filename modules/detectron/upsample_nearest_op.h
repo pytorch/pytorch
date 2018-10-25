@@ -50,7 +50,7 @@ class UpsampleNearestOp final : public Operator<Context> {
       d2 = Y->dim32(1);
       d3 = Y->dim32(2);
     } else {
-      d1 = Y->dim32(1);
+      d1 = Y->dim32(0) * Y->dim32(1);
       d2 = Y->dim32(2);
       d3 = Y->dim32(3);
     }

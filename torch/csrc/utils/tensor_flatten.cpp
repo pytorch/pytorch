@@ -85,8 +85,11 @@ std::vector<at::Tensor> unflatten_sparse_tensors(
 
   std::vector<at::Tensor> outputs;
   outputs.reserve(tensors.size());
-  for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; ++i)
-    outputs.emplace_back(at::_sparse_coo_tensor_unsafe(indices[i], values[i], tensors[i].sizes()));
+  for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; ++i) {
+    auto &ref_t = tensors[i];
+    auto t = at::_sparse_coo_tensor_unsafe(indices[i], values[i], ref_t.sizes());
+    outputs.emplace_back(t._coalesced_(ref_t.is_coalesced()));
+  }
   return outputs;
 }
 
