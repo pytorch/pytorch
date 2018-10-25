@@ -42,7 +42,11 @@ void addInputs(Node *n, const char * name, int64_t value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {
     Value * v = ArgumentStash::popValue(name);
-    n->addInput(v);
+    auto &g = *v->owningGraph();
+    Value *casted = g.createTensorToNum(IntType::get(), v)
+                      ->insertAfter(v->node())
+                      ->output();
+    n->addInput(casted);
   } else {
     detail::genericAddInput(n, value);
   }
@@ -185,16 +189,10 @@ void ArgumentStash::stashIntListElem(const std::string& arg_name, size_t size, s
   list_trace[idx] = prim;
 }
 
-void ArgumentStash::stashValue(const std::string& arg_name, size_t idx, const Variable& var, TypePtr type) {
+void ArgumentStash::stashValue(const std::string& arg_name, const Variable& var) {
   if (!isTracing()) return;
 
   Value* ten = getValueTrace(var);
-  if (type) {
-    auto& g = *ten->owningGraph();
-    ten = g.createTensorToNum(type, ten)
-                     ->insertAfter(ten->node())
-                     ->output();
-  }
   stash.values.emplace(arg_name, ten);
 }
 

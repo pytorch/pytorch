@@ -401,7 +401,7 @@ inline int64_t PythonArgs::toInt64(int i) {
   if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
     auto & var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
-        signature.params[i].name, idx, var, jit::IntType::get());
+        signature.params[i].name, var);
   }
   return THPUtils_unpackLong(args[i]);
 }

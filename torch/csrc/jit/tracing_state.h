@@ -86,9 +86,7 @@ struct ArgumentStash {
   // to regular Value*'s in the graph. i.e. they don't require special
   // handling like in the case of IntLists
   TORCH_API static void stashValue(const std::string& arg_name,
-                                   size_t idx,
-                                   const Variable& var,
-                                   TypePtr type=nullptr);
+                                   const Variable& var);
 
   static bool hasValue(const std::string& arg_name) {
     return stash.values.count(arg_name) > 0;
