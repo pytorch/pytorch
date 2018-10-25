@@ -197,7 +197,7 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
-      auto stream = streams[i]
+      auto stream = !streams[i]
           ? at::cuda::getCurrentCUDAStream(device).stream()
           : streams[i]->stream();
       NCCL_CHECK(ncclAllReduce(
@@ -277,7 +277,7 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
-      auto stream = streams[i]
+      auto stream = !streams[i]
           ? at::cuda::getCurrentCUDAStream(device).stream()
           : streams[i]->stream();
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
@@ -340,7 +340,7 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
-      auto stream = streams[i]
+      auto stream = !streams[i]
           ? at::cuda::getCurrentCUDAStream(device).stream()
           : streams[i]->stream();
       NCCL_CHECK(ncclReduceScatter(
