@@ -1110,9 +1110,12 @@ if BACKEND == "tcp" or BACKEND == "gloo" or BACKEND == "nccl":
                 getattr(fn, "skip_if_no_gpu", False) or
                 getattr(fn, "skip_if_small_worldsize", False)
             )
-            self.JOIN_TIMEOUT = get_timeout(self.id())
-            for p in self.processes:
-                p.join(self.JOIN_TIMEOUT)
+            join_timeout = get_timeout(self.id())
+            for rank, process in enumerate(self.processes):
+                process.join(join_timeout)
+                self.assertFalse(
+                    process.is_alive(),
+                    "Timeout waiting for rank %d to terminate" % rank)
 
             first_process = self.processes[0]
             for p in self.processes:

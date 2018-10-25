@@ -1,5 +1,6 @@
 #include "c10/util/Logging.h"
 #include "c10/util/Flags.h"
+#include "c10/util/Backtrace.h"
 
 #include <algorithm>
 #include <cstring>
@@ -23,7 +24,7 @@ namespace enforce_detail {
 
 namespace {
 std::function<string(void)>* GetFetchStackTrace() {
-  static std::function<string(void)> func = []() { return ""; };
+  static std::function<string(void)> func = []() { return get_backtrace(/*frames_to_skip=*/ 1); };
   return &func;
 };
 } // namespace
@@ -44,6 +45,16 @@ void ThrowEnforceNotMet(
   }
   throw e;
 }
+
+// PyTorch-style error message
+// (This must be defined here for access to GetFetchStackTrace)
+Error::Error(SourceLocation source_location, const std::string& msg)
+    : Error(
+          msg,
+          str(" (",
+              source_location,
+              ")\n",
+              (*GetFetchStackTrace())())) {}
 
 } // namespace c10
 

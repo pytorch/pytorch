@@ -24,10 +24,8 @@ inline bool BlobIsTensorType(const Blob& blob, DeviceType device_type) {
   return tensor && *tensor && tensor->GetDeviceType() == device_type;
 }
 
-inline Tensor* BlobGetMutableTensor(
-    Blob* blob,
-    const vector<int64_t>& dims,
-    const at::TensorOptions& options) {
+inline Tensor*
+BlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
   if (blob->IsType<Tensor>()) {
     Tensor* tensor = blob->GetMutable<Tensor>();
     if (*tensor) {
@@ -41,7 +39,7 @@ inline Tensor* BlobGetMutableTensor(
           tensor->raw_mutable_data();
         } else {
           // create a new Tensor when the data_type doesn't match
-          return blob->Reset<Tensor>(new Tensor(empty(dims, options)));
+          return blob->Reset<Tensor>(new Tensor(caffe2::empty(dims, options)));
         }
         return tensor;
       }
@@ -52,7 +50,7 @@ inline Tensor* BlobGetMutableTensor(
   VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<Tensor>()
           << " dims: " << dims;
   // << " options: " << options; (operator<< for Options is in at:: now)
-  return blob->Reset<Tensor>(new Tensor(empty(dims, options)));
+  return blob->Reset<Tensor>(new Tensor(caffe2::empty(dims, options)));
 }
 
 inline Tensor* BlobGetMutableTensor(Blob* blob, DeviceType device_type) {

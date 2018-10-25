@@ -245,7 +245,8 @@ TYPED_TEST_CASE(TensorCPUDeathTest, TensorTypes);
 
 TYPED_TEST(TensorCPUTest, TensorInitializedEmpty) {
   Tensor tensor(CPU);
-  EXPECT_EQ(tensor.ndim(), 0);
+  EXPECT_EQ(tensor.ndim(), 1);
+  EXPECT_EQ(tensor.size(), 0);
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
@@ -390,12 +391,6 @@ TYPED_TEST(TensorCPUTest, TensorShareDataRawPointerWithMeta) {
   }
 }
 
-TYPED_TEST(TensorCPUTest, CannotShareDataWhenShapeNotSet) {
-  std::unique_ptr<TypeParam[]> raw_buffer(new TypeParam[10]);
-  Tensor tensor(CPU);
-  ASSERT_THROW(tensor.ShareExternalPointer(raw_buffer.get()), EnforceNotMet);
-}
-
 TYPED_TEST(TensorCPUTest, TensorShareDataCanUseDifferentShapes) {
   vector<int> dims(3);
   dims[0] = 2;
@@ -514,13 +509,15 @@ TYPED_TEST(TensorCPUTest, MaxKeepOnShrink) {
 
 TYPED_TEST(TensorCPUDeathTest, CannotAccessRawDataWhenEmpty) {
   Tensor tensor(CPU);
-  EXPECT_EQ(tensor.ndim(), 0);
+  EXPECT_EQ(tensor.ndim(), 1);
+  EXPECT_EQ(tensor.size(), 0);
   ASSERT_ANY_THROW(tensor.raw_data());
 }
 
 TYPED_TEST(TensorCPUDeathTest, CannotAccessDataWhenEmpty) {
   Tensor tensor(CPU);
-  EXPECT_EQ(tensor.ndim(), 0);
+  EXPECT_EQ(tensor.ndim(), 1);
+  EXPECT_EQ(tensor.size(), 0);
   ASSERT_ANY_THROW(tensor.data<TypeParam>());
 }
 
@@ -1090,15 +1087,14 @@ TEST(BlobTest, CastingMessage) {
   }
 }
 
-TEST(TensorConstruction, UnitializedCopyTest) {
+TEST(TensorConstruction, UninitializedCopyTest) {
   Tensor x(CPU);
   Tensor y(x, CPU);
   Tensor z = x.Clone();
-  // should be uninitialized
-  EXPECT_EQ(x.size(), -1);
-  EXPECT_EQ(y.size(), -1);
+  EXPECT_FALSE(x.dtype_initialized());
+  EXPECT_FALSE(y.dtype_initialized());
   LOG(INFO) << "z.size()" << z.size();
-  EXPECT_EQ(z.size(), -1);
+  EXPECT_FALSE(z.dtype_initialized());
 }
 
 TEST(TensorConstruction, CopyConstructorTest) {

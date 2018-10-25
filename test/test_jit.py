@@ -2033,6 +2033,17 @@ class TestJit(JitTestCase):
         t = Test()
         self.assertEqual(t(torch.ones(1)), torch.ones(1) + 4)
 
+    def test_warnings(self):
+        import warnings
+
+        @torch.jit.script
+        def fn(x):
+            if bool(x < 2):
+                warnings.warn("x is less than 2")
+            return x
+
+        self.assertExpectedGraph(fn.graph)
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
@@ -4622,6 +4633,7 @@ a")
 
     def test_script_module_valid_consts(self):
         tester = self
+
         class Foo(torch.jit.ScriptModule):
             __constants__ = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']
 
@@ -4631,8 +4643,8 @@ a")
                 self.b = 1.2
                 self.c = False
                 with tester.assertRaisesRegex(
-                    TypeError,
-                    "'Linear' object for attribute 'd' is not a valid constant"):
+                        TypeError,
+                        "'Linear' object for attribute 'd' is not a valid constant"):
                     self.d = [nn.Linear(3, 4)]
                 self.e = lambda x: x
                 self.f = [3, 4, 5]

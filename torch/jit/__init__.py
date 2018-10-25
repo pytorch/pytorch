@@ -838,7 +838,6 @@ def _get_valid_constant(attr, v):
         "  3. a list or tuple of (2)\n")
 
 
-
 def _create_methods_from_stubs(self, stubs):
     defs = [m.def_ for m in stubs]
     rcbs = [m.resolution_callback for m in stubs]
@@ -1323,6 +1322,7 @@ def _get_builtin_table():
                 _builtin_table[id(v)] = "aten::" + name
     for mod in _modules_containing_builtins:
         register_all(mod)
+    _builtin_table[id(warnings.warn)] = "aten::warn"
 
     return _builtin_table
 

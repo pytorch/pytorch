@@ -34,9 +34,9 @@ void expand_dims_op_cpu_impl(
     return;
   }
 
-  auto newDims = input.dims().vec();
+  auto newDims = input.sizes().vec();
   CAFFE_ENFORCE_GE(
-      input.dims().size() + state->dims.size(),
+      input.sizes().size() + state->dims.size(),
       state->dims.back() + 1,
       "Input needs at least ",
       (1 + state->dims.back() - state->dims.size()),
