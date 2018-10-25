@@ -14,6 +14,7 @@ import caffe2.python.hypothesis_test_util as hu
 import unittest
 import os
 
+
 class TestGroupConvolution(hu.HypothesisTestCase):
 
     @given(stride=st.integers(1, 3),
@@ -69,8 +70,8 @@ class TestGroupConvolution(hu.HypothesisTestCase):
             w = w.transpose((0, 3, 1, 2))
 
         inputs = [X, w, b] if use_bias else [X, w]
-        if order != 'NHWC' or group == 1:
-            self.assertDeviceChecks(dc, op, inputs, [0])
+
+        self.assertDeviceChecks(dc, op, inputs, [0])
         for i in range(len(inputs)):
             self.assertGradientChecks(gc, op, inputs, i, [0])
 
