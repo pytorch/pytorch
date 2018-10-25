@@ -390,7 +390,7 @@ void Graph::lint() const {
     }
     void check_block(const Block *b) {
       // Check topological ordering
-      JIT_ASSERT(b->input_->isBefore(*b->nodes().begin()));
+      JIT_ASSERT(b->param_node()->isBefore(*b->nodes().begin()));
       auto curNode = *b->nodes().begin();
       while (curNode != b->return_node()) {
         JIT_ASSERT(curNode->isBefore(curNode->next()));
