@@ -273,7 +273,7 @@ Tensor batch_norm(
                         training, momentum, eps));
   }
 
-  return std::get<0>(at::native_batch_norm(input.contiguous(), weight, bias,
+  return std::get<0>(at::native_batch_norm(input, weight, bias,
 					   running_mean, running_var, training, momentum, eps));
 }
 
