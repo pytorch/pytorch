@@ -156,7 +156,7 @@ def load(github, model, force_reload=False, *args, **kwargs):
 
     func = _load_attr_from_module('hubconf', model)
     if func is None:
-        raise RuntimeError('Cannot find callable {} in module {}'.format(func_name, module_name))
+        raise RuntimeError('Cannot find callable {} in hubconf'.format(model))
 
     # Check if func is callable
     if not callable(func):
