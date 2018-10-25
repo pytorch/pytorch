@@ -5133,13 +5133,14 @@ class TestNN(NNTestCase):
             'smooth_l1_loss': lambda x, y, r: F.smooth_l1_loss(x, y, reduction=r),
         }
 
-        input = torch.ones(2, 1)
+        input = torch.randn(2, 1, requires_grad=True)
         for name, fn in losses.items():
             for requires_grad in (True, False):
                 # When target.requires_grad=True, its impl is in Python, while the other is in TH.
-                target = torch.ones(2, 10, requires_grad=requires_grad)
+                target = torch.randn(2, 10, requires_grad=requires_grad)
                 l = fn(input, target, 'none')
                 self.assertEqual(l.size(), target.size())
+                self.assertTrue(gradcheck(fn, (input, target, 'none')))
 
     def test_cosine_similarity(self):
         input1 = torch.randn(4, 4, requires_grad=True)
