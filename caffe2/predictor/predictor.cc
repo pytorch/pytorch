@@ -34,7 +34,7 @@ void exportOutputTensor(
     const std::string& name,
     TensorCPU& output) {
   auto tensor = getTensor(ws, name);
-  output.Resize(tensor->dims());
+  output.Resize(tensor->sizes());
   output.ShareData(*tensor);
 }
 
