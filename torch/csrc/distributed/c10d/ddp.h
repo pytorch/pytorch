@@ -11,6 +11,7 @@
 #include <vector>
 
 namespace c10d {
+
 void distBroadcastCoalesced(
     ProcessGroup& processGroup,
     std::vector<at::Tensor>& tensors,
@@ -28,4 +29,10 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
     ProcessGroup& processGroup,
     std::vector<std::vector<at::Tensor>>& gradsBatch,
     const std::vector<int64_t>& devices);
+
+void syncReduction(
+    std::shared_ptr<ProcessGroup::Work>& reductionWork,
+    std::vector<at::Tensor>& gradsBatch,
+    at::Tensor& gradsBatchCoalesced);
+
 } // namespace c10d
