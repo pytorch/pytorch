@@ -252,10 +252,24 @@ namespace detail {
  */
 struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
+
+  /**
+   * Construct a 1-dim 0-size tensor with the given settings.
+   * The provided allocator will be used to allocate data on
+   * subsequent resize.
+   */
   TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, Allocator *allocator, bool is_variable);
+
+  /**
+   * Construct a 1-dim 0-size tensor backed by the given storage.
+   */
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
 
  private:
+  // This constructor is private, because the data_type is redundant with
+  // storage.  Still, we pass it in separately because it's easier to write
+  // the initializer list if we're not worried about storage being moved out
+  // from under us.
   TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable);
 
  public:
@@ -264,6 +278,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(TensorImpl&&) = default;
   TensorImpl& operator=(TensorImpl&&) = default;
 
+  /**
+   * Release (decref) storage, and any other external allocations.  This
+   * override is for `intrusive_ptr_target` and is used to implement weak
+   * tensors.
+   */
   virtual void release_resources() override;
 
   // TODO: Ideally, type_id() would be the *only* key we need to consult
@@ -281,6 +300,15 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   //    to do the "thread-local no_grad" trick (where we process Variables
   //    "as if" they were non-Variables by setting a thread local variable.)
   //
+  // TODO: type() is a very attractive name for a method, but we don't
+  // actually want people to use it.  Rename this to something else.
+
+  /**
+   * Return the Type object corresponding to this Tensor, which we can
+   * use to do dynamic dispatch to operators from.  This method is NOT
+   * intended to be used by end-users; it is purely an implementation
+   * detail.
+   */
   Type & type() const {
     // NB: It's valid to use getTypeRaw here, because the TensorImpl
     // could not have been created without initializing the Type first.
@@ -289,11 +317,47 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(type_id()), dataTypeToScalarType(dtype().id()), is_variable());
   }
 
+  /**
+   * Return the TensorTypeId corresponding to this Tensor.  In the future,
+   * this will be the sole piece of information required to dispatch
+   * to an operator; however, at the moment, it is not used for
+   * dispatch.
+   *
+   * type_id() and type() are NOT in one-to-one correspondence; we only
+   * have a single type_id() for CPU tensors, but many Types (CPUFloatTensor,
+   * CPUDoubleTensor...)
+   */
   TensorTypeId type_id() const { return type_id_; }
+
+  /**
+   * Return a reference to the sizes of this tensor.  This reference remains
+   * valid as long as the tensor is live and not resized.
+   */
   virtual IntList sizes() const;
+
+  /**
+   * Return a reference to the strides of this tensor.  This reference remains
+   * valid as long as the tensor is live and not restrided.
+   */
   virtual IntList strides() const;
+
+  /**
+   * Return the number of dimensions of this tensor.  Note that 0-dimension
+   * represents a Tensor that is a Scalar, e.g., one that has a single element.
+   */
   virtual int64_t dim() const;
+
+  /**
+   * Return the underyling storage of a Tensor.  Multiple tensors may share
+   * a single storage.  A Storage is an impoverished, Tensor-like class
+   * which supports far less operations than Tensor.
+   *
+   * Avoid using this method if possible; try to use only Tensor APIs to perform
+   * operations.
+   */
   virtual const Storage& storage() const;
+
+  // TODO: Delete me.
   friend struct Type;
 
   /**
@@ -311,6 +375,13 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return numel_;
   }
 
+  /**
+   * Whether or not a tensor is laid out in contiguous memory.
+   *
+   * Tensors with non-trivial strides are not contiguous.  See
+   * compute_contiguous() for the exact definition of whether or not
+   * a tensor is contiguous or not.
+   */
   virtual bool is_contiguous() const {
 #ifdef DEBUG
     AT_ASSERT(compute_contiguous() == is_contiguous_);
@@ -318,22 +389,61 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_;
   }
 
-  // this is called by the generated wrapper code when there are conditions
-  // when this output tensor should be zero dimensional. e.g. when all inputs
-  // to a function 'add' were zero dimensional, then condition_when_zero_dim == true.
-  // we also prevent this from getting marked as a zero dim tensor if it is not
-  // the right shape afterall.
+  /**
+   * If `condition_when_zero_dim` is true, and the tensor is a 1-dim, 1-size
+   * tensor, reshape the tensor into a 0-dim tensor (scalar).
+   *
+   * This helper function is called from generated wrapper code, to help
+   * "fix up" tensors that legacy code didn't generate in the correct shape.
+   * For example, suppose that we have a legacy function 'add' which produces
+   * a tensor which is the same shape as its inputs; however, if the inputs
+   * were zero-dimensional, it produced a 1-dim 1-size tensor (don't ask).
+   * result->maybe_zero_dim(lhs->dim() == 0 && rhs->dim() == 0) will be called,
+   * correctly resetting the dimension to 0 when when the inputs had 0-dim.
+   *
+   * As we teach more and more of TH to handle 0-dim correctly, this function
+   * will become less necessary.  At the moment, it is often called from functions
+   * that correctly handle the 0-dim case, and is just dead code in this case.
+   * In the glorious future, this function will be eliminated entirely.
+   */
   virtual TensorImpl* maybe_zero_dim(bool condition_when_zero_dim);
 
-  // True if a tensor was auto-wrapped from a C++ or Python number.
-  // Wrapped numbers do not participate in the result type computation for
-  // mixed-type operations if there are any Tensors that are not wrapped
-  // numbers. Otherwise, they behave like their non-wrapped equivalents.
-  // See [Result type computation] in TensorIterator.h.
+  /**
+   * True if a tensor was auto-wrapped from a C++ or Python number.
+   * For example, when you write 't + 2', 2 is auto-wrapped into a Tensor
+   * with `is_wrapped_number_` set to true.
+   *
+   * Wrapped numbers do not participate in the result type computation for
+   * mixed-type operations if there are any Tensors that are not wrapped
+   * numbers.  This is useful, because we want 't + 2' to work with
+   * any type of tensor, not just LongTensor (which is what integers
+   * in Python represent).
+   *
+   * Otherwise, they behave like their non-wrapped equivalents.
+   * See [Result type computation] in TensorIterator.h.
+   *
+   * Why did we opt for wrapped numbers, as opposed to just having
+   * an extra function add(Tensor, Scalar)?  This helps greatly reduce
+   * the amount of code we have to write for add, when actually
+   * a Tensor-Scalar addition is really just a Tensor-Tensor
+   * addition when the RHS is 0-dim (except for promotion behavior.)
+   *
+   * WARNING: It is NOT valid to call this method on a Variable.
+   * See Note [We regret making Variable hold a Tensor]
+   */
   bool is_wrapped_number() const {
     AT_ASSERT(!is_variable());
     return is_wrapped_number_;
   }
+
+  /**
+   * Set whether or not a tensor was auto-wrapped from a C++ or Python
+   * number.  You probably don't want to call this, unless you are
+   * writing binding code.
+   *
+   * WARNING: It is NOT valid to call this method on a Variable.
+   * See Note [We regret making Variable hold a Tensor]
+   */
   void set_wrapped_number(bool value) {
     AT_ASSERT(!is_variable());
     AT_ASSERT(dim() == 0);
@@ -343,17 +453,98 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   // ~~~~~ Autograd API ~~~~~
   // Some methods below are defined in TensorImpl.cpp because Tensor is an
   // incomplete type.
+  //
+  // Note [Tensor versus Variable in C++]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // Autograd methods are only valid for the Variable::Impl subclass
+  // of Tensor.  This is due to some questionable life choices, where
+  // a Variable has a Tensor (so they are not the same thing), but
+  // a Variable is a Tensor (they are subclassed, so that you can write
+  // code on Tensor that works both with Variables and Tensors.  Poor
+  // man's polymorphism).  Variable does NOT satisfy the Liskov Substitution
+  // Principle for Tensor; generally you want to work with all Variables,
+  // or all Tensors, but not a mix of both.  We intend to fix this in
+  // the future.
+  //
+  // Note [We regret making Variable hold a Tensor]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // Tensor has a bunch of fields in it.  Are those fields always valid?
+  // Not necessarily: the Variable::Impl subclass of a tensor doesn't use these
+  // fields; instead, it *forwards* them to a contained, inner tensor
+  // (the 'data' tensor).  It doesn't even bother keeping the fields on the
+  // outer tensor up-to-date, because an end user could grab the inner
+  // tensor and directly, e.g., resize it (making any outer fields we track
+  // stale).
+  //
+  // As you might imagine, this is a TERRIBLE state of affairs to be in.
+  // It makes implementing everything on TensorImpl complicated: if
+  // you directly access a field on TensorImpl, you must *virtualize*
+  // the function, if you want it to work correctly when called from
+  // Variable (because we need to override the method to avoid looking
+  // in our fields, and look in the data tensor's fields.)  Anything that
+  // isn't virtualized, won't work if called on a variable.
+  //
+  // The way to fix this is to make Variable::Impl stop holding a tensor;
+  // instead, it should just *be* a tensor.
 
+  /**
+   * Set whether or not a tensor requires gradient.
+   *
+   * It is only valid to call this method on a Variable.
+   * See Note [Tensor versus Variable in C++].
+   */
   virtual void set_requires_grad(bool requires_grad) {
     AT_ERROR("set_requires_grad is not implemented for Tensor");
   }
+
+  /**
+   * True if a tensor requires gradient.  Tensors which require gradient
+   * have history tracked for any operations performed on them, so that
+   * we can automatically differentiate back to them.  A tensor that
+   * requires gradient and has no history is a "leaf" tensor, which we
+   * accumulate gradients into.
+   *
+   * It is only valid to call this method on a Variable.
+   * See Note [Tensor versus Variable in C++].
+   */
   virtual bool requires_grad() const {
     AT_ERROR("requires_grad is not implemented for Tensor");
   }
 
+  /**
+   * Return a mutable reference to the gradient.  This is conventionally
+   * used as `t.grad() = x` to set a gradient to a completely new tensor.
+   *
+   * It is only valid to call this method on a Variable.
+   * See Note [Tensor versus Variable in C++].
+   */
   virtual Tensor& grad();
+
+  /**
+   * Return the accumulated gradient of a tensor.  This gradient is written
+   * into when performing backwards, when this tensor is a leaf tensor.
+   *
+   * It is only valid to call this method on a Variable.
+   * See Note [Tensor versus Variable in C++].
+   */
   virtual const Tensor& grad() const;
 
+  /**
+   * Return a typed data pointer to the actual data which this tensor refers to.
+   * This checks that the requested type (from the template parameter) matches
+   * the internal type of the tensor.
+   *
+   * It is invalid to call data() on a dtype-uninitialized tensor, even if
+   * the size is 0.
+   *
+   * WARNING: If a tensor is not contiguous, you MUST use strides when
+   * performing index calculations to determine the location of elements in
+   * the tensor.  We recommend using 'TensorAccessor' to handle this computation
+   * for you; this class is available from 'Tensor'.
+   *
+   * WARNING: It is NOT valid to call this method on a Variable.
+   * See Note [We regret making Variable hold a Tensor]
+   */
   template <typename T>
   inline T * data() const {
     AT_ASSERT(!is_variable());
@@ -373,6 +564,19 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return storage_.unsafe_data<T>() + storage_offset_;
   }
 
+  /**
+   * Return a void* data pointer to the actual data which this tensor refers to.
+   *
+   * It is invalid to call data() on a dtype-uninitialized tensor, even if the
+   * size is 0.
+   *
+   * WARNING: The data pointed to by this tensor may not contiguous; do NOT
+   * assume that itemsize() * numel() is sufficient to compute the bytes that
+   * can be validly read from this tensor.
+   *
+   * WARNING: It is NOT valid to call this method on a Variable.
+   * See Note [We regret making Variable hold a Tensor]
+   */
   inline void* data() const {
     AT_ASSERT(!is_variable());
     AT_ASSERT(storage_initialized());
@@ -382,34 +586,66 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         data_type_.itemsize() * storage_offset_);
   }
 
+  /**
+   * Like data<T>(), but performs no checks.  You are responsible for ensuring
+   * that all invariants required by data() are upheld here.
+   *
+   * WARNING: It is NOT valid to call this method on a Variable.
+   * See Note [We regret making Variable hold a Tensor]
+   */
   template <typename T>
   inline T * unsafe_data() const {
-    AT_ASSERT(!is_variable());
     return storage_.unsafe_data<T>() + storage_offset_;
   }
 
+  /**
+   * Returns the TypeMeta of a tensor, which describes what data type
+   * it is (e.g., int, float, ...)
+   */
   const caffe2::TypeMeta& dtype() const {
     return data_type_;
   }
+
+  /**
+   * Return the size of a single element of this tensor in bytes.
+   */
   size_t itemsize() const {
     AT_ASSERT(dtype_initialized());
     return data_type_.itemsize();
   }
 
+  /**
+   * Return the offset in number of elements into the storage that this
+   * tensor points to.  Most tensors have storage_offset() == 0, but,
+   * for example, an index into a tensor will have a non-zero storage_offset().
+   *
+   * WARNING: This is NOT computed in bytes.
+   */
   virtual int64_t storage_offset() const {
     return storage_offset_;
   }
 
-  // represents that numel() == 0.
+  /**
+   * True if a tensor has no elements (e.g., numel() == 0).
+   */
   inline bool is_empty() const {
     return numel() == 0;
   }
 
+  /**
+   * Change the dimensionality of a tensor.  This is truly a resize:
+   * old sizes, if they are still valid, are preserved (this invariant
+   * is utilized by some call-sites, e.g., the implementation of squeeze, which
+   * mostly wants the sizes to stay the same).  New dimensions are given zero
+   * size and zero stride; this is probably not what you want--you should
+   * set_size/set_stride afterwards.
+   *
+   * TODO: This should be jettisoned in favor of `set_sizes_and_strides`,
+   * which is harder to misuse.
+   */
   virtual void resize_dim(int64_t ndim) {
-    // NB: This is *truly* a resize; calling code (e.g., squeeze)
-    // assumes that old values are preserved
     auto old_dim = sizes_.size();
-    sizes_.resize(ndim);
+    sizes_.resize(ndim, 0);
     if (old_dim != sizes_.size()) {
       auto new_strides = c10::guts::make_unique<int64_t[]>(ndim);
       for (size_t i = 0; i < std::min(old_dim, static_cast<size_t>(ndim)); i++) {
@@ -425,27 +661,53 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     refresh_contiguous();
   }
 
+  /**
+   * Change the size at some dimension.  This DOES NOT update strides;
+   * thus, most changes to size will not preserve contiguity.  You probably
+   * also want to call set_stride() when you call this.
+   *
+   * TODO: This should be jettisoned in favor of `set_sizes_and_strides`,
+   * which is harder to misuse.
+   */
   virtual void set_size(int64_t dim, int64_t new_size) {
     sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
   }
 
+  /**
+   * Change the stride at some dimension.
+   *
+   * TODO: This should be jettisoned in favor of `set_sizes_and_strides`,
+   * which is harder to misuse.
+   */
   virtual void set_stride(int64_t dim, int64_t new_stride) {
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
   }
 
+  /**
+   * Set the offset into the storage of this tensor.
+   *
+   * WARNING: This does NOT check if the tensor is in bounds for the new
+   * location at the storage; the caller is responsible for checking this
+   * (and resizing if necessary.)
+   */
   virtual void set_storage_offset(int64_t storage_offset) {
     storage_offset_ = storage_offset;
-    refresh_numel();
-    refresh_contiguous();
   }
 
-  // WARNING: This function does not check if the requested
-  // sizes/strides are in bounds for the storage that is allocated;
-  // this is the responsibility of the caller
+  /**
+   * Set the sizes and strides of a tensor.
+   *
+   * WARNING: This function does not check if the requested
+   * sizes/strides are in bounds for the storage that is allocated;
+   * this is the responsibility of the caller
+   *
+   * WARNING: It is NOT valid to call this method on a Variable.
+   * See Note [We regret making Variable hold a Tensor]
+   */
   void set_sizes_and_strides(at::IntList new_size, at::IntList new_stride) {
     AT_ASSERT(!is_variable());
     AT_CHECK(
@@ -467,38 +729,33 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     refresh_contiguous();
   }
 
+  /**
+   * Return the size of a tensor at some dimension.
+   */
   virtual int64_t size(int64_t d) const;
+
+  /**
+   * Return the stride of a tensor at some dimension.
+   */
   virtual int64_t stride(int64_t d) const;
 
+  /**
+   * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
+   */
   bool is_variable() const { return is_variable_; };
 
- private:
-  int64_t compute_numel() const {
-    int64_t n = 1;
-    for (auto s : sizes()) {
-      n *= s;
-    }
-    return n;
-  }
-  bool compute_contiguous() const;
-
- protected:
-  void refresh_numel() {
-    AT_ASSERT(!is_variable());
-    numel_ = compute_numel();
-  }
-  void refresh_contiguous() {
-    AT_ASSERT(!is_variable());
-    is_contiguous_ = compute_contiguous();
-  }
-
- public:
-
+  /**
+   * The device type of a Tensor, e.g., DeviceType::CPU or DeviceType::CUDA.
+   */
   at::DeviceType device_type() const {
     AT_ASSERT(!is_variable());
     return storage_.device_type();
   }
 
+  /**
+   * The device of a Tensor; e.g., Device(at::kCUDA, 1) (the 1-index CUDA
+   * device).
+   */
   at::Device GetDevice() const {
     return storage_.device();
   }
@@ -897,15 +1154,34 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return static_cast<T*>(raw_mutable_data(caffe2::TypeMeta::Make<T>()));
   }
 
+  /**
+   * True if a tensor is storage initialized.  A tensor may become
+   * storage UNINITIALIZED after a Resize() or FreeMemory()
+   */
   bool storage_initialized() const noexcept {
     return storage_.data() || numel_ == 0;
   }
 
+  /**
+   * True if a tensor is dtype initialized.  A tensor allocated with
+   * Caffe2-style constructors is dtype uninitialized until the
+   * first time mutable_data<T>() is called.
+   */
   bool dtype_initialized() const noexcept {
     return data_type_ != caffe2::TypeMeta();
   }
 
- private:
+private:
+
+  // The Caffe2 Resize() method supports being called both as Resize({2,2}) as
+  // well as variadic with Resize(2, 2).  These overloads provide all of the
+  // supported calling configurations, while being overloads (and not templates)
+  // so that implicit conversions still work.
+  //
+  // SetDims on ArrayRef is internally implemented as a template, so we can
+  // handle both ArrayRefs of different types (there are some uses of
+  // Resize in Caffe2 which pass in int, not int64_t.)
+
   template <
       typename T,
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
@@ -967,6 +1243,41 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       }
     }
     is_contiguous_ = true;
+  }
+
+  /**
+   * Compute the number of elements based on the sizes of a tensor.
+   */
+  int64_t compute_numel() const {
+    int64_t n = 1;
+    for (auto s : sizes()) {
+      n *= s;
+    }
+    return n;
+  }
+
+  /**
+   * Compute whether or not a tensor is contiguous based on the sizes and
+   * strides of a tensor.
+   */
+  bool compute_contiguous() const;
+
+protected:
+  /**
+   * Recompute the cached numel of a tensor.  Call this if you modify sizes.
+   */
+  void refresh_numel() {
+    AT_ASSERT(!is_variable());
+    numel_ = compute_numel();
+  }
+
+  /**
+   * Recompute the cached contiguity of a tensor.  Call this if you modify sizes
+   * or strides.
+   */
+  void refresh_contiguous() {
+    AT_ASSERT(!is_variable());
+    is_contiguous_ = compute_contiguous();
   }
 
 public:
