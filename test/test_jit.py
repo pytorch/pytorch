@@ -4068,18 +4068,23 @@ a")
         self.checkScript(func, [torch.arange(0, 2)], optimize=True)
 
     def test_script_clamp_none(self):
-        # TODO: could not enable default/optional argument for None in JIT
-        # result from Aten native python_default_init for clamp, it is used
-        # in Aten but not in JIT, need to fix type/default arg system in ATen
         def test_script_clamp_max_none(x):
-            return torch.clamp(x, min=None, max=2)
+            return torch.clamp(x, min=2, max=None)
+
+        def test_script_clamp_max(x):
+            return torch.clamp(x, max=2)
 
         def test_script_clamp_min_none(x):
-            return torch.clamp(x, min=2, max=None)
+            return torch.clamp(x, min=None, max=2)
+
+        def test_script_clamp_min(x):
+            return torch.clamp(x, min=2)
 
         input = [torch.arange(0, 3)]
         self.checkScript(test_script_clamp_max_none, input, optimize=True)
+        self.checkScript(test_script_clamp_max, input, optimize=True)
         self.checkScript(test_script_clamp_min_none, input, optimize=True)
+        self.checkScript(test_script_clamp_min, input, optimize=True)
 
     def test_script_bool_constant(self):
         script = '''
