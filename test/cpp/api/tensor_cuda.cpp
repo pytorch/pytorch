@@ -43,14 +43,20 @@ TEST(TensorTest, ToDevice_CUDA) {
   tensor = tensor.to(at::TensorOptions({at::kCUDA, 0}));
   REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kFloat, at::kStrided);
 
+  tensor = tensor.to(at::TensorOptions(at::kDouble));
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kDouble, at::kStrided);
+
   tensor = tensor.to(at::TensorOptions({at::kCUDA, 1}));
-  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kFloat, at::kStrided);
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kDouble, at::kStrided);
+
+  tensor = tensor.to(at::TensorOptions(at::kInt));
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kInt, at::kStrided);
 
   tensor = tensor.to(at::TensorOptions(at::Device(at::kCPU)));
-  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kInt, at::kStrided);
 
   tensor = tensor.to(at::TensorOptions(at::kCUDA));
-  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kFloat, at::kStrided);
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kInt, at::kStrided);
 }
 
 TEST(TensorTest, ToDeviceAndDtype_CUDA) {
@@ -62,6 +68,9 @@ TEST(TensorTest, ToDeviceAndDtype_CUDA) {
 
   tensor = tensor.to(at::TensorOptions({at::kCUDA, 0}).dtype(at::kLong));
   REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kLong, at::kStrided);
+
+  tensor = tensor.to(at::TensorOptions({at::kCUDA, 1}).dtype(at::kDouble));
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kDouble, at::kStrided);
 
   tensor = tensor.to(at::kCPU, at::kInt);
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kInt, at::kStrided);

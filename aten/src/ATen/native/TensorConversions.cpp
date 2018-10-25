@@ -34,8 +34,14 @@ Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, b
       (!dtype_opt  || self.dtype()  ==  dtype_opt.value()) && !copy) {
     return self;
   }
-
-  return to_impl(self, options, non_blocking);
+  auto specified_options = self.options();
+  if (device_opt) {
+    specified_options = specified_options.device(device_opt.value());
+  }
+  if (dtype_opt) {
+    specified_options = specified_options.dtype(dtype_opt.value());
+  }
+  return to_impl(self, specified_options, non_blocking);
 }
 
 Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy) {
