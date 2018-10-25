@@ -1031,7 +1031,8 @@ struct hash<c10::optional<T&>> {
 };
 } // namespace std
 
-// TODO: remove at::optional when done moving files
+// Plan on record is to land 'using namespace c10' to bridge c10 into at:: and
+// caffe2:: namespaces. Until that lands, proceeding one name at a time.
 namespace at {
 template <class T>
 using optional = c10::optional<T>;
