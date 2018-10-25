@@ -1,7 +1,5 @@
 # PyTorch Fuser
 
-PyTorch's fuser combines 
-
 The fuser accepts subgraphs wrapped in "fusion nodes" and tries to execute them by just-in-time compiling kernels that run all the graph operations. 
 
 ## Code Organization
