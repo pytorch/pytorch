@@ -122,9 +122,10 @@ struct CAFFE2_API TensorOptions {
 
   /// Constructs a `TensorOptions` object with the given device.
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
-  template<typename T, typename = c10::guts::enable_if_t<std::is_same<T, Device>::value>>
+  template<typename T,
+           typename = c10::guts::enable_if_t<std::is_same<std::decay<T>, Device>::value>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
-    this->set_device(device);
+    this->set_device(std::forward<T>(device));
   }
 
   /// Constructs a `TensorOptions` object from arguments allowed in `Device`
@@ -137,7 +138,7 @@ struct CAFFE2_API TensorOptions {
   ///     explicit constructors too.
   template <typename... Args,
             typename = c10::guts::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
-   /* implicit */  TensorOptions(Args&&... args)
+   /* implicit */ TensorOptions(Args&&... args)
     : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
   /// Constructs a `TensorOptions` object from a backend, forwarded to the
