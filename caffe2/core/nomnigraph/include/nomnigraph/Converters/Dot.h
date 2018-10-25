@@ -8,47 +8,39 @@
 #include <iostream>
 #include <map>
 #include <sstream>
+#include <vector>
 
 namespace {
 
-template <typename T, typename... U>
+template <typename GraphT>
 class DotGenerator {
  public:
   using NodePrinter = std::function<std::map<std::string, std::string>(
-      typename nom::Graph<T, U...>::NodeRef)>;
+      typename GraphT::NodeRef)>;
   using EdgePrinter = std::function<std::map<std::string, std::string>(
-      typename nom::Graph<T, U...>::EdgeRef)>;
+      typename GraphT::EdgeRef)>;
 
   static std::map<std::string, std::string> defaultEdgePrinter(
-      typename nom::Graph<T, U...>::EdgeRef) {
+      typename GraphT::EdgeRef) {
     std::map<std::string, std::string> labelMap;
     return labelMap;
   }
 
-  DotGenerator(typename nom::Graph<T, U...>* g) : g_(g) {}
+  DotGenerator(NodePrinter nodePrinter, EdgePrinter edgePrinter)
+      : nodePrinter_(nodePrinter), edgePrinter_(edgePrinter) {}
 
-  std::string convert(NodePrinter nodePrinter, EdgePrinter edgePrinter) {
+  // Convert a graph (with optional subgraphs cluster) to dot.
+  std::string convert(
+      GraphT* g,
+      const std::vector<typename GraphT::SubgraphType*>& subgraphs) {
     std::ostringstream output;
     output << "digraph G {\n\
       ";
-    for (const auto& node : g_->getMutableNodes()) {
-      output << (uint64_t)node; // dot doesn't like hex
-      output << "[";
-      for (const auto& attrib : nodePrinter(node)) {
-        output << attrib.first << "=\"" << attrib.second << "\",";
-      }
-      output << "];\n";
-      for (const auto& edge : node->getOutEdges()) {
-        output << (uint64_t)edge->tail() << " -> " << (uint64_t)edge->head();
-        output << "[";
-        for (const auto& attrib : edgePrinter(edge)) {
-          output << attrib.first << "=\"" << attrib.second << "\",";
-        }
-        output << "];\n";
-      }
+    for (const auto& node : g->getMutableNodes()) {
+      generateNode(node, nullptr, output);
     }
-    for (auto i = 0; i < subgraphs_.size(); ++i) {
-      const auto& subgraph = subgraphs_[i];
+    for (auto i = 0; i < subgraphs.size(); ++i) {
+      const auto& subgraph = subgraphs[i];
       output << "subgraph cluster" << i << " {\n";
       output << "style=dotted;\n";
       for (const auto& node : subgraph->getNodes()) {
@@ -61,13 +53,46 @@ class DotGenerator {
     return output.str();
   }
 
-  void addSubgraph(const nom::Subgraph<T, U...>* s) {
-    subgraphs_.emplace_back(s);
+  // Convert a subgraph to dot.
+  std::string convert(typename GraphT::SubgraphType* sg) {
+    std::ostringstream output;
+    output << "digraph G {\n\
+      ";
+    for (const auto& node : sg->getNodes()) {
+      generateNode(node, sg, output);
+    }
+    output << "}";
+    return output.str();
   }
 
  private:
-  typename nom::Graph<T, U...>* g_;
-  typename std::vector<const nom::Subgraph<T, U...>*> subgraphs_;
+  NodePrinter nodePrinter_;
+  EdgePrinter edgePrinter_;
+
+  // Generate dot string for a node. Optionally take a subgraph to check if
+  // out-edges belong to the subgraph.
+  void generateNode(
+      typename GraphT::NodeRef node,
+      typename GraphT::SubgraphType* sg,
+      std::ostringstream& output) {
+    output << (uint64_t)node; // dot doesn't like hex
+    output << "[";
+    for (const auto& attrib : nodePrinter_(node)) {
+      output << attrib.first << "=\"" << attrib.second << "\",";
+    }
+    output << "];\n";
+    for (const auto& edge : node->getOutEdges()) {
+      if (sg && !sg->hasEdge(edge)) {
+        continue;
+      }
+      output << (uint64_t)edge->tail() << " -> " << (uint64_t)edge->head();
+      output << "[";
+      for (const auto& attrib : edgePrinter_(edge)) {
+        output << attrib.first << "=\"" << attrib.second << "\",";
+      }
+      output << "];\n";
+    }
+  }
 };
 
 } // namespace
@@ -75,28 +100,38 @@ class DotGenerator {
 namespace nom {
 namespace converters {
 
-template <typename T, typename... U>
+// Convert a graph to dot string.
+template <typename GraphT>
 std::string convertToDotString(
-    nom::Graph<T, U...>* g,
-    typename DotGenerator<T, U...>::NodePrinter nodePrinter,
-    typename DotGenerator<T, U...>::EdgePrinter edgePrinter =
-        DotGenerator<T, U...>::defaultEdgePrinter) {
-  auto d = DotGenerator<T, U...>(g);
-  return d.convert(nodePrinter, edgePrinter);
+    GraphT* g,
+    typename DotGenerator<GraphT>::NodePrinter nodePrinter,
+    typename DotGenerator<GraphT>::EdgePrinter edgePrinter =
+        DotGenerator<GraphT>::defaultEdgePrinter) {
+  auto d = DotGenerator<GraphT>(nodePrinter, edgePrinter);
+  return d.convert(g, {});
 }
 
-template <typename T, typename... U>
+// Convert a graph to dot string and annotate subgraph clusters.
+template <typename GraphT>
 std::string convertToDotString(
-    nom::Graph<T, U...>* g,
-    const std::vector<nom::Subgraph<T, U...>>& subgraphs,
-    typename DotGenerator<T, U...>::NodePrinter nodePrinter,
-    typename DotGenerator<T, U...>::EdgePrinter edgePrinter =
-        DotGenerator<T, U...>::defaultEdgePrinter) {
-  auto d = DotGenerator<T, U...>(g);
-  for (const auto& subgraph : subgraphs) {
-    d.addSubgraph(&subgraph);
-  }
-  return d.convert(nodePrinter, edgePrinter);
+    GraphT* g,
+    const std::vector<typename GraphT::SubgraphType*>& subgraphs,
+    typename DotGenerator<GraphT>::NodePrinter nodePrinter,
+    typename DotGenerator<GraphT>::EdgePrinter edgePrinter =
+        DotGenerator<GraphT>::defaultEdgePrinter) {
+  auto d = DotGenerator<GraphT>(nodePrinter, edgePrinter);
+  return d.convert(g, subgraphs);
+}
+
+// Convert a subgraph to dot string.
+template <typename GraphT>
+std::string convertToDotString(
+    typename GraphT::SubgraphType* sg,
+    typename DotGenerator<GraphT>::NodePrinter nodePrinter,
+    typename DotGenerator<GraphT>::EdgePrinter edgePrinter =
+        DotGenerator<GraphT>::defaultEdgePrinter) {
+  auto d = DotGenerator<GraphT>(nodePrinter, edgePrinter);
+  return d.convert(sg);
 }
 
 } // namespace converters

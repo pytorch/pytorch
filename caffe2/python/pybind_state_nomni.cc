@@ -373,6 +373,11 @@ void addNomnigraphMethods(pybind11::module& m) {
   // Subgraph matching API
   py::class_<NNSubgraph> nnsubgraph(m, "NNSubgraph");
   nnsubgraph.def("__len__", [](NNSubgraph& s) { return s.getNodes().size(); })
+      .def(
+          "__repr__",
+          [](NNSubgraph* g) {
+            return nom::converters::convertToDotString<NNGraph>(g, NNPrinter);
+          })
       .def_property_readonly(
           "nodes",
           [](NNSubgraph& s) {
