@@ -44,7 +44,7 @@ class BatchMatMulOpGPUTest : public testing::Test {
     ASSERT_NE(nullptr, Y_blob);
     const auto& Y = Y_blob->Get<Tensor>();
     Tensor Y_cpu(Y, CPU);
-    const auto Y_dims = Y_cpu.dims();
+    const auto Y_dims = Y_cpu.sizes();
     ASSERT_EQ(dims.size(), Y_dims.size());
     for (std::size_t i = 0; i < dims.size(); ++i) {
       ASSERT_EQ(dims[i], Y_dims[i]);

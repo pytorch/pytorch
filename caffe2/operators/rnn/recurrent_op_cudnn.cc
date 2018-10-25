@@ -210,14 +210,14 @@ void RecurrentBaseOp<T>::initialize(
 template <typename T>
 bool RecurrentOp<T>::RunOnDevice() {
   const int seqLength = Input(INPUT).dim32(0);
-  if (Input(INPUT).dims() != cachedInputDims_) {
+  if (Input(INPUT).sizes() != cachedInputDims_) {
     initialize(
         Input(INPUT),
         Output(DROPOUT_STATES),
         Output(OUTPUT),
         Output(HIDDEN_OUTPUT),
         Output(CELL_OUTPUT));
-    cachedInputDims_ = Input(INPUT).dims().vec();
+    cachedInputDims_ = Input(INPUT).sizes().vec();
   }
 
   // Validation checks
@@ -303,9 +303,9 @@ bool RecurrentOp<T>::RunOnDevice() {
 template <typename T>
 bool RecurrentGradientOp<T>::RunOnDevice() {
   const int seqLength = Input(INPUT).dim32(0);
-  if (Input(INPUT).dims() != cachedInputDims_) {
+  if (Input(INPUT).sizes() != cachedInputDims_) {
     initialize(Input(INPUT), Output(DROPOUT_STATES));
-    cachedInputDims_ = Input(INPUT).dims().vec();
+    cachedInputDims_ = Input(INPUT).sizes().vec();
   }
   CUDNN_ENFORCE(cudnnGetRNNTrainingReserveSize(
       cudnn_wrapper_.inline_cudnn_handle(),

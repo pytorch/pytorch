@@ -33,12 +33,12 @@ class GatherByKeyOp : public Operator<CPUContext> {
     CAFFE_ENFORCE_GE(numPartitions, 1);
     const auto& keysTensor = Input(0);
     const auto* keysData = keysTensor.template data<Index>();
-    const auto& keysShape = Input(0).dims();
+    const auto& keysShape = Input(0).sizes();
     CAFFE_ENFORCE_EQ(
         keysShape.size(), 1, "Only 1D keys tensor supported currently.");
 
     // 1. Shape and type consistency checks
-    const auto& in0Shape = Input(1).dims();
+    const auto& in0Shape = Input(1).sizes();
     CAFFE_ENFORCE_GE(in0Shape.size(), 1);
 
     vector<int64_t> outShape(keysShape.vec());
@@ -54,7 +54,7 @@ class GatherByKeyOp : public Operator<CPUContext> {
       CAFFE_ENFORCE(std::equal(
           outShape.begin() + keysShape.size(),
           outShape.end(),
-          input.dims().begin() + 1));
+          input.sizes().begin() + 1));
       totalSize += input.dim(0);
     }
     CAFFE_ENFORCE_EQ(keysTensor.size(), totalSize);
@@ -159,7 +159,7 @@ class PartitionOpBase : public Operator<CPUContext> {
       metas_[i] = input.meta();
       // shape = partition_size + suffix of input dims
       vector<int64_t> shape(
-          input.dims().begin() + main_input.ndim() - 1, input.dims().end());
+          input.sizes().begin() + main_input.ndim() - 1, input.sizes().end());
       for (int j = 0; j < partitions; ++j) {
         int out_idx = i + j * inputSize;
         auto output = Output(out_idx);

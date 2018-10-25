@@ -1,9 +1,9 @@
-#include <ATen/core/DeviceType.h>
+#include <c10/DeviceType.h>
 #include <c10/util/Exception.h>
 
-namespace at {
+namespace c10 {
 
-std::string DeviceTypeName(at::DeviceType d, bool lower_case) {
+std::string DeviceTypeName(DeviceType d, bool lower_case) {
   switch (d) {
     // I considered instead using ctype::tolower to lower-case the strings
     // on the fly, but this seemed a bit much.
@@ -34,9 +34,9 @@ std::string DeviceTypeName(at::DeviceType d, bool lower_case) {
   }
 }
 
-std::ostream& operator<<(std::ostream& stream, at::DeviceType type) {
-  stream << at::DeviceTypeName(type, /* lower case */ true);
+std::ostream& operator<<(std::ostream& stream, DeviceType type) {
+  stream << DeviceTypeName(type, /* lower case */ true);
   return stream;
 }
 
-} // namespace at
+} // namespace c10

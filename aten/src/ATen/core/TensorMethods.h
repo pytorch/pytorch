@@ -515,6 +515,9 @@ inline Tensor & Tensor::exponential_(double lambd, Generator * generator) {
 inline Tensor & Tensor::geometric_(double p, Generator * generator) {
     return type().geometric_(*this, p, generator);
 }
+inline Tensor Tensor::alias() const {
+    return type().alias(*this);
+}
 inline Tensor Tensor::abs() const {
     return type().abs(*this);
 }
@@ -1166,11 +1169,11 @@ inline Tensor Tensor::addmm(const Tensor & mat1, const Tensor & mat2, Scalar bet
 inline Tensor & Tensor::addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) {
     return type().addmm_(*this, mat1, mat2, beta, alpha);
 }
-inline Tensor & Tensor::sparse_resize_(IntList size, int64_t sparseDims, int64_t denseDims) {
-    return type().sparse_resize_(*this, size, sparseDims, denseDims);
+inline Tensor & Tensor::sparse_resize_(IntList size, int64_t sparse_dim, int64_t dense_dim) {
+    return type().sparse_resize_(*this, size, sparse_dim, dense_dim);
 }
-inline Tensor & Tensor::sparse_resize_and_clear_(IntList size, int64_t sparseDims, int64_t denseDims) {
-    return type().sparse_resize_and_clear_(*this, size, sparseDims, denseDims);
+inline Tensor & Tensor::sparse_resize_and_clear_(IntList size, int64_t sparse_dim, int64_t dense_dim) {
+    return type().sparse_resize_and_clear_(*this, size, sparse_dim, dense_dim);
 }
 inline Tensor Tensor::sparse_mask(SparseTensorRef mask) const {
     return type().sparse_mask(*this, mask);
@@ -1178,11 +1181,17 @@ inline Tensor Tensor::sparse_mask(SparseTensorRef mask) const {
 inline Tensor Tensor::to_dense() const {
     return type().to_dense(*this);
 }
-inline int64_t Tensor::_sparseDims() const {
-    return type()._sparseDims(*this);
+inline int64_t Tensor::sparse_dim() const {
+    return type().sparse_dim(*this);
 }
-inline int64_t Tensor::_denseDims() const {
-    return type()._denseDims(*this);
+inline int64_t Tensor::_dimI() const {
+    return type()._dimI(*this);
+}
+inline int64_t Tensor::dense_dim() const {
+    return type().dense_dim(*this);
+}
+inline int64_t Tensor::_dimV() const {
+    return type()._dimV(*this);
 }
 inline int64_t Tensor::_nnz() const {
     return type()._nnz(*this);
@@ -1198,6 +1207,15 @@ inline Tensor Tensor::_indices() const {
 }
 inline Tensor Tensor::_values() const {
     return type()._values(*this);
+}
+inline Tensor & Tensor::_coalesced_(bool coalesced) {
+    return type()._coalesced_(*this, coalesced);
+}
+inline Tensor Tensor::indices() const {
+    return type().indices(*this);
+}
+inline Tensor Tensor::values() const {
+    return type().values(*this);
 }
 inline int64_t Tensor::numel() const {
     return type().numel(*this);

@@ -7,7 +7,7 @@ template <class Context>
 bool WeightedMultiSamplingOp<Context>::RunOnDevice() {
   const auto& weight = Input(0);
   CAFFE_ENFORCE_EQ(weight.ndim(), 1, "Input should be 1-D vector");
-  auto dims = weight.dims().vec();
+  auto dims = weight.sizes().vec();
   size_t data_size = weight.dim32(0);
   auto* indices = Output(0);
 

@@ -1,5 +1,5 @@
-#include <ATen/core/Device.h>
-#include <ATen/core/Macros.h>
+#include <c10/Device.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -10,7 +10,7 @@
 #include <tuple>
 #include <vector>
 
-namespace at {
+namespace c10 {
 namespace {
 DeviceType parse_type(const std::string& device_string) {
   static const std::array<std::pair<std::string, DeviceType>, 7> types = {{
@@ -73,7 +73,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
   }
   std::string device_index = device_string.substr(index + 1);
   try {
-    index_ = at::stoi(device_index);
+    index_ = c10::stoi(device_index);
   } catch (const std::exception&) {
     AT_ERROR(
         "Could not parse device index '",
@@ -84,7 +84,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
   }
 }
 
-std::ostream& operator<<(std::ostream& stream, const at::Device& device) {
+std::ostream& operator<<(std::ostream& stream, const Device& device) {
   stream << device.type();
   if (device.has_index()) {
     stream << ":" << device.index();
@@ -92,4 +92,4 @@ std::ostream& operator<<(std::ostream& stream, const at::Device& device) {
   return stream;
 }
 
-} // namespace at
+} // namespace c10
