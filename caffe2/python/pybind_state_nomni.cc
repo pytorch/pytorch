@@ -248,6 +248,7 @@ void addNomnigraphMethods(pybind11::module& m) {
   // Node level methods
   using NodeType = nom::Node<std::unique_ptr<nom::repr::Value>>;
   py::class_<NodeType> noderef(m, "NodeRef");
+
   auto getName = [](NNGraph::NodeRef n) {
     if (nn::is<nom::repr::Tensor>(n)) {
       return nn::get<nom::repr::Tensor>(n)->getName();
@@ -318,6 +319,7 @@ void addNomnigraphMethods(pybind11::module& m) {
           "tensor", getTensor, py::return_value_policy::reference)
       .def("getInputs", getInputs, py::return_value_policy::reference)
       .def("getOutputs", getOutputs, py::return_value_policy::reference)
+      .def("hasProducer", [](NNGraph::NodeRef n) { return nn::hasProducer(n); })
       .def("getProducer", getProducer, py::return_value_policy::reference)
       .def("getConsumers", getConsumers, py::return_value_policy::reference)
       .def_property_readonly(
@@ -372,12 +374,19 @@ void addNomnigraphMethods(pybind11::module& m) {
 
   // Subgraph matching API
   py::class_<NNSubgraph> nnsubgraph(m, "NNSubgraph");
-  nnsubgraph.def("__len__", [](NNSubgraph& s) { return s.getNodes().size(); })
+  nnsubgraph.def(py::init<>())
+      .def("__len__", [](NNSubgraph& s) { return s.getNodes().size(); })
       .def(
           "__repr__",
           [](NNSubgraph* g) {
             return nom::converters::convertToDotString<NNGraph>(g, NNPrinter);
           })
+      .def(
+          "addNode",
+          [](NNSubgraph* sg, NNGraph::NodeRef node) { sg->addNode(node); })
+      .def(
+          "induceEdges",
+          [](NNSubgraph* sg) { nom::algorithm::induceEdges(sg); })
       .def_property_readonly(
           "nodes",
           [](NNSubgraph& s) {
