@@ -470,4 +470,7 @@ install(FILES
 
 if (USE_DISTRIBUTED)
   add_subdirectory(${TORCH_SRC_DIR}/lib/THD)
+  if (NOT MSVC AND NOT APPLE)
+    add_subdirectory(${TORCH_SRC_DIR}/lib/c10d)
+  endif()
 endif()
