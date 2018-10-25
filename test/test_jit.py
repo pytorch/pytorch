@@ -4632,6 +4632,8 @@ a")
             M()
 
     def test_script_module_valid_consts(self):
+        tester = self
+
         class Foo(torch.jit.ScriptModule):
             __constants__ = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']
 
@@ -4640,15 +4642,20 @@ a")
                 self.a = 1
                 self.b = 1.2
                 self.c = False
-                self.d = [nn.Linear(3, 4)]
+                with tester.assertRaisesRegex(
+                        TypeError,
+                        "'Linear' object for attribute 'd' is not a valid constant"):
+                    self.d = [nn.Linear(3, 4)]
                 self.e = lambda x: x
                 self.f = [3, 4, 5]
-                self.assertTrue(type(self.f) is tuple)
+                tester.assertTrue(type(self.f) is tuple)
                 self.g = [3, (3, 4), 5]
-                with self.assertRaisesRegex(TypeError, "is not a valid constant"):
+                with tester.assertRaisesRegex(TypeError, "not a valid constant"):
                     self.h = type(1)
-                with self.assertRaisesRegex(TypeError, "is not a valid constant"):
+                with tester.assertRaisesRegex(TypeError, "not a valid constant"):
                     self.i = (3, 4, {})
+
+        f = Foo()
 
     def test_script_module_for(self):
         class M(torch.jit.ScriptModule):
