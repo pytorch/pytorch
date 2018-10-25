@@ -24,8 +24,8 @@ struct DefaultTensorOptions {
   caffe2::TypeMeta dtype_ = caffe2::TypeMeta::Make<float>(); // 64-bit
   Device device_          = at::kCPU;                        // 32-bit
   Layout layout_          = at::kStrided;                    // 8-bit
-  bool requires_grad_     = 1;                               // 8-bit
-  bool is_variable_       = 1;                               // 8-bit
+  bool requires_grad_     = false;                           // 8-bit
+  bool is_variable_       = false;                           // 8-bit
 };
 
 // TODO: Even better would be <= sizeof(int64_t)
