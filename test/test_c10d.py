@@ -868,6 +868,24 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self.assertEqual(local_grad_sum,
                          torch.ones(10) * (self.world_size + 1) / 2.0)
 
+    @skip_if_not_nccl
+    def test_sync_reduction(self):
+        # Set up process group.
+        store = c10d.FileStore(self.file.name)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        # Get this process' split of devices.
+        devices = gpus_for_rank(self.world_size)[self.rank]
+        grads_batch = [(torch.ones(10, device=torch.device('cuda', d)) *
+                       (self.rank + 1)).chunk(5)
+                       for d in devices]
+        work, local_grad_sum = c10d._queue_reduction(process_group,
+                                                     grads_batch,
+                                                     devices)
+        c10d._sync_reduction(work, grads_batch[0], local_grad_sum)
+        # The expected result of the allreduce should be the average
+        self.assertEqual(grads_batch[0], (torch.ones(10) * (self.world_size + 1) / 2.0).chunk(5))
+
 
 if __name__ == '__main__':
     assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"

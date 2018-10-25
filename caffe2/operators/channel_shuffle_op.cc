@@ -134,7 +134,7 @@ bool ChannelShuffleGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
 }
 
 REGISTER_CPU_OPERATOR(ChannelShuffle, ChannelShuffleOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_GRADIENT_OPERATOR(
     ChannelShuffleGradient,
     ChannelShuffleGradientOp<float, CPUContext>);
 
@@ -143,7 +143,7 @@ OPERATOR_SCHEMA(ChannelShuffle)
     .NumInputs(1)
     .NumOutputs(1)
     .InheritOnnxSchema();
-OPERATOR_SCHEMA(ChannelShuffleGradient)
+GRADIENT_OPERATOR_SCHEMA(ChannelShuffleGradient)
     .IdenticalTypeAndShape()
     .NumInputs(1)
     .NumOutputs(1);

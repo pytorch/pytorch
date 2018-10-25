@@ -17,7 +17,7 @@ class RemoveDataBlocksOp final : public Operator<Context> {
   USE_DISPATCH_HELPER;
 
   bool RunOnDevice() override {
-    if (Input(INDICES).dims()[0] == 0) {
+    if (Input(INDICES).sizes()[0] == 0) {
       Output(0)->CopyFrom(Input(0));
       return true;
     } else {
@@ -32,10 +32,10 @@ class RemoveDataBlocksOp final : public Operator<Context> {
     CAFFE_ENFORCE(data.ndim() > 0, "DATA should be at leat 1-D.");
     CAFFE_ENFORCE(indices.ndim() == 1, "INDICES should be 1-D.");
 
-    const auto outer_size = data.dims()[0];
+    const auto outer_size = data.sizes()[0];
     const auto block_size = data.size_from_dim(1);
     const auto block_size_bytes = block_size * data.meta().itemsize();
-    auto indices_size = indices.dims()[0];
+    auto indices_size = indices.sizes()[0];
     const char* data_ptr = (char*)data.raw_data();
     const auto* ind_ptr = indices.template data<T>();
 
@@ -53,7 +53,7 @@ class RemoveDataBlocksOp final : public Operator<Context> {
     indices_size = ind_vec.size();
 
     auto* output = Output(0);
-    auto shape = data.dims().vec();
+    auto shape = data.sizes().vec();
     shape[0] -= indices_size;
     output->Resize(shape);
     char* out_ptr = (char*)output->raw_mutable_data(data.meta());

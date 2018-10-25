@@ -73,7 +73,8 @@ Tensor read_images(const std::string& root, bool train) {
   expect_int32(images, kImageRows);
   expect_int32(images, kImageColumns);
 
-  auto tensor = torch::empty({count, kImageRows, kImageColumns}, torch::kByte);
+  auto tensor =
+      torch::empty({count, 1, kImageRows, kImageColumns}, torch::kByte);
   images.read(reinterpret_cast<char*>(tensor.data_ptr()), tensor.numel());
   return tensor.to(torch::kFloat32).div_(255);
 }

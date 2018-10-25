@@ -58,7 +58,7 @@ class PackRNNSequenceOpBase : public Operator<Context> {
     }
     // insert the dim for the feature
     shape.insert(
-        shape.end(), values.dims().begin() + dim_offset, values.dims().end());
+        shape.end(), values.sizes().begin() + dim_offset, values.sizes().end());
 
     auto* output = Output(OUTPUTVALUE);
     output->Resize(shape);

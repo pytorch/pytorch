@@ -210,8 +210,8 @@ TEST(RoiAlignTest, CheckCPUGPUEqual) {
     CreateAndRun<CUDAContext>(&y_gpu, "NCHW", test_params, false);
     CreateAndRun<CPUContext>(&y_cpu_nhwc, "NHWC", test_params, false);
 
-    EXPECT_EQ(y_cpu.dims(), y_gpu.dims());
-    EXPECT_EQ(y_cpu.dims(), y_cpu_nhwc.dims());
+    EXPECT_EQ(y_cpu.sizes(), y_gpu.sizes());
+    EXPECT_EQ(y_cpu.sizes(), y_cpu_nhwc.sizes());
     ConstEigenVectorMap<float> y_cpu_vec(y_cpu.data<float>(), y_cpu.size());
     ConstEigenVectorMap<float> y_gpu_vec(y_gpu.data<float>(), y_gpu.size());
     ConstEigenVectorMap<float> y_cpu_nhwc_vec(
@@ -251,8 +251,8 @@ TEST(RoiAlignTest, CheckCPUGPUEqual) {
     CreateAndRun<CUDAContext>(&y_gpu, "NCHW", test_params, true);
     CreateAndRun<CPUContext>(&y_cpu_nhwc, "NHWC", test_params, true);
 
-    EXPECT_EQ(y_cpu.dims(), y_gpu.dims());
-    EXPECT_EQ(y_cpu.dims(), y_cpu_nhwc.dims());
+    EXPECT_EQ(y_cpu.sizes(), y_gpu.sizes());
+    EXPECT_EQ(y_cpu.sizes(), y_cpu_nhwc.sizes());
     ConstEigenVectorMap<float> y_cpu_vec(y_cpu.data<float>(), y_cpu.size());
     ConstEigenVectorMap<float> y_gpu_vec(y_gpu.data<float>(), y_gpu.size());
     ConstEigenVectorMap<float> y_cpu_nhwc_vec(

@@ -4,7 +4,7 @@
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(Slice, SliceOp<CPUContext>);
-REGISTER_CPU_OPERATOR(SliceGradient, SliceGradientOp<CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(SliceGradient, SliceGradientOp<CPUContext>);
 
 OPERATOR_SCHEMA(Slice)
     .NumInputs(1, 3)
@@ -112,7 +112,7 @@ Y:
     .Output(0, "Y", "(*Tensor*): sliced output tensor")
     .InheritOnnxSchema();
 
-OPERATOR_SCHEMA(SliceGradient);
+GRADIENT_OPERATOR_SCHEMA(SliceGradient);
 
 namespace {
 struct GetSliceGradient : public GradientMakerBase {

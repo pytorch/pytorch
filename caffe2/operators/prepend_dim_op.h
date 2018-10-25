@@ -33,7 +33,7 @@ class PrependDimOp : public Operator<Context> {
     vector<int64_t> actual_new_shape(input.ndim() + 1);
     actual_new_shape[0] = dim_size_;
     actual_new_shape[1] = input.dim(0) / dim_size_;
-    for (int i = 1; i < input.dims().size(); ++i) {
+    for (int i = 1; i < input.sizes().size(); ++i) {
       actual_new_shape[i + 1] = input.dim(i);
     }
     output->Resize(actual_new_shape);
@@ -68,7 +68,7 @@ class MergeDimOp : public Operator<Context> {
 
     vector<int64_t> actual_new_shape(input.ndim() - 1);
     actual_new_shape[0] = input.dim(0) * input.dim(1);
-    for (int i = 1; i < input.dims().size() - 1; ++i) {
+    for (int i = 1; i < input.sizes().size() - 1; ++i) {
       actual_new_shape[i] = input.dim(i + 1);
     }
     output->Resize(actual_new_shape);

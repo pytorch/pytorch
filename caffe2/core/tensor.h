@@ -205,7 +205,7 @@ class CAFFE2_API Tensor final {
         src_tensor.is_contiguous(),
         "Right now ResizeLike is only supported for contiguous Tensor.");
     if (impl_ != src_tensor.impl_) {
-      impl_.get()->Resize(src_tensor.dims());
+      impl_.get()->Resize(src_tensor.sizes());
     }
   }
 
@@ -371,6 +371,10 @@ class CAFFE2_API Tensor final {
     return impl_->numel() * itemsize();
   }
 
+  inline at::IntList sizes() const {
+    return impl_.get()->sizes();
+  }
+
   inline at::IntList dims() const {
     return impl_.get()->sizes();
   }
@@ -496,8 +500,7 @@ void TensorVectorResize(
     DeviceType type);
 
 // Tensor factory function
-CAFFE2_API Tensor
-empty(const std::vector<int64_t>& dims, const at::TensorOptions& options);
+CAFFE2_API Tensor empty(at::IntList dims, at::TensorOptions options);
 
 class CAFFE2_API TensorPrinter {
  public:
