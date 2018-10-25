@@ -1321,6 +1321,7 @@ def _get_builtin_table():
                 _builtin_table[id(v)] = "aten::" + name
     for mod in _modules_containing_builtins:
         register_all(mod)
+    _builtin_table[id(warnings.warn)] = "aten::warn"
 
     return _builtin_table
 
