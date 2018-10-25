@@ -203,7 +203,7 @@ bool THC_pointwiseApply1(THCState* state,
 
   dim3 grid;
   ptrdiff_t totalElements = THCTensor_nElement(state, a);
-  
+
   int curDevice = -1;
   cudaGetDevice(&curDevice);
   if (!getApplyGrid(state, totalElements, grid, curDevice)) {
@@ -212,7 +212,7 @@ bool THC_pointwiseApply1(THCState* state,
 
   /*
   Expands readable/writable tensors whose indices may be "overlapped."
-  This ensures that each element of the tensor is operated on once and only 
+  This ensures that each element of the tensor is operated on once and only
   once.
   */
   TensorTypeA* oldA = NULL;
@@ -278,7 +278,7 @@ bool THC_pointwiseApply1(THCState* state,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time. 
+    large (64-bit indexed) tensors to reduce compilation time.
     */
     if (aInfo.dims == 1) {
       OffsetInfo<ScalarTypeA, uint64_t, 1>
@@ -354,7 +354,7 @@ bool THC_pointwiseApply2(THCState* state,
 
   /*
   Expands readable/writable tensors whose indices may be "overlapped."
-  This ensures that each element of the tensor is operated on once and only 
+  This ensures that each element of the tensor is operated on once and only
   once.
   */
   TensorTypeA* oldA = NULL;
@@ -405,7 +405,7 @@ bool THC_pointwiseApply2(THCState* state,
       HANDLE_CASE(TYPE, A, -1);             \
       break;                                \
   }                                         \
-}                                           
+}
 
 #define HANDLE_A_CASE(TYPE, A, B) {         \
   switch (A) {                              \
@@ -451,7 +451,7 @@ bool THC_pointwiseApply2(THCState* state,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time. 
+    large (64-bit indexed) tensors to reduce compilation time.
     */
     if (aInfo.dims == 1 && bInfo.dims == 1) {
       OffsetInfo<ScalarTypeA, uint64_t, 1>
@@ -549,7 +549,7 @@ bool THC_pointwiseApply3(THCState* state,
 
   /*
   Expands readable/writable tensors whose indices may be "overlapped."
-  This ensures that each element of the tensor is operated on once and only 
+  This ensures that each element of the tensor is operated on once and only
   once.
   */
   TensorTypeA* oldA = NULL;
@@ -671,7 +671,7 @@ bool THC_pointwiseApply3(THCState* state,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time. 
+    large (64-bit indexed) tensors to reduce compilation time.
     */
     if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1) {
       OffsetInfo<ScalarTypeA, uint64_t, 1>

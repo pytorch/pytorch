@@ -662,6 +662,24 @@ CAFFE2_API void AffineChannel(
     T* Y,
     Context* context);
 
+template <typename T, class Context>
+CAFFE2_API void NCHW2NHWC(
+    const int N,
+    const int C,
+    const int HxW,
+    const T* X,
+    T* Y,
+    Context* context);
+
+template <typename T, class Context>
+CAFFE2_API void NHWC2NCHW(
+    const int N,
+    const int C,
+    const int HxW,
+    const T* X,
+    T* Y,
+    Context* context);
+
 // Calculates ceil(a / b). User must be careful to ensure that there
 // is no overflow or underflow in the calculation.
 template <typename T>

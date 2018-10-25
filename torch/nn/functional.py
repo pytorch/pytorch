@@ -1,4 +1,5 @@
 r"""Functional interface"""
+from __future__ import division
 
 import warnings
 import math
@@ -14,6 +15,7 @@ from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
+from .._jit_internal import weak_script
 
 _VF = torch._C._VariableFunctions
 
@@ -906,6 +908,7 @@ def hardshrink(input, lambd=0.5):
     return torch.hardshrink(input, lambd)
 
 
+@torch._jit_internal.weak_script
 def tanhshrink(input):
     r"""tanhshrink(input) -> Tensor
 
@@ -916,6 +919,7 @@ def tanhshrink(input):
     return input - input.tanh()
 
 
+@torch._jit_internal.weak_script
 def softsign(input):
     r"""softsign(input) -> Tensor
 
@@ -2393,17 +2397,13 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
 def normalize(input, p=2, dim=1, eps=1e-12, out=None):
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.
 
-    Does:
+    For a tensor :attr:`input` of sizes :math:`(n_0, ..., n_{dim}, ..., n_k)`, each
+    :math:`n_{dim}` -element vector :math:`v` along dimension :attr:`dim` is transformed as
 
     .. math::
-        v = \frac{v}{\max(\lVert v \rVert_p, \epsilon)}
+        v = \frac{v}{\max(\lVert v \rVert_p, \epsilon)}.
 
-    for each subtensor v over dimension dim of input. Each subtensor is
-    flattened into a vector, i.e. :math:`\lVert v \rVert_p` is not a matrix
-    norm.
-
-    With default arguments normalizes over the second dimension with Euclidean
-    norm.
+    With the default arguments it uses the Euclidean norm over vectors along dimension :math:`1` for normalization.
 
     Args:
         input: input tensor of any shape

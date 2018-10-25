@@ -35,6 +35,6 @@ matrix:
           apt:
             sources:
               - ubuntu-toolchain-r-test
-              - llvm-toolchain-trusty-6.0
-            packages: clang-tidy-6.0
-        script: tools/run-clang-tidy-in-ci.sh -e "$(which clang-tidy-6.0)"
+              - llvm-toolchain-trusty
+            packages: clang-tidy
+        script: tools/run-clang-tidy-in-ci.sh

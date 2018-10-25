@@ -79,7 +79,9 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(Softmax, SoftmaxOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(SoftmaxGradient, SoftmaxGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    SoftmaxGradient,
+    SoftmaxGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Softmax)
     .NumInputs(1)
@@ -163,7 +165,7 @@ softmax: [[0.24422921 0.43525138 0.18582782 0.12303016 0.01166145]]
     .InheritOnnxSchema();
 
 // Input: Y, dY. Output: dX
-OPERATOR_SCHEMA(SoftmaxGradient).NumInputs(2).NumOutputs(1);
+GRADIENT_OPERATOR_SCHEMA(SoftmaxGradient).NumInputs(2).NumOutputs(1);
 
 class GetSoftmaxGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
