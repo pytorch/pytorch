@@ -1,4 +1,6 @@
 #pragma once
+#include "torch/csrc/jit/fuser/config.h"
+#if USE_CUDA_FUSER || USE_CPU_FUSER
 
 #include "c10/util/Optional.h"
 #include "torch/csrc/WindowsTorchApiMacro.h"
@@ -20,3 +22,5 @@ TORCH_API at::optional<KernelSpec&> retrieve(const int64_t key);
 } // namespace fuser
 } // namespace jit
 } // namespace torch
+
+#endif // USE_CUDA_FUSER || USE_CPU_FUSER

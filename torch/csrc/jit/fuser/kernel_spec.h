@@ -1,6 +1,6 @@
 #pragma once
 #include "torch/csrc/jit/fuser/config.h"
-#if USE_CPU_FUSER || USE_CUDA_FUSER
+#if USE_CUDA_FUSER || USE_CPU_FUSER
 
 #include "ATen/ATen.h"
 #include "torch/csrc/WindowsTorchApiMacro.h"
@@ -22,6 +22,9 @@ namespace torch { namespace jit { namespace fuser {
 
 // Helper struct containing partition information: the number of tensors
 // created and the dimension the partitioning is performed on.
+// Note: created during upfront compilation, once the tensors are known
+// at runtime the partition info is logically combined with the tensor
+// descriptions to create PartitionDesc objects.
 struct TORCH_API PartitionInfo {
   PartitionInfo(
     const int64_t _nSubTensors
@@ -65,16 +68,16 @@ struct TORCH_API KernelSpec {
   std::shared_ptr<Graph> graph() const { return graph_; }
   const Code& code() const { return code_; }
   int64_t nInputs() const { return nInputs_; }
-  bool isFusable() const { return isFusable_; }
+
   std::vector<std::vector<int64_t>>& inputBroadcastGroups() { 
-    return inputBroadcastGroups_; }
+    return inputBroadcastGroups_; 
+  }
   const std::vector<std::vector<int64_t>>& inputBroadcastGroups() const { 
-    return inputBroadcastGroups_; }
+    return inputBroadcastGroups_; 
+  }
+  
   std::vector<PartitionInfo>& inputChunks() { return inputChunks_; }
   const std::vector<PartitionInfo>& inputChunks() const { return inputChunks_; }
-
-   // Setters
-  void setFusable(const bool _isFusable) { isFusable_ = _isFusable; }
 
   // Cache functions
   c10::optional<std::shared_ptr<FusedKernel>> findKernel(const ArgSpec& arg_spec) const {
@@ -95,7 +98,6 @@ private:
   std::shared_ptr<Graph> graph_;
   Code code_;
   int64_t nInputs_;
-  bool isFusable_ = true;
   std::vector<std::vector<int64_t>> inputBroadcastGroups_;
   std::vector<PartitionInfo> inputChunks_;
   mutable std::mutex mutex_;

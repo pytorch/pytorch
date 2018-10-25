@@ -1,4 +1,6 @@
 #pragma once
+#include "torch/csrc/jit/fuser/config.h"
+#if USE_CUDA_FUSER || USE_CPU_FUSER
 
 #include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/jit/ir.h"
@@ -23,7 +25,8 @@ TORCH_API std::tuple<
   std::string
 , std::vector<PartitionDesc>
 , std::vector<PartitionDesc>
-, bool> generateKernel(
+, bool> 
+generateKernel(
   const std::string& name
 , const Graph& graph
 , const std::vector<TensorDesc>& input_desc
@@ -33,3 +36,5 @@ TORCH_API std::tuple<
 } // namespace fuser
 } // namespace jit
 } // namespace torch
+
+#endif // USE_CUDA_FUSER || USE_CPU_FUSER

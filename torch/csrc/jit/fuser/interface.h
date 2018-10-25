@@ -15,7 +15,7 @@ constexpr int kCPUDevice = -1;
 
 // Assigns a "key" to the given fusion_group that it can use to run its
 // fusion later (via runFusion() below).
-TORCH_API void registerFusion(int64_t& key, const Node* fusion_group);
+TORCH_API int64_t registerFusion(const Node* fusion_group);
 
 // Runs the fusion corresponding to the given key on the inputs
 // found on the stack. Outputs are placed on the same stack.

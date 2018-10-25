@@ -1,4 +1,6 @@
 #pragma once
+#include "torch/csrc/jit/fuser/config.h"
+#if USE_CUDA_FUSER || USE_CPU_FUSER
 
 #include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/jit/assertions.h"
@@ -12,6 +14,8 @@ namespace torch { namespace jit { namespace fuser {
 
 // Descriptor for chunk-ing an input tensor into subtensors
 // OR concat-ing an output tensor from subtensors
+// Note: default constructed used for tensors that do not participate in
+// chunk or cat operations.
 struct TORCH_API PartitionDesc {
   PartitionDesc()
   : nSubTensors_{1}
@@ -26,7 +30,7 @@ struct TORCH_API PartitionDesc {
   , dim_{_dim} {
     JIT_ASSERT(nSubTensors_ > 1);
     std::vector<bool> cont = _desc.contiguity;
-    if(dim_ > 0) {
+    if (dim_ > 0) {
       // when we narrow the concatenated output/chunked input
       // we make the size[dim] smaller while keeping the stride[dim] the same,
       // meaning: stride[dim - 1] != stride[dim]*size[dim]
@@ -51,3 +55,5 @@ private:
 } // namespace fuser
 } // namespace jit 
 } // namespace torch
+
+#endif // USE_CUDA_FUSER || USE_CPU_FUSER

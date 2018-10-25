@@ -117,9 +117,6 @@ static void expandArgs(
 // Note: assumes that inputs are 32-bit addressable
 static uint32_t computeNumel(const at::ArrayRef<int64_t>& sizes) {
   uint32_t result = 1;
-
-  // Short-circuits if scalar tensor
-  if (sizes.size() == 0) return 1;
   
   for (const auto& size : sizes) 
     result *= size;
@@ -302,9 +299,6 @@ bool runFusion(
   auto maybe_spec = retrieve(key);
   JIT_ASSERT(maybe_spec);
   auto& spec = *maybe_spec;
-  
-  // Short-circuits if the spec isn't fusable
-  if (!spec.isFusable()) return false;
 
   // Acquires inputs from stack
   auto inputs = fmap(last(stack, spec.nInputs()), [](const IValue& i) {

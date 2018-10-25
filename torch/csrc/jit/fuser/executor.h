@@ -1,4 +1,6 @@
 #pragma once
+#include "torch/csrc/jit/fuser/config.h"
+#if USE_CUDA_FUSER || USE_CPU_FUSER
 
 #include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/jit/stack.h"
@@ -16,3 +18,5 @@ TORCH_API bool runFusion(
 } // namespace fuser
 } // namespace jit
 } // namespace torch
+
+#endif // USE_CUDA_FUSER || USE_CPU_FUSER

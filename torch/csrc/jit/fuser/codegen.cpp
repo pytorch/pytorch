@@ -211,7 +211,8 @@ std::tuple<
   std::string
 , std::vector<PartitionDesc>
 , std::vector<PartitionDesc>
-, bool> generateKernel(
+, bool> 
+generateKernel(
   const std::string& name
 , const Graph& graph
 , const std::vector<TensorDesc>& input_desc

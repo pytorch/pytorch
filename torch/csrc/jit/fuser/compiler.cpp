@@ -122,7 +122,6 @@ void registerFusion(int64_t& key, const Node* fusion_group) {
   EraseShapeInformation(*graph);
   key = store(graph);
   
-
   if (canFuseOnCPU() || canFuseOnGPU()) {
     const auto maybe_spec = retrieve(key);
     JIT_ASSERT(maybe_spec);
