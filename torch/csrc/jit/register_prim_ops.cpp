@@ -370,7 +370,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::TupleSlice,
-        [](Node* node) {
+        [](const Node* node) {
           int64_t beg_ind = node->i(attr::beg);
           int64_t end_ind = node->i(attr::end);
           return [=](Stack& stack) {
@@ -386,7 +386,7 @@ RegisterOperators reg({
         }),
     Operator(
       prim::TupleIndex,
-      [](Node* node) {
+      [](const Node* node) {
         auto index = node->i(attr::index);
         return [=](Stack& stack) {
           auto tup = pop(stack).toTuple();
