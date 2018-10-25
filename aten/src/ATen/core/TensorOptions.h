@@ -94,7 +94,7 @@ struct CAFFE2_API TensorOptions {
     this->set_dtype(dtype);
   }
 
-  /// Constructs a `TensorOptions` object with the given dtype.
+  /// legacy constructor to support ScalarType
   /* implicit */ TensorOptions(ScalarType dtype) : TensorOptions() {
     this->set_dtype(dtype);
   }
@@ -151,6 +151,7 @@ struct CAFFE2_API TensorOptions {
     return r;
   }
 
+  // legacy function to support ScalarType
   C10_NODISCARD TensorOptions dtype(optional<ScalarType> dtype) const noexcept {
     TensorOptions r = *this;
     r.set_dtype(dtype);
@@ -318,6 +319,7 @@ struct CAFFE2_API TensorOptions {
     }
   }
 
+  // legacy function to support ScalarType
   void set_dtype(optional<ScalarType> dtype) & noexcept {
     if (dtype) {
       dtype_ = scalarTypeToTypeMeta(*dtype);
@@ -392,6 +394,7 @@ inline TensorOptions dtype(caffe2::TypeMeta dtype) {
   return TensorOptions().dtype(dtype);
 }
 
+// legacy function to support ScalarType
 inline TensorOptions dtype(ScalarType dtype) {
   return TensorOptions().dtype(scalarTypeToTypeMeta(dtype));
 }
