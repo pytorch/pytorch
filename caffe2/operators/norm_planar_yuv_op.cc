@@ -19,7 +19,7 @@ class NormalizePlanarYUVOp : public Operator<CPUContext> {
     auto* Z = Output(0);
     Z->ResizeLike(X);
 
-    CAFFE_ENFORCE(X.dims().size() == 4);
+    CAFFE_ENFORCE(X.sizes().size() == 4);
 
     const auto N = X.dim32(0);
     auto C = X.dim(1);

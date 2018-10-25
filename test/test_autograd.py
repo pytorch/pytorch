@@ -553,14 +553,14 @@ class TestAutograd(TestCase):
             [0, 2, 2],
         ])
         v1 = torch.DoubleTensor([[1, 2], [4, 5], [7, 8]])
-        sparse_grad1 = Variable(torch.sparse.DoubleTensor(i1, v1, size))
+        sparse_grad1 = torch.sparse.DoubleTensor(i1, v1, size)
         i2 = torch.LongTensor([
             [0, 1, 3, 4],
             [0, 1, 2, 2],
         ])
         v2 = torch.DoubleTensor([[1, 2], [4, 3], [4, 5], [7, 8]])
-        sparse_grad2 = Variable(torch.sparse.DoubleTensor(i2, v2, size))
-        dense_grad = Variable(torch.rand(size).double())
+        sparse_grad2 = torch.sparse.DoubleTensor(i2, v2, size)
+        dense_grad = torch.rand(size).double()
         sparse_fn1 = FixedGradientFunction(sparse_grad1)
         sparse_fn2 = FixedGradientFunction(sparse_grad2)
         dense_fn = FixedGradientFunction(dense_grad)
@@ -577,6 +577,47 @@ class TestAutograd(TestCase):
         x = torch.randn(size, requires_grad=True)
         (sparse_fn1(x) + sparse_fn2(x)).sum().backward()
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
+
+    @skipIfRocm
+    def test_sparse_ctor_getter_backward(self):
+        # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
+        def test(size, sparse_dim, nnz, device):
+            v_size = [nnz] + list(size[sparse_dim:])
+            i = torch.rand(sparse_dim, nnz)
+            i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
+            i = i.to(torch.long)
+
+            inp = torch.randn(v_size, requires_grad=True)
+            other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True)[0]
+            other = other.to(device)
+
+            def fn(v):
+                x = torch.sparse_coo_tensor(i, v, size, device=device)
+                y = (x + other).coalesce()
+                yv = y.values()
+                new_v = yv.tanh()
+                z = torch.sparse_coo_tensor(y.indices(), new_v, y.size())
+                return z.coalesce().values()
+
+            gradcheck(fn, (inp,))
+            # FIXME: make gradgradcheck work.
+            # gradgradcheck(fn, (inp,))
+
+            # assert that _values is non-differentiable
+            with self.assertRaisesRegex(RuntimeError, "does not have a grad_fn"):
+                other.detach().requires_grad_()._values().backward(torch.ones_like(other._values()))
+
+        devices = ['cpu']
+
+        if torch.cuda.is_available():
+            devices.append('cuda')
+
+        for empty_i, empty_v, empty_nnz in product([True, False], repeat=3):
+            sparse_size = [] if empty_i else [2, 1]
+            dense_size = [1, 0, 2] if empty_v else [1, 2]
+            nnz = 0 if empty_nnz else 5
+            for device in devices:
+                test(sparse_size + dense_size, len(sparse_size), nnz, device)
 
     def test_multi_backward(self):
         x = torch.randn(5, 5, requires_grad=True)

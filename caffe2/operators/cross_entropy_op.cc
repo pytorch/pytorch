@@ -74,15 +74,15 @@ template <>
 bool SigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
   auto& logits = Input(0);
   auto& targets = Input(1);
-  CAFFE_ENFORCE_EQ(logits.dims(), targets.dims());
-  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
+  CAFFE_ENFORCE_EQ(logits.sizes(), targets.sizes());
+  const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
   const auto outer_size = logits.size() / inner_size;
 
   auto* out = Output(0);
   if (logits.ndim() == 0) {
     out->Resize(std::vector<int64_t>{});
   } else {
-    std::vector<int64_t> dims(logits.dims().begin(), logits.dims().end() - 1);
+    std::vector<int64_t> dims(logits.sizes().begin(), logits.sizes().end() - 1);
     out->Resize(dims);
   }
   auto* out_ptr = out->template mutable_data<float>();
@@ -116,8 +116,8 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::RunOnDevice() {
   auto& g = Input(0);
   auto& logits = Input(1);
   auto& targets = Input(2);
-  CAFFE_ENFORCE(logits.dims() == targets.dims());
-  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
+  CAFFE_ENFORCE(logits.sizes() == targets.sizes());
+  const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
   const auto outer_size = logits.size() / inner_size;
   CAFFE_ENFORCE(g.size() == outer_size);
 
@@ -155,16 +155,16 @@ bool WeightedSigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
   auto& logits = Input(0);
   auto& targets = Input(1);
   auto& weights = Input(2);
-  CAFFE_ENFORCE(logits.dims() == targets.dims());
-  CAFFE_ENFORCE(weights.dims() == targets.dims());
-  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
+  CAFFE_ENFORCE(logits.sizes() == targets.sizes());
+  CAFFE_ENFORCE(weights.sizes() == targets.sizes());
+  const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
   const auto outer_size = logits.size() / inner_size;
 
   auto* out = Output(0);
   if (logits.ndim() == 0) {
     out->Resize(std::vector<int64_t>{});
   } else {
-    std::vector<int64_t> dims(logits.dims().begin(), logits.dims().end() - 1);
+    std::vector<int64_t> dims(logits.sizes().begin(), logits.sizes().end() - 1);
     out->Resize(dims);
   }
   auto* out_ptr = out->template mutable_data<float>();
@@ -193,9 +193,9 @@ bool WeightedSigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::
   auto& logits = Input(1);
   auto& targets = Input(2);
   auto& weights = Input(3);
-  CAFFE_ENFORCE(logits.dims() == targets.dims());
-  CAFFE_ENFORCE(weights.dims() == targets.dims());
-  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
+  CAFFE_ENFORCE(logits.sizes() == targets.sizes());
+  CAFFE_ENFORCE(weights.sizes() == targets.sizes());
+  const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
   const auto outer_size = logits.size() / inner_size;
   CAFFE_ENFORCE(g.size() == outer_size);
 
@@ -258,7 +258,7 @@ template <>
 bool MakeTwoClassOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  auto shape = X.dims().vec();
+  auto shape = X.sizes().vec();
   shape.push_back(2);
   int64_t N = X.size();
   Y->Resize(shape);
@@ -277,7 +277,7 @@ template <>
 bool MakeTwoClassGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(0);
   auto* dX = Output(0);
-  auto shape = dY.dims().vec();
+  auto shape = dY.sizes().vec();
   CAFFE_ENFORCE_GE(shape.size(), 1);
   CAFFE_ENFORCE_EQ(shape.back(), 2);
   shape.pop_back();

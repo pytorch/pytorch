@@ -56,7 +56,7 @@ class SpatialBNOp : public Operator<Context> {
     const int N = X.dim32(0);
     const int C =
         (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1));
-    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
     const int HxW =
         std::accumulate(
             X_dims.cbegin() + 1, X_dims.cend(), 1, std::multiplies<int>()) /
@@ -307,7 +307,7 @@ class SpatialBNGradientOp : public Operator<Context> {
     const int N = X.dim32(0);
     const int C =
         (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1));
-    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
     const int HxW =
         std::accumulate(
             X_dims.cbegin() + 1, X_dims.cend(), 1, std::multiplies<int>()) /

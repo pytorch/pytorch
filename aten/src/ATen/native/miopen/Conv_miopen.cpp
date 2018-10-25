@@ -457,20 +457,20 @@ template<>
 struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
   using perf_t = miopenConvAlgoPerf_t;
   using algo_t = miopenConvBwdWeightsAlgorithm_t;
-  
+
   static constexpr auto DEFAULT_ALGO = miopenConvolutionBwdWeightsAlgoGEMM;
   static BenchmarkCache<algo_t>& cache() { return bwd_filter_algos; }
-  
+
   static perf_t findAlgorithm(const ConvolutionArgs& args) {
     int perf_count;
-    perf_t perf_results; 
+    perf_t perf_results;
     size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
     Workspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionBackwardWeightsAlgorithm(
         args.handle,
         args.odesc.desc(), args.output.data_ptr(),
         args.idesc.desc(), args.input.data_ptr(),
-        args.cdesc.desc(), 
+        args.cdesc.desc(),
         args.wdesc.desc(), args.weight.data_ptr(),
         1,      // just return the fastest
         &perf_count,
@@ -603,7 +603,7 @@ void raw_miopen_convolution_forward_out(
     args.handle,
     &one, args.idesc.desc(), input.data_ptr(),
     args.wdesc.desc(), weight.data_ptr(),
-    args.cdesc.desc(), fwdAlg, &zero, 
+    args.cdesc.desc(), fwdAlg, &zero,
     args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size));
 }
 
@@ -720,7 +720,7 @@ void raw_miopen_convolution_backward_input_out(
       args.handle,
       &one, args.odesc.desc(), grad_output.data_ptr(),
       args.wdesc.desc(), weight.data_ptr(),
-      args.cdesc.desc(), bwdDataAlg, &zero, 
+      args.cdesc.desc(), bwdDataAlg, &zero,
       args.idesc.desc(), grad_input.data_ptr(), workspace.data, workspace.size));
 }
 

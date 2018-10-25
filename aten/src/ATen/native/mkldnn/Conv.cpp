@@ -76,7 +76,7 @@ at::Tensor mkldnn_convolution(
   auto cpu_engine = CpuEngine::Instance().get_engine();
 
   int32_t g = groups;
-  
+
   int32_t n = input.size(0);
   int32_t ic = input.size(1);
   int32_t ih = input.size(2);

@@ -2,11 +2,16 @@
 
 #include <ATen/ATen.h>
 
+#include <c10/util/Optional.h>
+
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 
 namespace torch {
-using namespace at;
+using namespace at; // NOLINT
+
+using c10::optional;
+using c10::nullopt;
 
 using Dtype = at::ScalarType;
 
