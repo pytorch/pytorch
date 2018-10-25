@@ -892,17 +892,87 @@ bool Node::moveBeforeTopologicallyValid(Node* n) {
   return tryMove(n, MoveSide::BEFORE);
 }
 
-bool Node::isDependent(const std::list<Node*>& nodes) const {
-  if (nodes.empty()) {
-    return false;
+// Helper for topologically-safe node moves. See `tryMove()` for details.
+namespace {
+struct WorkingSet {
+ public:
+  explicit WorkingSet(Node* mover) {
+    add(mover);
   }
 
-  if (this->isAfter(nodes.front())) {
-    return consumesFrom(nodes);
-  } else {
-    return producesFor(nodes);
+  // Add `n` to the working set
+  void add(Node* n) {
+    nodes_.push_back(n);
+    for (const auto user : getUsersSameBlock(n)) {
+      users_.insert(user);
+    }
   }
-}
+
+  void eraseMover() {
+    nodes_.pop_front();
+  }
+
+  const std::list<Node*>& nodes() {
+    return nodes_;
+  }
+
+  // Does the working set depend on `n`?
+  bool dependsOn(Node* n) const {
+    if (nodes_.empty()) {
+      return false;
+    }
+
+    if (n->isAfter(nodes_.front())) {
+      return producesFor(n);
+    } else {
+      return consumesFrom(n);
+    }
+  }
+
+  // Does the working set produce any values consumed by `n`?
+  bool producesFor(Node* n) const {
+    // This equivalent to asking: does the total use-set of all the nodes in the
+    // working set include `n`?
+    return users_.count(n) != 0;
+  }
+
+  // Does the working set consume any values produced by `n`?
+  bool consumesFrom(Node* n) const {
+    const auto& users = getUsersSameBlock(n);
+    return std::any_of(nodes_.begin(), nodes_.end(), [&](Node* node) {
+      return users.count(node) != 0;
+    });
+  }
+
+ private:
+  // Get all users of outputs of `n`, in the same block as `n`.
+  // This means if there is an `if` node that uses an output of `n` in some
+  // inner sub-block, we will consider the whole `if` node a user of `n`.
+  std::unordered_set<Node*> getUsersSameBlock(Node* n) const {
+    std::unordered_set<Node*> users;
+    for (const auto output : n->outputs()) {
+      for (const auto& use : output->uses()) {
+        if (use.user->owningBlock() == n->owningBlock()) {
+          users.insert(use.user);
+        } else {
+          // This user is in a sub-block. Traverse the blockchain upward until
+          // we arrive at a node that shares a block with `this`
+          auto curNode = use.user;
+          while (curNode->owningBlock() != n->owningBlock()) {
+            curNode = curNode->owningBlock()->owningNode();
+          }
+          users.insert(curNode);
+        }
+      }
+    }
+
+    return users;
+  }
+
+  std::list<Node*> nodes_;
+  std::unordered_set<Node*> users_;
+};
+} // namespace
 
 // Try to move `this` before/after `movePoint` while preserving value
 // dependencies. Returns false iff such a move could not be made
@@ -918,8 +988,7 @@ bool Node::tryMove(Node* movePoint, MoveSide moveSide) {
 
   // 1. Move from `this` toward movePoint, building up the working set of
   // dependencies
-  std::list<Node*> workingSet;
-  workingSet.push_back(this);
+  WorkingSet workingSet(this);
 
   int direction;
   if (this->isAfter(movePoint)) {
@@ -931,9 +1000,9 @@ bool Node::tryMove(Node* movePoint, MoveSide moveSide) {
   auto curNode = this->next_in_graph[direction];
   // Move forward one node at a time
   while (curNode != movePoint) {
-    if (curNode->isDependent(workingSet)) {
+    if (workingSet.dependsOn(curNode)) {
       // If we can't move past this node, add it to the working set
-      workingSet.push_back(curNode);
+      workingSet.add(curNode);
     }
     curNode = curNode->next_in_graph[direction];
   }
@@ -961,11 +1030,11 @@ bool Node::tryMove(Node* movePoint, MoveSide moveSide) {
 
   if (splitThisAndDeps) {
     // remove `this` from dependencies to be moved past `movePoint`
-    workingSet.pop_front();
+    workingSet.eraseMover();
   }
 
   // Check if we can move the working set past the move point
-  if (movePoint->isDependent(workingSet)) {
+  if (workingSet.dependsOn(movePoint)) {
     // if we can't, then there are intermediate dependencies between the
     // `this` and `movePoint`, so we can't do the move
     return false;
@@ -980,13 +1049,13 @@ bool Node::tryMove(Node* movePoint, MoveSide moveSide) {
     // Then move all of its dependencies on the other side of `movePoint`
     const auto reversed =
         moveSide == MoveSide::BEFORE ? MoveSide::AFTER : MoveSide::BEFORE;
-    for (auto toMove : workingSet) {
+    for (auto toMove : workingSet.nodes()) {
       toMove->move(curNode, reversed);
       curNode = toMove;
     }
   } else {
     // Just append/prepend everything to `movePoint`
-    for (auto toMove : workingSet) {
+    for (auto toMove : workingSet.nodes()) {
       toMove->move(curNode, moveSide);
       curNode = toMove;
     }
@@ -1004,49 +1073,6 @@ void Node::move(Node* movePoint, MoveSide moveSide) {
       this->moveAfter(movePoint);
       break;
   }
-}
-
-// Does `this` output any values used by `nodes`?
-template <typename T>
-bool Node::producesFor(const T& nodes) const {
-  return std::any_of(nodes.begin(), nodes.end(), [&](const Node* node) {
-    return std::any_of(
-               node->inputs().cbegin(),
-               node->inputs().cend(),
-               [&](const Value* input) { return input->node() == this; }) ||
-        // Check inner blocks for any uses
-        std::any_of(
-               node->blocks().cbegin(),
-               node->blocks().cend(),
-               [&](const Block* block) { return producesFor(block->nodes()); });
-  });
-}
-
-static void buildInputSet(
-    const Node* node,
-    std::unordered_set<const Value*>& inputs) {
-  for (const auto input : node->inputs()) {
-    inputs.insert(input);
-  }
-
-  for (const auto block : node->blocks()) {
-    for (const auto node : block->nodes()) {
-      buildInputSet(node, inputs);
-    }
-  }
-}
-
-// Does `this` use any outputs of `nodes`?
-bool Node::consumesFrom(const std::list<Node*>& nodes) const {
-  std::unordered_set<const Value*> inputs;
-  buildInputSet(this, inputs);
-
-  return std::any_of(nodes.cbegin(), nodes.cend(), [&](const Node* node) {
-    return std::any_of(
-        node->outputs().cbegin(),
-        node->outputs().cend(),
-        [&](const Value* output) { return inputs.count(output) != 0; });
-  });
 }
 
 void Node::moveAfter(Node * n) {

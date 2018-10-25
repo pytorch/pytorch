@@ -577,12 +577,6 @@ public:
   bool tryMove(Node* movePoint, MoveSide moveSide);
   void move(Node* movePoint, MoveSide moveSide);
 
-  bool isDependent(const std::list<Node*>& nodes) const;
-
-  template <typename T>
-  bool producesFor(const T& nodes) const;
-  bool consumesFrom(const std::list<Node*>& nodes) const;
-
   std::pair<Value*, const Argument&> findInput(Symbol name);
   void findSchema() const;
   // Lookup iterator in use list of _input i_ that corresponds to its use of _this_
