@@ -300,7 +300,7 @@ TEST(GenerateProposalsTest, TestRealDownSampled) {
   Blob* rois_blob = ws.GetBlob("rois");
   EXPECT_NE(nullptr, rois_blob);
   auto& rois = rois_blob->Get<TensorCPU>();
-  EXPECT_EQ(rois.dims(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
+  EXPECT_EQ(rois.sizes(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.dim(0), rois.dim(1));
   EXPECT_NEAR((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff(), 0, 1e-4);
@@ -309,7 +309,8 @@ TEST(GenerateProposalsTest, TestRealDownSampled) {
   Blob* rois_probs_blob = ws.GetBlob("rois_probs");
   EXPECT_NE(nullptr, rois_probs_blob);
   auto& rois_probs = rois_probs_blob->Get<TensorCPU>();
-  EXPECT_EQ(rois_probs.dims(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
+  EXPECT_EQ(
+      rois_probs.sizes(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
   auto rois_probs_data =
       ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.dim(0));
   EXPECT_NEAR(
@@ -470,7 +471,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   Blob* rois_blob = ws.GetBlob("rois");
   EXPECT_NE(nullptr, rois_blob);
   auto& rois = rois_blob->Get<TensorCPU>();
-  EXPECT_EQ(rois.dims(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
+  EXPECT_EQ(rois.sizes(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.dim(0), rois.dim(1));
   EXPECT_NEAR((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff(), 0, 1e-3);
@@ -479,7 +480,8 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   Blob* rois_probs_blob = ws.GetBlob("rois_probs");
   EXPECT_NE(nullptr, rois_probs_blob);
   auto& rois_probs = rois_probs_blob->Get<TensorCPU>();
-  EXPECT_EQ(rois_probs.dims(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
+  EXPECT_EQ(
+      rois_probs.sizes(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
   auto rois_probs_data =
       ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.dim(0));
   EXPECT_NEAR(

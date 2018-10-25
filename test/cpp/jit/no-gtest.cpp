@@ -17,6 +17,7 @@ std::string runJITCPPTests() {
   testCustomOperators();
   testDifferentiate(out);
   testDifferentiateWithRequiresGrad(out);
+  testDynamicDAG();
   testFromQualString();
   testFusion();
   testGraphExecutor();
@@ -24,6 +25,7 @@ std::string runJITCPPTests() {
   testInterp();
   testIValue();
   testProto();
+  testSchemaParser();
   return out.str();
 }
 } // namespace jit

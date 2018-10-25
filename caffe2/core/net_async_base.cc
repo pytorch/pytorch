@@ -68,7 +68,9 @@ std::vector<int>& AsyncNetBase::getStreamCounters() {
 AsyncNetBase::AsyncNetBase(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws)
-    : NetBase(net_def, ws) {
+    : NetBase(net_def, ws), counters_(net_def) {
+  computeExecutionModeFlags();
+
   operator_nodes_ = dag_utils::prepareOperatorNodes(net_def, ws);
   helper_ = caffe2::make_unique<AsyncNetExecutorHelper>(this);
   operators_.reserve(operator_nodes_.size());
@@ -78,7 +80,7 @@ AsyncNetBase::AsyncNetBase(
     operators_.push_back(op_ptr);
   }
 
-  if (c10::FLAGS_caffe2_net_async_inference_mode) {
+  if (FLAGS_caffe2_net_async_inference_mode) {
     execution_chains_ = dag_utils::computeGroups(operator_nodes_);
   } else {
     execution_chains_ = dag_utils::computeChains(operator_nodes_);
@@ -93,12 +95,15 @@ AsyncNetBase::AsyncNetBase(
   for (const auto& chain : chains_) {
     const auto& last_op = operators_[chain.back()];
     events_.push_back(&last_op->event());
-    for (const auto& op_id : chain) {
-      if (op_id == chain.back() || op_id == chain.front()) {
-        continue;
+    // keep events for inner chain ops in case of profiling
+    if (!report_stats_) {
+      for (const auto& op_id : chain) {
+        if (op_id == chain.back() || op_id == chain.front()) {
+          continue;
+        }
+        const auto& op = operators_[op_id];
+        op->DisableEvent();
       }
-      const auto& op = operators_[op_id];
-      op->DisableEvent();
     }
   }
 
@@ -108,8 +113,6 @@ AsyncNetBase::AsyncNetBase(
   if (tracer_) {
     LOG(INFO) << "Tracing net: " << net_def->name();
   }
-
-  computeExecutionModeFlags();
 }
 
 bool AsyncNetBase::handleRunError() {
@@ -161,14 +164,14 @@ TaskThreadPoolBase* AsyncNetBase::pool(const DeviceOption& device_option) {
     }
     CAFFE_ENFORCE_LT(
         numa_node_id,
-        c10::FLAGS_caffe2_net_async_max_numa_nodes,
+        FLAGS_caffe2_net_async_max_numa_nodes,
         "Invalid NUMA node id: ",
         numa_node_id);
     return poolGetter(cpu_pools_, PROTO_CPU, numa_node_id, num_workers_);
   } else if (device_option.device_type() == PROTO_CUDA) {
     auto gpu_id = device_option.device_id();
     CAFFE_ENFORCE(
-        gpu_id >= 0 && gpu_id < c10::FLAGS_caffe2_net_async_max_gpus,
+        gpu_id >= 0 && gpu_id < FLAGS_caffe2_net_async_max_gpus,
         "Invalid GPU id: " + caffe2::to_string(gpu_id));
     return poolGetter(gpu_pools_, PROTO_CUDA, gpu_id, num_workers_);
   } else {
@@ -294,14 +297,28 @@ int AsyncNetBase::numOps(int task_id) const {
   return chains_[task_id].size();
 }
 
+int AsyncNetBase::firstTaskOpId(int task_id) const {
+  return chains_[task_id].front();
+}
+
+int AsyncNetBase::lastTaskOpId(int task_id) const {
+  return chains_[task_id].back();
+}
+
 const OperatorBase* AsyncNetBase::firstTaskOp(int task_id) const {
-  auto op_id = chains_[task_id].front();
-  return operator_nodes_[op_id].operator_.get();
+  return operator_nodes_[firstTaskOpId(task_id)].operator_.get();
 }
 
 const OperatorBase* AsyncNetBase::lastTaskOp(int task_id) const {
-  auto op_id = chains_[task_id].back();
-  return operator_nodes_[op_id].operator_.get();
+  return operator_nodes_[lastTaskOpId(task_id)].operator_.get();
+}
+
+OperatorBase* AsyncNetBase::firstTaskOp(int task_id) {
+  return operator_nodes_[firstTaskOpId(task_id)].operator_.get();
+}
+
+OperatorBase* AsyncNetBase::lastTaskOp(int task_id) {
+  return operator_nodes_[lastTaskOpId(task_id)].operator_.get();
 }
 
 void AsyncNetBase::asyncWait(
@@ -364,14 +381,24 @@ bool AsyncNetBase::run(int task_id, int stream_id) {
     }
     for (auto& op_id : chains_[task_id]) {
       op = operators_[op_id];
-      TRACE_EVENT(
-          tracing::TRACE_OP,
-          op_id,
-          tracing::TRACE_TASK,
-          task_id,
-          tracing::TRACE_STREAM,
-          stream_id);
-      bool success = op->RunAsync(stream_id);
+      bool success = false;
+      if (!report_stats_) {
+        TRACE_EVENT(
+            tracing::TRACE_OP,
+            op_id,
+            tracing::TRACE_TASK,
+            task_id,
+            tracing::TRACE_STREAM,
+            stream_id);
+        success = op->RunAsync(stream_id);
+      } else {
+        counters_.AddPerOpStartTime(op_id);
+        success = op->RunAsync(stream_id);
+        if (success && op->device_option().device_type() != PROTO_CPU) {
+          op->Finish();
+        }
+        counters_.AddPerOpEndTime(op_id);
+      }
       if (!success) {
         auto err_msg = "Failed to execute an op: " +
             (op->has_debug_def() ? op->type() : " unknown");
@@ -422,10 +449,25 @@ void AsyncNetBase::finalizeEvents() {
     } else if (status == EventStatus::EVENT_INITIALIZED) {
       event(task_id).SetFinished();
     }
+    if (event(task_id).Query() != EventStatus::EVENT_SUCCESS) {
+      success_ = false;
+    }
   }
 }
 
-AsyncNetBase::~AsyncNetBase() {}
+ProfDAGProtos AsyncNetBase::GetOperatorStats() const {
+  return counters_.GetOperatorStats();
+}
+
+ProfDAGProtos AsyncNetBase::GetPerOperatorCost() const {
+  return counters_.GetPerOperatorCost();
+}
+
+AsyncNetBase::~AsyncNetBase() {
+  if (report_stats_) {
+    counters_.PrintStats();
+  }
+}
 
 C10_DEFINE_SHARED_REGISTRY(
     ThreadPoolRegistry,
@@ -459,6 +501,7 @@ void AsyncNetBase::computeExecutionModeFlags() {
     use_single_pool_ = true;
     use_per_net_pools_ = true;
     is_blocking_ = true;
+    report_stats_ = (net_type == kProfDag);
   } else if (net_type == kAsyncDag) {
     streams_per_gpu_ = 1;
     finish_chain_ = false;
@@ -467,14 +510,25 @@ void AsyncNetBase::computeExecutionModeFlags() {
     use_single_pool_ = true;
     use_per_net_pools_ = true;
     is_blocking_ = true;
+    report_stats_ = false;
   } else {
-    streams_per_gpu_ = c10::FLAGS_caffe2_streams_per_gpu;
-    finish_chain_ = c10::FLAGS_caffe2_net_async_finish_chain;
-    always_schedule_child_ = c10::FLAGS_caffe2_net_async_always_schedule_child;
-    check_stream_status_ = c10::FLAGS_caffe2_net_async_check_stream_status;
-    use_single_pool_ = c10::FLAGS_caffe2_net_async_use_single_pool;
-    use_per_net_pools_ = c10::FLAGS_caffe2_net_async_use_per_net_pools;
+    streams_per_gpu_ = FLAGS_caffe2_streams_per_gpu;
+    finish_chain_ = FLAGS_caffe2_net_async_finish_chain;
+    always_schedule_child_ = FLAGS_caffe2_net_async_always_schedule_child;
+    check_stream_status_ = FLAGS_caffe2_net_async_check_stream_status;
+    use_single_pool_ = FLAGS_caffe2_net_async_use_single_pool;
+    use_per_net_pools_ = FLAGS_caffe2_net_async_use_per_net_pools;
     is_blocking_ = false;
+    report_stats_ = false;
+  }
+
+  for (int arg_idx = 0; arg_idx < net_def_->arg_size(); ++arg_idx) {
+    auto& arg = net_def_->arg(arg_idx);
+    if (arg.has_name() && arg.name() == "enable_profiling") {
+      CAFFE_ENFORCE(arg.has_i(), "enable_profiling should be an int");
+      report_stats_ = arg.i() == 1;
+      break;
+    }
   }
 }
 

@@ -7,13 +7,13 @@
 #include "ATen/ATen.h"
 #include "ATen/CPUGenerator.h"
 #include "ATen/CheckGenerator.h"
-#include "ATen/core/Deprecated.h"
 #include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/ScalarType.h"
+#include "ATen/core/Deprecated.h"
 #include "ATen/core/TensorOptions.h"
-#include "ATen/core/Error.h"
 #include "TH/THRandom.h"
+#include "c10/util/Exception.h"
 
 #include <algorithm>
 #include <cmath>
@@ -103,10 +103,15 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor empty(IntList size, const TensorOptions& options) {
-  // Note [Native bindings for legacy TH factory functions]
-  // Can't call a factory function, because the buck stops with us!
-  return getFactoryType(options).tensor(size);
+Tensor empty_cpu(IntList size, const TensorOptions& options) {
+  AT_ASSERT(options.backend() == Backend::CPU);
+  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'
+  auto storage_impl = c10::make_intrusive<StorageImpl>(
+    scalarTypeToTypeMeta(options.dtype()), 0, at::getCPUAllocator(), true);
+
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId(), false);
+  tensor.resize_(size);
+  return tensor;
 }
 
 Tensor& empty_out(Tensor& result, IntList size) {
@@ -148,7 +153,7 @@ Tensor empty_like(const Tensor& self) {
 Tensor empty_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
     auto res = at::empty({0}, options); // to be resized
-    res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
+    res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
     return res;
   }
   return at::empty(self.sizes(), options);
@@ -520,7 +525,7 @@ Tensor zeros_like(const Tensor& self) {
 Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
     auto res = at::empty({0}, options); // to be resized
-    res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
+    res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
     return res;
   }
   return native::zeros(self.sizes(), options);
@@ -648,7 +653,7 @@ Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
 
 template <typename T>
 Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
-  auto cpu_tensor = tensor_cpu(values, TensorOptions(options).device(DeviceType::CPU));
+  auto cpu_tensor = tensor_cpu(values, options.device(DeviceType::CPU));
   return cpu_tensor.to(options.device());
 }
 

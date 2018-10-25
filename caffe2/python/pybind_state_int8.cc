@@ -38,11 +38,11 @@ class Int8TensorFetcher : public BlobFetcherBase {
     const int numpy_type = CaffeToNumpyType(src.t.meta());
     CAFFE_ENFORCE(numpy_type != -1, "Int8Tensor contains unknown type data");
     std::vector<npy_intp> npy_dims;
-    for (const auto dim : src.t.dims()) {
+    for (const auto dim : src.t.sizes()) {
       npy_dims.push_back(dim);
     }
     auto data_array = pybind11::reinterpret_steal<pybind11::object>(
-        PyArray_SimpleNew(src.t.dims().size(), npy_dims.data(), numpy_type));
+        PyArray_SimpleNew(src.t.sizes().size(), npy_dims.data(), numpy_type));
     void* ptr = static_cast<void*>(
         PyArray_DATA(reinterpret_cast<PyArrayObject*>(data_array.ptr())));
     CPUContext context;

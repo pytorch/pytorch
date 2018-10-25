@@ -93,7 +93,6 @@ if "%1"=="caffe2" (
   call:build_caffe2 %~1
 ) ELSE (
   set "IS_OURS="
-  IF "%1"=="THD" set IS_OURS=1
   IF "%1"=="libshm_windows" set IS_OURS=1
   if defined IS_OURS (
     cd torch\lib
@@ -144,6 +143,7 @@ goto:eof
                   -DTHS_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
                   -DTHC_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
                   -DTHCS_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
+                  -DC10_LIBRARIES="%INSTALL_DIR%/lib/c10.lib" ^
                   -DCAFFE2_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
                   -DTHNN_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
                   -DTHCUNN_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
@@ -184,6 +184,7 @@ goto:eof
                   -DBUILD_CAFFE2_OPS=%BUILD_CAFFE2_OPS% ^
                   -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
                   -DUSE_CUDA=%USE_CUDA% ^
+                  -DUSE_DISTRIBUTED=%USE_DISTRIBUTED% ^
                   -DUSE_NUMPY=%USE_NUMPY% ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
                   -DUSE_LEVELDB=%USE_LEVELDB% ^

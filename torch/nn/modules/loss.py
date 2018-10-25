@@ -24,8 +24,8 @@ class _WeightedLoss(_Loss):
 
 
 class L1Loss(_Loss):
-    r"""Creates a criterion that measures the mean absolute value of the
-    element-wise difference between input `x` and target `y`:
+    r"""Creates a criterion that measures the mean absolute error (MAE) between each element in
+    the input `x` and target `y`.
 
     The loss can be described as:
 
@@ -185,10 +185,11 @@ class NLLLoss(_WeightedLoss):
         >>> loss = nn.NLLLoss()
         >>> # input is of size N x C x height x width
         >>> data = torch.randn(N, 16, 10, 10)
-        >>> m = nn.Conv2d(16, C, (3, 3))
+        >>> conv = nn.Conv2d(16, C, (3, 3))
+        >>> m = nn.LogSoftmax()
         >>> # each element in target has to have 0 <= value < C
         >>> target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
-        >>> output = loss(m(data), target)
+        >>> output = loss(m(conv(data)), target)
         >>> output.backward()
     """
 
@@ -206,7 +207,7 @@ class NLLLoss2d(NLLLoss):
                  reduce=None, reduction='elementwise_mean'):
         warnings.warn("NLLLoss2d has been deprecated. "
                       "Please use NLLLoss instead as a drop-in replacement and see "
-                      "http://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss for more details.")
+                      "https://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss for more details.")
         super(NLLLoss2d, self).__init__(weight, size_average, ignore_index, reduce, reduction)
 
 
@@ -360,8 +361,8 @@ class KLDivLoss(_Loss):
 
 
 class MSELoss(_Loss):
-    r"""Creates a criterion that measures the mean squared error between
-    `n` elements in the input `x` and target `y`.
+    r"""Creates a criterion that measures the mean squared error (squared L2 norm) between
+    each element in the input `x` and target `y`.
 
     The loss can be described as:
 
@@ -498,8 +499,8 @@ class BCEWithLogitsLoss(_Loss):
 
     .. math::
         \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - w_n \left[ t_n \cdot \log \sigma(x_n)
-        + (1 - t_n) \cdot \log (1 - \sigma(x_n)) \right],
+        l_n = - w_n \left[ y_n \cdot \log \sigma(x_n)
+        + (1 - y_n) \cdot \log (1 - \sigma(x_n)) \right],
 
     where :math:`N` is the batch size. If reduce is ``True``, then
 
@@ -518,8 +519,8 @@ class BCEWithLogitsLoss(_Loss):
 
     .. math::
         \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - w_n \left[ p_n t_n \cdot \log \sigma(x_n)
-        + (1 - t_n) \cdot \log (1 - \sigma(x_n)) \right],
+        l_n = - w_n \left[ p_n y_n \cdot \log \sigma(x_n)
+        + (1 - y_n) \cdot \log (1 - \sigma(x_n)) \right],
 
     where :math:`p_n` is the positive weight of class :math:`n`.
     :math:`p_n > 1` increases the recall, :math:`p_n < 1` increases the precision.

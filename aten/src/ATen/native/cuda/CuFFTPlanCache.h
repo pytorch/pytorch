@@ -146,7 +146,8 @@ public:
     // See NOTE [ cuFFT Embedded Strides ].
     //
     // TODO: Figure out why windows fails to compile
-    //         at::optional<std::vector<long long int>> inembed_opt = at::nullopt;
+    //         c10::optional<std::vector<long long int>> inembed_opt =
+    //         c10::nullopt;
     //       Then move the following to a helper function.
 #ifdef __HIP_PLATFORM_HCC__
     std::vector<int> inembed(signal_ndim);

@@ -26,8 +26,8 @@ class GatherOp : public Operator<Context> {
     auto* output = Output(0);
 
     CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
-    auto shape = indices.dims().vec();
-    shape.insert(shape.end(), data.dims().begin() + 1, data.dims().end());
+    auto shape = indices.sizes().vec();
+    shape.insert(shape.end(), data.sizes().begin() + 1, data.sizes().end());
     output->Resize(shape);
 
     int block_size = data.size_from_dim(1);

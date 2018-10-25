@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/Error.h>
+#include "c10/util/Exception.h"
 
 #include <gtest/gtest.h>
 
@@ -19,11 +19,7 @@ namespace test {
 
 #ifdef WIN32
 struct TempFile {
-  TempFile() : filename_(std::tmpnam(nullptr)) {}
-  const std::string& str() const {
-    return filename_;
-  }
-  std::string filename_;
+  std::string name{std::tmpnam(nullptr)};
 };
 #else
 struct TempFile {
@@ -32,31 +28,33 @@ struct TempFile {
     char filename[] = "/tmp/fileXXXXXX";
     fd_ = mkstemp(filename);
     AT_CHECK(fd_ != -1, "Error creating tempfile");
-    filename_.assign(filename);
+    name.assign(filename);
   }
 
   ~TempFile() {
     close(fd_);
   }
 
-  const std::string& str() const {
-    return filename_;
-  }
-
-  std::string filename_;
+  std::string name;
   int fd_;
 };
 #endif
 
 #define ASSERT_THROWS_WITH(statement, substring)                        \
-  try {                                                                 \
-    (void)statement;                                                    \
-    FAIL() << "Expected statement `" #statement                         \
-              "` to throw an exception, but it did not";                \
-  } catch (const std::exception& e) {                                   \
-    std::string message = e.what();                                     \
-    if (message.find(substring) == std::string::npos) {                 \
-      FAIL() << "Error message \"" << message                           \
+  {                                                                     \
+    std::string assert_throws_with_error_message;                       \
+    try {                                                               \
+      (void)statement;                                                  \
+      FAIL() << "Expected statement `" #statement                       \
+                "` to throw an exception, but it did not";              \
+    } catch (const c10::Error& e) {                                     \
+      assert_throws_with_error_message = e.what_without_backtrace();    \
+    } catch (const std::exception& e) {                                 \
+      assert_throws_with_error_message = e.what();                      \
+    }                                                                   \
+    if (assert_throws_with_error_message.find(substring) ==             \
+        std::string::npos) {                                            \
+      FAIL() << "Error message \"" << assert_throws_with_error_message  \
              << "\" did not contain expected substring \"" << substring \
              << "\"";                                                   \
     }                                                                   \

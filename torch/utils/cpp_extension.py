@@ -114,6 +114,8 @@ def check_compiler_abi_compatibility(compiler):
     '''
     if not _is_binary_build():
         return True
+    if os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') in ['ON', '1', 'YES', 'TRUE', 'Y']:
+        return True
     try:
         check_cmd = '{}' if IS_WINDOWS else '{} --version'
         info = subprocess.check_output(
@@ -352,6 +354,7 @@ def CppExtension(name, sources, *args, **kwargs):
         kwargs['library_dirs'] = library_dirs
 
         libraries = kwargs.get('libraries', [])
+        libraries.append('c10')
         libraries.append('caffe2')
         libraries.append('torch')
         libraries.append('_C')
@@ -396,6 +399,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries = kwargs.get('libraries', [])
     libraries.append('cudart')
     if IS_WINDOWS:
+        libraries.append('c10')
         libraries.append('caffe2')
         libraries.append('torch')
         libraries.append('caffe2_gpu')
@@ -777,6 +781,8 @@ def verify_ninja_availability():
             subprocess.check_call('ninja --version'.split(), stdout=devnull)
         except OSError:
             raise RuntimeError("Ninja is required to load C++ extensions")
+        else:
+            return True
 
 
 def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
@@ -788,6 +794,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         torch_path = os.path.dirname(os.path.dirname(here))
         lib_path = os.path.join(torch_path, 'lib')
 
+        extra_ldflags.append('c10.lib')
         extra_ldflags.append('caffe2.lib')
         extra_ldflags.append('torch.lib')
         if with_cuda:

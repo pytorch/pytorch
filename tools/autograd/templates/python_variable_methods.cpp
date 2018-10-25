@@ -27,7 +27,7 @@
 #include "torch/csrc/utils/tensor_types.h"
 
 #include <ATen/ATen.h>
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #include "python_variable_methods_dispatch.h"
 
@@ -509,7 +509,7 @@ static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
 static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  auto parsed = parse_to_conversion(args, kwargs);
+  auto parsed = parse_to_conversion(args, kwargs, /*allow_copy*/ true);
   auto& device = std::get<0>(parsed);
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
@@ -573,7 +573,8 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   auto self_device_type = torch::getDeviceType(self_.type());
   auto& type = is_dtype ? torch::getVariableType(r.scalartype(0), *torch::getLayout(self_.type().backend()), self_device_type) :
                           torch::utils::type_from_string(type_name);
-  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, at::nullopt, r.toBool(1)));
+  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(
+      self_, type, c10::nullopt, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
 

@@ -1,5 +1,7 @@
 #include <gloo/transport/tcp/device.h>
 
+#include <ATen/cuda/CUDAGuard.h>
+
 #include <c10d/CUDAUtils.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
@@ -9,9 +11,8 @@
 
 using namespace c10d::test;
 
-using c10d::CUDAStream;
+using at::cuda::CUDAStream;
 using c10d::ProcessGroup;
-using c10d::THCStreamGuard;
 
 template <typename T, typename... Args>
 std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
@@ -22,8 +23,7 @@ std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
 
   std::vector<std::thread> threads;
   for (auto i = 0; i < N; i++) {
-    threads.push_back(
-        std::move(std::thread([i, N, &tests] { tests[i].start(i, N); })));
+    threads.push_back(std::thread([i, N, &tests] { tests[i].start(i, N); }));
   }
 
   for (auto& thread : threads) {
@@ -71,11 +71,11 @@ class AsyncInputIsOutputTest : public AsyncTest {
         numTensors_(numTensors),
         numDevices_(cudaNumDevices()),
         state_(::at::globalContext().lazyInitCUDA()) {
-
     // Allocate inputs on available devices in a round robin fashion.
     inputs_.resize(numTensors_);
     for (auto i = 0; i < numTensors_; i++) {
-      inputs_[i] = at::empty({16, 16}, at::device({at::kCUDA, i % numDevices_}));
+      inputs_[i] =
+          at::empty({16, 16}, at::device({at::kCUDA, i % numDevices_}));
     }
 
     // Allocate a stream per device.
@@ -89,14 +89,14 @@ class AsyncInputIsOutputTest : public AsyncTest {
     streams_.resize(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
-      streams_[i] = CUDAStream::create();
+      streams_[i] = at::cuda::getStreamFromPool();
     }
   }
 
-  std::vector<THCStreamGuard> createStreamGuard() {
-    std::vector<THCStreamGuard> guards;
+  std::vector<at::cuda::CUDAGuard> createStreamGuard() {
+    std::vector<at::cuda::CUDAGuard> guards;
     for (auto& stream : streams_) {
-      guards.push_back(std::move(THCStreamGuard(state_, stream)));
+      guards.push_back(at::cuda::CUDAGuard(stream));
     }
     return guards;
   }

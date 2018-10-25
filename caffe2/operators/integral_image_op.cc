@@ -19,7 +19,7 @@ bool IntegralImageOp<float, CPUContext>::RunOnDevice() {
   auto* Y = Output(0);
   CAFFE_ENFORCE_EQ(X.ndim(), 4, "Only supports 4D tensors for the momement");
 
-  vector<int64_t> out_shape(X.dims().vec());
+  vector<int64_t> out_shape(X.sizes().vec());
   out_shape[2] += 1; // H + 1 output size
   out_shape[3] += 1; // W + 1 output size
   Y->Resize(out_shape);

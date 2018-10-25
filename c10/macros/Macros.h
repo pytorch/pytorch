@@ -32,4 +32,53 @@
 #define CONCAT_IMPL(x, y) x##y
 #define MACRO_CONCAT(x, y) CONCAT_IMPL(x, y)
 
+#define MACRO_EXPAND(args) args
+
+/// C10_NODISCARD - Warn if a type or return value is discarded.
+#define C10_NODISCARD
+#if __cplusplus > 201402L && defined(__has_cpp_attribute)
+#if __has_cpp_attribute(nodiscard)
+#undef C10_NODISCARD
+#define C10_NODISCARD [[nodiscard]]
+#endif
+// Workaround for llvm.org/PR23435, since clang 3.6 and below emit a spurious
+// error when __has_cpp_attribute is given a scoped attribute in C mode.
+#elif __cplusplus && defined(__has_cpp_attribute)
+#if __has_cpp_attribute(clang::warn_unused_result)
+#undef C10_NODISCARD
+#define C10_NODISCARD [[clang::warn_unused_result]]
+#endif
+#endif
+
+// Simply define the namespace, in case a dependent library want to refer to
+// the c10 namespace but not any nontrivial files.
+namespace c10 {} // namespace c10
+
+// C10_NORETURN
+#if defined(_MSC_VER)
+#define C10_NORETURN __declspec(noreturn)
+#else
+#define C10_NORETURN __attribute__((noreturn))
+#endif
+
+// C10_LIKELY/C10_UNLIKELY
+//
+// These macros provide parentheses, so you can use these macros as:
+//
+//    if C10_LIKELY(some_expr) {
+//      ...
+//    }
+//
+// NB: static_cast to boolean is mandatory in C++, because __builtin_expect
+// takes a long argument, which means you may trigger the wrong conversion
+// without it.
+//
+#if defined(__GNUC__) || defined(__ICL) || defined(__clang__)
+#define C10_LIKELY(expr)    (__builtin_expect(static_cast<bool>(expr), 1))
+#define C10_UNLIKELY(expr)  (__builtin_expect(static_cast<bool>(expr), 0))
+#else
+#define C10_LIKELY(expr)    (expr)
+#define C10_UNLIKELY(expr)  (expr)
+#endif
+
 #endif // C10_MACROS_MACROS_H_

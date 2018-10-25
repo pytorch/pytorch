@@ -1,20 +1,10 @@
 #include "bbox_transform_op.h"
 #include "caffe2/operators/generate_proposals_op_util_boxes.h"
 
-#ifdef CAFFE2_USE_MKL
-#include "caffe2/mkl/operators/operator_fallback_mkl.h"
-#endif // CAFFE2_USE_MKL
-
 namespace caffe2 {
 namespace {
 
 REGISTER_CPU_OPERATOR(BBoxTransform, BBoxTransformOp<float, CPUContext>);
-
-#ifdef CAFFE2_HAS_MKL_DNN
-REGISTER_MKL_OPERATOR(
-    BBoxTransform,
-    mkl::MKLFallbackOp<BBoxTransformOp<float, CPUContext>>);
-#endif // CAFFE2_HAS_MKL_DNN
 
 // Input: box, delta Output: box
 OPERATOR_SCHEMA(BBoxTransform)
@@ -138,7 +128,7 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
     }
   }
 
-  CAFFE_ENFORCE_EQ(iminfo_in.dims(), (at::IntList{batch_size, 3}));
+  CAFFE_ENFORCE_EQ(iminfo_in.sizes(), (at::IntList{batch_size, 3}));
   Eigen::Map<const ERArrXXf> iminfo(
       iminfo_in.data<float>(), iminfo_in.dim(0), iminfo_in.dim(1));
 

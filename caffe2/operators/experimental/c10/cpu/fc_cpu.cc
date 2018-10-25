@@ -32,14 +32,14 @@ void fc_op_cpu_impl(
                                 : W.size_from_dim(canonical_axis_w);
 
   auto dimErrorString = [&]() {
-    return caffe2::MakeString(
+    return c10::str(
         "Dimension mismatch: ",
         "X: ",
-        X.dims(),
+        X.sizes(),
         ", W: ",
-        W.dims(),
+        W.sizes(),
         ", b: ",
-        b.dims(),
+        b.sizes(),
         ", axis: ",
         axis,
         ", M: ",
@@ -56,7 +56,7 @@ void fc_op_cpu_impl(
   CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
   CAFFE_ENFORCE(N == b.size(), dimErrorString());
 
-  cache->Y_shape_cache_ = X.dims().vec();
+  cache->Y_shape_cache_ = X.sizes().vec();
   // This is an invariant of canonical_axis, so we can DCHECK.
   DCHECK_LE(canonical_axis + 1, cache->Y_shape_cache_.size());
   cache->Y_shape_cache_.resize(canonical_axis + 1);

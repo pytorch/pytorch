@@ -331,7 +331,7 @@ class create_version_file(PytorchCommand):
 # All libraries that torch could depend on
 dep_libs = [
     'nccl', 'caffe2',
-    'libshm', 'libshm_windows', 'gloo', 'THD', 'c10d',
+    'libshm', 'libshm_windows'
 ]
 
 missing_pydep = '''
@@ -411,6 +411,7 @@ def build_libs(libs):
     my_env["USE_LMDB"] = "ON" if USE_LMDB else "OFF"
     my_env["USE_OPENCV"] = "ON" if USE_OPENCV else "OFF"
     my_env["USE_FFMPEG"] = "ON" if USE_FFMPEG else "OFF"
+    my_env["USE_DISTRIBUTED"] = "ON" if USE_DISTRIBUTED else "OFF"
 
     try:
         os.mkdir('build')
@@ -465,11 +466,6 @@ class build_deps(PytorchCommand):
             libs += ['libshm_windows']
         else:
             libs += ['libshm']
-        if USE_DISTRIBUTED:
-            if IS_LINUX:
-                libs += ['gloo']
-                libs += ['c10d']
-            libs += ['THD']
         build_libs(libs)
 
         # Use copies instead of symbolic files.
@@ -572,23 +568,6 @@ class develop(setuptools.command.develop.develop):
             print(" > pip install ninja")
 
 
-def monkey_patch_THD_link_flags():
-    '''
-    THD's dynamic link deps are not determined until after build_deps is run
-    So, we need to monkey-patch them in later
-    '''
-    # read tmp_install_path/THD_deps.txt for THD's dynamic linkage deps
-    with open(tmp_install_path + '/THD_deps.txt', 'r') as f:
-        thd_deps_ = f.read()
-    thd_deps = []
-    # remove empty lines
-    for l in thd_deps_.split(';'):
-        if l != '':
-            thd_deps.append(l)
-
-    C.extra_link_args += thd_deps
-
-
 def monkey_patch_C10D_inc_flags():
     '''
     C10D's include deps are not determined until after build c10d is run, so
@@ -640,7 +619,6 @@ class build_ext(build_ext_parent):
             print('-- Not using NCCL')
         if USE_DISTRIBUTED:
             print('-- Building with THD distributed package ')
-            monkey_patch_THD_link_flags()
             if IS_LINUX:
                 print('-- Building with c10d distributed package ')
                 monkey_patch_C10D_inc_flags()
@@ -853,7 +831,9 @@ include_dirs += [
 library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
-CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.so')]
+CAFFE2_LIBS = [
+    os.path.join(lib_path, 'libcaffe2.so'),
+    os.path.join(lib_path, 'libc10.so')]
 if USE_CUDA:
     CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_gpu.so'), '-Wl,--as-needed'])
 if USE_ROCM:
@@ -861,13 +841,9 @@ if USE_ROCM:
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.2')
 C10D_LIB = os.path.join(lib_path, 'libc10d.a')
+GLOO_CUDA_LIB = os.path.join(lib_path, 'libgloo_cuda.a')
 
 # static library only
-if DEBUG:
-    PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobufd.a')
-else:
-    PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobuf.a')
-
 if IS_DARWIN:
     CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.dylib')]
     if USE_CUDA:
@@ -877,19 +853,18 @@ if IS_DARWIN:
     NCCL_LIB = os.path.join(lib_path, 'libnccl.2.dylib')
 
 if IS_WINDOWS:
-    CAFFE2_LIBS = [os.path.join(lib_path, 'caffe2.lib')]
+    CAFFE2_LIBS = [
+        os.path.join(lib_path, 'caffe2.lib'),
+        os.path.join(lib_path, 'c10.lib')
+    ]
     if USE_CUDA:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
     if USE_ROCM:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
-    if DEBUG:
-        PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobufd.lib')
-    else:
-        PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobuf.lib')
 
 main_compile_args = ['-D_THP_CORE', '-DONNX_NAMESPACE=' + ONNX_NAMESPACE]
 main_libraries = ['shm']
-main_link_args = CAFFE2_LIBS + [PROTOBUF_STATIC_LIB]
+main_link_args = CAFFE2_LIBS
 if IS_WINDOWS:
     main_link_args.append(os.path.join(lib_path, 'torch.lib'))
 elif IS_DARWIN:
@@ -902,6 +877,7 @@ main_sources = [
     "torch/csrc/Dtype.cpp",
     "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/Exceptions.cpp",
+    "torch/csrc/TypeInfo.cpp",
     "torch/csrc/Generator.cpp",
     "torch/csrc/Layout.cpp",
     "torch/csrc/Module.cpp",
@@ -977,9 +953,10 @@ if USE_DISTRIBUTED:
     if IS_LINUX:
         extra_compile_args.append('-DUSE_C10D')
         main_sources.append('torch/csrc/distributed/c10d/init.cpp')
+        main_link_args.append(C10D_LIB)
         if USE_CUDA:
             main_sources.append('torch/csrc/distributed/c10d/ddp.cpp')
-        main_link_args.append(C10D_LIB)
+            main_link_args.append(GLOO_CUDA_LIB)
 
 if USE_CUDA:
     nvtoolext_lib_name = None
@@ -1222,7 +1199,13 @@ if __name__ == '__main__':
                 'lib/include/torch/*.h',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/api/include/torch/*.h',
+                'lib/include/torch/csrc/api/include/torch/data/*.h',
+                'lib/include/torch/csrc/api/include/torch/data/datasets/*.h',
+                'lib/include/torch/csrc/api/include/torch/data/detail/*.h',
+                'lib/include/torch/csrc/api/include/torch/data/samplers/*.h',
+                'lib/include/torch/csrc/api/include/torch/data/transforms/*.h',
                 'lib/include/torch/csrc/api/include/torch/detail/*.h',
+                'lib/include/torch/csrc/api/include/torch/detail/ordered_dict.h',
                 'lib/include/torch/csrc/api/include/torch/nn/*.h',
                 'lib/include/torch/csrc/api/include/torch/nn/modules/*.h',
                 'lib/include/torch/csrc/api/include/torch/nn/parallel/*.h',
@@ -1248,6 +1231,9 @@ if __name__ == '__main__':
                 'share/cmake/ATen/*.cmake',
                 'share/cmake/Caffe2/*.cmake',
                 'share/cmake/Caffe2/public/*.cmake',
+                'share/cmake/Caffe2/Modules_CUDA_fix/*.cmake',
+                'share/cmake/Caffe2/Modules_CUDA_fix/upstream/*.cmake',
+                'share/cmake/Caffe2/Modules_CUDA_fix/upstream/FindCUDA/*.cmake',
                 'share/cmake/Gloo/*.cmake',
                 'share/cmake/Torch/*.cmake',
             ],

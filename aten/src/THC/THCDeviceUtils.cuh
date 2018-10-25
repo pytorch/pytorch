@@ -104,6 +104,14 @@ __device__ __forceinline__ double WARP_SHFL_DOWN(double value, unsigned int delt
   //(HIP doesn't support double)
   return (double) __shfl_down((float) value, delta, width);
 }
+__device__ __forceinline__ int64_t WARP_SHFL_DOWN(int64_t value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
+{
+  //(HIP doesn't support int64_t). Trick from https://devblogs.nvidia.com/faster-parallel-reductions-kepler/
+  int2 a = *reinterpret_cast<int2*>(&value);
+  a.x = __shfl_down(a.x, delta);
+  a.y = __shfl_down(a.y, delta);
+  return *reinterpret_cast<int64_t*>(&a);
+}
 #endif
 template <typename T>
 __device__ __forceinline__ T WARP_SHFL_DOWN(T value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)

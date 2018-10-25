@@ -93,17 +93,17 @@ frontend includes the following:
 See `this <https://pytorch.org/cppdocs/frontend.html>`_ document for a more
 detailed description of the C++ frontend. Relevant sections of the `torch::`
 namespace related to the C++ Frontend include `torch::nn
-<https://pytorch.org/cppdocs/api/namespace_torch**nn.html#namespace-torch-nn>`_,
+<https://pytorch.org/cppdocs/api/namespace_torch__nn.html#namespace-torch-nn>`_,
 `torch::optim
-<https://pytorch.org/cppdocs/api/namespace_torch**optim.html#namespace-torch-optim>`_,
+<https://pytorch.org/cppdocs/api/namespace_torch__optim.html#namespace-torch-optim>`_,
 `torch::data
-<https://pytorch.org/cppdocs/api/namespace_torch**data.html#namespace-torch-data>`_,
+<https://pytorch.org/cppdocs/api/namespace_torch__data.html#namespace-torch-data>`_,
 `torch::serialize
-<https://pytorch.org/cppdocs/api/namespace_torch**serialize.html#namespace-torch-serialize>`_,
+<https://pytorch.org/cppdocs/api/namespace_torch__serialize.html#namespace-torch-serialize>`_,
 `torch::jit
-<https://pytorch.org/cppdocs/api/namespace_torch**jit.html#namespace-torch-jit>`_
+<https://pytorch.org/cppdocs/api/namespace_torch__jit.html#namespace-torch-jit>`_
 and `torch::python
-<https://pytorch.org/cppdocs/api/namespace_torch**python.html#namespace-torch-python>`_.
+<https://pytorch.org/cppdocs/api/namespace_torch__python.html#namespace-torch-python>`_.
 Examples of the C++ frontend can be found in `this repository
 <https://github.com/goldsborough/examples/tree/cpp/cpp>`_ which is being
 expanded on a continuous and active basis.
@@ -171,3 +171,11 @@ Indices and tables
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
+
+Acknowledgements
+----------------
+
+This documentation website for the PyTorch C++ universe has been enabled by the
+`Exhale <https://github.com/svenevs/exhale/>`_ project and generous investment
+of time and effort by its maintainer, `svenevs <https://github.com/svenevs/>`_.
+We thank Stephen for his work and his help with the PyTorch C++ documentation.

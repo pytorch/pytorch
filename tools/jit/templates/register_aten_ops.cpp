@@ -24,6 +24,15 @@
 
 // ${generated_comment}
 
+// NOTE [Sharded File]: This file is generated in a sharded fashion to speed up
+// incremental rebuilds. See the comment at the top of
+// templates/VariableType.cpp for an analogous, in-depth discussion.
+//
+// Note that unlike VariableType.cpp, when sharding this file we take
+// care to generate all overloads of a particular name in a single
+// file and in a particular order. See gen_jit_dispatch.py for
+// details.
+
 namespace torch { namespace jit {
 
 using autograd::Variable;
@@ -35,7 +44,7 @@ using at::DeviceGuard;
 
 namespace {
 
-int deviceForInputs(Stack & stack, size_t N) {
+inline int deviceForInputs(Stack & stack, size_t N) {
   if(N == 0)
     return -1;
   auto t = (stack.end() - N)->toTensor();

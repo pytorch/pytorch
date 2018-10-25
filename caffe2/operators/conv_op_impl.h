@@ -49,7 +49,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const vector<int> Y_dims = GetDims(*Y);
   const int X_HxW = X.size() / (N * C);
   const int Y_HxW = Y->size() / (N * M);
-  const vector<int> img_shape(X.dims().cbegin() + 1, X.dims().cend());
+  const vector<int> img_shape(X.sizes().cbegin() + 1, X.sizes().cend());
   vector<int> buffer_shape(Y_dims.size() + 1);
   buffer_shape[0] = C * kernel_size;
   std::copy(Y_dims.cbegin(), Y_dims.cend(), buffer_shape.begin() + 1);
@@ -173,7 +173,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       Y_data += Y_stride;
     }
   };
-  if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+  if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
     runWithSharedBuffer<Context>(ws_, func);
   } else {
     func(&col_buffer_);
@@ -299,7 +299,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       Y_data += output_offset;
     }
   };
-  if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+  if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
     runWithSharedBuffer<Context>(ws_, f);
   } else {
     f(&col_buffer_);
@@ -475,7 +475,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   // and width.
 
   vector<int> img_shape;
-  img_shape.assign(X.dims().begin() + 1, X.dims().end());
+  img_shape.assign(X.sizes().begin() + 1, X.sizes().end());
   vector<int> col_buffer_shape;
   col_buffer_shape.push_back(C / group_ * kernel_dims_size);
   col_buffer_shape.insert(

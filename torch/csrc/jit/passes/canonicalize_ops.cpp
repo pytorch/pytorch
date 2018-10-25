@@ -12,7 +12,7 @@ struct ChunkOutput {
   size_t offset;
 };
 
-static at::optional<std::vector<ChunkOutput>> getChunkOutputs(Node *chunk) {
+static c10::optional<std::vector<ChunkOutput>> getChunkOutputs(Node* chunk) {
   std::vector<ChunkOutput> outputs;
   for (auto list_use : chunk->output()->uses()) {
     if (list_use.user->matches("aten::select(Tensor[] a, int b) -> Tensor", attr::b)) {
@@ -21,14 +21,14 @@ static at::optional<std::vector<ChunkOutput>> getChunkOutputs(Node *chunk) {
     } else if (list_use.user->kind() == prim::ListUnpack) {
       // This sometimes happens if the sizes can't be evenly divided by the number of chunks
       if (static_cast<int64_t>(list_use.user->outputs().size()) != chunk->get<int64_t>(attr::chunks).value()) {
-        return at::nullopt;
+        return c10::nullopt;
       }
       auto unpack_outputs = list_use.user->outputs();
       for (size_t i = 0; i < unpack_outputs.size(); ++i) {
         outputs.emplace_back(unpack_outputs[i], i);
       }
     } else {
-      return at::nullopt;
+      return c10::nullopt;
     }
   }
   return outputs;

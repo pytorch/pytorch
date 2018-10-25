@@ -16,10 +16,11 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from common import TestCase
+from common_utils import TestCase
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
+from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.autograd import Variable
-import common
+import common_utils as common
 
 BACKEND = os.environ["BACKEND"]
 TEMP_DIR = os.environ["TEMP_DIR"]
@@ -28,8 +29,27 @@ INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 DEFAULT_TIMEOUT = 300
 CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
 
+
 if INIT_METHOD.startswith("file://"):
     FOLDER = INIT_METHOD[7:]
+
+
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.fc1 = nn.Linear(2, 10, bias=False)
+        self.fc2 = nn.Linear(10, 50, bias=False)
+        self.fc3 = nn.Linear(50, 4, bias=False)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = self.relu(self.fc1(x))
+        x = self.relu(self.fc2(x))
+        x = self.fc3(x)
+        return F.softmax(x, dim=1)
+
+
+DDP_NET = Net()
 
 
 def get_timeout(test_id):
@@ -43,6 +63,7 @@ def get_timeout(test_id):
 if not dist.is_available():
     print("Distributed not available, skipping tests")
     sys.exit(0)
+
 
 SKIP_IF_NO_CUDA_EXIT_CODE = 75
 SKIP_IF_NO_GPU_EXIT_CODE = 76
@@ -1109,23 +1130,6 @@ class _DistTestBase(object):
         rank_to_GPU = self._init_multigpu_helper()
         self._test_all_gather_multigpu_helper(group, group_id, rank, rank_to_GPU)
 
-    def _create_Net(self):
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.fc1 = nn.Linear(2, 10, bias=False)
-                self.fc2 = nn.Linear(10, 50, bias=False)
-                self.fc3 = nn.Linear(50, 4, bias=False)
-                self.relu = nn.ReLU()
-
-            def forward(self, x):
-                x = self.relu(self.fc1(x))
-                x = self.relu(self.fc2(x))
-                x = self.fc3(x)
-                return F.softmax(x, dim=1)
-
-        return Net()
-
     def _model_step(self, model):
         for param in model.parameters():
             param.data += param.grad
@@ -1176,12 +1180,24 @@ class _DistTestBase(object):
             # Shuffle the input so that DDP input is different
             input = input[torch.randperm(batch_size)]
 
+        # Test that saving and loading work
+        # TODO: It should be possible to save the entire model,
+        # but this doesn't work at the moment.  Update this test
+        # when it does work.
+        with tempfile.TemporaryFile() as tmp_file:
+            torch.save(model_DDP.state_dict(), tmp_file)
+            tmp_file.seek(0)
+            saved_state_dict = torch.load(tmp_file)
+        for k in model_DDP.state_dict():
+            self.assertEqual(model_DDP.state_dict()[k],
+                             saved_state_dict[k])
+
     def _test_DistributedDataParallel(self, gpu_subset, rank, output_device=None):
         # Run a simple end to end DDP model, use result of single node model
         # as baseline
 
         # cpu training setup
-        model = self._create_Net()
+        model = DDP_NET
 
         # single gpu training setup
         model_gpu = copy.deepcopy(model)
@@ -1193,6 +1209,12 @@ class _DistTestBase(object):
         model_DDP = nn.parallel.DistributedDataParallel(
             model_DDP, device_ids=gpu_subset
         )
+
+        # test serializable/unserializable
+        if INIT_METHOD.startswith("file://"):
+            _, filename = tempfile.mkstemp(prefix=FOLDER)
+            torch.save(model_DDP, filename)
+            model_DDP = torch.load(filename)
 
         # dummy data initialization
         local_bs = len(gpu_subset)
@@ -1220,7 +1242,7 @@ class _DistTestBase(object):
         group, group_id, rank = self._init_global_test()
 
         # cpu training setup
-        model_base = self._create_Net()
+        model_base = DDP_NET
 
         # DDP-CPU training setup
         model_DDP = copy.deepcopy(model_base)
@@ -1272,8 +1294,9 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
         @classmethod
         def setUpClass(cls):
-            os.environ["MASTER_ADDR"] = MASTER_ADDR
-            os.environ["WORLD_SIZE"] = WORLD_SIZE
+            os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
+            os.environ["MASTER_PORT"] = str(MASTER_PORT)
+            os.environ["WORLD_SIZE"] = str(WORLD_SIZE)
             for attr in dir(cls):
                 if attr.startswith("test"):
                     fn = getattr(cls, attr)
@@ -1286,10 +1309,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             if INIT_METHOD.startswith("file://"):
                 _, filename = tempfile.mkstemp(prefix=FOLDER)
                 INIT_METHOD = "file://{}".format(filename)
-
-            if INIT_METHOD.startswith("env://"):
-                port = common.find_free_port()
-                os.environ["MASTER_PORT"] = str(port)
 
             self.processes = []
             self.rank = self.MANAGER_PROCESS_RANK
@@ -1341,9 +1360,12 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 getattr(fn, "skip_if_no_gpu", False) or
                 getattr(fn, "skip_if_small_worldsize", False)
             )
-            self.JOIN_TIMEOUT = get_timeout(self.id())
-            for p in self.processes:
-                p.join(self.JOIN_TIMEOUT)
+            join_timeout = get_timeout(self.id())
+            for rank, process in enumerate(self.processes):
+                process.join(join_timeout)
+                self.assertFalse(
+                    process.is_alive(),
+                    "Timeout waiting for rank %d to terminate" % rank)
 
             first_process = self.processes[0]
             for p in self.processes:

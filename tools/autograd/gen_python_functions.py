@@ -19,8 +19,7 @@ except ImportError:
 SKIP_PYTHON_BINDINGS = [
     'alias', 'contiguous', 'is_cuda', 'is_sparse', 'size', 'stride',
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
-    '.*_forward_out', '_unsafe_view', 'tensor',
-    'sparse_coo_tensor', 'th_sparse_coo_tensor', 'native_sparse_coo_tensor',
+    '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_sparse_add.*', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
     'index',
@@ -331,7 +330,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             elif dispatch_type == 'Tensor &':
                 dispatch_type = 'Tensor'
             elif dispatch_type == 'const Device &':
-                dispatch_type = 'at::optional<int32_t>'
+                dispatch_type = 'c10::optional<int32_t>'
             formal = '{} {}'.format(dispatch_type, name)
             return expr, formal
 
@@ -541,7 +540,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'name': 'dtype',
                 'type': 'const Type &',
                 'simple_type': 'Type',
-                'is_type_dispatched': True,
                 'python_default_init': py_default_dtype,
             }
             python_binding_arguments.append(dtype_arg)
@@ -763,11 +761,6 @@ def get_python_signature(declaration, include_out):
                 default = 'None'
         if arg.get('python_default_init') is not None:
             default = 'None'
-        if default is None and arg.get('is_type_dispatched', False):
-            # this is necessary because ATen does not have default_types; in this case,
-            # the type exists in the public API (at:: namespace), but not in the type interface;
-            # to match the PyTorch default_type API, we set the default to None.
-            default = get_type_default(declaration)
         if default is not None:
             param += '=' + str(default)
         return param

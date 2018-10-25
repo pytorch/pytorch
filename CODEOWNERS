@@ -4,11 +4,6 @@
 /docs/cpp @goldsborough @ebetica
 /torch/csrc/api/ @ebetica @goldsborough
 /test/cpp/api/ @ebetica @goldsborough
-/torch/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
-/torch/csrc/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
-/torch/csrc/jit/passes/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
-/test/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
-/scripts/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
 /torch/lib/c10d/ @apaszke @pietern @teng-li
 /torch/csrc/distributed/ @apaszke @pietern @teng-li
 /torch/distributed/ @apaszke @pietern @teng-li

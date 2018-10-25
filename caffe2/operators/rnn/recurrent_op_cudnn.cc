@@ -42,9 +42,6 @@ RecurrentBaseOp<T>::RecurrentBaseOp(
   CUDNN_ENFORCE(cudnnCreateRNNDescriptor(&rnnDesc_));
   CUDNN_ENFORCE(cudnnCreateFilterDescriptor(&wDesc_));
   CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&hxDesc_));
-  CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&cxDesc_));
-  CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&hyDesc_));
-  CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&cyDesc_));
 }
 
 template <typename T>
@@ -53,9 +50,6 @@ RecurrentBaseOp<T>::~RecurrentBaseOp() {
   CUDNN_ENFORCE(cudnnDestroyRNNDescriptor(rnnDesc_));
   CUDNN_ENFORCE(cudnnDestroyFilterDescriptor(wDesc_));
   CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(hxDesc_));
-  CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(cxDesc_));
-  CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(hyDesc_));
-  CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(cyDesc_));
 }
 
 template <typename T>
@@ -169,12 +163,9 @@ void RecurrentBaseOp<T>::initialize(
     const std::array<int, 3> stride{batchSize * hiddenSize, hiddenSize, 1};
     CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
         hxDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
-    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
-        cxDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
-    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
-        hyDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
-    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
-        cyDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
+    cxDesc_ = hxDesc_;
+    hyDesc_ = hxDesc_;
+    cyDesc_ = hxDesc_;
 
     if (hiddenOutput) {
       hiddenOutput->Resize(
@@ -219,14 +210,14 @@ void RecurrentBaseOp<T>::initialize(
 template <typename T>
 bool RecurrentOp<T>::RunOnDevice() {
   const int seqLength = Input(INPUT).dim32(0);
-  if (Input(INPUT).dims() != cachedInputDims_) {
+  if (Input(INPUT).sizes() != cachedInputDims_) {
     initialize(
         Input(INPUT),
         Output(DROPOUT_STATES),
         Output(OUTPUT),
         Output(HIDDEN_OUTPUT),
         Output(CELL_OUTPUT));
-    cachedInputDims_ = Input(INPUT).dims().vec();
+    cachedInputDims_ = Input(INPUT).sizes().vec();
   }
 
   // Validation checks
@@ -312,9 +303,9 @@ bool RecurrentOp<T>::RunOnDevice() {
 template <typename T>
 bool RecurrentGradientOp<T>::RunOnDevice() {
   const int seqLength = Input(INPUT).dim32(0);
-  if (Input(INPUT).dims() != cachedInputDims_) {
+  if (Input(INPUT).sizes() != cachedInputDims_) {
     initialize(Input(INPUT), Output(DROPOUT_STATES));
-    cachedInputDims_ = Input(INPUT).dims().vec();
+    cachedInputDims_ = Input(INPUT).sizes().vec();
   }
   CUDNN_ENFORCE(cudnnGetRNNTrainingReserveSize(
       cudnn_wrapper_.inline_cudnn_handle(),
