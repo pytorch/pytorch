@@ -15,13 +15,13 @@ constexpr int MASTER_PORT = 45679;
 std::vector<std::thread> g_all_workers;
 std::mutex g_mutex;
 
-void master()
-{
+void master() {
   g_mutex.lock();
   setenv(WORLD_SIZE_ENV, std::to_string((WORKERS_NUM + 1)).data(), 1);
   setenv(RANK_ENV, "0", 1);
   setenv(MASTER_PORT_ENV, std::to_string(MASTER_PORT).data(), 1);
-  auto masterChannel = std::make_shared<thd::DataChannelTCP>(thd::getInitConfig("env://")); // reads all env variable
+  auto masterChannel = std::make_shared<thd::DataChannelTCP>(
+      thd::getInitConfig("env://")); // reads all env variable
   g_mutex.unlock();
 
   // wait a long time before init
@@ -38,12 +38,15 @@ void master()
   }
 }
 
-void worker(int id)
-{
+void worker(int id) {
   g_mutex.lock();
   setenv(RANK_ENV, std::to_string(id).data(), 1);
-  setenv(MASTER_ADDR_ENV, std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
-  auto workerChannel = std::make_shared<thd::DataChannelTCP>(thd::getInitConfig("env://"));  // reads all env variable
+  setenv(
+      MASTER_ADDR_ENV,
+      std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(),
+      1);
+  auto workerChannel = std::make_shared<thd::DataChannelTCP>(
+      thd::getInitConfig("env://")); // reads all env variable
   g_mutex.unlock();
 
   assert(workerChannel->init());
@@ -52,7 +55,6 @@ void worker(int id)
   workerChannel->broadcast(*float_tensor, 0);
   ASSERT_TENSOR_VALUE(float, *float_tensor, 4)
 }
-
 
 int main() {
   // start master

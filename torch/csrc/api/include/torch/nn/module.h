@@ -7,7 +7,6 @@
 #include <torch/tensor.h>
 
 #include <ATen/ATen.h>
-#include "c10/util/Optional.h"
 
 #include <map>
 #include <memory>
@@ -75,10 +74,10 @@ class Module {
   /// Tells the base `Module` about the name of the submodule.
   explicit Module(std::string name);
 
-  /// Constructs the base module without immediate knowledge of the submodule's
-  /// name. The name of the submodule is inferred via RTTI the first time
-  /// `.name()` is invoked.
-  Module() = default;
+  /// Constructs the module without immediate knowledge of the submodule's name.
+  /// The name of the submodule is inferred via RTTI (if possible) the first
+  /// time `.name()` is invoked.
+  Module();
 
   virtual ~Module() = default;
 
@@ -374,6 +373,12 @@ template <typename ModuleType>
 std::shared_ptr<ModuleType> Module::register_module(
     std::string name,
     std::shared_ptr<ModuleType> module) {
+  AT_CHECK(!name.empty(), "Submodule name must not be empty");
+  AT_CHECK(
+      name.find('.') == std::string::npos,
+      "Submodule name must not contain a dot (got '",
+      name,
+      "')");
   auto& base_module = children_.insert(std::move(name), std::move(module));
   return std::dynamic_pointer_cast<ModuleType>(base_module);
 }
