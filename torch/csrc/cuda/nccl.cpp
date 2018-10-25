@@ -241,13 +241,13 @@ void broadcast(
   const auto comms = user_comms.empty() ? _get_communicators(tensors)
                                         : ArrayRef<ncclComm_t>(user_comms);
 
-  auto thcState = at::globalContext().lazyInitCUDA();
   at::DeviceGuard device_guard;
   AutoNcclGroup nccl_group_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
-    device_guard.set_index(tensors[i].get_device());
+    int device = tensors[i].get_device();
+    device_guard.set_index(device);
     const auto stream = (streams.empty() || !streams[i])
-        ? THCState_getCurrentStream(thcState)
+        ? at::cuda::getCurrentCUDAStream(device).stream()
         : THCStream_stream(streams[i]);
     AT_CHECK(
         static_cast<uint64_t>(numel) <= static_cast<uint64_t>(count_max),
@@ -287,14 +287,14 @@ void reduce(
   auto comms_ref =
       comms ? _get_communicators(inputs) : ArrayRef<ncclComm_t>(*comms);
 
-  auto thcState = at::globalContext().lazyInitCUDA();
-
   at::DeviceGuard device_guard;
   AutoNcclGroup nccl_group_guard;
   for (size_t i = 0; i < len; i++) {
-    device_guard.set_index(inputs[i].device().index());
-    // Default to the current THC stream
-    cudaStream_t stream = THCState_getCurrentStream(thcState);
+    int device = inputs[i].device().index();
+    device_guard.set_index(device);
+
+    // Default to the current  stream
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream(device).stream();
 
     if (streams && (*streams)[i]) {
       stream = (*streams)[i].stream();

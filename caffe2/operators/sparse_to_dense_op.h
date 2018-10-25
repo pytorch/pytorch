@@ -81,6 +81,9 @@ class SparseToDenseOp final : public Operator<Context> {
     output->Resize(shape);
 
     TData* output_data = output->template mutable_data<TData>();
+    if (!output_first_dim) {
+      return true;
+    }
     memset(output_data, 0, output->nbytes());
     const auto block_nitems = sparse_values.size_from_dim(1);
     const TData* sparse_values_vec = sparse_values.template data<TData>();
