@@ -58,9 +58,10 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
         outputs[i]->setType(old->type());
-        // Copy over source location information to all nodes created by
-        // the symbolic
+        // Copy over source location and scope information to all nodes
+        // created by the symbolic
         outputs[i]->node()->setSourceLocation(node->getSourceLocation());
+        outputs[i]->node()->setScope(node->scope());
         env[old] = outputs[i];
       } else {
         // Null output means that the ONNX op doesn't have outputs corresponding

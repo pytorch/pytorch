@@ -135,13 +135,6 @@ private:
 struct GraphFuser {
   Block * block;
 
-  // Used to order nodes so we always consider producer-consumer fusions
-  // in reverse topological order.
-  // If topological_index[a] > topological_index[b] then a occurs after b.
-  // Because nodes can be added to this graph during optimization, this mapping is not bijective.
-  // Newly generated nodes will copy the location where they are inserted.
-  std::unordered_map<Node*,size_t> topological_index;
-
   GraphFuser(Block * block)
   : block(block) {}
 
@@ -279,7 +272,7 @@ struct GraphFuser {
     auto defining_node = producer->node();
     for(auto o : defining_node->outputs()) {
       for(auto u : o->uses()) {
-        if(u.user != consumer && topological_index.at(consumer) > topological_index.at(u.user))
+        if(u.user != consumer && consumer->isAfter(u.user))
           return false;
       }
     }
@@ -480,7 +473,6 @@ struct GraphFuser {
     auto group = block->owningGraph()->createFusionGroup(getDevice(n).index());
     // propogate position information for the new node so we can always
     // have a valid mapping
-    topological_index[group] = topological_index[n];
     group->insertBefore(n);
     Node * mergedNode = mergeNodeIntoGroup(group,n);
     getSubgraph(group).registerOutput(mergedNode->output());
@@ -492,7 +484,6 @@ struct GraphFuser {
   }
   void insertAfter(Node * n, Node * after) {
     n->insertAfter(after);
-    topological_index[n] = topological_index[after];
   }
 
   void insertAt(Node ** insertion_point, Node * n) {
@@ -511,7 +502,6 @@ struct GraphFuser {
       fused_cat->insertBefore(list_construct);
       fused_cat->output()->copyMetadata(consumer->output());
       consumer->output()->replaceAllUsesWith(fused_cat->output());
-      topological_index[fused_cat] = topological_index[list_construct];
 
       // NB: this deletes the fused_cat node from the original graph
       group = createSingletonFusionGroup(fused_cat);
@@ -635,12 +625,11 @@ struct GraphFuser {
     for (auto i : inputs) {
       if (i->node()->owningBlock() == block) {
         result.push_back(i);
-        JIT_ASSERT(topological_index.count(i->node()) > 0);
       }
     }
     // Sort in reverse topological order
     std::sort(result.begin(), result.end(), [&](Value * a, Value * b) {
-      return topological_index.at(a->node()) > topological_index.at(b->node());
+      return a->node()->isAfter(b->node());
     });
     return result;
   }
@@ -662,17 +651,6 @@ struct GraphFuser {
     WithInsertPoint insert_guard { node };
     auto tensors = tensorInputs(node);
     auto new_tensors = SymbolicVariable::broadcast_tensors(fmap<SymbolicVariable>(tensors));
-
-    // Fix up topological_index
-    Node * unpack_node = new_tensors.at(0).value()->node();
-    JIT_ASSERT(unpack_node->kind() == prim::ListUnpack);
-    Node * broadcast_node = unpack_node->input()->node();
-    JIT_ASSERT(broadcast_node->kind() == aten::broadcast_tensors);
-    Node * construct_node = broadcast_node->namedInput(attr::tensors)->node();
-    JIT_ASSERT(construct_node->kind() == prim::ListConstruct);
-    topological_index[unpack_node] = topological_index[node];
-    topological_index[broadcast_node] = topological_index[node];
-    topological_index[construct_node] = topological_index[node];
 
     // Replace tensors inputs with broadcasted values
     auto new_tensors_it = new_tensors.begin();
@@ -821,15 +799,6 @@ struct GraphFuser {
   }
 
   void run() {
-    for(auto p : block->inputs()) {
-      topological_index[p->node()] = 0;
-    }
-    size_t i = 1;
-    for(auto consumer : block->nodes()) {
-      topological_index[consumer] = i++;
-    }
-    topological_index[block->return_node()] = i++;
-
     // Run the pass until no changes are made.
     // This is neccessary, because the algorithm can miss out on certain fusion
     // opportunities if ran only once. Consider this graph:

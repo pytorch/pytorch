@@ -76,7 +76,7 @@ void applyOffsetAlias(
   auto* dst =
       BlobGetMutableTensor(ws->GetBlob(oc.dst), Context::GetDeviceType());
   auto timestep = src->size() / src->dim(0);
-  auto dims = src->dims().vec();
+  auto dims = src->sizes().vec();
   const int32_t startDstTimestep =
       oc.offset >= 0 ? oc.offset : src->dim(0) + oc.offset;
   const int32_t numDstTimesteps = src->dim(0) - startDstTimestep;
@@ -904,7 +904,7 @@ class RNNApplyLinkOp : public Operator<Context> {
     const int64_t externalTimestepSize = external.size() / external.dim(0);
     auto* externalData = external_out->template mutable_data<T>() +
         (t + offset_) * externalTimestepSize;
-    auto internalDims = external_out->dims().vec();
+    auto internalDims = external_out->sizes().vec();
     internalDims[0] = window_;
 
     internal_out->Resize(internalDims);
