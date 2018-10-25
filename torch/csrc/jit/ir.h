@@ -471,9 +471,10 @@ public:
   //
   // Returns `false` if it's impossible to move `this` after `n` without
   // violating dependencies, otherwise executes the move and returns `true`
-  TORCH_API bool moveAfterTopologicallyValid(Node * n);
+  TORCH_API bool moveAfterTopologicallyValid(Node* n);
 
-  // Move a node 'n' (already in the graph) before 'this' in the topological order.
+  // Move a node 'n' (already in the graph) before 'this' in the topological
+  // order.
   //
   // NOTE: Does not check that value dependencies are preserved, see
   //   moveBeforeTopologicallyValid
@@ -492,7 +493,7 @@ public:
   //
   // Returns `false` if it's impossible to move `this` after `n` without
   // violating dependencies, otherwise executes the move and returns `true`
-  TORCH_API bool moveBeforeTopologicallyValid(Node * n);
+  TORCH_API bool moveBeforeTopologicallyValid(Node* n);
 
   // Remove the input at 'i' from this node.
   //
@@ -570,17 +571,15 @@ public:
   void dump() const;
 
   virtual ~Node() = default;
-private:
-  enum class MoveSide {
-    BEFORE,
-    AFTER
-  };
+
+ private:
+  enum class MoveSide { BEFORE, AFTER };
   bool tryMove(Node* movePoint, MoveSide moveSide);
   void move(Node* movePoint, MoveSide moveSide);
 
   bool isDependent(const std::list<Node*>& nodes) const;
 
-  template<typename T>
+  template <typename T>
   bool producesFor(const T& nodes) const;
   bool consumesFrom(const std::list<Node*>& nodes) const;
 

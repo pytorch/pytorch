@@ -938,7 +938,6 @@ bool Node::tryMove(Node* movePoint, MoveSide moveSide) {
     curNode = curNode->next_in_graph[direction];
   }
 
-
   // 2. Decide whether we can move it all to `movePoint`.
 
   // Say we are moving directly before movePoint and `this` starts before
@@ -971,7 +970,6 @@ bool Node::tryMove(Node* movePoint, MoveSide moveSide) {
     // `this` and `movePoint`, so we can't do the move
     return false;
   }
-
 
   // 3. Execute the move
   JIT_ASSERT(curNode == movePoint);
@@ -1020,9 +1018,7 @@ bool Node::producesFor(const T& nodes) const {
         std::any_of(
                node->blocks().cbegin(),
                node->blocks().cend(),
-               [&](const Block* block) {
-                 return producesFor(block->nodes());
-               });
+               [&](const Block* block) { return producesFor(block->nodes()); });
   });
 }
 
