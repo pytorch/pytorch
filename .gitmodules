@@ -73,3 +73,12 @@
 [submodule "third_party/nccl/nccl"]
 	path = third_party/nccl/nccl
 	url = https://github.com/NVIDIA/nccl
+[submodule "third_party/gemmlowp/gemmlowp"]
+	path = third_party/gemmlowp/gemmlowp
+	url = https://github.com/google/gemmlowp.git
+[submodule "third_party/QNNPACK"]
+	path = third_party/QNNPACK
+	url = https://github.com/pytorch/QNNPACK
+[submodule "third_party/neon2sse"]
+	path = third_party/neon2sse
+	url = https://github.com/intel/ARM_NEON_2_x86_SSE.git

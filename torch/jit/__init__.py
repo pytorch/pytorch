@@ -828,14 +828,15 @@ class OrderedBufferDict(OrderedDictWrapper):
 _constant_types = (bool, float, int, types.FunctionType, torch.device, torch.layout, torch.dtype)
 
 
-def _get_valid_constant(v):
+def _get_valid_constant(attr, v):
     if isinstance(v, _constant_types):
         return v
     elif isinstance(v, tuple) or isinstance(v, list):
-        return tuple(_get_valid_constant(x) for x in v)
+        return tuple(_get_valid_constant(attr, x) for x in v)
     constants = ", ".join(typ.__name__ for typ in _constant_types)
     raise TypeError(
-        "'{}' object is not a valid constant.\n".format(type(v).__name__) +
+        "'{}' object for attribute '{}' ".format(type(v).__name__, attr) +
+        "is not a valid constant.\n" +
         "Valid constants are:\n" +
         "  1. a nn.ModuleList\n" +
         "  2. a value of type {{{}}}\n".format(constants) +
@@ -1054,7 +1055,7 @@ if _enabled:
             elif isinstance(value, Sequential):
                 super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
             else:
-                super(ScriptModule, self).__setattr__(attr, _get_valid_constant(value))
+                super(ScriptModule, self).__setattr__(attr, _get_valid_constant(attr, value))
 
         def __dir__(self):
             return sorted(Module.__dir__(self) + self._method_names())
@@ -1326,6 +1327,7 @@ def _get_builtin_table():
                 _builtin_table[id(v)] = "aten::" + name
     for mod in _modules_containing_builtins:
         register_all(mod)
+    _builtin_table[id(warnings.warn)] = "aten::warn"
 
     return _builtin_table
 

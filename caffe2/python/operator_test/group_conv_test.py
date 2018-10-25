@@ -8,11 +8,11 @@ import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
+import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
 
 import unittest
 import os
-
 
 class TestGroupConvolution(hu.HypothesisTestCase):
 
@@ -36,8 +36,13 @@ class TestGroupConvolution(hu.HypothesisTestCase):
             input_channels_per_group, output_channels_per_group, batch_size,
             order, engine, use_bias, gc, dc):
         assume(size >= kernel)
-        # TODO: Group conv in NHWC not implemented for GPU yet.
-        assume(group == 1 or order == "NCHW" or gc.device_type != caffe2_pb2.CUDA)
+
+        if hiputl.run_in_hip(gc, dc):
+            if order == "NHWC":
+                assume(group == 1 and engine != "CUDNN")
+        else:
+            # TODO: Group conv in NHWC not implemented for GPU yet.
+            assume(group == 1 or order == "NCHW" or gc.device_type != caffe2_pb2.CUDA)
         input_channels = input_channels_per_group * group
         output_channels = output_channels_per_group * group
 
