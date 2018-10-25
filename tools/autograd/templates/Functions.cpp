@@ -2087,15 +2087,13 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
   // since first backward takes care of padding_idx
   // and scaling by frequency, we don't need to worry
   // about it here.
-  auto grad_weight = grad.index_select(0, indices.reshape(-1));
+  auto gg_weight = grad.index_select(0, indices.reshape(-1));
 
   // reshape gradient as per the shape of indices
   auto size = indices.sizes().vec();
   size.push_back(-1);
-  grad_weight = grad_weight.view(size);
 
-
-  return grad_weight;
+  return gg_weight.view(size);
 }
 
 } // anonymous namespace
