@@ -1453,19 +1453,8 @@ private:
               tree->range(), entry->asValue(starred.range(), method)));
         }
       } else {
-          auto sugared = emitSugaredExpr(Expr(tree), 1);
-          auto expr = Expr(tree);
-
-          if (sugared->isTuple()) {
-            auto tuple = sugared->asTuple(tree->range(), method);
-            for (auto entry : tuple) {
-              auto value = getValue(entry, expr);
-              values.push_back(NamedValue(tree->range(), value));
-            }
-          } else {
-            values.push_back(NamedValue(
-                tree->range(), getValue(sugared, expr)));
-          }
+        values.push_back(NamedValue(
+            tree->range(), emitExpr(Expr(tree))));
       }
     }
     return values;
@@ -1482,6 +1471,7 @@ private:
       bool maybe_unpack) {
     return toValues(*graph, getNamedValues(trees, maybe_unpack));
   }
+
   std::vector<Value*> getValues(
       List<Expr> trees,
       bool maybe_unpack) {
@@ -1497,12 +1487,24 @@ private:
     return sv->call(apply.callee().range(), method, inputs, attributes, n_binders);
   }
 
-  Value* getValue(std::shared_ptr<SugaredValue> val, Expr tree) {
-    return val->asValue(tree.range(), method);
+  std::vector<Value*> getTupleValues(std::shared_ptr<SugaredValue> sugared) {
+    auto tuple = sugared->asTuple(tree.range(), method);
+    std::vector<Value*> values;
+    for (auto sugared_item : tuple) {
+      auto value = sugared_item->asValue(tree.range(), method);
+      values.push_back(value);
+    }
+    return values;
   }
 
   Value* emitExpr(Expr tree) {
-    return getValue(emitSugaredExpr(tree, 1), tree);
+    auto sugared = emitSugaredExpr(tree, 1);
+    if (sugared->isTuple()) {
+      auto tuple_node = method.graph()->createTuple(getTupleValues(sugared));
+      return method.graph()->insertNode(tuple_node)->output();
+    }
+
+    return sugared->asValue(tree.range(), method);
   }
 
   NodeKind reverseComparision(NodeKind kind) {
