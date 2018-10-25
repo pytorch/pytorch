@@ -23,7 +23,7 @@ bool almost_equal(at::Tensor left, T right, T tolerance = 1e-4) {
       tensor.device().type() == at::Device((device_), (index_)).type());   \
   ASSERT_TRUE(                                                             \
       tensor.device().index() == at::Device((device_), (index_)).index()); \
-  ASSERT_EQ(tensor.dtype(), (type_));                                  \
+  ASSERT_EQ(tensor.dtype(), (type_));                                      \
   ASSERT_TRUE(tensor.layout() == (layout_))
 
 TEST(TensorTest, ToDtype) {
