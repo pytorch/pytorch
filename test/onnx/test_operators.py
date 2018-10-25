@@ -55,6 +55,12 @@ class FuncModule(Module):
 
 class TestOperators(TestCase):
 
+    def skipAlwaysForCI(func):
+        def wrapper(self):
+            raise unittest.SkipTest("Skip known CI breaking test")
+            return func(self)
+        return wrapper
+
     def assertONNX(self, f, args, params=None, **kwargs):
         if params is None:
             params = ()
@@ -432,12 +438,10 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
-#   TODO(Rui Zhu): Enable upsample_op test by fixing the number of input.
-#   See https://github.com/onnx/onnx/pull/1467/files
-#
-#   def test_upsample(self):
-#       x = torch.randn(1, 2, 3, 4, requires_grad=True)
-#       self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
+    @skipAlwaysForCI
+    def test_upsample(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
 
     def test_unsqueeze(self):
         x = torch.randn(3, 4, requires_grad=True)
