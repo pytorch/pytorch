@@ -10,6 +10,7 @@ RUN bash ./install_base.sh && rm install_base.sh
 ARG DEVTOOLSET_VERSION
 ADD ./install_devtoolset.sh install_devtoolset.sh
 RUN bash ./install_devtoolset.sh
+RUN rm install_devtoolset.sh
 
 # Install rocm
 ARG ROCM_VERSION
@@ -29,6 +30,7 @@ ENV LANG en_US.utf8
 ARG CMAKE_VERSION
 ADD ./install_cmake.sh install_cmake.sh
 RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
+RUN rm install_cmake.sh
 
 # Compile/install ccache for faster builds
 ADD ./install_ccache.sh install_ccache.sh
@@ -45,8 +47,9 @@ ARG JENKINS
 ARG JENKINS_UID
 ARG JENKINS_GID
 ADD ./add_jenkins_user.sh add_jenkins_user.sh
-RUN if [ -n "${JENKINS}" ]; then bash ./add_jenkins_user.sh; echo "source scl_source enable devtoolset-7" >> /var/lib/jenkins/.bashrc; fi
+RUN if [ -n "${JENKINS}" ]; then bash ./add_jenkins_user.sh; bash echo "source scl_source enable devtoolset-${DEVTOOLSET_VERSION}" >> /var/lib/jenkins/.bashrc; fi
 RUN rm add_jenkins_user.sh
+RUN if [ -n "${JENKINS}" ]; then bash usermod -a -G video ${JENKINS}; fi
 
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
