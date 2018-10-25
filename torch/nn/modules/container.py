@@ -137,7 +137,7 @@ class ModuleList(Module):
             return self._modules[self._get_abs_string_index(idx)]
 
     def __setitem__(self, idx, module):
-        idx = operator.index(idx)
+        idx = self._get_abs_string_index(idx)
         return setattr(self, str(idx), module)
 
     def __delitem__(self, idx):
