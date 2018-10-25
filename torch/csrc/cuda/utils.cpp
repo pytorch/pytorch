@@ -20,13 +20,14 @@ std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStre
     throw std::runtime_error("expected PySequence, but got " + std::string(THPUtils_typename(obj)));
   }
 
-  std::vector<THCStream*> streams;
+  std::vector<c10::optional<at::cuda::CUDAStream>> streams;
   Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
   for (Py_ssize_t i = 0; i < length; i++) {
     PyObject *stream = PySequence_Fast_GET_ITEM(seq.get(), i);
 
     if (PyObject_IsInstance(stream, THCPStreamClass)) {
-      streams.emplace_back( CUDAStream((static_cast<THCPStream*>(stream))->cdata) );
+      // Spicy hot reinterpret cast!!
+      streams.emplace_back( at::cuda::CUDAStream((reinterpret_cast<THCPStream*>(stream))->cdata) );
     } else if (stream == Py_None) {
       streams.emplace_back();
     } else {
