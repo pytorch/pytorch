@@ -593,7 +593,6 @@ Caffe2Ops Caffe2Backend::CreateReshape(
 Caffe2Ops Caffe2Backend::CreateRandomNormal(
     OnnxNode* onnx_node,
     const ConversionContext& ctx) {
-  const auto& node = onnx_node->node;
   auto& attributes = onnx_node->attributes;
 
   if (attributes.HasAttribute("seed")) {

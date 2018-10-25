@@ -171,7 +171,7 @@ class Caffe2Backend(Backend):
         'Unsqueeze':             'ExpandDims',
         'Loop':                  'ONNXWhile',
         'Tile':                  'NumpyTile',
-        'RandomNormal':          'GaussianFill'
+        'RandomNormal':          'GaussianFill',
     }
 
     _global_renamed_attrs = {'kernel_shape': 'kernels'}
@@ -402,7 +402,7 @@ class Caffe2Backend(Backend):
         if "seed" in n.attrs:
             raise ValueError("Caffe2 does not support random seed")
 
-        if "dtype" in n.attrs and n.attrs[dtype] != onnx.TensorProtoDataType.FLOAT:
+        if "dtype" in n.attrs and n.attrs['dtype'] != onnx.TensorProtoDataType.FLOAT:
             raise ValueError("Caffe2 does not support no-float dtype")
 
         if "scale" in n.attrs:
