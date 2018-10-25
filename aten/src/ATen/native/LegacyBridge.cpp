@@ -134,33 +134,6 @@ Tensor& addmm_(Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta
   }
 }
 
-Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values) {
-  return at::getType(values.options().layout(at::kSparse)).native_sparse_coo_tensor(indices, values);
-}
-
-Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size) {
-  return at::getType(values.options().layout(at::kSparse)).native_sparse_coo_tensor(indices, values, size);
-}
-
-Tensor sparse_coo_tensor(ArrayRef<int64_t> size, const TensorOptions& options) {
-  TensorOptions toptions = TensorOptions(options).layout(at::kSparse);
-  return at::getType(toptions).native_sparse_coo_tensor(size, toptions);
-}
-
-Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, const TensorOptions& options) {
-  TensorOptions toptions = options;
-  return at::getType(toptions.layout(at::kSparse)).native_sparse_coo_tensor(indices, values);
-}
-
-Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size, const TensorOptions& options) {
-  TensorOptions toptions = options;
-  return at::getType(toptions.layout(at::kSparse)).native_sparse_coo_tensor(indices, values, size);
-}
-
-Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size) {
-  return at::getType(values.options().layout(at::kSparse))._native_sparse_coo_tensor_unsafe(indices, values, size);
-}
-
 int64_t get_device(const Tensor& self) {
   if (_has_native(self)) {
     return native_get_device(self);

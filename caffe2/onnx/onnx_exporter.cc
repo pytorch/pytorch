@@ -91,6 +91,15 @@ TensorProto CreateOnnxShapeTensor(
 std::string SsaName(const std::string& n, int version) {
   return c10::str(n, "_", version);
 }
+
+NodeProto AddShapeNode(const std::string& input, const std::string& output) {
+  NodeProto shape_node;
+  shape_node.set_op_type("Shape");
+  shape_node.add_input(input);
+  shape_node.add_output(output);
+  return shape_node;
+}
+
 } // namespace
 
 std::unordered_map<std::string, std::string> SsaRewrite(
@@ -617,10 +626,6 @@ ConvertedResult OnnxExporter::CreateConcatNodes(
 
   CAFFE_ENFORCE_EQ(nodes.size(), 1);
   auto& node = nodes.back();
-  if (node.output_size() == 2) {
-    node.mutable_output()->RemoveLast();
-  }
-
   bool explicit_axis = false;
   for (const auto& a : def.arg()) {
     if (a.name() == "axis") {
@@ -632,6 +637,12 @@ ConvertedResult OnnxExporter::CreateConcatNodes(
     node.add_attribute()->CopyFrom(MakeAttribute("axis", 1L));
   }
 
+  if (node.output_size() == 2) {
+    std::string shape_input = node.output(0);
+    std::string shape_output = node.output(1);
+    node.mutable_output()->RemoveLast();
+    nodes.emplace_back(AddShapeNode(shape_input, shape_output));
+  }
   return result;
 }
 
@@ -792,7 +803,10 @@ ConvertedResult OnnxExporter::CreateReshapeNodes(
   }
 
   if (node.output_size() == 2) {
+    std::string shape_input = node.output(0);
+    std::string shape_output = node.output(1);
     node.mutable_output()->RemoveLast();
+    nodes.emplace_back(AddShapeNode(shape_input, shape_output));
   }
 
   return result;

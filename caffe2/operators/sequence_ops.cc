@@ -52,9 +52,9 @@ template <typename T>
 bool RemovePaddingOp<CPUContext>::DoRunWithType() {
   const auto& in = Input(0);
   CAFFE_ENFORCE_GE(in.ndim(), 1);
-  const int32_t outer_size = in.dims()[0];
+  const int32_t outer_size = in.sizes()[0];
   const auto block_size = std::accumulate(
-      in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<int64_t>());
+      in.sizes().begin() + 1, in.sizes().end(), 1, std::multiplies<int64_t>());
   const auto pad_width = startPaddingWidth_ + endPaddingWidth_;
 
   // if no lengths is provided, assume it is a single full-span entry
@@ -68,7 +68,7 @@ bool RemovePaddingOp<CPUContext>::DoRunWithType() {
 
   auto* out = Output(0);
   {
-    auto out_dims = in.dims().vec();
+    auto out_dims = in.sizes().vec();
     out_dims[0] -= pad_width * lengths_size;
     out->Resize(std::move(out_dims));
   }
@@ -196,7 +196,7 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
     const auto block_size = features.size_from_dim(1);
 
     auto* out_features = Output(1 + k);
-    auto outDim = features.dims().vec();
+    auto outDim = features.sizes().vec();
     outDim.at(0) += needPadding;
     out_features->Resize(outDim);
     auto dst =

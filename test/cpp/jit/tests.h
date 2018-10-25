@@ -939,15 +939,15 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::bar");
+    ASSERT_EQ(op->schema().name(), "foo::bar");
 
-    ASSERT_EQ(op->schema().arguments.size(), 2);
-    ASSERT_EQ(op->schema().arguments[0].name, "_0");
-    ASSERT_EQ(op->schema().arguments[0].type->kind(), TypeKind::FloatType);
-    ASSERT_EQ(op->schema().arguments[1].name, "_1");
-    ASSERT_EQ(op->schema().arguments[1].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().arguments().size(), 2);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "_0");
+    ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
+    ASSERT_EQ(op->schema().arguments()[1].name(), "_1");
+    ASSERT_EQ(op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
 
-    ASSERT_EQ(op->schema().returns[0].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -967,16 +967,16 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::bar_with_schema");
+    ASSERT_EQ(op->schema().name(), "foo::bar_with_schema");
 
-    ASSERT_EQ(op->schema().arguments.size(), 2);
-    ASSERT_EQ(op->schema().arguments[0].name, "a");
-    ASSERT_EQ(op->schema().arguments[0].type->kind(), TypeKind::FloatType);
-    ASSERT_EQ(op->schema().arguments[1].name, "b");
-    ASSERT_EQ(op->schema().arguments[1].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().arguments().size(), 2);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "a");
+    ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
+    ASSERT_EQ(op->schema().arguments()[1].name(), "b");
+    ASSERT_EQ(op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
 
-    ASSERT_EQ(op->schema().returns.size(), 1);
-    ASSERT_EQ(op->schema().returns[0].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().returns().size(), 1);
+    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -998,22 +998,22 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::lists");
+    ASSERT_EQ(op->schema().name(), "foo::lists");
 
-    ASSERT_EQ(op->schema().arguments.size(), 3);
-    ASSERT_EQ(op->schema().arguments[0].name, "ints");
+    ASSERT_EQ(op->schema().arguments().size(), 3);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "ints");
     ASSERT_TRUE(
-        op->schema().arguments[0].type->isSubtypeOf(ListType::ofInts()));
-    ASSERT_EQ(op->schema().arguments[1].name, "floats");
+        op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofInts()));
+    ASSERT_EQ(op->schema().arguments()[1].name(), "floats");
     ASSERT_TRUE(
-        op->schema().arguments[1].type->isSubtypeOf(ListType::ofFloats()));
-    ASSERT_EQ(op->schema().arguments[2].name, "tensors");
+        op->schema().arguments()[1].type()->isSubtypeOf(ListType::ofFloats()));
+    ASSERT_EQ(op->schema().arguments()[2].name(), "tensors");
     ASSERT_TRUE(
-        op->schema().arguments[2].type->isSubtypeOf(ListType::ofTensors()));
+        op->schema().arguments()[2].type()->isSubtypeOf(ListType::ofTensors()));
 
-    ASSERT_EQ(op->schema().returns.size(), 1);
+    ASSERT_EQ(op->schema().returns().size(), 1);
     ASSERT_TRUE(
-        op->schema().returns[0].type->isSubtypeOf(ListType::ofFloats()));
+        op->schema().returns()[0].type()->isSubtypeOf(ListType::ofFloats()));
 
     Stack stack;
     push(stack, std::vector<int64_t>{1, 2});
@@ -1036,16 +1036,16 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::lists2");
+    ASSERT_EQ(op->schema().name(), "foo::lists2");
 
-    ASSERT_EQ(op->schema().arguments.size(), 1);
-    ASSERT_EQ(op->schema().arguments[0].name, "tensors");
+    ASSERT_EQ(op->schema().arguments().size(), 1);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "tensors");
     ASSERT_TRUE(
-        op->schema().arguments[0].type->isSubtypeOf(ListType::ofTensors()));
+        op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
-    ASSERT_EQ(op->schema().returns.size(), 1);
+    ASSERT_EQ(op->schema().returns().size(), 1);
     ASSERT_TRUE(
-        op->schema().returns[0].type->isSubtypeOf(ListType::ofTensors()));
+        op->schema().returns()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
     Stack stack;
     push(stack, std::vector<at::Tensor>{autograd::make_variable(at::ones(5))});
@@ -1134,15 +1134,15 @@ void testCustomOperators() {
 void testSchemaParser() {
   // nested arrays
   auto s = parseSchema("at::what(int[][4] foo) -> ()");
-  ASSERT_TRUE(s.arguments.at(0).N == 4);
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments.at(0)
-                                              .type->expect<ListType>()
+  ASSERT_TRUE(s.arguments().at(0).N() == 4);
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments().at(0)
+                                              .type()->expect<ListType>()
                                               ->getElementType()
                                               ->expect<ListType>()
                                               ->getElementType()));
   auto s2 = parseSchema("at::what(int[][] foo) -> ()");
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments.at(0)
-                                            .type->expect<ListType>()
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments().at(0)
+                                            .type()->expect<ListType>()
                                             ->getElementType()
                                             ->expect<ListType>()
                                             ->getElementType()));
@@ -1158,8 +1158,8 @@ void testSchemaParser() {
   // named returns
   parseSchema("at::what(Tensor! i_will_be_written_to) -> ()");
   auto s3 = parseSchema("at::what() -> (Tensor the_return, Tensor the_return2)");
-  ASSERT_TRUE(s3.returns.at(0).name == "the_return");
-  ASSERT_TRUE(s3.returns.at(1).name == "the_return2");
+  ASSERT_TRUE(s3.returns().at(0).name() == "the_return");
+  ASSERT_TRUE(s3.returns().at(1).name() == "the_return2");
 
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(t) foo) -> (Tensor(t))");

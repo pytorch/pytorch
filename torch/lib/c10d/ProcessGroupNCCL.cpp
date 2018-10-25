@@ -260,7 +260,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
 
     // Also create the NCCL streams and events
-    streamVal[i] = at::cuda::createCUDAStream();
+    streamVal[i] = at::cuda::getStreamFromPool();
     // Event created using cudaEventDisableTiming flag and not
     // cudaEventBlockingSync flag will provide the best performance when used
     // with cudaStreamWaitEvent() and cudaEventQuery(). Since we here don't

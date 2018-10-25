@@ -21,7 +21,8 @@ bool LayerNormOp<CPUContext>::DoRunWithType<float>() {
   auto* mean = Output(1);
   auto* stdev = Output(2);
 
-  CAFFE_ENFORCE_GE(input.dims().size(), 2, "LayerNorm requires input dim >= 2");
+  CAFFE_ENFORCE_GE(
+      input.sizes().size(), 2, "LayerNorm requires input dim >= 2");
 
   const auto canonical_axis = input.canonical_axis_index(axis_);
   const int left = input.size_to_dim(canonical_axis);
@@ -29,7 +30,7 @@ bool LayerNormOp<CPUContext>::DoRunWithType<float>() {
 
   output->ResizeLike(input);
   std::vector<int64_t> stats_dims(
-      input.dims().begin(), input.dims().begin() + canonical_axis);
+      input.sizes().begin(), input.sizes().begin() + canonical_axis);
   stats_dims.push_back(1);
   mean->Resize(stats_dims);
   stdev->Resize(stats_dims);

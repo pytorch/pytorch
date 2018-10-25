@@ -124,7 +124,9 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
       presence_mask->Resize(shape);
     }
     shape.insert(
-        shape.end(), default_value.dims().begin(), default_value.dims().end());
+        shape.end(),
+        default_value.sizes().begin(),
+        default_value.sizes().end());
     output->Resize(shape);
 
     // init
@@ -240,8 +242,8 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
     // insert feature_dim
     shape.insert(
         shape.end(),
-        gradient_output.dims().begin() + iter_offset,
-        gradient_output.dims().end());
+        gradient_output.sizes().begin() + iter_offset,
+        gradient_output.sizes().end());
     output->Resize(shape);
 
     const TInd* sparse_indices_vec = sparse_indices.template data<TInd>();
