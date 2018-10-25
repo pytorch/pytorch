@@ -33,8 +33,7 @@ struct TORCH_API ArgSpec {
   // Comparators
   bool operator==(const ArgSpec& other) const {
     return (
-       hash_code_ == other.hash_code_ 
-    && descs_ == other.descs_
+       descs_ == other.descs_
     && device_ == other.device_);
   }
 

@@ -49,12 +49,10 @@ static void getMajorMinor(const cudaDeviceProp& prop, int& major, int& minor) {
   minor = prop.minor;
   if (nvrtc_major <= 7 && prop.major > 5) { // 7 supports 2-5.x
     major = 5;
-    if (prop.major == 5) minor = prop.minor;
-    else minor = 0;
+    minor = 0;
   } else if (nvrtc_major <= 8 && prop.major > 6) { // 8 supports 2-6.x
     major = 6;
-    if (prop.major == 6) minor = prop.minor;
-    else minor = 0;
+    minor = 0;
   } else if (nvrtc_major <= 9 && prop.major >= 7) { // 9 supports 3-7.2
     major = 7;
     if (prop.major == 7 && prop.minor <= 2) minor = prop.minor;
@@ -89,9 +87,8 @@ FusedKernelCUDA::FusedKernelCUDA(
 
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
-  int prior_device;
-  cudaGetDevice(&prior_device);
-  cudaSetDevice(device_);
+  const auto prior_device = at::cuda::current_device();
+  at::cuda::set_device(device_);
   
   // Acquires device and NVRTC properties (for compile arch and occupancy calculations)
   TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop_, device_)); 
@@ -138,7 +135,7 @@ FusedKernelCUDA::FusedKernelCUDA(
   maxBlocks_ *= prop_.multiProcessorCount;
 
   // Resets device (end of hacked at::DeviceGuard)
-  cudaSetDevice(prior_device);
+  at::cuda::set_device(prior_device);
 }
 
 static int ceilDiv(const int a, const int b) {
@@ -150,9 +147,8 @@ void FusedKernelCUDA::launch_raw(
 , std::vector<void*>& arguments) const {
   at::DeviceGuard{device_};
   // Hacked at::DeviceGuard (see note above)
-  int prior_device;
-  cudaGetDevice(&prior_device);
-  cudaSetDevice(device_);
+  const auto prior_device = at::cuda::current_device();
+  at::cuda::set_device(device_);
 
   const auto nBlocks = std::min(maxBlocks_, ceilDiv(numel, kBlockSize));
 
@@ -178,7 +174,7 @@ void FusedKernelCUDA::launch_raw(
     nullptr));
 
   // Resets device (see at::DeviceGuard notes above)
-  cudaSetDevice(prior_device);
+  at::cuda::set_device(prior_device);
 }
 
 } // namespace cuda
