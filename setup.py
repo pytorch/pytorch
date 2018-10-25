@@ -39,6 +39,9 @@
 #   NO_NNPACK
 #     disables NNPACK build
 #
+#   NO_QNNPACK
+#     disables QNNPACK build (quantized 8-bit operators)
+#
 #   NO_DISTRIBUTED
 #     disables distributed (c10d, gloo, mpi, etc.) build
 #
@@ -156,7 +159,7 @@ def hotpatch_var(var, prefix='USE_'):
 # Before we run the setup_helpers, let's look for NO_* and WITH_*
 # variables and hotpatch environment with the USE_* equivalent
 use_env_vars = ['CUDA', 'CUDNN', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
-                'OPENCV', 'FFMPEG', 'SYSTEM_NCCL', 'GLOO_IBVERBS']
+                'OPENCV', 'QNNPACK', 'FFMPEG', 'SYSTEM_NCCL', 'GLOO_IBVERBS']
 list(map(hotpatch_var, use_env_vars))
 
 # Also hotpatch a few with BUILD_* equivalent
@@ -177,6 +180,7 @@ from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_LIB_DIR, \
 from tools.setup_helpers.mkldnn import (USE_MKLDNN, MKLDNN_LIBRARY,
                                         MKLDNN_LIB_DIR, MKLDNN_INCLUDE_DIR)
 from tools.setup_helpers.nnpack import USE_NNPACK
+from tools.setup_helpers.qnnpack import USE_QNNPACK
 from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
@@ -396,6 +400,8 @@ def build_libs(libs):
         my_env["MKLDNN_LIBRARY"] = MKLDNN_LIBRARY
         my_env["MKLDNN_INCLUDE_DIR"] = MKLDNN_INCLUDE_DIR
         build_libs_cmd += ['--use-mkldnn']
+    if USE_QNNPACK:
+        build_libs_cmd += ['--use-qnnpack']
     if USE_GLOO_IBVERBS:
         build_libs_cmd += ['--use-gloo-ibverbs']
     if not RERUN_CMAKE:
