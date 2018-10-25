@@ -404,6 +404,14 @@ PyObject* c10d_init(PyObject* _unused) {
       py::arg("grads_batch"),
       py::arg("devices"),
       py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_sync_reduction",
+      &::c10d::syncReduction,
+      py::arg("reduction_work"),
+      py::arg("grads_batch"),
+      py::arg("grads_batch_coalesced"),
+      py::call_guard<py::gil_scoped_release>());
 #endif
 
   Py_RETURN_TRUE;
