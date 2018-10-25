@@ -32,6 +32,65 @@ const std::string NeuralNetData::getName() const {
   }
 }
 
+NNGraph::NodeRef NNModule::createUniqueDataNode(const std::string& s) {
+  auto curr_name = s;
+  auto iter = 0;
+  bool need_name = true;
+  do {
+    for (const auto& node : dataFlow.getMutableNodes()) {
+      if (nn::getName(node) == curr_name) {
+        std::stringstream ss;
+        ss << iter;
+        curr_name = s + "_" + ss.str();
+        iter++;
+        break;
+      }
+    }
+    need_name = false;
+  } while (need_name);
+  return dataFlow.createNode(util::make_unique<nom::repr::Tensor>(curr_name));
+}
+
+void NNModule::replaceSubgraph(
+    const NNSubgraph& subgraph,
+    const NNGraph::NodeRef& node,
+    const std::vector<NNGraph::NodeRef>& node_inputs,
+    const std::vector<NNGraph::NodeRef>& node_outputs) {
+  auto sg = subgraph;
+  auto sg_inputs = nn::getInputs(sg);
+  auto sg_outputs = nn::getOutputs(sg);
+
+  auto sg_inputs_copy = sg_inputs;
+  for (const auto& input : node_inputs) {
+    sg_inputs_copy.erase(input);
+  }
+  assert(sg_inputs_copy.size() == 0 && "Not all inputs were listed");
+
+  auto sg_outputs_copy = sg_outputs;
+  for (const auto& output : node_outputs) {
+    sg_outputs_copy.erase(output);
+  }
+  assert(sg_outputs_copy.size() == 0 && "Not all outputs were listed");
+
+  for (auto& input : node_inputs) {
+    dataFlow.createEdge(input, node);
+    sg.removeNode(input);
+  }
+  for (auto& output : node_outputs) {
+    if (sg_inputs.count(output)) {
+      dataFlow.createEdge(node, createUniqueDataNode());
+      continue;
+    }
+    dataFlow.createEdge(node, output);
+    sg.removeNode(output);
+  }
+  deleteSubgraph(sg);
+}
+
+void NNModule::deleteSubgraph(const NNSubgraph& subgraph) {
+  dataFlow.deleteNodes(subgraph.getNodes());
+}
+
 namespace nn {
 
 bool hasProducer(NNGraph::NodeRef n) {
@@ -100,8 +159,36 @@ std::string getName(NNGraph::NodeRef n) {
   return "Unknown";
 }
 
-void deleteSubgraph(NNModule* nn, NNGraph::SubgraphType& sg) {
-  nn->dataFlow.deleteNodes(sg.getNodes());
+std::set<NNGraph::NodeRef> getInputs(const NNSubgraph& subgraph) {
+  std::set<NNGraph::NodeRef> subgraph_inputs;
+  for (const auto& node : subgraph.getNodes()) {
+    NOM_REQUIRE_OR_CONT(is<NeuralNetData>(node));
+    if (hasProducer(node)) {
+      if (!subgraph.hasNode(getProducer(node))) {
+        subgraph_inputs.insert(node);
+      }
+    } else {
+      subgraph_inputs.insert(node);
+    }
+  }
+  return subgraph_inputs;
+}
+
+std::set<NNGraph::NodeRef> getOutputs(const NNSubgraph& subgraph) {
+  std::set<NNGraph::NodeRef> subgraph_outputs;
+  for (const auto& n : subgraph.getNodes()) {
+    NOM_REQUIRE_OR_CONT(is<NeuralNetData>(n));
+    if (hasConsumer(n)) {
+      for (const auto& consumer : getConsumers(n)) {
+        if (!subgraph.hasNode(consumer)) {
+          subgraph_outputs.insert(n);
+        }
+      }
+    } else {
+      subgraph_outputs.insert(n);
+    }
+  }
+  return subgraph_outputs;
 }
 
 void replaceProducer(
