@@ -66,6 +66,23 @@ for instructions on how to install GCC 4.9 or higher.
 
                               !! WARNING !!
 '''
+WRONG_COMPILER_WARNING = '''
+
+                               !! WARNING !!
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Your compiler ({0}) is not compatible with the compiler Pytorch was built with
+for this platform, which is {1} on {2}. Please use {1} to to compile your
+extension. Alternatively, you may compile PyTorch from source using {0}, and
+then you can also use {0} to compile your extension.
+
+See https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md for help
+with compiling PyTorch from source.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+                              !! WARNING !!
+'''
+ACCEPTED_COMPILERS_FOR_PLATFORM = {'darwin': ['clang++', 'clang'], 'linux': ['g++', 'gcc']}
 CUDA_HOME = _find_cuda_home()
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
@@ -108,13 +125,16 @@ def check_compiler_ok_for_platform(compiler):
         compiler (str): The compiler executable to check.
 
     Returns:
-        True if the compiler is gcc/g++ on Linux or clang/clang++ on macOS.
+        True if the compiler is gcc/g++ on Linux or clang/clang++ on macOS,
+        and always True for Windows.
     '''
+    if IS_WINDOWS:
+        return True
     which = subprocess.check_output(['which', compiler], stderr=subprocess.STDOUT)
     # Use os.path.realpath to resolve any symlinks, in particular from 'c++' to e.g. 'g++'.
     compiler_path = os.path.realpath(which.decode().strip())
-    expected = {'darwin': ['clang', 'clang++'], 'linux': ['gcc', 'g++']}
-    return any(name in compiler_path for name in expected[sys.platform])
+    accepted_compilers = ACCEPTED_COMPILERS_FOR_PLATFORM[sys.platform]
+    return any(name in compiler_path for name in accepted_compilers)
 
 
 def check_compiler_abi_compatibility(compiler):
@@ -135,31 +155,37 @@ def check_compiler_abi_compatibility(compiler):
         return True
 
     # First check if the compiler is one of the expected ones for the particular platform.
-    if IS_WINDOWS or check_compiler_ok_for_platform(compiler):
-        if sys.platform == 'darwin':
-            # There is no particular minimum version we need for clang, so we're good here.
-            return True
-        try:
-            if sys.platform == 'linux':
-                minimum_required_version = MINIMUM_GCC_VERSION
-                version = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
-                version = version.split('.')
-            else:
-                minimum_required_version = MINIMUM_MSVC_VERSION
-                compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
-                match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info)
-                version = (0, 0, 0) if match is None else match.groups()
-        except Exception:
-            _, error, _ = sys.exc_info()
-            warnings.warn('Error checking compiler version: {}'.format(error))
-            return False
+    if not check_compiler_ok_for_platform(compiler):
+        warnings.warn(WRONG_COMPILER_WARNING.format(
+            compiler,
+            ACCEPTED_COMPILERS_FOR_PLATFORM[sys.platform][0],
+            sys.platform))
+        return False
 
-        if tuple(map(int, version)) >= minimum_required_version:
-            return True
+    if sys.platform == 'darwin':
+        # There is no particular minimum version we need for clang, so we're good here.
+        return True
+    try:
+        if sys.platform == 'linux':
+            minimum_required_version = MINIMUM_GCC_VERSION
+            version = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
+            version = version.split('.')
         else:
-            compiler = '{} {}'.format(compiler, version.group(0))
+            minimum_required_version = MINIMUM_MSVC_VERSION
+            compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
+            match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info)
+            version = (0, 0, 0) if match is None else match.groups()
+    except Exception:
+        _, error, _ = sys.exc_info()
+        warnings.warn('Error checking compiler version for {}: {}'.format(compiler, error))
+        return False
 
+    if tuple(map(int, version)) >= minimum_required_version:
+        return True
+
+    compiler = '{} {}'.format(compiler, version.group(0))
     warnings.warn(ABI_INCOMPATIBILITY_WARNING.format(compiler))
+
     return False
 
 
