@@ -96,6 +96,9 @@ class TestBindings(test_util.TestCase):
         dfg.createEdge(op, w)
         dfg.createEdge(x, op)
 
+        # Dot generation
+        assert(str(dfg).startswith("digraph G"))
+
     @given(size=st.sampled_from([10, 50]))
     def test_edges_complex(self, size):
         random.seed(1337)
@@ -149,6 +152,9 @@ class TestBindings(test_util.TestCase):
         for match in nn.match(mg):
             assert len(match) == 1
             count += 1
+            # Dot generation of subgraph
+            assert(str(match).startswith("digraph G"))
+
         assert count == 1
 
     def test_match_graph_node_strict(self):
@@ -193,7 +199,7 @@ class TestBindings(test_util.TestCase):
         g = ng.Graph()
         n1 = g.createNode("hello1")
         n2 = g.createNode("hello2")
-        e = g.createEdge(n1, n2)
+        g.createEdge(n1, n2)
         ng.render(g)
 
     def test_convertToProto(self):
@@ -319,7 +325,7 @@ class TestBindings(test_util.TestCase):
         net = core.Net("name")
         net.FC(["X", "W"], ["Y"])
         d = caffe2_pb2.DeviceOption()
-        nn = ng.NNModule(net, {"X": d, "W": d})
+        ng.NNModule(net, {"X": d, "W": d})
 
         with self.assertRaises(Exception):
-            nn = ng.NNModule(net, {"X": d, "Fake": d})
+            ng.NNModule(net, {"X": d, "Fake": d})
