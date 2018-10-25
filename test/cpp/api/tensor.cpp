@@ -38,6 +38,15 @@ TEST(TensorTest, ToDtype) {
 
   tensor = tensor.to(at::kDouble);
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kDouble, at::kStrided);
+
+  tensor = tensor.to(at::TensorOptions(at::kInt));
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kInt, at::kStrided);
+
+  tensor = tensor.to(at::TensorOptions(at::kChar));
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kChar, at::kStrided);
+
+  tensor = tensor.to(at::TensorOptions(at::kDouble));
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kDouble, at::kStrided);
 }
 
 // Not currently supported.
@@ -52,52 +61,44 @@ TEST(TensorTest, ToDtype) {
 //   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
 // }
 
-// TEST(TensorTest, ToDevice ", "[cuda]) {
-//   auto tensor = at::empty({3, 4});
-//   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
-//
-//   tensor = tensor.to({at::kCUDA, 1});
-//   REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kFloat, at::kStrided);
-//
-//   tensor = tensor.to({at::kCUDA, 0});
-//   REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kFloat, at::kStrided);
-//
-//   tensor = tensor.to({at::kCUDA, 1});
-//   REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kFloat, at::kStrided);
-//
-//   tensor = tensor.to(at::Device(at::kCPU));
-//   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
-// }
-//
-// TEST(TensorTest, ToDeviceAndDtype ", "[cuda]) {
-//   auto tensor = at::empty({3, 4});
-//   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
-//
-//   tensor = tensor.to({at::kCUDA, 1}, at::kInt);
-//   REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kInt, at::kStrided);
-// }
-
-TEST(TensorTest, ToOptionsRespectsRequiresGrad) {
+TEST(TensorTest, ToOptionsWithRequiresGrad) {
   {
+    // Respects requires_grad
     auto tensor = torch::empty({3, 4}, at::requires_grad());
     ASSERT_TRUE(tensor.requires_grad());
 
     tensor = tensor.to(at::kDouble);
     ASSERT_TRUE(tensor.requires_grad());
+
+    // Throws if requires_grad is set in TensorOptions
+    ASSERT_THROW(tensor.to(at::TensorOptions().requires_grad(true)), c10::Error);
+    ASSERT_THROW(tensor.to(at::TensorOptions().requires_grad(false)), c10::Error);
   }
   {
     auto tensor = torch::empty({3, 4});
     ASSERT_FALSE(tensor.requires_grad());
 
+    // Respects requires_grad
     tensor = tensor.to(at::kDouble);
     ASSERT_FALSE(tensor.requires_grad());
+
+    // Throws if requires_grad is set in TensorOptions
+    ASSERT_THROW(tensor.to(at::TensorOptions().requires_grad(true)), c10::Error);
+    ASSERT_THROW(tensor.to(at::TensorOptions().requires_grad(false)), c10::Error);
   }
 }
 
 TEST(TensorTest, ToDoesNotCopyWhenOptionsAreAllTheSame) {
-  auto tensor = at::empty({3, 4}, at::kFloat);
-  auto hopefully_not_copy = tensor.to(at::kFloat);
-  ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+  {
+    auto tensor = at::empty({3, 4}, at::kFloat);
+    auto hopefully_not_copy = tensor.to(at::kFloat);
+    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+  }
+  {
+    auto tensor = at::empty({3, 4}, at::kFloat);
+    auto hopefully_not_copy = tensor.to(tensor.options());
+    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+  }
 }
 
 TEST(TensorTest, ContainsCorrectValueForSingleValue) {

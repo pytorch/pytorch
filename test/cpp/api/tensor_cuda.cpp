@@ -4,8 +4,65 @@
 
 #include <cmath>
 
-TEST(Tensor, AllocatesTensorOnTheCorrectDevice_MultiCUDA) {
+#define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)            \
+  ASSERT_TRUE(                                                             \
+      tensor.device().type() == at::Device((device_), (index_)).type());   \
+  ASSERT_TRUE(                                                             \
+      tensor.device().index() == at::Device((device_), (index_)).index()); \
+  ASSERT_EQ(tensor.dtype(), (type_));                                  \
+  ASSERT_TRUE(tensor.layout() == (layout_))
+
+TEST(TensorTest, AllocatesTensorOnTheCorrectDevice_MultiCUDA) {
   auto tensor = at::tensor({1, 2, 3}, at::device({at::kCUDA, 1}));
   ASSERT_EQ(tensor.device().type(), at::Device::Type::CUDA);
   ASSERT_EQ(tensor.device().index(), 1);
+}
+
+TEST(TensorTest, ToDevice_CUDA) {
+  auto tensor = at::empty({3, 4});
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
+
+  tensor = tensor.to({at::kCUDA, 1});
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kFloat, at::kStrided);
+
+  tensor = tensor.to({at::kCUDA, 0});
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kFloat, at::kStrided);
+
+  tensor = tensor.to({at::kCUDA, 1});
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kFloat, at::kStrided);
+
+  tensor = tensor.to(at::Device(at::kCPU));
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
+
+  tensor = tensor.to(at::kCUDA);
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kFloat, at::kStrided);
+
+  tensor = tensor.to(at::TensorOptions({at::kCUDA, 1}));
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kFloat, at::kStrided);
+
+  tensor = tensor.to(at::TensorOptions({at::kCUDA, 0}));
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kFloat, at::kStrided);
+
+  tensor = tensor.to(at::TensorOptions({at::kCUDA, 1}));
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kFloat, at::kStrided);
+
+  tensor = tensor.to(at::TensorOptions(at::Device(at::kCPU)));
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
+
+  tensor = tensor.to(at::TensorOptions(at::kCUDA));
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kFloat, at::kStrided);
+}
+
+TEST(TensorTest, ToDeviceAndDtype_CUDA) {
+  auto tensor = at::empty({3, 4});
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
+
+  tensor = tensor.to({at::kCUDA, 1}, at::kInt);
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kInt, at::kStrided);
+
+  tensor = tensor.to(at::TensorOptions({at::kCUDA, 0}).dtype(at::kLong));
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kLong, at::kStrided);
+
+  tensor = tensor.to(at::kCPU, at::kInt);
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kInt, at::kStrided);
 }

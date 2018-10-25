@@ -100,10 +100,7 @@ const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
         .device(${device});
-auto result_ = torch::${name}(
-    ${args},
-    options
-);
+auto result_ = torch::${name}(${args_with_tensor_options});
 """)
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
@@ -111,10 +108,7 @@ const auto options = TensorOptions()
         .layout(${layout})
         .device(${device});
 DeviceGuard device_guard(deviceForInputs(stack, ${num_inputs}));
-auto result = (${first}).${name}(
-    ${args},
-    options
-);
+auto result_ = (${first}).${name}(${args_with_tensor_options});
 """)
 
 CONSTRUCTOR = CodeTemplate("""\
@@ -210,21 +204,28 @@ def gen_jit_dispatch(declarations, out, template_path):
         # because the arg list can get lengthy we put them on a separate line
         def pack_arguments(args):
             return ',\n'.join(args)
-        if 'namespace' in decl['method_of']:
-            if decl.get('has_tensor_options'):
+        is_namespace_function = 'namespace' in decl['method_of']
+        tensor_options_arg_index = decl.get('tensor_options_arg_index', None)
+        if tensor_options_arg_index is not None:
+            dtype = args[tensor_options_arg_index]
+            layout = args[tensor_options_arg_index + 1]
+            device = args[tensor_options_arg_index + 2]
+            args_with_tensor_options = args[:tensor_options_arg_index] + \
+                ['options'] + args[(tensor_options_arg_index + 3):]
+            if is_namespace_function:
                 return CALL_NAMESPACE_WITH_TENSOR_OPTIONS.substitute(
-                    name=decl['name'], args=pack_arguments(args[:-3]),
-                    dtype=args[-3], layout=args[-2], device=args[-1])
+                    name=decl['name'], dtype=dtype, layout=layout, device=device,
+                    args_with_tensor_options=pack_arguments(args_with_tensor_options))
             else:
+                return CALL_METHOD_WITH_TENSOR_OPTIONS.substitute(
+                    name=decl['name'], dtype=dtype, layout=layout, device=device,
+                    args_with_tensor_options=pack_arguments(args_with_tensor_options[1:]),
+                    first=args_with_tensor_options[0], num_inputs=num_inputs)
+        else:
+            if is_namespace_function:
                 return CALL_NAMESPACE.substitute(name=decl['name'],
                                                  args=pack_arguments(args),
                                                  num_inputs=num_inputs)
-        else:
-            if decl.get('has_tensor_options'):
-                return CALL_METHOD_WITH_TENSOR_OPTIONS.substitute(
-                    name=decl['name'], args=pack_arguments(args[:-3]),
-                    dtype=args[-3], layout=args[-2], device=args[-1],
-                    first=args[0], num_inputs=num_inputs)
             else:
                 return CALL_METHOD.substitute(
                     name=decl['name'], first=args[0],
@@ -304,8 +305,7 @@ def gen_jit_dispatch(declarations, out, template_path):
         arguments = decl['arguments']
         for n, arg in enumerate(arguments):
             if arg['simple_type'] == 'TensorOptions':
-                del arguments[n]
-                arguments.extend([
+                decl['arguments'] = arguments[:n] + [
                     # XXX - until we actually have first-class interpreter types for these
                     # concepts, the default values to be encoded in Tensors
                     # If you change this, you also need to update [TensorOptions in script]
@@ -317,8 +317,8 @@ def gen_jit_dispatch(declarations, out, template_path):
                     # device is specified as an IntList of { at::Device::Type, device_id }
                     {'name': 'device', 'simple_type': 'Device', 'kwarg_only': True,
                         'default': '[cpu, -1]'},
-                ])
-                decl['has_tensor_options'] = True
+                ] + arguments[(n + 1):]
+                decl['tensor_options_arg_index'] = n
         # add annotations about alias an mutability of arguments
         annotate_op(decl)
 
