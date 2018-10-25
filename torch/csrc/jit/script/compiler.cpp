@@ -1487,7 +1487,9 @@ private:
     return sv->call(apply.callee().range(), method, inputs, attributes, n_binders);
   }
 
-  std::vector<Value*> getTupleValues(std::shared_ptr<SugaredValue> sugared) {
+  std::vector<Value*> getTupleValues(
+      std::shared_ptr<SugaredValue> sugared,
+      Expr& tree) {
     auto tuple = sugared->asTuple(tree.range(), method);
     std::vector<Value*> values;
     for (auto sugared_item : tuple) {
@@ -1500,7 +1502,8 @@ private:
   Value* emitExpr(Expr tree) {
     auto sugared = emitSugaredExpr(tree, 1);
     if (sugared->isTuple()) {
-      auto tuple_node = method.graph()->createTuple(getTupleValues(sugared));
+      auto values = getTupleValues(sugared, tree);
+      auto tuple_node = method.graph()->createTuple(values);
       return method.graph()->insertNode(tuple_node)->output();
     }
 
