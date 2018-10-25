@@ -391,19 +391,23 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    const auto& tid = type_id();
+    auto tid = type_id();
+    // NB: At the moment, variables have the same TensorTypeId as their
+    // corresponding tensor, but if this ever changes, we need to modify this.
     return tid == SparseCPUTensorId() || tid == SparseCUDATensorId();
   }
 
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    const auto& tid = type_id();
+    auto tid = type_id();
+    // NB: At the moment, variables have the same TensorTypeId as their
+    // corresponding tensor, but if this ever changes, we need to modify this.
     return tid == CUDATensorId() || tid == SparseCUDATensorId();
   }
 
   int64_t get_device() const {
     // NB: This method is not virtual and tries to avoid dispatches in the common case for perf.
-    const auto& tid = type_id();
+    const auto tid = type_id();
     if (tid == CUDATensorId()) {
       // TODO: #12934 investigate caching device on TensorImpl to avoid this vdispatch.
       return storage().device().index();
@@ -776,6 +780,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
   bool compute_contiguous() const;
 
+  // As an optimization, get_device handles the typical CUDA Tensor case and
+  // calls get_device_slow if the tensor stores its device somewhere else
+  // (VariableImpl, SparseTensorImpl). This methods does a virtual dispatch
+  // that makes it 10-20ns slower than the special-cased CUDA Tensor case.
   virtual int64_t get_device_slow() const {
     AT_ERROR(
         "get_device is not implemented for tensors with ",
