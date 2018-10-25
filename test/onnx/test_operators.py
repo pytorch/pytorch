@@ -17,6 +17,8 @@ import shutil
 import sys
 import common_utils as common
 
+from test_pytorch_common import skipIfCI
+
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
@@ -54,11 +56,6 @@ class FuncModule(Module):
 
 
 class TestOperators(TestCase):
-
-    def skipAlwaysForCI(func):
-        def wrapper(self):
-            raise unittest.SkipTest("Skip known CI breaking test")
-        return wrapper
 
     def assertONNX(self, f, args, params=None, **kwargs):
         if params is None:
@@ -437,7 +434,7 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
-    @skipAlwaysForCI
+    @skipIfCI
     def test_upsample(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
