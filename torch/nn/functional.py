@@ -1396,6 +1396,14 @@ def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
     return torch.layer_norm(input, normalized_shape, weight, bias, eps,
                             torch.backends.cudnn.enabled)
 
+def c10_layer_norm_dont_use_this_op_yet(input, normalized_shape, weight=None, bias=None, eps=1e-5):
+    r"""Applies Layer Normalization for last certain number of dimensions.
+
+    See :class:`~torch.nn.LayerNorm` for details.
+    """
+    return torch.c10_layer_norm_dont_use_this_op_yet(input, normalized_shape, weight, bias, eps,
+                            torch.backends.cudnn.enabled)
+
 
 def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
     r"""Applies Group Normalization for last certain number of dimensions.

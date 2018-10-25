@@ -944,6 +944,11 @@
 
 - func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
 
+- func: c10_layer_norm_dont_use_this_op_yet(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
+  dispatch:
+    CPU: c10_layer_norm_dont_use_this_op_yet
+    CUDA: c10_layer_norm_dont_use_this_op_yet
+
 - func: linear(Tensor input, Tensor weight, Tensor bias={}) -> Tensor
 
 - func: linspace(Scalar start, Scalar end, TensorOptions options={}) -> Tensor

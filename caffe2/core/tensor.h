@@ -36,6 +36,9 @@ class CAFFE2_API Tensor final {
     return impl_.get();
   }
 
+  explicit Tensor(TensorImplPtr impl)
+      : impl_(std::move(impl)) {}
+
   explicit Tensor(Storage storage)
       : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(std::move(storage))) {}
 

@@ -386,6 +386,7 @@ _(aten, l1_loss) \
 _(aten, l1_loss_backward) \
 _(aten, l1_loss_forward) \
 _(aten, layer_norm) \
+_(aten, c10_layer_norm_dont_use_this_op_yet) \
 _(aten, le) \
 _(aten, leaky_relu) \
 _(aten, leaky_relu_backward) \
