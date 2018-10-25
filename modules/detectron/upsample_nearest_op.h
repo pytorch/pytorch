@@ -42,14 +42,17 @@ class UpsampleNearestOp final : public Operator<Context> {
     out_shape[X.ndim() - 2] *= scale_;
     Y->Resize(out_shape);
 
+    int d0;
     int d1;
     int d2;
     int d3;
     if (X.ndim() == 3) {
+      d0 = 1;
       d1 = Y->dim32(0);
       d2 = Y->dim32(1);
       d3 = Y->dim32(2);
     } else {
+      d0 = Y->dim32(0);
       d1 = Y->dim32(1);
       d2 = Y->dim32(2);
       d3 = Y->dim32(3);
@@ -62,23 +65,24 @@ class UpsampleNearestOp final : public Operator<Context> {
 
 #ifdef _OPENMP
 #if (_OPENMP >= 201307)
-#pragma omp parallel for simd
+#pragma omp parallel for simd collapse(3)
 #else
-#pragma omp parallel for
+#pragma omp parallel for collapse(3)
 #endif
 #endif
-    for (int i = 0; i < d1; ++i) {
-      for (int j = 0; j < d2; ++j) {
-        for (int u = 0; u < d3; ++u) {
-          int ii = (i * d2 + j) * d3 + u;
-          int scaled_u = u / scale_;
-          int scaled_j = j / scale_;
-          int ipidx = ((i * scaled_d2) + scaled_j) * scaled_d3 + scaled_u;
-          output_data[ii] = input_data[ipidx];
+    for (int n = 0; n < d0; ++n) {
+      for (int i = 0; i < d1; ++i) {
+        for (int j = 0; j < d2; ++j) {
+          for (int u = 0; u < d3; ++u) {
+            int ii = ((n * d1 + i) * d2 + j) * d3 + u;
+            int scaled_u = u / scale_;
+            int scaled_j = j / scale_;
+            int ipidx = ((n * d1 + i) * scaled_d2 + scaled_j) * scaled_d3 + scaled_u;
+            output_data[ii] = input_data[ipidx];
+          }
         }
       }
     }
-
     return true;
   }
 
