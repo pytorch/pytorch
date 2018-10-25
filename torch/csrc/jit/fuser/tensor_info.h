@@ -1,12 +1,14 @@
 #pragma once
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
+
 #include <cstdint>
 
 namespace torch { namespace jit { namespace fuser {
 
 // Host-side view of TensorInfo
 // Note dims[0] - we need to dynamically allocate the dims.
-struct TensorInfo {
+struct TORCH_API TensorInfo {
   
   uint32_t* sizes(size_t nDim) { return &sizes_strides[0]; }
   uint32_t* strides(size_t nDim) { return &sizes_strides[nDim]; }

@@ -31,8 +31,14 @@
 
 namespace torch { namespace jit { namespace fuser {
 
+// Counter for number of kernels compiled, used for debugging and
+// creating arbitrary kernel names.
 static std::atomic<size_t> next_kernel_id{0};
 
+size_t nCompiledKernels() { return next_kernel_id.load(); }
+
+// If the given node is used once by a chunk node, returns that node. 
+// Returns nullptr otherwise.
 static const Node* usedInFusedChunk(const Value* input) {
   const auto uses = input->uses();
   if (uses.size() == 1) {
@@ -44,8 +50,7 @@ static const Node* usedInFusedChunk(const Value* input) {
   return nullptr;
 }
 
-static void setInputChunkDescriptors(
-  KernelSpec& spec) {
+static void setInputChunkDescriptors(KernelSpec& spec) {
   spec.inputChunks().reserve((spec.graph())->inputs().size());
   for (const Value* input : (spec.graph())->inputs()) {
     if (const Node* chunk = usedInFusedChunk(input)) {
@@ -86,8 +91,7 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
   return offsets;
 }
 
-static void setInputBroadcastGroups(
-  KernelSpec& spec) {
+static void setInputBroadcastGroups(KernelSpec& spec) {
   std::unordered_set<std::vector<int64_t>, torch::hash<std::vector<int64_t>>> broadcast_groups;
   for (const Value* output : (spec.graph())->outputs()) {
     broadcast_groups.insert(getInputDependencies(output));
@@ -117,11 +121,11 @@ void registerFusion(int64_t& key, const Node* fusion_group) {
   auto graph = fusion_group->g(attr::Subgraph)->copy();
   EraseShapeInformation(*graph);
   key = store(graph);
-  const auto maybe_spec = retrieve(key);
-  if (!maybe_spec)
-    throw std::runtime_error("Failed to retrieve specification");
+  
 
   if (canFuseOnCPU() || canFuseOnGPU()) {
+    const auto maybe_spec = retrieve(key);
+    JIT_ASSERT(maybe_spec);
     upfrontCompilation(*maybe_spec);
   }  
 }
@@ -160,13 +164,13 @@ std::shared_ptr<FusedKernel> compileKernel(
   std::vector<PartitionDesc> chunk_desc;
   std::vector<PartitionDesc> concat_desc;
   bool has_random;
-  std::tie(code, chunk_desc, concat_desc, has_random) = generateKernel(
-    name
-  , *(spec.graph())
-  , device
-  , input_desc
-  , output_desc
-  , use_cuda);
+  std::tie(code, chunk_desc, concat_desc, has_random) 
+    = generateKernel(
+        name
+      , *(spec.graph())
+      , input_desc
+      , output_desc
+      , use_cuda);
 
   std::shared_ptr<FusedKernel> fused_kernel;
   if (device != kCPUDevice) {

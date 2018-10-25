@@ -2,6 +2,7 @@
 #include "torch/csrc/jit/fuser/config.h"
 #if USE_CUDA_FUSER
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/jit/code_template.h"
 
 namespace torch { namespace jit { namespace fuser { namespace cuda {

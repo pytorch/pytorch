@@ -6,13 +6,15 @@
 
 namespace torch { namespace jit { namespace fuser {
 
-static int64_t fusion_counter{0};
+static int64_t kernel_counter{0};
 static std::unordered_map<int64_t, KernelSpec> specMap_;
 static std::mutex mutex_;
 
+// TODO: lookup by historic string key to start, then issue key
+// as appropriate for faster lookup in the future
 int64_t store(std::shared_ptr<Graph> graph) {
   std::lock_guard<std::mutex> guard{mutex_};
-  const auto key = fusion_counter++;
+  const auto key = kernel_counter++;
   specMap_.emplace(
   std::piecewise_construct
   , std::forward_as_tuple(key)

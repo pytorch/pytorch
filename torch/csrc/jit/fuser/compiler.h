@@ -1,5 +1,6 @@
 #pragma once
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/stack.h"
 #include "torch/csrc/jit/fuser/config.h"
@@ -13,15 +14,20 @@
 
 namespace torch { namespace jit { namespace fuser {
 
-// Performs device-independent compilation of the given fusion_group
+// Performs device-independent "upfront" compilation of the given fusion_group
 // Sets key to a key that can be used to run the fusion later
-void registerFusion(int64_t& key, const Node* fusion_group);
+TORCH_API void registerFusion(int64_t& key, const Node* fusion_group);
 
-std::shared_ptr<FusedKernel> compileKernel(
+// Performs device-specific "runtime" compilation of the given kernel
+//  with the runtime arguments specified in ArgSpec.
+//  Outputs are allocated using map_size on the specified device.
+TORCH_API std::shared_ptr<FusedKernel> compileKernel(
   const KernelSpec& spec
 , const ArgSpec& arg_spec
 , const std::vector<int64_t>& map_size
 , const int device);
+
+TORCH_API size_t nCompiledKernels();
 
 } // namespace fuser
 } // namespace jit

@@ -3,6 +3,7 @@
 #if USE_CPU_FUSER
 
 #include "ATen/ATen.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
 #include "torch/csrc/jit/fuser/fused_kernel.h"
@@ -13,7 +14,8 @@
 
 namespace torch { namespace jit { namespace fuser { namespace cpu {
 
-struct FusedKernelCPU : public ::torch::jit::fuser::FusedKernel {
+// Represents a compiled CPU kernel and the metadata necessary to run it
+struct TORCH_API FusedKernelCPU : public ::torch::jit::fuser::FusedKernel {
   FusedKernelCPU(
     const std::string& _name
   , const std::string& _code

@@ -3,6 +3,7 @@
 #if USE_CUDA_FUSER
 
 #include "ATen/ATen.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/jit/fuser/fused_kernel.h"
 
 #include "nvrtc.h"
@@ -15,7 +16,9 @@
 
 namespace torch { namespace jit { namespace fuser { namespace cuda {
 
-struct FusedKernelCUDA : public ::torch::jit::fuser::FusedKernel {
+// A class holding metadata for an actual CUDA function.
+// Note: CUDA functions are per device.
+struct TORCH_API FusedKernelCUDA : public ::torch::jit::fuser::FusedKernel {
   FusedKernelCUDA(
     const int _device
   , const std::string& _name
@@ -27,7 +30,7 @@ struct FusedKernelCUDA : public ::torch::jit::fuser::FusedKernel {
   , const bool _has_random);
 
   virtual ~FusedKernelCUDA() override {
-    cuModuleUnload(module);
+    cuModuleUnload(module_);
   }
 
   virtual void launch_raw(
@@ -39,16 +42,16 @@ struct FusedKernelCUDA : public ::torch::jit::fuser::FusedKernel {
   }
 
 private:
-  std::vector<char> ptx;
-  CUmodule module;
-  CUfunction function;
+  static constexpr auto kBlockSize = 128;
 
-  // we record prop/device so if they are availiable for launch heuristics
-  // querying at launch is too slow for device properties.
-  const int device_;
-  cudaDeviceProp prop;
-  int blockSize = 128;
-  int maxBlocks;
+  // Note: per device to store device properties and compute launch heuristics
+  //  Acquiring these values at launch time would be too slow
+  int device_;
+  int maxBlocks_;
+  cudaDeviceProp prop_;
+  std::vector<char> ptx_;
+  CUmodule module_;
+  CUfunction function_;
 };
 
 } // namespace cuda

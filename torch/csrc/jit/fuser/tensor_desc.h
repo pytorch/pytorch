@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ATen/ATen.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/utils/hash.h"
 #include "torch/csrc/jit/type.h"
 #include "torch/csrc/jit/assertions.h"
@@ -14,7 +15,7 @@ namespace torch { namespace jit { namespace fuser {
 // type information needed by the compiler for input/outputs
 // contiguity[i] is true if the dim i is contiguous with dim i + 1.
 // contiguity.back() == true means strides.back() == 1.
-struct TensorDesc {
+struct TORCH_API TensorDesc {
   at::ScalarType scalar_type;
   std::vector<bool> contiguity;
 
@@ -81,7 +82,7 @@ private:
 
 inline std::ostream& operator<<(std::ostream& out, const TensorDesc& d) {
   out << d.scalar_type << "[";
-  for (auto b : d.contiguity)
+  for (const auto b : d.contiguity)
     out << b << ";";
   out << "]";
   return out;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/fuser/tensor_desc.h"
 
@@ -11,8 +12,7 @@ namespace torch { namespace jit { namespace fuser {
 
 // Descriptor for chunk-ing an input tensor into subtensors
 // OR concat-ing an output tensor from subtensors
-struct PartitionDesc {
-  
+struct TORCH_API PartitionDesc {
   PartitionDesc()
   : nSubTensors_{1}
   , dim_{0} 

@@ -22,7 +22,7 @@ namespace torch { namespace jit {
 
 FunctionSchema parseSchema(const std::string& schema);
 
-using OperationCreator = std::function<Operation(const Node*)>;
+using OperationCreator = std::function<Operation(Node*)>;
 
 struct TORCH_API Operator {
   Operator(FunctionSchema schema, OperationCreator op_creator)
@@ -54,8 +54,10 @@ struct TORCH_API Operator {
     if (op_) {
       return *op_;
     }
+    // TODO: this const_cast should not be necessary
+    auto unconst_node = const_cast<Node*>(node);
     AT_ASSERT(node != nullptr);
-    return op_creator_(node);
+    return op_creator_(unconst_node);
   }
 
   const FunctionSchema & schema() const {

@@ -9,6 +9,7 @@ namespace torch { namespace jit {
 
 namespace detail {
 
+// Note: CPU fusion is currently disabled due to test flakiness
 bool cpu_fuser_enabled = false;
 
 } // namespace detail
@@ -18,11 +19,8 @@ void registerFusion(int64_t& key, const Node* fusion_group) {
 }
 
 void runFusion(const int64_t key, Stack& stack) {
-  try {
-    fuser::runFusion(key, stack);
-  } catch (...) {
-    fuser::runFallback(key, stack);
-  }
+  const auto result = fuser::runFusion(key, stack);
+  if (!result) fuser::runFallback(key, stack);
 }
 
 bool canFuseOnCPU() {
@@ -45,6 +43,8 @@ void overrideCanFuseOnCPU(bool value) {
   detail::cpu_fuser_enabled = value;
 }
 
+// Uses the above interface by stuffing the graph into a node and treating that
+// node as a fusion group.
 std::vector<at::Tensor> debugLaunchGraph(
   Graph& graph
 , int device
@@ -67,6 +67,8 @@ std::vector<at::Tensor> debugLaunchGraph(
   fuser::runFusion(key, stack);
   return fmap(stack, [](const IValue& iv) { return iv.toTensor(); });
 }
+
+size_t nCompiledKernels() { return fuser::nCompiledKernels(); }
 
 } // namespace jit
 } // namespace torch

@@ -25,6 +25,7 @@
 
 namespace torch { namespace jit { namespace fuser {
 
+// Template for computing the offset into the tensor to access a value
 static auto dim_calc = CodeTemplate(R"(
 //printf("tensor ${tensor} sizes[${d}] = %d, strides[${d}] = %d\n", ${tensor}.sizes[${d}],${tensor}.strides[${d}]);
 size_t ${tensor}_dimIndex${d} = ${tensor}_linearIndex ${mod_sizes};
@@ -59,6 +60,7 @@ static std::string scalarValue(const double v) {
   return out.str();
 }
 
+// Note: Half is special-cased to avoid returning at::Half
 static const char* scalarTypeName(const at::ScalarType type) {
   if (type == at::ScalarType::Half) {
     return "half";
@@ -74,6 +76,7 @@ static const char* scalarTypeName(const at::ScalarType type) {
   }
 }
 
+// Writes "simple mappable" ops
 static std::string encodeRHS(const Node* n) {
   static std::unordered_map<NodeKind, std::string> simple_map_ops = {
     // unary
@@ -169,6 +172,8 @@ static std::string encodeRHS(const Node* n) {
   return format(str, env);
 }
 
+// If there is a single user of a node and it's a chunk operation, returns
+//  that user. Returns nullptr otherwise.
 static Node* usedInFusedChunk(const Value* input) {
   auto uses = input->uses();
   if (uses.size() == 1) {
@@ -209,7 +214,6 @@ std::tuple<
 , bool> generateKernel(
   const std::string& name
 , const Graph& graph
-, const int device
 , const std::vector<TensorDesc>& input_desc
 , const std::vector<TensorDesc>& output_desc
 , const bool use_cuda) {
@@ -221,9 +225,11 @@ std::tuple<
   std::stringstream tensorOffsets;
   std::vector<std::string> formals;
   std::vector<std::string> argument_loads;
+
+  // Lambda for writing arguments
   auto emitFormal = [&](const Value* n, const TensorDesc& desc) {
     std::string tensor = "t" + std::to_string(formals.size()); //can't be unique() because Param may be an output
-    size_t nDim = desc.nDim();
+    const auto nDim = desc.nDim();
     emitIndexingFor(tensorOffsets, tensor, nDim,  desc.lastIsContiguous());
     env.s("tensor", tensor);
     env.d("formal_index", formals.size() + 1); // + 1 because the first argument is the linearIndex
@@ -233,6 +239,7 @@ std::tuple<
     argument_loads.push_back(format("*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])", env));
   };
 
+  // Writes input parameters and creates flattened inputs
   std::vector<PartitionDesc> chunk_desc;
   std::vector<std::pair<const Value*, const TensorDesc&>> flat_inputs;
   {
@@ -255,6 +262,7 @@ std::tuple<
     }
   }
 
+  // Writes output parameters and creates flattened outputs
   std::vector<PartitionDesc> concat_desc;
   std::vector<std::pair<const Value*, TensorDesc>> flat_output_nodes;
   {
@@ -276,9 +284,8 @@ std::tuple<
     }
   }
 
-  #if USE_CUDA_FUSER
-    bool has_half_tensor = false;
-  #endif // USE_CUDA_FUSER
+  // Acquires input values
+  bool has_half_tensor = false;
   size_t formal_count = 0;
   for (const auto input : flat_inputs) {
     auto p = input.first;
@@ -286,15 +293,16 @@ std::tuple<
     env.d("formal", formal_count++);
 
     // Acquires and converts (if needed) inputs
-    bool is_half = input.second.scalar_type == at::ScalarType::Half;
+    // Note: conversion from half is only supported for CUDA kernels.
+    //  The conversion immediately converts fp16 inputs to float.
+    //  Access for other types is common to CUDA and CPU kernels.
+    const auto is_half = (input.second.scalar_type == at::ScalarType::Half);
     if (is_half) {
-      AT_ASSERT(use_cuda);
-      #if USE_CUDA_FUSER
-        env.s(
-          "access"
-        , format("__half2float(t${formal}.data[t${formal}_offset])", env));
-        has_half_tensor = true;
-      #endif // USE_CUDA_FUSER
+      JIT_ASSERT(use_cuda);
+      env.s(
+        "access"
+      , format("__half2float(t${formal}.data[t${formal}_offset])", env));
+      has_half_tensor = true;
     } else {
       env.s("access", format("t${formal}.data[t${formal}_offset]", env));
     }
@@ -304,42 +312,43 @@ std::tuple<
   }
 
   bool has_random = false;
+  // Generates code for intermediate nodes
+  // Note: Concat and Chunk are implicitly generated
+  // Note: Random number generation is only supported for CUDA kernels. 
   for (const auto& n : graph.nodes()) {
-    // FusedConcat nodes work by narrowing the output Tensors before the kernel runs
-    if (n->kind() == prim::FusedConcat)
-      continue;
-    if (n->kind() == prim::ConstantChunk)
-      continue;
+    // Note: FusedConcat nodes work by narrowing the output Tensors before the kernel runs
+    if (n->kind() == prim::FusedConcat) continue;
+    if (n->kind() == prim::ConstantChunk) continue;
     if (n->kind() == aten::rand_like) {
+      JIT_ASSERT(use_cuda);
       has_random = true;
-      if (!use_cuda)
-        throw std::runtime_error("Fusion doesn't support rand on CPU");
     }
-    env.s("node",valueName(n->output()));
+    env.s("node", valueName(n->output()));
     env.s("rhs", encodeRHS(n));
     body << format("auto ${node} = ${rhs};\n",env);
   }
 
-  for (auto output : flat_output_nodes) {
-    auto o = output.first;
-    env.d("formal",formal_count++);
-    env.s("access",format("t${formal}.data[t${formal}_offset]",env));
-    env.s("node",valueName(o));
+  // Generates writes to output tensors
+  for (const auto& output : flat_output_nodes) {
+    const auto& o = output.first;
+    env.d("formal", formal_count++);
+    env.s("access", format("t${formal}.data[t${formal}_offset]",env));
+    env.s("node", valueName(o));
 
     // Acquires and converts (if needed) outputs
-    bool is_half = output.second.scalar_type == at::ScalarType::Half;
+    // Note: conversion to half is only supported for CUDA kernels.
+    const auto is_half = (output.second.scalar_type == at::ScalarType::Half);
     if (is_half) {
-      AT_ASSERT(use_cuda);
-      #if USE_CUDA_FUSER
-        body << format("${access} = __float2half(${node});\n",env);
-        has_half_tensor = true;
-      #endif // USE_CUDA_FUSER
+      JIT_ASSERT(use_cuda);
+      body << format("${access} = __float2half(${node});\n",env);
+      has_half_tensor = true;
     } else {
       body << format("${access} = ${node};\n",env);
     }
   }
 
-  // Includes half support if any half tensors are involved
+  // Includes headers
+  // Note: CUDA kernels support halfs and random generation, CPU kernels do not
   #if USE_CUDA_FUSER
     if (has_half_tensor) {
       env.s("HalfHeader", cuda::half_support_literal);
@@ -358,6 +367,7 @@ std::tuple<
     }
   #endif // USE_CUDA_FUSER
 
+  // Insantiates the CUDA or CPU-specific templates
   env.s("tensorOffsets", tensorOffsets.str());
   env.s("kernelBody", body.str());
   env.v("formals", formals);

@@ -23,7 +23,8 @@ THCGenerator* THCRandom_getGenerator(THCState* state);
 
 namespace torch { namespace jit { namespace fuser { namespace cuda {
 
-void checkCUDAVersion(const cudaDeviceProp& prop) {
+void checkCUDAVersion(
+  const cudaDeviceProp& prop) {
   if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
       (prop.major >= 7 && CUDA_VERSION < 9000)) {
     std::stringstream err_string;
@@ -34,6 +35,38 @@ void checkCUDAVersion(const cudaDeviceProp& prop) {
   }
 }
 
+static void getMajorMinor(const cudaDeviceProp& prop, int& major, int& minor) {
+  int nvrtc_major, nvrtc_minor;
+  TORCH_NVRTC_CHECK(nvrtcVersion(&nvrtc_major, &nvrtc_minor));
+
+  // Short-circuits if NVRTC version too low
+  JIT_ASSERT(nvrtc_major >= 6);
+
+  // Major and minor is determined by device properties and 
+  // possibly "downcompiled" to a lower (compatible) compute architecture
+  // based on the NVRTC version
+  major = prop.major;
+  minor = prop.minor;
+  if (nvrtc_major <= 7 && prop.major > 5) { // 7 supports 2-5.x
+    major = 5;
+    if (prop.major == 5) minor = prop.minor;
+    else minor = 0;
+  } else if (nvrtc_major <= 8 && prop.major > 6) { // 8 supports 2-6.x
+    major = 6;
+    if (prop.major == 6) minor = prop.minor;
+    else minor = 0;
+  } else if (nvrtc_major <= 9 && prop.major >= 7) { // 9 supports 3-7.2
+    major = 7;
+    if (prop.major == 7 && prop.minor <= 2) minor = prop.minor;
+    else minor = 0;
+  } else if (nvrtc_major <= 10 && prop.major >= 7) { // 10 supports 3-7.5
+    major = 7;
+    if (prop.major == 7 && prop.minor <= 5) minor = prop.minor;
+    else minor = 0;
+  }
+}
+
+// Compiles the specified kernel and stores the metadata required to run it
 FusedKernelCUDA::FusedKernelCUDA(
   const int _device
 , const std::string& _name
@@ -43,13 +76,29 @@ FusedKernelCUDA::FusedKernelCUDA(
 , const std::vector<PartitionDesc> _chunk_desc
 , const std::vector<PartitionDesc> _concat_desc
 , const bool _has_random)
-: FusedKernel{_name, _code, _input_desc, _output_desc, _chunk_desc, _concat_desc, _has_random}
+: FusedKernel{_name, _code, _input_desc, _output_desc, _chunk_desc, _concat_desc, _has_random} 
 , device_{_device} {
-  // Acquires and validates device properties
-  at::DeviceGuard device_guard(device_);
-  TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
-  checkCUDAVersion(prop);
+  // Initializes driver's API context (if necessary)
+  CUcontext pctx = 0;
+  TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));
+  if (!pctx) {
+     std::unique_lock<std::mutex> cudaFreeMutexLock(
+     *(THCCachingAllocator_getCudaFreeMutex()));
+     cudaFree(0);
+  }
 
+  // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
+  // properly in some scenarios
+  int prior_device;
+  cudaGetDevice(&prior_device);
+  cudaSetDevice(device_);
+  
+  // Acquires device and NVRTC properties (for compile arch and occupancy calculations)
+  TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop_, device_)); 
+  int major, minor;
+  getMajorMinor(prop_, major, minor);
+
+  // Creates the NVRTC program
   nvrtcProgram program;
   TORCH_NVRTC_CHECK(nvrtcCreateProgram(
     &program
@@ -58,8 +107,8 @@ FusedKernelCUDA::FusedKernelCUDA(
   , 0
   , nullptr
   , nullptr));
-
-  const std::string compute = "--gpu-architecture=compute_" + std::to_string(prop.major) + std::to_string(prop.minor);
+  
+  const std::string compute = "--gpu-architecture=compute_" + std::to_string(major) + std::to_string(minor);
   const std::vector<const char *> args = {"--std=c++11", compute.c_str(), "-default-device"};
   const auto result = nvrtcCompileProgram(program, args.size(), args.data());
   if (result == NVRTC_ERROR_COMPILATION) {
@@ -75,66 +124,61 @@ FusedKernelCUDA::FusedKernelCUDA(
     TORCH_NVRTC_CHECK(nvrtcDestroyProgram(&program));
   });
   TORCH_NVRTC_CHECK(result);
-
   size_t ptx_size;
   TORCH_NVRTC_CHECK(nvrtcGetPTXSize(program, &ptx_size));
-  ptx.resize(ptx_size);
-  TORCH_NVRTC_CHECK(nvrtcGetPTX(program, ptx.data()));
-  CUcontext pctx = 0;
-  TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));
-  if (!pctx) {
-     std::unique_lock<std::mutex> cudaFreeMutexLock(
-     *(THCCachingAllocator_getCudaFreeMutex()));
-     cudaFree(0);
-  }
-  TORCH_CU_CHECK(cuModuleLoadData(&module, ptx.data()));
-  TORCH_CU_CHECK(cuModuleGetFunction(&function, module, name_.c_str()));
+  ptx_.resize(ptx_size);
+  TORCH_NVRTC_CHECK(nvrtcGetPTX(program, ptx_.data()));
 
+  TORCH_CU_CHECK(cuModuleLoadData(&module_, ptx_.data()));
+  TORCH_CU_CHECK(cuModuleGetFunction(&function_, module_, name_.c_str()));
+
+  // Computes max blocks
   TORCH_CU_CHECK(cuOccupancyMaxActiveBlocksPerMultiprocessor(
-    &maxBlocks, function, 128, 0));
-  maxBlocks *= prop.multiProcessorCount;
+    &maxBlocks_, function_, 128, 0));
+  maxBlocks_ *= prop_.multiProcessorCount;
+
+  // Resets device (end of hacked at::DeviceGuard)
+  cudaSetDevice(prior_device);
 }
 
 static int ceilDiv(const int a, const int b) {
   return (a + b - 1) / b;
 }
 
-static int counter = 1;
-
 void FusedKernelCUDA::launch_raw(
   const uint32_t numel
 , std::vector<void*>& arguments) const {
-  const auto nBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
+  at::DeviceGuard{device_};
+  // Hacked at::DeviceGuard (see note above)
+  int prior_device;
+  cudaGetDevice(&prior_device);
+  cudaSetDevice(device_);
+
+  const auto nBlocks = std::min(maxBlocks_, ceilDiv(numel, kBlockSize));
 
   // Adds random state to arguments if necessary
   // Note: offset defined here so its lifetime extends to the launch
   uint64_t offset;
   if (has_random_) {
-    const auto rand_offset = 4 * (std::ceil(numel / (4.0 * blockSize * nBlocks)) + 1);
+    const auto rand_offset = 4 * (std::ceil(numel / (4.0 * kBlockSize * nBlocks)) + 1);
     auto gen = THCRandom_getGenerator(at::globalContext().getTHCState());
     offset = gen->state.philox_seed_offset.fetch_add(rand_offset);
     arguments.push_back(&gen->state.initial_seed);
     arguments.push_back(&offset);
   }
 
-  // Initializes driver's API context (if necessary)
-  CUcontext pctx = 0;
-  TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));
-  if (!pctx) {
-    std::unique_lock<std::mutex> 
-      cudaFreeMutexLock{*(THCCachingAllocator_getCudaFreeMutex())};
-    cudaFree(0);
-  }
-
-  // Launches kernel on current stream
+  // Launches kernel on current stream (device was set by executor)
   auto stream = at::cuda::getCurrentCUDAStream();
   TORCH_CU_CHECK(cuLaunchKernel(
-    function,
+    function_,
     nBlocks, 1, 1,
-    blockSize, 1, 1,
+    kBlockSize, 1, 1,
     0, stream,
     arguments.data(),
     nullptr));
+
+  // Resets device (see at::DeviceGuard notes above)
+  cudaSetDevice(prior_device);
 }
 
 } // namespace cuda

@@ -11,7 +11,6 @@
 #include <string>
 #include <stdexcept>
 
-
 namespace torch { namespace jit { namespace fuser { namespace cpu {
 
 static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
@@ -25,6 +24,9 @@ static bool programExists(const std::string& program) {
   return (system(cmd.c_str()) == 0);
 }
 
+// A single compiler config is accessed through getConfig() (below)
+// Controls compilation options and may be updated based on the result
+// of compilation attempts.
 struct CompilerConfig {
   CompilerConfig() {
     const char* cxx_env = getenv("CXX");
@@ -85,7 +87,7 @@ static void runCompiler(
     config.openmp = false; // disable for future compiles
     return runCompiler(cpp_file, so_file);
   }
-  throw std::runtime_error("Failed to compile a fused CPU kernel.");
+  JIT_ASSERTM(r == 0, "Failed to compile a fused CPU kernel");
 }
 
 static const std::string disas_string =

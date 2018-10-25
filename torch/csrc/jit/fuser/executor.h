@@ -1,14 +1,15 @@
 #pragma once
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/jit/stack.h"
 
 #include <cstdint>
 
 namespace torch { namespace jit { namespace fuser {
 
-// Runs the fusion associated with the key (from registerFusion above)
+// Runs the fusion associated with the key (see registerFusion() in interface.h)
 // on the inputs taken from the given Stack.
-void runFusion(
+TORCH_API bool runFusion(
   const int64_t key
 , Stack& stack);
 

@@ -13,19 +13,32 @@ namespace torch { namespace jit {
 
 constexpr int kCPUDevice = -1;
 
+// Assigns a "key" to the given fusion_group that it can use to run its
+// fusion later (via runFusion() below).
 TORCH_API void registerFusion(int64_t& key, const Node* fusion_group);
+
+// Runs the fusion corresponding to the given key on the inputs
+// found on the stack. Outputs are placed on the same stack.
+// In some cases a fusion cannot be run and a fallback path where
+// PyTorch's interpreter runs the graph instead is attempted.
 TORCH_API void runFusion(const int64_t key, Stack& stack);  
 
+// True if the respective devices can fuse, false otherwise
 TORCH_API bool canFuseOnCPU();
 TORCH_API bool canFuseOnGPU();
 
-// CPU fuser is disabled by default, but we still want to test it.
+// Sets whether fusion on the CPU is allowed (disabled by default due to flakiness)
 TORCH_API void overrideCanFuseOnCPU(bool value);
 
+// Treats the given graph as a fusion group and launches it on the 
+// specified device with the given inputs.
+// Returns the outputs.
 TORCH_API std::vector<at::Tensor> debugLaunchGraph(
   Graph& graph
 , int device
 , at::ArrayRef<at::Tensor> inputs);
+
+TORCH_API size_t nCompiledKernels();
 
 } // namespace jit
 } // namespace torch
