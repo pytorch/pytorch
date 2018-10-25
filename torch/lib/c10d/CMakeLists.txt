@@ -6,14 +6,6 @@ list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules_CUDA_fix)
 
-# Relies on CMAKE_INSTALL_PREFIX to be set to ../tmp_install.
-# It then finds $PREFIX/share/cmake/ATen/ATenConfig.cmake,
-# which defines ATEN_INCLUDE_DIR and ATEN_LIBRARIES.
-find_package(Caffe2 REQUIRED)
-if(NOT Caffe2_FOUND)
-  message(FATAL_ERROR "Caffe2 not found")
-endif()
-
 if(USE_CUDA)
   find_package(CUDA)
   if(CUDA_FOUND)
@@ -27,15 +19,6 @@ if(USE_CUDA)
 else()
   set(C10D_USE_CUDA false)
   message(STATUS "Building C10D without CUDA support")
-endif()
-
-find_package(Gloo REQUIRED)
-if(Gloo_FOUND)
-  message(STATUS "Gloo_LIBRARY: ${Gloo_LIBRARY}")
-  message(STATUS "Gloo_NATIVE_LIBRARY: ${Gloo_NATIVE_LIBRARY}")
-  message(STATUS "Gloo_INCLUDE_DIR: ${Gloo_INCLUDE_DIR}")
-else()
-  message(FATAL_ERROR "Gloo not found")
 endif()
 
 find_package(MPI)
@@ -93,14 +76,10 @@ if(C10D_USE_CUDA)
   list(APPEND C10D_SRCS CUDAUtils.cpp)
   set(C10D_LIBS
     caffe2_gpu
-    ${Gloo_LIBRARY}
-    ${Gloo_NATIVE_LIBRARY}
     )
 else()
   set(C10D_LIBS
     caffe2
-    ${Gloo_LIBRARY}
-    ${Gloo_NATIVE_LIBRARY}
     )
 endif()
 
@@ -115,7 +94,7 @@ if(MPI_FOUND)
   list(APPEND C10D_LIBS ${MPI_LIBRARIES})
 endif()
 
-add_library(c10d ${C10D_SRCS})
+add_library(c10d STATIC ${C10D_SRCS})
 set_property(TARGET c10d PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET c10d PROPERTY CXX_STANDARD 11)
 target_compile_options(c10d PUBLIC
@@ -127,19 +106,29 @@ target_compile_options(c10d PUBLIC
   -Wno-unknown-pragmas
   )
 
-# c10d links to Caffe2/ATen, but the targets don't add TH/THC to the include path
-target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../tmp_install/include/TH)
 
-if(C10D_USE_CUDA)
-  target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../tmp_install/include/THC)
+add_dependencies(c10d caffe2)
+
+if (USE_GLOO)
+  add_dependencies(c10d gloo)
+  target_link_libraries(c10d PUBLIC gloo)
+  if (USE_CUDA)
+    target_link_libraries(c10d PUBLIC gloo_cuda)
+  endif()
 endif()
+
+target_include_directories(c10d PUBLIC
+  ${CMAKE_SOURCE_DIR}/aten/src/TH # provides "THAllocator.h" to THCGeneral.h
+  ${CMAKE_SOURCE_DIR}/aten/src/THC # provides "THC.h" to ProcessGroupGloo.cpp
+  ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
+  ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
+  ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC # provides "THCGeneral.h" to THC.h
+  )
 
 # For <c10d/...>
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 # For torch/csrc/utils/hash.h and torch/csrc/utils/functional.h
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
-# For <gloo/...>
-target_include_directories(c10d PUBLIC ${GLOO_INCLUDE_DIR})
 
 if(C10D_USE_CUDA)
   copy_header(CUDAUtils.hpp)
@@ -172,7 +161,10 @@ endif()
 target_link_libraries(c10d PUBLIC ${C10D_LIBS})
 target_include_directories(c10d PRIVATE ${CMAKE_BINARY_DIR}/include)
 
-install(TARGETS c10d ARCHIVE DESTINATION lib)
+install(TARGETS c10d
+  RUNTIME DESTINATION bin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib)
 
 option(BUILD_EXAMPLES "Build examples" ON)
 if(BUILD_EXAMPLES)

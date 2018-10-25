@@ -24,8 +24,8 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
     if (InputSize() == 2) {
       auto& values = Input(1);
       CAFFE_ENFORCE_EQ(
-          weights.dims(),
-          values.dims(),
+          weights.sizes(),
+          values.sizes(),
           "The sampling weights tensor and the sampling values tensor must have the same dimensions.");
       mat_values = values.template data<float>();
       auto* out_value = Output(1);

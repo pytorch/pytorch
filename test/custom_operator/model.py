@@ -4,13 +4,16 @@ import sys
 
 import torch
 
-
-SHARED_LIBRARY_EXTENSIONS = {'linux': 'so', 'darwin': 'dylib', 'win32': 'dll'}
+SHARED_LIBRARY_NAMES = {
+    'linux': 'libcustom_ops.so',
+    'darwin': 'libcustom_ops.dylib',
+    'win32': 'custom_ops.dll'
+}
 
 
 def get_custom_op_library_path():
-    extension = SHARED_LIBRARY_EXTENSIONS[sys.platform]
-    path = os.path.abspath('build/libcustom_ops.{}'.format(extension))
+    path = os.path.abspath('build/{}'.format(
+        SHARED_LIBRARY_NAMES[sys.platform]))
     assert os.path.exists(path), path
     return path
 
@@ -27,8 +30,7 @@ class Model(torch.jit.ScriptModule):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Serialize a script module with custom ops"
-    )
+        description="Serialize a script module with custom ops")
     parser.add_argument("--export-script-module-to", required=True)
     options = parser.parse_args()
 

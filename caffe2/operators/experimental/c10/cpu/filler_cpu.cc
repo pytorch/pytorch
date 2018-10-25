@@ -31,7 +31,7 @@ void filler_init(
     } else {
       auto& input = *inputs[0];
       real_shape.insert(
-          real_shape.end(), input.dims().begin(), input.dims().end());
+          real_shape.end(), input.sizes().begin(), input.sizes().end());
     }
     real_shape.insert(real_shape.end(), extra_shape.begin(), extra_shape.end());
     output->Resize(real_shape);
@@ -124,7 +124,7 @@ void uniform_fill_op_cpu_impl(
     min = *inputs[1]->template data<float>();
     max = *inputs[2]->template data<float>();
     if (min > max) {
-      auto shape = output->dims().vec();
+      auto shape = output->sizes().vec();
       shape[0] = 0;
       output->Resize(shape);
       output->template mutable_data<float>();

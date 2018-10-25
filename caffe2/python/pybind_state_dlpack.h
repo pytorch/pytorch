@@ -57,7 +57,7 @@ class DLPackWrapper {
     dlTensor.ctx = tensor_context;
     dlTensor.ndim = tensor->ndim();
     dlTensor.dtype = tensor_type;
-    dlTensor.shape = const_cast<int64_t*>(&(tensor->dims()[0]));
+    dlTensor.shape = const_cast<int64_t*>(&(tensor->sizes()[0]));
     dlTensor.strides = nullptr;
     dlTensor.byte_offset = 0;
 

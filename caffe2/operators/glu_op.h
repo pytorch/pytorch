@@ -18,7 +18,7 @@ class GluOp final : public Operator<Context> {
     auto& X = Input(0);
     auto* Y = Output(0);
     vector<int64_t> Yshape;
-    Yshape.insert(Yshape.end(), X.dims().begin(), X.dims().end());
+    Yshape.insert(Yshape.end(), X.sizes().begin(), X.sizes().end());
     const int split_index = dim_ == -1 ? Yshape.size() - 1 : dim_;
     CAFFE_ENFORCE(
         Yshape[split_index] % 2 == 0,

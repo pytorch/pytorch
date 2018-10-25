@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/sparse/SparseUtils.h>
+#include <ATen/SparseTensorUtils.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
@@ -24,6 +24,8 @@
 
 namespace at { namespace native {
 
+using namespace at::sparse;
+
 SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   int64_t nnz = self._nnz();
   if (self.is_coalesced()) {
@@ -33,7 +35,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // we should keep the original tensor intact and do coalesce on a copy of the tensor
   if (nnz < 2) {
     SparseTensor dst = self.clone();
-    _get_sparse_impl(dst)->set_coalesced(true);
+    dst._coalesced_(true);
     return dst;
   }
 
@@ -45,15 +47,13 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // For indices, a simple sort + unique suffices
   // For values, we use a custom kernel for segmented reduction (can't use Thrust due to indirection).
 
-  // TODO: I'm not sure if this could ever be non-contiguous
-  LongTensor values = self._values().contiguous();
+  Tensor values = self._values();
 
-  int64_t sparseDims = self._sparseDims();
-  int64_t stride = values.stride(0);
+  int64_t sparse_dim = self.sparse_dim();
 
   // indices will be modified by Thrust, so we have to clone or use new storage
   // here.
-  LongTensor indices1D = _newFlattenedIndices(self, true);
+  LongTensor indices1D = flatten_indices(self._indices(), self.sizes(), true);
 
   LongTensor origIndices = at::empty({nnz}, self._indices().options());
   LongTensor uniqueOffsets = at::empty({nnz}, self._indices().options());
@@ -88,21 +88,26 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   newValues_size[0] = newNnz;
   Tensor newValues = at::empty(newValues_size, values.options());
 
-  dim3 grid(THCCeilDiv(newNnz, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
-  dim3 block(32, 4);
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
-      values.type(), "coalesce_sparse_cuda", [&] {
-        using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
-        apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
-          uniqueOffsets.data<int64_t>(),
-          origIndices.data<int64_t>(),
-          values.data<scalar_t>(),
-          newValues.data<scalar_t>(),
-          nnz,
-          newNnz,
-          stride
-        );
-      });
+  // If there is no values to copy, save running the kernel.
+  if (newValues.numel() > 0) {
+    values = values.contiguous();
+    int64_t stride = at::prod_intlist(values.sizes().slice(1));
+    dim3 grid(THCCeilDiv(newNnz, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
+    dim3 block(32, 4);
+    AT_DISPATCH_ALL_TYPES_AND_HALF(
+        values.type(), "coalesce_sparse_cuda", [&] {
+          using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
+          apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
+            uniqueOffsets.data<int64_t>(),
+            origIndices.data<int64_t>(),
+            values.data<scalar_t>(),
+            newValues.data<scalar_t>(),
+            nnz,
+            newNnz,
+            stride
+          );
+        });
+  }
 
 // this grid-strided version is slower but probably more flexible
   // to different sizes
@@ -122,14 +127,14 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   ////////////////////////////////////////////////////////////
   // unflatten indices if necessary
   LongTensor newIndices;
-  if (sparseDims == 1) {
+  if (sparse_dim == 1) {
     newIndices = indices1D;
   } else {
-    newIndices = at::empty({sparseDims, newNnz}, origIndices.options());
+    newIndices = at::empty({sparse_dim, newNnz}, origIndices.options());
     if (TH_INDEX_BASE != 0) {
       indices1D.add_(-1);
     }
-    for (int64_t d = sparseDims - 1; d >= 0; d--) {
+    for (int64_t d = sparse_dim - 1; d >= 0; d--) {
       // NB: Not a select, so I can preserve the outer dimension
       LongTensor indicesSlice = newIndices.narrow(0, d, 1);
       // Note for the porting guide: THCTensor_(copy) does NOT do normal
@@ -145,8 +150,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   }
   ////////////////////////////////////////////////////////////
 
-  SparseTensor dst = ::at::native::sparse_coo_tensor(newIndices, newValues, self.sizes());
-  _get_sparse_impl(dst)->set_coalesced(true);
+  SparseTensor dst = ::at::native::sparse_coo_tensor(newIndices, newValues, self.sizes())._coalesced_(true);
 
   THCudaCheck(cudaGetLastError());
   return dst;
