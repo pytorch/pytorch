@@ -122,6 +122,9 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
       case TypeKind::IntType:
         return py::cast<int64_t>(obj);
       case TypeKind::NoneType:
+        if(obj != Py_None)
+          throw py::cast_error();
+
         return {};
       case TypeKind::BoolType:
         return py::cast<bool>(obj);
@@ -158,6 +161,11 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
             return createGenericList(obj, elem_type);
         }
       }
+      case TypeKind::OptionalType:
+        // check if it's a none obj since optional accepts NoneType
+        if (obj == Py_None)
+            return {};
+        return toIValue(obj, type->expect<OptionalType>()->getElementType());
       case TypeKind::WorldType:
         AT_ERROR("World arguments should not be passed in by users");
       case TypeKind::NumberType:

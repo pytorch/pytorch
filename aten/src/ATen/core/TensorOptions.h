@@ -124,10 +124,11 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Return a copy of `TensorOptions` with `device` set to the given one.
-  /// (This overload ensures that initializer lists for Device work
-  /// correctly.)
-  C10_NODISCARD TensorOptions device(Device d) const noexcept {
-    return device(c10::make_optional(d));
+  /// (This overload ensures that variadic template c10::optional constructor
+  /// for Device work correctly.)
+  template<typename ... Args>
+  C10_NODISCARD TensorOptions device(Args&&... args) const noexcept {
+    return device(optional<Device>(c10::in_place, std::forward<Args>(args)...));
   }
 
   /// Return a copy of `TensorOptions`, but with device set to CUDA, and the
@@ -136,7 +137,7 @@ struct CAFFE2_API TensorOptions {
   /// TODO: This function encourages bad behavior (assuming CUDA is
   /// the only device that matters).  Get rid of it / rename it.
   C10_NODISCARD TensorOptions device_index(int32_t device_index) const noexcept {
-    return device({Device::Type::CUDA, device_index});
+    return device(Device::Type::CUDA, device_index);
   }
 
   /// Return a copy of `TensorOptions` with `dtype` set to the given one.
