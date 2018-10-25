@@ -404,12 +404,15 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-static inline bool isIntUsedAsIntList(
+static inline bool isIntOrFloatUsedAsList(
     const Value* value,
     const Argument& arg) {
-  // Look for int[N]
-  return value->type()->kind() == TypeKind::IntType &&
-         *arg.type() == *ListType::ofInts() && arg.N();
+  // Look for int[N] or float[N]
+  auto v_type = value->type();
+  if (v_type != FloatType::get() && v_type != IntType::get())
+    return false;
+  auto list_type = arg.type()->cast<ListType>();
+  return (list_type && list_type->getElementType() == v_type && arg.N());
 }
 
 inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
@@ -441,12 +444,12 @@ Value* tryMatchArgument(
     TypeEnv & type_env) {
   Value* value = named_value.value(graph);
 
-  // some functions that take lists of integers for fixed size arrays
-  // also allow single ints to be passed in their place.
-  // the single int is then repeated to the length of the list
-  if (isIntUsedAsIntList(value, arg)) {
+  // some functions that take lists of integers or floats for fixed size arrays
+  // also allow single ints/floats to be passed in their place.
+  // the single int/float is then repeated to the length of the list
+  if (isIntOrFloatUsedAsList(value, arg)) {
     std::vector<Value*> repeated(*arg.N(), value);
-    value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
+    value = graph.insertNode(graph.createList(value->type(), repeated))->output();
   }
 
   TypePtr concrete_type;
@@ -2076,23 +2079,58 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
   return map;
 }
 
-TypePtr parseTypeFromExpr(Expr expr);
 
-const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscript_to_type_fns() {
-  static std::unordered_map<std::string, std::function<TypePtr(Subscript)>> map = {
-    {"Tuple", [](Subscript subscript) -> TypePtr {
+// TypePtr, and an optional statically known length for list types
+// the length is not (currently) part of the list type
+using TypeAndOptLen = std::pair<TypePtr, c10::optional<int32_t>>;
+TypeAndOptLen parseTypeFromExpr(Expr expr);
+
+
+int32_t getFixedLengthListSubscript(Subscript subscript) {
+  if (subscript.subscript_exprs().size() != 1) {
+    throw ErrorReport(subscript) << " expected exactly one element type but found " << subscript.subscript_exprs().size();
+  }
+  auto expr = *subscript.subscript_exprs().begin();
+  if (expr.kind () != TK_CONST) {
+    throw ErrorReport(expr) << "subscript of fixed length list must be constant integer";
+  }
+  auto constant = Const(expr);
+  if (!constant.isIntegral()) {
+    throw ErrorReport(expr) << "subscript of fixed length list must be constant integer";
+  }
+  return constant.asIntegral();
+}
+
+
+//since the optional length of a list is a member of Argument, and not a part of
+//the type information, a fixed length list cannot appear as a nested type
+//e.g. List[int[3]], because list is the arg
+const std::unordered_map<std::string, std::function<TypeAndOptLen(Subscript)>> &subscript_to_type_fns() {
+  static std::unordered_map<std::string, std::function<TypeAndOptLen(Subscript)>> map = {
+    {"Tuple", [](Subscript subscript) -> TypeAndOptLen {
       std::vector<TypePtr> subscript_expr_types;
       for (auto expr : subscript.subscript_exprs()) {
-        subscript_expr_types.push_back(parseTypeFromExpr(expr));
+        auto type_pair = parseTypeFromExpr(expr);
+        if (type_pair.second)
+          throw ErrorReport(expr) << "fixed length lists cannot appear as a nested type";
+        subscript_expr_types.push_back(type_pair.first);
       }
-      return TupleType::create(subscript_expr_types);
+      return TypeAndOptLen(TupleType::create(subscript_expr_types), c10::nullopt);
     }},
-    {"List", [](Subscript subscript) -> TypePtr {
+    {"List", [](Subscript subscript) -> TypeAndOptLen {
       if (subscript.subscript_exprs().size() != 1) {
         throw ErrorReport(subscript) << " expected exactly one element type but found " << subscript.subscript_exprs().size();
       }
-      auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
-      return ListType::create(elem_type);
+      auto type_pair = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+      if (type_pair.second)
+        throw ErrorReport(*subscript.subscript_exprs().begin()) << "fixed length lists cannot appear as a nested type";
+      return TypeAndOptLen(ListType::create(type_pair.first), c10::nullopt);
+    }},
+    {"int", [](Subscript subscript) -> TypeAndOptLen {
+      return TypeAndOptLen(ListType::ofInts(), getFixedLengthListSubscript(subscript));
+    }},
+    {"float", [](Subscript subscript) -> TypeAndOptLen {
+      return TypeAndOptLen(ListType::ofFloats(), getFixedLengthListSubscript(subscript));
     }},
     {"Optional", [](Subscript subscript) -> TypePtr {
       if (subscript.subscript_exprs().size() != 1) {
@@ -2105,12 +2143,12 @@ const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscr
   return map;
 }
 
-TypePtr parseTypeFromExpr(Expr expr) {
+TypeAndOptLen parseTypeFromExpr(Expr expr) {
   if (expr.kind() == TK_VAR) {
     auto ident = Var(expr).name();
     auto itr = ident_to_type_lut().find(ident.name());
     if (itr != ident_to_type_lut().end()) {
-      return itr->second;
+      return TypeAndOptLen(itr->second, c10::nullopt);
     }
     throw ErrorReport(expr.range()) << "Unknown type name " << ident.name();
   } else if (expr.kind() == TK_SUBSCRIPT) {
@@ -2127,7 +2165,7 @@ TypePtr parseTypeFromExpr(Expr expr) {
     auto select = Select(expr);
     if (select.value().kind() == TK_VAR && Var(select.value()).name().name() == "torch"
         && select.selector().name() == "Tensor") {
-      return ident_to_type_lut().at("Tensor");
+      return TypeAndOptLen(ident_to_type_lut().at("Tensor"), c10::nullopt);
     }
   }
   throw ErrorReport(expr.range()) << "Expression of type " << kindToString(expr.kind())
@@ -2139,10 +2177,11 @@ std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
   size_t i = is_method ? 1 : 0;
   for (; i < decl.params().size(); ++i) {
     auto decl_arg = decl.params()[i];
+    auto type_optlen = parseTypeFromExpr(decl_arg.type());
     auto arg = Argument(
         decl_arg.ident().name(),
-        parseTypeFromExpr(decl_arg.type()),
-        /*N =*/c10::nullopt,
+        type_optlen.first,
+        type_optlen.second,
         /*default_value =*/c10::nullopt,
         /*kwarg_only =*/false);
     retval.push_back(arg);
@@ -2152,7 +2191,10 @@ std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
 
 std::vector<Argument> parseReturnsFromDecl(Decl decl) {
   JIT_ASSERT(decl.return_type().present());
-  auto parsed_type = parseTypeFromExpr(decl.return_type().get());
+  auto type_optlen = parseTypeFromExpr(decl.return_type().get());
+  if (type_optlen.second)
+    throw ErrorReport(decl.return_type().range()) << "fixed length lists cannot appear as a return type";
+  auto parsed_type = type_optlen.first;
   if (auto tuple_type = parsed_type->cast<TupleType>()) {
     // Flatten a single return type of type Tuple into its constituent types
     std::vector<Argument> retval;

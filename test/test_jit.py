@@ -5256,6 +5256,52 @@ a")
         tensor_unifying.graph.propagate_shapes((a, b, c), False)
         self.assertExpected(canonical(tensor_unifying.graph))
 
+    def test_type_annotations_repeated_list(self):
+        @torch.jit.script
+        def float_fn(x, y):
+            # type: (float, float[3]) -> List[float]
+            return y
+        self.assertEqual(float_fn(2.0, 1.0), float_fn(2.0, [1.0, 1.0, 1.0]))
+        self.assertEqual(float_fn(2.0, 1.0), float_fn(2.0, (1.0, 1.0, 1.0)))
+
+        @torch.jit.script
+        def float_fn_call():
+            print(float_fn(1.0, 1.0))
+            print(float_fn(1.0, (1.0, 1.0, 1.0)))
+
+        @torch.jit.script
+        def int_fn(x):
+            # type: (int[3]) -> List[int]
+            return x
+        self.assertEqual(int_fn(1), int_fn([1, 1, 1]))
+        self.assertEqual(int_fn(1), int_fn((1, 1, 1)))
+
+        @torch.jit.script
+        def int_fn_call():
+            print(int_fn(1))
+            print(int_fn((1, 1, 1)))
+
+        with self.assertRaisesRegex(RuntimeError, "Input fixed length list has length 2 expected 3"):
+            int_fn([2, 2])
+
+        with self.assertRaisesRegex(RuntimeError, "subscript of fixed length list must be constant integer"):
+            @torch.jit.script
+            def fn(x):
+                # type: (int[x]) -> List[int]
+                return x
+
+        with self.assertRaisesRegex(RuntimeError, "fixed length lists cannot appear as a nested type"):
+            @torch.jit.script
+            def nested(x, y):
+                # type: (int, Tuple[int, int[2]]) -> List[int]
+                return x
+
+        with self.assertRaisesRegex(RuntimeError, "fixed length lists cannot appear as a return type"):
+            @torch.jit.script
+            def return_fixed(x):
+                # type: (int[3]) -> int[3]
+                return x
+
     def test_type_annotations(self):
         def fn(x, y):
             # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
