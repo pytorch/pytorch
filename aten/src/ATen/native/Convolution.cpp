@@ -4,7 +4,6 @@
 #include "ATen/Config.h"
 
 static const int MIOPEN_DIM_MAX = 4;
-static const bool MIOPEN_ENABLED = getenv("DISABLE_MIOPEN") == NULL;
 
 namespace at { namespace native {
 
@@ -128,7 +127,6 @@ auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
          && detail::getCUDAHooks().compiledWithMIOpen()
          && input.type().is_cuda()
          && input.dim() <= MIOPEN_DIM_MAX
-         && MIOPEN_ENABLED
          && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
          && !transposed
          && (dilation.at(0) == dilation.at(1)) //MIOpen currently does not support assymetric dilation values.
