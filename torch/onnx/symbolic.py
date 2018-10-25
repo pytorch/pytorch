@@ -1316,3 +1316,9 @@ def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total
     if batch_first:
         data = g.op('Transpose', data, perm_i=[1, 0, 2])
     return data, lengths
+
+
+def randn(g, *shapes):
+    shapes_list = list(shapes)
+    shape = _maybe_get_const(shapes_list[0], "is")
+    return g.op('RandomNormal', shape_i=shape)
