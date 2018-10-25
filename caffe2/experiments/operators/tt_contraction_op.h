@@ -111,8 +111,8 @@ class TTContractionGradientOp final : public Operator<Context> {
 
     int64_t dB_size = D_ * K_ * N_;
 
-    dA->Resize(A.dims());
-    dB->Resize(B.dims());
+    dA->Resize(A.sizes());
+    dB->Resize(B.sizes());
 
     int64_t B_stride = K_ * N_;
     int64_t G_stride = M_ * N_;
