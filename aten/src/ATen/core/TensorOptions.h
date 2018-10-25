@@ -161,7 +161,7 @@ struct CAFFE2_API TensorOptions {
   template <typename T>
   TensorOptions& dtype() {
     // TODO: Fix after @roy-li's fix
-    dtype_ = CTypeToScalarType<T>::to();
+    dtype_ = caffe2::TypeMeta::Make<T>();
     has_dtype_ = true;
     return *this;
   }
