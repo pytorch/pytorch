@@ -134,7 +134,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
 
         cat >/home/circleci/project/ci_build_script.sh <<EOL
         # =================== The following code will be executed inside Docker container ===================
-        set -ex
+        set -x
 
         # Canary Test 1: Timeout on TestNN
         if [[ "${CIRCLE_JOB}" == *test* ]] && [[ "${CIRCLE_JOB}" != *cuda* ]]; then
