@@ -173,12 +173,12 @@ Tensor irfft(const Tensor& self, const int64_t signal_ndim, const bool normalize
 }
 
 
-Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
-            const int64_t win_length, const Tensor& window,
+Tensor stft(const Tensor& self, const int64_t n_fft, optional<int64_t> hop_length,
+            optional<int64_t> win_length, const Tensor& window,
             const bool normalized, const bool onesided) {
   #define REPR(SS) \
     SS << "stft(" << self.type() << self.sizes() << ", n_fft=" << n_fft \
-       << ", hop_length=" << hop_length << ", win_length=" << win_length \
+       << ", hop_length=" << *hop_length << ", win_length=" << *win_length \
        << ", window="; \
     if (window.defined()) { \
       SS << window.type() << "{" << window.sizes() << "}"; \
@@ -186,6 +186,10 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
       SS << "None"; \
     } \
     SS << ", normalized=" << normalized << ", onesided=" << onesided << ")"
+
+  // default_init hop_length and win_length
+  if(!hop_length) hop_length = (n_fft >> 2);
+  if(!win_length) win_length = n_fft;
 
   if (!at::isFloatingType(self.type().scalarType()) || self.dim() > 2 || self.dim() < 1) {
     std::ostringstream ss;
@@ -201,24 +205,24 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
   if (n_fft <= 0 || n_fft > len) {
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < n_fft < " << len
-             << ", but got n_fft=" << win_length;
+             << ", but got n_fft=" << *win_length;
     AT_ERROR(ss.str());
   }
-  if (hop_length <= 0) {
+  if (*hop_length <= 0) {
     std::ostringstream ss;
-    REPR(ss) << ": expected hop_length > 0, but got hop_length=" << hop_length;
+    REPR(ss) << ": expected hop_length > 0, but got hop_length=" << *hop_length;
     AT_ERROR(ss.str());
   }
-  if (win_length <= 0 || win_length > n_fft) {
+  if (*win_length <= 0 || *win_length > n_fft) {
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < win_length <= n_fft, but got win_length="
-             << win_length;
+             << *win_length;
     AT_ERROR(ss.str());
   }
   if (window.defined() && (window.dim() != 1 || window.size(0) != win_length)) {
     std::ostringstream ss;
     REPR(ss) << ": expected a 1D window tensor of size equal to win_length="
-             << win_length << ", but got window with size " << window.sizes();
+             << *win_length << ", but got window with size " << window.sizes();
     AT_ERROR(ss.str());
   }
   #undef REPR
@@ -226,18 +230,18 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
   if (win_length < n_fft) {
     // pad center
     window_ = at::zeros({n_fft}, self.options());
-    auto left = (n_fft - win_length) / 2;
+    auto left = (n_fft - *win_length) / 2;
     if (window.defined()) {
-      window_.narrow(0, left, win_length).copy_(window);
+      window_.narrow(0, left, *win_length).copy_(window);
     } else {
-      window_.narrow(0, left, win_length).fill_(1);
+      window_.narrow(0, left, *win_length).fill_(1);
     }
   }
-  int64_t n_frames = 1 + (len - n_fft) / hop_length;
+  int64_t n_frames = 1 + (len - n_fft) / *hop_length;
   // time2col
   input = input.as_strided(
     {batch, n_frames, n_fft},
-    {input.stride(0), hop_length * input.stride(1), input.stride(1)}
+    {input.stride(0), *hop_length * input.stride(1), input.stride(1)}
   );
   if (window_.defined()) {
     input = input.mul(window_);

@@ -47,6 +47,13 @@ void addInputs(Node *n, const char * name, int64_t value) {
     detail::genericAddInput(n, value);
   }
 }
+void addInputs(Node *n, const char * name, c10::optional<int64_t> value)     {
+  if(value) {
+    detail::genericAddInput(n, *value);
+  } else {
+    detail::genericAddInput(n, IValue());
+  }
+}
 void addInputs(Node *n, const char * name, bool value)               { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, double value)             { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, const at::Scalar& value)  { detail::genericAddInput(n, value); }
@@ -80,6 +87,15 @@ void addInputs(Node *n, const char * name, at::Layout value) {
 void addInputs(Node *n, const char * name, at::ScalarType value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }
+
+void addInputs(Node *n, const char * name, c10::optional<at::ScalarType> value) {
+  if(value) {
+    detail::genericAddInput(n, static_cast<int64_t>(*value));
+  } else {
+    detail::genericAddInput(n, IValue());
+  }
+}
+
 
 void addInputs(Node *n, const char * name, at::TensorList value) {
   Graph *g = n->owningGraph();

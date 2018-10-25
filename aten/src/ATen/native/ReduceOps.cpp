@@ -414,18 +414,19 @@ Tensor& _norm_out_cpu(Tensor& result, const Tensor& self, Scalar p, int64_t dim_
   }
 }
 
-Tensor& norm_out(Tensor &result, const Tensor &self, Scalar p, int64_t dim, bool keepdim) {
+Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> p, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "norm only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "norm only supports floating-point dtypes");
+  if (!p) p = 2;
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
     return result;
   } else {
     if (self.is_cuda()) {
-      return at::_th_norm_out(result, self, p, dim, keepdim);
+      return at::_th_norm_out(result, self, *p, dim, keepdim);
     } else {
-      return _norm_out_cpu(result, self, p, dim, keepdim);
+      return _norm_out_cpu(result, self, *p, dim, keepdim);
     }
   }
 }
@@ -451,7 +452,7 @@ Tensor _norm(const Tensor &self, Scalar p) {
   }
 }
 
-Tensor norm(const Tensor& self, Scalar p, int64_t dim, bool keepdim) {
+Tensor norm(const Tensor& self, optional<Scalar> p, int64_t dim, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::norm_out(result, self, p, dim, keepdim);
 }

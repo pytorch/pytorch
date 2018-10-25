@@ -81,8 +81,8 @@ int64_t _safe_size(IntList sizes, int64_t dim) {
   return sizes.size() != 0 ? sizes[dim] : 1;
 }
 
-Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_, const Tensor & norm) {
-  double p = p_.toDouble();
+Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Scalar> & p_, const Tensor & norm) {
+  double p = p_->toDouble();
   Tensor self_scaled;
   Tensor scale_v;
   if (p == 0.0) {
@@ -107,7 +107,7 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_
   return self_scaled * scale_v;
 }
 
-Tensor norm_backward(Tensor grad, const Tensor & self, const Scalar & p_, Tensor norm, int64_t dim, bool keepdim) {
+Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & p_, Tensor norm, int64_t dim, bool keepdim) {
   if (!keepdim && self.dim() != 0) {
     grad = grad.unsqueeze(dim);
     norm = norm.unsqueeze(dim);
@@ -1344,7 +1344,7 @@ static inline int64_t _min_storage_size(IntList sizes, IntList strides, int64_t 
 }
 
 // See NOTE [ as_strided Backward and layout-aware/agnostic autograd ] for explanation
-Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, int64_t storage_offset) {
+Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, optional<int64_t> storage_offset) {
   // For output geometry,
   //   check for size 0 dimensions,
   //   skip size 1 dimensions,
@@ -1409,9 +1409,9 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   //       more sensible to raise here.
 
   // Step (1): create underlying tensor as "storage"
-  auto shared_offset = std::min(input_geometry.storage_offset(), storage_offset);
+  auto shared_offset = std::min(input_geometry.storage_offset(), *storage_offset);
   auto inp_effective_offset = input_geometry.storage_offset() - shared_offset;
-  auto out_effective_offset = storage_offset - shared_offset;
+  auto out_effective_offset = *storage_offset - shared_offset;
   auto base_size = std::max(
     _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
     _min_storage_size(out_sizes_, out_strides_, out_effective_offset)
