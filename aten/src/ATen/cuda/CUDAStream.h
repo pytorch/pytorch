@@ -7,7 +7,6 @@
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <c10/util/Exception.h>
-#include <c10/Stream.h>
 
 /*
 * A CUDAStream interface. See CUDAStream.cpp for implementation details.
@@ -60,7 +59,7 @@ struct CUDAEvent;
 
 namespace detail {
 
-// Pointer-based API (for internal use, backwards compatibility with C-based API)
+// Pointer-based API (for internal use)
 AT_CUDA_API CUDAStreamInternals* CUDAStream_getDefaultStream(int64_t device = -1);
 
 AT_CUDA_API CUDAStreamInternals* CUDAStream_getStreamFromPool(
@@ -81,22 +80,32 @@ AT_CUDA_API int64_t CUDAStream_device(CUDAStreamInternals*);
 // Allows use as a cudaStream_t, copying, moving, and metadata access.
 struct AT_CUDA_API CUDAStream {
 
-  explicit CUDAStream(Stream stream) : stream_(stream) {
-    AT_ASSERT(stream_.device_type() == DeviceType::CUDA);
+  // Constructors
+  /* implicit */ CUDAStream(CUDAStreamInternals* internals_in)
+    : internals_{internals_in} {
+    AT_ASSERT(internals_in);
   }
 
+  // Returns true if the CUDAStream is not null.
+  explicit operator bool() const noexcept { return internals_ != nullptr; }
+
   // Implicit conversion to cudaStream_t
-  operator cudaStream_t() const { return stream(); }
+  operator cudaStream_t() const { return detail::CUDAStream_stream(internals_); }
+
+  // Less than operator (to allow use in sets)
+  friend bool operator<(const CUDAStream& left, const CUDAStream& right) {
+    return left.internals_ < right.internals_;
+  }
 
   // Getters
-  int64_t device_index() const { return stream_.device_index(); }
-  cudaStream_t stream() const { return detail::CUDAStream_stream(internals()); }
-  CUDAStreamInternals* internals() const;
+  int64_t device() const { return detail::CUDAStream_device(internals_); }
+  cudaStream_t stream() const { return detail::CUDAStream_stream(internals_); }
+  CUDAStreamInternals* internals() const { return internals_; }
 
   void synchronize_with(const CUDAEvent& event) const;
 
 private:
-  Stream stream_;
+  CUDAStreamInternals* internals_ = nullptr;
 };
 
 } // namespace cuda

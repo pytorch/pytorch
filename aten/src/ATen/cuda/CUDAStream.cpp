@@ -22,7 +22,6 @@ struct CUDAStreamInternals {
   }
 
   int64_t device = -1;
-  int32_t stream_id = -1;
   cudaStream_t stream = nullptr;
 };
 
@@ -33,8 +32,7 @@ namespace detail {
 
 // Global stream state and constants
 static int64_t num_gpus = -1;
-static constexpr int kStreamsPerPoolBits = 5;
-static constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
+static constexpr int kStreamsPerPool = 32;
 static constexpr unsigned int kDefaultFlags = cudaStreamNonBlocking;
 
 // Note: stream priority is not supported by HIP
@@ -61,78 +59,6 @@ static std::deque<std::atomic<uint32_t>> low_priority_counters;
 static std::deque<std::atomic<uint32_t>> high_priority_counters;
 static std::vector<std::array<CUDAStreamInternals, kStreamsPerPool>> low_priority_streams;
 static std::vector<std::array<CUDAStreamInternals, kStreamsPerPool>> high_priority_streams;
-
-// Note [StreamId assignment]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~
-// How do we assign stream IDs?
-//
-// -- 2 bits --  -- 5 bits -----
-// StreamIdType  stream id index
-//  00 = default stream
-//  01 = low priority stream
-//  10 = high priority stream
-//
-// This is not really for efficiency; it's just easier to write the code
-// to extract the index if we do this with bitmasks :)
-//
-// This is entirely an internal implementation detail, we reserve the right to
-// renumber streams however we like.
-
-enum class StreamIdType : uint8_t {
-  DEFAULT = 0x0,
-  LOW     = 0x1,
-  HIGH    = 0x2,
-}
-
-// Promotion makes me nervous...
-
-static inline StreamIdType streamIdType(StreamId s) {
-  return static_cast<StreamIdType>(s >> kStreamsPerPoolBits);
-}
-
-static inline size_t streamIdIndex(StreamId s) {
-  return static_cast<size_t>(s & ((1 << kStreamsPerPoolBits) - 1));
-}
-
-StreamId makeStreamId(StreamIdType st, size_t si) {
-  return (static_cast<StreamId>(st) << kStreamPerPoolBits) | static_cast<StreamId>(si);
-}
-
-template <typename T>
-static bool pointer_within(const T* ptr, ArrayRef arr) {
-  return std::greater_equal(ptr, arr.data()) && std::less(ptr, arr.data() + arr.size());
-}
-
-static StreamId CUDAStream_getStreamId(const CUDAStreamInternals* ptr) {
-  // Hypothetically, we could store the stream ID in the stream.  But that
-  // introduces a degree of freedom which could lead to bugs (where we
-  // misnumber streams in the pool, or overwrite the number).  Better
-  // to just compute it based on the metric that actually matters,
-  // which is how we map IDs back into the vectors.
-
-  DeviceIndex device_index = ptr->device;
-
-  // Check if it's the default stream
-  if (ptr == &default_streams[device_index]) {
-    return makeStreamId(StreamIdType::DEFAULT, 0);
-  }
-
-  // Check if it's a low priority stream
-  // NB: Because ptr may not necessarily lie within the array, we must use
-  // std::less and similar templates to avoid UB that arises when
-  // doing an operator< comparison.
-  if (pointer_within(ptr, low_priority_streams[device_index])) {
-    return makeStreamId(StreamIdType::LOW, ptr - low_priority_streams[device_index].data());
-  }
-
-  // Check if it's a high priority stream
-  if (pointer_within(ptr, high_priority_streams[device_index])) {
-    return makeStreamId(StreamIdType::HIGH, ptr - high_priority_streams[device_index].data());
-  }
-
-  AT_ASSERTM(0, "Could not compute stream ID for ", ptr, " on device ", device_index,
-                " (something has gone horribly wrong!)");
-}
 
 // Thread-local current streams
 static thread_local CUDAStreamInternals** current_streams = nullptr;
@@ -291,25 +217,6 @@ void CUDAStream_synchronize_with(CUDAStreamInternals* ptr, const CUDAEvent& even
 
 void CUDAStream::synchronize_with(const CUDAEvent& event) const {
     detail::CUDAStream_synchronize_with(internals_, event);
-}
-
-// See Note [StreamId assignment]
-CUDAStreamInternals* CUDAStream::internals() const {
-  DeviceIndex device_index = stream_.device_index();
-  StreamIdType st = streamIdType(stream_);
-  size_t si = streamIdIndex(stream_);
-  switch (st) {
-    case StreamIdType::DEFAULT:
-      AT_ASSERTM(si == 0, "Unrecognized StreamId ", stream_,
-                          " (I think this should be the default stream, but I got a non-zero index ", si, ")");
-      return default_streams[device_index];
-    case StreamIdType::LOW:
-      return detail::low_priority_streams[device_index][si];
-    case StreamIdType::HIGH
-      return detail::high_priority_streams[device_index][si];
-    default:
-      AT_ASSERTM(0, "Unrecognized StreamId ", stream_, " (I didn't recognize the stream type, ", st, ")");
-  }
 }
 
 } // namespace cuda
