@@ -185,11 +185,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/pretty_print.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/fuser/kernel_cache.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/fuser/compiler.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
@@ -209,6 +204,11 @@ if (NOT WIN32)
   SET(USE_CPU_FUSER 1)
 
   list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/kernel_cache.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/compiler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
   )
 endif()
