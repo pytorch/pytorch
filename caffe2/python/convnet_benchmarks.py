@@ -66,6 +66,33 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import data_parallel_model as dpm
 from caffe2.python.models import resnet
 
+def add_parameter_update_ops_resnet(model, base_learning_rate, weight_decay):
+        brew.add_weight_decay(model, weight_decay)
+        iter = brew.iter(model, "iter")
+        lr = model.net.LearningRate([iter],
+                                    "lr",
+                                    base_lr=base_learning_rate,
+                                    policy="fixed",
+                                    gamma=0.1)
+        for param in model.GetParams():
+            param_grad = model.param_to_grad[param]
+            param_momentum = model.param_init_net.ConstantFill(
+                [param], param + '_momentum', value=0.0 )
+
+            model.net.MomentumSGDUpdate(
+                [param_grad, param_momentum, lr, param],
+                [param_grad, param_momentum, param],
+                momentum=0.9,
+                nesterov=1)
+
+def optimize_gradient_memory_resnet(model, loss):
+    model.net._net = memonger.share_grad_blobs(
+        model.net,
+        loss,
+        set(model.param_to_grad.values()),
+        namescope="",
+        share_activations=False)
+
 def MLP(order, cudnn_ws, model_path=""):
     model = model_helper.ModelHelper(name="MLP")
     d = 256
@@ -594,45 +621,60 @@ def Resnet50(args):
         brew.accuracy(model, [softmax, "label"], prefix + "_accuracy")
         return [loss]
 
-    def add_parameter_update_ops(model):
-        brew.add_weight_decay(model, weight_decay)
-        iter = brew.iter(model, "iter")
-        lr = model.net.LearningRate([iter],
-                                    "lr",
-                                    base_lr=base_learning_rate,
-                                    policy="fixed",
-                                    gamma=0.1)
-        for param in model.GetParams():
-            param_grad = model.param_to_grad[param]
-            param_momentum = model.param_init_net.ConstantFill(
-                [param], param + '_momentum', value=0.0 )
-
-            model.net.MomentumSGDUpdate(
-                [param_grad, param_momentum, lr, param],
-                [param_grad, param_momentum, param],
-                momentum=0.9,
-                nesterov=1)
-
-    def optimize_gradient_memory(model, loss):
-        model.net._net = memonger.share_grad_blobs(
-            model.net,
-            loss,
-            set(model.param_to_grad.values()),
-            namescope="",
-            share_activations=False)
-
-
     with core.NameScope(""):
         with core.DeviceScope(device_opt):
             losses = create_resnet50_model_ops(train_model)
             if not args.forward_only:
                 blobs_to_gradients = train_model.AddGradientOperators(losses)
-                add_parameter_update_ops(train_model)
+                add_parameter_update_ops_resnet(train_model, base_learning_rate, weight_decay)
         if not args.forward_only:
-            optimize_gradient_memory(train_model, [blobs_to_gradients[losses[0]]])
+            optimize_gradient_memory_resnet(train_model, [blobs_to_gradients[losses[0]]])
 
     return train_model, 224
 
+def Resnext101(args):
+    gpus = [0]
+    device_opt = core.DeviceOption(caffe2_pb2.HIP)
+    device_opt.device_id = gpus[0]
+    num_labels = 1000
+    base_learning_rate = 0.0004 * args.batch_size
+    num_layers = 101
+    num_groups = 32
+    num_width_per_group = 4
+    # Weight decay (L2 regularization)
+    weight_decay = 1e-4
+
+    ##################
+    # Define the Model
+    ##################
+    train_model = model_helper.ModelHelper(name="resnext101_train")
+
+    def create_resnext_model_ops(model, loss_scale=1.0):
+        # residual network
+        [softmax, loss] = resnet.create_resnext(model,
+                                                 "data",
+                                                 num_input_channels=3,
+                                                 num_labels=num_labels,
+                                                 label="label",
+                                                 num_layers=num_layers,
+                                                 num_groups=num_groups,
+                                                 num_width_per_group=num_width_per_group,
+                                                 no_bias=True, )
+        prefix = model.net.Proto().name
+        loss = model.net.Scale(loss, prefix + "_loss", scale=loss_scale)
+        brew.accuracy(model, [softmax, "label"], prefix + "_accuracy")
+        return [loss]
+
+    with core.NameScope(""):
+        with core.DeviceScope(device_opt):
+            losses = create_resnext_model_ops(train_model)
+            if not args.forward_only:
+                blobs_to_gradients = train_model.AddGradientOperators(losses)
+                add_parameter_update_ops_resnet(train_model, base_learning_rate, weight_decay)
+        if not args.forward_only:
+            optimize_gradient_memory_resnet(train_model, [blobs_to_gradients[losses[0]]])
+
+    return train_model, 227
 
 def Inception_v2(order, cudnn_ws, model_path=""):
     if model_path == "":
@@ -683,7 +725,7 @@ def AddParameterUpdate(model):
 
 
 def Benchmark(model_gen, arg):
-    if arg.model == 'Resnet50':
+    if arg.model == 'Resnet50' or arg.model == "Resnext101":
         model, input_size = model_gen(arg)
     else:
         model, input_size = model_gen(arg.order, arg.cudnn_ws, arg.model_path)
@@ -718,7 +760,7 @@ def Benchmark(model_gen, arg):
         print('{}: running forward only.'.format(arg.model))
     else:
         print('{}: running forward-backward.'.format(arg.model))
-        if not arg.model == "Resnet50":
+        if not (arg.model == "Resnet50" or arg.model == "Resnext101"):
             model.AddGradientOperators(["loss"])
             AddParameterUpdate(model)
         if arg.order == 'NHWC':
@@ -837,6 +879,7 @@ if __name__ == '__main__':
             'Inception': Inception,
             'MLP': MLP,
             'Resnet50': Resnet50,
-            'Inception_v2':Inception_v2
+            'Inception_v2': Inception_v2,
+            'Resnext101': Resnext101,
         }
         Benchmark(model_map[args.model], args)
