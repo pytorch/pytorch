@@ -7543,6 +7543,8 @@ a")
             a = 3
             if bool(cond):
                 raise ArbitraryError(a, "hi")
+                if False:
+                    raise ArbitraryError
             return a
 
         foo(torch.tensor(0))
