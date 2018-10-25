@@ -21,6 +21,8 @@ namespace caffe2 {
 
 namespace {
 
+constexpr int kWaitBeforeForceAbortMs = 10 * 60 * 1000; // ms
+
 struct NetDefInfo {
   const NetDef* netDef;
   // in order to keep the "override existing nets" on the top-level workflow,
@@ -404,6 +406,33 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
         std::atomic<int> next_substep{0};
         std::mutex exception_mutex;
         string first_exception;
+        bool exception_occured{false};
+
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+        std::exception_ptr first_ex_ptr;
+        std::thread exception_handler;
+        std::condition_variable exception_cv;
+        std::mutex exception_cv_mutex;
+        bool all_threads_done = false;
+        auto wait_for_all_threads = [&]() {
+          CAFFE_ENFORCE(
+              exception_occured,
+              "Exception monitoring thread should only be active if an "
+              "exception occurs!");
+          std::unique_lock<std::mutex> lock(exception_cv_mutex);
+          exception_cv.wait_for(
+              lock, std::chrono::milliseconds(kWaitBeforeForceAbortMs), [&] {
+                return all_threads_done;
+              });
+          if (!all_threads_done) {
+            LOG(FATAL) << "One of the workers failed, and plan is potentially "
+                       << "stuck:\n"
+                       << first_exception;
+            std::terminate();
+          }
+        };
+#endif // CAFFE2_USE_EXCEPTION_PTR
+
         auto worker = [&]() {
           auto num_substeps = compiledStep->recurringSubsteps.size();
           int substep_id = next_substep++ % num_substeps;
@@ -417,11 +446,22 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
             }
           } catch (const std::exception& ex) {
             std::lock_guard<std::mutex> guard(exception_mutex);
-            if (!first_exception.size()) {
+            if (!exception_occured) {
+              // This is the first exception we see in the threads launched in
+              // this scope
               first_exception = c10::GetExceptionString(ex);
               LOG(ERROR) << "Parallel worker exception:\n" << first_exception;
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+              first_ex_ptr = std::current_exception();
+              exception_handler = std::thread(wait_for_all_threads);
+#endif // CAFFE2_USE_EXCEPTION_PTR
+            } else {
+              LOG(ERROR) << "Yet another parallel worker exception:\n"
+                         << c10::GetExceptionString(ex);
             }
+            exception_occured = true;
             compiledStep->gotFailure = true;
+#ifndef CAFFE2_USE_EXCEPTION_PTR
             if (!FLAGS_caffe2_handle_executor_threads_exceptions) {
               // In complex plans other threads might get stuck if another
               // one fails. So we let exception to go out of thread which
@@ -429,6 +469,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
               // in order to use Python debugger after a failure
               throw;
             }
+#endif // CAFFE2_USE_EXCEPTION_PTR
           }
         };
 
@@ -443,9 +484,30 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
         for (auto& thread : threads) {
           thread.join();
         }
+
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+        if (exception_occured) {
+          CAFFE_ENFORCE(first_ex_ptr && compiledStep->gotFailure);
+          {
+            std::lock_guard<std::mutex> lock(exception_cv_mutex);
+            // Since we have an exception from a thread launched from this
+            // scope, we should have launched an exception handler thread that
+            // monitors termination of all of the threads here. Let's notify
+            // that thread that we are done.
+            all_threads_done = true;
+          }
+          exception_cv.notify_one();
+          exception_handler.join();
+          // Now, bubble up the exception
+          std::rethrow_exception(first_ex_ptr);
+        }
+#endif // CAFFE2_USE_EXCEPTION_PTR
+
         if (compiledStep->gotFailure) {
           LOG(ERROR) << "One of the workers failed.";
-          if (first_exception.size()) {
+          // If the exception occured in one of the threads in the current
+          // scope and we are not dead yet, throw the exception again.
+          if (exception_occured) {
             CAFFE_THROW(
                 "One of the workers died with an unhandled exception ",
                 first_exception);
