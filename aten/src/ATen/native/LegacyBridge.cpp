@@ -26,7 +26,7 @@ Tensor clone(const Tensor& self) {
   if (_has_native(self)) {
     return native_clone(self);
   } else {
-    return th_clone(self);
+    return _th_clone(self);
   }
 }
 
@@ -34,7 +34,7 @@ Tensor& resize_as_(Tensor& self, const Tensor& the_template) {
   if (_has_native(self)) {
     return native_resize_as_(self, the_template);
   } else {
-    return th_resize_as_(self, the_template);
+    return _th_resize_as_(self, the_template);
   }
 }
 
@@ -42,7 +42,7 @@ Tensor& pow_out(Tensor& result, const Tensor& self, Scalar exponent) {
   if (_has_native(self)) {
     return native_pow_out(result, self, exponent);
   } else {
-    return th_pow_out(result, self, exponent);
+    return _th_pow_out(result, self, exponent);
   }
 }
 
@@ -50,7 +50,7 @@ Tensor pow(const Tensor& self, Scalar exponent) {
   if (_has_native(self)) {
     return native_pow(self, exponent);
   } else {
-    return th_pow(self, exponent);
+    return _th_pow(self, exponent);
   }
 }
 
@@ -58,7 +58,7 @@ Tensor& zero_(Tensor& self) {
   if (_has_native(self)) {
     return native_zero_(self);
   } else {
-    return th_zero_(self);
+    return _th_zero_(self);
   }
 }
 
