@@ -270,7 +270,7 @@ void reduce(
     std::vector<at::Tensor>& outputs,
     int32_t root,
     int32_t op,
-    c10::optional<std::vector<at::cuda::CUDAStream>> streams,
+    c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams,
     c10::optional<std::vector<ncclComm_t>> comms) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
@@ -296,8 +296,9 @@ void reduce(
     // Default to the current  stream
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(device).stream();
 
+    // Two levels of optional! Wow!
     if (streams && (*streams)[i]) {
-      stream = (*streams)[i].stream();
+      stream = (*streams)[i]->stream();
     }
     NCCL_CHECK(ncclReduce(
         inputs[i].data_ptr(),
@@ -318,7 +319,7 @@ void reduce(
     std::vector<at::Tensor>& inputs,
     int32_t root,
     int32_t op,
-    c10::optional<std::vector<at::cuda::CUDAStream>> streams,
+    c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams,
     c10::optional<std::vector<ncclComm_t>> comms) {
   reduce(inputs, /*outputs=*/inputs, root, op, streams, comms);
 }

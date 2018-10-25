@@ -171,8 +171,9 @@ void setBackCompatKeepdimWarn(bool warn);
 bool getBackCompatKeepdimWarn();
 bool maybeThrowBackCompatKeepdimWarn(char *func);
 
+// NB: This is in torch/csrc/cuda/utils.cpp, for whatever reason
 #ifdef USE_CUDA
-std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj);
+std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj);
 #endif
 
 #endif /* _THP_CORE */

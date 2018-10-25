@@ -9,9 +9,11 @@
 #include <THC/THCGenerateAllTypes.h>
 
 #ifdef USE_CUDA
-std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj) {
+// NB: It's a list of *optional* CUDAStream; when nullopt, that means to use
+// whatever the current stream of the device the input is associated with was.
+std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj) {
   if (!PySequence_Check(obj)) {
-    throw std::runtime_error("Expected a sequence in THPUtils_PySequence_to_THCStreamList");
+    throw std::runtime_error("Expected a sequence in THPUtils_PySequence_to_CUDAStreamList");
   }
   THPObjectPtr seq = THPObjectPtr(PySequence_Fast(obj, nullptr));
   if (seq.get() == nullptr) {
@@ -24,9 +26,9 @@ std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj) {
     PyObject *stream = PySequence_Fast_GET_ITEM(seq.get(), i);
 
     if (PyObject_IsInstance(stream, THCPStreamClass)) {
-      streams.push_back( ((THCPStream *)stream)->cdata);
+      streams.emplace_back( CUDAStream((static_cast<THCPStream*>(stream))->cdata) );
     } else if (stream == Py_None) {
-      streams.push_back(nullptr);
+      streams.emplace_back();
     } else {
       std::runtime_error("Unknown data type found in stream list. Need THCStream or None");
     }

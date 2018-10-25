@@ -42,11 +42,7 @@ void initCommMethods(PyObject *module) {
             c10::optional<std::vector<at::cuda::CUDAStream>> streams;
             if (py_streams) {
               py::handle handle = *py_streams;
-              streams = fmap(
-                  THPUtils_PySequence_to_THCStreamList(handle.ptr()),
-                  [](THCStream* stream) {
-                    return at::cuda::CUDAStream(stream);
-                  });
+              streams = THPUtils_PySequence_to_CUDAStreamList(handle.ptr());
             }
             // Note: We're holding the GIL up to here.
             AutoNoGIL no_gil;
