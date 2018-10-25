@@ -6609,6 +6609,10 @@ class TestTorch(TestCase):
             self.assertEqual(x, x.flip(0))
             self.assertEqual(x, x.flip(2))
 
+            # roll
+            self.assertEqual(x, x.roll(0, 1).roll(0, -1))
+            self.assertEqual(x, x.roll(1, x.size(1)))
+
             # unbind
             self.assertEqual((), x.unbind(0))
             self.assertEqual((torch.empty((0, 1, 0), device=device), torch.empty((0, 1, 0), device=device)),
@@ -7179,6 +7183,17 @@ class TestTorch(TestCase):
 
     def test_flip(self):
         self._test_flip(self, use_cuda=False)
+
+    def test_roll(self):
+        numbers = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8])
+        data = numbers.view(2, 2, 2)
+        self.assertEqual(torch.tensor([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2), data.roll(1, 0))
+        data = data.view(2, 4)
+        # roll a loop until back where started
+        self.assertEqual(data, data.roll(2, 0).roll(4, 1))
+        # multiple inverse loops
+        self.assertEqual(data, data.roll(-20, 0).roll(-40, 1))
+        self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7]),numbers.roll(1, 0))
 
     def test_reversed(self):
         val = torch.arange(0, 10)
