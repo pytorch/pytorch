@@ -5,7 +5,6 @@ import torch
 import types
 import warnings
 from torch.version import cuda
-from torch._six import with_metaclass
 from contextlib import contextmanager
 from subprocess import Popen, PIPE
 
@@ -459,8 +458,8 @@ class ContextProp(object):
 
 class CudnnModule(types.ModuleType):
     def __init__(self, m, name):
-        self.m = m
         super(CudnnModule, self).__init__(name)
+        self.m = m
 
     def __getattr__(self, attr):
         return self.m.__getattribute__(attr)
