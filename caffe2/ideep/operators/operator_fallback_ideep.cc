@@ -40,19 +40,6 @@
 
 // can add more non-IDEEP operators if needed
 namespace caffe2 {
-namespace {
-
-struct SigmoidCPUFunctor {
-  template <typename T>
-  bool operator()(const int n, const T* x, T* y, CPUContext* /* context */)
-      const {
-    ConstEigenVectorArrayMap<T> xM(x, n);
-    EigenVectorArrayMap<T>(y, n) = 1. / (1. + (-xM).exp());
-    return true;
-  }
-};
-
-} // namespace
 
 REGISTER_IDEEP_OPERATOR(Softmax, IDEEPFallbackOp<SoftmaxOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
@@ -93,10 +80,6 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(Load, IDEEPFallbackOp<LoadOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Save, IDEEPFallbackOp<SaveOp<CPUContext>>);
 
-REGISTER_IDEEP_OPERATOR(
-    Sigmoid,
-    IDEEPFallbackOp<
-        UnaryElementwiseOp<TensorTypes<float>, CPUContext, SigmoidCPUFunctor>>);
 REGISTER_IDEEP_OPERATOR(
     RoIAlign,
     IDEEPFallbackOp<RoIAlignOp<float, CPUContext>>);
