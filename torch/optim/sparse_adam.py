@@ -4,7 +4,7 @@ from .optimizer import Optimizer
 
 
 class SparseAdam(Optimizer):
-    """Implements lazy version of Adam algorithm suitable for sparse tensors.
+    r"""Implements lazy version of Adam algorithm suitable for sparse tensors.
 
     In this variant, only moments that show up in the gradient get updated, and
     only those portions of the gradient get applied to the parameters.

@@ -1087,15 +1087,15 @@ void testCustomOperators() {
     CATCH_REQUIRE(ops.size() == 1);
 
     auto& op = ops.front();
-    CATCH_REQUIRE(op->schema().name == "foo::bar");
+    CATCH_REQUIRE(op->schema().name() == "foo::bar");
 
-    CATCH_REQUIRE(op->schema().arguments.size() == 2);
-    CATCH_REQUIRE(op->schema().arguments[0].name == "_0");
-    CATCH_REQUIRE(op->schema().arguments[0].type->kind() == TypeKind::FloatType);
-    CATCH_REQUIRE(op->schema().arguments[1].name == "_1");
-    CATCH_REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
+    CATCH_REQUIRE(op->schema().arguments().size() == 2);
+    CATCH_REQUIRE(op->schema().arguments()[0].name() == "_0");
+    CATCH_REQUIRE(op->schema().arguments()[0].type()->kind() == TypeKind::FloatType);
+    CATCH_REQUIRE(op->schema().arguments()[1].name() == "_1");
+    CATCH_REQUIRE(op->schema().arguments()[1].type()->kind() == TypeKind::DynamicType);
 
-    CATCH_REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
+    CATCH_REQUIRE(op->schema().returns()[0].type()->kind() == TypeKind::DynamicType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -1115,16 +1115,16 @@ void testCustomOperators() {
     CATCH_REQUIRE(ops.size() == 1);
 
     auto& op = ops.front();
-    CATCH_REQUIRE(op->schema().name == "foo::bar_with_schema");
+    CATCH_REQUIRE(op->schema().name() == "foo::bar_with_schema");
 
-    CATCH_REQUIRE(op->schema().arguments.size() == 2);
-    CATCH_REQUIRE(op->schema().arguments[0].name == "a");
-    CATCH_REQUIRE(op->schema().arguments[0].type->kind() == TypeKind::FloatType);
-    CATCH_REQUIRE(op->schema().arguments[1].name == "b");
-    CATCH_REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
+    CATCH_REQUIRE(op->schema().arguments().size() == 2);
+    CATCH_REQUIRE(op->schema().arguments()[0].name() == "a");
+    CATCH_REQUIRE(op->schema().arguments()[0].type()->kind() == TypeKind::FloatType);
+    CATCH_REQUIRE(op->schema().arguments()[1].name() == "b");
+    CATCH_REQUIRE(op->schema().arguments()[1].type()->kind() == TypeKind::DynamicType);
 
-    CATCH_REQUIRE(op->schema().returns.size() == 1);
-    CATCH_REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
+    CATCH_REQUIRE(op->schema().returns().size() == 1);
+    CATCH_REQUIRE(op->schema().returns()[0].type()->kind() == TypeKind::DynamicType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -1147,18 +1147,18 @@ void testCustomOperators() {
     CATCH_REQUIRE(ops.size() == 1);
 
     auto& op = ops.front();
-    CATCH_REQUIRE(op->schema().name == "foo::lists");
+    CATCH_REQUIRE(op->schema().name() == "foo::lists");
 
-    CATCH_REQUIRE(op->schema().arguments.size() == 3);
-    CATCH_REQUIRE(op->schema().arguments[0].name == "ints");
-    CATCH_REQUIRE(op->schema().arguments[0].type->isSubtypeOf(ListType::ofInts()));
-    CATCH_REQUIRE(op->schema().arguments[1].name == "floats");
-    CATCH_REQUIRE(op->schema().arguments[1].type->isSubtypeOf(ListType::ofFloats()));
-    CATCH_REQUIRE(op->schema().arguments[2].name == "tensors");
-    CATCH_REQUIRE(op->schema().arguments[2].type->isSubtypeOf(ListType::ofTensors()));
+    CATCH_REQUIRE(op->schema().arguments().size() == 3);
+    CATCH_REQUIRE(op->schema().arguments()[0].name() == "ints");
+    CATCH_REQUIRE(op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofInts()));
+    CATCH_REQUIRE(op->schema().arguments()[1].name() == "floats");
+    CATCH_REQUIRE(op->schema().arguments()[1].type()->isSubtypeOf(ListType::ofFloats()));
+    CATCH_REQUIRE(op->schema().arguments()[2].name() == "tensors");
+    CATCH_REQUIRE(op->schema().arguments()[2].type()->isSubtypeOf(ListType::ofTensors()));
 
-    CATCH_REQUIRE(op->schema().returns.size() == 1);
-    CATCH_REQUIRE(op->schema().returns[0].type->isSubtypeOf(ListType::ofFloats()));
+    CATCH_REQUIRE(op->schema().returns().size() == 1);
+    CATCH_REQUIRE(op->schema().returns()[0].type()->isSubtypeOf(ListType::ofFloats()));
 
     Stack stack;
     push(stack, std::vector<int64_t>{1, 2});
@@ -1182,14 +1182,14 @@ void testCustomOperators() {
     CATCH_REQUIRE(ops.size() == 1);
 
     auto& op = ops.front();
-    CATCH_REQUIRE(op->schema().name == "foo::lists2");
+    CATCH_REQUIRE(op->schema().name() == "foo::lists2");
 
-    CATCH_REQUIRE(op->schema().arguments.size() == 1);
-    CATCH_REQUIRE(op->schema().arguments[0].name == "tensors");
-    CATCH_REQUIRE(op->schema().arguments[0].type->isSubtypeOf(ListType::ofTensors()));
+    CATCH_REQUIRE(op->schema().arguments().size() == 1);
+    CATCH_REQUIRE(op->schema().arguments()[0].name() == "tensors");
+    CATCH_REQUIRE(op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
-    CATCH_REQUIRE(op->schema().returns.size() == 1);
-    CATCH_REQUIRE(op->schema().returns[0].type->isSubtypeOf(ListType::ofTensors()));
+    CATCH_REQUIRE(op->schema().returns().size() == 1);
+    CATCH_REQUIRE(op->schema().returns()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
     Stack stack;
     push(stack, std::vector<at::Tensor>{autograd::make_variable(at::ones(5))});

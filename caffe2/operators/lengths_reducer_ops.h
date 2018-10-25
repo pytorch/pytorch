@@ -53,7 +53,7 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
     const int64_t indices_size = indicesInput.size();
 
     auto* output = Output(0);
-    auto shape = dataInput.dims().vec();
+    auto shape = dataInput.sizes().vec();
     shape[0] = M;
     output->Resize(shape);
     T* out_data = output->template mutable_data<T>();

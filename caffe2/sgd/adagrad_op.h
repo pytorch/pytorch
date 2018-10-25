@@ -250,7 +250,7 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     // Enforce shapes
-    CAFFE_ENFORCE_EQ(Input(PARAM).dims()[0], Input(MOMENT_1).size());
+    CAFFE_ENFORCE_EQ(Input(PARAM).sizes()[0], Input(MOMENT_1).size());
     CAFFE_ENFORCE_EQ(Input(LR).size(), 1);
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),

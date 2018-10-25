@@ -93,8 +93,8 @@ class PowOp : public Operator<Context> {
           C->template mutable_data<typename TypeMap::template type<T>>();
       if (!enable_broadcast_) {
         CAFFE_ENFORCE_EQ(
-            A.dims(),
-            B.dims(),
+            A.sizes(),
+            B.sizes(),
             "Dimension mismatch - did you forget to set broadcast=1?");
         functor_.template Run<false, T, T, T>(
             A.size(), Adata, Bdata, 0, Cdata, &context_);

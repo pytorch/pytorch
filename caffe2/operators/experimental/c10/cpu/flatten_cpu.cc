@@ -14,7 +14,7 @@ void flatten_op_cpu_impl(
     int axis,
     BaseContext* context) {
   CAFFE_ENFORCE_GE(
-      input.dims().size(), axis, "The rank of the tensor must be >= axis.");
+      input.sizes().size(), axis, "The rank of the tensor must be >= axis.");
   output->Resize(input.size_to_dim(axis), input.size_from_dim(axis));
   context->CopyItemsSameDevice(
       input.meta(),

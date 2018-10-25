@@ -46,7 +46,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
       }
     }
 
-    auto num_entries = input.dims()[0];
+    auto num_entries = input.sizes()[0];
 
     if (OutputSize() > NUM_VISITED) {
       auto* num_visited_tensor = Output(NUM_VISITED);
@@ -60,7 +60,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
     }
 
     if (!output_initialized) {
-      auto dims = input.dims().vec();
+      auto dims = input.sizes().vec();
       dims[0] = 0;
       output->Resize(dims);
       // pass meta to output
