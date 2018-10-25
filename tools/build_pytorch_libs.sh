@@ -382,10 +382,6 @@ for arg in "$@"; do
         popd
     elif [[ "$arg" == "caffe2" ]]; then
         build_caffe2
-    elif [[ "$arg" == "libshm" ]] || [[ "$arg" == "libshm_windows" ]]; then
-        pushd "$TORCH_LIB_DIR"
-        build $arg
-        popd
     else
         pushd "$THIRD_PARTY_DIR"
         build $arg

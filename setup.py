@@ -462,10 +462,6 @@ class build_deps(PytorchCommand):
         if USE_NCCL and not USE_SYSTEM_NCCL:
             libs += ['nccl']
         libs += ['caffe2']
-        if IS_WINDOWS:
-            libs += ['libshm_windows']
-        else:
-            libs += ['libshm']
         build_libs(libs)
 
         # Use copies instead of symbolic files.
