@@ -58,7 +58,6 @@ class TestOperators(TestCase):
     def skipAlwaysForCI(func):
         def wrapper(self):
             raise unittest.SkipTest("Skip known CI breaking test")
-            return func(self)
         return wrapper
 
     def assertONNX(self, f, args, params=None, **kwargs):
