@@ -46,6 +46,7 @@ USE_CUDA=0
 USE_ROCM=0
 USE_NNPACK=0
 USE_GEMMLOWP=0
+USE_NEON2SSE=0
 USE_MKLDNN=0
 USE_GLOO_IBVERBS=0
 CAFFE2_STATIC_LINK_CUDA=0
@@ -66,6 +67,9 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-gemmlowp)
           USE_GEMMLOWP=1
+          ;;
+      --use-neon2sse)
+          USE_NEON2SSE=1
           ;;
       --use-mkldnn)
           USE_MKLDNN=1
@@ -221,6 +225,7 @@ function build() {
 		       -DBUILD_TEST=$BUILD_TEST \
 		       -DNO_NNPACK=$((1-$USE_NNPACK)) \
 		       -DNO_GEMMLOWP=$((1-$USE_GEMMLOWP)) \
+		       -DNO_NEON2SSE=$((1-$USE_NEON2SSE)) \
 		       -DNCCL_EXTERNAL=1 \
 		       -DCMAKE_DEBUG_POSTFIX="" \
 		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
@@ -318,6 +323,7 @@ function build_caffe2() {
 		       -DUSE_ROCM=$USE_ROCM \
 		       -DUSE_NNPACK=$USE_NNPACK \
 		       -DUSE_GEMMLOWP=$USE_GEMMLOWP \
+		       -DUSE_NEON2SSE=$USE_NEON2SSE \
 		       -DUSE_LEVELDB=$USE_LEVELDB \
 		       -DUSE_LMDB=$USE_LMDB \
 		       -DUSE_OPENCV=$USE_OPENCV \

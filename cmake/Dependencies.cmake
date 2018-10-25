@@ -122,6 +122,20 @@ if(USE_GEMMLOWP)
   endif()
 endif()
 
+# ---[ Caffe2 Int8 Ops, use neon2sse
+if(USE_NEON2SSE)
+  set(CAFFE2_THIRD_PARTY_ROOT ${PROJECT_SOURCE_DIR}/third_party)
+
+  # Directories for gemmlowp dependencies submoduled in Caffe2
+  set(NEON2SSE_INCLUDE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/neon2sse" CACHE STRING "neon2sse include directory")
+  set(NEON2SSE_FOUND TRUE)
+  include_directories(SYSTEM ${NEON2SSE_INCLUDE_DIR})
+  if(NOT NEON2SSE_FOUND)
+    message(WARNING "Not compiling with neon2sse. Suppress this warning with -DUSE_NEON2SSE=OFF")
+    caffe2_update_option(USE_NEON2SSE OFF)
+  endif()
+endif()
+
 # ---[ Caffe2 uses cpuinfo library in the thread pool
 if (NOT TARGET cpuinfo)
   if (NOT DEFINED CPUINFO_SOURCE_DIR)

@@ -49,6 +49,15 @@ IF "%~1"=="--use-gemmlowp" (
   set /a USE_GEMMLOWP=0
 )
 
+IF "%~1"=="--use-neon2sse" (
+  set /a NO_NEON2SSE=0
+  set /a USE_NEON2SSE=1
+  shift
+) ELSE (
+  set /a NO_NEON2SSE=1
+  set /a USE_NEON2SSE=0
+)
+
 IF "%~1"=="--use-mkldnn" (
   set /a NO_MKLDNN=0
   shift
@@ -165,6 +174,7 @@ goto:eof
                   -DBUILD_TEST=%BUILD_TEST% ^
                   -DNO_NNPACK=%NO_NNPACK% ^
                   -DNO_GEMMLOWP=%NO_GEMMLOWP% ^
+                  -DNO_NEON2SSE=%NO_NEON2SSE% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
   %MAKE_COMMAND%
