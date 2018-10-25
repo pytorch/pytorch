@@ -123,7 +123,7 @@ struct CAFFE2_API TensorOptions {
   /// Constructs a `TensorOptions` object with the given device.
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
   template<typename T,
-           typename = c10::guts::enable_if_t<std::is_same<std::decay<T>, Device>::value>>
+           typename = c10::guts::enable_if_t<std::is_same<c10::guts::decay_t<T>, Device>::value>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -134,8 +134,8 @@ struct CAFFE2_API TensorOptions {
   /// See NOTE [ TensorOptions Constructors ].
   ///
   /// NB: Ideally we only allow implicit constructors here. But there is no easy
-  ///     way to detect implicit constructors. So we have this one that allows
-  ///     explicit constructors too.
+  ///     way to detect them. So we have this one that allows explicit
+  ///     constructors too.
   template <typename... Args,
             typename = c10::guts::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
    /* implicit */ TensorOptions(Args&&... args)
