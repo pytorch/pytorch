@@ -327,10 +327,7 @@ class create_version_file(PytorchCommand):
 ################################################################################
 
 # All libraries that torch could depend on
-dep_libs = [
-    'nccl', 'caffe2',
-    'libshm', 'libshm_windows'
-]
+dep_libs = ['caffe2']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -457,8 +454,6 @@ class build_deps(PytorchCommand):
         check_pydep('typing', 'typing')
 
         libs = []
-        if USE_NCCL and not USE_SYSTEM_NCCL:
-            libs += ['nccl']
         libs += ['caffe2']
         build_libs(libs)
 
@@ -1031,10 +1026,9 @@ if USE_ROCM:
 
 if USE_NCCL:
     if USE_SYSTEM_NCCL:
-        main_link_args += [NCCL_SYSTEM_LIB]
         include_dirs.append(NCCL_INCLUDE_DIR)
     else:
-        main_link_args += [NCCL_LIB]
+        include_dirs.append("build/nccl/include")
     extra_compile_args += ['-DUSE_NCCL']
     main_sources += [
         "torch/csrc/cuda/nccl.cpp",
