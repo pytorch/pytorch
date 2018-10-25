@@ -13,6 +13,8 @@ message ParameterDef {
   // tensor type parameter
   optional caffe2.TensorProto tensor = 3;
   // objects other than tensors will be added here
+
+  optional string name = 4;
 }
 
 message MethodDef {
