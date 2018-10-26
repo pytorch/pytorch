@@ -5029,6 +5029,15 @@ a")
                 print(a)
                 print(b)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_script_get_device_cuda(self):
+        @torch.jit.script
+        def foo(a):
+            return a.get_device()
+
+        v = torch.randn(1, device='cuda')
+        self.assertEqual(foo(v), 0)
+
     def test_script_chunk(self):
         @torch.jit.script
         def foo(a):

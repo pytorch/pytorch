@@ -438,14 +438,14 @@ Tensor _norm(const Tensor &self, Scalar p) {
              "norm only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
     AT_CHECK(at::isFloatingType(self.type().scalarType()), "norm only supports floating-point dtypes");
     if (self.is_cuda()) {
-      return at::th_norm(self, p);
+      return at::_th_norm(self, p);
     } else {
       if (self.is_contiguous()) {
         Tensor result = CPU(kFloat).scalarTensor(0).toType(self.type());
         norm_kernel(kCPU, result, self, p, c10::nullopt);
         return result;
       } else {
-        return at::th_norm(self, p);
+        return at::_th_norm(self, p);
       }
     }
   }

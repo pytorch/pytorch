@@ -81,7 +81,7 @@ void addInputs(Node *n, const char * name, at::TensorList value) {
 
 void addInputs(Node* n, const char * name, const at::TensorOptions& options) {
   // [TensorOptions in script] - update this when you change how we schematize TensorOptions
-  addInputs(n, name, options.dtype());
+  addInputs(n, name, at::typeMetaToScalarType(options.dtype()));
   addInputs(n, name, options.layout());
   addInputs(n, name, options.device());
 }

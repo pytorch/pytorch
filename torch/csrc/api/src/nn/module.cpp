@@ -5,7 +5,6 @@
 #include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <c10/util/Exception.h>
-#include "c10/util/Optional.h"
 
 #include <algorithm>
 #include <map>
@@ -40,7 +39,7 @@ const std::string& Module::name() const noexcept {
   return *name_;
 }
 
-std::shared_ptr<Module> Module::clone(c10::optional<Device> device) const {
+std::shared_ptr<Module> Module::clone(optional<Device> device) const {
   AT_ERROR(
       "clone() has not been implemented for ",
       name(),
@@ -181,6 +180,6 @@ Tensor& Module::register_buffer(std::string name, Tensor tensor) {
   return buffers_.insert(std::move(name), std::move(tensor));
 }
 
-void Module::clone_(Module& other, c10::optional<Device> device) {}
+void Module::clone_(Module& other, optional<Device> device) {}
 } // namespace nn
 } // namespace torch
