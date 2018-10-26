@@ -2007,6 +2007,15 @@ class TestJit(JitTestCase):
             torch.ones(1))
 
         @torch.jit.script
+        def none_fn(x=None):
+            # type: (Optional[int]) -> Optional[int]
+            return x
+
+        self.assertExpectedGraph(none_fn.graph, "none")
+        self.assertEqual(none_fn(), None)
+        self.assertEqual(none_fn(1), 1)
+
+        @torch.jit.script
         def hints(x, a=0.5, b=10):
             # type: (Tensor, float, int) -> Tensor
             return x + a + b
