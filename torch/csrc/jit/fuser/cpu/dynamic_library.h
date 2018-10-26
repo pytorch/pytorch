@@ -20,7 +20,9 @@ struct DynamicLibrary {
   TH_DISALLOW_COPY_AND_ASSIGN(DynamicLibrary);
 
   DynamicLibrary(const char* name) {
-    handle = checkDL(dlopen(name, RTLD_LOCAL | RTLD_NOW));
+    handle = checkDL(dlopen(
+        name,
+        static_cast<unsigned>(RTLD_LOCAL) | static_cast<unsigned>(RTLD_NOW)));
   }
 
   void* sym(const char* name) {
