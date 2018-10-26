@@ -287,8 +287,7 @@ class PyTorchStreamWriter final {
 
   void writePad(const size_t num_bytes) {
     // TODO: move this buffer to the .cc file
-    static std::vector<char> pad_buffer_(
-        kFieldAlignment, kPadValue);
+    static std::vector<char> pad_buffer_(kFieldAlignment, kPadValue);
     out_->write(pad_buffer_.data(), num_bytes);
     cursor_ += num_bytes;
   }
@@ -386,5 +385,4 @@ class PyTorchFileWriter final {
   std::ofstream out_;
   PyTorchStreamWriter stream_writer_;
 };
-
 }}  // namespace torch::jit

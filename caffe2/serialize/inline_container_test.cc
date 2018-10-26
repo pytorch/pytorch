@@ -1,6 +1,6 @@
 #include <cstdio>
-#include <iostream>
 #include <string>
+#include <array>
 
 #include <gtest/gtest.h>
 
@@ -17,16 +17,17 @@ TEST(PyTorchFileWriterAndReader, SaveAndLoad) {
 
   // write records through writers
   torch::jit::PyTorchFileWriter writer{tmp_name};
-  char data1[127];
-  for (int i = 0; i < sizeof(data1); ++i) {
-    data1[i] = sizeof(data1) - i;
+  std::array<char, 127> data1;
+
+  for (int i = 0; i < data1.size(); ++i) {
+    data1[i] = data1.size() - i;
   }
-  ASSERT_EQ(writer.writeRecord(data1, sizeof(data1)), writer.getCurrentSize());
-  char data2[64];
-  for (int i = 0; i < sizeof(data2); ++i) {
-    data2[i] = sizeof(data2) - i;
+  ASSERT_EQ(writer.writeRecord(data1.data(), data1.size()), writer.getCurrentSize());
+  std::array<char, 64> data2;
+  for (int i = 0; i < data2.size(); ++i) {
+    data2[i] = data2.size() - i;
   }
-  ASSERT_EQ(writer.writeRecord(data2, sizeof(data2)), writer.getCurrentSize());
+  ASSERT_EQ(writer.writeRecord(data2.data(), data2.size()), writer.getCurrentSize());
   writer.writeEndOfFile();
   ASSERT_TRUE(writer.closed());
 
@@ -38,29 +39,29 @@ TEST(PyTorchFileWriterAndReader, SaveAndLoad) {
   int64_t size;
   std::tie(data_ptr, key, size) = reader.getNextRecord();
   ASSERT_EQ(key, kFieldAlignment);
-  ASSERT_EQ(size, sizeof(data1));
-  ASSERT_EQ(memcmp(data_ptr.get(), data1, sizeof(data1)), 0);
+  ASSERT_EQ(size, data1.size());
+  ASSERT_EQ(memcmp(data_ptr.get(), data1.data(), data1.size()), 0);
 
   ASSERT_TRUE(reader.hasNextRecord());
   std::tie(data_ptr, key, size) = reader.getNextRecord();
   ASSERT_EQ(
       key,
       kFieldAlignment * 2 +
-          (sizeof(data1) + kFieldAlignment - 1) / kFieldAlignment *
+          (data1.size() + kFieldAlignment - 1) / kFieldAlignment *
               kFieldAlignment);
-  ASSERT_EQ(size, sizeof(data2));
-  ASSERT_EQ(memcmp(data_ptr.get(), data2, sizeof(data2)), 0);
+  ASSERT_EQ(size, data2.size());
+  ASSERT_EQ(memcmp(data_ptr.get(), data2.data(), data2.size()), 0);
 
   ASSERT_FALSE(reader.hasNextRecord());
 
   std::tie(data_ptr, size) = reader.getLastRecord();
-  ASSERT_EQ(size, sizeof(data2));
-  ASSERT_EQ(memcmp(data_ptr.get(), data2, sizeof(data2)), 0);
+  ASSERT_EQ(size, data2.size());
+  ASSERT_EQ(memcmp(data_ptr.get(), data2.data(), data2.size()), 0);
   ASSERT_FALSE(reader.hasNextRecord());
 
   std::tie(data_ptr, size) = reader.getRecordWithKey(kFieldAlignment);
-  ASSERT_EQ(size, sizeof(data1));
-  ASSERT_EQ(memcmp(data_ptr.get(), data1, sizeof(data1)), 0);
+  ASSERT_EQ(size, data1.size());
+  ASSERT_EQ(memcmp(data_ptr.get(), data1.data(), data1.size()), 0);
   ASSERT_TRUE(reader.hasNextRecord());
 
   // clean up
