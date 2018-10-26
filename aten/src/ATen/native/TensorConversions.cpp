@@ -5,11 +5,16 @@
 namespace at {
 namespace native {
 
-static void ensure_has_index(Device* device) {
-  if (!device->is_cuda() || device->has_index()) {
-    return;
+// Since the given Device may not have device_index set (i.e., having it as -1
+// representing the current device), we need to set the device_index before
+// comparing against the current device object in Tensor.
+// This always **copies** but this is intended because (1) we shouldn't modify
+// input argument, and (2) Device is small anyways.
+static inline Device ensure_has_index(const Device &device) {
+  if (!device.is_cuda() || device.has_index()) {
+    return device;
   }
-  device->set_index(at::current_device());
+  return Device(device.type(), at::current_device());
 }
 
 static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking) {
@@ -19,7 +24,7 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
 
 Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy) {
   AT_CHECK(options.requires_grad_opt() == c10::nullopt,
-           "to(options) expects unset requires_grad, but got "
+           "to(options) expects unset requires_grad flag, but got "
            "options.requires_grad set as ", options.requires_grad());
 
   const auto & layout_opt = options.layout_opt();
@@ -28,7 +33,10 @@ Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, b
            "but got self.layout being ", self.layout(),
            " and options.layout set as ", options.layout());
 
-  const auto & device_opt = options.device_opt();
+  auto device_opt = options.device_opt();
+  if (device_opt) {
+    device_opt = ensure_has_index(device_opt.value());
+  }
   const auto & dtype_opt = options.dtype_opt();
   if ((!device_opt || self.device() == device_opt.value()) &&
       (!dtype_opt  || self.dtype()  ==  dtype_opt.value()) && !copy) {
@@ -45,7 +53,7 @@ Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, b
 }
 
 Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy) {
-  ensure_has_index(&device);
+  device = ensure_has_index(device);
   if (self.device() == device && self.dtype() == dtype && !copy) {
     return self;
   }
@@ -62,6 +70,8 @@ Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy) {
 Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy) {
   auto self_options = self.options();
   auto options = other.options();
+  // Tensor.options() always have everything filled so we are happy and don't
+  // even need to fill in device index.
   if (self_options == options && !copy) {
     return self;
   }

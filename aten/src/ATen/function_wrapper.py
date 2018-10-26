@@ -527,6 +527,7 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('buffers', Optional[List[str]]),
     ('returns', List[ReturnType]),
     ('inplace', bool),
+    ('is_factory_method', bool),
     ('abstract', bool),
     ('requires_tensor', bool),
     ('device_guard', bool),
@@ -924,6 +925,7 @@ def create_generic(top_env, declarations):
             buffers=buffer_names,
             returns=option['returns'],
             inplace=option['inplace'],
+            is_factory_method=False,
             # See Note [Abstract ATen methods]
             abstract=abstract,
             requires_tensor=option.get('requires_tensor', False),
@@ -1172,6 +1174,7 @@ def create_generic(top_env, declarations):
             buffers=None,
             returns=option['returns'],
             inplace=option['inplace'],
+            is_factory_method=is_factory_method,
             # See Note [Abstract ATen methods]
             abstract=abstract,
             requires_tensor=option.get('requires_tensor', False),
