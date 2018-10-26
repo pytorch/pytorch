@@ -91,6 +91,73 @@ set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
 set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
   CACHE PATH "Confu-style dependencies binary directory")
 
+# ---[ QNNPACK
+if(USE_QNNPACK)
+  if (NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin)$"))
+    message(WARNING
+      "Target platform \"${CMAKE_SYSTEM_NAME}\" is not supported in QNNPACK. "
+      "Supported platforms are Android, iOS, Linux, and macOS. "
+      "Turn this warning off by USE_QNNPACK=OFF.")
+    set(USE_QNNPACK OFF)
+  endif()
+  if (NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64)$"))
+    message(WARNING
+      "Target architecture \"${CMAKE_SYSTEM_PROCESSOR}\" is not supported in QNNPACK. "
+      "Supported platforms are x86, x86-64, ARM, and ARM64. "
+      "Turn this warning off by USE_QNNPACK=OFF.")
+    set(USE_QNNPACK OFF)
+  endif()
+  if (USE_QNNPACK)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+
+    # Directories for QNNPACK dependencies submoduled in Caffe2
+    if (NOT DEFINED CPUINFO_SOURCE_DIR)
+      set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
+    endif()
+    if (NOT DEFINED QNNPACK_SOURCE_DIR)
+      set(QNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/QNNPACK" CACHE STRING "QNNPACK source directory")
+    endif()
+    if (NOT DEFINED FP16_SOURCE_DIR)
+      set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
+    endif()
+    if (NOT DEFINED FXDIV_SOURCE_DIR)
+      set(FXDIV_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FXdiv" CACHE STRING "FXdiv source directory")
+    endif()
+    if (NOT DEFINED PSIMD_SOURCE_DIR)
+      set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
+    endif()
+    if (NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+      set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+    endif()
+
+    if(NOT TARGET qnnpack)
+      set(QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
+      set(QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
+      set(QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
+      set(QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
+      set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
+      set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+      add_subdirectory(
+        "${QNNPACK_SOURCE_DIR}"
+        "${CONFU_DEPENDENCIES_BINARY_DIR}/QNNPACK")
+      # We build static versions of QNNPACK and pthreadpool but link
+      # them into a shared library for Caffe2, so they need PIC.
+      set_property(TARGET qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
+      set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+      set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+    endif()
+
+    list(APPEND Caffe2_DEPENDENCY_LIBS qnnpack)
+  endif()
+endif()
+
+# ---[ Caffe2 Int8 operators (enabled by USE_QNNPACK) depend on gemmlowp and neon2sse headers
+if(USE_QNNPACK)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
+  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/neon2sse")
+endif()
+
 # ---[ NNPACK
 if(USE_NNPACK)
   include(${CMAKE_CURRENT_LIST_DIR}/External/nnpack.cmake)

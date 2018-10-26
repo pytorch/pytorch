@@ -46,6 +46,7 @@ USE_CUDA=0
 USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
+USE_QNNPACK=0
 USE_GLOO_IBVERBS=0
 CAFFE2_STATIC_LINK_CUDA=0
 RERUN_CMAKE=1
@@ -65,6 +66,9 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-mkldnn)
           USE_MKLDNN=1
+          ;;
+      --use-qnnpack)
+          USE_QNNPACK=1
           ;;
       --use-gloo-ibverbs)
           USE_GLOO_IBVERBS=1
@@ -315,6 +319,7 @@ function build_caffe2() {
 		       -DUSE_LEVELDB=$USE_LEVELDB \
 		       -DUSE_LMDB=$USE_LMDB \
 		       -DUSE_OPENCV=$USE_OPENCV \
+		       -DUSE_QNNPACK=$USE_QNNPACK \
 		       -DUSE_FFMPEG=$USE_FFMPEG \
 		       -DUSE_GLOG=OFF \
 		       -DUSE_GFLAGS=OFF \
