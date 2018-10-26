@@ -92,9 +92,4 @@ inline int stoi(const std::string& str) {
 
 } // namespace c10
 
-// TODO: Remove me when namespace unification occurs
-namespace at {
-using c10::stoi;
-}
-
 #endif // C10_UTIL_STRINGUTIL_H_
