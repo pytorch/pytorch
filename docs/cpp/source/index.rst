@@ -161,6 +161,7 @@ Contents
 
    frontend
    installing
+   faq
    contributing
    api/library_root
 
