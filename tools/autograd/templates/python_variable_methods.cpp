@@ -27,7 +27,7 @@
 #include "torch/csrc/utils/tensor_types.h"
 
 #include <ATen/ATen.h>
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #include "python_variable_methods_dispatch.h"
 
@@ -103,6 +103,14 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
+  return wrap(self.get_device());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
@@ -116,13 +124,24 @@ static Tensor dispatch_contiguous(const Tensor & self) {
   DeviceGuard device_guard(self);
   return self.contiguous();
 }
-
-static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
+ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   // avoids touching the GIL or current device if self is already contiguous
   if (self_.is_contiguous()) {
+    // NOTE: this logic is duplicated from VariableType.cpp. Since we need to
+    // record this call to contiguous() in the trace regardless of whether
+    // we actually call contiguous here, we need to record this information
+    // manually.
+    if (jit::tracer::isTracing()) {
+      auto tracer_state = jit::tracer::getTracingState();
+      auto node = tracer_state->graph->create(jit::aten::contiguous, /*num_outputs=*/0);
+      jit::tracer::recordSourceLocation(node);
+      jit::tracer::addInputs(node, "self", self_);
+      tracer_state->graph->appendNode(node);
+      jit::tracer::addOutput(node, self_);
+    }
     Py_INCREF(self);
     return self;
   }
@@ -230,26 +249,26 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking) {
+static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking, bool copy) {
   AutoNoGIL no_gil;
-  return self.to(device, non_blocking);
+  return self.to(device, non_blocking, copy);
 }
 
-static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking) {
+static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) {
   AutoNoGIL no_gil;
-  return self.to(dtype, non_blocking);
+  return self.to(dtype, non_blocking, copy);
 }
 
-static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking) {
+static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) {
   AutoNoGIL no_gil;
-  return self.to(device, dtype, non_blocking);
+  return self.to(device, dtype, non_blocking, copy);
 }
 
 static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-   return THPVariable_Wrap(dispatch_to(self_, at::Device(at::DeviceType::CPU), false));
+   return THPVariable_Wrap(dispatch_to(self_, at::Device(at::DeviceType::CPU), false, false));
    END_HANDLE_TH_ERRORS
 }
 
@@ -266,14 +285,14 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto device = r.isNone(0) ? at::Device(at::DeviceType::CUDA) : r.device(0);
   AT_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
   torch::utils::cuda_lazy_init();
-  return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1)));
+  return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPVariable_to_type(PyObject* self, ScalarType scalarType) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  return THPVariable_Wrap(dispatch_to(self_, scalarType, false));
+  return THPVariable_Wrap(dispatch_to(self_, scalarType, false, false));
   END_HANDLE_TH_ERRORS
 }
 static PyObject * THPVariable_byte(PyObject* self, PyObject* args) {
@@ -498,23 +517,24 @@ static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
 static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  auto parsed = parse_to_conversion(args, kwargs);
+  auto parsed = parse_to_conversion(args, kwargs, /*allow_copy*/ true);
   auto& device = std::get<0>(parsed);
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
+  auto copy = std::get<3>(parsed);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (device && device->is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
-  if (!device && !scalarType) {
+  if (!device && !scalarType && !copy) {
     Py_INCREF(self);
     return self;
   } else if (!device) {
-    return THPVariable_Wrap(dispatch_to(self_, *scalarType, non_blocking));
+    return THPVariable_Wrap(dispatch_to(self_, *scalarType, non_blocking, copy));
   } else if (!scalarType) {
-    return THPVariable_Wrap(dispatch_to(self_, *device, non_blocking));
+    return THPVariable_Wrap(dispatch_to(self_, *device, non_blocking, copy));
   } else {
-    return THPVariable_Wrap(dispatch_to(self_, *device, *scalarType, non_blocking));
+    return THPVariable_Wrap(dispatch_to(self_, *device, *scalarType, non_blocking, copy));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -561,7 +581,8 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   auto self_device_type = torch::getDeviceType(self_.type());
   auto& type = is_dtype ? torch::getVariableType(r.scalartype(0), *torch::getLayout(self_.type().backend()), self_device_type) :
                           torch::utils::type_from_string(type_name);
-  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, at::nullopt, r.toBool(1)));
+  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(
+      self_, type, c10::nullopt, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
 
@@ -606,6 +627,7 @@ PyMethodDef variable_methods[] = {
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
   {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},
+  {"get_device", (PyCFunction)THPVariable_get_device, METH_NOARGS, NULL},
   {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
   {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
   {"item", (PyCFunction)THPVariable_item, METH_NOARGS, NULL},

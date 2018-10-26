@@ -34,9 +34,10 @@
 #include "torch/csrc/jit/batched/BatchTensor.h"
 #include "torch/csrc/jit/pybind_utils.h"
 #include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/serialization.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/fusers/interface.h"
+
+#include "caffe2/serialize/inline_container.h"
 
 #include <pybind11/functional.h>
 
@@ -90,7 +91,7 @@ void initJITBindings(PyObject *module) {
      return EliminateCommonSubexpression(g); // overload resolution
    })
    .def("_jit_pass_constant_pooling", ConstantPooling)
-   .def("_jit_pass_peephole", PeepholeOptimize)
+   .def("_jit_pass_peephole", PeepholeOptimize, py::arg("graph"), py::arg("addmm_fusion_enabled") = false)
    .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
      return Canonicalize(g);
    })
@@ -274,25 +275,25 @@ void initJITBindings(PyObject *module) {
         return invokeOperatorFromPython(
             *op, std::move(args), std::move(kwargs));
       }, py::name(qualified_name.c_str()), py::doc(docstring.str().c_str()));
-    } catch (const at::Error& error) {
+    } catch (const c10::Error& error) {
       throw std::runtime_error(error.what_without_backtrace());
     }
   }, py::arg("qualified_name"));
 
   py::class_<FunctionSchema>(m, "FunctionSchema")
-  .def_property_readonly("name", [](FunctionSchema& self) { return self.name; })
-  .def_property_readonly("arguments", [](FunctionSchema& self) { return self.arguments; })
-  .def_property_readonly("returns", [](FunctionSchema& self) { return self.returns; });
+  .def_property_readonly("name", [](FunctionSchema& self) { return self.name(); })
+  .def_property_readonly("arguments", [](FunctionSchema& self) { return self.arguments(); })
+  .def_property_readonly("returns", [](FunctionSchema& self) { return self.returns(); });
   py::class_<Argument>(m, "Argument")
-  .def_property_readonly("name", [](Argument& self) { return self.name; })
-  .def_property_readonly("type", [](Argument& self) { return self.type; })
+  .def_property_readonly("name", [](Argument& self) { return self.name(); })
+  .def_property_readonly("type", [](Argument& self) { return self.type(); })
   .def_property_readonly("N", [](Argument& self) -> py::object {
-    return (self.N) ? py::cast(*self.N) :  py::none();
+    return (self.N()) ? py::cast(*self.N()) :  py::none();
   })
   .def_property_readonly("default_value", [](Argument& self) -> py::object {
-    if(!self.default_value)
+    if(!self.default_value())
       return py::none();
-    IValue v = *self.default_value;
+    IValue v = *self.default_value();
     return toPyObject(std::move(v));
   });
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {

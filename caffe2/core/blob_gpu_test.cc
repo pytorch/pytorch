@@ -19,7 +19,8 @@ TYPED_TEST_CASE(TensorGPUDeathTest, TensorTypes);
 TYPED_TEST(TensorGPUTest, TensorInitializedEmpty) {
   if (!caffe2::HasCudaGPU()) return;
   Tensor tensor(CUDA);
-  EXPECT_EQ(tensor.ndim(), 0);
+  EXPECT_EQ(tensor.size(), 0);
+  EXPECT_EQ(tensor.ndim(), 1);
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
@@ -117,7 +118,8 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
   if (!HasCudaGPU()) return;
   ::testing::FLAGS_gtest_death_test_style = "threadsafe";
   Tensor tensor(CUDA);
-  EXPECT_EQ(tensor.ndim(), 0);
+  EXPECT_EQ(tensor.ndim(), 1);
+  EXPECT_EQ(tensor.size(), 0);
   EXPECT_THROW(tensor.data<TypeParam>(), EnforceNotMet);
 }
 
@@ -195,7 +197,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     }
     EXPECT_TRUE(tensor_proto.has_device_detail());
     EXPECT_EQ(tensor_proto.device_detail().device_type(), PROTO_CUDA);
-    EXPECT_EQ(tensor_proto.device_detail().cuda_gpu_id(), gpu_id);
+    EXPECT_EQ(tensor_proto.device_detail().device_id(), gpu_id);
     // Test if the restored blob is still of the same device.
     blob.Reset();
     EXPECT_NO_THROW(DeserializeBlob(serialized, &blob));
@@ -205,7 +207,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     // Test if we force the restored blob on a different device, we
     // can still get so.
     blob.Reset();
-    proto.mutable_tensor()->mutable_device_detail()->set_cuda_gpu_id(0);
+    proto.mutable_tensor()->mutable_device_detail()->set_device_id(0);
     EXPECT_NO_THROW(DeserializeBlob(proto.SerializeAsString(), &blob));
     EXPECT_TRUE(BlobIsTensorType(blob, CUDA));
     EXPECT_EQ(GetGPUIDForPointer(blob.Get<TensorCUDA>().data<float>()), 0);

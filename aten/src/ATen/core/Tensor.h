@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/core/Device.h"
+#include "c10/Device.h"
 #include "ATen/core/Layout.h"
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
@@ -8,9 +8,9 @@
 #include "ATen/core/Storage.h"
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/core/TensorImpl.h"
-#include "ATen/core/optional.h"
 #include "ATen/core/UndefinedTensorImpl.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
+#include "c10/util/Optional.h"
 
 namespace at {
 struct Generator;
@@ -143,7 +143,7 @@ public:
     return impl_->type_id();
   }
   ScalarType scalar_type() const {
-    return dataTypeToScalarType(impl_->dtype().id());
+    return typeMetaToScalarType(impl_->dtype());
   }
   const Storage& storage() const {
     return impl_->storage();
@@ -160,11 +160,20 @@ public:
   /// Returns a `Tensor`'s layout. Defined in Type.h
   Layout layout() const noexcept;
 
-  /// Returns a `Tensor`'s dtype (`ScalarType`). Defined in Type.h
-  ScalarType dtype() const noexcept;
+  /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.h
+  caffe2::TypeMeta dtype() const noexcept;
 
   /// Returns a `Tensor`'s device.
   Device device() const;
+
+  /// Returns a `Tensor`'s device index.
+  int64_t get_device() const;
+
+  /// Returns if a `Tensor` has CUDA backend.
+  bool is_cuda() const;
+
+  /// Returns if a `Tensor` has sparse backend.
+  bool is_sparse() const;
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
@@ -195,13 +204,13 @@ public:
   // cast the data pointer to a __restrict__ pointer.
   // In order to use this, your CUDA kernel has to take a corresponding PackedTensorAccessor
   // as an argument.
-  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
-    PackedTensorAccessor<T,N,PtrTraits> packed_accessor() const& {
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
     AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
-    return PackedTensorAccessor<T,N,PtrTraits>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
+    return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
   }
-  template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits>
+  template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   PackedTensorAccessor<T,N> packed_accessor() && = delete;
 
   Tensor operator-() const;
@@ -241,7 +250,7 @@ public:
 
   /// Computes the gradient of current tensor w.r.t. graph leaves.
   void backward(
-      at::optional<Tensor> gradient = at::nullopt,
+      c10::optional<Tensor> gradient = c10::nullopt,
       bool keep_graph = false,
       bool create_graph = false);
 
@@ -251,7 +260,6 @@ public:
   //example
   //Tensor * add(Tensor & b);
   int64_t storage_offset() const;
-  Tensor & resize_(IntList size);
   Tensor & set_(Storage source);
   Tensor & set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
   Tensor & set_(const Tensor & source);
@@ -263,7 +271,6 @@ public:
   Tensor & masked_scatter_(const Tensor & mask, const Tensor & source);
   Tensor masked_select(const Tensor & mask) const;
   Tensor nonzero() const;
-  Tensor contiguous() const;
   Tensor view(IntList size) const;
   Tensor index_select(int64_t dim, const Tensor & index) const;
   Tensor take(const Tensor & index) const;
@@ -383,7 +390,7 @@ public:
   std::tuple<Tensor,Tensor> trtrs(const Tensor & A, bool upper=true, bool transpose=false, bool unitriangular=false) const;
   std::tuple<Tensor,Tensor> symeig(bool eigenvectors=false, bool upper=true) const;
   std::tuple<Tensor,Tensor> eig(bool eigenvectors=false) const;
-  std::tuple<Tensor,Tensor,Tensor> svd(bool some=true) const;
+  std::tuple<Tensor,Tensor,Tensor> svd(bool some=true, bool compute_uv=true) const;
   Tensor potrf(bool upper=true) const;
   Tensor potrs(const Tensor & input2, bool upper=true) const;
   Tensor potri(bool upper=true) const;
@@ -405,6 +412,7 @@ public:
   Tensor & log_normal_(double mean=1, double std=2, Generator * generator=nullptr);
   Tensor & exponential_(double lambd=1, Generator * generator=nullptr);
   Tensor & geometric_(double p, Generator * generator=nullptr);
+  Tensor alias() const;
   Tensor abs() const;
   Tensor & abs_();
   Tensor acos() const;
@@ -443,12 +451,13 @@ public:
   Tensor ceil() const;
   Tensor & ceil_();
   std::vector<Tensor> chunk(int64_t chunks, int64_t dim=0) const;
-  Tensor clamp(Scalar min, Scalar max) const;
-  Tensor & clamp_(Scalar min, Scalar max);
+  Tensor clamp(c10::optional<Scalar> min=c10::nullopt, c10::optional<Scalar> max=c10::nullopt) const;
+  Tensor & clamp_(c10::optional<Scalar> min=c10::nullopt, c10::optional<Scalar> max=c10::nullopt);
   Tensor clamp_max(Scalar max) const;
   Tensor & clamp_max_(Scalar max);
   Tensor clamp_min(Scalar min) const;
   Tensor & clamp_min_(Scalar min);
+  Tensor contiguous() const;
   Tensor cos() const;
   Tensor & cos_();
   Tensor cosh() const;
@@ -465,6 +474,7 @@ public:
   Tensor div(Scalar other) const;
   Tensor & div_(Scalar other);
   Tensor dot(const Tensor & tensor) const;
+  Tensor & resize_(IntList size);
   Tensor erf() const;
   Tensor & erf_();
   Tensor erfc() const;
@@ -492,14 +502,12 @@ public:
   Tensor & index_put_(TensorList indices, const Tensor & values);
   Tensor inverse() const;
   Tensor isclose(const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
-  bool is_cuda() const;
   bool is_distributed() const;
   bool is_floating_point() const;
   bool is_complex() const;
   bool is_nonzero() const;
   bool is_same_size(const Tensor & other) const;
   bool is_signed() const;
-  bool is_sparse() const;
   std::tuple<Tensor,Tensor> kthvalue(int64_t k, int64_t dim=-1, bool keepdim=false) const;
   Tensor log() const;
   Tensor & log_();
@@ -510,6 +518,7 @@ public:
   Tensor log2() const;
   Tensor & log2_();
   Tensor logdet() const;
+  Tensor log_softmax(int64_t dim, ScalarType dtype) const;
   Tensor log_softmax(int64_t dim) const;
   Tensor logsumexp(int64_t dim, bool keepdim=false) const;
   Tensor matmul(const Tensor & other) const;
@@ -564,6 +573,7 @@ public:
   Tensor slice(int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) const;
   std::tuple<Tensor,Tensor> slogdet() const;
   Tensor smm(const Tensor & mat2) const;
+  Tensor softmax(int64_t dim, ScalarType dtype) const;
   Tensor softmax(int64_t dim) const;
   std::vector<Tensor> split(int64_t split_size, int64_t dim=0) const;
   std::vector<Tensor> split_with_sizes(IntList split_sizes, int64_t dim=0) const;
@@ -619,24 +629,28 @@ public:
   Tensor & sub_(Scalar other, Scalar alpha=1);
   Tensor addmm(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1);
-  Tensor & sparse_resize_(IntList size, int64_t sparseDims, int64_t denseDims);
-  Tensor & sparse_resize_and_clear_(IntList size, int64_t sparseDims, int64_t denseDims);
+  Tensor & sparse_resize_(IntList size, int64_t sparse_dim, int64_t dense_dim);
+  Tensor & sparse_resize_and_clear_(IntList size, int64_t sparse_dim, int64_t dense_dim);
   Tensor sparse_mask(SparseTensorRef mask) const;
   Tensor to_dense() const;
-  int64_t _sparseDims() const;
-  int64_t _denseDims() const;
+  int64_t sparse_dim() const;
+  int64_t _dimI() const;
+  int64_t dense_dim() const;
+  int64_t _dimV() const;
   int64_t _nnz() const;
   Tensor coalesce() const;
   bool is_coalesced() const;
   Tensor _indices() const;
   Tensor _values() const;
+  Tensor & _coalesced_(bool coalesced);
+  Tensor indices() const;
+  Tensor values() const;
   int64_t numel() const;
   std::vector<Tensor> unbind(int64_t dim=0) const;
-  int64_t get_device() const;
-  Tensor to(Device device, ScalarType dtype, bool non_blocking=false) const;
-  Tensor to(ScalarType dtype, bool non_blocking=false) const;
-  Tensor to(Device device, bool non_blocking=false) const;
-  Tensor to(const Tensor & other, bool non_blocking=false) const;
+  Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
+  Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
+  Tensor to(Device device, bool non_blocking=false, bool copy=false) const;
+  Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
   Scalar _local_scalar() const;
 
   template <typename F, typename... Args>
@@ -654,7 +668,7 @@ struct CAFFE2_API WeakTensor {
   WeakTensor(const Tensor& t) : weak_impl_(t.impl_) {}
 
   // XXX: this can return undefined tensors
-  // Ideally it would be at::optional<Tensor>, but MSVC is too cool for that
+  // Ideally it would be c10::optional<Tensor>, but MSVC is too cool for that
   Tensor lock() const {
     return Tensor(weak_impl_.lock());
   }

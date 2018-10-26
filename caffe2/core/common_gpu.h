@@ -108,6 +108,12 @@ namespace caffe2 {
 class TensorCoreEngine {};
 #endif
 
+#if CUDA_VERSION >= 10000
+  #define CAFFE2_CUDA_PTRATTR_MEMTYPE type
+#else
+  #define CAFFE2_CUDA_PTRATTR_MEMTYPE memoryType
+#endif
+
 /**
  * A runtime function to report the cuda version that Caffe2 is built with.
  */

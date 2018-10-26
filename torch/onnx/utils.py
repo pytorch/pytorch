@@ -138,7 +138,7 @@ def _optimize_graph(graph, operator_export_type):
     torch._C._jit_pass_canonicalize_ops(graph)
     torch._C._jit_pass_lint(graph)
 
-    torch._C._jit_pass_peephole(graph)
+    torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_lint(graph)
 
     # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
@@ -147,7 +147,7 @@ def _optimize_graph(graph, operator_export_type):
     torch._C._jit_pass_erase_number_types(graph)
     # onnx does not support tuples, so try to remove them
     torch._C._jit_pass_lower_all_tuples(graph)
-    torch._C._jit_pass_peephole(graph)
+    torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_lint(graph)
 
     if operator_export_type != OperatorExportTypes.RAW:
@@ -521,9 +521,9 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 elif t == torch._C.ListType.ofInts():
                     unsqueezed = [g.op("Unsqueeze", input, axes_i=[0]) for input in inputs]
                     return g.op("Concat", *unsqueezed, axis_i=0)
-            elif op_name == "Undefined":
-                # Undefined is not an ONNX operator; keep it as prim::Undefined
-                # and let the exporter handle finally eliminating these
+            elif op_name == "Undefined" or op_name == "None":
+                # Undefined/None is not an ONNX operator; keep it as prim::Undefined/
+                # prim::None and let the exporter handle finally eliminating these
                 return None
             elif op_name == 'Loop' or op_name == 'If':
                 new_op_outputs = g.op(op_name, *inputs, outputs=n.outputsSize())

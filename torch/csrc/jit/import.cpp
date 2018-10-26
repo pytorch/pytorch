@@ -1,10 +1,11 @@
 #include "torch/csrc/jit/import.h"
-#include "torch/csrc/jit/serialization.h"
-#include "onnx/onnx_pb.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/operator.h"
+
+#include "caffe2/serialize/inline_container.h"
+#include "onnx/onnx_pb.h"
 
 #include <ATen/ATen.h>
 
@@ -372,7 +373,8 @@ ModuleDecoder::ModuleDecoder(
 void import_ir_module(
     ModuleLookup module_lookup,
     std::istream& in) {
-  ModuleDecoder(module_lookup, in);
+  ModuleDecoder decoder(module_lookup, in);
+  (void)decoder;
 }
 
 void import_ir_module(
@@ -380,7 +382,8 @@ void import_ir_module(
     const std::string& filename) {
   std::ifstream in(filename, std::ios_base::binary);
 
-  ModuleDecoder(module_lookup, in);
+  ModuleDecoder decoder(module_lookup, in);
+  (void)decoder;
 }
 
 std::shared_ptr<script::Module> load(std::istream& in) {
@@ -397,7 +400,8 @@ std::shared_ptr<script::Module> load(std::istream& in) {
     return curr;
   };
 
-  ModuleDecoder(module_lookup, in);
+  ModuleDecoder decoder(module_lookup, in);
+  (void)decoder;
 
   return module;
 }

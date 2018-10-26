@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/core/ATenGeneral.h>
-#include <ATen/core/Error.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
 #include <atomic>
 #include <stdexcept>
-#include <c10/util/C++17.h>
 
 namespace c10 {
 
@@ -138,9 +138,12 @@ template <
     class NullType = detail::intrusive_target_default_null_type<TTarget>>
 class C10_EXPORT intrusive_ptr final {
  private:
-  static_assert(
-      std::is_base_of<intrusive_ptr_target, TTarget>::value,
-      "intrusive_ptr can only be used for classes that inherit from intrusive_ptr_target.");
+//  the following static assert would be nice to have but it requires
+//  the target class T to be fully defined when intrusive_ptr<T> is instantiated
+//  this is a problem for classes that contain pointers to themselves
+//  static_assert(
+//      std::is_base_of<intrusive_ptr_target, TTarget>::value,
+//      "intrusive_ptr can only be used for classes that inherit from intrusive_ptr_target.");
 #ifndef _WIN32
   // This static_assert triggers on MSVC
   //  error C2131: expression did not evaluate to a constant

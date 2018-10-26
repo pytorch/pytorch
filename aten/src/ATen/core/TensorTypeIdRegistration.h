@@ -12,6 +12,7 @@
 #include "ATen/core/TensorTypeId.h"
 
 #include <atomic>
+#include <mutex>
 #include <unordered_set>
 
 namespace at {
@@ -95,9 +96,14 @@ inline at::TensorTypeId TensorTypeIdRegistrar::id() const noexcept {
   }
 
 AT_DECLARE_TENSOR_TYPE(UndefinedTensorId);
-AT_DECLARE_TENSOR_TYPE(CPUTensorId); // Caffe2 supported
-AT_DECLARE_TENSOR_TYPE(CUDATensorId); // Caffe2 supported
-AT_DECLARE_TENSOR_TYPE(SparseCPUTensorId);
-AT_DECLARE_TENSOR_TYPE(SparseCUDATensorId);
+AT_DECLARE_TENSOR_TYPE(CPUTensorId); // PyTorch/Caffe2 supported
+AT_DECLARE_TENSOR_TYPE(CUDATensorId); // PyTorch/Caffe2 supported
+AT_DECLARE_TENSOR_TYPE(SparseCPUTensorId); // PyTorch only
+AT_DECLARE_TENSOR_TYPE(SparseCUDATensorId); // PyTorch only
+AT_DECLARE_TENSOR_TYPE(MKLDNNTensorId); // Caffe2 only
+AT_DECLARE_TENSOR_TYPE(OpenGLTensorId); // Caffe2 only
+AT_DECLARE_TENSOR_TYPE(OpenCLTensorId); // Caffe2 only
+AT_DECLARE_TENSOR_TYPE(IDEEPTensorId); // Caffe2 only
+AT_DECLARE_TENSOR_TYPE(HIPTensorId); // Caffe2 only
 
 } // namespace at

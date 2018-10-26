@@ -624,7 +624,7 @@ CAFFE2_API void CopyMatrix(
     void* B,
     const int ldb,
     Context* context,
-    TypeMeta::TypedCopy copy = nullptr);
+    TypeMeta::Copy copy = nullptr);
 
 template <typename T, class Context>
 CAFFE2_API void CopyMatrix(
@@ -659,6 +659,24 @@ CAFFE2_API void AffineChannel(
     const T* X,
     const T* scale,
     const T* bias,
+    T* Y,
+    Context* context);
+
+template <typename T, class Context>
+CAFFE2_API void NCHW2NHWC(
+    const int N,
+    const int C,
+    const int HxW,
+    const T* X,
+    T* Y,
+    Context* context);
+
+template <typename T, class Context>
+CAFFE2_API void NHWC2NCHW(
+    const int N,
+    const int C,
+    const int HxW,
+    const T* X,
     T* Y,
     Context* context);
 

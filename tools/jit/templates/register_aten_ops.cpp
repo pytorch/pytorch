@@ -24,6 +24,15 @@
 
 // ${generated_comment}
 
+// NOTE [Sharded File]: This file is generated in a sharded fashion to speed up
+// incremental rebuilds. See the comment at the top of
+// templates/VariableType.cpp for an analogous, in-depth discussion.
+//
+// Note that unlike VariableType.cpp, when sharding this file we take
+// care to generate all overloads of a particular name in a single
+// file and in a particular order. See gen_jit_dispatch.py for
+// details.
+
 namespace torch { namespace jit {
 
 using autograd::Variable;
@@ -35,7 +44,7 @@ using at::DeviceGuard;
 
 namespace {
 
-int deviceForInputs(Stack & stack, size_t N) {
+inline int deviceForInputs(Stack & stack, size_t N) {
   if(N == 0)
     return -1;
   auto t = (stack.end() - N)->toTensor();
@@ -51,6 +60,20 @@ std::array<bool, N> as_bool_array(at::ArrayRef<int64_t> vec) {
 }
 
 RegisterOperators reg({
+  Operator(
+  "aten::get_device(Tensor self) -> int",
+  [](Stack & stack) {
+      autograd::profiler::RecordFunction record("get_device");
+      auto result = at::get_device(
+          (std::move(peek(stack, 0, 1))).toTensor()
+      );
+      drop(stack, 1);
+      pack(stack, std::move(result));
+      return 0;
+  }
+  ),
+
+  // Generated operators
   ${constructors}
 });
 

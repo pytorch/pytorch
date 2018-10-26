@@ -17,7 +17,27 @@ class SpectralNorm(object):
         self.n_power_iterations = n_power_iterations
         self.eps = eps
 
-    def compute_weight(self, module):
+    def compute_weight_and_update_u(self, module):
+        # NB: This updates the _u vector **in-place**. This is very important
+        #     because in DataParallel forward, the _u vector (being a buffer) is
+        #     broadcast from the parallelized module to each module replica,
+        #     which is a new module object on the fly. And each replica runs its
+        #     own spectral norm power iteration. So simply assigning the updated
+        #     _u vector to module this runs on will cause the update to be lost
+        #     forever. And the next time the parallelized module is replicated,
+        #     the same randomly initialized _u vector is broadcast!
+        #
+        #     Therefore, to make the change propagate back, we rely on two
+        #     important bahaviors (also enforced via tests):
+        #       1. DataParallel doesn't clone storage if the broadcast tensor is
+        #          alreay on correct device; and it makes sure that the
+        #          parallelized module is already on device[0].
+        #       2. If the out tensor in out= kwarg has correct shape, it will
+        #          just fill in the values.
+        #     Therefore, since the same power iteration is performed on all
+        #     devices, simply updating the _u tensor in-place will make sure
+        #     that the module replica on device[0] will update the _u vector on
+        #     the parallized module (by shared storage).
         weight = getattr(module, self.name + '_orig')
         u = getattr(module, self.name + '_u')
         weight_mat = weight
@@ -33,11 +53,11 @@ class SpectralNorm(object):
                 # are the first left and right singular vectors.
                 # This power iteration produces approximations of `u` and `v`.
                 v = normalize(torch.matmul(weight_mat.t(), u), dim=0, eps=self.eps)
-                u = normalize(torch.matmul(weight_mat, v), dim=0, eps=self.eps)
+                u = normalize(torch.matmul(weight_mat, v), dim=0, eps=self.eps, out=u)
 
         sigma = torch.dot(u, torch.matmul(weight_mat, v))
         weight = weight / sigma
-        return weight, u
+        return weight
 
     def remove(self, module):
         weight = getattr(module, self.name)
@@ -48,12 +68,16 @@ class SpectralNorm(object):
 
     def __call__(self, module, inputs):
         if module.training:
-            weight, u = self.compute_weight(module)
+            weight = self.compute_weight_and_update_u(module)
             setattr(module, self.name, weight)
-            setattr(module, self.name + '_u', u)
         else:
             r_g = getattr(module, self.name + '_orig').requires_grad
-            getattr(module, self.name).detach_().requires_grad_(r_g)
+            weight = getattr(module, self.name).detach()
+            # NB: Cannot detach weight in-place here because if this is used
+            #     DataParallel, the buffers are broadcast using
+            #     `broadacast_coalesced` and `weight` here is actually a view,
+            #     and you can't detach views in-place.
+            setattr(module, self.name, weight.requires_grad_(r_g))
 
     @staticmethod
     def apply(module, name, n_power_iterations, dim, eps):

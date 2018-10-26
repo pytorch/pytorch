@@ -1,6 +1,6 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 
 namespace at { namespace native {
 // sparse, sparse, sparse, dense, real, real -> sparse

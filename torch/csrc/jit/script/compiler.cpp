@@ -13,7 +13,7 @@
 
 #include "torch/csrc/jit/constants.h"
 
-#include "ATen/core/optional.h"
+#include "c10/util/Optional.h"
 
 #include <climits>
 #include <set>
@@ -152,11 +152,11 @@ private:
 //      the IR API, but for now we choose to pessimisitically create inputs and
 //      delete unnecessary ones later with replaceAllusesWith().
 struct Environment {
-  Environment(Method & method, const Resolver& resolver, Block* b, std::shared_ptr<Environment> next = nullptr)
-      : method(method), resolver(resolver), b(b), next(next) {}
+  Environment(Method & method, Resolver resolver, Block* b, std::shared_ptr<Environment> next = nullptr)
+      : method(method), resolver(std::move(resolver)), b(b), next(next) {}
 
   Method & method;
-  const Resolver& resolver;
+  Resolver resolver;
   std::vector<std::string> captured_inputs;
   std::unordered_map<std::string, std::string> error_messages;
   Block* b;
@@ -174,7 +174,7 @@ struct Environment {
   }
 
   // see if type error has been set for a variable
-  at::optional<std::string> findVariableTypeError(const std::string& name) {
+  c10::optional<std::string> findVariableTypeError(const std::string& name) {
     auto runner = this;
     while (runner->next) {
       runner = runner->next.get();
@@ -183,7 +183,7 @@ struct Environment {
     if (msg != runner->error_messages.end()) {
       return msg->second;
     } else {
-      return at::nullopt;
+      return c10::nullopt;
     }
   }
 
@@ -319,10 +319,6 @@ struct Environment {
     auto retval = createCapturedInputIfNeeded(range, ident);
 
     if(!retval) {
-      retval = resolver(ident, method, range);
-    }
-
-    if(!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
         {"print", std::make_shared<PrintValue>()},
         {"float", std::make_shared<CastValue>(FloatType::get())},
@@ -335,6 +331,10 @@ struct Environment {
       auto it = globals.find(ident);
       if(it != globals.end())
         retval = it->second;
+    }
+
+    if(!retval) {
+      retval = resolver(ident, method, range);
     }
 
     if (!retval && required) {
@@ -395,23 +395,6 @@ Value* packOutputs(Graph& g, at::ArrayRef<Value*> values) {
   return g.insertNode(g.createTuple(values))->output();
 }
 
-at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
-  auto list = constant_as<Shared<jit::IntList>>(input);
-  if(list)
-    return list.value()->elements();
-
-  // broadcast IntList[3] with value 4 -> {4, 4, 4}
-  if(!N)
-    return at::nullopt;
-
-  auto r = constant_as<int64_t>(input);
-  if(!r)
-    return at::nullopt;
-
-  // broadcast to attribute size
-  return std::vector<int64_t>(*N, *r);
-}
-
 at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   // small peephole optimization to ensure IntList attributes can still turn
   // into constants e.g. in x.expand([3, 4])
@@ -426,7 +409,7 @@ static inline bool isIntUsedAsIntList(
     const Argument& arg) {
   // Look for int[N]
   return value->type()->kind() == TypeKind::IntType &&
-         *arg.type == *ListType::ofInts() && arg.N;
+         *arg.type() == *ListType::ofInts() && arg.N();
 }
 
 inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
@@ -462,16 +445,16 @@ Value* tryMatchArgument(
   // also allow single ints to be passed in their place.
   // the single int is then repeated to the length of the list
   if (isIntUsedAsIntList(value, arg)) {
-    std::vector<Value*> repeated(*arg.N, value);
+    std::vector<Value*> repeated(*arg.N(), value);
     value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
   }
 
   TypePtr concrete_type;
   try {
-    concrete_type = matchTypeVariables(arg.type, value->type(), type_env);
+    concrete_type = matchTypeVariables(arg.type(), value->type(), type_env);
   } catch(TypeMatchError& e) {
     err() << "could not match type " << value->type()->str() << " to "
-          << arg.type->str() << " in argument '" << arg.name << "': " << e.what() << "\n"
+          << arg.type()->str() << " in argument '" << arg.name() << "': " << e.what() << "\n"
           << named_value.locOr(loc);
     return nullptr;
   }
@@ -484,13 +467,12 @@ Value* tryMatchArgument(
     value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
-  if (value->node()->kind() == prim::None){
-    if (concrete_type->isSubtypeOf(NumberType::get()))
-      value = graph.insertConstant(at::Scalar(NAN), loc);
-    else if (concrete_type->isSubtypeOf(GeneratorType::get())) {
+  if (value->type()->isSubtypeOf(NoneType::get())){
+    if (concrete_type->isSubtypeOf(GeneratorType::get())) {
       value = graph.insertNode(graph.createNoneGenerator())->output();
-    } else
+    } else if (concrete_type->isSubtypeOf(DynamicType::get())) {
       value = graph.insertNode(graph.createUndefined())->output();
+    }
   }
 
   //implicit conversion of tensors to scalars
@@ -503,7 +485,7 @@ Value* tryMatchArgument(
   }
 
   if(!value->type()->isSubtypeOf(concrete_type)) {
-    err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name << "' but found "
+    err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name() << "' but found "
           << value->type()->str() << "\n"
           << named_value.locOr(loc);
     return nullptr;
@@ -511,12 +493,14 @@ Value* tryMatchArgument(
   return value;
 }
 
-at::optional<size_t> findInputWithName(const std::string& name, at::ArrayRef<NamedValue> kwargs) {
+c10::optional<size_t> findInputWithName(
+    const std::string& name,
+    at::ArrayRef<NamedValue> kwargs) {
   for(size_t i = 0; i < kwargs.size(); ++i) {
     if(kwargs[i].name() == name)
       return i;
   }
-  return at::nullopt;
+  return c10::nullopt;
 }
 
 Value* tryCreateList(
@@ -553,10 +537,11 @@ static Value* materializeConstant(T val, Graph& graph,
   return new_constant;
 }
 
-at::optional<MatchedSchema> tryMatchSchema(
+c10::optional<MatchedSchema> tryMatchSchema(
     const FunctionSchema& schema,
     const SourceRange& loc,
     Graph& graph,
+    c10::optional<NamedValue> self,
     at::ArrayRef<NamedValue> raw_args,
     at::ArrayRef<NamedValue> kwargs,
     std::ostream& failure_messages,
@@ -576,7 +561,7 @@ at::optional<MatchedSchema> tryMatchSchema(
   // NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
   // necessary to enforce linearization on effectful ops.
   std::vector<NamedValue> modifiedArgs(raw_args.begin(), raw_args.end());
-  if (schema.is_mutable) {
+  if (schema.has_world_token()) {
     // Add a dummy world token to be matched against
     const auto worldToken = graph.insertDummyWorld();
     modifiedArgs.insert(modifiedArgs.begin(), worldToken);
@@ -592,65 +577,71 @@ at::optional<MatchedSchema> tryMatchSchema(
 
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
-
-  for (size_t schema_i = 0; schema_i < schema.arguments.size(); ++schema_i) {
-    const auto& arg = schema.arguments[schema_i];
-    at::optional<NamedValue> v;
-    if (!arg.kwarg_only && schema_i < modifiedArgs.size()) {
+  for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
+    const auto& arg = schema.arguments()[schema_i];
+    c10::optional<NamedValue> v;
+    if (arg.name() == "self" && self) {
+      v = self;
+      self = c10::nullopt;
+    } else if (!arg.kwarg_only() && used_args < modifiedArgs.size()) {
       // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
-      if (arg.type->kind() == TypeKind::ListType && // the formal must be a list
-          !arg.N && // it must not be a broadcasting list like int[3], otherwise
+      if (arg.type()->kind() == TypeKind::ListType && // the formal must be a list
+          !arg.N() && // it must not be a broadcasting list like int[3], otherwise
                     // a single int is a valid input
-          (schema_i + 1 == schema.arguments.size() ||
-           schema.arguments[schema_i + 1]
-               .kwarg_only)) { // must be the last position argument
-        auto actual_type = modifiedArgs[schema_i].value(graph)->type();
+          (schema_i + 1 == schema.arguments().size() ||
+           schema.arguments()[schema_i + 1]
+               .kwarg_only())) { // must be the last position argument
+        auto actual_type = modifiedArgs[used_args].value(graph)->type();
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(
                 actual_type,
-                arg.type)) { // and the actual should not be a list already
-          auto elem_type = arg.type->expect<ListType>()->getElementType();
+                arg.type())) { // and the actual should not be a list already
+          auto elem_type = arg.type()->expect<ListType>()->getElementType();
           Value* list = tryCreateList(
               elem_type,
               graph,
               loc,
-              at::ArrayRef<NamedValue>(modifiedArgs).slice(schema_i),
+              at::ArrayRef<NamedValue>(modifiedArgs).slice(used_args),
               err,
               convert_tensors_to_nums,
               type_env);
           if (!list)
-            return at::nullopt;
+            return c10::nullopt;
           used_args = modifiedArgs.size();
           positional_inputs.push_back(list);
           continue;
         }
       }
 
-      v = modifiedArgs[schema_i];
+      v = modifiedArgs[used_args];
       used_args++;
-    } else if (auto idx = findInputWithName(arg.name, kwargs)) {
+    } else if (auto idx = findInputWithName(arg.name(), kwargs)) {
       const NamedValue& nv = kwargs[*idx];
       if (used_kwarg[*idx]) {
         err() << "argument " << nv.name()
               << " specified twice in schema, submit a bug report!\n"
               << nv.locOr(loc);
-        return at::nullopt;
+        return c10::nullopt;
       }
       used_kwarg[*idx] = true;
       v = nv;
-    } else if (arg.default_value) {
-      v = NamedValue(*arg.default_value);
+    } else if (arg.default_value()) {
+      v = NamedValue(*arg.default_value());
     } else {
-      err() << "argument " << schema.arguments[schema_i].name
+      err() << "argument " << schema.arguments()[schema_i].name()
             << " not provided.\n"
             << loc;
-      return at::nullopt;
+      return c10::nullopt;
     }
     Value* positional = tryMatchArgument(
         arg, graph, loc, *v, err, convert_tensors_to_nums, type_env);
     if (!positional)
-      return at::nullopt;
+      return c10::nullopt;
     positional_inputs.push_back(positional);
+  }
+  // check for unused self argument
+  if(self != c10::nullopt) {
+    err() << "provided self argument not used in schema\n";
   }
 
   // check for unused positional arguments
@@ -658,7 +649,7 @@ at::optional<MatchedSchema> tryMatchSchema(
     err() << "expected at most " << used_args << " arguments "
           << "but found " << modifiedArgs.size() << " positional arguments.\n"
           << loc << "\n";
-    return at::nullopt;
+    return c10::nullopt;
   }
   // check for unused kwargs
   for (size_t i = 0; i < kwargs.size(); ++i) {
@@ -669,11 +660,11 @@ at::optional<MatchedSchema> tryMatchSchema(
       } else {
         err() << "keyword argument " << nv.name() << " specified twice\n";
       }
-      return at::nullopt;
+      return c10::nullopt;
     }
   }
-  auto return_types = fmap(schema.returns, [&](const Argument& r) {
-    return evalTypeVariables(r.type, type_env);
+  auto return_types = fmap(schema.returns(), [&](const Argument& r) {
+    return evalTypeVariables(r.type(), type_env);
   });
   return MatchedSchema{std::move(positional_inputs), std::move(return_types)};
 }
@@ -717,6 +708,7 @@ Value* emitBuiltinCall(
   const SourceRange& loc,
   Graph& graph,
   Symbol name,
+  c10::optional<NamedValue> self,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
@@ -738,6 +730,7 @@ Value* emitBuiltinCall(
           op->schema(),
           loc,
           graph,
+          self,
           inputs,
           attributes,
           failure_messages,
@@ -752,6 +745,7 @@ Value* emitBuiltinCall(
               graph,
               loc,
               *method,
+              self,
               inputs,
               attributes,
               failure_messages,
@@ -785,15 +779,11 @@ static Value* ensureInt(const SourceRange& range, Value* v) {
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
     SourceRange loc,
     Method& m,
-    at::ArrayRef<NamedValue> inputs_,
+    at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  std::vector<NamedValue> inputs;
-  if (value)
-    inputs.push_back(*value);
-  inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
   return std::make_shared<SimpleValue>(emitBuiltinCall(
-      loc, *m.graph(), symbol, inputs, attributes, true));
+      loc, *m.graph(), symbol, self, inputs, attributes, true));
 }
 
 inline bool isSupportedListElementType(TypePtr type) {
@@ -804,16 +794,15 @@ inline bool isSupportedListElementType(TypePtr type) {
 struct to_ir {
   to_ir(
       Def def,
-      FunctionTable& function_table,
-      const Resolver& resolver,
+      Resolver resolver_,
       SugaredValuePtr self,
       Method& method) // method being constructed
       : method(method)
       , graph(method.graph())
       , def(def)
-      , function_table(function_table)
-      , resolver(resolver)
+      , resolver(std::move(resolver_))
       , environment_stack(nullptr) {
+    JIT_ASSERT(resolver);
     pushFrame(graph->block());
 
     auto schema = extractSchemaFromDef(def, bool(self));
@@ -829,7 +818,7 @@ struct to_ir {
       throw ErrorReport(def.decl().params().range()) << "methods must have a self argument";
     }
     auto expected_annotation_size = self ? def.decl().params().size() - 1 : def.decl().params().size();
-    if (schema.arguments.size() != expected_annotation_size) {
+    if (schema.arguments().size() != expected_annotation_size) {
       throw ErrorReport(def.decl().params().range()) << "Number of type annotations for"
         << " function parameters (" << arguments.size() << ")"
         << " does not match the number of parameters on the function ("
@@ -849,8 +838,8 @@ struct to_ir {
       environment_stack->setVar((*it).ident().range(), name, new_input);
 
       // Record the type for the schema and set the Type on the Value*
-      arguments.push_back(schema.arguments.at(arg_annotation_idx++));
-      new_input->setType(arguments.back().type);
+      arguments.push_back(schema.arguments().at(arg_annotation_idx++));
+      new_input->setType(arguments.back().type());
     }
     // body
     auto stmts = def.statements();
@@ -876,9 +865,9 @@ struct to_ir {
           results = createTupleUnpack(result).vec();
         }
       }
-      if (!schema.is_varret && schema.returns.size() != results.size()) {
+      if (!schema.is_varret() && schema.returns().size() != results.size()) {
         throw ErrorReport(def.range()) << "Number of type annotations for function"
-          << " return (" << schema.returns.size() << ") does not match"
+          << " return (" << schema.returns().size() << ") does not match"
           << " the number of returns from the function (" << results.size() << ")!";
       }
       auto range = return_stmt.range();
@@ -886,8 +875,8 @@ struct to_ir {
       for (auto& r : results) {
         graph->registerOutput(r);
         TypePtr type = DynamicType::get();
-        if (!schema.is_varret) {
-          type = schema.returns.at(return_type_idx).type;
+        if (!schema.is_varret()) {
+          type = schema.returns().at(return_type_idx).type();
           if (!r->type()->isSubtypeOf(type)) {
             throw ErrorReport(return_stmt.range()) << "Return value at position "
               << return_type_idx << " was annotated as having type " << type->str()
@@ -911,8 +900,7 @@ private:
   Method& method;
   std::shared_ptr<Graph> graph;
   Def def;
-  FunctionTable& function_table;
-  const Resolver& resolver;
+  Resolver resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
 
@@ -1169,13 +1157,12 @@ private:
   // loop-carried variables whose definitions are updated as the loop executes
   // in a way that ensure single static assignment.
 
-
   void emitLoopCommon(
       SourceRange range,
-      at::optional<Expr> max_trip_count,
-      at::optional<Expr> cond,
+      c10::optional<Expr> max_trip_count,
+      c10::optional<Expr> cond,
       const List<Stmt>& body,
-      at::optional<Ident> itr_ident) {
+      c10::optional<Ident> itr_ident) {
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
     Value *max_trip_count_val, *cond_val;
     {
@@ -1371,8 +1358,10 @@ private:
       return;
     }
 
-    auto outputs = output->asTuple(stmt.rhs().range(), method,
-                                   starred_unpack ? at::nullopt : at::optional<size_t>{n_binders});
+    auto outputs = output->asTuple(
+        stmt.rhs().range(),
+        method,
+        starred_unpack ? c10::nullopt : c10::optional<size_t>{n_binders});
     if(outputs.size() < n_binders) {
       throw ErrorReport(stmt)
         << "need " << (starred_unpack ? "at least " : "")
@@ -1488,23 +1477,13 @@ private:
     return getValues(trees.tree()->trees(), maybe_unpack);
   }
 
-  // special rules apply when we directly call foo(a,b) when foo is an ident
-  std::shared_ptr<SugaredValue> emitApplyIdent(Ident ident, const std::vector<NamedValue>& inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) {
-    auto it = function_table.find(ident.name());
-    if (it != function_table.end()) {
-      return std::make_shared<SimpleValue>(packOutputs(*graph, method.emit_call_to(ident.range(), it->second, inputs, attributes)));
-    }
-    if(auto result = emitBuiltinCall(ident.range(), *method.graph(), Symbol::aten(ident.name()), inputs, attributes, false)) {
-      return std::make_shared<SimpleValue>(result);
-    }
-    // it wasn't known built in, so treat it like standard apply
-    return emitApplyExpr(Var::create(ident.range(), ident), inputs, attributes, n_binders);
-  }
-
-  std::shared_ptr<SugaredValue> emitApplyExpr(Expr callee, const std::vector<NamedValue>& inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) {
-    // otherwise we evaluate the callee and then desugar it
-    auto sv = emitSugaredExpr(callee, 1);
-    return sv->call(callee.range(), method, inputs, attributes, n_binders);
+  std::shared_ptr<SugaredValue> emitApplyExpr(Apply &apply, size_t n_binders) {
+    auto sv = emitSugaredExpr(apply.callee(), 1);
+    auto inputs = getNamedValues(apply.inputs(), true);
+    auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
+      return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
+    });
+    return sv->call(apply.callee().range(), method, inputs, attributes, n_binders);
   }
 
   Value* emitExpr(Expr tree) {
@@ -1537,19 +1516,37 @@ private:
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
-        auto inputs = getNamedValues(apply.inputs(), true);
-        auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
-          return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
-        });
-        // the apply is directly an identifier 'foo'
-        if(apply.callee().kind() == TK_VAR) {
-          return emitApplyIdent(Var(apply.callee()).name(), inputs, attributes, n_binders);
-        }
-        return emitApplyExpr(apply.callee(), inputs, attributes, n_binders);
+        return emitApplyExpr(apply, n_binders);
       } break;
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree));
     }
+  }
+
+  Value * emitNegate(const TreeRef& tree) {
+    const auto& inputs = tree->trees();
+    auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+
+    auto neg_val = emitBuiltinCall(
+               tree->range(),
+               *method.graph(),
+               aten::neg,
+               c10::nullopt,
+               named_values,
+               {},
+               /*required=*/true);
+
+    // constant fold the input if possible
+    auto maybe_constant_input = toIValue(neg_val->node()->input());
+    if (!maybe_constant_input) {
+      return neg_val;
+    }
+    auto op = getOperation(neg_val->node());
+    Stack stack;
+    stack.push_back(*maybe_constant_input);
+    op(stack);
+    JIT_ASSERT(stack.size() == 1);
+    return graph->insertConstant(stack[0], tree->range());
   }
 
   Value* emitSimpleExpr(
@@ -1568,8 +1565,7 @@ private:
       case '/':
       case '+':
       case '-':
-      case '%':
-      case TK_UNARY_MINUS: {
+      case '%': {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
@@ -1577,9 +1573,13 @@ private:
                    tree->range(),
                    *method.graph(),
                    kind,
+                   c10::nullopt,
                    named_values,
                    {},
                    /*required=*/true);
+      }
+      case TK_UNARY_MINUS: {
+        return emitNegate(tree);
       }
       case TK_AND:
       case TK_OR: {
@@ -1603,7 +1603,7 @@ private:
         return graph->insertConstant(false, tree->range());
       } break;
       case TK_NONE: {
-        return emitNone(tree->range());
+        return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_SUBSCRIPT: {
         const auto subscript = Subscript(tree);
@@ -1652,13 +1652,6 @@ private:
     }
   }
 
-  Value* emitNone(SourceRange range) {
-    auto& g = *method.graph();
-    return g.insertNode(
-        g.create(prim::None, {}, 1)->setSourceLocation(
-          std::make_shared<SourceRange>(range)))->output();
-  }
-
   Value* emitConst(const Const& c) {
     if (c.isFloatingPoint())
       return materializeConstant(c.asFloatingPoint(), *graph, c.range(), fp_constants);
@@ -1677,7 +1670,7 @@ private:
       int64_t dim,
       Value* index) {
     return emitBuiltinCall(
-        loc, *graph, aten::select,
+        loc, *graph, aten::select, c10::nullopt,
         {input, graph->insertConstant(dim, loc), index}, {}, true);
   }
 
@@ -1685,7 +1678,7 @@ private:
   Value* emitSlice(
       const SourceRange& loc,
       Value* input,
-      at::optional<int64_t> dim, // Only used for tensor slicing
+      c10::optional<int64_t> dim, // Only used for tensor slicing
       const SliceExpr& slice) {
     std::vector<NamedValue> args;
     args.reserve(4);
@@ -1705,8 +1698,15 @@ private:
     if (has_end) {
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
+    if (input->type()->cast<TupleType>()) {
+      if (has_end) {
+        return emitTupleSlice(loc, args[0], args[1], /*end*/args[2]);
+      } else {
+        return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
+      }
+    }
     NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
+    return emitBuiltinCall(loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
 
   Value* emitIndex(
@@ -1715,7 +1715,7 @@ private:
       at::ArrayRef<Value*> indices) {
     auto* index = graph->insertNode(
         graph->createList(DynamicType::get(), indices))->output();
-    return emitBuiltinCall(loc, *graph, aten::index, {input, index}, {}, true);
+    return emitBuiltinCall(loc, *graph, aten::index, c10::nullopt,  {input, index}, {}, true);
   }
 
   // Emits multidimensional slicing with int and slice indices.
@@ -1816,13 +1816,69 @@ private:
     JIT_ASSERT(subscript.subscript_exprs()[0].kind() == TK_SLICE_EXPR);
     auto slice_exp = SliceExpr(subscript.subscript_exprs()[0]);
     auto * sliceable = emitExpr(subscript.value());
-    at::optional<int64_t> maybe_dim;
+    c10::optional<int64_t> maybe_dim;
     if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
       maybe_dim = 0;
     }
     return emitSlice(loc, sliceable, maybe_dim, slice_exp);
   }
+
+  int64_t getTupleIndexVal(const SourceRange& loc,
+    const TupleTypePtr& tuple_type,
+      Value * idx_val,
+      bool allow_out_of_bounds) {
+     int64_t index;
+    at::optional<IValue> ivalue = toIValue(idx_val);
+    if (ivalue && ivalue->isInt()) {
+      index = ivalue->to<int64_t>();
+    } else {
+      throw ErrorReport(loc)
+        << "tuple indices must be integer constants";
+    }
+     // set index to be positive to simplify logic in runtime
+    int64_t adj_index = index;
+    int64_t tuple_len = tuple_type->elements().size();
+    if (index < 0) {
+      adj_index = tuple_len + index;
+    }
+    if (!allow_out_of_bounds && (adj_index >= tuple_len || adj_index < 0)) {
+      throw ErrorReport(loc)
+        << "Tuple index out of range. Tuple is length " << tuple_len
+        << " and index is " << index;
+    }
+    return adj_index;
+  }
+   Value* emitTupleIndex(const SourceRange& loc,
+      Value * tuple_val,
+      Value * idx_val) {
+    auto tuple_typ = tuple_val->type()->cast<TupleType>();
+    auto adj_index = getTupleIndexVal(loc, tuple_typ, idx_val, /*allow_out_of_bounds*/false);
+    return graph->insertNode(
+        graph->createTupleIndex(tuple_val, adj_index))->output();
+  }
+
+  Value* emitTupleSlice(const SourceRange& loc,
+      const NamedValue& tuple_val,
+      const NamedValue& beg_val,
+      const at::optional<NamedValue>& end_val) {
+    auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
+    int64_t beg = getTupleIndexVal(loc, tuple_type, beg_val.value(*graph), /*allow_out_of_bounds*/true);
+    int64_t end;
+    int64_t tuple_len = tuple_type->elements().size();
+    if (end_val) {
+      end = getTupleIndexVal(loc, tuple_type, end_val->value(*graph), true);
+    } else {
+      end = tuple_len;
+    }
+    // slicing does not throw out of bounds errors
+    end = std::min(std::max((int64_t)0, end), tuple_len);
+    beg = std::min(std::max((int64_t)0, beg), tuple_len);
+
+    return graph->insertNode(
+        graph->createTupleSlice(tuple_val.value(*graph), beg, end))->output();
+  }
+
 
   // Desugars gather syntactic sugar foo[i]
   Value* emitBasicGather(const Subscript& subscript) {
@@ -1834,10 +1890,15 @@ private:
       // if it's a list, emit a regular index selection op
       auto* idx = emitExpr(subscript.subscript_exprs()[0]);
       return emitBuiltinCall(
-                 loc, *graph, aten::select, {gatherable, idx}, {}, true);
-    } else {
-      JIT_ASSERT(gatherable->type()->isSubtypeOf(DynamicType::get()));
+                 loc, *graph, aten::select, c10::nullopt, {gatherable, idx}, {}, true);
+    } else if (gatherable->type()->isSubtypeOf(DynamicType::get())) {
       return emitMultidimSlicing(loc, gatherable, subscript);
+    } else if (auto tuple_type = gatherable->type()->cast<TupleType>()) {
+      auto* idx = emitExpr(subscript.subscript_exprs()[0]);
+      return emitTupleIndex(loc, gatherable, idx);
+    } else {
+      throw ErrorReport(loc)
+        << "Indexing only supported on lists, tensors, and tuples.";
     }
   }
 };
@@ -1860,23 +1921,31 @@ static const std::unordered_map<std::string, std::string> &builtin_cast_methods(
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
-  if (value->type()->isSubtypeOf(DynamicType::get()) && builtin_cast_methods().count(field)) {
-    return std::make_shared<BuiltinFunction>(
-        Symbol::aten(builtin_cast_methods().at(field)),
-        NamedValue(loc, "self", value));
+  if (value->type()->isSubtypeOf(DynamicType::get())) {
+    if (builtin_cast_methods().count(field)) {
+      return std::make_shared<BuiltinFunction>(
+          Symbol::aten(builtin_cast_methods().at(field)),
+          NamedValue(loc, "self", value));
+    }
+    if (field == "dtype") {
+      auto* node = m.graph()->create(prim::TensorDType, {value});
+      node->output()->setType(IntType::get());
+      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
+    } else if (field == "device") {
+      auto* node = m.graph()->create(prim::TensorDevice, {value});
+      node->output()->setType(ListType::create(IntType::get()));
+      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
+    } else if (field == "shape") {
+      auto* node = m.graph()->create(prim::TensorShape, {value});
+      node->output()->setType(ListType::create(IntType::get()));
+      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
+    }
   }
   if (getValue()->type()->isSubtypeOf(NumberType::get())) {
     throw ErrorReport(loc) << "Cannot call methods on numbers";
   }
   return std::make_shared<BuiltinFunction>(
       Symbol::aten(field), NamedValue(loc, "self", value));
-}
-
-std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m, const SourceRange& loc) {
-  if (name == "torch") {
-    return std::make_shared<BuiltinModule>(name);
-  }
-  return nullptr;
 }
 
 std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
@@ -1902,24 +1971,35 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
 }
 
 void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
-  FunctionTable table;
   JIT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
+  std::unordered_map<std::string, Method*> function_table;
   for(Def def : definitions) {
     const std::string& name = def.name().name();
-    Resolver resolver = *resolver_it++;
-    auto creator = [def, &table, resolver, self](Method& method) {
-      to_ir(def, table, resolver, self,  method);
+    auto resolver = *resolver_it++;
+    JIT_ASSERT(resolver);
+    if(!self) {
+      // if self is defined, then these are methods and do not go into the global namespace
+      // otherwise, they get defined together so we add them to the function table
+      // so the methods can see each other
+      resolver = [resolver, &function_table](
+                     const std::string& name,
+                     Method& m,
+                     const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
+        auto it = function_table.find(name);
+        if (it != function_table.end()) {
+          return std::make_shared<MethodValue>(nullptr, *it->second);
+        }
+        return resolver(name, m, loc);
+      };
+    }
+    auto creator = [def, resolver, self](Method& method) {
+      JIT_ASSERT(resolver);
+      to_ir(def, resolver, self,  method);
     };
     Method& method = m.create_method(name, creator);
-    // if self is defined, then these are methods and do not go into the global namespace
-    // otherwise, they get defined together so we add them to the function table
-    // so the methods can see each other
-    if(!self) {
-      auto result = table.emplace(name, method);
-      JIT_ASSERT(result.second);
-    }
+    function_table[name] = &method;
     methods.push_back(&method);
   }
   for(Method* method : methods) {
@@ -1933,6 +2013,7 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
     {"int", IntType::get()},
     {"float", FloatType::get()},
     {"bool", BoolType::get()},
+    {"str", StringType::get()},
   };
   return map;
 }
@@ -1993,9 +2074,12 @@ std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
   size_t i = is_method ? 1 : 0;
   for (; i < decl.params().size(); ++i) {
     auto decl_arg = decl.params()[i];
-    auto arg = Argument(decl_arg.ident().name(), parseTypeFromExpr(decl_arg.type()),
-                        /*N =*/at::nullopt, /*default_value =*/at::nullopt,
-                        /*kwarg_only =*/false);
+    auto arg = Argument(
+        decl_arg.ident().name(),
+        parseTypeFromExpr(decl_arg.type()),
+        /*N =*/c10::nullopt,
+        /*default_value =*/c10::nullopt,
+        /*kwarg_only =*/false);
     retval.push_back(arg);
   }
   return retval;
@@ -2008,13 +2092,21 @@ std::vector<Argument> parseReturnsFromDecl(Decl decl) {
     // Flatten a single return type of type Tuple into its constituent types
     std::vector<Argument> retval;
     for (auto type_ptr : tuple_type->elements()) {
-      retval.emplace_back("", type_ptr, /*N =*/at::nullopt,
-                          /*default_value =*/at::nullopt, /*kwarg_only =*/false);
+      retval.emplace_back(
+          "",
+          type_ptr,
+          /*N =*/c10::nullopt,
+          /*default_value =*/c10::nullopt,
+          /*kwarg_only =*/false);
     }
     return retval;
   } else {
-    return {Argument("", parsed_type, /*N =*/at::nullopt,
-                     /*default_value =*/at::nullopt, /*kwarg_only =*/false)};
+    return {Argument(
+        "",
+        parsed_type,
+        /*N =*/c10::nullopt,
+        /*default_value =*/c10::nullopt,
+        /*kwarg_only =*/false)};
   }
 }
 
@@ -2032,7 +2124,7 @@ FunctionSchema extractSchemaFromDef(const Def &def, bool is_method) {
     return FunctionSchema(name, args, returns, false, is_varret);
 }
 
-void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, SugaredValuePtr self) {
+void defineMethodsInModule(Module & m, const std::string& source, Resolver resolver, SugaredValuePtr self) {
   Parser p(source);
   std::vector<Def> definitions;
   std::vector<Resolver> resolvers;
@@ -2044,13 +2136,16 @@ void defineMethodsInModule(Module & m, const std::string& source, const Resolver
   defineMethodsInModule(m, definitions, resolvers, self);
 }
 
-std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
+std::shared_ptr<Graph> compileFunction(Def def, Resolver resolver) {
   Module m;
   defineMethodsInModule(m, {def}, {resolver}, nullptr);
   return m.get_method(def.name().name()).graph();
 }
 
-std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint) {
+std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
+    SourceRange loc,
+    Method& m,
+    c10::optional<size_t> size_hint) {
   static const auto make_simple_value = [](Value* v) -> std::shared_ptr<SugaredValue> {
     return std::make_shared<SimpleValue>(v);
   };

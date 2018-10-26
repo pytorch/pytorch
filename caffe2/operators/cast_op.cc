@@ -178,7 +178,7 @@ Y: [[9 5 0]
         "Y",
         "*(type: Tensor`<'to' type>`)* Output tensor with the same shape as "
         "input with type specified by the `to` argument.")
-    .InheritOnnxSchema("Cast");
+    .InheritOnnxSchema();
 
 // Some Casts are compatible with gradients, but for now we don't support it
 // GRADIENT_NOT_IMPLEMENTED_YET(Cast);

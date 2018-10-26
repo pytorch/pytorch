@@ -195,11 +195,12 @@ class MapSerializer : public BlobSerializerBase {
   using MapType = typename MapTypeTraits<KEY_T, VALUE_T>::MapType;
 
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       BlobSerializerBase::SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(blob.IsType<MapType>());
-    const MapType& map_data = blob.template Get<MapType>();
+    CAFFE_ENFORCE(typeMeta.Match<MapType>());
+    const MapType& map_data = *static_cast<const MapType*>(pointer);
     int64_t sz = map_data.size();
     Tensor key_tensor(CPU);
     key_tensor.Resize(sz);
@@ -224,8 +225,8 @@ class MapSerializer : public BlobSerializerBase {
     BlobProto blob_proto;
     blob_proto.set_name(name);
     blob_proto.set_type(MapTypeTraits<KEY_T, VALUE_T>::MapTypeName());
-    blob_proto.set_content(tensor_protos.SerializeAsString());
-    acceptor(name, blob_proto.SerializeAsString());
+    blob_proto.set_content(SerializeAsString_EnforceCheck(tensor_protos));
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 };
 

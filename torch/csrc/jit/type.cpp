@@ -51,6 +51,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
+  } else if (t.kind() == TypeKind::OptionalType) {
+    auto prim = t.cast<OptionalType>()->getElementType();
+    out << *prim << "?";
   } else if(t.kind() == TypeKind::NoneType) {
     out << "None";
   } else if(t.kind() == TypeKind::StringType) {
@@ -149,7 +152,7 @@ TypePtr inferTypeFrom(const IValue& value) {
   AT_ASSERTM(false, "Unhandled IValue kind in inferTypeFrom");
 }
 
-at::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
   if (t1->isSubtypeOf(t2)) {
     return t2;
@@ -170,26 +173,26 @@ at::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
     if (unified_type) {
       return static_cast<TypePtr>(ListType::create(*unified_type));
     } else {
-      return at::nullopt;
+      return c10::nullopt;
     }
   } else if(t1->cast<TupleType>() && t2->cast<TupleType>()) {
     auto tuple1 = t1->cast<TupleType>();
     auto tuple2 = t2->cast<TupleType>();
     if (tuple1->elements().size() != tuple2->elements().size()) {
-      return at::nullopt;
+      return c10::nullopt;
     }
     std::vector<TypePtr> elements;
     for (size_t i = 0; i < tuple1->elements().size(); i++) {
       if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i))) {
         elements.push_back(*elem);
       } else {
-        return at::nullopt;
+        return c10::nullopt;
       }
     }
     return static_cast<TypePtr>(TupleType::create(elements));
   }
 
-  return at::nullopt;
+  return c10::nullopt;
 }
 
 TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
@@ -237,6 +240,7 @@ TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
       throw TypeMatchError(ss.str());
     }
   }
+
   AT_ERROR("unhandled free variable container: ", formal->str());
 }
 
@@ -249,14 +253,12 @@ TORCH_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::string
     auto it = type_env.find(vt->name());
     AT_ASSERTM(it != type_env.end(), "schema has unbound type variable '", vt->name(), "' in its return type");
     return it->second;
-  } else if(auto lt = type->cast<ListType>()) {
-    return ListType::create(evalTypeVariables(lt->getElementType(), type_env));
-  } else if(auto tp = type->cast<TupleType>()) {
-    return TupleType::create(fmap(tp->elements(), [&](const TypePtr& typ) {
-      return evalTypeVariables(typ, type_env);
-    }));
+  } else {
+    auto new_contained = fmap(type->containedTypes(), [&](TypePtr t) {
+      return evalTypeVariables(t, type_env);
+    });
+    return type->withContained(std::move(new_contained));
   }
-  return type;
 }
 
 }} // namespace torch::jit

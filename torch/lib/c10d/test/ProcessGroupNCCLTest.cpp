@@ -7,11 +7,13 @@
 #include <c10d/test/CUDATest.hpp>
 #include <c10d/test/TestUtils.hpp>
 
+#include <ATen/cuda/CUDAGuard.h>
+#include <ATen/cuda/CUDAStream.h>
+
 using namespace c10d::test;
 
-using c10d::CUDAStream;
+using at::cuda::CUDAStream;
 using c10d::ProcessGroup;
-using c10d::THCStreamGuard;
 
 class NCCLTestBase {
  public:
@@ -68,14 +70,14 @@ class NCCLTest : public NCCLTestBase {
     streams_.resize(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
-      streams_[i] = CUDAStream::create();
+      streams_[i] = at::cuda::getStreamFromPool();
     }
   }
 
-  std::vector<THCStreamGuard> createStreamGuard() {
-    std::vector<THCStreamGuard> guards;
+  std::vector<at::cuda::CUDAGuard> createStreamGuard() {
+    std::vector<at::cuda::CUDAGuard> guards;
     for (auto& stream : streams_) {
-      guards.push_back(std::move(THCStreamGuard(state_, stream)));
+      guards.push_back(at::cuda::CUDAGuard(stream));
     }
     return guards;
   }
@@ -93,7 +95,7 @@ class NCCLTest : public NCCLTestBase {
 
     // Copy inputs to outputs
     for (auto i = 0; i < numDevices_; i++) {
-      cudaStreamSynchronize(streams_[i].getStream());
+      cudaStreamSynchronize(streams_[i].stream());
       outputs[i] = inputs_[i].cpu();
     }
 
@@ -111,7 +113,7 @@ class NCCLTest : public NCCLTestBase {
 
     // Copy inputs to outputs
     for (auto i = 0; i < numDevices_; ++i) {
-      cudaStreamSynchronize(streams_[i].getStream());
+      cudaStreamSynchronize(streams_[i].stream());
       for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
         outputs[i][j] = outputs_[i][j].cpu();
       }

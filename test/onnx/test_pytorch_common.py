@@ -13,7 +13,7 @@ import torch.autograd.function as function
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(-1, pytorch_test_dir)
 
-from common import *
+from common_utils import *
 
 torch.set_default_tensor_type('torch.FloatTensor')
 
@@ -35,7 +35,8 @@ skipIfNoCuda = _skipper(lambda: not torch.cuda.is_available(),
 skipIfTravis = _skipper(lambda: os.getenv('TRAVIS'),
                         'Skip In Travis')
 
-skipIfCI = _skipper(lambda: os.getenv('CI') or os.getenv('TRAVIS') or os.getenv('JENKINS_URL'),
+skipIfCI = _skipper(lambda: os.getenv('CI') or os.getenv('TRAVIS') or
+                    os.getenv('JENKINS_URL') or os.getenv('INTEGRATED'),
                     'Skip In CI')
 
 

@@ -12,7 +12,7 @@ class CopyCPUToIDEEPOp final : public IDEEPOperator {
   bool RunOnDevice() override {
     const auto& X = OperatorBase::Input<Tensor>(0, CPU);
     auto* Y = OperatorBase::OutputBlob(0);
-    itensor::dims src_dims(X.dims().begin(), X.dims().end());
+    itensor::dims src_dims(X.sizes().begin(), X.sizes().end());
     if (!(Y->template IsType<itensor>() &&
           Y->Get<itensor>().get_data_type() == itensor::data_type::f32) ||
         Y->Get<itensor>().get_dims() != src_dims) {

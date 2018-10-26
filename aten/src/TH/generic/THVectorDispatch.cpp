@@ -32,12 +32,6 @@ static FunctionDescription THVector_(fill_DISPATCHTABLE)[] = {
     #endif
   #endif
 
-  #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
-          || defined(USE_SSE4_1) || defined(USE_SSE4_2)
-    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(fill_SSE), SIMDExtension_SSE),
-    #endif
-  #endif
   FUNCTION_IMPL(THVector_(fill_DEFAULT), SIMDExtension_DEFAULT)
 };
 void THVector_(fill)(scalar_t *x, const scalar_t c, const ptrdiff_t n) {
@@ -61,13 +55,6 @@ static FunctionDescription THVector_(cadd_DISPATCHTABLE)[] = {
   #if defined(USE_AVX)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(cadd_AVX), SIMDExtension_AVX),
-    #endif
-  #endif
-
-  #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
-          || defined(USE_SSE4_1) || defined(USE_SSE4_2)
-    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(cadd_SSE), SIMDExtension_SSE),
     #endif
   #endif
 
@@ -97,13 +84,6 @@ static FunctionDescription THVector_(adds_DISPATCHTABLE)[] = {
     #endif
   #endif
 
-  #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
-          || defined(USE_SSE4_1) || defined(USE_SSE4_2)
-    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(adds_SSE), SIMDExtension_SSE),
-    #endif
-  #endif
-
   FUNCTION_IMPL(THVector_(adds_DEFAULT), SIMDExtension_DEFAULT)
 };
 // Dispatch stubs that just call the pointers
@@ -122,13 +102,6 @@ static FunctionDescription THVector_(cmul_DISPATCHTABLE)[] = {
   #if defined(USE_AVX)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(cmul_AVX), SIMDExtension_AVX),
-    #endif
-  #endif
-
-  #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
-          || defined(USE_SSE4_1) || defined(USE_SSE4_2)
-    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(cmul_SSE), SIMDExtension_SSE),
     #endif
   #endif
 
@@ -158,13 +131,6 @@ static FunctionDescription THVector_(muls_DISPATCHTABLE)[] = {
     #endif
   #endif
 
-  #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
-          || defined(USE_SSE4_1) || defined(USE_SSE4_2)
-    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(muls_SSE), SIMDExtension_SSE),
-    #endif
-  #endif
-
   FUNCTION_IMPL(THVector_(muls_DEFAULT), SIMDExtension_DEFAULT)
 };
 void THVector_(muls)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n) {
@@ -185,13 +151,6 @@ static FunctionDescription THVector_(cdiv_DISPATCHTABLE)[] = {
     #endif
   #endif
 
-  #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
-          || defined(USE_SSE4_1) || defined(USE_SSE4_2)
-    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(cdiv_SSE), SIMDExtension_SSE),
-    #endif
-  #endif
-
   FUNCTION_IMPL(THVector_(cdiv_DEFAULT), SIMDExtension_DEFAULT)
 };
 void THVector_(cdiv)(scalar_t *z, const scalar_t *x, const scalar_t *y, const ptrdiff_t n) {
@@ -209,13 +168,6 @@ static FunctionDescription THVector_(divs_DISPATCHTABLE)[] = {
   #if defined(USE_AVX)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
       FUNCTION_IMPL(THVector_(divs_AVX), SIMDExtension_AVX),
-    #endif
-  #endif
-
-  #if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
-          || defined(USE_SSE4_1) || defined(USE_SSE4_2)
-    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(divs_SSE), SIMDExtension_SSE),
     #endif
   #endif
 

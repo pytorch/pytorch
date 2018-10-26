@@ -42,7 +42,7 @@ void concat(
       CAFFE_ENFORCE_EQ(inputZero[j].itemsize(), input.itemsize());
       CAFFE_ENFORCE_EQ(inputZero[j].ndim(), input.ndim());
       for (int k = 0; k < input.ndim(); ++k) {
-        CAFFE_ENFORCE_EQ(input.dims()[k], inputZero[j].dims()[k]);
+        CAFFE_ENFORCE_EQ(input.sizes()[k], inputZero[j].dims()[k]);
       }
 
       // Skip empty tensors
@@ -68,7 +68,7 @@ std::vector<std::vector<TensorCPU>> split(
     const std::vector<const TensorCPU*>& inputs) {
   CAFFE_ENFORCE(!inputs.empty());
 
-  const auto outputSize = inputs[0]->dims().at(0);
+  const auto outputSize = inputs[0]->sizes().at(0);
   std::vector<std::vector<TensorCPU>> outputs(outputSize);
 
   for (const auto* inputPtr : inputs) {
@@ -78,10 +78,10 @@ std::vector<std::vector<TensorCPU>> split(
     const auto innerSize = input.size_from_dim(1);
     const auto itemSize = input.meta().itemsize();
 
-    auto outputDims = input.dims().vec();
+    auto outputDims = input.sizes().vec();
     CAFFE_ENFORCE(!outputDims.empty());
     outputDims.erase(outputDims.begin());
-    CAFFE_ENFORCE_EQ(input.dims().at(0), outputSize);
+    CAFFE_ENFORCE_EQ(input.sizes().at(0), outputSize);
 
     for (int i = 0; i < outputSize; ++i) {
       outputs[i].push_back(Tensor(outputDims, CPU));

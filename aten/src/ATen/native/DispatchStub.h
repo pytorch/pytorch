@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/ScalarType.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 #include <type_traits>
 
 // Implements instruction set specific function dispatch.
