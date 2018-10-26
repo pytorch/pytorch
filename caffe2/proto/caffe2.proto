@@ -31,7 +31,7 @@ message ExternalDataProto {
   optional string record_id = 2;
   // the offset of the starting point, the content may be shared between
   // multiple tensors
-  optional int64 offset = 3;
+  optional int64 offset = 3 [default = 0];
   // the strides of the content
   repeated int64 strides = 4;
 }

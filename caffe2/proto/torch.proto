@@ -52,6 +52,8 @@ message ModuleDef {
 
   // the names of inputs and outputs of the module are inferred
   // from the main method.
+
+  optional string name = 6;
 }
 
 enum ProtoVersion {
