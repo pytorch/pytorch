@@ -483,12 +483,13 @@ void serializeIntermediateModel(IntermediateModel* imodel,
 }
 
 // serialize functions
-void serializeIntermediateModel(const std::string& filename) {
+void serializeIntermediateModel(IntermediateModel* imdoel, const std::string& filename) {
   PyTorchFileWriter writer(filename);
-  serializeIntermediateModel(&writer);
+  serializeIntermediateModel(imodel, &writer);
 }
 
-void deserializeIntermediateModel(torch::jit::PyTorchFileReader* reader) {
+void deserializeIntermediateModel(IntermediateModel* imodel,
+    torch::jit::PyTorchFileReader* reader) {
   std::unordered_map<uint64_t, std::shared_ptr<SharedData> id_data;
   while (reader->hasNextRecord()) {
     at::DataPtr data_ptr;
@@ -500,7 +501,7 @@ void deserializeIntermediateModel(torch::jit::PyTorchFileReader* reader) {
       if (it != id_data.end()) {
         id_data->second->updateData(std::move(data_ptr));
       } else {
-        id_data[data_key] = make_shared<SharedData>(
+        (*id_data)[data_key] = make_shared<SharedData>(
             data_key, std::move(data_ptr));
       }
       continue;
@@ -508,13 +509,13 @@ void deserializeIntermediateModel(torch::jit::PyTorchFileReader* reader) {
     torch::ModelDef model_def = torch::ModelDef();
     AT_ASSERTM(model_def.ParsePartialFromArray(proto_ptr.get(),
           proto_size), "Parsing proto from array failedl");
-    update(&model_def);
+    imodel->update(&model_def, id_data);
   }
 }
 
-void deserializeIntermediateModel(const std::string& filename) {
+void deserializeIntermediateModel(IntermediateModel* imodel, const std::string& filename) {
   PyTorchFileReader reader(filename);
-  deserializeIntermediateModel(&reader);
+  deserializeIntermediateModel(imodel, &reader);
 }
 
 }  // namespace serialize
