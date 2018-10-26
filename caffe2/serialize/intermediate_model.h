@@ -5,6 +5,7 @@
 
 #include <ATen/core/Allocator.h>
 
+#include "caffe2/core/common.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/proto/torch_pb.h"
 #include "caffe2/serialize/inline_container.h"
@@ -153,17 +154,41 @@ class IntermediateTensor final {
     // TODO maybe later to support RAW
   }
 
-  // getters
-  std::shared_ptr<SharedData> mutableData() {
+  // getters/setters
+  std::shared_ptr<SharedData> data() {
     return data_;
+  }
+
+  const IntermediateDeviceOption& deviceDetail() const {
+    return deviceDetail_;
+  }
+
+  std::vector<int64_t>* mutableDims() {
+    return &dims_;
+  }
+
+  std::vector<int64_t>* mutableStrides() {
+    return &strides_;
+  }
+
+  IntermediateDeviceOption* mutableDeviceDetail() {
+    return &deviceDetail_;
+  }
+
+  void setDataType(int64_t data_type) {
+    dataType_ = data_type;
+  }
+
+  void setData(std::shared_ptr<SharedData> data) {
+    data_ = data;
   }
 
  private:
   std::string name_;
   int64_t dataType_;
-  vector<int64_t> dims_;
+  std::vector<int64_t> dims_;
   int64_t offset_;
-  vector<int64_t> strides_;
+  std::vector<int64_t> strides_;
   // TODO: since we still have 2 different Tensor classes in Caffe2 and PyTorch
   // right now, let's just store the data pointer, and create Tensors
   // while converting IntermediateModel to the JitScriptModule/Predictor/etc.
@@ -175,6 +200,8 @@ class IntermediateTensor final {
 class IntermediateParameter final {
  public:
   // constructor
+  IntermediateParameter() = default;
+
   explicit IntermediateParameter(torch::ParameterDef* param_def,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data) {
     isBuffer_ = param_def->is_buffer();
@@ -195,7 +222,11 @@ class IntermediateParameter final {
     tensor_.dump(tensor_def);
   }
 
-  // getters
+  // getters/setters
+  const std::string& name() const {
+    return name_;
+  }
+
   bool isBuffer() const {
     return isBuffer_;
   }
@@ -206,6 +237,14 @@ class IntermediateParameter final {
 
   IntermediateTensor* mutableTensor() {
     return &tensor_;
+  }
+
+  void setIsBuffer(bool is_buffer) {
+    isBuffer_ = is_buffer;
+  }
+
+  void setRequireGradient(bool require_gradient) {
+    requireGradient_ = require_gradient;
   }
 
  private:
@@ -226,7 +265,7 @@ class IntermediateMethod final {
     if (method_def->has_torch_script()) {
       torchScript_ = method_def->torch_script();
     } else if (method_def->has_graph()) {
-      graph_ = make_unique(release_graph());
+      graph_ = caffe2::make_unique(release_graph());
     } else {
       // TODO throw exception
     }
@@ -294,7 +333,7 @@ class IntermediateModule final {
     }
   }
 
-  // getters
+  // getters/setters
   std::vector<IntermediateParameter>* mutableParameters() {
     return &parameters_;
   }
@@ -305,6 +344,10 @@ class IntermediateModule final {
 
   std::vector<IntermediateMethod>* mutableMethods() {
     return &methods_;
+  }
+
+  void setName(const std::string& name) {
+    name_ = name;
   }
 
  private:
@@ -370,6 +413,27 @@ class IntermediateModel final {
     return mainModule_;
   }
 
+  // setters, most for test purposes
+  void setName(const std::string& name) {
+    name_ = name;
+  }
+
+  void setProducerName(const std::string& producer_name) {
+    producerName_ = producer_name;
+  }
+
+  void setProducerVersion(const std::string& producer_version) {
+    producerVersion_ = producer_version;
+  }
+
+  void setProtoVersion(int64_t proto_version) {
+    protoVersion_ = proto_version;
+  }
+
+  IntermediateModule* mutableMainModule() {
+    return &mainModule_;
+  }
+
  private:
   std::string name_;
   std::string producerName_;
@@ -409,9 +473,13 @@ void serializeIntermediateModel(IntermediateModel* imodel,
   }
 
   // TODO
-  size_t proto_size = .ByteSizeLong(); 
-  void *buffer = malloc(size);
-  address_book.SerializeToArray(buffer, size);
+  torch::ModelDef model_def;
+  imodel->dump(&model_def);
+  size_t proto_size = model_def.ByteSizeLong();
+  void* buffer = malloc(proto_size);
+  model_def.SerializeToArray(buffer, size);
+  writer->writeRecord(buffer, proto_size);
+  free(proto_size);
 }
 
 // serialize functions
