@@ -57,9 +57,4 @@ SparseTensor sparse_mask_cuda(const Tensor& t, SparseTensorRef mask) {
   return r;
 }
 
-// Technically, this is not actually CUDA specific
-int64_t get_device_sparse_cuda(const Tensor& self) {
-  return self._values().get_device();
-}
-
 }} // namespace at::native

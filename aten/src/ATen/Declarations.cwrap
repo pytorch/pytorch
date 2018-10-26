@@ -17,17 +17,6 @@
     - THTensor* self
 ]]
 [[
-  name: resize_
-  return: self
-  cname: resize
-  cpu_half: True
-  arguments:
-    - THTensor* self
-    - arg: IntListSize size
-      long_args: True
-    - CONSTANT {}
-]]
-[[
   name: set_
   cname: set
   cpu_half: True
@@ -1056,18 +1045,6 @@
           default: "false"
 ]]
 [[
-  name: _th_get_device
-  cname: getDevice
-  device_guard: False
-  variants:
-    - function
-  backends:
-    - CUDA
-  return: long
-  arguments:
-    - THTensor* self
-]]
-[[
   name: _abs
   cname: abs
   types:
@@ -1993,56 +1970,6 @@
     - function
   arguments:
     - THTensor* self
-]]
-[[
-  name: _sumall
-  variants: function
-  options:
-    - cname: sumall
-      return: accreal
-      arguments:
-        - THTensor* self
-]]
-[[
-  name: _th_sum
-  variants: function
-  options:
-    - cname: sum
-      return: argument 0
-      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - arg: bool keepdim
-          default: "false"
-]]
-[[
-  name: _prodall
-  variants: function
-  options:
-    - cname: prodall
-      return: accreal
-      arguments:
-        - THTensor* self
-]]
-[[
-  name: _th_prod
-  variants: function
-  options:
-    - cname: prod
-      return: argument 0
-      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - arg: bool keepdim
-          default: "false"
 ]]
 [[
   name: _cumsum

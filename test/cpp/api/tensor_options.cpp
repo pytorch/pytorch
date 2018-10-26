@@ -50,7 +50,7 @@ TEST(TensorOptionsTest, UtilityFunctionsReturnTheRightTensorOptions) {
   options = device_index(1);
   REQUIRE_OPTIONS(kCUDA, 1, kFloat, kStrided);
 
-  options = dtype(kByte).layout(kSparse).device({kCUDA, 2}).device_index(3);
+  options = dtype(kByte).layout(kSparse).device(kCUDA, 2).device_index(3);
   REQUIRE_OPTIONS(kCUDA, 3, kByte, kSparse);
 }
 

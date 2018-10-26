@@ -6,6 +6,8 @@
 #include "generic/THTensor.cpp"
 #include "THGenerateHalfType.h"
 
+#include "ATen/native/Resize.h"
+
 #include <numeric>
 
 // NB: This is NOT valid on UndefinedTensorImpl
@@ -74,61 +76,12 @@ void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride)
 void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
   AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
-  int d;
-  ptrdiff_t totalSize;
-  bool hascorrectsize = true;
-
-  for(d = 0; d < nDimension; d++)
-  {
-    if((self->dim() > d) && (size[d] != self->size(d))) {
-      hascorrectsize = false;
-    }
-
-    // NB: this used to test that stride[d] was >= 0
-    if((self->dim() > d) && stride && (stride[d] != self->stride(d))) {
-      hascorrectsize = false;
-    }
+  at::IntList sizes(size, nDimension);
+  at::optional<at::IntList> strides;
+  if (stride) {
+    strides = at::IntList(stride, nDimension);
   }
-
-  if(nDimension != self->dim()) {
-    hascorrectsize = false;
-  }
-
-  if(hascorrectsize) {
-    return;
-  }
-
-  if(nDimension != self->dim())
-  {
-    self->resize_dim(nDimension);
-  }
-
-  totalSize = 1;
-  for(d = nDimension-1; d >= 0; d--)
-  {
-    self->set_size(d, size[d]);
-    if(stride && (stride[d] >= 0) ) {
-      self->set_stride(d, stride[d]);
-    } else {
-      if(d == nDimension-1) {
-        self->set_stride(d, 1);
-      } else {
-        // Keep stride monotonically increasing to match NumPy.
-        self->set_stride(d, std::max<int64_t>(self->size(d+1), 1)*self->stride(d+1));
-      }
-    }
-    totalSize += (self->size(d)-1)*self->stride(d);
-  }
-
-  if(totalSize+self->storage_offset() > 0)
-  {
-    if(!THTensor_getStoragePtr(self)) {
-      THTensor_stealAndSetStoragePtr(self, THStorage_new(self->dtype()));
-    }
-    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->numel()) {
-      THStorage_resize(THTensor_getStoragePtr(self), totalSize+self->storage_offset());
-    }
-  }
+  at::native::resize_impl_cpu_(self, sizes, strides);
 }
 
 // On a high level,

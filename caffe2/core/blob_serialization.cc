@@ -184,7 +184,7 @@ void TensorSerializer::SerializeWithChunkSize(
 
 void TensorSerializer::Serialize(
     const Tensor& input,
-    const string& /*name*/,
+    const string& name,
     TensorProto* proto_ptr,
     size_t chunkBegin,
     int32_t chunkSize) {
@@ -198,12 +198,19 @@ void TensorSerializer::Serialize(
     chunkSize = input.size() - chunkBegin;
   }
 
-  CAFFE_ENFORCE(
-      input.raw_data() || chunkSize == 0,
-      "The input does not have data input yet. This is probably because you "
-      "created a tensor of non-zero shape but never filled its data via "
-      "mutable_data() calls. This means that it makes no sense to serialize "
-      "the tensor content.");
+  if (chunkSize != 0) {
+    CAFFE_ENFORCE(
+        input.raw_data(),
+        "The input does not have data input yet. This is probably because you "
+        "created a tensor of non-zero shape but never filled its data via "
+        "mutable_data() calls. This means that it makes no sense to serialize "
+        "the tensor content.");
+  } else {
+    LOG(ERROR)
+        << "You're trying to serialize tensor with zero numel and no dtype. "
+        << "This is a legacy behavior and it WILL BREAK. Contact PyTorch team "
+        << "for details or see D10380678. Offending blob name: " << name;
+  }
 
   TensorProto& proto = *proto_ptr;
   proto.mutable_segment()->set_begin(chunkBegin);
@@ -320,10 +327,12 @@ void TensorSerializer::Serialize(
       break;
     case TensorProto_DataType_UNDEFINED: {
       proto.mutable_string_data()->Reserve(chunkSize);
-      const char* raw_data = static_cast<const char*>(input.raw_data());
-      for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
-        proto.add_string_data(
-            SerializeBlob(raw_data + i * input.itemsize(), input.meta(), ""));
+      if (chunkSize > 0) {
+        const char* raw_data = static_cast<const char*>(input.raw_data());
+        for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
+          proto.add_string_data(
+              SerializeBlob(raw_data + i * input.itemsize(), input.meta(), ""));
+        }
       }
     } break;
       // Note: we intentially do not provide "default:" so if any new data types
