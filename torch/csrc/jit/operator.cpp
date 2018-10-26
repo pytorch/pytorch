@@ -30,7 +30,7 @@ struct SchemaParser {
         if (tok.kind == TK_IDENT) {
           is_vararg = true;
           arguments.push_back(parseArgument(
-              idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only));
+              idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only, writes));
         } else {
           kwarg_only = true;
         }
