@@ -51,7 +51,7 @@ class GatherPaddingOp final : public Operator<Context> {
     if (InputSize() > 1) {
       const auto& lengths = Input(1);
       lengths_ptr = lengths.template data<int32_t>();
-      lengths_size = lengths.size();
+      lengths_size = lengths.numel();
     }
     std::vector<int64_t> padShape(in.sizes().begin() + 1, in.sizes().end());
     // output will contain accumulator over paddings
@@ -178,7 +178,7 @@ class AddPaddingOp final : public Operator<Context> {
     if (InputSize() > 1) {
       const auto& lengths = Input(1);
       lengths_ptr = lengths.template data<int32_t>();
-      lengths_size = lengths.size();
+      lengths_size = lengths.numel();
     }
 
     // fetch paddings
@@ -189,12 +189,12 @@ class AddPaddingOp final : public Operator<Context> {
     const T* padding_end_ptr = nullptr;
     if (InputSize() >= 3) {
       auto& padding_start = Input(2);
-      CAFFE_ENFORCE_EQ(block_size, padding_start.size());
+      CAFFE_ENFORCE_EQ(block_size, padding_start.numel());
       padding_start_ptr = padding_start.template data<T>();
     }
     if (InputSize() == 4) {
       auto& padding_end = Input(3);
-      CAFFE_ENFORCE_EQ(block_size, padding_end.size());
+      CAFFE_ENFORCE_EQ(block_size, padding_end.numel());
       padding_end_ptr = padding_end.template data<T>();
     } else {
       padding_end_ptr = padding_start_ptr;

@@ -19,7 +19,7 @@ static void AddConstInput(
   auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   math::Set<float, CPUContext>(
-      tensor->size(), value, tensor->template mutable_data<float>(), &context);
+      tensor->numel(), value, tensor->template mutable_data<float>(), &context);
   return;
 }
 

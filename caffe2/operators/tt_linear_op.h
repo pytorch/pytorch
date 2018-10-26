@@ -64,21 +64,21 @@ class TTLinearOp final : public Operator<Context> {
       int curr_cols = tt_ranks_[i] * out_sizes_[i];
 
       // TODO Replace by Reshape(), once wrappers are written
-      Y_buf->Resize(Y_buf->size() / curr_rows, curr_rows);
-      Y->Resize(Y_buf->size() / curr_rows, curr_cols);
+      Y_buf->Resize(Y_buf->numel() / curr_rows, curr_rows);
+      Y->Resize(Y_buf->numel() / curr_rows, curr_cols);
 
       // Defensive checks
-      CAFFE_ENFORCE(Y_buf->size() % curr_rows == 0, Y_buf->size(), curr_rows);
+      CAFFE_ENFORCE(Y_buf->numel() % curr_rows == 0, Y_buf->numel(), curr_rows);
       CAFFE_ENFORCE(
-          cores_idx + curr_rows * curr_cols <= cores.size(),
+          cores_idx + curr_rows * curr_cols <= cores.numel(),
           cores_idx + curr_rows * curr_cols,
-          cores.size());
+          cores.numel());
 
       // Multiply ith core with the intermediate output
       math::Gemm<float, Context, Engine>(
           CblasNoTrans,
           CblasNoTrans,
-          Y_buf->size() / curr_rows,
+          Y_buf->numel() / curr_rows,
           curr_cols,
           curr_rows,
           1,
@@ -88,24 +88,24 @@ class TTLinearOp final : public Operator<Context> {
           Y->template mutable_data<float>(),
           &context_);
 
-      CAFFE_ENFORCE(Y->size() % out_sizes_[i] == 0, Y->size(), out_sizes_[i]);
+      CAFFE_ENFORCE(Y->numel() % out_sizes_[i] == 0, Y->numel(), out_sizes_[i]);
 
       // TODO Add GPU support by writing a generic wrapper.
       auto Y_mat = EigenMatrixMap<float>(
           Y->template mutable_data<float>(),
-          Y->size() / out_sizes_[i],
+          Y->numel() / out_sizes_[i],
           out_sizes_[i]);
       Y_mat = ConstEigenMatrixMap<float>(
                   Y->template data<float>(),
                   out_sizes_[i],
-                  Y->size() / out_sizes_[i])
+                  Y->numel() / out_sizes_[i])
                   .transpose()
                   .eval();
 
       // Resize operation
       Y_buf->Resize(Y->dim32(0), Y->dim32(1));
       context_.template CopyFromCPU<float>(
-          Y->size(),
+          Y->numel(),
           Y->template data<float>(),
           Y_buf->template mutable_data<float>());
 
@@ -114,13 +114,13 @@ class TTLinearOp final : public Operator<Context> {
 
     // TODO Add GPU support by writing a generic wrapper.
     auto Y_mat = EigenMatrixMap<float>(
-        Y->template mutable_data<float>(), batch_size, Y->size() / batch_size);
+        Y->template mutable_data<float>(), batch_size, Y->numel() / batch_size);
     Y_mat = ConstEigenMatrixMap<float>(
-                Y->template data<float>(), Y->size() / batch_size, batch_size)
+                Y->template data<float>(), Y->numel() / batch_size, batch_size)
                 .transpose()
                 .eval();
     // TODO Replace by Reshape(), once wrappers are written
-    Y->Resize(batch_size, Y->size() / batch_size);
+    Y->Resize(batch_size, Y->numel() / batch_size);
 
     // Check that output size of Y is the element-wise product of out_sizes
     int prod_out_sizes = 1;
@@ -135,7 +135,7 @@ class TTLinearOp final : public Operator<Context> {
         prod_out_sizes);
 
     // Add bias term
-    if (bias_multiplier_.size() != batch_size) {
+    if (bias_multiplier_.numel() != batch_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(batch_size);
       math::Set<T, Context>(

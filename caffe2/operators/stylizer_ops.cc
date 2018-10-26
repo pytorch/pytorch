@@ -96,12 +96,12 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
 #endif
     }
     const auto& noise = noiseBlob->template Get<TensorCPU>();
-    CAFFE_ENFORCE(noise.size() >= defaultNoiseSize);
+    CAFFE_ENFORCE(noise.numel() >= defaultNoiseSize);
 
     CAFFE_ENFORCE(X.ndim() == 4);
     const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
     // Assume BGR or BGRA
-    CAFFE_ENFORCE(mean.size() == kOutputChannels);
+    CAFFE_ENFORCE(mean.numel() == kOutputChannels);
 
     CAFFE_ENFORCE(C == kInputChannels);
     Y->Resize(N, kOutputChannels, H, W);
@@ -417,7 +417,7 @@ class BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp
     CAFFE_ENFORCE(X.ndim() == 4);
     const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
     // Assume BGR or BGRA
-    CAFFE_ENFORCE(mean.size() == kInputChannels);
+    CAFFE_ENFORCE(mean.numel() == kInputChannels);
     CAFFE_ENFORCE(C == kInputChannels);
     // RGB
     Y->Resize(N, H, W, kOutputChannels);
