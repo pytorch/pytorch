@@ -897,6 +897,9 @@
 - name: relu(Tensor self)
   self: threshold_backward(grad, self, 0, 0)
 
+- name: relu_(Tensor self)
+  self: threshold_backward(grad, output, 0, 0)
+
 - name: elu_forward(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale)
   self: elu_backward(grad, alpha, scale, input_scale, output)
 
@@ -949,10 +952,10 @@
 - name: softshrink_forward(Tensor self, Scalar lambd)
   self: softshrink_backward(grad, self, lambd)
 
-- name: threshold_forward(Tensor self, Scalar threshold, Scalar value)
+- name: threshold(Tensor self, Scalar threshold, Scalar value)
   self: threshold_backward(grad, self, threshold, value)
 
-- name: threshold_forward_(Tensor self, Scalar threshold, Scalar value)
+- name: threshold_(Tensor self, Scalar threshold, Scalar value)
   self: threshold_backward(grad, output, threshold, value)
 
 - name: reflection_pad1d_forward(Tensor self, IntList padding)

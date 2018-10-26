@@ -1662,6 +1662,18 @@
 - func: tensordot(Tensor self, Tensor other, IntList dims_self, IntList dims_other) -> Tensor
   variants: function
 
+- func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
+  variants: function
+
+- func: threshold_(Tensor self, Scalar threshold, Scalar value) -> Tensor
+  variants: function
+
+- func: threshold_out(Tensor result, Tensor self, Scalar threshold, Scalar value) -> Tensor
+  variants: function
+
+- func: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold, Scalar value) -> Tensor
+  variants: function
+
 - func: transpose(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: function, method
 

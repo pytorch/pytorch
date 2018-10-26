@@ -104,12 +104,6 @@
   scalar_check:
     output: self_->dim() == 0
 
-- name: threshold(Tensor self, Scalar threshold, Scalar value)
-  cname: Threshold
-  has_inplace: True
-  scalar_check:
-    output: self_->dim() == 0
-
 # Pooling
 
 - name: adaptive_avg_pool2d(Tensor self, IntList[2] output_size)
