@@ -632,10 +632,10 @@ inline Tensor & Tensor::ceil_() {
 inline std::vector<Tensor> Tensor::chunk(int64_t chunks, int64_t dim) const {
     return type().chunk(*this, chunks, dim);
 }
-inline Tensor Tensor::clamp(Scalar min, Scalar max) const {
+inline Tensor Tensor::clamp(c10::optional<Scalar> min, c10::optional<Scalar> max) const {
     return type().clamp(*this, min, max);
 }
-inline Tensor & Tensor::clamp_(Scalar min, Scalar max) {
+inline Tensor & Tensor::clamp_(c10::optional<Scalar> min, c10::optional<Scalar> max) {
     return type().clamp_(*this, min, max);
 }
 inline Tensor Tensor::clamp_max(Scalar max) const {

@@ -860,46 +860,6 @@ if (NOT BUILD_ATEN_MOBILE)
     set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
   endif()
 
-  if (NOT MSVC)
-    set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
-  endif()
-
-  INCLUDE(CheckCXXSourceCompiles)
-
-  # disable some verbose warnings
-  IF (MSVC)
-    set(CMAKE_CXX_FLAGS "/wd4267 /wd4251 /wd4522 /wd4522 /wd4838 /wd4305 /wd4244 /wd4190 /wd4101 /wd4996 /wd4275 ${CMAKE_CXX_FLAGS}")
-  ENDIF()
-
-  # windef.h will define max/min macros if NOMINMAX is not defined
-  IF (MSVC)
-    add_definitions(/DNOMINMAX)
-  ENDIF()
-
-  #Check if certain std functions are supported. Sometimes
-  #_GLIBCXX_USE_C99 macro is not defined and some functions are missing.
-  CHECK_CXX_SOURCE_COMPILES("
-  #include <cmath>
-  #include <string>
-
-  int main() {
-    int a = std::isinf(3.0);
-    int b = std::isnan(0.0);
-    std::string s = std::to_string(1);
-
-    return 0;
-    }" SUPPORT_GLIBCXX_USE_C99)
-
-  if (NOT SUPPORT_GLIBCXX_USE_C99)
-    message(FATAL_ERROR
-            "The C++ compiler does not support required functions. "
-            "This is very likely due to a known bug in GCC 5 "
-            "(and maybe other versions) on Ubuntu 17.10 and newer. "
-            "For more information, see: "
-            "https://github.com/pytorch/pytorch/issues/5229"
-           )
-  endif()
-
   # Top-level build config
   ############################################
   # Flags
@@ -1044,24 +1004,6 @@ if (NOT BUILD_ATEN_MOBILE)
   IF (CORTEXA9_FOUND)
     MESSAGE(STATUS "Cortex-A9 Found with compiler flag : -mcpu=cortex-a9")
     add_compile_options(-mcpu=cortex-a9)
-  ENDIF()
-
-  # Check that our programs run.  This is different from the native CMake compiler
-  # check, which just tests if the program compiles and links.  This is important
-  # because with ASAN you might need to help the compiled library find some
-  # dynamic libraries.
-  CHECK_C_SOURCE_RUNS("
-  int main() { return 0; }
-  " COMPILER_WORKS)
-  IF (NOT COMPILER_WORKS)
-    # Force cmake to retest next time around
-    unset(COMPILER_WORKS CACHE)
-    MESSAGE(FATAL_ERROR
-        "Could not run a simple program built with your compiler. "
-        "If you are trying to use -fsanitize=address, make sure "
-        "libasan is properly installed on your system (you can confirm "
-        "if the problem is this by attempting to build and run a "
-        "small program.)")
   ENDIF()
 
   CHECK_INCLUDE_FILE(cpuid.h HAVE_CPUID_H)

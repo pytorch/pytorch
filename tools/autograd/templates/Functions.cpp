@@ -450,14 +450,16 @@ std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<
   return grad_inputs;
 }
 
-Tensor clamp_backward(const Tensor & grad, const Tensor &self, const Scalar & min, const Scalar & max) {
+Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Scalar> & min, const optional<Scalar> & max) {
   // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
-  if (std::isnan(min.toFloat())) {
-    return grad * (self <= max).type_as(grad);
-  } else if (std::isnan(max.toFloat())) {
-    return grad * (self >= min).type_as(grad);
+  if (max && min) {
+    return grad * ((self >= *min) * (self <= *max)).type_as(grad);
+  } else if (min) {
+    return grad * (self >= *min).type_as(grad);
+  } else if (max) {
+    return grad * (self <= *max).type_as(grad);
   } else {
-    return grad * ((self >= min) * (self <= max)).type_as(grad);
+    return grad;
   }
 }
 

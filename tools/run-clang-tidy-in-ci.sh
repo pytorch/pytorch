@@ -45,5 +45,4 @@ time python tools/clang_tidy.py    \
   -g"-torch/csrc/jit/init.cpp"     \
   -g"-torch/csrc/jit/export.cpp"   \
   -g"-torch/csrc/jit/import.cpp"   \
-  -g"-torch/csrc/jit/test_jit.cpp" \
   "$@"

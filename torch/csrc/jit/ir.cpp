@@ -389,6 +389,14 @@ void Graph::lint() const {
       n->lint();
     }
     void check_block(const Block *b) {
+      // Check topological ordering
+      JIT_ASSERT(b->param_node()->isBefore(*b->nodes().begin()));
+      auto curNode = *b->nodes().begin();
+      while (curNode != b->return_node()) {
+        JIT_ASSERT(curNode->isBefore(curNode->next()));
+        curNode = curNode->next();
+      }
+
       for (auto input : b->inputs()) {
         check_value(input);
         JIT_ASSERT(input->node()->kind_ == prim::Param);
@@ -835,14 +843,14 @@ Value* Node::insertOutput(size_t i) {
   return outputs_.at(i);
 }
 
-bool Node::isBefore(Node * n) const {
+bool Node::isBefore(const Node * n) const {
   if (this == n) {
     return false;
   }
   return !isAfter(n);
 }
 
-bool Node::isAfter(Node * n) const {
+bool Node::isAfter(const Node * n) const {
   JIT_ASSERT(this->owningBlock() == n->owningBlock());
 
   return this->topo_position_ > n->topo_position_;

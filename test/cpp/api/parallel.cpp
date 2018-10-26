@@ -44,8 +44,8 @@ TEST_F(ParallelTest, DifferentiableScatter_MultiCUDA) {
 TEST_F(ParallelTest, DifferentiableGather_MultiCUDA) {
   Gather gather(torch::Device(torch::kCUDA, 1));
 
-  auto a = torch::ones(5, torch::requires_grad(true).device({torch::kCUDA, 0}));
-  auto b = torch::ones(5, torch::requires_grad(true).device({torch::kCUDA, 1}));
+  auto a = torch::ones(5, torch::requires_grad(true).device(torch::kCUDA, 0));
+  auto b = torch::ones(5, torch::requires_grad(true).device(torch::kCUDA, 1));
 
   auto outputs = gather.apply({a, b});
   ASSERT_EQ(outputs.size(), 1);

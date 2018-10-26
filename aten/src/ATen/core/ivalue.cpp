@@ -18,6 +18,7 @@
   _(World)
 
 namespace c10 {
+namespace ivalue {
 
 CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
     std::string str_) {
@@ -60,6 +61,8 @@ template<>
 std::ostream& operator<<(std::ostream & out, const List<IValue> & v) {
   return printList<IValue>(out, v, "(", ", ", ")");
 }
+
+} // namespace ivalue
 
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
   switch(v.tag) {
