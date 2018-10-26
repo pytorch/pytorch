@@ -4434,6 +4434,28 @@ a")
     def test_tensor_number_math_cuda(self):
         self._test_tensor_number_math(device='cuda')
 
+    def test_is_isnot(self):
+        # test is and is not operator in python
+        template = dedent('''
+        def func():
+            # type: () -> bool
+            return {lhs} {op} {rhs}
+        ''')
+
+        def test(op, args):
+            code = template.format(lhs=args[0], rhs=args[1], op=op)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            self.assertEqual(cu.func(), scope['func']())
+
+        ops = ['is', 'is not']
+        type_literals = [1, 1.0, True, '"is"', None, torch.tensor(1), [1, 1], (1, 1)]
+
+        # do literals product to try any types combinations
+        for op, lhs, rhs in product(ops, type_literals, type_literals):
+            test(op, [lhs, rhs])
+
     def test_python_call(self):
         def pyfunc(a):
             return a * 3.0

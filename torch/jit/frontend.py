@@ -361,6 +361,8 @@ class ExprBuilder(Builder):
         ast.Lt: '<',
         ast.GtE: '>=',
         ast.Gt: '>',
+        ast.Is: 'is',
+        ast.IsNot: 'is not',
     }
 
     @staticmethod
