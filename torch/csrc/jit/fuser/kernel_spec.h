@@ -48,6 +48,8 @@ private:
  // devices (cpu vs gpu, different gpus) and different inputs (int vs float, 
  // contiguous vs discontiguous).
  // Note: uses a mutex to control access to its kernel store
+ // Note: unordered containers do not invalidate references/pointers on
+ //   rehashing, which is critical for thread-safety.
  // TODO: allow abstract kernels to use multiple generated kernels
  // TODO: allow abstract kernels to reuse generated kernels from common pool
 struct TORCH_API KernelSpec {

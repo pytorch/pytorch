@@ -298,7 +298,7 @@ bool runFusion(
   // Acquires the FusionSpec
   auto maybe_spec = retrieve(key);
   JIT_ASSERT(maybe_spec);
-  auto& spec = *maybe_spec;
+  auto& spec = *(*maybe_spec);
 
   // Acquires inputs from stack
   auto inputs = fmap(last(stack, spec.nInputs()), [](const IValue& i) {

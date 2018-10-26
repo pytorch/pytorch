@@ -6,6 +6,8 @@
 
 namespace torch { namespace jit { namespace fuser {
 
+// Note: std::unordered_map does not invalidate references even if rehashing
+// occurs. This is a critical property for thread-safety. 
 static int64_t kernel_counter{0};
 static std::unordered_map<int64_t, KernelSpec> specMap_;
 static std::mutex mutex_;
@@ -22,11 +24,11 @@ int64_t store(std::shared_ptr<Graph> graph) {
   return key;
 }
 
-at::optional<KernelSpec&> retrieve(const int64_t key) { 
+at::optional<KernelSpec*> retrieve(const int64_t key) { 
   std::lock_guard<std::mutex> guard{mutex_};
   auto it = specMap_.find(key);
-  if (it == specMap_.end()) return c10::nullopt;
-  return it->second;
+  if (it == specMap_.end()) return nullptr;
+  return &(it->second);
 }
 
 } // namespace fuser

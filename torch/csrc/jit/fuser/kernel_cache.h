@@ -8,6 +8,7 @@
 #include "torch/csrc/jit/fuser/kernel_spec.h"
 
 #include <cstdint> 
+#include <functional>
 
 namespace torch { namespace jit { namespace fuser {
 
@@ -17,7 +18,7 @@ namespace torch { namespace jit { namespace fuser {
 TORCH_API int64_t store(std::shared_ptr<Graph> graph);
 
 // Returns the graph corresponding to the given key (if it exists)
-TORCH_API at::optional<KernelSpec&> retrieve(const int64_t key);
+TORCH_API at::optional<KernelSpec*> retrieve(const int64_t key);
 
 } // namespace fuser
 } // namespace jit
