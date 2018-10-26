@@ -18,10 +18,10 @@ bool PercentileOp<CPUContext>::RunOnDevice() {
 
   const auto& lengths = Input(LENS);
   const int* lengths_data = lengths.template data<int>();
-  CAFFE_ENFORCE_EQ(lengths.size(), num_features);
+  CAFFE_ENFORCE_EQ(lengths.numel(), num_features);
 
   CAFFE_ENFORCE_EQ(
-      std::accumulate(lengths_data, lengths_data + lengths.size(), 0),
+      std::accumulate(lengths_data, lengths_data + lengths.numel(), 0),
       num_values,
       "Sum of lengths should be equal to the total number of samples");
 

@@ -25,10 +25,13 @@ class NumpyTileOp : public Operator<Context> {
     // Check that the `repeats` tensor has the correct rank, has a number of
     // elements equal to the number of axes of `input`.
     CAFFE_ENFORCE_EQ(repeats.ndim(), 1, "repeats input must be a 1-d tensor");
-    CAFFE_ENFORCE_EQ(repeats.size(), input.ndim(), "repeats input have the same"
-                            " number of elements as `inputs` has dimensions.");
+    CAFFE_ENFORCE_EQ(
+        repeats.numel(),
+        input.ndim(),
+        "repeats input have the same"
+        " number of elements as `inputs` has dimensions.");
     const int64_t *repeats_data = repeats.template data<int64_t>();
-    for (size_t i=0; i<repeats.size(); ++i) {
+    for (size_t i = 0; i < repeats.numel(); ++i) {
       CAFFE_ENFORCE_GE(repeats_data[i], 0);
     }
 
@@ -40,7 +43,7 @@ class NumpyTileOp : public Operator<Context> {
     Tensor *src = &buffer, *dst = output;
     src->CopyFrom(input);
     vector<int64_t> output_dims(input.sizes().vec());
-    for (size_t i = 0; i < repeats.size(); ++i) {
+    for (size_t i = 0; i < repeats.numel(); ++i) {
       if (repeats_data[i] == 1) {
         continue;
       }
