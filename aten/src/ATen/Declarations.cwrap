@@ -1056,18 +1056,6 @@
           default: "false"
 ]]
 [[
-  name: _th_get_device
-  cname: getDevice
-  device_guard: False
-  variants:
-    - function
-  backends:
-    - CUDA
-  return: long
-  arguments:
-    - THTensor* self
-]]
-[[
   name: _abs
   cname: abs
   types:

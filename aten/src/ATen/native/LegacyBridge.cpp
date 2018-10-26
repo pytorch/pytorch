@@ -134,12 +134,4 @@ Tensor& addmm_(Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta
   }
 }
 
-int64_t get_device(const Tensor& self) {
-  if (_has_native(self)) {
-    return native_get_device(self);
-  } else {
-    return _th_get_device(self);
-  }
-}
-
 }} // namespace at::native

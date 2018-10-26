@@ -782,9 +782,6 @@ inline Tensor Tensor::inverse() const {
 inline Tensor Tensor::isclose(const Tensor & other, double rtol, double atol, bool equal_nan) const {
     return type().isclose(*this, other, rtol, atol, equal_nan);
 }
-inline bool Tensor::is_cuda() const {
-    return type().is_cuda(*this);
-}
 inline bool Tensor::is_distributed() const {
     return type().is_distributed(*this);
 }
@@ -802,9 +799,6 @@ inline bool Tensor::is_same_size(const Tensor & other) const {
 }
 inline bool Tensor::is_signed() const {
     return type().is_signed(*this);
-}
-inline bool Tensor::is_sparse() const {
-    return type().is_sparse(*this);
 }
 inline std::tuple<Tensor,Tensor> Tensor::kthvalue(int64_t k, int64_t dim, bool keepdim) const {
     return type().kthvalue(*this, k, dim, keepdim);
@@ -1223,9 +1217,6 @@ inline int64_t Tensor::numel() const {
 inline std::vector<Tensor> Tensor::unbind(int64_t dim) const {
     return type().unbind(*this, dim);
 }
-inline int64_t Tensor::get_device() const {
-    return type().get_device(*this);
-}
 inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking, bool copy) const {
     return type().to(*this, device, dtype, non_blocking, copy);
 }
@@ -1256,6 +1247,33 @@ inline Layout Tensor::layout() const noexcept {
 
 inline Device Tensor::device() const {
   return Device(type().device_type(), type().is_cuda() ? get_device() : -1);
+}
+
+inline int64_t Tensor::get_device() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->get_device();
+}
+
+inline int64_t get_device(Tensor self) {
+  return self.get_device();
+}
+
+inline bool Tensor::is_cuda() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_cuda();
+}
+
+inline bool is_cuda(Tensor self) {
+  return self.is_cuda();
+}
+
+inline bool Tensor::is_sparse() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_sparse();
+}
+
+inline bool is_sparse(Tensor self) {
+  return self.is_sparse();
 }
 
 #define DEFINE_CAST(T, name, _)                  \
