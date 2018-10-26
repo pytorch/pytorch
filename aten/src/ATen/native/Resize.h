@@ -30,11 +30,13 @@ inline TensorImpl* resize_impl_cpu_(
     return self;
   }
 
-  size_t storage_size = 1;
+  int64_t storage_size = 1;
   if (stride) {
     self->set_sizes_and_strides(size, *stride);
     // NB: storage size can be different from numel.
     for (size_t dim = 0; dim < size.size(); ++dim) {
+      // FIXME: Don't rely on storage_size being negative...
+      // This behavior was carried over from TH
       storage_size += (size[dim] - 1) * stride.value()[dim];
     }
   } else {
@@ -44,6 +46,60 @@ inline TensorImpl* resize_impl_cpu_(
   maybe_resize_storage_cpu(self, storage_size);
 
   return self;
+}
+
+static inline void checkInBoundsForStorage(
+    IntList size,
+    IntList stride,
+    ptrdiff_t storageOffset,
+    StorageImpl* new_storage) {
+  ptrdiff_t storage_size = 1;
+  for (size_t dim = 0; dim < size.size(); ++dim) {
+    // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
+    if (size[dim] == 0) {
+      return;
+    }
+    storage_size += (size[dim] - 1) * stride[dim];
+  }
+  AT_CHECK(
+      storageOffset + storage_size <= new_storage->numel(),
+      "setStorage: sizes ", size, ", strides ", stride, ","
+      " and storage offset ", storageOffset,
+      " requiring a storage size of ", storage_size + storageOffset,
+      " are out of bounds for storage with numel ", new_storage->numel());
+}
+
+/**
+ * Set self's storage to be new_storage with sizes, strides, and storageOffset.
+ * (size, stride, storageOffset) must be in bounds for the new storage.
+ */
+inline void setStorage(
+    TensorImpl* self,
+    StorageImpl* new_storage,
+    ptrdiff_t storageOffset,
+    IntList size,
+    IntList stride) {
+  AT_ASSERT(new_storage);
+  checkInBoundsForStorage(size, stride, storageOffset, new_storage);
+
+  /* storage */
+  auto* old_storage = self->storage_.unsafeGetStorageImpl();
+  AT_CHECK(old_storage, "Tensor: invalid null storage");
+  if (old_storage != new_storage) {
+    c10::raw::intrusive_ptr::incref(new_storage);
+    THTensor_stealAndSetStoragePtr(self, new_storage);
+  }
+
+  /* storage offset */
+  AT_CHECK(storageOffset >= 0, "Tensor: invalid storage offset ", storageOffset);
+  self->set_storage_offset(storageOffset);
+
+  /* size and stride */
+  AT_ASSERT(size.size() == stride.size());
+  if (self->sizes() == size && self->strides() == stride) {
+    return;
+  }
+  self->set_sizes_and_strides(size, stride);
 }
 
 }}
