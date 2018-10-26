@@ -31,7 +31,7 @@
 namespace at {
 
 struct CAFFE2_API LegacyTypeInitInterface {
-  virtual ~LegacyTypeInitInterface() {}
+  virtual ~LegacyTypeInitInterface();
   virtual void initCPU() const {
     AT_ERROR("cannot use CPU without ATen library");
   }

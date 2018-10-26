@@ -32,7 +32,7 @@ struct FusedKernel {
   , input_desc{agraph.input_desc}
   , output_desc{agraph.output_desc} { }
 
-  virtual ~FusedKernel() = default;
+  virtual ~FusedKernel();
 
   // expects outputs to be pre-allocated
   void launch_with_tensors(

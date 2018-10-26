@@ -24,7 +24,7 @@ CAFFE2_API void NoDelete(void*);
 // A virtual allocator class to do memory allocation and deallocation.
 struct CAFFE2_API CPUAllocator {
   CPUAllocator() {}
-  virtual ~CPUAllocator() noexcept {}
+  virtual ~CPUAllocator() noexcept;
   virtual std::pair<void*, MemoryDeleter> New(size_t nbytes) = 0;
   virtual MemoryDeleter GetDeleter() = 0;
 };
@@ -45,7 +45,7 @@ class CAFFE2_API MemoryAllocationReporter {
 
 struct CAFFE2_API DefaultCPUAllocator final : at::Allocator {
   DefaultCPUAllocator() {}
-  ~DefaultCPUAllocator() override {}
+  ~DefaultCPUAllocator() override;
   at::DataPtr allocate(size_t nbytes) const override {
     void* data = nullptr;
 #ifdef __ANDROID__

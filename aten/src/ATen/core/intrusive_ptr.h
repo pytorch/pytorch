@@ -67,25 +67,7 @@ class CAFFE2_API intrusive_ptr_target {
  protected:
   // protected destructor. We never want to destruct intrusive_ptr_target*
   // directly.
-  virtual ~intrusive_ptr_target() {
-// Disable -Wterminate and -Wexceptions so we're allowed to use assertions
-// (i.e. throw exceptions) in a destructor.
-// We also have to disable -Wunknown-warning-option and -Wpragmas, because
-// some other compilers don't know about -Wterminate or -Wexceptions and
-// will show a warning about unknown warning options otherwise.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpragmas"
-#pragma GCC diagnostic ignored "-Wunknown-warning-option"
-#pragma GCC diagnostic ignored "-Wterminate"
-#pragma GCC diagnostic ignored "-Wexceptions"
-    AT_ASSERTM(
-        refcount_.load() == 0,
-        "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it");
-    AT_ASSERTM(
-        weakcount_.load() == 0,
-        "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
-#pragma GCC diagnostic pop
-  }
+  virtual ~intrusive_ptr_target();
 
   constexpr intrusive_ptr_target() noexcept : refcount_(0), weakcount_(0) {}
 
@@ -109,7 +91,7 @@ class CAFFE2_API intrusive_ptr_target {
    * destructed by the scope (i.e. without intrusive_ptr), this function will
    * not be called.
    */
-  virtual void release_resources() {}
+  virtual void release_resources() { }
 };
 
 namespace detail {

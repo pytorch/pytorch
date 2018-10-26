@@ -89,7 +89,7 @@ struct Tree : std::enable_shared_from_this<Tree> {
       throw std::runtime_error(ss.str());
     }
   }
-  virtual ~Tree() = default;
+  virtual ~Tree();
 
  private:
   int kind_;
@@ -97,6 +97,7 @@ struct Tree : std::enable_shared_from_this<Tree> {
 
 struct String : public Tree {
   String(const std::string& value_) : Tree(TK_STRING), value_(value_) {}
+  ~String() override;
   virtual const std::string& stringValue() const override {
     return value_;
   }
@@ -126,6 +127,7 @@ struct Compound : public Tree {
       : Tree(kind),
         range_(mergeRanges(range_, trees_)),
         trees_(std::move(trees_)) {}
+  ~Compound() override;
   virtual const TreeList& trees() const override {
     return trees_;
   }

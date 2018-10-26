@@ -1003,6 +1003,7 @@ struct PythonOp : public Node {
     this->cconv = cconv;
     return this;
   }
+
   // The Python object which contains the implementation of this function.
   // This is either a class (non-legacy) or an object (legacy).  See
   // TraceInterpreterState for execution semantics.

@@ -108,7 +108,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   Function(Function&& other) = delete;
   Function& operator=(const Function& other) = delete;
   Function& operator=(Function&& other) = delete;
-  virtual ~Function() = default;
+  virtual ~Function();
 
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
@@ -328,6 +328,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
 
 /// See Function::is_traceable() for definition.
 struct TraceableFunction : public Function {
+  ~TraceableFunction();
   using Function::Function;
   bool is_traceable() final {
     return true;

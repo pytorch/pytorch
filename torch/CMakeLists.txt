@@ -305,6 +305,10 @@ else()
     # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
     -Wno-missing-braces
     )
+  
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(torch PRIVATE -Wweak-vtables)
+  endif()
 
   if(NOT APPLE)
     target_compile_options(torch PRIVATE

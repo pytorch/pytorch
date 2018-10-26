@@ -27,9 +27,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
    * Initializes an empty Blob.
    */
   Blob() noexcept : meta_(), pointer_(nullptr), has_ownership_(false) {}
-  ~Blob() {
-    Reset();
-  }
+  ~Blob() override;
 
   Blob(Blob&& other) noexcept : Blob() {
     swap(other);

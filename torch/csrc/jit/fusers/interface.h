@@ -17,7 +17,7 @@ constexpr int kCPUDevice = -1;
 struct TORCH_API FusionHandle {
   virtual void run(Stack& inputs) = 0;
 
-  virtual ~FusionHandle() = 0;
+  virtual ~FusionHandle();
 };
 
 TORCH_API std::shared_ptr<FusionHandle> getFusionHandle(Node* fusion_group);

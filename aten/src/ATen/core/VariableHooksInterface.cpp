@@ -29,4 +29,7 @@ C10_DEFINE_REGISTRY(
     VariableHooksInterface,
     VariableHooksArgs)
 
+// vtable anchor
+VariableHooksInterface::~VariableHooksInterface() = default;
+
 } // namespace at::detail

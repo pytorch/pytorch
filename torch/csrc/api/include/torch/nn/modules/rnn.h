@@ -32,7 +32,7 @@ namespace detail {
 /// Common options for LSTM and GRU modules.
 struct RNNOptionsBase {
   RNNOptionsBase(int64_t input_size, int64_t hidden_size);
-  virtual ~RNNOptionsBase() = default;
+  virtual ~RNNOptionsBase();
   /// The number of features of a single sample in the input sequence `x`.
   TORCH_ARG(int64_t, input_size);
   /// The number of features in the hidden state `h`.
@@ -177,6 +177,7 @@ class RNNImpl : public detail::RNNImplBase<RNNImpl> {
   RNNImpl(int64_t input_size, int64_t hidden_size)
       : RNNImpl(RNNOptions(input_size, hidden_size)) {}
   explicit RNNImpl(RNNOptions options);
+  ~RNNImpl() override;
 
   /// Applies the `RNN` module to an input sequence and input state.
   /// The `input` should follow a `(sequence, batch, features)` layout unless
@@ -205,6 +206,7 @@ class LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
   LSTMImpl(int64_t input_size, int64_t hidden_size)
       : LSTMImpl(LSTMOptions(input_size, hidden_size)) {}
   explicit LSTMImpl(LSTMOptions options);
+  ~LSTMImpl() override;
 
   /// Applies the `LSTM` module to an input sequence and input state.
   /// The `input` should follow a `(sequence, batch, features)` layout unless
@@ -231,6 +233,7 @@ class GRUImpl : public detail::RNNImplBase<GRUImpl> {
   GRUImpl(int64_t input_size, int64_t hidden_size)
       : GRUImpl(GRUOptions(input_size, hidden_size)) {}
   explicit GRUImpl(GRUOptions options);
+  ~GRUImpl() override;
 
   /// Applies the `GRU` module to an input sequence and input state.
   /// The `input` should follow a `(sequence, batch, features)` layout unless

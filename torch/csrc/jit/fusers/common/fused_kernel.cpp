@@ -573,5 +573,8 @@ std::tuple<
   return std::make_tuple(std::move(chunk_desc), std::move(concat_desc), has_random);
 }
 
+// vtable anchor
+FusedKernel::~FusedKernel() = default;
+
 } // namespace jit
 } // namespace torch

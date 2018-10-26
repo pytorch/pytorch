@@ -30,7 +30,7 @@ class BaseContext;
  */
 class CAFFE2_API BaseContext {
  public:
-  virtual ~BaseContext() noexcept {}
+  virtual ~BaseContext() noexcept;
 
   virtual Device device() const = 0;
 

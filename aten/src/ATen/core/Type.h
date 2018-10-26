@@ -82,7 +82,7 @@ struct CAFFE2_API Type {
   explicit Type(TensorTypeId type_id, bool is_variable, bool is_undefined)
       : type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
 
-  virtual ~Type() {}
+  virtual ~Type();
   virtual ScalarType scalarType() const = 0;
   virtual caffe2::TypeMeta typeMeta() const = 0;
   virtual Backend backend() const = 0;

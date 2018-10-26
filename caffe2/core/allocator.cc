@@ -50,4 +50,8 @@ void MemoryAllocationReporter::Delete(void* ptr) {
   size_table_.erase(it);
 }
 
+// vtable anchor
+CPUAllocator::~CPUAllocator() noexcept = default;
+DefaultCPUAllocator::~DefaultCPUAllocator() = default;
+
 } // namespace caffe2

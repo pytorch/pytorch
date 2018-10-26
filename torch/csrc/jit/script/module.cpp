@@ -8,7 +8,11 @@
 namespace torch { namespace jit { namespace script {
 
 
-struct RecursiveMethodCallError : public std::exception {};
+struct RecursiveMethodCallError : public std::exception {
+  ~RecursiveMethodCallError() override;
+};
+RecursiveMethodCallError::~RecursiveMethodCallError() = default;
+
 void placeholderCreator(Method&) {
   throw RecursiveMethodCallError();
 }

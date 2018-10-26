@@ -90,6 +90,9 @@ CPUFusedKernel::CPUFusedKernel(
   #pragma GCC diagnostic pop
 }
 
+// vtable anchor
+CPUFusedKernel::~CPUFusedKernel() = default;
+
 } // namespace cpufuser
 } // namespace jit
 } // namespace torch

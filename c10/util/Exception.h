@@ -54,6 +54,7 @@ class C10_API Error : public std::exception {
       const std::string& msg,
       const std::string& backtrace,
       const void* caller = nullptr);
+  ~Error() override;
 
   void AppendMessage(const std::string& msg);
 

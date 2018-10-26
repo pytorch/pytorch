@@ -15,6 +15,7 @@ struct Value;
 // thrown when insertConstant cannot encode the IValue into a graph
 struct TORCH_API constant_not_supported_error : public std::runtime_error {
   using runtime_error::runtime_error;
+  ~constant_not_supported_error() override;
 };
 
 // note: prefer g.insertConsant(val, loc) which does exactly the same thing

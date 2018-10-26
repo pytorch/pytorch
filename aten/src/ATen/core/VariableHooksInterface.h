@@ -23,7 +23,7 @@ namespace at {
 struct CAFFE2_API VariableHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
-  virtual ~VariableHooksInterface() {}
+  virtual ~VariableHooksInterface();
 
   virtual Type& getVariableTypeFromBaseType(const at::Type& baseType) const {
     AT_ERROR("cannot getVariableTypeFromBaseType without libtorch");

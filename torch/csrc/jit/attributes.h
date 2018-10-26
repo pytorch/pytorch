@@ -30,7 +30,7 @@ struct AttributeValue {
   Symbol name;
   virtual AttributeKind kind() const = 0;
   virtual Ptr clone() const = 0;
-  virtual ~AttributeValue() = default;
+  virtual ~AttributeValue();
 };
 
 template<typename T, AttributeKind Kind>
@@ -90,9 +90,7 @@ struct AttributeError : public std::exception {
     }
     msg = ss.str();
   }
-  const char* what() const noexcept override  {
-    return msg.c_str();
-  }
+  const char* what() const noexcept override;
 private:
   std::string msg;
 };

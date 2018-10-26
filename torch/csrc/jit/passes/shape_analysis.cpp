@@ -19,7 +19,11 @@
 
 namespace torch { namespace jit {
 
-struct propagation_error : std::exception {};
+struct propagation_error : std::exception {
+  ~propagation_error() override;
+};
+
+propagation_error::~propagation_error() = default;
 
 #define SHAPE_ASSERT(cond) if (!(cond)) throw propagation_error()
 

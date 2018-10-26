@@ -19,6 +19,9 @@
 
 namespace torch { namespace jit {
 
+// vtable anchor
+Scope::~Scope() = default;
+
 ScopePtr Scope::push(Symbol name) {
   return c10::make_intrusive<Scope>(intrusive_from_this(), name);
 }

@@ -81,7 +81,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 
-  virtual ~SugaredValue() = default;
+  virtual ~SugaredValue();
 };
 
 // most things in the environment are just simple value types
@@ -131,6 +131,7 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
 struct TORCH_API BuiltinModule : public SugaredValue {
   BuiltinModule(const std::string& name)
     : name(name) {}
+  ~BuiltinModule() override;
   std::string name;
 
   std::string kind() const override {
@@ -174,6 +175,7 @@ struct MethodValue : public SugaredValue {
   MethodValue(std::shared_ptr<Module> module, Method& method)
   : module(std::move(module)) //insurance that method stays alive
   , method(method) {}
+  ~MethodValue() override;
   std::string kind() const override {
     return "method";
   }

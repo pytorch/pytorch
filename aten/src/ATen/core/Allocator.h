@@ -98,8 +98,8 @@ inline bool operator!=(std::nullptr_t, const at::DataPtr& dp) noexcept {
 // possible, or the raw interface will incorrectly reported as unsupported,
 // when it is actually possible.
 
-struct Allocator {
-  virtual ~Allocator() {}
+struct CAFFE2_API Allocator {
+  virtual ~Allocator();
   virtual at::DataPtr allocate(size_t n) const = 0;
 
   // If this returns a non nullptr, it means that allocate()

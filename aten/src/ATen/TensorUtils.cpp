@@ -235,4 +235,8 @@ bool geometry_is_contiguous(IntList sizes, IntList strides) {
   return contig_if_nonempty;
 }
 
+// vtable anchor
+Type::~Type() = default;
+TypeExtendedInterface::~TypeExtendedInterface() = default;
+
 }

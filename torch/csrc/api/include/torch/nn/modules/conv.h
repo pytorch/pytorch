@@ -103,6 +103,7 @@ class ConvImpl : public torch::nn::Cloneable<Derived> {
 class Conv1dImpl : public ConvImpl<1, Conv1dImpl> {
  public:
   using ConvImpl<1, Conv1dImpl>::ConvImpl;
+  ~Conv1dImpl() override;
   Tensor forward(Tensor input);
 };
 
@@ -123,6 +124,7 @@ TORCH_MODULE(Conv1d);
 class Conv2dImpl : public ConvImpl<2, Conv2dImpl> {
  public:
   using ConvImpl<2, Conv2dImpl>::ConvImpl;
+  ~Conv2dImpl() override;
   Tensor forward(Tensor input);
 };
 
@@ -143,6 +145,7 @@ TORCH_MODULE(Conv2d);
 class Conv3dImpl : public ConvImpl<3, Conv3dImpl> {
  public:
   using ConvImpl<3, Conv3dImpl>::ConvImpl;
+  ~Conv3dImpl() override;
   Tensor forward(Tensor input);
 };
 

@@ -18,6 +18,9 @@ Error::Error(
   msg_without_backtrace_ = msg_without_backtrace();
 }
 
+// vtable anchor
+Error::~Error() = default;
+
 // PyTorch-style error message
 // Error::Error(SourceLocation source_location, const std::string& msg)
 // NB: This is defined in Logging.cpp for access to GetFetchStackTrace

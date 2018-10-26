@@ -9,6 +9,9 @@ C10_DEFINE_TYPED_REGISTRY(
     std::unique_ptr,
     at::Device);
 
+// vtable anchor
+BaseContext::~BaseContext() noexcept = default;
+
 } // namespace at
 
 namespace caffe2 {

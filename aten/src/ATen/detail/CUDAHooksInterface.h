@@ -51,7 +51,7 @@ constexpr const char* CUDA_HELP =
 struct CAFFE2_API CUDAHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
-  virtual ~CUDAHooksInterface() {}
+  virtual ~CUDAHooksInterface();
 
   // Initialize THCState and, transitively, the CUDA state
   virtual std::unique_ptr<THCState, void (*)(THCState*)> initCUDA() const {

@@ -313,7 +313,7 @@ public:
   ContainerTensor()
   : TensorImpl(at::UndefinedTensorId(), caffe2::TypeMeta(), nullptr, /* is_variable */ false) {}
 
-  virtual ~ContainerTensor() = default;
+  virtual ~ContainerTensor();
   virtual at::IntList sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
@@ -327,6 +327,9 @@ public:
     throw std::runtime_error("storage() on ContainerTensor");
   }
 };
+
+// vtable anchor
+ContainerTensor::~ContainerTensor() = default;
 
 // We need some lists for inputs and outputs. To keep all the memory
 // contiguous we allocate a single vector and use offsets into the vector

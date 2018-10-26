@@ -27,4 +27,7 @@ const LegacyTypeInitInterface& getLegacyTypeInit() {
   return *legacy_type_init;
 }
 
+// vtable anchor
+LegacyTypeInitInterface::~LegacyTypeInitInterface() = default;
+
 }

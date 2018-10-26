@@ -56,4 +56,7 @@ const CUDAHooksInterface& getCUDAHooks() {
 
 C10_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
 
+// vtable anchor
+CUDAHooksInterface::~CUDAHooksInterface() = default;
+
 } // namespace at

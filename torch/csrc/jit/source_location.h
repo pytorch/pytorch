@@ -12,7 +12,7 @@ namespace torch { namespace jit {
 // In the case of using the scripting frontend this will be backed
 // by a SourceRange object
 struct SourceLocation {
-  virtual ~SourceLocation() = default;
+  virtual ~SourceLocation();
   virtual void highlight(std::ostream & out) const = 0;
   void wrapAndRethrowException(const std::exception & e, const std::string & additional = "") {
     std::stringstream msg;
@@ -35,9 +35,7 @@ inline std::ostream& operator<<(std::ostream& out, const SourceLocation& sl) {
 struct StringSourceLocation : public SourceLocation {
   StringSourceLocation(std::string context)
   : context(std::move(context)) {}
-  void highlight(std::ostream & out) const override {
-    out << context;
-  }
+  void highlight(std::ostream & out) const;
 private:
   std::string context;
 };

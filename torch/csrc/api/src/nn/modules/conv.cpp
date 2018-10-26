@@ -150,5 +150,10 @@ template class ConvImpl<2, Conv2dImpl>;
 template struct ConvOptions<3>;
 template class ConvImpl<3, Conv3dImpl>;
 
+// vtable anchor
+Conv1dImpl::~Conv1dImpl() = default;
+Conv2dImpl::~Conv2dImpl() = default;
+Conv3dImpl::~Conv3dImpl() = default;
+
 } // namespace nn
 } // namespace torch

@@ -22,6 +22,8 @@
 #ifndef C10_UTIL_OPTIONAL_H_
 #define C10_UTIL_OPTIONAL_H_
 
+#include "c10/macros/Export.h"
+
 #include <cassert>
 #include <functional>
 #include <initializer_list>
@@ -200,12 +202,16 @@ struct nullopt_t {
 constexpr nullopt_t nullopt{nullopt_t::init()};
 
 // 20.5.8, class bad_optional_access
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wweak-vtables"
+// NOTE: Moving the virtual dtor out-of-line causes linkage problems on Windows.
 class bad_optional_access : public std::logic_error {
  public:
   explicit bad_optional_access(const std::string& what_arg)
       : logic_error{what_arg} {}
   explicit bad_optional_access(const char* what_arg) : logic_error{what_arg} {}
 };
+#pragma diagnostic pop
 
 template <class T>
 union storage_t {

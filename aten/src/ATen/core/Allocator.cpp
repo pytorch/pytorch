@@ -16,6 +16,9 @@ at::DataPtr InefficientStdFunctionContext::makeDataPtr(
           device};
 }
 
+// vtable anchor
+Allocator::~Allocator() = default;
+
 } // namespace at
 
 namespace caffe2 {

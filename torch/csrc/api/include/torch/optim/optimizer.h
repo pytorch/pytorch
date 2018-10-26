@@ -104,6 +104,7 @@ serialize::InputArchive& operator>>(
 /// according to the concrete optimization algorithm.
 class Optimizer : public detail::OptimizerBase {
  public:
+  ~Optimizer() override;
   using detail::OptimizerBase::OptimizerBase;
   virtual void step() = 0;
 };
@@ -114,6 +115,7 @@ class Optimizer : public detail::OptimizerBase {
 /// function also returns the loss value.
 class LossClosureOptimizer : public detail::OptimizerBase {
  public:
+  ~LossClosureOptimizer() override;
   /// A loss function closure, which is expected to return the loss value.
   using LossClosure = std::function<Tensor()>;
   using detail::OptimizerBase::OptimizerBase;

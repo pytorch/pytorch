@@ -27,4 +27,11 @@ auto DelayedError::apply(variable_list&& inputs) -> variable_list {
   });
 }
 
+// vtable anchor
+variable_list GraphRoot::apply(variable_list&& inputs) {
+   return outputs;
+}
+
+NotImplemented::~NotImplemented() = default;
+
 }} // namespace torch::autograd

@@ -38,6 +38,7 @@ public:
     name_ = name;
     parent_ = parent;
   }
+  ~Scope() override;
   ScopePtr push(Symbol name);
 
   ScopePtr parent() {

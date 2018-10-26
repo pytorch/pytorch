@@ -118,7 +118,7 @@ public:
     JIT_ASSERT(r);
     return r;
   }
-  virtual ~Type() = default;
+  virtual ~Type();
   virtual bool hasFreeVariables() const {
     return false;
   }
@@ -184,6 +184,7 @@ struct DynamicType;
 using DynamicTypePtr = std::shared_ptr<DynamicType>;
 // This type represents a single Tensor, with an unknown shape.
 struct TORCH_API DynamicType : public Type {
+  ~DynamicType() override;
   static DynamicTypePtr create() {
     return DynamicTypePtr(new DynamicType()); // NOLINT(modernize-make-shared)
   }
@@ -208,6 +209,7 @@ struct UndefinedTensorType;
 using UndefinedTensorTypePtr = std::shared_ptr<UndefinedTensorType>;
 // This type represents an undefined tensor.
 struct TORCH_API UndefinedTensorType : public Type {
+  ~UndefinedTensorType() override;
   static const TypeKind Kind = TypeKind::UndefinedTensorType;
   static UndefinedTensorTypePtr create() {
     return UndefinedTensorTypePtr(new UndefinedTensorType()); // NOLINT(modernize-make-shared)
@@ -232,6 +234,7 @@ struct TensorType;
 using TensorTypePtr = std::shared_ptr<TensorType>;
 // This type represents a single Tensor with a specific size
 struct TORCH_API TensorType : public Type {
+  ~TensorType() override;
   static const TypeKind Kind = TypeKind::TensorType;
   template<typename ... T>
   static TensorTypePtr create( T&& ... all ) {
@@ -302,6 +305,7 @@ struct CompleteTensorType;
 using CompleteTensorTypePtr = std::shared_ptr<CompleteTensorType>;
 // This type represents a single Tensor with a specific size
 struct TORCH_API CompleteTensorType : public TensorType {
+  ~CompleteTensorType() override;
   template<typename ... T>
   static CompleteTensorTypePtr create( T&& ... all ) {
     return CompleteTensorTypePtr(new CompleteTensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
@@ -403,6 +407,8 @@ private:
 struct WorldType;
 using WorldTypePtr = std::shared_ptr<WorldType>;
 struct TORCH_API WorldType : public Type {
+  ~WorldType() override;
+
   static WorldTypePtr create() {
     return WorldTypePtr(new WorldType());
   }
@@ -427,6 +433,7 @@ struct ListType;
 using ListTypePtr = std::shared_ptr<ListType>;
 
 struct TORCH_API ListType : public Type {
+  ~ListType() override;
   static ListTypePtr create(TypePtr element) {
     return ListTypePtr(new ListType(std::move(element))); // NOLINT(modernize-make-shared)
   }
@@ -475,6 +482,7 @@ struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
 // This type represents a Tuple
 struct TORCH_API TupleType : public Type {
+  ~TupleType() override;
   static TupleTypePtr create(std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType( std::move(types) )); // NOLINT(modernize-make-shared)
   }
@@ -554,6 +562,7 @@ struct NumberType;
 using NumberTypePtr = std::shared_ptr<NumberType>;
 // This type represents a Python number
 struct TORCH_API NumberType : public Type {
+  ~NumberType() override;
   static NumberTypePtr create() {
     return NumberTypePtr(new NumberType()); // NOLINT(modernize-make-shared)
   }
@@ -575,6 +584,7 @@ struct FloatType;
 using FloatTypePtr = std::shared_ptr<FloatType>;
 // This type represents a Python float number
 struct TORCH_API FloatType : public Type {
+  ~FloatType() override;
   static FloatTypePtr create() {
     return FloatTypePtr(new FloatType()); // NOLINT(modernize-make-shared)
   }
@@ -602,6 +612,7 @@ struct IntType;
 using IntTypePtr = std::shared_ptr<IntType>;
 // This type represents a Python int number
 struct TORCH_API IntType : public Type {
+  ~IntType() override;
   static IntTypePtr create() {
     return IntTypePtr(new IntType()); // NOLINT(modernize-make-shared)
   }
@@ -629,6 +640,7 @@ struct BoolType;
 using BoolTypePtr = std::shared_ptr<BoolType>;
 // This node represents a Python bool value
 struct TORCH_API BoolType : public Type {
+  ~BoolType() override;
   static BoolTypePtr create( ) {
     return BoolTypePtr(new BoolType());
   }
@@ -653,6 +665,7 @@ struct StringType;
 using StringTypePtr = std::shared_ptr<StringType>;
 // This type represents a Python string
 struct TORCH_API StringType : public Type {
+  ~StringType() override;
   static StringTypePtr create() {
     return StringTypePtr(new StringType()); // NOLINT(modernize-make-shared)
   }
@@ -680,6 +693,7 @@ struct NoneType;
 using NoneTypePtr = std::shared_ptr<NoneType>;
 // This type represents a Python None
 struct NoneType : public Type {
+  ~NoneType() override;
   static NoneTypePtr create() {
     return NoneTypePtr(new NoneType()); // NOLINT(modernize-make-shared)
   }
@@ -707,6 +721,7 @@ struct GeneratorType;
 using GeneratorTypePtr = std::shared_ptr<GeneratorType>;
 // This type represents a Generator
 struct GeneratorType : public Type {
+  ~GeneratorType() override;
   static GeneratorTypePtr create() {
     return GeneratorTypePtr(new GeneratorType()); // NOLINT(modernize-make-shared)
   }
@@ -729,6 +744,7 @@ struct VarType;
 using VarTypePtr = std::shared_ptr<VarType>;
 // This type represents a type variable, used in FunctionSchema
 struct VarType : public Type {
+  ~VarType() override;
   static VarTypePtr create(std::string name_) {
     return VarTypePtr(new VarType(std::move(name_)));
   }
@@ -821,9 +837,7 @@ TORCH_API TypePtr inferTypeFrom(const IValue& value);
 struct TORCH_API TypeMatchError : public std::exception {
   TypeMatchError(std::string msg_)
   : msg_(std::move(msg_)) {}
-  const char * what() const noexcept override {
-    return msg_.c_str();
-  }
+  const char * what() const noexcept override;
 private:
   std::string msg_;
 };

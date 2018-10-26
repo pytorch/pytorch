@@ -91,4 +91,10 @@ void deleteFunction(Function* function) {
   }
 }
 
+// vtable anchor
+Function::~Function() = default;
+TraceableFunction::~TraceableFunction() = default;
+FunctionPreHook::~FunctionPreHook() = default;
+FunctionPostHook::~FunctionPostHook() = default;
+
 }} // namespace torch::autograd

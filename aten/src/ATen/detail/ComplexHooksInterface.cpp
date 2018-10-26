@@ -24,4 +24,8 @@ C10_DEFINE_REGISTRY(
     ComplexHooksRegistry,
     ComplexHooksInterface,
     ComplexHooksArgs)
+
+// vtable anchor
+ComplexHooksInterface::~ComplexHooksInterface() = default;
+
 }

@@ -139,4 +139,8 @@ c10::optional<IValue> toIValue(Value* v) {
   op(stack);
   return stack.back();
 }
+
+// vtable anchor
+constant_not_supported_error::~constant_not_supported_error() = default;
+
 }}

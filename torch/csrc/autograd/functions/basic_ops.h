@@ -34,6 +34,8 @@ struct TORCH_API NotImplemented : public Error {
 
   NotImplemented(std::string forward_fn)
     : Error("derivative for " + forward_fn + " is not implemented") {}
+
+  ~NotImplemented() override;
 };
 
 // Identity in forward, Error in backward. Used to implement @once_differentiable
@@ -54,9 +56,7 @@ struct TORCH_API GraphRoot : public Function {
       : Function(std::move(functions)),
         outputs(std::move(inputs)) {}
 
-  variable_list apply(variable_list&& inputs) override {
-    return outputs;
-  }
+  variable_list apply(variable_list&& inputs) override;
 
   variable_list outputs;
 };

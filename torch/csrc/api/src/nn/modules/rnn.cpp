@@ -26,6 +26,9 @@ namespace detail {
 RNNOptionsBase::RNNOptionsBase(int64_t input_size, int64_t hidden_size)
     : input_size_(input_size), hidden_size_(hidden_size) {}
 
+// vtable anchor
+RNNOptionsBase::~RNNOptionsBase() = default;
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNNImplBase ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename Derived>
@@ -217,6 +220,9 @@ RNNOutput RNNImpl::forward(Tensor input, Tensor state) {
   }
 }
 
+// vtable anchor
+RNNImpl::~RNNImpl() = default;
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 LSTMImpl::LSTMImpl(LSTMOptions options)
@@ -253,6 +259,9 @@ RNNOutput LSTMImpl::forward(Tensor input, Tensor state) {
   return {output, torch::stack({hidden_state, cell_state})};
 }
 
+// vtable anchor
+LSTMImpl::~LSTMImpl() = default;
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 GRUImpl::GRUImpl(GRUOptions options)
@@ -265,5 +274,9 @@ RNNOutput GRUImpl::forward(Tensor input, Tensor state) {
   return generic_forward(
       static_cast<RNNFunctionSignature*>(&torch::gru), input, state);
 }
+
+// vtable anchor
+GRUImpl::~GRUImpl() = default;
+
 } // namespace nn
 } // namespace torch

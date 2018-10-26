@@ -86,5 +86,10 @@ serialize::InputArchive& operator>>(
   return archive;
 }
 } // namespace detail
+
+// vtable anchor
+Optimizer::~Optimizer() = default;
+LossClosureOptimizer::~LossClosureOptimizer() = default;
+
 } // namespace optim
 } // namespace torch

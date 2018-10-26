@@ -263,4 +263,26 @@ TORCH_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::string
   return type;
 }
 
+// vtable anchors
+Type::~Type() = default;
+DynamicType::~DynamicType() = default;
+TensorType::~TensorType() = default;
+UndefinedTensorType::~UndefinedTensorType() = default;
+CompleteTensorType::~CompleteTensorType() = default;
+WorldType::~WorldType() = default;
+ListType::~ListType() = default;
+TupleType::~TupleType() = default;
+NumberType::~NumberType() = default;
+FloatType::~FloatType() = default;
+IntType::~IntType() = default;
+BoolType::~BoolType() = default;
+StringType::~StringType() = default;
+NoneType::~NoneType() = default;
+GeneratorType::~GeneratorType() = default;
+VarType::~VarType() = default;
+
+const char * TypeMatchError::what() const noexcept {
+  return msg_.c_str();
+}
+
 }} // namespace torch::jit

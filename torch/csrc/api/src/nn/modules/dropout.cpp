@@ -33,5 +33,10 @@ Tensor DropoutImpl::forward(Tensor input) {
 Tensor FeatureDropoutImpl::forward(Tensor input) {
   return torch::feature_dropout(input, options.rate_, this->is_training());
 }
+
+// vtable anchor
+DropoutImpl::~DropoutImpl() = default;
+FeatureDropoutImpl::~FeatureDropoutImpl() = default;
+
 } // namespace nn
 } // namespace torch

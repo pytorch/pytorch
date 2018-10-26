@@ -24,6 +24,7 @@ struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
  public:
   ConstantString(std::string str)
   : str_(std::move(str)) {}
+  ~ConstantString() override;
   static c10::intrusive_ptr<ConstantString> create(std::string str_);
   const std::string & string() const {
     return str_;
@@ -72,6 +73,7 @@ struct C10_EXPORT Tuple : public List<IValue> {
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
     return c10::make_intrusive<Tuple>(std::move(elements_));
   }
+  ~Tuple() override;
 };
 using IntList = List<int64_t>;
 using TensorList = List<at::Tensor>;

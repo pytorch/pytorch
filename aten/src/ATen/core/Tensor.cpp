@@ -18,4 +18,7 @@ const char * Tensor::toString() const {
   return type().toString();
 }
 
+// vtable anchor
+Generator::~Generator() = default;
+
 } // namespace at

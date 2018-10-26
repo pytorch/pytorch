@@ -21,6 +21,8 @@ struct CPUFusedKernel : public ::torch::jit::FusedKernel {
   , AnnotatedGraph& agraph
   , CPUFusionCompilerConfig& config);
 
+  ~CPUFusedKernel() override;
+
 protected:
   virtual at::Backend backend() const override {
     return at::Backend::CPU;

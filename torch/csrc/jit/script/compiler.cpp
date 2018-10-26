@@ -29,16 +29,17 @@ using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 struct NoneValue : SugaredValue {
-  NoneValue() {}
+  ~NoneValue();
   virtual std::string kind() const override {
     return "None";
   }
 };
 
+// vtable anchor
+NoneValue::~NoneValue() = default;
+
 struct PrintValue : public SugaredValue {
-  std::string kind() const override {
-    return "print";
-  }
+  std::string kind() const override;
   std::shared_ptr<SugaredValue> call(
     SourceRange loc,
     Method & m,
@@ -65,6 +66,10 @@ struct PrintValue : public SugaredValue {
       return std::make_shared<NoneValue>();
   }
 };
+
+std::string PrintValue::kind() const {
+  return "print";
+}
 
 static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
   auto& graph = *value->owningGraph();
@@ -96,8 +101,8 @@ static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
 
 // expressions like int(x)
 struct CastValue : public SugaredValue {
-  CastValue(TypePtr type)
-  : type(type) {}
+  CastValue(TypePtr type) : type(type) {}
+  ~CastValue() override;
   std::string kind() const override {
     std::stringstream ss;
     ss << "<" << type->str() << " cast primitive>";
@@ -123,6 +128,9 @@ struct CastValue : public SugaredValue {
 private:
   TypePtr type;
 };
+
+// vtable anchor
+CastValue::~CastValue() = default;
 
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down
@@ -2168,6 +2176,27 @@ void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const st
     throw ErrorReport(loc) << "expected " << expected << " " << what << " but found " << actual;
   }
 }
+
+const char* ErrorReport::what() const noexcept {
+  std::stringstream msg;
+  msg << "\n" << ss.str();
+  if (context != nullptr) {
+    msg << ":\n";
+    context->highlight(msg);
+  } else {
+    msg << ".\n";
+  }
+  the_message = msg.str();
+  return the_message.c_str();
+}
+
+// vtable anchor
+SugaredValue::~SugaredValue() = default;
+BuiltinModule::~BuiltinModule() = default;
+MethodValue::~MethodValue() = default;
+Tree::~Tree() = default;
+String::~String() = default;
+Compound::~Compound() = default;
 
 } // namespace script
 } // namespace jit

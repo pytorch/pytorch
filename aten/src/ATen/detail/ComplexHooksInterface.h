@@ -8,7 +8,7 @@ namespace at {
 class Context;
 
 struct CAFFE2_API ComplexHooksInterface {
-  virtual ~ComplexHooksInterface() {}
+  virtual ~ComplexHooksInterface();
 
   virtual void registerComplexTypes(Context*) const {
     AT_ERROR("Cannot register complex types without loading a library with complex support");
