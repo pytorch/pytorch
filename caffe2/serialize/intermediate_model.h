@@ -72,8 +72,9 @@ class IntermediateTensor final {
     for (int i = 0; i < tensor_proto->dims_size(); ++i) {
       dims_.push_back(tensor_proto->dims(i));
     }
-    AT_ASSERTM(tensor_proto->has_name(), "no name in TensorProto!");
-    name_ = tensor_proto->name();
+    if (tensor_proto->has_name()) {
+      name_ = tensor_proto->name();
+    }
     if (tensor_proto->has_device_detail()) {
       const auto& device_detail = tensor_proto->device_detail();
       deviceDetail_.deviceType = device_detail.device_type();
@@ -212,6 +213,9 @@ class IntermediateParameter final {
 
   explicit IntermediateParameter(torch::ParameterDef* param_def,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data) {
+    AT_ASSERTM(param_def->has_name(), "ParameterDef has no name! %s",
+        param_def->DebugString());
+    name_ = param_def->name();
     isBuffer_ = param_def->is_buffer();
     requireGradient_ = param_def->require_gradient();
     if (param_def->has_tensor()) {
@@ -350,6 +354,10 @@ class IntermediateModule final {
   }
 
   // getters/setters
+  const std::string& name() const {
+    return name_;
+  }
+
   std::vector<IntermediateParameter>* mutableParameters() {
     return &parameters_;
   }
@@ -405,7 +413,11 @@ class IntermediateModel final {
   }
 
   void dump(torch::ModelDef* model_def) {
-    // TODO
+    model_def->set_name(name_);
+    model_def->set_producer_name(producerName_);
+    model_def->set_producer_version(producerVersion_);
+    model_def->set_proto_version(protoVersion_);
+    mainModule_.dump(model_def->mutable_main_module());
   }
 
   // getters
@@ -499,6 +511,7 @@ void serializeIntermediateModel(IntermediateModel* imodel,
 void serializeIntermediateModel(IntermediateModel* imodel, const std::string& filename) {
   torch::jit::PyTorchFileWriter writer(filename);
   serializeIntermediateModel(imodel, &writer);
+  writer.writeEndOfFile();
 }
 
 void deserializeIntermediateModel(IntermediateModel* imodel,
@@ -509,7 +522,7 @@ void deserializeIntermediateModel(IntermediateModel* imodel,
     size_t data_key;
     size_t data_size;
     std::tie(data_ptr, data_key, data_size) = reader->getNextRecord();
-    if (!reader->hasNextRecord()) {
+    if (reader->hasNextRecord()) {
       auto it = id_data.find(data_key);
       if (it != id_data.end()) {
         it->second->setDataPtr(std::move(data_ptr));
@@ -520,8 +533,7 @@ void deserializeIntermediateModel(IntermediateModel* imodel,
       continue;
     }
     torch::ModelDef model_def = torch::ModelDef();
-    AT_ASSERTM(model_def.ParsePartialFromArray(data_ptr.get(),
-          data_size), "Parsing proto from array failedl");
+    model_def.ParsePartialFromArray(data_ptr.get(), data_size);
     imodel->update(&model_def, &id_data);
   }
 }

@@ -65,6 +65,18 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   at::serialize::deserializeIntermediateModel(&loaded_model, tmp_name);
 
   ASSERT_EQ(loaded_model.name(), model_name);
+  auto* loaded_main_module = loaded_model.mutableMainModule();
+  ASSERT_EQ(loaded_main_module->name(), module_name);
+  ASSERT_EQ(loaded_main_module->mutableSubmodules()->size(), 1);
+  ASSERT_EQ(loaded_main_module->mutableSubmodules()->at(0).name(), sub_name);
+  ASSERT_EQ(loaded_main_module->mutableParameters()->size(), 1);
+  auto& loaded_param = loaded_main_module->mutableParameters()->at(0);
+  ASSERT_EQ(loaded_param.name(), param_name);
+  ASSERT_EQ(loaded_param.isBuffer(), is_buffer);
+  ASSERT_EQ(loaded_param.requireGradient(), require_gradient);
+  auto* loaded_tensor = loaded_param.mutableTensor();
+  ASSERT_EQ(*loaded_tensor->mutableDims(), *dims);
+  // ASSERT_EQ(*loaded_tensor->mutable)
 }
 
 }  // namespace
