@@ -103,6 +103,7 @@ endif()
 cmake_pop_check_state()
 
 # ---[ Check if the compiler has AVX/AVX2 support. We only check AVX2.
+if (USE_AVX)
 cmake_push_check_state(RESET)
 if (MSVC)
   set(CMAKE_REQUIRED_FLAGS "/arch:AVX2")
@@ -130,6 +131,7 @@ if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   endif()
 endif()
 cmake_pop_check_state()
+endif()
 
 # ---[ Checks if compiler supports -fvisibility=hidden
 check_cxx_compiler_flag("-fvisibility=hidden" COMPILER_SUPPORTS_HIDDEN_VISIBILITY)
