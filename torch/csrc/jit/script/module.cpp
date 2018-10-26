@@ -111,7 +111,7 @@ void Module::to_impl(
     // Use the data's original device or dtype if not supplied here.
     auto new_data = data.to(
         device.value_or(data.device()),
-        dtype.value_or(data.dtype()),
+        dtype.value_or(data.scalar_type()),
         non_blocking);
     variable.set_data(new_data);
   }

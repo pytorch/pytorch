@@ -2,6 +2,7 @@
 
 #include <torch/data.h>
 #include <torch/data/detail/sequencers.h>
+#include <torch/serialize.h>
 #include <torch/tensor.h>
 
 #include <test/cpp/api/support.h>
@@ -73,6 +74,9 @@ struct BatchSizeSampler : samplers::Sampler {
   c10::optional<std::vector<size_t>> next(size_t batch_size) override {
     return {{batch_size}};
   }
+
+  void save(torch::serialize::OutputArchive& archive) const override {}
+  void load(torch::serialize::InputArchive& archive) override {}
 };
 
 TEST(DataTest, InfiniteStreamDataset) {
@@ -102,7 +106,6 @@ TEST(DataTest, InfiniteStreamDataset) {
     }
   }
 }
-
 TEST(DataTest, NoSequencerIsIdentity) {
   using namespace torch::data::detail::sequencers; // NOLINT
   NoSequencer<int> no_sequencer;
@@ -212,6 +215,31 @@ TEST(DataTest, SequentialSamplerResetsWell) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
+TEST(DataTest, CanSaveAndLoadSequentialSampler) {
+  {
+    samplers::SequentialSampler a(10);
+    ASSERT_EQ(a.index(), 0);
+    std::stringstream stream;
+    torch::save(a, stream);
+
+    samplers::SequentialSampler b(10);
+    torch::load(b, stream);
+    ASSERT_EQ(b.index(), 0);
+  }
+  {
+    samplers::SequentialSampler a(10);
+    a.next(3);
+    a.next(4);
+    ASSERT_EQ(a.index(), 7);
+    std::stringstream stream;
+    torch::save(a, stream);
+
+    samplers::SequentialSampler b(10);
+    torch::load(b, stream);
+    ASSERT_EQ(b.index(), 7);
+  }
+}
+
 TEST(DataTest, RandomSamplerReturnsIndicesInCorrectRange) {
   samplers::RandomSampler sampler(10);
 
@@ -226,6 +254,7 @@ TEST(DataTest, RandomSamplerReturnsIndicesInCorrectRange) {
     ASSERT_GE(i, 0);
     ASSERT_LT(i, 10);
   }
+
 
   indices = sampler.next(2).value();
   for (auto i : indices) {
@@ -250,6 +279,36 @@ TEST(DataTest, RandomSamplerResetsWell) {
   sampler.reset();
   ASSERT_EQ(sampler.next(5).value().size(), 5);
   ASSERT_FALSE(sampler.next(2).has_value());
+}
+
+TEST(DataTest, SavingAndLoadingRandomSamplerYieldsSameSequence) {
+  {
+    samplers::RandomSampler a(10);
+
+    std::stringstream stream;
+    torch::save(a, stream);
+
+    samplers::RandomSampler b(10);
+    torch::load(b, stream);
+
+    ASSERT_EQ(a.next(10).value(), b.next(10).value());
+  }
+  {
+    samplers::RandomSampler a(10);
+    a.next(3);
+    ASSERT_EQ(a.index(), 3);
+
+    std::stringstream stream;
+    torch::save(a, stream);
+
+    samplers::RandomSampler b(10);
+    torch::load(b, stream);
+    ASSERT_EQ(b.index(), 3);
+
+    auto b_sequence = b.next(10).value();
+    ASSERT_EQ(b_sequence.size(), 7);
+    ASSERT_EQ(a.next(10).value(), b_sequence);
+  }
 }
 
 TEST(DataTest, TensorDatasetConstructsFromSingleTensor) {
