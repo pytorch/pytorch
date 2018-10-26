@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/data/samplers/base.h>
+#include <torch/serialize/archive.h>
 #include <torch/tensor.h>
 
 #include "c10/util/Optional.h"
@@ -51,6 +52,37 @@ class RandomSampler : public Sampler {
     std::copy(data, data + index_batch.size(), index_batch.begin());
     index_ += index_batch.size();
     return index_batch;
+  }
+
+  /// Serializes the `RandomSampler` to the `archive`.
+  void save(serialize::OutputArchive& archive) const override {
+    archive.write(
+        "index",
+        torch::tensor(static_cast<int64_t>(index_), torch::kInt64),
+        /*is_buffer=*/true);
+    archive.write(
+        "indices",
+        indices_,
+        /*is_buffer=*/true);
+  }
+
+  /// Deserializes the `RandomSampler` from the `archive`.
+  void load(serialize::InputArchive& archive) override {
+    auto tensor = torch::empty(1, torch::kInt64);
+    archive.read(
+        "index",
+        tensor,
+        /*is_buffer=*/true);
+    index_ = tensor.item<int64_t>();
+    archive.read(
+        "indices",
+        indices_,
+        /*is_buffer=*/true);
+  }
+
+  /// Returns the current index of the `RandomSampler`.
+  size_t index() const noexcept {
+    return index_;
   }
 
  private:
