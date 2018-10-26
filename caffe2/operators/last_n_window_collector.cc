@@ -36,7 +36,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
     const auto& input = Input(DATA);
 
     CAFFE_ENFORCE_GE(input.ndim(), 1);
-    bool output_initialized = output->size() > 0 &&
+    bool output_initialized = output->numel() > 0 &&
         (static_cast<std::shared_ptr<std::vector<TensorCPU>>*>(
              output->raw_mutable_data(input.meta()))[0] != nullptr);
     if (output_initialized) {
@@ -50,7 +50,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
 
     if (OutputSize() > NUM_VISITED) {
       auto* num_visited_tensor = Output(NUM_VISITED);
-      CAFFE_ENFORCE_EQ(1, num_visited_tensor->size());
+      CAFFE_ENFORCE_EQ(1, num_visited_tensor->numel());
       auto* num_visited = num_visited_tensor->template mutable_data<int64_t>();
       if (!output_initialized) {
         *num_visited = 0;

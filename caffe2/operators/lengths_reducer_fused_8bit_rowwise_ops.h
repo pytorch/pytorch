@@ -41,8 +41,8 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
       const auto& weights_input = Input(WEIGHTS);
       CAFFE_ENFORCE_EQ(weights_input.ndim(), 1, "WEIGHTS must be a vector");
       CAFFE_ENFORCE_EQ(
-          weights_input.size(),
-          indices.size(),
+          weights_input.numel(),
+          indices.numel(),
           "WEIGHTS should have the same length as INDICES.");
       weights = weights_input.template data<float>();
     }
@@ -56,7 +56,7 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
     Fused8BitRowwiseEmbeddingLookup(
         /*block_size=*/output->dim(1),
         /*output_size=*/output->dim(0),
-        /*index_size=*/indices.size(),
+        /*index_size=*/indices.numel(),
         /*data_size=*/data.dim(0),
         /*input=*/data.template data<uint8_t>(),
         /*indices=*/indices.template data<IndexType>(),
