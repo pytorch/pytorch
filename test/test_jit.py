@@ -7845,6 +7845,22 @@ a")
         weak_mod.weight = torch.nn.Parameter(torch.ones(5, 5) * 100)
         self.assertFalse(strong_mod(inp).allclose(weak_mod(inp)))
 
+    def test_inplace_add(self):
+
+        def foo(a, b):
+            c = a + b
+            c.add_(b)
+            return c
+        self.checkScript(foo, (torch.rand(3), torch.rand(3)))
+
+    def test_add_out(self):
+        def foo(a, b):
+            c = a + b
+            e = 2 * a
+            torch.add(c, b, out=e)
+            return e
+        self.checkScript(foo, (torch.rand(3), torch.rand(3)))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -8849,19 +8865,20 @@ class TestCustomOperators(JitTestCase):
         from torch._ops import _OpNamespace
         self.assertTrue(hasattr(torch, 'ops'))
 
-        torch.ops.__dict__.pop('aten')
+        if '_test' in torch.ops.__dict__:
+            torch.ops.__dict__.pop('_test')
 
         # Don't use `hasattr()` because it will call `__getattr__`.
-        self.assertNotIn('aten', torch.ops.__dict__)
-        torch.ops.aten
-        self.assertIn('aten', torch.ops.__dict__)
-        self.assertEqual(type(torch.ops.aten), _OpNamespace)
+        self.assertNotIn('_test', torch.ops.__dict__)
+        torch.ops._test
+        self.assertIn('_test', torch.ops.__dict__)
+        self.assertEqual(type(torch.ops._test), _OpNamespace)
 
-        self.assertNotIn('relu', torch.ops.aten.__dict__)
-        op = torch.ops.aten.relu
+        self.assertNotIn('leaky_relu', torch.ops._test.__dict__)
+        op = torch.ops._test.leaky_relu
         self.assertTrue(callable(op))
-        self.assertIn('relu', torch.ops.aten.__dict__)
-        op2 = torch.ops.aten.relu
+        self.assertIn('leaky_relu', torch.ops._test.__dict__)
+        op2 = torch.ops._test.leaky_relu
         self.assertEqual(op, op2)
 
     def test_simply_calling_an_operator(self):
@@ -8870,11 +8887,11 @@ class TestCustomOperators(JitTestCase):
         self.assertEqual(output, input.relu())
 
     def test_default_arguments_are_used(self):
-        output = torch.ops.aten.leaky_relu(torch.tensor([-1.0, 1.0]))
+        output = torch.ops._test.leaky_relu(torch.tensor([-1.0, 1.0]))
         self.assertEqual(output, torch.tensor([-0.01, 1]))
 
     def test_only_kwargs(self):
-        output = torch.ops.aten.leaky_relu(self=torch.tensor(-1.0))
+        output = torch.ops._test.leaky_relu(self=torch.tensor(-1.0))
         self.assertEqual(output, torch.tensor(-0.01))
 
     def test_passing_too_many_args(self):
@@ -8903,19 +8920,19 @@ class TestCustomOperators(JitTestCase):
             RuntimeError,
             "Argument 'self' specified both as positional and keyword argument"
         ):
-            torch.ops.aten.leaky_relu(torch.ones(5), self=torch.ones(5))
+            torch.ops._test.leaky_relu(torch.ones(5), self=torch.ones(5))
 
     def test_passing_unknown_kwargs(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Unknown keyword argument 'foo' for operator 'aten::leaky_relu'"
+            "Unknown keyword argument 'foo' for operator '_test::leaky_relu'"
         ):
-            torch.ops.aten.leaky_relu(torch.ones(5), foo=torch.ones(5))
+            torch.ops._test.leaky_relu(torch.ones(5), foo=torch.ones(5))
 
     def test_passing_and_returning_lists(self):
         # Replace with actual test once we support lists.
         a, b = torch.rand(5), torch.rand(5)
-        output = torch.ops.aten.cat([a, b])
+        output = torch.ops._test.cat([a, b])
         output_ref = torch.cat([a, b])
         self.assertEqual(output, output_ref)
 
