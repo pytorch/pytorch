@@ -28,5 +28,6 @@ std::string runJITCPPTests() {
   testSchemaParser();
   return out.str();
 }
+
 } // namespace jit
 } // namespace torch

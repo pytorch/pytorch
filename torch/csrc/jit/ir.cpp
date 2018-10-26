@@ -624,6 +624,15 @@ void Node::findSchema() const {
   schema_ = &getOperatorFor(this).schema();
 }
 
+const FunctionSchema* Node::maybeSchema() const {
+  if(!schema_) {
+    if(auto op = findOperatorFor(this)) {
+      schema_ = &op->schema();
+    }
+  }
+  return schema_;
+}
+
 bool Node::isNondeterministic() const {
   static const OperatorSet nondeterministic_ops = {
     "aten::dropout(Tensor input, float p, bool train) -> Tensor",

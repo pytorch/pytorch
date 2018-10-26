@@ -541,6 +541,7 @@ public:
       findSchema();
     return *schema_;
   }
+  const FunctionSchema* maybeSchema() const;
 
   void dump() const;
 
