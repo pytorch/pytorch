@@ -41,7 +41,7 @@ class MIOPENActivationOp final : public MIOPENActivationOpBase {
   MIOPENActivationOp(const OperatorDef& operator_def, Workspace* ws)
       : MIOPENActivationOpBase(operator_def, ws) {
     MIOPEN_ENFORCE(miopenSetActivationDescriptor(
-        act_desc_, kMIOPENActivationMode, 1.0, 0.0, 1.0));
+        act_desc_, kMIOPENActivationMode, 1.0, 1.0, 1.0));
   }
 
   bool RunOnDevice() override {
@@ -96,7 +96,7 @@ class MIOPENActivationGradientOp final : public MIOPENActivationOpBase {
   MIOPENActivationGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : MIOPENActivationOpBase(operator_def, ws) {
     MIOPEN_ENFORCE(miopenSetActivationDescriptor(
-        act_desc_, kMIOPENActivationMode,  1.0, 0.0, 1.0));
+        act_desc_, kMIOPENActivationMode,  1.0, 1.0, 1.0));
   }
 
   bool RunOnDevice() override {
