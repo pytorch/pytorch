@@ -149,7 +149,7 @@ std::vector<at::Tensor> scatter(
   }
   at::cuda::CUDAGuard cuda_guard;
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
-    const auto device_index = static_cast<int32_t>(devices[chunk]);
+    const auto device_index = static_cast<int16_t>(devices[chunk]);
     if (streams) {
       AT_CHECK(
           (*streams)[chunk].device() == device_index,
