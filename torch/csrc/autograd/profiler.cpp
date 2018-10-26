@@ -98,10 +98,7 @@ void popRange() {
 }
 
 RecordFunction::RecordFunction(Function* fn) {
-  // NB: we don't use fn->name() here, because it will unnecessarily allocate
-  // a string. We will run a demangler on all the names anyway, so it's ok to
-  // avoid doing it now.
-  pushRangeImpl(typeid(*fn).name(), ", stashed seq=", fn->sequence_nr());
+  pushRangeImpl(fn->name(), ", stashed seq=", fn->sequence_nr());
 }
 
 RecordFunction::RecordFunction(std::string name) {
