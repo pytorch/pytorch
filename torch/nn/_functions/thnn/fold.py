@@ -19,12 +19,13 @@ class Col2Im(Function):
 
         output = input.new()
 
+        # TODO(devashisht) Update the circular argument
         ctx._backend.Col2Im_updateOutput(ctx._backend.library_state,
                                          input, output,
                                          output_size[0], output_size[1],
                                          kernel_size[0], kernel_size[1],
                                          dilation[0], dilation[1],
-                                         padding[0], padding[1],
+                                         padding[0], padding[1], False,
                                          stride[0], stride[1])
         return output
 
@@ -34,12 +35,13 @@ class Col2Im(Function):
 
         grad_input = grad_output.new()
 
+        # TODO(devashisht) Update the circular argument
         ctx._backend.Col2Im_updateGradInput(ctx._backend.library_state,
                                             grad_output,
                                             grad_input,
                                             ctx.kernel_size[0], ctx.kernel_size[1],
                                             ctx.dilation[0], ctx.dilation[1],
-                                            ctx.padding[0], ctx.padding[1],
+                                            ctx.padding[0], ctx.padding[1], False,
                                             ctx.stride[0], ctx.stride[1])
         return grad_input, None, None, None, None, None
 
@@ -61,11 +63,12 @@ class Im2Col(Function):
 
         output = input.new()
 
+        # TODO(devashisht) Update the circular argument
         ctx._backend.Im2Col_updateOutput(ctx._backend.library_state,
                                          input, output,
                                          kernel_size[0], kernel_size[1],
                                          dilation[0], dilation[1],
-                                         padding[0], padding[1],
+                                         padding[0], padding[1], False,
                                          stride[0], stride[1])
         return output
 
@@ -75,12 +78,13 @@ class Im2Col(Function):
 
         grad_input = grad_output.new()
 
+        # TODO(devashisht) Update the circular argument
         ctx._backend.Im2Col_updateGradInput(ctx._backend.library_state,
                                             grad_output,
                                             grad_input,
                                             ctx.input_size[0], ctx.input_size[1],
                                             ctx.kernel_size[0], ctx.kernel_size[1],
                                             ctx.dilation[0], ctx.dilation[1],
-                                            ctx.padding[0], ctx.padding[1],
+                                            ctx.padding[0], ctx.padding[1], False,
                                             ctx.stride[0], ctx.stride[1])
         return grad_input, None, None, None, None

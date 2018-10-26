@@ -59,36 +59,49 @@ class _Reduction:
     def legacy_get_enum(size_average, reduce, emit_warning=True):
         return _Reduction.get_enum(_Reduction.legacy_get_string(size_average, reduce, emit_warning))
 
+CONVOLUTION_PADDING_TYPE = {
+    'zeros' : 0,
+    'circular' : 1
+}
 
-conv1d = _add_docstr(torch.conv1d, r"""
-conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1,
+           padding_type='zeros'):
+    r"""
+    Applies a 1D convolution over an input signal composed of several input
+    planes.
 
-Applies a 1D convolution over an input signal composed of several input
-planes.
+    See :class:`~torch.nn.Conv1d` for details and output shape.
 
-See :class:`~torch.nn.Conv1d` for details and output shape.
+    .. include:: cudnn_deterministic.rst
 
-.. include:: cudnn_deterministic.rst
+    Args:
+        input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iW)`
+        weight: filters of shape :math:`(\text{out\_channels} \times \frac{\text{in\_channels}}{\text{groups}} \times kW)`
+        bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
+        stride: the stride of the convolving kernel. Can be a single number or
+          a one-element tuple `(sW,)`. Default: 1
+        padding: pad tensor by values specified through `(padding_type)`. Can be a
+          single number or a one-element tuple `(padW,)`. Default: 0
+        dilation: the spacing between kernel elements. Can be a single number or
+          a one-element tuple `(dW,)`. Default: 1
+        groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
+          the number of groups. Default: 1
+        padding_type: {'zeros', 'circular'}, optional
+            'zeros': By default the padding_type is 'zeros' which specifies that
+            if non-zero padding dim is specified then padded values would be 0.
+            'circular': When padding_type is 'circular' then tensor would be
+            wrapped around for padding purposes.
 
-Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iW)`
-    weight: filters of shape :math:`(\text{out\_channels} \times \frac{\text{in\_channels}}{\text{groups}} \times kW)`
-    bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
-    stride: the stride of the convolving kernel. Can be a single number or
-      a one-element tuple `(sW,)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a one-element tuple `(padW,)`. Default: 0
-    dilation: the spacing between kernel elements. Can be a single number or
-      a one-element tuple `(dW,)`. Default: 1
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
-      the number of groups. Default: 1
+    Examples::
 
-Examples::
-
-    >>> filters = torch.randn(33, 16, 3)
-    >>> inputs = torch.randn(20, 16, 50)
-    >>> F.conv1d(inputs, filters)
-""")
+        >>> filters = torch.randn(33, 16, 3)
+        >>> inputs = torch.randn(20, 16, 50)
+        >>> F.conv1d(inputs, filters)
+    """
+    if padding_type not in CONVOLUTION_PADDING_TYPE:
+        raise ValueError("nn.functional.conv1d(): expected padding_type to be "
+                         "{}, but got: '{}'".format(CONVOLUTION_PADDING_TYPE.items(), padding_type))
+    return torch.conv1d(input, weight, bias, stride, padding, dilation, groups, CONVOLUTION_PADDING_TYPE[padding_type])
 
 conv2d = _add_docstr(torch.conv2d, r"""
 conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
@@ -151,38 +164,47 @@ Examples::
     >>> F.conv3d(inputs, filters)
 """)  # noqa: E501
 
-conv_transpose1d = _add_docstr(torch.conv_transpose1d, r"""
-conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
+def conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0,
+                     groups=1, dilation=1, padding_type='circular'):
+    r""""
+    Applies a 1D transposed convolution operator over an input signal
+    composed of several input planes, sometimes also called "deconvolution".
 
-Applies a 1D transposed convolution operator over an input signal
-composed of several input planes, sometimes also called "deconvolution".
+    See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
 
-See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
+    .. include:: cudnn_deterministic.rst
 
-.. include:: cudnn_deterministic.rst
+    Args:
+        input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iW)`
+        weight: filters of shape :math:`(\text{in\_channels} \times \frac{\text{out\_channels}}{\text{groups}} \times kW)`
+        bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
+        stride: the stride of the convolving kernel. Can be a single number or a
+          tuple ``(sW,)``. Default: 1
+        padding: ``kernel_size - 1 - padding`` padding specified with `(padding_type)`
+          will be added to both sides of each dimension in the input. Can be a
+          single number or a tuple ``(padW,)``. Default: 0
+        output_padding: additional size added to one side of each dimension in the
+          output shape. Can be a single number or a tuple ``(out_padW)``. Default: 0
+        groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
+          number of groups. Default: 1
+        dilation: the spacing between kernel elements. Can be a single number or
+          a tuple ``(dW,)``. Default: 1
+        padding_type: {'zeros', 'circular'}, optional
+            'zeros': By default the padding_type is 'zeros' which specifies that
+            if non-zero padding dim is specified then padded values would be 0.
+            'circular': When padding_type is 'circular' then tensor would be
+            wrapped around for padding purposes.
 
-Args:
-    input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iW)`
-    weight: filters of shape :math:`(\text{in\_channels} \times \frac{\text{out\_channels}}{\text{groups}} \times kW)`
-    bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
-    stride: the stride of the convolving kernel. Can be a single number or a
-      tuple ``(sW,)``. Default: 1
-    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
-      sides of each dimension in the input. Can be a single number or a tuple
-      ``(padW,)``. Default: 0
-    output_padding: additional size added to one side of each dimension in the
-      output shape. Can be a single number or a tuple ``(out_padW)``. Default: 0
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
-      number of groups. Default: 1
-    dilation: the spacing between kernel elements. Can be a single number or
-      a tuple ``(dW,)``. Default: 1
+    Examples::
 
-Examples::
-
-    >>> inputs = torch.randn(20, 16, 50)
-    >>> weights = torch.randn(16, 33, 5)
-    >>> F.conv_transpose1d(inputs, weights)
-""")
+        >>> inputs = torch.randn(20, 16, 50)
+        >>> weights = torch.randn(16, 33, 5)
+        >>> F.conv_transpose1d(inputs, weights)
+    """
+    if padding_type not in CONVOLUTION_PADDING_TYPE:
+        raise ValueError("nn.functional.conv1d(): expected padding_type to be "
+                         "{}, but got: '{}'".format(CONVOLUTION_PADDING_TYPE.items(), padding_type))
+    return torch.conv_transpose1d(input, weight, bias, stride, padding, dilation, groups, CONVOLUTION_PADDING_TYPE[padding_type])
 
 conv_transpose2d = _add_docstr(torch.conv_transpose2d, r"""
 conv_transpose2d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor

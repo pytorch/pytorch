@@ -50,7 +50,7 @@ void THNN_(Im2Col_updateOutput)(
            THTensor *output,
            int64_t kH, int64_t kW,
            int64_t dH, int64_t dW,
-           int64_t padH, int64_t padW,
+           int64_t padH, int64_t padW, bool circular,
            int64_t sH, int64_t sW) {
 
   THNN_(Im2Col_shapeCheck)(state, input, NULL, kH, kW, dH, dW, padH, padW, sH, sW);
@@ -87,8 +87,8 @@ void THNN_(Im2Col_updateOutput)(
       nInputPlane,
       inputHeight, inputWidth,
       outputHeight, outputWidth,
-      kH, kW, padH, padW, sH, sW,
-      dH, dW, output_n->data<scalar_t>());
+      kH, kW, padH, padW, circular,
+      sH, sW, dH, dW, output_n->data<scalar_t>());
   }
 
   c10::raw::intrusive_ptr::decref(input_n);
@@ -107,14 +107,15 @@ void THNN_(Im2Col_updateGradInput)(
            int64_t inputHeight, int64_t inputWidth,
            int64_t kH, int64_t kW,
            int64_t dH, int64_t dW,
-           int64_t padH, int64_t padW,
+           int64_t padH, int64_t padW, bool circular,
            int64_t sH, int64_t sW) {
 
 
   THNN_(Col2Im_updateOutput)(state, gradOutput, gradInput,
                              inputHeight, inputWidth,
                              kH, kW, dH, dW,
-                             padH, padW, sH, sW);
+                             padH, padW, circular,
+                             sH, sW);
 }
 
 

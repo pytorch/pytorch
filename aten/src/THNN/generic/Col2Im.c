@@ -56,14 +56,27 @@
 //
 // ALSO do vol2col
 
-static void THNN_(im2col)(const scalar_t* data_im, const int64_t channels,
-      const int64_t height, const int64_t width,
-      const int64_t output_height, const int64_t output_width,
-      const int64_t kernel_h, const int64_t kernel_w,
-      const int64_t pad_h, const int64_t pad_w,
-      const int64_t stride_h, const int64_t stride_w,
-      const int64_t dilation_h, const int64_t dilation_w,
-      scalar_t* data_col) {
+// Transforms a given matrix into columns of kernel footprint which depends
+// on kernel dimensions, stride and dilation. The matrix wraps round or
+// pads itself with 0 in case padding is supplied. More information can be
+// found here. https://www.mathworks.com/help/images/ref/im2col.html
+static void THNN_(im2col)(
+    const scalar_t* data_im,
+    const int64_t channels,
+    const int64_t height,
+    const int64_t width,
+    const int64_t output_height,
+    const int64_t output_width,
+    const int64_t kernel_h,
+    const int64_t kernel_w,
+    const int64_t pad_h,
+    const int64_t pad_w,
+    const bool circular,
+    const int64_t stride_h,
+    const int64_t stride_w,
+    const int64_t dilation_h,
+    const int64_t dilation_w,
+    scalar_t* data_col) {
   const int64_t height_col = output_height;
   const int64_t width_col = output_width;
   const int64_t channels_col = channels * kernel_h * kernel_w;
@@ -75,19 +88,26 @@ static void THNN_(im2col)(const scalar_t* data_im, const int64_t channels,
       int64_t h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
       for (int64_t w_col = 0; w_col < width_col; ++w_col) {
         int64_t w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
+        if (circular) {
+          h_im = (h_im + height) % height;
+          w_im = (w_im + width) % height;
+        }
         data_col[(c_col * height_col + h_col) * width_col + w_col] =
-          (h_im >= 0 && w_im >= 0 && h_im < height && w_im < width) ?
-          data_im[(c_im * height + h_im) * width + w_im] : 0;
+            (h_im >= 0 && w_im >= 0 && h_im < height && w_im < width)
+            ? data_im[(c_im * height + h_im) * width + w_im]
+            : 0;
       }
     }
   }
 }
 
-static void THNN_(col2im)(const scalar_t* data_col, const int64_t channels,
+static void THNN_(col2im)(
+      const scalar_t* data_col,
+      const int64_t channels,
       const int64_t height, const int64_t width,
       const int64_t output_height, const int64_t output_width,
       const int64_t kernel_h, const int64_t kernel_w,
-      const int64_t pad_h, const int64_t pad_w,
+      const int64_t pad_h, const int64_t pad_w, const bool circular,
       const int64_t stride_h, const int64_t stride_w,
       const int64_t dilation_h, const int64_t dilation_w,
       scalar_t* data_im) {
@@ -103,6 +123,11 @@ static void THNN_(col2im)(const scalar_t* data_col, const int64_t channels,
       int64_t h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
       for (int64_t w_col = 0; w_col < width_col; ++w_col) {
         int64_t w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
+        if (circular)
+        {
+          h_im = (h_im + height) % height;
+          w_im = (w_im + width) % width;
+        }
         if (h_im >= 0 && h_im < height && w_im >= 0 && w_im < width)
           data_im[(c_im * height + h_im) * width + w_im] +=
             data_col[(c_col * height_col + h_col) * width_col + w_col];
@@ -166,7 +191,7 @@ void THNN_(Col2Im_updateOutput)(
            int64_t outputHeight, int64_t outputWidth,
            int64_t kH, int64_t kW,
            int64_t dH, int64_t dW,
-           int64_t padH, int64_t padW,
+           int64_t padH, int64_t padW, bool circular,
            int64_t sH, int64_t sW) {
 
   THNN_(Col2Im_shapeCheck)(state, input, NULL, outputHeight, outputWidth,
@@ -204,7 +229,7 @@ void THNN_(Col2Im_updateOutput)(
       outputHeight, outputWidth,
       height_col, width_col,
       kH, kW,
-      padH, padW,
+      padH, padW, circular,
       sH, sW,
       dH, dW, output_n->data<scalar_t>());
   }
@@ -224,11 +249,12 @@ void THNN_(Col2Im_updateGradInput)(
            THTensor *gradInput,
            int64_t kH, int64_t kW,
            int64_t dH, int64_t dW,
-           int64_t padH, int64_t padW,
+           int64_t padH, int64_t padW, bool circular,
            int64_t sH, int64_t sW) {
 
   THNN_(Im2Col_updateOutput)(state, gradOutput, gradInput,
-                             kH, kW, dH, dW, padH, padW, sH, sW);
+                             kH, kW, dH, dW, padH, padW, circular,
+                             sH, sW);
 }
 
 #endif

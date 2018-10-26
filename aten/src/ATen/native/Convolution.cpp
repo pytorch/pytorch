@@ -1,3 +1,4 @@
+#include "Convolution.h"
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
 
@@ -105,7 +106,7 @@ auto ConvParams::view1d_as_2d() -> void {
 }
 
 auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
-  if (!detail::getCUDAHooks().compiledWithCuDNN()) {
+  if (!at::detail::getCUDAHooks().compiledWithCuDNN()) {
     return false;
   }
   if (!input.type().is_cuda() || !cudnn_enabled) {
@@ -116,7 +117,7 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
     return false;
   }
   if (is_dilated()) {
-    return detail::getCUDAHooks().supportsDilatedConvolutionWithCuDNN() && !is_output_padding_big();
+    return at::detail::getCUDAHooks().supportsDilatedConvolutionWithCuDNN() && !is_output_padding_big();
   }
   return !is_output_padding_big();
 }
@@ -124,7 +125,7 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
 auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 
   return ((input.type().scalarType() == at::kFloat) || (input.type().scalarType() == at::kHalf))
-         && detail::getCUDAHooks().compiledWithMIOpen()
+         && at::detail::getCUDAHooks().compiledWithMIOpen()
          && input.type().is_cuda()
          && input.dim() <= MIOPEN_DIM_MAX
          && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
@@ -221,12 +222,23 @@ static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
   return tensor.narrow(dim, n * g, n).contiguous();
 }
 
+static detail::ConvolutionPaddingType to_padding_type(
+    int64_t padding_type_int) {
+  AT_CHECK(
+      padding_type_int >=
+              static_cast<int64_t>(detail::ConvolutionPaddingType::ZEROS) &&
+          padding_type_int <
+              static_cast<int64_t>(detail::ConvolutionPaddingType::END),
+      "Invalid padding type value specified. Should be one of the values of ConvolutionPaddinType enums.");
+  return static_cast<detail::ConvolutionPaddingType>(padding_type_int);
+}
 
 at::Tensor conv1d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList dilation, int64_t groups) {
+    IntList stride, IntList padding, IntList dilation, int64_t groups,
+    int64_t padding_type_int) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {0}, groups);
+                         false, {0}, groups, padding_type_int);
 }
 
 at::Tensor conv2d(
@@ -245,9 +257,10 @@ at::Tensor conv3d(
 
 at::Tensor conv_transpose1d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList output_padding, int64_t groups, IntList dilation) {
+    IntList stride, IntList padding, IntList output_padding, int64_t groups, IntList dilation,
+    int64_t padding_type_int) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
-                         true, output_padding, groups);
+                         true, output_padding, groups, padding_type_int);
 }
 
 at::Tensor conv_transpose2d(
@@ -267,11 +280,22 @@ at::Tensor conv_transpose3d(
 at::Tensor convolution(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntList stride, IntList padding, IntList dilation,
-    bool transposed, IntList output_padding, int64_t groups) {
+    bool transposed, IntList output_padding, int64_t groups, int64_t padding_type_int) {
   auto& ctx = at::globalContext();
-  return at::_convolution(input, weight, bias, stride, padding, dilation,
-                          transposed, output_padding, groups,
-                          ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
+  return at::_convolution(
+      input,
+      weight,
+      bias,
+      stride,
+      padding,
+      dilation,
+      transposed,
+      output_padding,
+      groups,
+      ctx.benchmarkCuDNN(),
+      ctx.deterministicCuDNN(),
+      ctx.userEnabledCuDNN(),
+      padding_type_int);
 }
 
 static inline std::vector<int64_t> convolution_expand_param_if_needed(
@@ -290,16 +314,25 @@ static inline std::vector<int64_t> convolution_expand_param_if_needed(
 }
 
 at::Tensor _convolution(
-    const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
-    IntList stride_, IntList padding_, IntList dilation_,
-    bool transposed_, IntList output_padding_, int64_t groups_,
-    bool benchmark, bool deterministic, bool cudnn_enabled) {
-
+    const Tensor& input_r,
+    const Tensor& weight_r,
+    const Tensor& bias_r,
+    IntList stride_,
+    IntList padding_,
+    IntList dilation_,
+    bool transposed_,
+    IntList output_padding_,
+    int64_t groups_,
+    bool benchmark,
+    bool deterministic,
+    bool cudnn_enabled,
+    int64_t padding_type_int) {
   auto input = input_r.contiguous();
   auto weight = weight_r;
   auto bias = bias_r;
   auto k = weight.ndimension();
   int64_t dim = k - 2;
+  auto padding_type = to_padding_type(padding_type_int);
 
   AT_CHECK(dim > 0, "weight should at least have at least two dimensions");
 
@@ -330,6 +363,11 @@ at::Tensor _convolution(
   if (params.is_depthwise(input, weight)) {
       /* output.resize_(output_size(input, weight)); */
 
+      // TODO(devashisht) Change this to pad the tensor here and pass it on.
+      AT_CHECK(
+          detail::ConvolutionPaddingType::ZEROS == padding_type,
+          "Doesn't support any other padding type than zero!");
+
       auto kernel_size = weight.sizes().slice(2);
       auto stride = params.stride;
       auto padding = params.padding;
@@ -337,6 +375,10 @@ at::Tensor _convolution(
 
       output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
   } else if (params.use_cudnn(input)) {
+    // TODO(devashisht) Change this to pad the tensor here and pass it on.
+    AT_CHECK(
+        detail::ConvolutionPaddingType::ZEROS == padding_type,
+        "Doesn't support any other padding type than zero!");
     AT_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
              ") should be the same");
@@ -354,6 +396,10 @@ at::Tensor _convolution(
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_miopen(input)) {
+    // TODO(devashisht) Change this to pad the tensor here and pass it on.
+    AT_CHECK(
+        detail::ConvolutionPaddingType::ZEROS == padding_type,
+        "Doesn't support any other padding type than zero!");
     AT_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
              ") should be the same");
@@ -372,6 +418,10 @@ at::Tensor _convolution(
     }
   } else if (params.use_mkldnn(input)) {
 #if AT_MKLDNN_ENABLED()
+    // TODO(devashisht) Change this to pad the tensor here and pass it on.
+    AT_CHECK(
+        detail::ConvolutionPaddingType::ZEROS == padding_type,
+        "Doesn't support any other padding type than zero!");
     AT_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
              ") should be the same");
@@ -384,7 +434,7 @@ at::Tensor _convolution(
   } else {
     if (params.groups == 1) {
       output = at::_convolution_nogroup(
-          input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
+          input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, padding_type_int);
     } else {
       std::vector<Tensor> outputs(params.groups);
       for (int g = 0; g < params.groups; ++g) {
@@ -392,7 +442,7 @@ at::Tensor _convolution(
         auto weight_g = subtensor(weight, 0, params.groups, g);
         auto bias_g = subtensor(bias, 0, params.groups, g);
         outputs[g] = at::_convolution_nogroup(
-            input_g, weight_g, bias_g, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
+            input_g, weight_g, bias_g, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, padding_type_int);
       }
       output = at::cat(outputs, 1);
     }
@@ -410,7 +460,7 @@ at::Tensor _convolution(
 at::Tensor _convolution_nogroup(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntList stride, IntList padding, IntList dilation,
-    bool transposed, IntList output_padding) {
+    bool transposed, IntList output_padding, int64_t padding_type_int) {
 
   ConvParams params;
   params.stride = stride.vec();
@@ -426,24 +476,46 @@ at::Tensor _convolution_nogroup(
   auto dim = input.ndimension();
   auto dilated = params.is_dilated();
   auto kernel_size = weight.sizes().slice(2);
+  auto padding_type = to_padding_type(padding_type_int);
+  bool is_circular_padding =
+      (padding_type == detail::ConvolutionPaddingType::CIRCULAR);
 
   if (params.transposed) {
     if (dim == 4) {
       return at::thnn_conv_transpose2d(
-          input, weight, kernel_size, bias,
-          stride, padding, output_padding, dilation);
+          input,
+          weight,
+          kernel_size,
+          bias,
+          stride,
+          padding,
+          is_circular_padding,
+          output_padding,
+          dilation);
     } else if (dim == 5) {
+      AT_CHECK(
+          !is_circular_padding,
+          "Volumetric convolution with circular padding not allowed!");
       return at::thnn_conv_transpose3d(
-        input, weight, kernel_size, bias,
-        stride, padding, output_padding, dilation);
-      }
+          input,
+          weight,
+          kernel_size,
+          bias,
+          stride,
+          padding,
+          output_padding,
+          dilation);
+    }
   } else {  /* Not transposed */
     if (dim == 4) {
       if (dilated) {
         return at::thnn_conv_dilated2d(
             input, weight, kernel_size, bias,
-            stride, padding, dilation);
+            stride, padding, is_circular_padding, dilation);
       } else {  /* dim == 4, non-dilated */
+        AT_CHECK(
+            !is_circular_padding,
+            "Circular convolution not supported for MM kernels");
         /* CPU implementation has specialized MM kernels
            for non-dilated case here */
         return at::thnn_conv2d(
@@ -451,10 +523,16 @@ at::Tensor _convolution_nogroup(
             stride, padding);
       }
     } else if (dim == 5 && (input.type().is_cuda() || dilated)) {
+      AT_CHECK(
+          !is_circular_padding,
+          "Volumetric convolution with circular padding not allowed!");
       return at::thnn_conv_dilated3d(
           input, weight, kernel_size, bias,
           stride, padding, dilation);
     } else if (dim == 5) { /* dim == 5, CPU, non-dilated */
+      AT_CHECK(
+          !is_circular_padding,
+          "Volumetric convolution with circular padding not allowed!");
       /* CPU implementation has specialized MM kernels
          for non-dilated case here */
       return at::thnn_conv3d(
@@ -472,6 +550,7 @@ static Tensor subvariable(const Tensor& var, int dim, int groups, int g) {
   return result;
 }
 
+// TODO(devashisht)
 std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
     const Tensor& ggI, const Tensor& ggW_r, const Tensor& ggb,
     const Tensor& gO_r, const Tensor& weight_r, const Tensor& input,

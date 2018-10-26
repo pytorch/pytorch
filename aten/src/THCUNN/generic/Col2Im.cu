@@ -59,7 +59,7 @@ void THNN_(Col2Im_updateOutput)(
            int64_t outputHeight, int64_t outputWidth,
            int64_t kH, int64_t kW,
            int64_t dH, int64_t dW,
-           int64_t padH, int64_t padW,
+           int64_t padH, int64_t padW, bool /*circular*/,
            int64_t sH, int64_t sW) {
 
   THCUNN_assertSameGPU(state, 2, input, output);
@@ -120,11 +120,13 @@ void THNN_(Col2Im_updateGradInput)(
            THCTensor *gradInput,
            int64_t kH, int64_t kW,
            int64_t dH, int64_t dW,
-           int64_t padH, int64_t padW,
+           int64_t padH, int64_t padW, bool /*circular*/,
            int64_t sH, int64_t sW) {
 
+  // TODO(devashisht) Update circular argument
   THNN_(Im2Col_updateOutput)(state, gradOutput, gradInput,
-                             kH, kW, dH, dW, padH, padW, sH, sW);
+                             kH, kW, dH, dW, padH, padW, false,
+                             sH, sW);
 
 }
 

@@ -17,7 +17,7 @@ void THNN_(SpatialFullConvolution_updateOutput)(
 {
   THNN_(SpatialFullDilatedConvolution_updateOutput)(
       state, input, output, weight, bias, columns, ones,
-      kW, kH, dW, dH, padW, padH, 1, 1, adjW, adjH);
+      kW, kH, dW, dH, padW, padH, false, 1, 1, adjW, adjH);
 }
 
 void THNN_(SpatialFullConvolution_updateGradInput)(
@@ -34,7 +34,7 @@ void THNN_(SpatialFullConvolution_updateGradInput)(
 {
   THNN_(SpatialFullDilatedConvolution_updateGradInput)(
       state, input, gradOutput, gradInput, weight, gradColumns,
-      kW, kH, dW, dH, padW, padH, 1, 1, adjW, adjH);
+      kW, kH, dW, dH, padW, padH, false, 1, 1, adjW, adjH);
 }
 
 
@@ -55,7 +55,7 @@ void THNN_(SpatialFullConvolution_accGradParameters)(
   THNN_(SpatialFullDilatedConvolution_accGradParameters)(
       state, input, gradOutput, gradWeight, gradBias,
       columns, ones,
-      kW, kH, dW, dH, padW, padH, 1, 1, adjW, adjH, scale_);
+      kW, kH, dW, dH, padW, padH, false, 1, 1, adjW, adjH, scale_);
 }
 
 #endif

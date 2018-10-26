@@ -83,7 +83,7 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
            THCTensor *ones,
            int kW, int kH,
            int dW, int dH,
-           int padW, int padH,
+           int padW, int padH, bool /*circular*/,
            int dilationW, int dilationH) {
 
   THCUNN_assertSameGPU(state, 5, input, output, weight, columns, ones);
@@ -232,7 +232,7 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
            THCTensor *gradColumns,
            int kW, int kH,
            int dW, int dH,
-           int padW, int padH,
+           int padW, int padH, bool /*circular*/,
            int dilationW, int dilationH) {
 
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
@@ -341,7 +341,7 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
            THCTensor *ones,
            int kW, int kH,
            int dW, int dH,
-           int padW, int padH,
+           int padW, int padH, bool /*circular*/,
            int dilationW, int dilationH,
            accreal scale_) {
 

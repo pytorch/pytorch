@@ -106,7 +106,7 @@ TH_API void THNN_(Im2Col_updateOutput)(
           THTensor *output,
           int64_t kH, int64_t kW,
           int64_t dH, int64_t dW,
-          int64_t padH, int64_t padW,
+          int64_t padH, int64_t padW, bool circular,
           int64_t sH, int64_t sW);
 
 TH_API void THNN_(Im2Col_updateGradInput)(
@@ -116,7 +116,7 @@ TH_API void THNN_(Im2Col_updateGradInput)(
           int64_t inputHeight, int64_t inputWidth,
           int64_t kH, int64_t kW,
           int64_t dH, int64_t dW,
-          int64_t padH, int64_t padW,
+          int64_t padH, int64_t padW, bool circular,
           int64_t sH, int64_t sW);
 
 TH_API void THNN_(Col2Im_updateOutput)(
@@ -126,7 +126,7 @@ TH_API void THNN_(Col2Im_updateOutput)(
           int64_t outputHeight, int64_t outputWidth,
           int64_t kH, int64_t kW,
           int64_t dH, int64_t dW,
-          int64_t padH, int64_t padW,
+          int64_t padH, int64_t padW, bool circular,
           int64_t sH, int64_t sW);
 
 TH_API void THNN_(Col2Im_updateGradInput)(
@@ -135,7 +135,7 @@ TH_API void THNN_(Col2Im_updateGradInput)(
           THTensor *gradInput,
           int64_t kH, int64_t kW,
           int64_t dH, int64_t dW,
-          int64_t padH, int64_t padW,
+          int64_t padH, int64_t padW, bool circular,
           int64_t sH, int64_t sW);
 
 TH_API void THNN_(LeakyReLU_updateOutput)(
@@ -630,7 +630,7 @@ TH_API void THNN_(SpatialDilatedConvolution_updateOutput)(
           THTensor *ones,
           int kW, int kH,
           int dW, int dH,
-          int padW, int padH,
+          int padW, int padH, bool circular,
           int dilationW, int dilationH);
 
 TH_API void THNN_(SpatialDilatedConvolution_updateGradInput)(
@@ -642,7 +642,7 @@ TH_API void THNN_(SpatialDilatedConvolution_updateGradInput)(
           THTensor *columns,
           int kW, int kH,
           int dW, int dH,
-          int padW, int padH,
+          int padW, int padH, bool circular,
           int dilationW, int dilationH);
 
 TH_API void THNN_(SpatialDilatedConvolution_accGradParameters)(
@@ -655,7 +655,7 @@ TH_API void THNN_(SpatialDilatedConvolution_accGradParameters)(
           THTensor *ones,
           int kW, int kH,
           int dW, int dH,
-          int padW, int padH,
+          int padW, int padH, bool circular,
           int dilationW, int dilationH,
           accreal scale);
 
@@ -669,7 +669,7 @@ TH_API void THNN_(SpatialFullDilatedConvolution_updateOutput)(
           THTensor *ones,
           int kW, int kH,
           int dW, int dH,
-          int padW, int padH,
+          int padW, int padH, bool circular,
           int dilationW, int dilationH,
           int adjW, int adjH);
 
@@ -682,7 +682,7 @@ TH_API void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
           THTensor *columns,
           int kW, int kH,
           int dW, int dH,
-          int padW, int padH,
+          int padW, int padH, bool circular,
           int dilationW, int dilationH,
           int adjW, int adjH);
 
@@ -696,7 +696,7 @@ TH_API void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
           THTensor *ones,
           int kW, int kH,
           int dW, int dH,
-          int padW, int padH,
+          int padW, int padH, bool circular,
           int dilationW, int dilationH,
           int adjW, int adjH,
           accreal scale);

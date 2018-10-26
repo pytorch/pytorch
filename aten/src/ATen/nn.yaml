@@ -237,7 +237,7 @@
 
 # Convolutions
 
-- name: thnn_conv_transpose2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, IntList[2] dilation=1)
+- name: thnn_conv_transpose2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, bool circular=false, IntList[2] output_padding=0, IntList[2] dilation=1)
   cname: SpatialFullDilatedConvolution
   buffers: [columns, ones]
 
@@ -257,7 +257,7 @@
   cname: VolumetricConvolutionMM
   buffers: [finput, fgrad_input]
 
-- name: thnn_conv_dilated2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
+- name: thnn_conv_dilated2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, bool circular=false, IntList[2] dilation=1)
   cname: SpatialDilatedConvolution
   buffers: [columns, ones]
 

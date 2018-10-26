@@ -83,7 +83,7 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
            THCTensor *ones,
            int kW, int kH,
            int dW, int dH,
-           int padW, int padH,
+           int padW, int padH, bool /*circular*/,
            int dilationW, int dilationH,
            int adjW, int adjH)
 {
@@ -224,7 +224,7 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
            THCTensor *gradColumns,
            int kW, int kH,
            int dW, int dH,
-           int padW, int padH,
+           int padW, int padH, bool /*circular*/,
            int dilationW, int dilationH,
            int adjW, int adjH)
 {
@@ -335,7 +335,7 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
            THCTensor *ones,
            int kW, int kH,
            int dW, int dH,
-           int padW, int padH,
+           int padW, int padH, bool /*circular*/,
            int dilationW, int dilationH,
            int adjW, int adjH,
            accreal scale_)

@@ -82,7 +82,7 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
     THTensor *ones,
     int kW, int kH,
     int dW, int dH,
-    int padW, int padH,
+    int padW, int padH, bool circular,
     int dilationW, int dilationH,
     int adjW, int adjH)
 {
@@ -163,7 +163,12 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
     // Unpack columns back into input:
     THNN_(col2im)(
       columns->data<scalar_t>(),
-      nOutputPlane, outputHeight, outputWidth, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
+      nOutputPlane,
+			outputHeight, outputWidth,
+			inputHeight, inputWidth,
+			kH, kW,
+			padH, padW, circular,
+			dH, dW,
       dilationH, dilationW,
       output_n->data<scalar_t>()
     );
@@ -213,7 +218,7 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
     THTensor *gradColumns,
     int kW, int kH,
     int dW, int dH,
-    int padW, int padH,
+    int padW, int padH, bool circular,
     int dilationW, int dilationH,
     int adjW, int adjH)
 {
@@ -264,14 +269,17 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
     THTensor_(select)(gradOutput_n, gradOutput, 0, elt);
 
     // Extract columns:
-    THNN_(im2col)(
-      gradOutput_n->data<scalar_t>(),
-      nOutputPlane, outputHeight, outputWidth,
-      inputHeight, inputWidth,
-      kH, kW, padH, padW, dH, dW,
-      dilationH, dilationW,
-      gradColumns->data<scalar_t>()
-    );
+    THNN_(im2col)
+    (gradOutput_n->data<scalar_t>(),
+     nOutputPlane,
+     outputHeight, outputWidth,
+     inputHeight,
+     inputWidth,
+     kH, kW,
+     padH, padW, circular,
+     dH, dW,
+     dilationH, dilationW,
+     gradColumns->data<scalar_t>());
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
@@ -318,7 +326,7 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
     THTensor *ones,
     int kW, int kH,
     int dW, int dH,
-    int padW, int padH,
+    int padW, int padH, bool circular,
     int dilationW, int dilationH,
     int adjW, int adjH,
     accreal scale_)
@@ -390,14 +398,16 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
       THTensor_(select)(input_n, input, 0, elt);
 
       // Extract columns:
-      THNN_(im2col)(
-        gradOutput_n->data<scalar_t>(),
-        nOutputPlane, outputHeight, outputWidth,
-        inputHeight, inputWidth,
-        kH, kW, padH, padW, dH, dW,
-        dilationH, dilationW,
-        columns->data<scalar_t>()
-      );
+      THNN_(im2col)
+      (gradOutput_n->data<scalar_t>(),
+       nOutputPlane,
+       outputHeight, outputWidth,
+       inputHeight, inputWidth,
+       kH, kW,
+       padH, padW, circular,
+       dH, dW,
+       dilationH, dilationW,
+       columns->data<scalar_t>());
 
       // M,N,K are dims of matrix A and B
       // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)

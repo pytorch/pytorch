@@ -187,7 +187,7 @@ THC_API void THNN_(Im2Col_updateOutput)(
                   THCTensor *output,
                   int64_t kH, int64_t kW,
                   int64_t dH, int64_t dW,
-                  int64_t padH, int64_t padW,
+                  int64_t padH, int64_t padW, bool circular,
                   int64_t sH, int64_t sW);
 
 THC_API void THNN_(Im2Col_updateGradInput)(
@@ -197,7 +197,7 @@ THC_API void THNN_(Im2Col_updateGradInput)(
                   int64_t inputHeight, int64_t inputWidth,
                   int64_t kH, int64_t kW,
                   int64_t dH, int64_t dW,
-                  int64_t padH, int64_t padW,
+                  int64_t padH, int64_t padW, bool circular,
                   int64_t sH, int64_t sW);
 
 THC_API void THNN_(Col2Im_updateOutput)(
@@ -207,7 +207,7 @@ THC_API void THNN_(Col2Im_updateOutput)(
                   int64_t outputHeight, int64_t outputWidth,
                   int64_t kH, int64_t kW,
                   int64_t dH, int64_t dW,
-                  int64_t padH, int64_t padW,
+                  int64_t padH, int64_t padW, bool circular,
                   int64_t sH, int64_t sW);
 
  THC_API void THNN_(Col2Im_updateGradInput)(
@@ -216,7 +216,7 @@ THC_API void THNN_(Col2Im_updateOutput)(
                   THCTensor *gradInput,
                   int64_t kH, int64_t kW,
                   int64_t dH, int64_t dW,
-                  int64_t padH, int64_t padW,
+                  int64_t padH, int64_t padW, bool circular,
                   int64_t sH, int64_t sW);
 
 THC_API void THNN_(LeakyReLU_updateOutput)(
@@ -703,7 +703,7 @@ THC_API void THNN_(SpatialDilatedConvolution_updateOutput)(
                   THCTensor *ones,
                   int kW, int kH,
                   int dW, int dH,
-                  int padW, int padH,
+                  int padW, int padH, bool circular,
                   int dilationW, int dilationH);
 
 THC_API void THNN_(SpatialDilatedConvolution_updateGradInput)(
@@ -715,7 +715,7 @@ THC_API void THNN_(SpatialDilatedConvolution_updateGradInput)(
                   THCTensor *columns,
                   int kW, int kH,
                   int dW, int dH,
-                  int padW, int padH,
+                  int padW, int padH, bool circular,
                   int dilationW, int dilationH);
 
 THC_API void THNN_(SpatialDilatedConvolution_accGradParameters)(
@@ -728,7 +728,7 @@ THC_API void THNN_(SpatialDilatedConvolution_accGradParameters)(
                   THCTensor *ones,
                   int kW, int kH,
                   int dW, int dH,
-                  int padW, int padH,
+                  int padW, int padH, bool circular,
                   int dilationW, int dilationH,
                   accreal scale);
 
@@ -742,7 +742,7 @@ THC_API void THNN_(SpatialFullDilatedConvolution_updateOutput)(
                   THCTensor *ones,
                   int kW, int kH,
                   int dW, int dH,
-                  int padW, int padH,
+                  int padW, int padH, bool circular,
                   int dilationW, int dilationH,
                   int adjW, int adjH);
 
@@ -755,7 +755,7 @@ THC_API void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
                   THCTensor *columns,
                   int kW, int kH,
                   int dW, int dH,
-                  int padW, int padH,
+                  int padW, int padH, bool circular,
                   int dilationW, int dilationH,
                   int adjW, int adjH);
 
@@ -769,7 +769,7 @@ THC_API void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
                   THCTensor *ones,
                   int kW, int kH,
                   int dW, int dH,
-                  int padW, int padH,
+                  int padW, int padH, bool circular,
                   int dilationW, int dilationH,
                   int adjW, int adjH,
                   accreal scale);
