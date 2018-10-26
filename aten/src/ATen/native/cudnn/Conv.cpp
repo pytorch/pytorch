@@ -119,7 +119,7 @@ constexpr int max_dim = 3;
 // as conv_output_size loses information; this is why conv_input_size
 // takes an extra output_padding argument to resolve the ambiguity.
 
-std::vector<int64_t> conv_output_size(
+static std::vector<int64_t> conv_output_size(
     IntList input_size, IntList weight_size,
     IntList padding, IntList stride, IntList dilation, int64_t groups
 ) {
