@@ -76,8 +76,8 @@ Tensor& threshold_out(Tensor& result, const Tensor& self, Scalar threshold, Scal
   return result;
 }
 
-Tensor threshold_backward(const Tensor& grad, const Tensor& self, Scalar threshold, Scalar value) {
-  return threshold_out(nullopt, self, threshold, value, grad);
+Tensor threshold_backward(const Tensor& grad, const Tensor& self, Scalar threshold) {
+  return threshold_out(nullopt, self, threshold, 0, grad);
 }
 
 // -----------------------------------
