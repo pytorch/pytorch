@@ -213,7 +213,7 @@ class FlattenToVecOp : public Operator<Context> {
     auto& input = Input(0);
     auto* output = Output(0);
     CAFFE_ENFORCE_GE(
-        input.dims().size(), 1, "The rank of the tensor must be >= 1.");
+        input.sizes().size(), 1, "The rank of the tensor must be >= 1.");
     output->Resize(input.size());
 
     context_.CopyItemsSameDevice(
@@ -265,15 +265,15 @@ class SumOp : public Operator<Context> {
     T* output_data = output->template mutable_data<T>();
     // Dimension checking
     for (int i = 1; i < InputSize(); ++i) {
-      if (output->dims() != Input(i).dims()) {
+      if (output->sizes() != Input(i).sizes()) {
         CAFFE_THROW(
             "Check failed: output->dims() == Input(i).dims().",
             "Description: Input #",
             i,
             ", input dimension:",
-            Input(i).dims(),
+            Input(i).sizes(),
             " should match output dimension: ",
-            output->dims());
+            output->sizes());
       }
     }
 
@@ -709,7 +709,7 @@ class LengthsToSegmentIdsOp : public Operator<Context> {
     auto* output = Output(0);
     auto* input_data = input.template data<int32_t>();
 
-    CAFFE_ENFORCE(input.dims().size() == 1, "Input must be a vector.");
+    CAFFE_ENFORCE(input.sizes().size() == 1, "Input must be a vector.");
     auto total_length =
         std::accumulate(input_data, input_data + input.size(), 0);
 
@@ -736,7 +736,7 @@ class LengthsToRangesOp : public Operator<Context> {
     auto* output = Output(0);
     auto* input_data = input.template data<int32_t>();
 
-    CAFFE_ENFORCE(input.dims().size() == 1, "Input must be a vector.");
+    CAFFE_ENFORCE(input.sizes().size() == 1, "Input must be a vector.");
     auto size = input.size();
 
     output->Resize(size, 2);
@@ -823,7 +823,7 @@ class SegmentIdsToRangesOp : public Operator<Context> {
   template <typename Index>
   bool DoRunWithType() {
     auto& input = Input(0);
-    CAFFE_ENFORCE(input.dims().size() == 1, "Input must be a vector.");
+    CAFFE_ENFORCE(input.sizes().size() == 1, "Input must be a vector.");
     auto* input_data = input.template data<Index>();
     auto input_size = input.size();
     auto* output = Output(0);
@@ -879,7 +879,7 @@ class LengthsToWeightsOp : public Operator<Context> {
   template <typename Index>
   bool DoRunWithType() {
     auto& input = Input(0);
-    CAFFE_ENFORCE(input.dims().size() == 1, "Input must be a vector.");
+    CAFFE_ENFORCE(input.sizes().size() == 1, "Input must be a vector.");
     auto* input_data = input.template data<Index>();
     auto input_size = input.size();
     auto* output = Output(0);
@@ -974,7 +974,7 @@ class LengthsToShapeOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
 
-    CAFFE_ENFORCE(input.dims().size() == 1, "Input must be a vector.");
+    CAFFE_ENFORCE(input.sizes().size() == 1, "Input must be a vector.");
     auto* output = Output(0);
     auto* input_data = input.template data<int32_t>();
 
@@ -1105,7 +1105,7 @@ class LengthsGatherOp : public Operator<Context> {
       CAFFE_ENFORCE_LT(idx, lengths.size());
       total_length += lengths_data[idx];
     }
-    auto shape = items.dims().vec();
+    auto shape = items.sizes().vec();
     shape[0] = total_length;
     output->Resize(shape);
 

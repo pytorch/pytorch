@@ -128,11 +128,14 @@ struct SchemaParser {
 
   Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
     Argument result;
-    result.type = parseType();
+    auto type = parseType();
+    c10::optional<int32_t> N;
+    c10::optional<IValue> default_value;
+    std::string name;
     if(L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
-      result.type = ListType::create(result.type);
-      result.N = std::stoll(L.expect(TK_NUMBER).text());
+      type = ListType::create(type);
+      N = std::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
     }
     if(L.nextIf('!')) {
@@ -142,18 +145,17 @@ struct SchemaParser {
     if(is_return) {
       // optionally named return values
       if(L.cur().kind == TK_IDENT) {
-        result.name = L.next().text();
+        name = L.next().text();
       } else {
-        result.name = "ret" + std::to_string(idx);
+        name = "ret" + std::to_string(idx);
       }
     } else {
-      result.kwarg_only = kwarg_only;
-      result.name = L.expect(TK_IDENT).text();
+      name = L.expect(TK_IDENT).text();
       if(L.nextIf('=')) {
-        parseDefaultValue(result);
+        default_value = parseDefaultValue(type, N);
       }
     }
-    return result;
+    return Argument(std::move(name), std::move(type), N, std::move(default_value), !is_return && kwarg_only);
   }
   IValue parseSingleConstant(TypeKind kind) {
     switch(L.cur().kind) {
@@ -229,34 +231,35 @@ struct SchemaParser {
     L.expect(TK_NONE);
     return IValue();
   }
-  void parseDefaultValue(Argument& arg) {
+  IValue parseDefaultValue(TypePtr arg_type, c10::optional<int32_t> arg_N) {
     auto range = L.cur().range;
-    switch(arg.type->kind()) {
+    switch(arg_type->kind()) {
       case TypeKind::DynamicType:
       case TypeKind::GeneratorType: {
-        arg.default_value = parseTensorDefault(range);
+        return parseTensorDefault(range);
       }  break;
       case TypeKind::NumberType:
       case TypeKind::IntType:
       case TypeKind::BoolType:
       case TypeKind::FloatType:
-        arg.default_value = parseSingleConstant(arg.type->kind());
+        return parseSingleConstant(arg_type->kind());
         break;
       case TypeKind::ListType: {
-        auto elem_kind = arg.type->cast<ListType>()->getElementType();
+        auto elem_kind = arg_type->cast<ListType>()->getElementType();
         if(L.cur().kind == TK_IDENT) {
-          arg.default_value = parseTensorDefault(range);
-        } else if(arg.N && L.cur().kind != '[') {
+          return parseTensorDefault(range);
+        } else if(arg_N && L.cur().kind != '[') {
           IValue v = parseSingleConstant(elem_kind->kind());
-          std::vector<IValue> repeated(*arg.N, v);
-          arg.default_value = convertToList(elem_kind->kind(), range, repeated);
+          std::vector<IValue> repeated(*arg_N, v);
+          return convertToList(elem_kind->kind(), range, repeated);
         } else {
-          arg.default_value = parseConstantList(elem_kind->kind());
+          return parseConstantList(elem_kind->kind());
         }
       } break;
       default:
         throw ErrorReport(range) << "unexpected type, file a bug report";
     }
+    return IValue(); // silence warnings
   }
 
   void parseList(int begin, int sep, int end, std::function<void()> callback) {
@@ -281,28 +284,28 @@ namespace {
 std::string canonicalSchemaString(const FunctionSchema& schema) {
   std::ostringstream out;
 
-  out << schema.name;
+  out << schema.name();
   out << "(";
 
   bool seen_kwarg_only = false;
-  for(size_t i = 0; i < schema.arguments.size(); ++i) {
+  for(size_t i = 0; i < schema.arguments().size(); ++i) {
     if (i > 0) out << ", ";
-    if (schema.arguments[i].kwarg_only && !seen_kwarg_only) {
+    if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
       out << "*, ";
       seen_kwarg_only = true;
     }
-    const auto & arg = schema.arguments[i];
-    out << arg.type->str() << " " << arg.name;
+    const auto & arg = schema.arguments()[i];
+    out << arg.type()->str() << " " << arg.name();
   }
 
   out << ") -> ";
-  if (schema.returns.size() == 1) {
-    out << schema.returns.at(0).type->str();
-  } else if (schema.returns.size() > 1) {
+  if (schema.returns().size() == 1) {
+    out << schema.returns().at(0).type()->str();
+  } else if (schema.returns().size() > 1) {
     out << "(";
-    for (size_t i = 0; i < schema.returns.size(); ++i) {
+    for (size_t i = 0; i < schema.returns().size(); ++i) {
       if (i > 0) out << ", ";
-      out << schema.returns[i].type->str();
+      out << schema.returns()[i].type()->str();
     }
     out << ")";
   }
@@ -331,7 +334,7 @@ private:
   // XXX - caller must be holding lock
   void registerPendingOperators() {
     for(auto op : to_register) {
-      Symbol sym = Symbol::fromQualString(op->schema().name);
+      Symbol sym = Symbol::fromQualString(op->schema().name());
       operators[sym].push_back(op);
       operators_by_sig[canonicalSchemaString(op->schema())] = op;
     }
@@ -401,11 +404,11 @@ FunctionSchema parseSchema(const std::string& schema) {
 
 bool Operator::matches(const Node* node) const {
   // wrong name
-  if (node->kind().toQualString() != schema().name) {
+  if (node->kind().toQualString() != schema().name()) {
     return false;
   }
   at::ArrayRef<const Value*> actuals = node->inputs();
-  const auto& formals = schema().arguments;
+  const auto& formals = schema().arguments();
 
   // not enough inputs
   if(actuals.size() < formals.size())
@@ -415,7 +418,7 @@ bool Operator::matches(const Node* node) const {
   TypeEnv type_env;
   for(size_t i = 0; i < formals.size(); ++i) {
     try {
-      TypePtr formal = matchTypeVariables(formals[i].type, actuals[i]->type(), type_env);
+      TypePtr formal = matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
       // mismatched input type
       if (!actuals[i]->type()->isSubtypeOf(formal)) {
         return false;
@@ -426,7 +429,7 @@ bool Operator::matches(const Node* node) const {
   }
 
   // too many inputs
-  if(!schema().is_vararg && actuals.size() != formals.size()) {
+  if(!schema().is_vararg() && actuals.size() != formals.size()) {
     // std::cout << "not all inputs used\n" << input_i << " " << inputs_size << "\n";
     return false;
   }
@@ -471,7 +474,7 @@ OperatorSet::OperatorSet(std::initializer_list<const char *> sig_literals) {
   auto & registry = getRegistry();
   for (const char * sig : sig_literals) {
     auto op = registry.lookupByLiteral(sig);
-    ops[Symbol::fromQualString(op->schema().name)].push_back(op);
+    ops[Symbol::fromQualString(op->schema().name())].push_back(op);
   }
 }
 

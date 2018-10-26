@@ -2033,6 +2033,17 @@ class TestJit(JitTestCase):
         t = Test()
         self.assertEqual(t(torch.ones(1)), torch.ones(1) + 4)
 
+    def test_warnings(self):
+        import warnings
+
+        @torch.jit.script
+        def fn(x):
+            if bool(x < 2):
+                warnings.warn("x is less than 2")
+            return x
+
+        self.assertExpectedGraph(fn.graph)
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
@@ -3403,7 +3414,7 @@ a")
             if True:
                 x = [1, 2, 3]
             return
-        with self.assertRaisesRegex(RuntimeError, "previously has type Tensor\[\]"):
+        with self.assertRaisesRegex(RuntimeError, r"previously has type Tensor\[\]"):
             self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
@@ -4621,6 +4632,8 @@ a")
             M()
 
     def test_script_module_valid_consts(self):
+        tester = self
+
         class Foo(torch.jit.ScriptModule):
             __constants__ = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']
 
@@ -4629,15 +4642,20 @@ a")
                 self.a = 1
                 self.b = 1.2
                 self.c = False
-                self.d = [nn.Linear(3, 4)]
+                with tester.assertRaisesRegex(
+                        TypeError,
+                        "'Linear' object for attribute 'd' is not a valid constant"):
+                    self.d = [nn.Linear(3, 4)]
                 self.e = lambda x: x
                 self.f = [3, 4, 5]
-                self.assertTrue(type(self.f) is tuple)
+                tester.assertTrue(type(self.f) is tuple)
                 self.g = [3, (3, 4), 5]
-                with self.assertRaisesRegex(TypeError, "is not a valid constant"):
+                with tester.assertRaisesRegex(TypeError, "not a valid constant"):
                     self.h = type(1)
-                with self.assertRaisesRegex(TypeError, "is not a valid constant"):
+                with tester.assertRaisesRegex(TypeError, "not a valid constant"):
                     self.i = (3, 4, {})
+
+        f = Foo()
 
     def test_script_module_for(self):
         class M(torch.jit.ScriptModule):
@@ -5967,7 +5985,7 @@ a")
             def f4(a):
                 torch.cat(a)
 
-        with self.assertRaisesRegex(RuntimeError, 'argument \'tensors\' but found int\[\]'):
+        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but found int\[\]'):
             @torch.jit.script
             def f5(a):
                 torch.cat([3])
@@ -6295,7 +6313,7 @@ a")
                     return x
 
     def test_for_range_no_arg(self):
-        with self.assertRaisesRegex(RuntimeError, 'range\(\) expects 1 argument but got 0'):
+        with self.assertRaisesRegex(RuntimeError, r'range\(\) expects 1 argument but got 0'):
             @torch.jit.script
             def range_no_arg(x):
                 for i in range():
@@ -6944,6 +6962,88 @@ a")
             return target
 
         self.assertExpectedGraph(test_index_put.graph)
+
+    def test_tuple_indexing(self):
+        def tuple_index(a):
+            if bool(a):
+                b = (1, 2)
+            else:
+                b = (0, 2)
+            return b[-2], b[1]
+
+        self.checkScript(tuple_index, (torch.tensor([1]),))
+        self.checkScript(tuple_index, (torch.tensor([1]),), optimize=True)
+        tuple_comp = torch.jit.script(tuple_index)
+        self.assertExpectedGraph(tuple_comp.graph)
+        self.run_pass('lower_all_tuples', tuple_comp.graph)
+        m = torch.jit.ScriptModule()
+        m._create_method_from_graph("forward", tuple_comp.graph)
+        self.assertEqual(m(torch.tensor(1)), (1, 2))
+
+        with self.assertRaisesRegex(RuntimeError, "tuple indices must be integer constants"):
+            @torch.jit.script
+            def test_non_constant_input(a):
+                if bool(a):
+                    b = 1
+                else:
+                    b = 0
+                c = (0, 1)
+                return c[b]
+
+        def test_indexing_float():
+            c = (1, 2)
+            return c[0.1]
+        self.checkScriptRaisesRegex(test_indexing_float, (), Exception,
+                                    "tuple indices must")
+
+        def test_indexing_out_of_bounds_pos():
+            c = (1, 2)
+            return c[2]
+
+        self.checkScriptRaisesRegex(test_indexing_out_of_bounds_pos, (), Exception,
+                                    "out of range")
+
+        def test_indexing_out_of_bounds_neg():
+            c = (1, 2)
+            return c[-3]
+
+        self.checkScriptRaisesRegex(test_indexing_out_of_bounds_pos, (), Exception,
+                                    "out of range")
+
+    def test_tuple_slicing(self):
+        def tuple_slice(a):
+            if bool(a):
+                b = (1, 2, 3, 4)
+            else:
+                b = (4, 3, 2, 1)
+            c = b[-4:4]
+            d = b[0:]
+            e = c[1:-1]
+            return e
+
+        self.checkScript(tuple_slice, (torch.tensor([1]),), optimize=True)
+        tuple_comp = torch.jit.script(tuple_slice)
+        self.assertExpectedGraph(tuple_comp.graph)
+        self.run_pass('lower_all_tuples', tuple_comp.graph)
+        self.assertTrue('Tuple' not in str(tuple_comp.graph))
+        m = torch.jit.ScriptModule()
+        m._create_method_from_graph("forward", tuple_comp.graph)
+        self.assertEqual(m(torch.tensor(1)), (2, 3))
+
+        @torch.jit.script
+        def test_indexing_end_out_of_bounds():
+            c = (1, 2)
+            return c[2:10]
+
+        # output is None in script and () in python
+        self.assertEqual(test_indexing_end_out_of_bounds(), None)
+
+    def test_indexing_error(self):
+        with self.assertRaisesRegex(RuntimeError, "Indexing only supported on lists, tensors, and tuples"):
+            @torch.jit.script
+            def test_wrong_type():
+                a = 8
+                return a[0]
 
     def test_annotated_script_fn(self):
         @torch.jit.script
@@ -8754,21 +8854,21 @@ class TestCustomOperators(JitTestCase):
     def test_passing_too_many_args(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "aten::relu\(\) expected at most 1 argument\(s\) but received 2 argument\(s\)"
+            r"aten::relu\(\) expected at most 1 argument\(s\) but received 2 argument\(s\)"
         ):
             torch.ops.aten.relu(1, 2)
 
     def test_passing_too_few_args(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "aten::relu\(\) is missing value for argument 'self'."
+            r"aten::relu\(\) is missing value for argument 'self'."
         ):
             torch.ops.aten.relu()
 
     def test_passing_one_positional_but_not_the_second(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "aten::transpose\(\) is missing value for argument 'dim0'."
+            r"aten::transpose\(\) is missing value for argument 'dim0'."
         ):
             torch.ops.aten.transpose(torch.ones(5, 5))
 

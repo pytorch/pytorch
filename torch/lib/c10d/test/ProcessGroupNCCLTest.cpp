@@ -70,7 +70,7 @@ class NCCLTest : public NCCLTestBase {
     streams_.resize(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
-      streams_[i] = at::cuda::createCUDAStream();
+      streams_[i] = at::cuda::getStreamFromPool();
     }
   }
 

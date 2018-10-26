@@ -290,6 +290,33 @@ class TestCase(expecttest.TestCase):
             max_err = max(max_err, abs(x[index] - y[index]))
         self.assertLessEqual(max_err, prec, message)
 
+    def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu'):
+        # Assert not given impossible combination, where the sparse dims have
+        # empty numel, but nnz > 0 makes the indices containing values.
+        assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
+
+        v_size = [nnz] + list(size[sparse_dim:])
+        v = torch.randn(*v_size, device=device)
+        i = torch.rand(sparse_dim, nnz, device=device)
+        i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
+        i = i.to(torch.long)
+        if is_uncoalesced:
+            v = torch.cat([v, torch.randn_like(v)], 0)
+            i = torch.cat([i, i], 1)
+
+        x = torch.sparse_coo_tensor(i, v, torch.Size(size))
+
+        if not is_uncoalesced:
+            x = x.coalesce()
+        else:
+            # FIXME: `x` is a sparse view of `v`. Currently rebase_history for
+            #        sparse views is not implemented, so this workaround is
+            #        needed for inplace operations done on `x`, e.g., copy_().
+            #        Remove after implementing something equivalent to CopySlice
+            #        for sparse views.
+            x = x.detach()
+        return x, x._indices().clone(), x._values().clone()
+
     def safeToDense(self, t):
         r = self.safeCoalesce(t)
         return r.to_dense()

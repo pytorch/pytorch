@@ -66,7 +66,7 @@ class FillerOp : public Operator<Context> {
         shape.insert(shape.end(), shape_data, shape_data + input.dim32(0));
       } else {
         auto& input = Input(0);
-        shape.insert(shape.end(), input.dims().begin(), input.dims().end());
+        shape.insert(shape.end(), input.sizes().begin(), input.sizes().end());
       }
       shape.insert(shape.end(), extra_shape_.begin(), extra_shape_.end());
       output->Resize(shape);
@@ -114,7 +114,7 @@ class UniformFillOp final : public FillerOp<Context> {
       min = *Input(1).template data<T>();
       max = *Input(2).template data<T>();
       if (min > max) {
-        auto shape = output->dims().vec();
+        auto shape = output->sizes().vec();
         shape[0] = 0;
         output->Resize(shape);
         output->template mutable_data<T>();
@@ -373,13 +373,13 @@ class DiagonalFillOp final : public FillerOp<Context> {
       step = output->dim(1) + 1;
     } else {
       int64_t prev_i = output->dim(0);
-      for (auto i : output->dims()) {
+      for (auto i : output->sizes()) {
         if (i != prev_i) {
           CAFFE_THROW("All dimensions of input must be of equal length");
         }
       }
       vector<int64_t> cumprod(output->ndim());
-      auto dims = output->dims();
+      auto dims = output->sizes();
       std::partial_sum(
           dims.begin(),
           dims.end() - 1,

@@ -18,7 +18,7 @@ import unittest
 
 class TestActivations(serial.SerializedTestCase):
     @serial.given(X=hu.tensor(), in_place=st.booleans(),
-           engine=st.sampled_from(["", "MIOPEN" if workspace.has_hip_support else "CUDNN"]), **mu.gcs)
+           engine=st.sampled_from(["", "CUDNN"]), **mu.gcs)
     def test_relu(self, X, in_place, engine, gc, dc):
         if gc == mu.mkl_do:
             in_place = False
@@ -44,7 +44,7 @@ class TestActivations(serial.SerializedTestCase):
     @unittest.skipIf(not workspace.has_gpu_support,
                      "Relu for float16 can only run on GPU now.")
     @given(X=hu.tensor(dtype=np.float16), in_place=st.booleans(),
-           engine=st.sampled_from([""] if workspace.has_hip_support else ["", "CUDNN"]), **hu.gcs_gpu_only)
+           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs_gpu_only)
     def test_relu_fp16(self, X, in_place, engine, gc, dc):
         op = core.CreateOperator(
             "Relu",
@@ -103,7 +103,7 @@ class TestActivations(serial.SerializedTestCase):
 
     @serial.given(X=hu.tensor(),
            alpha=st.floats(min_value=0.1, max_value=2.0),
-           in_place=st.booleans(), engine=st.sampled_from([""] if workspace.has_hip_support else ["", "CUDNN"]),
+           in_place=st.booleans(), engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
     def test_elu(self, X, alpha, in_place, engine, gc, dc):
         op = core.CreateOperator(

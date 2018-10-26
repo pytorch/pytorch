@@ -2,9 +2,12 @@
 
 #include "torch/csrc/python_headers.h"
 
+namespace c10 {
+struct Device;
+}
+
 namespace at {
 struct Type;
-struct Device;
 class Tensor;
 } // namespace at
 
@@ -29,6 +32,6 @@ void py_set_default_dtype(PyObject* dtype_obj);
 at::Type& get_default_tensor_type();
 
 // Gets the torch::Device object of a given at::Tensor
-at::Device getDevice(const at::Tensor& tensor);
+c10::Device getDevice(const at::Tensor& tensor);
 
 }} // namespace torch::tensors

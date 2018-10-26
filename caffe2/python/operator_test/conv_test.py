@@ -11,6 +11,7 @@ import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import brew, core, workspace
+import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python.model_helper import ModelHelper
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -41,15 +42,6 @@ def _cudnn_supports(
             return False
     return True
 
-def _miopen_supports(
-        dilation=False,
-        nhwc=False,
-        backward=False,
-):
-    """Return True if MIOPEN supports this configuration."""
-    if nhwc or dilation:
-        return False
-    return True
 
 def _cudnn_convolution_algo_count(direction):
     try:
@@ -204,7 +196,7 @@ class TestConvolution(serial.SerializedTestCase):
            batch_size=st.integers(1, 3),
            group=st.integers(1, 2),
            order=st.sampled_from(["NCHW", "NHWC"]),
-           engine=st.sampled_from(["", "MIOPEN" if workspace.has_hip_support else "CUDNN", "MKLDNN"]),
+           engine=st.sampled_from(["", "CUDNN", "MKLDNN"]),
            use_bias=st.booleans(),
            force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
            force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
@@ -222,13 +214,12 @@ class TestConvolution(serial.SerializedTestCase):
         dkernel = dilation * (kernel - 1) + 1
 
         if engine == 'CUDNN':
-            assume(_cudnn_supports(dilation=(dilation > 1),
-                                   nhwc=(order == 'NHWC'),
-                                   backward=True))
-        if engine == 'MIOPEN':
-            assume(_miopen_supports(dilation=(dilation > 1),
-                                    nhwc=(order == 'NHWC'),
-                                    backward=True))
+            if hiputl.run_in_hip(gc, dc):
+                assume((order == "NCHW") and not (dilation > 1 and group > 1))
+            else:
+                assume(_cudnn_supports(dilation=(dilation > 1),
+                                       nhwc=(order == 'NHWC'),
+                                       backward=True))
 
         assume(engine != "MKLDNN" or use_bias is True)
 
@@ -386,7 +377,7 @@ class TestConvolution(serial.SerializedTestCase):
            force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
            force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
            force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
-           **hu.gcs)
+           **hu.gcs_no_hip)     # MIOPEN doesn't support 3D conv yet
     def test_3d_convolution_cudnn_nchw(self, op_type, batch_size, stride, size,
                                        kernel, dilation, pad, use_bias,
                                        force_algo_fwd, force_algo_dgrad,
@@ -474,8 +465,8 @@ class TestConvolution(serial.SerializedTestCase):
 
         for order in ["NCHW", "NHWC"]:
             engine_list = ['']
-            if workspace.has_hip_support:
-                if _miopen_supports(dilation=(dilation > 1), nhwc=(order == 'NHWC')):
+            if hiputl.run_in_hip(gc, dc):
+                if order == 'NCHW':
                     engine_list.append('MIOPEN')
             else:
                 if _cudnn_supports(dilation=(dilation > 1), nhwc=(order == 'NHWC')):
@@ -651,7 +642,8 @@ class TestConvolution(serial.SerializedTestCase):
                             f(**kwargs)
                     else:
                         f(**kwargs)
-                        self.assertEqual(model.Proto().op[-1].engine, expected_engine)
+                        self.assertEqual(model.Proto().op[-1].engine,
+                                         expected_engine)
 
     @serial.given(
         op_type=st.sampled_from(["Conv", "Conv2D"]), N=st.integers(1, 4),
@@ -665,6 +657,8 @@ class TestConvolution(serial.SerializedTestCase):
     def test_1x1_conv(self, op_type, N, G, DX, DY, H, W, use_bias, order,
                       force_algo_fwd, force_algo_dgrad,
                       force_algo_wgrad, gc, dc):
+        if hiputl.run_in_hip(gc, dc):
+            assume(order == "NCHW")
         if order == "NHWC":
             G = 1
 
