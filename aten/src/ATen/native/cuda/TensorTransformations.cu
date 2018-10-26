@@ -126,4 +126,71 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
   return out_tensor;
 }
 
+template <typename scalar_t>
+__global__
+void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
+                      int64_t roll_dim, int64_t shift, int64_t start,
+                      int64_t* shape, int64_t total_dims) {
+  int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (linear_index >= N) {
+    return;
+  }
+
+  int64_t roll_dim_idx = linear_index;
+  int64_t to_add = 0;
+  for (int64_t i = 0; i < total_dims; i++) {
+    if( i != roll_dim ) {
+      to_add += (roll_dim_idx / shape[i]) * shape[i];
+      roll_dim_idx %= shape[i];
+    }
+  }
+  if( roll_dim_idx >= start ) {
+    roll_dim_idx = roll_dim_idx - start + to_add;
+  } else {
+    roll_dim_idx = roll_dim_idx + start + to_add;
+  }
+  out_tensor[linear_index] = in_tensor[roll_dim_idx];
+}
+
+// Roll a tensor along a dimension
+Tensor roll_cuda(const Tensor& self, int64_t shift, IntList dims) {
+  // todo: support rolling along no or multiple dimensions as in numpy.roll.
+  AT_CHECK(dims.size() == 1, "only single dimension roll currently supported");
+  // If the first dimension is zero, this is an empty tensor and rolls do nothing.
+  // Return a clone so the caller can safely modify result, and avoid a div by
+  // zero error below.
+  if( self.size(0) == 0 ) {
+    return self.clone();
+  }
+  const int64_t N = self.numel();
+  const int64_t dim = dims[0];
+  const int64_t size = self.size(dim);
+  int64_t start = (size - shift) % size;
+  // Behavior of % is different in C++ vs Python for negative numbers. This
+  // corrects the difference.
+  if( start < 0 ) start = start + size;
+
+  const int64_t block_size = 512;
+  dim3 dim_block(block_size);
+  dim3 dim_grid((N + block_size - 1) / block_size);
+
+  auto total_dims = self.dim();
+  auto shape = self.sizes().vec();
+  auto shape_t = at::CPU(kLong).tensorFromBlob(shape.data(), {static_cast<int64_t>(shape.size())});
+
+  auto out_tensor = at::empty_like(self);
+  if (out_tensor.numel() == 0) {
+    return out_tensor;
+  }
+
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "roll_cuda", [&] {
+    roll_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+      self.data<scalar_t>(), out_tensor.data<scalar_t>(), N,
+      dim, shift, start,
+      shape_t.toType(CUDA(kLong)).data<int64_t>(), total_dims);
+  });
+
+  return out_tensor;
+}
+
 }} // namespace at::native
