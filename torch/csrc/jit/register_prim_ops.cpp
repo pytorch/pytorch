@@ -224,7 +224,7 @@ RegisterOperators reg({
         }),
     Operator(
       prim::None,
-      [](Node* node) {
+      [](const Node* node) {
         return [](Stack& stack) {
           stack.push_back(IValue());
           return 0;
