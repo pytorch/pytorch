@@ -48,7 +48,7 @@ void window_function_checks(
       " is not implemented for sparse types, got: ",
       options);
   AT_CHECK(
-      at::isFloatingType(options.dtype()),
+      at::isFloatingType(typeMetaToScalarType(options.dtype())),
       function_name,
       " expects floating point dtypes, got: ",
       options);
@@ -107,7 +107,7 @@ Tensor empty_cpu(IntList size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == Backend::CPU);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'
   auto storage_impl = c10::make_intrusive<StorageImpl>(
-    scalarTypeToTypeMeta(options.dtype()), 0, at::getCPUAllocator(), true);
+    options.dtype(), 0, at::getCPUAllocator(), true);
 
   auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId(), false);
   resize_cpu_(tensor, size);  // avoid dispatch overhead

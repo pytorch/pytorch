@@ -314,7 +314,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // could not have been created without initializing the Type first.
     // TODO: This is not actually true via the Caffe2 codepath!  Make
     // it so.
-    return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(type_id()), dataTypeToScalarType(dtype().id()), is_variable());
+    return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(type_id()), typeMetaToScalarType(dtype()), is_variable());
   }
 
   /**
