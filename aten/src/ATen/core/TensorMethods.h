@@ -56,9 +56,6 @@ inline void Tensor::set_data(Tensor new_data) {
 inline int64_t Tensor::storage_offset() const {
     return type().storage_offset(*this);
 }
-inline Tensor & Tensor::resize_(IntList size) {
-    return type().resize_(*this, size);
-}
 inline Tensor & Tensor::set_(Storage source) {
     return type().set_(*this, source);
 }
@@ -700,6 +697,9 @@ inline Tensor & Tensor::div_(Scalar other) {
 }
 inline Tensor Tensor::dot(const Tensor & tensor) const {
     return type().dot(*this, tensor);
+}
+inline Tensor & Tensor::resize_(IntList size) {
+    return type().resize_(*this, size);
 }
 inline Tensor Tensor::erf() const {
     return type().erf(*this);
