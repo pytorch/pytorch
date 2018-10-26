@@ -119,7 +119,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
         }
       }
     }
-    CAFFE_ENFORCE_EQ(rangesDataOffset, ranges.size());
+    CAFFE_ENFORCE_EQ(rangesDataOffset, ranges.numel());
 
     return true;
   }
