@@ -237,20 +237,26 @@ void initJITBindings(PyObject *module) {
         return createPyObjectForStack(std::move(stack));
       });
 
-    py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
+  py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
-      .def("write_record", &PyTorchFileWriter::writeRecord)
+      .def(
+          "write_record",
+          [](PyTorchFileWriter& self, const char* data, size_t size) {
+            return self.writeRecord(data, size);
+          })
       .def("write_end_of_file", &PyTorchFileWriter::writeEndOfFile);
 
-    py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
+  py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
-      .def("get_record_with_key", [](PyTorchFileReader &self, uint64_t key) {
-        at::DataPtr data;
-        size_t size;
-        std::tie(data, size) = self.getRecordWithKey(key);
-        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
-      })
-      .def("get_last_record", [](PyTorchFileReader &self){
+      .def(
+          "get_record_with_key",
+          [](PyTorchFileReader& self, uint64_t key) {
+            at::DataPtr data;
+            size_t size;
+            std::tie(data, size) = self.getRecordWithKey(key);
+            return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+          })
+      .def("get_last_record", [](PyTorchFileReader& self) {
         at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getLastRecord();
