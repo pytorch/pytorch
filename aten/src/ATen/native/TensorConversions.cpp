@@ -12,7 +12,7 @@ static void ensure_has_index(Device* device) {
 }
 
 static Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking) {
-  return self.type().toBackend(options.backend()).toScalarType(options.dtype())
+  return self.type().toBackend(options.backend()).toScalarType(typeMetaToScalarType(options.dtype()))
                     .copy(self, non_blocking, options.device());
 }
 
