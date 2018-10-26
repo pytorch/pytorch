@@ -79,7 +79,7 @@ SparseTensor new_sparse(const TensorOptions& options) {
     type_id = SparseCPUTensorId();
   }
   return detail::make_tensor<SparseTensorImpl>(
-      type_id, scalarTypeToTypeMeta(options.dtype()));
+      type_id, options.dtype());
 }
 
 /** Actual dispatched creation methods ***/

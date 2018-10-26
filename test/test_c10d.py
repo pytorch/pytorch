@@ -144,8 +144,12 @@ class TCPStoreTest(TestCase, StoreTestBase):
         with self.assertRaisesRegex(RuntimeError, "^Address already in use$"):
             addr = 'localhost'
             port = common.find_free_port()
-            store1 = c10d.TCPStore(addr, port, True)
-            store2 = c10d.TCPStore(addr, port, True)
+
+            # Use noqa to silence flake8.
+            # Need to store in an unused variable here to ensure the first
+            # object is not destroyed before the second object is created.
+            store1 = c10d.TCPStore(addr, port, True)  # noqa: F841
+            store2 = c10d.TCPStore(addr, port, True)  # noqa: F841
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
@@ -489,6 +493,24 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             if i == self.rank:
                 continue
             self.assertEqual(torch.Tensor([i]), outputs[i])
+
+    def test_timeout_kwarg(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(
+            store,
+            self.rank,
+            self.world_size,
+            timeout=timedelta(seconds=0.5))
+
+        # Wait on barrier
+        self.assertTrue(pg.barrier().wait())
+
+        # Sleep on one of the processes to trigger barrier timeout
+        if self.rank == 0:
+            time.sleep(0.6)
+
+        # The barrier will now time output
+        self.assertFalse(pg.barrier().wait())
 
 
 class ProcessGroupNCCLTest(TestCase):

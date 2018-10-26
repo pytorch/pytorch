@@ -207,7 +207,7 @@ struct GraphFuser {
           /*const_inputs=*/{attr::other, attr::alpha}) ||
         node->matches("aten::mul(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
         node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
-        node->matches("aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor", /*const_inputs=*/{attr::min, attr::max})) {
+        node->matches("aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor", /*const_inputs=*/{attr::min, attr::max})) {
       auto inputs = tensorInputs(node);
       return haveSupportedType(inputs);
     }

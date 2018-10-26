@@ -155,9 +155,9 @@ struct CAFFE2_API Type {
   }
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.
-  TensorOptions options(int32_t device_index = -1) const {
-    return TensorOptions().dtype(scalarType())
-                          .device({backendToDeviceType(backend()), device_index})
+  TensorOptions options(int16_t device_index = -1) const {
+    return TensorOptions().dtype(typeMeta())
+                          .device(backendToDeviceType(backend()), device_index)
                           .layout(layout())
                           .is_variable(is_variable());
   }
@@ -169,7 +169,6 @@ struct CAFFE2_API Type {
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   virtual int64_t storage_offset(const Tensor & self) const = 0;
-  virtual Tensor & resize_(Tensor & self, IntList size) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source, int64_t storage_offset, IntList size, IntList stride) const = 0;
   virtual Tensor & set_(Tensor & self, const Tensor & source) const = 0;
@@ -406,8 +405,8 @@ struct CAFFE2_API Type {
   virtual Tensor ceil(const Tensor & self) const = 0;
   virtual Tensor & ceil_(Tensor & self) const = 0;
   virtual std::vector<Tensor> chunk(const Tensor & self, int64_t chunks, int64_t dim) const = 0;
-  virtual Tensor clamp(const Tensor & self, Scalar min, Scalar max) const = 0;
-  virtual Tensor & clamp_(Tensor & self, Scalar min, Scalar max) const = 0;
+  virtual Tensor clamp(const Tensor & self, c10::optional<Scalar> min, c10::optional<Scalar> max) const = 0;
+  virtual Tensor & clamp_(Tensor & self, c10::optional<Scalar> min, c10::optional<Scalar> max) const = 0;
   virtual Tensor clamp_max(const Tensor & self, Scalar max) const = 0;
   virtual Tensor & clamp_max_(Tensor & self, Scalar max) const = 0;
   virtual Tensor clamp_min(const Tensor & self, Scalar min) const = 0;
@@ -429,6 +428,7 @@ struct CAFFE2_API Type {
   virtual Tensor div(const Tensor & self, Scalar other) const = 0;
   virtual Tensor & div_(Tensor & self, Scalar other) const = 0;
   virtual Tensor dot(const Tensor & self, const Tensor & tensor) const = 0;
+  virtual Tensor & resize_(Tensor & self, IntList size) const = 0;
   virtual Tensor erf(const Tensor & self) const = 0;
   virtual Tensor & erf_(Tensor & self) const = 0;
   virtual Tensor erfc(const Tensor & self) const = 0;
@@ -456,14 +456,12 @@ struct CAFFE2_API Type {
   virtual Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & values) const = 0;
   virtual Tensor inverse(const Tensor & self) const = 0;
   virtual Tensor isclose(const Tensor & self, const Tensor & other, double rtol, double atol, bool equal_nan) const = 0;
-  virtual bool is_cuda(const Tensor & self) const = 0;
   virtual bool is_distributed(const Tensor & self) const = 0;
   virtual bool is_floating_point(const Tensor & self) const = 0;
   virtual bool is_complex(const Tensor & self) const = 0;
   virtual bool is_nonzero(const Tensor & self) const = 0;
   virtual bool is_same_size(const Tensor & self, const Tensor & other) const = 0;
   virtual bool is_signed(const Tensor & self) const = 0;
-  virtual bool is_sparse(const Tensor & self) const = 0;
   virtual std::tuple<Tensor,Tensor> kthvalue(const Tensor & self, int64_t k, int64_t dim, bool keepdim) const = 0;
   virtual Tensor log(const Tensor & self) const = 0;
   virtual Tensor & log_(Tensor & self) const = 0;
@@ -603,7 +601,6 @@ struct CAFFE2_API Type {
   virtual Tensor values(const Tensor & self) const = 0;
   virtual int64_t numel(const Tensor & self) const = 0;
   virtual std::vector<Tensor> unbind(const Tensor & self, int64_t dim) const = 0;
-  virtual int64_t get_device(const Tensor & self) const = 0;
   virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, Device device, bool non_blocking, bool copy) const = 0;
