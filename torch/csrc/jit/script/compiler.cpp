@@ -561,7 +561,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
   // NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
   // necessary to enforce linearization on effectful ops.
   std::vector<NamedValue> modifiedArgs(raw_args.begin(), raw_args.end());
-  if (schema.is_mutable()) {
+  if (schema.has_world_token()) {
     // Add a dummy world token to be matched against
     const auto worldToken = graph.insertDummyWorld();
     modifiedArgs.insert(modifiedArgs.begin(), worldToken);
@@ -2035,6 +2035,13 @@ const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscr
       }
       auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
       return ListType::create(elem_type);
+    }},
+    {"Optional", [](Subscript subscript) -> TypePtr {
+      if (subscript.subscript_exprs().size() != 1) {
+        throw ErrorReport(subscript) << " expected exactly one element type but found " << subscript.subscript_exprs().size();
+      }
+      auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+      return OptionalType::create(elem_type);
     }},
   };
   return map;

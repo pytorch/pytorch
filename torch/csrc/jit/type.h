@@ -30,7 +30,7 @@ _(GeneratorType) \
 _(BoolType) \
 _(OptionalType) \
 _(VarType) \
-_(WorldType) \
+_(WorldType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -121,6 +121,26 @@ public:
   virtual ~Type() = default;
   virtual bool hasFreeVariables() const {
     return false;
+  }
+  // list of types this type contains, e.g. for a List then element type of a list
+  // for a tuple, the types of the tuple elements
+  virtual at::ArrayRef<TypePtr> containedTypes() const {
+    return at::ArrayRef<TypePtr>();
+  }
+  // create a new version of this type, replacing its contained types with
+  // contained_types
+  TypePtr withContained(std::vector<TypePtr> contained_types) {
+    auto current_contained = containedTypes();
+    JIT_ASSERT(current_contained.size() == contained_types.size());
+    if(current_contained.equals(contained_types)) {
+      return shared_from_this();
+    }
+    return createWithContained(std::move(contained_types));
+  }
+  // per-type constructor, you only need to override this if the containedTypes()
+  // is not empty
+  virtual TypePtr createWithContained(std::vector<TypePtr> contained_types) const {
+    AT_ERROR("type with contained types did not overload createWithContained: ", str());
   }
 };
 
@@ -423,21 +443,49 @@ struct TORCH_API WorldType : public Type {
   WorldType() : Type(TypeKind::WorldType) {}
 };
 
-struct ListType;
-using ListTypePtr = std::shared_ptr<ListType>;
-
-struct TORCH_API ListType : public Type {
-  static ListTypePtr create(TypePtr element) {
-    return ListTypePtr(new ListType(std::move(element))); // NOLINT(modernize-make-shared)
+// common base for all types that have a single sub element
+// e.g. Future[T], Option[T], List[T]
+template<TypeKind K, typename T>
+struct SingleElementType : public Type {
+  static const TypeKind Kind = K;
+  static constexpr bool is_singleton = true;
+  TypePtr getElementType() const {
+    return elem;
+  }
+  bool hasFreeVariables() const override {
+    return has_free_variables_;
+  }
+  at::ArrayRef<TypePtr> containedTypes() const override {
+    return elem;
+  }
+  bool requires_grad() const override {
+    return elem->requires_grad();
   }
   bool operator==(const Type& rhs) const override {
-    if(auto rhs_ = rhs.cast<ListType>()) {
+    if(auto rhs_ = rhs.cast<T>()) {
       return *getElementType() == *rhs_->getElementType();
     }
     return false;
   }
-  bool requires_grad() const override {
-    return elem->requires_grad();
+protected:
+  SingleElementType(TypePtr elem)
+  : Type(Kind)
+  , elem(std::move(elem))
+  , has_free_variables_(getElementType()->hasFreeVariables()) {}
+private:
+  TypePtr elem;
+  bool has_free_variables_;
+};
+
+struct ListType;
+using ListTypePtr = std::shared_ptr<ListType>;
+struct TORCH_API ListType : public SingleElementType<TypeKind::ListType, ListType> {
+  // It's not exactly a singleton, but there should be exactly once instance of
+  // List[T] for every T
+  friend struct Type;
+  template<typename ... T>
+  static ListTypePtr create( T&& ... all ) {
+    return ListTypePtr(new ListType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
   std::string str() const override {
     std::stringstream ss;
@@ -449,26 +497,16 @@ struct TORCH_API ListType : public Type {
     ss << "List[" << getElementType()->python_str() << "]";
     return ss.str();
   }
-  TypePtr getElementType() const {
-    return elem;
-  }
-  bool hasFreeVariables() const override {
-    return has_free_variables_;
+  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+    return create(contained_types.at(0));
   }
   // common cast List[Tensor]
   static ListTypePtr ofTensors();
   static ListTypePtr ofInts();
   static ListTypePtr ofFloats();
   static ListTypePtr ofBools();
-
-  static const TypeKind Kind = TypeKind::ListType;
 private:
-  ListType(TypePtr elem)
-  : Type(TypeKind::ListType)
-  , elem(std::move(elem))
-  , has_free_variables_(getElementType()->hasFreeVariables()) {}
-  TypePtr elem;
-  bool has_free_variables_;
+  using SingleElementType::SingleElementType;
 };
 
 struct TupleType;
@@ -520,6 +558,13 @@ struct TORCH_API TupleType : public Type {
   }
   bool hasFreeVariables() const override {
     return has_free_variables_;
+  }
+
+  at::ArrayRef<TypePtr> containedTypes() const override {
+    return elements_;
+  }
+  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+    return create(std::move(contained_types));
   }
 
   static const TypeKind Kind = TypeKind::TupleType;
@@ -756,16 +801,11 @@ TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 
 inline TypePtr unshapedType(const TypePtr& type) {
-  if (TupleTypePtr t = type->cast<TupleType>()) {
-    return TupleType::create(fmap(t->elements(), unshapedType));
-  } else if (ListTypePtr t = type->cast<ListType>()) {
-    return ListType::create(unshapedType(t->getElementType()));
-  } else if (type->kind() == TypeKind::TensorType ||
-             type->kind() == TypeKind::CompleteTensorType) {
+  if (type->kind() == TypeKind::TensorType ||
+      type->kind() == TypeKind::CompleteTensorType) {
     return DynamicType::get();
-  } else {
-    return type;
   }
+  return type->withContained(fmap(type->containedTypes(), unshapedType));
 }
 
 inline TypePtr CompleteTensorType::fromNumberType(TypePtr typ) {

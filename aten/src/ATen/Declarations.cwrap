@@ -136,7 +136,7 @@
     - THTensor* self
 ]]
 [[
-  name: th_clone
+  name: _th_clone
   cname: newClone
   return: THTensor*
   variants:
@@ -156,7 +156,7 @@
       long_args: True
 ]]
 [[
-  name: th_resize_as_
+  name: _th_resize_as_
   cname: resizeAs
   variants:
     - function
@@ -1616,7 +1616,7 @@
           default: "false"
 ]]
 [[
-  name: th_norm
+  name: _th_norm
   cname: norm
   types:
     - floating_point
@@ -1808,7 +1808,7 @@
     - THTensor* other
 ]]
 [[
-  name: th_pow
+  name: _th_pow
   cname: pow
   variants:
     - function
@@ -1963,7 +1963,7 @@
       default: 0
 ]]
 [[
-  name: th_zero_
+  name: _th_zero_
   cname: zero
   return: self
   variants:
@@ -3153,19 +3153,6 @@
         - THTensor* x
         - THTensor* alpha
         - THTensor* total
-]]
-[[
-  name: th_tensor
-  return: THTensor*
-  cpu_half: True
-  variants: [function]
-  options:
-    - cname: new
-      arguments: []
-    - cname: newWithSize
-      arguments:
-        - IntListSize size
-        - CONSTANT {}
 ]]
 [[
   name: tensor
