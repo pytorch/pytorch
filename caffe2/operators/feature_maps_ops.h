@@ -28,7 +28,7 @@ class MergeSingleScalarFeatureTensorsOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     int totalNumFeatures = 0;
     for (int inputIndex = 0; inputIndex < numInputs_; ++inputIndex) {
       const bool* inPresenceData =
@@ -98,7 +98,7 @@ class MergeSingleScalarFeatureTensorsGradientOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     for (int inputIndex = 0; inputIndex < numFeatureInputs_; ++inputIndex) {
       Output(inputIndex)->ResizeLike(Input(inputIndex));
     }
@@ -149,7 +149,7 @@ class MergeSingleListFeatureTensorsOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     int totalNumFeatures = 0;
     int totalNumValues = 0;
     for (int inputIndex = 0; inputIndex < numInputs_; ++inputIndex) {
@@ -240,7 +240,7 @@ class MergeSingleListOrMapFeatureTensorsGradientOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     std::vector<int> outValuesOffset(numFeatureInputs_);
     for (int inputIndex = 0; inputIndex < numFeatureInputs_; ++inputIndex) {
       int inputNumValues = 0;
@@ -314,7 +314,7 @@ class MergeSingleMapFeatureTensorsOp : public Operator<Context> {
 
   template <typename K, typename V>
   bool DoRunWithType2() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     int totalNumFeatures = 0;
     int totalNumValues = 0;
     for (int inputIndex = 0; inputIndex < numInputs_; ++inputIndex) {
@@ -415,10 +415,10 @@ class MergeMultiScalarFeatureTensorsOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     int totalNumFeatures = 0;
     for (int inputIndex = 0; inputIndex < numInputs_; ++inputIndex) {
-      totalNumFeatures += Input(kNumTensorsPerInput * inputIndex + 1).size();
+      totalNumFeatures += Input(kNumTensorsPerInput * inputIndex + 1).numel();
     }
 
     auto* outLengths = Output(0);
@@ -488,7 +488,7 @@ class MergeMultiScalarFeatureTensorsGradientOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     std::vector<int> outValuesOffset(numFeatureInputs_);
     for (int inputIndex = 0; inputIndex < numFeatureInputs_; ++inputIndex) {
       int inputNumValues = 0;
@@ -549,12 +549,12 @@ class MergeMultiListFeatureTensorsOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     int totalNumFeatures = 0;
     int totalNumValues = 0;
     for (int inputIndex = 0; inputIndex < numInputs_; ++inputIndex) {
-      totalNumFeatures += Input(kNumTensorsPerInput * inputIndex + 1).size();
-      totalNumValues += Input(kNumTensorsPerInput * inputIndex + 3).size();
+      totalNumFeatures += Input(kNumTensorsPerInput * inputIndex + 1).numel();
+      totalNumValues += Input(kNumTensorsPerInput * inputIndex + 3).numel();
     }
 
     auto* outLengths = Output(0);
@@ -651,12 +651,12 @@ class MergeMultiMapFeatureTensorsOp : public Operator<Context> {
 
   template <typename K, typename V>
   bool DoRunWithType2() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     int totalNumFeatures = 0;
     int totalNumValues = 0;
     for (int inputIndex = 0; inputIndex < numInputs_; ++inputIndex) {
-      totalNumFeatures += Input(kNumTensorsPerInput * inputIndex + 1).size();
-      totalNumValues += Input(kNumTensorsPerInput * inputIndex + 4).size();
+      totalNumFeatures += Input(kNumTensorsPerInput * inputIndex + 1).numel();
+      totalNumValues += Input(kNumTensorsPerInput * inputIndex + 4).numel();
     }
 
     auto* outLengths = Output(0);
@@ -756,7 +756,7 @@ class MergeMultiListOrMapFeatureTensorsGradientOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     std::vector<int> outValuesLengthOffset(numFeatureInputs_);
     std::vector<int> outValuesValuesOffset(numFeatureInputs_);
     for (int inputIndex = 0; inputIndex < numFeatureInputs_; ++inputIndex) {
@@ -764,7 +764,7 @@ class MergeMultiListOrMapFeatureTensorsGradientOp : public Operator<Context> {
       auto& inValuesLength = Input(kNumTensorsPerInput * inputIndex + 1);
       const int32_t* inValuesLengthsData =
           inValuesLength.template data<int32_t>();
-      for (int valuesIndex = 0; valuesIndex < inValuesLength.size();
+      for (int valuesIndex = 0; valuesIndex < inValuesLength.numel();
            ++valuesIndex) {
         inputNumValues += inValuesLengthsData[valuesIndex];
       }

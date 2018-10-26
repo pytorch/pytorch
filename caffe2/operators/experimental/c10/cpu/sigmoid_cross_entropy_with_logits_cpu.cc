@@ -32,7 +32,7 @@ void sigmoid_cross_entropy_with_logits_op_cpu_impl(
     bool unjoined_lr_loss) {
   CAFFE_ENFORCE_EQ(logits.sizes(), targets.sizes());
   const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
-  const auto outer_size = logits.size() / inner_size;
+  const auto outer_size = logits.numel() / inner_size;
 
   if (logits.ndim() == 0) {
     out->Resize(std::vector<int64_t>{});
