@@ -2314,6 +2314,23 @@ class TestAutograd(TestCase):
     def test_where_functional_cuda(self):
         self._test_where_functional(lambda t: t.cuda())
 
+    def test_reduce_dtype(self):
+        def test_reduction(op):
+            x = torch.randn(3, 3, dtype=torch.float, requires_grad=True)
+            grad1, = torch.autograd.grad([op(x)], [x])
+            grad2, = torch.autograd.grad([op(x, dtype=torch.double)], [x])
+            self.assertEqual(grad1, grad2)
+            self.assertEqual(grad2.dtype, torch.float)
+
+            gi = torch.randn(3, dtype=torch.float)
+            grad1, = torch.autograd.grad([op(x, dim=0)], [x], gi)
+            grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
+            self.assertEqual(grad1, grad2)
+            self.assertEqual(grad2.dtype, torch.float)
+
+        test_reduction(torch.sum)
+        test_reduction(torch.prod)
+
     def test_inplace_view_backprop_base(self):
         # modify view and back-prop through base
         root = torch.randn(2, 2, requires_grad=True)

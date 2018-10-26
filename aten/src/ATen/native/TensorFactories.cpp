@@ -110,7 +110,7 @@ Tensor empty_cpu(IntList size, const TensorOptions& options) {
     scalarTypeToTypeMeta(options.dtype()), 0, at::getCPUAllocator(), true);
 
   auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId(), false);
-  tensor.resize_(size);
+  resize_cpu_(tensor, size);  // avoid dispatch overhead
   return tensor;
 }
 

@@ -18,6 +18,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from common_utils import TestCase
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
+from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.autograd import Variable
 import common_utils as common
 
@@ -1293,8 +1294,9 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
         @classmethod
         def setUpClass(cls):
-            os.environ["MASTER_ADDR"] = MASTER_ADDR
-            os.environ["WORLD_SIZE"] = WORLD_SIZE
+            os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
+            os.environ["MASTER_PORT"] = str(MASTER_PORT)
+            os.environ["WORLD_SIZE"] = str(WORLD_SIZE)
             for attr in dir(cls):
                 if attr.startswith("test"):
                     fn = getattr(cls, attr)
@@ -1307,10 +1309,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             if INIT_METHOD.startswith("file://"):
                 _, filename = tempfile.mkstemp(prefix=FOLDER)
                 INIT_METHOD = "file://{}".format(filename)
-
-            if INIT_METHOD.startswith("env://"):
-                port = common.find_free_port()
-                os.environ["MASTER_PORT"] = str(port)
 
             self.processes = []
             self.rank = self.MANAGER_PROCESS_RANK

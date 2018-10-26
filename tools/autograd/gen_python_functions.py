@@ -28,7 +28,7 @@ SKIP_PYTHON_BINDINGS = [
     'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice', 'randint(_out)?',
     '_local_scalar', '_local_scalar_dense',
     'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to',
-    'copy_sparse_to_sparse_'
+    'copy_sparse_to_sparse_',
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -314,7 +314,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     default_expr += '.scalarType()'
                 expr = 'r.{}({}, {})'.format(unpack_with_default, arg_index, default_expr)
             else:
-                unpack = unpack_methods.get(typename, typename.lower())
+                opt_match = re.match(r'c10::optional<(.+)>', typename)
+                if (opt_match):
+                    unpack = opt_match.group(1).lower() + 'Optional'
+                else:
+                    unpack = unpack_methods.get(typename, typename.lower())
                 expr = 'r.{}({})'.format(unpack, arg_index)
 
             if unpack_args:
@@ -745,12 +749,13 @@ def get_python_signature(declaration, include_out):
 
     def get_py_formal_arg(arg):
         typename = arg['simple_type']
-        opt_match = re.match(r'optional<(.+)>', typename)
-        if opt_match:
-            typename = opt_match.group(1)
         typename = typename if typename != 'Type' else 'ScalarType'
-        if arg.get('is_nullable') or opt_match:
+
+        # TODO: remove this and make optional types in simple_type to be consistent across
+        # tensor and other types after make Tensor? be optional instead of undefined
+        if arg.get('is_nullable') and '?' not in typename:
             typename = '{}?'.format(typename)
+
         if arg.get('size') is not None:
             typename = '{}[{}]'.format(typename, arg['size'])
         param = typename + ' ' + arg['name']

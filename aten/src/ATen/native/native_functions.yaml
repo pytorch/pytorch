@@ -351,28 +351,19 @@
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
   variants: function, method
 
-- func: clamp(Tensor self, Scalar min, Scalar max) -> Tensor
+- func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   variants: function, method
-  python_default_init:
-    min: NAN
-    max: NAN
 
-- func: clamp_(Tensor self, Scalar min, Scalar max) -> Tensor
+- func: clamp_(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   variants: function, method
   dispatch:
     CPU: _clamp__cpu
     CUDA: _clamp__cuda
-  python_default_init:
-    min: NAN
-    max: NAN
 
-- func: clamp_out(Tensor result, Tensor self, Scalar min, Scalar max) -> Tensor
+- func: clamp_out(Tensor result, Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   dispatch:
     CPU: _clamp_out_cpu
     CUDA: _clamp_out_cuda
-  python_default_init:
-    min: NAN
-    max: NAN
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
   variants: function, method
@@ -663,6 +654,14 @@
     SparseCPU: empty_sparse
     SparseCUDA: empty_sparse
 
+- func: resize_(Tensor self, IntList size) -> Tensor
+  variants: method
+  cpu_half: True
+  device_guard: False
+  dispatch:
+    CPU: resize_cpu_
+    CUDA: resize_cuda_
+
 - func: empty_out(Tensor result, IntList size) -> Tensor
 
 - func: empty_like(Tensor self) -> Tensor
@@ -898,10 +897,6 @@
 - func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
   variants: function, method
 
-- func: is_cuda(Tensor self) -> bool
-  variants: function, method
-  device_guard: false
-
 - func: is_distributed(Tensor self) -> bool
   variants: function, method
   device_guard: false
@@ -923,10 +918,6 @@
   device_guard: false
 
 - func: is_signed(Tensor self) -> bool
-  variants: function, method
-  device_guard: false
-
-- func: is_sparse(Tensor self) -> bool
   variants: function, method
   device_guard: false
 
@@ -1212,6 +1203,16 @@
 
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
   variants: function, method
+
+- func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: batch_norm_cpu
+    CUDA: batch_norm_cuda
+
+- func: native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, double eps, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: batch_norm_backward_cpu
+    CUDA: batch_norm_backward_cuda
 
 - func: ones(IntList size, TensorOptions options={}) -> Tensor
 
@@ -1565,12 +1566,6 @@
 - func: sum(Tensor self) -> Tensor
   variants: function, method
 
-- func: _sum(Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _sum_cpu
-    CUDA: _sum_cuda
-
 - func: sum(Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
@@ -1580,20 +1575,11 @@
 - func: sum(Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: _sum(Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
-  variants: function
-
 - func: sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
 
 - func: sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
 
 - func: sum_out(Tensor result, Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
-
-- func: _sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
-
-- func: _sum_cuda_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
-  dispatch:
-    CUDA: _sum_out_cuda
 
 - func: sqrt(Tensor self) -> Tensor
   variants: function, method
@@ -1624,12 +1610,6 @@
 - func: prod(Tensor self) -> Tensor
   variants: function, method
 
-- func: _prod(Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _prod_cpu
-    CUDA: _prod_cuda
-
 - func: prod(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
@@ -1639,19 +1619,11 @@
 - func: prod(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: _prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
-  variants: function
-
 - func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
 
 - func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
 
 - func: prod_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
-
-- func: _prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
-  dispatch:
-    CPU: _prod_out_cpu
-    CUDA: _prod_out_cuda
 
 - func: t(Tensor self) -> Tensor
   variants: function, method
@@ -2228,15 +2200,6 @@
 
 - func: unbind(Tensor self, int64_t dim=0) -> TensorList
   variants: function, method
-
-- func: native_get_device(Tensor self) -> int64_t
-  dispatch:
-    SparseCUDA: get_device_sparse_cuda
-  device_guard: False
-
-- func: get_device(Tensor self) -> int64_t
-  variants: function, method
-  device_guard: False
 
 - func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method

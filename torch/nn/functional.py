@@ -858,6 +858,7 @@ In-place version of :func:`~leaky_relu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def prelu(input, weight):
     r"""prelu(input, weight) -> Tensor
 
@@ -897,6 +898,7 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 """)
 
 
+@torch._jit_internal.weak_script
 def hardshrink(input, lambd=0.5):
     r"""
     hardshrink(input, lambd=0.5) -> Tensor
@@ -905,6 +907,7 @@ def hardshrink(input, lambd=0.5):
 
     See :class:`~torch.nn.Hardshrink` for more details.
     """
+    # type: (Tensor, float) -> Tensor
     return torch.hardshrink(input, lambd)
 
 
@@ -2320,10 +2323,12 @@ def pad(input, pad, mode='constant', value=0):
 
 # distance
 
-def pairwise_distance(x1, x2, p=2, eps=1e-6, keepdim=False):
+@torch._jit_internal.weak_script
+def pairwise_distance(x1, x2, p=2., eps=1e-6, keepdim=False):
     r"""
     See :class:`torch.nn.PairwiseDistance` for details
     """
+    # type: (Tensor, Tensor, float, float, bool) -> Tensor
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 
