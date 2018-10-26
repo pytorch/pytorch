@@ -200,7 +200,7 @@ RegisterOperators reg({
           return [](Stack& stack) {
             at::Tensor a;
             pop(stack, a);
-            push(stack, static_cast<int64_t>(a.dtype()));
+            push(stack, static_cast<int64_t>(a.scalar_type()));
             return 0;
           };
         }),

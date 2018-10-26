@@ -35,7 +35,7 @@ inline Tensor Tensor::toBackend(Backend b) const {
 }
 
 inline TensorOptions Tensor::options() const {
-  return TensorOptions().dtype(dtype())
+  return TensorOptions().dtype(scalar_type())
                         .device(device())
                         .layout(layout())
                         .is_variable(is_variable());
@@ -59,8 +59,8 @@ inline bool Tensor::is_variable() const noexcept {
   return type().is_variable();
 }
 
-inline ScalarType Tensor::dtype() const noexcept {
-  return type().scalarType();
+inline caffe2::TypeMeta Tensor::dtype() const noexcept {
+  return impl_->dtype();
 }
 
 inline Layout Tensor::layout() const noexcept {
