@@ -575,17 +575,17 @@ bool CudnnConvOp::DoRunWithType() {
   int group_offset_filter = filter.size() / group_;
 
   // Set up the cudnn algorithms & workspace if necessary
-  bool input_changed = (X.dims() != cudnn_input_dims_);
-  bool filter_changed = (filter.dims() != cudnn_filter_dims_);
+  bool input_changed = (X.sizes() != cudnn_input_dims_);
+  bool filter_changed = (filter.sizes() != cudnn_filter_dims_);
   if (input_changed || filter_changed) {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
-      cudnn_input_dims_ = X.dims().vec();
+      cudnn_input_dims_ = X.sizes().vec();
       SetTensorNdDescriptorWithGroup<T_X>(
           X.ndim(), bottom_desc_, N, C, H, W, D);
     }
     if (filter_changed) {
-      cudnn_filter_dims_ = filter.dims().vec();
+      cudnn_filter_dims_ = filter.sizes().vec();
       if (kernel_.size() == 2) {
 #if CUDNN_VERSION_MIN(7, 0, 0)
         const int MM = M;
@@ -601,7 +601,7 @@ bool CudnnConvOp::DoRunWithType() {
             kernel_h(),
             kernel_w()));
       } else {
-        vector<int> dims(filter.dims().begin(), filter.dims().end());
+        vector<int> dims(filter.sizes().begin(), filter.sizes().end());
 #if !CUDNN_VERSION_MIN(7, 0, 0)
         // We only need to divide dims by group_ when CUDNN version < 7.0
         // see CUDA group convolution doc: https://fburl.com/dgj6dvpd
@@ -692,7 +692,7 @@ bool CudnnConvOp::DoRunWithType() {
         SetConvDescComputeType(conv_desc_, kComputeTypesToTry[i]);
 
         algosToCompare[i] = algo_cache_.getAlgorithm(
-            X.dims(), filter.dims(), kComputeTypesToTry[i], [&]() {
+            X.sizes(), filter.sizes(), kComputeTypesToTry[i], [&]() {
               VLOG(1) << "CUDNN Convolution fwd: doing exhaustive "
                       << "search for " << kComputePassNames[i];
               // When we do an exhaustive search, we will ignore the workspace
@@ -931,17 +931,17 @@ bool CudnnConvGradientOp::DoRunWithType() {
   dfilter->ResizeLike(filter);
 
   // Set up the cudnn algorithms & workspace if necessary
-  bool input_changed = (X.dims() != cudnn_input_dims_);
-  bool filter_changed = (filter.dims() != cudnn_filter_dims_);
+  bool input_changed = (X.sizes() != cudnn_input_dims_);
+  bool filter_changed = (filter.sizes() != cudnn_filter_dims_);
   if (input_changed || filter_changed) {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
-      cudnn_input_dims_ = X.dims().vec();
+      cudnn_input_dims_ = X.sizes().vec();
       SetTensorNdDescriptorWithGroup<T_X>(
           X.ndim(), bottom_desc_, N, C, H, W, D);
     }
     if (filter_changed) {
-      cudnn_filter_dims_ = filter.dims().vec();
+      cudnn_filter_dims_ = filter.sizes().vec();
       if (kernel_.size() == 2) {
 #if CUDNN_VERSION_MIN(7, 0, 0)
         const int MM = M;
@@ -957,7 +957,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
             kernel_h(),
             kernel_w()));
       } else {
-        vector<int> dims(filter.dims().begin(), filter.dims().end());
+        vector<int> dims(filter.sizes().begin(), filter.sizes().end());
 #if !CUDNN_VERSION_MIN(7, 0, 0)
         // We only need to divide dims by group_ when CUDNN version < 7.0
         // see CUDA group convolution doc: https://fburl.com/dgj6dvpd
@@ -1059,7 +1059,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
         SetConvDescComputeType(bwd_filter_conv_desc_, kComputeTypesToTry[i]);
 
         algosToCompare[i] = filter_algo_cache_.getAlgorithm(
-            X.dims(), filter.dims(), kComputeTypesToTry[i], [&]() {
+            X.sizes(), filter.sizes(), kComputeTypesToTry[i], [&]() {
               VLOG(1) << "CUDNN Convolution bwd: doing filter exhaustive"
                       << "search for " << kComputePassNames[i];
               // When we do an exhaustive search, we will ignore the workspace
@@ -1146,7 +1146,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
           SetConvDescComputeType(bwd_data_conv_desc_, kComputeTypesToTry[i]);
 
           algosToCompare[i] = data_algo_cache_.getAlgorithm(
-              X.dims(), filter.dims(), kComputeTypesToTry[i], [&]() {
+              X.sizes(), filter.sizes(), kComputeTypesToTry[i], [&]() {
                 VLOG(1) << "CUDNN Convolution bwd: doing data exhaustive"
                         << "search for " << kComputePassNames[i];
                 int returned_algo_count;

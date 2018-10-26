@@ -28,7 +28,7 @@ from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
-from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, TEST_WITH_ROCM, \
+from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, TEST_WITH_ROCM, \
     TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, download_file, PY3, PY34, to_gpu, \
     get_function_arglist, skipCUDAMemoryLeakCheckIf
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
@@ -705,6 +705,22 @@ class TestNN(NNTestCase):
         expected_grad = torch.ones(5, 5).mm(module.weight.data) * 2
         self.assertEqual(input.grad.data, expected_grad)
 
+    def test_to(self):
+        m = nn.Linear(3, 5)
+        self.assertIs(m, m.to('cpu'))
+        self.assertIs(m, m.to('cpu', dtype=torch.float32))
+        self.assertEqual(m.double(), m.to(torch.float64))
+        self.assertRaises(RuntimeError, lambda: m.to('cpu', copy=True))
+
+        if torch.cuda.is_available():
+            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
+                m2 = m.cuda(device=cuda)
+                self.assertIs(m2, m2.to(cuda))
+                self.assertEqual(m, m2.to('cpu'))
+                self.assertEqual(m2, m.to(cuda))
+                self.assertIs(m2, m2.to(dtype=torch.float32))
+                self.assertEqual(m2.double(), m2.to(dtype=torch.float64))
+
     def test_zero_grad(self):
         i = torch.randn(2, 5, requires_grad=True)
         module = nn.Linear(5, 5)
@@ -754,6 +770,13 @@ class TestNN(NNTestCase):
         module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2)
         input = torch.empty(1, 1, 4, 4)
         self.assertRaises(RuntimeError, lambda: module(input))
+
+        module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True)
+        input = torch.randn(1, 3, 1, 1)
+        with self.assertRaisesRegex(RuntimeError,
+                                    r'Calculated padded input size per channel: \(1 x 1\). ' +
+                                    r'Kernel size: \(10 x 10\). Kernel size can\'t be greater than actual input size'):
+            module(input)
 
     def test_invalid_conv3d(self):
         module = torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2)
@@ -1723,6 +1746,26 @@ class TestNN(NNTestCase):
         self.assertTrue(hasattr(m, 'weight'))
         self.assertTrue('weight' in m._parameters)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_spectral_norm_dp(self):
+        for requires_grad in (True, False):
+            m = nn.Linear(5, 7).to(torch.device('cuda'))
+            m.weight.requires_grad_(requires_grad)
+            m = torch.nn.utils.spectral_norm(m)
+            dpm = torch.nn.DataParallel(m, [0, 1])
+            self.assertTrue(hasattr(m, 'weight_u'))
+            u0 = m.weight_u.clone()
+
+            # assert that u is updated
+            input = torch.randn(2, 5, device=torch.device('cuda'))
+            dpm(input)
+            self.assertNotEqual(u0, m.weight_u)
+
+            # test that eval works
+            dpm.eval()
+            eval_out0 = dpm(input)
+            self.assertEqual(eval_out0, dpm(input))
+
     def test_spectral_norm_eval_remove(self):
         inp = torch.randn(3, 5)
         m = nn.Linear(5, 7)
@@ -1889,6 +1932,21 @@ class TestNN(NNTestCase):
 
         res_F = F.embedding(a, embeddings)
         self.assertEqual(res_old, res_F)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @repeat_test_for_types([torch.float, torch.half])
+    def test_softmax_dtype(self, dtype=torch.float):
+        input = torch.rand(32, 100, device="cuda", dtype=dtype, requires_grad=True)
+        inputf = input.to(torch.float).detach().requires_grad_(True)
+        out = F.softmax(input, dim=-1, dtype=torch.float)
+        outf = F.softmax(inputf, dim=-1)
+        # should be bitwise equal
+        self.assertEqual(out, outf, prec=0)
+        gO = torch.empty_like(outf).uniform_()
+        out.backward(gO)
+        outf.backward(gO)
+        # should be bitwise equal
+        self.assertEqual(input.grad, inputf.grad.to(dtype), prec=0)
 
     def _test_gumbel_softmax_st(self, cuda, dtype=torch.float):
         th = torch.cuda if cuda else torch
@@ -2594,6 +2652,17 @@ class TestNN(NNTestCase):
     def test_Conv2d_naive_groups_cuda(self, dtype=torch.float):
         self._test_Conv2d_naive_groups("cuda", dtype)
 
+    def test_batchnorm_grad(self):
+        self._test_batchnorm_grad()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
+    def test_batchnorm_grad_cuda(self):
+        self._test_batchnorm_grad("cuda")
+        if TEST_CUDNN:
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_grad("cuda")
+
     def test_batchnorm_eval(self):
         self._test_batchnorm_eval()
 
@@ -2601,6 +2670,9 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_batchnorm_eval_cuda(self, dtype=torch.float):
         self._test_batchnorm_eval("cuda", dtype)
+        if TEST_CUDNN:
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_eval("cuda", dtype)
 
     def test_batchnorm_simple_average(self):
         self._test_batchnorm_simple_average()
@@ -2609,6 +2681,9 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_batchnorm_simple_average_cuda(self):
         self._test_batchnorm_simple_average(torch.cuda.FloatTensor)
+        if TEST_CUDNN:
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_simple_average(torch.cuda.FloatTensor)
 
     def test_MaxPool1d_indices(self):
         self._test_maxpool_indices(1)
@@ -3525,6 +3600,12 @@ class TestNN(NNTestCase):
                     self.assertEqual(output.size()[2:], (h, w))
                 else:
                     self.assertRaises(ValueError, lambda: m(i, (h, w)))
+
+    def test_ConvTranspose3d_correct_output_size(self):
+        # Check that ConvTranspose3d can take a 5d output_size.
+        m = nn.ConvTranspose3d(2, 2, 2)
+        i = torch.rand(1, 2, 1, 1, 1)
+        out = m(i, output_size=(1, 2, 2, 2, 2))
 
     def _test_Conv2d_naive_groups(self, device="cpu", dtype=torch.float):
         # Check that grouped convolutions matches two half convolutions
@@ -4817,6 +4898,9 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_batchnorm_update_stats_cuda(self):
         self._test_batchnorm_update_stats("cuda", torch.float)
+        if TEST_CUDNN:
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_update_stats("cuda", torch.float)
 
     def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
         input = torch.rand(2, 10)
@@ -4851,6 +4935,18 @@ class TestNN(NNTestCase):
         for size in wrong_sizes:
             with self.assertRaises(RuntimeError):
                 F.batch_norm(input, running_mean, running_var, bias=Parameter(torch.rand(size)))
+
+    def _test_batchnorm_grad(self, device="cpu", dtype=torch.double):
+        bs, n_feat, size_feat = 4, 5, 6
+        input = torch.arange(bs * n_feat * size_feat, device=device,
+                             requires_grad=True, dtype=dtype).view(bs, n_feat, size_feat)
+        weight = torch.arange(1, n_feat + 1, device=device, requires_grad=True, dtype=dtype)
+        bias = torch.arange(n_feat, device=device, requires_grad=True, dtype=dtype)
+        running_mean = 1 - torch.arange(n_feat, device=device, dtype=dtype)
+        running_var = 2 * torch.arange(n_feat, device=device, dtype=dtype)
+        for training in [False, True]:
+            _assertGradAndGradgradChecks(self, F.batch_norm, (input, running_mean, running_var, weight, bias,
+                                                              training, 0.1, 0.0001))
 
     def _test_batchnorm_eval(self, device="cpu", dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)
@@ -6913,6 +7009,20 @@ def bceloss_weights_no_reduce_scalar_test():
     )
 
 
+def bce_with_logistic_legacy_enum_test():
+    t = Variable(torch.randn(15, 10).gt(0).double())
+    sigmoid = nn.Sigmoid()
+    return dict(
+        fullname='BCEWithLogitsLoss_legacy_enum',
+        constructor=wrap_functional(
+            lambda i: F.binary_cross_entropy_with_logits(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
+        reference_fn=lambda i, m: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
+        check_gradgrad=False,
+        pickle=False,
+    )
+
+
 def bce_with_logistic_no_reduce_test():
     t = Variable(torch.randn(15, 10).gt(0).double())
     sigmoid = nn.Sigmoid()
@@ -7401,6 +7511,7 @@ new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
     bceloss_weights_no_reduce_test(),
+    bce_with_logistic_legacy_enum_test(),
     bce_with_logistic_no_reduce_test(),
     bceloss_no_reduce_scalar_test(),
     bceloss_weights_no_reduce_scalar_test(),
@@ -8562,6 +8673,13 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
+        constructor=wrap_functional(F.softmax, dim=1, dtype=torch.float64),
+        input_size=(2, 128),
+        fullname='softmax_lastdim_dtype',
+        pickle=False,
+        test_cuda=False
+    ),
+    dict(
         constructor=wrap_functional(F.softmax, dim=1),
         input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
         fullname='softmax_spatial_special',
@@ -8573,6 +8691,13 @@ new_module_tests = [
         input_size=(2, 2, 4, 4),  # regular spatial algorithm
         fullname='softmax_spatial',
         pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.softmax, dim=1, dtype=torch.float64),
+        input_size=(2, 2, 4, 4),  # regular spatial algorithm
+        fullname='softmax_spatial_dtype',
+        pickle=False,
+        test_cuda=False
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=0),

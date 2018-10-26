@@ -17,7 +17,7 @@ figures:
 	@$(PYCMD) source/scripts/build_activation_images.py
 
 docset: html
-	doc2dash --name $(SPHINXPROJ) --icon $(SOURCEDIR)/_static/img/pytorch-logo-flame.png --enable-js --online-redirect-url http://pytorch.org/docs/ --force $(BUILDDIR)/html/
+	doc2dash --name $(SPHINXPROJ) --icon $(SOURCEDIR)/_static/img/pytorch-logo-flame.png --enable-js --online-redirect-url https://pytorch.org/docs/ --force $(BUILDDIR)/html/
 
 	# Manually fix because Zeal doesn't deal well with `icon.png`-only at 2x resolution.
 	cp $(SPHINXPROJ).docset/icon.png $(SPHINXPROJ).docset/icon@2x.png

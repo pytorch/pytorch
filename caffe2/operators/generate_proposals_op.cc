@@ -2,10 +2,6 @@
 #include "caffe2/operators/generate_proposals_op_util_boxes.h"
 #include "generate_proposals_op_util_nms.h"
 
-#ifdef CAFFE2_USE_MKL
-#include "caffe2/mkl/operators/operator_fallback_mkl.h"
-#endif // CAFFE2_USE_MKL
-
 namespace caffe2 {
 
 namespace {
@@ -240,16 +236,16 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
 
   // bbox_deltas: (num_images, A * box_dim, H, W)
   CAFFE_ENFORCE_EQ(
-      bbox_deltas.dims(),
+      bbox_deltas.sizes(),
       (at::ArrayRef<int64_t>{num_images, box_dim * A, height, width}));
 
   // im_info_tensor: (num_images, 3), format [height, width, scale; ...]
-  CAFFE_ENFORCE_EQ(im_info_tensor.dims(), (vector<int64_t>{num_images, 3}));
+  CAFFE_ENFORCE_EQ(im_info_tensor.sizes(), (vector<int64_t>{num_images, 3}));
   CAFFE_ENFORCE(
       im_info_tensor.template IsType<float>(), im_info_tensor.meta().name());
 
   // anchors: (A, box_dim)
-  CAFFE_ENFORCE_EQ(anchors.dims(), (vector<int64_t>{A, box_dim}));
+  CAFFE_ENFORCE_EQ(anchors.sizes(), (vector<int64_t>{A, box_dim}));
   CAFFE_ENFORCE(anchors.template IsType<float>(), anchors.meta().name());
 
   // Broadcast the anchors to all pixels
@@ -317,16 +313,6 @@ namespace {
 REGISTER_CPU_OPERATOR(GenerateProposals, GenerateProposalsOp<CPUContext>);
 // For backward compatibility
 REGISTER_CPU_OPERATOR(GenerateProposalsCPP, GenerateProposalsOp<CPUContext>);
-
-#ifdef CAFFE2_HAS_MKL_DNN
-REGISTER_MKL_OPERATOR(
-    GenerateProposals,
-    mkl::MKLFallbackOp<GenerateProposalsOp<CPUContext>>);
-// For backward compatibility
-REGISTER_MKL_OPERATOR(
-    GenerateProposalsCPP,
-    mkl::MKLFallbackOp<GenerateProposalsOp<CPUContext>>);
-#endif // CAFFE2_HAS_MKL_DNN
 
 OPERATOR_SCHEMA(GenerateProposals)
     .NumInputs(4)

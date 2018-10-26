@@ -1,9 +1,5 @@
 #include "caffe2/operators/collect_and_distribute_fpn_rpn_proposals_op.h"
 
-#ifdef CAFFE2_USE_MKL
-#include "caffe2/mkl/operators/operator_fallback_mkl.h"
-#endif // CAFFE2_USE_MKL
-
 namespace caffe2 {
 
 namespace utils {
@@ -231,12 +227,6 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
 namespace {
 
 REGISTER_CPU_OPERATOR(CollectAndDistributeFpnRpnProposals, CollectAndDistributeFpnRpnProposalsOp<CPUContext>);
-
-#ifdef CAFFE2_HAS_MKL_DNN
-REGISTER_MKL_OPERATOR(
-    CollectAndDistributeFpnRpnProposals,
-    mkl::MKLFallbackOp<CollectAndDistributeFpnRpnProposalsOp<CPUContext>>);
-#endif // CAFFE2_HAS_MKL_DNN
 
 OPERATOR_SCHEMA(CollectAndDistributeFpnRpnProposals)
     .NumInputs(2, INT_MAX)

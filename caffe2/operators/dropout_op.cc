@@ -6,7 +6,7 @@ template <>
 bool DropoutOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  Y->Resize(X.dims());
+  Y->Resize(X.sizes());
   if (is_test_) {
     if (Y != &X) {
       context_.CopyFromCPU<float>(
@@ -21,7 +21,7 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
     const float* Xdata = X.data<float>();
     float* Ydata = Y->template mutable_data<float>();
     auto mask = Output(1);
-    mask->Resize(X.dims());
+    mask->Resize(X.sizes());
     bool* mask_data = mask->template mutable_data<bool>();
     auto& gen = context_.RandGenerator();
     for (int i = 0; i < X.size(); ++i) {
@@ -36,7 +36,7 @@ template <>
 bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(0);
   auto* dX = Output(0);
-  dX->Resize(dY.dims());
+  dX->Resize(dY.sizes());
   if (is_test_) {
     if (dX != &dY) {
       context_.CopyFromCPU<float>(
@@ -58,7 +58,9 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(Dropout, DropoutOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(DropoutGrad, DropoutGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    DropoutGrad,
+    DropoutGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Dropout)
     .NumInputs(1)
@@ -158,9 +160,9 @@ mask: [[False False False  True  True]
         "*(type: Tensor`<bool>`)* The output mask containing boolean values for"
         "each element, signifying which elements are dropped out. If `is_test` is"
         "nonzero, this output is not filled.")
-    .InheritOnnxSchema("Dropout");
+    .InheritOnnxSchema();
 
-OPERATOR_SCHEMA(DropoutGrad)
+GRADIENT_OPERATOR_SCHEMA(DropoutGrad)
     .NumInputs(1, 2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}});

@@ -42,7 +42,7 @@ inline TensorOptions Tensor::options() const {
 }
 
 inline void Tensor::backward(
-    at::optional<Tensor> gradient,
+    c10::optional<Tensor> gradient,
     bool keep_graph,
     bool create_graph) {
   type().backward(*this, std::move(gradient), keep_graph, create_graph);
@@ -55,9 +55,6 @@ inline void Tensor::set_data(Tensor new_data) {
 // all static inline to allow for inlining of the non-dynamic part of dispatch
 inline int64_t Tensor::storage_offset() const {
     return type().storage_offset(*this);
-}
-inline Tensor & Tensor::resize_(IntList size) {
-    return type().resize_(*this, size);
 }
 inline Tensor & Tensor::set_(Storage source) {
     return type().set_(*this, source);
@@ -91,9 +88,6 @@ inline Tensor Tensor::masked_select(const Tensor & mask) const {
 }
 inline Tensor Tensor::nonzero() const {
     return type().nonzero(*this);
-}
-inline Tensor Tensor::contiguous() const {
-    return type().contiguous(*this);
 }
 inline Tensor Tensor::view(IntList size) const {
     return type().view(*this, size);
@@ -452,8 +446,8 @@ inline std::tuple<Tensor,Tensor> Tensor::symeig(bool eigenvectors, bool upper) c
 inline std::tuple<Tensor,Tensor> Tensor::eig(bool eigenvectors) const {
     return type().eig(*this, eigenvectors);
 }
-inline std::tuple<Tensor,Tensor,Tensor> Tensor::svd(bool some) const {
-    return type().svd(*this, some);
+inline std::tuple<Tensor,Tensor,Tensor> Tensor::svd(bool some, bool compute_uv) const {
+    return type().svd(*this, some, compute_uv);
 }
 inline Tensor Tensor::potrf(bool upper) const {
     return type().potrf(*this, upper);
@@ -517,6 +511,9 @@ inline Tensor & Tensor::exponential_(double lambd, Generator * generator) {
 }
 inline Tensor & Tensor::geometric_(double p, Generator * generator) {
     return type().geometric_(*this, p, generator);
+}
+inline Tensor Tensor::alias() const {
+    return type().alias(*this);
 }
 inline Tensor Tensor::abs() const {
     return type().abs(*this);
@@ -632,10 +629,10 @@ inline Tensor & Tensor::ceil_() {
 inline std::vector<Tensor> Tensor::chunk(int64_t chunks, int64_t dim) const {
     return type().chunk(*this, chunks, dim);
 }
-inline Tensor Tensor::clamp(Scalar min, Scalar max) const {
+inline Tensor Tensor::clamp(c10::optional<Scalar> min, c10::optional<Scalar> max) const {
     return type().clamp(*this, min, max);
 }
-inline Tensor & Tensor::clamp_(Scalar min, Scalar max) {
+inline Tensor & Tensor::clamp_(c10::optional<Scalar> min, c10::optional<Scalar> max) {
     return type().clamp_(*this, min, max);
 }
 inline Tensor Tensor::clamp_max(Scalar max) const {
@@ -649,6 +646,9 @@ inline Tensor Tensor::clamp_min(Scalar min) const {
 }
 inline Tensor & Tensor::clamp_min_(Scalar min) {
     return type().clamp_min_(*this, min);
+}
+inline Tensor Tensor::contiguous() const {
+    return type().contiguous(*this);
 }
 inline Tensor Tensor::cos() const {
     return type().cos(*this);
@@ -697,6 +697,9 @@ inline Tensor & Tensor::div_(Scalar other) {
 }
 inline Tensor Tensor::dot(const Tensor & tensor) const {
     return type().dot(*this, tensor);
+}
+inline Tensor & Tensor::resize_(IntList size) {
+    return type().resize_(*this, size);
 }
 inline Tensor Tensor::erf() const {
     return type().erf(*this);
@@ -779,9 +782,6 @@ inline Tensor Tensor::inverse() const {
 inline Tensor Tensor::isclose(const Tensor & other, double rtol, double atol, bool equal_nan) const {
     return type().isclose(*this, other, rtol, atol, equal_nan);
 }
-inline bool Tensor::is_cuda() const {
-    return type().is_cuda(*this);
-}
 inline bool Tensor::is_distributed() const {
     return type().is_distributed(*this);
 }
@@ -799,9 +799,6 @@ inline bool Tensor::is_same_size(const Tensor & other) const {
 }
 inline bool Tensor::is_signed() const {
     return type().is_signed(*this);
-}
-inline bool Tensor::is_sparse() const {
-    return type().is_sparse(*this);
 }
 inline std::tuple<Tensor,Tensor> Tensor::kthvalue(int64_t k, int64_t dim, bool keepdim) const {
     return type().kthvalue(*this, k, dim, keepdim);
@@ -832,6 +829,9 @@ inline Tensor & Tensor::log2_() {
 }
 inline Tensor Tensor::logdet() const {
     return type().logdet(*this);
+}
+inline Tensor Tensor::log_softmax(int64_t dim, ScalarType dtype) const {
+    return type().log_softmax(*this, dim, dtype);
 }
 inline Tensor Tensor::log_softmax(int64_t dim) const {
     return type().log_softmax(*this, dim);
@@ -994,6 +994,9 @@ inline std::tuple<Tensor,Tensor> Tensor::slogdet() const {
 }
 inline Tensor Tensor::smm(const Tensor & mat2) const {
     return type().smm(*this, mat2);
+}
+inline Tensor Tensor::softmax(int64_t dim, ScalarType dtype) const {
+    return type().softmax(*this, dim, dtype);
 }
 inline Tensor Tensor::softmax(int64_t dim) const {
     return type().softmax(*this, dim);
@@ -1160,11 +1163,11 @@ inline Tensor Tensor::addmm(const Tensor & mat1, const Tensor & mat2, Scalar bet
 inline Tensor & Tensor::addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) {
     return type().addmm_(*this, mat1, mat2, beta, alpha);
 }
-inline Tensor & Tensor::sparse_resize_(IntList size, int64_t sparseDims, int64_t denseDims) {
-    return type().sparse_resize_(*this, size, sparseDims, denseDims);
+inline Tensor & Tensor::sparse_resize_(IntList size, int64_t sparse_dim, int64_t dense_dim) {
+    return type().sparse_resize_(*this, size, sparse_dim, dense_dim);
 }
-inline Tensor & Tensor::sparse_resize_and_clear_(IntList size, int64_t sparseDims, int64_t denseDims) {
-    return type().sparse_resize_and_clear_(*this, size, sparseDims, denseDims);
+inline Tensor & Tensor::sparse_resize_and_clear_(IntList size, int64_t sparse_dim, int64_t dense_dim) {
+    return type().sparse_resize_and_clear_(*this, size, sparse_dim, dense_dim);
 }
 inline Tensor Tensor::sparse_mask(SparseTensorRef mask) const {
     return type().sparse_mask(*this, mask);
@@ -1172,11 +1175,17 @@ inline Tensor Tensor::sparse_mask(SparseTensorRef mask) const {
 inline Tensor Tensor::to_dense() const {
     return type().to_dense(*this);
 }
-inline int64_t Tensor::_sparseDims() const {
-    return type()._sparseDims(*this);
+inline int64_t Tensor::sparse_dim() const {
+    return type().sparse_dim(*this);
 }
-inline int64_t Tensor::_denseDims() const {
-    return type()._denseDims(*this);
+inline int64_t Tensor::_dimI() const {
+    return type()._dimI(*this);
+}
+inline int64_t Tensor::dense_dim() const {
+    return type().dense_dim(*this);
+}
+inline int64_t Tensor::_dimV() const {
+    return type()._dimV(*this);
 }
 inline int64_t Tensor::_nnz() const {
     return type()._nnz(*this);
@@ -1193,26 +1202,32 @@ inline Tensor Tensor::_indices() const {
 inline Tensor Tensor::_values() const {
     return type()._values(*this);
 }
+inline Tensor & Tensor::_coalesced_(bool coalesced) {
+    return type()._coalesced_(*this, coalesced);
+}
+inline Tensor Tensor::indices() const {
+    return type().indices(*this);
+}
+inline Tensor Tensor::values() const {
+    return type().values(*this);
+}
 inline int64_t Tensor::numel() const {
     return type().numel(*this);
 }
 inline std::vector<Tensor> Tensor::unbind(int64_t dim) const {
     return type().unbind(*this, dim);
 }
-inline int64_t Tensor::get_device() const {
-    return type().get_device(*this);
+inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking, bool copy) const {
+    return type().to(*this, device, dtype, non_blocking, copy);
 }
-inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking) const {
-    return type().to(*this, device, dtype, non_blocking);
+inline Tensor Tensor::to(ScalarType dtype, bool non_blocking, bool copy) const {
+    return type().to(*this, dtype, non_blocking, copy);
 }
-inline Tensor Tensor::to(ScalarType dtype, bool non_blocking) const {
-    return type().to(*this, dtype, non_blocking);
+inline Tensor Tensor::to(Device device, bool non_blocking, bool copy) const {
+    return type().to(*this, device, non_blocking, copy);
 }
-inline Tensor Tensor::to(Device device, bool non_blocking) const {
-    return type().to(*this, device, non_blocking);
-}
-inline Tensor Tensor::to(const Tensor & other, bool non_blocking) const {
-    return type().to(*this, other, non_blocking);
+inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) const {
+    return type().to(*this, other, non_blocking, copy);
 }
 inline Scalar Tensor::_local_scalar() const {
     return type()._local_scalar(*this);
@@ -1222,8 +1237,8 @@ inline bool Tensor::is_variable() const noexcept {
   return type().is_variable();
 }
 
-inline ScalarType Tensor::dtype() const noexcept {
-  return type().scalarType();
+inline caffe2::TypeMeta Tensor::dtype() const noexcept {
+  return impl_->dtype();
 }
 
 inline Layout Tensor::layout() const noexcept {
@@ -1232,6 +1247,33 @@ inline Layout Tensor::layout() const noexcept {
 
 inline Device Tensor::device() const {
   return Device(type().device_type(), type().is_cuda() ? get_device() : -1);
+}
+
+inline int64_t Tensor::get_device() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->get_device();
+}
+
+inline int64_t get_device(Tensor self) {
+  return self.get_device();
+}
+
+inline bool Tensor::is_cuda() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_cuda();
+}
+
+inline bool is_cuda(Tensor self) {
+  return self.is_cuda();
+}
+
+inline bool Tensor::is_sparse() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_sparse();
+}
+
+inline bool is_sparse(Tensor self) {
+  return self.is_sparse();
 }
 
 #define DEFINE_CAST(T, name, _)                  \

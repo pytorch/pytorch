@@ -39,13 +39,21 @@ cat >ci_scripts/setup_pytorch_env.bat <<EOL
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\ProgramData\\chocolatey\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install Miniconda3
-IF EXIST C:\\Jenkins\\Miniconda3 ( rd /s /q C:\\Jenkins\\Miniconda3 )
-curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
-.\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
-call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
-call conda install -y -q numpy mkl cffi pyyaml boto3
-
-pip install ninja future
+if "%BUILD_ENVIRONMENT%"=="" (
+    set CONDA_PARENT_DIR=%CD%
+) else (
+    set CONDA_PARENT_DIR=C:\\Jenkins
+)
+if NOT "%BUILD_ENVIRONMENT%"=="" (
+    IF EXIST %CONDA_PARENT_DIR%\\Miniconda3 ( rd /s /q %CONDA_PARENT_DIR%\\Miniconda3 )
+    curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
+    .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\\Miniconda3
+)
+call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3
+if NOT "%BUILD_ENVIRONMENT%"=="" (
+    call conda install -y -q numpy mkl cffi pyyaml boto3
+)
+pip install ninja future hypothesis
 
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
 
@@ -58,13 +66,14 @@ set CUDA_TOOLKIT_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\
 set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set PYTHONPATH=%CD%\\test;%PYTHONPATH%
 
-cd test/
-
-python ..\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
-
-7z x %IMAGE_COMMIT_TAG%.7z
-
-cd ..
+if NOT "%BUILD_ENVIRONMENT%"=="" (
+    cd test/
+    python ..\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
+    7z x %IMAGE_COMMIT_TAG%.7z
+    cd ..
+) else (
+    xcopy /s %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch .\\test\\torch\\
+)
 
 EOL
 
@@ -78,14 +87,37 @@ call ci_scripts/setup_pytorch_env.bat
 cd test/ && python run_test.py --exclude nn --verbose && cd ..
 EOL
 
+cat >ci_scripts/test_custom_script_ops.bat <<EOL
+call ci_scripts/setup_pytorch_env.bat
+
+cd test/custom_operator
+
+:: Build the custom operator library.
+mkdir build
+cd build
+:: Note: Caffe2 does not support MSVC + CUDA + Debug mode (has to be Release mode)
+cmake -DCMAKE_PREFIX_PATH=%CD%\\..\\..\\torch -DCMAKE_BUILD_TYPE=Release -GNinja ..
+ninja -v
+cd ..
+
+:: Run tests Python-side and export a script module.
+python test_custom_ops.py -v
+python model.py --export-script-module="build/model.pt"
+:: Run tests C++-side and load the exported script module.
+cd build
+set PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt/bin/x64;%CD%\\..\\..\\torch\\lib;%PATH%
+test_custom_ops.exe model.pt
+
+EOL
+
 run_tests() {
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
-        ci_scripts/test_python_nn.bat && ci_scripts/test_python_all_except_nn.bat
+        ci_scripts/test_python_nn.bat && ci_scripts/test_python_all_except_nn.bat && ci_scripts/test_custom_script_ops.bat
     else
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
             ci_scripts/test_python_nn.bat
         elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
-            ci_scripts/test_python_all_except_nn.bat
+            ci_scripts/test_python_all_except_nn.bat && ci_scripts/test_custom_script_ops.bat
         fi
     fi
 }

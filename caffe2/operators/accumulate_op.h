@@ -19,7 +19,7 @@ class AccumulateOp final : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
-    if (output->dims() != input.dims()) {
+    if (output->sizes() != input.sizes()) {
       LOG(INFO) << "Reshaping and initializing output.";
       output->ResizeLike(input);
       math::Set<T, Context>(

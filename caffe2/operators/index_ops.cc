@@ -348,10 +348,12 @@ class IndexSerializer : public BlobSerializerBase {
   ~IndexSerializer() {}
 
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    auto& base = blob.template Get<std::unique_ptr<IndexBase>>();
+    CAFFE_ENFORCE(typeMeta.Match<std::unique_ptr<IndexBase>>());
+    const auto& base = *static_cast<const std::unique_ptr<IndexBase>*>(pointer);
     Blob tensor_blob;
     auto* tensor_out = BlobGetMutableTensor(&tensor_blob, CPU);
 
@@ -379,7 +381,7 @@ class IndexSerializer : public BlobSerializerBase {
     os << base->maxElements() << " " << base->isFrozen();
     blob_proto.set_content(os.str());
 
-    acceptor(name, blob_proto.SerializeAsString());
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 
  private:

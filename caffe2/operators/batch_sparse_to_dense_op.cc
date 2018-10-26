@@ -80,7 +80,7 @@ bool BatchDenseToSparseOp<T, Context>::RunOnDevice() {
 
   CAFFE_ENFORCE_EQ(batch_size, dense.dim(0));
   dense_last_dim_ = dense.dim(1);
-  vector<int64_t> output_shape = indices.dims().vec();
+  vector<int64_t> output_shape = indices.sizes().vec();
   output->Resize(output_shape);
   T* output_data = output->template mutable_data<T>();
 

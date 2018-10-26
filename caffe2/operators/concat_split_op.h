@@ -161,7 +161,7 @@ bool SplitOp<Context>::RunOnDevice() {
       input_channels,
       "Sum of split dimensions do not match: should be ",
       input_channels);
-  vector<int64_t> output_dims(input.dims().vec());
+  vector<int64_t> output_dims(input.sizes().vec());
   int before = 1, after = 1;
   for (int i = 0; i < canonical_axis; ++i) {
     before *= input.dim32(i);
@@ -215,7 +215,7 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
       input_channels,
       "Sum of split dimensions do not match: should be ",
       input_channels);
-  vector<int64_t> output_dims(input.dims().vec());
+  vector<int64_t> output_dims(input.sizes().vec());
   int before = input.size_to_dim(canonical_axis);
   int after = input.size_from_dim(canonical_axis + 1);
   size_t input_offset = 0;
@@ -263,7 +263,7 @@ bool ConcatOp<Context>::RunOnDevice() {
   }
 
   int before = 1, after = 1;
-  vector<int64_t> output_dims(input_zero.dims().vec());
+  vector<int64_t> output_dims(input_zero.sizes().vec());
   for (int i = 0; i < input_zero.ndim(); ++i) {
     if (i == canonical_axis && !add_axis_) {
       continue;
@@ -291,9 +291,9 @@ bool ConcatOp<Context>::RunOnDevice() {
           "when arg 'add_axis' = 0 and along the axis = ",
           canonical_axis,
           " <",
-          Input(0).dims(),
+          Input(0).sizes(),
           "> vs <",
-          Input(j).dims(),
+          Input(j).sizes(),
           ">.");
     }
   }

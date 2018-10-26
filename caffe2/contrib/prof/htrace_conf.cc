@@ -32,12 +32,12 @@ const string defaultHTraceConf(const string& net_name) {
   stream << HTRACE_SPAN_RECEIVER_KEY << "=local.file;";
   stream << HTRACE_SAMPLER_KEY << "=always;";
 
-  if (c10::FLAGS_caffe2_htrace_span_log_path.empty()) {
+  if (FLAGS_caffe2_htrace_span_log_path.empty()) {
     stream << HTRACE_LOCAL_FILE_RCV_PATH_KEY << "=/tmp/htrace_" << net_name_copy
            << "_span_log_" << datetime << ";";
   } else {
     stream << HTRACE_LOCAL_FILE_RCV_PATH_KEY << "="
-           << c10::FLAGS_caffe2_htrace_span_log_path << ";";
+           << FLAGS_caffe2_htrace_span_log_path << ";";
   }
 
   return stream.str();

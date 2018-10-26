@@ -10,7 +10,6 @@ else()
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif()
 
-option(BUILD_TEST "Build torch test binaries" ON)
 option(TORCH_STATIC "Build libtorch.a rather than libtorch.so" OFF)
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -71,7 +70,11 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/nn/THNN.cpp"
   "${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
@@ -84,7 +87,9 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
-  "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp"
+  "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp"
+  "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
+  "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/aten_interned_strings.h"
   COMMAND
   ${PYCMD} tools/setup_helpers/generate_code.py
@@ -132,16 +137,23 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/utils.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp
-  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/grad_mode.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
   ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
@@ -175,6 +187,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/pretty_print.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
@@ -218,6 +231,7 @@ CONFIGURE_FILE(
 if (NOT NO_API AND NOT USE_ROCM)
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/data/datasets/mnist.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/cursor.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
@@ -236,9 +250,9 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/serialize.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize/tensor.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
   )
 endif()
@@ -410,7 +424,7 @@ install(TARGETS torch
   LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
-if (BUILD_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
+if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
   add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
 endif()
 
@@ -453,3 +467,16 @@ install(FILES
     ${PROJECT_BINARY_DIR}/TorchConfigVersion.cmake
     ${PROJECT_BINARY_DIR}/TorchConfig.cmake
     DESTINATION share/cmake/Torch)
+
+if (USE_DISTRIBUTED)
+  add_subdirectory(${TORCH_SRC_DIR}/lib/THD)
+  if (NOT MSVC AND NOT APPLE)
+    add_subdirectory(${TORCH_SRC_DIR}/lib/c10d)
+  endif()
+endif()
+
+if (MSVC)
+  add_subdirectory(${TORCH_SRC_DIR}/lib/libshm_windows)
+else()
+  add_subdirectory(${TORCH_SRC_DIR}/lib/libshm)
+endif()

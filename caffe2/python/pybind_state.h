@@ -110,10 +110,10 @@ class TensorFetcher : public BlobFetcherBase {
   // of `tensor`
   bool NeedsCopy(const Tensor* tensor, const TypeMeta& meta) const {
 #ifdef USE_NUMPY
-    return tensor->GetStaticContext() != GetCPUStaticContext() ||
+    return tensor->GetDeviceType() != CPU ||
         CaffeToNumpyType(meta) == NPY_OBJECT;
 #else
-    return tensor->GetStaticContext() != GetCPUStaticContext();
+    return tensor->GetDeviceType() != CPU;
 #endif // USE_NUMPY
   }
 
@@ -128,7 +128,7 @@ class TensorFetcher : public BlobFetcherBase {
         tensor.meta().name(),
         ".");
     std::vector<npy_intp> npy_dims;
-    for (const auto dim : tensor.dims()) {
+    for (const auto dim : tensor.sizes()) {
       npy_dims.push_back(dim);
     }
     result.copied = force_copy || NeedsCopy(&tensor, tensor.meta());

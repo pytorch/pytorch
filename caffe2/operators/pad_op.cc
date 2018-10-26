@@ -418,7 +418,9 @@ std::vector<TensorShape> PadImageOp<float, CPUContext>::PadTensorInference(
 }
 
 REGISTER_CPU_OPERATOR(PadImage, PadImageOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(PadImageGradient, PadImageGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    PadImageGradient,
+    PadImageGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(PadImage)
     .NumInputs(1)
@@ -444,7 +446,7 @@ values and stride sizes defined by the ConvPoolOpBase operator.
         "the tensor. Dimensions will vary based on various pad and stride "
         "sizes.");
 
-OPERATOR_SCHEMA(PadImageGradient).NumInputs(1).NumOutputs(1);
+GRADIENT_OPERATOR_SCHEMA(PadImageGradient).NumInputs(1).NumOutputs(1);
 
 class GetPadImageGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
