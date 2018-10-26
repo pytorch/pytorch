@@ -107,7 +107,6 @@ const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
         .device(${device});
-DeviceGuard device_guard(deviceForInputs(stack, ${num_inputs}));
 auto result_ = (${first}).${name}(${args_with_tensor_options});
 """)
 
@@ -301,24 +300,27 @@ def gen_jit_dispatch(declarations, out, template_path):
     jit_decls = [d for d in aten_decls if is_jit_op(d)]
 
     # add arguments dtype and device for functions like zeros
+    def expand_options(decl, i, arg):
+        if arg['simple_type'] != 'TensorOptions':
+            return [arg]
+        assert decl.get('tensor_options_arg_index') != i
+        decl['tensor_options_arg_index'] = i
+        return [
+            # XXX - until we actually have first-class interpreter types for these
+            # concepts, the default values to be encoded in Tensors
+            # If you change this, you also need to update [TensorOptions in script]
+            # in the tracer code.
+            # dtype is specified as an int64_t of at::ScalarType
+            {'name': 'dtype', 'simple_type': 'ScalarType', 'default': 'float', 'kwarg_only': True},
+            # layout is specified as an int64_t of at::Layout
+            {'name': 'layout', 'simple_type': 'Layout', 'default': 'strided', 'kwarg_only': True},
+            # device is specified as an IntList of { at::Device::Type, device_id }
+            {'name': 'device', 'simple_type': 'Device', 'kwarg_only': True,
+                'default': '[cpu, -1]'},
+        ]
+
     for decl in jit_decls:
-        arguments = decl['arguments']
-        for n, arg in enumerate(arguments):
-            if arg['simple_type'] == 'TensorOptions':
-                decl['arguments'] = arguments[:n] + [
-                    # XXX - until we actually have first-class interpreter types for these
-                    # concepts, the default values to be encoded in Tensors
-                    # If you change this, you also need to update [TensorOptions in script]
-                    # in the tracer code.
-                    # dtype is specified as an int64_t of at::ScalarType
-                    {'name': 'dtype', 'simple_type': 'ScalarType', 'default': 'float', 'kwarg_only': True},
-                    # layout is specified as an int64_t of at::Layout
-                    {'name': 'layout', 'simple_type': 'Layout', 'default': 'strided', 'kwarg_only': True},
-                    # device is specified as an IntList of { at::Device::Type, device_id }
-                    {'name': 'device', 'simple_type': 'Device', 'kwarg_only': True,
-                        'default': '[cpu, -1]'},
-                ] + arguments[(n + 1):]
-                decl['tensor_options_arg_index'] = n
+        decl['arguments'] = [a for i, arg in enumerate(decl['arguments']) for a in expand_options(decl, i, arg)]
         # add annotations about alias an mutability of arguments
         annotate_op(decl)
 
