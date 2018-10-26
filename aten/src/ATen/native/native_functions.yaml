@@ -396,6 +396,9 @@
 - func: cudnn_is_acceptable(Tensor self) -> bool
   device_guard: false
 
+- func: constant_pad_nd(Tensor self, IntList pad, Scalar value=0) -> Tensor
+  variants: function
+
 - func: contiguous(Tensor self) -> Tensor
   variants: method
 
