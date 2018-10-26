@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/data/samplers/base.h>
+#include <torch/serialize/archive.h>
 #include <torch/tensor.h>
 
 #include "c10/util/Optional.h"
@@ -37,6 +38,29 @@ class SequentialSampler : public Sampler {
       i = index_++;
     }
     return index_batch;
+  }
+
+  /// Serializes the `SequentialSampler` to the `archive`.
+  void save(serialize::OutputArchive& archive) const override {
+    archive.write(
+        "index",
+        torch::tensor(static_cast<int64_t>(index_), torch::kInt64),
+        /*is_buffer=*/true);
+  }
+
+  /// Deserializes the `SequentialSampler` from the `archive`.
+  void load(serialize::InputArchive& archive) override {
+    auto tensor = torch::empty(1, torch::kInt64);
+    archive.read(
+        "index",
+        tensor,
+        /*is_buffer=*/true);
+    index_ = tensor.item<int64_t>();
+  }
+
+  /// Returns the current index of the `SequentialSampler`.
+  size_t index() const noexcept {
+    return index_;
   }
 
  private:
