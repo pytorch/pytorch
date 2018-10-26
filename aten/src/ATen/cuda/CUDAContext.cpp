@@ -20,6 +20,10 @@ void set_device(int64_t device) {
   AT_CUDA_CHECK(cudaSetDevice((int)device));
 }
 
+int warp_size() {
+  return getCurrentDeviceProperties()->warpSize;
+}
+
 cudaDeviceProp* getCurrentDeviceProperties() {
   return THCState_getCurrentDeviceProperties(at::globalContext().getTHCState());
 }

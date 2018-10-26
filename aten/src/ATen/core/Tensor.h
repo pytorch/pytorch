@@ -160,11 +160,20 @@ public:
   /// Returns a `Tensor`'s layout. Defined in Type.h
   Layout layout() const noexcept;
 
-  /// Returns a `Tensor`'s dtype (`ScalarType`). Defined in Type.h
-  ScalarType dtype() const noexcept;
+  /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.h
+  caffe2::TypeMeta dtype() const noexcept;
 
   /// Returns a `Tensor`'s device.
   Device device() const;
+
+  /// Returns a `Tensor`'s device index.
+  int64_t get_device() const;
+
+  /// Returns if a `Tensor` has CUDA backend.
+  bool is_cuda() const;
+
+  /// Returns if a `Tensor` has sparse backend.
+  bool is_sparse() const;
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
@@ -195,13 +204,13 @@ public:
   // cast the data pointer to a __restrict__ pointer.
   // In order to use this, your CUDA kernel has to take a corresponding PackedTensorAccessor
   // as an argument.
-  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
-    PackedTensorAccessor<T,N,PtrTraits> packed_accessor() const& {
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
     AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
-    return PackedTensorAccessor<T,N,PtrTraits>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
+    return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
   }
-  template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits>
+  template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   PackedTensorAccessor<T,N> packed_accessor() && = delete;
 
   Tensor operator-() const;
@@ -251,7 +260,6 @@ public:
   //example
   //Tensor * add(Tensor & b);
   int64_t storage_offset() const;
-  Tensor & resize_(IntList size);
   Tensor & set_(Storage source);
   Tensor & set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
   Tensor & set_(const Tensor & source);
@@ -443,8 +451,8 @@ public:
   Tensor ceil() const;
   Tensor & ceil_();
   std::vector<Tensor> chunk(int64_t chunks, int64_t dim=0) const;
-  Tensor clamp(Scalar min, Scalar max) const;
-  Tensor & clamp_(Scalar min, Scalar max);
+  Tensor clamp(c10::optional<Scalar> min=c10::nullopt, c10::optional<Scalar> max=c10::nullopt) const;
+  Tensor & clamp_(c10::optional<Scalar> min=c10::nullopt, c10::optional<Scalar> max=c10::nullopt);
   Tensor clamp_max(Scalar max) const;
   Tensor & clamp_max_(Scalar max);
   Tensor clamp_min(Scalar min) const;
@@ -466,6 +474,7 @@ public:
   Tensor div(Scalar other) const;
   Tensor & div_(Scalar other);
   Tensor dot(const Tensor & tensor) const;
+  Tensor & resize_(IntList size);
   Tensor erf() const;
   Tensor & erf_();
   Tensor erfc() const;
@@ -493,14 +502,12 @@ public:
   Tensor & index_put_(TensorList indices, const Tensor & values);
   Tensor inverse() const;
   Tensor isclose(const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
-  bool is_cuda() const;
   bool is_distributed() const;
   bool is_floating_point() const;
   bool is_complex() const;
   bool is_nonzero() const;
   bool is_same_size(const Tensor & other) const;
   bool is_signed() const;
-  bool is_sparse() const;
   std::tuple<Tensor,Tensor> kthvalue(int64_t k, int64_t dim=-1, bool keepdim=false) const;
   Tensor log() const;
   Tensor & log_();
@@ -640,7 +647,6 @@ public:
   Tensor values() const;
   int64_t numel() const;
   std::vector<Tensor> unbind(int64_t dim=0) const;
-  int64_t get_device() const;
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(Device device, bool non_blocking=false, bool copy=false) const;

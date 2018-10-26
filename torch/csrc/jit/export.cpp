@@ -482,7 +482,7 @@ ModuleEncoder::ModuleEncoder(
     const script::Module &module,
     std::ostream& out)
     : EncoderBase(onnx_torch::OperatorExportTypes::RAW, false),
-      stream_writer_(out) {
+      stream_writer_(&out) {
   model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
   EncodeModule(model_proto_.mutable_graph(), module);
 }

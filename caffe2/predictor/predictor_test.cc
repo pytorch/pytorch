@@ -186,7 +186,7 @@ TEST_F(PredictorTest, SimpleBatchSized) {
   Predictor::TensorList output;
   (*p_)(input, &output);
   EXPECT_EQ(output.size(), 1);
-  EXPECT_EQ(output.front().dims().size(), 2);
+  EXPECT_EQ(output.front().sizes().size(), 2);
   EXPECT_EQ(output.front().dim(0), 1);
   EXPECT_EQ(output.front().dim(1), 10);
   EXPECT_NEAR(output.front().data<float>()[4], 0.1209, 1E-4);
@@ -203,7 +203,7 @@ TEST_F(PredictorTest, SimpleBatchSizedMapInput) {
   Predictor::TensorList output;
   (*p_)(input, &output);
   EXPECT_EQ(output.size(), 1);
-  EXPECT_EQ(output.front().dims().size(), 2);
+  EXPECT_EQ(output.front().sizes().size(), 2);
   EXPECT_EQ(output.front().dim(0), 1);
   EXPECT_EQ(output.front().dim(1), 10);
   EXPECT_NEAR(output.front().data<float>()[4], 0.1209, 1E-4);

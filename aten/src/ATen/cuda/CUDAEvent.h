@@ -35,7 +35,7 @@ struct AT_CUDA_API CUDAEvent {
   ~CUDAEvent() {
     try {
       if (is_created_) {
-        at::DeviceGuard device_guard{(int)device_index_};
+        at::DeviceGuard device_guard{static_cast<int16_t>(device_index_)};
         cudaEventDestroy(event_);
       }
     } catch (...) { /* No throw */ }
@@ -105,7 +105,7 @@ private:
   }
 
   void create(const int64_t device) {
-    at::DeviceGuard device_index_guard{(int)device};
+    at::DeviceGuard device_index_guard{static_cast<int16_t>(device)};
     AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
 
     is_created_ = true;
@@ -115,4 +115,3 @@ private:
 
 } // namespace cuda
 } // namespace at
-
