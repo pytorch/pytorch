@@ -833,15 +833,16 @@ def pow(g, self, exponent):
     return g.op("Pow", self, _if_scalar_type_as(g, exponent, self))
 
 
-@parse_args('v', 'f', 'f')
 def clamp(g, self, min, max):
-    # check min/max is NaN or not, and dispatch the call
-    # a != a means a == NaN
-    if min != min:
+    # min or max may be prim::None that we need to dispatch to
+    # Clip separately, as ONNX does not have None syntax
+    if min.node().kind() == "prim::None":
         return clamp_max(g, self, max)
-    elif max != max:
+    elif max.node().kind() == "prim::None":
         return clamp_min(g, self, min)
     else:
+        min = _parse_arg(min, 'f')
+        max = _parse_arg(max, 'f')
         return g.op("Clip", self, min_f=min, max_f=max)
 
 

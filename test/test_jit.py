@@ -2007,6 +2007,15 @@ class TestJit(JitTestCase):
             torch.ones(1))
 
         @torch.jit.script
+        def none_fn(x=None):
+            # type: (Optional[int]) -> Optional[int]
+            return x
+
+        self.assertExpectedGraph(none_fn.graph, "none")
+        self.assertEqual(none_fn(), None)
+        self.assertEqual(none_fn(1), 1)
+
+        @torch.jit.script
         def hints(x, a=0.5, b=10):
             # type: (Tensor, float, int) -> Tensor
             return x + a + b
@@ -4068,18 +4077,23 @@ a")
         self.checkScript(func, [torch.arange(0, 2)], optimize=True)
 
     def test_script_clamp_none(self):
-        # TODO: could not enable default/optional argument for None in JIT
-        # result from Aten native python_default_init for clamp, it is used
-        # in Aten but not in JIT, need to fix type/default arg system in ATen
         def test_script_clamp_max_none(x):
-            return torch.clamp(x, min=None, max=2)
+            return torch.clamp(x, min=2, max=None)
+
+        def test_script_clamp_max(x):
+            return torch.clamp(x, max=2)
 
         def test_script_clamp_min_none(x):
-            return torch.clamp(x, min=2, max=None)
+            return torch.clamp(x, min=None, max=2)
+
+        def test_script_clamp_min(x):
+            return torch.clamp(x, min=2)
 
         input = [torch.arange(0, 3)]
         self.checkScript(test_script_clamp_max_none, input, optimize=True)
+        self.checkScript(test_script_clamp_max, input, optimize=True)
         self.checkScript(test_script_clamp_min_none, input, optimize=True)
+        self.checkScript(test_script_clamp_min, input, optimize=True)
 
     def test_script_bool_constant(self):
         script = '''
@@ -5031,6 +5045,15 @@ a")
                 a, b = return3()
                 print(a)
                 print(b)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_script_get_device_cuda(self):
+        @torch.jit.script
+        def foo(a):
+            return a.get_device()
+
+        v = torch.randn(1, device='cuda')
+        self.assertEqual(foo(v), 0)
 
     def test_script_chunk(self):
         @torch.jit.script
@@ -7839,6 +7862,22 @@ a")
         weak_mod.weight = torch.nn.Parameter(torch.ones(5, 5) * 100)
         self.assertFalse(strong_mod(inp).allclose(weak_mod(inp)))
 
+    def test_inplace_add(self):
+
+        def foo(a, b):
+            c = a + b
+            c.add_(b)
+            return c
+        self.checkScript(foo, (torch.rand(3), torch.rand(3)))
+
+    def test_add_out(self):
+        def foo(a, b):
+            c = a + b
+            e = 2 * a
+            torch.add(c, b, out=e)
+            return e
+        self.checkScript(foo, (torch.rand(3), torch.rand(3)))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -8843,19 +8882,20 @@ class TestCustomOperators(JitTestCase):
         from torch._ops import _OpNamespace
         self.assertTrue(hasattr(torch, 'ops'))
 
-        torch.ops.__dict__.pop('aten')
+        if '_test' in torch.ops.__dict__:
+            torch.ops.__dict__.pop('_test')
 
         # Don't use `hasattr()` because it will call `__getattr__`.
-        self.assertNotIn('aten', torch.ops.__dict__)
-        torch.ops.aten
-        self.assertIn('aten', torch.ops.__dict__)
-        self.assertEqual(type(torch.ops.aten), _OpNamespace)
+        self.assertNotIn('_test', torch.ops.__dict__)
+        torch.ops._test
+        self.assertIn('_test', torch.ops.__dict__)
+        self.assertEqual(type(torch.ops._test), _OpNamespace)
 
-        self.assertNotIn('relu', torch.ops.aten.__dict__)
-        op = torch.ops.aten.relu
+        self.assertNotIn('leaky_relu', torch.ops._test.__dict__)
+        op = torch.ops._test.leaky_relu
         self.assertTrue(callable(op))
-        self.assertIn('relu', torch.ops.aten.__dict__)
-        op2 = torch.ops.aten.relu
+        self.assertIn('leaky_relu', torch.ops._test.__dict__)
+        op2 = torch.ops._test.leaky_relu
         self.assertEqual(op, op2)
 
     def test_simply_calling_an_operator(self):
@@ -8864,11 +8904,11 @@ class TestCustomOperators(JitTestCase):
         self.assertEqual(output, input.relu())
 
     def test_default_arguments_are_used(self):
-        output = torch.ops.aten.leaky_relu(torch.tensor([-1.0, 1.0]))
+        output = torch.ops._test.leaky_relu(torch.tensor([-1.0, 1.0]))
         self.assertEqual(output, torch.tensor([-0.01, 1]))
 
     def test_only_kwargs(self):
-        output = torch.ops.aten.leaky_relu(self=torch.tensor(-1.0))
+        output = torch.ops._test.leaky_relu(self=torch.tensor(-1.0))
         self.assertEqual(output, torch.tensor(-0.01))
 
     def test_passing_too_many_args(self):
@@ -8897,19 +8937,19 @@ class TestCustomOperators(JitTestCase):
             RuntimeError,
             "Argument 'self' specified both as positional and keyword argument"
         ):
-            torch.ops.aten.leaky_relu(torch.ones(5), self=torch.ones(5))
+            torch.ops._test.leaky_relu(torch.ones(5), self=torch.ones(5))
 
     def test_passing_unknown_kwargs(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Unknown keyword argument 'foo' for operator 'aten::leaky_relu'"
+            "Unknown keyword argument 'foo' for operator '_test::leaky_relu'"
         ):
-            torch.ops.aten.leaky_relu(torch.ones(5), foo=torch.ones(5))
+            torch.ops._test.leaky_relu(torch.ones(5), foo=torch.ones(5))
 
     def test_passing_and_returning_lists(self):
         # Replace with actual test once we support lists.
         a, b = torch.rand(5), torch.rand(5)
-        output = torch.ops.aten.cat([a, b])
+        output = torch.ops._test.cat([a, b])
         output_ref = torch.cat([a, b])
         self.assertEqual(output, output_ref)
 
