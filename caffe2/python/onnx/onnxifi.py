@@ -22,7 +22,7 @@ def onnxifi_caffe2_net(
         infer_shapes=False,
         debug=False):
     """
-    Transfrom the caffe2_net by collapsing ONNXIFI-runnable nodes into Onnxifi c2 ops
+    Transform the caffe2_net by collapsing ONNXIFI-runnable nodes into Onnxifi c2 ops
     """
     # Inject an fake input tensor to help popluate the shape if we
     # do not do shape inference
