@@ -58,6 +58,13 @@ TEST(PyTorchFileWriterAndReader, SaveAndLoad) {
   ASSERT_EQ(memcmp(data_ptr.get(), data2, sizeof(data2)), 0);
   ASSERT_FALSE(reader.hasNextRecord());
 
+  std::tie(data_ptr, size) = reader.getRecordWithKey(kFieldAlignment);
+  ASSERT_EQ(size, sizeof(data1));
+  ASSERT_EQ(memcmp(data_ptr.get(), data1, sizeof(data1)), 0);
+  ASSERT_TRUE(reader.hasNextRecord());
+
+  // clean up
+  std::remove(tmp_name.c_str());
 }
 
 } // namespace
