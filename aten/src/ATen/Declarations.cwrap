@@ -17,17 +17,6 @@
     - THTensor* self
 ]]
 [[
-  name: resize_
-  return: self
-  cname: resize
-  cpu_half: True
-  arguments:
-    - THTensor* self
-    - arg: IntListSize size
-      long_args: True
-    - CONSTANT {}
-]]
-[[
   name: set_
   cname: set
   cpu_half: True
