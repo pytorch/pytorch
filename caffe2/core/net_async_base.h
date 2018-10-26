@@ -20,7 +20,7 @@ C10_DECLARE_bool(caffe2_net_async_finish_chain);
 C10_DECLARE_bool(caffe2_net_async_always_schedule_child);
 C10_DECLARE_int(caffe2_net_async_max_gpus);
 C10_DECLARE_int(caffe2_net_async_max_numa_nodes);
-C10_DECLARE_int(caffe2_net_async_cpu_pool_size);
+C10_DECLARE_int(caffe2_net_async_thread_pool_size);
 C10_DECLARE_bool(caffe2_net_async_check_stream_status);
 C10_DECLARE_bool(caffe2_net_async_use_single_pool);
 C10_DECLARE_bool(caffe2_net_async_use_per_net_pools);
@@ -172,47 +172,47 @@ class AsyncNetExecutorHelper : public ExecutorHelper {
   AsyncNetBase* net_;
 };
 
-template <class TaskThreadPoolImpl>
+template <class TaskThreadPoolImpl, int device_type>
 std::shared_ptr<TaskThreadPoolBase>
-GetAsyncNetCPUThreadPool(int numa_node_id, int pool_size, bool create_new) {
-  // Note: numa_node_id = -1 corresponds to no NUMA used
+GetAsyncNetThreadPool(int device_id, int pool_size, bool create_new) {
   static std::unordered_map<
       int,
       std::unordered_map<int, std::weak_ptr<TaskThreadPoolBase>>>
       pools;
   static std::mutex pool_mutex;
 
+  const auto& device_type_name = DeviceTypeName(device_type);
+
   if (pool_size <= 0) {
-    if (FLAGS_caffe2_net_async_cpu_pool_size > 0) {
-      pool_size = FLAGS_caffe2_net_async_cpu_pool_size;
-      LOG(INFO) << "Using default CPU pool size: " << pool_size
-                << "; NUMA node id: " << numa_node_id;
+    if (FLAGS_caffe2_net_async_thread_pool_size > 0) {
+      pool_size = FLAGS_caffe2_net_async_thread_pool_size;
+      LOG(INFO) << "Using default " << device_type_name
+                << " pool size: " << pool_size << "; device id: " << device_id;
     } else {
       auto num_cores = std::thread::hardware_concurrency();
       CAFFE_ENFORCE(num_cores > 0, "Failed to get number of CPU cores");
-      LOG(INFO) << "Using estimated CPU pool size: " << num_cores
-                << "; NUMA node id: " << numa_node_id;
+      LOG(INFO) << "Using estimated " << device_type_name
+                << " pool size: " << num_cores << "; device id: " << device_id;
       pool_size = num_cores;
     }
   } else {
-    LOG(INFO) << "Using specified CPU pool size: " << pool_size
-              << "; NUMA node id: " << numa_node_id;
+    LOG(INFO) << "Using specified " << device_type_name
+              << " pool size: " << pool_size << "; device id: " << device_id;
   }
 
   if (create_new) {
-    LOG(INFO) << "Created new CPU pool, size: " << pool_size
-              << "; NUMA node id: " << numa_node_id;
-    return std::make_shared<TaskThreadPoolImpl>(pool_size, numa_node_id);
+    LOG(INFO) << "Created new " << device_type_name
+              << " pool, size: " << pool_size << "; device id: " << device_id;
+    return std::make_shared<TaskThreadPoolImpl>(pool_size, device_id);
   } else {
     std::lock_guard<std::mutex> lock(pool_mutex);
 
-    auto shared_pool = pools[numa_node_id][pool_size].lock();
+    auto shared_pool = pools[device_id][pool_size].lock();
     if (!shared_pool) {
-      LOG(INFO) << "Created shared CPU pool, size: " << pool_size
-                << "; NUMA node id: " << numa_node_id;
-      shared_pool =
-          std::make_shared<TaskThreadPoolImpl>(pool_size, numa_node_id);
-      pools[numa_node_id][pool_size] = shared_pool;
+      LOG(INFO) << "Created shared " << device_type_name
+                << " pool, size: " << pool_size << "; device id: " << device_id;
+      shared_pool = std::make_shared<TaskThreadPoolImpl>(pool_size, device_id);
+      pools[device_id][pool_size] = shared_pool;
     }
     return shared_pool;
   }
