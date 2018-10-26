@@ -93,7 +93,7 @@ static void initGlobalStreamState() {
 static void initDeviceStreamState(const int64_t device) {
   // Switches to the requested device so streams are properly associated
   // with it.
-  at::DeviceGuard device_guard{(int)device};
+  at::DeviceGuard device_guard{static_cast<int16_t>(device)};
 
   for (auto i = decltype(kStreamsPerPool){0}; i < kStreamsPerPool; ++i) {
     auto& lowpri_stream = low_priority_streams[device][i];

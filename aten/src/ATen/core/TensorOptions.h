@@ -136,7 +136,7 @@ struct CAFFE2_API TensorOptions {
   ///
   /// TODO: This function encourages bad behavior (assuming CUDA is
   /// the only device that matters).  Get rid of it / rename it.
-  C10_NODISCARD TensorOptions device_index(int32_t device_index) const noexcept {
+  C10_NODISCARD TensorOptions device_index(int16_t device_index) const noexcept {
     return device(Device::Type::CUDA, device_index);
   }
 
@@ -388,7 +388,7 @@ inline TensorOptions device(Device device) {
 
 /// Convenience function that returns a `TensorOptions` object with the
 /// `device` set to CUDA and the `device_index` set to the given one.
-inline TensorOptions device_index(int32_t device_index) {
+inline TensorOptions device_index(int16_t device_index) {
   return TensorOptions().device_index(device_index);
 }
 
