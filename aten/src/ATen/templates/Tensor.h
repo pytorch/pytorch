@@ -160,8 +160,8 @@ public:
   /// Returns a `Tensor`'s layout. Defined in Type.h
   Layout layout() const noexcept;
 
-  /// Returns a `Tensor`'s dtype (`ScalarType`). Defined in Type.h
-  ScalarType dtype() const noexcept;
+  /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.h
+  caffe2::TypeMeta dtype() const noexcept;
 
   /// Returns a `Tensor`'s device.
   Device device() const;
