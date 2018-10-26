@@ -374,6 +374,9 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   // state are still thread-safe. Used by get_grad_fn and
   // get_grad_accumulator.
   std::mutex mutex_;
+
+ private:
+  int64_t get_device_slow() const override;
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -389,6 +389,32 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_;
   }
 
+  bool is_sparse() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    auto tid = type_id();
+    // NB: At the moment, variables have the same TensorTypeId as their
+    // corresponding tensor, but if this ever changes, we need to modify this.
+    return tid == SparseCPUTensorId() || tid == SparseCUDATensorId();
+  }
+
+  bool is_cuda() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    auto tid = type_id();
+    // NB: At the moment, variables have the same TensorTypeId as their
+    // corresponding tensor, but if this ever changes, we need to modify this.
+    return tid == CUDATensorId() || tid == SparseCUDATensorId();
+  }
+
+  int64_t get_device() const {
+    // NB: This method is not virtual and tries to avoid dispatches in the common case for perf.
+    const auto tid = type_id();
+    if (tid == CUDATensorId()) {
+      // TODO: #12934 investigate caching device on TensorImpl to avoid this vdispatch.
+      return storage().device().index();
+    }
+    return get_device_slow();
+  }
+
   /**
    * If `condition_when_zero_dim` is true, and the tensor is a 1-dim, 1-size
    * tensor, reshape the tensor into a 0-dim tensor (scalar).
@@ -743,6 +769,20 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
    */
   bool is_variable() const { return is_variable_; };
+
+ private:
+  // As an optimization, get_device handles the typical CUDA Tensor case and
+  // calls get_device_slow if the tensor stores its device somewhere else
+  // (VariableImpl, SparseTensorImpl). This methods does a virtual dispatch
+  // that makes it 10-20ns slower than the special-cased CUDA Tensor case.
+  virtual int64_t get_device_slow() const {
+    AT_ERROR(
+        "get_device is not implemented for tensors with ",
+        toString(tensorTypeIdToBackend(type_id())),
+        " backend");
+  }
+
+ public:
 
   /**
    * The device type of a Tensor, e.g., DeviceType::CPU or DeviceType::CUDA.
