@@ -391,8 +391,8 @@ class TestHub(TestCase):
     @skipIfNoTorchVision
     def test_load_from_github(self):
         hub_model = hub.load(
-            'ailzhang/vision:hub',
-            'wrapper1',
+            'pytorch/vision',
+            'resnet18',
             pretrained=True)
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
 
@@ -401,12 +401,12 @@ class TestHub(TestCase):
         temp_dir = tempfile.gettempdir()
         hub.set_dir(temp_dir)
         hub_model = hub.load(
-            'ailzhang/vision:hub',
-            'wrapper1',
+            'pytorch/vision',
+            'resnet18',
             pretrained=True)
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
-        assert os.path.exists(temp_dir + '/vision_hub')
-        shutil.rmtree(temp_dir + '/vision_hub')
+        assert os.path.exists(temp_dir + '/vision_master')
+        shutil.rmtree(temp_dir + '/vision_master')
 
 
 if __name__ == '__main__':
