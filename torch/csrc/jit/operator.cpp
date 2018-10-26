@@ -36,7 +36,7 @@ struct SchemaParser {
         }
       } else {
         if (is_vararg) {
-          AT_ERROR("bad");
+          AT_ERROR("Found argument after varargs declaration");
         }
         arguments.push_back(parseArgument(
             idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only, writes));
