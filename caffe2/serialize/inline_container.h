@@ -155,6 +155,9 @@ class PyTorchStreamReader final {
   }
 
   bool hasNextRecord() const {
+    // if this is not the last record, at least we have
+    // another record header (kFieldAlignment) and
+    // the footer (kFieldAlignment)
     return cursor_ + kFieldAlignment * 2 <= file_size_;
   }
 
