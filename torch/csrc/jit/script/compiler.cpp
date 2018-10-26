@@ -578,8 +578,9 @@ c10::optional<MatchedSchema> tryMatchSchema(
 
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
-  for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
-    const auto& arg = schema.arguments()[schema_i];
+
+  auto processArgument = [&](const Argument& arg, size_t schema_i) -> Value* {
+    // const auto& arg = schema.arguments()[schema_i];
     c10::optional<NamedValue> v;
     if (arg.name() == "self" && self) {
       v = self;
@@ -607,10 +608,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
               convert_tensors_to_nums,
               type_env);
           if (!list)
-            return c10::nullopt;
+            return nullptr;
           used_args = modifiedArgs.size();
           positional_inputs.push_back(list);
-          continue;
+          return nullptr;
         }
       }
 
@@ -622,7 +623,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
         err() << "argument " << nv.name()
               << " specified twice in schema, submit a bug report!\n"
               << nv.locOr(loc);
-        return c10::nullopt;
+        return nullptr;
       }
       used_kwarg[*idx] = true;
       v = nv;
@@ -632,10 +633,14 @@ c10::optional<MatchedSchema> tryMatchSchema(
       err() << "argument " << schema.arguments()[schema_i].name()
             << " not provided.\n"
             << loc;
-      return c10::nullopt;
+      return nullptr;
     }
-    Value* positional = tryMatchArgument(
+    return tryMatchArgument(
         arg, graph, loc, *v, err, convert_tensors_to_nums, type_env);
+  };
+
+  for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
+    auto positional = processArgument(schema.arguments()[schema_i], schema_i);
     if (!positional)
       return c10::nullopt;
     positional_inputs.push_back(positional);
@@ -643,6 +648,18 @@ c10::optional<MatchedSchema> tryMatchSchema(
   // check for unused self argument
   if(self != c10::nullopt) {
     err() << "provided self argument not used in schema\n";
+  }
+
+  auto& var_arg = schema.arguments()[used_args - 1];
+  if (used_args < modifiedArgs.size() && schema.is_vararg()) {
+    // push the rest of the arguments if function takes varargs
+    for (size_t schema_i = used_args; schema_i < modifiedArgs.size(); ++schema_i) {
+      auto positional = processArgument(var_arg, schema_i);
+
+      if (!positional)
+        return c10::nullopt;
+      positional_inputs.push_back(positional);
+    }
   }
 
   // check for unused positional arguments
