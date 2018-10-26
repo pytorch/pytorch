@@ -16,7 +16,11 @@ from torch._six import inf, nan
 
 from test_torch import TestTorch
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
-    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_WITH_ROCM
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_WITH_ROCM, load_tests
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 # We cannot import TEST_CUDA and TEST_MULTIGPU from common_cuda here,
 # because if we do that, the TEST_CUDNN line from common_cuda will be executed
@@ -2107,7 +2111,7 @@ if __name__ == '__main__':
     # skip TestTorch tests
     # hide in __name__ == '__main__' because we don't want this to be run when
     # someone imports test_cuda
-    def load_tests(loader, tests, pattern):
+    def load_tests(loader, tests, pattern):  # noqa: F811
         test_suite = unittest.TestSuite()
         for test_group in tests:
             for test in test_group:

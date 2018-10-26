@@ -30,13 +30,16 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, TEST_WITH_ROCM, \
     TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, download_file, PY3, PY34, to_gpu, \
-    get_function_arglist, skipCUDAMemoryLeakCheckIf
+    get_function_arglist, skipCUDAMemoryLeakCheckIf, load_tests
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, loss_reference_fns, get_reduction, \
     get_weight, smoothl1loss_reference, kldivloss_reference, ctcloss_reference
 
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 if TEST_SCIPY:
     from scipy import stats
@@ -9177,22 +9180,6 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
     return transform_tensor, transform_ary, grid_ary
 # end TestNN.test_affine_* helpers
-
-
-num_shards = os.environ.get('TEST_NN_NUM_SHARDS', None)
-shard = os.environ.get('TEST_NN_SHARD', None)
-if num_shards is not None and shard is not None:
-    num_shards = int(num_shards)
-    shard = int(shard)
-
-    def load_tests(loader, tests, pattern):
-        test_suite = unittest.TestSuite()
-        for test_group in tests:
-            for test in test_group:
-                hash_id = int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16)
-                if hash_id % num_shards == shard:
-                    test_suite.addTest(test)
-        return test_suite
 
 
 if __name__ == '__main__':

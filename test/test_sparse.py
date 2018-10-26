@@ -5,10 +5,13 @@ import itertools
 import functools
 import random
 import unittest
-from common_utils import TestCase, run_tests, skipIfRocm
+from common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, do_test_empty_full, load_tests
 from common_cuda import TEST_CUDA
-from test_torch import TestTorch
 from numbers import Number
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 
 def cpu_only(inner):
@@ -1529,17 +1532,17 @@ class TestSparse(TestCase):
     @cpu_only  # not really, but we only really want to run this once
     def test_dtypes(self):
         all_sparse_dtypes = [dtype for dtype in torch.testing.get_all_dtypes() if dtype != torch.float16]
-        TestTorch._test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
+        do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.is_available():
-            TestTorch._test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
+            do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
 
     @cpu_only  # not really, but we only really want to run this once
     def test_empty_full(self):
         all_sparse_dtypes = [dtype for dtype in torch.testing.get_all_dtypes() if dtype != torch.float16]
-        TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
+        do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
-            TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, None)
-            TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
+            do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, None)
+            do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
 
     def test_is_sparse(self):
         x = torch.randn(3, 3)
