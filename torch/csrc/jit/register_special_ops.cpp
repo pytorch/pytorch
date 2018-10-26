@@ -27,49 +27,31 @@ RegisterOperators reg({
           return 0;
         }),
     Operator(
-        FunctionSchema(
-          Symbol::fromQualString("aten::format"),
-          {Argument("self", StringType::get()), Argument("args", StringType::get())},
-          {Argument("", StringType::get())},
-          true),
+        "aten::format(str self, *str args) -> Tensor",
         [](Node* node) {
           size_t num_inputs = node->inputs().size();
           return [num_inputs](Stack& stack) {
-            std::stringstream ss;
-
             auto format = peek(stack, 0, num_inputs).toStringRef();
             auto args = last(stack, num_inputs - 1);
-            size_t current_arg = 0;
-            bool prev_was_curly_left = false;
 
-            // Iterate over string until '{}' pair, then try to get a value for
-            // it from the varargs
-            for (char& c : format) {
-              if (prev_was_curly_left) {
-                if (c == '}') {
-                  // write arg
-                  if (current_arg >= args.size()) {
-                    AT_ERROR("Not enough args for format string!");
-                  }
-                  ss << args[current_arg];
-                  prev_was_curly_left = false;
-                  ++current_arg;
-                  continue;
-                } else {
-                  // Skipped writing the '{', so do it now
-                  ss << '{';
-                }
-              }
+            size_t base = 0;
+            std::string format_arg = "{}";
+            size_t next = format.find(format_arg, base);
+            size_t used_args = 0;
+            std::stringstream ss;
 
-              prev_was_curly_left = c == '{';
-              if (!prev_was_curly_left) {
-                ss << c;
+            while (next != std::string::npos) {
+              if (used_args == args.size()) {
+                AT_ERROR("Too few arguments for format string: ", format);
               }
+              ss << format.substr(base, next - base);
+              ss << args[used_args++];
+              base = next + format_arg.length();
+              next = format.find(format_arg, base);
             }
 
             drop(stack, num_inputs);
             stack.push_back(ss.str());
-            std::cout << std::endl;
             return 0;
           };
         })

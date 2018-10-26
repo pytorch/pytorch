@@ -21,11 +21,22 @@ struct SchemaParser {
     std::vector<Argument> arguments;
     std::vector<Argument> returns;
     bool kwarg_only = false;
+    bool is_vararg = false;
     size_t idx = 0;
     parseList('(', ',', ')', [&] {
-      if(L.nextIf('*')) {
-        kwarg_only = true;
+      if (L.nextIf('*')) {
+        auto tok = L.cur();
+        if (tok.kind == TK_IDENT) {
+          is_vararg = true;
+          arguments.push_back(parseArgument(
+              idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only));
+        } else {
+          kwarg_only = true;
+        }
       } else {
+        if (is_vararg) {
+          AT_ERROR("bad");
+        }
         arguments.push_back(parseArgument(
             idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only));
       }
@@ -41,7 +52,7 @@ struct SchemaParser {
       returns.push_back(
           parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
     }
-    return FunctionSchema { name, arguments, returns };
+    return FunctionSchema { name, arguments, returns, is_vararg };
   }
 
   std::vector<FunctionSchema> parseDeclarations() {

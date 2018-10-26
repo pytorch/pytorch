@@ -4114,7 +4114,7 @@ a")
 
     def test_format(self):
         def func(x):
-            print("{}, I'm a {}".format("Hello", "test"))
+            print("{}, I'm a {} {} {} {}".format("Hello", "test", 1, False, x))
             return x + 1
 
         x = torch.arange(4., requires_grad=True)
