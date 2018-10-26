@@ -209,10 +209,6 @@ private:
   // This list represents a topological sort
 
   Node* next_in_graph[2] = { nullptr, nullptr };
-  Node* & next() { return next_in_graph[kNextDirection]; }
-  Node* & prev() { return next_in_graph[kPrevDirection]; }
-  Node* const & next() const { return next_in_graph[kNextDirection]; }
-  Node* const & prev() const { return next_in_graph[kPrevDirection]; }
 
   const NodeKind kind_;
   std::vector<Value*> inputs_;
@@ -233,6 +229,11 @@ private:
 protected:
   TORCH_API Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
+  Node* & next() { return next_in_graph[kNextDirection]; }
+  Node* & prev() { return next_in_graph[kPrevDirection]; }
+  Node* const & next() const { return next_in_graph[kNextDirection]; }
+  Node* const & prev() const { return next_in_graph[kPrevDirection]; }
+
   NodeKind kind() const {
     return kind_;
   }
@@ -466,8 +467,10 @@ public:
 
   // Move 'this' (already in the graph) after 'n' in the topological order.
   //
-  // Tries to preserve value dependencies, so other nodes might be moved. The
-  // only guarantee is that in the new ordering, `this` is after `n`.
+  // Tries to preserve value dependencies, so other nodes might be moved. We
+  // make two gurantees about the postcondition of the node list:
+  //   - `this` is directly after `n`.
+  //   - only nodes between `this` and `n` have been moved
   //
   // Returns `false` if it's impossible to move `this` after `n` without
   // violating dependencies, otherwise executes the move and returns `true`
@@ -488,8 +491,10 @@ public:
 
   // Move 'this' (already in the graph) before 'n' in the topological order.
   //
-  // Tries to preserve value dependencies, so other nodes might be moved. The
-  // only guarantee is that in the new ordering, `this` is before `n`
+  // Tries to preserve value dependencies, so other nodes might be moved. We
+  // make two gurantees about the postcondition of the node list:
+  //   - `this` is directly before `n`.
+  //   - only nodes between `this` and `n` have been moved
   //
   // Returns `false` if it's impossible to move `this` after `n` without
   // violating dependencies, otherwise executes the move and returns `true`

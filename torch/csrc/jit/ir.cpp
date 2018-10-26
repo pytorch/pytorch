@@ -889,6 +889,10 @@ bool Node::moveAfterTopologicallyValid(Node* n) {
 }
 
 bool Node::moveBeforeTopologicallyValid(Node* n) {
+  // We have to distinguish the move side (instead of just moving after
+  // n->prev()). Consider the following example:
+  //   If the dependency graph looks like this -> n -> o then moveBefore(o) will
+  //   end up with [this, o, n], but moveAfter(n) will return false.
   return tryMove(n, MoveSide::BEFORE);
 }
 
@@ -904,11 +908,18 @@ struct WorkingSet {
   void add(Node* n) {
     nodes_.push_back(n);
     for (const auto user : getUsersSameBlock(n)) {
-      users_.insert(user);
+      users_[user]++;
     }
   }
 
   void eraseMover() {
+    auto mover = nodes_.front();
+    for (const auto user : getUsersSameBlock(mover)) {
+      // If this user node only uses the mover, we can remove it
+      if (users_[user] == 1) {
+        users_.erase(user);
+      }
+    }
     nodes_.pop_front();
   }
 
@@ -938,7 +949,7 @@ struct WorkingSet {
 
   // Does the working set consume any values produced by `n`?
   bool consumesFrom(Node* n) const {
-    const auto& users = getUsersSameBlock(n);
+    const auto users = getUsersSameBlock(n);
     return std::any_of(nodes_.begin(), nodes_.end(), [&](Node* node) {
       return users.count(node) != 0;
     });
@@ -960,6 +971,7 @@ struct WorkingSet {
           auto curNode = use.user;
           while (curNode->owningBlock() != n->owningBlock()) {
             curNode = curNode->owningBlock()->owningNode();
+            JIT_ASSERT(curNode);
           }
           users.insert(curNode);
         }
@@ -970,7 +982,8 @@ struct WorkingSet {
   }
 
   std::list<Node*> nodes_;
-  std::unordered_set<Node*> users_;
+  // users => # of working set nodes it uses
+  std::unordered_map<Node*, size_t> users_;
 };
 } // namespace
 
@@ -984,7 +997,9 @@ struct WorkingSet {
 bool Node::tryMove(Node* movePoint, MoveSide moveSide) {
   JIT_ASSERT(this->inBlockList() && movePoint->inBlockList());
   JIT_ASSERT(this->owningBlock() == movePoint->owningBlock());
-  JIT_ASSERT(this != movePoint);
+  if (this == movePoint) {
+    return true;
+  }
 
   // 1. Move from `this` toward movePoint, building up the working set of
   // dependencies

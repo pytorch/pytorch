@@ -1436,6 +1436,11 @@ struct TopoMoveTestFixture {
     createNode("l", {"a"});
     createNode("m", {}, {"l"}); // block depends on l
     createNode("n", {"m"});
+    createNode("o", {"n"});
+    createNode("p", {});
+    createNode("q", {});
+    createNode("r", {"q"});
+    createNode("s", {"q"});
 
     graph.lint();
   }
@@ -1464,21 +1469,66 @@ struct TopoMoveTestFixture {
     }
   }
 
-  bool moveAfterTopologicallyValid(
-      const std::string& toInsert,
-      const std::string& insertPoint) {
-    const auto couldMove =
-        nodes.at(toInsert)->moveAfterTopologicallyValid(nodes.at(insertPoint));
-    graph.lint();
-    return couldMove;
-  }
-
   bool moveBeforeTopologicallyValid(
       const std::string& toInsert,
       const std::string& insertPoint) {
-    const auto couldMove =
-        nodes.at(toInsert)->moveBeforeTopologicallyValid(nodes.at(insertPoint));
+    std::function<bool(Node*, Node*)> func = [](Node* toInsert,
+                                                Node* insertPoint) {
+      return toInsert->moveBeforeTopologicallyValid(insertPoint);
+    };
+    return moveWithChecks(toInsert, insertPoint, func);
+  }
+
+  bool moveAfterTopologicallyValid(
+      const std::string& toInsert,
+      const std::string& insertPoint) {
+    std::function<bool(Node*, Node*)> func = [](Node* toInsert,
+                                                Node* insertPoint) {
+      return toInsert->moveAfterTopologicallyValid(insertPoint);
+    };
+    return moveWithChecks(toInsert, insertPoint, func);
+  }
+
+  bool moveWithChecks(
+      const std::string& toInsert,
+      const std::string& insertPoint,
+      std::function<bool(Node*, Node*)> func) {
+    auto n = nodes.at(toInsert);
+    auto insert = nodes.at(insertPoint);
+    bool isAfter = n->isAfter(insert);
+
+    std::vector<Node*> originalOrdering;
+    Node* original = isAfter ? n->next() : n->prev();
+
+    auto curNode = original;
+    while (curNode != n->owningBlock()->return_node()) {
+      originalOrdering.push_back(curNode);
+      if (isAfter) {
+        curNode = curNode->next();
+      } else {
+        curNode = curNode->prev();
+      }
+    }
+
+    const auto couldMove = func(n, insert);
+    // Check the graph is okay
     graph.lint();
+
+    // If this is the picture of nodes
+    // <some nodes> ... toInsert ... <some more nodes> ... insertPoint
+    // ^----------^ check that these nodes haven't moved
+    curNode = original;
+    size_t idx = 0;
+    while (curNode != n->owningBlock()->return_node()) {
+      JIT_ASSERT(originalOrdering[idx] == curNode);
+      if (isAfter) {
+        curNode = curNode->next();
+      } else {
+        curNode = curNode->prev();
+      }
+      idx++;
+    }
+
     return couldMove;
   }
 
@@ -1486,21 +1536,11 @@ struct TopoMoveTestFixture {
       const std::string& toInsert,
       const std::string& insertPoint,
       bool after) {
-    for (auto iter = graph.block()->nodes().begin();
-         iter != graph.block()->nodes().end();
-         ++iter) {
-      if (*iter == nodes.at(insertPoint)) {
-        if (after) {
-          ++iter;
-        } else {
-          --iter;
-        }
-        JIT_ASSERT(*iter == nodes.at(toInsert));
-        return;
-      }
+    if (after) {
+      JIT_ASSERT(nodes.at(toInsert)->prev() == nodes.at(insertPoint));
+    } else {
+      JIT_ASSERT(nodes.at(toInsert)->next() == nodes.at(insertPoint));
     }
-    // should not reach here
-    JIT_ASSERT(false);
   }
 
   Graph graph;
@@ -1508,6 +1548,13 @@ struct TopoMoveTestFixture {
 };
 
 void testTopologicalMove() {
+  {
+    // Check that we are removing `this`'s deps properly when we need to split
+    // `this` and deps (see code for what the hell that means)
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("q", "s"));
+    fixture.checkPostCondition("q", "s", false);
+  }
   // Move after
   {
     // Simple move backward
@@ -1590,6 +1637,17 @@ void testTopologicalMove() {
     JIT_ASSERT(!fixture.moveBeforeTopologicallyValid("m", "l"));
     JIT_ASSERT(!fixture.moveAfterTopologicallyValid("n", "l"));
     JIT_ASSERT(!fixture.moveBeforeTopologicallyValid("l", "n"));
+  }
+
+  // Test that moveAfter(n) and moveBefore(n->next()) are not necessarily
+  // equivalent. Here, the dependency ordering is n -> o -> p.  So we can't
+  // move `n` after `o`, but we can move `n` before `p` (which pushes `o` after
+  // `p`)
+  {
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(!fixture.moveAfterTopologicallyValid("n", "o"));
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("o", "p"));
+    fixture.checkPostCondition("o", "p", false);
   }
 }
 } // namespace
