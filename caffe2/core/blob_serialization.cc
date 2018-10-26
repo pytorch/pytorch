@@ -206,10 +206,11 @@ void TensorSerializer::Serialize(
         "mutable_data() calls. This means that it makes no sense to serialize "
         "the tensor content.");
   } else {
-    LOG(ERROR)
-        << "You're trying to serialize tensor with zero numel and no dtype. "
-        << "This is a legacy behavior and it WILL BREAK. Contact PyTorch team "
-        << "for details or see D10380678. Offending blob name: " << name;
+    // Uncomment this when we try to remove this behavior entirely, see T35723601
+    //LOG(ERROR)
+    //    << "You're trying to serialize tensor with zero numel and no dtype. "
+    //    << "This is a legacy behavior and it WILL BREAK. Contact PyTorch team "
+    //    << "for details or see D10380678. Offending blob name: " << name;
   }
 
   TensorProto& proto = *proto_ptr;
