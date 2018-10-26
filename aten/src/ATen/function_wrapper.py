@@ -973,6 +973,9 @@ def create_generic(top_env, declarations):
                     'TensorOptions': 'const TensorOptions &' if const else 'TensorOptions &',
                 }
 
+            if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
+                argument['type'] = "c10::optional<{}>".format(argument['type'])
+
             if (option['inplace'] and argument['name'] == 'self') or argument.get('output', False):
                 argument['type'] = translate_map(False).get(argument['type'], argument['type'])
             else:
@@ -1188,6 +1191,7 @@ def create_generic(top_env, declarations):
             except NYIError:
                 option['skip'] = True
         output_declarations.extend(output_options)
+
     return output_declarations
 
 

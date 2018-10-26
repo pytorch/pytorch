@@ -136,6 +136,10 @@ public:
   bool isTensor() const {
     return type()->kind() == TypeKind::CompleteTensorType;
   }
+  bool isNone() const {
+    return type()->kind() == TypeKind::NoneType;
+
+  }
   size_t unique() const {
     return unique_;
   }
@@ -418,10 +422,10 @@ public:
   }
 
   // Is 'this' before 'n' in the topological order?
-  TORCH_API bool isBefore(Node * n) const;
+  TORCH_API bool isBefore(const Node * n) const;
 
   // Is 'this' after 'n' in the topological order?
-  TORCH_API bool isAfter(Node * n) const;
+  TORCH_API bool isAfter(const Node * n) const;
 
   // Insert unattached 'this' node before 'n' in the topological order.
   // Returns this (for chaining).

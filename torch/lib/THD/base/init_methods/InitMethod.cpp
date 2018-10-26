@@ -9,42 +9,45 @@
 namespace thd {
 namespace init {
 
-InitMethod::Config initTCP(std::string argument,
-                           int world_size_r,
-                           std::string group_name,
-                           int rank);
-InitMethod::Config initFile(std::string argument,
-                            int world_size_r,
-                            std::string group_name,
-                            int rank);
-InitMethod::Config initEnv(std::string argument,
-                           int world_size_r,
-                           std::string group_name,
-                           int rank);
+InitMethod::Config initTCP(
+    std::string argument,
+    int world_size_r,
+    std::string group_name,
+    int rank);
+InitMethod::Config initFile(
+    std::string argument,
+    int world_size_r,
+    std::string group_name,
+    int rank);
+InitMethod::Config initEnv(
+    std::string argument,
+    int world_size_r,
+    std::string group_name,
+    int rank);
 
-InitMethodFuncMap initMethods({
-    {"env://", ::thd::init::initEnv},
-    {"file://", ::thd::init::initFile},
-    {"tcp://", ::thd::init::initTCP}
+InitMethodFuncMap initMethods(
+    {{"env://", ::thd::init::initEnv},
+     {"file://", ::thd::init::initFile},
+     {"tcp://", ::thd::init::initTCP}
 
 #ifdef THD_INIT_EXTENSION_H
-    ,
-    /**
-     * Additional method pairs can be defined in THD_INIT_EXTENSION_H header
-     * to extend the init methods
-     */
-    THD_INIT_EXTENSION_METHODS
+     ,
+     /**
+      * Additional method pairs can be defined in THD_INIT_EXTENSION_H header
+      * to extend the init methods
+      */
+     THD_INIT_EXTENSION_METHODS
 #endif
 
-});
+    });
 
 } // namespace init
 
-InitMethod::Config getInitConfig(std::string argument,
-                                 int world_size,
-                                 std::string group_name,
-                                 int rank) {
-
+InitMethod::Config getInitConfig(
+    std::string argument,
+    int world_size,
+    std::string group_name,
+    int rank) {
   InitMethod::Config config;
 
   for (auto& methodPair : init::initMethods) {

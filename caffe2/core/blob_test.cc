@@ -1123,5 +1123,32 @@ TEST(TensorConstruction, MoveAssignmentOpTest) {
   EXPECT_EQ(*y.data<float>(), 1);
 }
 
+TEST(TensorSerialization, MistakenlySerializingDtypeUninitializedTensor) {
+  // This test preserves a legacy behavior that dtype-unitialized tensors can
+  // go through serialization. We want to kill this behavior - when it's done,
+  // remove this test
+  Blob blob;
+  Tensor* x = BlobGetMutableTensor(&blob, CPU);
+  x->Resize(0);
+  string output;
+  SerializeBlob(
+      blob,
+      "foo",
+      [&output](const string& /*blobName*/, const std::string& data) {
+        output = data;
+      });
+  BlobProto b;
+  CHECK(b.ParseFromString(output));
+  LOG(INFO) << "serialized proto: " << b.DebugString();
+
+  Blob new_blob;
+  DeserializeBlob(output, &new_blob);
+  const Tensor& new_tensor = new_blob.Get<Tensor>();
+  LOG(INFO) << "tensor " << new_tensor.DebugString();
+  EXPECT_FALSE(new_tensor.dtype_initialized());
+  EXPECT_EQ(0, new_tensor.numel());
+  EXPECT_EQ(1, new_tensor.ndim());
+}
+
 } // namespace
 } // namespace caffe2

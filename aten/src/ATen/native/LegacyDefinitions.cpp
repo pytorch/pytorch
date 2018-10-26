@@ -13,10 +13,6 @@ int64_t ndimension(const Tensor& self) {
   return self._th_ndimension();
 }
 
-Tensor & resize_(Tensor& self, IntList size) {
-  return self._th_resize_(size);
-}
-
 Tensor & set_(Tensor& self, Storage source) {
   return self._th_set_(source);
 }

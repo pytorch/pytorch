@@ -429,6 +429,8 @@ void initPythonIRBindings(PyObject * module_) {
           return "DynamicType";
         case TypeKind::TensorType:
           return "TensorType";
+        case TypeKind::OptionalType:
+          return "OptionalType";
         case TypeKind::NumberType:
           return "NumberType";
         case TypeKind::NoneType:
