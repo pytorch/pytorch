@@ -7185,15 +7185,26 @@ class TestTorch(TestCase):
         self._test_flip(self, use_cuda=False)
 
     def test_roll(self):
-        numbers = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8])
-        data = numbers.view(2, 2, 2)
-        self.assertEqual(torch.tensor([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2), data.roll(1, 0))
-        data = data.view(2, 4)
-        # roll a loop until back where started
-        self.assertEqual(data, data.roll(2, 0).roll(4, 1))
-        # multiple inverse loops
-        self.assertEqual(data, data.roll(-20, 0).roll(-40, 1))
-        self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7]),numbers.roll(1, 0))
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            numbers = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=device)
+
+            single_roll = numbers.roll(1, 0)
+            expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device)
+            self.assertEqual(single_roll, expected, "{} did not equal expected result".format(single_roll))
+
+            data = numbers.view(2, 2, 2)
+            rolled =  data.roll(1, 0)
+            expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], device=device).view(2, 2, 2)
+            self.assertEqual(expected, rolled, "{} did not equal expected result: {}".format(rolled, expected))
+
+            data = data.view(2, 4)
+            # roll a loop until back where started
+            loop_rolled = data.roll(2, 0).roll(4, 1)
+            self.assertEqual(data, loop_rolled, "{} did not equal the original: {}".format(loop_rolled, data))
+            # multiple inverse loops
+            self.assertEqual(data, data.roll(-20, 0).roll(-40, 1))
+            self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device),numbers.roll(1, 0))
 
     def test_reversed(self):
         val = torch.arange(0, 10)

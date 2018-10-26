@@ -136,26 +136,29 @@ void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
     return;
   }
 
-  int64_t roll_dim_idx = linear_index;
-  int64_t to_add = 0;
-  for (int64_t i = 0; i < total_dims; i++) {
-    if( i != roll_dim ) {
-      to_add += (roll_dim_idx / shape[i]) * shape[i];
-      roll_dim_idx %= shape[i];
-    }
+  // amount by which to increment or decrement linear_index to shift that
+  // dimensions by 1.
+  int64_t roll_dim_multiplier = 1;
+  for (int64_t i = total_dims - 1; i  > roll_dim; i--) {
+    roll_dim_multiplier *= shape[i];
   }
-  if( roll_dim_idx >= start ) {
-    roll_dim_idx = roll_dim_idx - start + to_add;
+  // roll dim idx is the index of linear_index along the rolling dimension.
+  int64_t roll_dim_idx = linear_index % (roll_dim_multiplier * shape[roll_dim]) / roll_dim_multiplier;
+  // index into the source data to find appropriate value.
+  int64_t source_idx = 0;
+  if( roll_dim_idx >= (shape[roll_dim] - start) ) {
+    source_idx = linear_index - (shift * roll_dim_multiplier);
   } else {
-    roll_dim_idx = roll_dim_idx + start + to_add;
+    source_idx = linear_index + (start * roll_dim_multiplier);
   }
-  out_tensor[linear_index] = in_tensor[roll_dim_idx];
+  out_tensor[linear_index] = in_tensor[source_idx];
 }
 
 // Roll a tensor along a dimension
-Tensor roll_cuda(const Tensor& self, int64_t shift, IntList dims) {
+Tensor roll_cuda(const Tensor& self, IntList shift, IntList dims) {
   // todo: support rolling along no or multiple dimensions as in numpy.roll.
   AT_CHECK(dims.size() == 1, "only single dimension roll currently supported");
+  AT_CHECK(shift.size() == dims.size(), "shifts and dimensions must align");
   // If the first dimension is zero, this is an empty tensor and rolls do nothing.
   // Return a clone so the caller can safely modify result, and avoid a div by
   // zero error below.
@@ -165,7 +168,7 @@ Tensor roll_cuda(const Tensor& self, int64_t shift, IntList dims) {
   const int64_t N = self.numel();
   const int64_t dim = dims[0];
   const int64_t size = self.size(dim);
-  int64_t start = (size - shift) % size;
+  int64_t start = (size - shift[0]) % size;
   // Behavior of % is different in C++ vs Python for negative numbers. This
   // corrects the difference.
   if( start < 0 ) start = start + size;
@@ -186,7 +189,7 @@ Tensor roll_cuda(const Tensor& self, int64_t shift, IntList dims) {
   AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "roll_cuda", [&] {
     roll_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
       self.data<scalar_t>(), out_tensor.data<scalar_t>(), N,
-      dim, shift, start,
+      dim, shift[0], start,
       shape_t.toType(CUDA(kLong)).data<int64_t>(), total_dims);
   });
 
