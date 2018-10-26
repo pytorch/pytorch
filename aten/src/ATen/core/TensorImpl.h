@@ -389,6 +389,32 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_;
   }
 
+  bool is_sparse() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    auto tid = type_id();
+    // NB: At the moment, variables have the same TensorTypeId as their
+    // corresponding tensor, but if this ever changes, we need to modify this.
+    return tid == SparseCPUTensorId() || tid == SparseCUDATensorId();
+  }
+
+  bool is_cuda() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    auto tid = type_id();
+    // NB: At the moment, variables have the same TensorTypeId as their
+    // corresponding tensor, but if this ever changes, we need to modify this.
+    return tid == CUDATensorId() || tid == SparseCUDATensorId();
+  }
+
+  int64_t get_device() const {
+    // NB: This method is not virtual and tries to avoid dispatches in the common case for perf.
+    const auto tid = type_id();
+    if (tid == CUDATensorId()) {
+      // TODO: #12934 investigate caching device on TensorImpl to avoid this vdispatch.
+      return storage().device().index();
+    }
+    return get_device_slow();
+  }
+
   /**
    * If `condition_when_zero_dim` is true, and the tensor is a 1-dim, 1-size
    * tensor, reshape the tensor into a 0-dim tensor (scalar).
@@ -699,6 +725,25 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
+   * Like set_sizes_and_strides but assumes contiguous strides.
+   *
+   * WARNING: This function does not check if the requested
+   * sizes/strides are in bounds for the storage that is allocated;
+   * this is the responsibility of the caller
+   *
+   * WARNING: It is NOT valid to call this method on a Variable.
+   * See Note [We regret making Variable hold a Tensor]
+   */
+  void set_sizes_contiguous(at::IntList new_size) {
+    AT_ASSERT(!is_variable());
+    auto old_dim = sizes_.size();
+    sizes_ = new_size.vec();
+
+    update_to_contiguous_strides(old_dim);
+    refresh_numel();
+  }
+
+  /**
    * Set the sizes and strides of a tensor.
    *
    * WARNING: This function does not check if the requested
@@ -718,13 +763,31 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         new_stride.size(),
         ")");
     auto old_dim = sizes_.size();
+    auto new_dim = new_size.size();
     sizes_ = new_size.vec();
-    if (old_dim != sizes_.size()) {
-      strides_.reset(new int64_t[sizes_.size()]);
+    if (old_dim != new_dim) {
+      strides_.reset(new int64_t[new_dim]);
     }
-    for (size_t i = 0; i < sizes_.size(); i++) {
-      strides_[i] = new_stride[i];
+
+    if (new_dim > 0) {
+      for (size_t dim = new_dim - 1; ; dim--) {
+        if (new_stride[dim] >= 0) {
+          strides_[dim] = new_stride[dim];
+        } else {
+          // XXX: This behavior is surprising and may need to be removed to
+          // support negative strides. Some pytorch functions rely on it:
+          // for example, torch.cat (run TestTorch.test_cat_empty).
+          if (dim == new_dim - 1) {
+            strides_[dim] = 1;
+          } else {
+            // Keep stride monotonically increasing to match NumPy.
+            strides_[dim] = std::max<int64_t>(sizes_[dim + 1], 1) * strides_[dim + 1];
+          }
+        }
+        if (dim == 0) break;
+      }
     }
+
     refresh_numel();
     refresh_contiguous();
   }
@@ -743,6 +806,20 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
    */
   bool is_variable() const { return is_variable_; };
+
+ private:
+  // As an optimization, get_device handles the typical CUDA Tensor case and
+  // calls get_device_slow if the tensor stores its device somewhere else
+  // (VariableImpl, SparseTensorImpl). This methods does a virtual dispatch
+  // that makes it 10-20ns slower than the special-cased CUDA Tensor case.
+  virtual int64_t get_device_slow() const {
+    AT_ERROR(
+        "get_device is not implemented for tensors with ",
+        toString(tensorTypeIdToBackend(type_id())),
+        " backend");
+  }
+
+ public:
 
   /**
    * The device type of a Tensor, e.g., DeviceType::CPU or DeviceType::CUDA.
@@ -816,6 +893,12 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
             "but src tensor was ", src.device_type());
         data_type_.copy()(src.data(), raw_mutable_data(data_type_), numel());
       } else {
+        // The following copy uses the current (thread local) stream for copying
+        // and also takes the current GPU id previously set through CUDA API
+        // as we don't invoke SwitchToDevice anywhere
+        // TODO: this logic is overly complex and can be replaced with simple
+        // dispatch based on two device types
+        //
         // We'll need to use a non-CPU context to perform the copy if
         // one of the context is not CPU since only non-CPU context
         // knows how to copy between CPU and that context
