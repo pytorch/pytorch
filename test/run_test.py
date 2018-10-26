@@ -3,6 +3,7 @@
 from __future__ import print_function
 
 import argparse
+from datetime import datetime
 import os
 import shlex
 import shutil
@@ -13,7 +14,7 @@ import tempfile
 
 import torch
 from torch.utils import cpp_extension
-from common import TEST_WITH_ROCM
+from common_utils import TEST_WITH_ROCM
 import torch.distributed as dist
 
 TESTS = [
@@ -25,6 +26,7 @@ TESTS = [
     'dataloader',
     'distributed',
     'distributions',
+    'expecttest',
     'indexing',
     'jit',
     'multiprocessing',
@@ -368,7 +370,8 @@ def main():
         test_name = 'test_{}'.format(test)
         test_module = parse_test_module(test)
 
-        print_to_stderr('Running {} ...'.format(test_name))
+        # Printing the date here can help diagnose which tests are slow
+        print_to_stderr('Running {} ... [{}]'.format(test_name, datetime.now()))
         handler = CUSTOM_HANDLERS.get(test_module, run_test)
         return_code = handler(python, test_name, test_directory, options)
         assert isinstance(return_code, int) and not isinstance(

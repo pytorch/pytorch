@@ -1,4 +1,4 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
 #include <c10d/Def.hpp>
 #include <c10d/FileStore.hpp>
@@ -33,8 +33,7 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* c10d_init(PyObject* _unused) {
-  auto c10d_module =
-      THPObjectPtr(PyImport_ImportModule("torch.distributed"));
+  auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
     throw python_error();
   }
@@ -318,7 +317,8 @@ PyObject* c10d_init(PyObject* _unused) {
         } else if (!interface.empty()) {
           attr.iface = interface;
         } else {
-          // Neither argument is specified; Gloo itself will use the hostname
+          // Neither argument is specified; Gloo itself will use the
+          // hostname
           // Nothing specified, default to something useful
         }
         return ::gloo::transport::tcp::CreateDevice(attr);
@@ -381,10 +381,11 @@ PyObject* c10d_init(PyObject* _unused) {
   module.def(
       "_dist_broadcast_coalesced",
       &::c10d::distBroadcastCoalesced,
+      py::arg("process_group"),
       py::arg("tensors"),
       py::arg("buffer_size"),
-      py::arg("process_group"),
       py::call_guard<py::gil_scoped_release>());
+
   module.def(
       "_sync_params",
       &::c10d::syncParams,
@@ -394,6 +395,22 @@ PyObject* c10d_init(PyObject* _unused) {
       py::arg("devices"),
       py::arg("broadcast_bucket_size"),
       py::arg("broadcast_buffers"),
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_queue_reduction",
+      &::c10d::queueReduction,
+      py::arg("process_group"),
+      py::arg("grads_batch"),
+      py::arg("devices"),
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_sync_reduction",
+      &::c10d::syncReduction,
+      py::arg("reduction_work"),
+      py::arg("grads_batch"),
+      py::arg("grads_batch_coalesced"),
       py::call_guard<py::gil_scoped_release>());
 #endif
 

@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/graph_node_list.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/resource_guard.h"
+#include "torch/csrc/jit/scope.h"
 #include "torch/csrc/jit/source_location.h"
 #include "torch/csrc/jit/source_range.h"
 #include "torch/csrc/jit/constants.h"
@@ -97,49 +98,6 @@ struct Use {
 // If you are looking for "use induced by an input", it's best to use
 // findUseForInput() to get it.
 
-
-// Scope is a node of a trie that represents the tree of nested scopes.
-// Individual scopes are pushed and popped from Graph, which holds a
-// pointer to the current scope. Each Node in Graph holds a pointer
-// to the scope that was current when the node was created.
-// The trie never needs to shrink, it only grows until it is disposed
-// of when Graph is deallocated. Hence, pointers to scopes held by nodes
-// will always be valid as long as Graph is alive.
-struct Scope {
-private:
-  Scope* parent_;
-  Symbol name_;
-  std::vector<std::unique_ptr<Scope> > children_;
-public:
-  Scope() {
-    name_ = Symbol::scope("");
-    parent_ = nullptr;
-  }
-  Scope(Scope* parent, Symbol name) {
-    name_ = name;
-    parent_ = parent;
-  }
-  TORCH_API Scope* push(Symbol name);
-
-  Scope* parent() {
-    if (parent_ == nullptr) {
-      throw std::runtime_error("Cannot get parent from Scope with no parent");
-    }
-    return parent_;
-  }
-  bool isRoot() {
-    return parent_ == nullptr;
-  }
-
-  TORCH_API Scope* getRoot();
-
-  Symbol name() {
-    return name_;
-  }
-
-  TORCH_API std::string namesFromRoot(const std::string& separator="/");
-};
-
 // the list types are intentionally simple, but we type-def
 // them here so if we need to change them, refactoring will be easier
 using node_list = std::vector<Node*>;
@@ -149,6 +107,7 @@ using pyobj_list = std::vector<THPObjectPtr>;
 template<typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
+using topo_position_t = int64_t;
 
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);
@@ -224,6 +183,7 @@ public:
   TORCH_API Value* copyMetadata(Value * from);
 };
 
+
 struct Node : public Attributes<Node> {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
@@ -258,13 +218,14 @@ private:
   Graph* graph_;
   Block* owning_block_;
   std::shared_ptr<SourceLocation> source_location_;
-  Scope* scope_;
+  ScopePtr scope_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially change
   // the schema.
   // note: mutable because schema_ is effectively a cache
   mutable const FunctionSchema* schema_;
+  topo_position_t topo_position_;
 protected:
   TORCH_API Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
@@ -290,14 +251,14 @@ public:
   const Block * owningBlock() const {
     return owning_block_;
   }
-  Scope* scope() {
+  ScopePtr scope() {
     return scope_;
   }
-  void setScope(Scope* scope) {
+  void setScope(ScopePtr scope) {
     scope_ = scope;
   }
   std::string scopeName() const {
-    if (scope_ == nullptr) {
+    if (!scope_) {
       return "";
     }
     return scope_->namesFromRoot();
@@ -456,6 +417,12 @@ public:
     return {blocks_.data(), blocks_.size()};
   }
 
+  // Is 'this' before 'n' in the topological order?
+  TORCH_API bool isBefore(Node * n) const;
+
+  // Is 'this' after 'n' in the topological order?
+  TORCH_API bool isAfter(Node * n) const;
+
   // Insert unattached 'this' node before 'n' in the topological order.
   // Returns this (for chaining).
   //
@@ -594,6 +561,9 @@ private:
 
   TORCH_API void removeFromList();
   TORCH_API void lint() const;
+
+  void assignTopoPosition();
+
 protected:
   // subclasses must override
   // this function is used by createClone to initialize a new version
@@ -615,7 +585,7 @@ struct Block {
   friend struct Node;
   friend struct Graph;
   TH_DISALLOW_COPY_AND_ASSIGN(Block);
-  Block(Graph * graph_, Node * node_);
+  TORCH_API Block(Graph * graph_, Node * node_);
   at::ArrayRef<Value*> inputs() {
     return input_->outputs();
   }
@@ -694,6 +664,8 @@ struct Block {
   // in src to look up its corresponding value
   TORCH_API void cloneFrom(Block * src, std::function<Value*(Value*)> value_map);
 private:
+  void reIndexTopology();
+
   // should only be called in the constructor
   Node* initOutput(Node* p) {
     p->next() = p;
@@ -734,8 +706,7 @@ private:
 
   std::unordered_map<std::string, Value*> unique_names_;
 
-  std::shared_ptr<Scope> scope_root_;
-  Scope * current_scope_;
+  ScopePtr current_scope_;
 
   Block* const block_;
   // when insertNode() is called, the node is inserted before this node
@@ -744,14 +715,13 @@ private:
 
 public:
 
-  Graph(std::shared_ptr<Scope> scope_root)
+  Graph(ScopePtr scope_root)
   : next_unique_(0)
-  , scope_root_(std::move(scope_root))
-  , current_scope_(scope_root_.get())
+  , current_scope_(std::move(scope_root))
   , block_(new Block(this, nullptr))
   , insert_before_(return_node()) {}
 
-  Graph() : Graph(std::make_shared<Scope>()) {}
+  Graph() : Graph(c10::make_intrusive<Scope>()) {}
 
   at::ArrayRef<Value*> inputs() {
     return block_->inputs();
@@ -786,17 +756,11 @@ public:
   void pop_scope() {
     current_scope_ = current_scope_->parent();
   }
-  Scope * current_scope() {
+  ScopePtr current_scope() {
     return current_scope_;
   }
-  void set_current_scope(Scope* scope) {
-    if (scope->getRoot() != scope_root_.get()) {
-      throw std::runtime_error("trying to set a scope as current that does not belong to the Graph's scope trie");
-    }
+  void set_current_scope(ScopePtr scope) {
     current_scope_ = scope;
-  }
-  std::shared_ptr<Scope> scope_root() {
-    return scope_root_;
   }
   Value * addInput(std::string name="") {
     return block_->addInput(std::move(name));
@@ -826,8 +790,10 @@ public:
   TORCH_API Node* createFusionGroup(int device);
   TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
   TORCH_API Node* createTupleUnpack(Value * v);
+  TORCH_API Node* createTupleIndex(Value * tup, int64_t index);
+  TORCH_API Node* createTupleSlice(Value * tup, int64_t beg, int64_t end);
   TORCH_API Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values);
-  TORCH_API Node * createListUnpack(Value *v, size_t size);
+  TORCH_API Node* createListUnpack(Value *v, size_t size);
   TORCH_API Node* createNumToTensor(Value* value);
   TORCH_API Node* createBoolToTensor(Value* value);
   TORCH_API Node* createTensorToNum(const TypePtr& type, Value* value);
@@ -848,7 +814,8 @@ public:
 
   TORCH_API Value* insertConstant(
       IValue val,
-      c10::optional<SourceRange> loc = c10::nullopt);
+      c10::optional<SourceRange> loc = c10::nullopt,
+      c10::optional<ScopePtr> scope = c10::nullopt);
 
   TORCH_API Value* insertDummyWorld();
 
@@ -936,7 +903,7 @@ private:
 };
 
 struct WithCurrentScope : public ResourceGuard {
-  WithCurrentScope(Graph & g, Scope* scope)
+  WithCurrentScope(Graph & g, ScopePtr scope)
   : ResourceGuard([&g, this]() {
     g.set_current_scope(prev_scope);
   })
@@ -944,7 +911,7 @@ struct WithCurrentScope : public ResourceGuard {
     g.set_current_scope(scope);
   }
 private:
-  Scope * prev_scope;
+  ScopePtr prev_scope;
 };
 
 inline Value::Value(Node * node_, size_t offset_)
@@ -970,16 +937,6 @@ inline Graph * Value::owningGraph() {
 
 inline const Graph * Value::owningGraph() const {
   return node()->owningGraph();
-}
-
-inline Block::Block(Graph* graph_, Node* node_)
-    : graph_(graph_),
-      output_(initOutput(graph_->create(prim::Return, 0))),
-      input_(graph_->create(prim::Param, 0)),
-      owning_node_(node_) {
-  graph_->all_blocks.emplace(this);
-  output_->owning_block_ = this;
-  input_->owning_block_ = this;
 }
 
 // Helper macros for constructing switch statements over Node types

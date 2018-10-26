@@ -37,16 +37,17 @@ class StringSerializer : public BlobSerializerBase {
    * otherwise this function produces a fatal error.
    */
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(blob.IsType<std::string>());
+    CAFFE_ENFORCE(typeMeta.Match<std::string>());
 
     BlobProto blob_proto;
     blob_proto.set_name(name);
     blob_proto.set_type("std::string");
-    blob_proto.set_content(blob.template Get<std::string>());
-    acceptor(name, blob_proto.SerializeAsString());
+    blob_proto.set_content(*static_cast<const std::string*>(pointer));
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 };
 
@@ -61,48 +62,66 @@ class StringDeserializer : public BlobDeserializerBase {
   }
 };
 
-// The blob serialization member function implementation.
+namespace {
 void SerializeBlob(
-    const Blob& blob,
+    const void* pointer,
+    TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
     int chunk_size) {
   std::unique_ptr<BlobSerializerBase> serializer(
-      CreateSerializer(blob.meta().id()));
-  CAFFE_ENFORCE(serializer, "No known serializer for ", blob.meta().name());
-  serializer->SerializeWithChunkSize(blob, name, acceptor, chunk_size);
+      CreateSerializer(typeMeta.id()));
+  CAFFE_ENFORCE(serializer, "No known serializer for ", typeMeta.name());
+  serializer->SerializeWithChunkSize(
+      pointer, typeMeta, name, acceptor, chunk_size);
 }
 
-// The blob serialization member function implementation.
-std::string SerializeBlob(const Blob& blob, const string& name) {
+std::string
+SerializeBlob(const void* pointer, TypeMeta typeMeta, const string& name) {
   std::string data;
   BlobSerializerBase::SerializationAcceptor acceptor =
       [&data](const std::string&, const std::string& blob_str) {
         DCHECK(data.empty()); // should be called once with kNoChunking
         data = blob_str;
       };
-  SerializeBlob(blob, name, acceptor, kNoChunking);
+  SerializeBlob(pointer, typeMeta, name, acceptor, kNoChunking);
   return data;
 }
+} // namespace
 
-void TensorSerializer::Serialize(
-    const Blob& blob,
-    const string& name,
-    BlobSerializerBase::SerializationAcceptor acceptor) {
-  this->SerializeWithChunkSize(blob, name, acceptor, kDefaultChunkSize);
-}
-
-void TensorSerializer::SerializeWithChunkSize(
+void SerializeBlob(
     const Blob& blob,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
     int chunk_size) {
-  CAFFE_ENFORCE(blob.IsType<Tensor>());
-  const auto& tensor = blob.template Get<Tensor>();
+  SerializeBlob(blob.GetRaw(), blob.meta(), name, acceptor, chunk_size);
+}
+
+std::string SerializeBlob(const Blob& blob, const string& name) {
+  return SerializeBlob(blob.GetRaw(), blob.meta(), name);
+}
+
+void TensorSerializer::Serialize(
+    const void* pointer,
+    TypeMeta typeMeta,
+    const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor) {
+  this->SerializeWithChunkSize(
+      pointer, typeMeta, name, acceptor, kDefaultChunkSize);
+}
+
+void TensorSerializer::SerializeWithChunkSize(
+    const void* pointer,
+    TypeMeta typeMeta,
+    const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor,
+    int chunk_size) {
+  CAFFE_ENFORCE(typeMeta.Match<Tensor>());
+  const auto& tensor = *static_cast<const Tensor*>(pointer);
   if (chunk_size == kNoChunking) {
     chunk_size = tensor.size() + 1; // to account for empty tensors
   } else if (chunk_size == kDefaultChunkSize) {
-    chunk_size = c10::FLAGS_caffe2_tensor_chunk_size;
+    chunk_size = FLAGS_caffe2_tensor_chunk_size;
   }
 
   auto processChunk = [&](int64_t chunkStart) {
@@ -115,7 +134,7 @@ void TensorSerializer::SerializeWithChunkSize(
         tensor, name, blob_proto.mutable_tensor(), chunkStart, chunk_size);
     acceptor(
         c10::str(name, kChunkIdSeparator, chunkStart / chunk_size),
-        blob_proto.SerializeAsString());
+        SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   };
 
 #ifndef __ANDROID__
@@ -129,7 +148,7 @@ void TensorSerializer::SerializeWithChunkSize(
     }
   };
   if (tensor.size() > chunk_size) {
-    for (int i = 0; i < c10::FLAGS_caffe2_max_tensor_serializer_threads; ++i) {
+    for (int i = 0; i < FLAGS_caffe2_max_tensor_serializer_threads; ++i) {
       futures.emplace_back(std::async(std::launch::async, task));
     }
   }
@@ -268,7 +287,7 @@ void TensorSerializer::Serialize(
           uniq_ptr.get());
       break;
     case TensorProto_DataType_FLOAT16: {
-      if (c10::FLAGS_caffe2_serialize_fp16_as_bytes) {
+      if (FLAGS_caffe2_serialize_fp16_as_bytes) {
         const int kValue = 1;
         CAFFE_ENFORCE_EQ(
             reinterpret_cast<const char*>(&kValue)[0],
@@ -301,12 +320,10 @@ void TensorSerializer::Serialize(
       break;
     case TensorProto_DataType_UNDEFINED: {
       proto.mutable_string_data()->Reserve(chunkSize);
-      Blob temp_blob;
       const char* raw_data = static_cast<const char*>(input.raw_data());
       for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
-        temp_blob.ShareExternal(
-            const_cast<char*>(raw_data + i * input.itemsize()), input.meta());
-        proto.add_string_data(SerializeBlob(temp_blob, ""));
+        proto.add_string_data(
+            SerializeBlob(raw_data + i * input.itemsize(), input.meta(), ""));
       }
     } break;
       // Note: we intentially do not provide "default:" so if any new data types
@@ -520,10 +537,30 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
                 (i + chunkBegin) * temp_blob.meta().itemsize(),
             1);
       }
-    }
+    } break;
+      // Note: we intentially do not provide "default:" so if any new data types
   }
   context->FinishDeviceComputation();
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// Serialization Helpers
+////////////////////////////////////////////////////////////////////////////////
+
+std::string SerializeAsString_EnforceCheck(
+    const google::protobuf::MessageLite& msg,
+    const char* error_location) {
+  std::string serialize_output;
+  bool result = msg.SerializeToString(&serialize_output);
+  if (!error_location) {
+    CAFFE_ENFORCE(result, "protobuf::SerializeToString failed");
+  } else {
+    CAFFE_ENFORCE(result,
+        "protobuf::SerializeToString failed for ", error_location);
+  }
+  return serialize_output;
+}
+
 
 namespace {
 // Serialize Tensor

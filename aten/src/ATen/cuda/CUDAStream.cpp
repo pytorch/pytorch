@@ -1,9 +1,9 @@
 #include "ATen/cuda/CUDAStream.h"
+#include "ATen/DeviceGuard.h"
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/CUDAEvent.h"
 #include "ATen/cuda/Exceptions.h"
-#include "ATen/DeviceGuard.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 
 #include <mutex>
 #include <atomic>
@@ -21,7 +21,7 @@ struct CUDAStreamInternals {
     if (stream) cudaStreamDestroy(stream);
   }
 
-  int64_t device = -1; 
+  int64_t device = -1;
   cudaStream_t stream = nullptr;
 };
 
@@ -48,12 +48,12 @@ static std::vector<CUDAStreamInternals> default_streams;
 
 // Non-default streams
 // Note: the number of CUDA devices is determined at run time,
-// and the low and high priority pools are lazily initialized 
+// and the low and high priority pools are lazily initialized
 // when the first stream is requested for a device.
 // The device flags track the initialization of each device, while
-// the low and high priority counters track, for each device, the next stream 
+// the low and high priority counters track, for each device, the next stream
 // in the pool to be returned when a stream is requested (round-robin fashion
-// , see the note in CUDAStream.h). 
+// , see the note in CUDAStream.h).
 static std::deque<std::once_flag> device_flags;
 static std::deque<std::atomic<uint32_t>> low_priority_counters;
 static std::deque<std::atomic<uint32_t>> high_priority_counters;
@@ -64,7 +64,7 @@ static std::vector<std::array<CUDAStreamInternals, kStreamsPerPool>> high_priori
 static thread_local CUDAStreamInternals** current_streams = nullptr;
 
 // Populates global values and creates a default stream for each device.
-// Note: the default stream on each device is signified by a nullptr, 
+// Note: the default stream on each device is signified by a nullptr,
 // and so is not created as usual.
 // In particular, we don't need to switch devices when creating the
 // streams.
@@ -94,14 +94,14 @@ static void initDeviceStreamState(const int64_t device) {
   // Switches to the requested device so streams are properly associated
   // with it.
   at::DeviceGuard device_guard{(int)device};
-  
+
   for (auto i = decltype(kStreamsPerPool){0}; i < kStreamsPerPool; ++i) {
     auto& lowpri_stream = low_priority_streams[device][i];
     auto& hipri_stream = high_priority_streams[device][i];
-    
+
     lowpri_stream.device = device;
     hipri_stream.device = device;
-    
+
     #ifndef __HIP_PLATFORM_HCC__
       AT_CUDA_CHECK(cudaStreamCreateWithPriority(
         &lowpri_stream.stream
@@ -162,13 +162,13 @@ static uint32_t get_idx(std::atomic<uint32_t> &counter) {
 // Returns a stream from the requested pool
 // Note: when called the first time on a device, this will create the
 // stream pools for that device.
-CUDAStreamInternals* CUDAStream_createStream(
+CUDAStreamInternals* CUDAStream_getStreamFromPool(
   const bool isHighPriority
 , int64_t device) {
   initCUDAStreamsOnce();
   if (device == -1) device = current_device();
   check_gpu(device);
-  
+
   // Initializes the stream pools (once)
   std::call_once(device_flags[device], initDeviceStreamState, device);
 

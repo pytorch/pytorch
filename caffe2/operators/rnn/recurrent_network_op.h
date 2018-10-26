@@ -76,7 +76,7 @@ void applyOffsetAlias(
   auto* dst =
       BlobGetMutableTensor(ws->GetBlob(oc.dst), Context::GetDeviceType());
   auto timestep = src->size() / src->dim(0);
-  auto dims = src->dims().vec();
+  auto dims = src->sizes().vec();
   const int32_t startDstTimestep =
       oc.offset >= 0 ? oc.offset : src->dim(0) + oc.offset;
   const int32_t numDstTimesteps = src->dim(0) - startDstTimestep;
@@ -86,8 +86,7 @@ void applyOffsetAlias(
   dst->Resize(dims);
   CAFFE_ENFORCE(timestep == dst->size() / numDstTimesteps, "Invalid offset");
   dst->ShareExternalPointer(
-      src->template mutable_data<T>() + startDstTimestep * timestep,
-      dst->size());
+      src->template mutable_data<T>() + startDstTimestep * timestep);
 }
 
 template <typename T, class Context>
@@ -198,7 +197,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
     detail::AddApplyLinkOps(
         links_, timestep_, operator_def.device_option(), &stepNetDef_);
 
-    if (c10::FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
+    if (FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
       VLOG(1) << "Use RecurrentNetworkExecutor";
       auto recurrent_map = detail::GetRecurrentMapping(links_, false /* backward */);
       rnnExecutor_ =
@@ -434,7 +433,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         links_, timestep_, operator_def.device_option(), &stepNetDef_);
     AddParamGradientAccumulationOps(operator_def);
 
-    if (c10::FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
+    if (FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
       InitializeExecutor(operator_def);
     }
   }
@@ -905,7 +904,7 @@ class RNNApplyLinkOp : public Operator<Context> {
     const int64_t externalTimestepSize = external.size() / external.dim(0);
     auto* externalData = external_out->template mutable_data<T>() +
         (t + offset_) * externalTimestepSize;
-    auto internalDims = external_out->dims().vec();
+    auto internalDims = external_out->sizes().vec();
     internalDims[0] = window_;
 
     internal_out->Resize(internalDims);

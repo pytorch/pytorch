@@ -30,8 +30,7 @@ def set_declaration_defaults(declaration):
     if 'backends' not in declaration:
         declaration['backends'] = ['CPU', 'CUDA']
     if 'api_name' not in declaration:
-        declaration['api_name'] = (declaration['python_name']
-                                   if 'python_name' in declaration else declaration['name'])
+        declaration['api_name'] = declaration['name']
     # Simulate multiple dispatch, even if it's not necessary
     if 'options' not in declaration:
         declaration['options'] = [{'arguments': declaration['arguments']}]

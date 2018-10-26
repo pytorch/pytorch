@@ -5,18 +5,57 @@
 
 namespace torch { namespace jit {
 
+namespace {
+
 // operators where we expect to find tuples as inputs/outputs
-// this is to assert we are only  doing modifications when we know
+// this is to assert we are only doing modifications when we know
 // we can flatten tuples
 std::unordered_set<Symbol> white_list = {
   prim::If,
   prim::Loop,
   prim::TupleUnpack,
   prim::TupleConstruct,
+  prim::TupleIndex,
+  prim::TupleSlice,
   prim::Param,
   prim::Return,
 };
 
+void removeTupleNodes(Node *n, bool must_remove_tuples) {
+  if (n->kind() != prim::TupleUnpack && n->kind() != prim::TupleIndex
+      && n->kind() != prim::TupleSlice) {
+    return;
+  }
+  auto construct = n->input()->node();
+  if (construct->kind() != prim::TupleConstruct) {
+    if (must_remove_tuples) {
+      AT_ERROR(n->kind().toQualString(), " not matched to tuple construct");
+    }
+    return;
+  }
+  if (n->kind() == prim::TupleUnpack) {
+    for(size_t i = 0; i < n->outputs().size(); ++i) {
+      n->outputs()[i]->replaceAllUsesWith(construct->inputs().at(i));
+    }
+  } else if (n->kind() == prim::TupleIndex) {
+    auto idx = n->i(attr::index);
+    n->output()->replaceAllUsesWith(construct->inputs().at(idx));
+  } else if (n->kind() == prim::TupleSlice) {
+    std::vector<Value*> values;
+    int64_t beg = n->i(attr::beg);
+    int64_t end = n->i(attr::end);
+    for (int64_t i = beg; i < end; i += 1) {
+      values.push_back(construct->inputs().at(i));
+    }
+    auto graph = n->owningGraph();
+    auto tuple_out = graph->createTuple(values);
+    WithInsertPoint insert(n);
+    graph->insertNode(tuple_out);
+    n->output()->replaceAllUsesWith(tuple_out->output());
+  }
+}
+
+} //anonymous namespace
 
 static void LowerAllTuples(Block* block);
 
@@ -28,18 +67,16 @@ static void VisitNode(Node* n, Node* insert_point) {
     return;
   }
 
-  // make any TupleUnpack dead by undoing TupleUnpack(TupleConstruct())
-  if(n->kind() == prim::TupleUnpack) {
-    auto construct = n->input()->node();
-    // note: removing these asserts changes this pass from a complete lowering
-    // pass to one that removes tuples when possible. When tuples are first-class
-    // in the interpreter, we should still run this pass to remove extraneous uses
-    JIT_ASSERTM(construct->kind() == prim::TupleConstruct, "tuple unpack not matched to tuple construct");
-    for(size_t i = 0; i < n->outputs().size(); ++i) {
-      n->outputs()[i]->replaceAllUsesWith(construct->inputs()[i]);
-    }
-    return;
+  // note: changing the second argument to false changes this pass from a complete lowering
+  // pass to one that removes tuples when possible. When tuples are first-class
+  // in the interpreter, we should still run this pass to remove extraneous uses
+
+  if(n->kind() == prim::TupleUnpack || n->kind() == prim::TupleIndex ||
+      n->kind() == prim::TupleSlice) {
+     removeTupleNodes(n, /*must_remove_tuples*/true);
+     return;
   }
+
   // flatten the input list  op(a, tup, b) --> op(a, t0, t1, b)
   for(size_t i = 0; i < n->inputs().size();) {
     auto input = n->inputs()[i];
@@ -126,15 +163,7 @@ void LowerAllTuples(std::shared_ptr<Graph>& graph) {
 
 static void LowerSimpleTuples(Block* block) {
   for(auto n : block->nodes()) {
-    // make any TupleUnpack dead by undoing TupleUnpack(TupleConstruct())
-    if(n->kind() == prim::TupleUnpack) {
-      auto construct = n->input()->node();
-      if(construct->kind() == prim::TupleConstruct) {
-        for(size_t i = 0; i < n->outputs().size(); ++i) {
-          n->outputs()[i]->replaceAllUsesWith(construct->inputs()[i]);
-        }
-      }
-    }
+    removeTupleNodes(n, /*must_remove_tuples*/false);
     for(auto b : n->blocks()) {
       LowerSimpleTuples(b);
     }

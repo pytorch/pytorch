@@ -1,7 +1,6 @@
 #pragma once
 
-#include "ATen/core/Device.h"
-#include "ATen/core/Error.h"
+#include "c10/Device.h"
 #include "ATen/core/Layout.h"
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
@@ -10,6 +9,7 @@
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/core/TensorImpl.h"
 #include "ATen/core/UndefinedTensorImpl.h"
+#include "c10/util/Exception.h"
 #include "c10/util/Optional.h"
 
 namespace at {
@@ -404,6 +404,7 @@ public:
   Tensor & log_normal_(double mean=1, double std=2, Generator * generator=nullptr);
   Tensor & exponential_(double lambd=1, Generator * generator=nullptr);
   Tensor & geometric_(double p, Generator * generator=nullptr);
+  Tensor alias() const;
   Tensor abs() const;
   Tensor & abs_();
   Tensor acos() const;
@@ -621,17 +622,22 @@ public:
   Tensor & sub_(Scalar other, Scalar alpha=1);
   Tensor addmm(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1);
-  Tensor & sparse_resize_(IntList size, int64_t sparseDims, int64_t denseDims);
-  Tensor & sparse_resize_and_clear_(IntList size, int64_t sparseDims, int64_t denseDims);
+  Tensor & sparse_resize_(IntList size, int64_t sparse_dim, int64_t dense_dim);
+  Tensor & sparse_resize_and_clear_(IntList size, int64_t sparse_dim, int64_t dense_dim);
   Tensor sparse_mask(SparseTensorRef mask) const;
   Tensor to_dense() const;
-  int64_t _sparseDims() const;
-  int64_t _denseDims() const;
+  int64_t sparse_dim() const;
+  int64_t _dimI() const;
+  int64_t dense_dim() const;
+  int64_t _dimV() const;
   int64_t _nnz() const;
   Tensor coalesce() const;
   bool is_coalesced() const;
   Tensor _indices() const;
   Tensor _values() const;
+  Tensor & _coalesced_(bool coalesced);
+  Tensor indices() const;
+  Tensor values() const;
   int64_t numel() const;
   std::vector<Tensor> unbind(int64_t dim=0) const;
   int64_t get_device() const;

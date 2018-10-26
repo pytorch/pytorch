@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <test/cpp/common/support.h>
 #else
-#include <ATen/Error.h>
+#include "c10/util/Exception.h"
 #define ASSERT_EQ(x, y) AT_ASSERT((x) == (y))
 #define ASSERT_NE(x, y) AT_ASSERT((x) != (y))
 #define ASSERT_TRUE AT_ASSERT
@@ -16,6 +16,15 @@
   } catch (const std::exception& e) {                                    \
     ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
   }
+#define ASSERT_ANY_THROW(statement)                                      \
+  bool threw = false;                                                    \
+  try {                                                                  \
+    (void)statement;                                                     \
+  } catch (const std::exception& e) {                                    \
+    threw = true;                                                        \
+  }                                                                      \
+  ASSERT_TRUE(threw);                                                    \
+
 #endif // defined(USE_GTEST)
 
 #include "torch/csrc/autograd/variable.h"
@@ -25,6 +34,7 @@
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/custom_operator.h"
+#include "torch/csrc/jit/dynamic_dag.h"
 #include "torch/csrc/jit/fusers/interface.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/interpreter.h"
@@ -52,6 +62,8 @@
 #include "onnx/onnx_pb.h"
 
 #include <ATen/ATen.h>
+
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -930,15 +942,15 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::bar");
+    ASSERT_EQ(op->schema().name(), "foo::bar");
 
-    ASSERT_EQ(op->schema().arguments.size(), 2);
-    ASSERT_EQ(op->schema().arguments[0].name, "_0");
-    ASSERT_EQ(op->schema().arguments[0].type->kind(), TypeKind::FloatType);
-    ASSERT_EQ(op->schema().arguments[1].name, "_1");
-    ASSERT_EQ(op->schema().arguments[1].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().arguments().size(), 2);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "_0");
+    ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
+    ASSERT_EQ(op->schema().arguments()[1].name(), "_1");
+    ASSERT_EQ(op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
 
-    ASSERT_EQ(op->schema().returns[0].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -958,16 +970,16 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::bar_with_schema");
+    ASSERT_EQ(op->schema().name(), "foo::bar_with_schema");
 
-    ASSERT_EQ(op->schema().arguments.size(), 2);
-    ASSERT_EQ(op->schema().arguments[0].name, "a");
-    ASSERT_EQ(op->schema().arguments[0].type->kind(), TypeKind::FloatType);
-    ASSERT_EQ(op->schema().arguments[1].name, "b");
-    ASSERT_EQ(op->schema().arguments[1].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().arguments().size(), 2);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "a");
+    ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
+    ASSERT_EQ(op->schema().arguments()[1].name(), "b");
+    ASSERT_EQ(op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
 
-    ASSERT_EQ(op->schema().returns.size(), 1);
-    ASSERT_EQ(op->schema().returns[0].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().returns().size(), 1);
+    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -989,22 +1001,22 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::lists");
+    ASSERT_EQ(op->schema().name(), "foo::lists");
 
-    ASSERT_EQ(op->schema().arguments.size(), 3);
-    ASSERT_EQ(op->schema().arguments[0].name, "ints");
+    ASSERT_EQ(op->schema().arguments().size(), 3);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "ints");
     ASSERT_TRUE(
-        op->schema().arguments[0].type->isSubtypeOf(ListType::ofInts()));
-    ASSERT_EQ(op->schema().arguments[1].name, "floats");
+        op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofInts()));
+    ASSERT_EQ(op->schema().arguments()[1].name(), "floats");
     ASSERT_TRUE(
-        op->schema().arguments[1].type->isSubtypeOf(ListType::ofFloats()));
-    ASSERT_EQ(op->schema().arguments[2].name, "tensors");
+        op->schema().arguments()[1].type()->isSubtypeOf(ListType::ofFloats()));
+    ASSERT_EQ(op->schema().arguments()[2].name(), "tensors");
     ASSERT_TRUE(
-        op->schema().arguments[2].type->isSubtypeOf(ListType::ofTensors()));
+        op->schema().arguments()[2].type()->isSubtypeOf(ListType::ofTensors()));
 
-    ASSERT_EQ(op->schema().returns.size(), 1);
+    ASSERT_EQ(op->schema().returns().size(), 1);
     ASSERT_TRUE(
-        op->schema().returns[0].type->isSubtypeOf(ListType::ofFloats()));
+        op->schema().returns()[0].type()->isSubtypeOf(ListType::ofFloats()));
 
     Stack stack;
     push(stack, std::vector<int64_t>{1, 2});
@@ -1027,16 +1039,16 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::lists2");
+    ASSERT_EQ(op->schema().name(), "foo::lists2");
 
-    ASSERT_EQ(op->schema().arguments.size(), 1);
-    ASSERT_EQ(op->schema().arguments[0].name, "tensors");
+    ASSERT_EQ(op->schema().arguments().size(), 1);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "tensors");
     ASSERT_TRUE(
-        op->schema().arguments[0].type->isSubtypeOf(ListType::ofTensors()));
+        op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
-    ASSERT_EQ(op->schema().returns.size(), 1);
+    ASSERT_EQ(op->schema().returns().size(), 1);
     ASSERT_TRUE(
-        op->schema().returns[0].type->isSubtypeOf(ListType::ofTensors()));
+        op->schema().returns()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
     Stack stack;
     push(stack, std::vector<at::Tensor>{autograd::make_variable(at::ones(5))});
@@ -1125,15 +1137,15 @@ void testCustomOperators() {
 void testSchemaParser() {
   // nested arrays
   auto s = parseSchema("at::what(int[][4] foo) -> ()");
-  ASSERT_TRUE(s.arguments.at(0).N == 4);
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments.at(0)
-                                              .type->expect<ListType>()
+  ASSERT_TRUE(s.arguments().at(0).N() == 4);
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments().at(0)
+                                              .type()->expect<ListType>()
                                               ->getElementType()
                                               ->expect<ListType>()
                                               ->getElementType()));
   auto s2 = parseSchema("at::what(int[][] foo) -> ()");
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments.at(0)
-                                            .type->expect<ListType>()
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments().at(0)
+                                            .type()->expect<ListType>()
                                             ->getElementType()
                                             ->expect<ListType>()
                                             ->getElementType()));
@@ -1149,14 +1161,257 @@ void testSchemaParser() {
   // named returns
   parseSchema("at::what(Tensor! i_will_be_written_to) -> ()");
   auto s3 = parseSchema("at::what() -> (Tensor the_return, Tensor the_return2)");
-  ASSERT_TRUE(s3.returns.at(0).name == "the_return");
-  ASSERT_TRUE(s3.returns.at(1).name == "the_return2");
+  ASSERT_TRUE(s3.returns().at(0).name() == "the_return");
+  ASSERT_TRUE(s3.returns().at(1).name() == "the_return2");
 
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(t) foo) -> (Tensor(t))");
 
 }
 
+void testTopologicalIndex() {
+  {
+    Graph graph;
+    auto node1 = graph.create(prim::Undefined);
+    auto node2 = graph.create(prim::Undefined);
+    auto node3 = graph.create(prim::Undefined);
+    auto node4 = graph.create(prim::Undefined);
+
+    graph.appendNode(node4);
+    graph.prependNode(node1);
+    node2->insertAfter(node1);
+    node3->insertBefore(node4);
+
+    // nodes should be in numerical order
+    ASSERT_TRUE(node1->isBefore(node2));
+    ASSERT_TRUE(node1->isBefore(node3));
+    ASSERT_TRUE(node1->isBefore(node4));
+    ASSERT_TRUE(node2->isAfter(node1));
+    ASSERT_TRUE(node2->isBefore(node3));
+    ASSERT_TRUE(node2->isBefore(node4));
+    ASSERT_FALSE(node3->isBefore(node1));
+    ASSERT_FALSE(node3->isBefore(node2));
+    ASSERT_FALSE(node3->isAfter(node4));
+
+    // make sure things don't blow up on deletions
+    node2->destroy();
+    auto node2p = graph.create(prim::Undefined);
+    node2p->insertAfter(node1);
+    ASSERT_TRUE(node1->isBefore(node2p));
+    ASSERT_TRUE(node2p->isBefore(node3));
+  }
+  {
+    // Induce reindexing to test that path
+    Graph graph;
+    std::map<size_t, Node*> nodes;
+
+    auto anchor = graph.create(prim::Undefined);
+    graph.appendNode(anchor);
+    // Inserting to the same place a lot will trigger reindexing
+    for (auto i = 0; i < 100; ++i) {
+      auto n = graph.create(prim::Undefined);
+      n->insertAfter(anchor);
+      nodes[i] = n;
+    }
+
+    // Nodes should be in reverse order
+    for (auto i = 0; i < 100; ++i) {
+      for (auto j = i + 1; j < 100; ++j) {
+        ASSERT_TRUE(nodes[i]->isAfter(nodes[j]));
+      }
+    }
+  }
+}
+
+
+std::unique_ptr<detail::DynamicDAG<std::string>> newDynamicDAG() {
+  return std::unique_ptr<detail::DynamicDAG<std::string>>(new detail::DynamicDAG<std::string>());
+}
+
+void testNewVertex() {
+  auto graph = newDynamicDAG();
+  JIT_ASSERT(graph->debugNumVertices() == 0);
+  auto a = graph->newVertex("a");
+  JIT_ASSERT(graph->debugNumVertices() == 1);
+  JIT_ASSERT(a->ord == 0);
+  JIT_ASSERT(a->data.size() == 1);
+  JIT_ASSERT(a->data[0] == "a");
+  JIT_ASSERT(a->in_edges().size() == 0);
+  JIT_ASSERT(a->out_edges().size() == 0);
+  auto b = graph->newVertex("b");
+  auto c = graph->newVertex("c");
+  JIT_ASSERT(graph->debugNumVertices() == 3);
+  JIT_ASSERT(b->ord == 1);
+  JIT_ASSERT(c->ord == 2);
+}
+
+void testAddEdgeBasic() {
+  // a -> b -> c
+  // \---------^
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  auto c = graph->newVertex("c");
+  graph->addEdge(a, b);
+  graph->addEdge(b, c);
+  graph->addEdge(a, c);
+  JIT_ASSERT(a->in_edges().size() == 0);
+  JIT_ASSERT(a->out_edges().size() == 2);
+  JIT_ASSERT(a->out_edges().contains(b));
+  JIT_ASSERT(a->out_edges().contains(c));
+  JIT_ASSERT(b->in_edges().size() == 1);
+  JIT_ASSERT(b->out_edges().size() == 1);
+  JIT_ASSERT(b->in_edges().contains(a));
+  JIT_ASSERT(b->out_edges().contains(c));
+  JIT_ASSERT(c->in_edges().size() == 2);
+  JIT_ASSERT(c->out_edges().size() == 0);
+  JIT_ASSERT(c->in_edges().contains(a));
+  JIT_ASSERT(c->in_edges().contains(b));
+}
+
+void testAddEdgeCycleDetection() {
+  // a -> b -> c
+  // ^---------/
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  auto c = graph->newVertex("c");
+  graph->addEdge(a, b);
+  graph->addEdge(b, c);
+  bool erred = false;
+  try {
+    graph->addEdge(c, a);
+  } catch (c10::Error& err) {
+    erred = true;
+  }
+  JIT_ASSERT(erred);
+}
+
+void testAddEdgeReordersBasic() {
+  // a, b => b -> a
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  JIT_ASSERT(a->ord == 0);
+  JIT_ASSERT(b->ord == 1);
+  graph->addEdge(b, a);
+  JIT_ASSERT(a->ord == 1);
+  JIT_ASSERT(b->ord == 0);
+}
+
+void testAddEdgeReordersComplicated() {
+  // a -> b  c -> d with addEdge(d, b) ==>
+  // c -> d -> a -> b
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  auto c = graph->newVertex("c");
+  auto d = graph->newVertex("d");
+  graph->addEdge(a, b);
+  graph->addEdge(c, d);
+  JIT_ASSERT(a->ord == 0);
+  JIT_ASSERT(b->ord == 1);
+  JIT_ASSERT(c->ord == 2);
+  JIT_ASSERT(d->ord == 3);
+  graph->addEdge(d, a);
+  JIT_ASSERT(c->ord == 0);
+  JIT_ASSERT(d->ord == 1);
+  JIT_ASSERT(a->ord == 2);
+  JIT_ASSERT(b->ord == 3);
+  JIT_ASSERT(c->in_edges().size() == 0);
+  JIT_ASSERT(c->out_edges().size() == 1);
+  JIT_ASSERT(c->out_edges().contains(d));
+  JIT_ASSERT(d->in_edges().size() == 1);
+  JIT_ASSERT(d->out_edges().size() == 1);
+  JIT_ASSERT(d->in_edges().contains(c));
+  JIT_ASSERT(d->out_edges().contains(a));
+  JIT_ASSERT(a->in_edges().size() == 1);
+  JIT_ASSERT(a->out_edges().size() == 1);
+  JIT_ASSERT(a->in_edges().contains(d));
+  JIT_ASSERT(a->out_edges().contains(b));
+  JIT_ASSERT(b->in_edges().size() == 1);
+  JIT_ASSERT(b->out_edges().size() == 0);
+  JIT_ASSERT(b->in_edges().contains(a));
+}
+
+void testRemoveEdgeBasic() {
+  // a -> b
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  graph->addEdge(a, b);
+  JIT_ASSERT(graph->debugNumVertices() == 2);
+  graph->removeEdge(a, b);
+  JIT_ASSERT(graph->debugNumVertices() == 2);
+  JIT_ASSERT(a->out_edges().size() == 0);
+  JIT_ASSERT(b->in_edges().size() == 0);
+}
+
+void testRemoveVertexBasic() {
+  // a -> b
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  auto c = graph->newVertex("c");
+  graph->addEdge(a, b);
+  graph->addEdge(b, c);
+  JIT_ASSERT(graph->debugNumVertices() == 3);
+  graph->removeVertex(b);
+  JIT_ASSERT(graph->debugNumVertices() == 2);
+  JIT_ASSERT(a->out_edges().size() == 0);
+  JIT_ASSERT(c->in_edges().size() == 0);
+}
+
+void testContractEdgeBasic() {
+  // a -> b -> c -> d
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  auto c = graph->newVertex("c");
+  auto d = graph->newVertex("d");
+  graph->addEdge(a, b);
+  graph->addEdge(b, c);
+  graph->addEdge(c, d);
+  graph->contractEdge(b, c);
+  JIT_ASSERT(graph->debugNumVertices() == 3);
+  JIT_ASSERT(a->out_edges().size() == 1);
+  JIT_ASSERT(d->in_edges().size() == 1);
+  JIT_ASSERT(*a->out_edges().begin() == *d->in_edges().begin());
+  auto* contracted = *a->out_edges().begin();
+  JIT_ASSERT(contracted->data.size() == 2);
+  JIT_ASSERT(contracted->data[0] == "b");
+  JIT_ASSERT(contracted->data[1] == "c");
+  JIT_ASSERT(contracted->out_edges().size() == 1);
+  JIT_ASSERT(contracted->in_edges().size() == 1);
+  JIT_ASSERT(contracted->in_edges().contains(a));
+  JIT_ASSERT(contracted->out_edges().contains(d));
+}
+
+void testContractEdgeCycleDetection() {
+  // a -> b -> c
+  // `---------^
+  // contractEdge(a, c) will cause a cycle
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  auto c = graph->newVertex("c");
+  graph->addEdge(a, b);
+  graph->addEdge(b, c);
+  graph->addEdge(a, c);
+  JIT_ASSERT(!graph->contractEdge(a, c));
+}
+
+void testDynamicDAG() {
+  testNewVertex();
+  testAddEdgeBasic();
+  testAddEdgeCycleDetection();
+  testAddEdgeReordersBasic();
+  testAddEdgeReordersComplicated();
+  testRemoveEdgeBasic();
+  testRemoveVertexBasic();
+  testContractEdgeBasic();
+  testContractEdgeCycleDetection();
+}
 } // namespace
 } // namespace jit
 } // namespace torch

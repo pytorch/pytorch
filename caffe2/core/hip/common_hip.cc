@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <sstream>
+#include <iostream>
 
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
@@ -89,7 +90,7 @@ int NumHipDevices()
 
 namespace {
 int gDefaultGPUID = 0;
-// Only used when c10::FLAGS_caffe2_hip_full_device_control is set true.
+// Only used when FLAGS_caffe2_hip_full_device_control is set true.
 thread_local int gCurrentDevice = -1;
 } // namespace
 
@@ -109,7 +110,7 @@ int GetDefaultGPUID() { return gDefaultGPUID; }
 
 int CaffeHipGetDevice()
 {
-  if (c10::FLAGS_caffe2_hip_full_device_control) {
+  if (FLAGS_caffe2_hip_full_device_control) {
     if (gCurrentDevice < 0) {
       HIP_ENFORCE(hipGetDevice(&gCurrentDevice));
     }
@@ -123,7 +124,7 @@ int CaffeHipGetDevice()
 
 void CaffeHipSetDevice(const int id)
 {
-  if (c10::FLAGS_caffe2_hip_full_device_control) {
+  if (FLAGS_caffe2_hip_full_device_control) {
     if (gCurrentDevice != id) {
       HIP_ENFORCE(hipSetDevice(id));
     }

@@ -41,7 +41,7 @@ class GatherPaddingOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& in = Input(0);
     CAFFE_ENFORCE_GE(in.ndim(), 1);
-    const int32_t outer_size = in.dims()[0];
+    const int32_t outer_size = in.sizes()[0];
     const auto block_size = in.size_from_dim(1);
     const auto pad_width = startPaddingWidth_ + endPaddingWidth_;
 
@@ -53,7 +53,7 @@ class GatherPaddingOp final : public Operator<Context> {
       lengths_ptr = lengths.template data<int32_t>();
       lengths_size = lengths.size();
     }
-    std::vector<int64_t> padShape(in.dims().begin() + 1, in.dims().end());
+    std::vector<int64_t> padShape(in.sizes().begin() + 1, in.sizes().end());
     // output will contain accumulator over paddings
     Output(0)->Resize(padShape);
     T* padding_start_ptr = Output(0)->template mutable_data<T>();
@@ -169,7 +169,7 @@ class AddPaddingOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& in = Input(0);
     CAFFE_ENFORCE_GE(in.ndim(), 1);
-    const int32_t outer_size = in.dims()[0];
+    const int32_t outer_size = in.sizes()[0];
     const auto block_size = in.size_from_dim(1);
 
     // if no lengths is provided, assume it is a single full-span entry
@@ -202,7 +202,7 @@ class AddPaddingOp final : public Operator<Context> {
 
     auto* out = Output(0);
     {
-      auto out_dims = in.dims().vec();
+      auto out_dims = in.sizes().vec();
       out_dims[0] += (startPaddingWidth_ + endPaddingWidth_) * lengths_size;
       out->Resize(std::move(out_dims));
     }

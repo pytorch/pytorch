@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/Tensor.h>
-#include <ATen/core/Device.h>
-#include <ATen/core/Error.h>
+#include <c10/Device.h>
 #include <ATen/core/ScalarType.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <c10/util/Exception.h>
 #include "c10/util/Optional.h"
 
 #include <cstddef>

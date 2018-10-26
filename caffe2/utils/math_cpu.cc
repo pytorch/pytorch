@@ -2628,7 +2628,7 @@ C10_EXPORT void CopyMatrix<CPUContext>(
     void* B,
     const int ldb,
     CPUContext* /*context*/,
-    TypeMeta::TypedCopy copy) {
+    TypeMeta::Copy copy) {
   if (A == nullptr || B == nullptr) {
     return;
   }
@@ -3491,10 +3491,10 @@ void Transpose2D(const int rows, const int cols, const T* X, T* Y);
 
 #ifdef CAFFE2_USE_MKL
 
-#define DELEGATE_TRANSPOSE_2D_FUNCTION(T, Func)                          \
-  template <>                                                            \
+#define DELEGATE_TRANSPOSE_2D_FUNCTION(T, Func)                           \
+  template <>                                                             \
   void Transpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
-    Func('R', 'T', rows, cols, T(1), X, cols, Y, rows);                  \
+    Func('R', 'T', rows, cols, T(1), X, cols, Y, rows);                   \
   }
 DELEGATE_TRANSPOSE_2D_FUNCTION(float, mkl_somatcopy);
 DELEGATE_TRANSPOSE_2D_FUNCTION(double, mkl_domatcopy);
@@ -3502,11 +3502,11 @@ DELEGATE_TRANSPOSE_2D_FUNCTION(double, mkl_domatcopy);
 
 #endif // CAFFE2_USE_MKL
 
-#define CAFFE2_SPECIALIZED_TRANSPOSE_2D(T)                               \
-  template <>                                                            \
+#define CAFFE2_SPECIALIZED_TRANSPOSE_2D(T)                                \
+  template <>                                                             \
   void Transpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
-    EigenMatrixMap<T>(Y, rows, cols) =                                   \
-        ConstEigenMatrixMap<T>(X, cols, rows).transpose();               \
+    EigenMatrixMap<T>(Y, rows, cols) =                                    \
+        ConstEigenMatrixMap<T>(X, cols, rows).transpose();                \
   }
 
 #ifndef CAFFE2_USE_MKL
@@ -3605,11 +3605,17 @@ void TransposeCPUImpl(
     std::memcpy(Y, X, size * sizeof(T));
     return;
   }
-  if (ndim == 2) {
-    Transpose2D<T>(dims[0], dims[1], X, Y);
-  } else {
-    TransposeND<T>(ndim, dims, axes, X, Y);
+  if (utils::IsBatchTranspose2D(ndim, axes)) {
+    const int N =
+        std::accumulate(dims, dims + ndim - 2, 1, std::multiplies<int>());
+    const int H = dims[ndim - 2];
+    const int W = dims[ndim - 1];
+    for (int i = 0; i < N; ++i) {
+      Transpose2D<T>(H, W, X + i * H * W, Y + i * H * W);
+    }
+    return;
   }
+  TransposeND<T>(ndim, dims, axes, X, Y);
 }
 
 template <>
@@ -3625,16 +3631,22 @@ void TransposeCPUImpl(
     std::memcpy(Y, X, size * sizeof(float));
     return;
   }
-  if (ndim == 2) {
-    Transpose2D<float>(dims[0], dims[1], X, Y);
-  } else {
-#ifdef CAFFE2_USE_HPTT
-    if (TransposeWithHPTT(ndim, dims, axes, X, Y)) {
-      return;
+  if (utils::IsBatchTranspose2D(ndim, axes)) {
+    const int N =
+        std::accumulate(dims, dims + ndim - 2, 1, std::multiplies<int>());
+    const int H = dims[ndim - 2];
+    const int W = dims[ndim - 1];
+    for (int i = 0; i < N; ++i) {
+      Transpose2D<float>(H, W, X + i * H * W, Y + i * H * W);
     }
-#endif
-    TransposeND<float>(ndim, dims, axes, X, Y);
+    return;
   }
+#ifdef CAFFE2_USE_HPTT
+  if (TransposeWithHPTT(ndim, dims, axes, X, Y)) {
+    return;
+  }
+#endif
+  TransposeND<float>(ndim, dims, axes, X, Y);
 }
 
 } // namespace
@@ -3702,6 +3714,40 @@ CAFFE2_SPECIALIZED_TRANSPOSE(std::uint16_t)
   }
 CAFFE2_SPECIALIZED_AFFINE_CHANNEL(float)
 #undef CAFFE2_SPECIALIZED_AFFINE_CHANNEL
+
+#define CAFFE2_SPECIALIZED_NCHW2NHWC(T)                       \
+  template <>                                                 \
+  C10_EXPORT void NCHW2NHWC<T, CPUContext>(                   \
+      const int N,                                            \
+      const int C,                                            \
+      const int HxW,                                          \
+      const T* X,                                             \
+      T* Y,                                                   \
+      CPUContext* /* context */) {                            \
+    const int stride = C * HxW;                               \
+    for (int i = 0; i < N; ++i) {                             \
+      Transpose2D<T>(C, HxW, X + i * stride, Y + i * stride); \
+    }                                                         \
+  }
+CAFFE2_SPECIALIZED_NCHW2NHWC(float)
+#undef CAFFE2_SPECIALIZED_NCHW2NHWC
+
+#define CAFFE2_SPECIALIZED_NHWC2NCHW(T)                       \
+  template <>                                                 \
+  C10_EXPORT void NHWC2NCHW<T, CPUContext>(                   \
+      const int N,                                            \
+      const int C,                                            \
+      const int HxW,                                          \
+      const T* X,                                             \
+      T* Y,                                                   \
+      CPUContext* /* context */) {                            \
+    const int stride = HxW * C;                               \
+    for (int i = 0; i < N; ++i) {                             \
+      Transpose2D<T>(HxW, C, X + i * stride, Y + i * stride); \
+    }                                                         \
+  }
+CAFFE2_SPECIALIZED_NHWC2NCHW(float)
+#undef CAFFE2_SPECIALIZED_NHWC2NCHW
 
 } // namespace math
 } // namespace caffe2

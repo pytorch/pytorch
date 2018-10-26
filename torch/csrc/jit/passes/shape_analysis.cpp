@@ -71,15 +71,15 @@ c10::optional<std::vector<std::shared_ptr<T>>> gatherTensorTypes(Node* node) {
   std::vector<std::shared_ptr<T>> tensor_types;
 
   auto & schema = node->schema();
-  auto & args = schema.arguments;
+  auto & args = schema.arguments();
   // can't handle varargs primitives because we don't know what should be a Tensor
-  if (schema.is_vararg) {
+  if (schema.is_vararg()) {
     return c10::nullopt;
   }
   for (size_t i = 0; i < args.size(); ++i) {
-    if (args[i].type->isSubtypeOf(ListType::ofTensors())) {
+    if (args[i].type()->isSubtypeOf(ListType::ofTensors())) {
       return c10::nullopt;
-    } else if (args[i].type->isSubtypeOf(DynamicType::get())) {
+    } else if (args[i].type()->isSubtypeOf(DynamicType::get())) {
       if (auto type = node->input(i)->type()->cast<T>()) {
         tensor_types.push_back(type);
       } else {
@@ -557,7 +557,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::pow(Tensor self, Scalar exponent) -> Tensor",
     "aten::fmod(Tensor self, Scalar other) -> Tensor",
     "aten::remainder(Tensor self, Scalar other) -> Tensor",
-    "aten::pow(Scalar base, Tensor self) -> Tensor",
+    "aten::pow(Scalar self, Tensor exponent) -> Tensor",
     "aten::__and__(Tensor self, Scalar other) -> Tensor",
     "aten::__or__(Tensor self, Scalar other) -> Tensor",
     "aten::__xor__(Tensor self, Scalar other) -> Tensor",

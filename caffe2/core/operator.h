@@ -9,6 +9,7 @@
 #include <typeinfo>
 #include <vector>
 
+#include "c10/macros/Macros.h"
 #include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
@@ -122,7 +123,16 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     static_assert(
         std::is_same<T, Tensor>::value,
         "Output(int, DeviceType) is only available for Tensor");
+    // When you get a Tensor here it is not fully initialized
     return BlobGetMutableTensor(outputs_.at(idx), type);
+  }
+
+  inline Tensor*
+  OutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        options.device_opt() != c10::nullopt,
+        "device must be provided in option.");
+    return BlobGetMutableTensor(outputs_.at(idx), dims, options);
   }
 
   template <typename T>
@@ -137,6 +147,13 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   inline Blob* OutputBlob(int idx) {
     return outputs_.at(idx);
+  }
+
+  // Check whether output j is an alias of input i by comparing Blob pointers,
+  // note this does not check if the two Blobs points to the same Tensor, or if
+  // the Tensor pointers point to the same TensorImpl, or if the Storages alias
+  inline bool IsInputOutputAlias(int i, int j) {
+    return inputs_.at(i) == outputs_.at(j);
   }
 
   template <typename T>
@@ -453,6 +470,14 @@ class Operator : public OperatorBase {
     return OperatorBase::template Input<Tensor>(idx, type);
   }
 
+  inline Tensor* Output(int idx, at::IntList dims, at::TensorOptions options) {
+    if (options.device_opt() == c10::nullopt) {
+      return OperatorBase::OutputTensor(
+          idx, dims, at::TensorOptions(options).device(context_.device()));
+    }
+    return OperatorBase::OutputTensor(idx, dims, options);
+  }
+
   inline Tensor* Output(int idx, DeviceType type = Context::GetDeviceType()) {
     return OperatorBase::template Output<Tensor>(idx, type);
   }
@@ -615,7 +640,8 @@ class Operator : public OperatorBase {
   /* using override */ using OperatorBase::InputSize;               \
   /* using override */ using OperatorBase::Output;                  \
   /* using override */ using OperatorBase::Input;                   \
-  /* using override */ using OperatorBase::OutputSize
+  /* using override */ using OperatorBase::OutputSize;              \
+  /* using override */ using OperatorBase::IsInputOutputAlias
 
 #define USE_OPERATOR_FUNCTIONS(context)                    \
   USE_OPERATOR_BASE_FUNCTIONS;                             \
@@ -836,6 +862,15 @@ C10_DECLARE_REGISTRY(
 #define REGISTER_CPU_OPERATOR_WITH_ENGINE(name, engine, ...) \
   C10_REGISTER_CLASS(CPUOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
+// Use these macros to register gradient operators.  They can be automatically
+// excluded from builds that don't need them (e.g., mobile).
+#ifdef CAFFE2_NO_GRADIENT_OPS
+#define REGISTER_CPU_GRADIENT_OPERATOR(...) /* No gradients. */
+#else
+#define REGISTER_CPU_GRADIENT_OPERATOR(...) \
+  MACRO_EXPAND(REGISTER_CPU_OPERATOR(__VA_ARGS__))
+#endif
+
 C10_DECLARE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
@@ -880,7 +915,8 @@ C10_DECLARE_REGISTRY(
   C10_REGISTER_CLASS(HIPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 #define REGISTER_MIOPEN_OPERATOR(name, ...) \
-  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__)
+  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__) \
+  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__) // Make CUDNN an alias of MIOPEN for HIP ops
 
 // StaticLinkingProtector is a helper class that ensures that the Caffe2
 // library is linked correctly with whole archives (in the case of static

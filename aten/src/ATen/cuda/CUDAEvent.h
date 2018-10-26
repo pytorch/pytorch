@@ -1,11 +1,11 @@
 #pragma once
 
-#include "ATen/cuda/ATenCUDAGeneral.h"
-#include "ATen/cuda/CUDAStream.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/Exceptions.h"
-#include "ATen/core/Error.h"
 #include "ATen/DeviceGuard.h"
+#include "ATen/cuda/ATenCUDAGeneral.h"
+#include "ATen/cuda/CUDAContext.h"
+#include "ATen/cuda/CUDAStream.h"
+#include "ATen/cuda/Exceptions.h"
+#include "c10/util/Exception.h"
 
 #include "cuda_runtime_api.h"
 
@@ -27,12 +27,12 @@ struct AT_CUDA_API CUDAEvent {
   static constexpr unsigned int DEFAULT_FLAGS = cudaEventDisableTiming;
 
   // Constructors
-  CUDAEvent(unsigned int flags = DEFAULT_FLAGS) 
+  CUDAEvent(unsigned int flags = DEFAULT_FLAGS)
   : flags_{flags} { }
 
-  // Note: event destruction done on creating device to avoid creating a 
+  // Note: event destruction done on creating device to avoid creating a
   // CUDA context on other devices.
-  ~CUDAEvent() { 
+  ~CUDAEvent() {
     try {
       if (is_created_) {
         at::DeviceGuard device_guard{(int)device_};
@@ -44,7 +44,7 @@ struct AT_CUDA_API CUDAEvent {
   CUDAEvent(const CUDAEvent&) = delete;
   CUDAEvent& operator=(const CUDAEvent&) = delete;
 
-  CUDAEvent(CUDAEvent&& other) { moveHelper(std::move(other)); } 
+  CUDAEvent(CUDAEvent&& other) { moveHelper(std::move(other)); }
   CUDAEvent& operator=(CUDAEvent&& other) {
     moveHelper(std::move(other));
     return *this;
@@ -60,17 +60,17 @@ struct AT_CUDA_API CUDAEvent {
   bool isCreated() const { return is_created_; }
   int64_t device() const { return device_; }
   cudaEvent_t event() const { return event_; }
-  
-  bool happened() const { 
+
+  bool happened() const {
     return (was_recorded_ && cudaEventQuery(event_) == cudaSuccess);
   }
 
   void record() { record(getCurrentCUDAStream()); }
-  
-  void recordOnce(const CUDAStream& stream) { 
+
+  void recordOnce(const CUDAStream& stream) {
     if (!was_recorded_) record(stream);
   }
-  
+
   void record(const CUDAStream& stream) {
     if (is_created_) {
       AT_ASSERT(device_ == stream.device());
@@ -87,7 +87,7 @@ struct AT_CUDA_API CUDAEvent {
       AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
     }
   }
-  
+
 
 private:
   unsigned int flags_ = DEFAULT_FLAGS;

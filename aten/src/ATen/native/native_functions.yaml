@@ -59,6 +59,10 @@
   dispatch:
      CUDA: masked_scale_cuda
 
+- func: _reshape_from_tensor(Tensor self, Tensor shape) -> Tensor
+
+- func: _shape_as_tensor(Tensor self) -> Tensor
+
 - func: dropout(Tensor input, double p, bool train) -> Tensor
 
 - func: dropout_(Tensor self, double p, bool train) -> Tensor
@@ -1561,12 +1565,6 @@
 - func: sum(Tensor self) -> Tensor
   variants: function, method
 
-- func: _sum(Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _sum_cpu
-    CUDA: _sum_cuda
-
 - func: sum(Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
@@ -1576,20 +1574,11 @@
 - func: sum(Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: _sum(Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
-  variants: function
-
 - func: sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
 
 - func: sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
 
 - func: sum_out(Tensor result, Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
-
-- func: _sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
-
-- func: _sum_cuda_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
-  dispatch:
-    CUDA: _sum_out_cuda
 
 - func: sqrt(Tensor self) -> Tensor
   variants: function, method
@@ -1620,12 +1609,6 @@
 - func: prod(Tensor self) -> Tensor
   variants: function, method
 
-- func: _prod(Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _prod_cpu
-    CUDA: _prod_cuda
-
 - func: prod(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
@@ -1635,19 +1618,11 @@
 - func: prod(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: _prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
-  variants: function
-
 - func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
 
 - func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
 
 - func: prod_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
-
-- func: _prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
-  dispatch:
-    CPU: _prod_out_cpu
-    CUDA: _prod_out_cuda
 
 - func: t(Tensor self) -> Tensor
   variants: function, method
@@ -1925,66 +1900,160 @@
 - func: addmm_(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: method
 
-# NB: I have to decompose sparse_coo_tensor into two functions, because
-# it has custom dispatch logic for which Type to dispatch on (we must
-# use the sparse equivalent of the type of the SECOND argument).
+
+# NOTE [ Sparse: autograd and API ]
 #
-# The actual dispatcher, native_sparse_coo_tensor, has all of its overloads
-# removed so you don't accidentally trigger the default behavior, which
-# is to infer Type based on the first argument (indices), which is ~never
-# what you want. (I guess hypothetically it would work; you'd
-# just only ever dispatch to CPULongTensor or CUDALongTensor, but that
-# seems a bit too finely balanced.)
+#
+# Sparse Tensor Constructors
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# The API entry points to sparse tensor construction should be
+# `sparse_coo tensor` and `_sparse_coo_tensor_unsafe`. Depending on whether the
+# indices and values tensors are given, they eventually dispatch to either
+# `sparse_coo_tensor_with_dims` or `sparse_coo_tensor_with_dims_and_tensors`.
+#
+# The autograd support for ctor is implement on `sparse_coo_tensor_with_dims_and_tensors`.
+#
+# The API methods `sparse_coo tensor` and `_sparse_coo_tensor_unsafe`
+# **must not** have specific type dispatches because otherwise codegen will
+# consider them as abstract methods (see Note [Abstract ATen methods]), dispatch
+# using **Tensor** type, and thus lose autograd tracking on the actual method
+# they dispatch to, e.g., `sparse_coo_tensor_with_dims_and_tensors`.
+#
+# The actual ctors `sparse_coo_tensor_with_dims` and `sparse_coo_tensor_with_dims_and_tensors`,
+# on the other hand, need to create `SparseTensorImpl` and know nothing about
+# how `VariableType`s work. So they need to be dispatched using Tensor types.
+# We thus put `requires_tensor=True` to ensure that `VariableType` will unwrap
+# the given variables and call with the Tensor type.
+#
+#
+# Sparse Methods API Design
+# ~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# Goals: 1. Flexible API for users to write custom sparse ops
+#        2. ctor and member accessor with autograd support
+#
+# To achieve 1, we need to provide a set of *dangerous* APIs (dangerous in the
+# sense that misusing them will break sparse tensor invariant and may result in
+# unexpected behavior, e.g., crash). These methods are all prefixed with
+# underscore "_" to indicate that they should be used with care. We provide:
+#
+#   + `_indices()`: returns the *raw* indices within the sparse tensor (not just
+#                   sharing storage). Any inplace operation will change the
+#                   actual indices, including t_, set_, as_strided_, resize_,
+#                   etc.
+#   + `_values()`: returns the *raw* values within the sparse tensor. Similar
+#                  semantics as `_indices()`
+#   + `_nnz()`: returns the number of non-zero entries. This will always be
+#               determined by the shapes of indices and values.
+#   + `_coalesced_(bool)`: inplace sets whether the tensor is coalesced, and
+#                          returns itself.
+#
+# These methods are very useful in writing new operations, e.g., a custom
+# autograd Function.
+#
+# We also provide other public *safe* APIs:
+#   + `indices()`: returns a **view** of the indices tensor if the sparse tensor
+#                  is **coalesced**.
+#   + `values()`: returns a **view** of the values tensor if the containing
+#                 sparse tensor is **coalesced**.
+#   + `sparse_dim()`: number of sparse dimensions
+#   + `dense_dim()`: number of dense dimensions
+#   + `is_coalesced()`: whether the sparse tensor is coalesced
+#
+# `_indices()` and `_values()` should returns the raw indices and values dense
+# tensors within a sparse tensor. They can be quite unsafe with inplace
+# operations like `t_()`, and exposes uncoalesced indices and values. The public
+# recommended API is `indices()` and `values()`, both of which first check that
+# the tensor is coalesced and return views on those tensors.
+#
+#
+# Autograd Support
+# ~~~~~~~~~~~~~~~~
+#
+# Autograd is supported on `values()` and sparse tensor ctor with indices and
+# values tensors. E.g., `torch.sparse_coo_tensor(i, v).values().sum()` is
+# differentiable w.r.t. `v`.
+#
+# NB: The `values()` and `_values()` operators are special in that they are
+# layout-aware, i.e., the output depends not just on the data it represents, but
+# also on the input layout details (in this case, the `indices` tensor). See
+# NOTE [ as_strided Backward and layout-aware/agnostic autograd ] in Functions.cpp
+# for discussion on layout-aware vs layout-agnostic autograd. Since PyTorch ops
+# operate in the layout-agnostic mode, similar to `as_strided`, backward of
+# these two operators need to consider them in a layout-agnostic way:
+#   + `values()`:
+#     Input is coalesced.
+#     We just pretend having `input.indices()` as an additional argument
+#     `input_indices`, then forward is similar to
+#     `input.to(kStrided).index_select(input_indices)` regardless of the layout.
+#     Note that `values()` normally is layout-aware even if we constrain
+#     ourselves on sparse inputs since it may include all zeros values entries
+#     as "present" entries.
+#   + `_values()`:
+#     Input may be uncoalesced.
+#     It is not straightforward to construct a layout-agnostic version because
+#     duplicate indices entries may exist and additional parameterization is
+#     needed to distribute the value into different values entries. Furthermore,
+#     this op is intended to provide ways to write custom sparse ops, rather
+#     than being used in autograd graph, so it is marked as *non-differentiable*
+#     in derivatives.yaml.
+#
+# Before reading the following, see NOTE [ Autograd Variable Views ] in
+# variable.h for details on views that are tracked by autograd, and views that
+# are not.
+#
+# Moreover, these methods return tensors that share storage with inputs, so we
+# mark these methods as view ops to support autograd history tracking.
+# The sparse tensor ctor output should technically be view of both input indices
+# and values tensors, but currently we only support setting as view of a single
+# Variable, so it is only view of the values tensor.
+# TODO: clone indices in sparse tensor ctor.
+#
+# For other methods that return outputs that share storage with inputs, i.e.,
+# `indices()` and `_indices()`. We mark their outputs as non-differentiable, so
+# the view relation is not tracked by autograd, but the version counter is still
+# shared. In other words, their outputs are non-differentiable views of the
+# sparse tensor.
 
-- func: native_sparse_coo_tensor(IntList size, TensorOptions options) -> Tensor
-  variants: []
-  dispatch:
-    SparseCPU: new_with_size_sparse
-    SparseCUDA: new_with_size_sparse
-
-- func: native_sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
-  variants: []
-  dispatch:
-    SparseCPU: new_with_tensor_sparse
-    SparseCUDA: new_with_tensor_sparse
-
-- func: native_sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size) -> Tensor
-  variants: []
-  dispatch:
-    SparseCPU: new_with_tensor_and_size_sparse
-    SparseCUDA: new_with_tensor_and_size_sparse
-
-- func: sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
-
-- func: sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size) -> Tensor
 
 # FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
 # the default would never make sense.
 - func: sparse_coo_tensor(IntList size, *, TensorOptions options) -> Tensor
 
-- func: sparse_coo_tensor(IndexTensor indices, Tensor values, *, TensorOptions options) -> Tensor
+- func: sparse_coo_tensor(IndexTensor indices, Tensor values, *, TensorOptions options={}) -> Tensor
 
-- func: sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size, *, TensorOptions options) -> Tensor
+- func: sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size, *, TensorOptions options={}) -> Tensor
 
-- func: _native_sparse_coo_tensor_unsafe(IndexTensor indices, Tensor values, IntList size) -> Tensor
-  variants: []
+- func: _sparse_coo_tensor_unsafe(IndexTensor indices, Tensor values, IntList size, *, TensorOptions options={}) -> Tensor
+
+
+- func: _sparse_coo_tensor_with_dims(int64_t sparse_dim, int64_t dense_dim, IntList size, *, TensorOptions options) -> Tensor
   dispatch:
-    SparseCPU: new_with_tensor_and_size_unsafe_sparse
-    SparseCUDA: new_with_tensor_and_size_unsafe_sparse
+    SparseCPU: new_with_dims_sparse
+    SparseCUDA: new_with_dims_sparse
+  requires_tensor: True
 
-- func: _sparse_coo_tensor_unsafe(IndexTensor indices, Tensor values, IntList size) -> Tensor
+- func: _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntList size, Tensor indices, Tensor values, *, TensorOptions options) -> Tensor
+  dispatch:
+    SparseCPU: new_with_dims_and_tensor_sparse
+    SparseCUDA: new_with_dims_and_tensor_sparse
+  requires_tensor: True
 
-- func: sparse_resize_(Tensor self, IntList size, int64_t sparseDims, int64_t denseDims) -> Tensor
+
+- func: sparse_resize_(Tensor self, IntList size, int64_t sparse_dim, int64_t dense_dim) -> Tensor
   variants: method
   dispatch:
     SparseCPU: sparse_resize_
     SparseCUDA: sparse_resize_
+  requires_tensor: True
 
-- func: sparse_resize_and_clear_(Tensor self, IntList size, int64_t sparseDims, int64_t denseDims) -> Tensor
+- func: sparse_resize_and_clear_(Tensor self, IntList size, int64_t sparse_dim, int64_t dense_dim) -> Tensor
   variants: method
   dispatch:
     SparseCPU: sparse_resize_and_clear_
     SparseCUDA: sparse_resize_and_clear_
+  requires_tensor: True
 
 
 - func: sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor
@@ -1992,6 +2061,7 @@
   dispatch:
     CPU: sparse_mask_cpu
     CUDA: sparse_mask_cuda
+  requires_tensor: True
 
 
 - func: to_dense(Tensor self) -> Tensor
@@ -1999,33 +2069,38 @@
   dispatch:
     SparseCPU: sparse_to_dense
     SparseCUDA: sparse_to_dense
+  requires_tensor: True
 
 
-- func: _sparseDims(Tensor self) -> int64_t
+- func: sparse_dim(Tensor self) -> int64_t
   variants: method
   dispatch:
-    SparseCPU: _sparseDims_sparse
-    SparseCUDA: _sparseDims_sparse
+    SparseCPU: sparse_dim_sparse
+    SparseCUDA: sparse_dim_sparse
+  requires_tensor: True
   device_guard: False
 
 # legacy method
 - func: _dimI(Tensor self) -> int64_t
-  variants: function
-  dispatch: _sparseDims_sparse
+  variants: method
+  dispatch: sparse_dim_sparse
+  requires_tensor: True
   device_guard: False
 
 
-- func: _denseDims(Tensor self) -> int64_t
+- func: dense_dim(Tensor self) -> int64_t
   variants: method
   dispatch:
-    SparseCPU: _denseDims_sparse
-    SparseCUDA: _denseDims_sparse
+    SparseCPU: dense_dim_sparse
+    SparseCUDA: dense_dim_sparse
+  requires_tensor: True
   device_guard: False
 
 # legacy method
 - func: _dimV(Tensor self) -> int64_t
-  variants: function
-  dispatch: _denseDims_sparse
+  variants: method
+  dispatch: dense_dim_sparse
+  requires_tensor: True
   device_guard: False
 
 
@@ -2034,6 +2109,7 @@
   dispatch:
     SparseCPU: _nnz_sparse
     SparseCUDA: _nnz_sparse
+  requires_tensor: True
   device_guard: False
 
 
@@ -2042,6 +2118,7 @@
   dispatch:
     SparseCPU: coalesce_sparse_cpu
     SparseCUDA: coalesce_sparse_cuda
+  requires_tensor: True
 
 
 - func: is_coalesced(Tensor self) -> bool
@@ -2049,6 +2126,7 @@
   dispatch:
     SparseCPU: is_coalesced_sparse
     SparseCUDA: is_coalesced_sparse
+  requires_tensor: True
   device_guard: False
 
 
@@ -2057,14 +2135,42 @@
   dispatch:
     SparseCPU: _indices_sparse
     SparseCUDA: _indices_sparse
+  requires_tensor: True
   device_guard: False
-
 
 - func: _values(Tensor self) -> Tensor
   variants: method
   dispatch:
     SparseCPU: _values_sparse
     SparseCUDA: _values_sparse
+  requires_tensor: True
+  device_guard: False
+
+# This method doesn't do any check but only directly sets the flag. So it can be
+# a bit unsafe. Similar to _indices and _values, this is useful for implementing
+# custom sparse operations in Python/C++ extension.
+- func: _coalesced_(Tensor self, bool coalesced) -> Tensor
+  variants: method
+  dispatch:
+    SparseCPU: _coalesced_sparse_
+    SparseCUDA: _coalesced_sparse_
+  requires_tensor: True
+  device_guard: False
+
+- func: indices(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    SparseCPU: indices_sparse
+    SparseCUDA: indices_sparse
+  requires_tensor: True
+  device_guard: False
+
+- func: values(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    SparseCPU: values_sparse
+    SparseCUDA: values_sparse
+  requires_tensor: True
   device_guard: False
 
 
@@ -2072,17 +2178,20 @@
   dispatch:
     SparseCPU: hspmm_out_sparse_cpu
     SparseCUDA: hspmm_out_sparse_cuda
+  requires_tensor: True
 
 - func: hspmm(Tensor mat1, Tensor mat2) -> Tensor
   dispatch:
     SparseCPU: hspmm_sparse_cpu
     SparseCUDA: hspmm_sparse_cuda
+  requires_tensor: True
 
 - func: copy_sparse_to_sparse_(Tensor self, Tensor src, bool non_blocking=false) -> Tensor
   variants: function
   dispatch:
     SparseCPU: copy_sparse_
     SparseCUDA: copy_sparse_
+  requires_tensor: True
 
 - func: numel(Tensor self) -> int64_t
   variants: function, method

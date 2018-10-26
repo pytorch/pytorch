@@ -90,7 +90,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int output_image_size = this->GetDimsSize(*Y);
 
   vector<int> img_shape;
-  img_shape.assign(X.dims().begin() + 1, X.dims().end());
+  img_shape.assign(X.sizes().begin() + 1, X.sizes().end());
 
   vector<int> buffer_shape;
   buffer_shape.push_back(C / group_ * kernel_dims_size);
@@ -142,8 +142,8 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         DeformableIm2col(
             Xdata + group_id * input_offset,
             offset_data,
-            X.dims(),
-            col_buffer->dims(),
+            X.sizes(),
+            col_buffer->sizes(),
             col_buffer_data);
         // Weight term
         math::Gemm<T, Context>(
@@ -179,7 +179,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     }
   };
 
-  if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+  if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
     runWithSharedBuffer<Context>(ws_, f);
   } else {
     f(&col_buffer_);

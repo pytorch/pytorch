@@ -6,77 +6,11 @@
 // This is a stand-alone op: Y = gamma * (X - mu) / sig + beta
 // ------------------------------------------------------------------
 
-#include "group_norm_op.h"
-
-#include <array>
-
-#include "caffe2/utils/eigen_utils.h"
-#include "caffe2/utils/math.h"
+#include "caffe2/operators/group_norm_op.h"
 
 namespace caffe2 {
 
 namespace {
-
-template <typename T>
-void GroupNormForwardNCHW(
-    const int N,
-    const int G,
-    const int D,
-    const int HxW,
-    const T* X,
-    const T* mu,
-    const T* rsig,
-    const T* gamma,
-    const T* beta,
-    T* Y) {
-  const int C = G * D;
-  EigenArrayMap<T>(Y, D * HxW, N * G) =
-      (ConstEigenArrayMap<T>(X, D * HxW, N * G).rowwise() -
-       ConstEigenVectorArrayMap<T>(mu, N * G).transpose())
-          .rowwise() *
-      ConstEigenVectorArrayMap<T>(rsig, N * G).transpose();
-  T* Y_ptr = Y;
-  const int stride = C * HxW;
-  ConstEigenVectorArrayMap<T> gamma_arr(gamma, C);
-  ConstEigenVectorArrayMap<T> beta_arr(beta, C);
-  for (int i = 0; i < N; ++i) {
-    EigenArrayMap<T> Y_arr(Y_ptr, HxW, C);
-    Y_arr = (Y_arr.rowwise() * gamma_arr.transpose()).rowwise() +
-        beta_arr.transpose();
-    Y_ptr += stride;
-  }
-}
-
-template <typename T>
-void GroupNormForwardNHWC(
-    const int N,
-    const int G,
-    const int D,
-    const int HxW,
-    const T* X,
-    const T* mu,
-    const T* rsig,
-    const T* gamma,
-    const T* beta,
-    T* Y) {
-  const int C = G * D;
-  const T* X_ptr = X;
-  T* Y_ptr = Y;
-  for (int i = 0; i < N; ++i) {
-    for (int j = 0; j < HxW; ++j) {
-      EigenArrayMap<T>(Y_ptr, D, G) =
-          (ConstEigenArrayMap<T>(X_ptr, D, G).rowwise() -
-           ConstEigenVectorArrayMap<T>(mu + i * G, G).transpose())
-              .rowwise() *
-          ConstEigenVectorArrayMap<T>(rsig + i * G, G).transpose();
-      X_ptr += C;
-      Y_ptr += C;
-    }
-  }
-  EigenArrayMap<T> Y_arr(Y, C, N * HxW);
-  Y_arr = (Y_arr.colwise() * ConstEigenVectorArrayMap<T>(gamma, C)).colwise() +
-      ConstEigenVectorArrayMap<T>(beta, C);
-}
 
 template <typename T, StorageOrder kOrder>
 void ComputeInternalGradients(
@@ -143,58 +77,6 @@ void GroupNormBackward(
 }
 
 } // namespace
-
-template <typename T, class Context>
-bool GroupNormOp<T, Context>::RunOnDeviceImpl(
-    const int N,
-    const int G,
-    const int D,
-    const int HxW,
-    const T* X_data,
-    const T* gamma_data,
-    const T* beta_data,
-    T* Y_data,
-    T* mu_data,
-    T* rsig_data) {
-  if (order_ == StorageOrder::NCHW) {
-    const std::array<int, 2> dims = {N * G, D * HxW};
-    const int axis = 1;
-    math::Moments<T, Context>(
-        2, dims.data(), 1, &axis, X_data, mu_data, rsig_data, &context_);
-    math::InvStd<T, Context>(
-        N * G, static_cast<T>(epsilon_), rsig_data, rsig_data, &context_);
-    GroupNormForwardNCHW<T>(
-        N,
-        G,
-        D,
-        HxW,
-        X_data,
-        mu_data,
-        rsig_data,
-        gamma_data,
-        beta_data,
-        Y_data);
-  } else {
-    const std::array<int, 4> dims = {N, HxW, G, D};
-    const std::array<int, 2> axes = {1, 3};
-    math::Moments<T, Context>(
-        4, dims.data(), 2, axes.data(), X_data, mu_data, rsig_data, &context_);
-    math::InvStd<T, Context>(
-        N * G, static_cast<T>(epsilon_), rsig_data, rsig_data, &context_);
-    GroupNormForwardNHWC<T>(
-        N,
-        G,
-        D,
-        HxW,
-        X_data,
-        mu_data,
-        rsig_data,
-        gamma_data,
-        beta_data,
-        Y_data);
-  }
-  return true;
-}
 
 // Math:
 // let: s = gamma * rsig
@@ -280,7 +162,7 @@ REGISTER_CPU_OPERATOR(
 // Input: X, gamma, beta; Output: Y, mu, sig
 OPERATOR_SCHEMA(GroupNorm)
     .NumInputs(3)
-    .NumOutputs(3)
+    .NumOutputs({1, 3})
     .SetDoc(R"DOC(
 Group Normalization (GN) operation: https://arxiv.org/abs/1803.08494
 )DOC")

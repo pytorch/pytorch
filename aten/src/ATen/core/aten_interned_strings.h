@@ -96,7 +96,6 @@ _(aten, _logspace) \
 _(aten, _masked_scale) \
 _(aten, _mm) \
 _(aten, _mv) \
-_(aten, _native_sparse_coo_tensor_unsafe) \
 _(aten, _nnz) \
 _(aten, _pack_padded_sequence) \
 _(aten, _pack_padded_sequence_backward) \
@@ -106,9 +105,11 @@ _(aten, _pdist_forward) \
 _(aten, _prod) \
 _(aten, _prodall) \
 _(aten, _range) \
+_(aten, _reshape_from_tensor) \
 _(aten, _round) \
 _(aten, _rsqrt) \
 _(aten, _s_where) \
+_(aten, _shape_as_tensor) \
 _(aten, _sigmoid) \
 _(aten, _sigmoid_backward) \
 _(aten, _sigmoid_forward) \
@@ -116,6 +117,8 @@ _(aten, _sin) \
 _(aten, _sinh) \
 _(aten, _sparseDims) \
 _(aten, _sparse_add) \
+_(aten, _sparse_coo_tensor_with_dims) \
+_(aten, _sparse_coo_tensor_with_dims_and_tensors) \
 _(aten, _sparse_coo_tensor_unsafe) \
 _(aten, _sparse_dense_add) \
 _(aten, _sparse_div_scalar) \
@@ -362,6 +365,7 @@ _(aten, index_copy) \
 _(aten, index_fill) \
 _(aten, index_put) \
 _(aten, index_select) \
+_(aten, indices) \
 _(aten, instance_norm) \
 _(aten, inverse) \
 _(aten, irfft) \
@@ -476,7 +480,6 @@ _(aten, native_get_device) \
 _(aten, native_norm) \
 _(aten, native_pow) \
 _(aten, native_resize_as) \
-_(aten, native_sparse_coo_tensor) \
 _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
@@ -683,6 +686,7 @@ _(aten, upsample_nearest3d_forward) \
 _(aten, upsample_trilinear3d) \
 _(aten, upsample_trilinear3d_backward) \
 _(aten, upsample_trilinear3d_forward) \
+_(aten, values) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
@@ -735,7 +739,7 @@ _(attr, cudnn_enabled) \
 _(attr, cx) \
 _(attr, cy) \
 _(attr, data) \
-_(attr, denseDims) \
+_(attr, dense_dim) \
 _(attr, descending) \
 _(attr, deterministic) \
 _(attr, device) \
@@ -929,7 +933,8 @@ _(attr, some) \
 _(attr, sorted) \
 _(attr, source) \
 _(attr, sparse) \
-_(attr, sparseDims) \
+_(attr, sparse_dim) \
+_(attr, sparse_dtype) \
 _(attr, spatialScale) \
 _(attr, split_size) \
 _(attr, split_sizes) \

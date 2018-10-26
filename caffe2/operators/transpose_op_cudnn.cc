@@ -43,7 +43,7 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
     const auto& X = Input(0);
     auto* Y = Output(0);
     const int ndim = X.ndim();
-    X_dims_.assign(X.dims().cbegin(), X.dims().cend());
+    X_dims_.assign(X.sizes().cbegin(), X.sizes().cend());
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.rbegin(), axes_.rend(), 0);

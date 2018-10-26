@@ -8,6 +8,12 @@
 #     Note that a single gradient entry can specify the gradient
 #     formula for multiple input names, by specifying a key
 #     "input1, input2" (see atan2 for an example).
+#   - Optional entry with key 'output_differentiability' and value a list of the
+#     same length as the number of outputs from the forward function. The list
+#     should contain only booleans, specifying whether each of the output Tensor
+#     is differentiable.
+#     If None of the output is differentiable, you can also add the function
+#     name to `gen_variable_type.py`'s `DONT_REQUIRE_DERIVATIVE` list.
 #
 # If a function has out-of-place and in-place variants, then the derivative
 # definition for the in-place variant is optional. It will default to the
@@ -23,12 +29,15 @@
 #
 #     When a function returns multiple *differentiable* outputs,
 #     you can refer to the gradients of each outputs using 'grads',
-#     e.g., 'grads[0]', 'grads[1]'
+#     e.g., 'grads[0]', 'grads[1]'.
 #
 #     When a function returns *one* differentiable output (the
 #     first output) and some more nondifferentiable outputs,
 #     you MUST refer to the gradient of the differentiable output with
 #     'grad' (this case is special-cased in our code generation).
+#
+#     Note that the number of differentibale outputs can be modified by the
+#     'output_differentiability' entry (see above).
 #
 #   - Any of the input arguments, tensor or non-tensor, including
 #     argument names that only appear in Declarations.cwrap, e.g. 'output'.
@@ -189,6 +198,9 @@
 - name: clone(Tensor self)
   self: grad
 
+- name: coalesce(Tensor self)
+  self: grad
+
 - name: cos(Tensor self)
   self: grad * -self.sin()
 
@@ -320,6 +332,12 @@
 - name: _gesv_helper(Tensor self, Tensor A)
   self: gesv_backward_self(grad, self, A)
   A: gesv_backward_A(grad, self, A, result0)
+
+- name: indices(Tensor self)
+  output_differentiability: [False]
+
+- name: _indices(Tensor self)
+  output_differentiability: [False]
 
 - name: grid_sampler_2d(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode)
   input, grid: grid_sampler_2d_backward(grad, input, grid, interpolation_mode, padding_mode)
@@ -559,14 +577,23 @@
   self: pow_backward_self(grad, self, exponent)
   exponent: pow_backward_exponent(grad, self, exponent)
 
-- name: pow(Scalar base, Tensor self)
-  self: pow_backward_exponent(grad, base, self)
+- name: pow(Scalar self, Tensor exponent)
+  exponent: pow_backward_exponent(grad, self, exponent)
 
-- name: _prod(Tensor self, int64_t dim, bool keepdim)
+- name: prod(Tensor self)
+  self: prod_backward(grad, self, result)
+
+- name: prod(Tensor self, ScalarType dtype)
+  self: prod_backward(grad, self.to(grad.type().scalarType()), result).to(self.type().scalarType())
+
+- name: prod(Tensor self, int64_t dim, bool keepdim)
   self: prod_backward(grad, self, result, dim, keepdim)
 
-- name: _prod(Tensor self)
-  self: prod_backward(grad, self, result)
+- name: prod(Tensor self, int64_t dim, ScalarType dtype)
+  self: prod_backward(grad, self.to(grad.type().scalarType()), result, dim, false).to(self.type().scalarType())
+
+- name: prod(Tensor self, int64_t dim, bool keepdim, ScalarType dtype)
+  self: prod_backward(grad, self.to(grad.type().scalarType()), result, dim, keepdim).to(self.type().scalarType())
 
 - name: pstrf(Tensor self, bool upper, Scalar tol)
   self: not_implemented("pstrf")
@@ -687,11 +714,20 @@
 - name: sub(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
 
-- name: _sum(Tensor self)
+- name: sum(Tensor self)
   self: grad.expand(self.sizes())
 
-- name: _sum(Tensor self, IntList dim, bool keepdim)
+- name: sum(Tensor self, ScalarType dtype)
+  self: grad.expand(self.sizes()).to(self.type().scalarType())
+
+- name: sum(Tensor self, IntList dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim)
+
+- name: sum(Tensor self, IntList dim, ScalarType dtype)
+  self: sum_backward(grad, self.sizes(), dim, false).to(self.type().scalarType())
+
+- name: sum(Tensor self, IntList dim, bool keepdim, ScalarType dtype)
+  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type().scalarType())
 
 - name: svd(Tensor self, bool some, bool compute_uv)
   self: svd_backward(grads, self, some, compute_uv, res1, res2, res3)  # resX are defined in Declarations.cwrap
@@ -785,11 +821,22 @@
   self: not_implemented("sparse_mask")
   mask: not_implemented("sparse_mask")
 
+- name: _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntList size, Tensor indices, Tensor values, TensorOptions options)
+  values: sparse_constructor_values_backward(grad, indices, values.sizes())
+
 - name: _standard_gamma(Tensor self, Generator generator)
   self: grad * _standard_gamma_grad(self, result)
 
 - name: _standard_gamma_grad(Tensor self, Tensor output)
   self: not_implemented("_standard_gamma_grad")
+
+- name: values(Tensor self)
+  self: at::_sparse_coo_tensor_unsafe(self.indices(), grad, self.sizes())._coalesced_(true);
+
+# Why is _values() not differentiable?
+# See NOTE [ Sparse: autograd and API ]
+- name: _values(Tensor self)
+  output_differentiability: [False]
 
 # NN
 - name: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim)
@@ -1234,7 +1281,11 @@
   save_var: not_implemented("cudnn_batch_norm_backward save_var")
   input, weight, grad_output: batchnorm_double_backward(input, weight, grads[0], grads[1], grads[2], grad_output, running_mean, running_var, true, epsilon, save_mean, save_var, grad_input_mask)
 
+
+# Only frst three of _cudnn_rnn outputs can have gradients.
+# _cudnn_rnn outputs: (output, hy, cy, reserve, weight_buf)
 - name: _cudnn_rnn(Tensor input, TensorList weight, int64_t weight_stride0, Tensor weight_buf, Tensor hx, Tensor cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, Tensor dropout_state)
+  output_differentiability: [True, True, True, False, False]
   input, hx, cx, weight: "_cudnn_rnn_backward(input, weight, weight_stride0, result4, hx, cx, result0, grads[0], grads[1], grads[2], mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, retain_variables ? result3.clone() : result3, grad_input_mask)"
 
 # miopen
@@ -1274,7 +1325,11 @@
   tensors: unbind(grad, dim)
 
 # fused RNN kernels
+
+# Only frst two of _thnn_fused_lstm_cell outputs can have gradients.
+# _thnn_fused_lstm_cell outputs: (hy, cy, workspace)
 - name: _thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor input_bias, Tensor hidden_bias)
+  output_differentiability: [True, True, False]
   input_gates, hidden_gates, cx, input_bias, hidden_bias: _thnn_fused_lstm_cell_backward(grads[0], grads[1], cx, result1, result2, input_bias.defined())
 
 - name: _thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor input_bias, Tensor hidden_bias)

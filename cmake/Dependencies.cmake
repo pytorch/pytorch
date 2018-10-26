@@ -442,7 +442,7 @@ if(USE_MPI)
     message(STATUS "MPI libraries: " ${MPI_CXX_LIBRARIES})
     include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${MPI_CXX_LIBRARIES})
-    set(CMAKE_EXE_LINKER_FLAGS ${MPI_CXX_LINK_FLAGS})
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${MPI_CXX_LINK_FLAGS}")
     find_program(OMPI_INFO
       NAMES ompi_info
       HINTS ${MPI_CXX_LIBRARIES}/../bin)
@@ -641,35 +641,28 @@ if(USE_GLOO)
     message(WARNING "Gloo can only be used on 64-bit systems.")
     caffe2_update_option(USE_GLOO OFF)
   else()
-    set(Gloo_USE_CUDA ${USE_CUDA})
-    find_package(Gloo)
-    if(Gloo_FOUND)
-      include_directories(SYSTEM ${Gloo_INCLUDE_DIRS})
-      list(APPEND Caffe2_DEPENDENCY_LIBS gloo)
-    else()
-      set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
-      set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
+    set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
+    set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
-      # Temporarily override variables to avoid building Gloo tests/benchmarks
-      set(__BUILD_TEST ${BUILD_TEST})
-      set(__BUILD_BENCHMARK ${BUILD_BENCHMARK})
-      set(BUILD_TEST OFF)
-      set(BUILD_BENCHMARK OFF)
-      add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
-      # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
-      # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
-      # gloo generates a new config.h in the binary diretory.
-      include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
-      include_directories(BEFORE SYSTEM ${PROJECT_BINARY_DIR}/third_party/gloo)
-      set(BUILD_TEST ${__BUILD_TEST})
-      set(BUILD_BENCHMARK ${__BUILD_BENCHMARK})
+    # Temporarily override variables to avoid building Gloo tests/benchmarks
+    set(__BUILD_TEST ${BUILD_TEST})
+    set(__BUILD_BENCHMARK ${BUILD_BENCHMARK})
+    set(BUILD_TEST OFF)
+    set(BUILD_BENCHMARK OFF)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
+    # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
+    # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
+    # gloo generates a new config.h in the binary diretory.
+    include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
+    include_directories(BEFORE SYSTEM ${PROJECT_BINARY_DIR}/third_party/gloo)
+    set(BUILD_TEST ${__BUILD_TEST})
+    set(BUILD_BENCHMARK ${__BUILD_BENCHMARK})
 
-      # Add explicit dependency if NCCL is built from third_party.
-      # Without dependency, make -jN with N>1 can fail if the NCCL build
-      # hasn't finished when CUDA targets are linked.
-      if(NCCL_EXTERNAL)
-        add_dependencies(gloo_cuda nccl_external)
-      endif()
+    # Add explicit dependency if NCCL is built from third_party.
+    # Without dependency, make -jN with N>1 can fail if the NCCL build
+    # hasn't finished when CUDA targets are linked.
+    if(NCCL_EXTERNAL)
+      add_dependencies(gloo_cuda nccl_external)
     endif()
     # Pick the right dependency depending on USE_CUDA
     list(APPEND Caffe2_DEPENDENCY_LIBS gloo)

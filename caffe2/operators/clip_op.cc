@@ -33,7 +33,7 @@ bool ClipGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(Clip, ClipOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(ClipGradient, ClipGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(ClipGradient, ClipGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Clip)
     .NumInputs(1)
@@ -94,10 +94,14 @@ Y: [[45. 20. 59. 60. 48.]
 </details>
 
 )DOC")
-    .Arg("min", "*(type: float)* Minimum value, under which element is "
-    "replaced by min (default=*numeric_limits::lowest()*).")
-    .Arg("max", "*(type: float)* Maximum value, under which element is "
-    "replaced by max (default=*numeric_limits::max()*).")
+    .Arg(
+        "min",
+        "*(type: float)* Minimum value, under which element is "
+        "replaced by min (default=*numeric_limits::lowest()*).")
+    .Arg(
+        "max",
+        "*(type: float)* Maximum value, under which element is "
+        "replaced by max (default=*numeric_limits::max()*).")
     .Input(
         0,
         "X",
@@ -107,9 +111,12 @@ Y: [[45. 20. 59. 60. 48.]
         0,
         "Y",
         "*(Tensor`<float>`)* Output tensor clipped within range [`min`, `max`].")
-    .InheritOnnxSchema("Clip");
+    .InheritOnnxSchema();
 
-OPERATOR_SCHEMA(ClipGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
+GRADIENT_OPERATOR_SCHEMA(ClipGradient)
+    .NumInputs(2)
+    .NumOutputs(1)
+    .AllowInplace({{1, 0}});
 
 class GetClipGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

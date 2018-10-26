@@ -18,6 +18,17 @@
 #include <string>
 
 namespace torch { namespace jit {
+// Constants relating to maintaining the topological index of nodes.
+//
+// Lower and upper bounds of the index. Inclusive range.
+static constexpr topo_position_t kLowerBound = INT64_MIN;
+static constexpr topo_position_t kUpperBound = INT64_MAX;
+static constexpr topo_position_t kMidPoint = 0;
+// How far away to space nodes that are appended to the graph.
+// should be 2^n, where:
+//   - n is the maximum number of repeated insertions without a re-index
+//   - 2^(64-n) is the maximum number of appends to the end without reindex
+static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 
 // Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
 constexpr Symbol PythonOp::Kind;
@@ -183,34 +194,6 @@ std::ostream& Graph::prettyPrint(std::ostream & out) {
 
 void Graph::dumpPretty() {
   PrettyPrint(std::cout, *this);
-}
-
-Scope* Scope::push(Symbol name) {
-  children_.push_back(std::unique_ptr<Scope>(new Scope(this, name)));
-  return children_.back().get();
-}
-
-Scope* Scope::getRoot() {
-  Scope* current = this;
-  while (current->parent_) {
-    current = current->parent_;
-  }
-  return current;
-}
-
-std::string Scope::namesFromRoot(const std::string& separator) {
-  // TODO: I think the answer is we shouldn't have used Symbol here
-  std::string out = this->name_.toUnqualString();
-  if (this->isRoot()) {
-    return out;
-  }
-  Scope* parent = this->parent_;
-  while (!parent->isRoot()) {
-    // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-    out = std::string(parent->name_.toUnqualString()) + separator + out;
-    parent = parent->parent_;
-  }
-  return out;
 }
 
 static void checkSameDevice(const Node* node) {
@@ -461,6 +444,27 @@ void LintGraph(std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 
+Block::Block(Graph* graph_, Node* node_)
+    : graph_(graph_),
+      output_(initOutput(graph_->create(prim::Return, 0))),
+      input_(graph_->create(prim::Param, 0)),
+      owning_node_(node_) {
+  graph_->all_blocks.emplace(this);
+  output_->owning_block_ = this;
+  output_->topo_position_ = kUpperBound;
+  input_->owning_block_ = this;
+  input_->topo_position_ = kLowerBound;
+}
+
+void Block::reIndexTopology() {
+  auto curPos = kLowerBound;
+  for (auto node : nodes()) {
+    AT_ASSERT(curPos <= (kUpperBound - kAppendInterval));
+    curPos += kAppendInterval;
+    node->topo_position_ = curPos;
+  }
+}
+
 void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   std::unordered_map<Value*, Value*> local_map;
   auto env = [&](Value * v) {
@@ -579,9 +583,9 @@ void Value::replaceAllUsesWith(Value * newValue) {
 
 size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   auto name_str = name.toUnqualString();
-  for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
-    const Argument* arg = &the_schema.arguments[i];
-    if (arg->name == name_str) {
+  for (size_t i = 0; i < the_schema.arguments().size(); ++i) {
+    const Argument* arg = &the_schema.arguments()[i];
+    if (arg->name() == name_str) {
       return i;
     }
   }
@@ -651,6 +655,62 @@ bool Node::isNondeterministic() const {
   return true;
 }
 
+// Assign this node a topological position, to facilitate fast isBefore() and
+// isAfter() queries. Must be called right after a node is inserted into the
+// node list.
+//
+// The basic scheme is: assign every node a position (uint64_t).  The common
+// case (appending to the end of the graph) is made more efficient by advancing
+// a fixed interval past the previous node and placing `this` there. Otherwise,
+// assign `this` a position at the midpoint between its prev() and next()
+// nodes.
+//
+// If we ever run out of space (by, e.g. inserting too much in place), we
+// reindex by spreading out all the nodes again.
+void Node::assignTopoPosition() {
+  auto returnNode = owningBlock()->return_node();
+  const auto prevPos = prev()->topo_position_;
+  const auto nextPos = next()->topo_position_;
+
+  // Append to the end of the graph
+  if (next() == returnNode) {
+    if (next() == prev()) {
+      // the node list is empty, assign the first position
+      topo_position_ = kMidPoint;
+      return;
+    }
+
+    if (prevPos >= (kUpperBound - kAppendInterval)) {
+      // we're running off the edge
+      owningBlock()->reIndexTopology();
+      return;
+    }
+
+    topo_position_ = prevPos + kAppendInterval;
+
+    // Prepend to the graph
+  } else if (prev() == returnNode) {
+    // next() is the first element in the block list
+    if (nextPos <= (kLowerBound + kAppendInterval)) {
+      // we're running off the edge
+      owningBlock()->reIndexTopology();
+      return;
+    }
+
+    topo_position_ = nextPos - kAppendInterval;
+
+    // insert between two existing nodes
+  } else {
+    const auto posBetween = prevPos + (nextPos - prevPos) / 2;
+    if (posBetween == prevPos) {
+      // There was no room
+      owningBlock()->reIndexTopology();
+      return;
+    }
+    topo_position_ = posBetween;
+  }
+}
+
 Node::Node(Graph * graph_, NodeKind kind_) :
   kind_(kind_),
   graph_(graph_),
@@ -698,11 +758,10 @@ void Node::destroy() {
 }
 
 void Node::cloneFrom(Node * s) {
-	setSourceLocation(s->getSourceLocation());
-	if (s->owningGraph()->scope_root_ == owningGraph()->scope_root_) {
-		scope_ = s->scope_;
-	}
-	copyAttributes(*s);
+  setSourceLocation(s->getSourceLocation());
+  if(s->scope_ && !s->scope_->isBlank())
+    scope_ = s->scope_;
+  copyAttributes(*s);
 }
 
 void Node::replaceAllUsesWith(Node * n) {
@@ -776,6 +835,19 @@ Value* Node::insertOutput(size_t i) {
   return outputs_.at(i);
 }
 
+bool Node::isBefore(Node * n) const {
+  if (this == n) {
+    return false;
+  }
+  return !isAfter(n);
+}
+
+bool Node::isAfter(Node * n) const {
+  JIT_ASSERT(this->owningBlock() == n->owningBlock());
+
+  return this->topo_position_ > n->topo_position_;
+}
+
 Node* Node::insertBefore(Node * n) {
   JIT_ASSERT(n->inBlockList());
   insertAfter(n->prev());
@@ -791,6 +863,7 @@ Node* Node::insertAfter(Node * n) {
   this->prev() = n;
   this->next() = next;
   next->prev() = this;
+  assignTopoPosition();
   return this;
 }
 
@@ -858,7 +931,7 @@ inline const SourceRange& fakeRange() {
 }
 
 Value* Graph::insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs) {
-  return script::emitBuiltinCall(fakeRange(), *this, opname, args, kwargs, /*required=*/true);
+  return script::emitBuiltinCall(fakeRange(), *this, opname, c10::nullopt, args, kwargs, /*required=*/true);
 }
 
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
@@ -888,7 +961,7 @@ Node * Graph::createNoneGenerator() {
 
 Node * Graph::createFusionGroup(int device) {
   auto n = create(prim::FusionGroup, 0);
-  n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));
+  n->g_(attr::Subgraph,std::make_shared<Graph>(current_scope()));
   n->i_(attr::device, device);
   return n;
 }
@@ -907,6 +980,28 @@ Node* Graph::createTupleUnpack(Value * v) {
   for(auto & element : tt->elements()) {
     n->addOutput()->setType(element);
   }
+  return n;
+}
+
+Node* Graph::createTupleIndex(Value * tup, int64_t index) {
+  auto n = create(prim::TupleIndex, {tup});
+  n->i_(attr::index, index);
+  auto tuple_type = tup->type()->expect<TupleType>();
+  n->output()->setType(tuple_type->elements().at(index));
+  return n;
+}
+
+Node* Graph::createTupleSlice(Value * tup, int64_t beg, int64_t end) {
+  auto n = create(prim::TupleSlice, {tup});
+  auto tuple_type = tup->type()->expect<TupleType>();
+  n->i_(attr::beg, beg);
+  n->i_(attr::end, end);
+  std::vector<TypePtr> output_types;
+  for (auto i = beg; i < end; ++i) {
+    output_types.push_back(tuple_type->elements().at(i));
+  }
+  auto tt = TupleType::create(std::move(output_types));
+  n->output()->setType(tt);
   return n;
 }
 
@@ -1003,8 +1098,9 @@ Node* Graph::createClone(Node * n, std::function<Value*(Value*)> value_map, bool
 
 Value* Graph::insertConstant(
     IValue val,
-    c10::optional<SourceRange> loc) {
-  return jit::insertConstant(*this, std::move(val), loc);
+    c10::optional<SourceRange> loc,
+    c10::optional<ScopePtr> scope) {
+  return jit::insertConstant(*this, std::move(val), loc, scope);
 }
 
 Value* Graph::insertDummyWorld() {
