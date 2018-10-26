@@ -1,6 +1,6 @@
 # PyTorch Fuser
 
-The fuser accepts subgraphs wrapped in "fusion nodes" and tries to execute them by just-in-time compiling kernels that run all the graph operations. 
+The fuser accepts subgraphs wrapped in "fusion nodes" and tries to execute them by just-in-time (JIT) compiling kernels that run all the graph operations. 
 
 ## Code Organization
 
