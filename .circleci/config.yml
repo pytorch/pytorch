@@ -127,7 +127,8 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
           # Here we give it 30 seconds to run.
           # yf225 TODO: make sure to change timeout value back to 30 after debugging
           timeout 1 python test/test_nn.py -v TestNN.test_BatchNorm3d || export TIMEOUT=1
-          if [[ -n "${TIMEOUT}" ]]; then
+          echo $TIMEOUT  # debug
+          if [[ -n $TIMEOUT ]]; then
             echo "This machine is unhealthy. Re-running this job on another machine."
             curl -X POST https://circleci.com/api/v1.1/project/github/pytorch/pytorch/${CIRCLE_BUILD_NUM}/retry?circle-token=${CIRCLECI_TOKEN}
             exit 1
