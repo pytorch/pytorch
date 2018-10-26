@@ -34,7 +34,7 @@ class TestUpSample(serial.SerializedTestCase):
            num_channels=st.integers(1, 4),
            batch_size=st.integers(1, 4),
            seed=st.integers(0, 65535),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_upsample(self, height_scale, width_scale, height, width,
                      num_channels, batch_size, seed,
                      gc, dc):
@@ -114,7 +114,7 @@ class TestUpSample(serial.SerializedTestCase):
            num_channels=st.integers(1, 4),
            batch_size=st.integers(1, 4),
            seed=st.integers(0, 65535),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_upsample_grad(self, height_scale, width_scale, height, width,
                           num_channels, batch_size, seed, gc, dc):
 

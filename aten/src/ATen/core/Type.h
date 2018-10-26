@@ -155,9 +155,9 @@ struct CAFFE2_API Type {
   }
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.
-  TensorOptions options(int32_t device_index = -1) const {
+  TensorOptions options(int16_t device_index = -1) const {
     return TensorOptions().dtype(scalarType())
-                          .device({backendToDeviceType(backend()), device_index})
+                          .device(backendToDeviceType(backend()), device_index)
                           .layout(layout())
                           .is_variable(is_variable());
   }
@@ -169,7 +169,6 @@ struct CAFFE2_API Type {
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   virtual int64_t storage_offset(const Tensor & self) const = 0;
-  virtual Tensor & resize_(Tensor & self, IntList size) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source, int64_t storage_offset, IntList size, IntList stride) const = 0;
   virtual Tensor & set_(Tensor & self, const Tensor & source) const = 0;
@@ -367,6 +366,7 @@ struct CAFFE2_API Type {
   virtual Tensor & log_normal_(Tensor & self, double mean, double std, Generator * generator) const = 0;
   virtual Tensor & exponential_(Tensor & self, double lambd, Generator * generator) const = 0;
   virtual Tensor & geometric_(Tensor & self, double p, Generator * generator) const = 0;
+  virtual Tensor alias(const Tensor & self) const = 0;
   virtual Tensor abs(const Tensor & self) const = 0;
   virtual Tensor & abs_(Tensor & self) const = 0;
   virtual Tensor acos(const Tensor & self) const = 0;
@@ -405,8 +405,8 @@ struct CAFFE2_API Type {
   virtual Tensor ceil(const Tensor & self) const = 0;
   virtual Tensor & ceil_(Tensor & self) const = 0;
   virtual std::vector<Tensor> chunk(const Tensor & self, int64_t chunks, int64_t dim) const = 0;
-  virtual Tensor clamp(const Tensor & self, Scalar min, Scalar max) const = 0;
-  virtual Tensor & clamp_(Tensor & self, Scalar min, Scalar max) const = 0;
+  virtual Tensor clamp(const Tensor & self, c10::optional<Scalar> min, c10::optional<Scalar> max) const = 0;
+  virtual Tensor & clamp_(Tensor & self, c10::optional<Scalar> min, c10::optional<Scalar> max) const = 0;
   virtual Tensor clamp_max(const Tensor & self, Scalar max) const = 0;
   virtual Tensor & clamp_max_(Tensor & self, Scalar max) const = 0;
   virtual Tensor clamp_min(const Tensor & self, Scalar min) const = 0;
@@ -428,6 +428,7 @@ struct CAFFE2_API Type {
   virtual Tensor div(const Tensor & self, Scalar other) const = 0;
   virtual Tensor & div_(Tensor & self, Scalar other) const = 0;
   virtual Tensor dot(const Tensor & self, const Tensor & tensor) const = 0;
+  virtual Tensor & resize_(Tensor & self, IntList size) const = 0;
   virtual Tensor erf(const Tensor & self) const = 0;
   virtual Tensor & erf_(Tensor & self) const = 0;
   virtual Tensor erfc(const Tensor & self) const = 0;
@@ -455,14 +456,12 @@ struct CAFFE2_API Type {
   virtual Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & values) const = 0;
   virtual Tensor inverse(const Tensor & self) const = 0;
   virtual Tensor isclose(const Tensor & self, const Tensor & other, double rtol, double atol, bool equal_nan) const = 0;
-  virtual bool is_cuda(const Tensor & self) const = 0;
   virtual bool is_distributed(const Tensor & self) const = 0;
   virtual bool is_floating_point(const Tensor & self) const = 0;
   virtual bool is_complex(const Tensor & self) const = 0;
   virtual bool is_nonzero(const Tensor & self) const = 0;
   virtual bool is_same_size(const Tensor & self, const Tensor & other) const = 0;
   virtual bool is_signed(const Tensor & self) const = 0;
-  virtual bool is_sparse(const Tensor & self) const = 0;
   virtual std::tuple<Tensor,Tensor> kthvalue(const Tensor & self, int64_t k, int64_t dim, bool keepdim) const = 0;
   virtual Tensor log(const Tensor & self) const = 0;
   virtual Tensor & log_(Tensor & self) const = 0;
@@ -584,20 +583,24 @@ struct CAFFE2_API Type {
   virtual Tensor & sub_(Tensor & self, Scalar other, Scalar alpha) const = 0;
   virtual Tensor addmm(const Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & addmm_(Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
-  virtual Tensor & sparse_resize_(Tensor & self, IntList size, int64_t sparseDims, int64_t denseDims) const = 0;
-  virtual Tensor & sparse_resize_and_clear_(Tensor & self, IntList size, int64_t sparseDims, int64_t denseDims) const = 0;
+  virtual Tensor & sparse_resize_(Tensor & self, IntList size, int64_t sparse_dim, int64_t dense_dim) const = 0;
+  virtual Tensor & sparse_resize_and_clear_(Tensor & self, IntList size, int64_t sparse_dim, int64_t dense_dim) const = 0;
   virtual Tensor sparse_mask(const Tensor & self, SparseTensorRef mask) const = 0;
   virtual Tensor to_dense(const Tensor & self) const = 0;
-  virtual int64_t _sparseDims(const Tensor & self) const = 0;
-  virtual int64_t _denseDims(const Tensor & self) const = 0;
+  virtual int64_t sparse_dim(const Tensor & self) const = 0;
+  virtual int64_t _dimI(const Tensor & self) const = 0;
+  virtual int64_t dense_dim(const Tensor & self) const = 0;
+  virtual int64_t _dimV(const Tensor & self) const = 0;
   virtual int64_t _nnz(const Tensor & self) const = 0;
   virtual Tensor coalesce(const Tensor & self) const = 0;
   virtual bool is_coalesced(const Tensor & self) const = 0;
   virtual Tensor _indices(const Tensor & self) const = 0;
   virtual Tensor _values(const Tensor & self) const = 0;
+  virtual Tensor & _coalesced_(Tensor & self, bool coalesced) const = 0;
+  virtual Tensor indices(const Tensor & self) const = 0;
+  virtual Tensor values(const Tensor & self) const = 0;
   virtual int64_t numel(const Tensor & self) const = 0;
   virtual std::vector<Tensor> unbind(const Tensor & self, int64_t dim) const = 0;
-  virtual int64_t get_device(const Tensor & self) const = 0;
   virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, Device device, bool non_blocking, bool copy) const = 0;

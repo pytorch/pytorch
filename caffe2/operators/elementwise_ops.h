@@ -172,8 +172,10 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
         B_dims = {static_cast<int>(n), 1};
       }
     } else {
-      std::copy(A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
-      std::copy(B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+      std::copy(
+          A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
+      std::copy(
+          B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
       const std::vector<int> C_dims =
           elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
               A_dims, B_dims);
@@ -272,8 +274,10 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
         B_dims = {static_cast<int>(n), 1};
       }
     } else {
-      std::copy(A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
-      std::copy(B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+      std::copy(
+          A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
+      std::copy(
+          B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
     }
     const typename OutputTypeMap::template type<T>* C_data = nullptr;
     if (InputSize() == 4) {

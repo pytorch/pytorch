@@ -51,6 +51,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
+  } else if (t.kind() == TypeKind::OptionalType) {
+    auto prim = t.cast<OptionalType>()->getElementType();
+    out << *prim << "?";
   } else if(t.kind() == TypeKind::NoneType) {
     out << "None";
   } else if(t.kind() == TypeKind::StringType) {
@@ -237,6 +240,7 @@ TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
       throw TypeMatchError(ss.str());
     }
   }
+
   AT_ERROR("unhandled free variable container: ", formal->str());
 }
 
@@ -249,14 +253,12 @@ TORCH_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::string
     auto it = type_env.find(vt->name());
     AT_ASSERTM(it != type_env.end(), "schema has unbound type variable '", vt->name(), "' in its return type");
     return it->second;
-  } else if(auto lt = type->cast<ListType>()) {
-    return ListType::create(evalTypeVariables(lt->getElementType(), type_env));
-  } else if(auto tp = type->cast<TupleType>()) {
-    return TupleType::create(fmap(tp->elements(), [&](const TypePtr& typ) {
-      return evalTypeVariables(typ, type_env);
-    }));
+  } else {
+    auto new_contained = fmap(type->containedTypes(), [&](TypePtr t) {
+      return evalTypeVariables(t, type_env);
+    });
+    return type->withContained(std::move(new_contained));
   }
-  return type;
 }
 
 }} // namespace torch::jit

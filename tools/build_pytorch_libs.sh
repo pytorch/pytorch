@@ -21,17 +21,24 @@ CMAKE_COMMAND="cmake"
 if [[ -x "$(command -v cmake3)" ]]; then
     if [[ -x "$(command -v cmake)" ]]; then
         # have both cmake and cmake3, compare versions
-        CMAKE_VERSION=$(cmake --version | grep 'cmake version' | awk '{print $NF}')
-        CMAKE3_VERSION=$(cmake3 --version | grep 'cmake version' | awk '{print $NF}')
-        CMAKE3_IS_NEWER=$($PYTORCH_PYTHON -c "from distutils.version import StrictVersion; print(1 if StrictVersion(\"${CMAKE3_VERSION}\") >= StrictVersion(\"${CMAKE_VERSION}\") else 0)")
+        # Usually cmake --version returns two lines,
+        #   cmake version #.##.##
+        #   <an empty line>
+        # On the nightly machines it returns one line
+        #   cmake3 version 3.11.0 CMake suite maintained and supported by Kitware (kitware.com/cmake).
+        # Thus we extract the line that has 'version' in it and hope the actual
+        # version number is gonna be the 3rd element
+        CMAKE_VERSION=$(cmake --version | grep 'version' | awk '{print $3}')
+        CMAKE3_VERSION=$(cmake3 --version | grep 'version' | awk '{print $3}')
+        CMAKE3_NEEDED=$($PYTORCH_PYTHON -c "from distutils.version import StrictVersion; print(1 if StrictVersion(\"${CMAKE_VERSION}\") < StrictVersion(\"3.5.0\") and StrictVersion(\"${CMAKE3_VERSION}\") > StrictVersion(\"${CMAKE_VERSION}\") else 0)")
     else
         # don't have cmake
-        CMAKE3_IS_NEWER=1
+        CMAKE3_NEEDED=1
     fi
-    if [[ $CMAKE3_IS_NEWER == "1" ]]; then
+    if [[ $CMAKE3_NEEDED == "1" ]]; then
         CMAKE_COMMAND="cmake3"
     fi
-    unset CMAKE_VERSION CMAKE3_VERSION CMAKE3_IS_NEWER
+    unset CMAKE_VERSION CMAKE3_VERSION CMAKE3_NEEDED
 fi
 
 # Options for building only a subset of the libraries
@@ -39,6 +46,7 @@ USE_CUDA=0
 USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
+USE_QNNPACK=0
 USE_GLOO_IBVERBS=0
 CAFFE2_STATIC_LINK_CUDA=0
 RERUN_CMAKE=1
@@ -58,6 +66,9 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-mkldnn)
           USE_MKLDNN=1
+          ;;
+      --use-qnnpack)
+          USE_QNNPACK=1
           ;;
       --use-gloo-ibverbs)
           USE_GLOO_IBVERBS=1
@@ -205,7 +216,6 @@ function build() {
 		       -DTHC_SO_VERSION=1 \
 		       -DTHNN_SO_VERSION=1 \
 		       -DTHCUNN_SO_VERSION=1 \
-		       -DTHD_SO_VERSION=1 \
 		       -DUSE_CUDA=$USE_CUDA \
 		       -DBUILD_EXAMPLES=OFF \
 		       -DBUILD_TEST=$BUILD_TEST \
@@ -301,6 +311,7 @@ function build_caffe2() {
 		       -DBUILD_CAFFE2_OPS=$BUILD_CAFFE2_OPS \
 		       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
 		       -DUSE_CUDA=$USE_CUDA \
+		       -DUSE_DISTRIBUTED=$USE_DISTRIBUTED \
 		       -DUSE_NUMPY=$USE_NUMPY \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \
@@ -308,6 +319,7 @@ function build_caffe2() {
 		       -DUSE_LEVELDB=$USE_LEVELDB \
 		       -DUSE_LMDB=$USE_LMDB \
 		       -DUSE_OPENCV=$USE_OPENCV \
+		       -DUSE_QNNPACK=$USE_QNNPACK \
 		       -DUSE_FFMPEG=$USE_FFMPEG \
 		       -DUSE_GLOG=OFF \
 		       -DUSE_GFLAGS=OFF \
@@ -325,6 +337,8 @@ function build_caffe2() {
 		       -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
 		       -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
 		       $GLOO_FLAGS \
+		       -DTHD_SO_VERSION=1 \
+		       $THD_FLAGS \
 		       ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
@@ -373,18 +387,6 @@ for arg in "$@"; do
         popd
     elif [[ "$arg" == "caffe2" ]]; then
         build_caffe2
-    elif [[ "$arg" == "THD" ]]; then
-        pushd "$TORCH_LIB_DIR"
-        build THD $THD_FLAGS
-        popd
-    elif [[ "$arg" == "libshm" ]] || [[ "$arg" == "libshm_windows" ]]; then
-        pushd "$TORCH_LIB_DIR"
-        build $arg
-        popd
-    elif [[ "$arg" == "c10d" ]]; then
-        pushd "$TORCH_LIB_DIR"
-        build c10d
-        popd
     else
         pushd "$THIRD_PARTY_DIR"
         build $arg

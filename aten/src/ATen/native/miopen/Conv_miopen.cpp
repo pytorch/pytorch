@@ -555,9 +555,10 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
   auto handle = getMiopenHandle();
   auto dataType = getMiopenDataType(*bias);
   Constant one(dataType, 1);
+  Constant zero(dataType, 0);
 
   MIOPEN_CHECK(miopenConvolutionForwardBias(handle, &one, bdesc.desc(), bias->data_ptr(),
-                                     &one, odesc.desc(), output->data_ptr()));
+                                     &zero, odesc.desc(), output->data_ptr()));
 }
 
 // see NOTE [ Convolution design ] in src/Aten/native/cudnn/Conv.cpp
