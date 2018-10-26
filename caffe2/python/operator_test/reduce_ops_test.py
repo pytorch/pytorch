@@ -52,7 +52,7 @@ class TestReduceOps(serial.SerializedTestCase):
             self.run_reduce_op_test_impl(
                 op_name, X, range(num_dims), keepdims, ref_func, gc, dc)
         else:
-            for axes in it.combinations(range(num_dims), num_axes):
+            for axes in it.combinations(range(-num_dims + 1, num_dims), num_axes):
                 self.run_reduce_op_test_impl(
                     op_name, X, axes, keepdims, ref_func, gc, dc)
 

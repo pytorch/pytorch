@@ -461,7 +461,6 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.sum(-1), x)
 
-
     def test_symbolic_override(self):
         """Lifted from fast-neural-style: custom implementation of instance norm
         to be mapped to ONNX operator"""
