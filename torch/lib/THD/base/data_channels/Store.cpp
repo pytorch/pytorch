@@ -2,32 +2,23 @@
 #include "../ChannelUtils.hpp"
 
 #include <poll.h>
-#include <system_error>
 #include <unistd.h>
+#include <system_error>
 
 namespace thd {
 
 namespace {
 
-enum class QueryType : std::uint8_t {
-  SET,
-  GET,
-  WAIT,
-  STOP_WAITING
-};
+enum class QueryType : std::uint8_t { SET, GET, WAIT, STOP_WAITING };
 
 } // anonymous namespace
 
 Store::StoreDeamon::StoreDeamon(int listen_socket)
- : _listen_socket(listen_socket)
- , _keys_awaited()
- , _sockets()
-{
+    : _listen_socket(listen_socket), _keys_awaited(), _sockets() {
   _deamon = std::thread(&Store::StoreDeamon::deamon, this);
 }
 
-Store::StoreDeamon::~StoreDeamon()
-{
+Store::StoreDeamon::~StoreDeamon() {
   ::close(_listen_socket);
   for (auto socket : _sockets) {
     if (socket != -1)
@@ -41,7 +32,7 @@ void Store::StoreDeamon::join() {
 
 void Store::StoreDeamon::deamon() {
   std::vector<struct pollfd> fds;
-  fds.push_back({ .fd = _listen_socket, .events = POLLIN });
+  fds.push_back({.fd = _listen_socket, .events = POLLIN});
 
   // receive the queries
   bool finished = false;
@@ -58,7 +49,7 @@ void Store::StoreDeamon::deamon() {
       int sock_fd = std::get<0>(accept(_listen_socket));
       _sockets.push_back(sock_fd);
       _keys_awaited.push_back(0);
-      fds.push_back({ .fd = sock_fd, .events = POLLIN });
+      fds.push_back({.fd = sock_fd, .events = POLLIN});
     }
     for (size_t rank = 0; rank < _sockets.size(); rank++) {
       if (fds[rank + 1].revents == 0)
@@ -70,11 +61,11 @@ void Store::StoreDeamon::deamon() {
       try {
         query(rank);
       } catch (...) {
-        // There was an error when processing query. Probably an exception occurred in
-        // recv/send what would indicate that socket on the other side has been closed.
-        // If the closing was due to normal exit, then the store should exit too.
-        // Otherwise, if it was different exception, other processes will get
-        // an exception once they try to use the store.
+        // There was an error when processing query. Probably an exception
+        // occurred in recv/send what would indicate that socket on the other
+        // side has been closed. If the closing was due to normal exit, then the
+        // store should exit too. Otherwise, if it was different exception,
+        // other processes will get an exception once they try to use the store.
         finished = true;
         break;
       }
@@ -143,19 +134,14 @@ bool Store::StoreDeamon::checkAndUpdate(std::vector<std::string>& keys) const {
   return ret;
 }
 
-
-
-Store::Store(const std::string& addr,
-             port_type port, int listen_socket)
- : _socket(-1)
- , _store_addr(addr)
- , _store_port(port)
- , _store_thread(nullptr)
-{
+Store::Store(const std::string& addr, port_type port, int listen_socket)
+    : _socket(-1),
+      _store_addr(addr),
+      _store_port(port),
+      _store_thread(nullptr) {
   if (listen_socket != Store::CLIENT_ONLY) {
-    _store_thread = std::unique_ptr<StoreDeamon>(
-      new StoreDeamon(listen_socket)
-    );
+    _store_thread =
+        std::unique_ptr<StoreDeamon>(new StoreDeamon(listen_socket));
   }
 
   _socket = connect(_store_addr, _store_port);

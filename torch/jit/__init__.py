@@ -1300,12 +1300,19 @@ _modules_containing_builtins = (torch, torch.nn.functional)
 
 # These functions don't have aten ops but have been converted to weak script, so
 # don't add them as builtins
-# TODO: delete this list and remove torch.nn.functional from builtins list once
-# everything in it has been converted to weak script
+# TODO: delete this list, _should_skip(), and remove torch.nn.functional from
+# builtins list once everything in it has been converted to weak script
 _builtin_blacklist = {
     'tanhshrink',
     'softsign',
+    'pairwise_distance',
+    'prelu',
+    'hardshrink',
 }
+
+
+def _should_skip(mod, name):
+    return mod is torch.nn.functional and name in _builtin_blacklist
 
 
 # lazily built to ensure the correct initialization order
@@ -1318,7 +1325,7 @@ def _get_builtin_table():
     def register_all(mod):
         for name in dir(mod):
             v = getattr(mod, name)
-            if callable(v) and name not in _builtin_blacklist:
+            if callable(v) and not _should_skip(mod, name):
                 _builtin_table[id(v)] = "aten::" + name
     for mod in _modules_containing_builtins:
         register_all(mod)

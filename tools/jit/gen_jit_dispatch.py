@@ -27,6 +27,7 @@ TYPE_MAP = {
     'std::array<bool,4>': 'bool[4]',
     'std::string': 'str',
     'Scalar': 'Scalar',
+    'Scalar?': 'Scalar?',
     'Tensor': 'Tensor',
     'TensorList': 'Tensor[]',
     # this appears in return values instead of TensorList
@@ -49,8 +50,6 @@ def jit_type_of(arg):
     if is_sized_intlist_arg(arg):
         typ = 'int[{}]'.format(arg['size'])
 
-    if arg.get('is_nullable'):
-        typ = '{}?'.format(typ)
     return typ
 
 
@@ -61,6 +60,7 @@ FROM_IVALUE = {
     'IntList': '{}.toIntList()->elements()',
     'Layout': '{}.to<at::Layout>()',
     'Scalar': '{}.toScalar()',
+    'Scalar?': '{}.toOptional<Scalar>()',
     'ScalarType': '{}.to<at::ScalarType>()',
     'Tensor': '{}.toTensor()',
     'TensorList': '{}.toTensorList()->elements()',
@@ -314,7 +314,7 @@ def gen_jit_dispatch(declarations, out, template_path):
     }
     write(out, 'aten_interned_strings.h', ATEN_INTERNED_STRINGS_H, strings_env)
 
-default_map = {'{}': 'None', 'nullptr': 'None'}
+default_map = {'{}': 'None', 'nullptr': 'None', 'c10::nullopt': 'None'}
 
 
 def signature(decl):
@@ -329,7 +329,6 @@ def signature(decl):
                 .replace('}}', ']') \
                 .replace('true', 'True') \
                 .replace('false', 'False') \
-                .replace('nullptr', 'None') \
                 .replace('Reduction::ElementwiseMean', 'ElementwiseMean') \
                 .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
                 .replace('{', '[') \

@@ -435,10 +435,10 @@ struct Module {
   void save(const std::string& filename);
 
  private:
-   void to_impl(
-       at::optional<at::Device> device,
-       at::optional<at::ScalarType> dtype,
-       bool non_blocking);
+  void to_impl(
+      c10::optional<at::Device> device,
+      c10::optional<at::ScalarType> dtype,
+      bool non_blocking);
 
   // invariant: to ensure member_inputs of Methods stay valid,
   // it is only legal to _add_ new modules and parameters.

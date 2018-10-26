@@ -11,6 +11,7 @@ import argparse
 import copy
 import os
 import yaml
+import re
 from collections import defaultdict
 from .utils import YamlLoader, split_name_params
 
@@ -60,6 +61,10 @@ def get_simple_type(arg):
     simple_type = arg['type']
     simple_type = simple_type.replace(' &', '').replace('const ', '')
     simple_type = simple_type.replace('Generator *', 'Generator')
+
+    opt_match = re.match(r'c10::optional<(.+)>', simple_type)
+    if opt_match:
+        simple_type = '{}?'.format(opt_match.group(1))
     return simple_type
 
 
