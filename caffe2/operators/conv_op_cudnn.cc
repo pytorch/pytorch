@@ -758,14 +758,32 @@ bool CudnnConvOp::DoRunWithType() {
           cudnn_ws_nbytes_limit_,
           &algo_));
     }
-    CUDNN_ENFORCE(cudnnGetConvolutionForwardWorkspaceSize(
-        cudnn_wrapper_.inline_cudnn_handle(),
-        bottom_desc_,
-        filter_desc_,
-        conv_desc_,
-        top_desc_,
-        algo_,
-        &cudnn_ws_nbytes_));
+    for(int step = 0; step < 2; ++step) {
+      cudnnStatus_t _status = cudnnGetConvolutionForwardWorkspaceSize(
+          cudnn_wrapper_.inline_cudnn_handle(),
+          bottom_desc_,
+          filter_desc_,
+          conv_desc_,
+          top_desc_,
+          algo_,
+          &cudnn_ws_nbytes_);
+      if(step == 0) {
+        if(_status == CUDNN_STATUS_SUCCESS) {
+          break;
+        }
+        if(_status == CUDNN_STATUS_NOT_SUPPORTED) {
+          cudnnConvolutionFwdAlgo_t new_algo = deterministic_ ?
+              CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM :
+              CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM;
+          VLOG(1) << "Forward algorithm " << (int)algo_
+              << " is not currently supported for given parameters."
+              << " Trying the default algorithm " << (int)new_algo;
+          algo_ = new_algo;
+          continue;
+        }
+      }
+      CUDNN_ENFORCE(_status);
+    }
     VLOG(1) << "CuDNN algorithm: " << algo_;
     VLOG(1) << "CuDNN workspace size: " << cudnn_ws_nbytes_;
   }
@@ -1223,24 +1241,61 @@ bool CudnnConvGradientOp::DoRunWithType() {
     // get workspace size for backwards filter algorithm
     size_t bwd_filter_ws_size, bwd_data_ws_size;
 
-    CUDNN_ENFORCE(cudnnGetConvolutionBackwardFilterWorkspaceSize(
-        cudnn_wrapper_.inline_cudnn_handle(),
-        bottom_desc_,
-        top_desc_,
-        bwd_filter_conv_desc_,
-        filter_desc_,
-        bwd_filter_algo_,
-        &bwd_filter_ws_size));
+    for(int step = 0; step < 2; ++step) {
+      cudnnStatus_t _status = cudnnGetConvolutionBackwardFilterWorkspaceSize(
+          cudnn_wrapper_.inline_cudnn_handle(),
+          bottom_desc_,
+          top_desc_,
+          bwd_filter_conv_desc_,
+          filter_desc_,
+          bwd_filter_algo_,
+          &bwd_filter_ws_size);
+      if(step == 0) {
+        if(_status == CUDNN_STATUS_SUCCESS) {
+          break;
+        }
+        if(_status == CUDNN_STATUS_NOT_SUPPORTED) {
+          cudnnConvolutionBwdFilterAlgo_t new_algo = deterministic_ ?
+              CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1 :
+              CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0;
+          VLOG(1) << "Backward Filter algorithm " << (int)bwd_filter_algo_
+              << " is not currently supported for given parameters."
+              << " Trying the default algorithm " << (int)new_algo;
+          bwd_filter_algo_ = new_algo;
+          continue;
+        }
+      }
+      CUDNN_ENFORCE(_status);
+    }
+
     if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
       // get workspace size for backwards data algorithm
-      CUDNN_ENFORCE(cudnnGetConvolutionBackwardDataWorkspaceSize(
-          cudnn_wrapper_.inline_cudnn_handle(),
-          filter_desc_,
-          top_desc_,
-          bwd_data_conv_desc_,
-          bottom_desc_,
-          bwd_data_algo_,
-          &bwd_data_ws_size));
+      for(int step = 0; step < 2; ++step) {
+        cudnnStatus_t _status = cudnnGetConvolutionBackwardDataWorkspaceSize(
+            cudnn_wrapper_.inline_cudnn_handle(),
+            filter_desc_,
+            top_desc_,
+            bwd_data_conv_desc_,
+            bottom_desc_,
+            bwd_data_algo_,
+            &bwd_data_ws_size);
+        if(step == 0) {
+          if(_status == CUDNN_STATUS_SUCCESS) {
+            break;
+          }
+          if(_status == CUDNN_STATUS_NOT_SUPPORTED) {
+            cudnnConvolutionBwdDataAlgo_t new_algo = deterministic_ ?
+                CUDNN_CONVOLUTION_BWD_DATA_ALGO_1 :
+                CUDNN_CONVOLUTION_BWD_DATA_ALGO_0;
+            VLOG(1) << "Backward Data algorithm " << (int)bwd_data_algo_
+                << " is not currently supported for given parameters."
+                << " Trying the default algorithm " << (int)new_algo;
+            bwd_data_algo_ = new_algo;
+            continue;
+          }
+        }
+        CUDNN_ENFORCE(_status);
+      }
     } else {
       bwd_data_ws_size = 0;
     }

@@ -325,9 +325,9 @@ class TestConvolution(serial.SerializedTestCase):
            pad=st.integers(0, 3),
            use_bias=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]),
-           force_algo_fwd=st.integers(0, 1),
-           force_algo_dgrad=st.integers(0, 1),
-           force_algo_wgrad=st.integers(0, 1),
+           force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
+           force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
+           force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
            **hu.gcs)
     def test_1d_convolution_nchw(self, input_channels, output_channels,
                                  batch_size, stride, size, kernel, dilation,
