@@ -144,8 +144,12 @@ class TCPStoreTest(TestCase, StoreTestBase):
         with self.assertRaisesRegex(RuntimeError, "^Address already in use$"):
             addr = 'localhost'
             port = common.find_free_port()
-            store1 = c10d.TCPStore(addr, port, True)
-            store2 = c10d.TCPStore(addr, port, True)
+
+            # Use noqa to silence flake8.
+            # Need to store in an unused variable here to ensure the first
+            # object is not destroyed before the second object is created.
+            store1 = c10d.TCPStore(addr, port, True)  # noqa: F841
+            store2 = c10d.TCPStore(addr, port, True)  # noqa: F841
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
