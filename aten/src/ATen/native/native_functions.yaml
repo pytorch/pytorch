@@ -1204,6 +1204,16 @@
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
   variants: function, method
 
+- func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: batch_norm_cpu
+    CUDA: batch_norm_cuda
+
+- func: native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, double eps, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: batch_norm_backward_cpu
+    CUDA: batch_norm_backward_cuda
+
 - func: ones(IntList size, TensorOptions options={}) -> Tensor
 
 - func: ones_out(Tensor result, IntList size) -> Tensor
