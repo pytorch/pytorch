@@ -518,6 +518,9 @@ class TestOperators(TestCase):
         BigModule()(*inp)
         self.assertONNX(BigModule(), inp)
 
+    def test_randn(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(lambda x: torch.randn(1, 2, 3, 4) + x, x)
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

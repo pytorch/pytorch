@@ -28,57 +28,68 @@ struct Barrier {
     }
   }
 
-private:
+ private:
   std::mutex _mutex;
   std::condition_variable _cv;
   size_t _count;
 };
 
-template<typename T>
+template <typename T>
 typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::type
-    check_equal(T x, T y, int ulp = 5) {
+check_equal(T x, T y, int ulp = 5) {
   auto eps = std::numeric_limits<T>::epsilon();
   auto min = std::numeric_limits<T>::min();
-  return (std::abs(x-y) < eps * std::abs(x+y) * ulp) || (std::abs(x-y) < min);
+  return (std::abs(x - y) < eps * std::abs(x + y) * ulp) ||
+      (std::abs(x - y) < min);
 }
 
-template<typename T>
+template <typename T>
 typename std::enable_if<std::numeric_limits<T>::is_integer, bool>::type
-    check_equal(T x, T y) {
+check_equal(T x, T y) {
   return x == y;
 }
 
-template<typename T>
-std::shared_ptr<thpp::THTensor<T>> buildTensor(std::vector<int64_t> shape, T value) {
+template <typename T>
+std::shared_ptr<thpp::THTensor<T>> buildTensor(
+    std::vector<int64_t> shape,
+    T value) {
   auto tensor = std::make_shared<thpp::THTensor<T>>();
   tensor->resize(shape);
   tensor->fill(value);
   return tensor;
 }
 
-template<typename T>
+template <typename T>
 inline bool contains(std::vector<T> v, T value) {
   return std::find(v.begin(), v.end(), value) != v.end();
 }
 
 inline int64_t nowInMilliseconds() {
-  return std::chrono::duration_cast<std::chrono::milliseconds>
-      (std::chrono::system_clock::now().time_since_epoch()).count();
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
 }
 
 inline int64_t factorial(int n) {
   int64_t a = 1;
-  for (int64_t i = 1; i <= n; ++i) { a *= i; }
+  for (int64_t i = 1; i <= n; ++i) {
+    a *= i;
+  }
   return a;
 }
 
-#define ASSERT_TENSOR_VALUE(T, tensor, value) {            \
-  for (size_t idx = 0; idx < (tensor).numel(); idx++) \
-    assert(check_equal(                                    \
-      reinterpret_cast<T*>((tensor).data())[idx], static_cast<T>(value) \
-    ));                                                    \
-}
+#define ASSERT_TENSOR_VALUE(T, tensor, value)                                  \
+  {                                                                            \
+    for (size_t idx = 0; idx < (tensor).numel(); idx++)                        \
+      assert(check_equal(                                                      \
+          reinterpret_cast<T*>((tensor).data())[idx], static_cast<T>(value))); \
+  }
 
-#define ASSERT_THROWS(exception, expr) {                       \
-  try { (expr); assert(false); } catch (const exception& e) {} \
-}
+#define ASSERT_THROWS(exception, expr) \
+  {                                    \
+    try {                              \
+      (expr);                          \
+      assert(false);                   \
+    } catch (const exception& e) {     \
+    }                                  \
+  }

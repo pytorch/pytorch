@@ -70,7 +70,7 @@ struct InfiniteStreamDataset
 
 struct BatchSizeSampler : samplers::Sampler {
   void reset() override {}
-  at::optional<std::vector<size_t>> next(size_t batch_size) override {
+  c10::optional<std::vector<size_t>> next(size_t batch_size) override {
     return {{batch_size}};
   }
 };

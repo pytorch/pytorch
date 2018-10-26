@@ -17,8 +17,16 @@ ELSE ()
 ENDIF ()
 
 ADD_LIBRARY(shm SHARED core.cpp)
+
+target_include_directories(shm PRIVATE
+  ${CMAKE_SOURCE_DIR}/aten/src/TH # provides "THAllocator.h" to THCGeneral.h
+  ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
+  ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
+  ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC # provides "THCGeneral.h" to THC.h
+  )
+
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
-TARGET_LINK_LIBRARIES(shm ${TH_LIBRARIES} ${C10_LIBRARIES})
+TARGET_LINK_LIBRARIES(shm caffe2 c10)
 
 
 INSTALL(TARGETS shm

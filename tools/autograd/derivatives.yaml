@@ -186,7 +186,7 @@
 
 # For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
-- name: clamp(Tensor self, Scalar min, Scalar max)
+- name: clamp(Tensor self, Scalar? min, Scalar? max)
   self: clamp_backward(grad, self, min, max)
 
 - name: clamp_min(Tensor self, Scalar min)
