@@ -109,7 +109,7 @@ class Module {
   ///   easier-to-use polymorphic interface.
   /// \endrst
   virtual std::shared_ptr<Module> clone(
-      c10::optional<Device> device = c10::nullopt) const;
+      optional<Device> device = nullopt) const;
 
   /// Provides a means to traverse the `Module` tree.
   ///
@@ -333,7 +333,7 @@ class Module {
   // Private methods.
 
   /// Used in the implementation of `Cloneable`.
-  virtual void clone_(Module& other, c10::optional<Device> device);
+  virtual void clone_(Module& other, optional<Device> device);
 
   /// The implementation of the various `to()` methods.
   template <typename... Ts>
@@ -349,7 +349,7 @@ class Module {
   OrderedDict<std::shared_ptr<Module>> children_;
 
   /// The module's name (e.g. "LSTM").
-  mutable c10::optional<std::string> name_;
+  mutable optional<std::string> name_;
 
   /// Whether the module is in training mode.
   bool is_training_{true};
