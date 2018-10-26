@@ -49,6 +49,30 @@ TEST(TensorTest, ToDtype) {
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kDouble, at::kStrided);
 }
 
+TEST(TensorTest, ToTensorAndTensorAttributes) {
+  auto tensor = at::empty({3, 4});
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
+
+  auto other = at::empty({3, 4}, at::kInt);
+  tensor = tensor.to(other);
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kInt, at::kStrided);
+
+  other = at::empty({3, 4}, at::kDouble);
+  tensor = tensor.to(other.dtype());
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kDouble, at::kStrided);
+  tensor = tensor.to(other.device());
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kDouble, at::kStrided);
+
+  other = at::empty({3, 4}, at::kLong);
+  tensor = tensor.to(other.device(), other.dtype());
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kLong, at::kStrided);
+
+  other = at::empty({3, 4}, at::kInt);
+  tensor = tensor.to(other.options());
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kInt, at::kStrided);
+}
+
+
 // Not currently supported.
 // TEST(TensorTest, ToLayout) {
 //   auto tensor = at::empty({3, 4});
@@ -97,6 +121,21 @@ TEST(TensorTest, ToDoesNotCopyWhenOptionsAreAllTheSame) {
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(tensor.options());
+    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+  }
+  {
+    auto tensor = at::empty({3, 4}, at::kFloat);
+    auto hopefully_not_copy = tensor.to(tensor.dtype());
+    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+  }
+  {
+    auto tensor = at::empty({3, 4}, at::kFloat);
+    auto hopefully_not_copy = tensor.to(tensor.device());
+    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+  }
+  {
+    auto tensor = at::empty({3, 4}, at::kFloat);
+    auto hopefully_not_copy = tensor.to(tensor);
     ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
   }
 }

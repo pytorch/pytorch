@@ -59,6 +59,30 @@ TEST(TensorTest, ToDevice_CUDA) {
   REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kInt, at::kStrided);
 }
 
+TEST(TensorTest, ToTensorAndTensorAttributes_CUDA) {
+  auto tensor = at::empty({3, 4});
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
+
+  auto other = at::empty({3, 4}, at::kFloat);
+  tensor = tensor.to(other);
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
+
+  other = at::empty({3, 4}, at::TensorOptions(at::kCUDA).dtype(at::kDouble));
+  tensor = tensor.to(other.dtype());
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kDouble, at::kStrided);
+  tensor = tensor.to(other.device());
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kDouble, at::kStrided);
+
+  other = at::empty({3, 4}, at::TensorOptions({at::kCUDA, 1}).dtype(at::kLong));
+  tensor = tensor.to(other.device(), other.dtype());
+  REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kLong, at::kStrided);
+
+  other = at::empty({3, 4}, at::kFloat);
+  tensor = tensor.to(other.options());
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
+}
+
+
 TEST(TensorTest, ToDoesNotCopyWhenOptionsAreAllTheSame_CUDA) {
   auto tensor = at::empty({3, 4}, at::TensorOptions(at::kFloat).device(at::Device("cuda")));
   auto hopefully_not_copy = tensor.to(tensor.options());
