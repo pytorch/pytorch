@@ -402,7 +402,7 @@ void addObjectMethods(py::module& m) {
             // be, since we're doing an extra allocation we didn't
             // need to do.  But I don't remember how to clue in
             // pybind11 how to convert ArrayRef to vector.
-            return tensor->dims().vec();
+            return tensor->sizes().vec();
           })
       .def(
           "_reshape",

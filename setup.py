@@ -331,7 +331,7 @@ class create_version_file(PytorchCommand):
 # All libraries that torch could depend on
 dep_libs = [
     'nccl', 'caffe2',
-    'libshm', 'libshm_windows', 'THD', 'c10d',
+    'libshm', 'libshm_windows'
 ]
 
 missing_pydep = '''
@@ -411,6 +411,7 @@ def build_libs(libs):
     my_env["USE_LMDB"] = "ON" if USE_LMDB else "OFF"
     my_env["USE_OPENCV"] = "ON" if USE_OPENCV else "OFF"
     my_env["USE_FFMPEG"] = "ON" if USE_FFMPEG else "OFF"
+    my_env["USE_DISTRIBUTED"] = "ON" if USE_DISTRIBUTED else "OFF"
 
     try:
         os.mkdir('build')
@@ -461,14 +462,6 @@ class build_deps(PytorchCommand):
         if USE_NCCL and not USE_SYSTEM_NCCL:
             libs += ['nccl']
         libs += ['caffe2']
-        if IS_WINDOWS:
-            libs += ['libshm_windows']
-        else:
-            libs += ['libshm']
-        if USE_DISTRIBUTED:
-            if IS_LINUX:
-                libs += ['c10d']
-            libs += ['THD']
         build_libs(libs)
 
         # Use copies instead of symbolic files.

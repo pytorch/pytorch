@@ -467,3 +467,16 @@ install(FILES
     ${PROJECT_BINARY_DIR}/TorchConfigVersion.cmake
     ${PROJECT_BINARY_DIR}/TorchConfig.cmake
     DESTINATION share/cmake/Torch)
+
+if (USE_DISTRIBUTED)
+  add_subdirectory(${TORCH_SRC_DIR}/lib/THD)
+  if (NOT MSVC AND NOT APPLE)
+    add_subdirectory(${TORCH_SRC_DIR}/lib/c10d)
+  endif()
+endif()
+
+if (MSVC)
+  add_subdirectory(${TORCH_SRC_DIR}/lib/libshm_windows)
+else()
+  add_subdirectory(${TORCH_SRC_DIR}/lib/libshm)
+endif()

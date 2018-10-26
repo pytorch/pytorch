@@ -8,6 +8,8 @@
 #include <c10d/ProcessGroup.hpp>
 
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/CUDAGuard.h>
 
 #include <cstddef>
 #include <memory>
@@ -112,8 +114,28 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
   AT_ASSERT(!gradsBatch.empty());
   AT_ASSERT(!devices.empty());
 
-  // TODO: create a copy stream to do the async memory copy and
-  // Intra node reduction with profiler perf work
+  // Events to record the current state on the default stream of each GPUs
+  std::vector<at::cuda::CUDAEvent> events;
+  events.resize(devices.size());
+
+  // Creating a separate CUDA stream to allow memory copy
+  // and intra-node reduce to be operated on this worker stream to
+  // improve performance
+  std::vector<at::cuda::CUDAStream> workerStreams;
+  for (size_t devIdx = 0; devIdx < devices.size(); ++devIdx) {
+    at::DeviceGuard guard(devices[devIdx]);
+    events[devIdx].record();
+    workerStreams.push_back(at::cuda::getStreamFromPool(false, devices[devIdx]));
+    // Let the worker stream to wait for the default stream
+    events[devIdx].block(workerStreams.back());
+  }
+
+  // Stream guards, now the current stream is the worker stream
+  std::vector<at::cuda::CUDAGuard> cudaGuards;
+  for (size_t devIdx = 0; devIdx < devices.size(); ++devIdx) {
+    cudaGuards.push_back(at::cuda::CUDAGuard(workerStreams[devIdx]));
+  }
+
   std::vector<at::Tensor> gradsBatchCoalesced;
   for (size_t devIdx = 0; devIdx < devices.size(); ++devIdx) {
     at::DeviceGuard guard(devices[devIdx]);
@@ -132,4 +154,39 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
 
   return std::make_tuple(reductionWork, gradsBatchCoalesced[0]);
 }
+
+void syncReduction(
+    std::shared_ptr<ProcessGroup::Work>& reductionWork,
+    std::vector<at::Tensor>& gradsBatch,
+    at::Tensor& gradsBatchCoalesced) {
+  // Creating a separate CUDA stream to allow memory copy
+  // and intra-node reduce to be operated on this worker stream to
+  // improve performance
+  at::cuda::CUDAStream workerStream = at::cuda::getStreamFromPool();
+  at::cuda::CUDAGuard cudaGuard = at::cuda::CUDAGuard(workerStream);
+
+  // Let the worker stream wait on the reduction stream
+  reductionWork->wait();
+  // Now do the copy in worker stream
+  std::vector<at::Tensor> gradsReduced =
+      torch::utils::unflatten_dense_tensors(gradsBatchCoalesced, gradsBatch);
+
+  AT_ASSERT(gradsReduced.size() == gradsBatch.size());
+
+  for (size_t i = 0; i < gradsReduced.size(); ++i) {
+    gradsBatch[i].copy_(gradsReduced[i]);
+  }
+
+  // Record the state in the worker stream
+  at::cuda::CUDAEvent event;
+  event.record(workerStream);
+
+  // Now make the BW stream wait on it
+  auto bwDevice = cudaGuard.original_device();
+  auto bwStream = cudaGuard.original_streams()[bwDevice];
+
+  // Now let the BW stream wait for the worker stream
+  event.block(bwStream);
+}
+
 } // namespace c10d

@@ -118,7 +118,7 @@ struct SchemaParser {
         L.next(); // ]
         value = ListType::create(value);
       } else if(L.nextIf('?')) {
-        // pass - currently ignored but optional types would go here when implemented
+        value = OptionalType::create(value);
       } else {
         break;
       }
@@ -238,6 +238,7 @@ struct SchemaParser {
       case TypeKind::GeneratorType: {
         return parseTensorDefault(range);
       }  break;
+      case TypeKind::OptionalType:
       case TypeKind::NumberType:
       case TypeKind::IntType:
       case TypeKind::BoolType:
@@ -324,7 +325,7 @@ private:
   // Basically, every function schema is assigned a unique string you can use to match it. However,
   // parsing those strings or comparing and hashing them character by character would be very slow, so
   // we use a trick here! Every string literal in your program is guaranteed to have static storage
-  // duration and so its address won't change at runtime. This allows us to memoize answerts for every
+  // duration and so its address won't change at runtime. This allows us to memoize answers for every
   // pointer, which is done by the operators_by_sig_literal map. Still, this map is initially
   // empty, and so we still need to do the complete string matching at the first time, which is implemented
   // by performing a lookup in the operators_by_sig map.

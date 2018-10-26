@@ -163,6 +163,7 @@ def process_definition(defn, declarations_by_signature):
     #     `None` means all differentiable.
     output_differentiability = defn.pop('output_differentiability', None)
     param_types, param_names = unzip([p.split(' ') for p in params if p != '*'])
+
     if 'grad_input_mask' in param_names:
         raise RuntimeError("Signature for {} has an argument named grad_input_mask, "
                            "but this name would be shadowed by our codegen. "

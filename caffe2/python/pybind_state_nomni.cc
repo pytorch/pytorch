@@ -490,12 +490,33 @@ void addNomnigraphMethods(pybind11::module& m) {
           [](Caffe2Annotation& annot, py::object& def) {
             CAFFE_ENFORCE(
                 pybind11::hasattr(def, "SerializeToString"),
-                "convertToCaffe2Proto takes either no args",
-                "a NetDef");
+                "device_option can only be set to a DeviceOption");
             auto str = def.attr("SerializeToString")();
             caffe2::DeviceOption proto;
             proto.ParseFromString(py::bytes(str));
             annot.setDeviceOption(proto);
+          },
+          py::return_value_policy::reference)
+      .def_property(
+          "operator_def",
+          [](Caffe2Annotation& annot) {
+            auto opDef = py::module::import("caffe2.proto.caffe2_pb2")
+                                    .attr("OperatorDef");
+            auto proto = annot.getOperatorDef();
+            std::string serialized_proto;
+            proto.SerializeToString(&serialized_proto);
+            auto py_op_def= opDef();
+            py_op_def.attr("ParseFromString")(py::bytes(serialized_proto));
+            return py_op_def;
+          },
+          [](Caffe2Annotation& annot, py::object& def) {
+            CAFFE_ENFORCE(
+                pybind11::hasattr(def, "SerializeToString"),
+                "operator_def can only be set to an OperatorDef");
+            auto str = def.attr("SerializeToString")();
+            caffe2::OperatorDef proto;
+            proto.ParseFromString(py::bytes(str));
+            annot.setOperatorDef(proto);
           },
           py::return_value_policy::reference);
 }

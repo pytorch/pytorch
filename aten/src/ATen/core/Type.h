@@ -157,7 +157,7 @@ struct CAFFE2_API Type {
   /// Constructs the `TensorOptions` from a type and a `device_index`.
   TensorOptions options(int32_t device_index = -1) const {
     return TensorOptions().dtype(scalarType())
-                          .device({backendToDeviceType(backend()), device_index})
+                          .device(backendToDeviceType(backend()), device_index)
                           .layout(layout())
                           .is_variable(is_variable());
   }
@@ -406,8 +406,8 @@ struct CAFFE2_API Type {
   virtual Tensor ceil(const Tensor & self) const = 0;
   virtual Tensor & ceil_(Tensor & self) const = 0;
   virtual std::vector<Tensor> chunk(const Tensor & self, int64_t chunks, int64_t dim) const = 0;
-  virtual Tensor clamp(const Tensor & self, Scalar min, Scalar max) const = 0;
-  virtual Tensor & clamp_(Tensor & self, Scalar min, Scalar max) const = 0;
+  virtual Tensor clamp(const Tensor & self, c10::optional<Scalar> min, c10::optional<Scalar> max) const = 0;
+  virtual Tensor & clamp_(Tensor & self, c10::optional<Scalar> min, c10::optional<Scalar> max) const = 0;
   virtual Tensor clamp_max(const Tensor & self, Scalar max) const = 0;
   virtual Tensor & clamp_max_(Tensor & self, Scalar max) const = 0;
   virtual Tensor clamp_min(const Tensor & self, Scalar min) const = 0;

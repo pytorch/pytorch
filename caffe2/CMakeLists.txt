@@ -222,7 +222,7 @@ target_include_directories(caffe2 INTERFACE $<INSTALL_INTERFACE:include>)
 target_include_directories(caffe2 PRIVATE ${Caffe2_CPU_INCLUDE})
 target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
-aten_set_target_props(caffe2)
+torch_set_target_props(caffe2)
 
 if (MSVC)
 target_compile_options(caffe2 INTERFACE "-std=c++11")
@@ -346,7 +346,7 @@ if(USE_CUDA)
   endif()
 
   # Set standard properties on the target
-  aten_set_target_props(caffe2_gpu)
+  torch_set_target_props(caffe2_gpu)
 
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
@@ -383,7 +383,7 @@ if(USE_ROCM)
   target_include_directories(caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
 
   # Set standard properties on the target
-  aten_set_target_props(caffe2_hip)
+  torch_set_target_props(caffe2_hip)
 
   # When a library has object files that contain device code, it needs to use hipcc/hcc to link.
   set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
