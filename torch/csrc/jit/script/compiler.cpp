@@ -561,7 +561,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
   // NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
   // necessary to enforce linearization on effectful ops.
   std::vector<NamedValue> modifiedArgs(raw_args.begin(), raw_args.end());
-  if (schema.is_mutable()) {
+  if (schema.has_world_token()) {
     // Add a dummy world token to be matched against
     const auto worldToken = graph.insertDummyWorld();
     modifiedArgs.insert(modifiedArgs.begin(), worldToken);
