@@ -704,7 +704,8 @@ THC_API void THNN_(SpatialDilatedConvolution_updateOutput)(
                   int kW, int kH,
                   int dW, int dH,
                   int padW, int padH,
-                  int dilationW, int dilationH);
+                  int dilationW, int dilationH,
+                  bool wrap);
 
 THC_API void THNN_(SpatialDilatedConvolution_updateGradInput)(
                   THCState *state,
@@ -716,7 +717,8 @@ THC_API void THNN_(SpatialDilatedConvolution_updateGradInput)(
                   int kW, int kH,
                   int dW, int dH,
                   int padW, int padH,
-                  int dilationW, int dilationH);
+                  int dilationW, int dilationH,
+                  bool wrap);
 
 THC_API void THNN_(SpatialDilatedConvolution_accGradParameters)(
                   THCState *state,
@@ -730,6 +732,7 @@ THC_API void THNN_(SpatialDilatedConvolution_accGradParameters)(
                   int dW, int dH,
                   int padW, int padH,
                   int dilationW, int dilationH,
+                  bool wrap,
                   accreal scale);
 
 THC_API void THNN_(SpatialFullDilatedConvolution_updateOutput)(

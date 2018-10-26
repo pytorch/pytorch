@@ -84,7 +84,8 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
            int kW, int kH,
            int dW, int dH,
            int padW, int padH,
-           int dilationW, int dilationH) {
+           int dilationW, int dilationH,
+           bool /*wrap*/) {
 
   THCUNN_assertSameGPU(state, 5, input, output, weight, columns, ones);
   if (bias) {
@@ -233,7 +234,8 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
            int kW, int kH,
            int dW, int dH,
            int padW, int padH,
-           int dilationW, int dilationH) {
+           int dilationW, int dilationH,
+           bool /*wrap*/) {
 
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                        gradColumns, gradInput);
@@ -343,6 +345,7 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
            int dW, int dH,
            int padW, int padH,
            int dilationW, int dilationH,
+           bool /*wrap*/,
            accreal scale_) {
 
   scalar_t scale = ScalarConvert<accreal, scalar_t>::to(scale_);

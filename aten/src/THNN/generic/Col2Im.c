@@ -56,14 +56,27 @@
 //
 // ALSO do vol2col
 
-static void THNN_(im2col)(const scalar_t* data_im, const int64_t channels,
-      const int64_t height, const int64_t width,
-      const int64_t output_height, const int64_t output_width,
-      const int64_t kernel_h, const int64_t kernel_w,
-      const int64_t pad_h, const int64_t pad_w,
-      const int64_t stride_h, const int64_t stride_w,
-      const int64_t dilation_h, const int64_t dilation_w,
-      scalar_t* data_col) {
+// Transforms a given matrix into columns of kernel footprint which depends
+// on kernel dimensions, stride and dilation. The matrix wraps around or
+// pads itself with 0 in case padding is supplied. More information can be
+// found here. https://www.mathworks.com/help/images/ref/im2col.html
+static void THNN_(im2col)(
+    const scalar_t* data_im,
+    const int64_t channels,
+    const bool wrap,
+    const int64_t height,
+    const int64_t width,
+    const int64_t output_height,
+    const int64_t output_width,
+    const int64_t kernel_h,
+    const int64_t kernel_w,
+    const int64_t pad_h,
+    const int64_t pad_w,
+    const int64_t stride_h,
+    const int64_t stride_w,
+    const int64_t dilation_h,
+    const int64_t dilation_w,
+    scalar_t* data_col) {
   const int64_t height_col = output_height;
   const int64_t width_col = output_width;
   const int64_t channels_col = channels * kernel_h * kernel_w;
@@ -75,9 +88,14 @@ static void THNN_(im2col)(const scalar_t* data_im, const int64_t channels,
       int64_t h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
       for (int64_t w_col = 0; w_col < width_col; ++w_col) {
         int64_t w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
+        if (wrap) {
+          h_im = (h_im + height) % height;
+          w_im = (w_im + width) % height;
+        }
         data_col[(c_col * height_col + h_col) * width_col + w_col] =
-          (h_im >= 0 && w_im >= 0 && h_im < height && w_im < width) ?
-          data_im[(c_im * height + h_im) * width + w_im] : 0;
+            (h_im >= 0 && w_im >= 0 && h_im < height && w_im < width)
+            ? data_im[(c_im * height + h_im) * width + w_im]
+            : 0;
       }
     }
   }

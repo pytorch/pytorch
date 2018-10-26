@@ -73,22 +73,36 @@ static inline void THNN_(SpatialDilatedConvolution_shapeCheck)(
 }
 
 void THNN_(SpatialDilatedConvolution_updateOutput)(
-    THNNState *state,
-    THTensor *input,
-    THTensor *output,
-    THTensor *weight,
-    THTensor *bias,
-    THTensor *columns,
-    THTensor *ones,
-    int kW, int kH,
-    int dW, int dH,
-    int padW, int padH,
-    int dilationW, int dilationH)
-{
-
+    THNNState* state,
+    THTensor* input,
+    THTensor* output,
+    THTensor* weight,
+    THTensor* bias,
+    THTensor* columns,
+    THTensor* ones,
+    int kW,
+    int kH,
+    int dW,
+    int dH,
+    int padW,
+    int padH,
+    int dilationW,
+    int dilationH,
+    bool wrap) {
   THNN_(SpatialDilatedConvolution_shapeCheck)
-    (input, NULL, weight, bias, kH, kW, dH, dW, padH, padW,
-     dilationH, dilationW, 0);
+  (input,
+   NULL,
+   weight,
+   bias,
+   kH,
+   kW,
+   dH,
+   dW,
+   padH,
+   padW,
+   dilationH,
+   dilationW,
+   0);
 
   // Params:
   int nInputPlane = weight->size(1);
@@ -166,7 +180,9 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
     // Extract columns:
     THNN_(im2col)(
       input_n->data<scalar_t>(),
-      nInputPlane, inputHeight, inputWidth,
+      nInputPlane,
+			wrap,
+			inputHeight, inputWidth,
       outputHeight, outputWidth,
       kH, kW, padH, padW, dH, dW,
       dilationH, dilationW,
@@ -206,17 +222,21 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
 }
 
 void THNN_(SpatialDilatedConvolution_updateGradInput)(
-    THNNState *state,
-    THTensor *input,
-    THTensor *gradOutput,
-    THTensor *gradInput,
-    THTensor *weight,
-    THTensor *gradColumns,
-    int kW, int kH,
-    int dW, int dH,
-    int padW, int padH,
-    int dilationW, int dilationH)
-{
+    THNNState* state,
+    THTensor* input,
+    THTensor* gradOutput,
+    THTensor* gradInput,
+    THTensor* weight,
+    THTensor* gradColumns,
+    int kW,
+    int kH,
+    int dW,
+    int dH,
+    int padW,
+    int padH,
+    int dilationW,
+    int dilationH,
+    bool wrap) {
   THNN_(SpatialDilatedConvolution_shapeCheck)
     (input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW,
      dilationH, dilationW, 0);
@@ -305,7 +325,6 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
   c10::raw::intrusive_ptr::decref(weight);
 }
 
-
 void THNN_(SpatialDilatedConvolution_accGradParameters)(
     THNNState *state,
     THTensor *input,
@@ -318,6 +337,7 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
     int dW, int dH,
     int padW, int padH,
     int dilationW, int dilationH,
+		bool wrap,
     accreal scale_)
 {
   scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
@@ -375,7 +395,9 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
       // Extract columns:
       THNN_(im2col)(
         input_n->data<scalar_t>(),
-        nInputPlane, inputHeight, inputWidth,
+        nInputPlane,
+				wrap,
+				inputHeight, inputWidth,
         outputHeight, outputWidth,
         kH, kW, padH, padW, dH, dW,
         dilationH, dilationW,

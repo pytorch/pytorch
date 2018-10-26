@@ -217,52 +217,52 @@ at::Tensor conv1d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntList stride, IntList padding, IntList dilation, int64_t groups) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {0}, groups);
+                         false, {0}, groups, false);
 }
 
 at::Tensor conv2d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntList stride, IntList padding, IntList dilation, int64_t groups) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {{0, 0}}, groups);
+                         false, {{0, 0}}, groups, false);
 }
 
 at::Tensor conv3d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntList stride, IntList padding, IntList dilation, int64_t groups) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {{0, 0, 0}}, groups);
+                         false, {{0, 0, 0}}, groups, false);
 }
 
 at::Tensor conv_transpose1d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntList stride, IntList padding, IntList output_padding, int64_t groups, IntList dilation) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
-                         true, output_padding, groups);
+                         true, output_padding, groups, false);
 }
 
 at::Tensor conv_transpose2d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntList stride, IntList padding, IntList output_padding, int64_t groups, IntList dilation) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
-                         true, output_padding, groups);
+                         true, output_padding, groups, false);
 }
 
 at::Tensor conv_transpose3d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntList stride, IntList padding, IntList output_padding, int64_t groups, IntList dilation) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
-                         true, output_padding, groups);
+                         true, output_padding, groups, false);
 }
 
 at::Tensor convolution(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntList stride, IntList padding, IntList dilation,
-    bool transposed, IntList output_padding, int64_t groups) {
+    bool transposed, IntList output_padding, int64_t groups, bool wrap) {
   auto& ctx = at::globalContext();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
-                          ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
+                          ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN(), wrap);
 }
 
 static inline std::vector<int64_t> convolution_expand_param_if_needed(
@@ -284,7 +284,7 @@ at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
     IntList stride_, IntList padding_, IntList dilation_,
     bool transposed_, IntList output_padding_, int64_t groups_,
-    bool benchmark, bool deterministic, bool cudnn_enabled) {
+    bool benchmark, bool deterministic, bool cudnn_enabled, bool wrap) {
 
   auto input = input_r.contiguous();
   auto weight = weight_r;
@@ -375,7 +375,7 @@ at::Tensor _convolution(
   } else {
     if (params.groups == 1) {
       output = at::_convolution_nogroup(
-          input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
+          input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, wrap);
     } else {
       std::vector<Tensor> outputs(params.groups);
       for (int g = 0; g < params.groups; ++g) {
@@ -383,7 +383,7 @@ at::Tensor _convolution(
         auto weight_g = subtensor(weight, 0, params.groups, g);
         auto bias_g = subtensor(bias, 0, params.groups, g);
         outputs[g] = at::_convolution_nogroup(
-            input_g, weight_g, bias_g, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
+            input_g, weight_g, bias_g, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, wrap);
       }
       output = at::cat(outputs, 1);
     }
@@ -401,7 +401,7 @@ at::Tensor _convolution(
 at::Tensor _convolution_nogroup(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntList stride, IntList padding, IntList dilation,
-    bool transposed, IntList output_padding) {
+    bool transposed, IntList output_padding, bool wrap) {
 
   ConvParams params;
   params.stride = stride.vec();
@@ -421,13 +421,19 @@ at::Tensor _convolution_nogroup(
   if (params.transposed) {
     if (dim == 4) {
       return at::thnn_conv_transpose2d(
-          input, weight, kernel_size, bias,
-          stride, padding, output_padding, dilation);
+          input,
+          weight,
+          kernel_size,
+          bias,
+          stride,
+          padding,
+          output_padding,
+          dilation);
     } else if (dim == 5) {
       return at::thnn_conv_transpose3d(
         input, weight, kernel_size, bias,
         stride, padding, output_padding, dilation);
-      }
+    }
   } else {  /* Not transposed */
     if (dim == 4) {
       if (dilated) {

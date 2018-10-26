@@ -653,7 +653,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::conv_transpose1d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
     "aten::conv_transpose2d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
     "aten::conv_transpose3d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
-    "aten::convolution(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int transposed, int[] output_padding, int groups) -> Tensor",
+    "aten::convolution(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int transposed, int[] output_padding, int groups, bool wrap) -> Tensor",
     "aten::adaptive_avg_pool1d(Tensor self, int[] output_size) -> Tensor",
     "aten::adaptive_avg_pool2d(Tensor self, int[] output_size) -> Tensor",
     "aten::adaptive_avg_pool3d(Tensor self, int[] output_size) -> Tensor",

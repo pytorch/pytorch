@@ -85,6 +85,7 @@ void THNN_(Im2Col_updateOutput)(
     THNN_(im2col)(
       input_n->data<scalar_t>(),
       nInputPlane,
+      false,
       inputHeight, inputWidth,
       outputHeight, outputWidth,
       kH, kW, padH, padW, sH, sW,

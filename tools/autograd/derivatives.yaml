@@ -998,10 +998,10 @@
 - name: thnn_conv3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, Tensor finput, Tensor fgrad_input, std::array<bool,3> output_mask)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, {{1, 1, 1}}, false, {{0, 0, 0}}, 1, false, false, false, grad_input_mask)
 
-- name: thnn_conv_dilated2d_forward(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding, IntList dilation)
-  self, weight, bias: thnn_conv_dilated2d_backward(grad, self, weight, kernel_size, stride, padding, dilation, columns, ones, grad_input_mask)
+- name: thnn_conv_dilated2d_forward(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding, IntList dilation, bool wrap)
+  self, weight, bias: thnn_conv_dilated2d_backward(grad, self, weight, kernel_size, stride, padding, dilation, wrap, columns, ones, grad_input_mask)
 
-- name: thnn_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, IntList dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask)
+- name: thnn_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool wrap, Tensor columns, Tensor ones, std::array<bool,3> output_mask)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, {{0, 0}}, 1, false, false, false, grad_input_mask)
 
 - name: thnn_conv_dilated3d_forward(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding, IntList dilation)

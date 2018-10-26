@@ -264,14 +264,24 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
     THTensor_(select)(gradOutput_n, gradOutput, 0, elt);
 
     // Extract columns:
-    THNN_(im2col)(
-      gradOutput_n->data<scalar_t>(),
-      nOutputPlane, outputHeight, outputWidth,
-      inputHeight, inputWidth,
-      kH, kW, padH, padW, dH, dW,
-      dilationH, dilationW,
-      gradColumns->data<scalar_t>()
-    );
+		// TODO(devashisht) Change this to use wrap parameter
+    THNN_(im2col)
+    (gradOutput_n->data<scalar_t>(),
+     nOutputPlane,
+     false,
+     outputHeight,
+     outputWidth,
+     inputHeight,
+     inputWidth,
+     kH,
+     kW,
+     padH,
+     padW,
+     dH,
+     dW,
+     dilationH,
+     dilationW,
+     gradColumns->data<scalar_t>());
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
@@ -390,14 +400,24 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
       THTensor_(select)(input_n, input, 0, elt);
 
       // Extract columns:
-      THNN_(im2col)(
-        gradOutput_n->data<scalar_t>(),
-        nOutputPlane, outputHeight, outputWidth,
-        inputHeight, inputWidth,
-        kH, kW, padH, padW, dH, dW,
-        dilationH, dilationW,
-        columns->data<scalar_t>()
-      );
+			// TODO(devashisht) Change this to use wrap!
+      THNN_(im2col)
+      (gradOutput_n->data<scalar_t>(),
+       nOutputPlane,
+       false,
+       outputHeight,
+       outputWidth,
+       inputHeight,
+       inputWidth,
+       kH,
+       kW,
+       padH,
+       padW,
+       dH,
+       dW,
+       dilationH,
+       dilationW,
+       columns->data<scalar_t>());
 
       // M,N,K are dims of matrix A and B
       // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
