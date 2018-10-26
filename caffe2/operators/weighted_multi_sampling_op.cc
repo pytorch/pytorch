@@ -17,7 +17,7 @@ bool WeightedMultiSamplingOp<Context>::RunOnDevice() {
         !OperatorBase::HasArgument("num_samples"),
         "New shape is specified by the input blob, do not pass in "
         "the argument `num_samples`.");
-    num_samples = Input(1).size();
+    num_samples = Input(1).numel();
     indices->ResizeLike(Input(1));
   } else {
     indices->Resize(num_samples);
