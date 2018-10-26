@@ -49,10 +49,22 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
     dims->push_back(i);
   }
   tensor->dataType_ = caffe2::TensorProto_DataType::TensorProto_DataType_FLOAT;
-  void* raw_data = malloc(raw_size);
-  at::DataPtr data_ptr(raw_data, raw_data, free, at::kCPU);
+  std::array<char, raw_size> data_array;
+  for (size_t i = 0; i < data_array.size(); ++i) {
+    data_array[i] = data_array.size() - i;
+  }
+  at::DataPtr data_ptr(data_array, at::kCPU);
   std::shared_ptr<SharedData> data = make_shared<SharedData>(0, std::move(data_ptr));
   tensor.setData(std::move(data));
+  auto& device_detail = tensor->mutableDeviceDetail();
+
+  std::string tmp_name = std::tmpnam(nullptr);
+  serializeIntermediateModel(imodel, tmp_name);
+
+  IntermediateModel loaded_model;
+  deserializeIntermediateModel(&loaded_model, tmp_name);
+
+  ASSERT_EQ(loaded_model.name(), model_name);
 }
 
 }  // namespace
