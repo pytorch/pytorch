@@ -143,7 +143,7 @@ public:
     return impl_->type_id();
   }
   ScalarType scalar_type() const {
-    return dataTypeToScalarType(impl_->dtype().id());
+    return typeMetaToScalarType(impl_->dtype());
   }
   const Storage& storage() const {
     return impl_->storage();
