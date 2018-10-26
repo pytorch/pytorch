@@ -119,20 +119,17 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
 
         cat >/home/circleci/project/ci_build_script.sh <<EOL
         # =================== The following code will be executed inside Docker container ===================
-        set -x
+        set -ex
 
         # Canary Test 1: Timeout on TestNN
         if [[ "${CIRCLE_JOB}" == *test* ]] && [[ "${CIRCLE_JOB}" != *cuda* ]]; then
           # This test normally takes 8 seconds. On a bad machine it can take >20 minutes.
           # Here we give it 30 seconds to run.
           # yf225 TODO: make sure to change timeout value back to 30 after debugging
-          timeout 1 python test/test_nn.py -v TestNN.test_BatchNorm3d || export TIMEOUT=1
-          echo $TIMEOUT  # debug
-          if [[ -n $TIMEOUT ]]; then
-            echo "This machine is unhealthy. Re-running this job on another machine."
-            curl -X POST https://circleci.com/api/v1.1/project/github/pytorch/pytorch/${CIRCLE_BUILD_NUM}/retry?circle-token=${CIRCLECI_TOKEN}
-            exit 1
-          fi
+          timeout 1 python test/test_nn.py -v TestNN.test_BatchNorm3d || \
+            (echo "This machine is unhealthy. Re-running this job on another machine." && \
+            curl -X POST https://circleci.com/api/v1.1/project/github/pytorch/pytorch/${CIRCLE_BUILD_NUM}/retry?circle-token=${CIRCLECI_TOKEN} && \
+            exit 1)
         fi
 
         if [ -n "${MULTI_GPU}" ]; then
