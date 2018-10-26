@@ -774,8 +774,8 @@ class TestNN(NNTestCase):
         module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True)
         input = torch.randn(1, 3, 1, 1)
         with self.assertRaisesRegex(RuntimeError,
-                                    'Calculated padded input size per channel: \(1 x 1\). ' +
-                                    'Kernel size: \(10 x 10\). Kernel size can\'t be greater than actual input size'):
+                                    r'Calculated padded input size per channel: \(1 x 1\). ' +
+                                    r'Kernel size: \(10 x 10\). Kernel size can\'t be greater than actual input size'):
             module(input)
 
     def test_invalid_conv3d(self):
@@ -2652,6 +2652,17 @@ class TestNN(NNTestCase):
     def test_Conv2d_naive_groups_cuda(self, dtype=torch.float):
         self._test_Conv2d_naive_groups("cuda", dtype)
 
+    def test_batchnorm_grad(self):
+        self._test_batchnorm_grad()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
+    def test_batchnorm_grad_cuda(self):
+        self._test_batchnorm_grad("cuda")
+        if TEST_CUDNN:
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_grad("cuda")
+
     def test_batchnorm_eval(self):
         self._test_batchnorm_eval()
 
@@ -2659,6 +2670,9 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_batchnorm_eval_cuda(self, dtype=torch.float):
         self._test_batchnorm_eval("cuda", dtype)
+        if TEST_CUDNN:
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_eval("cuda", dtype)
 
     def test_batchnorm_simple_average(self):
         self._test_batchnorm_simple_average()
@@ -2667,6 +2681,9 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_batchnorm_simple_average_cuda(self):
         self._test_batchnorm_simple_average(torch.cuda.FloatTensor)
+        if TEST_CUDNN:
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_simple_average(torch.cuda.FloatTensor)
 
     def test_MaxPool1d_indices(self):
         self._test_maxpool_indices(1)
@@ -3583,6 +3600,12 @@ class TestNN(NNTestCase):
                     self.assertEqual(output.size()[2:], (h, w))
                 else:
                     self.assertRaises(ValueError, lambda: m(i, (h, w)))
+
+    def test_ConvTranspose3d_correct_output_size(self):
+        # Check that ConvTranspose3d can take a 5d output_size.
+        m = nn.ConvTranspose3d(2, 2, 2)
+        i = torch.rand(1, 2, 1, 1, 1)
+        out = m(i, output_size=(1, 2, 2, 2, 2))
 
     def _test_Conv2d_naive_groups(self, device="cpu", dtype=torch.float):
         # Check that grouped convolutions matches two half convolutions
@@ -4875,6 +4898,9 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_batchnorm_update_stats_cuda(self):
         self._test_batchnorm_update_stats("cuda", torch.float)
+        if TEST_CUDNN:
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_update_stats("cuda", torch.float)
 
     def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
         input = torch.rand(2, 10)
@@ -4909,6 +4935,18 @@ class TestNN(NNTestCase):
         for size in wrong_sizes:
             with self.assertRaises(RuntimeError):
                 F.batch_norm(input, running_mean, running_var, bias=Parameter(torch.rand(size)))
+
+    def _test_batchnorm_grad(self, device="cpu", dtype=torch.double):
+        bs, n_feat, size_feat = 4, 5, 6
+        input = torch.arange(bs * n_feat * size_feat, device=device,
+                             requires_grad=True, dtype=dtype).view(bs, n_feat, size_feat)
+        weight = torch.arange(1, n_feat + 1, device=device, requires_grad=True, dtype=dtype)
+        bias = torch.arange(n_feat, device=device, requires_grad=True, dtype=dtype)
+        running_mean = 1 - torch.arange(n_feat, device=device, dtype=dtype)
+        running_var = 2 * torch.arange(n_feat, device=device, dtype=dtype)
+        for training in [False, True]:
+            _assertGradAndGradgradChecks(self, F.batch_norm, (input, running_mean, running_var, weight, bias,
+                                                              training, 0.1, 0.0001))
 
     def _test_batchnorm_eval(self, device="cpu", dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)

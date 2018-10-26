@@ -47,7 +47,7 @@ class StringSerializer : public BlobSerializerBase {
     blob_proto.set_name(name);
     blob_proto.set_type("std::string");
     blob_proto.set_content(*static_cast<const std::string*>(pointer));
-    acceptor(name, blob_proto.SerializeAsString());
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 };
 
@@ -134,7 +134,7 @@ void TensorSerializer::SerializeWithChunkSize(
         tensor, name, blob_proto.mutable_tensor(), chunkStart, chunk_size);
     acceptor(
         c10::str(name, kChunkIdSeparator, chunkStart / chunk_size),
-        blob_proto.SerializeAsString());
+        SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   };
 
 #ifndef __ANDROID__
@@ -184,7 +184,7 @@ void TensorSerializer::SerializeWithChunkSize(
 
 void TensorSerializer::Serialize(
     const Tensor& input,
-    const string& /*name*/,
+    const string& name,
     TensorProto* proto_ptr,
     size_t chunkBegin,
     int32_t chunkSize) {
@@ -198,12 +198,19 @@ void TensorSerializer::Serialize(
     chunkSize = input.size() - chunkBegin;
   }
 
-  CAFFE_ENFORCE(
-      input.raw_data() || chunkSize == 0,
-      "The input does not have data input yet. This is probably because you "
-      "created a tensor of non-zero shape but never filled its data via "
-      "mutable_data() calls. This means that it makes no sense to serialize "
-      "the tensor content.");
+  if (chunkSize != 0) {
+    CAFFE_ENFORCE(
+        input.raw_data(),
+        "The input does not have data input yet. This is probably because you "
+        "created a tensor of non-zero shape but never filled its data via "
+        "mutable_data() calls. This means that it makes no sense to serialize "
+        "the tensor content.");
+  } else {
+    LOG(ERROR)
+        << "You're trying to serialize tensor with zero numel and no dtype. "
+        << "This is a legacy behavior and it WILL BREAK. Contact PyTorch team "
+        << "for details or see D10380678. Offending blob name: " << name;
+  }
 
   TensorProto& proto = *proto_ptr;
   proto.mutable_segment()->set_begin(chunkBegin);
@@ -320,10 +327,12 @@ void TensorSerializer::Serialize(
       break;
     case TensorProto_DataType_UNDEFINED: {
       proto.mutable_string_data()->Reserve(chunkSize);
-      const char* raw_data = static_cast<const char*>(input.raw_data());
-      for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
-        proto.add_string_data(
-            SerializeBlob(raw_data + i * input.itemsize(), input.meta(), ""));
+      if (chunkSize > 0) {
+        const char* raw_data = static_cast<const char*>(input.raw_data());
+        for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
+          proto.add_string_data(
+              SerializeBlob(raw_data + i * input.itemsize(), input.meta(), ""));
+        }
       }
     } break;
       // Note: we intentially do not provide "default:" so if any new data types
@@ -542,6 +551,25 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
   }
   context->FinishDeviceComputation();
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// Serialization Helpers
+////////////////////////////////////////////////////////////////////////////////
+
+std::string SerializeAsString_EnforceCheck(
+    const google::protobuf::MessageLite& msg,
+    const char* error_location) {
+  std::string serialize_output;
+  bool result = msg.SerializeToString(&serialize_output);
+  if (!error_location) {
+    CAFFE_ENFORCE(result, "protobuf::SerializeToString failed");
+  } else {
+    CAFFE_ENFORCE(result,
+        "protobuf::SerializeToString failed for ", error_location);
+  }
+  return serialize_output;
+}
+
 
 namespace {
 // Serialize Tensor

@@ -55,7 +55,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     kernel_dims_size *= kernel_[i];
   }
 
-  shape.X_dims.assign(X.dims().cbegin() + 1, X.dims().cend());
+  shape.X_dims.assign(X.sizes().cbegin() + 1, X.sizes().cend());
   shape.kernel_size = shape.C / group_ * kernel_dims_size;
   lc_op_util::SetColumnBufferShape(
       shape.N,
@@ -398,7 +398,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     kernel_dims_size *= kernel_[i];
   }
 
-  shape.X_dims.assign(X.dims().cbegin() + 1, X.dims().cend());
+  shape.X_dims.assign(X.sizes().cbegin() + 1, X.sizes().cend());
   shape.kernel_size = shape.C / group_ * kernel_dims_size;
   lc_op_util::SetColumnBufferShape(
       shape.N,

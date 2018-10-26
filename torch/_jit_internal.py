@@ -54,7 +54,12 @@ def createResolutionCallback(frames_up=0):
 
         baz()
     """
-    frame = inspect.stack()[1 + frames_up][0]
+    frame = inspect.currentframe()
+    i = 0
+    while i < frames_up + 1:
+        frame = frame.f_back
+        i += 1
+
     f_locals = frame.f_locals
     f_globals = frame.f_globals
 

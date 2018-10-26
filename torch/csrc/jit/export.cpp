@@ -26,9 +26,9 @@ namespace onnx = ::ONNX_NAMESPACE;
 
 std::string getExportableSchemaStringForMethod(const script::Method& method) {
   const auto& schema = method.getSchema();
-  for (const auto& argument : schema.arguments) {
+  for (const auto& argument : schema.arguments()) {
     AT_CHECK(
-        !argument.default_value,
+        !argument.default_value(),
         "Default arguments in script graphs may currently not be exported.");
   }
   std::ostringstream stream;
@@ -482,7 +482,7 @@ ModuleEncoder::ModuleEncoder(
     const script::Module &module,
     std::ostream& out)
     : EncoderBase(onnx_torch::OperatorExportTypes::RAW, false),
-      stream_writer_(out) {
+      stream_writer_(&out) {
   model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
   EncodeModule(model_proto_.mutable_graph(), module);
 }

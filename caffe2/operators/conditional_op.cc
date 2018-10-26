@@ -13,10 +13,10 @@ bool ConditionalOp<CPUContext>::RunOnDevice() {
   // verify the inputs shape
   CAFFE_ENFORCE_EQ(condition.ndim(), 1);
   CAFFE_ENFORCE(dataT.ndim() >= 1);
-  CAFFE_ENFORCE(dataT.dims()[0] == condition.dims()[0]);
+  CAFFE_ENFORCE(dataT.sizes()[0] == condition.sizes()[0]);
   CAFFE_ENFORCE_EQ(dataT.ndim(), dataF.ndim());
-  for (size_t i = 0; i < dataT.dims().size(); i++) {
-    CAFFE_ENFORCE(dataT.dims().at(i) == dataF.dims().at(i));
+  for (size_t i = 0; i < dataT.sizes().size(); i++) {
+    CAFFE_ENFORCE(dataT.sizes().at(i) == dataF.sizes().at(i));
   }
   const auto innerSize = dataT.size_from_dim(1);
   const auto innerSizeBytes = innerSize * dataT.meta().itemsize();

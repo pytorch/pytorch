@@ -200,7 +200,7 @@ RegisterOperators reg({
           return [](Stack& stack) {
             at::Tensor a;
             pop(stack, a);
-            push(stack, static_cast<int64_t>(a.dtype()));
+            push(stack, static_cast<int64_t>(a.scalar_type()));
             return 0;
           };
         }),
@@ -222,6 +222,14 @@ RegisterOperators reg({
             return 0;
           };
         }),
+    Operator(
+      prim::None,
+      [](Node* node) {
+        return [](Stack& stack) {
+          stack.push_back(IValue());
+          return 0;
+        };
+      }),
     Operator(
         prim::NoneGenerator,
         [](Node* node) {
@@ -368,6 +376,34 @@ RegisterOperators reg({
             return 0;
           };
         }),
+    Operator(
+        prim::TupleSlice,
+        [](Node* node) {
+          int64_t beg_ind = node->i(attr::beg);
+          int64_t end_ind = node->i(attr::end);
+          return [=](Stack& stack) {
+            auto t = pop(stack).toTuple();
+            const auto & elems = t->elements();
+            std::vector<IValue> output_elems;
+            for (int64_t i = beg_ind; i < end_ind; ++i) {
+              output_elems.push_back(elems.at(i));
+            }
+            push(stack, Tuple::create(std::move(output_elems)));
+            return 0;
+          };
+        }),
+    Operator(
+      prim::TupleIndex,
+      [](Node* node) {
+        auto index = node->i(attr::index);
+        return [=](Stack& stack) {
+          auto tup = pop(stack).toTuple();
+          const auto & elems = tup->elements();
+          // index is normalized to be positive at compile time
+          stack.push_back(elems.at(index));
+          return 0;
+        };
+      }),
     Operator(
         prim::TupleConstruct,
         [](Node* node) {
@@ -841,4 +877,18 @@ RegisterOperators reg2({
           };
         }),
 });
+
+
+at::Tensor leaky_relu(at::Tensor tensor, double scalar) {
+  return at::leaky_relu(tensor, scalar);
+}
+at::Tensor cat(std::vector<at::Tensor> tensors) {
+  return at::cat(tensors);
+}
+
+static auto reg3 =
+    torch::jit::RegisterOperators()
+        .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor", &leaky_relu)
+        .op("_test::cat(Tensor[] inputs) -> Tensor", &cat);
+
 }}} // torch::jit::anon

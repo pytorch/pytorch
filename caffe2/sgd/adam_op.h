@@ -333,7 +333,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
   bool RunOnDevice() override {
     // Enforce shapes
     CAFFE_ENFORCE_EQ(Input(PARAM).size(), Input(MOMENT_1).size());
-    CAFFE_ENFORCE_EQ(Input(PARAM).dims()[0], Input(MOMENT_2).size());
+    CAFFE_ENFORCE_EQ(Input(PARAM).sizes()[0], Input(MOMENT_2).size());
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),
         Input(GRAD).size_from_dim(Input(INDICES).ndim()));

@@ -2,7 +2,7 @@
 
 #include <ATen/core/Backend.h>
 #include <ATen/core/DefaultTensorOptions.h>
-#include <ATen/core/Device.h>
+#include <c10/Device.h>
 #include <ATen/core/Layout.h>
 #include <ATen/core/ScalarType.h>
 #include <ATen/core/ScalarTypeUtils.h>
@@ -124,10 +124,11 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Return a copy of `TensorOptions` with `device` set to the given one.
-  /// (This overload ensures that initializer lists for Device work
-  /// correctly.)
-  C10_NODISCARD TensorOptions device(Device d) const noexcept {
-    return device(c10::make_optional(d));
+  /// (This overload ensures that variadic template c10::optional constructor
+  /// for Device work correctly.)
+  template<typename ... Args>
+  C10_NODISCARD TensorOptions device(Args&&... args) const noexcept {
+    return device(optional<Device>(c10::in_place, std::forward<Args>(args)...));
   }
 
   /// Return a copy of `TensorOptions`, but with device set to CUDA, and the
@@ -135,8 +136,8 @@ struct CAFFE2_API TensorOptions {
   ///
   /// TODO: This function encourages bad behavior (assuming CUDA is
   /// the only device that matters).  Get rid of it / rename it.
-  C10_NODISCARD TensorOptions device_index(int32_t device_index) const noexcept {
-    return device({Device::Type::CUDA, device_index});
+  C10_NODISCARD TensorOptions device_index(int16_t device_index) const noexcept {
+    return device(Device::Type::CUDA, device_index);
   }
 
   /// Return a copy of `TensorOptions` with `dtype` set to the given one.
@@ -181,6 +182,11 @@ struct CAFFE2_API TensorOptions {
     return has_device_ ? device_ : getDefaultTensorOptions().device();
   }
 
+  /// Returns whether the device is specified.
+  bool has_device() const noexcept {
+    return has_device_;
+  }
+
   /// Returns the device of the `TensorOptions`, or `c10::nullopt` if
   /// device is not specified.
   optional<Device> device_opt() const noexcept {
@@ -197,6 +203,11 @@ struct CAFFE2_API TensorOptions {
     return has_dtype_ ? dtype_ : getDefaultTensorOptions().dtype();
   }
 
+  /// Returns whether the dtype is specified.
+  bool has_dtype() const noexcept {
+    return has_dtype_;
+  }
+
   /// Returns the dtype of the `TensorOptions`, or `c10::nullopt` if
   /// device is not specified.
   optional<ScalarType> dtype_opt() const noexcept {
@@ -206,6 +217,11 @@ struct CAFFE2_API TensorOptions {
   /// Returns the layout of the `TensorOptions`.
   Layout layout() const noexcept {
     return has_layout_ ? layout_ : getDefaultTensorOptions().layout();
+  }
+
+  /// Returns whether the layout is specified.
+  bool has_layout() const noexcept {
+    return has_layout_;
   }
 
   /// Returns the layout of the `TensorOptions`, or `c10::nullopt` if
@@ -219,6 +235,11 @@ struct CAFFE2_API TensorOptions {
     return has_requires_grad_ ? requires_grad_ : getDefaultTensorOptions().requires_grad();
   }
 
+  /// Returns whether the `requires_grad` is specified.
+  bool has_requires_grad() const noexcept {
+    return has_requires_grad_;
+  }
+
   /// Returns the `requires_grad` property of the `TensorOptions`, or
   /// `c10::nullopt` if `requires_grad` is not specified.
   optional<bool> requires_grad_opt() const noexcept {
@@ -229,6 +250,11 @@ struct CAFFE2_API TensorOptions {
   /// Returns the `is_variable` property of the `TensorOptions`.
   bool is_variable() const noexcept {
     return has_is_variable_ ? is_variable_ : getDefaultTensorOptions().is_variable();
+  }
+
+  /// Returns whether the `is_variable` is specified.
+  bool has_is_variable() const noexcept {
+    return has_is_variable_;
   }
 
   /// Returns the `is_variable` property of the `TensorOptions`, or
@@ -362,7 +388,7 @@ inline TensorOptions device(Device device) {
 
 /// Convenience function that returns a `TensorOptions` object with the
 /// `device` set to CUDA and the `device_index` set to the given one.
-inline TensorOptions device_index(int32_t device_index) {
+inline TensorOptions device_index(int16_t device_index) {
   return TensorOptions().device_index(device_index);
 }
 

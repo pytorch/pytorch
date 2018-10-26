@@ -28,6 +28,11 @@ def div(a : ${Scalar}, b : Tensor) -> Tensor:
   return torch.reciprocal(b) * a
 )SCRIPT");
 
+auto python_builtins_source = R"SCRIPT(
+def warn(string: str):
+  print(string)
+)SCRIPT";
+
 struct BuiltinFunctionRegistry {
 
   const std::vector<Method*>& getAllBuiltinFunctionsFor(Symbol name) {
@@ -68,6 +73,7 @@ private:
       env.s("Scalar", scalar);
       loadSource(scalar_operators_source.format(env));
     }
+    loadSource(python_builtins_source);
   }
   enum {UNINITIALIZED, INTIIALIZING, INITIALIZED} state = UNINITIALIZED;
   std::recursive_mutex mutex;

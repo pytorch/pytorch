@@ -6,7 +6,7 @@ THC_API THCStream* THCStream_defaultStream(int device) {
 }
 
 THC_API THCStream* THCStream_new() {
-  return at::cuda::detail::CUDAStream_createStream();
+  return at::cuda::detail::CUDAStream_getStreamFromPool();
 }
 
 THC_API cudaStream_t THCStream_stream(THCStream* stream) {
