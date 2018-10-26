@@ -439,7 +439,10 @@
   source: masked_scatter_backward(grad, mask, source.sizes())
 
 - name: masked_select(Tensor self, Tensor mask)
-  self: zeros_like(self).masked_scatter_(mask, grad)
+# normally broadcasting is handled implicitly, but here, because we call an inplace
+# function as an optimization and the LHS doesn't broadcast for inplace functions,
+# we need to explicitly broadcast.
+  self: zeros_like(self.expand(at::infer_size(self.sizes(), mask.sizes()))).masked_scatter_(mask, grad)
 
 - name: max(Tensor self, int64_t dim, bool keepdim)
   self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
