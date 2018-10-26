@@ -893,6 +893,12 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
             "but src tensor was ", src.device_type());
         data_type_.copy()(src.data(), raw_mutable_data(data_type_), numel());
       } else {
+        // The following copy uses the current (thread local) stream for copying
+        // and also takes the current GPU id previously set through CUDA API
+        // as we don't invoke SwitchToDevice anywhere
+        // TODO: this logic is overly complex and can be replaced with simple
+        // dispatch based on two device types
+        //
         // We'll need to use a non-CPU context to perform the copy if
         // one of the context is not CPU since only non-CPU context
         // knows how to copy between CPU and that context
