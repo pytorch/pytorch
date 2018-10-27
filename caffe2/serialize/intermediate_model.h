@@ -172,6 +172,14 @@ class IntermediateTensor final {
     return deviceDetail_;
   }
 
+  bool noContent() const {
+    return noContent_;
+  }
+
+  int64_t dataType() const {
+    return dataType_;
+  }
+
   std::vector<int64_t>* mutableDims() {
     return &dims_;
   }
