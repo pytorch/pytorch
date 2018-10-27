@@ -654,6 +654,7 @@ _(aten, threshold) \
 _(aten, threshold_backward) \
 _(aten, threshold_forward) \
 _(aten, to) \
+_(aten, to_sparse) \
 _(aten, to_dense) \
 _(aten, topk) \
 _(aten, trace) \

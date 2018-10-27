@@ -281,6 +281,38 @@ SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
   return self;
 }
 
+SparseTensor dense_to_sparse(const Tensor& self){
+  return dense_to_sparse(self, self.dim());
+}
+
+SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
+  int64_t dims = self.dim();
+  AT_CHECK(sparse_dim > 0, "sparse_dim must be >0");
+  AT_CHECK(sparse_dim <= dims, 
+    "sparse_dim must be less than or equal to self.dim()");
+  at::TensorOptions sparse_options = self.type().toSparse().options();
+  std::vector<int64_t> sizes = self.sizes().vec();
+
+  Tensor nz = self.nonzero().transpose(0, 1);
+  if (nz.numel() == 0) {
+    return new_with_dims_sparse(sparse_dim, dims - sparse_dim, sizes, sparse_options);
+  }
+  LongTensor indices;
+  if (sparse_dim == dims) {
+    indices = nz.clone();
+  } else {
+    Tensor i = nz.narrow(0, 0, sparse_dim);
+    std::tie(indices, std::ignore) = _unique_dim(i, 1);
+    indices = indices.contiguous();  // many sparse CUDA kernels require contiguity, see issue #12633
+  }
+
+  std::vector<Tensor> ix = indices.chunk(indices.size(0), 0);
+  Tensor values = self.index(ix).squeeze(0).clone();
+
+  Tensor sparse = at::sparse_coo_tensor(indices, values, sizes, sparse_options);
+  return sparse._coalesced_(true);
+}
+
 // NB: Dropped the resizeNd variants
 
 Tensor sparse_to_dense(const SparseTensor& self) {
