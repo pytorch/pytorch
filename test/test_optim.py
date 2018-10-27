@@ -6,7 +6,6 @@ import torch
 from torch._six import inf
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau
@@ -358,6 +357,44 @@ class TestOptim(TestCase):
         res2 = opt2.step(closure)
         self.assertEqual(type(res1), type(res2))
 
+    def test_qhm(self):
+        self._test_basic_cases(
+            lambda weight, bias: optim.QHM(
+                [weight, bias],
+                lr=1e-3, nu=0.7, momentum=0.999)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.QHM(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3, nu=0.7, momentum=0.999)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.QHM(
+                self._build_params_dict_single(weight, bias, lr=1e-2),
+                lr=1e-3, nu=0.7, momentum=0.999)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.QHM(
+                self._build_params_dict_single(weight, bias, lr=1e-2))
+        )
+
+    def test_qhadam(self):
+        self._test_basic_cases(
+            lambda weight, bias: optim.QHAdam(
+                [weight, bias],
+                lr=1e-3, nus=(0.8, 0.7), betas=(0.95, 0.98))
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.QHAdam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3, nus=(0.8, 0.7), betas=(0.95, 0.98))
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.QHAdam(
+                self._build_params_dict_single(weight, bias, lr=1e-2),
+                lr=1e-3, nus=(0.8, 0.7), betas=(0.95, 0.98))
+        )
+
     def test_invalid_param_type(self):
         with self.assertRaises(TypeError):
             optim.SGD(Variable(torch.randn(5, 5)), lr=3)
@@ -390,7 +427,7 @@ class LambdaLRTestObject:
 class TestLRScheduler(TestCase):
     def setUp(self):
         self.net = SchedulerTestNet()
-        self.opt = SGD(
+        self.opt = optim.SGD(
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
 

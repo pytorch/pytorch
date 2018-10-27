@@ -119,6 +119,10 @@ Algorithms
     :members:
 .. autoclass:: LBFGS
     :members:
+.. autoclass:: QHM
+    :members:
+.. autoclass:: QHAdam
+    :members:
 .. autoclass:: RMSprop
     :members:
 .. autoclass:: Rprop
