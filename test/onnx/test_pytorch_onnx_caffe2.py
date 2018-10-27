@@ -957,7 +957,7 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, input):
                 return torch.cat([input, torch.zeros(input.size(0), 1).type_as(input)], dim=1)
 
-        x = torch.randn(3, 4, dtype=torch.uint8)
+        x = torch.zeros(3, 4)
         self.run_model_test(ZerosFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
 

@@ -504,10 +504,11 @@ static void eraseListConstruct(Block* block) {
             Node* unsqueezed_node = g->create(onnx::Unsqueeze, 1);
             unsqueezed_node->insertBefore(lc_node);
             unsqueezed_node->addInput(input);
-            unsqueezed_node->i_(attr::axis, 0);
+            unsqueezed_node->is_(attr::axes, {0});
             unsqueezed.emplace_back(unsqueezed_node->output());
           }
           Node* concat_node = g->create(onnx::Concat, 1);
+          concat_node->i_(attr::axis, 0);
           for(auto v: unsqueezed) {
             concat_node->addInput(v);
           }
