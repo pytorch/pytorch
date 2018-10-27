@@ -1,3 +1,4 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
 import copy
 import glob
 import imp
@@ -113,6 +114,8 @@ def check_compiler_abi_compatibility(compiler):
         else True.
     '''
     if not _is_binary_build():
+        return True
+    if os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') in ['ON', '1', 'YES', 'TRUE', 'Y']:
         return True
     try:
         check_cmd = '{}' if IS_WINDOWS else '{} --version'
@@ -779,6 +782,8 @@ def verify_ninja_availability():
             subprocess.check_call('ninja --version'.split(), stdout=devnull)
         except OSError:
             raise RuntimeError("Ninja is required to load C++ extensions")
+        else:
+            return True
 
 
 def _prepare_ldflags(extra_ldflags, with_cuda, verbose):

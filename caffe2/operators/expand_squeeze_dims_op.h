@@ -31,9 +31,9 @@ class ExpandDimsOp : public Operator<Context> {
       return true;
     }
 
-    auto newDims = input.dims().vec();
+    auto newDims = input.sizes().vec();
     CAFFE_ENFORCE_GE(
-        input.dims().size() + dims_.size(),
+        input.sizes().size() + dims_.size(),
         dims_.back() + 1,
         "Input needs at least ",
         (1 + dims_.back() - dims_.size()),
@@ -79,7 +79,7 @@ class SqueezeOp : public Operator<Context> {
         (dims_.back() + 1),
         " dimensions.");
 
-    std::vector<int> newDims = ComputeDims(input.dims(), dims_);
+    std::vector<int> newDims = ComputeDims(input.sizes(), dims_);
     output->Reshape(newDims);
     return true;
   }

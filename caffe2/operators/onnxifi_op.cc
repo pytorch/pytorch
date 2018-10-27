@@ -36,7 +36,7 @@ void BlobToTensorDescriptor(
   }
 
   // Set dims
-  const auto shape = cpu_tensor.dims();
+  const auto shape = cpu_tensor.sizes();
   desc->dimensions = shape.size();
   shapes->emplace_back(shape.cbegin(), shape.cend());
   desc->shape = shapes->back().data();
@@ -76,7 +76,7 @@ template <>
 bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
   for (unsigned i = 0U; i < InputSize(); ++i) {
     const auto& input_tensor = Input(i);
-    const auto tensor_dims = input_tensor.dims();
+    const auto tensor_dims = input_tensor.sizes();
     auto& tensor_descriptor = input_desc_.at(i);
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
     tensor_descriptor.dataType = ONNXIFI_DATATYPE_FLOAT32;

@@ -52,7 +52,7 @@ class NGramFromCategoricalOp : public Operator<Context> {
     auto* output = Output(0);
     output->Resize(N);
     auto* output_data = output->template mutable_data<T>();
-    math::Set<T, Context>(output->size(), 0, output_data, &context_);
+    math::Set<T, Context>(output->numel(), 0, output_data, &context_);
 
     CAFFE_ENFORCE_GT(D, max_col_id_);
     for (int i = 0; i < N; i++) {

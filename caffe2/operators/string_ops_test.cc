@@ -30,7 +30,7 @@ class StringJoinOpTest : public testing::Test {
     const auto& outputTensor = output->Get<TensorCPU>();
     EXPECT_EQ(outputTensor.ndim(), 1);
     EXPECT_EQ(outputTensor.dim(0), outputSize);
-    EXPECT_EQ(outputTensor.size(), outputSize);
+    EXPECT_EQ(outputTensor.numel(), outputSize);
     return outputTensor.data<std::string>();
   }
 

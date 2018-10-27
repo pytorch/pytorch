@@ -2,25 +2,28 @@
 #include "InitMethodUtils.hpp"
 
 #include <fcntl.h>
-#include <unistd.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <algorithm>
 #include <fstream>
+#include <iterator>
 #include <system_error>
 #include <thread>
-#include <iterator>
 
 namespace thd {
 namespace init {
 
 namespace {
 
-void lockLoop(int fd, struct flock &oflock) {
+void lockLoop(int fd, struct flock& oflock) {
   while (true) {
     int err = ::fcntl(fd, F_SETLKW, &oflock);
-    if (err == 0) break;
-    else if (errno == EINTR) continue;
-    else throw std::system_error(errno, std::system_category());
+    if (err == 0)
+      break;
+    else if (errno == EINTR)
+      continue;
+    else
+      throw std::system_error(errno, std::system_category());
   }
 }
 
@@ -43,8 +46,10 @@ void unlockFile(int fd) {
 }
 
 // file_descriptor, number_of_lines_in_file
-std::pair<int, size_t> waitForGroup(std::string file_path, std::string group_name,
-                                         std::fstream& file) {
+std::pair<int, size_t> waitForGroup(
+    std::string file_path,
+    std::string group_name,
+    std::fstream& file) {
   int fd;
   std::string content;
   struct stat fd_stat, path_stat;
@@ -54,8 +59,10 @@ std::pair<int, size_t> waitForGroup(std::string file_path, std::string group_nam
     while (true) {
       fd = ::open(file_path.c_str(), O_RDWR | O_CREAT, 0644);
       if (fd == -1) {
-        throw std::system_error(fd, std::generic_category(),
-                                "cannot access '" + file_path + "' file");
+        throw std::system_error(
+            fd,
+            std::generic_category(),
+            "cannot access '" + file_path + "' file");
       }
       lockFile(fd);
 
@@ -63,19 +70,20 @@ std::pair<int, size_t> waitForGroup(std::string file_path, std::string group_nam
       // the file has been removed from the fs
       SYSCHECK(::fstat(fd, &fd_stat));
       int err = stat(file_path.c_str(), &path_stat);
-      if (err == 0 &&
-          fd_stat.st_dev == path_stat.st_dev &&
+      if (err == 0 && fd_stat.st_dev == path_stat.st_dev &&
           fd_stat.st_ino == path_stat.st_ino) {
         break;
       }
       ::close(fd);
     }
 
-    file.close(); file.open(file_path);
+    file.close();
+    file.open(file_path);
     content = {std::istreambuf_iterator<char>(file),
                std::istreambuf_iterator<char>()};
 
-    if (content.length() == 0 || content.find(group_name) == 0) break;
+    if (content.length() == 0 || content.find(group_name) == 0)
+      break;
 
     unlockFile(fd);
     ::close(fd);
@@ -105,8 +113,10 @@ size_t waitForData(int fd, std::fstream& file, rank_type world_size) {
 }
 
 // master_port, master_addrs, ranks
-std::tuple<port_type, std::vector<std::string>, std::vector<int>>
-parseFile(std::fstream& file, rank_type world_size, std::string group_name) {
+std::tuple<port_type, std::vector<std::string>, std::vector<int>> parseFile(
+    std::fstream& file,
+    rank_type world_size,
+    std::string group_name) {
   port_type master_port;
   std::vector<std::string> master_addrs;
   std::vector<int> ranks(world_size);
@@ -152,21 +162,21 @@ parseFile(std::fstream& file, rank_type world_size, std::string group_name) {
 
 } // anonymous namespace
 
-
-InitMethod::Config initFile(std::string argument,
-                            int world_size_r,
-                            std::string group_name,
-                            int assigned_rank) {
-
+InitMethod::Config initFile(
+    std::string argument,
+    int world_size_r,
+    std::string group_name,
+    int assigned_rank) {
   group_name.append("#"); // To make sure it's not empty
   std::string file_path = argument.substr(7); // chop "file://"
   rank_type world_size;
   try {
     world_size = convertToRank(world_size_r);
-  } catch(std::exception& e) {
+  } catch (std::exception& e) {
     if (world_size_r == -1) {
-      throw std::invalid_argument("world_size is not set - it is required for "
-                                  "`file://` init methods with this backend");
+      throw std::invalid_argument(
+          "world_size is not set - it is required for "
+          "`file://` init methods with this backend");
     }
     throw std::invalid_argument("invalid world_size");
   }
@@ -185,8 +195,8 @@ InitMethod::Config initFile(std::string argument,
 
   // Append our information
   auto if_addrs = getInterfaceAddresses();
-  file << group_name << ' ' << assigned_rank << ' ' << port
-       << ' ' << if_addrs.size();
+  file << group_name << ' ' << assigned_rank << ' ' << port << ' '
+       << if_addrs.size();
   for (auto addr_str : if_addrs) {
     file << ' ' << addr_str;
   }
@@ -197,13 +207,15 @@ InitMethod::Config initFile(std::string argument,
   port_type master_port;
   std::vector<std::string> master_addrs;
   std::vector<int> ranks;
-  std::tie(master_port, master_addrs, ranks) = parseFile(file, world_size, group_name);
+  std::tie(master_port, master_addrs, ranks) =
+      parseFile(file, world_size, group_name);
 
   config.rank = getRank(ranks, assigned_rank, order);
 
   // Last process removes the file.
   file.seekp(0, std::ios_base::end);
-  file << std::endl; lines++;
+  file << std::endl;
+  lines++;
   if (lines == 2 * world_size) {
     ::remove(file_path.c_str());
   }
@@ -215,17 +227,18 @@ InitMethod::Config initFile(std::string argument,
   if (config.rank == 0) {
     config.public_address = discoverWorkers(listen_socket, world_size);
     config.master = {
-      .listen_socket = listen_socket,
-      .listen_port = master_port,
+        .listen_socket = listen_socket,
+        .listen_port = master_port,
     };
   } else {
     ::close(listen_socket);
 
     std::string master_address;
-    std::tie(master_address, config.public_address) = discoverMaster(master_addrs, master_port);
+    std::tie(master_address, config.public_address) =
+        discoverMaster(master_addrs, master_port);
     config.worker = {
-      .master_addr = master_address,
-      .master_port = master_port,
+        .master_addr = master_address,
+        .master_port = master_port,
     };
   }
 

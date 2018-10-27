@@ -65,7 +65,7 @@ bool ResizeNearestOp<float, CPUContext>::RunOnDevice() {
   if (InputSize() == 2) {
     const auto& scales = Input(1);
     CAFFE_ENFORCE_EQ(scales.ndim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
     const float* scales_data = scales.data<float>();
     height_scale_ = scales_data[0];
     width_scale_ = scales_data[1];
@@ -108,7 +108,7 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(1);
   auto* dX = Output(0);
 
-  const auto inputDims = dY.dims();
+  const auto inputDims = dY.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
   const int batch_size = dY.dim32(0),
             num_channels = dY.dim32(1),
@@ -119,14 +119,14 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
   if (InputSize() == 3) {
     const auto& scales = Input(2);
     CAFFE_ENFORCE_EQ(scales.ndim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
     const float* scales_data = scales.data<float>();
     height_scale_ = scales_data[0];
     width_scale_ = scales_data[1];
   }
   dX->Resize(batch_size, num_channels, output_height, output_width);
   math::Set<float, CPUContext>(
-      dX->size(), 0.0f, dX->template mutable_data<float>(), &context_);
+      dX->numel(), 0.0f, dX->template mutable_data<float>(), &context_);
 
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
@@ -151,8 +151,9 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(ResizeNearest, ResizeNearestOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(ResizeNearestGradient,
-                      ResizeNearestGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    ResizeNearestGradient,
+    ResizeNearestGradientOp<float, CPUContext>);
 
 // Input: X, output: Y
 OPERATOR_SCHEMA(ResizeNearest)
@@ -176,7 +177,7 @@ output_height = floor(output_height * height_scale)
     .InheritOnnxSchema("Upsample");
 
 // Input: dY, output: dX
-OPERATOR_SCHEMA(ResizeNearestGradient)
+GRADIENT_OPERATOR_SCHEMA(ResizeNearestGradient)
     .NumInputs(2, 3)
     .NumOutputs(1)
     .Arg("width_scale", "Scale along width dimension")

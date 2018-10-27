@@ -34,7 +34,7 @@ class IndexHashOp : public Operator<Context> {
         modulo_,
         "MODULO shouldn't be larger than the numeric limit of the indices");
 
-    auto N = indices.size();
+    auto N = indices.numel();
     auto* indices_data = indices.template data<T>();
     auto* hashed_indices_data = hashed_indices->template mutable_data<T>();
 

@@ -22,7 +22,7 @@ const int MAX_BLOCK_SIZE = 256;
 static int getGradParamsNumThreads(int batchSize){
 //warp per item in a batch, up to a maximum
    return std::min(batchSize * WARP_SIZE, MAX_BLOCK_SIZE);
-      
+
 }
 
 template <typename T, typename AccT, typename IndexType, int kSize>
@@ -44,29 +44,29 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
 {
   const int KW_LIMIT = (kSize !=0) ? kSize : kernelWidth;
   const int KH_LIMIT = (kSize !=0) ? kSize : kernelHeight;
-  
+
 
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x) {
-    //calculate n,c,h,w indices, replacing modulos by divide and multiply add, 
+    //calculate n,c,h,w indices, replacing modulos by divide and multiply add,
     //result is same as would be in the code below
     //const int n = linearIndex / batchStride; //batchStride = outputChannels * outputHeight * outputWidth
     //const int c = (linearIndex / channelStride) % outputChannels; //channelStride = outputHeight * outputWidth
     //const int h = (linearIndex / outputWidth) % outputHeight;
     //const int w = linearIndex % outputWidth;
-    
+
     int indtmp1 = linearIndex/outputWidth;
     const int w = linearIndex - indtmp1 * outputWidth;
     int indtmp2 = indtmp1/outputHeight;
     const int h = indtmp1 - indtmp2 * outputHeight;
-    indtmp1 = indtmp2; 
+    indtmp1 = indtmp2;
     indtmp2 = indtmp1/outputChannels;
     const int c = indtmp1 - indtmp2 * outputChannels;
     const int n = indtmp2;
 
-    int inputChannel = c; 
-    int inputChannels = outputChannels; 
+    int inputChannel = c;
+    int inputChannels = outputChannels;
     if (depthwiseMultiplier !=1) {
       inputChannel /= depthwiseMultiplier;
       inputChannels /= depthwiseMultiplier;
@@ -127,13 +127,13 @@ __global__ void spatialDepthwiseConvolutionUpdateGradInput(
     const int w = linearIndex - indtmp1 * inputWidth;
     int indtmp2 = indtmp1/inputHeight;
     const int h = indtmp1 - indtmp2 * inputHeight;
-    indtmp1 = indtmp2; 
+    indtmp1 = indtmp2;
     indtmp2 = indtmp1/inputChannels;
     const int c = indtmp1 - indtmp2 * inputChannels;
     const int n = indtmp2;
 
     AccT value = ScalarConvert<int, AccT>::to(0);
-  
+
 #pragma unroll
     for (int multiplier = 0; multiplier < depthwiseMultiplier; ++multiplier) {
       int och = (c * depthwiseMultiplier) + multiplier;
@@ -215,7 +215,7 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
   // should be. That allows to get rid of one modulo operation inside the loop (because n/batchIdx
   // now does not have to be computed through modulo, you are just looping over it), and
   // bring a nice speed-up.
-  for (int batchIdx = batch; batchIdx < batchSize; batchIdx += nwarps){  
+  for (int batchIdx = batch; batchIdx < batchSize; batchIdx += nwarps){
     // Warp-stride loop over elements in a batch item
     for (IndexType idx = laneId; idx < imageElements; idx += WARP_SIZE) {
     // Need to calculate the following: batch position, and offset into the gradOutput
@@ -223,13 +223,13 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
     // the other parameters we have
       int go_w_offset = idx % outputWidth;
       int go_h_offset = (idx / outputWidth);
-  
+
       int i_w_offset = (go_w_offset * strideWidth) + (kW * dilationWidth) - padWidth;
       int i_h_offset = (go_h_offset * strideHeight) + (kH * dilationHeight) - padHeight;
-  
+
       if (i_w_offset >= 0 && i_h_offset >= 0 && i_w_offset < inputWidth && i_h_offset < inputHeight) {
         int inputOffset = ((batchIdx * inputChannels + inputCh) * inputHeight + i_h_offset) * inputWidth + i_w_offset;
-        int outputOffset = ((batchIdx * kernelChannels + ch) * outputHeight ) * outputWidth + idx; 
+        int outputOffset = ((batchIdx * kernelChannels + ch) * outputHeight ) * outputWidth + idx;
         grad = THCNumerics<AccT>::add(
             grad,
             THCNumerics<AccT>::mul(

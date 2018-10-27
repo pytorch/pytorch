@@ -25,15 +25,15 @@ class ExpandOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& X = Input(0);
     const auto& Y_shape_tensor = Input(1);
-    std::vector<int64_t> shape_dims(Y_shape_tensor.size());
+    std::vector<int64_t> shape_dims(Y_shape_tensor.numel());
     context_.template CopyToCPU<int64_t>(
-        Y_shape_tensor.size(),
+        Y_shape_tensor.numel(),
         Y_shape_tensor.template data<int64_t>(),
         shape_dims.data());
     auto* Y = Output(0);
 
     const int ndim = shape_dims.size();
-    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
     std::vector<int> Y_dims;
     Y_dims.reserve(std::max(ndim, X.ndim()));
     // ndim, X.ndim() might equal to 0
@@ -82,8 +82,8 @@ class ExpandGradientOp final : public Operator<Context> {
     const auto& X = Input(1);
     auto* dX = Output(0);
     const int ndim = dY.ndim();
-    const std::vector<int> dX_dims(X.dims().cbegin(), X.dims().cend());
-    const std::vector<int> dY_dims(dY.dims().cbegin(), dY.dims().cend());
+    const std::vector<int> dX_dims(X.sizes().cbegin(), X.sizes().cend());
+    const std::vector<int> dY_dims(dY.sizes().cbegin(), dY.sizes().cend());
     dX->ResizeLike(X);
     std::vector<int> axes;
     const int offset = ndim - X.ndim();

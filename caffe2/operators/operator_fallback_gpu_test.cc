@@ -17,7 +17,7 @@ class IncrementByOneOp final : public Operator<CPUContext> {
     out->ResizeLike(in);
     const float* in_data = in.template data<float>();
     float* out_data = out->template mutable_data<float>();
-    for (int i = 0; i < in.size(); ++i) {
+    for (int i = 0; i < in.numel(); ++i) {
       out_data[i] = in_data[i] + 1.f;
     }
     return true;
