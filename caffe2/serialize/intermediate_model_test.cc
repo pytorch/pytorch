@@ -47,6 +47,7 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
     raw_size *= i;
     dims->push_back(i);
   }
+  // TODO: add strides
   tensor->setDataType(caffe2::TensorProto_DataType_FLOAT);
   std::vector<char> data_vector;
   data_vector.resize(raw_size);
@@ -76,7 +77,14 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   ASSERT_EQ(loaded_param.requireGradient(), require_gradient);
   auto* loaded_tensor = loaded_param.mutableTensor();
   ASSERT_EQ(*loaded_tensor->mutableDims(), *dims);
-  // ASSERT_EQ(*loaded_tensor->mutable)
+  // ASSERT_EQ(*loaded_tensor->mutableStrides(), *);
+  ASSERT_EQ(loaded_tensor->mutableDeviceDetail()->deviceId, 0);
+  ASSERT_EQ(loaded_tensor->noContent(), false);
+  ASSERT_EQ(loaded_tensor->dataType(), caffe2::TensorProto_DataType_FLOAT);
+  ASSERT_EQ(loaded_tensor->data()->size(), raw_size);
+  ASSERT_EQ(std::memcmp(loaded_tensor->data()->rawData(),
+        data_vector.data(), raw_size));
+  ASSERT_EQ(loaded_tensor->data()->recordId(), kFieldAlignment);
 }
 
 }  // namespace
