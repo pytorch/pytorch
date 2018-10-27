@@ -10,7 +10,7 @@
 
 namespace c10 {
 
-#if !AT_MOBILE
+#if !AT_MOBILE || true
 #define FORALL_NS_SYMBOLS(_)       \
   _(namespaces, prim)              \
   _(namespaces, aten)              \

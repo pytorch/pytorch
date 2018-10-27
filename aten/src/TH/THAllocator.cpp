@@ -34,9 +34,9 @@ at::Allocator* getTHDefaultAllocator() {
   return &th_default_allocator;
 }
 
-#if defined(_WIN32) || defined(HAVE_MMAP)
-
 #define TH_ALLOC_ALIGNMENT 64
+
+#if defined(_WIN32) || defined(HAVE_MMAP)
 
 typedef struct {
   std::atomic<int> refcount;
@@ -394,11 +394,11 @@ THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size) {
   AT_ERROR("file mapping not supported on your system");
 }
 
-THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags) {
+THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size) {
   AT_ERROR("file mapping not supported on your system");
 }
 
-THMapAllocator::~THMapAllocator(THMapAllocator* ctx) {}
+void THMapAllocator::close() { }
 
 #endif
 
@@ -505,16 +505,23 @@ int THRefcountedMapAllocator::decref()
 
 THRefcountedMapAllocatorArgCheck::THRefcountedMapAllocatorArgCheck(int flags) {}
 
-THRefcountedMapAllocator::THRefcountedMapAllocator(const char *filename, int flags, size_t size) {
+THRefcountedMapAllocator::THRefcountedMapAllocator(const char *filename, int flags, size_t size)
+  : THRefcountedMapAllocatorArgCheck(flags),
+    THMapAllocator(filename, flags, size + TH_ALLOC_ALIGNMENT) 
+{
   AT_ERROR("refcounted file mapping not supported on your system");
 }
 
-THRefcountedMapAllocator::THRefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size) {
+THRefcountedMapAllocator::THRefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size)
+  : THRefcountedMapAllocatorArgCheck(flags),
+    THMapAllocator(WITH_FD, filename, flags, fd, size + TH_ALLOC_ALIGNMENT) 
+{
   AT_ERROR("refcounted file mapping not supported on your system");
 }
 
 void THRefcountedMapAllocator::initializeAlloc() {}
-THRefcountedMapAllocator::~THRefcountedMapAllocator() {}
+
+void THRefcountedMapAllocator::close() {}
 
 #endif
 

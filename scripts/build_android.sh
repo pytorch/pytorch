@@ -101,7 +101,7 @@ CMAKE_ARGS+=("-DUSE_MOBILE_OPENGL=OFF")
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
 
-cmake "$CAFFE2_ROOT" \
+echo cmake "$CAFFE2_ROOT" \
     -DCMAKE_INSTALL_PREFIX=../install \
     -DCMAKE_BUILD_TYPE=Release \
     "${CMAKE_ARGS[@]}"
@@ -114,4 +114,4 @@ if [ -z "$MAX_JOBS" ]; then
     MAX_JOBS=$(nproc)
   fi
 fi
-cmake --build . -- "-j${MAX_JOBS}"
+echo cmake --build . -- "-j${MAX_JOBS}"

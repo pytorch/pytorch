@@ -1,14 +1,17 @@
-if (BUILD_ATEN_MOBILE)
-  return()
-endif()
+#if (BUILD_ATEN_MOBILE)
+#  return()
+#endif()
 
 # Find modules
 list(APPEND CMAKE_MODULE_PATH
-  /usr/lib/x86_64-linux-gnu/
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix)
-list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/)
+
+if (NOT BUILD_ATEN_MOBILE)
+  list(APPEND CMAKE_MODULE_PATH  /usr/lib/x86_64-linux-gnu/)
+  list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/)
+endif()
 
 cmake_policy(SET CMP0012 NEW)
 

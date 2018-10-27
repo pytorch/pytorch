@@ -202,3 +202,8 @@ function(caffe2_protobuf_generate_cpp_py srcs_var hdrs_var python_var)
   set(${hdrs_var} ${${hdrs_var}} PARENT_SCOPE)
   set(${python_var} ${${python_var}} PARENT_SCOPE)
 endfunction()
+if (ANDROID)
+  set_target_properties(
+    protoc PROPERTIES LINK_FLAGS -llog
+    )
+endif()
