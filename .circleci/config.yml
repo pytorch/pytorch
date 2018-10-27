@@ -25,21 +25,23 @@ setup_ci_environment: &setup_ci_environment
   no_output_timeout: "1h"
   command: |
     set -e
-    sudo pip -q install awscli==1.16.35
-
-    sudo apt-get -qq update
-    sudo apt-get -qq remove linux-image-generic linux-headers-generic linux-generic
-    sudo apt-get -qq install linux-headers-$(uname -r)
-    sudo apt-get -qq install linux-image-generic
-    sudo apt-get -qq install moreutils
 
     curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
     echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
     echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
     echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+
     sudo apt-get -qq update
-    sudo apt-get -qq install nvidia-docker2
+    sudo apt-get -qq remove linux-image-generic linux-headers-generic linux-generic
+    sudo apt-get -qq install \
+      linux-headers-$(uname -r) \
+      linux-image-generic \
+      moreutils \
+      nvidia-docker2
+
     sudo pkill -SIGHUP dockerd
+
+    sudo pip -q install awscli==1.16.35
 
     if [[ "${JOB_BASE_NAME}" == *-test* ]]; then
       if [ -n "${CUDA_VERSION}" ]; then
