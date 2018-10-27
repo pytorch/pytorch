@@ -18,8 +18,11 @@ import torch.nn.functional as F
 import torch.distributed as c10d
 from torch.nn.parallel import DistributedDataParallel
 
-from common_utils import TestCase
+from common_utils import TestCase, load_tests
 
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 if not c10d.is_available():
     print('c10d not available, skipping tests')

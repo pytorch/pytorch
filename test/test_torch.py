@@ -24,8 +24,13 @@ from functools import reduce
 from torch import multiprocessing as mp
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
-    IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm
+    IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
+    IS_SANDCASTLE, load_tests
 from multiprocessing.reduction import ForkingPickler
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 if TEST_NUMPY:
     import numpy as np
@@ -2101,20 +2106,11 @@ class TestTorch(TestCase):
         output = torch.ones_like(x)
         self.assertEqual(output, expected)
 
-    @staticmethod
-    def _test_dtypes(self, dtypes, layout, device):
-        for dtype in dtypes:
-            if dtype != torch.float16:
-                out = torch.zeros((2, 3), dtype=dtype, layout=layout, device=device)
-                self.assertIs(dtype, out.dtype)
-                self.assertIs(layout, out.layout)
-                self.assertEqual(device, out.device)
-
     def test_dtypes(self):
         all_dtypes = torch.testing.get_all_dtypes()
-        self._test_dtypes(self, all_dtypes, torch.strided, torch.device('cpu'))
+        do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cpu'))
         if torch.cuda.is_available():
-            self._test_dtypes(self, all_dtypes, torch.strided, torch.device('cuda:0'))
+            do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cuda:0'))
 
     def test_copy_dtypes(self):
         all_dtypes = torch.testing.get_all_dtypes()
@@ -2242,66 +2238,12 @@ class TestTorch(TestCase):
                     self.assertEqual(a.device, b.to(a, non_blocking=non_blocking).device)
                     self.assertEqual(b.device, a.to(b, non_blocking=non_blocking).device)
 
-    @staticmethod
-    def _test_empty_full(self, dtypes, layout, device):
-        shape = torch.Size([2, 3])
-
-        def check_value(tensor, dtype, layout, device, value, requires_grad):
-            self.assertEqual(shape, tensor.shape)
-            self.assertIs(dtype, tensor.dtype)
-            self.assertIs(layout, tensor.layout)
-            self.assertEqual(tensor.requires_grad, requires_grad)
-            if tensor.is_cuda and device is not None:
-                self.assertEqual(device, tensor.device)
-            if value is not None:
-                fill = tensor.new(shape).fill_(value)
-                self.assertEqual(tensor, fill)
-
-        def get_int64_dtype(dtype):
-            module = '.'.join(str(dtype).split('.')[1:-1])
-            if not module:
-                return torch.int64
-            return operator.attrgetter(module)(torch).int64
-
-        default_dtype = torch.get_default_dtype()
-        check_value(torch.empty(shape), default_dtype, torch.strided, -1, None, False)
-        check_value(torch.full(shape, -5), default_dtype, torch.strided, -1, None, False)
-        for dtype in dtypes:
-            for rg in {dtype.is_floating_point, False}:
-                int64_dtype = get_int64_dtype(dtype)
-                v = torch.empty(shape, dtype=dtype, device=device, layout=layout, requires_grad=rg)
-                check_value(v, dtype, layout, device, None, rg)
-                out = v.new()
-                check_value(torch.empty(shape, out=out, device=device, layout=layout, requires_grad=rg),
-                            dtype, layout, device, None, rg)
-                check_value(v.new_empty(shape), dtype, layout, device, None, False)
-                check_value(v.new_empty(shape, dtype=int64_dtype, device=device, requires_grad=False),
-                            int64_dtype, layout, device, None, False)
-                check_value(torch.empty_like(v), dtype, layout, device, None, False)
-                check_value(torch.empty_like(v, dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
-                            int64_dtype, layout, device, None, False)
-
-                if dtype is not torch.float16 and layout != torch.sparse_coo:
-                    fv = 3
-                    v = torch.full(shape, fv, dtype=dtype, layout=layout, device=device, requires_grad=rg)
-                    check_value(v, dtype, layout, device, fv, rg)
-                    check_value(v.new_full(shape, fv + 1), dtype, layout, device, fv + 1, False)
-                    out = v.new()
-                    check_value(torch.full(shape, fv + 2, out=out, device=device, layout=layout, requires_grad=rg),
-                                dtype, layout, device, fv + 2, rg)
-                    check_value(v.new_full(shape, fv + 3, dtype=int64_dtype, device=device, requires_grad=False),
-                                int64_dtype, layout, device, fv + 3, False)
-                    check_value(torch.full_like(v, fv + 4), dtype, layout, device, fv + 4, False)
-                    check_value(torch.full_like(v, fv + 5,
-                                                dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
-                                int64_dtype, layout, device, fv + 5, False)
-
     @skipIfRocm
     def test_empty_full(self):
-        self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cpu'))
+        do_test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
-            self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, None)
-            self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cuda:0'))
+            do_test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, None)
+            do_test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cuda:0'))
 
     def test_dtype_out_match(self):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
@@ -9089,7 +9031,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(grid_b2.equal(expected_grid_b))
         self.assertTrue(grid_c2.equal(expected_grid_c))
 
-    @unittest.skipIf(torch.cuda.is_available(), "CUDA is available, can't test CUDA not built error")
+    @unittest.skipIf(torch.cuda.is_available() or IS_SANDCASTLE, "CUDA is available, can't test CUDA not built error")
     def test_cuda_not_built(self):
         msg = "Torch not compiled with CUDA enabled"
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.current_device())
