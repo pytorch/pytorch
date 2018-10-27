@@ -1014,6 +1014,7 @@ class TestTorch(TestCase):
     def test_dim_reduction(self):
         self._test_dim_reduction(self, lambda t: t)
 
+    @skipIfRocm
     def test_reduction_empty(self):
         fns_to_test = [
             # name, function, identity

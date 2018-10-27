@@ -921,6 +921,7 @@ class TestSparse(TestCase):
         self._test_basic_ops_shape(0, 0, [10, 10, 10], [2, 0])
         self._test_basic_ops_shape(0, 0, [10, 10, 0], [2, 0])
 
+    @skipIfRocm
     def test_add_dense_sparse_mismatch(self):
         def test_shape(dense_size, sparse_dims_shape, dense_dims_shape, sparse_size):
             x = torch.zeros(dense_size, dtype=self.value_dtype, device=self.device)
