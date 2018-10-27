@@ -23,6 +23,7 @@ _(TupleType) \
 _(ListType) \
 _(NumberType) \
 _(FloatType) \
+_(FutureType) \
 _(IntType) \
 _(NoneType) \
 _(StringType) \
@@ -507,6 +508,54 @@ struct TORCH_API ListType : public SingleElementType<TypeKind::ListType, ListTyp
   static ListTypePtr ofBools();
 private:
   using SingleElementType::SingleElementType;
+};
+
+struct FutureType;
+using FutureTypePtr = std::shared_ptr<FutureType>;
+
+struct TORCH_API FutureType : public Type {
+  // It's not exactly a singleton, but there should be exactly once instance of
+  // Future[T] for every T
+  static constexpr bool is_singleton = true;
+  friend struct Type;
+  template<typename ... T>
+  static FutureTypePtr create(TypePtr elem) {
+    return FutureTypePtr(new FutureType(std::move(elem))); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    if (auto rhs_ = rhs.cast<FutureType>()) {
+      return *getElementType() == *rhs_->getElementType();
+    }
+    return false;
+  }
+  bool requires_grad() const override {
+    return elem->requires_grad();
+  }
+  std::string str() const override {
+    std::stringstream ss;
+    ss << "Future(" << getElementType()->str() << ")";
+    return ss.str();
+  }
+  std::string python_str() const override {
+    std::stringstream ss;
+    ss << "Future[" << getElementType()->python_str() << "]";
+    return ss.str();
+  }
+  TypePtr getElementType() const {
+    return elem;
+  }
+  bool hasFreeVariables() const override {
+    return has_free_variables_;
+  }
+
+  static const TypeKind Kind = TypeKind::FutureType;
+private:
+  FutureType(TypePtr elem)
+  : Type(TypeKind::FutureType)
+  , elem(std::move(elem))
+  , has_free_variables_(getElementType()->hasFreeVariables()) {}
+  TypePtr elem;
+  bool has_free_variables_;
 };
 
 struct TupleType;

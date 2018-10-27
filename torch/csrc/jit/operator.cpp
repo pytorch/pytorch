@@ -128,7 +128,7 @@ struct SchemaParser {
       auto subtype = std::move(p.first);
       auto subalias = std::move(p.second);
       L.expect(')');
-      throw ErrorReport(L.cur()) << "Futures are not yet implemented";
+      value = FutureType::create(subtype);
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
       L.next();
       value = DynamicType::get();
