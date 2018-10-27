@@ -5,7 +5,6 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/operators/quantized/int8_utils.h"
-#include "caffe2/operators/reshape_op.h"
 
 namespace caffe2 {
 
