@@ -19,7 +19,7 @@ from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           prod_single_zero, random_square_matrix_of_rank,
                           random_symmetric_matrix, random_symmetric_psd_matrix,
                           random_symmetric_pd_matrix, make_nonzero_det,
-                          random_fullrank_matrix_distinct_singular_value)
+                          random_fullrank_matrix_distinct_singular_value, load_tests)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -31,6 +31,10 @@ from common_methods_invocations import (method_tests,
                                         exclude_tensor_method,
                                         mask_not_all_zeros,
                                         L, S)
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 if sys.version_info[0] == 2:
     import cPickle as pickle

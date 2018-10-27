@@ -286,7 +286,8 @@ std::shared_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
   MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
 
   MPI_Group ranksGroup;
-  MPI_CHECK(MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
+  MPI_CHECK(
+      MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
 
   MPI_Comm groupComm;
   MPI_CHECK(MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm));

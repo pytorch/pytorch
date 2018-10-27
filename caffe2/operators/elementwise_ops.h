@@ -55,7 +55,7 @@ class UnaryElementwiseWithArgsOp final : public Operator<Context> {
     auto* Y = Output(0);
     Y->ResizeLike(X);
     return functor_(
-        X.size(),
+        X.numel(),
         X.template data<T>(),
         Y->template mutable_data<typename OutputTypeMap::template type<T>>(),
         &context_);
@@ -160,8 +160,8 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
           "In-place is allowed only with the first tensor when "
           "legacy-broadcasting");
       C->ResizeLike(A);
-      if (B.size() == 1) {
-        A_dims = {static_cast<int>(A.size())};
+      if (B.numel() == 1) {
+        A_dims = {static_cast<int>(A.numel())};
         B_dims = {1};
       } else {
         size_t pre, n, post;
@@ -262,8 +262,8 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
     vector<int> A_dims;
     vector<int> B_dims;
     if (legacy_broadcast_) {
-      if (B.size() == 1) {
-        A_dims = {static_cast<int>(A.size())};
+      if (B.numel() == 1) {
+        A_dims = {static_cast<int>(A.numel())};
         B_dims = {1};
       } else {
         size_t pre, n, post;

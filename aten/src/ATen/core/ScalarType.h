@@ -106,6 +106,14 @@ static inline ScalarType dataTypeToScalarType(DataType dtype) {
   AT_ERROR("Unsupported DataType in ATen: ", dtype, " (please report this error)");
 }
 
+static inline bool operator==(ScalarType t, caffe2::TypeMeta m) {
+  return dataTypeToScalarType(m.id()) == t;
+}
+
+static inline bool operator==(caffe2::TypeMeta m, ScalarType t) {
+  return dataTypeToScalarType(m.id()) == t;
+}
+
 #define DEFINE_CONSTANT(_,name,_2) \
 constexpr ScalarType k##name = ScalarType::name;
 

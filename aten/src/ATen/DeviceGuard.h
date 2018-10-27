@@ -36,7 +36,7 @@ struct DeviceGuard {
   }
 
   /// Calls `set_index` with the given index.
-  explicit DeviceGuard(int32_t index) {
+  explicit DeviceGuard(int16_t index) {
     set_index(index);
   }
 
@@ -87,7 +87,7 @@ struct DeviceGuard {
   }
 
   /// Sets the device to the given one.
-  void set_index(int32_t index) {
+  void set_index(int16_t index) {
     if (index == -1) {
       return;
     }
@@ -114,19 +114,19 @@ struct DeviceGuard {
   }
 
   /// Returns the device that was set upon construction of the guard.
-  int32_t original_index() const noexcept {
+  int16_t original_index() const noexcept {
     return original_index_;
   }
 
   /// Returns the last device that was set via `set_index`, if any.
-  int32_t last_index() const noexcept {
+  int16_t last_index() const noexcept {
     return last_index_;
   }
 
  private:
   /// The original device that was active at construction of this object.
-  int32_t original_index_ = -1;
+  int16_t original_index_ = -1;
   /// The last index that was set via `set_index`.
-  int32_t last_index_ = -1;
+  int16_t last_index_ = -1;
 };
 } // namespace at

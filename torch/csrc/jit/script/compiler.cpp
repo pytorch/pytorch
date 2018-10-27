@@ -467,13 +467,12 @@ Value* tryMatchArgument(
     value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
-  if (value->node()->kind() == prim::None){
-    if (concrete_type->isSubtypeOf(NumberType::get()))
-      value = graph.insertConstant(at::Scalar(NAN), loc);
-    else if (concrete_type->isSubtypeOf(GeneratorType::get())) {
+  if (value->type()->isSubtypeOf(NoneType::get())){
+    if (concrete_type->isSubtypeOf(GeneratorType::get())) {
       value = graph.insertNode(graph.createNoneGenerator())->output();
-    } else
+    } else if (concrete_type->isSubtypeOf(DynamicType::get())) {
       value = graph.insertNode(graph.createUndefined())->output();
+    }
   }
 
   //implicit conversion of tensors to scalars
@@ -562,7 +561,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
   // NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
   // necessary to enforce linearization on effectful ops.
   std::vector<NamedValue> modifiedArgs(raw_args.begin(), raw_args.end());
-  if (schema.is_mutable()) {
+  if (schema.has_world_token()) {
     // Add a dummy world token to be matched against
     const auto worldToken = graph.insertDummyWorld();
     modifiedArgs.insert(modifiedArgs.begin(), worldToken);
@@ -1604,7 +1603,7 @@ private:
         return graph->insertConstant(false, tree->range());
       } break;
       case TK_NONE: {
-        return emitNone(tree->range());
+        return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_SUBSCRIPT: {
         const auto subscript = Subscript(tree);
@@ -1651,13 +1650,6 @@ private:
         throw ErrorReport(tree) << "NYI: " << tree;
         break;
     }
-  }
-
-  Value* emitNone(SourceRange range) {
-    auto& g = *method.graph();
-    return g.insertNode(
-        g.create(prim::None, {}, 1)->setSourceLocation(
-          std::make_shared<SourceRange>(range)))->output();
   }
 
   Value* emitConst(const Const& c) {
@@ -1869,7 +1861,7 @@ private:
   Value* emitTupleSlice(const SourceRange& loc,
       const NamedValue& tuple_val,
       const NamedValue& beg_val,
-      const at::optional<NamedValue&> end_val) {
+      const at::optional<NamedValue>& end_val) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
     int64_t beg = getTupleIndexVal(loc, tuple_type, beg_val.value(*graph), /*allow_out_of_bounds*/true);
     int64_t end;
@@ -2043,6 +2035,13 @@ const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscr
       }
       auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
       return ListType::create(elem_type);
+    }},
+    {"Optional", [](Subscript subscript) -> TypePtr {
+      if (subscript.subscript_exprs().size() != 1) {
+        throw ErrorReport(subscript) << " expected exactly one element type but found " << subscript.subscript_exprs().size();
+      }
+      auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+      return OptionalType::create(elem_type);
     }},
   };
   return map;

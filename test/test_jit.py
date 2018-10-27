@@ -11,7 +11,8 @@ from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2
-from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, skipIfRocm, suppress_warnings
+from common_utils import (TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN,
+                          skipIfRocm, suppress_warnings, load_tests, IS_SANDCASTLE)
 from textwrap import dedent
 import os
 import io
@@ -35,6 +36,10 @@ from torch.jit import BatchTensor
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future
 from test_module.no_future_div import div_int_nofuture, div_float_nofuture
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 try:
     import torchvision
@@ -60,7 +65,6 @@ RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
-IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 
 
 def LSTMCellF(input, hx, cx, *params):
@@ -367,8 +371,10 @@ class JitTestCase(TestCase):
         graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
         m = torch.jit.ScriptModule()
         m._create_method_from_graph("forward", graph)
-        m_import = self.getExportImportCopy(m)
+        self.assertExportImportModule(m, inputs)
 
+    def assertExportImportModule(self, m, inputs):
+        m_import = self.getExportImportCopy(m)
         self.assertEqual(m.forward(*inputs), m_import.forward(*inputs))
 
 
@@ -2003,6 +2009,15 @@ class TestJit(JitTestCase):
         self.assertEqual(
             bool_fn(torch.ones(1), torch.tensor(1), torch.tensor(True)),
             torch.ones(1))
+
+        @torch.jit.script
+        def none_fn(x=None):
+            # type: (Optional[int]) -> Optional[int]
+            return x
+
+        self.assertExpectedGraph(none_fn.graph, "none")
+        self.assertEqual(none_fn(), None)
+        self.assertEqual(none_fn(1), 1)
 
         @torch.jit.script
         def hints(x, a=0.5, b=10):
@@ -4066,18 +4081,23 @@ a")
         self.checkScript(func, [torch.arange(0, 2)], optimize=True)
 
     def test_script_clamp_none(self):
-        # TODO: could not enable default/optional argument for None in JIT
-        # result from Aten native python_default_init for clamp, it is used
-        # in Aten but not in JIT, need to fix type/default arg system in ATen
         def test_script_clamp_max_none(x):
-            return torch.clamp(x, min=None, max=2)
+            return torch.clamp(x, min=2, max=None)
+
+        def test_script_clamp_max(x):
+            return torch.clamp(x, max=2)
 
         def test_script_clamp_min_none(x):
-            return torch.clamp(x, min=2, max=None)
+            return torch.clamp(x, min=None, max=2)
+
+        def test_script_clamp_min(x):
+            return torch.clamp(x, min=2)
 
         input = [torch.arange(0, 3)]
         self.checkScript(test_script_clamp_max_none, input, optimize=True)
+        self.checkScript(test_script_clamp_max, input, optimize=True)
         self.checkScript(test_script_clamp_min_none, input, optimize=True)
+        self.checkScript(test_script_clamp_min, input, optimize=True)
 
     def test_script_bool_constant(self):
         script = '''
@@ -5021,6 +5041,15 @@ a")
                 a, b = return3()
                 print(a)
                 print(b)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_script_get_device_cuda(self):
+        @torch.jit.script
+        def foo(a):
+            return a.get_device()
+
+        v = torch.randn(1, device='cuda')
+        self.assertEqual(foo(v), 0)
 
     def test_script_chunk(self):
         @torch.jit.script
@@ -7829,6 +7858,22 @@ a")
         weak_mod.weight = torch.nn.Parameter(torch.ones(5, 5) * 100)
         self.assertFalse(strong_mod(inp).allclose(weak_mod(inp)))
 
+    def test_inplace_add(self):
+
+        def foo(a, b):
+            c = a + b
+            c.add_(b)
+            return c
+        self.checkScript(foo, (torch.rand(3), torch.rand(3)))
+
+    def test_add_out(self):
+        def foo(a, b):
+            c = a + b
+            e = 2 * a
+            torch.add(c, b, out=e)
+            return e
+        self.checkScript(foo, (torch.rand(3), torch.rand(3)))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -8519,6 +8564,11 @@ def the_method({}):
     return {}
 '''
 
+script_method_template = '''
+def forward({}):
+    return {}
+'''
+
 
 def get_constant(x):
     if x == inf:
@@ -8528,23 +8578,28 @@ def get_constant(x):
     return x
 
 
+def get_script_args(args):
+    formals = []
+    tensors = []
+    actuals = []
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            name = 'i{}'.format(len(formals))
+            formals.append(name)
+            actuals.append(name)
+            tensors.append(arg)
+        else:
+            actuals.append(str(get_constant(arg)))
+    return (formals, tensors, actuals)
+
+
 # create a script function from (name, func_type, output_process_fn),
 # returns a function takes in (args, kwargs) and runs the compiled function and
 # then applies the post process fn to the outputs
 def create_script_fn(self, method_name, func_type, output_process_fn,
                      disable_autodiff_subgraph_inlining=False):
     def script_fn(*args, **kwargs):
-        formals = []
-        tensors = []
-        actuals = []
-        for arg in args:
-            if isinstance(arg, torch.Tensor):
-                name = 'i{}'.format(len(formals))
-                formals.append(name)
-                actuals.append(name)
-                tensors.append(arg)
-            else:
-                actuals.append(str(get_constant(arg)))
+        formals, tensors, actuals = get_script_args(args)
         kwargs_str = ''
         for k, v in kwargs.items():
             kwargs_str += ', ' + k + '=' + str(v)
@@ -8823,19 +8878,20 @@ class TestCustomOperators(JitTestCase):
         from torch._ops import _OpNamespace
         self.assertTrue(hasattr(torch, 'ops'))
 
-        torch.ops.__dict__.pop('aten')
+        if '_test' in torch.ops.__dict__:
+            torch.ops.__dict__.pop('_test')
 
         # Don't use `hasattr()` because it will call `__getattr__`.
-        self.assertNotIn('aten', torch.ops.__dict__)
-        torch.ops.aten
-        self.assertIn('aten', torch.ops.__dict__)
-        self.assertEqual(type(torch.ops.aten), _OpNamespace)
+        self.assertNotIn('_test', torch.ops.__dict__)
+        torch.ops._test
+        self.assertIn('_test', torch.ops.__dict__)
+        self.assertEqual(type(torch.ops._test), _OpNamespace)
 
-        self.assertNotIn('relu', torch.ops.aten.__dict__)
-        op = torch.ops.aten.relu
+        self.assertNotIn('leaky_relu', torch.ops._test.__dict__)
+        op = torch.ops._test.leaky_relu
         self.assertTrue(callable(op))
-        self.assertIn('relu', torch.ops.aten.__dict__)
-        op2 = torch.ops.aten.relu
+        self.assertIn('leaky_relu', torch.ops._test.__dict__)
+        op2 = torch.ops._test.leaky_relu
         self.assertEqual(op, op2)
 
     def test_simply_calling_an_operator(self):
@@ -8844,11 +8900,11 @@ class TestCustomOperators(JitTestCase):
         self.assertEqual(output, input.relu())
 
     def test_default_arguments_are_used(self):
-        output = torch.ops.aten.leaky_relu(torch.tensor([-1.0, 1.0]))
+        output = torch.ops._test.leaky_relu(torch.tensor([-1.0, 1.0]))
         self.assertEqual(output, torch.tensor([-0.01, 1]))
 
     def test_only_kwargs(self):
-        output = torch.ops.aten.leaky_relu(self=torch.tensor(-1.0))
+        output = torch.ops._test.leaky_relu(self=torch.tensor(-1.0))
         self.assertEqual(output, torch.tensor(-0.01))
 
     def test_passing_too_many_args(self):
@@ -8877,19 +8933,19 @@ class TestCustomOperators(JitTestCase):
             RuntimeError,
             "Argument 'self' specified both as positional and keyword argument"
         ):
-            torch.ops.aten.leaky_relu(torch.ones(5), self=torch.ones(5))
+            torch.ops._test.leaky_relu(torch.ones(5), self=torch.ones(5))
 
     def test_passing_unknown_kwargs(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Unknown keyword argument 'foo' for operator 'aten::leaky_relu'"
+            "Unknown keyword argument 'foo' for operator '_test::leaky_relu'"
         ):
-            torch.ops.aten.leaky_relu(torch.ones(5), foo=torch.ones(5))
+            torch.ops._test.leaky_relu(torch.ones(5), foo=torch.ones(5))
 
     def test_passing_and_returning_lists(self):
         # Replace with actual test once we support lists.
         a, b = torch.rand(5), torch.rand(5)
-        output = torch.ops.aten.cat([a, b])
+        output = torch.ops._test.cat([a, b])
         output_ref = torch.cat([a, b])
         self.assertEqual(output, output_ref)
 
@@ -8945,6 +9001,21 @@ UBSAN_BLACKLISTED_TESTS = [
 L = 20
 M = 10
 S = 5
+
+# (
+#     module name,
+#     constructor arguments,
+#     args (tuple represents shape of a tensor arg),
+# )
+nn_module_tests = [
+    ('Sigmoid', (), ((S,),)),
+    ('PairwiseDistance', (), ((S, S), (S, S))),
+    ('Tanh', (), ((S,),)),
+    ('Hardshrink', (), ((S,),)),
+    ('PReLU', (), ((S,),)),
+    ('Softsign', (), ((S,),)),
+    ('Tanhshrink', (), ((S,),)),
+]
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
 # not support in_place operations yet, so no inplace operation tests added.
@@ -9156,7 +9227,7 @@ def add_autograd_test(
         post_add_test(test_name, skipTestIf, do_test)
 
 
-def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x: x, kwargs=None):
+def add_nn_functional_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x: x, kwargs=None):
     test_name = 'test_nn_' + name
 
     def do_test(self, name=name, args=args, test_name=test_name):
@@ -9187,6 +9258,46 @@ def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x
     post_add_test(test_name, skipTestIf, do_test)
 
 
+def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
+    def do_test(self):
+        nn_module = getattr(torch.nn, module_name)
+
+        # Construct a script module that passes arguments through
+        # to self.submodule
+        def create_module(*args, **kwargs):
+            formals, tensors, actuals = get_script_args(args)
+
+            method_args = ', '.join(['self'] + actuals)
+            call_args_str = ', '.join(actuals)
+            call = "self.submodule({})".format(call_args_str)
+            script = script_method_template.format(method_args, call)
+            print(script)
+
+            # Create module to use the script method
+            class TheModule(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(TheModule, self).__init__()
+                    self.submodule = nn_module(*constructor_args)
+
+            module = TheModule()
+            module.define(script)
+
+            # Check there are no Python ops by exporting
+            self.assertExportImportModule(module, tensors)
+            create_module.last_graph = module.graph
+            return module(*args)
+
+        # Check against Python module as reference
+        args_variable, kwargs_variable = create_input(call_args)
+        f_args_variable = deepcopy(unpack_variables(args_variable))
+        reference = nn_module(*constructor_args)
+
+        check_against_reference(self, create_module, reference, f_args_variable)
+
+    test_name = 'test_nn_{}'.format(module_name)
+    post_add_test(test_name, skipTestIf, do_test)
+
+
 def post_add_test(test_name, skipTestIf, do_test):
     assert not hasattr(TestJitGenerated, test_name), 'Two tests have the same name: ' + test_name
 
@@ -9201,7 +9312,10 @@ for test in autograd_method_tests:
     add_autograd_test(*test)
 
 for test in nn_functional_tests:
-    add_nn_test(*test)
+    add_nn_functional_test(*test)
+
+for test in nn_module_tests:
+    add_nn_module_test(*test)
 
 if __name__ == '__main__':
     run_tests()
