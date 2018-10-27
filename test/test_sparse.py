@@ -247,6 +247,24 @@ class TestSparse(TestCase):
         res = self.ValueTensor(3, 4, 5, 0)
         test_tensor(x, res)
 
+    @skipIfRocm  # see https://github.com/pytorch/pytorch/pull/12171#issuecomment-431069849
+    def test_to_sparse(self):
+        shape = [10, 5, 19, 8]
+        max_nnz = 1
+        for dim, dim_sz in enumerate(shape, 1):
+            max_nnz *= dim_sz
+            rnnz = torch.randint(2, max_nnz, (1,)).item()
+            for nnz in [0, 1, rnnz]:
+                expected, _, _ = self._gen_sparse(dim, nnz, shape)
+                d = expected.to_dense()
+                result = d.to_sparse(dim)
+                self.assertEqual(d, result.to_dense())  # == not implemented for sparse tensors yet
+                self.assertEqual(expected.size(), result.size())
+                self.assertEqual(dim, result.sparse_dim())
+
+        sp, _, _ = self._gen_sparse(2, 10, [3, 3, 3])
+        self.assertRaises(RuntimeError, lambda: sp.to_sparse())
+
     @skipIfRocm
     def test_shared(self):
         i = self.IndexTensor([[2]])
