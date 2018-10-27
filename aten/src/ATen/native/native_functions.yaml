@@ -2204,6 +2204,18 @@
 - func: unbind(Tensor self, int64_t dim=0) -> TensorList
   variants: function, method
 
+- func: to_sparse(Tensor self, int64_t sparse_dim) -> Tensor
+  variants: method
+  dispatch:
+    CPU: dense_to_sparse
+    CUDA: dense_to_sparse
+
+- func: to_sparse(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    CPU: dense_to_sparse
+    CUDA: dense_to_sparse
+
 - func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
