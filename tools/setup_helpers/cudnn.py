@@ -42,7 +42,7 @@ if USE_CUDA and not check_negative_env_flag('USE_CUDNN'):
         include_file_path = os.path.join(path, 'cudnn.h')
         CUDNN_INCLUDE_VERSION = None
         if os.path.exists(include_file_path):
-            CUDNN_INCLUDE_DIR = path
+            CUDNN_INCLUDE_DIR = path.replace('\\', '/')
             with open(include_file_path) as f:
                 for line in f:
                     if "#define CUDNN_MAJOR" in line:
@@ -67,8 +67,8 @@ if USE_CUDA and not check_negative_env_flag('USE_CUDNN'):
         if IS_WINDOWS:
             library = os.path.join(path, 'cudnn.lib')
             if os.path.exists(library):
-                CUDNN_LIBRARY = library
-                CUDNN_LIB_DIR = path
+                CUDNN_LIBRARY = library.replace('\\', '/')
+                CUDNN_LIB_DIR = path.replace('\\', '/')
                 break
         else:
             if WITH_STATIC_CUDNN is not None:
@@ -83,7 +83,7 @@ if USE_CUDA and not check_negative_env_flag('USE_CUDNN'):
     # Specifying the library directly will overwrite the lib directory
     library = os.getenv('CUDNN_LIBRARY')
     if library is not None and os.path.exists(library):
-        CUDNN_LIBRARY = library
+        CUDNN_LIBRARY = library.replace('\\', '/')
         CUDNN_LIB_DIR = os.path.dirname(CUDNN_LIBRARY)
 
     if not all([CUDNN_LIBRARY, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR]):
