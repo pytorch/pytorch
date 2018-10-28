@@ -169,7 +169,7 @@ build_env_vars = ['BINARY', 'TEST', 'CAFFE2_OPS']
 from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.build import (BUILD_BINARY, BUILD_TEST,
                                        BUILD_CAFFE2_OPS, USE_LEVELDB,
-                                       USE_LMDB, USE_OPENCV, USE_FFMPEG)
+                                       USE_LMDB, USE_OPENCV, USE_TENSORRT, USE_FFMPEG)
 from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
 from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
@@ -416,6 +416,7 @@ def build_libs(libs):
     my_env["USE_LEVELDB"] = "ON" if USE_LEVELDB else "OFF"
     my_env["USE_LMDB"] = "ON" if USE_LMDB else "OFF"
     my_env["USE_OPENCV"] = "ON" if USE_OPENCV else "OFF"
+    my_env["USE_TENSORRT"] = "ON" if USE_TENSORRT else "OFF"
     my_env["USE_FFMPEG"] = "ON" if USE_FFMPEG else "OFF"
     my_env["USE_DISTRIBUTED"] = "ON" if USE_DISTRIBUTED else "OFF"
 
