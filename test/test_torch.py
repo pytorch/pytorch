@@ -3986,9 +3986,9 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_gesv_batched(self, cast):
-        from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
+        from common_utils import random_fullrank_matrix_distinct_singular_value
         # test against gesv: one batch
-        A = cast(fullrank(5, 1))
+        A = cast(random_fullrank_matrix_distinct_singular_value(5, 1))
         b = cast(torch.randn(1, 5, 10))
         x_exp, LU_exp = torch.gesv(b.squeeze(0), A.squeeze(0))
         x, LU = torch.gesv(b, A)
@@ -3996,7 +3996,7 @@ class TestTorch(TestCase):
         self.assertEqual(LU, LU_exp.unsqueeze(0))
 
         # test against gesv in a loop: four batches
-        A = cast(fullrank(5, 4))
+        A = cast(random_fullrank_matrix_distinct_singular_value(5, 4))
         b = cast(torch.randn(4, 5, 10))
 
         x_exp_list = list()
@@ -4013,7 +4013,7 @@ class TestTorch(TestCase):
         self.assertEqual(LU, LU_exp)
 
         # basic correctness test
-        A = cast(fullrank(5, 3))
+        A = cast(random_fullrank_matrix_distinct_singular_value(5, 3))
         b = cast(torch.randn(3, 5, 10))
         x, LU = torch.gesv(b, A)
         self.assertEqual(torch.matmul(A, x), b)
@@ -4023,7 +4023,7 @@ class TestTorch(TestCase):
             return
         import numpy
         from numpy.linalg import solve
-        A = cast(fullrank(2, 2)).permute(1, 0, 2)
+        A = cast(random_fullrank_matrix_distinct_singular_value(2, 2)).permute(1, 0, 2)
         b = cast(torch.randn(2, 2, 2)).permute(2, 1, 0)
         x, _ = torch.gesv(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
@@ -4039,17 +4039,16 @@ class TestTorch(TestCase):
             return
 
         from numpy.linalg import solve
-        from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
-
+        from common_utils import random_fullrank_matrix_distinct_singular_value
         # test against numpy.linalg.solve
-        A = cast(fullrank(4, 2, 1, 3))
+        A = cast(random_fullrank_matrix_distinct_singular_value(4, 2, 1, 3))
         b = cast(torch.randn(2, 1, 3, 4, 6))
         x, _ = torch.gesv(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(x.data, cast(x_exp))
 
         # test column major format
-        A = cast(fullrank(4, 2, 1, 3)).transpose(-2, -1)
+        A = cast(random_fullrank_matrix_distinct_singular_value(4, 2, 1, 3)).transpose(-2, -1)
         b = cast(torch.randn(2, 1, 3, 6, 4)).transpose(-2, -1)
         assert not A.is_contiguous()
         assert not b.is_contiguous()
@@ -4058,21 +4057,21 @@ class TestTorch(TestCase):
         self.assertEqual(x.data, cast(x_exp))
 
         # broadcasting b
-        A = cast(fullrank(4, 2, 1, 3))
+        A = cast(random_fullrank_matrix_distinct_singular_value(4, 2, 1, 3))
         b = cast(torch.randn(4, 6))
         x, _ = torch.gesv(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(x.data, cast(x_exp))
 
         # broadcasting A
-        A = cast(fullrank(4))
+        A = cast(random_fullrank_matrix_distinct_singular_value(4))
         b = cast(torch.randn(2, 1, 3, 4, 2))
         x, _ = torch.gesv(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(x.data, cast(x_exp))
 
         # broadcasting both A & b
-        A = cast(fullrank(4, 1, 3, 1))
+        A = cast(random_fullrank_matrix_distinct_singular_value(4, 1, 3, 1))
         b = cast(torch.randn(2, 1, 3, 4, 5))
         x, _ = torch.gesv(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
@@ -4589,23 +4588,78 @@ class TestTorch(TestCase):
     def test_signal_window_functions(self):
         self._test_signal_window_functions(self)
 
+    @staticmethod
+    def _test_inverse(self, conv_fn):
+        from common_utils import random_fullrank_matrix_distinct_singular_value
+
+        # no batches: 2-D tensors
+        matrix = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
+        matrix_inverse = torch.inverse(matrix)
+        identity = conv_fn(torch.eye(5))
+        self.assertEqual(identity, torch.mm(matrix, matrix_inverse), 1e-8, 'inverse value')
+        self.assertEqual(identity, torch.mm(matrix_inverse, matrix), 1e-8, 'inverse value')
+
+        matrix_inverse_out = conv_fn(torch.empty(5, 5))
+        torch.inverse(matrix, out=matrix_inverse_out)
+        self.assertEqual(matrix_inverse_out, matrix_inverse, 0, 'inverse value in-place')
+        # second call, now that matrix_inverse_out is transposed
+        torch.inverse(matrix, out=matrix_inverse_out)
+        self.assertEqual(matrix_inverse_out, matrix_inverse, 0, 'inverse value in-place')
+
+        # one batch
+        matrix = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 1))
+        matrix_inverse = torch.inverse(matrix)
+        expected_inv = matrix.squeeze(0).inverse()
+        self.assertEqual(matrix_inverse, expected_inv.unsqueeze(0))
+
+        # four batches
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 4))
+        expected_inv_list = []
+        for i in range(0, 4):
+            expected_inv_list.append(torch.inverse(matrices[i]))
+        expected_inv = torch.stack(expected_inv_list)
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(matrices_inverse, expected_inv)
+
+        # six batches (2 x 3)
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 2, 3))
+        expected_inv_list = []
+        for mat in matrices.view(-1, 5, 5):
+            expected_inv_list.append(torch.inverse(mat))
+        expected_inv = torch.stack(expected_inv_list).view(2, 3, 5, 5)
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(matrices_inverse, expected_inv)
+
+        # incorrect input test
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+            torch.inverse(torch.randn(2, 3, 4, 3))
+
+        # correctness test
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 3))
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(torch.matmul(matrices, matrices_inverse), identity.expand_as(matrices))
+        self.assertEqual(torch.matmul(matrices_inverse, matrices), identity.expand_as(matrices))
+
+        # torch.inverse with out and batches
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 3))
+        matrices_inverse = conv_fn(torch.empty(3, 5, 5))
+        torch.inverse(matrices, out=matrices_inverse)
+        self.assertEqual(torch.inverse(matrices), matrices_inverse)
+
+        # non-contiguous inputs
+        if not TEST_NUMPY:
+            return
+
+        from numpy.linalg import inv
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(3, 2)).permute(0, 2, 1)
+        assert not matrices.is_contiguous()
+        matrices_inverse = torch.inverse(matrices)
+        expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
+        self.assertEqual(matrices_inverse, conv_fn(expected_inv))
+
     @skipIfNoLapack
     def test_inverse(self):
-        M = torch.randn(5, 5)
-        MI = torch.inverse(M)
-        E = torch.eye(5)
-        self.assertFalse(MI.is_contiguous(), 'MI is contiguous')
-        self.assertEqual(E, torch.mm(M, MI), 1e-8, 'inverse value')
-        self.assertEqual(E, torch.mm(MI, M), 1e-8, 'inverse value')
-
-        MII = torch.Tensor(5, 5)
-        torch.inverse(M, out=MII)
-        self.assertFalse(MII.is_contiguous(), 'MII is contiguous')
-        self.assertEqual(MII, MI, 0, 'inverse value in-place')
-        # second call, now that MII is transposed
-        torch.inverse(M, out=MII)
-        self.assertFalse(MII.is_contiguous(), 'MII is contiguous')
-        self.assertEqual(MII, MI, 0, 'inverse value in-place')
+        self._test_inverse(self, lambda t: t)
 
     @staticmethod
     def _test_pinverse(self, conv_fn):
@@ -4666,11 +4720,15 @@ class TestTorch(TestCase):
         M = conv_fn(torch.randn(2, 3, 3, 3))
         run_test(M)
 
-        # Single matrix, but full rank
         # This is for negative powers
         from common_utils import random_fullrank_matrix_distinct_singular_value
         M = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
-        run_test(M)
+        run_test(M, sign=-1)
+
+        M = conv_fn(random_fullrank_matrix_distinct_singular_value(3, 3))
+        run_test(M, sign=-1)
+
+        M = conv_fn(random_fullrank_matrix_distinct_singular_value(3, 2, 3))
         run_test(M, sign=-1)
 
     @skipIfNoLapack
