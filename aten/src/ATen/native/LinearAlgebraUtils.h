@@ -52,6 +52,64 @@ static inline double _get_epsilon(const ScalarType& sc_type) {
   }
 }
 
+// Validates input shapes for gesv
+static inline void gesvCheckInputs(const Tensor& self, const Tensor& A) {
+  AT_CHECK(A.size(-1) == A.size(-2),
+           "A must be batches of square matrices, "
+           "but they are ", A.size(-1), " by ", A.size(-2), " matrices");
+
+  AT_CHECK(A.size(-1) == self.size(-2),
+           "Incompatible matrix sizes for matmul: each A "
+           "matrix is ", A.size(-1), " by ", A.size(-1),
+           " but each b matrix is ", self.size(-2), " by ", self.size(-1));
+}
+
+// Validates input shapes for inverse
+static inline void inverseCheckInputs(const Tensor& self) {
+  AT_CHECK(self.size(-1) == self.size(-2),
+           "A must be batches of square matrices, "
+           "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
+}
+
+/*
+ * Given a vector of int64_t infos, obtained after a batch operations,
+ * this function checks if the computation over all these batches has been
+ * successful (info = 0) or not, and report in case of the latter.
+ */ 
+static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* name) {
+  for (size_t i = 0; i < infos.size(); i++) {
+    auto info = infos[i];
+    if (info < 0) {
+      AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
+    } else if (info > 0) {
+      AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
+    }
+  }
+}
+
+#define GENERATE_LINALG_HELPER_1_ARGS(NAME, ARG, BACKEND) \
+  Tensor _##NAME##_helper_##BACKEND(const Tensor& ARG) { \
+    std::vector<int64_t> infos(batchCount(ARG), 0); \
+    auto ARG##_working_copy = cloneBatchedColumnMajor(ARG); \
+    AT_DISPATCH_FLOATING_TYPES(ARG.type(), #NAME, [&]{ \
+      apply_##NAME<scalar_t>(ARG##_working_copy, infos); \
+    }); \
+    batchCheckErrors(infos, #NAME); \
+    return ARG##_working_copy; \
+  }
+
+#define GENERATE_LINALG_HELPER_2_ARGS(NAME, ARG1, ARG2, BACKEND) \
+  std::tuple<Tensor, Tensor> _##NAME##_helper_##BACKEND(const Tensor& ARG1, const Tensor& ARG2) { \
+    std::vector<int64_t> infos(batchCount(ARG1), 0); \
+    auto ARG1##_working_copy = cloneBatchedColumnMajor(ARG1); \
+    auto ARG2##_working_copy = cloneBatchedColumnMajor(ARG2); \
+    AT_DISPATCH_FLOATING_TYPES(ARG1.type(), #NAME, [&]{ \
+      apply_##NAME<scalar_t>(ARG1##_working_copy, ARG2##_working_copy, infos); \
+    }); \
+    batchCheckErrors(infos, #NAME); \
+    return std::tuple<Tensor, Tensor>(ARG1##_working_copy, ARG2##_working_copy); \
+  }
+
 // Checks if all the Tensors in a TensorList are of the same dimensions
 static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
   for (auto &t : tensors) {
