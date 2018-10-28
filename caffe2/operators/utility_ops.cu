@@ -107,9 +107,8 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
 
       {
         std::lock_guard<std::mutex> lock(CUDAContext::mutex());
-        cpu_X.CopyFrom(Input(j), &context_);
+        cpu_X.CopyFrom(Input(j)); // sync copy
       }
-      context_.FinishDeviceComputation();
       std::cerr << "Input tensor: " << j << ": [" << this->debug_def().input(j)
                 << "]" << std::endl;
       tensorPrinter_.Print<float>(cpu_X);
