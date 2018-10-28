@@ -961,10 +961,10 @@ class CollectTensorOp final : public Operator<Context> {
       } else if (pos >= tensorVector->size()) {
         // append
         tensorVector->emplace_back(Context::GetDeviceType());
-        tensorVector->back().CopyFrom(tensor, &context_);
+        tensorVector->back().CopyFrom(tensor); // sync copy
       } else {
         // replace
-        tensorVector->at(pos).CopyFrom(tensor, &context_);
+        tensorVector->at(pos).CopyFrom(tensor); // sync copy
       }
     }
 
