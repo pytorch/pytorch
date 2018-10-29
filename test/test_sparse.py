@@ -205,6 +205,7 @@ class TestSparse(TestCase):
             RuntimeError,
             lambda: self.SparseTensor(indices, values, torch.Size([2, 4, 2, 1])))
 
+    @skipIfRocm
     def test_to_dense(self):
         def test_tensor(x, res):
             x.to_dense()  # Tests triple to_dense for memory corruption
@@ -280,6 +281,7 @@ class TestSparse(TestCase):
         i[0][0] = 0
         self.assertEqual(self.ValueTensor(3, 0), self.safeToDense(x))
 
+    @skipIfRocm
     def test_to_dense_hybrid(self):
         def test_tensor(x, res):
             x.to_dense()  # Tests double to_dense for memory corruption
