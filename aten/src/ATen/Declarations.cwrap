@@ -254,7 +254,8 @@
         - THTensor* value
 ]]
 [[
-  name: unfold
+  name: _th_unfold
+  cname: unfold
   cpu_half: True
   device_guard: False
   return: argument 0
@@ -364,7 +365,8 @@
     - THTensor* self
 ]]
 [[
-  name: equal
+  name: _th_equal
+  cname: equal
   variants:
     - method
     - function
@@ -791,7 +793,7 @@
         - THTensor* other
 ]]
 [[
-  name: min
+  name: _th_min
   variants:
     - method
     - function
@@ -828,7 +830,7 @@
           default: "false"
 ]]
 [[
-  name: max
+  name: _th_max
   variants:
     - method
     - function
@@ -904,7 +906,7 @@
       default: "false"
 ]]
 [[
-  name: median
+  name: _th_median
   variants:
     - method
     - function
@@ -935,7 +937,8 @@
           default: "false"
 ]]
 [[
-  name: sort
+  name: _th_sort
+  cname: sort
   variants:
     - method
     - function
@@ -953,7 +956,8 @@
       default: "false"
 ]]
 [[
-  name: topk
+  name: _th_topk
+  cname: topk
   variants:
     - method
     - function
@@ -974,7 +978,7 @@
       default: "true"
 ]]
 [[
-  name: all
+  name: _th_all
   types:
     - Byte
   variants:
@@ -1011,7 +1015,7 @@
           default: "false"
 ]]
 [[
-  name: any
+  name: _th_any
   types:
     - Byte
   variants:
@@ -1048,7 +1052,7 @@
           default: "false"
 ]]
 [[
-  name: _abs
+  name: _th_abs
   cname: abs
   types:
     - floating_point
@@ -1080,7 +1084,7 @@
     - THTensor* self
 ]]
 [[
-  name: _log
+  name: _th_log
   cname: log
   types:
     - floating_point
@@ -1094,7 +1098,7 @@
     - THTensor* self
 ]]
 [[
-  name: _log10
+  name: _th_log10
   cname: log10
   types:
     - floating_point
@@ -1109,7 +1113,7 @@
     - THTensor* self
 ]]
 [[
-  name: _log1p
+  name: _th_log1p
   cname: log1p
   types:
     - floating_point
@@ -1123,7 +1127,7 @@
     - THTensor* self
 ]]
 [[
-  name: _log2
+  name: _th_log2
   cname: log2
   types:
     - floating_point
@@ -1230,7 +1234,7 @@
     - THTensor* self
 ]]
 [[
-  name: _exp
+  name: _th_exp
   cname: exp
   types:
     - floating_point
@@ -1244,7 +1248,7 @@
     - THTensor* self
 ]]
 [[
-  name: _expm1
+  name: _th_expm1
   cname: expm1
   types:
     - floating_point
@@ -1258,7 +1262,7 @@
     - THTensor* self
 ]]
 [[
-  name: _cos
+  name: _th_cos
   cname: cos
   types:
     - floating_point
@@ -1272,7 +1276,7 @@
     - THTensor* self
 ]]
 [[
-  name: _acos
+  name: _th_acos
   cname: acos
   types:
     - floating_point
@@ -1286,7 +1290,7 @@
     - THTensor* self
 ]]
 [[
-  name: _cosh
+  name: _th_cosh
   cname: cosh
   types:
     - floating_point
@@ -1301,7 +1305,7 @@
     - THTensor* self
 ]]
 [[
-  name: _sin
+  name: _th_sin
   cname: sin
   types:
     - floating_point
@@ -1315,7 +1319,7 @@
     - THTensor* self
 ]]
 [[
-  name: _asin
+  name: _th_asin
   cname: asin
   types:
     - floating_point
@@ -1329,7 +1333,7 @@
     - THTensor* self
 ]]
 [[
-  name: _sinh
+  name: _th_sinh
   cname: sinh
   types:
     - floating_point
@@ -1344,7 +1348,7 @@
     - THTensor* self
 ]]
 [[
-  name: _tan
+  name: _th_tan
   cname: tan
   types:
     - floating_point
@@ -1358,7 +1362,7 @@
     - THTensor* self
 ]]
 [[
-  name: _atan
+  name: _th_atan
   cname: atan
   types:
     - floating_point
@@ -1386,7 +1390,7 @@
     - THTensor* self
 ]]
 [[
-  name: _erf
+  name: _th_erf
   cname: erf
   types:
     - floating_point
@@ -1400,7 +1404,7 @@
     - THTensor* self
 ]]
 [[
-  name: _erfc
+  name: _th_erfc
   cname: erfc
   types:
     - floating_point
@@ -1444,7 +1448,7 @@
     - THTensor* self
 ]]
 [[
-  name: _sqrt
+  name: _th_sqrt
   cname: sqrt
   types:
     - floating_point
@@ -1458,7 +1462,7 @@
     - THTensor* self
 ]]
 [[
-  name: _rsqrt
+  name: _th_rsqrt
   cname: rsqrt
   types:
     - floating_point
@@ -1472,7 +1476,7 @@
     - THTensor* self
 ]]
 [[
-  name: _ceil
+  name: _th_ceil
   cname: ceil
   types:
     - floating_point
@@ -1486,7 +1490,7 @@
     - THTensor* self
 ]]
 [[
-  name: _floor
+  name: _th_floor
   cname: floor
   types:
     - floating_point
@@ -1500,7 +1504,7 @@
     - THTensor* self
 ]]
 [[
-  name: _round
+  name: _th_round
   cname: round
   types:
     - floating_point
@@ -1514,7 +1518,7 @@
     - THTensor* self
 ]]
 [[
-  name: _trunc
+  name: _th_trunc
   cname: trunc
   types:
     - floating_point
@@ -1665,7 +1669,8 @@
           default: "false"
 ]]
 [[
-  name: renorm
+  name: _th_renorm
+  cname: renorm
   types:
     - floating_point
   backends:
@@ -1830,7 +1835,7 @@
         - real exponent
 ]]
 [[
-  name: pow
+  name: _th_pow
   variants:
     - method
     - function
@@ -1845,7 +1850,7 @@
         - THTensor* exponent
 ]]
 [[
-  name: pow
+  name: _th_pow
   variants:
     - function
   return: argument 0
@@ -3036,7 +3041,7 @@
       default: 1
 ]]
 [[
-  name: normal
+  name: _th_normal
   cname: normal
   types:
     - floating_point
@@ -3205,7 +3210,7 @@
 # practice this leads to all sorts of problems with ambiguous overloads.
 # So we add it here with a separate name.
 [[
-  name: alias
+  name: _th_alias
   return: THTensor*
   cpu_half: True
   variants:

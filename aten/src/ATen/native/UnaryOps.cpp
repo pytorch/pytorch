@@ -151,7 +151,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     result.resize_(self.sizes());                               \
-    return at::_##op##_out(result, self);                       \
+    return at::_th_##op##_out(result, self);                    \
   }
 
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple
