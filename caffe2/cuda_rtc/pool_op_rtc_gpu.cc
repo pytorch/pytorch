@@ -202,9 +202,9 @@ class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
     if (input_dims_ != X.sizes()) {
       // recompile
       VLOG(1) << "MaxPool RTC recompiling";
-      CAFFE_ENFORCE_LT(Y->size(), std::numeric_limits<int>::max());
+      CAFFE_ENFORCE_LT(Y->numel(), std::numeric_limits<int>::max());
       func_.Compile(
-          static_cast<int>(Y->size()),
+          static_cast<int>(Y->numel()),
           X.dim32(1),
           X.dim32(2),
           X.dim32(3),
@@ -219,9 +219,17 @@ class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
       input_dims_ = X.sizes().vec();
     }
     // Carry out the pooling computation.
-    func_.Launch(CAFFE_GET_BLOCKS(Y->size()), 1, 1, CAFFE_CUDA_NUM_THREADS,
-                 1, 1, 0, context_.cuda_stream(),
-                 X.data<float>(), Y->mutable_data<float>());
+    func_.Launch(
+        CAFFE_GET_BLOCKS(Y->numel()),
+        1,
+        1,
+        CAFFE_CUDA_NUM_THREADS,
+        1,
+        1,
+        0,
+        context_.cuda_stream(),
+        X.data<float>(),
+        Y->mutable_data<float>());
     return true;
   }
 
@@ -254,9 +262,9 @@ class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
     ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(2), X.dim32(3)});
     if (input_dims_ != X.sizes()) {
       VLOG(1) << "MaxPoolGradient RTC recompiling";
-      CAFFE_ENFORCE_LT(X.size(), std::numeric_limits<int>::max());
+      CAFFE_ENFORCE_LT(X.numel(), std::numeric_limits<int>::max());
       func_.Compile(
-          static_cast<int>(X.size()),
+          static_cast<int>(X.numel()),
           X.dim32(0),
           X.dim32(1),
           X.dim32(2),
@@ -271,10 +279,19 @@ class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
           pad_l());
       input_dims_ = X.sizes().vec();
     }
-    func_.Launch(CAFFE_GET_BLOCKS(X.size()), 1, 1, CAFFE_CUDA_NUM_THREADS, 1, 1,
-                 0, context_.cuda_stream(),
-                 X.data<float>(), Y.data<float>(), dY.data<float>(),
-                 dX->mutable_data<float>());
+    func_.Launch(
+        CAFFE_GET_BLOCKS(X.numel()),
+        1,
+        1,
+        CAFFE_CUDA_NUM_THREADS,
+        1,
+        1,
+        0,
+        context_.cuda_stream(),
+        X.data<float>(),
+        Y.data<float>(),
+        dY.data<float>(),
+        dX->mutable_data<float>());
     return true;
   }
 

@@ -125,7 +125,7 @@ std::vector<at::Tensor> scatter(
     at::IntList devices,
     const c10::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
-    const c10::optional<std::vector<at::cuda::CUDAStream>>& streams) {
+    const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams) {
   std::vector<at::Tensor> chunks;
   if (chunk_sizes) {
     const int64_t chunk_size_sum =
@@ -150,14 +150,14 @@ std::vector<at::Tensor> scatter(
   at::cuda::CUDAGuard cuda_guard;
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
     const auto device_index = static_cast<int16_t>(devices[chunk]);
-    if (streams) {
+    if (streams && (*streams)[chunk]) {
       AT_CHECK(
-          (*streams)[chunk].device() == device_index,
+          (*streams)[chunk]->device() == device_index,
           "Expected the device associated with the stream at index ",
-          chunk, " (was ", (*streams)[chunk].device(), ") ",
+          chunk, " (was ", (*streams)[chunk]->device(), ") ",
           "to match the device supplied at that index ",
           "(expected ", device_index, ")");
-      cuda_guard.set_stream(at::cuda::CUDAStream((*streams)[chunk]));
+      cuda_guard.set_stream(*(*streams)[chunk]);
     }
     chunks[chunk] = chunks[chunk].contiguous().to(
         {at::DeviceType::CUDA, device_index}, /*non_blocking=*/true);

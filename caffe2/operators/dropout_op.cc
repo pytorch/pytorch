@@ -10,7 +10,7 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
   if (is_test_) {
     if (Y != &X) {
       context_.CopyFromCPU<float>(
-          X.size(), X.data<float>(), Y->template mutable_data<float>());
+          X.numel(), X.data<float>(), Y->template mutable_data<float>());
     }
     return true;
   } else {
@@ -24,7 +24,7 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
     mask->Resize(X.sizes());
     bool* mask_data = mask->template mutable_data<bool>();
     auto& gen = context_.RandGenerator();
-    for (int i = 0; i < X.size(); ++i) {
+    for (int i = 0; i < X.numel(); ++i) {
       mask_data[i] = dist(gen);
       Ydata[i] = Xdata[i] * scale * mask_data[i];
     }
@@ -40,17 +40,17 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
   if (is_test_) {
     if (dX != &dY) {
       context_.CopyFromCPU<float>(
-          dY.size(), dY.data<float>(), dX->template mutable_data<float>());
+          dY.numel(), dY.data<float>(), dX->template mutable_data<float>());
     }
     return true;
   } else {
     auto& mask = Input(1);
-    CAFFE_ENFORCE_EQ(dY.size(), mask.size());
+    CAFFE_ENFORCE_EQ(dY.numel(), mask.numel());
     const float* dYdata = dY.data<float>();
     const bool* mask_data = mask.data<bool>();
     float* dXdata = dX->template mutable_data<float>();
     float scale = 1. / (1. - ratio_);
-    for (int i = 0; i < dY.size(); ++i) {
+    for (int i = 0; i < dY.numel(); ++i) {
       dXdata[i] = dYdata[i] * mask_data[i] * scale;
     }
     return true;

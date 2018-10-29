@@ -4,6 +4,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor_int8.h"
+#include "caffe2/operators/quantized/int8_simd.h"
 #include "caffe2/operators/quantized/int8_utils.h"
 
 namespace caffe2 {

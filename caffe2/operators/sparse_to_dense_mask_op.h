@@ -82,10 +82,10 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     CAFFE_ENFORCE_EQ(sparse_indices.ndim(), 1);
     auto& sparse_values = Input(VALUES);
     CAFFE_ENFORCE_GE(sparse_values.ndim(), 1);
-    CAFFE_ENFORCE_EQ(sparse_indices.size(), sparse_values.dim(0));
+    CAFFE_ENFORCE_EQ(sparse_indices.numel(), sparse_values.dim(0));
     auto& default_value = Input(DEFAULT);
     CAFFE_ENFORCE_EQ(default_value.ndim() + 1, sparse_values.ndim());
-    CAFFE_ENFORCE_EQ(default_value.size(), sparse_values.size_from_dim(1));
+    CAFFE_ENFORCE_EQ(default_value.numel(), sparse_values.size_from_dim(1));
     CAFFE_ENFORCE(sparse_values.meta() == default_value.meta());
 
     const TInd* sparse_indices_vec = sparse_indices.template data<TInd>();
@@ -93,7 +93,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
         static_cast<const char*>(sparse_values.raw_data());
     const void* default_val = default_value.raw_data();
 
-    int64_t block_size = default_value.size();
+    int64_t block_size = default_value.numel();
     size_t block_nbytes = default_value.nbytes();
 
     const int cols = this->featuresCount_;

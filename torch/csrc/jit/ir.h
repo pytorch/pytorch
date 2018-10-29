@@ -209,10 +209,6 @@ private:
   // This list represents a topological sort
 
   Node* next_in_graph[2] = { nullptr, nullptr };
-  Node* & next() { return next_in_graph[kNextDirection]; }
-  Node* & prev() { return next_in_graph[kPrevDirection]; }
-  Node* const & next() const { return next_in_graph[kNextDirection]; }
-  Node* const & prev() const { return next_in_graph[kPrevDirection]; }
 
   const NodeKind kind_;
   std::vector<Value*> inputs_;
@@ -233,6 +229,11 @@ private:
 protected:
   TORCH_API Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
+  Node* & next() { return next_in_graph[kNextDirection]; }
+  Node* & prev() { return next_in_graph[kPrevDirection]; }
+  Node* const & next() const { return next_in_graph[kNextDirection]; }
+  Node* const & prev() const { return next_in_graph[kPrevDirection]; }
+
   NodeKind kind() const {
     return kind_;
   }
@@ -453,6 +454,9 @@ public:
 
   // Move 'this' (already in the graph) after 'n' in the topological order.
   //
+  // NOTE: Does not check that value dependencies are preserved, see
+  //   moveAfterTopologicallyValid
+  //
   // Given: %2 = f(%1)
   //        %3 = g(%1)
   // Execute: %2.moveAfter(%3)
@@ -461,7 +465,22 @@ public:
   //
   TORCH_API void moveAfter(Node * n);
 
-  // Move a node 'n' (already in the graph) before 'this' in the topological order.
+  // Move 'this' (already in the graph) after 'n' in the topological order.
+  //
+  // Tries to preserve value dependencies, so other nodes might be moved. We
+  // make two gurantees about the postcondition of the node list:
+  //   - `this` is directly after `n`.
+  //   - only nodes between `this` and `n` have been moved
+  //
+  // Returns `false` if it's impossible to move `this` after `n` without
+  // violating dependencies, otherwise executes the move and returns `true`
+  TORCH_API bool moveAfterTopologicallyValid(Node* n);
+
+  // Move a node 'n' (already in the graph) before 'this' in the topological
+  // order.
+  //
+  // NOTE: Does not check that value dependencies are preserved, see
+  //   moveBeforeTopologicallyValid
   //
   // Given: %2 = f(%1)
   //        %3 = g(%1)
@@ -469,6 +488,17 @@ public:
   // Result: %3 = g(%1)
   //         %2 = f(%1)
   TORCH_API void moveBefore(Node * n);
+
+  // Move 'this' (already in the graph) before 'n' in the topological order.
+  //
+  // Tries to preserve value dependencies, so other nodes might be moved. We
+  // make two gurantees about the postcondition of the node list:
+  //   - `this` is directly before `n`.
+  //   - only nodes between `this` and `n` have been moved
+  //
+  // Returns `false` if it's impossible to move `this` after `n` without
+  // violating dependencies, otherwise executes the move and returns `true`
+  TORCH_API bool moveBeforeTopologicallyValid(Node* n);
 
   // Remove the input at 'i' from this node.
   //
@@ -546,7 +576,12 @@ public:
   void dump() const;
 
   virtual ~Node() = default;
-private:
+
+ private:
+  enum class MoveSide { BEFORE, AFTER };
+  bool tryMove(Node* movePoint, MoveSide moveSide);
+  void move(Node* movePoint, MoveSide moveSide);
+
   std::pair<Value*, const Argument&> findInput(Symbol name);
   void findSchema() const;
   // Lookup iterator in use list of _input i_ that corresponds to its use of _this_

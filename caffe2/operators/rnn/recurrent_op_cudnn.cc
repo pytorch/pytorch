@@ -320,7 +320,7 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
 
   Output(GRAD_WEIGHT)->ResizeLike(Input(WEIGHT));
   math::Set<T, CUDAContext>(
-      Output(GRAD_WEIGHT)->size(),
+      Output(GRAD_WEIGHT)->numel(),
       0.0,
       Output(GRAD_WEIGHT)->template mutable_data<T>(),
       &context_);
@@ -402,7 +402,7 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
         cudnnTypeWrapper<T>::type));
 
     CAFFE_ENFORCE_EQ(
-        paramsSize / 4, Input(1).size(), "Incorrect weight initialization");
+        paramsSize / 4, Input(1).numel(), "Incorrect weight initialization");
   }
 
   int layer = OperatorBase::GetSingleArgument<int>("layer", 0);
@@ -448,7 +448,7 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
 
     if (mode == SET_PARAM) {
       CAFFE_ENFORCE_EQ(
-          biasDims[0] * biasDims[1] * biasDims[2], Input(2).size());
+          biasDims[0] * biasDims[1] * biasDims[2], Input(2).numel());
       this->context_.template CopySameDevice<T>(
           biasDims[0] * biasDims[1] * biasDims[2],
           Input(2).template data<T>(),
@@ -485,7 +485,7 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
         matrixParamDesc, 3, &dt, &tf, &numDims, matDims.data()));
     CAFFE_ENFORCE_EQ(numDims, 3);
     if (mode == SET_PARAM) {
-      CAFFE_ENFORCE_EQ(matDims[0] * matDims[1] * matDims[2], Input(2).size());
+      CAFFE_ENFORCE_EQ(matDims[0] * matDims[1] * matDims[2], Input(2).numel());
       this->context_.template CopySameDevice<T>(
           matDims[0] * matDims[1] * matDims[2],
           Input(2).template data<T>(),

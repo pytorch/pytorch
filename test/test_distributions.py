@@ -31,7 +31,7 @@ from random import shuffle
 
 import torch
 from torch._six import inf
-from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN
+from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
 from common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
@@ -59,6 +59,10 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             identity_transform)
 from torch.distributions.utils import _finfo, probs_to_logits, lazy_property
 from torch.nn.functional import softmax
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 TEST_NUMPY = True
 try:
