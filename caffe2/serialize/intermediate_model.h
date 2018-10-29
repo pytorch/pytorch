@@ -18,9 +18,10 @@ namespace serialize {
 // SharedData contains:
 //    1) record id (i.e., the offset in the inline container)
 //    2) size, the size of the content
-//    3) data, in serialize, we don't have the ownership of the data
+//    3) data, in serialize, IntermediateModel does NOT own the data,
 //       in deserialize, the data pointer is returned by PyTorchFileReader,
-//       and SharedData owns the data
+//       and IntermediateModel owns the data. The ownership later will be
+//       transferred to Tensor
 class SharedData {
  public:
   // constructor
@@ -62,8 +63,8 @@ class SharedData {
 // IntermediateDeviceOption stores device related information
 struct IntermediateDeviceOption {
   int32_t deviceType = 0;
-  bool hasDeviceId = false;
   int32_t deviceId;
+  bool hasDeviceId = false;
 };
 
 // IntermediateTensor contains
@@ -75,7 +76,7 @@ class IntermediateTensor final {
   // constructor
   IntermediateTensor() = default;
 
-  // extract data from TensorProto,
+  // extract data from TensorProto, called in deserialize
   // assume record id to data mapping is complete
   void update(caffe2::TensorProto* tensor_proto,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data) {
@@ -85,6 +86,8 @@ class IntermediateTensor final {
       dims_.push_back(tensor_proto->dims(i));
     }
     if (tensor_proto->has_name()) {
+      // TODO: TensorProto's name is not used, we just keep it here for now
+      // later we will deprecate it.
       name_ = tensor_proto->name();
     }
     if (tensor_proto->has_device_detail()) {
@@ -95,13 +98,13 @@ class IntermediateTensor final {
         deviceDetail_.deviceId = device_detail.device_id();
       }
       if (device_detail.has_random_seed()) {
-        AT_ERROR("DeviceOption contains random seed!");
+        AT_ERROR("DeviceOption contains random seed, not supported!");
       }
       if (device_detail.has_node_name()) {
-        AT_ERROR("DeviceOption contains node name!");
+        AT_ERROR("DeviceOption contains node name, not supported!");
       }
       if (device_detail.extra_info_size() > 0) {
-        AT_ERROR("DeviceOption contains extra info!");
+        AT_ERROR("DeviceOption contains extra info, not supported!");
       }
     }
     AT_ASSERTM(tensor_proto->has_storage_type(), "no storage_type in TensorProto!");
@@ -109,10 +112,10 @@ class IntermediateTensor final {
     switch (storage_type) {
       case caffe2::TensorProto_StorageType_TYPED:
         // TODO
-        AT_ERROR("Not implemented!");
+        AT_ERROR("Storing data in typed field is not suppored yet!");
       case caffe2::TensorProto_StorageType_RAW:
         // TODO
-        AT_ERROR("Not implemented!");
+        AT_ERROR("Storing data in raw field is not supported yet!");
       case caffe2::TensorProto_StorageType_EXTERNAL:
         {
           AT_ASSERTM(tensor_proto->has_external_data(), "storage type is EXTERNAL, "
@@ -124,19 +127,19 @@ class IntermediateTensor final {
           }
           int64_t source_type = external_data.source_type();
           if (source_type == caffe2::ExternalDataProto_SourceType_INLINE_CONTAINER) {
-            AT_ASSERTM(external_data.has_record_id(), "no record_id in ExternalDataProto!");
+            AT_ASSERTM(external_data.has_record_id(), "no record_id in ExternalDataProto and source_type is INLINE_CONTAINER!");
             int64_t record_id = std::stoul(external_data.record_id());
             auto it = id_data->find(record_id);
             if (it == id_data->end()) {
-              AT_ERROR("Tensor's data is missing, tensor name is ", name_);
+              AT_ERROR("Tensor's data is missing in id_data, tensor name is %s, and record_id is %lld", name_, record_id);
             }
             data_ = it->second;
           } else if (source_type == caffe2::ExternalDataProto_SourceType_SIMPLE_FILE) {
             // TODO
-            AT_ERROR("Not implemented!");
+            AT_ERROR("Storing data in separate file is not supported yet!");
           } else {
             // TODO
-            AT_ERROR("Not implemented!");
+            AT_ERROR("Unknown source_type: %lld!", source_type);
           }
           break;
         }
@@ -146,7 +149,7 @@ class IntermediateTensor final {
           break;
         }
       default:
-        AT_ERROR("Uknown type %lld", storage_type);
+        AT_ERROR("Uknown storage_type %lld", storage_type);
     }
   }
 
@@ -155,14 +158,17 @@ class IntermediateTensor final {
     data_ = data;
   }
 
-  // dump data to TensorProto
+  // dump data to TensorProto, called in serialize
+  // assume the data is already saved
   void dump(caffe2::TensorProto* tensor_proto) {
     for (auto dim : dims_) {
       tensor_proto->add_dims(dim);
     }
     tensor_proto->set_data_type(static_cast<caffe2::TensorProto_DataType>(dataType_));
+    // NB: maybe later we support RAW
     tensor_proto->set_storage_type(caffe2::TensorProto_StorageType::TensorProto_StorageType_EXTERNAL);
     caffe2::ExternalDataProto* data_proto = tensor_proto->mutable_external_data();
+    // NB: maybe later we support SIMPLE_FILE
     data_proto->set_source_type(caffe2::ExternalDataProto_SourceType_INLINE_CONTAINER);
     data_proto->set_record_id(std::to_string(data_->recordId()));
     data_proto->set_offset(offset_);
@@ -174,7 +180,6 @@ class IntermediateTensor final {
     if (deviceDetail_.hasDeviceId) {
       device_detail->set_device_id(deviceDetail_.deviceId);
     }
-    // TODO maybe later to support RAW
   }
 
   // getters/setters
@@ -248,7 +253,7 @@ class IntermediateParameter final {
     }
   }
 
-  // dump data to ParameterDef
+  // dump data to ParameterDef, invoked in serialize
   void dump(torch::ParameterDef* param_def) {
     param_def->set_name(name_);
     param_def->set_is_buffer(isBuffer_);
@@ -295,25 +300,24 @@ class IntermediateParameter final {
 
 class IntermediateMethod final {
  public:
+  // constructors
   IntermediateMethod() = default;
+
   explicit IntermediateMethod(torch::MethodDef* method_def) {
-    if (method_def->has_name()) {
-      name_ = method_def->name();
-    } else {
-      // TODO throw exception
-    }
+    AT_ASSERTM(method_def->has_name(), "name is required for MethodDef!");
+    name_ = method_def->name();
     if (method_def->has_torch_script()) {
       torchScript_ = method_def->torch_script();
     } else if (method_def->has_graph()) {
       graph_.reset(method_def->release_graph());
     } else {
-      // TODO throw exception
+      AT_ERROR("No method body is found!");
     }
   }
 
-  // dump data to MethodDef
+  // dump data to MethodDef, called in serialize
   void dump(torch::MethodDef* method_def) {
-    AT_ASSERTM(name_.size() > 0, "IntermediateMethod has no name.");
+    AT_ASSERTM(name_.size() > 0, "IntermediateMethod's name is invalid. name: %s", name_.c_str());
     method_def->set_name(name_);
     if (graph_) {
       method_def->set_allocated_graph(graph_.release());
@@ -356,15 +360,12 @@ class IntermediateModule final {
     update(module_def, id_data);
   }
 
-  // extract data from ModuleDef,
+  // extract data from ModuleDef, invoked in deserialize
   // assume record id to data mapping is complete
   void update(torch::ModuleDef* module_def,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data) {
-    if (module_def->has_name()) {
-      name_ = module_def->name();
-    } else {
-      // TODO throw exception
-    }
+    AT_ASSERTM(module_def->has_name(), "name is required for ModuleDef!");
+    name_ = module_def->name();
     for (int i = 0; i < module_def->parameters_size(); ++i) {
       auto* param_def = module_def->mutable_parameters(i);
       parameters_.emplace_back(param_def, id_data);
@@ -381,7 +382,7 @@ class IntermediateModule final {
     }
   }
 
-  // dump data to ModuleDef
+  // dump data to ModuleDef, called in serialize
   void dump(torch::ModuleDef* module_def) {
     module_def->set_name(name_);
 
@@ -430,6 +431,8 @@ class IntermediateModule final {
   std::vector<IntermediateParameter> parameters_;
   std::vector<IntermediateModule> submodules_;
   std::vector<IntermediateMethod> methods_;
+  // TODO handle cpp_arena
+  // TODO handle pickle_arena
 };
 
 class IntermediateModel final {
@@ -437,34 +440,22 @@ class IntermediateModel final {
   // constructor
   IntermediateModel() = default;
 
-  // extract data from ModelDef,
+  // extract data from ModelDef, invoked in deserialize
   // assume record id to data mapping is complete
   void update(torch::ModelDef* model_def,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data) {
-    if (model_def->has_name()) {
-      name_ = model_def->name();
-    } else {
-      AT_ERROR("ModelDef does not have name.");
-    }
-    if (model_def->has_producer_name()) {
-      producerName_ = model_def->producer_name();
-    } else {
-      AT_ERROR("ModelDef does not have producer_name.");
-    }
+    AT_ASSERTM(model_def->has_name(), "name is required for ModelDef.");
+    name_ = model_def->name();
+    AT_ASSERTM(model_def->has_producer_name(), "producer_name is required for ModelDef.");
+    producerName_ = model_def->producer_name();
     producerVersion_ = model_def->producer_version();
-    if (model_def->has_proto_version()) {
-      protoVersion_ = model_def->proto_version();
-    } else {
-      AT_ERROR("ModelDef does not have proto_version.");
-    }
-    if (model_def->has_main_module()) {
-      mainModule_.update(model_def->mutable_main_module(), id_data);
-    } else {
-      AT_ERROR("ModelDef does not have main_module.");
-    }
+    AT_ASSERTM(model_def->has_proto_version(), "proto_version is required for ModelDef.");
+    protoVersion_ = model_def->proto_version();
+    AT_ASSERTM(model_def->has_main_module(), "main_module is required for ModelDef.");
+    mainModule_.update(model_def->mutable_main_module(), id_data);
   }
 
-  // dump data to ModelDef
+  // dump data to ModelDef, called in serialize
   void dump(torch::ModelDef* model_def) {
     model_def->set_name(name_);
     model_def->set_producer_name(producerName_);
@@ -488,6 +479,10 @@ class IntermediateModel final {
 
   const IntermediateModule& mainModule() const {
     return mainModule_;
+  }
+
+  int64_t protoVersion() const {
+    return protoVersion_;
   }
 
   // setters, most for test purposes
@@ -521,6 +516,8 @@ class IntermediateModel final {
 };
 
 // serialize an IntermediateModel through a PyTorchFileWriter
+// we always put the model data at the end, so when serializing
+// model, the we assume the record_id in imodel is already updated
 void serializeIntermediateModel(IntermediateModel* imodel,
     torch::jit::PyTorchFileWriter* writer) {
   std::unordered_map<void*, uint64_t> data_id;
@@ -566,7 +563,9 @@ void serializeIntermediateModel(IntermediateModel* imodel, const std::string& fi
   writer.writeEndOfFile();
 }
 
-// deserialize an IntermediateModel through reader
+// deserialize an IntermediateModel through a reader,
+// serialize tensors' data first, and maintain the mappint from
+// record id to tensor data
 void deserializeIntermediateModel(IntermediateModel* imodel,
     torch::jit::PyTorchFileReader* reader) {
   std::unordered_map<uint64_t, std::shared_ptr<SharedData>> id_data;

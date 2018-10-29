@@ -9,12 +9,13 @@ namespace at {
 namespace {
 
 TEST(IntermediateModel, SerializeAndDeserialize) {
+  // TODO: split the test cases
 
   // prepare model
   std::string model_name("Test-Model-Name");
   std::string producer_name("Test-Producer-Name");
   std::string producer_version("Test-Producer-Version");
-  int64_t proto_version = 1;
+  int64_t proto_version = 2; // invalid, only for testing
   at::serialize::IntermediateModel imodel;
   imodel.setName(model_name);
   imodel.setProducerName(producer_name);
@@ -85,22 +86,25 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
 
   // verify the loaded model
   ASSERT_EQ(loaded_model.name(), model_name);
+  ASSERT_EQ(loaded_model.producerName(), producer_name);
+  ASSERT_EQ(loaded_model.producerVersion(), producer_version);
+  ASSERT_EQ(loaded_model.protoVersion(), proto_version);
 
   // verify the main module
   auto* loaded_main_module = loaded_model.mutableMainModule();
+  ASSERT_EQ(loaded_main_module->name(), module_name);
 
   // verify the method
-  ASSERT_EQ(loaded_main_module->name(), module_name);
   ASSERT_EQ(loaded_main_module->mutableMethods()->size(), 1);
   ASSERT_EQ(loaded_main_module->mutableMethods()->at(0).name(), method_name);
   ASSERT_EQ(loaded_main_module->mutableMethods()->at(0).torchScript(), torch_script);
 
-  // verify the submodules
+  // verify the submodule
   ASSERT_EQ(loaded_main_module->mutableSubmodules()->size(), 1);
   ASSERT_EQ(loaded_main_module->mutableSubmodules()->at(0).name(), sub_name);
   ASSERT_EQ(loaded_main_module->mutableParameters()->size(), 1);
 
-  // verify the parameters
+  // verify the parameter
   auto& loaded_param = loaded_main_module->mutableParameters()->at(0);
   ASSERT_EQ(loaded_param.name(), param_name);
   ASSERT_EQ(loaded_param.isBuffer(), is_buffer);
