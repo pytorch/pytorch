@@ -931,8 +931,9 @@ class _DistTestBase(object):
 
     def _model_step(self, model):
         for param in model.parameters():
-            param.data += param.grad
-            param.grad = None
+            if param.grad is not None:
+                param.data += param.grad
+                param.grad = None
 
     def _prepare_dummy_data(self, local_bs):
         # global_bs for DDP should be divisible by WORLD_SIZE
