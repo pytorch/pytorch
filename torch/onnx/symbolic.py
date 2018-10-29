@@ -633,8 +633,10 @@ replication_pad3d = replication_pad
 def upsample_nearest2d(g, input, output_size):
     height_scale = float(output_size[-2]) / input.type().sizes()[-2]
     width_scale = float(output_size[-1]) / input.type().sizes()[-1]
-    return g.op("Upsample", input,
-                scales_f=[1., 1., height_scale, width_scale],
+    scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
+                                                    width_scale]))
+
+    return g.op("Upsample", input, scales,
                 mode_s="nearest")
 
 
@@ -644,8 +646,9 @@ def upsample_bilinear2d(g, input, output_size, align_corners):
         return _unimplemented("upsample_bilinear2d", "align_corners == True")
     height_scale = float(output_size[-2]) / input.type().sizes()[-2]
     width_scale = float(output_size[-1]) / input.type().sizes()[-1]
-    return g.op("Upsample", input,
-                scales_f=[1., 1., height_scale, width_scale],
+    scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
+                                                    width_scale]))
+    return g.op("Upsample", input, scales,
                 mode_s="linear")
 
 
@@ -1316,7 +1319,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
 
-@parse_args('v', 'v', 'i', 't', 'i')
+@parse_args('v', 'v', 'i', 't', 'v')
 def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total_length):
     # Ignore total_length as it is not supported in _symbolic_pad_packed_sequence
     # It is only useful/used when training using data_parallel model, so

@@ -98,10 +98,13 @@ void popRange() {
 }
 
 RecordFunction::RecordFunction(Function* fn) {
-  // NB: we don't use fn->name() here, because it will unnecessarily allocate
-  // a string. We will run a demangler on all the names anyway, so it's ok to
-  // avoid doing it now.
-  pushRangeImpl(typeid(*fn).name(), ", stashed seq=", fn->sequence_nr());
+  // typeid(*fn).name() would avoid an additional string allocation.
+  // However, typeid(*fn).name() would cause nvtx annotations for all user-defined 
+  // (Python-side) custom autograd function backward() methods to have the same name,
+  // because they route through the same C++ side class.
+  // fn->name() ensures that nvtx annotations for custom function backward() methods
+  // receive a relevant, demangled name.
+  pushRangeImpl(fn->name(), ", stashed seq=", fn->sequence_nr());
 }
 
 RecordFunction::RecordFunction(std::string name) {

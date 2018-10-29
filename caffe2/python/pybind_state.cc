@@ -977,12 +977,12 @@ void addGlobalMethods(py::module& m) {
   // keep this Python attribute for BC
   m.attr("has_mkldnn") = py::bool_(false);
 
-  m.attr("use_ideep") = py::bool_(
-#ifdef CAFFE2_USE_IDEEP
+  m.attr("use_mkldnn") = py::bool_(
+#ifdef CAFFE2_USE_MKLDNN
       true
-#else // CAFFE2_USE_IDEEP
+#else // CAFFE2_USE_MKLDNN
       false
-#endif // CAFFE2_USE_IDEEP
+#endif // CAFFE2_USE_MKLDNN
       );
 
   m.attr("use_trt") = py::bool_(

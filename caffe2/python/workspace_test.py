@@ -347,17 +347,7 @@ class TestWorkspaceGPU(test_util.TestCase):
         self.assertEqual(pattern.shape[0], workspace.NumCudaDevices())
 
 
-@unittest.skipIf(not workspace.C.has_mkldnn, "No MKLDNN support.")
-class TestWorkspaceMKLDNN(test_util.TestCase):
-
-    def testFeedFetchBlobMKLDNN(self):
-        arr = np.random.randn(2, 3).astype(np.float32)
-        workspace.FeedBlob(
-            "testblob_mkldnn", arr, core.DeviceOption(caffe2_pb2.MKLDNN))
-        fetched = workspace.FetchBlob("testblob_mkldnn")
-        np.testing.assert_array_equal(arr, fetched)
-
-@unittest.skipIf(not workspace.C.use_ideep, "No IDEEP support.")
+@unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class TestWorkspaceIDEEP(test_util.TestCase):
 
     def testFeedFetchBlobIDEEP(self):

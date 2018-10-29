@@ -90,6 +90,11 @@ struct CAFFE2_API TensorOptions {
       : TensorOptions(Device(device_type)) {}
 
   /// Constructs a `TensorOptions` object with the given dtype.
+  /* implicit */ TensorOptions(caffe2::TypeMeta dtype) : TensorOptions() {
+    this->set_dtype(dtype);
+  }
+
+  /// legacy constructor to support ScalarType
   /* implicit */ TensorOptions(ScalarType dtype) : TensorOptions() {
     this->set_dtype(dtype);
   }
@@ -141,6 +146,13 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Return a copy of `TensorOptions` with `dtype` set to the given one.
+  C10_NODISCARD TensorOptions dtype(optional<caffe2::TypeMeta> dtype) const noexcept {
+    TensorOptions r = *this;
+    r.set_dtype(dtype);
+    return r;
+  }
+
+  // legacy function to support ScalarType
   C10_NODISCARD TensorOptions dtype(optional<ScalarType> dtype) const noexcept {
     TensorOptions r = *this;
     r.set_dtype(dtype);
@@ -150,8 +162,7 @@ struct CAFFE2_API TensorOptions {
   // Since dtype is taken...
   template <typename T>
   TensorOptions& dtype() {
-    // TODO: Fix after @roy-li's fix
-    dtype_ = CTypeToScalarType<T>::to();
+    dtype_ = caffe2::TypeMeta::Make<T>();
     has_dtype_ = true;
     return *this;
   }
@@ -199,7 +210,7 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Returns the dtype of the `TensorOptions`.
-  ScalarType dtype() const noexcept {
+  caffe2::TypeMeta dtype() const noexcept {
     return has_dtype_ ? dtype_ : getDefaultTensorOptions().dtype();
   }
 
@@ -210,7 +221,7 @@ struct CAFFE2_API TensorOptions {
 
   /// Returns the dtype of the `TensorOptions`, or `c10::nullopt` if
   /// device is not specified.
-  optional<ScalarType> dtype_opt() const noexcept {
+  optional<caffe2::TypeMeta> dtype_opt() const noexcept {
     return has_dtype_ ? c10::make_optional(dtype_) : c10::nullopt;
   }
 
@@ -299,9 +310,19 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Mutably set the dtype of `TensorOptions`.
-  void set_dtype(optional<ScalarType> dtype) & noexcept {
+  void set_dtype(optional<caffe2::TypeMeta> dtype) & noexcept {
     if (dtype) {
       dtype_ = *dtype;
+      has_dtype_ = true;
+    } else {
+      has_dtype_ = false;
+    }
+  }
+
+  // legacy function to support ScalarType
+  void set_dtype(optional<ScalarType> dtype) & noexcept {
+    if (dtype) {
+      dtype_ = scalarTypeToTypeMeta(*dtype);
       has_dtype_ = true;
     } else {
       has_dtype_ = false;
@@ -344,13 +365,12 @@ struct CAFFE2_API TensorOptions {
   // NB: We didn't use c10::optional here, because then we can't pack
   // the has_***_ boolean fields.
 
-  Device     device_  = at::kCPU; // 64-bit (TODO: this should be 32-bit)
+  caffe2::TypeMeta dtype_ = caffe2::TypeMeta::Make<float>(); // 64-bit
+  Device device_ = at::kCPU; // 32-bit
+  Layout layout_ = at::kStrided; // 8-bit
 
   // Bitmask required here to get this to fit inside 32 bits (or even 64 bits,
   // for that matter)
-
-  ScalarType dtype_   = at::kFloat;  // 8-bit
-  Layout     layout_  = at::kStrided; // 8-bit
 
   bool requires_grad_     : 1;
   bool is_variable_       : 1;
@@ -370,8 +390,13 @@ static_assert( sizeof(TensorOptions) <= sizeof(int64_t) * 2,
 
 /// Convenience function that returns a `TensorOptions` object with the `dtype`
 /// set to the given one.
-inline TensorOptions dtype(ScalarType dtype) {
+inline TensorOptions dtype(caffe2::TypeMeta dtype) {
   return TensorOptions().dtype(dtype);
+}
+
+// legacy function to support ScalarType
+inline TensorOptions dtype(ScalarType dtype) {
+  return TensorOptions().dtype(scalarTypeToTypeMeta(dtype));
 }
 
 /// Convenience function that returns a `TensorOptions` object with the `layout`
@@ -424,8 +449,7 @@ DefaultTensorOptions& DefaultTensorOptions::merge(const TensorOptions& options) 
 
 template <typename T>
 inline TensorOptions dtype() {
-  // TODO: Fix after @roy-li's fix
-  return dtype(CTypeToScalarType<T>::to());
+  return dtype(caffe2::TypeMeta::Make<T>());
 }
 
 } // namespace at

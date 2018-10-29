@@ -756,6 +756,23 @@ Operation listSlice(Node* node) {
 
 RegisterOperators reg2({
 
+#define DEFINE_STRING_OP(op_name, string_op, result)                           \
+Operator(                                                                      \
+    #op_name "(str a, str b) ->" #result,                                \
+    [](Node* node) {                                                           \
+      return [=](Stack& stack) {                                               \
+        auto b = pop(stack).toStringRef();                                     \
+        auto a = pop(stack).toStringRef();                                     \
+        push(stack, string_op);                                                \
+        return 0;                                                              \
+    };                                                                         \
+  }),
+
+  DEFINE_STRING_OP(aten::eq, a == b, bool)
+  DEFINE_STRING_OP(aten::ne, a != b, bool)
+  DEFINE_STRING_OP(aten::add, a + b, str)
+
+
 #define CREATE_LIST_OPS(decl_type, c_type) \
     Operator("aten::select(" decl_type "[] a, int b) -> " decl_type, listSelect<Shared<c_type>>), \
     Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>), \
