@@ -604,9 +604,9 @@ struct CAFFE2_API Type {
   virtual std::vector<Tensor> unbind(const Tensor & self, int64_t dim) const = 0;
   virtual Tensor to_sparse(const Tensor & self, int64_t sparse_dim) const = 0;
   virtual Tensor to_sparse(const Tensor & self) const = 0;
+  virtual Tensor to(const Tensor & self, const TensorOptions & options, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
-  virtual Tensor to(const Tensor & self, Device device, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, const Tensor & other, bool non_blocking, bool copy) const = 0;
   virtual Scalar _local_scalar(const Tensor & self) const = 0;
   virtual int64_t storage_offset(const Tensor & self) const = 0;
