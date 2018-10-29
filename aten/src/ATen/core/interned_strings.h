@@ -24,7 +24,6 @@ namespace c10 {
   _(prim, Drop)                    \
   _(prim, Eval)                    \
   _(prim, Expand) /* onnx */       \
-  _(prim, Format)                  \
   _(prim, FusionGroup)             \
   _(prim, DifferentiableGraph)     \
   _(prim, If)                      \
