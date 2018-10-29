@@ -195,10 +195,6 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         # =================== The following code will be executed inside Docker container ===================
         set -ex
 
-        # Need to checkout fetch PRs for onnxbot tracking PRs
-        git submodule update -q --init third_party/onnx || true
-        cd third_party/onnx && git fetch --tags origin +refs/pull/*:refs/remotes/origin/pr/* && cd -
-
         # Reinitialize submodules
         git submodule sync && git submodule update -q --init --recursive
 
