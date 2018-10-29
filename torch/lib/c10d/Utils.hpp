@@ -15,10 +15,6 @@
 
 #include <ATen/ATen.h>
 
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAGuard.h>
-#endif
-
 #include <c10d/Types.hpp>
 
 namespace c10d {
@@ -74,13 +70,13 @@ inline at::Tensor newLikeFlat(
     throw std::runtime_error("Invalid device index");
   }
   auto& t = tensors[deviceIdx][0];
-  auto device = t.is_cuda() ? t.get_device() : -1;
+  auto device = t.device();
   for (size_t i = 1; i < tensors[deviceIdx].size(); ++i) {
-    if (tensors[deviceIdx][i].get_device() != device) {
+    if (tensors[deviceIdx][i].device() != device) {
       throw std::runtime_error("Expecting all tensors on the same device");
     }
   }
-  at::cuda::CUDAGuard gpuGuard(device);
+  at::DeviceGuard gpuGuard(device);
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors[deviceIdx].size())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   return at::empty(sizes, t.options());
@@ -91,7 +87,7 @@ inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
     throw std::runtime_error("Received an empty list");
   }
   auto& t = tensors[0];
-  at::cuda::CUDAGuard gpuGuard(t.is_cuda() ? t.get_device() : -1);
+  at::DeviceGuard gpuGuard(t.device());
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors.size())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   return at::empty(sizes, t.options());
