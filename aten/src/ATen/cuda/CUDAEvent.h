@@ -35,13 +35,7 @@ struct AT_CUDA_API CUDAEvent {
   ~CUDAEvent() {
     try {
       if (is_created_) {
-<<<<<<< dest:   0504088ae558 - ezyang: Add c10::Stream, make at::cuda::CUDASt...
-        at::DeviceGuard device_guard{static_cast<int16_t>(device_index_)};
-||||||| base
-        at::DeviceGuard device_guard{(int)device_index_};
-=======
-        at::cuda::CUDAGuard device_guard(static_cast<int>(device_index_));
->>>>>>> source: aa097875d8ce - ezyang: Delete DeviceGuard(int64_t) constructor.
+        at::cuda::CUDAGuard device_guard(static_cast<int16_t>(device_index_));
         cudaEventDestroy(event_);
       }
     } catch (...) { /* No throw */ }
