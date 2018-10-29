@@ -35,7 +35,7 @@ class NHWC2NCHWOp final : public Operator<Context> {
       HxW *= Y_dims[i];
     }
     Y->Resize(Y_dims);
-    if (X.size() <= 0) {
+    if (X.numel() <= 0) {
       return true;
     }
     math::NHWC2NCHW<T, Context>(
@@ -72,7 +72,7 @@ class NCHW2NHWCOp final : public Operator<Context> {
       HxW *= Y_dims[i];
     }
     Y->Resize(Y_dims);
-    if (X.size() <= 0) {
+    if (X.numel() <= 0) {
       return true;
     }
     math::NCHW2NHWC<T, Context>(

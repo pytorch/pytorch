@@ -82,7 +82,7 @@ class AbstractSortedSegmentRangeOp : public Operator<Context> {
       return true;
     }
 
-    int64_t block_size = dataInput.size() / N;
+    int64_t block_size = dataInput.numel() / N;
 
     // Assume the segments are sorted and there are no gaps
     CAFFE_ENFORCE_EQ(0, s_ids[0], "Indices must be sorted and not have gaps");
@@ -329,7 +329,7 @@ class AbstractReduceFrontOrBackOp : public Operator<Context> {
         ? data.size_from_dim(num_reduce_dims_)
         : data.size_from_dim(data.ndim() - num_reduce_dims_);
 
-    const int num_blocks = block_size > 0 ? data.size() / block_size : 0;
+    const int num_blocks = block_size > 0 ? data.numel() / block_size : 0;
 
     Reducer r(ctx, out, &context_);
     for (int64_t i = 0; i < num_blocks; ++i) {
@@ -365,7 +365,7 @@ class AbstractReduceFrontOrBackGradientOp : public Operator<Context> {
   bool RunOnDevice() override {
     // If more complicated fixed size logic becomes necessary, it can be moved
     // to the reducer class
-    int64_t grad_block_size = Input(REDUCTION_GRAD).size();
+    int64_t grad_block_size = Input(REDUCTION_GRAD).numel();
     return DispatchHelper<typename ReducerGradient::FixedDispatch>::call(
         this, grad_block_size);
   }
@@ -389,18 +389,18 @@ class AbstractReduceFrontOrBackGradientOp : public Operator<Context> {
 
     const T* r_grad = reduction_grad.template data<T>();
 
-    CAFFE_ENFORCE_LE(num_reduce_dims_, source_shape.size());
+    CAFFE_ENFORCE_LE(num_reduce_dims_, source_shape.numel());
 
     vector<int64_t> shape(
         source_shape.template data<int64_t>(),
-        source_shape.template data<int64_t>() + source_shape.size());
+        source_shape.template data<int64_t>() + source_shape.numel());
 
     data_grads->Resize(shape);
 
     int64_t block_size = FirstDim
         ? data_grads->size_from_dim(num_reduce_dims_)
         : data_grads->size_from_dim(data_grads->ndim() - num_reduce_dims_);
-    int64_t block_num = block_size > 0 ? data_grads->size() / block_size : 0;
+    int64_t block_num = block_size > 0 ? data_grads->numel() / block_size : 0;
 
     T* out = data_grads->template mutable_data<T>();
 

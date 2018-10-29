@@ -45,7 +45,7 @@ bool FloatToFusedRandRowwiseQuantizedOp<Context>::RunOnDevice() {
   const auto* input_data = input.template data<float>();
   auto* output_data = output->template mutable_data<uint8_t>();
   const size_t output_columns = static_cast<size_t>(output->dim(1));
-  memset(output_data, 0, output->size());
+  memset(output_data, 0, output->numel());
 
   if (random_) {
 #ifdef FUSED_ROWWISE_RANDOM_QUANTIZATION_USE_MKL
@@ -81,7 +81,9 @@ bool FusedRandRowwiseQuantizedToFloatOp<Context>::RunOnDevice() {
   auto* output = Output(DATA_FLOAT);
   CAFFE_ENFORCE_EQ(input.ndim(), 2, "Expect input to be a matrix.");
   CAFFE_ENFORCE_GE(
-      input.size(), 4, "Expect input to have size greater than or equal to 4.");
+      input.numel(),
+      4,
+      "Expect input to have size greater than or equal to 4.");
 
   const auto input_rows = input.dim(0);
   const auto input_columns = input.dim(1);

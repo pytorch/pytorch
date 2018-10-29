@@ -98,7 +98,7 @@ class PrintOp final : public Operator<Context> {
       return true;
     }
     // special-case empty tensors since they may have no meta()
-    if (Input(0).size() == 0) {
+    if (Input(0).numel() == 0) {
       tensor_printer_.PrintMeta(Input(0));
       return true;
     }
@@ -169,7 +169,7 @@ class AliasOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    CAFFE_ENFORCE_GE(input.size(), 0, "Tensor is not initialized");
+    CAFFE_ENFORCE_GE(input.numel(), 0, "Tensor is not initialized");
     Output(0)->ResizeLike(input);
     Output(0)->ShareData(input);
     return true;
@@ -214,11 +214,11 @@ class FlattenToVecOp : public Operator<Context> {
     auto* output = Output(0);
     CAFFE_ENFORCE_GE(
         input.sizes().size(), 1, "The rank of the tensor must be >= 1.");
-    output->Resize(input.size());
+    output->Resize(input.numel());
 
     context_.CopyItemsSameDevice(
         input.meta(),
-        input.size(),
+        input.numel(),
         input.raw_data(),
         output->raw_mutable_data(input.meta()));
     return true;
@@ -236,11 +236,11 @@ class ResizeLikeOp : public Operator<Context> {
     auto& input0 = Input(0);
     auto& input1 = Input(1);
     auto* output = Output(0);
-    CAFFE_ENFORCE_EQ(input0.size(), input1.size());
+    CAFFE_ENFORCE_EQ(input0.numel(), input1.numel());
     output->ResizeLike(Input(1));
     context_.CopyItemsSameDevice(
         input0.meta(),
-        input0.size(),
+        input0.numel(),
         input0.raw_data(),
         output->raw_mutable_data(input0.meta()));
     return true;
@@ -279,7 +279,7 @@ class SumOp : public Operator<Context> {
 
     // Add the first two - works if in-place or not.
     math::Add(
-        output->size(),
+        output->numel(),
         input0.template data<T>(),
         Input(1).template data<T>(),
         output_data,
@@ -287,7 +287,7 @@ class SumOp : public Operator<Context> {
     // Add remaining.
     for (int i = 2; i < InputSize(); ++i) {
       math::Add(
-          output->size(),
+          output->numel(),
           output_data,
           Input(i).template data<T>(),
           output_data,
@@ -329,9 +329,9 @@ class WeightedSumOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(input_size % 2, 0);
     const auto& X0 = Input(0);
     const auto& weight0 = Input(1);
-    CAFFE_ENFORCE_GT(X0.size(), 0);
-    CAFFE_ENFORCE_EQ(weight0.size(), 1);
-    const int size = X0.size();
+    CAFFE_ENFORCE_GT(X0.numel(), 0);
+    CAFFE_ENFORCE_EQ(weight0.numel(), 1);
+    const int size = X0.numel();
     auto* Y = Output(0);
     if (Y != &X0) {
       Y->ResizeLike(X0);
@@ -353,8 +353,8 @@ class WeightedSumOp : public Operator<Context> {
         "Input #2 is the same as output. If you want to do in-place updates, "
         "put the output as input #0.");
     const auto& weight1 = Input(3);
-    CAFFE_ENFORCE_EQ(X1.size(), size);
-    CAFFE_ENFORCE_EQ(weight1.size(), 1);
+    CAFFE_ENFORCE_EQ(X1.numel(), size);
+    CAFFE_ENFORCE_EQ(weight1.numel(), 1);
     if (Y != &X0) {
       context_.template CopySameDevice<T>(size, X0.template data<T>(), Y_data);
     }
@@ -374,8 +374,8 @@ class WeightedSumOp : public Operator<Context> {
           "put the output as input #0.";
       CAFFE_ENFORCE_NE(&Xi, Y, err_msg);
       const auto& weighti = Input(i + 1);
-      CAFFE_ENFORCE_EQ(Xi.size(), size);
-      CAFFE_ENFORCE_EQ(weighti.size(), 1);
+      CAFFE_ENFORCE_EQ(Xi.numel(), size);
+      CAFFE_ENFORCE_EQ(weighti.numel(), 1);
       math::Axpy<T, Context>(
           size,
           weighti.template data<float>(),
@@ -405,12 +405,12 @@ class WeightedSumGradientOp : public Operator<Context> {
 
     auto& dY = Input(0);
     const auto* dY_data = dY.template data<DstType>();
-    int size = dY.size();
+    int size = dY.numel();
 
     // The input size should be the input size of the forward op plus 1
     for (int i = 0; i < InputSize() / 2; i++) {
       auto& cur_w = Input(2 * i + 2);
-      CAFFE_ENFORCE_EQ(cur_w.size(), 1);
+      CAFFE_ENFORCE_EQ(cur_w.numel(), 1);
       auto* cur_dX = Output(i);
       cur_dX->ResizeLike(dY);
 
@@ -423,7 +423,7 @@ class WeightedSumGradientOp : public Operator<Context> {
 
       if (grad_on_w_) {
         auto& cur_X = Input(2 * i + 1);
-        CAFFE_ENFORCE_EQ(cur_X.size(), size);
+        CAFFE_ENFORCE_EQ(cur_X.numel(), size);
         auto* cur_dw = Output(i + output_size / 2);
         cur_dw->Resize(1);
         math::Dot<DstType, Context>(
@@ -509,12 +509,12 @@ class ScatterWeightedSumOp : public Operator<Context> {
     auto* output = Output(0);
     CAFFE_ENFORCE_EQ(&X0, output, "In place operation is required");
 
-    CAFFE_ENFORCE_GT(X0.size(), 0);
+    CAFFE_ENFORCE_GT(X0.numel(), 0);
     CAFFE_ENFORCE_GT(X0.ndim(), 0, "X0 has to be at least the vector");
-    CAFFE_ENFORCE_EQ(weight0.size(), 1);
-    int64_t M = X0.size();
+    CAFFE_ENFORCE_EQ(weight0.numel(), 1);
+    int64_t M = X0.numel();
     int64_t N = X0.dim(0);
-    int64_t K = indices.size();
+    int64_t K = indices.numel();
     int64_t block_size = M / N;
     T* data = output->template mutable_data<T>();
     const Index* idxs = indices.template data<Index>();
@@ -540,8 +540,8 @@ class ScatterWeightedSumOp : public Operator<Context> {
     for (int inp = 3; inp < InputSize(); inp += 2) {
       auto& X = Input(inp);
       auto& weight = Input(inp + 1);
-      CAFFE_ENFORCE_EQ(X.size(), block_size * K);
-      CAFFE_ENFORCE_EQ(weight.size(), 1);
+      CAFFE_ENFORCE_EQ(X.numel(), block_size * K);
+      CAFFE_ENFORCE_EQ(weight.numel(), 1);
       const T* x_data = X.template data<T>();
       T w = *weight.template data<T>();
       for (int i = 0; i < K; ++i) {
@@ -664,11 +664,11 @@ class ScatterAssignOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(&input, output, "In place operation is required");
 
     CAFFE_ENFORCE_GT(input.ndim(), 0, "X0 has to be at least the vector");
-    int64_t M = input.size();
+    int64_t M = input.numel();
     int64_t N = input.dim(0);
-    int64_t K = indices.size();
+    int64_t K = indices.numel();
     int64_t block_size = M / N;
-    CAFFE_ENFORCE_EQ(slices.size(), block_size * K);
+    CAFFE_ENFORCE_EQ(slices.numel(), block_size * K);
     // TODO(dzhulgakov): it can be made to work with arbitrary data type by
     // using raw_mutable_data
     T* data = output->template mutable_data<T>();
@@ -711,12 +711,12 @@ class LengthsToSegmentIdsOp : public Operator<Context> {
 
     CAFFE_ENFORCE(input.sizes().size() == 1, "Input must be a vector.");
     auto total_length =
-        std::accumulate(input_data, input_data + input.size(), 0);
+        std::accumulate(input_data, input_data + input.numel(), 0);
 
     output->Resize(total_length);
     auto* output_data = output->template mutable_data<int32_t>();
 
-    for (int i = 0; i < input.size(); ++i) {
+    for (int i = 0; i < input.numel(); ++i) {
       auto len = input_data[i];
       std::fill(output_data, output_data + len, i);
       output_data += len;
@@ -737,7 +737,7 @@ class LengthsToRangesOp : public Operator<Context> {
     auto* input_data = input.template data<int32_t>();
 
     CAFFE_ENFORCE(input.sizes().size() == 1, "Input must be a vector.");
-    auto size = input.size();
+    auto size = input.numel();
 
     output->Resize(size, 2);
     auto* output_data = output->template mutable_data<int32_t>();
@@ -774,7 +774,7 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
       CAFFE_ENFORCE_EQ(input.ndim(), 1, "Input must be a vector.");
     }
     auto* input_data = input.template data<Index>();
-    auto input_size = input.size();
+    auto input_size = input.numel();
     auto* output = Output(0);
     // segment id starts from 0
     auto num_segments = input_size ? input_data[input_size - 1] + 1 : 0;
@@ -825,7 +825,7 @@ class SegmentIdsToRangesOp : public Operator<Context> {
     auto& input = Input(0);
     CAFFE_ENFORCE(input.sizes().size() == 1, "Input must be a vector.");
     auto* input_data = input.template data<Index>();
-    auto input_size = input.size();
+    auto input_size = input.numel();
     auto* output = Output(0);
     // segment id starts from 0
     auto num_segments = input_size ? input_data[input_size - 1] + 1 : 0;
@@ -881,7 +881,7 @@ class LengthsToWeightsOp : public Operator<Context> {
     auto& input = Input(0);
     CAFFE_ENFORCE(input.sizes().size() == 1, "Input must be a vector.");
     auto* input_data = input.template data<Index>();
-    auto input_size = input.size();
+    auto input_size = input.numel();
     auto* output = Output(0);
 
     int64_t output_size = 0;
@@ -937,7 +937,7 @@ class HasElementsOp : public Operator<Context> {
     auto& input = Input(0);
     auto* output = Output(0);
     output->Resize(std::vector<int64_t>{});
-    *output->template mutable_data<bool>() = input.size() > 0;
+    *output->template mutable_data<bool>() = input.numel() > 0;
     return true;
   }
 };
@@ -956,7 +956,7 @@ class SizeOp : public Operator<Context> {
     output->Resize(vector<int64_t>());
     auto* output_data = output->template mutable_data<int64_t>();
 
-    auto size = input.size();
+    auto size = input.numel();
     math::Set<int64_t, Context>(
         1, static_cast<int64_t>(size), output_data, &context_);
 
@@ -978,7 +978,7 @@ class LengthsToShapeOp : public Operator<Context> {
     auto* output = Output(0);
     auto* input_data = input.template data<int32_t>();
 
-    auto size = input.size();
+    auto size = input.numel();
     auto first = input_data[0];
 
     for (int i = 1; i < size; i++) {
@@ -1033,7 +1033,7 @@ class GatherRangesOp : public Operator<Context> {
       start = end;
     }
 
-    size_t outputSize = accumulate(rangesData, 0, ranges.size());
+    size_t outputSize = accumulate(rangesData, 0, ranges.numel());
     outputData->Resize(outputSize);
 
     auto outputRawData =
@@ -1041,7 +1041,7 @@ class GatherRangesOp : public Operator<Context> {
     VLOG(1) << "Copying data";
     size_t outputOffsetBytes = 0;
     auto itemsize = data.meta().itemsize();
-    for (int i = 0; i < ranges.size(); i += 2) {
+    for (int i = 0; i < ranges.numel(); i += 2) {
       auto rangeStart = rangesData[i];
       auto rangeLength = rangesData[i + 1];
       if (!rangeLength) {
@@ -1049,7 +1049,7 @@ class GatherRangesOp : public Operator<Context> {
       }
       auto rangeSizeBytes = rangeLength * itemsize;
       CAFFE_ENFORCE(outputOffsetBytes < outputSize * itemsize);
-      CAFFE_ENFORCE(rangeStart + rangeLength <= data.size());
+      CAFFE_ENFORCE(rangeStart + rangeLength <= data.numel());
       context_.CopyItemsSameDevice(
           data.meta(),
           rangeLength,
@@ -1100,9 +1100,9 @@ class LengthsGatherOp : public Operator<Context> {
     const auto* indices_data = indices.template data<Index>();
 
     int64_t total_length = 0;
-    for (size_t i = 0; i < indices.size(); ++i) {
+    for (size_t i = 0; i < indices.numel(); ++i) {
       auto idx = indices_data[i];
-      CAFFE_ENFORCE_LT(idx, lengths.size());
+      CAFFE_ENFORCE_LT(idx, lengths.numel());
       total_length += lengths_data[idx];
     }
     auto shape = items.sizes().vec();
@@ -1111,8 +1111,8 @@ class LengthsGatherOp : public Operator<Context> {
 
     offsets_.clear();
     int64_t running_offset = 0;
-    offsets_.reserve(lengths.size());
-    for (size_t i = 0; i < lengths.size(); ++i) {
+    offsets_.reserve(lengths.numel());
+    for (size_t i = 0; i < lengths.numel(); ++i) {
       offsets_.push_back(running_offset);
       running_offset += lengths_data[i];
     }
@@ -1126,7 +1126,7 @@ class LengthsGatherOp : public Operator<Context> {
     auto block_bytesize = block_size * items.itemsize();
     auto out = static_cast<char*>(output->raw_mutable_data(items.meta()));
 
-    for (size_t i = 0; i < indices.size(); ++i) {
+    for (size_t i = 0; i < indices.numel(); ++i) {
       auto idx = indices_data[i];
       auto length = lengths_data[idx];
       context_.CopyItemsSameDevice(
@@ -1165,7 +1165,7 @@ class AccumulateHistogramOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& X = Input(X_IN);
     auto* X_data = X.template data<T>();
-    int N = X.size();
+    int N = X.numel();
     auto* cur_hist = Output(CUR_HIST);
     auto* acc_hist = Output(ACC_HIST);
     cur_hist->Resize(num_output_buckets_);

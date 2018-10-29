@@ -36,7 +36,7 @@ class LengthsPadOp : public Operator<Context> {
     // why? CPUContext is not used in Sum
     lengths_host_.CopyFrom(lengths);
 
-    auto lengths_size = lengths_host_.size();
+    auto lengths_size = lengths_host_.numel();
     auto* lengths_data = lengths_host_.template data<int32_t>();
 
     int32_t total_length = 0;
@@ -55,7 +55,7 @@ class LengthsPadOp : public Operator<Context> {
     auto out_data = output->template mutable_data<T>();
 
     math::Set(
-        output->size(), static_cast<T>(padding_value_), out_data, &context_);
+        output->numel(), static_cast<T>(padding_value_), out_data, &context_);
     for (int64_t i = 0; i < lengths_size; ++i) {
       auto length = lengths_data[i];
       CAFFE_ENFORCE_GE(length, 0);

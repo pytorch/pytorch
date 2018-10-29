@@ -58,7 +58,7 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
     // batch size
     int M = X.ndim() > 1 ? X.dim32(0) : 1;
     // Feature dimension
-    int K = X.size() / M;
+    int K = X.numel() / M;
     // number of outputs.
     int N = U.dim32(0);
     int middle = U.dim32(0);
@@ -85,7 +85,7 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
         U.template data<T>(), 0, Y->template mutable_data<T>(),
         &context_);
     // Add bias term
-    if (bias_multiplier_.size() != M) {
+    if (bias_multiplier_.numel() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(M);
       math::Set<T, Context>(
@@ -124,7 +124,7 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
     // batch size
     int M = X.ndim() > 1 ? X.dim32(0) : 1;
     // Feature dimension
-    int K = X.size() / M;
+    int K = X.numel() / M;
     // number of outputs.
     int N = U.dim32(0);
     int middle = U.dim32(1);
@@ -134,7 +134,7 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
       DCHECK_EQ(N, dY.dim32(1));
     } else {
       DCHECK_EQ(X.ndim(), 1);
-      DCHECK_EQ(N, dY.size());
+      DCHECK_EQ(N, dY.numel());
     }
     auto* dU = Output(0);
     auto* dV = Output(1);
@@ -171,7 +171,7 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
         dY.template data<T>(), du_buffer_data,
         0, dV->template mutable_data<T>(),
         &context_);
-    if (bias_multiplier_.size() != M) {
+    if (bias_multiplier_.numel() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(M);
       math::Set<T, Context>(

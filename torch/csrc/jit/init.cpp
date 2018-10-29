@@ -50,6 +50,13 @@
 
 namespace torch  { namespace jit {
 
+// TODO: make a fake future for python
+namespace detail {
+class Future {
+
+};
+}
+
 namespace {
 
 using autograd::variable_list;
@@ -308,6 +315,17 @@ void initJITBindings(PyObject *module) {
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
         return op->schema();
       });
+  });
+
+  py::class_<detail::Future>(m, "Future");
+
+  m.def("fork", [](script::Module &sm, py::args args) {
+    // TODO: this is a fake stub
+    return detail::Future();
+  });
+
+  m.def("wait", [](detail::Future &fut) {
+    // TODO: this is a fake stub
   });
 
 

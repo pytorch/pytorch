@@ -884,6 +884,212 @@ Node* Node::insertAfter(Node * n) {
   return this;
 }
 
+bool Node::moveAfterTopologicallyValid(Node* n) {
+  return tryMove(n, MoveSide::AFTER);
+}
+
+bool Node::moveBeforeTopologicallyValid(Node* n) {
+  // We have to distinguish the move side (instead of just moving after
+  // n->prev()). Consider the following example:
+  //   If the dependency graph looks like this -> n -> o then moveBefore(o) will
+  //   end up with [this, o, n], but moveAfter(n) will return false.
+  return tryMove(n, MoveSide::BEFORE);
+}
+
+// Helper for topologically-safe node moves. See `tryMove()` for details.
+namespace {
+struct WorkingSet {
+ public:
+  explicit WorkingSet(Node* mover) {
+    add(mover);
+  }
+
+  // Add `n` to the working set
+  void add(Node* n) {
+    nodes_.push_back(n);
+    for (const auto user : getUsersSameBlock(n)) {
+      users_[user]++;
+    }
+  }
+
+  void eraseMover() {
+    auto mover = nodes_.front();
+    for (const auto user : getUsersSameBlock(mover)) {
+      // If this user node only uses the mover, we can remove it
+      if (users_[user] == 1) {
+        users_.erase(user);
+      }
+    }
+    nodes_.pop_front();
+  }
+
+  const std::list<Node*>& nodes() {
+    return nodes_;
+  }
+
+  // Does the working set depend on `n`?
+  bool dependsOn(Node* n) const {
+    if (nodes_.empty()) {
+      return false;
+    }
+
+    if (n->isAfter(nodes_.front())) {
+      return producesFor(n);
+    } else {
+      return consumesFrom(n);
+    }
+  }
+
+  // Does the working set produce any values consumed by `n`?
+  bool producesFor(Node* n) const {
+    // This equivalent to asking: does the total use-set of all the nodes in the
+    // working set include `n`?
+    return users_.count(n) != 0;
+  }
+
+  // Does the working set consume any values produced by `n`?
+  bool consumesFrom(Node* n) const {
+    const auto users = getUsersSameBlock(n);
+    return std::any_of(nodes_.begin(), nodes_.end(), [&](Node* node) {
+      return users.count(node) != 0;
+    });
+  }
+
+ private:
+  // Get all users of outputs of `n`, in the same block as `n`.
+  // This means if there is an `if` node that uses an output of `n` in some
+  // inner sub-block, we will consider the whole `if` node a user of `n`.
+  std::unordered_set<Node*> getUsersSameBlock(Node* n) const {
+    std::unordered_set<Node*> users;
+    for (const auto output : n->outputs()) {
+      for (const auto& use : output->uses()) {
+        if (use.user->owningBlock() == n->owningBlock()) {
+          users.insert(use.user);
+        } else {
+          // This user is in a sub-block. Traverse the blockchain upward until
+          // we arrive at a node that shares a block with `this`
+          auto curNode = use.user;
+          while (curNode->owningBlock() != n->owningBlock()) {
+            curNode = curNode->owningBlock()->owningNode();
+            JIT_ASSERT(curNode);
+          }
+          users.insert(curNode);
+        }
+      }
+    }
+
+    return users;
+  }
+
+  std::list<Node*> nodes_;
+  // users => # of working set nodes it uses
+  std::unordered_map<Node*, size_t> users_;
+};
+} // namespace
+
+// Try to move `this` before/after `movePoint` while preserving value
+// dependencies. Returns false iff such a move could not be made
+//
+// The basic approach is: have a "working set" that we are moving forward, one
+// node at a time. When we can't move past a node (because it depends on the
+// working set), then add it to the working set and keep moving until we hit
+// `moveAfter`.
+bool Node::tryMove(Node* movePoint, MoveSide moveSide) {
+  JIT_ASSERT(this->inBlockList() && movePoint->inBlockList());
+  JIT_ASSERT(this->owningBlock() == movePoint->owningBlock());
+  if (this == movePoint) {
+    return true;
+  }
+
+  // 1. Move from `this` toward movePoint, building up the working set of
+  // dependencies
+  WorkingSet workingSet(this);
+
+  int direction;
+  if (this->isAfter(movePoint)) {
+    direction = kPrevDirection;
+  } else {
+    direction = kNextDirection;
+  }
+
+  auto curNode = this->next_in_graph[direction];
+  // Move forward one node at a time
+  while (curNode != movePoint) {
+    if (workingSet.dependsOn(curNode)) {
+      // If we can't move past this node, add it to the working set
+      workingSet.add(curNode);
+    }
+    curNode = curNode->next_in_graph[direction];
+  }
+
+  // 2. Decide whether we can move it all to `movePoint`.
+
+  // Say we are moving directly before movePoint and `this` starts before
+  // movePoint in the graph. The move looks like
+  //
+  //  `this`              `this`           |
+  //  <dependencies>  ->  `movePoint`      | `this` and deps are split
+  //  `movePoint`         <dependencies>   |
+  //
+  // Contrast with the case where `this` starts AFTER movePoint:
+  //
+  //  `movePoint`         <dependencies>   |
+  //  <dependencies>  ->  `this`           | `this` and deps are together
+  //  `this`              `movePoint`      |
+  //
+  // In the first case, we need to split `this` off from its dependencies, so we
+  // can move the dependencies below `movePoint` and keep `this` above.
+  const bool splitThisAndDeps =
+      (moveSide == MoveSide::BEFORE && this->isBefore(movePoint)) ||
+      (moveSide == MoveSide::AFTER && this->isAfter(movePoint));
+
+  if (splitThisAndDeps) {
+    // remove `this` from dependencies to be moved past `movePoint`
+    workingSet.eraseMover();
+  }
+
+  // Check if we can move the working set past the move point
+  if (workingSet.dependsOn(movePoint)) {
+    // if we can't, then there are intermediate dependencies between the
+    // `this` and `movePoint`, so we can't do the move
+    return false;
+  }
+
+  // 3. Execute the move
+  JIT_ASSERT(curNode == movePoint);
+  if (splitThisAndDeps) {
+    // Move `this`
+    this->move(movePoint, moveSide);
+
+    // Then move all of its dependencies on the other side of `movePoint`
+    const auto reversed =
+        moveSide == MoveSide::BEFORE ? MoveSide::AFTER : MoveSide::BEFORE;
+    for (auto toMove : workingSet.nodes()) {
+      toMove->move(curNode, reversed);
+      curNode = toMove;
+    }
+  } else {
+    // Just append/prepend everything to `movePoint`
+    for (auto toMove : workingSet.nodes()) {
+      toMove->move(curNode, moveSide);
+      curNode = toMove;
+    }
+  }
+  return true;
+}
+
+// Helper function so we can generalize `tryMove`
+void Node::move(Node* movePoint, MoveSide moveSide) {
+  switch (moveSide) {
+    case MoveSide::BEFORE:
+      this->moveBefore(movePoint);
+      break;
+    case MoveSide::AFTER:
+      this->moveAfter(movePoint);
+      break;
+  }
+}
+
 void Node::moveAfter(Node * n) {
   removeFromList();
   insertAfter(n);

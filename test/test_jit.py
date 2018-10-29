@@ -11,7 +11,8 @@ from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2
-from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, skipIfRocm, suppress_warnings
+from common_utils import (TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN,
+                          skipIfRocm, suppress_warnings, load_tests, IS_SANDCASTLE)
 from textwrap import dedent
 import os
 import io
@@ -35,6 +36,10 @@ from torch.jit import BatchTensor
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future
 from test_module.no_future_div import div_int_nofuture, div_float_nofuture
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 try:
     import torchvision
@@ -60,7 +65,6 @@ RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
-IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 
 
 def LSTMCellF(input, hx, cx, *params):
@@ -2806,6 +2810,13 @@ a")
                 return a
         ''')
         self.assertExpected(str(cu.foo.graph))
+
+    def test_string_ops(self):
+        def foo():
+            a = "a" + "b"
+            return a + a, "ab" == "b", "ab" != "b", "ab" == "ab", "ab" != "ab"
+
+        self.checkScript(foo, ())
 
     def test_string_new_line(self):
         with self.assertRaisesRegex(RuntimeError, "expected a valid token*"):
@@ -9303,6 +9314,96 @@ def post_add_test(test_name, skipTestIf, do_test):
     if not (TEST_WITH_UBSAN and test_name in UBSAN_BLACKLISTED_TESTS):
         setattr(TestJitGenerated, test_name, do_test)
 
+
+class TestAsync(JitTestCase):
+    def test_async_python(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.neg(x)
+
+        x = torch.rand(3, 4)
+        fut = torch.jit._fork(foo, x)
+        y_hat = foo(x)
+        y = torch.jit._wait(fut)
+        # assert nothing; only to make sure the fake python path works
+
+    def test_async_script(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.neg(x), x
+
+        x = torch.rand(3, 4)
+
+        @torch.jit.script
+        def wait_script(x):
+            fut = torch.jit._fork(foo, x)
+            y_hat = foo(x)
+            y = torch.jit._wait(fut)
+            return y, y_hat
+
+        y, y_hat = wait_script(x)
+
+        self.assertEqual(y, y_hat)
+
+    def test_async_script_capture(self):
+        class Module(torch.jit.ScriptModule):
+            __constants__ = ['const']
+
+            def __init__(self):
+                super(Module, self).__init__(False)
+                self.const = 42
+                self.param = nn.Parameter(torch.randn(2, 2))
+
+            @torch.jit.script_method
+            def foo(self, x1, x2):
+                return torch.neg(x1), self.param, self.const, torch.neg(x2), self.param
+
+            @torch.jit.script_method
+            def wait_script(self, x1, x2):
+                fut = torch.jit._fork(self.foo, x1, x2)
+                y_hat = self.foo(x1, x2)
+                y = torch.jit._wait(fut)
+                return y, y_hat
+
+        x1 = torch.rand(3, 4)
+        x2 = torch.rand(5, 6)
+
+        m = Module()
+        y, y_hat = m.wait_script(x1, x2)
+
+        self.assertEqual(y, y_hat)
+
+    def test_async_script_nested(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.neg(x), x
+
+        x = torch.rand(3, 4)
+
+        @torch.jit.script
+        def wait_script(x):
+            fut = torch.jit._fork(foo, x)
+            y_hat = foo(x)
+            y = torch.jit._wait(fut)
+            return y, y_hat
+
+        @torch.jit.script
+        def wait_script_nest(x):
+            fut = torch.jit._fork(wait_script, x)
+            return torch.jit._wait(fut)
+
+        y, y_hat = wait_script_nest(x)
+
+        self.assertEqual(y, y_hat)
+
+    def test_async_script_no_script_mod(self):
+        x = torch.rand(3, 4)
+
+        with self.assertRaisesRegex(RuntimeError, 'cannot call a value'):
+            @torch.jit.script
+            def wait_script(x):
+                fut = torch.jit._fork(x)
+                return fut
 
 for test in autograd_method_tests:
     add_autograd_test(*test)
