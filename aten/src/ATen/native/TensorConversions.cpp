@@ -4,6 +4,7 @@
 namespace at {
 namespace native {
 
+// NB: This ONLY works for CUDA device
 static void ensure_has_index(Device* device) {
   if (!device->is_cuda() || device->has_index()) {
     return;
