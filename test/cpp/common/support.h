@@ -10,14 +10,14 @@
 #include <string>
 #include <utility>
 
-#ifndef WIN32
+#ifndef _WIN32
 #include <unistd.h>
 #endif
 
 namespace torch {
 namespace test {
 
-#ifdef WIN32
+#ifdef _WIN32
 struct TempFile {
   std::string name{std::tmpnam(nullptr)};
 };
