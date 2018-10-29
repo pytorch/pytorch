@@ -783,10 +783,12 @@ THESE_TAKE_WAY_TOO_LONG = {
 running_script_path = None
 
 
-def set_running_file():
+def set_running_script_path():
     global running_script_path
     try:
-        running_script_path = os.path.abspath(os.path.realpath(sys.argv[0]))
+        running_file = os.path.abspath(os.path.realpath(sys.argv[0]))
+        if running_file.endswith('.py'):  # skip if the running file is not a script
+            running_script_path = running_file
     except Exception:
         pass
 
@@ -808,7 +810,7 @@ if num_shards is not None and shard is not None:
     shard = int(shard)
 
     def load_tests(loader, tests, pattern):
-        set_running_file()
+        set_running_script_path()
         test_suite = unittest.TestSuite()
         for test_group in tests:
             for test in test_group:
@@ -823,7 +825,7 @@ if num_shards is not None and shard is not None:
 else:
 
     def load_tests(loader, tests, pattern):
-        set_running_file()
+        set_running_script_path()
         test_suite = unittest.TestSuite()
         for test_group in tests:
             for test in test_group:
