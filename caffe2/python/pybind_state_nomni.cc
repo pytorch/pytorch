@@ -121,6 +121,10 @@ void addNomnigraphMethods(pybind11::module& m) {
         return caffe2::convertToNNModule(proto, m);
       });
 
+  m.def("replaceProducer", &nn::replaceProducer);
+  m.def("replaceAllUsesWith", &nn::replaceAllUsesWith);
+  m.def("replaceAsConsumer", &nn::replaceAsConsumer);
+
   py::class_<NNModule> nnmodule(m, "NNModule");
   nnmodule.def(py::init<>())
       .def(
@@ -157,7 +161,9 @@ void addNomnigraphMethods(pybind11::module& m) {
             }
             return out;
           },
-          py::return_value_policy::reference_internal);
+          py::return_value_policy::reference_internal)
+      .def("replaceSubgraph", &NNModule::replaceSubgraph)
+      .def("deleteSubgraph", &NNModule::deleteSubgraph);
 
   auto getTensors = [](NNGraph* g) {
     return nn::nodeIterator<nom::repr::Tensor>(*g);
