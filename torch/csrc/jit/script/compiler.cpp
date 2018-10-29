@@ -438,7 +438,8 @@ Value* tryMatchArgument(
     const NamedValue& named_value,
     std::function<std::ostream&()> err,
     bool convert_tensors_to_nums,
-    TypeEnv & type_env) {
+    TypeEnv & type_env,
+    bool check_types) {
   Value* value = named_value.value(graph);
 
   // some functions that take lists of integers for fixed size arrays
@@ -484,7 +485,7 @@ Value* tryMatchArgument(
         ->output();
   }
 
-  if(!value->type()->isSubtypeOf(concrete_type) && !concrete_type->isSubtypeOf(StringType::get())) {
+  if(!value->type()->isSubtypeOf(concrete_type) && check_types) {
     err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name() << "' but found "
           << value->type()->str() << "\n"
           << named_value.locOr(loc);
@@ -514,8 +515,16 @@ Value* tryCreateList(
   Argument elem_arg("<varargs>", elem_type);
   std::vector<Value*> list_ctor;
   for(const auto& a : varargs) {
-    Value* av = tryMatchArgument(elem_arg, graph, loc, a, err, convert_tensor_to_num, type_env);
-    if(!av)
+    Value* av = tryMatchArgument(
+        elem_arg,
+        graph,
+        loc,
+        a,
+        err,
+        convert_tensor_to_num,
+        type_env,
+        /*check_types=*/true);
+    if (!av)
       return nullptr;
     list_ctor.push_back(av);
   }
@@ -577,6 +586,9 @@ c10::optional<MatchedSchema> tryMatchSchema(
 
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
+
+  // check types for varargs?
+  bool check_types = true;
   for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
     const auto& arg = schema.arguments()[schema_i];
     c10::optional<NamedValue> v;
@@ -634,7 +646,14 @@ c10::optional<MatchedSchema> tryMatchSchema(
       return c10::nullopt;
     }
     Value* positional = tryMatchArgument(
-        arg, graph, loc, *v, err, convert_tensors_to_nums, type_env);
+        arg,
+        graph,
+        loc,
+        *v,
+        err,
+        convert_tensors_to_nums,
+        type_env,
+        check_types);
     if (!positional)
       return c10::nullopt;
     positional_inputs.push_back(positional);
@@ -642,6 +661,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (schema.is_vararg() && schema_i == schema.arguments().size() - 1) {
       // Freeze iteration to the last argument in the schema and keep going for
       // all of the provided arguments
+      check_types = false;
       if (used_args < modifiedArgs.size()) {
         schema_i--;
       }
@@ -653,7 +673,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
   }
 
   // check for unused positional arguments
-  if (used_args < modifiedArgs.size()) {
+  if (used_args < modifiedArgs.size() && !schema.is_vararg()) {
     err() << "expected at most " << used_args << " arguments "
           << "but found " << modifiedArgs.size() << " positional arguments.\n"
           << loc << "\n";

@@ -24,6 +24,7 @@ namespace c10 {
   _(prim, Drop)                    \
   _(prim, Eval)                    \
   _(prim, Expand) /* onnx */       \
+  _(prim, Format)                  \
   _(prim, FusionGroup)             \
   _(prim, DifferentiableGraph)     \
   _(prim, If)                      \
@@ -73,6 +74,7 @@ namespace c10 {
   _(prim, DummyWorld)              \
   _(aten, append)                  \
   _(aten, __not__)                 \
+  _(aten, format)                  \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \

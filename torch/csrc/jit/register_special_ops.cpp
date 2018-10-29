@@ -28,7 +28,7 @@ RegisterOperators reg({
           return 0;
         }),
     Operator(
-        "aten::format(str self, *str args) -> Tensor",
+        FunctionSchema(aten::format, {Argument("self", StringType::get())}, {Argument("", StringType::get())}, true),
         [](Node* node) {
           size_t num_inputs = node->inputs().size();
           std::regex unsupported_options("\\{(.*)\\}");

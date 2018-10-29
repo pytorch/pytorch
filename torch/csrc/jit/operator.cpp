@@ -458,7 +458,7 @@ bool Operator::matches(const Node* node) const {
     try {
       TypePtr formal = matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
       // mismatched input type
-      if (!actuals[i]->type()->isSubtypeOf(formal) && !formal->isSubtypeOf(StringType::get())) {
+      if (!actuals[i]->type()->isSubtypeOf(formal)) {
         return false;
       }
     } catch(TypeMatchError& err) {
