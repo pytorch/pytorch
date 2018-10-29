@@ -42,7 +42,7 @@ class PrependDimOp : public Operator<Context> {
       // If we are not doing in-place computation, a copy is needed.
       context_.CopyItemsSameDevice(
           input.meta(),
-          input.size(),
+          input.numel(),
           input.raw_data(),
           output->raw_mutable_data(input.meta()));
     }
@@ -77,7 +77,7 @@ class MergeDimOp : public Operator<Context> {
       // If we are not doing in-place computation, a copy is needed.
       context_.CopyItemsSameDevice(
           input.meta(),
-          input.size(),
+          input.numel(),
           input.raw_data(),
           output->raw_mutable_data(input.meta()));
     }

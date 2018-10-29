@@ -82,9 +82,10 @@ _(aten, _fused_dropout) \
 _(aten, _ger) \
 _(aten, _gesv_helper) \
 _(aten, _gesv_single) \
-_(aten, _getri) \
+_(aten, _getri_single) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
+_(aten, _inverse_helper) \
 _(aten, _linspace) \
 _(aten, _local_scalar) \
 _(aten, _local_scalar_dense) \
@@ -241,6 +242,7 @@ _(aten, clamp_max) \
 _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
+_(aten, constant_pad_nd) \
 _(aten, contiguous) \
 _(aten, conv1d) \
 _(aten, conv2d) \
@@ -475,8 +477,6 @@ _(aten, mv) \
 _(aten, mvlgamma) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
-_(aten, native_batch_norm) \
-_(aten, native_batch_norm_backward) \
 _(aten, native_clone) \
 _(aten, native_get_device) \
 _(aten, native_norm) \
@@ -628,6 +628,9 @@ _(aten, th_pow) \
 _(aten, th_resize_as) \
 _(aten, th_tensor) \
 _(aten, th_zero) \
+_(aten, thnn_batch_norm) \
+_(aten, thnn_batch_norm_backward) \
+_(aten, thnn_batch_norm_forward) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
@@ -653,6 +656,7 @@ _(aten, threshold) \
 _(aten, threshold_backward) \
 _(aten, threshold_forward) \
 _(aten, to) \
+_(aten, to_sparse) \
 _(aten, to_dense) \
 _(aten, topk) \
 _(aten, trace) \

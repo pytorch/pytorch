@@ -113,7 +113,7 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
     // batch size
     int K = Xt.ndim() > 1 ? Xt.dim32(0) : 1;
     // Feature dimension
-    int M = Xt.size() / K;
+    int M = Xt.numel() / K;
     // number of outputs.
     int N = iw.dim32(0)-1;
     CAFFE_ENFORCE_EQ(N, b.dim32(0));
@@ -125,7 +125,7 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
       jw.template data<int>(), N, K, M, Xt.template data<T>(),
       Yt->template mutable_data<T>(), &context_);
     // Add bias term
-    if (bias_multiplier_.size() != M) {
+    if (bias_multiplier_.numel() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(shape(M));
       math::Set<T, Context>(
