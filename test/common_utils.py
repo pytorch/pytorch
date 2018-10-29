@@ -798,7 +798,7 @@ def check_test_defined_in_running_script(test_case):
     assert test_case_class_file == running_script_path, "Class of loaded TestCase \"{}\" " \
         "is not defined in the running script \"{}\", but in \"{}\". Did you " \
         "accidentally import a unittest.TestCase from another file?".format(
-            test_case.id(), runfile, test_case_class_file)
+            test_case.id(), running_script_path, test_case_class_file)
 
 
 num_shards = os.environ.get('TEST_NUM_SHARDS', None)
