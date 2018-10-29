@@ -35,7 +35,7 @@ SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeM
     , sparse_dim_(1)
     , dense_dim_(0)
     , indices_(at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(ScalarType::Long)))
-    , values_(at::empty({0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(dataTypeToScalarType(data_type.id())))) {}
+    , values_(at::empty({0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(data_type))) {}
 
 IntList SparseTensorImpl::sizes() const {
   return size_;
