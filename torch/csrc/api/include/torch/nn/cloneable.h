@@ -7,7 +7,6 @@
 #include <ATen/OptionsGuard.h>
 #include <ATen/core/TensorOptions.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 
 #include <memory>
 #include <utility>
@@ -34,7 +33,7 @@ class Cloneable : public virtual Module {
   /// and submodules in the cloned module are different from those in the
   /// original module.
   std::shared_ptr<Module> clone(
-      c10::optional<Device> device = c10::nullopt) const override {
+      optional<Device> device = nullopt) const override {
     OptionsGuard options_guard(TensorOptions().device(device));
 
     NoGradGuard no_grad;

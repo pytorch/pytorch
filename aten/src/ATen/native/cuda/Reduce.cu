@@ -41,7 +41,8 @@ std::ostream& operator<<(std::ostream& out, const ReduceConfig& config) {
   out << "], ";
   out << "values_per_thread=" << config.values_per_thread() << ", ";
   out << "block=" << config.block() << ", ";
-  out << "grid=" << config.grid();
+  out << "grid=" << config.grid() << ", ";
+  out << "global_memory_size=" << config.global_memory_size();
   out << ")";
   return out;
 }

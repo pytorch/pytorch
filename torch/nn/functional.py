@@ -10,7 +10,6 @@ import torch
 from torch._C import _infer_size, _add_docstr
 from . import _functions
 from .modules import utils
-from ._functions.padding import ConstantPadNd
 from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
@@ -858,6 +857,7 @@ In-place version of :func:`~leaky_relu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def prelu(input, weight):
     r"""prelu(input, weight) -> Tensor
 
@@ -897,6 +897,7 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 """)
 
 
+@torch._jit_internal.weak_script
 def hardshrink(input, lambd=0.5):
     r"""
     hardshrink(input, lambd=0.5) -> Tensor
@@ -905,6 +906,7 @@ def hardshrink(input, lambd=0.5):
 
     See :class:`~torch.nn.Hardshrink` for more details.
     """
+    # type: (Tensor, float) -> Tensor
     return torch.hardshrink(input, lambd)
 
 
@@ -2293,7 +2295,7 @@ def pad(input, pad, mode='constant', value=0):
     assert len(pad) % 2 == 0, 'Padding length must be divisible by 2'
     assert len(pad) // 2 <= input.dim(), 'Padding length too large'
     if mode == 'constant':
-        return ConstantPadNd.apply(input, pad, value)
+        return _VF.constant_pad_nd(input, pad, value)
     else:
         assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
         if input.dim() == 3:
@@ -2320,10 +2322,12 @@ def pad(input, pad, mode='constant', value=0):
 
 # distance
 
-def pairwise_distance(x1, x2, p=2, eps=1e-6, keepdim=False):
+@torch._jit_internal.weak_script
+def pairwise_distance(x1, x2, p=2., eps=1e-6, keepdim=False):
     r"""
     See :class:`torch.nn.PairwiseDistance` for details
     """
+    # type: (Tensor, Tensor, float, float, bool) -> Tensor
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 

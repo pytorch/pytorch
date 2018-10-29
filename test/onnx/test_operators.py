@@ -17,6 +17,8 @@ import shutil
 import sys
 import common_utils as common
 
+from test_pytorch_common import skipIfCI
+
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
@@ -73,7 +75,6 @@ class TestOperators(TestCase):
             import test_onnx_common
             model_def = onnx.ModelProto.FromString(onnx_model_pb)
             onnx.checker.check_model(model_def)
-
             if _onnx_test:
                 test_function = inspect.stack()[1][0].f_code.co_name
                 test_name = test_function[0:4] + "_operator" + test_function[4:]
@@ -432,6 +433,7 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
+    @skipIfCI
     def test_upsample(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
@@ -518,6 +520,9 @@ class TestOperators(TestCase):
         BigModule()(*inp)
         self.assertONNX(BigModule(), inp)
 
+    def test_randn(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(lambda x: torch.randn(1, 2, 3, 4) + x, x)
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

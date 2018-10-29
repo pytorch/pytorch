@@ -106,9 +106,9 @@ class CAFFE2_API Tensor final {
         /*is_variable=*/ false
       )) {
     Resize(dims);
-    CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), size());
+    CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), numel());
     context->CopyItemsFromCPU(
-        storage().dtype(), size(), values.data(), mutable_data<T>());
+        storage().dtype(), numel(), values.data(), mutable_data<T>());
   }
 
   /**
@@ -128,7 +128,7 @@ class CAFFE2_API Tensor final {
       )) {
     Resize(std::vector<int64_t>{});
     context->CopyItemsFromCPU(
-        storage().dtype(), size(), &value, mutable_data<T>());
+        storage().dtype(), numel(), &value, mutable_data<T>());
   }
 
   Tensor Clone() const {
@@ -337,19 +337,27 @@ class CAFFE2_API Tensor final {
   /**
    * Returns the number of dimensions of the data.
    */
+  inline int dim() const {
+    return impl_->dim();
+  }
+
+  /**
+   * (To be deprecated) Returns the number of dimensions of the data.
+   */
   inline int ndim() const {
     return impl_->dim();
   }
 
   /**
-   * Returns the size (i.e. the number of items) of the tensor.
+   * (To be deprecated) Returns the size (i.e. the number of items) of the
+   * tensor.
    */
   inline int64_t size() const {
     return impl_->numel();
   }
 
   /**
-   * Returns the size (i.e. the number of items) of the tensor.
+   * Returns the number of items of the tensor.
    */
   inline int64_t numel() const {
     return impl_->numel();
@@ -375,6 +383,7 @@ class CAFFE2_API Tensor final {
     return impl_.get()->sizes();
   }
 
+  // To be deprecated
   inline at::IntList dims() const {
     return impl_.get()->sizes();
   }
@@ -429,6 +438,14 @@ class CAFFE2_API Tensor final {
   /**
    * Returns the TypeMeta object associated with the current data type.
    */
+  inline const TypeMeta& dtype() const {
+    return impl_->dtype();
+  }
+
+  /**
+   * (To be deprecated) Returns the TypeMeta object associated with the current
+   * data type.
+   */
   inline const TypeMeta& meta() const {
     return impl_->dtype();
   }
@@ -450,6 +467,11 @@ class CAFFE2_API Tensor final {
     return static_cast<int>(s);
   }
 
+  inline int64_t size(const int i) const {
+    return impl_->size(i);
+  }
+
+  // To be deprecated
   inline int64_t dim(const int i) const {
     return impl_->size(i);
   }
@@ -529,7 +551,7 @@ void TensorPrinter::Print(const Tensor& tensor) {
   std::stringstream values_stream;
   // One most likely doesn't want to print int64-number of items for visual
   // inspection, so we cast down to int here.
-  int total_count = static_cast<int>(std::min(tensor.size(), int64_t(limit_)));
+  int total_count = static_cast<int>(std::min(tensor.numel(), int64_t(limit_)));
   const T* tensor_data = tensor.template data<T>();
   for (int i = 0; i < total_count - 1; ++i) {
     values_stream << tensor_data[i] << ",";

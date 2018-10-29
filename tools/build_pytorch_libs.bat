@@ -40,11 +40,18 @@ IF "%~1"=="--use-nnpack" (
   set /a USE_NNPACK=0
 )
 
-IF "%~1"=="--use-mkldnn" (
-  set /a NO_MKLDNN=0
+IF "%~1"=="--use-qnnpack" (
+  set /a USE_QNNPACK=1
   shift
 ) ELSE (
-  set /a NO_MKLDNN=1
+  set /a USE_QNNPACK=0
+)
+
+IF "%~1"=="--use-mkldnn" (
+  set /a USE_MKLDNN=1
+  shift
+) ELSE (
+  set /a USE_MKLDNN=0
 )
 
 IF "%~1"=="--use-gloo-ibverbs" (
@@ -190,6 +197,7 @@ goto:eof
                   -DUSE_LEVELDB=%USE_LEVELDB% ^
                   -DUSE_LMDB=%USE_LMDB% ^
                   -DUSE_OPENCV=%USE_OPENCV% ^
+                  -DUSE_QNNPACK=%USE_QNNPACK% ^
                   -DUSE_FFMPEG=%USE_FFMPEG% ^
                   -DUSE_GLOG=OFF ^
                   -DUSE_GFLAGS=OFF ^
@@ -197,10 +205,7 @@ goto:eof
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
                   -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^
-                  -DNO_MKLDNN=%NO_MKLDNN% ^
-                  -DMKLDNN_INCLUDE_DIR="%MKLDNN_INCLUDE_DIR%" ^
-                  -DMKLDNN_LIB_DIR="%MKLDNN_LIB_DIR%" ^
-                  -DMKLDNN_LIBRARY="%MKLDNN_LIBRARY%" ^
+                  -DUSE_MKLDNN=%USE_MKLDNN% ^
                   -DATEN_NO_CONTRIB=1 ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^

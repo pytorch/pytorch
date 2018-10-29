@@ -28,6 +28,7 @@ import __main__
 import errno
 
 import expecttest
+import hashlib
 
 import torch
 import torch.cuda
@@ -690,3 +691,110 @@ def random_fullrank_matrix_distinct_singular_value(l, *batches):
             s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
             all_matrices.append(u.mm(torch.diag(s)).mm(v.t()))
         return torch.stack(all_matrices).reshape(*(batches + (l, l)))
+
+
+def do_test_dtypes(self, dtypes, layout, device):
+    for dtype in dtypes:
+        if dtype != torch.float16:
+            out = torch.zeros((2, 3), dtype=dtype, layout=layout, device=device)
+            self.assertIs(dtype, out.dtype)
+            self.assertIs(layout, out.layout)
+            self.assertEqual(device, out.device)
+
+
+def do_test_empty_full(self, dtypes, layout, device):
+    shape = torch.Size([2, 3])
+
+    def check_value(tensor, dtype, layout, device, value, requires_grad):
+        self.assertEqual(shape, tensor.shape)
+        self.assertIs(dtype, tensor.dtype)
+        self.assertIs(layout, tensor.layout)
+        self.assertEqual(tensor.requires_grad, requires_grad)
+        if tensor.is_cuda and device is not None:
+            self.assertEqual(device, tensor.device)
+        if value is not None:
+            fill = tensor.new(shape).fill_(value)
+            self.assertEqual(tensor, fill)
+
+    def get_int64_dtype(dtype):
+        module = '.'.join(str(dtype).split('.')[1:-1])
+        if not module:
+            return torch.int64
+        return operator.attrgetter(module)(torch).int64
+
+    default_dtype = torch.get_default_dtype()
+    check_value(torch.empty(shape), default_dtype, torch.strided, -1, None, False)
+    check_value(torch.full(shape, -5), default_dtype, torch.strided, -1, None, False)
+    for dtype in dtypes:
+        for rg in {dtype.is_floating_point, False}:
+            int64_dtype = get_int64_dtype(dtype)
+            v = torch.empty(shape, dtype=dtype, device=device, layout=layout, requires_grad=rg)
+            check_value(v, dtype, layout, device, None, rg)
+            out = v.new()
+            check_value(torch.empty(shape, out=out, device=device, layout=layout, requires_grad=rg),
+                        dtype, layout, device, None, rg)
+            check_value(v.new_empty(shape), dtype, layout, device, None, False)
+            check_value(v.new_empty(shape, dtype=int64_dtype, device=device, requires_grad=False),
+                        int64_dtype, layout, device, None, False)
+            check_value(torch.empty_like(v), dtype, layout, device, None, False)
+            check_value(torch.empty_like(v, dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
+                        int64_dtype, layout, device, None, False)
+
+            if dtype is not torch.float16 and layout != torch.sparse_coo:
+                fv = 3
+                v = torch.full(shape, fv, dtype=dtype, layout=layout, device=device, requires_grad=rg)
+                check_value(v, dtype, layout, device, fv, rg)
+                check_value(v.new_full(shape, fv + 1), dtype, layout, device, fv + 1, False)
+                out = v.new()
+                check_value(torch.full(shape, fv + 2, out=out, device=device, layout=layout, requires_grad=rg),
+                            dtype, layout, device, fv + 2, rg)
+                check_value(v.new_full(shape, fv + 3, dtype=int64_dtype, device=device, requires_grad=False),
+                            int64_dtype, layout, device, fv + 3, False)
+                check_value(torch.full_like(v, fv + 4), dtype, layout, device, fv + 4, False)
+                check_value(torch.full_like(v, fv + 5,
+                                            dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
+                            int64_dtype, layout, device, fv + 5, False)
+
+
+IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
+
+THESE_TAKE_WAY_TOO_LONG = {
+    'test_Conv3d_groups',
+    'test_conv_double_backward_groups',
+    'test_Conv3d_dilated',
+    'test_Conv3d_stride_padding',
+    'test_Conv3d_dilated_strided',
+    'test_Conv3d',
+    'test_Conv2d_dilated',
+    'test_ConvTranspose3d_dilated',
+    'test_ConvTranspose2d_dilated',
+    'test_snli',
+    'test_Conv2d',
+    'test_Conv2d_padding',
+    'test_ConvTranspose2d_no_bias',
+    'test_ConvTranspose2d',
+    'test_ConvTranspose3d',
+    'test_Conv2d_no_bias',
+    'test_matmul_4d_4d',
+    'test_multinomial_invalid_probs',
+}
+
+num_shards = os.environ.get('TEST_NUM_SHARDS', None)
+shard = os.environ.get('TEST_SHARD', None)
+if num_shards is not None and shard is not None:
+    num_shards = int(num_shards)
+    shard = int(shard)
+
+    def load_tests(loader, tests, pattern):
+        test_suite = unittest.TestSuite()
+        for test_group in tests:
+            for test in test_group:
+                name = test.id().split('.')[-1]
+                if name in THESE_TAKE_WAY_TOO_LONG:
+                    continue
+                hash_id = int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16)
+                if hash_id % num_shards == shard:
+                    test_suite.addTest(test)
+        return test_suite
+else:
+    load_tests = None
