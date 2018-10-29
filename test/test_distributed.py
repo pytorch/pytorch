@@ -42,6 +42,7 @@ class _FC2(nn.Module):
 
     def forward(self, x):
         x = self.fc(x)
+        return x
 
 
 class Net(nn.Module):

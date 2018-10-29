@@ -156,6 +156,19 @@ class Barrier(object):
 
 
 # The test network must live at top level so we can test pickling it.
+
+
+class _FC2(nn.Module):
+
+    def __init__(self):
+        super(_FC2, self).__init__()
+        self.fc = nn.Linear(10, 50, bias=True)
+        self.fc.bias.requires_grad = False
+
+    def forward(self, x):
+        x = self.fc(x)
+        return x
+
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
