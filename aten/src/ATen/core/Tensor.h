@@ -780,10 +780,10 @@ public:
   // `x.to(y.dtype)`.
   // TODO: remove following two after at::kDouble and its friends are TypeMeta's.
   inline Tensor to(caffe2::TypeMeta type_meta, bool non_blocking=false, bool copy=false) const {
-    return this->to(/*scalar_type=*/dataTypeToScalarType(type_meta.id()), non_blocking, copy);
+    return this->to(/*scalar_type=*/typeMetaToScalarType(type_meta), non_blocking, copy);
   }
   inline Tensor to(Device device, caffe2::TypeMeta type_meta, bool non_blocking=false, bool copy=false) const {
-    return this->to(device, /*scalar_type=*/dataTypeToScalarType(type_meta.id()), non_blocking, copy);
+    return this->to(device, /*scalar_type=*/typeMetaToScalarType(type_meta), non_blocking, copy);
   }
 
   template <typename F, typename... Args>
