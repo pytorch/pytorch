@@ -193,8 +193,23 @@ class DistributedDataParallel(Module):
                     self.bucket_map[p] = (bucket_idx, idx)
                 self.bucket_sizes[bucket_idx] += 1
 
-        self.buckets = [[[None for _ in range(self.bucket_sizes[i])]
-                        for _ in range(len(self.device_ids))] for i in range(len(self.bucket_sizes))]
+        # Cache an empty tensor on each GPU device such that when there are
+        # parameters that are not used in forward, the DDP can still continue
+        # without failing, and caching it will make it zero overhead, compared
+        # to creating the empty tensors for every gradient
+        self.empty_tensors = [torch.tensor([]).cuda(self.device_ids[dev_idx])
+                              for dev_idx in range(len(self.device_ids))]
+
+        # We give each gradient tensor in the bucket an initial value of an
+        # empty tensor, for any gradients that are updated during the backward
+        # hook, it will be overriden, so those gradients that are not overriden
+        # are unused gradients. This will allow further tensor coalescing and
+        # all-reduction proceed without problem even though we might have
+        # unused parameters thus gradients that are not updated by backward in
+        # the bucket itself
+        self.buckets = [[[self.empty_tensors[dev_idx] for _ in range(self.bucket_sizes[i])]
+                        for dev_idx in range(len(self.device_ids))] for i in range(len(self.bucket_sizes))]
+
         # The number of params ready in each bucket
         self.buckets_ready_size = [[0 for _ in range(len(self.device_ids))] for i in range(len(self.bucket_sizes))]
 
@@ -378,8 +393,8 @@ class DistributedDataParallel(Module):
         self.ready_buckets_not_reduced = set()
         self.reduction_works = [None for _ in range(len(self.bucket_sizes))]
         self.devs_ready = [0 for _ in range(len(self.bucket_sizes))]
+        self.buckets = [[[self.empty_tensors[dev_idx] for _ in range(self.bucket_sizes[i])]
+                        for dev_idx in range(len(self.device_ids))] for i in range(len(self.bucket_sizes))]
 
-        self.buckets = [[[None for _ in range(self.bucket_sizes[i])]
-                        for _ in range(len(self.device_ids))] for i in range(len(self.bucket_sizes))]
         self.buckets_coalesced = [[] for _ in range(len(self.bucket_sizes))]
         self.buckets_ready_size = [[0 for _ in range(len(self.device_ids))] for i in range(len(self.bucket_sizes))]
