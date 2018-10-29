@@ -40,7 +40,7 @@ echo "CMake version:"
 cmake --version
 
 # TODO: Don't run this...
-pip install -r requirements.txt || true
+pip install --user -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # This is necessary in order to cross compile (or else we'll have missing GPU device).
@@ -69,19 +69,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   python tools/amd_build/build_caffe2_amd.py
   USE_ROCM=1 python setup.py install --user
   exit 0
-fi
-
-# TODO: Don't install this here
-if ! which conda; then
-  if ! which pip; then
-    sudo chown -R jenkins /usr/local
-    wget https://bootstrap.pypa.io/get-pip.py
-    python get-pip.py
-    pip install numpy pyyaml future hypothesis protobuf pytest pillow typing
-    # TODO: This probably doesn't work on Python 3.7
-    pip install scipy==1.1.0 scikit-image
-  fi
-  pip install mkl mkl-devel
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
