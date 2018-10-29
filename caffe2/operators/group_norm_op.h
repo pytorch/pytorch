@@ -41,10 +41,10 @@ class GroupNormOp final : public Operator<Context> {
     const int ndim = X.ndim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
-    const int HxW = X.size() / (N * C);
+    const int HxW = X.numel() / (N * C);
     CAFFE_ENFORCE_EQ(C % group_, 0);
-    CAFFE_ENFORCE_EQ(gamma.size(), C);
-    CAFFE_ENFORCE_EQ(beta.size(), C);
+    CAFFE_ENFORCE_EQ(gamma.numel(), C);
+    CAFFE_ENFORCE_EQ(beta.numel(), C);
     const int G = group_;
     const int D = C / G;
     auto* Y = Output(OUTPUT);
@@ -214,10 +214,10 @@ class GroupNormGradientOp final : public Operator<Context> {
     const int ndim = X.ndim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
-    const int HxW = X.size() / (N * C);
+    const int HxW = X.numel() / (N * C);
     CAFFE_ENFORCE_EQ(C % group_, 0);
-    CAFFE_ENFORCE_EQ(gamma.size(), C);
-    CAFFE_ENFORCE_EQ(beta.size(), C);
+    CAFFE_ENFORCE_EQ(gamma.numel(), C);
+    CAFFE_ENFORCE_EQ(beta.numel(), C);
     const int G = group_;
     const int D = C / G;
     auto* dX = Output(INPUT_GRAD);

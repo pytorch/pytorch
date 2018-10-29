@@ -122,9 +122,9 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
       *bounds = bounds_input.template data<T>();
       *slopes = slopes_input.template data<T>();
       *intercepts = intercepts_input.template data<T>();
-      num_bounds = bounds_input.size();
-      num_slopes = slopes_input.size();
-      num_intercepts = intercepts_input.size();
+      num_bounds = bounds_input.numel();
+      num_slopes = slopes_input.numel();
+      num_intercepts = intercepts_input.numel();
     }
     InferNumFunctionsPerGroup(
         num_bounds, num_slopes, num_intercepts, num_func_per_group, num_group);

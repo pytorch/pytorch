@@ -73,7 +73,7 @@ bool PoolGradientOp<T, Context, PoolType>::RunOnDeviceWithOrderNCHW() {
   // TODO(Yangqing): Add shape checks.
   dX->ResizeLike(X);
   math::Set<float, CPUContext>(
-      X.size(), 0, dX->template mutable_data<float>(), &context_);
+      X.numel(), 0, dX->template mutable_data<float>(), &context_);
   const float* Xdata = X.template data<float>();
   const float* Ydata = Y.template data<float>();
   const float* dYdata = dY.template data<float>();
@@ -207,13 +207,13 @@ bool PoolGradientOp<T, Context, PoolType>::RunOnDeviceWithOrderNHWC() {
   int channels = X.dim32(X.ndim() - 1);
   CAFFE_ENFORCE_EQ(channels, dY.dim32(dY.ndim() - 1));
   ConstEigenArrayMap<T> Ymat(
-      Y.template data<float>(), channels, Y.size() / channels);
+      Y.template data<float>(), channels, Y.numel() / channels);
   ConstEigenArrayMap<float> dYmat(
-      dY.template data<float>(), channels, Y.size() / channels);
+      dY.template data<float>(), channels, Y.numel() / channels);
   ConstEigenArrayMap<float> Xmat(
-      X.template data<float>(), channels, X.size() / channels);
+      X.template data<float>(), channels, X.numel() / channels);
   EigenArrayMap<float> dXmat(
-      dX->template mutable_data<float>(), channels, X.size() / channels);
+      dX->template mutable_data<float>(), channels, X.numel() / channels);
   dXmat.setZero();
   int height = X.dim32(1);
   int width = kernel_.size() > 1 ? X.dim32(2) : 1;

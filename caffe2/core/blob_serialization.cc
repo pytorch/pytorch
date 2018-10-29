@@ -119,7 +119,7 @@ void TensorSerializer::SerializeWithChunkSize(
   CAFFE_ENFORCE(typeMeta.Match<Tensor>());
   const auto& tensor = *static_cast<const Tensor*>(pointer);
   if (chunk_size == kNoChunking) {
-    chunk_size = tensor.size() + 1; // to account for empty tensors
+    chunk_size = tensor.numel() + 1; // to account for empty tensors
   } else if (chunk_size == kDefaultChunkSize) {
     chunk_size = FLAGS_caffe2_tensor_chunk_size;
   }
@@ -147,7 +147,7 @@ void TensorSerializer::SerializeWithChunkSize(
       processChunk(chunkStart);
     }
   };
-  if (tensor.size() > chunk_size) {
+  if (tensor.numel() > chunk_size) {
     for (int i = 0; i < FLAGS_caffe2_max_tensor_serializer_threads; ++i) {
       futures.emplace_back(std::async(std::launch::async, task));
     }
@@ -158,11 +158,11 @@ void TensorSerializer::SerializeWithChunkSize(
   // Serialize whole vector. If vector is empty, it's shape still needs to be
   // serialized in empty proto
   for (size_t chunkBegin = 0;
-       chunkBegin < std::max(tensor.size(), static_cast<int64_t>(1));
+       chunkBegin < std::max(tensor.numel(), static_cast<int64_t>(1));
        chunkBegin += chunk_size) {
     VLOG(2) << "Starting a chunk at " << chunkBegin;
 #ifndef __ANDROID__
-    if (tensor.size() > chunk_size) {
+    if (tensor.numel() > chunk_size) {
       chunkQueue.Push(chunkBegin);
     } else {
       // Sync mode for small tensors
@@ -189,13 +189,13 @@ void TensorSerializer::Serialize(
     size_t chunkBegin,
     int32_t chunkSize) {
   CAFFE_ENFORCE(
-      chunkBegin <= input.size(),
+      chunkBegin <= input.numel(),
       "Chunk begin is out of tensor: ",
       chunkBegin,
       ' ',
-      input.size());
-  if (chunkBegin + chunkSize > input.size()) {
-    chunkSize = input.size() - chunkBegin;
+      input.numel());
+  if (chunkBegin + chunkSize > input.numel()) {
+    chunkSize = input.numel() - chunkBegin;
   }
 
   if (chunkSize != 0) {
@@ -408,19 +408,19 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
   tensor->Resize(dims);
 
   int64_t chunkBegin = 0;
-  auto chunkEnd = tensor->size();
+  auto chunkEnd = tensor->numel();
   if (proto.has_segment()) {
     chunkBegin = proto.segment().begin();
     chunkEnd = proto.segment().end();
   }
   CAFFE_ENFORCE(
-      0 <= chunkBegin && chunkBegin <= chunkEnd && chunkEnd <= tensor->size(),
+      0 <= chunkBegin && chunkBegin <= chunkEnd && chunkEnd <= tensor->numel(),
       "Invalid chunk ",
       chunkBegin,
       ' ',
       chunkEnd,
       " with total tensor size ",
-      tensor->size());
+      tensor->numel());
   auto chunkSize = chunkEnd - chunkBegin;
 
   switch (proto.data_type()) {

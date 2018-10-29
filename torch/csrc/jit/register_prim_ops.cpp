@@ -535,6 +535,26 @@ RegisterOperators reg({
             };
           }
         }),
+    Operator(
+        prim::fork,
+        [](Node* node) {
+          Code code(node->g(attr::Subgraph));
+          JIT_ASSERT(node->blocks().size() == 0);
+          JIT_ASSERT(node->hasAttribute(attr::Subgraph));
+          return [=](Stack& stack) {
+            InterpreterState(code).run(stack);
+            push(stack, Future(pop(stack)));
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::wait(Future(t) self) -> t",
+        [](Node* node) {
+          return [=](Stack& stack) {
+            push(stack, pop(stack).toFuture()->get());
+            return 0;
+          };
+        }),
 });
 
 // define implementations for primitive number ops

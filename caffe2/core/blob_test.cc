@@ -246,7 +246,7 @@ TYPED_TEST_CASE(TensorCPUDeathTest, TensorTypes);
 TYPED_TEST(TensorCPUTest, TensorInitializedEmpty) {
   Tensor tensor(CPU);
   EXPECT_EQ(tensor.ndim(), 1);
-  EXPECT_EQ(tensor.size(), 0);
+  EXPECT_EQ(tensor.numel(), 0);
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
@@ -256,7 +256,7 @@ TYPED_TEST(TensorCPUTest, TensorInitializedEmpty) {
   EXPECT_EQ(tensor.dim32(0), 2);
   EXPECT_EQ(tensor.dim32(1), 3);
   EXPECT_EQ(tensor.dim32(2), 5);
-  EXPECT_EQ(tensor.size(), 2 * 3 * 5);
+  EXPECT_EQ(tensor.numel(), 2 * 3 * 5);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
 }
@@ -318,7 +318,7 @@ TYPED_TEST(TensorCPUTest, TensorResizeZeroDim) {
   dims[1] = 0;
   dims[2] = 13;
   tensor.Resize(dims);
-  EXPECT_EQ(tensor.size(), 0);
+  EXPECT_EQ(tensor.numel(), 0);
   EXPECT_EQ(tensor.ndim(), 3);
   EXPECT_EQ(tensor.dim32(0), 7);
   EXPECT_EQ(tensor.dim32(1), 0);
@@ -332,7 +332,7 @@ TYPED_TEST(TensorCPUTest, TensorInitializedScalar) {
   vector<int> dims;
   Tensor tensor(dims, CPU);
   EXPECT_EQ(tensor.ndim(), 0);
-  EXPECT_EQ(tensor.size(), 1);
+  EXPECT_EQ(tensor.numel(), 1);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
 }
@@ -350,7 +350,7 @@ TYPED_TEST(TensorCPUTest, TensorShareData) {
   EXPECT_TRUE(other_tensor.data<TypeParam>() != nullptr);
   EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
   // Set one value, check the other
-  for (int i = 0; i < tensor.size(); ++i) {
+  for (int i = 0; i < tensor.numel(); ++i) {
     tensor.mutable_data<TypeParam>()[i] = i;
     EXPECT_EQ(other_tensor.data<TypeParam>()[i], i);
   }
@@ -367,7 +367,7 @@ TYPED_TEST(TensorCPUTest, TensorShareDataRawPointer) {
   EXPECT_EQ(tensor.mutable_data<TypeParam>(), raw_buffer.get());
   EXPECT_EQ(tensor.data<TypeParam>(), raw_buffer.get());
   // Set one value, check the other
-  for (int i = 0; i < tensor.size(); ++i) {
+  for (int i = 0; i < tensor.numel(); ++i) {
     raw_buffer.get()[i] = i;
     EXPECT_EQ(tensor.data<TypeParam>()[i], i);
   }
@@ -385,7 +385,7 @@ TYPED_TEST(TensorCPUTest, TensorShareDataRawPointerWithMeta) {
   EXPECT_EQ(tensor.mutable_data<TypeParam>(), raw_buffer.get());
   EXPECT_EQ(tensor.data<TypeParam>(), raw_buffer.get());
   // Set one value, check the other
-  for (int i = 0; i < tensor.size(); ++i) {
+  for (int i = 0; i < tensor.numel(); ++i) {
     raw_buffer.get()[i] = i;
     EXPECT_EQ(tensor.data<TypeParam>()[i], i);
   }
@@ -408,7 +408,7 @@ TYPED_TEST(TensorCPUTest, TensorShareDataCanUseDifferentShapes) {
   EXPECT_TRUE(other_tensor.data<TypeParam>() != nullptr);
   EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
   // Set one value, check the other
-  for (int i = 0; i < tensor.size(); ++i) {
+  for (int i = 0; i < tensor.numel(); ++i) {
     tensor.mutable_data<TypeParam>()[i] = i;
     EXPECT_EQ(other_tensor.data<TypeParam>()[i], i);
   }
@@ -510,14 +510,14 @@ TYPED_TEST(TensorCPUTest, MaxKeepOnShrink) {
 TYPED_TEST(TensorCPUDeathTest, CannotAccessRawDataWhenEmpty) {
   Tensor tensor(CPU);
   EXPECT_EQ(tensor.ndim(), 1);
-  EXPECT_EQ(tensor.size(), 0);
+  EXPECT_EQ(tensor.numel(), 0);
   ASSERT_ANY_THROW(tensor.raw_data());
 }
 
 TYPED_TEST(TensorCPUDeathTest, CannotAccessDataWhenEmpty) {
   Tensor tensor(CPU);
   EXPECT_EQ(tensor.ndim(), 1);
-  EXPECT_EQ(tensor.size(), 0);
+  EXPECT_EQ(tensor.numel(), 0);
   ASSERT_ANY_THROW(tensor.data<TypeParam>());
 }
 
@@ -525,7 +525,7 @@ TEST(TensorTest, TensorNonFundamentalType) {
   Tensor tensor(vector<int>{2, 3, 4}, CPU);
   EXPECT_TRUE(tensor.mutable_data<std::string>() != nullptr);
   const std::string* ptr = tensor.data<std::string>();
-  for (int i = 0; i < tensor.size(); ++i) {
+  for (int i = 0; i < tensor.numel(); ++i) {
     EXPECT_TRUE(ptr[i] == "");
   }
 }
@@ -534,22 +534,22 @@ TEST(TensorTest, TensorNonFundamentalTypeClone) {
   Tensor tensor(vector<int>{2, 3, 4}, CPU);
   std::string* ptr = tensor.mutable_data<std::string>();
   EXPECT_TRUE(ptr != nullptr);
-  for (int i = 0; i < tensor.size(); ++i) {
+  for (int i = 0; i < tensor.numel(); ++i) {
     EXPECT_TRUE(ptr[i] == "");
     ptr[i] = "filled";
   }
   Tensor dst_tensor = tensor.Clone();
   const std::string* dst_ptr = dst_tensor.data<std::string>();
-  for (int i = 0; i < dst_tensor.size(); ++i) {
+  for (int i = 0; i < dst_tensor.numel(); ++i) {
     EXPECT_TRUE(dst_ptr[i] == "filled");
   }
   // Change the original tensor
-  for (int i = 0; i < tensor.size(); ++i) {
+  for (int i = 0; i < tensor.numel(); ++i) {
     EXPECT_TRUE(ptr[i] == "filled");
     ptr[i] = "changed";
   }
   // Confirm that the cloned tensor is not affect
-  for (int i = 0; i < dst_tensor.size(); ++i) {
+  for (int i = 0; i < dst_tensor.numel(); ++i) {
     EXPECT_TRUE(dst_ptr[i] == "filled");
   }
 }
@@ -561,7 +561,7 @@ TEST(TensorTest, Tensor64BitDimension) {
   Tensor tensor(vector<int64_t>{large_number}, CPU);
   EXPECT_EQ(tensor.ndim(), 1);
   EXPECT_EQ(tensor.dim(0), large_number);
-  EXPECT_EQ(tensor.size(), large_number);
+  EXPECT_EQ(tensor.numel(), large_number);
   try {
     EXPECT_TRUE(tensor.mutable_data<char>() != nullptr);
   } catch (const EnforceNotMet& e) {
@@ -584,7 +584,7 @@ TEST(TensorTest, Tensor64BitDimension) {
   EXPECT_EQ(tensor.ndim(), 2);
   EXPECT_EQ(tensor.dim(0), large_number);
   EXPECT_EQ(tensor.dim(1), 100);
-  EXPECT_EQ(tensor.size(), large_number * 100);
+  EXPECT_EQ(tensor.numel(), large_number * 100);
 }
 
 TEST(TensorDeathTest, CannotCastDownLargeDims) {
@@ -697,7 +697,7 @@ TEST(TensorTest, Half) {
   Blob blob;
   TensorCPU* tensor = BlobGetMutableTensor(&blob, CPU);
   tensor->Resize(kSize);
-  for (int i = 0; i < tensor->size(); ++i) {
+  for (int i = 0; i < tensor->numel(); ++i) {
     tensor->mutable_data<at::Half>()[i].x = i % 10000;
   }
   string serialized = SerializeBlob(blob, "test");
@@ -1093,7 +1093,7 @@ TEST(TensorConstruction, UninitializedCopyTest) {
   Tensor z = x.Clone();
   EXPECT_FALSE(x.dtype_initialized());
   EXPECT_FALSE(y.dtype_initialized());
-  LOG(INFO) << "z.size()" << z.size();
+  LOG(INFO) << "z.size()" << z.numel();
   EXPECT_FALSE(z.dtype_initialized());
 }
 

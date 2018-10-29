@@ -142,7 +142,7 @@ bool CuDNNDropoutOp::DoRunWithType() {
   if (is_test_) {
     if (Y != &X) {
       context_.CopySameDevice<T>(
-          X.size(), X.template data<T>(), Y->template mutable_data<T>());
+          X.numel(), X.template data<T>(), Y->template mutable_data<T>());
     }
     return true;
   } else {

@@ -528,13 +528,11 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
   // If these are CUDA tensors, create streams and events
   if (key.type->is_cuda()) {
     entry->streams.reserve(key.devices.size());
-    entry->events.resize(key.devices.size());
+    entry->events.reserve(key.devices.size());
     for (size_t i = 0; i < key.devices.size(); i++) {
       deviceGuard.set_index(key.devices[i]);
       entry->streams.push_back(at::cuda::getStreamFromPool());
-      // Avoid move constructor, to workaround
-      // https://github.com/pytorch/pytorch/pull/13183
-      entry->events[i] = CUDAEvent::create();
+      entry->events.push_back(CUDAEvent::create());
     }
   }
 #endif

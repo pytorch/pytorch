@@ -39,9 +39,9 @@ C10_DEFINE_int(
     "Max number of NUMA nodes allowed in net async executor");
 
 C10_DEFINE_int(
-    caffe2_net_async_cpu_pool_size,
+    caffe2_net_async_thread_pool_size,
     0,
-    "Number of threads in CPU pool by default");
+    "Number of threads in device thread pool by default");
 
 C10_DEFINE_bool(
     caffe2_net_async_check_stream_status,
@@ -150,13 +150,7 @@ TaskThreadPoolBase* AsyncNetBase::pool(const DeviceOption& device_option) {
   if (use_single_pool_) {
     return poolGetter(cpu_pools_, PROTO_CPU, -1, num_workers_);
   }
-  static const std::unordered_set<int> cpu_types{
-      PROTO_CPU,
-      PROTO_MKLDNN,
-      PROTO_IDEEP,
-      PROTO_ONLY_FOR_TEST,
-  };
-  if (cpu_types.find(device_option.device_type()) != cpu_types.end()) {
+  if (IsCPUDeviceType(device_option.device_type())) {
     auto numa_node_id = -1;
     if (device_option.has_numa_node_id()) {
       numa_node_id = device_option.numa_node_id();
@@ -479,7 +473,15 @@ C10_DEFINE_SHARED_REGISTRY(
 C10_REGISTER_CREATOR(
     ThreadPoolRegistry,
     CPU,
-    GetAsyncNetCPUThreadPool<TaskThreadPool>);
+    GetAsyncNetThreadPool<TaskThreadPool, PROTO_CPU>);
+C10_REGISTER_CREATOR(
+    ThreadPoolRegistry,
+    CUDA,
+    GetAsyncNetThreadPool<TaskThreadPool, PROTO_CUDA>);
+C10_REGISTER_CREATOR(
+    ThreadPoolRegistry,
+    HIP,
+    GetAsyncNetThreadPool<TaskThreadPool, PROTO_HIP>);
 
 void AsyncNetBase::computeExecutionModeFlags() {
   static const std::string kDag = "dag";
