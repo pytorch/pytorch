@@ -83,12 +83,12 @@ bool BatchBoxCoxOp<CPUContext>::DoRunWithType() {
   output->ResizeLike(Input(DATA));
   auto* output_ptr = output->template mutable_data<T>();
 
-  if (data.size() <= 0) {
+  if (data.numel() <= 0) {
     return true;
   }
 
-  CAFFE_ENFORCE_EQ(lambda1.size(), D);
-  CAFFE_ENFORCE_EQ(lambda2.size(), D);
+  CAFFE_ENFORCE_EQ(lambda1.numel(), D);
+  CAFFE_ENFORCE_EQ(lambda2.numel(), D);
 
   const auto* data_ptr = data.template data<T>();
   const auto* lambda1_ptr = lambda1.template data<T>();

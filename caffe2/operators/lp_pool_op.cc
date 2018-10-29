@@ -18,7 +18,7 @@ bool PoolOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNCHW() {
 
   const float* Xdata = X.data<float>();
   float* Ydata = Y->template mutable_data<float>();
-  math::Set<float, CPUContext>(Y->size(), 0, Ydata, &context_);
+  math::Set<float, CPUContext>(Y->numel(), 0, Ydata, &context_);
   // The main loop
   int channels = X.dim32(1);
   int height = X.dim32(2);
@@ -68,7 +68,7 @@ bool PoolOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
 
   const float* Xdata = X.data<float>();
   float* Ydata = Y->template mutable_data<float>();
-  math::Set<float, CPUContext>(Y->size(), 0, Ydata, &context_);
+  math::Set<float, CPUContext>(Y->numel(), 0, Ydata, &context_);
   // The main loop
   int pooled_height = Y->dim32(1);
   int pooled_width = Y->dim32(2);
@@ -97,8 +97,8 @@ bool PoolOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
       }
     }
     // Do offset.
-    Xdata += X.size() / X.dim32(0);
-    Ydata += Y->size() / Y->dim32(0);
+    Xdata += X.numel() / X.dim32(0);
+    Ydata += Y->numel() / Y->dim32(0);
   }
   return true;
 }
@@ -115,7 +115,7 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNCHW() {
   // TODO(Yangqing): Add shape checks.
   dX->ResizeLike(X);
   math::Set<float, CPUContext>(
-      X.size(), 0, dX->template mutable_data<float>(), &context_);
+      X.numel(), 0, dX->template mutable_data<float>(), &context_);
   const float* dYdata = dY.data<float>();
   const float* Xdata = X.data<float>();
   const float* Ydata = Y.data<float>();
@@ -171,7 +171,7 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
   // TODO(Yangqing): Add shape checks.
   dX->ResizeLike(X);
   math::Set<float, CPUContext>(
-      X.size(), 0, dX->template mutable_data<float>(), &context_);
+      X.numel(), 0, dX->template mutable_data<float>(), &context_);
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
   const float* Xdata = X.data<float>();
@@ -213,10 +213,10 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
       }
     }
     // offset
-    dXdata += X.size() / X.dim32(0);
-    dYdata += dY.size() / dY.dim32(0);
-    Xdata += X.size() / X.dim32(0);
-    Ydata += Y.size() / Y.dim32(0);
+    dXdata += X.numel() / X.dim32(0);
+    dYdata += dY.numel() / dY.dim32(0);
+    Xdata += X.numel() / X.dim32(0);
+    Ydata += Y.numel() / Y.dim32(0);
   }
   return true;
 }

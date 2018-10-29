@@ -22,6 +22,8 @@ def parse_default(s):
         return '{}'
     elif re.match(r'{.*}', s):
         return s
+    elif s == 'None':
+        return 'c10::nullopt'
     try:
         return int(s)
     except Exception:

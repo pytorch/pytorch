@@ -43,7 +43,7 @@ class MaxReduceDimsOp final : public Operator<Context> {
     float* out_data = Y->template mutable_data<float>();
 
     if (cols == 0 || rows == 0) {
-      math::Set(Y->size(), static_cast<float>(0), out_data, &context_);
+      math::Set(Y->numel(), static_cast<float>(0), out_data, &context_);
       return true;
     }
 
@@ -56,7 +56,7 @@ class MaxReduceDimsOp final : public Operator<Context> {
           "Given lengths input, the number of reduce dimensions should be one.");
       const int batch_size = FIRSTDIMS ? cols : rows;
       CAFFE_ENFORCE(
-          lengths.size() == batch_size,
+          lengths.numel() == batch_size,
           "The size of lengths vector doesn't match the batch size.");
     }
 
@@ -111,7 +111,7 @@ class MaxReduceDimsGradientOp final : public Operator<Context> {
           "Given lengths input, the number of reduce dimensions should be one.");
       const int batch_size = FIRSTDIMS ? cols : rows;
       CAFFE_ENFORCE(
-          lengths.size() == batch_size,
+          lengths.numel() == batch_size,
           "The size of lengths vector doesn't match the batch size.");
     }
 

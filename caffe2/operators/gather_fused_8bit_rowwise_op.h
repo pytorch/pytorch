@@ -33,7 +33,7 @@ class GatherFused8BitRowwiseOp : public Operator<Context> {
 
     int block_size = shape[1];
     auto block_bytesize = data.size_from_dim(1) * data.meta().itemsize();
-    int N = indices.size();
+    int N = indices.numel();
 
     const uint8_t* src_base = data.template data<uint8_t>();
     const Index* idxs = indices.template data<Index>();

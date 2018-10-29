@@ -120,7 +120,7 @@ void TensorVectorResize(
 Tensor empty(at::IntList dims, at::TensorOptions options) {
   // TODO: merge this with at::empty after Tensor is merged
   auto tensor = Tensor(dims, options.device().type());
-  tensor.raw_mutable_data(scalarTypeToTypeMeta(options.dtype()));
+  tensor.raw_mutable_data(options.dtype());
   return tensor;
 }
 
@@ -132,7 +132,7 @@ struct TensorStatGetter : BlobStatGetter {
     auto nbytes = tensor.nbytes();
     if (nbytes > 0 && tensor.IsType<std::string>()) {
       const auto* data = tensor.data<std::string>();
-      for (int i = 0; i < tensor.size(); ++i) {
+      for (int i = 0; i < tensor.numel(); ++i) {
         nbytes += data[i].size();
       }
     }

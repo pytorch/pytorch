@@ -103,7 +103,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   // image.
   const int input_offset = C / group_ * input_image_size;
   const int output_offset = M / group_ * output_image_size;
-  const int offset_offset = offset.size() / offset.dim32(0);
+  const int offset_offset = offset.numel() / offset.dim32(0);
   const int filter_offset = filter.size() / group_;
 
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
