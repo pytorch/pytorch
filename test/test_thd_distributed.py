@@ -16,9 +16,8 @@ import torch.distributed.deprecated as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from common_utils import TestCase
+from common_utils import TestCase, run_tests
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
-from torch.autograd import Variable
 
 
 BACKEND = os.environ["BACKEND"]
@@ -1159,4 +1158,4 @@ if __name__ == "__main__":
         not torch.cuda._initialized
     ), "test_distributed must not have initialized CUDA context on main process"
 
-    unittest.main()
+    run_tests()

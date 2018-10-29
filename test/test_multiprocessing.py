@@ -10,7 +10,6 @@ import torch
 import torch.cuda
 import torch.multiprocessing as mp
 import torch.utils.hooks
-from torch.autograd import Variable
 from torch.nn import Parameter
 from common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
                           load_tests)
@@ -58,7 +57,7 @@ def send_tensor(queue, event, tp):
 
 
 def call_backward():
-    x = torch.autograd.Variable(torch.randn(3, 3), requires_grad=True)
+    x = torch.randn(3, 3, requires_grad=True)
     x.sum().backward()
 
 

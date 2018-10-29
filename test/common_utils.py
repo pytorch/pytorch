@@ -54,6 +54,14 @@ torch.manual_seed(SEED)
 
 
 def run_tests(argv=UNITTEST_ARGS):
+    runfile = os.path.realpath(__file__)
+
+    for name, obj in globals().items():
+        if isinstance(obj, unittest.TestCase):
+            assert inspect.getfile(obj) == runfile, "A unittest.TestCase class " \
+                "existing in top-level is not defined in the running script. " \
+                "Did you accidentally import a unittest.TestCase from another file?"
+
     unittest.main(argv=argv)
 
 PY3 = sys.version_info > (3, 0)
