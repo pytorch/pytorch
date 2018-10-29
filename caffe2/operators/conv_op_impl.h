@@ -47,8 +47,8 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, M);
   const vector<int> X_dims = GetDims(X);
   const vector<int> Y_dims = GetDims(*Y);
-  const int X_HxW = X.size() / (N * C);
-  const int Y_HxW = Y->size() / (N * M);
+  const int X_HxW = X.numel() / (N * C);
+  const int Y_HxW = Y->numel() / (N * M);
   const vector<int> img_shape(X.sizes().cbegin() + 1, X.sizes().cend());
   vector<int> buffer_shape(Y_dims.size() + 1);
   buffer_shape[0] = C * kernel_size;
@@ -60,7 +60,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int kernel_dim = C / G * kernel_size;
   const int X_stride = C * X_HxW;
   const int Y_stride = M * Y_HxW;
-  const int filter_stride = filter.size() / G;
+  const int filter_stride = filter.numel() / G;
 
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
   // and width.
@@ -207,7 +207,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   // The offset corresponding to a single input image, and a single output
   // image.
   const int input_offset = H * W * C;
-  const int output_offset = Y->size() / Y->dim32(0);
+  const int output_offset = Y->numel() / Y->dim32(0);
   // The output image size is the spatial size of the output.
   const int output_image_size = Y->dim32(1) * Y->dim32(2);
   // The col buffer is stored in HWC order as well - kernel_dim, and the height
@@ -225,7 +225,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   // Specialized path for 1 by 1 convolution with stride 1, pad 0 - we
   // can skip im2col.
   if (kernel_dim == (C / group_) && !HasPad() && !HasStride()) {
-    const int HxW = X.size() / (N * C);
+    const int HxW = X.numel() / (N * C);
     if (bias_data != nullptr) {
       ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
           N * HxW, &bias_multiplier_);
@@ -469,8 +469,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   // The offset corresponding to a single input image, and a single output
   // image.
   const int input_offset = C / group_ * input_image_size;
-  const int output_offset = dY.size() / dY.dim32(0) / group_;
-  const int filter_offset = filter.size() / group_;
+  const int output_offset = dY.numel() / dY.dim32(0) / group_;
+  const int filter_offset = filter.numel() / group_;
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
   // and width.
 
@@ -496,13 +496,13 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   T* dfilter_data = dfilter->template mutable_data<T>();
 
   // Pre-setting the gradients to zero.
-  math::Set<T, Context>(dfilter->size(), 0, dfilter_data, &context_);
+  math::Set<T, Context>(dfilter->numel(), 0, dfilter_data, &context_);
 
   T* dbias_data = nullptr;
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);
     dbias->Resize(M);
-    if (bias_multiplier_.size() != output_image_size) {
+    if (bias_multiplier_.numel() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
       math::Set<T, Context>(
@@ -512,7 +512,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           &context_);
     }
     dbias_data = dbias->template mutable_data<T>();
-    math::Set<T, Context>(dbias->size(), 0, dbias_data, &context_);
+    math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
   }
 
   for (int image_id = 0; image_id < N; ++image_id) {
@@ -665,7 +665,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   // The offset corresponding to a single input image, and a single output
   // image.
   const int input_offset = H * W * C;
-  const int output_offset = dY.size() / dY.dim32(0);
+  const int output_offset = dY.numel() / dY.dim32(0);
   // The output image size is the spatial size of the output.
   const int output_image_size = dY.dim32(1) * dY.dim32(2);
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
@@ -679,15 +679,15 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   T* dfilter_data = dfilter->template mutable_data<T>();
 
   // Pre-setting the gradients to zero.
-  math::Set<T, Context>(dfilter->size(), 0, dfilter_data, &context_);
+  math::Set<T, Context>(dfilter->numel(), 0, dfilter_data, &context_);
 
   T* dbias_data = nullptr;
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);
     dbias->Resize(M);
     dbias_data = dbias->template mutable_data<T>();
-    math::Set<T, Context>(dbias->size(), 0, dbias_data, &context_);
-    if (bias_multiplier_.size() != output_image_size) {
+    math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
+    if (bias_multiplier_.numel() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
       math::Set<T, Context>(

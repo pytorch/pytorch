@@ -172,7 +172,7 @@ void TreeWalker::gatherLengthData() {
   lengths_.resize(cursor_.it.numLengthFields());
   for (int i = 0; i < lengths_.size(); ++i) {
     auto& in = input(cursor_.it.lengthField(i).id);
-    if (in.size() > 0) {
+    if (in.numel() > 0) {
       lengths_[i] = in.data<int>();
     } else {
       lengths_[i] = &lenZero;
@@ -325,7 +325,7 @@ class PackRecordsOp : public Operator<CPUContext> {
         auto& tensor = dst[batchId]->back();
         context_.CopyItemsSameDevice(
             field.meta(),
-            tensor.size(),
+            tensor.numel(),
             field.ptr() /* src */,
             tensor.raw_mutable_data(field.meta()) /* dst */);
       }
@@ -348,7 +348,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     const auto* inputs = Input(0).template data<SharedTensorVectorPtr>();
-    const auto numRows = Input(0).size();
+    const auto numRows = Input(0).numel();
 
     CAFFE_ENFORCE_GE(numRows, 0);
 
@@ -399,13 +399,13 @@ class UnPackRecordsOp : public Operator<CPUContext> {
 
         context_.CopyItemsSameDevice(
             *metas[j],
-            input.size(),
+            input.numel(),
             input.raw_data() /* src */,
             destinations[j] /* dst */
         );
 
         destinations[j] =
-            (char*)destinations[j] + input.size() * input.itemsize();
+            (char*)destinations[j] + input.numel() * input.itemsize();
       }
     }
 
@@ -472,7 +472,7 @@ class ReadNextBatchOp : public Operator<CPUContext> {
     lengths.resize(cursor->it.numLengthFields());
     for (int i = 0; i < lengths.size(); ++i) {
       auto& a = Input(cursor->it.lengthField(i).id + 1);
-      if (a.size() > 0) {
+      if (a.numel() > 0) {
         lengths[i] = a.data<int>();
       } else {
         lengths[i] = &lenZero;
@@ -515,10 +515,10 @@ class ReadNextBatchOp : public Operator<CPUContext> {
       void* src =
           (char*)in.raw_data() + offset * innerSize * in.meta().itemsize();
       void* dst = out->raw_mutable_data(in.meta()); // create the tensor
-      if (out->size() == 0) {
+      if (out->numel() == 0) {
         continue;
       }
-      context_.CopyItemsSameDevice(in.meta(), out->size(), src, dst);
+      context_.CopyItemsSameDevice(in.meta(), out->numel(), src, dst);
     }
     return true;
   }
@@ -545,7 +545,7 @@ class ComputeOffsetOp : public Operator<CPUContext> {
     lengths.resize(cursor->it.numLengthFields());
     for (int i = 0; i < lengths.size(); ++i) {
       auto& a = Input(cursor->it.lengthField(i).id + 1);
-      if (a.size() > 0) {
+      if (a.numel() > 0) {
         lengths[i] = a.data<int>();
       } else {
         lengths[i] = &lenZero;
@@ -684,10 +684,10 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
       idx = cursor->offsets.at(0);
       // if we want to enforce batch size but we dont have a complete
       // batch, skip the last rows.
-      if (enforceBatchSize_ && idx + batchSize_ > idxblob.size()) {
-        idx = idxblob.size();
+      if (enforceBatchSize_ && idx + batchSize_ > idxblob.numel()) {
+        idx = idxblob.numel();
       }
-      if (loopOver_ && idx >= idxblob.size()) {
+      if (loopOver_ && idx >= idxblob.numel()) {
         cursor->offsets.at(0) = 0;
         idx = 0;
       }
@@ -701,11 +701,11 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
       outDim.at(0) = 0;
       auto idxbegin = idx;
       for (int j = 0; j < batchSize_; ++j) {
-        if (idx >= idxblob.size()) {
+        if (idx >= idxblob.numel()) {
           break;
         }
         CAFFE_ENFORCE(
-            (idxvec[idx] + 1) * offsetdim[1] + lengthIdx < offsetsmat.size(),
+            (idxvec[idx] + 1) * offsetdim[1] + lengthIdx < offsetsmat.numel(),
             "Out of bound when trying to get elem from offsetsmat");
         auto offsetptr = offsetsmat.template data<TOffset>() +
             idxvec[idx] * offsetdim[1] + lengthIdx;
@@ -717,11 +717,11 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
       idx = idxbegin; // reSet
       auto* out = Output(i);
       out->Resize(outDim);
-      if (out->size() == 0) {
+      if (out->numel() == 0) {
         continue;
       }
       auto dst = static_cast<char*>(out->raw_mutable_data(in.meta()));
-      int block_size = in.size() / in.dim(0);
+      int block_size = in.numel() / in.dim(0);
       auto block_bytesize = in.size_from_dim(1) * in.meta().itemsize();
       CAFFE_ENFORCE(
           block_bytesize == in.nbytes() / in.dim(0),
@@ -729,7 +729,7 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
       auto src_base = static_cast<const char*>(in.raw_data());
       int start = 0;
       for (int j = 0; j < batchSize_; ++j) {
-        if (idx >= idxblob.size()) {
+        if (idx >= idxblob.numel()) {
           break;
         }
         auto offsetptr = offsetsmat.template data<TOffset>() +
@@ -764,7 +764,7 @@ class AppendOp final : public Operator<Context> {
     auto& b = Input(1);
     auto* c = Output(0);
     CAFFE_ENFORCE(b.ndim() >= 1);
-    if (a.size() == 0 && a.dim(0) == 0) {
+    if (a.numel() == 0 && a.dim(0) == 0) {
       c->CopyFrom(b);
       return true;
     }
@@ -775,10 +775,10 @@ class AppendOp final : public Operator<Context> {
     for (int i = 1; i < a.ndim(); ++i) {
       CAFFE_ENFORCE(a.sizes()[i] == b.sizes()[i]);
     }
-    auto oldSize = c->size();
+    auto oldSize = c->numel();
     c->Extend(b.sizes()[0], kDatasetGrowthPct, &context_);
     auto* dst = (char*)c->raw_mutable_data() + oldSize * b.meta().itemsize();
-    context_.CopyItemsSameDevice(b.meta(), b.size(), b.raw_data(), dst);
+    context_.CopyItemsSameDevice(b.meta(), b.numel(), b.raw_data(), dst);
     return true;
   }
 };
@@ -803,7 +803,7 @@ class AtomicAppendOp final : public Operator<Context> {
       auto& b = Input(1 + i + numFields);
       auto* c = Output(i);
       CAFFE_ENFORCE(b.ndim() >= 1);
-      if (a.size() == 0) {
+      if (a.numel() == 0) {
         continue;
       }
       CAFFE_ENFORCE(
@@ -821,14 +821,14 @@ class AtomicAppendOp final : public Operator<Context> {
       auto& a = Input(1 + i);
       auto& b = Input(1 + i + numFields);
       auto* c = Output(i);
-      if (a.size() == 0 && a.dim(0) == 0) {
+      if (a.numel() == 0 && a.dim(0) == 0) {
         c->CopyFrom(b);
         continue;
       }
-      auto oldSize = c->size();
+      auto oldSize = c->numel();
       c->Extend(b.sizes()[0], kDatasetGrowthPct, &context_);
       auto* dst = (char*)c->raw_mutable_data() + oldSize * b.meta().itemsize();
-      context_.CopyItemsSameDevice(b.meta(), b.size(), b.raw_data(), dst);
+      context_.CopyItemsSameDevice(b.meta(), b.numel(), b.raw_data(), dst);
     }
     return true;
   }
@@ -900,7 +900,7 @@ class ConcatTensorVectorOp final : public Operator<Context> {
 
     for (const auto& t : *tensorVector) {
       context_.CopyItemsSameDevice(
-          t.meta(), t.size(), t.raw_data(), dst + offset);
+          t.meta(), t.numel(), t.raw_data(), dst + offset);
       offset += t.nbytes();
     }
 
@@ -1439,7 +1439,7 @@ class TreeCursorSerializer : public BlobSerializerBase {
           offsets->template mutable_data<TOffset>());
       TensorSerializer ser;
       ser.Serialize(
-          *offsets, name, blob_proto.mutable_tensor(), 0, offsets->size());
+          *offsets, name, blob_proto.mutable_tensor(), 0, offsets->numel());
     }
     blob_proto.set_name(name);
     blob_proto.set_type("std::unique_ptr<TreeCursor>");
@@ -1485,7 +1485,7 @@ class TreeCursorDeserializer : public BlobDeserializerBase {
       deser.Deserialize(proto, &offset_blob);
       auto& offsets = offset_blob.template Get<Tensor>();
       auto* offsets_ptr = offsets.data<TOffset>();
-      (*base)->offsets.assign(offsets_ptr, offsets_ptr + offsets.size());
+      (*base)->offsets.assign(offsets_ptr, offsets_ptr + offsets.numel());
     }
   }
 };
