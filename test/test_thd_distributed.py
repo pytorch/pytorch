@@ -169,6 +169,7 @@ class _FC2(nn.Module):
         x = self.fc(x)
         return x
 
+
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
