@@ -44,7 +44,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     CAFFE_ENFORCE(
         bias.dim32(0) == C,
         "bias dimension must be equal to output channel number");
-    if (bias_multiplier_.size() != output_image_size) {
+    if (bias_multiplier_.numel() != output_image_size) {
       bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
       T* bm_data = bias_multiplier_.template mutable_data<T>();
       math::Set<T, Context>(
@@ -126,7 +126,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       }
 
       Xdata += M * H * W;
-      Ydata += Y->size() / Y->dim32(0);
+      Ydata += Y->numel() / Y->dim32(0);
     }
   };
   if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
@@ -166,7 +166,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     CAFFE_ENFORCE(
         bias.dim32(0) == C,
         "bias dimension must be equal to output channel number");
-    if (bias_multiplier_.size() != output_image_size) {
+    if (bias_multiplier_.numel() != output_image_size) {
       bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
       T* bm_data = bias_multiplier_.template mutable_data<T>();
       math::Set<T, Context>(
@@ -234,7 +234,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
             &context_);
       }
       Xdata += M * H * W;
-      Ydata += Y->size() / Y->dim32(0);
+      Ydata += Y->numel() / Y->dim32(0);
     }
   };
   if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
@@ -274,7 +274,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);
     dbias->Resize(C);
-    if (bias_multiplier_.size() != output_image_size) {
+    if (bias_multiplier_.numel() != output_image_size) {
       bias_multiplier_.Resize(1, output_image_size);
       T* bm_data = bias_multiplier_.template mutable_data<T>();
       math::Set<T, Context>(
@@ -290,11 +290,11 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const T* dYdata = dY.template data<T>();
   T* dfilter_data = dfilter->template mutable_data<T>();
   // Pre-setting the gradients to zero
-  math::Set<T, Context>(dfilter->size(), 0, dfilter_data, &context_);
+  math::Set<T, Context>(dfilter->numel(), 0, dfilter_data, &context_);
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);
     T* dbias_data = dbias->template mutable_data<T>();
-    math::Set<T, Context>(dbias->size(), 0, dbias_data, &context_);
+    math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
   }
   for (auto image_id = 0; image_id < N; ++image_id) {
     // gradient w.r.t. filters. Im2Col followed by Gemm
@@ -346,8 +346,8 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           input_grad_data,
           &context_);
     }
-    dYdata += dY.size() / dY.dim32(0);
-    Xdata += X.size() / X.dim32(0);
+    dYdata += dY.numel() / dY.dim32(0);
+    Xdata += X.numel() / X.dim32(0);
   }
   if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
     // Compute gradients w.r.t. the input
@@ -390,8 +390,8 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           0,
           dXdata,
           &context_);
-      dYdata += dY.size() / dY.dim32(0);
-      dXdata += X.size() / X.dim32(0);
+      dYdata += dY.numel() / dY.dim32(0);
+      dXdata += X.numel() / X.dim32(0);
     }
   }
   return true;
@@ -426,7 +426,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);
     dbias->Resize(C);
-    if (bias_multiplier_.size() != output_image_size) {
+    if (bias_multiplier_.numel() != output_image_size) {
       bias_multiplier_.Resize(1, output_image_size);
       T* bm_data = bias_multiplier_.template mutable_data<T>();
       math::Set<T, Context>(
@@ -442,11 +442,11 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const T* dYdata = dY.template data<T>();
   T* dfilter_data = dfilter->template mutable_data<T>();
   // Pre-setting the gradients to zero
-  math::Set<T, Context>(dfilter->size(), 0, dfilter_data, &context_);
+  math::Set<T, Context>(dfilter->numel(), 0, dfilter_data, &context_);
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);
     T* dbias_data = dbias->template mutable_data<T>();
-    math::Set<T, Context>(dbias->size(), 0, dbias_data, &context_);
+    math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
   }
   for (auto image_id = 0; image_id < N; ++image_id) {
     // gradient w.r.t. filters. Im2Col followed by Gemm
@@ -498,8 +498,8 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           input_grad_data,
           &context_);
     }
-    dYdata += dY.size() / dY.dim32(0);
-    Xdata += X.size() / X.dim32(0);
+    dYdata += dY.numel() / dY.dim32(0);
+    Xdata += X.numel() / X.dim32(0);
   }
   if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
     // Compute gradients w.r.t. the input
@@ -542,8 +542,8 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           0,
           dXdata,
           &context_);
-      dYdata += dY.size() / dY.dim32(0);
-      dXdata += X.size() / X.dim32(0);
+      dYdata += dY.numel() / dY.dim32(0);
+      dXdata += X.numel() / X.dim32(0);
     }
   }
   return true;

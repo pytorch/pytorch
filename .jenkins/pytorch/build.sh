@@ -7,15 +7,15 @@
 # (4) build with neither
 if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
   # TODO: move this to Docker
-  sudo apt-get update
-  sudo apt-get install -y --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
+  sudo apt-get -qq update
+  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
   # TODO: move this to Docker
-  sudo apt-get update
-  sudo apt-get install -y --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-  sudo apt-get install -y --no-install-recommends openssh-client openssh-server
+  sudo apt-get -qq update
+  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
+  sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
   sudo mkdir -p /var/run/sshd
 fi
 
@@ -40,7 +40,7 @@ echo "CMake version:"
 cmake --version
 
 # TODO: Don't run this...
-pip install -r requirements.txt || true
+pip install -q -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # This is necessary in order to cross compile (or else we'll have missing GPU device).
@@ -56,8 +56,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export KMTHINLTO=1
 
   # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
-  sudo apt-get install libc++1
-  sudo apt-get install libc++abi1
+  sudo apt-get -qq install libc++1
+  sudo apt-get -qq install libc++abi1
 
   # When hcc runs out of memory, it silently exits without stopping
   # the build process, leaving undefined symbols in the shared lib
@@ -73,7 +73,7 @@ fi
 
 # TODO: Don't install this here
 if ! which conda; then
-  pip install mkl mkl-devel
+  pip install -q mkl mkl-devel
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -112,7 +112,7 @@ git add -f build/bin
 if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
   pushd docs
   # TODO: Don't run this here
-  pip install -r requirements.txt || true
+  pip install -q -r requirements.txt || true
   LC_ALL=C make html
   popd
 fi

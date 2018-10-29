@@ -67,6 +67,8 @@ struct World {
   int64_t world_id;
 };
 
+struct Future;
+
 struct C10_EXPORT Tuple : public List<IValue> {
   using List<IValue>::List;
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
@@ -103,6 +105,7 @@ using GenericList = List<IValue>;
   _(Blob) \
   _(GenericList) \
   _(World) \
+  _(Future) \
 
 struct CAFFE2_API IValue final {
   IValue()
@@ -220,6 +223,19 @@ struct CAFFE2_API IValue final {
   ivalue::World toWorld() const {
     AT_ASSERT(isWorld());
     return payload.as_world;
+  }
+
+  // Future
+  IValue(c10::intrusive_ptr<ivalue::Future> v);
+  IValue(ivalue::Future&& future);
+  bool isFuture() const { return Tag::Future == tag; }
+  c10::intrusive_ptr<ivalue::Future> toFuture() && {
+    AT_ASSERT(isFuture());
+    return moveToIntrusivePtr<ivalue::Future>();
+  }
+  c10::intrusive_ptr<ivalue::Future> toFuture() const & {
+    AT_ASSERT(isFuture());
+    return toIntrusivePtr<ivalue::Future>();
   }
 
   // Int
@@ -439,6 +455,23 @@ struct CAFFE2_API IValue final {
   bool is_intrusive_ptr;
 };
 
+// Future
+struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
+  explicit Future(IValue result_) : result(result_), ready(true) {}
+
+  IValue get() const {
+    AT_ASSERT(ready);
+    return result;
+  }
+
+  CAFFE2_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const Future& v);
+
+  IValue result;
+  bool ready = false;
+};
+
 #undef TORCH_FORALL_TAGS
 
 
@@ -469,6 +502,7 @@ DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
 DEFINE_TO(std::vector<IValue>, toGenericListRef)
 DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(ivalue::World, toWorld)
+DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(IValue, toIValue)
 
 #undef DEFINE_TO
@@ -548,6 +582,13 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericList> v)
 }
 inline IValue::IValue(std::vector<IValue> v)
 : IValue(ivalue::GenericList::create(std::move(v))) {}
+
+inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
+: tag(Tag::Future), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+inline IValue::IValue(ivalue::Future&& future)
+: IValue(c10::make_intrusive<ivalue::Future>(std::move(future))) {}
 
 
 inline const std::vector<int64_t>& IValue::toIntListRef() const {

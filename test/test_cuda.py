@@ -475,7 +475,6 @@ tests = [
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('qr', large_2d_lapack, lambda t: [], 'big', float_types, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('inverse', new_t(20, 20), lambda t: [], None, float_types, False, "skipIfRocm:DoubleTensor,FloatTensor"),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('svd', new_t(10, 10), lambda t: [], 'square', float_types_no_half, False,
@@ -1498,9 +1497,21 @@ class TestCuda(TestCase):
         self.assertEqual(gpu_tensor1[0], 1)
         self.assertEqual(gpu_tensor0[0], 2)
 
+    def test_sum_noncontig(self):
+        x = torch.randn(1, 75, 57, 20, device='cuda').permute(0, 3, 1, 2)
+        y = x.cpu()
+        self.assertEqual(x.sum().cpu(), y.sum())
+        self.assertEqual(x.sum(dim=(-1, -2)).cpu(), y.sum(dim=(-1, -2)))
+        self.assertEqual(x.sum(dim=(1, 3)).cpu(), y.sum(dim=(1, 3)))
+
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
         return TestTorch._select_broadcastable_dims(dims_full)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_inverse(self):
+        TestTorch._test_inverse(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_pinverse(self):

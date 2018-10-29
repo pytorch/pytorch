@@ -6,7 +6,7 @@ namespace caffe2 {
 
 template <>
 bool BooleanUnmaskOp<CPUContext>::RunOnDevice() {
-  int maskSize = Input(0).size();
+  int maskSize = Input(0).numel();
   int numMasks = InputSize() / 2;
   auto& valueMeta = Input(1).meta();
 
@@ -20,7 +20,7 @@ bool BooleanUnmaskOp<CPUContext>::RunOnDevice() {
     for (int maskIndex = 0; maskIndex < numMasks; ++maskIndex) {
       auto& mask = Input(maskIndex * 2);
       CAFFE_ENFORCE_EQ(mask.ndim(), 1);
-      CAFFE_ENFORCE_EQ(mask.size(), maskSize);
+      CAFFE_ENFORCE_EQ(mask.numel(), maskSize);
       const auto* maskPtr = mask.template data<bool>();
 
       auto& values = Input(maskIndex * 2 + 1);
@@ -29,7 +29,7 @@ bool BooleanUnmaskOp<CPUContext>::RunOnDevice() {
 
       if (maskPtr[maskOffset]) {
         auto& valueIndex = nextValueIndices[maskIndex];
-        CAFFE_ENFORCE_LT(valueIndex, values.size());
+        CAFFE_ENFORCE_LT(valueIndex, values.numel());
         auto* src = valuesPtr + (valueIndex++) * valueMeta.itemsize();
         auto* dst = valuesOutPtr + maskOffset * valueMeta.itemsize();
         std::copy(src, src + valueMeta.itemsize(), dst);
@@ -44,7 +44,7 @@ bool BooleanUnmaskOp<CPUContext>::RunOnDevice() {
   for (int i = 0; i < numMasks; ++i) {
     auto& values = Input(i * 2 + 1);
     CAFFE_ENFORCE_EQ(
-        values.size(),
+        values.numel(),
         nextValueIndices[i],
         "The number of true at mask ",
         i,

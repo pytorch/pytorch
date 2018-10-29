@@ -82,9 +82,10 @@ _(aten, _fused_dropout) \
 _(aten, _ger) \
 _(aten, _gesv_helper) \
 _(aten, _gesv_single) \
-_(aten, _getri) \
+_(aten, _getri_single) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
+_(aten, _inverse_helper) \
 _(aten, _linspace) \
 _(aten, _local_scalar) \
 _(aten, _local_scalar_dense) \
