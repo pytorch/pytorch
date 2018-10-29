@@ -117,15 +117,12 @@ TORCH_LIB_DIR="$BASE_DIR/torch/lib"
 INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
 
-C_FLAGS=" -I\"$INSTALL_DIR/include\" \
-  -I\"$INSTALL_DIR/include/TH\" -I\"$INSTALL_DIR/include/THC\" \
-  -I\"$INSTALL_DIR/include/THS\" -I\"$INSTALL_DIR/include/THCS\" \
-  -I\"$INSTALL_DIR/include/THNN\" -I\"$INSTALL_DIR/include/THCUNN\""
+C_FLAGS=""
 # Workaround OpenMPI build failure
 # ImportError: /build/pytorch-0.2.0/.pybuild/pythonX.Y_3.6/build/torch/_C.cpython-36m-x86_64-linux-gnu.so: undefined symbol: _ZN3MPI8Datatype4FreeEv
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=686926
 C_FLAGS="${C_FLAGS} -DOMPI_SKIP_MPICXX=1"
-LDFLAGS="-L\"$INSTALL_DIR/lib\" "
+LDFLAGS=""
 LD_POSTFIX=".so"
 if [[ $(uname) == 'Darwin' ]]; then
     LDFLAGS="$LDFLAGS -Wl,-rpath,@loader_path"
@@ -139,10 +136,6 @@ else
 fi
 CPP_FLAGS=" -std=c++11 "
 THD_FLAGS=""
-NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
-if [[ $USE_CUDA -eq 1 ]]; then
-    GLOO_FLAGS+="-DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
-fi
 # Gloo infiniband support
 if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
     GLOO_FLAGS+=" -DUSE_IBVERBS=1"
@@ -169,76 +162,6 @@ elif [[ -n "$REL_WITH_DEB_INFO" && $REL_WITH_DEB_INFO -ne 0 ]]; then
 fi
 
 echo "Building in $BUILD_TYPE mode"
-
-# Used to build an individual library
-function build() {
-  if [[ -z "$CMAKE_ARGS" ]]; then
-    CMAKE_ARGS=()
-  fi
-  # We create a build directory for the library, which will
-  # contain the cmake output
-  mkdir -p build/$1
-  pushd build/$1
-  BUILD_C_FLAGS=''
-  case $1 in
-      THCS | THCUNN ) BUILD_C_FLAGS=$C_FLAGS;;
-      *) BUILD_C_FLAGS=$C_FLAGS" -fexceptions";;
-  esac
-  if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
-      # TODO: The *_LIBRARIES cmake variables should eventually be
-      # deprecated because we are using .cmake files to handle finding
-      # installed libraries instead
-      ${CMAKE_COMMAND} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
-		       ${CMAKE_GENERATOR} \
-		       -DTorch_FOUND="1" \
-		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-		       -DCMAKE_C_FLAGS="$BUILD_C_FLAGS $USER_CFLAGS" \
-		       -DCMAKE_CXX_FLAGS="$BUILD_C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
-		       -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
-		       -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
-		       -DCMAKE_INSTALL_LIBDIR="$INSTALL_DIR/lib" \
-		       -DCUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS" \
-		       -DCUDA_DEVICE_DEBUG=$CUDA_DEVICE_DEBUG \
-		       -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
-		       -Dcwrap_files="$CWRAP_FILES" \
-		       -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
-		       -DTH_LIB_PATH="$INSTALL_DIR/lib" \
-		       -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
-		       -DC10_LIBRARIES="$INSTALL_DIR/lib/libc10$LD_POSTFIX" \
-		       -DCAFFE2_LIBRARIES="$INSTALL_DIR/lib/libcaffe2$LD_POSTFIX" \
-		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
-		       -DTHNN_LIBRARIES="$INSTALL_DIR/lib/libTHNN$LD_POSTFIX" \
-		       -DTHCUNN_LIBRARIES="$INSTALL_DIR/lib/libTHCUNN$LD_POSTFIX" \
-		       -DTHS_LIBRARIES="$INSTALL_DIR/lib/libTHS$LD_POSTFIX" \
-		       -DTHC_LIBRARIES="$INSTALL_DIR/lib/libTHC$LD_POSTFIX" \
-		       -DTHCS_LIBRARIES="$INSTALL_DIR/lib/libTHCS$LD_POSTFIX" \
-		       -DTH_SO_VERSION=1 \
-		       -DTHC_SO_VERSION=1 \
-		       -DTHNN_SO_VERSION=1 \
-		       -DTHCUNN_SO_VERSION=1 \
-		       -DUSE_CUDA=$USE_CUDA \
-		       -DBUILD_EXAMPLES=OFF \
-		       -DBUILD_TEST=$BUILD_TEST \
-		       -DNO_NNPACK=$((1-$USE_NNPACK)) \
-		       -DNCCL_EXTERNAL=1 \
-		       -DCMAKE_DEBUG_POSTFIX="" \
-		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-		       ${@:2} \
-		       ${CMAKE_ARGS[@]}
-  fi
-  ${CMAKE_INSTALL} -j"$MAX_JOBS"
-  popd
-
-  # Fix rpaths of shared libraries
-  if [[ $(uname) == 'Darwin' ]]; then
-    pushd "$INSTALL_DIR/lib"
-    for lib in *.dylib; do
-      echo "Updating install_name for $lib"
-      install_name_tool -id @rpath/$lib $lib
-    done
-    popd
-  fi
-}
 
 function path_remove {
   # Delete path by parts so we can never accidentally remove sub paths
