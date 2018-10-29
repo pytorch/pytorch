@@ -40,7 +40,7 @@ find_package(Caffe2 REQUIRED)
 
 find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
 add_library(torch UNKNOWN IMPORTED)
-set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
+set(TORCH_LIBRARIES torch caffe2 caffe2_gpu)
 
 if (@USE_CUDA@)
   if(MSVC)
