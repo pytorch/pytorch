@@ -344,7 +344,7 @@ class BaseReducer {
 
     void observeInput(int input, const Tensor& value, int skip_dims) {
       DCHECK_EQ(0, input);
-      auto dims = value.dims();
+      auto dims = value.sizes();
       computeMeta(dims, skip_dims);
     }
 
@@ -395,7 +395,7 @@ class BaseReducerGradient {
 
     Meta(const Tensor& out_grad, int skip_dims, bool first_dim = true)
         : first_dim(first_dim) {
-      auto dims = out_grad.dims();
+      auto dims = out_grad.sizes();
       first_dim ? block_shape.assign(dims.begin() + skip_dims, dims.end())
                 : block_shape.assign(dims.begin(), dims.end() - skip_dims);
       block_size = first_dim

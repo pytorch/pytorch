@@ -31,9 +31,9 @@ TEST(TestStream, CopyAndMoveTest) {
   cudaStream_t cuda_stream;
 
   // Tests that copying works as expected and preserves the stream
-  at::cuda::CUDAStream copyStream;
+  at::cuda::CUDAStream copyStream = at::cuda::getStreamFromPool();
   {
-    auto s = at::cuda::createCUDAStream();
+    auto s = at::cuda::getStreamFromPool();
     device = s.device();
     cuda_stream = s.stream();
 
@@ -49,9 +49,9 @@ TEST(TestStream, CopyAndMoveTest) {
   ASSERT_EQ_CUDA(copyStream.stream(), cuda_stream);
 
   // Tests that moving works as expected and preserves the stream
-  at::cuda::CUDAStream moveStream;
+  at::cuda::CUDAStream moveStream = at::cuda::getStreamFromPool();
   {
-    auto s = at::cuda::createCUDAStream();
+    auto s = at::cuda::getStreamFromPool();
     device = s.device();
     cuda_stream = s.stream();
 
@@ -68,7 +68,7 @@ TEST(TestStream, CopyAndMoveTest) {
 
 // Verifies streams are set properly
 TEST(TestStream, GetAndSetTest) {
-  at::cuda::CUDAStream myStream = at::cuda::createCUDAStream();
+  at::cuda::CUDAStream myStream = at::cuda::getStreamFromPool();
 
   // Sets and gets
   at::cuda::setCurrentCUDAStream(myStream);
@@ -85,16 +85,16 @@ TEST(TestStream, GetAndSetTest) {
   ASSERT_EQ_CUDA(curStream, defaultStream);
 }
 
-void thread_fun(at::cuda::CUDAStream& cur_thread_stream) {
-  auto new_stream = at::cuda::createCUDAStream();
+void thread_fun(at::optional<at::cuda::CUDAStream>& cur_thread_stream) {
+  auto new_stream = at::cuda::getStreamFromPool();
   at::cuda::setCurrentCUDAStream(new_stream);
-  cur_thread_stream = at::cuda::getCurrentCUDAStream();
-  ASSERT_EQ_CUDA(cur_thread_stream, new_stream);
+  cur_thread_stream = {at::cuda::getCurrentCUDAStream()};
+  ASSERT_EQ_CUDA(*cur_thread_stream, new_stream);
 }
 
 // Ensures streams are thread local
 TEST(TestStream, MultithreadGetAndSetTest) {
-  at::cuda::CUDAStream s0, s1;
+  at::optional<at::cuda::CUDAStream> s0, s1;
 
   std::thread t0{thread_fun, std::ref(s0)};
   std::thread t1{thread_fun, std::ref(s1)};
@@ -105,8 +105,8 @@ TEST(TestStream, MultithreadGetAndSetTest) {
   at::cuda::CUDAStream default_stream = at::cuda::getDefaultCUDAStream();
 
   ASSERT_EQ_CUDA(cur_stream, default_stream);
-  ASSERT_NE_CUDA(cur_stream, s0);
-  ASSERT_NE_CUDA(cur_stream, s1);
+  ASSERT_NE_CUDA(cur_stream, *s0);
+  ASSERT_NE_CUDA(cur_stream, *s1);
   ASSERT_NE_CUDA(s0, s1);
 }
 
@@ -120,7 +120,7 @@ TEST(TestStream, CUDAGuardTest) {
 
   ASSERT_EQ_CUDA(at::cuda::current_device(), 0);
   std::vector<at::cuda::CUDAStream> streams0 = {
-      at::cuda::getDefaultCUDAStream(), at::cuda::createCUDAStream()};
+      at::cuda::getDefaultCUDAStream(), at::cuda::getStreamFromPool()};
   ASSERT_EQ_CUDA(streams0[0].device(), 0);
   ASSERT_EQ_CUDA(streams0[1].device(), 0);
   at::cuda::setCurrentCUDAStream(streams0[0]);
@@ -129,7 +129,7 @@ TEST(TestStream, CUDAGuardTest) {
   {
     at::DeviceGuard device_guard(1);
     streams1.push_back(at::cuda::getDefaultCUDAStream());
-    streams1.push_back(at::cuda::createCUDAStream());
+    streams1.push_back(at::cuda::getStreamFromPool());
   }
   ASSERT_EQ_CUDA(streams1[0].device(), 1);
   ASSERT_EQ_CUDA(streams1[1].device(), 1);
@@ -190,7 +190,7 @@ TEST(TestStream, CUDAGuardMovableTest) {
   if (at::cuda::getNumGPUs() < 2) {
     return;
   }
-  const auto stream = at::cuda::createCUDAStream();
+  const auto stream = at::cuda::getStreamFromPool();
   const auto device_count = at::cuda::getNumGPUs();
   at::cuda::CUDAGuard first(stream);
   first.set_device(1);
@@ -209,7 +209,7 @@ TEST(TestStream, CUDAGuardMovableTest) {
 TEST(TestStream, StreamPoolTest) {
   std::vector<at::cuda::CUDAStream> streams{};
   for (int i = 0; i < 200; ++i) {
-    streams.emplace_back(at::cuda::detail::CUDAStream_createStream());
+    streams.emplace_back(at::cuda::detail::CUDAStream_getStreamFromPool());
   }
 
   std::unordered_set<cudaStream_t> stream_set{};
@@ -229,8 +229,8 @@ TEST(TestStream, MultiGPUTest) {
   if (at::cuda::getNumGPUs() < 2)
     return;
 
-  at::cuda::CUDAStream s0 = at::cuda::createCUDAStream(true, 0);
-  at::cuda::CUDAStream s1 = at::cuda::createCUDAStream(false, 1);
+  at::cuda::CUDAStream s0 = at::cuda::getStreamFromPool(true, 0);
+  at::cuda::CUDAStream s1 = at::cuda::getStreamFromPool(false, 1);
 
   at::cuda::setCurrentCUDAStream(s0);
   at::cuda::setCurrentCUDAStream(s1);
@@ -243,15 +243,15 @@ TEST(TestStream, MultiGPUTest) {
 
 // CUDAEvent Syncs
 TEST(TestStream, CUDAEventSyncTest) {
-  const auto stream = at::cuda::createCUDAStream();
+  const auto stream = at::cuda::getStreamFromPool();
   at::cuda::CUDAEvent event;
 
   ASSERT_FALSE(event.happened());
 
   event.recordOnce(stream);
 
-  const auto wait_stream0 = at::cuda::createCUDAStream();
-  const auto wait_stream1 = at::cuda::createCUDAStream();
+  const auto wait_stream0 = at::cuda::getStreamFromPool();
+  const auto wait_stream1 = at::cuda::getStreamFromPool();
 
   wait_stream0.synchronize_with(event);
   wait_stream1.synchronize_with(event);
@@ -265,11 +265,11 @@ TEST(TestStream, CrossDeviceTest) {
   if (at::cuda::getNumGPUs() < 2)
     return;
 
-  const auto stream0 = at::cuda::createCUDAStream();
+  const auto stream0 = at::cuda::getStreamFromPool();
   at::cuda::CUDAEvent event0;
 
   at::cuda::set_device(1);
-  const auto stream1 = at::cuda::createCUDAStream();
+  const auto stream1 = at::cuda::getStreamFromPool();
   at::cuda::CUDAEvent event1;
 
   event0.record(stream0);

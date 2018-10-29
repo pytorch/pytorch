@@ -6,6 +6,7 @@
 #include "cuda_runtime_api.h"
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
+#include <c10/util/Exception.h>
 
 /*
 * A CUDAStream interface. See CUDAStream.cpp for implementation details.
@@ -61,7 +62,7 @@ namespace detail {
 // Pointer-based API (for internal use)
 AT_CUDA_API CUDAStreamInternals* CUDAStream_getDefaultStream(int64_t device = -1);
 
-AT_CUDA_API CUDAStreamInternals* CUDAStream_createStream(
+AT_CUDA_API CUDAStreamInternals* CUDAStream_getStreamFromPool(
   const bool isHighPriority = false
 , int64_t device = -1);
 
@@ -80,9 +81,10 @@ AT_CUDA_API int64_t CUDAStream_device(CUDAStreamInternals*);
 struct AT_CUDA_API CUDAStream {
 
   // Constructors
-  CUDAStream() = default;
   /* implicit */ CUDAStream(CUDAStreamInternals* internals_in)
-  : internals_{internals_in} { }
+    : internals_{internals_in} {
+    AT_ASSERT(internals_in);
+  }
 
   // Returns true if the CUDAStream is not null.
   explicit operator bool() const noexcept { return internals_ != nullptr; }

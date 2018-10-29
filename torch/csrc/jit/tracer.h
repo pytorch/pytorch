@@ -170,6 +170,7 @@ TORCH_API void addInputs(Node *n, const char * name, int64_t value);
 TORCH_API void addInputs(Node *n, const char * name, bool value);
 TORCH_API void addInputs(Node *n, const char * name, double value);
 TORCH_API void addInputs(Node *n, const char * name, const at::Scalar& value);
+TORCH_API void addInputs(Node *n, const char * name, const c10::optional<at::Scalar>& value);
 TORCH_API void addInputs(Node *n, const char * name, const at::Tensor& value);
 TORCH_API void addInputs(Node *n, const char * name, at::IntList value);
 TORCH_API void addInputs(Node *n, const char * name, at::TensorList value);

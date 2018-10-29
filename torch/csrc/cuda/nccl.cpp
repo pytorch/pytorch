@@ -241,14 +241,14 @@ void broadcast(
   const auto comms = user_comms.empty() ? _get_communicators(tensors)
                                         : ArrayRef<ncclComm_t>(user_comms);
 
-  auto thcState = at::globalContext().lazyInitCUDA();
   at::DeviceGuard device_guard;
   AutoNcclGroup nccl_group_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
-    device_guard.set_index(tensors[i].get_device());
+    int device = tensors[i].get_device();
+    device_guard.set_index(device);
     const auto stream = (streams.empty() || !streams[i])
-        ? THCState_getCurrentStream(thcState)
-        : THCStream_stream(streams[i]);
+        ? at::cuda::getCurrentCUDAStream(device).stream()
+        : streams[i]->stream();
     AT_CHECK(
         static_cast<uint64_t>(numel) <= static_cast<uint64_t>(count_max),
         "Broadcast tensor has ",
@@ -270,8 +270,8 @@ void reduce(
     std::vector<at::Tensor>& outputs,
     int32_t root,
     int32_t op,
-    c10::optional<std::vector<at::cuda::CUDAStream>> streams,
-    c10::optional<std::vector<ncclComm_t>> comms) {
+    const c10::optional<stream_list>& streams,
+    const c10::optional<std::vector<ncclComm_t>>& comms) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   AT_CHECK(
@@ -287,17 +287,18 @@ void reduce(
   auto comms_ref =
       comms ? _get_communicators(inputs) : ArrayRef<ncclComm_t>(*comms);
 
-  auto thcState = at::globalContext().lazyInitCUDA();
-
   at::DeviceGuard device_guard;
   AutoNcclGroup nccl_group_guard;
   for (size_t i = 0; i < len; i++) {
-    device_guard.set_index(inputs[i].device().index());
-    // Default to the current THC stream
-    cudaStream_t stream = THCState_getCurrentStream(thcState);
+    int device = inputs[i].device().index();
+    device_guard.set_index(device);
 
+    // Default to the current  stream
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream(device).stream();
+
+    // Two levels of optional! Wow!
     if (streams && (*streams)[i]) {
-      stream = (*streams)[i].stream();
+      stream = (*streams)[i]->stream();
     }
     NCCL_CHECK(ncclReduce(
         inputs[i].data_ptr(),
@@ -318,8 +319,8 @@ void reduce(
     std::vector<at::Tensor>& inputs,
     int32_t root,
     int32_t op,
-    c10::optional<std::vector<at::cuda::CUDAStream>> streams,
-    c10::optional<std::vector<ncclComm_t>> comms) {
+    const c10::optional<stream_list>& streams,
+    const c10::optional<std::vector<ncclComm_t>>& comms) {
   reduce(inputs, /*outputs=*/inputs, root, op, streams, comms);
 }
 } // namespace nccl

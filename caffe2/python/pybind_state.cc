@@ -402,7 +402,7 @@ void addObjectMethods(py::module& m) {
             // be, since we're doing an extra allocation we didn't
             // need to do.  But I don't remember how to clue in
             // pybind11 how to convert ArrayRef to vector.
-            return tensor->dims().vec();
+            return tensor->sizes().vec();
           })
       .def(
           "_reshape",
@@ -586,7 +586,8 @@ void addObjectMethods(py::module& m) {
         const auto& meta = GetGradientForOp(def, output_gradients);
         std::vector<py::bytes> grad_ops;
         for (const auto& op : meta.ops_) {
-          grad_ops.push_back(op.SerializeAsString());
+          grad_ops.push_back(
+            SerializeAsString_EnforceCheck(op, "addObjectMethods"));
         }
         return std::pair<std::vector<py::bytes>, std::vector<GradientWrapper>>{
             grad_ops, meta.g_input_};
@@ -976,12 +977,12 @@ void addGlobalMethods(py::module& m) {
   // keep this Python attribute for BC
   m.attr("has_mkldnn") = py::bool_(false);
 
-  m.attr("use_ideep") = py::bool_(
-#ifdef CAFFE2_USE_IDEEP
+  m.attr("use_mkldnn") = py::bool_(
+#ifdef CAFFE2_USE_MKLDNN
       true
-#else // CAFFE2_USE_IDEEP
+#else // CAFFE2_USE_MKLDNN
       false
-#endif // CAFFE2_USE_IDEEP
+#endif // CAFFE2_USE_MKLDNN
       );
 
   m.attr("use_trt") = py::bool_(

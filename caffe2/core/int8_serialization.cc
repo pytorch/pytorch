@@ -35,14 +35,14 @@ class Int8TensorCPUSerializer : public BlobSerializerBase {
     switch (data_type) {
       case TensorProto_DataType_INT32:
         detail::CopyToProtoAsIs(
-            tensor.t.size(),
+            tensor.t.numel(),
             tensor.t.template data<int32_t>(),
             proto.mutable_data(),
             &this->context_);
         break;
       case TensorProto_DataType_UINT8:
         detail::CopyToProtoWithCast(
-            tensor.t.size(),
+            tensor.t.numel(),
             tensor.t.template data<uint8_t>(),
             proto.mutable_data(),
             &this->context_);
@@ -51,7 +51,7 @@ class Int8TensorCPUSerializer : public BlobSerializerBase {
         CAFFE_ENFORCE(false, "Unsupported data type in Int8TensorCPU");
     }
 
-    acceptor(name, blob_proto.SerializeAsString());
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 
  private:
@@ -73,14 +73,14 @@ class Int8TensorCPUDeserializer : public TensorDeserializer {
     switch (proto.data_type()) {
       case TensorProto_DataType_INT32:
         detail::CopyFromProtoAsIs(
-            tensor->t.size(),
+            tensor->t.numel(),
             proto.data(),
             tensor->t.template mutable_data<int32_t>(),
             &this->context_);
         break;
       case TensorProto_DataType_UINT8:
         detail::CopyFromProtoWithCast(
-            tensor->t.size(),
+            tensor->t.numel(),
             proto.data(),
             tensor->t.template mutable_data<uint8_t>(),
             &this->context_);

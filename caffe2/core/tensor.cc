@@ -45,7 +45,7 @@ std::string TensorPrinter::MetaStr(const Tensor& tensor) {
   std::stringstream meta_stream;
   meta_stream << "Tensor " << tensor_name_ << " of type "
               << tensor.meta().name() << ". Dims: (";
-  for (const auto dim : tensor.dims()) {
+  for (const auto dim : tensor.sizes()) {
     meta_stream << dim << ",";
   }
   meta_stream << "): ";
@@ -86,7 +86,7 @@ vector<int64_t> GetTensorInfo(
   CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImpl());
   *capacity = tc->storage().capacity();
   ExtractDeviceOption(device, tc->GetDevice());
-  return tc->dims().vec();
+  return tc->sizes().vec();
 }
 
 // since we only have one tensor, probably need to remove this at some point?
@@ -117,12 +117,10 @@ void TensorVectorResize(
   }
 }
 
-Tensor empty(
-    const std::vector<int64_t>& dims,
-    const at::TensorOptions& options) {
+Tensor empty(at::IntList dims, at::TensorOptions options) {
   // TODO: merge this with at::empty after Tensor is merged
   auto tensor = Tensor(dims, options.device().type());
-  tensor.raw_mutable_data(scalarTypeToTypeMeta(options.dtype()));
+  tensor.raw_mutable_data(options.dtype());
   return tensor;
 }
 
@@ -134,7 +132,7 @@ struct TensorStatGetter : BlobStatGetter {
     auto nbytes = tensor.nbytes();
     if (nbytes > 0 && tensor.IsType<std::string>()) {
       const auto* data = tensor.data<std::string>();
-      for (int i = 0; i < tensor.size(); ++i) {
+      for (int i = 0; i < tensor.numel(); ++i) {
         nbytes += data[i].size();
       }
     }

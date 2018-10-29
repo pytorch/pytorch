@@ -4,6 +4,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/Functions.h>
 #include <ATen/OptionsGuard.h>
+#include <ATen/core/ScalarType.h>
 #include <ATen/core/TensorOptions.h>
 
 using namespace at;
@@ -13,7 +14,7 @@ using namespace at;
   ASSERT_EQ(options.device().type(), Device((device_), (index_)).type()); \
   ASSERT_TRUE(                                                                \
       options.device().index() == Device((device_), (index_)).index());       \
-  ASSERT_EQ(options.dtype(), (type_));                                    \
+  ASSERT_EQ(typeMetaToScalarType(options.dtype()), (type_));                  \
   ASSERT_TRUE(options.layout() == (layout_))
 
 #define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)                \

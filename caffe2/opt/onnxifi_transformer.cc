@@ -259,7 +259,11 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
 
   for (const auto& op : net.op()) {
     for (const auto& input : op.input()) {
-      if (total_inputs.emplace(input).second && weights_in_ws.count(input)) {
+      bool not_seen = total_inputs.emplace(input).second;
+      if (!not_seen) {
+        continue;
+      }
+      if (weights_in_ws.count(input)) {
         // We add weights as inputs too
         total_inputs_vec.emplace_back(input);
         initialization_list.emplace(input);

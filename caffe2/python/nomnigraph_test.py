@@ -274,6 +274,17 @@ class TestBindings(test_util.TestCase):
         new_annot = node.getAnnotation()
         assert new_annot.getDeviceType() == 7
 
+    def test_annotation_operator_def(self):
+        nn = ng.NNModule()
+        opdef = core.CreateOperator("Conv", [], [], engine="SENTINEL")
+        node = nn.dataFlow.createNode(opdef)
+        assert node.annotation.operator_def.engine == "SENTINEL"
+        opdef = core.CreateOperator("Conv", [], [], engine="NEW_SENTINEL")
+        node.annotation.operator_def = opdef
+        netdef = nn.convertToCaffe2Proto()
+        assert len(netdef.op) == 1
+        assert netdef.op[0].engine == "NEW_SENTINEL"
+
     def test_annotation_device_option(self):
         nn = ng.NNModule()
         node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))

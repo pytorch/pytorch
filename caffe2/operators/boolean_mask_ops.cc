@@ -26,12 +26,12 @@ class BooleanMaskLengthsOp final : public Operator<Context> {
     const auto* lengthsPtr = lengths.template data<T>();
     const auto* maskPtr = mask.template data<bool>();
     auto totalLength =
-        std::accumulate(lengthsPtr, lengthsPtr + lengths.size(), 0);
-    CAFFE_ENFORCE(mask.size() == totalLength);
+        std::accumulate(lengthsPtr, lengthsPtr + lengths.numel(), 0);
+    CAFFE_ENFORCE(mask.numel() == totalLength);
     lengthsOut->ResizeLike(lengths);
     auto* lengthsOutPtr = lengthsOut->template mutable_data<T>();
     int p = 0;
-    for (int i = 0; i < lengths.size(); ++i) {
+    for (int i = 0; i < lengths.numel(); ++i) {
       T lengthOut = 0;
       for (int j = 0; j < lengthsPtr[i]; ++j) {
         if (maskPtr[p++]) {
@@ -52,11 +52,11 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   auto* dataOut = Output(0);
   CAFFE_ENFORCE(data.ndim() >= 1);
   CAFFE_ENFORCE_EQ(mask.ndim(), 1);
-  CAFFE_ENFORCE(data.dims()[0] == mask.dims()[0]);
+  CAFFE_ENFORCE(data.sizes()[0] == mask.sizes()[0]);
 
   const auto* maskPtr = mask.template data<bool>();
   int numOutputs = 0;
-  int outerSize = mask.size();
+  int outerSize = mask.numel();
   for (int i = 0; i < outerSize; ++i) {
     if (maskPtr[i]) {
       ++numOutputs;
@@ -64,7 +64,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   }
   std::vector<int64_t> outShape;
   outShape.push_back(numOutputs);
-  outShape.insert(outShape.end(), data.dims().begin() + 1, data.dims().end());
+  outShape.insert(outShape.end(), data.sizes().begin() + 1, data.sizes().end());
   dataOut->Resize(outShape);
   auto* outPtr = (char*)dataOut->raw_mutable_data(data.meta());
 
@@ -410,7 +410,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
           repeated_dims,
           input->data<T>(),
           SequenceFunctor(
-              sequence_lengths->data<int>(), sequence_lengths->size()),
+              sequence_lengths->data<int>(), sequence_lengths->numel()),
           fill_val,
           output->template mutable_data<T>());
     } else {
@@ -420,7 +420,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
           batch_dim,
           input->data<T>(),
           SequenceFunctor(
-              sequence_lengths->data<int>(), sequence_lengths->size()),
+              sequence_lengths->data<int>(), sequence_lengths->numel()),
           fill_val,
           output->template mutable_data<T>());
     }

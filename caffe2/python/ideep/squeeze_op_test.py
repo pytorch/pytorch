@@ -12,7 +12,7 @@ import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu
 
 
-@unittest.skipIf(not workspace.C.use_ideep, "No IDEEP support.")
+@unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class SqueezeTest(hu.HypothesisTestCase):
     @given(
         squeeze_dims=st.lists(st.integers(0, 3), min_size=1, max_size=3),

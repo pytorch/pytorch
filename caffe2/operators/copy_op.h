@@ -19,7 +19,7 @@ class CopyOp : public Operator<Context> {
     output->ResizeLike(input);
     this->context_.template CopyItems<SrcContext, DstContext>(
         input.meta(),
-        input.size(),
+        input.numel(),
         input.raw_data(),
         output->raw_mutable_data(input.meta()));
     return true;

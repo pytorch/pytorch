@@ -42,6 +42,13 @@ void addInputs(Node *n, const char * name, int64_t value)            { detail::g
 void addInputs(Node *n, const char * name, bool value)               { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, double value)             { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, const at::Scalar& value)  { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, const c10::optional<at::Scalar>& value)  {
+  if(value) {
+    detail::genericAddInput(n, *value);
+  } else {
+    detail::genericAddInput(n, IValue());
+  }
+}
 void addInputs(Node *n, const char * name, const std::string& value) { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, const at::Tensor& value)  { n->addInput(getValueTrace(value)); }
 void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { detail::badArgType(value); }
@@ -74,7 +81,7 @@ void addInputs(Node *n, const char * name, at::TensorList value) {
 
 void addInputs(Node* n, const char * name, const at::TensorOptions& options) {
   // [TensorOptions in script] - update this when you change how we schematize TensorOptions
-  addInputs(n, name, options.dtype());
+  addInputs(n, name, at::typeMetaToScalarType(options.dtype()));
   addInputs(n, name, options.layout());
   addInputs(n, name, options.device());
 }
