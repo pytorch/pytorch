@@ -2494,51 +2494,51 @@
   variants: method
   device_guard: false
 
-- func: addbmm_(Tensor self, Tensor batch1, Tensor batch2, Scalar beta=1, Scalar alpha=1) -> Tensor
+- func: addbmm_(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: method
   device_guard: false
 
-- func: addcmul_(Tensor self, Tensor tensor1, Tensor tensor2, Scalar value=1) -> Tensor
+- func: addcmul_(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method
   device_guard: false
 
-- func: addcdiv_(Tensor self, Tensor tensor1, Tensor tensor2, Scalar value=1) -> Tensor
+- func: addcdiv_(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method
   device_guard: false
 
-- func: random_(Tensor self, int64_t from, int64_t to, Generator * generator=nullptr) -> Tensor
+- func: random_(Tensor self, int64_t from, int64_t to, *, Generator* generator=nullptr) -> Tensor
   variants: method
   device_guard: false
 
-- func: random_(Tensor self, int64_t to, Generator * generator=nullptr) -> Tensor
+- func: random_(Tensor self, int64_t to, *, Generator* generator=nullptr) -> Tensor
   variants: method
   device_guard: false
 
-- func: random_(Tensor self, Generator * generator=nullptr) -> Tensor
+- func: random_(Tensor self, *, Generator* generator=nullptr) -> Tensor
   variants: method
   device_guard: false
 
-- func: uniform_(Tensor self, double from=0, double to=1, Generator * generator=nullptr) -> Tensor
+- func: uniform_(Tensor self, double from=0, double to=1, *, Generator* generator=nullptr) -> Tensor
   variants: method
   device_guard: false
 
-- func: normal_(Tensor self, double mean=0, double std=1, Generator * generator=nullptr) -> Tensor
+- func: normal_(Tensor self, double mean=0, double std=1, *, Generator* generator=nullptr) -> Tensor
   variants: method
   device_guard: false
 
-- func: cauchy_(Tensor self, double median=0, double sigma=1, Generator * generator=nullptr) -> Tensor
+- func: cauchy_(Tensor self, double median=0, double sigma=1, *, Generator* generator=nullptr) -> Tensor
   variants: method
   device_guard: false
 
-- func: log_normal_(Tensor self, double mean=1, double std=2, Generator * generator=nullptr) -> Tensor
+- func: log_normal_(Tensor self, double mean=1, double std=2, *, Generator* generator=nullptr) -> Tensor
   variants: method
   device_guard: false
 
-- func: exponential_(Tensor self, double lambd=1, Generator * generator=nullptr) -> Tensor
+- func: exponential_(Tensor self, double lambd=1, *, Generator* generator=nullptr) -> Tensor
   variants: method
   device_guard: false
 
-- func: geometric_(Tensor self, double p, Generator * generator=nullptr) -> Tensor
+- func: geometric_(Tensor self, double p, *, Generator* generator=nullptr) -> Tensor
   variants: method
   device_guard: false
 
