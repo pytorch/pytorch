@@ -17,6 +17,7 @@ from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM
 import torch.distributed as dist
 
+"""
 TESTS = [
     'autograd',
     'cpp_extensions',
@@ -40,6 +41,9 @@ TESTS = [
     'type_info',
     'utils',
 ]
+"""
+
+TESTS = ['distributed']
 
 WINDOWS_BLACKLIST = [
     'distributed',
