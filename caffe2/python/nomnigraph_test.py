@@ -189,6 +189,48 @@ class TestBindings(test_util.TestCase):
             count += 1
         assert count == 1
 
+    def test_delete_subgraph(self):
+        mg = ng.NNMatchGraph()
+        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)
+        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)
+        testm = mg.createNode(ng.NeuralNetOperator("test"))
+        mg.createEdge(test2m, xm)
+        mg.createEdge(xm, testm)
+
+        nn = ng.NNModule()
+        test2 = nn.dataFlow.createNode(ng.NeuralNetOperator("test2"))
+        x = nn.dataFlow.createNode(ng.NeuralNetData("X"))
+        test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))
+        nn.dataFlow.createEdge(test2, x)
+        nn.dataFlow.createEdge(x, test)
+
+        for m in nn.match(mg):
+            match = m
+        nn.deleteSubgraph(match)
+        assert len(nn.controlFlow) == 0
+
+    def test_replace_subraph(self):
+        mg = ng.NNMatchGraph()
+        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)
+        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)
+        testm = mg.createNode(ng.NeuralNetOperator("test"))
+        mg.createEdge(test2m, xm)
+        mg.createEdge(xm, testm)
+
+        nn = ng.NNModule()
+        test2 = nn.dataFlow.createNode(ng.NeuralNetOperator("test2"))
+        x = nn.dataFlow.createNode(ng.NeuralNetData("X"))
+        test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))
+        nn.dataFlow.createEdge(test2, x)
+        nn.dataFlow.createEdge(x, test)
+
+        for m in nn.match(mg):
+            match = m
+        new_op = nn.dataFlow.createNode(ng.NeuralNetOperator("new_op"))
+        nn.replaceSubgraph(match, new_op, [], [])
+        assert len(nn.controlFlow) == 1
+        assert nn.controlFlow[0].name == "new_op"
+
     def test_genericGraph(self):
         g = ng.Graph()
         n1 = g.createNode("hello1")
@@ -257,6 +299,42 @@ class TestBindings(test_util.TestCase):
         node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
         nn.dataFlow.deleteNode(node)
         assert len(nn.dataFlow.getMutableNodes()) == 0
+
+    def test_replace_producer(self):
+        net = core.Net("name")
+        net.FC(["X", "W"], ["Y"])
+        nn = ng.NNModule(net)
+        fc = nn.controlFlow[0]
+        test_op = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        nn.replaceProducer(fc.outputs[0], test_op)
+        nn.deleteNode(fc)
+        assert len(nn.controlFlow) == 1
+        assert nn.controlFlow[0].name == "TestOp"
+
+    def test_replace_all_uses_with(self):
+        net = core.Net("name")
+        net.FC(["X", "W"], ["Y"])
+        net.FC(["X", "W2"], ["Y2"])
+        nn = ng.NNModule(net)
+        fc = nn.controlFlow[0]
+        test_tensor = nn.dataFlow.createNode(ng.NeuralNetData("T"))
+        nn.replaceAllUsesWith(fc.inputs[0], test_tensor)
+
+        for op in nn.controlFlow:
+            assert op.inputs[0].name == "T"
+
+    def test_replace_as_consumer(self):
+        net = core.Net("name")
+        net.FC(["X", "W"], ["Y"])
+        nn = ng.NNModule(net)
+        fc = nn.controlFlow[0]
+        test_op = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        nn.replaceAsConsumer(fc, test_op)
+        nn.deleteNode(fc)
+        assert len(nn.controlFlow) == 1
+        assert nn.controlFlow[0].name == "TestOp"
+        assert nn.controlFlow[0].inputs[0].name == "X"
+        assert nn.controlFlow[0].inputs[1].name == "W"
 
     def test_annotation_basic(self):
         annot = ng.Annotation()
