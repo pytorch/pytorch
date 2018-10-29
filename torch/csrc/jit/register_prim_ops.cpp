@@ -245,11 +245,11 @@ RegisterOperators reg({
           size_t num_inputs = node->inputs().size();
           return [num_inputs](Stack& stack) {
             bool first = true;
-            for(const auto& ivalue: last(stack, num_inputs)) {
-              if(!first)
+            for (const IValue& i : last(stack, num_inputs)) {
+              if (!first)
                 std::cout << " ";
               first = false;
-              std::cout << ivalue;
+              std::cout << i;
             }
             drop(stack, num_inputs);
             std::cout << std::endl;

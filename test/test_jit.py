@@ -1,5 +1,4 @@
 from __future__ import division
-
 import torch
 import torch.jit
 import torch.nn as nn
@@ -7535,7 +7534,7 @@ a")
         ''')
 
         cu.foo(torch.tensor(0))
-        with self.assertRaisesRegex(torch._C.JITException, "Exception"):
+        with self.assertRaisesRegex(torch.jit.Exception, "Exception"):
             cu.foo(torch.tensor(1))
 
         @torch.jit.script
@@ -7549,7 +7548,7 @@ a")
 
         foo(torch.tensor(0))
         # we don't currently validate the name of the exception
-        with self.assertRaisesRegex(torch._C.JITException, "Exception"):
+        with self.assertRaisesRegex(torch.jit.Exception, "Exception"):
             foo(torch.tensor(1))
 
         @torch.jit.script

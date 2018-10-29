@@ -650,7 +650,6 @@ struct InterpreterStateImpl {
     size_t pc = current_pc;
     auto & instructions = function->instructions;
     size_t last = instructions.size();
-    bool jit_exception_thrown = false;
     while(pc < last) {
         // std::cout << "executing " << pc << ": ";
         // function->dumpInstruction(std::cout, pc);
@@ -665,17 +664,15 @@ struct InterpreterStateImpl {
             // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
           }
           pc = new_pc;
-        } catch(JITException & e) {
-          jit_exception_thrown = true;
-          if(!instructions[pc].debug_location)
-            throw; // rethrow original exception
-          // throw a new exception with enhanced debugging information
-          instructions[pc].debug_location->wrapAndRethrowException(e, "operation failed in interpreter");
-        }  catch(std::exception & e) {
-          if(!instructions[pc].debug_location || jit_exception_thrown)
-            throw; // rethrow original exception
-          // throw a new exception with enhanced debugging information
-          instructions[pc].debug_location->wrapAndRethrowException(e, "operation failed in interpreter");
+        } catch(std::exception & e) {
+          if (!instructions[pc].debug_location) {
+            throw;
+          }
+          if (JITException* jit_e = dynamic_cast<JITException *>(&e)) {
+            instructions[pc].debug_location->wrapAndRethrowException(*jit_e, "operation failed in interpreter");
+          } else {
+            instructions[pc].debug_location->wrapAndRethrowException(e, "operation failed in interpreter");
+          }
         }
     }
     current_pc = pc;
