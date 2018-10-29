@@ -63,6 +63,7 @@ Concat
 Softmax
 ChannelShuffle
 Add
+- Broadcast : int : 0
 Reshape
 Flatten
 
@@ -72,3 +73,9 @@ CopyFromOpenCL
 NCHW2NHWC
 NHWC2NCHW
 
+Declare
+Export
+
+GatherRanges
+Slice
+MergeIdLists

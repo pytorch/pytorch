@@ -10,6 +10,7 @@
 #include "torch/csrc/jit/passes/annotate_effects.h"
 #include "torch/csrc/jit/passes/batch_mm.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/erase_number_types.h"
@@ -56,7 +57,7 @@ struct ExecutionPlan {
     , graph(std::move(graph)) {}
 
   void run(Stack& stack) const {
-    return InterpreterState(code).runOneStage(stack);
+    return InterpreterState(code).run(stack);
   }
 
   operator bool() const {
@@ -170,7 +171,7 @@ struct DifferentiableGraphOp {
     }
 
     detachVariables(stack);
-    InterpreterState(f).runOneStage(stack);
+    InterpreterState(f).run(stack);
 
     {
       auto outputs = last(stack, num_outputs);
@@ -317,12 +318,30 @@ struct GraphExecutorImpl {
     return total;
   }
 
+  inline bool hasMutableOperators(Block* block) {
+    for(auto n : block->nodes()) {
+      if(n->kind().is_aten() && n->schema().is_mutable())
+        return true;
+      for(auto b : n->blocks()) {
+        if(hasMutableOperators(b))
+          return true;
+      }
+    }
+    return false;
+  }
+
   GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
     : graph(prepareGraph(graph))
     , optimize(optimize)
     , num_inputs(this->graph->inputs().size())
     , num_flat_inputs(countFlatInputs(graph))
-    , num_outputs(this->graph->outputs().size()) {}
+    , num_outputs(this->graph->outputs().size()) {
+      // until we have correct alias analysis any use of mutable operators
+      // disables all optimization
+      if(hasMutableOperators(this->graph->block())) {
+        optimize = false;
+      }
+    }
 
   // entry point where execution begins
   void run(Stack & stack) {
@@ -444,6 +463,7 @@ private:
   void runOptimization(std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
+    ConstantPooling(graph);
     UnrollLoops(graph);
     PeepholeOptimize(graph);
     CheckInplace(graph);

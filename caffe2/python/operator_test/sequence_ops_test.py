@@ -188,7 +188,6 @@ class TestSequenceOps(serial.SerializedTestCase):
             inputs=[data, lengths],
             reference=partial(_remove_padding_ref, start_pad_width, end_pad_width))
 
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     @serial.given(start_pad_width=st.integers(min_value=0, max_value=2),
            end_pad_width=st.integers(min_value=0, max_value=2),
            args=_gen_test_add_padding(with_pad_data=True),

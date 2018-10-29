@@ -170,6 +170,7 @@ TORCH_API void addInputs(Node *n, const char * name, int64_t value);
 TORCH_API void addInputs(Node *n, const char * name, bool value);
 TORCH_API void addInputs(Node *n, const char * name, double value);
 TORCH_API void addInputs(Node *n, const char * name, const at::Scalar& value);
+TORCH_API void addInputs(Node *n, const char * name, const c10::optional<at::Scalar>& value);
 TORCH_API void addInputs(Node *n, const char * name, const at::Tensor& value);
 TORCH_API void addInputs(Node *n, const char * name, at::IntList value);
 TORCH_API void addInputs(Node *n, const char * name, at::TensorList value);
@@ -209,7 +210,8 @@ template <
          !std::is_convertible<torch::decay_t<T>, at::Tensor>::value)>>
 void addOutput(Node* node, T&&) {
   AT_ERROR(
-      "Found an unsupported argument type ", at::demangle_type<T>(),
+      "Found an unsupported argument type ",
+      c10::demangle_type<T>(),
       " in the JIT tracer. File a bug report.");
 }
 TORCH_API void addOutput(Node* node, const at::Tensor& tensor);

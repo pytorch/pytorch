@@ -12,7 +12,7 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
-CAFFE2_DEFINE_string(
+C10_DEFINE_string(
     caffe2_override_executor,
     "",
     "Comma-separated list of executor overrides");
@@ -107,6 +107,7 @@ std::vector<NetObserverCreator>* GetNetObserverCreators() {
 const std::unordered_map<std::string, std::string>& defaultOverrides() {
   static const std::unordered_map<std::string, std::string> overrides = {
       {"dag", "async_scheduling"},
+      {"prof_dag", "async_scheduling"},
       {"async_dag", "async_scheduling"},
       {"async_polling", "async_scheduling"},
       {"async_simple", "simple"},
@@ -173,7 +174,7 @@ unique_ptr<NetBase> CreateNet(
   return net;
 }
 
-TaskThreadPool* ExecutorHelper::GetPool(
+TaskThreadPoolBase* ExecutorHelper::GetPool(
     const DeviceOption& /* unused */) const {
   CAFFE_THROW("Not implemented");
 }

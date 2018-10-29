@@ -50,9 +50,10 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
       " is equal to the first data dimension ",
       data.dim(0));
 
-  auto shape = data.dims(); // Shape of output is batch_size x max_len x ...
+  auto shape =
+      data.sizes().vec(); // Shape of output is batch_size x max_len x ...
   shape[0] = max_length;
-  shape.insert(shape.begin(), lengths.size());
+  shape.insert(shape.begin(), lengths.numel());
   output->Resize(shape);
 
   // create output tensor
@@ -61,7 +62,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   bool* presence_mask_data = nullptr;
   if (return_presence_mask_) {
     // Shape of presence is batch_size x max_len
-    std::vector<int64_t> presence_shape{lengths.size(), max_length};
+    std::vector<int64_t> presence_shape{lengths.numel(), max_length};
     presence_mask->Resize(presence_shape);
     presence_mask_data = presence_mask->template mutable_data<bool>();
   }
@@ -74,13 +75,13 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   // Do padding
   if (output->template IsType<float>()) {
     math::Set<float, CPUContext>(
-        output->size(),
+        output->numel(),
         padding_,
         output->template mutable_data<float>(),
         &context_);
   }
   if (return_presence_mask_) {
-    memset(presence_mask_data, (int)false, presence_mask->size());
+    memset(presence_mask_data, (int)false, presence_mask->numel());
   }
 
   auto block_size = data.size_from_dim(1);
@@ -129,7 +130,7 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
 
   int64_t total_l = std::accumulate(l, l + lengths.dim(0), (int64_t)0);
 
-  auto shape = data.dims();
+  auto shape = data.sizes().vec();
   CAFFE_ENFORCE_EQ(
       shape[0], lengths.dim(0), "LENGTH should match DATA in dimension 0");
   shape.erase(shape.begin());

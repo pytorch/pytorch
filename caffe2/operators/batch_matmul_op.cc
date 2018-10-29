@@ -13,6 +13,7 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
   if (!broadcast) {
     const auto ndim = in[0].dims_size();
     CAFFE_ENFORCE_GE(ndim, 2);
+    CAFFE_ENFORCE_GE(in[1].dims_size(), 2);
     int a_dim0;
     int b_dim1;
     if (helper.GetSingleArgument<int>("trans_a", 0)) {
@@ -141,7 +142,8 @@ two diemnsional, it behaves like normal matrix multiplication.
         "Pass 1 to allow broadcasting of dimensions. Behavior is the same as numpy.matmul. Gradient is currently not supported when running in broadcast mode.")
     .TensorInferenceFunction(TensorInferenceForBatchMatMul)
     .CostInferenceFunction(
-        OpSchema::CostInferenceFunctionType(CostInferenceForBatchMatMul));
+        OpSchema::CostInferenceFunctionType(CostInferenceForBatchMatMul))
+    .InheritOnnxSchema();
 
 class GetBatchMatMulGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

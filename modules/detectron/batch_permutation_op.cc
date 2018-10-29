@@ -15,14 +15,14 @@
  */
 
 #include "batch_permutation_op.h"
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
 
 namespace caffe2 {
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(
     BatchPermutation,
     IDEEPFallbackOp<BatchPermutationOp<float, CPUContext>>);
@@ -100,6 +100,13 @@ bool BatchPermutationOp<float, CPUContext>::RunOnDevice() {
   const float *src = X.template data<float>();
   float *dst = Y->template mutable_data<float>();
 
+#ifdef _OPENMP
+#if (_OPENMP >= 201307)
+#pragma omp parallel for simd
+#else
+#pragma omp parallel for
+#endif 
+#endif  
   for (int i = 0; i < N; i++) {
     int idx = indices.template data<int>()[i];
 

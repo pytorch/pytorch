@@ -13,6 +13,7 @@ class Foo {
   explicit Foo(int x) {
     // LOG(INFO) << "Foo " << x;
   }
+  virtual ~Foo() {}
 };
 
 C10_DECLARE_REGISTRY(FooRegistry, Foo, int);
@@ -44,6 +45,47 @@ TEST(RegistryTest, CanRunCreator) {
 
 TEST(RegistryTest, ReturnNullOnNonExistingCreator) {
   EXPECT_EQ(FooRegistry()->Create("Non-existing bar", 1), nullptr);
+}
+
+// C10_REGISTER_CLASS_WITH_PRIORITY defines static variable
+void RegisterFooDefault() {
+  C10_REGISTER_CLASS_WITH_PRIORITY(
+      FooRegistry, FooWithPriority, c10::REGISTRY_DEFAULT, Foo);
+}
+
+void RegisterFooDefaultAgain() {
+  C10_REGISTER_CLASS_WITH_PRIORITY(
+      FooRegistry, FooWithPriority, c10::REGISTRY_DEFAULT, Foo);
+}
+
+void RegisterFooBarFallback() {
+  C10_REGISTER_CLASS_WITH_PRIORITY(
+      FooRegistry, FooWithPriority, c10::REGISTRY_FALLBACK, Bar);
+}
+
+void RegisterFooBarPreferred() {
+  C10_REGISTER_CLASS_WITH_PRIORITY(
+      FooRegistry, FooWithPriority, c10::REGISTRY_PREFERRED, Bar);
+}
+
+TEST(RegistryTest, RegistryPriorities) {
+  FooRegistry()->SetTerminate(false);
+  RegisterFooDefault();
+
+  // throws because Foo is already registered with default priority
+  EXPECT_THROW(RegisterFooDefaultAgain(), std::runtime_error);
+
+#ifdef __GXX_RTTI
+  // not going to register Bar because Foo is registered with Default priority
+  RegisterFooBarFallback();
+  std::unique_ptr<Foo> bar1(FooRegistry()->Create("FooWithPriority", 1));
+  EXPECT_EQ(dynamic_cast<Bar*>(bar1.get()), nullptr);
+
+  // will register Bar because of higher priority
+  RegisterFooBarPreferred();
+  std::unique_ptr<Foo> bar2(FooRegistry()->Create("FooWithPriority", 1));
+  EXPECT_NE(dynamic_cast<Bar*>(bar2.get()), nullptr);
+#endif
 }
 
 } // namespace c10_test

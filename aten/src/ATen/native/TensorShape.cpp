@@ -1,17 +1,34 @@
 #include <TH/THTensor.hpp>
+#include <algorithm>
+#include <vector>
 #include "ATen/ATen.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/InferSize.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
-#include "ATen/core/Error.h"
-#include "ATen/core/optional.h"
-#include <ATen/native/sparse/SparseUtils.h>
+#include "c10/util/Exception.h"
+#include "c10/util/Optional.h"
+#include <ATen/SparseTensorUtils.h>
 #include <algorithm>
 #include <vector>
 
 namespace at {
 namespace native {
+
+Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
+  AT_CHECK(shape_tensor.dim() == 1);
+  std::vector<int64_t> shape;
+  auto accessor = shape_tensor.accessor<int64_t, 1>();
+  for (size_t i = 0; i < shape_tensor.numel(); ++i) {
+    shape.push_back(accessor[i]);
+  }
+  return self.reshape(IntList(shape));
+}
+
+Tensor _shape_as_tensor(const Tensor& self) {
+  auto options = TensorOptions(at::kLong).is_variable(self.options().is_variable());
+  return at::tensor(self.sizes(), options);
+}
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
@@ -148,39 +165,38 @@ Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
   return at::as_strided_(self, size, stride, self.storage_offset());
 }
 
-Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length){
+Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   int64_t allDim = self.dim();
   int64_t end = start+length;
   AT_CHECK(allDim > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  AT_CHECK(dim >= 0 && dim < allDim, 
+  AT_CHECK(dim >= 0 && dim < allDim,
     "Dimension ", dim, " out of range. Expecting 0 <= dim < ", allDim, ".");
   AT_CHECK(start >= 0 && length >= 0 && end <= self.size(dim),
     "Invalid range to narrow. range(start, start+length) must be a subset of range(0, ", self.size(dim), ").")
-  LongTensor indices = self._indices();
-  int64_t sparseDims = self._sparseDims();
-  
-  std::vector<int64_t> newSizes = self.sizes().vec();
-  newSizes[dim]=length;
-  
-  Tensor newValues;
-  LongTensor newIndices;
-  if(dim < sparseDims){
+  Tensor indices = self._indices();
+  int64_t sparse_dim = self.sparse_dim();
+
+  std::vector<int64_t> new_sizes = self.sizes().vec();
+  new_sizes[dim] = length;
+
+  Tensor new_values;
+  Tensor new_indices;
+  if (dim < sparse_dim) {
     Tensor mask = (indices[dim] >= start).__and__((indices[dim] < end));
-    newIndices = indices.masked_select(mask).view({sparseDims, -1});
-    newIndices[dim].add_(-start);
+    new_indices = indices.masked_select(mask).view({sparse_dim, -1});
+    new_indices[dim].sub_(start);
     Tensor nzIndices = mask.nonzero().view(-1);
-    newValues = self._values().index_select(0, nzIndices);
-  }else{
+    new_values = self._values().index_select(0, nzIndices);
+  } else {
     /* This means we are narrowing on a dense dim, which is in effect just a
         regular narrow on _values() */
-    newIndices = indices;
-    int64_t ddim = dim - sparseDims + 1;
-    newValues = self._values().narrow_copy(ddim, start, length);
+    new_indices = indices;
+    int64_t dense_dim = dim - sparse_dim + 1;
+    new_values = self._values().narrow_copy(dense_dim, start, length);
   }
 
-  SparseTensor newTensor = at::sparse_coo_tensor(newIndices, newValues, newSizes, self.type().options());
-  _get_sparse_impl(newTensor)->set_coalesced(self.is_coalesced());
-  return newTensor;
+  auto newTensor = at::sparse_coo_tensor(new_indices, new_values, new_sizes);
+  return newTensor._coalesced_(self.is_coalesced());
 }
 
 Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length){
@@ -382,16 +398,16 @@ Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
 }
 
 static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
-  int64_t nsparseDims = self._sparseDims();
-  AT_CHECK(dim0 < nsparseDims && dim1 < nsparseDims,
+  int64_t nsparse_dim = self.sparse_dim();
+  AT_CHECK(dim0 < nsparse_dim && dim1 < nsparse_dim,
            "sparse transpose: transposed dimensions must be sparse ",
-           "Got sparseDims: ", nsparseDims, ", d0: ", dim0, ", d1: ", dim1);
+           "Got sparse_dim: ", nsparse_dim, ", d0: ", dim0, ", d1: ", dim1);
 
   if (self._indices().numel() == 0 && self._values().numel() == 0) {
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
-    _get_sparse_impl(self)->raw_resize_(self._sparseDims(), self._denseDims(), sizes);
+    at::sparse::get_sparse_impl(self)->raw_resize_(self.sparse_dim(), self.dense_dim(), sizes);
   } else {
     auto indices = self._indices();
     auto row0 = indices.select(0, dim0);
@@ -403,12 +419,12 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     row0.copy_(row1);
     row1.copy_(tmp);
 
-    _get_sparse_impl(self)->set_coalesced(false);
+    self._coalesced_(false);
 
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
-    _get_sparse_impl(self)->raw_resize_(self._indices().size(0), self._values().dim() - 1, sizes);
+    at::sparse::get_sparse_impl(self)->raw_resize_(self._indices().size(0), self._values().dim() - 1, sizes);
   }
   return self;
 }
@@ -454,11 +470,11 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
 
 static void check_t(const Tensor& self, const char *fn) {
   if (self.is_sparse()) {
-    int64_t sparseDims = self._sparseDims();
-    int64_t denseDims = self._denseDims();
-    AT_CHECK(sparseDims == 2 && denseDims == 0,
+    int64_t sparse_dim = self.sparse_dim();
+    int64_t dense_dim = self.dense_dim();
+    AT_CHECK(sparse_dim == 2 && dense_dim == 0,
              fn, " expects a tensor with 2 sparse and 0 dense dimensions, but got ",
-             sparseDims, " sparse and ", denseDims, " dense dimensions");
+             sparse_dim, " sparse and ", dense_dim, " dense dimensions");
   } else if (self.dim() != 2) {
     AT_ERROR(fn, " expects a 2D tensor, but self is ", self.dim(), "D");
   }

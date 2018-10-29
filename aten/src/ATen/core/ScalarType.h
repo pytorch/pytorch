@@ -59,7 +59,7 @@ _(int64_t,Long,i) \
 _(float,Float,d) \
 _(double,Double,d)
 
-enum class ScalarType {
+enum class ScalarType : int8_t {
 #define DEFINE_ENUM(_1,n,_2) \
   n,
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ENUM)
@@ -69,8 +69,9 @@ enum class ScalarType {
 };
 
 static inline DataType scalarTypeToDataType(ScalarType scalar_type) {
-#define DEFINE_CASE(ctype,name,_) \
-  case ScalarType:: name : return caffe2::TypeMeta::Id<ctype>();
+#define DEFINE_CASE(ctype, name, _) \
+  case ScalarType::name:            \
+    return caffe2::TypeIdentifier::Get<ctype>();
 
   switch(scalar_type) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
@@ -92,17 +93,25 @@ static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 #undef DEFINE_CASE
 }
 
-static inline ScalarType dataTypeToScalarType(DataType dtype) {
-#define DEFINE_IF(ctype,name,_) \
-  if (dtype == caffe2::TypeMeta::Id<ctype>()) { \
-    return ScalarType:: name; \
+static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
+#define DEFINE_IF(ctype, name, _)                      \
+  if (dtype == caffe2::TypeMeta::Make<ctype>()) { \
+    return ScalarType::name;                           \
   }
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_IF)
 #undef DEFINE_IF
-  if (dtype == at::DataType::uninitialized()) {
+  if (dtype == caffe2::TypeMeta()) {
     return ScalarType::Undefined;
   }
-  AT_ERROR("Unsupported DataType in ATen: ", dtype, " (please report this error)");
+  AT_ERROR("Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
+}
+
+static inline bool operator==(ScalarType t, caffe2::TypeMeta m) {
+  return typeMetaToScalarType(m) == t;
+}
+
+static inline bool operator==(caffe2::TypeMeta m, ScalarType t) {
+  return typeMetaToScalarType(m) == t;
 }
 
 #define DEFINE_CONSTANT(_,name,_2) \
@@ -189,7 +198,6 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
 }
 
 class Tensor;
-typedef ArrayRef<int64_t> IntList;
 typedef ArrayRef<Tensor> TensorList;
 
 inline std::ostream& operator<<(

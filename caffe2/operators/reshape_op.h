@@ -49,9 +49,9 @@ class ReshapeOp : public Operator<Context> {
       const T* shape_data = shape.template data<T>();
 
       // Bit awkward, but needed so works on both CPU and CUDA contexts
-      std::vector<T> tmpv(shape.size());
-      context_.CopyBytesToCPU(shape.size() * sizeof(T), shape_data, &tmpv[0]);
-      actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.size());
+      std::vector<T> tmpv(shape.numel());
+      context_.CopyBytesToCPU(shape.numel() * sizeof(T), shape_data, &tmpv[0]);
+      actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.numel());
     }
 
     // Copy over the dimensions for those that are specified zero.
@@ -64,7 +64,7 @@ class ReshapeOp : public Operator<Context> {
     // Checks if the new shape is valid and fills in the missing dimension
     // specified by -1.
     // NOTE: At most one dimension can be -1.
-    auto total_size = input.size_from_dim(0);
+    auto total_size = input.numel();
     T size = 1;
     int unknown_idx = -1;
     for (int i = 0; i < actual_new_shape.size(); ++i) {
@@ -123,7 +123,7 @@ class ReshapeOp : public Operator<Context> {
       // If we are not doing in-place computation, a copy is needed.
       context_.CopyItemsSameDevice(
           input.meta(),
-          input.size(),
+          input.numel(),
           input.raw_data(),
           output->raw_mutable_data(input.meta()));
     }

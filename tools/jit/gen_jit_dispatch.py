@@ -5,6 +5,7 @@ from itertools import count, combinations, groupby
 from ..autograd.utils import CodeTemplate, write, uninplace_api_name
 from ..autograd.gen_autograd import load_aten_declarations
 from collections import OrderedDict
+from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 
 # JIT has a type system of
 # Scalar = int | float | bool # int is the largest int (int64_t),
@@ -27,6 +28,7 @@ TYPE_MAP = {
     'std::array<bool,4>': 'bool[4]',
     'std::string': 'str',
     'Scalar': 'Scalar',
+    'Scalar?': 'Scalar?',
     'Tensor': 'Tensor',
     'TensorList': 'Tensor[]',
     # this appears in return values instead of TensorList
@@ -45,12 +47,14 @@ TYPE_MAP = {
 
 
 def jit_type_of(arg):
+    # override for when viewing ops have already set
+    # annotated jit types
+    if 'jit_type' in arg:
+        return arg['jit_type']
     typ = TYPE_MAP[arg['simple_type']]
     if is_sized_intlist_arg(arg):
         typ = 'int[{}]'.format(arg['size'])
 
-    if arg.get('is_nullable'):
-        typ = '{}?'.format(typ)
     return typ
 
 
@@ -61,10 +65,11 @@ FROM_IVALUE = {
     'IntList': '{}.toIntList()->elements()',
     'Layout': '{}.to<at::Layout>()',
     'Scalar': '{}.toScalar()',
+    'Scalar?': '{}.toOptional<Scalar>()',
     'ScalarType': '{}.to<at::ScalarType>()',
     'Tensor': '{}.toTensor()',
     'TensorList': '{}.toTensorList()->elements()',
-    'bool': 'bool({}.toInt())',
+    'bool': '{}.toBool()',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
     'std::string': '{}.toString()->string()',
@@ -81,13 +86,12 @@ def from_ivalue(arg, value):
 
 
 CALL_NAMESPACE = CodeTemplate("""\
-auto result = at::${name}(
+auto result_ = at::${name}(
     ${args}
 );
 """)
 CALL_METHOD = CodeTemplate("""\
-DeviceGuard device_guard(deviceForInputs(stack, ${num_inputs}));
-auto result = (${first}).${name}(
+auto result_ = (${first}).${name}(
     ${args}
 );
 """)
@@ -96,7 +100,7 @@ const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
         .device(${device});
-auto result = torch::${name}(
+auto result_ = torch::${name}(
     ${args},
     options
 );
@@ -105,9 +109,10 @@ auto result = torch::${name}(
 CONSTRUCTOR = CodeTemplate("""\
 [](Stack & stack) {
     autograd::profiler::RecordFunction record("${name}");
+    ${lvalues}
     ${call}
     drop(stack, ${num_inputs});
-    pack(stack, std::move(result));
+    pack(stack, std::move(result_));
     return 0;
 }
 """)
@@ -118,10 +123,6 @@ Operator(
     ${op}
 ),
 """)
-
-
-def is_magic_method(api_name):
-    return api_name.startswith('__') and api_name.endswith('__')
 
 
 blacklisted_types = {'SparseTensorRef', 'Storage', 'void*'}
@@ -144,13 +145,13 @@ def is_jit_op(decl):
     if all(r['type'] == 'void' for r in decl['returns']):
         return False
 
-    # we currently only support vararg tensor lists when they are the _first_ argument
-    # and the only tensor argument
     arguments = decl['arguments']
 
-    return ((not decl['api_name'].endswith('_') or is_magic_method(decl['api_name'])) and
-            not decl['name'].endswith('_out') and
-            ('namespace' in decl['method_of'] or 'Tensor' in decl['method_of']) and
+    # there must be a single out variant
+    if is_out_variant(decl) and sum([not not arg.get('output') for arg in arguments]) > 1:
+        return False
+
+    return (('namespace' in decl['method_of'] or 'Tensor' in decl['method_of']) and
             all(is_jit_arg(i, arg) for i, arg in enumerate(decl['arguments'])) and
             all(is_jit_arg(i, arg) for i, arg in enumerate(decl['returns'])))
 
@@ -162,6 +163,29 @@ def is_tensor_arg(arg):
 def is_sized_intlist_arg(arg):
     """Returns True for arguments declared as IntList[k], but False for IntList."""
     return (arg['simple_type'] == 'IntList') and ('size' in arg)
+
+
+def base_name(decl):
+    name = decl['name']
+    return name[:-1] if decl.get('inplace', False) else name[:-4] if name.endswith('_out') else name
+
+
+def is_view(decl):
+    return base_name(decl) in RETURNS_VIEWS_OF_INPUT
+
+
+def is_out_variant(decl):
+    return decl['name'].endswith('_out')
+
+
+# for each argument in decl, the location it should appear in the
+# jit schema declaration. e.g.
+# arguments = [x, y, z] # the order in aten
+# jit_argument_order = [2, 0, 1]
+# aten::my_arg(Tensor y, Tensor z, Tensor x) # the order in schema
+# used to move 'out' arguments to the end of the list
+def argument_order(decl):
+    return decl.get('jit_argument_order') or list(range(len(decl['arguments'])))
 
 
 def gen_jit_dispatch(declarations, out, template_path):
@@ -190,17 +214,27 @@ def gen_jit_dispatch(declarations, out, template_path):
                 name=decl['name'], first=args[0], args=pack_arguments(args[1:]),
                 num_inputs=num_inputs)
 
+    def requires_lvalue(arg):
+        return 'jit_type' in arg and arg['jit_type'] in {"Tensor!", "Tensor(a!)"}
+
     def emit_decl_variant(decl):
         kw_assignments = []
+
+        # mutable arguments in aten are passed as non const references
+        # these must be lvalues, so we have to put them in variables
+        # before calling the function
+        lvalues = []
+
         arguments = []
         num_inputs = len(decl['arguments'])
         op_capture = ''
-
-        real_inputs = 0
-        for arg in decl['arguments']:
-            value = '(std::move(peek(stack, {}, {})))'.format(real_inputs, num_inputs)
-            arguments.append(from_ivalue(arg, value))
-            real_inputs += 1
+        order = argument_order(decl)
+        for i, arg in enumerate(decl['arguments']):
+            value = from_ivalue(arg, '(std::move(peek(stack, {}, {})))'.format(order[i], num_inputs))
+            if requires_lvalue(arg):
+                lvalues.append('auto {} = {};\n'.format(arg['name'], value))
+                value = arg['name']
+            arguments.append(value)
 
         call = get_invocation(decl, arguments, num_inputs)
 
@@ -210,7 +244,8 @@ def gen_jit_dispatch(declarations, out, template_path):
                                              call=call,
                                              kw_assignments=kw_assignments,
                                              num_inputs=num_inputs,
-                                             op_capture=op_capture)
+                                             op_capture=op_capture,
+                                             lvalues=lvalues)
         return constructor
 
     # This function declares an order on declarations. This is necessary because
@@ -235,11 +270,7 @@ def gen_jit_dispatch(declarations, out, template_path):
         sorted_decls = sorted(jit_decls, key=lambda decl: decl['name'])
         grouped_decls = [list(g) for _, g in
                          groupby(sorted_decls, key=lambda decl: decl['name'])]
-        result = []
-        for group in grouped_decls:
-            sorted_decls = sorted(group, key=declkey)
-            result.extend(sorted_decls)
-        return result
+        return [sorted(g, key=declkey) for g in grouped_decls]
 
     # We need to add methods implemented manually in TensorImpl
     tensor_impl_methods = [{
@@ -250,7 +281,6 @@ def gen_jit_dispatch(declarations, out, template_path):
         'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
     } for name in ['sizes', 'strides', 'dim']]
     aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
-
     jit_decls = [d for d in aten_decls if is_jit_op(d)]
 
     # add arguments dtype and device for functions like zeros
@@ -273,17 +303,34 @@ def gen_jit_dispatch(declarations, out, template_path):
                         'default': '[cpu, -1]'},
                 ])
                 decl['has_tensor_options'] = True
+        # add annotations about alias an mutability of arguments
+        annotate_op(decl)
 
-    jit_decls = sort_decls(jit_decls)
-    for decl in jit_decls:
-        ops.append(OPERATOR.substitute(signature=signature(decl),
-                                       op=emit_decl_variant(decl)))
+    # Group and sort the generated snippets to ensure that the
+    # generation is deterministic
+    jit_decl_groups = sort_decls(jit_decls)
 
-    # Sort the generated snippets to ensure that the generation is deterministic
-    env = {
-        'constructors': ops,
-    }
-    write(out, 'register_aten_ops.cpp', REGISTER_ATEN_OPS_CPP, env)
+    # NOTE: see Note [Sharded File] at the top of the register_aten_ops.cpp
+    # template regarding sharding of the generated files.
+    #
+    # If you edit the number of shards here, you will also have to
+    # modify generate_code.py, torch/CMakeLists.txt, and the TARGETS
+    # files.
+    num_shards = 3
+    shards = [[] for _ in range(num_shards)]
+
+    # ops are assigned arbitrarily but stably to a file based on hash
+    for group in jit_decl_groups:
+        x = sum(ord(c) for c in group[0]['name']) % num_shards
+        for decl in group:
+            shards[x].append(OPERATOR.substitute(signature=signature(decl),
+                                                 op=emit_decl_variant(decl)))
+
+    for i, shard in enumerate(shards):
+        env = {
+            'constructors': shard,
+        }
+        write(out, 'register_aten_ops_%d.cpp' % i, REGISTER_ATEN_OPS_CPP, env)
 
     # NB: Operate on aten_decls, not jit_decls, because VariableType is
     # a client for these symbols as well
@@ -303,12 +350,44 @@ def gen_jit_dispatch(declarations, out, template_path):
     }
     write(out, 'aten_interned_strings.h', ATEN_INTERNED_STRINGS_H, strings_env)
 
-default_map = {'{}': 'None', 'nullptr': 'None'}
+default_map = {'{}': 'None', 'nullptr': 'None', 'c10::nullopt': 'None'}
+
+
+def annotate_op(decl):
+    # insert alias annotations into viewing operators
+    if decl.get('inplace') or is_out_variant(decl):
+        first_arg = decl['arguments'][0]
+        assert(jit_type_of(first_arg) == 'Tensor')
+        first_arg['jit_type'] = 'Tensor(a!)'
+        first_ret = decl['returns'][0]
+        assert(jit_type_of(first_ret) == 'Tensor')
+        first_ret['jit_type'] = 'Tensor(a!)'
+        if is_out_variant(decl):
+            assert(first_arg['output'])
+            # the output variant must go at the end
+            # note: this is an annoying side effect of using a single '*'
+            # to denote kwarg_only
+            nargs = len(decl['arguments'])
+            decl['jit_argument_order'] = [nargs - 1] + list(range(nargs - 1))
+    elif is_view(decl):
+        first_arg = decl['arguments'][0]
+        assert jit_type_of(first_arg) == 'Tensor'
+        first_arg['jit_type'] = 'Tensor(a)'
+        first_ret = decl['returns'][0]
+        ret_type = jit_type_of(first_ret)
+        if ret_type == 'Tensor[]':
+            first_ret['jit_type'] = 'Tensor(a)[]'
+        elif ret_type == 'Tensor':
+            first_ret['jit_type'] = 'Tensor(a)'
+
+
+def is_kwarg_only(a):
+    return a.get('kwarg_only') or a.get('output')
 
 
 def signature(decl):
     def format_arg(arg):
-        name = arg['name']
+        name = arg['name'] if not arg.get('output') else 'out'
         typ = jit_type_of(arg)
         decl = '{} {}'.format(typ, name)
         if 'default' in arg:
@@ -318,7 +397,6 @@ def signature(decl):
                 .replace('}}', ']') \
                 .replace('true', 'True') \
                 .replace('false', 'False') \
-                .replace('nullptr', 'None') \
                 .replace('Reduction::ElementwiseMean', 'ElementwiseMean') \
                 .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
                 .replace('{', '[') \
@@ -330,8 +408,10 @@ def signature(decl):
 
     args = []
     kwarg_only = False
-    for a in decl['arguments']:
-        if not kwarg_only and a.get('kwarg_only'):
+
+    ordered_arguments = sorted(zip(argument_order(decl), decl['arguments']))
+    for _, a in ordered_arguments:
+        if not kwarg_only and is_kwarg_only(a):
             args.append('*')
             kwarg_only = True
         args.append(format_arg(a))
@@ -341,7 +421,8 @@ def signature(decl):
         ret_list = jit_type_of(decl['returns'][0])
     else:
         ret_list = '({})'.format(', '.join(jit_type_of(r) for r in decl['returns']))
-    return 'aten::{}({}) -> {}'.format(decl['name'], arg_list, ret_list)
+    name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
+    return 'aten::{}({}) -> {}'.format(name, arg_list, ret_list)
 
 
 def main():

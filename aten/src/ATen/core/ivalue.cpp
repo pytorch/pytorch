@@ -2,20 +2,24 @@
 #include <ATen/core/Formatting.h>
 
 #define TORCH_FORALL_TAGS(_) \
-  _(None) \
-  _(Tensor) \
-  _(Double) \
-  _(Int) \
-  _(Tuple) \
-  _(IntList) \
-  _(DoubleList) \
-  _(String) \
-  _(TensorList) \
-  _(Blob) \
-  _(GenericList) \
-  _(World) \
+  _(None)                    \
+  _(Tensor)                  \
+  _(Double)                  \
+  _(Int)                     \
+  _(Bool)                    \
+  _(Tuple)                   \
+  _(IntList)                 \
+  _(DoubleList)              \
+  _(BoolList)                \
+  _(String)                  \
+  _(TensorList)              \
+  _(Blob)                    \
+  _(GenericList)             \
+  _(World)                   \
+  _(Future)                  \
 
-namespace torch { namespace jit {
+namespace c10 {
+namespace ivalue {
 
 CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
     std::string str_) {
@@ -48,6 +52,10 @@ std::ostream& operator<<(std::ostream & out, const ConstantString & v) {
   return out << v.string();
 }
 
+std::ostream& operator<<(std::ostream & out, const Future & v) {
+  return out << "Future";
+}
+
 template<typename Elem>
 std::ostream& operator<<(std::ostream & out, const List<Elem> & v) {
   return printList<Elem>(out, v, "[", ", ", "]");
@@ -58,6 +66,8 @@ template<>
 std::ostream& operator<<(std::ostream & out, const List<IValue> & v) {
   return printList<IValue>(out, v, "(", ", ", ")");
 }
+
+} // namespace ivalue
 
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
   switch(v.tag) {
@@ -70,4 +80,4 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
 
 #undef TORCH_FORALL_TAGS
 
-}}
+} // namespace c10

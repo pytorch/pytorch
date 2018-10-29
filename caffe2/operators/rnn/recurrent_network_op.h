@@ -9,7 +9,7 @@
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
 
-CAFFE2_DECLARE_bool(caffe2_rnn_executor);
+C10_DECLARE_bool(caffe2_rnn_executor);
 
 namespace caffe2 {
 namespace detail {
@@ -75,19 +75,24 @@ void applyOffsetAlias(
   auto* src = BlobGetMutableTensor(srcBlob, Context::GetDeviceType());
   auto* dst =
       BlobGetMutableTensor(ws->GetBlob(oc.dst), Context::GetDeviceType());
-  auto timestep = src->size() / src->dim(0);
-  auto dims = src->dims();
+  auto timestep = src->numel() / src->dim(0);
+  auto dims = src->sizes().vec();
   const int32_t startDstTimestep =
       oc.offset >= 0 ? oc.offset : src->dim(0) + oc.offset;
   const int32_t numDstTimesteps = src->dim(0) - startDstTimestep;
-  CAFFE_ENFORCE(
-      numDstTimesteps >= 1, "Invalid number of timesteps: ", numDstTimesteps);
-  dims[0] = numDstTimesteps;
-  dst->Resize(dims);
-  CAFFE_ENFORCE(timestep == dst->size() / numDstTimesteps, "Invalid offset");
-  dst->ShareExternalPointer(
-      src->template mutable_data<T>() + startDstTimestep * timestep,
-      dst->size());
+  if (numDstTimesteps >= 1) {
+    dims[0] = numDstTimesteps;
+    dst->Resize(dims);
+    CAFFE_ENFORCE(timestep == dst->numel() / numDstTimesteps, "Invalid offset");
+    dst->ShareExternalPointer(
+        src->template mutable_data<T>() + startDstTimestep * timestep);
+  } else {
+    CAFFE_ENFORCE_EQ(
+        numDstTimesteps, 0, "Invalid number of timesteps: ", numDstTimesteps);
+    dims[0] = 0;
+    dst->Resize(dims);
+    dst->template mutable_data<T>();
+  }
 }
 
 template <typename T, class Context>
@@ -665,8 +670,8 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       auto* g = BlobGetMutableTensor(gBlob, Context::GetDeviceType());
       g->ResizeLike(p);
       math::Set<T, Context>(
-          g->size(),
-          convert::To<float,T>(0.0),
+          g->numel(),
+          convert::To<float, T>(0.0),
           g->template mutable_data<T>(),
           &context_);
     }
@@ -681,7 +686,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       auto* g = BlobGetMutableTensor(gBlob, Context::GetDeviceType());
       g->ResizeLike(p);
       CAFFE_ENFORCE_EQ(g->ndim(), 3);
-      const auto timestep = g->size() / g->dim(0);
+      const auto timestep = g->numel() / g->dim(0);
       // Fill the last timestep with zeros for the gradient
       math::Set<T, Context>(
           timestep,
@@ -702,7 +707,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       VLOG(1) << "Initializing gradient for input " << gradientInputIndex
               << " (" << inputName << ") "
               << " as blob " << gradientName
-              << ". Size: " << Input(gradientInputIndex).size();
+              << ". Size: " << Input(gradientInputIndex).numel();
       auto pGradientBlob = sharedWs_->GetBlob(gradientName);
       CAFFE_ENFORCE(pGradientBlob);
       auto* g = BlobGetMutableTensor(pGradientBlob, Context::GetDeviceType());
@@ -728,8 +733,8 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         CAFFE_ENFORCE_EQ(g->dim(2), oglast.dim(2));
 
         const auto t = g->dim(0) - 1;
-        const auto timestep_size = g->size() / g->dim(0);
-        CAFFE_ENFORCE_EQ(timestep_size, oglast.size());
+        const auto timestep_size = g->numel() / g->dim(0);
+        CAFFE_ENFORCE_EQ(timestep_size, oglast.numel());
         T* g_data_with_offset =
             g->template mutable_data<T>() + t * timestep_size;
         math::Add<T, Context>(
@@ -851,13 +856,13 @@ class AccumulateInputGradientOp : public Operator<Context> {
     auto* g = Output(0);
 
     T* g_data = g->template mutable_data<T>();
-    const auto timestep_size = g->size() / g->dim(0);
+    const auto timestep_size = g->numel() / g->dim(0);
 
     CAFFE_ENFORCE(
-        (t + offset_) * timestep_size + timestep_size <= g->size(),
+        (t + offset_) * timestep_size + timestep_size <= g->numel(),
         "Accumulation destination address over bounds");
     CAFFE_ENFORCE(
-        t * timestep_size + timestep_size <= og.size(),
+        t * timestep_size + timestep_size <= og.numel(),
         "Accumulation source address out of bounds");
 
     math::Add<T, Context>(
@@ -901,11 +906,11 @@ class RNNApplyLinkOp : public Operator<Context> {
     auto* internal_out = Output(0);
     auto* external_out = Output(1);
 
-    CAFFE_ENFORCE_GT(external.size(), 0);
-    const int64_t externalTimestepSize = external.size() / external.dim(0);
+    CAFFE_ENFORCE_GT(external.numel(), 0);
+    const int64_t externalTimestepSize = external.numel() / external.dim(0);
     auto* externalData = external_out->template mutable_data<T>() +
         (t + offset_) * externalTimestepSize;
-    auto internalDims = external_out->dims();
+    auto internalDims = external_out->sizes().vec();
     internalDims[0] = window_;
 
     internal_out->Resize(internalDims);

@@ -24,10 +24,10 @@ float HSoftmaxOp<float, CPUContext>::RunForwardSingle(const float* X,
   //Softmax
   float* softmax_output_data = int_output + int_output_offset;
 
-  if (scale_.size() != 1) {
+  if (scale_.numel() != 1) {
     scale_.Resize(1);
   }
-  if (sum_multiplier_.size() != dim_out) {
+  if (sum_multiplier_.numel() != dim_out) {
     sum_multiplier_.Resize(dim_out);
     math::Set<float, CPUContext>(dim_out, 1.f,
       sum_multiplier_.mutable_data<float>(), &context_);
@@ -78,10 +78,10 @@ bool HSoftmaxOp<float, CPUContext>::RunOnDevice() {
   // Batch size
   int M = X.ndim() > 1 ? X.dim32(0) : 1;
   // Input feature dimension
-  int K = X.size() / M;
+  int K = X.numel() / M;
   CAFFE_ENFORCE_GE(W.ndim(), 2); // N*K
   CAFFE_ENFORCE_EQ(b.ndim(), 1); // N
-  CAFFE_ENFORCE_EQ(K, W.size() / (W.dim32(0)));
+  CAFFE_ENFORCE_EQ(K, W.numel() / (W.dim32(0)));
   // Sum of output dimensions of all hierarchy nodes
   int N = W.dim32(0);
   CAFFE_ENFORCE_EQ(N, b.dim32(0));
@@ -96,7 +96,7 @@ bool HSoftmaxOp<float, CPUContext>::RunOnDevice() {
   float* int_output_data = intermediate_output->template mutable_data<float>();
   int int_output_offset = 0;
 
-  if (bias_multiplier_.size() != M) {
+  if (bias_multiplier_.numel() != M) {
     bias_multiplier_.Resize(M);
     math::Set<float, CPUContext>(M, static_cast<float>(1),
         bias_multiplier_.mutable_data<float>(), &context_);
@@ -139,12 +139,12 @@ void HSoftmaxGradientOp<float, CPUContext>::RunBackwardSingle(const float* X,
   int_output_offset -= dim_out;
 
   //Softmax
-  if (scale_.size() != 1) {
+  if (scale_.numel() != 1) {
     scale_.Resize(1);
   }
   float* scaledata = scale_.mutable_data<float>();
 
-  if (sum_multiplier_.size() != dim_out) {
+  if (sum_multiplier_.numel() != dim_out) {
     sum_multiplier_.Resize(dim_out);
     math::Set<float, CPUContext>(dim_out, 1.f,
       sum_multiplier_.mutable_data<float>(), &context_);
@@ -163,7 +163,7 @@ void HSoftmaxGradientOp<float, CPUContext>::RunBackwardSingle(const float* X,
   int_output_offset -= dim_out;
 
   //FC
-  if (bias_multiplier_.size() != 1) {
+  if (bias_multiplier_.numel() != 1) {
     // If the helper bias multiplier has not been created, reshape and fill
     // it with 1
     bias_multiplier_.Resize(1);
@@ -210,16 +210,16 @@ bool HSoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   float* db_data = db->template mutable_data<float>();
   float* dOutput_data = dX_intermediate_output->template mutable_data<float>();
 
-  math::Set<float, CPUContext>(X.size(), 0.f, dX_data, &context_);
-  math::Set<float, CPUContext>(W.size(), 0.f, dW_data, &context_);
-  math::Set<float, CPUContext>(b.size(), 0.f, db_data, &context_);
-  math::Set<float, CPUContext>(intermediate_output.size(), 0.f, dOutput_data,
-                               &context_);
+  math::Set<float, CPUContext>(X.numel(), 0.f, dX_data, &context_);
+  math::Set<float, CPUContext>(W.numel(), 0.f, dW_data, &context_);
+  math::Set<float, CPUContext>(b.numel(), 0.f, db_data, &context_);
+  math::Set<float, CPUContext>(
+      intermediate_output.numel(), 0.f, dOutput_data, &context_);
 
   // Batch size
   int M = X.ndim() > 1 ? X.dim32(0) : 1;
   // Input feature dimension
-  int K = X.size() / M;
+  int K = X.numel() / M;
   const auto* labeldata = label.data<int>();
 
   auto hierarchy = getHierarchyForLabels(M, labeldata, hierarchy_all_map_);
@@ -346,17 +346,17 @@ bool HSoftmaxSearchOp<float, CPUContext>::RunOnDevice() {
   // Batch size
   int M = X.ndim() > 1 ? X.dim32(0) : 1;
   // Input feature dimension
-  int K = X.size() / M;
+  int K = X.numel() / M;
   CAFFE_ENFORCE(W.ndim() == 2, "Weight must be a matrix."); // N*K
   CAFFE_ENFORCE(b.ndim() == 1, "Bias must be a vector."); // N
-  CAFFE_ENFORCE(K == W.size() / (W.dim32(0)), "feature dimension mismatch.");
+  CAFFE_ENFORCE(K == W.numel() / (W.dim32(0)), "feature dimension mismatch.");
   // Sum of output dimensions of all hierarchy nodes
   int N = W.dim32(0);
   CAFFE_ENFORCE(N == b.dim32(0), "mismatch between Weight and Bias.");
   Y_names->Resize(M, top_n_);
   Y_scores->Resize(M, top_n_);
 
-  if (bias_multiplier_.size() != M) {
+  if (bias_multiplier_.numel() != M) {
     bias_multiplier_.Resize(M);
     math::Set<float, CPUContext>(
         M,

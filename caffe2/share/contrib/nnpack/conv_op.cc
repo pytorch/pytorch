@@ -13,7 +13,7 @@
 #include "caffe2/utils/math.h"
 #include "nnpack.h"
 
-CAFFE2_DEFINE_bool(caffe2_profile_nnpack, false, "");
+C10_DEFINE_bool(caffe2_profile_nnpack, false, "");
 namespace caffe2 {
 
 void initNNPACK() {

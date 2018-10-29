@@ -16,11 +16,11 @@
 
 #include "caffe2/core/operator_c10wrapper.h"
 
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_operator_max_engine_name_length,
     10,
     "Maximum engine name length to be stored");
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_disable_implicit_engine_preference,
     false,
     "If set, disable implicit engine preferences. This is useful for unit "
@@ -173,7 +173,8 @@ unique_ptr<OperatorBase> _CreateOperator(
             << engine;
     auto op = TryCreateOperator(key, operator_def, ws);
     if (op) {
-      if (engine.size() <= (unsigned)FLAGS_caffe2_operator_max_engine_name_length) {
+      if (engine.size() <=
+          (unsigned)FLAGS_caffe2_operator_max_engine_name_length) {
         op->annotate_engine(engine);
       } else {
         op->annotate_engine(
@@ -648,12 +649,9 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
           &_capacity,
           &blob_device);
 
-      if (blob_device.device_type() == PROTO_CUDA &&
-          blob_device.cuda_gpu_id() != op_device.cuda_gpu_id()) {
-        mismatches[blob_name] = std::make_pair(op_device, blob_device);
-      } else if (
-          blob_device.device_type() == PROTO_HIP &&
-          blob_device.hip_gpu_id() != op_device.hip_gpu_id()) {
+      if ((blob_device.device_type() == PROTO_CUDA ||
+           blob_device.device_type() == PROTO_HIP) &&
+          blob_device.device_id() != op_device.device_id()) {
         mismatches[blob_name] = std::make_pair(op_device, blob_device);
       }
     }

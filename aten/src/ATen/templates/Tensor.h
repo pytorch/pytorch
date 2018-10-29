@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/core/Device.h"
+#include "c10/Device.h"
 #include "ATen/core/Layout.h"
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
@@ -8,9 +8,9 @@
 #include "ATen/core/Storage.h"
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/core/TensorImpl.h"
-#include "ATen/core/optional.h"
 #include "ATen/core/UndefinedTensorImpl.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
+#include "c10/util/Optional.h"
 
 namespace at {
 struct Generator;
@@ -143,7 +143,7 @@ public:
     return impl_->type_id();
   }
   ScalarType scalar_type() const {
-    return dataTypeToScalarType(impl_->dtype().id());
+    return typeMetaToScalarType(impl_->dtype());
   }
   const Storage& storage() const {
     return impl_->storage();
@@ -160,11 +160,20 @@ public:
   /// Returns a `Tensor`'s layout. Defined in Type.h
   Layout layout() const noexcept;
 
-  /// Returns a `Tensor`'s dtype (`ScalarType`). Defined in Type.h
-  ScalarType dtype() const noexcept;
+  /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.h
+  caffe2::TypeMeta dtype() const noexcept;
 
   /// Returns a `Tensor`'s device.
   Device device() const;
+
+  /// Returns a `Tensor`'s device index.
+  int64_t get_device() const;
+
+  /// Returns if a `Tensor` has CUDA backend.
+  bool is_cuda() const;
+
+  /// Returns if a `Tensor` has sparse backend.
+  bool is_sparse() const;
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
@@ -241,7 +250,7 @@ public:
 
   /// Computes the gradient of current tensor w.r.t. graph leaves.
   void backward(
-      at::optional<Tensor> gradient = at::nullopt,
+      c10::optional<Tensor> gradient = c10::nullopt,
       bool keep_graph = false,
       bool create_graph = false);
 
@@ -267,7 +276,7 @@ struct CAFFE2_API WeakTensor {
   WeakTensor(const Tensor& t) : weak_impl_(t.impl_) {}
 
   // XXX: this can return undefined tensors
-  // Ideally it would be at::optional<Tensor>, but MSVC is too cool for that
+  // Ideally it would be c10::optional<Tensor>, but MSVC is too cool for that
   Tensor lock() const {
     return Tensor(weak_impl_.lock());
   }
@@ -290,6 +299,17 @@ struct CAFFE2_API WeakTensor {
 private:
   c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_impl_;
 };
+
+namespace detail {
+// Helper creator for Tensor clas which doesn't requires the users to pass
+// in an intrusive_ptr instead it just converts the argument passed to
+// requested intrusive_ptr type.
+template <typename T, typename... Args>
+Tensor make_tensor(Args&&... args) {
+  return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
+}
+} // namespace detail
+
 } // namespace at
 
 #include "ATen/core/TensorMethods.h"

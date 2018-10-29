@@ -11,7 +11,7 @@
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_handle_executor_threads_exceptions,
     false,
     "If used we will handle exceptions in executor threads. "
@@ -105,7 +105,7 @@ inline bool getShouldStop(const Blob* b) {
   }
 
   const auto& t = b->Get<TensorCPU>();
-  CAFFE_ENFORCE(t.IsType<bool>() && t.size() == 1, "expects a scalar boolean");
+  CAFFE_ENFORCE(t.IsType<bool>() && t.numel() == 1, "expects a scalar boolean");
   return *(t.template data<bool>());
 }
 
@@ -418,7 +418,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
           } catch (const std::exception& ex) {
             std::lock_guard<std::mutex> guard(exception_mutex);
             if (!first_exception.size()) {
-              first_exception = at::GetExceptionString(ex);
+              first_exception = c10::GetExceptionString(ex);
               LOG(ERROR) << "Parallel worker exception:\n" << first_exception;
             }
             compiledStep->gotFailure = true;

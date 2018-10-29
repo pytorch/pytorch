@@ -33,15 +33,15 @@ class GatherByKeyOp : public Operator<CPUContext> {
     CAFFE_ENFORCE_GE(numPartitions, 1);
     const auto& keysTensor = Input(0);
     const auto* keysData = keysTensor.template data<Index>();
-    const auto& keysShape = Input(0).dims();
+    const auto& keysShape = Input(0).sizes();
     CAFFE_ENFORCE_EQ(
         keysShape.size(), 1, "Only 1D keys tensor supported currently.");
 
     // 1. Shape and type consistency checks
-    const auto& in0Shape = Input(1).dims();
+    const auto& in0Shape = Input(1).sizes();
     CAFFE_ENFORCE_GE(in0Shape.size(), 1);
 
-    vector<int64_t> outShape(keysShape);
+    vector<int64_t> outShape(keysShape.vec());
     outShape.insert(outShape.end(), in0Shape.begin() + 1, in0Shape.end());
 
     CAFFE_ENFORCE_GE(outShape.size(), 1);
@@ -54,10 +54,10 @@ class GatherByKeyOp : public Operator<CPUContext> {
       CAFFE_ENFORCE(std::equal(
           outShape.begin() + keysShape.size(),
           outShape.end(),
-          input.dims().begin() + 1));
+          input.sizes().begin() + 1));
       totalSize += input.dim(0);
     }
-    CAFFE_ENFORCE_EQ(keysTensor.size(), totalSize);
+    CAFFE_ENFORCE_EQ(keysTensor.numel(), totalSize);
 
     auto* outTensor = Output(0);
     outTensor->Resize(outShape);
@@ -73,7 +73,7 @@ class GatherByKeyOp : public Operator<CPUContext> {
     int currentShard = -1;
 
     // 2. copy from inputs into output based on shard for each input key
-    const auto numEntries = keysTensor.size();
+    const auto numEntries = keysTensor.numel();
     for (int64_t i = 0; i <= numEntries; ++i) {
       auto newShard =
           i < numEntries ? moduloPartition(keysData[i], numPartitions) : -1;
@@ -122,7 +122,7 @@ class PartitionOpBase : public Operator<CPUContext> {
     CAFFE_ENFORCE_GT(partitions, 0, "Invalid number of partitions");
 
     auto& main_input = Input(mainInputIndex);
-    int64_t size = main_input.size();
+    int64_t size = main_input.numel();
     const Index* data = main_input.template data<Index>();
     counts_.assign(partitions, 0);
     for (int64_t p = 0; p < size; p++) {
@@ -159,7 +159,7 @@ class PartitionOpBase : public Operator<CPUContext> {
       metas_[i] = input.meta();
       // shape = partition_size + suffix of input dims
       vector<int64_t> shape(
-          input.dims().begin() + main_input.ndim() - 1, input.dims().end());
+          input.sizes().begin() + main_input.ndim() - 1, input.sizes().end());
       for (int j = 0; j < partitions; ++j) {
         int out_idx = i + j * inputSize;
         auto output = Output(out_idx);
@@ -256,7 +256,7 @@ class LengthsPartitionOp : public PartitionOpBase {
         output.ResizeLike(input);
         context_.CopyItemsSameDevice(
             input.meta(),
-            input.size(),
+            input.numel(),
             input.raw_data(),
             output.raw_mutable_data(input.meta()));
       }
@@ -268,11 +268,11 @@ class LengthsPartitionOp : public PartitionOpBase {
 
     // Compute lengths after sharding
     auto& main_input = Input(1);
-    int64_t size = main_input.size();
+    int64_t size = main_input.numel();
     const Index* data = main_input.template data<Index>();
 
     auto& length_input = Input(0);
-    int64_t elements = length_input.size();
+    int64_t elements = length_input.numel();
     const int32_t* lengths_data = length_input.template data<int32_t>();
     out_length_.resize(partitions);
     for (int i = 0; i < partitions; ++i) {

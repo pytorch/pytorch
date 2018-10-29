@@ -57,9 +57,9 @@ REGISTER_CPU_OPERATOR_STR(
 template <typename Def>
 string FormatDoc() {
   string doc = Def::doc;
-  ReplaceAll(doc, "{op}", Def::OpDef::name);
-  ReplaceAll(doc, "{op_doc}", Def::OpDef::doc);
-  auto replaced = ReplaceAll(doc, "{extra}", "");
+  c10::ReplaceAll(doc, "{op}", Def::OpDef::name);
+  c10::ReplaceAll(doc, "{op_doc}", Def::OpDef::doc);
+  auto replaced = c10::ReplaceAll(doc, "{extra}", "");
   CAFFE_ENFORCE_EQ(replaced, 0);
   return doc;
 }
@@ -79,7 +79,8 @@ OPERATOR_SCHEMA(SparseLengthsSum)
         SparseLengthsSumOp::LENGTHS)
     .SetDoc(FormatDoc<SparseLengthsSumDef>())
     .Output(0, "OUTPUT", "Aggregated tensor")
-    .FillUsing(SparseLengthsSumDef::PopulateSchema);
+    .FillUsing(SparseLengthsSumDef::PopulateSchema)
+    .InheritOnnxSchema();
 REGISTER_CPU_OPERATOR(
     SparseLengthsSumGradient,
     SparseLengthsSumDef::BackwardOp);

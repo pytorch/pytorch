@@ -12,7 +12,7 @@ namespace torch { namespace jit {
 
 // Transform PythonOps into Nodes that match ONNX semantics.
 std::shared_ptr<Graph> ToONNX(std::shared_ptr<Graph>& graph, ::torch::onnx::OperatorExportTypes operator_export_type) {
-  auto new_graph = std::make_shared<Graph>(graph->scope_root());
+  auto new_graph = std::make_shared<Graph>(graph->current_scope());
   std::unordered_map<Value*, Value*> env;
   BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
   return new_graph;
@@ -36,7 +36,6 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
   // Initialize context and environment
   for (auto input : old_block->inputs()) {
     auto n = ctx.block->addInput()->copyMetadata(input);
-    n->setStage(input->stage());
     env[input] = n;
   }
   // Put the new outputs in our environment map, and copy the type from the
@@ -59,9 +58,10 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
         outputs[i]->setType(old->type());
-        // Copy over source location information to all nodes created by
-        // the symbolic
+        // Copy over source location and scope information to all nodes
+        // created by the symbolic
         outputs[i]->node()->setSourceLocation(node->getSourceLocation());
+        outputs[i]->node()->setScope(node->scope());
         env[old] = outputs[i];
       } else {
         // Null output means that the ONNX op doesn't have outputs corresponding
@@ -180,8 +180,6 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
 
   // Finally, visit all nodes in the graph
   for (auto node : old_block->nodes()) {
-    // Needed so that symbolic calls create nodes with correct stages.
-    auto stage_guard = ctx.block->owningGraph()->setStageTemporary(node->stage());
     IR_IFM(node, PythonOp)
       callPySymbolicMethod(value);
     IR_ELSE()
@@ -193,8 +191,6 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
     env.at(output)->setType(output->type());
   }
 
-  // Copy stage from original graph
-  ctx.block->owningGraph()->setStage(old_block->owningGraph()->stage());
   EliminateDeadCode(ctx.block);
 }
 

@@ -1,11 +1,13 @@
-#include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/passes/pretty_print.h"
+#include "torch/csrc/jit/attributes.h"
+#include "torch/csrc/jit/generic_if.h"
+#include "torch/csrc/jit/ir.h"
 
 namespace torch {
 namespace jit {
 
 static std::ostream& indent(std::ostream& out, size_t level) {
-  for (size_t  i = 0; i < level; ++i) {
+  for (size_t i = 0; i < level; ++i) {
     out << "  ";
   }
   return out;
@@ -24,6 +26,9 @@ class PrettyPrintPass {
 
   // Cache of value names
   std::unordered_map<const Value*, std::string> value_names_;
+
+  // Nodes that were skipped to be printed later
+  std::unordered_set<const Node*> skipped_nodes_;
 
   template <class T>
   void zipWith(
@@ -157,14 +162,29 @@ class PrettyPrintPass {
     return out;
   }
 
+  // Returns false if the node has no outputs, or if outputs are used anywhere
+  // except in a single prim::Return node
+  bool nodeOnlyOutputReturns(const Node* node) {
+    if (node->outputs().size() == 0) {
+      return false;
+    }
+    for (const auto* output : node->outputs()) {
+      if (output->uses().size() != 1) {
+        return false;
+      }
+      if (output->uses()[0].user->kind() != prim::Return) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   std::ostream& printNode(
       std::ostream& out,
       const Node* node,
       const size_t level) {
-    // if there are subblocks on this node, visit them
     switch (node->kind()) {
       case prim::Return:
-        // Handled elsewhere, do nothing
         break;
       case prim::Constant:
         break;
@@ -175,6 +195,13 @@ class PrettyPrintPass {
         printIf(out, node, level);
         break;
       default:
+        if (nodeOnlyOutputReturns(node)) {
+          // This node is assigned to a temp which is then used by prim::Return,
+          // so just print this node there
+          skipped_nodes_.insert(node);
+          return out;
+        }
+
         indent(out, level);
         // Print outputs
         if (node->outputs().size() > 0) {
@@ -187,14 +214,25 @@ class PrettyPrintPass {
           out << " = ";
         }
 
-        out << node->kind().toQualString();
-
-        // Print instruction parameters
-        printValueList(out, node->inputs());
+        printRHS(out, node);
 
         out << "\n";
     }
 
+    return out;
+  }
+
+  // Prints the RHS value of a Node, e.g. `aten::add(x, y)`
+  std::ostream& printRHS(std::ostream& out, const Node* node) {
+    IR_IFM_CONST(node, PythonOp)
+    out << "^" << value->name();
+    value->writeScalars(out);
+    IR_ELSE()
+    out << node->kind().toQualString();
+    IR_END()
+
+    // Print instruction parameters
+    printValueList(out, node->inputs());
     return out;
   }
 
@@ -206,7 +244,6 @@ class PrettyPrintPass {
     const auto& returns = node->inputs();
     if (returns.size() > 0) {
       out << "return ";
-      std::string delimiter = "";
       if (returns.size() > 1) {
         printValueList(out, returns);
       } else {
@@ -252,6 +289,13 @@ class PrettyPrintPass {
     if (node->kind() == prim::Constant) {
       // printAttributeValue(out, node->attributeNames()[0], node);
       node->printValue(out, node->attributeNames()[0]);
+      return out;
+    }
+
+    if (skipped_nodes_.count(node) > 0) {
+      skipped_nodes_.erase(node);
+      // Node was skipped earlier, so print it now
+      printRHS(out, node);
       return out;
     }
 

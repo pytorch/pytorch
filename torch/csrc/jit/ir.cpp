@@ -18,6 +18,17 @@
 #include <string>
 
 namespace torch { namespace jit {
+// Constants relating to maintaining the topological index of nodes.
+//
+// Lower and upper bounds of the index. Inclusive range.
+static constexpr topo_position_t kLowerBound = INT64_MIN;
+static constexpr topo_position_t kUpperBound = INT64_MAX;
+static constexpr topo_position_t kMidPoint = 0;
+// How far away to space nodes that are appended to the graph.
+// should be 2^n, where:
+//   - n is the maximum number of repeated insertions without a re-index
+//   - 2^(64-n) is the maximum number of appends to the end without reindex
+static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 
 // Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
 constexpr Symbol PythonOp::Kind;
@@ -26,6 +37,8 @@ void printValueRef(std::ostream & out, const Value * n) {
   out << "%" << n->uniqueName();
 }
 
+// NB: This overload will become ambiguous with the one Caffe2 provides in its
+// logging, if they ever intersect.
 template <typename T>
 std::ostream& operator<<(std::ostream & out, const std::vector<T> & nodes) {
   out << at::ArrayRef<T>{nodes};
@@ -33,7 +46,7 @@ std::ostream& operator<<(std::ostream & out, const std::vector<T> & nodes) {
 }
 
 template <typename T>
-std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
+std::ostream& printValueRefs(std::ostream & out, const at::ArrayRef<T> & nodes) {
   size_t i = 0;
   for(auto n : nodes) {
     if(i++ > 0)
@@ -41,6 +54,17 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
     printValueRef(out, n);
   }
   return out;
+}
+
+// Can't make these two overloads directly a template, it'll be ambiguous with
+// the global printer for operator<<.
+
+std::ostream& operator<<(std::ostream & out, const at::ArrayRef<const Value*> & nodes) {
+  return printValueRefs(out, nodes);
+}
+
+std::ostream& operator<<(std::ostream & out, const at::ArrayRef<Value*> & nodes) {
+  return printValueRefs(out, nodes);
 }
 
 struct const_value_list_with_types {
@@ -51,16 +75,11 @@ struct const_value_list_with_types {
 };
 std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
   size_t i = 0;
-  size_t prev_stage = 0;
   for(auto n : l.values) {
     if(i++ > 0) {
       if (l.use_newlines) {
         // TODO: Indent here is hard-coded for "graph(": un-hard-code it
         out << "\n      ";
-        if (n->stage() != prev_stage) {
-          out << "-------- stage " << n->stage() << " --------\n      ";
-          prev_stage = n->stage();
-        }
       } else {
         out << ", ";
       }
@@ -147,12 +166,7 @@ std::ostream& operator<<(std::ostream & out, const Node & n) {
 std::ostream& operator<<(std::ostream & out, const Graph & g) {
   out << "graph(" << const_value_list_with_types(g.inputs(), true) << ") {\n";
   std::vector<const Node*> groups;
-  size_t prev_stage = 0;
   for(auto n : g.nodes()) {
-    if (n->stage() != prev_stage) {
-      out << "  ---------------- stage " << n->stage() << " ----------------\n";
-      prev_stage = n->stage();
-    }
     printNode(out, 1, n, &groups);
   }
   out << "  return (" << g.outputs() << ");\n}\n";
@@ -217,7 +231,6 @@ void Node::lint() const {
   // Node invariants
   // - if node should live in list, nodes_iter is consistent
   // - Inputs are all marked as a use by the nodes they refer to
-  // - Stage is consistent (stage is >= all input stages)
   // - Owning graph is non-null and consistent
   // - The "Select" invariant, when the node is MultiReturn
   //
@@ -230,7 +243,6 @@ void Node::lint() const {
     for (auto input : inputs_) {
       // WARNING: O(n^2)
       JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) != input->uses_.end());
-      JIT_ASSERT(stage_ >= input->stage_);
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
       i++;
     }
@@ -377,6 +389,14 @@ void Graph::lint() const {
       n->lint();
     }
     void check_block(const Block *b) {
+      // Check topological ordering
+      JIT_ASSERT(b->param_node()->isBefore(*b->nodes().begin()));
+      auto curNode = *b->nodes().begin();
+      while (curNode != b->return_node()) {
+        JIT_ASSERT(curNode->isBefore(curNode->next()));
+        curNode = curNode->next();
+      }
+
       for (auto input : b->inputs()) {
         check_value(input);
         JIT_ASSERT(input->node()->kind_ == prim::Param);
@@ -418,12 +438,6 @@ void Graph::lint() const {
       for (auto kv : anticipated_uses) {
         JIT_ASSERT(kv.second == -1);
       }
-      // graph->stage() should be equal to max(node.stage for node in graph->nodes())
-      if (g.nodes().begin() == g.nodes().end()) {
-        JIT_ASSERT(g.stage() == 0);
-      } else {
-        JIT_ASSERT(g.stage() == g.nodes().rbegin()->stage());
-      }
       JIT_ASSERT(std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
     }
   };
@@ -438,6 +452,27 @@ void LintGraph(std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 
+Block::Block(Graph* graph_, Node* node_)
+    : graph_(graph_),
+      output_(initOutput(graph_->create(prim::Return, 0))),
+      input_(graph_->create(prim::Param, 0)),
+      owning_node_(node_) {
+  graph_->all_blocks.emplace(this);
+  output_->owning_block_ = this;
+  output_->topo_position_ = kUpperBound;
+  input_->owning_block_ = this;
+  input_->topo_position_ = kLowerBound;
+}
+
+void Block::reIndexTopology() {
+  auto curPos = kLowerBound;
+  for (auto node : nodes()) {
+    AT_ASSERT(curPos <= (kUpperBound - kAppendInterval));
+    curPos += kAppendInterval;
+    node->topo_position_ = curPos;
+  }
+}
+
 void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   std::unordered_map<Value*, Value*> local_map;
   auto env = [&](Value * v) {
@@ -449,25 +484,35 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
 
   auto graph = owningGraph();
   for(auto input : src->inputs()) {
-    local_map[input] = this->addInput()->copyMetadata(input)->setStage(input->stage());
-    graph->setStage(std::max(graph->stage(), input->stage()));
+    local_map[input] = this->addInput()->copyMetadata(input);
   }
 
   for(auto node : src->nodes()) {
     auto new_node = this->appendNode(graph->createClone(node, env));
-    new_node->setStage(node->stage());
-    graph->setStage(std::max(graph->stage(), node->stage()));
     for(size_t i = 0; i < node->outputs().size(); ++i) {
       auto oo = node->outputs()[i];
       auto no = new_node->outputs()[i];
       local_map[oo] = no;
       no->copyMetadata(oo);
-      no->setStage(oo->stage());
     }
   }
   for(auto output : src->outputs()) {
     this->registerOutput(env(output));
   }
+}
+
+void Block::destroy() {
+  // we cannot destroy the output because it is used as the sentinel
+  // for the nodes() list and has to remain valid for the loop
+  output_->removeAllInputs();
+  for(auto it = this->nodes().reverse().begin(),
+      end = this->nodes().reverse().end();
+      it != end; ++it) {
+    it.destroyCurrent();
+  }
+  output_->destroy();
+  input_->destroy();
+  graph_->freeBlock(this);
 }
 
 std::shared_ptr<Graph> Graph::copy() {
@@ -523,18 +568,39 @@ Value* Value::setUniqueName(const std::string & name) {
   return this;
 }
 
+Value* Value::copyMetadata(Value * from) {
+  setType(from->type());
+  if (from->hasUniqueName())
+    setUniqueName(from->uniqueName());
+  return this;
+}
+
+void Value::replaceFirstUseWith(Value * newValue) {
+  JIT_ASSERT(owningGraph() == newValue->owningGraph());
+  auto u = uses()[0];
+  u.user->inputs_[u.offset] = newValue;
+  newValue->uses_.push_back(u);
+  uses_.erase(uses_.begin());
+}
+
+void Value::replaceAllUsesWith(Value * newValue) {
+  while (!uses().empty()) {
+    replaceFirstUseWith(newValue);
+  }
+}
+
 size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   auto name_str = name.toUnqualString();
-  for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
-    const Argument* arg = &the_schema.arguments[i];
-    if (arg->name == name_str) {
+  for (size_t i = 0; i < the_schema.arguments().size(); ++i) {
+    const Argument* arg = &the_schema.arguments()[i];
+    if (arg->name() == name_str) {
       return i;
     }
   }
   throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
 }
 
-at::optional<IValue> Node::get(Symbol name) const {
+c10::optional<IValue> Node::get(Symbol name) const {
   return toIValue(namedInput(name));
 }
 
@@ -558,22 +624,29 @@ void Node::findSchema() const {
   schema_ = &getOperatorFor(this).schema();
 }
 
-namespace {
+const FunctionSchema* Node::maybeSchema() const {
+  if(!schema_) {
+    if(auto op = findOperatorFor(this)) {
+      schema_ = &op->schema();
+    }
+  }
+  return schema_;
+}
 
-const OperatorSet& nondeterminstic_aten_ops() {
-  static OperatorSet nondeterministic_ops = {
-    "aten::dropout(Tensor input, float p, int train) -> Tensor",
+bool Node::isNondeterministic() const {
+  static const OperatorSet nondeterministic_ops = {
+    "aten::dropout(Tensor input, float p, bool train) -> Tensor",
     "aten::_fused_dropout(Tensor self, float p, Generator generator) -> (Tensor, Tensor)",
     "aten::_standard_gamma(Tensor self, Generator generator) -> Tensor",
     "aten::bernoulli(Tensor self, *, Generator generator) -> Tensor",
     "aten::bernoulli(Tensor self, float p, *, Generator generator) -> Tensor",
-    "aten::multinomial(Tensor self, int num_samples, int replacement, *, Generator generator) -> Tensor",
+    "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator generator) -> Tensor",
     "aten::normal(Tensor mean, Tensor std, *, Generator generator) -> Tensor",
     "aten::normal(float mean, Tensor std, *, Generator generator) -> Tensor",
     "aten::normal(Tensor mean, float std, *, Generator generator) -> Tensor",
     "aten::poisson(Tensor self, Generator generator) -> Tensor",
-    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
-    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
+    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator) -> Tensor",
+    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator) -> Tensor",
     "aten::rand(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
     "aten::rand_like(Tensor self) -> Tensor",
     "aten::rand_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
@@ -588,20 +661,491 @@ const OperatorSet& nondeterminstic_aten_ops() {
     "aten::randn_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
     "aten::randperm(int n, *, int dtype, int layout, int[] device) -> Tensor"
   };
-  return nondeterministic_ops;
-}
 
-}  // namespace
-
-bool Node::isNondeterministic() const {
-  if (nondeterminstic_aten_ops().find(this) == nullptr) {
+  if (nondeterministic_ops.find(this) == nullptr) {
     return false;
   }
   // Dropout with train = False is deterministic
-  if (matches("aten::dropout(Tensor input, float p, int train) -> Tensor") && is_constant(attr::train) && !get<bool>(attr::train).value()) {
+  if (matches("aten::dropout(Tensor input, float p, bool train) -> Tensor") && is_constant(attr::train) && !get<bool>(attr::train).value()) {
     return false;
   }
   return true;
+}
+
+// Assign this node a topological position, to facilitate fast isBefore() and
+// isAfter() queries. Must be called right after a node is inserted into the
+// node list.
+//
+// The basic scheme is: assign every node a position (uint64_t).  The common
+// case (appending to the end of the graph) is made more efficient by advancing
+// a fixed interval past the previous node and placing `this` there. Otherwise,
+// assign `this` a position at the midpoint between its prev() and next()
+// nodes.
+//
+// If we ever run out of space (by, e.g. inserting too much in place), we
+// reindex by spreading out all the nodes again.
+void Node::assignTopoPosition() {
+  auto returnNode = owningBlock()->return_node();
+  const auto prevPos = prev()->topo_position_;
+  const auto nextPos = next()->topo_position_;
+
+  // Append to the end of the graph
+  if (next() == returnNode) {
+    if (next() == prev()) {
+      // the node list is empty, assign the first position
+      topo_position_ = kMidPoint;
+      return;
+    }
+
+    if (prevPos >= (kUpperBound - kAppendInterval)) {
+      // we're running off the edge
+      owningBlock()->reIndexTopology();
+      return;
+    }
+
+    topo_position_ = prevPos + kAppendInterval;
+
+    // Prepend to the graph
+  } else if (prev() == returnNode) {
+    // next() is the first element in the block list
+    if (nextPos <= (kLowerBound + kAppendInterval)) {
+      // we're running off the edge
+      owningBlock()->reIndexTopology();
+      return;
+    }
+
+    topo_position_ = nextPos - kAppendInterval;
+
+    // insert between two existing nodes
+  } else {
+    const auto posBetween = prevPos + (nextPos - prevPos) / 2;
+    if (posBetween == prevPos) {
+      // There was no room
+      owningBlock()->reIndexTopology();
+      return;
+    }
+    topo_position_ = posBetween;
+  }
+}
+
+Node::Node(Graph * graph_, NodeKind kind_) :
+  kind_(kind_),
+  graph_(graph_),
+  owning_block_(nullptr),
+  scope_(graph_->current_scope_),
+  schema_(nullptr) {
+  graph_->all_nodes.emplace(this);
+}
+
+void Node::eraseOutput(size_t i) {
+  JIT_ASSERT(i < outputs_.size());
+  JIT_ASSERT(outputs_[i]->uses().empty());
+  schema_ = nullptr;
+  Value * n = outputs_[i];
+  outputs_.erase(outputs_.begin() + i);
+  owningGraph()->freeValue(n);
+  for(size_t j = i; j < outputs_.size(); j++) {
+    outputs_[j]->offset_--;
+  }
+}
+
+Block * Node::addBlock() {
+  schema_ = nullptr;
+  blocks_.push_back(new Block(owningGraph(), this));
+  return blocks_.back();
+}
+
+void Node::eraseBlock(size_t i) {
+  JIT_ASSERT(i < blocks_.size());
+  schema_ = nullptr;
+  Block * n = blocks_[i];
+  blocks_.erase(blocks_.begin() + i);
+  n->destroy();
+}
+
+void Node::destroy() {
+  while(!outputs().empty())
+    eraseOutput(outputs().size() - 1);
+  while(!blocks().empty())
+    eraseBlock(blocks().size() - 1);
+  removeAllInputs();
+  if(inBlockList())
+    removeFromList();
+  graph_->freeNode(this);
+}
+
+void Node::cloneFrom(Node * s) {
+  setSourceLocation(s->getSourceLocation());
+  if(s->scope_ && !s->scope_->isBlank())
+    scope_ = s->scope_;
+  copyAttributes(*s);
+}
+
+void Node::replaceAllUsesWith(Node * n) {
+  JIT_ASSERT(outputs().size() == n->outputs().size());
+  size_t nOutputs = outputs().size();
+  for(size_t i = 0; i < nOutputs; i++) {
+    outputs()[i]->replaceAllUsesWith(n->outputs()[i]);
+  }
+}
+
+Value* Node::insertInput(size_t i, Value* value) {
+  JIT_ASSERT(graph_ == value->owningGraph());
+  schema_ = nullptr;
+  // First we update the offsets for all existing inputs that will reside
+  // after the one we're inserting. Concretely, these are the inputs at
+  // indices [i, # input). Since we're inserting one input before all of
+  // these inputs, increment their use offsets for this value by 1
+  for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
+    // See Note [User node does not uniquely identify use]
+    auto use = findUseForInput(use_itr);
+    use->offset += 1;
+  }
+  // Insert the actual input at the specified index
+  inputs_.insert(inputs_.begin() + i, value);
+  // Register the new use of the value we're inserted as an input.
+  value->uses_.emplace_back(this, i);
+  return value;
+}
+
+Value* Node::addInput(Value * value) {
+  JIT_ASSERT(graph_ == value->owningGraph());
+  schema_ = nullptr;
+  value->uses_.emplace_back(this, inputs_.size());
+  inputs_.push_back(value);
+  return value;
+}
+
+Value* Node::replaceInput(size_t i, Value * newValue) {
+  JIT_ASSERT(newValue->owningGraph() == graph_);
+  schema_ = nullptr;
+  Value * old = dropInput(i);
+  inputs_[i] = newValue;
+  newValue->uses_.emplace_back(this, i);
+  return old;
+}
+
+void Node::replaceInputWith(Value * from, Value * to) {
+  JIT_ASSERT(from->owningGraph() == graph_);
+  JIT_ASSERT(to->owningGraph() == graph_);
+  schema_ = nullptr;
+  size_t i = 0;
+  for(auto input : inputs()) {
+    if(input == from)
+      replaceInput(i, to);
+    i++;
+  }
+}
+
+Value* Node::addOutput() {
+  outputs_.push_back(new Value(this, outputs_.size()));
+  schema_ = nullptr;
+  return outputs_.back();
+}
+
+Value* Node::insertOutput(size_t i) {
+  schema_ = nullptr;
+  outputs_.insert(outputs_.begin() + i, new Value(this, i));
+  for (size_t itr = i + 1; itr < outputs_.size(); ++itr) {
+    outputs_[itr]->setOffset(outputs_[itr]->offset() + 1);
+  }
+  return outputs_.at(i);
+}
+
+bool Node::isBefore(const Node * n) const {
+  if (this == n) {
+    return false;
+  }
+  return !isAfter(n);
+}
+
+bool Node::isAfter(const Node * n) const {
+  JIT_ASSERT(this->owningBlock() == n->owningBlock());
+
+  return this->topo_position_ > n->topo_position_;
+}
+
+Node* Node::insertBefore(Node * n) {
+  JIT_ASSERT(n->inBlockList());
+  insertAfter(n->prev());
+  return this;
+}
+
+Node* Node::insertAfter(Node * n) {
+  JIT_ASSERT(!inBlockList() && n->inBlockList());
+  JIT_ASSERT(n->owningBlock());
+  this->owning_block_ = n->owningBlock();
+  Node * next = n->next();
+  n->next() = this;
+  this->prev() = n;
+  this->next() = next;
+  next->prev() = this;
+  assignTopoPosition();
+  return this;
+}
+
+bool Node::moveAfterTopologicallyValid(Node* n) {
+  return tryMove(n, MoveSide::AFTER);
+}
+
+bool Node::moveBeforeTopologicallyValid(Node* n) {
+  // We have to distinguish the move side (instead of just moving after
+  // n->prev()). Consider the following example:
+  //   If the dependency graph looks like this -> n -> o then moveBefore(o) will
+  //   end up with [this, o, n], but moveAfter(n) will return false.
+  return tryMove(n, MoveSide::BEFORE);
+}
+
+// Helper for topologically-safe node moves. See `tryMove()` for details.
+namespace {
+struct WorkingSet {
+ public:
+  explicit WorkingSet(Node* mover) {
+    add(mover);
+  }
+
+  // Add `n` to the working set
+  void add(Node* n) {
+    nodes_.push_back(n);
+    for (const auto user : getUsersSameBlock(n)) {
+      users_[user]++;
+    }
+  }
+
+  void eraseMover() {
+    auto mover = nodes_.front();
+    for (const auto user : getUsersSameBlock(mover)) {
+      // If this user node only uses the mover, we can remove it
+      if (users_[user] == 1) {
+        users_.erase(user);
+      }
+    }
+    nodes_.pop_front();
+  }
+
+  const std::list<Node*>& nodes() {
+    return nodes_;
+  }
+
+  // Does the working set depend on `n`?
+  bool dependsOn(Node* n) const {
+    if (nodes_.empty()) {
+      return false;
+    }
+
+    if (n->isAfter(nodes_.front())) {
+      return producesFor(n);
+    } else {
+      return consumesFrom(n);
+    }
+  }
+
+  // Does the working set produce any values consumed by `n`?
+  bool producesFor(Node* n) const {
+    // This equivalent to asking: does the total use-set of all the nodes in the
+    // working set include `n`?
+    return users_.count(n) != 0;
+  }
+
+  // Does the working set consume any values produced by `n`?
+  bool consumesFrom(Node* n) const {
+    const auto users = getUsersSameBlock(n);
+    return std::any_of(nodes_.begin(), nodes_.end(), [&](Node* node) {
+      return users.count(node) != 0;
+    });
+  }
+
+ private:
+  // Get all users of outputs of `n`, in the same block as `n`.
+  // This means if there is an `if` node that uses an output of `n` in some
+  // inner sub-block, we will consider the whole `if` node a user of `n`.
+  std::unordered_set<Node*> getUsersSameBlock(Node* n) const {
+    std::unordered_set<Node*> users;
+    for (const auto output : n->outputs()) {
+      for (const auto& use : output->uses()) {
+        if (use.user->owningBlock() == n->owningBlock()) {
+          users.insert(use.user);
+        } else {
+          // This user is in a sub-block. Traverse the blockchain upward until
+          // we arrive at a node that shares a block with `this`
+          auto curNode = use.user;
+          while (curNode->owningBlock() != n->owningBlock()) {
+            curNode = curNode->owningBlock()->owningNode();
+            JIT_ASSERT(curNode);
+          }
+          users.insert(curNode);
+        }
+      }
+    }
+
+    return users;
+  }
+
+  std::list<Node*> nodes_;
+  // users => # of working set nodes it uses
+  std::unordered_map<Node*, size_t> users_;
+};
+} // namespace
+
+// Try to move `this` before/after `movePoint` while preserving value
+// dependencies. Returns false iff such a move could not be made
+//
+// The basic approach is: have a "working set" that we are moving forward, one
+// node at a time. When we can't move past a node (because it depends on the
+// working set), then add it to the working set and keep moving until we hit
+// `moveAfter`.
+bool Node::tryMove(Node* movePoint, MoveSide moveSide) {
+  JIT_ASSERT(this->inBlockList() && movePoint->inBlockList());
+  JIT_ASSERT(this->owningBlock() == movePoint->owningBlock());
+  if (this == movePoint) {
+    return true;
+  }
+
+  // 1. Move from `this` toward movePoint, building up the working set of
+  // dependencies
+  WorkingSet workingSet(this);
+
+  int direction;
+  if (this->isAfter(movePoint)) {
+    direction = kPrevDirection;
+  } else {
+    direction = kNextDirection;
+  }
+
+  auto curNode = this->next_in_graph[direction];
+  // Move forward one node at a time
+  while (curNode != movePoint) {
+    if (workingSet.dependsOn(curNode)) {
+      // If we can't move past this node, add it to the working set
+      workingSet.add(curNode);
+    }
+    curNode = curNode->next_in_graph[direction];
+  }
+
+  // 2. Decide whether we can move it all to `movePoint`.
+
+  // Say we are moving directly before movePoint and `this` starts before
+  // movePoint in the graph. The move looks like
+  //
+  //  `this`              `this`           |
+  //  <dependencies>  ->  `movePoint`      | `this` and deps are split
+  //  `movePoint`         <dependencies>   |
+  //
+  // Contrast with the case where `this` starts AFTER movePoint:
+  //
+  //  `movePoint`         <dependencies>   |
+  //  <dependencies>  ->  `this`           | `this` and deps are together
+  //  `this`              `movePoint`      |
+  //
+  // In the first case, we need to split `this` off from its dependencies, so we
+  // can move the dependencies below `movePoint` and keep `this` above.
+  const bool splitThisAndDeps =
+      (moveSide == MoveSide::BEFORE && this->isBefore(movePoint)) ||
+      (moveSide == MoveSide::AFTER && this->isAfter(movePoint));
+
+  if (splitThisAndDeps) {
+    // remove `this` from dependencies to be moved past `movePoint`
+    workingSet.eraseMover();
+  }
+
+  // Check if we can move the working set past the move point
+  if (workingSet.dependsOn(movePoint)) {
+    // if we can't, then there are intermediate dependencies between the
+    // `this` and `movePoint`, so we can't do the move
+    return false;
+  }
+
+  // 3. Execute the move
+  JIT_ASSERT(curNode == movePoint);
+  if (splitThisAndDeps) {
+    // Move `this`
+    this->move(movePoint, moveSide);
+
+    // Then move all of its dependencies on the other side of `movePoint`
+    const auto reversed =
+        moveSide == MoveSide::BEFORE ? MoveSide::AFTER : MoveSide::BEFORE;
+    for (auto toMove : workingSet.nodes()) {
+      toMove->move(curNode, reversed);
+      curNode = toMove;
+    }
+  } else {
+    // Just append/prepend everything to `movePoint`
+    for (auto toMove : workingSet.nodes()) {
+      toMove->move(curNode, moveSide);
+      curNode = toMove;
+    }
+  }
+  return true;
+}
+
+// Helper function so we can generalize `tryMove`
+void Node::move(Node* movePoint, MoveSide moveSide) {
+  switch (moveSide) {
+    case MoveSide::BEFORE:
+      this->moveBefore(movePoint);
+      break;
+    case MoveSide::AFTER:
+      this->moveAfter(movePoint);
+      break;
+  }
+}
+
+void Node::moveAfter(Node * n) {
+  removeFromList();
+  insertAfter(n);
+}
+
+void Node::moveBefore(Node * n) {
+  removeFromList();
+  insertBefore(n);
+}
+
+void Node::removeInput(size_t i) {
+  schema_ = nullptr;
+  dropInput(i);
+  // everything after this input shifts left,
+  // so we need to update their use offsets to match
+  for(size_t j = i+1; j < inputs_.size(); j++) {
+    auto it = findUseForInput(j);
+    it->offset--;
+  }
+  inputs_.erase(inputs_.begin() + i);
+}
+
+void Node::removeAllInputs() {
+  schema_ = nullptr;
+  for(size_t i = 0; i < inputs().size(); ++i)
+    dropInput(i);
+  inputs_.clear();
+}
+
+use_list::iterator Node::findUseForInput(size_t i) {
+  auto & input_uses = inputs_[i]->uses_;
+  // O(N) on the use list, but unless we get nodes with +100 uses
+  // vector traversal still is probably faster than linked list
+  auto use_it = std::find(input_uses.begin(), input_uses.end(), Use(this, i));
+  JIT_ASSERT(use_it != input_uses.end());
+  return use_it;
+}
+
+Value* Node::dropInput(size_t i) {
+  JIT_ASSERT(i < inputs_.size());
+  auto input_node = inputs_[i];
+  auto use_it = findUseForInput(i);
+  input_node->uses_.erase(use_it);
+  inputs_[i] = nullptr;
+  return input_node;
+}
+
+void Node::removeFromList() {
+  JIT_ASSERT(inBlockList());
+  this->owning_block_ = nullptr;
+  Node * next = this->next();
+  Node * prev = this->prev();
+  prev->next() = next;
+  next->prev() = prev;
+  this->next() = nullptr;
+  this->prev() = nullptr;
 }
 
 inline const SourceRange& fakeRange() {
@@ -610,7 +1154,217 @@ inline const SourceRange& fakeRange() {
 }
 
 Value* Graph::insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs) {
-  return script::emitBuiltinCall(fakeRange(), *this, opname, args, kwargs, /*required=*/true);
+  return script::emitBuiltinCall(fakeRange(), *this, opname, c10::nullopt, args, kwargs, /*required=*/true);
+}
+
+Node* Graph::create(NodeKind kind, size_t num_outputs) {
+  // NB: Node constructor adds node to all_nodes
+  auto n = new Node(this, kind);
+  for(size_t i = 0; i < num_outputs; i++)
+    n->addOutput();
+  return n;
+}
+
+Node* Graph::create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs) {
+  auto n = create(kind, num_outputs);
+  for(auto i : inputs)
+    n->addInput(i);
+  return n;
+}
+
+Node* Graph::createUndefined() {
+  return create(prim::Undefined);
+}
+
+Node * Graph::createNoneGenerator() {
+  auto n = create(prim::NoneGenerator);
+  n->output()->setType(GeneratorType::get());
+  return n;
+}
+
+Node * Graph::createFusionGroup(int device) {
+  auto n = create(prim::FusionGroup, 0);
+  n->g_(attr::Subgraph,std::make_shared<Graph>(current_scope()));
+  n->i_(attr::device, device);
+  return n;
+}
+
+Node* Graph::createTuple(at::ArrayRef<Value*> values) {
+  auto types = fmap(values, [](Value* v) { return v->type(); });
+  auto tt = TupleType::create(std::move(types));
+  auto n = create(prim::TupleConstruct, values);
+  n->output()->setType(tt);
+  return n;
+}
+
+Node* Graph::createTupleUnpack(Value * v) {
+  TupleTypePtr tt = v->type()->expect<TupleType>();
+  auto n = create(prim::TupleUnpack, {v}, 0);
+  for(auto & element : tt->elements()) {
+    n->addOutput()->setType(element);
+  }
+  return n;
+}
+
+Node* Graph::createTupleIndex(Value * tup, int64_t index) {
+  auto n = create(prim::TupleIndex, {tup});
+  n->i_(attr::index, index);
+  auto tuple_type = tup->type()->expect<TupleType>();
+  n->output()->setType(tuple_type->elements().at(index));
+  return n;
+}
+
+Node* Graph::createTupleSlice(Value * tup, int64_t beg, int64_t end) {
+  auto n = create(prim::TupleSlice, {tup});
+  auto tuple_type = tup->type()->expect<TupleType>();
+  n->i_(attr::beg, beg);
+  n->i_(attr::end, end);
+  std::vector<TypePtr> output_types;
+  for (auto i = beg; i < end; ++i) {
+    output_types.push_back(tuple_type->elements().at(i));
+  }
+  auto tt = TupleType::create(std::move(output_types));
+  n->output()->setType(tt);
+  return n;
+}
+
+Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
+  auto n = create(prim::ListConstruct, values);
+  for(const auto & v : values) {
+    JIT_ASSERT(v->type()->isSubtypeOf(elem_type));
+  }
+  n->output()->setType(ListType::create(elem_type));
+  return n;
+}
+Node* Graph::createListUnpack(Value *v, size_t size) {
+  ListTypePtr list_type = v->type()->expect<ListType>();
+  TypePtr elem_type = list_type->getElementType();
+  auto n = create(prim::ListUnpack, {v}, 0);
+  for (size_t i = 0; i < size; ++i) {
+    n->addOutput()->setType(elem_type);
+  }
+  return n;
+}
+
+Node* Graph::createNumToTensor(Value* value) {
+  auto typ = value->type();
+  Node * result = create(prim::NumToTensor, {value});
+  result->output()->setType(CompleteTensorType::fromNumberType(typ));
+  return result;
+}
+
+Node* Graph::createBoolToTensor(Value* value) {
+  auto typ = value->type();
+  Node * result = create(prim::BoolToTensor, {value});
+  if (!typ->isSubtypeOf(BoolType::get())) {
+    AT_ERROR("Cannot create bool type from ", typ->str());
+  }
+  result->output()->setType(CompleteTensorType::fromBoolType());
+  return result;
+}
+Node* Graph::createTensorToNum(const TypePtr& type, Value* value) {
+  auto* result = create(prim::TensorToNum, {value});
+  result->output()->setType(type);
+  return result;
+}
+
+Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
+  auto* result = create(prim::ImplicitTensorToNum, {value});
+  result->output()->setType(type);
+  return result;
+}
+
+Node* Graph::createTensorToBool(Value* value) {
+  auto* result = create(prim::TensorToBool, {value});
+  result->output()->setType(BoolType::get());
+  return result;
+}
+
+Node* Graph::createIntToFloat(Value* value) {
+  JIT_ASSERT(*value->type() == *IntType::get());
+  auto* result = create(prim::IntToFloat, {value});
+  result->output()->setType(FloatType::get());
+  return result;
+}
+
+Node* Graph::createFloatToInt(Value* value) {
+  JIT_ASSERT(*value->type() == *FloatType::get());
+  auto* result = create(prim::FloatToInt, {value});
+  result->output()->setType(IntType::get());
+  return result;
+}
+
+Node* Graph::createStringToFloat(Value* value) {
+  JIT_ASSERT(*value->type() == *StringType::get());
+  auto* result = create(prim::StringToFloat, {value});
+  result->output()->setType(FloatType::get());
+  return result;
+}
+
+Node* Graph::createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks) {
+  //n can be from a different graph
+  Node * r = n->allocNewInstance(this);
+  for(auto o : n->outputs()) {
+    r->addOutput()->copyMetadata(o);
+  }
+  r->cloneFrom(n);
+  for(auto i : n->inputs()) {
+    r->addInput(value_map(i));
+  }
+  if(copy_blocks) {
+    for(auto b : n->blocks()) {
+      r->addBlock()->cloneFrom(b, value_map);
+    }
+  }
+  return r;
+}
+
+Value* Graph::insertConstant(
+    IValue val,
+    c10::optional<SourceRange> loc,
+    c10::optional<ScopePtr> scope) {
+  return jit::insertConstant(*this, std::move(val), loc, scope);
+}
+
+Value* Graph::insertDummyWorld() {
+  auto node = create(prim::DummyWorld, 1);
+  node->output()->setType(WorldType::get());
+  return insertNode(node)->output();
+}
+
+std::string Graph::toString() const {
+  std::ostringstream oss;
+  oss << *this;
+  return oss.str();
+}
+
+Graph::~Graph() {
+  for (const Node * n : all_nodes)
+    delete n;
+  for (const Value * v : all_values)
+    delete v;
+  for (const Block * b : all_blocks)
+    delete b;
+}
+
+void Graph::freeNode(Node * n) {
+  auto it = all_nodes.find(n);
+  JIT_ASSERT(it != all_nodes.end());
+  delete *it;
+  all_nodes.erase(it);
+}
+void Graph::freeValue(Value * v) {
+  v->setUniqueName("");
+  auto it = all_values.find(v);
+  JIT_ASSERT(it != all_values.end());
+  delete *it;
+  all_values.erase(it);
+}
+void Graph::freeBlock(Block * b) {
+  auto it = all_blocks.find(b);
+  JIT_ASSERT(it != all_blocks.end());
+  delete *it;
+  all_blocks.erase(it);
 }
 
 PythonOp* defaultAllocPythonOp(Graph*g) {

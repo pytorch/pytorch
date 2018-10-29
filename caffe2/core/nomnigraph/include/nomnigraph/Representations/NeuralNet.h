@@ -245,10 +245,51 @@ struct CAFFE2_API NNModule {
   NNCFGraph controlFlow;
   std::unordered_set<NNGraph::NodeRef> inputs;
   std::unordered_set<NNGraph::NodeRef> outputs;
+
   NNModule(const NNModule&) = delete;
   NNModule(NNModule&&) = default;
   NNModule() {}
+
+  /* Repalce subgraph sg by node, using the order of
+   * node_inputs and node_outputs to determine how to link
+   * them to the node.  node_inputs *must* enumerate all the
+   * inputs to the subgraph (NeuralNetData that do not
+   * have producers inside the subgraph).  Same for node_outputs
+   *
+   * New output names may be created in the case that an inputs
+   * and an output have the same name (to avoid in place ops).
+   * This may cause issues with external_output -- be sure to check
+   * after running this function (and perhaps inserting a copy/alias op).
+   **/
+  void replaceSubgraph(
+      const NNGraph::SubgraphType& subgraph,
+      const NNGraph::NodeRef& node,
+      const std::vector<NNGraph::NodeRef>& node_inputs,
+      const std::vector<NNGraph::NodeRef>& node_outputs);
+
+  void deleteSubgraph(const NNGraph::SubgraphType& subgraph);
+  NNGraph::NodeRef createUniqueDataNode(const std::string& s = "_unique");
+
+  // Simple wrapper of replaceSubgraph where the node is created for you.
+  // Returns a NodeRef to the node containing the operator that was created
+  template <typename T, typename... Args>
+  NNGraph::NodeRef replaceSubgraphWithOperator(
+      const NNGraph::SubgraphType&,
+      const std::vector<NNGraph::NodeRef>&,
+      const std::vector<NNGraph::NodeRef>&,
+      Args...);
 };
+
+template <typename T, typename... Args>
+NNGraph::NodeRef NNModule::replaceSubgraphWithOperator(
+    const NNGraph::SubgraphType& sg,
+    const std::vector<NNGraph::NodeRef>& subgraph_inputs,
+    const std::vector<NNGraph::NodeRef>& subgraph_outputs,
+    Args... args) {
+  auto node = dataFlow.createNode(util::make_unique<T>(args...));
+  replaceSubgraph(sg, node, subgraph_inputs, subgraph_outputs);
+  return node;
+}
 
 // Although these seem generic, they make subtle assumptions
 // about the structure of the graph that is 100% valid for NNModule graphs
@@ -297,9 +338,9 @@ struct C10_EXPORT
   }
 };
 
-template <typename T, typename N>
-inline bool is(N n) {
-  return is_impl<T, N>::impl(n);
+template <typename T>
+inline bool is(NNGraph::NodeRef n) {
+  return is_impl<T, NNGraph::NodeRef>::impl(n);
 }
 
 // This is just a way to fix issues when the dyn_cast<> implementation
@@ -428,87 +469,56 @@ CAFFE2_API bool hasInputs(NNGraph::NodeRef n);
 CAFFE2_API std::vector<NNGraph::NodeRef> getInputs(NNGraph::NodeRef n);
 CAFFE2_API std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n);
 
+CAFFE2_API std::set<NNGraph::NodeRef> getInputs(const NNSubgraph& sg);
+CAFFE2_API std::set<NNGraph::NodeRef> getOutputs(const NNSubgraph& sg);
+
+// Get the name of the node regardless of underlying type.
+CAFFE2_API std::string getName(NNGraph::NodeRef n);
+
+// Replace the producer of the first argument with the second argument
+CAFFE2_API void replaceProducer(
+    NNGraph::NodeRef tensorNode,
+    NNGraph::NodeRef newProducer);
+// Set all consumers of first argument to consume the second argument
+CAFFE2_API void replaceAllUsesWith(
+    NNGraph::NodeRef oldTensorNode,
+    NNGraph::NodeRef newTensorNode);
+// Set the second argument to consume the inputs of the first argument
+CAFFE2_API void replaceAsConsumer(
+    NNGraph::NodeRef oldConsumer,
+    NNGraph::NodeRef newConsumer);
+
+// Create an output tensor node
+CAFFE2_API NNGraph::NodeRef
+createOutput(NNModule* nn, NNGraph::NodeRef producer, std::string name);
+
+// Hack for windows compiler.
+template <typename T, typename... Args>
+CAFFE2_API NNGraph::NodeRef createOperator(NNModule* nn, Args... args);
+
+// Create an operator
+template <typename T, typename... Args>
+NNGraph::NodeRef createOperator(NNModule* nn, Args... args) {
+  return nn->dataFlow.createNode(util::make_unique<T>(args...));
+}
+
 CAFFE2_API void coalesceInsertedDataDependencies(repr::NNModule* m);
 
 template <NNGraph* G>
 struct C10_EXPORT NodeHelper {};
 
-struct NNNodeMatchCriteria {
-  std::function<bool(NNGraph::NodeRef)> predicate;
-  std::string debugString;
+using NNMatchGraph = nom::matcher::MatchGraph<NNGraph>;
+using NNMatchPredicate = nom::matcher::MatchPredicate<NNGraph>;
 
-  NNNodeMatchCriteria(
-      const std::function<bool(NNGraph::NodeRef)>& predicate,
-      const std::string& debugString = "No debug string specified")
-      : predicate(predicate), debugString(debugString){};
-
-  NNNodeMatchCriteria() = default;
-  NNNodeMatchCriteria(const NNNodeMatchCriteria&) = default;
-  NNNodeMatchCriteria& operator=(const NNNodeMatchCriteria&) = default;
-  NNNodeMatchCriteria(NNNodeMatchCriteria&&) = default;
-
-  NNNodeMatchCriteria andCriteria(const NNNodeMatchCriteria& other) {
-    auto thisPredicate = predicate;
-    auto otherPredicate = other.predicate;
-    return NNNodeMatchCriteria(
-        [thisPredicate, otherPredicate](NNGraph::NodeRef node) {
-          return thisPredicate(node) && otherPredicate(node);
-        },
-        debugString + " and " + other.debugString);
-  }
-};
-
-CAFFE2_API std::ostream& operator<<(
-    std::ostream& oss,
-    const NNNodeMatchCriteria& criteria);
-
-using NNMatchGraph = nom::matcher::MatchGraph<NNNodeMatchCriteria>;
-using NNMatchNode = nom::matcher::MatchNode<NNNodeMatchCriteria>;
-
-// Commonly used criteria.
+// Commonly used node predicate.
 
 // The node has a single output and the output has a single consumer.
-CAFFE2_API NNNodeMatchCriteria criteriaSingleOutputAndConsumer();
+CAFFE2_API bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef);
 // The node has a unique consumer (there may be multiple edges from output
 // to the single consumer).
-CAFFE2_API NNNodeMatchCriteria criteriaSingleConsumer();
+CAFFE2_API bool hasUniqueConsumer(NNGraph::NodeRef nodeRef);
 
-template <typename NodeType>
-NNNodeMatchCriteria matchOp(const std::string& debugString = "matchOp") {
-  return NNNodeMatchCriteria(
-      [](NNGraph::NodeRef nodeRef) { return is<NodeType>(nodeRef); },
-      debugString);
-}
-
-template <typename NodeType>
-NNNodeMatchCriteria matchOp(
-    const std::function<bool(const NodeType&)> predicate,
-    const std::string& debugString = "matchOpWithPredicate") {
-  return NNNodeMatchCriteria(
-      [predicate](NNGraph::NodeRef nodeRef) {
-        NOM_REQUIRE_OR_RET_FALSE(is<NodeType>(nodeRef));
-        NodeType* node = get<NodeType>(nodeRef);
-        return predicate(*node);
-      },
-      debugString);
-};
-
-CAFFE2_API NNNodeMatchCriteria
-matchTensor(const std::string& debugString = "matchTensor");
-
-CAFFE2_API NNMatchNode
-matchExternalTensorNode(const std::string& debugString = "matchExternalTensor");
-
-struct CAFFE2_API NNNodeMatch {
-  static bool isMatch(
-      const NNGraph::NodeRef& node,
-      const NNNodeMatchCriteria& criteria) {
-    return criteria.predicate(node);
-  }
-};
-
-using NNSubgraphMatcher =
-    nom::matcher::SubgraphMatcher<NNGraph, NNNodeMatchCriteria, NNNodeMatch>;
+CAFFE2_API NNMatchPredicate matchExternalTensorNode();
 
 } // namespace nn
 

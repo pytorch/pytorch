@@ -2,7 +2,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
@@ -34,13 +34,13 @@ class AtomicFetchAddOp final : public Operator<CPUContext> {
     auto& b = Input(2);
     auto* c = Output(0);
     auto* d = Output(1);
-    c->Resize(std::vector<int64_t>());
-    d->Resize(std::vector<int64_t>());
+    std::lock_guard<std::mutex> lg(*mutex);
+    c->Resize();
+    d->Resize();
     auto* aPtr = a.data<int32_t>();
     auto* bPtr = b.data<int32_t>();
     auto* cPtr = c->template mutable_data<int32_t>();
     auto* dPtr = d->template mutable_data<int32_t>();
-    std::lock_guard<std::mutex> lg(*mutex);
     *dPtr = *aPtr;
     *cPtr = *aPtr + *bPtr;
     return true;
@@ -90,7 +90,7 @@ class CheckAtomicBoolOp final : public Operator<CPUContext> {
 REGISTER_CPU_OPERATOR(CreateMutex, CreateMutexOp);
 REGISTER_CPU_OPERATOR(AtomicFetchAdd, AtomicFetchAddOp);
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(CreateMutex, IDEEPFallbackOp<CreateMutexOp, SkipIndices<0>>);
 #endif
 

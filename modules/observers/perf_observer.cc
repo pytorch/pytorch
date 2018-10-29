@@ -11,27 +11,27 @@
 #include "caffe2/core/operator.h"
 
 #if !CAFFE2_MOBILE
-CAFFE2_DEFINE_int64(
+C10_DEFINE_int64(
     aiBench_netInitSampleRate,
     0,
     "One in N sampling rate for net delay");
 
-CAFFE2_DEFINE_int64(
+C10_DEFINE_int64(
     aiBench_netFollowupSampleRate,
     0,
     "One in N sampling rate for net delay");
 
-CAFFE2_DEFINE_int64(
+C10_DEFINE_int64(
     aiBench_netFollowupSampleCount,
     0,
     "control the following c logs");
 
-CAFFE2_DEFINE_int64(
+C10_DEFINE_int64(
     aiBench_operatorNetSampleRatio,
     0,
     "One in N sampling rate for operator delay");
 
-CAFFE2_DEFINE_int64(
+C10_DEFINE_int64(
     aiBench_skipIters,
     0,
     "skip the first N iterations of the net run");

@@ -19,21 +19,21 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
-CAFFE2_DEFINE_string(
+C10_DEFINE_string(
     caffe2_net_async_tracing_filepath,
     "/tmp",
     "Path to save tracing information");
 
-CAFFE2_DEFINE_string(
+C10_DEFINE_string(
     caffe2_net_async_names_to_trace,
     "",
     "Comma-separated list of net names to trace");
 
-CAFFE2_DEFINE_int(caffe2_net_async_tracing_nth, 100, "Trace every Nth batch");
+C10_DEFINE_int(caffe2_net_async_tracing_nth, 100, "Trace every Nth batch");
 
 // For every Nth iterations, we will dump the tracing results to a json file
 // The file is appended with the iteration number.
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_net_async_tracing_dumping_nth,
     10000,
     "Dump profiling result file every Nth batch");

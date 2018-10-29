@@ -89,8 +89,17 @@ TensorProto CreateOnnxShapeTensor(
 }
 
 std::string SsaName(const std::string& n, int version) {
-  return MakeString(n, "_", version);
+  return c10::str(n, "_", version);
 }
+
+NodeProto AddShapeNode(const std::string& input, const std::string& output) {
+  NodeProto shape_node;
+  shape_node.set_op_type("Shape");
+  shape_node.add_input(input);
+  shape_node.add_output(output);
+  return shape_node;
+}
+
 } // namespace
 
 std::unordered_map<std::string, std::string> SsaRewrite(
@@ -283,8 +292,7 @@ void OnnxExporter::CopyCaffe2ArgToOnnxAttr(
     attr->mutable_strings()->CopyFrom(arg.strings());
     attr->set_type(AttributeProto::STRINGS);
   } else {
-    CAFFE_THROW(
-        caffe2::MakeString("Unsupported Caffe2 argument: ", arg.name()));
+    CAFFE_THROW(c10::str("Unsupported Caffe2 argument: ", arg.name()));
   }
 }
 
@@ -294,6 +302,7 @@ bool OnnxExporter::IsBlackListed(const caffe2::Argument& arg) {
   const static std::unordered_map<std::string, std::unordered_set<int64_t>>
       kBlackListInt = {{"cudnn_exhaustive_search", {0, 1}},
                        {"use_cudnn", {0, 1}},
+                       {"exhaustive_search", {0, 1}},
                        {"is_test", {0, 1}},
                        {"broadcast", {0, 1}}};
 
@@ -428,8 +437,9 @@ ConvertedResult OnnxExporter::CreateCastNodes(
     std::transform(
         c2_dtype.begin(), c2_dtype.end(), c2_dtype.begin(), ::toupper);
     if (c2_dtype == "FLOAT") {
-    } else if (c2_dtype == "INT32") {
       onnx_dtype = ::ONNX_NAMESPACE::TensorProto::FLOAT;
+    } else if (c2_dtype == "INT32") {
+      onnx_dtype = ::ONNX_NAMESPACE::TensorProto::INT32;
     } else if (c2_dtype == "BOOL") {
       onnx_dtype = ::ONNX_NAMESPACE::TensorProto::BOOL;
     } else if (c2_dtype == "UINT8") {
@@ -616,10 +626,6 @@ ConvertedResult OnnxExporter::CreateConcatNodes(
 
   CAFFE_ENFORCE_EQ(nodes.size(), 1);
   auto& node = nodes.back();
-  if (node.output_size() == 2) {
-    node.mutable_output()->RemoveLast();
-  }
-
   bool explicit_axis = false;
   for (const auto& a : def.arg()) {
     if (a.name() == "axis") {
@@ -631,6 +637,12 @@ ConvertedResult OnnxExporter::CreateConcatNodes(
     node.add_attribute()->CopyFrom(MakeAttribute("axis", 1L));
   }
 
+  if (node.output_size() == 2) {
+    std::string shape_input = node.output(0);
+    std::string shape_output = node.output(1);
+    node.mutable_output()->RemoveLast();
+    nodes.emplace_back(AddShapeNode(shape_input, shape_output));
+  }
   return result;
 }
 
@@ -791,7 +803,10 @@ ConvertedResult OnnxExporter::CreateReshapeNodes(
   }
 
   if (node.output_size() == 2) {
+    std::string shape_input = node.output(0);
+    std::string shape_output = node.output(1);
     node.mutable_output()->RemoveLast();
+    nodes.emplace_back(AddShapeNode(shape_input, shape_output));
   }
 
   return result;
@@ -933,7 +948,7 @@ void OnnxExporter::InitOpToTensorProto(
     }
   } else {
     CAFFE_THROW(
-        MakeString("Cannot convert C2 op ", op.type(), "to ONNX TensorProto"));
+        c10::str("Cannot convert C2 op ", op.type(), "to ONNX TensorProto"));
   }
 }
 

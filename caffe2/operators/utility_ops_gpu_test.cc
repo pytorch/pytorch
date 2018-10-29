@@ -6,7 +6,7 @@
 #include "caffe2/operators/utility_ops.h"
 #include <gtest/gtest.h>
 
-CAFFE2_DECLARE_string(caffe_test_root);
+C10_DECLARE_string(caffe_test_root);
 
 namespace caffe2 {
 
@@ -22,7 +22,7 @@ static void AddConstInput(
   auto* tensor = BlobGetMutableTensor(blob, CUDA);
   tensor->Resize(shape);
   math::Set<float, CUDAContext>(
-      tensor->size(), value, tensor->template mutable_data<float>(), &context);
+      tensor->numel(), value, tensor->template mutable_data<float>(), &context);
   return;
 }
 
@@ -45,7 +45,7 @@ TEST(UtilityOpGPUTest, testReshapeWithScalar) {
   Blob* XNew = ws.GetBlob("XNew");
   const Tensor& XNewTensor = XNew->Get<Tensor>();
   EXPECT_EQ(1, XNewTensor.ndim());
-  EXPECT_EQ(1, XNewTensor.size());
+  EXPECT_EQ(1, XNewTensor.numel());
 }
 
 } // namespace caffe2

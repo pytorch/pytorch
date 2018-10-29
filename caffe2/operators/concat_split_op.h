@@ -135,7 +135,7 @@ bool SplitOp<Context>::RunOnDevice() {
         "If you set split with an input blob, do not pass in "
         "split in the argument.");
     auto& split_tensor = this->template Input<Tensor>(1, CPU);
-    CAFFE_ENFORCE_EQ(split_tensor.size(), OutputSize());
+    CAFFE_ENFORCE_EQ(split_tensor.numel(), OutputSize());
     axis_data = split_tensor.template data<int>();
   } else if (split_.size() == 0) {
     CAFFE_ENFORCE_EQ(
@@ -161,7 +161,7 @@ bool SplitOp<Context>::RunOnDevice() {
       input_channels,
       "Sum of split dimensions do not match: should be ",
       input_channels);
-  vector<int64_t> output_dims(input.dims());
+  vector<int64_t> output_dims(input.sizes().vec());
   int before = 1, after = 1;
   for (int i = 0; i < canonical_axis; ++i) {
     before *= input.dim32(i);
@@ -200,7 +200,7 @@ template <class Context>
 bool SplitByLengthsOp<Context>::RunOnDevice() {
   auto& input = Input(0);
   auto& length = this->template Input<Tensor>(1, CPU);
-  auto length_length = length.size();
+  auto length_length = length.numel();
   CAFFE_ENFORCE_EQ(
       length_length % OutputSize(),
       0,
@@ -211,11 +211,11 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
   const int input_channels = input.dim32(canonical_axis);
   const auto* axis_data = length.template data<int>();
   CAFFE_ENFORCE_EQ(
-      std::accumulate(axis_data, axis_data + length.size(), 0),
+      std::accumulate(axis_data, axis_data + length.numel(), 0),
       input_channels,
       "Sum of split dimensions do not match: should be ",
       input_channels);
-  vector<int64_t> output_dims(input.dims());
+  vector<int64_t> output_dims(input.sizes().vec());
   int before = input.size_to_dim(canonical_axis);
   int after = input.size_from_dim(canonical_axis + 1);
   size_t input_offset = 0;
@@ -263,7 +263,7 @@ bool ConcatOp<Context>::RunOnDevice() {
   }
 
   int before = 1, after = 1;
-  vector<int64_t> output_dims(input_zero.dims());
+  vector<int64_t> output_dims(input_zero.sizes().vec());
   for (int i = 0; i < input_zero.ndim(); ++i) {
     if (i == canonical_axis && !add_axis_) {
       continue;
@@ -291,9 +291,9 @@ bool ConcatOp<Context>::RunOnDevice() {
           "when arg 'add_axis' = 0 and along the axis = ",
           canonical_axis,
           " <",
-          Input(0).dims(),
+          Input(0).sizes(),
           "> vs <",
-          Input(j).dims(),
+          Input(j).sizes(),
           ">.");
     }
   }

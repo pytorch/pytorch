@@ -167,6 +167,7 @@ struct Attributes {
   const Kind##Attr::ValueType& method(Symbol name) const { \
     return get<Kind##Attr>(name); \
   }
+
   CREATE_ACCESSOR(Float,f)
   CREATE_ACCESSOR(Floats,fs)
   CREATE_ACCESSOR(String,s)

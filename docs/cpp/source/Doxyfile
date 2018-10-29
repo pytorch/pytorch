@@ -37,17 +37,15 @@ INPUT                  = ../../../torch/csrc/api/include \
                          ../../../torch/csrc/jit/script/module.h \
                          ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/Backend.h \
-                         ../../../aten/src/ATen/Device.h \
                          ../../../aten/src/ATen/DeviceGuard.h \
                          ../../../aten/src/ATen/Layout.h \
                          ../../../aten/src/ATen/OptionsGuard.h \
                          ../../../aten/src/ATen/Scalar.h \
                          ../../../aten/src/ATen/TensorOptions.h \
                          ../../../aten/src/ATen/core/ArrayRef.h \
-                         ../../../aten/src/ATen/core/DeviceType.h \
-                         ../../../aten/src/ATen/core/Error.h \
                          ../../../aten/src/ATen/core/Half.h \
                          ../../../aten/src/ATen/core/ScalarType.h \
+                         ../../../aten/src/ATen/core/Tensor.h \
                          ../../../aten/src/ATen/cuda/CUDAGuard.h \
                          ../../../aten/src/ATen/cuda/CUDAStream.h \
                          ../../../aten/src/ATen/cuda/CUDAContext.h \
@@ -56,7 +54,10 @@ INPUT                  = ../../../torch/csrc/api/include \
                          ../../../aten/src/ATen/cudnn/Types.h \
                          ../../../aten/src/ATen/cudnn/Utils.h \
                          ../../../aten/src/ATen/mkl/Descriptors.h \
-                         ../../../build/aten/src/ATen/Tensor.h \
+                         ../../../c10/util/Optional.h \
+                         ../../../c10/util/Exception.h \
+                         ../../../c10/Device.h \
+                         ../../../c10/DeviceType.h \
                          ../../../build/aten/src/ATen/Functions.h
 # Don't include .cpp files!
 FILE_PATTERNS          = *.h
@@ -67,7 +68,8 @@ FULL_PATH_NAMES        = YES
 # Nested folders will be ignored without this.
 RECURSIVE              = YES
 # Blacklist certain file patterns from the INPUT section.
-EXCLUDE = ../../../torch/csrc/api/include/torch/nn/pimpl-inl.h
+EXCLUDE = ../../../torch/csrc/api/include/torch/nn/pimpl-inl.h \
+          ../../../torch/csrc/api/include/torch/detail
 ################################################################################
 # Output formats for Doxygen to create.                                        #
 ################################################################################

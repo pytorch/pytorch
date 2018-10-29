@@ -57,7 +57,7 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
     int64_t dataToReduceSize = indicesInput.dim(0);
 
     const int* lengths = lengthsInput.template data<int>();
-    vector<int64_t> shape = dataInput.dims();
+    vector<int64_t> shape = dataInput.sizes().vec();
     shape[0] = outputSize;
     output->Resize(shape);
     const float* w = nullptr;
@@ -69,7 +69,7 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
     const uint8_t* input_data = dataInput.template data<uint8_t>();
 
     // delegate work to perfkernel that branches based on architecture
-    const int64_t indices_size = indicesInput.size();
+    const int64_t indices_size = indicesInput.numel();
     const int64_t N = dataInput.dim(0);
     EmbeddingLookup(
         in_block_size,

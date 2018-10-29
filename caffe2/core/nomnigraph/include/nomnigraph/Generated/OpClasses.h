@@ -1,3 +1,4 @@
+
 class Relu : public NeuralNetOperator {
  public:
   Relu() : NeuralNetOperator(NNKind::Relu) {}
@@ -638,13 +639,23 @@ class ChannelShuffle : public NeuralNetOperator {
 
 class Add : public NeuralNetOperator {
  public:
-  Add() : NeuralNetOperator(NNKind::Add) {}
+  Add(int broadcast = 0)
+      : NeuralNetOperator(NNKind::Add), broadcast_(broadcast) {}
 
   ~Add() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(Add);
 
+  int getBroadcast() const {
+    return broadcast_;
+  }
+
+  void setBroadcast(int broadcast) {
+    broadcast_ = broadcast;
+  }
+
  private:
+  int broadcast_;
 };
 
 class Reshape : public NeuralNetOperator {
@@ -709,6 +720,61 @@ class NHWC2NCHW : public NeuralNetOperator {
   ~NHWC2NCHW() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(NHWC2NCHW);
+
+ private:
+};
+
+class Declare : public NeuralNetOperator {
+ public:
+  Declare() : NeuralNetOperator(NNKind::Declare) {}
+
+  ~Declare() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Declare);
+
+ private:
+};
+
+class Export : public NeuralNetOperator {
+ public:
+  Export() : NeuralNetOperator(NNKind::Export) {}
+
+  ~Export() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Export);
+
+ private:
+};
+
+class GatherRanges : public NeuralNetOperator {
+ public:
+  GatherRanges() : NeuralNetOperator(NNKind::GatherRanges) {}
+
+  ~GatherRanges() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(GatherRanges);
+
+ private:
+};
+
+class Slice : public NeuralNetOperator {
+ public:
+  Slice() : NeuralNetOperator(NNKind::Slice) {}
+
+  ~Slice() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Slice);
+
+ private:
+};
+
+class MergeIdLists : public NeuralNetOperator {
+ public:
+  MergeIdLists() : NeuralNetOperator(NNKind::MergeIdLists) {}
+
+  ~MergeIdLists() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(MergeIdLists);
 
  private:
 };

@@ -1,15 +1,16 @@
 #include "torch/csrc/jit/export.h"
-#include "torch/csrc/jit/serialization.h"
 #include "torch/csrc/autograd/symbolic.h"
-#include "onnx/onnx_pb.h"
 #include "torch/csrc/onnx/onnx.h"
 
 #include "torch/csrc/utils/functional.h"
 #include <torch/csrc/jit/assertions.h>
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 
+#include "caffe2/serialize/inline_container.h"
+#include "onnx/onnx_pb.h"
+
 #include <ATen/ATen.h>
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #include <memory>
 #include <vector>
@@ -25,9 +26,9 @@ namespace onnx = ::ONNX_NAMESPACE;
 
 std::string getExportableSchemaStringForMethod(const script::Method& method) {
   const auto& schema = method.getSchema();
-  for (const auto& argument : schema.arguments) {
+  for (const auto& argument : schema.arguments()) {
     AT_CHECK(
-        !argument.default_value,
+        !argument.default_value(),
         "Default arguments in script graphs may currently not be exported.");
   }
   std::ostringstream stream;
@@ -113,9 +114,10 @@ class EncoderBase {
                    const Block *block,
                    const std::vector<at::Tensor> &initializers = {});
 
-  virtual void EncodeTensor(onnx::TensorProto *tensor_proto,
-                            const at::Tensor &tensor,
-                            const at::optional<std::string> external_ref = {}) = 0;
+  virtual void EncodeTensor(
+      onnx::TensorProto* tensor_proto,
+      const at::Tensor& tensor,
+      const c10::optional<std::string> external_ref = {}) = 0;
 
   virtual void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
                                            const Value* n) {};
@@ -369,12 +371,13 @@ class GraphEncoder: public EncoderBase {
   }
 
  private:
-  virtual void EncodeTensor(onnx::TensorProto *tensor_proto,
-                            const at::Tensor &tensor,
-                            const at::optional<std::string> external_ref = {}) override;
+  virtual void EncodeTensor(
+      onnx::TensorProto* tensor_proto,
+      const at::Tensor& tensor,
+      const c10::optional<std::string> external_ref = {}) override;
 
-   RawDataExportMap raw_data_export_map_;
-   bool defer_weight_export_;
+  RawDataExportMap raw_data_export_map_;
+  bool defer_weight_export_;
 };
 
 GraphEncoder::GraphEncoder(
@@ -398,9 +401,9 @@ GraphEncoder::GraphEncoder(
 }
 
 void GraphEncoder::EncodeTensor(
-    onnx::TensorProto *tensor_proto,
-    const at::Tensor &tensor,
-    const at::optional<std::string> external_ref) {
+    onnx::TensorProto* tensor_proto,
+    const at::Tensor& tensor,
+    const c10::optional<std::string> external_ref) {
   for(auto d : tensor.sizes()) {
     tensor_proto->add_dims(d);
   }
@@ -447,9 +450,10 @@ class ModuleEncoder: public EncoderBase {
                     script::Method &method,
                     const std::string prefix);
 
-  virtual void EncodeTensor(onnx::TensorProto *tensor_proto,
-                            const at::Tensor &tensor,
-                            const at::optional<std::string> external_ref = {}) override;
+  virtual void EncodeTensor(
+      onnx::TensorProto* tensor_proto,
+      const at::Tensor& tensor,
+      const c10::optional<std::string> external_ref = {}) override;
 
   virtual void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
                                            const Value* n) override;
@@ -478,7 +482,7 @@ ModuleEncoder::ModuleEncoder(
     const script::Module &module,
     std::ostream& out)
     : EncoderBase(onnx_torch::OperatorExportTypes::RAW, false),
-      stream_writer_(out) {
+      stream_writer_(&out) {
   model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
   EncodeModule(model_proto_.mutable_graph(), module);
 }
@@ -559,6 +563,8 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("FloatType");
   } else if (kind == TypeKind::IntType) {
     type_proto->set_denotation("IntType");
+  } else if (kind == TypeKind::BoolType) {
+    type_proto->set_denotation("BoolType");
   } else if (kind == TypeKind::NoneType) {
     type_proto->set_denotation("NoneType");
   } else if (kind == TypeKind::GeneratorType) {
@@ -673,9 +679,9 @@ void ModuleEncoder::EncodeMethod(
 }
 
 void ModuleEncoder::EncodeTensor(
-    onnx::TensorProto *tensor_proto,
-    const at::Tensor &tensor,
-    const at::optional<std::string> external_ref) {
+    onnx::TensorProto* tensor_proto,
+    const at::Tensor& tensor,
+    const c10::optional<std::string> external_ref) {
   auto storage_ptr = tensor.storage().unsafeGetStorageImpl();
   auto dedup_it = storage_dedup_map_.find(storage_ptr);
   if (dedup_it != storage_dedup_map_.end()) {
@@ -689,8 +695,8 @@ void ModuleEncoder::EncodeTensor(
       t = at::getType(tensor).tensor(
           tensor.storage(),
           /* storageOffset = */ 0,
-          /* size = */ { static_cast<int64_t>(tensor.type().elementSizeInBytes() * tensor.storage().size()) },
-          /* strides = */ { 1 })
+          /* size = */ { static_cast<int64_t>(tensor.storage().size()) },
+          /* stride = */ { 1 })
         .cpu();
     }
 
