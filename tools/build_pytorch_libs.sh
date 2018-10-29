@@ -217,6 +217,7 @@ function build() {
 		       -DTHNN_SO_VERSION=1 \
 		       -DTHCUNN_SO_VERSION=1 \
 		       -DUSE_CUDA=$USE_CUDA \
+		       -DUSE_TENSORRT=$USE_TENSORRT \
 		       -DBUILD_EXAMPLES=OFF \
 		       -DBUILD_TEST=$BUILD_TEST \
 		       -DNO_NNPACK=$((1-$USE_NNPACK)) \
