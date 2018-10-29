@@ -74,14 +74,15 @@ Tensor roll_cpu(const Tensor& self, IntList shifts, IntList dims) {
   // corrects the difference.
   if( start < 0 ) start = start + size;
 
+  auto tensors = self.unbind(dim);
   std::vector<Tensor> vec = std::vector<Tensor>(size);
   int64_t index = 0;
   for (int64_t i = start; i < size; i++) {
-    vec[index++] = self.select(dim, i);
+    vec[index++] = tensors[i];
   }
 
   for (int64_t i = 0; i < start; i++) {
-    vec[index++] = self.select(dim, i);
+    vec[index++] = tensors[i];
   }
 
   auto stacked = at::stack(vec, dim);
