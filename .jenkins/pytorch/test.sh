@@ -33,7 +33,7 @@ export PATH="$PWD:$PATH"
 popd
 
 # TODO: move this to Docker
-pip install hypothesis
+pip install --user hypothesis
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the

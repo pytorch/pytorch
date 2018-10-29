@@ -94,7 +94,7 @@ fi
 # set only when building other architectures
 # only use for "python setup.py install" line
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
-  WERROR=1 python setup.py install
+  WERROR=1 python setup.py install --user
 elif [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   python setup.py install
 fi
