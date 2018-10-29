@@ -1322,6 +1322,8 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
         input = g.op('Transpose', input, perm_i=[1, 0, 2])
     if not lengths.type().isSubtypeOf(torch._C.DynamicType.get()):
         raise RuntimeError("Lengths must be a Tensor for ONNX export")
+    if lengths.type().scalarType() != 'Int':
+        lengths = _cast_Int(g, lengths, False)
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
 
