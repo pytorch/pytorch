@@ -53,9 +53,10 @@ setup_ci_environment: &setup_ci_environment
 
     # If we don't do this, `apt-get update` will complain about "Could not get lock /var/lib/dpkg/lock - open (11: Resource temporarily unavailable)"
     sudo apt-get install systemd
-    sudo systemctl stop apt-daily.service || true
-    sudo systemctl kill --kill-who=all apt-daily.service || true
-    while ! (systemctl list-units --all apt-daily.service | fgrep -q dead) do sleep 1; done
+    (sudo systemctl stop apt-daily.service && \
+    sudo systemctl kill --kill-who=all apt-daily.service && \
+    while ! (systemctl list-units --all apt-daily.service | fgrep -q dead) do sleep 1; done) \
+    || true
 
     sudo pip install awscli==1.16.35
 
