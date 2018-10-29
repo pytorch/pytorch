@@ -1319,7 +1319,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
 
-@parse_args('v', 'v', 'i', 't', 'i')
+@parse_args('v', 'v', 'i', 't', 'v')
 def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total_length):
     # Ignore total_length as it is not supported in _symbolic_pad_packed_sequence
     # It is only useful/used when training using data_parallel model, so
