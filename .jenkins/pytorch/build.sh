@@ -74,7 +74,7 @@ fi
 # TODO: Don't install this here
 if ! which conda; then
   if ! which pip; then
-    sudo chown -r jenkins /usr/local
+    sudo chown -R jenkins /usr/local
     wget https://bootstrap.pypa.io/get-pip.py
     python get-pip.py
   fi
