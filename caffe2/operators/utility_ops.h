@@ -132,9 +132,8 @@ class PrintOp final : public Operator<Context> {
     if (this->InputIsTensorType(0, CPU)) {
       tensor = &this->template Input<Tensor>(0, CPU);
     } else {
-      tensor_copy_if_needed.CopyFrom(Input(0), &context_);
-      // Make sure that the copy is finished.
-      context_.FinishDeviceComputation();
+      // sync copy
+      tensor_copy_if_needed.CopyFrom(Input(0));
       tensor = &tensor_copy_if_needed;
     }
     tensor_printer_.Print<T>(*tensor);
