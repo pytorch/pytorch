@@ -326,6 +326,7 @@
     CUDA: bmm_out_cuda
 
 - func: broadcast_tensors(TensorList tensors) -> TensorList
+  device_guard: false
 
 - func: cat(TensorList tensors, int64_t dim=0) -> Tensor
 
@@ -350,6 +351,7 @@
 
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
   variants: function, method
+  device_guard: false
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   variants: function, method
@@ -731,9 +733,11 @@
 
 - func: expand(Tensor self, IntList size, *, bool implicit=false) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  device_guard: false
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  device_guard: false
 
 - func: eye(int64_t n, TensorOptions options={}) -> Tensor
 
@@ -1211,6 +1215,7 @@
 
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: ones(IntList size, TensorOptions options={}) -> Tensor
 
@@ -1311,9 +1316,11 @@
 
 - func: reshape(Tensor self, IntList shape) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: reshape_as(Tensor self, Tensor other) -> Tensor
   variants: method
+  device_guard: false
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   dispatch:
@@ -1389,6 +1396,7 @@
 
 - func: select(Tensor self, int64_t dim, int64_t index) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: selu(Tensor self) -> Tensor
 
@@ -1452,6 +1460,7 @@
 
 - func: slice(Tensor self, int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: slogdet(Tensor self) -> (Tensor, Tensor)
   variants: function, method
@@ -1513,21 +1522,27 @@
 
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
   variants: function, method
+  device_guard: false
 
 - func: split_with_sizes(Tensor self, IntList split_sizes, int64_t dim=0) -> TensorList
   variants: function, method
+  device_guard: false
 
 - func: squeeze(Tensor self) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: squeeze(Tensor self, int64_t dim) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: squeeze_(Tensor self) -> Tensor
   variants: method
+  device_guard: false
 
 - func: squeeze_(Tensor self, int64_t dim) -> Tensor
   variants: method
+  device_guard: false
 
 - func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -1662,9 +1677,11 @@
 
 - func: transpose(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method
+  device_guard: false
 
 - func: flip(Tensor self, IntList dims) -> Tensor
   variants: function, method
@@ -1713,9 +1730,11 @@
 
 - func: unsqueeze(Tensor self, int64_t dim) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
   variants: method
+  device_guard: false
 
 - func: var(Tensor self, bool unbiased=true) -> Tensor
   variants: function, method
@@ -1727,6 +1746,7 @@
 
 - func: view_as(Tensor self, Tensor other) -> Tensor
   variants: method
+  device_guard: false
 
 # we define both of these because 'where' does the broadcast and '_s_where' doesn't;
 # this allows us to implicitly calculate the broadcast derivative, while only dealing with the
