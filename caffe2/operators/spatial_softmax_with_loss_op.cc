@@ -72,7 +72,7 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   D = X.dim32(1);
   P->ResizeLike(X);
 
-  if (sum_multiplier_.size() != D) {
+  if (sum_multiplier_.numel() != D) {
     sum_multiplier_.Resize(D);
     math::Set<float, CPUContext>(
         D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
@@ -181,7 +181,7 @@ bool SpatialSoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   // Copy softmax probabilities into dX. All but the neuron
   // corresponding to the correct label has gradient equaling e(x_j)
   // which is the probability under softmax.
-  context_.CopyFromCPU<float>(P.size(), Pdata, dX_data);
+  context_.CopyFromCPU<float>(P.numel(), Pdata, dX_data);
 
   float total_weight = 0.0f;
   for (int y = 0; y < H; ++y) {
@@ -218,14 +218,14 @@ bool SpatialSoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
 
   if (total_weight > 0) {
     math::Scale<float, float, CPUContext>(
-        dX->size(),
+        dX->numel(),
         scale_ / total_weight,
         dX->data<float>(),
         dX_data,
         &context_);
   }
   math::Scale<float, float, CPUContext>(
-      dX->size(),
+      dX->numel(),
       d_avg_loss.data<float>(),
       dX->data<float>(),
       dX->template mutable_data<float>(),

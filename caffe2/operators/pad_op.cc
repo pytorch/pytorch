@@ -193,8 +193,8 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
           }
         }
         // Do offset.
-        Xdata += X.size() / X.dim32(0);
-        Ydata += Y->size() / Y->dim32(0);
+        Xdata += X.numel() / X.dim32(0);
+        Ydata += Y->numel() / Y->dim32(0);
       }
       break;
     case PadMode::REFLECT:
@@ -217,8 +217,8 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
           }
         }
         // Do offset.
-        Xdata += X.size() / X.dim32(0);
-        Ydata += Y->size() / Y->dim32(0);
+        Xdata += X.numel() / X.dim32(0);
+        Ydata += Y->numel() / Y->dim32(0);
       }
       break;
     case PadMode::EDGE:
@@ -235,8 +235,8 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
           }
         }
         // Do offset.
-        Xdata += X.size() / X.dim32(0);
-        Ydata += Y->size() / Y->dim32(0);
+        Xdata += X.numel() / X.dim32(0);
+        Ydata += Y->numel() / Y->dim32(0);
       }
       break;
   }
@@ -260,7 +260,7 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
-  math::Set<float, CPUContext>(dX->size(), 0, dXdata, &context_);
+  math::Set<float, CPUContext>(dX->numel(), 0, dXdata, &context_);
   // The main loop
   switch (mode_) {
     case PadMode::CONSTANT:
@@ -340,7 +340,7 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
 
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
-  math::Set<float, CPUContext>(dX->size(), 0, dXdata, &context_);
+  math::Set<float, CPUContext>(dX->numel(), 0, dXdata, &context_);
 
   switch (mode_) {
     case PadMode::CONSTANT:
@@ -359,8 +359,8 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
           }
         }
         // Do offset.
-        dXdata += dX->size() / dX->dim32(0);
-        dYdata += dY.size() / dY.dim32(0);
+        dXdata += dX->numel() / dX->dim32(0);
+        dYdata += dY.numel() / dY.dim32(0);
       }
       break;
     case PadMode::REFLECT:
@@ -383,8 +383,8 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
           }
         }
         // Do offset.
-        dXdata += dX->size() / dX->dim32(0);
-        dYdata += dY.size() / dY.dim32(0);
+        dXdata += dX->numel() / dX->dim32(0);
+        dYdata += dY.numel() / dY.dim32(0);
       }
       break;
     case PadMode::EDGE:
@@ -402,8 +402,8 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
           }
         }
         // Do offset.
-        dXdata += dX->size() / dX->dim32(0);
-        dYdata += dY.size() / dY.dim32(0);
+        dXdata += dX->numel() / dX->dim32(0);
+        dYdata += dY.numel() / dY.dim32(0);
       }
       break;
   }

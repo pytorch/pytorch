@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <cerrno>
 #include <fstream>
+#include <unordered_set>
 
 #include <google/protobuf/io/coded_stream.h>
 
@@ -45,6 +46,16 @@ C10_EXPORT bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
       lhs.device_id() == rhs.device_id() &&
       lhs.node_name() == rhs.node_name() &&
       lhs.numa_node_id() == rhs.numa_node_id());
+}
+
+C10_EXPORT bool IsCPUDeviceType(int device_type) {
+  static const std::unordered_set<int> cpu_types{
+      PROTO_CPU,
+      PROTO_MKLDNN,
+      PROTO_IDEEP,
+      PROTO_ONLY_FOR_TEST,
+  };
+  return cpu_types.count(device_type);
 }
 
 C10_EXPORT bool ReadStringFromFile(const char* filename, string* str) {

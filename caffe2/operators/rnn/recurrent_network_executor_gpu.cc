@@ -136,11 +136,19 @@ void CUDARecurrentNetworkExecutor::_ExecRange(int from, int to) {
 }
 
 bool CUDARecurrentNetworkExecutor::Run(int T) {
+  CAFFE_ENFORCE_GE(T, 0, "Negative number of steps");
+  if (T == 0) {
+    return true;
+  }
   _ExecRange(0, T);
   return true;
 }
 
 bool CUDARecurrentNetworkExecutor::RunBackwards(int T) {
+  CAFFE_ENFORCE_GE(T, 0, "Negative number of steps");
+  if (T == 0) {
+    return true;
+  }
   _ExecRange(T - 1, -1);
   return true;
 }

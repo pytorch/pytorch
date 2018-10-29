@@ -200,7 +200,7 @@ namespace ska
         template<typename T>
         struct sherwood_v3_entry_constexpr
         {
-            constexpr explicit sherwood_v3_entry_constexpr(int8_t distance_from_desired_ = -1, typename std::aligned_storage<sizeof(T), alignof(T)>::type bytes_ = {})
+            constexpr explicit sherwood_v3_entry_constexpr(int8_t distance_from_desired_, typename std::aligned_storage<sizeof(T), alignof(T)>::type bytes_)
                     : distance_from_desired(distance_from_desired_), bytes(bytes_) {}
 
             static constexpr sherwood_v3_entry_constexpr special_end_entry()
@@ -219,10 +219,10 @@ namespace ska
         {
             static constexpr std::array<const sherwood_v3_entry_constexpr<T>, min_lookups> table
                     {{
-                            sherwood_v3_entry_constexpr<T>(),
-                            sherwood_v3_entry_constexpr<T>(),
-                            sherwood_v3_entry_constexpr<T>(),
-                            sherwood_v3_entry_constexpr<T>::special_end_entry()
+                            sherwood_v3_entry_constexpr<T>(-1, {}),
+                            sherwood_v3_entry_constexpr<T>(-1, {}),
+                            sherwood_v3_entry_constexpr<T>(-1, {}),
+                            sherwood_v3_entry_constexpr<T>(sherwood_v3_entry<T>::special_end_value, {})
                     }};
         };
         template<typename T>

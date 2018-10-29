@@ -15,7 +15,8 @@
   _(TensorList)              \
   _(Blob)                    \
   _(GenericList)             \
-  _(World)
+  _(World)                   \
+  _(Future)                  \
 
 namespace c10 {
 namespace ivalue {
@@ -49,6 +50,10 @@ std::ostream& operator<<(std::ostream & out, const Shared<PointerType> & v) {
 
 std::ostream& operator<<(std::ostream & out, const ConstantString & v) {
   return out << v.string();
+}
+
+std::ostream& operator<<(std::ostream & out, const Future & v) {
+  return out << "Future";
 }
 
 template<typename Elem>

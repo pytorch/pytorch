@@ -63,7 +63,7 @@ bool RemovePaddingOp<CPUContext>::DoRunWithType() {
   if (InputSize() > 1) {
     const auto& lengths = Input(1);
     lengths_ptr = lengths.data<int32_t>();
-    lengths_size = lengths.size();
+    lengths_size = lengths.numel();
   }
 
   auto* out = Output(0);
@@ -171,16 +171,16 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
   auto* out_lengths = Output(0);
   int needPadding = 0;
   int sumLen = 0;
-  for (int i = 0; i < lengths.size(); ++i) {
+  for (int i = 0; i < lengths.numel(); ++i) {
     if (lengthsPtr[i] == 0) {
       needPadding++;
     }
     sumLen += lengthsPtr[i];
   }
 
-  out_lengths->Resize(lengths.size());
+  out_lengths->Resize(lengths.numel());
   auto* outLengthsPtr = out_lengths->template mutable_data<int32_t>();
-  for (int i = 0; i < lengths.size(); ++i) {
+  for (int i = 0; i < lengths.numel(); ++i) {
     if (lengthsPtr[i] == 0) {
       outLengthsPtr[i] = 1;
     } else {
@@ -209,7 +209,7 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
         static_cast<const char*>(zero.raw_mutable_data(features.meta()));
     int start_dest = 0;
     int start_src = 0;
-    for (int i = 0; i < lengths.size(); ++i) {
+    for (int i = 0; i < lengths.numel(); ++i) {
       if (lengthsPtr[i] == 0) {
         context_.CopyItemsSameDevice(
             features.meta(),
