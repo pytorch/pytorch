@@ -1489,18 +1489,17 @@ private:
 
   std::vector<Value*> getTupleValues(
       std::shared_ptr<SugaredValue> sugared,
-      Expr& tree) {
+      Expr tree) {
     auto tuple = sugared->asTuple(tree.range(), method);
     std::vector<Value*> values;
     for (auto sugared_item : tuple) {
-      auto value = sugared_item->asValue(tree.range(), method);
-      values.push_back(value);
+      // auto value = sugared_item->asValue(tree.range(), method);
+      values.push_back(emitSugared(sugared_item, tree));
     }
     return values;
   }
 
-  Value* emitExpr(Expr tree) {
-    auto sugared = emitSugaredExpr(tree, 1);
+  Value* emitSugared(std::shared_ptr<SugaredValue> sugared, Expr tree) {
     if (sugared->isTuple()) {
       auto values = getTupleValues(sugared, tree);
       auto tuple_node = method.graph()->createTuple(values);
@@ -1508,6 +1507,10 @@ private:
     }
 
     return sugared->asValue(tree.range(), method);
+  }
+
+  Value* emitExpr(Expr tree) {
+    return emitSugared(emitSugaredExpr(tree, 1), tree);
   }
 
   NodeKind reverseComparision(NodeKind kind) {

@@ -4654,14 +4654,14 @@ a")
                     self.h = type(1)
                 with tester.assertRaisesRegex(TypeError, "not a valid constant"):
                     self.i = (3, 4, {})
-                self.j = (6, 7, 8)
+                self.j = (6, (1, 2, 3), 8)
 
             @torch.jit.script_method
             def forward(self, x):
-                return x + self.a + self.b + self.f[0] + self.j[0]
+                return x + self.a + self.b + self.f[0] + self.j[1][2]
 
         f = Foo()
-        self.assertEqual(f(torch.ones(1)), torch.ones(1) + 1 + 1.2 + 3 + 6)
+        self.assertEqual(f(torch.ones(1)), torch.ones(1) + 1 + 1.2 + 3 + 3)
 
     def test_script_module_for(self):
         class M(torch.jit.ScriptModule):
