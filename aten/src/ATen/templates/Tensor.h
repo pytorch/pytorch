@@ -53,6 +53,9 @@ public:
   int64_t dim() const {
     return impl_->dim();
   }
+  int64_t storage_offset() const {
+    return impl_->storage_offset();
+  }
 
   TensorImpl * unsafeGetTensorImpl() const {
     return impl_.get();
