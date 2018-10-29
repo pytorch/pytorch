@@ -171,6 +171,7 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
       case TypeKind::NumberType:
       case TypeKind::GeneratorType:
       case TypeKind::VarType:
+      case TypeKind::FutureType:
         break;
     }
   AT_ERROR("Missing cases in toIValue for type: ", type->str(), "! File a bug report.");

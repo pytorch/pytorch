@@ -40,7 +40,7 @@ class WhileOp final : public Operator<Context> {
 
     const auto& condition = Input(0);
     CAFFE_ENFORCE_EQ(
-        condition.size(),
+        condition.numel(),
         1,
         "Invalid condition tensor in While operator: single value expected");
 

@@ -786,7 +786,7 @@ template <>
 bool NanCheckOp<CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  const int D = X.size();
+  const int D = X.numel();
   const float* data = X.data<float>();
   ConstEigenVectorMap<float> input_data(data, D);
 
@@ -802,7 +802,7 @@ bool NanCheckOp<CPUContext>::RunOnDevice() {
       tensorPrinter_.Print<float>(Input(j));
       std::cerr << "NaN idxs:" << std::endl;
       const float* x = Input(j).data<float>();
-      for (size_t i = 0; i < Input(j).size(); ++i) {
+      for (size_t i = 0; i < Input(j).numel(); ++i) {
         if (std::isnan(x[i]) || std::isinf(x[i])) {
           std::cerr << i << " ";
         }
@@ -912,7 +912,7 @@ bool RangeOp<CPUContext>::DoRunOnDevice(
     const T& step,
     Tensor* output) {
   auto* output_data = output->template mutable_data<T>();
-  for (int i = 0; i < output->size(); ++i) {
+  for (int i = 0; i < output->numel(); ++i) {
     output_data[i] = i * step + start;
   }
   return true;

@@ -25,15 +25,15 @@ bool SliceImpl(
 
   CAFFE_ENFORCE_EQ(starts.ndim(), 1);
   CAFFE_ENFORCE_EQ(ends.ndim(), 1);
-  CAFFE_ENFORCE_GE(data.ndim(), starts.size());
-  CAFFE_ENFORCE_EQ(starts.size(), ends.size());
+  CAFFE_ENFORCE_GE(data.ndim(), starts.numel());
+  CAFFE_ENFORCE_EQ(starts.numel(), ends.numel());
 
   std::vector<SIndex> starts_idx(data.ndim());
   std::vector<SIndex> ends_idx(data.ndim());
   std::vector<SIndex> dst_sizes(data.ndim());
 
   for (int i = 0; i < data.ndim(); ++i) {
-    if (i >= starts.size()) {
+    if (i >= starts.numel()) {
       starts_idx[i] = 0;
       ends_idx[i] = data.sizes()[i];
       continue;
@@ -66,7 +66,7 @@ bool SliceImpl(
     }
   }
 
-  if (data.size() <= 0) {
+  if (data.numel() <= 0) {
     // When the input is empty, we do not need to do copy.
     if (!backward) {
       output->Resize(dst_sizes);

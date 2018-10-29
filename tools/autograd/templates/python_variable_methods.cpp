@@ -103,6 +103,14 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
+  return wrap(self.get_device());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
@@ -619,6 +627,7 @@ PyMethodDef variable_methods[] = {
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
   {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},
+  {"get_device", (PyCFunction)THPVariable_get_device, METH_NOARGS, NULL},
   {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
   {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
   {"item", (PyCFunction)THPVariable_item, METH_NOARGS, NULL},

@@ -10,7 +10,6 @@ import torch
 from torch._C import _infer_size, _add_docstr
 from . import _functions
 from .modules import utils
-from ._functions.padding import ConstantPadNd
 from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
@@ -2296,7 +2295,7 @@ def pad(input, pad, mode='constant', value=0):
     assert len(pad) % 2 == 0, 'Padding length must be divisible by 2'
     assert len(pad) // 2 <= input.dim(), 'Padding length too large'
     if mode == 'constant':
-        return ConstantPadNd.apply(input, pad, value)
+        return _VF.constant_pad_nd(input, pad, value)
     else:
         assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
         if input.dim() == 3:

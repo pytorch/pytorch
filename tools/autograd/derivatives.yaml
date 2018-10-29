@@ -374,7 +374,7 @@
   self: at::zeros(self.sizes(), grad.options()).index_add_(dim, index, grad)
 
 - name: inverse(Tensor self)
-  self: -at::mm(result.t(), at::mm(grad, result.t()))
+  self: -at::matmul(result.transpose(-2, -1), at::matmul(grad, result.transpose(-2, -1)))
 
 - name: kthvalue(Tensor self, int64_t k, int64_t dim, bool keepdim)
   self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
@@ -439,7 +439,10 @@
   source: masked_scatter_backward(grad, mask, source.sizes())
 
 - name: masked_select(Tensor self, Tensor mask)
-  self: zeros_like(self).masked_scatter_(mask, grad)
+# normally broadcasting is handled implicitly, but here, because we call an inplace
+# function as an optimization and the LHS doesn't broadcast for inplace functions,
+# we need to explicitly broadcast.
+  self: zeros_like(self.expand(at::infer_size(self.sizes(), mask.sizes()))).masked_scatter_(mask, grad)
 
 - name: max(Tensor self, int64_t dim, bool keepdim)
   self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
@@ -841,6 +844,9 @@
 # NN
 - name: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim)
   i1, i2, i3: _trilinear_backward(grad, i1, i2, i3, expand1, expand2, expand3, sumdim, unroll_dim, grad_input_mask)
+
+- name: constant_pad_nd(Tensor self, IntList pad, Scalar value)
+  self: constant_pad_nd_backward(grad, pad)
 
 - name: binary_cross_entropy_forward(Tensor self, Tensor target, Tensor weight, int64_t reduction)
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)
