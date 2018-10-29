@@ -7253,7 +7253,7 @@ class TestTorch(TestCase):
             self.assertEqual(single_roll, expected, "{} did not equal expected result".format(single_roll))
 
             data = numbers.view(2, 2, 2)
-            rolled =  data.roll(1, 0)
+            rolled = data.roll(1, 0)
             expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], device=device).view(2, 2, 2)
             self.assertEqual(expected, rolled, "{} did not equal expected result: {}".format(rolled, expected))
 
@@ -7263,7 +7263,7 @@ class TestTorch(TestCase):
             self.assertEqual(data, loop_rolled, "{} did not equal the original: {}".format(loop_rolled, data))
             # multiple inverse loops
             self.assertEqual(data, data.roll(-20, 0).roll(-40, 1))
-            self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device),numbers.roll(1, 0))
+            self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device), numbers.roll(1, 0))
 
     def test_reversed(self):
         val = torch.arange(0, 10)
