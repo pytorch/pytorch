@@ -43,6 +43,7 @@ namespace c10 {
   _(prim, Store)                   \
   _(prim, Undefined)               \
   _(prim, Starred)                 \
+  _(prim, ToString)                \
   _(prim, TupleConstruct)          \
   _(prim, TupleUnpack)             \
   _(prim, TupleIndex)              \
