@@ -14,7 +14,10 @@
 #include <vector>
 
 #include <ATen/ATen.h>
+
+#ifdef USE_CUDA
 #include <ATen/cuda/CUDAGuard.h>
+#endif
 
 #include <c10d/Types.hpp>
 
