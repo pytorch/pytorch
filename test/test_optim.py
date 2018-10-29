@@ -10,7 +10,11 @@ from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau
-from common import TestCase, run_tests, TEST_WITH_UBSAN, skipIfRocm
+from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, skipIfRocm, load_tests
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 
 def rosenbrock(tensor):

@@ -13,34 +13,11 @@ void placeholderCreator(Method&) {
   throw RecursiveMethodCallError();
 }
 
-static FunctionSchema defaultSchemaFor(const Method& method) {
-  std::vector<Argument> args;
-  std::vector<Argument> returns;
-  Graph& g = *method.graph();
-  size_t num_inputs = method.num_inputs();
-  for(size_t i = 0; i < num_inputs; ++i) {
-    const Value* v = g.inputs().at(i);
-    std::string name = v->hasUniqueName() ? v->uniqueName() : ("argument_"  + std::to_string(i));
-    args.push_back({std::move(name), unshapedType(g.inputs()[i]->type())});
-  }
-  for(size_t i = 0; i < g.outputs().size(); ++i) {
-    returns.push_back({"", unshapedType(g.outputs()[i]->type())});
-  }
-  return { method.name(), std::move(args), std::move(returns) };
-}
-
-
-const FunctionSchema& Method::getSchema() const {
-  if(schema == nullptr) {
-    schema.reset(new FunctionSchema(defaultSchemaFor(*this)));
-  }
-  return *schema;
-}
-
 c10::optional<std::vector<Value*>> try_emit_call_to(
     Graph& graph,
     SourceRange loc,
     Method& callee,
+    c10::optional<NamedValue> self,
     ArrayRef<NamedValue> args,
     ArrayRef<NamedValue> kwargs,
     std::stringstream& failure_messages,
@@ -56,7 +33,7 @@ c10::optional<std::vector<Value*>> try_emit_call_to(
 
   auto matched_schema = tryMatchSchema(
     callee.getSchema(),
-    loc, graph, args, kwargs, failure_messages, conv_tensors_to_nums);
+    loc, graph, self, args, kwargs, failure_messages, conv_tensors_to_nums);
   if(!matched_schema)
     return c10::nullopt;
 
@@ -78,6 +55,7 @@ std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, Array
           *graph(),
           loc,
           callee,
+          c10::nullopt,
           args,
           kwargs,
           failure_messages,
@@ -97,12 +75,46 @@ void Method::ensure_defined() {
   }
 }
 
+void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
+  to_impl(device, dtype, non_blocking);
+}
+
+void Module::to(at::ScalarType dtype, bool non_blocking) {
+  to_impl(/*device=*/c10::nullopt, dtype, non_blocking);
+}
+
+void Module::to(at::Device device, bool non_blocking) {
+  to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
+}
+
 void Module::save(std::ostream& out) {
   ExportModule(*this, out);
 }
 
 void Module::save(const std::string& filename) {
   ExportModule(*this, filename);
+}
+
+void Module::to_impl(
+    c10::optional<at::Device> device,
+    c10::optional<at::ScalarType> dtype,
+    bool non_blocking) {
+  // First call `to()` on every child module.
+  for (auto& child : modules) {
+    child->module->to_impl(device, dtype, non_blocking);
+  }
+  // Then convert every of our parameters.
+  for (auto& parameter : parameters) {
+    // Need to access the `at::Tensor` as a `Variable` here.
+    autograd::Variable variable = *parameter->slot();
+    at::Tensor data = variable.data();
+    // Use the data's original device or dtype if not supplied here.
+    auto new_data = data.to(
+        device.value_or(data.device()),
+        dtype.value_or(data.scalar_type()),
+        non_blocking);
+    variable.set_data(new_data);
+  }
 }
 
 }}}

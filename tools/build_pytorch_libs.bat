@@ -40,6 +40,13 @@ IF "%~1"=="--use-nnpack" (
   set /a USE_NNPACK=0
 )
 
+IF "%~1"=="--use-qnnpack" (
+  set /a USE_QNNPACK=1
+  shift
+) ELSE (
+  set /a USE_QNNPACK=0
+)
+
 IF "%~1"=="--use-mkldnn" (
   set /a NO_MKLDNN=0
   shift
@@ -93,7 +100,6 @@ if "%1"=="caffe2" (
   call:build_caffe2 %~1
 ) ELSE (
   set "IS_OURS="
-  IF "%1"=="THD" set IS_OURS=1
   IF "%1"=="libshm_windows" set IS_OURS=1
   if defined IS_OURS (
     cd torch\lib
@@ -185,11 +191,13 @@ goto:eof
                   -DBUILD_CAFFE2_OPS=%BUILD_CAFFE2_OPS% ^
                   -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
                   -DUSE_CUDA=%USE_CUDA% ^
+                  -DUSE_DISTRIBUTED=%USE_DISTRIBUTED% ^
                   -DUSE_NUMPY=%USE_NUMPY% ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
                   -DUSE_LEVELDB=%USE_LEVELDB% ^
                   -DUSE_LMDB=%USE_LMDB% ^
                   -DUSE_OPENCV=%USE_OPENCV% ^
+                  -DUSE_QNNPACK=%USE_QNNPACK% ^
                   -DUSE_FFMPEG=%USE_FFMPEG% ^
                   -DUSE_GLOG=OFF ^
                   -DUSE_GFLAGS=OFF ^

@@ -4,8 +4,7 @@
 
 #include <torch/csrc/autograd/generated/VariableType.h>
 
-#include <ATen/core/Error.h>
-#include "c10/util/Optional.h"
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <map>
@@ -16,7 +15,12 @@
 namespace torch {
 namespace nn {
 
-Module::Module(std::string name) : name_(std::move(name)) {}
+Module::Module()
+    : parameters_("Parameter"), buffers_("Buffer"), children_("Submodule") {}
+
+Module::Module(std::string name) : Module() {
+  name_ = std::move(name);
+}
 
 const std::string& Module::name() const noexcept {
   // If the name optional is empty at this point, we grab the name of the
@@ -35,7 +39,7 @@ const std::string& Module::name() const noexcept {
   return *name_;
 }
 
-std::shared_ptr<Module> Module::clone(c10::optional<Device> device) const {
+std::shared_ptr<Module> Module::clone(optional<Device> device) const {
   AT_ERROR(
       "clone() has not been implemented for ",
       name(),
@@ -156,14 +160,26 @@ Tensor& Module::register_parameter(
     std::string name,
     Tensor tensor,
     bool requires_grad) {
+  AT_CHECK(!name.empty(), "Parameter name must not be empty");
+  AT_CHECK(
+      name.find('.') == std::string::npos,
+      "Parameter name must not contain a dot (got '",
+      name,
+      "')");
   tensor.set_requires_grad(requires_grad);
   return parameters_.insert(std::move(name), std::move(tensor));
 }
 
 Tensor& Module::register_buffer(std::string name, Tensor tensor) {
+  AT_CHECK(!name.empty(), "Buffer name must not be empty");
+  AT_CHECK(
+      name.find('.') == std::string::npos,
+      "Buffer name must not contain a dot (got '",
+      name,
+      "')");
   return buffers_.insert(std::move(name), std::move(tensor));
 }
 
-void Module::clone_(Module& other, c10::optional<Device> device) {}
+void Module::clone_(Module& other, optional<Device> device) {}
 } // namespace nn
 } // namespace torch

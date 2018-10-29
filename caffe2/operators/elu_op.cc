@@ -42,7 +42,7 @@ REGISTER_CPU_OPERATOR(
         TensorTypes<float>,
         CPUContext,
         EluFunctor<CPUContext>>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_GRADIENT_OPERATOR(
     EluGradient,
     BinaryElementwiseWithArgsOp<
         TensorTypes<float>,
@@ -113,10 +113,10 @@ Y:
     .Arg(
         "alpha",
         "*(type: float; default: 1.0)* Defines alpha parameter used in calculation.")
-    .InheritOnnxSchema("Elu");
+    .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
-OPERATOR_SCHEMA(EluGradient)
+GRADIENT_OPERATOR_SCHEMA(EluGradient)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{1, 0}})

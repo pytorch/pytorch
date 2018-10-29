@@ -15,7 +15,9 @@ import glob
 import os
 import shutil
 import sys
-import common
+import common_utils as common
+
+from test_pytorch_common import skipIfCI
 
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
@@ -432,6 +434,7 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
+    @skipIfCI
     def test_upsample(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
@@ -518,6 +521,9 @@ class TestOperators(TestCase):
         BigModule()(*inp)
         self.assertONNX(BigModule(), inp)
 
+    def test_randn(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(lambda x: torch.randn(1, 2, 3, 4) + x, x)
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

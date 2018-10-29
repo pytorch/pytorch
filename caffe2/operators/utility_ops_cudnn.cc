@@ -41,9 +41,9 @@ class CuDNNWeightedSumOp : public Operator<CUDAContext> {
     CAFFE_ENFORCE_EQ(num_inputs % 2, 0);
     const auto& X0 = Input(0);
     const auto& weight0 = Input(1);
-    CAFFE_ENFORCE_GT(X0.size(), 0);
-    CAFFE_ENFORCE_EQ(weight0.size(), 1);
-    const int input_size = X0.size();
+    CAFFE_ENFORCE_GT(X0.numel(), 0);
+    CAFFE_ENFORCE_EQ(weight0.numel(), 1);
+    const int input_size = X0.numel();
     SetTensorDescriptor(cudnnTypeWrapper<T>::type, input_size);
     auto* Y = Output(0);
     if (Y != &X0) {
@@ -71,8 +71,8 @@ class CuDNNWeightedSumOp : public Operator<CUDAContext> {
         "Input #2 is the same as output. If you want to do in-place updates, "
         "put the output as input #0.");
     const auto& weight1 = Input(3);
-    CAFFE_ENFORCE_EQ(X1.size(), input_size);
-    CAFFE_ENFORCE_EQ(weight1.size(), 1);
+    CAFFE_ENFORCE_EQ(X1.numel(), input_size);
+    CAFFE_ENFORCE_EQ(weight1.numel(), 1);
     CopyWeightToHost<T>(weight1.template data<float>(), &alpha);
     CopyWeightToHost<T>(weight0.template data<float>(), &beta);
     if (Y == &X0) {
@@ -107,8 +107,8 @@ class CuDNNWeightedSumOp : public Operator<CUDAContext> {
           "put the output as input #0.";
       CAFFE_ENFORCE_NE(&Xi, Y, err_msg);
       const auto& weighti = Input(i + 1);
-      CAFFE_ENFORCE_EQ(Xi.size(), input_size);
-      CAFFE_ENFORCE_EQ(weighti.size(), 1);
+      CAFFE_ENFORCE_EQ(Xi.numel(), input_size);
+      CAFFE_ENFORCE_EQ(weighti.numel(), 1);
       CopyWeightToHost<T>(weighti.template data<float>(), &alpha);
       CUDNN_ENFORCE(cudnnAddTensor(
           cudnn_wrapper_.inline_cudnn_handle(),

@@ -1,8 +1,8 @@
 #include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
 #include "ATen/InitialTensorOptions.h"
-#include "ATen/core/Error.h"
+#include "ATen/NativeFunctions.h"
 #include "ATen/cuda/CUDAContext.h"
+#include "c10/util/Exception.h"
 
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
@@ -46,7 +46,7 @@ Tensor empty_cuda(IntList size, const TensorOptions& options) {
     scalarTypeToTypeMeta(options.dtype()), 0, cuda::getCUDADeviceAllocator(), true);
 
   auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId(), false);
-  tensor.resize_(size);
+  resize_cuda_(tensor, size); // avoid dispatch overhead
   return tensor;
 }
 

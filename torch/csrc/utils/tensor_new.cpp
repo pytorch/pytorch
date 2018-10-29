@@ -18,7 +18,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 #include "c10/util/Optional.h"
 
 #include <stdexcept>
@@ -221,8 +221,8 @@ Tensor internal_new_from_data(
                                                      *torch::getLayout(type.backend()),
                                                      type_inference_device_type);
     const auto& type_to_use = type_inference ? type_inference_type : type;
-    return copy_variables ? new_with_tensor_copy(type_to_use, var, device_index) :
-                              new_with_type_conversion(type_to_use, var, device_index);
+    return copy_variables ? new_with_tensor_copy(type_to_use, var, device_index)
+                          : new_with_type_conversion(type_to_use, var, device_index);
   }
 
 #ifdef USE_NUMPY
@@ -291,12 +291,12 @@ Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwa
     auto deviceOptional = r.deviceOptional(2);
     check_legacy_ctor_device(type, deviceOptional);
     at::DeviceGuard device_guard(deviceOptional);
-    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), type.options());
+    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
     auto deviceOptional = r.deviceOptional(3);
     check_legacy_ctor_device(type, deviceOptional);
     at::DeviceGuard device_guard(deviceOptional);
-    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2), type.options());
+    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
@@ -335,14 +335,14 @@ Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObject* kwar
     auto deviceOptional = r.deviceOptional(2);
     check_legacy_ctor_device(type, deviceOptional);
     at::DeviceGuard device_guard(deviceOptional);
-    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), type.options());
+    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
     // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
     // have a device (we should infer it).
     auto deviceOptional = r.deviceOptional(3);
     check_legacy_ctor_device(type, deviceOptional);
     at::DeviceGuard device_guard(deviceOptional);
-    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2), type.options());
+    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
@@ -464,10 +464,7 @@ Tensor legacy_new_from_data(
   return internal_new_from_data(type, device, data, false, false, false);
 }
 
-Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
-  const auto sparse_backend = type.is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU;
-  const auto& default_sparse_type = type.toBackend(sparse_backend);
-
+Tensor sparse_coo_tensor_ctor(const Type& default_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
     "sparse_coo_tensor(PyObject* indices, PyObject* values, IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
@@ -478,29 +475,27 @@ Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     bool type_inference = r.isNone(2);
-    const auto& sparse_type = typeWithDefault(r, 2, 3, default_sparse_type);
-    const auto& dense_type = sparse_type.toBackend(sparse_type.is_cuda() ? Backend::CUDA : Backend::CPU);
+    const auto& type = typeWithDefault(r, 2, 3, default_type);
+    const auto& values_type = type.toDense();
     at::DeviceGuard device_guard(r.device(3));
-    Tensor values = internal_new_from_data(dense_type, r.deviceOptional(3), r.pyobject(1), false, true, type_inference);
     // if no dtype provided, infer type based on value type.
-    const auto& index_type = values.type().toScalarType(kLong);
-    Tensor indices = internal_new_from_data(index_type, r.deviceOptional(3), r.pyobject(0), false, true, false);
-    const auto& sparse_type_to_use = values.type().toBackend(values.type().is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU);
-    return at::sparse_coo_tensor(indices, values, sparse_type_to_use.options()).set_requires_grad(r.toBool(4));
+    Tensor values = internal_new_from_data(values_type, r.deviceOptional(3), r.pyobject(1), false, true, type_inference);
+    const auto& indices_type = values.type().toScalarType(kLong);
+    Tensor indices = internal_new_from_data(indices_type, r.deviceOptional(3), r.pyobject(0), false, true, false);
+    return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(4));
   } else if (r.idx == 1) {
     bool type_inference = r.isNone(3);
-    const auto& sparse_type = typeWithDefault(r, 3, 4, default_sparse_type);
-    const auto& dense_type = sparse_type.toBackend(sparse_type.is_cuda() ? Backend::CUDA : Backend::CPU);
+    const auto& type = typeWithDefault(r, 3, 4, default_type);
+    const auto& values_type = type.toDense();
     at::DeviceGuard device_guard(r.device(4));
-    Tensor values = internal_new_from_data(dense_type, r.deviceOptional(4), r.pyobject(1), false, true, type_inference);
-    const auto& index_type = values.type().toScalarType(kLong);
-    Tensor indices = internal_new_from_data(index_type, r.deviceOptional(4), r.pyobject(0), false, true, false);
-    const auto& sparse_type_to_use = values.type().toBackend(values.type().is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU);
-    return at::sparse_coo_tensor(indices, values, r.intlist(2), sparse_type_to_use.options()).set_requires_grad(r.toBool(5));
+    Tensor values = internal_new_from_data(values_type, r.deviceOptional(4), r.pyobject(1), false, true, type_inference);
+    const auto& indices_type = values.type().toScalarType(kLong);
+    Tensor indices = internal_new_from_data(indices_type, r.deviceOptional(4), r.pyobject(0), false, true, false);
+    return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(5));
   } else if (r.idx == 2) {
-    const auto& sparse_type_to_use = typeWithDefault(r, 1, 2, default_sparse_type);
+    const auto& type = typeWithDefault(r, 1, 2, default_type);
     at::DeviceGuard device_guard(r.device(2));
-    return at::sparse_coo_tensor(r.intlist(0), sparse_type_to_use.options()).set_requires_grad(r.toBool(3));
+    return at::sparse_coo_tensor(r.intlist(0), type.options().layout(at::kSparse)).set_requires_grad(r.toBool(3));
   }
   throw std::runtime_error("sparse_coo_tensor(): invalid arguments");
 }

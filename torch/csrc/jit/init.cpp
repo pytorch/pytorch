@@ -34,9 +34,10 @@
 #include "torch/csrc/jit/batched/BatchTensor.h"
 #include "torch/csrc/jit/pybind_utils.h"
 #include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/serialization.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/fusers/interface.h"
+
+#include "caffe2/serialize/inline_container.h"
 
 #include <pybind11/functional.h>
 
@@ -48,6 +49,13 @@
 #include <utility>
 
 namespace torch  { namespace jit {
+
+// TODO: make a fake future for python
+namespace detail {
+class Future {
+
+};
+}
 
 namespace {
 
@@ -236,20 +244,26 @@ void initJITBindings(PyObject *module) {
         return createPyObjectForStack(std::move(stack));
       });
 
-    py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
+  py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
-      .def("write_record", &PyTorchFileWriter::writeRecord)
+      .def(
+          "write_record",
+          [](PyTorchFileWriter& self, const char* data, size_t size) {
+            return self.writeRecord(data, size);
+          })
       .def("write_end_of_file", &PyTorchFileWriter::writeEndOfFile);
 
-    py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
+  py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
-      .def("get_record_with_key", [](PyTorchFileReader &self, uint64_t key) {
-        at::DataPtr data;
-        size_t size;
-        std::tie(data, size) = self.getRecordWithKey(key);
-        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
-      })
-      .def("get_last_record", [](PyTorchFileReader &self){
+      .def(
+          "get_record_with_key",
+          [](PyTorchFileReader& self, uint64_t key) {
+            at::DataPtr data;
+            size_t size;
+            std::tie(data, size) = self.getRecordWithKey(key);
+            return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+          })
+      .def("get_last_record", [](PyTorchFileReader& self) {
         at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getLastRecord();
@@ -280,19 +294,19 @@ void initJITBindings(PyObject *module) {
   }, py::arg("qualified_name"));
 
   py::class_<FunctionSchema>(m, "FunctionSchema")
-  .def_property_readonly("name", [](FunctionSchema& self) { return self.name; })
-  .def_property_readonly("arguments", [](FunctionSchema& self) { return self.arguments; })
-  .def_property_readonly("returns", [](FunctionSchema& self) { return self.returns; });
+  .def_property_readonly("name", [](FunctionSchema& self) { return self.name(); })
+  .def_property_readonly("arguments", [](FunctionSchema& self) { return self.arguments(); })
+  .def_property_readonly("returns", [](FunctionSchema& self) { return self.returns(); });
   py::class_<Argument>(m, "Argument")
-  .def_property_readonly("name", [](Argument& self) { return self.name; })
-  .def_property_readonly("type", [](Argument& self) { return self.type; })
+  .def_property_readonly("name", [](Argument& self) { return self.name(); })
+  .def_property_readonly("type", [](Argument& self) { return self.type(); })
   .def_property_readonly("N", [](Argument& self) -> py::object {
-    return (self.N) ? py::cast(*self.N) :  py::none();
+    return (self.N()) ? py::cast(*self.N()) :  py::none();
   })
   .def_property_readonly("default_value", [](Argument& self) -> py::object {
-    if(!self.default_value)
+    if(!self.default_value())
       return py::none();
-    IValue v = *self.default_value;
+    IValue v = *self.default_value();
     return toPyObject(std::move(v));
   });
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
@@ -301,6 +315,17 @@ void initJITBindings(PyObject *module) {
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
         return op->schema();
       });
+  });
+
+  py::class_<detail::Future>(m, "Future");
+
+  m.def("fork", [](script::Module &sm, py::args args) {
+    // TODO: this is a fake stub
+    return detail::Future();
+  });
+
+  m.def("wait", [](detail::Future &fut) {
+    // TODO: this is a fake stub
   });
 
 

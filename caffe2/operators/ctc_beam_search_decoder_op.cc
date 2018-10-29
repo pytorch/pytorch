@@ -5,7 +5,7 @@ namespace caffe2 {
 namespace {
 
 const float* getTensorDataPtr(const Tensor& tensor, int t, int n) {
-  const auto dims = tensor.dims();
+  const auto dims = tensor.sizes();
   CAFFE_ENFORCE_EQ(dims.size(), 3);
   int offset = (t * dims[1] + n) * dims[2];
   CAFFE_ENFORCE_LT(offset, tensor.size());
@@ -23,7 +23,7 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
   // shape: sum over all decoded_length
   auto* values = Output(VALUES);
 
-  const auto inputs_dims = inputs.dims();
+  const auto inputs_dims = inputs.sizes();
   int32_t max_activation_length = inputs_dims[0];
   int32_t batch_size = inputs_dims[1];
   int32_t alphabet_size = inputs_dims[2];
@@ -164,7 +164,7 @@ OPERATOR_SCHEMA(CTCBeamSearchDecoder)
         "VALUES",
         "Values vector, size (total_decoded_outputs). "
         "The flattened vector of final output sequences, in batch order.")
-    .InheritOnnxSchema("CTCBeamSearchDecoder");
+    .InheritOnnxSchema();
 SHOULD_NOT_DO_GRADIENT(CTCBeamSearchDecoder);
 
 } // namespace caffe2

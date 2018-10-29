@@ -39,9 +39,9 @@ C10_DEFINE_int(
     "Max number of NUMA nodes allowed in net async executor");
 
 C10_DEFINE_int(
-    caffe2_net_async_cpu_pool_size,
+    caffe2_net_async_thread_pool_size,
     0,
-    "Number of threads in CPU pool by default");
+    "Number of threads in device thread pool by default");
 
 C10_DEFINE_bool(
     caffe2_net_async_check_stream_status,
@@ -80,7 +80,7 @@ AsyncNetBase::AsyncNetBase(
     operators_.push_back(op_ptr);
   }
 
-  if (c10::FLAGS_caffe2_net_async_inference_mode) {
+  if (FLAGS_caffe2_net_async_inference_mode) {
     execution_chains_ = dag_utils::computeGroups(operator_nodes_);
   } else {
     execution_chains_ = dag_utils::computeChains(operator_nodes_);
@@ -150,13 +150,7 @@ TaskThreadPoolBase* AsyncNetBase::pool(const DeviceOption& device_option) {
   if (use_single_pool_) {
     return poolGetter(cpu_pools_, PROTO_CPU, -1, num_workers_);
   }
-  static const std::unordered_set<int> cpu_types{
-      PROTO_CPU,
-      PROTO_MKLDNN,
-      PROTO_IDEEP,
-      PROTO_ONLY_FOR_TEST,
-  };
-  if (cpu_types.find(device_option.device_type()) != cpu_types.end()) {
+  if (IsCPUDeviceType(device_option.device_type())) {
     auto numa_node_id = -1;
     if (device_option.has_numa_node_id()) {
       numa_node_id = device_option.numa_node_id();
@@ -164,14 +158,14 @@ TaskThreadPoolBase* AsyncNetBase::pool(const DeviceOption& device_option) {
     }
     CAFFE_ENFORCE_LT(
         numa_node_id,
-        c10::FLAGS_caffe2_net_async_max_numa_nodes,
+        FLAGS_caffe2_net_async_max_numa_nodes,
         "Invalid NUMA node id: ",
         numa_node_id);
     return poolGetter(cpu_pools_, PROTO_CPU, numa_node_id, num_workers_);
   } else if (device_option.device_type() == PROTO_CUDA) {
     auto gpu_id = device_option.device_id();
     CAFFE_ENFORCE(
-        gpu_id >= 0 && gpu_id < c10::FLAGS_caffe2_net_async_max_gpus,
+        gpu_id >= 0 && gpu_id < FLAGS_caffe2_net_async_max_gpus,
         "Invalid GPU id: " + caffe2::to_string(gpu_id));
     return poolGetter(gpu_pools_, PROTO_CUDA, gpu_id, num_workers_);
   } else {
@@ -449,6 +443,9 @@ void AsyncNetBase::finalizeEvents() {
     } else if (status == EventStatus::EVENT_INITIALIZED) {
       event(task_id).SetFinished();
     }
+    if (event(task_id).Query() != EventStatus::EVENT_SUCCESS) {
+      success_ = false;
+    }
   }
 }
 
@@ -476,7 +473,15 @@ C10_DEFINE_SHARED_REGISTRY(
 C10_REGISTER_CREATOR(
     ThreadPoolRegistry,
     CPU,
-    GetAsyncNetCPUThreadPool<TaskThreadPool>);
+    GetAsyncNetThreadPool<TaskThreadPool, PROTO_CPU>);
+C10_REGISTER_CREATOR(
+    ThreadPoolRegistry,
+    CUDA,
+    GetAsyncNetThreadPool<TaskThreadPool, PROTO_CUDA>);
+C10_REGISTER_CREATOR(
+    ThreadPoolRegistry,
+    HIP,
+    GetAsyncNetThreadPool<TaskThreadPool, PROTO_HIP>);
 
 void AsyncNetBase::computeExecutionModeFlags() {
   static const std::string kDag = "dag";
@@ -509,12 +514,12 @@ void AsyncNetBase::computeExecutionModeFlags() {
     is_blocking_ = true;
     report_stats_ = false;
   } else {
-    streams_per_gpu_ = c10::FLAGS_caffe2_streams_per_gpu;
-    finish_chain_ = c10::FLAGS_caffe2_net_async_finish_chain;
-    always_schedule_child_ = c10::FLAGS_caffe2_net_async_always_schedule_child;
-    check_stream_status_ = c10::FLAGS_caffe2_net_async_check_stream_status;
-    use_single_pool_ = c10::FLAGS_caffe2_net_async_use_single_pool;
-    use_per_net_pools_ = c10::FLAGS_caffe2_net_async_use_per_net_pools;
+    streams_per_gpu_ = FLAGS_caffe2_streams_per_gpu;
+    finish_chain_ = FLAGS_caffe2_net_async_finish_chain;
+    always_schedule_child_ = FLAGS_caffe2_net_async_always_schedule_child;
+    check_stream_status_ = FLAGS_caffe2_net_async_check_stream_status;
+    use_single_pool_ = FLAGS_caffe2_net_async_use_single_pool;
+    use_per_net_pools_ = FLAGS_caffe2_net_async_use_per_net_pools;
     is_blocking_ = false;
     report_stats_ = false;
   }

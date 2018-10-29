@@ -11,8 +11,8 @@ bool SoftplusOp<float, CPUContext>::RunOnDevice() {
   auto* Y = Output(0);
   Y->ResizeLike(X);
 
-  EigenVectorMap<float>(Y->template mutable_data<float>(), X.size()) =
-      (ConstEigenVectorMap<float>(X.data<float>(), X.size()).array().exp() +
+  EigenVectorMap<float>(Y->template mutable_data<float>(), X.numel()) =
+      (ConstEigenVectorMap<float>(X.data<float>(), X.numel()).array().exp() +
        1.0f)
           .log();
   return true;
@@ -23,15 +23,15 @@ bool SoftplusGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  DCHECK_EQ(dY.size(), Y.size());
+  DCHECK_EQ(dY.numel(), Y.numel());
   dX->ResizeLike(Y);
 
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
-  EigenVectorArrayMap<float> dXvec(dXdata, dX->size());
-  ConstEigenVectorArrayMap<float> Yvec(Ydata, Y.size());
-  ConstEigenVectorArrayMap<float> dYvec(dYdata, dY.size());
+  EigenVectorArrayMap<float> dXvec(dXdata, dX->numel());
+  ConstEigenVectorArrayMap<float> Yvec(Ydata, Y.numel());
+  ConstEigenVectorArrayMap<float> dYvec(dYdata, dY.numel());
   dXvec = dYvec * (1.0 - (-Yvec).exp());
   return true;
 }
@@ -99,7 +99,7 @@ Y:
 )DOC")
     .Input(0, "X", "Input data blob to be operated on.")
     .Output(0, "Y", "Output data blob with same shape as input.")
-    .InheritOnnxSchema("Softplus");
+    .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(SoftplusGradient)

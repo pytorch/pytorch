@@ -2,6 +2,14 @@
 
 set -ex
 
+BASE_BRANCH=master
+# From https://docs.travis-ci.com/user/environment-variables
+if [[ $TRAVIS ]]; then
+  git remote add upstream https://github.com/pytorch/pytorch
+  git fetch upstream "$TRAVIS_BRANCH"
+  BASE_BRANCH="upstream/$TRAVIS_BRANCH"
+fi
+
 if [[ ! -d build ]]; then
   git submodule update --init --recursive
 
@@ -33,9 +41,8 @@ fi
 time python tools/clang_tidy.py    \
   --verbose                        \
   --paths torch/csrc               \
-  --diff master                    \
+  --diff "$BASE_BRANCH"            \
   -g"-torch/csrc/jit/init.cpp"     \
   -g"-torch/csrc/jit/export.cpp"   \
   -g"-torch/csrc/jit/import.cpp"   \
-  -g"-torch/csrc/jit/test_jit.cpp" \
   "$@"

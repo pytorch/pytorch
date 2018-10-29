@@ -299,11 +299,11 @@ bool SumElementsGradientOp<T, Context>::RunOnDevice()
   Tensor sum_grad(Input(1), CPU);
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  DCHECK_EQ(sum_grad.size(), 1);
+  DCHECK_EQ(sum_grad.numel(), 1);
   math::Set<T, Context>(
-      dX->size(),
+      dX->numel(),
       static_cast<T>(
-          sum_grad.template data<T>()[0] * (average_ ? 1.0 / X.size() : 1)),
+          sum_grad.template data<T>()[0] * (average_ ? 1.0 / X.numel() : 1)),
       dX->template mutable_data<T>(),
       &context_);
   return true;

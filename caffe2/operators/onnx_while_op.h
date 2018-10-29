@@ -159,19 +159,19 @@ class ONNXWhileOp final : public Operator<Context> {
                   ->template Get<Tensor>();
           auto* scan_output_target = Output(i + num_loop_carried_deps);
           if (itr == 0) {
-            auto dims = scan_output.dims().vec();
+            auto dims = scan_output.sizes().vec();
             scan_outputs_sizes.push_back(dims);
             dims.insert(dims.begin(), 1);
             scan_output_target->Resize(dims);
             scan_output_target->CopyFrom(scan_output);
           } else {
-            auto dims = scan_output.dims().vec();
+            auto dims = scan_output.sizes().vec();
             CAFFE_ENFORCE_EQ(
                 dims,
                 scan_outputs_sizes[i],
                 "Size of scan output changed across iterations");
             dims.insert(dims.begin(), itr);
-            scan_output_target->Extend(1, 2.0f, &context_);
+            scan_output_target->Extend(1, 100, &context_);
 
             int64_t timestep_size = 1;
             for (const int64_t t : scan_outputs_sizes[i]) {

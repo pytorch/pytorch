@@ -302,7 +302,8 @@ Caffe2Backend::get_renamed_operators() const {
       {"Greater", "GT"},
       {"Unsqueeze", "ExpandDims"},
       {"Tile", "NumpyTile"},
-      {"DynamicSlice", "Slice"}};
+      {"DynamicSlice", "Slice"},
+      {"RandomNormal", "GaussianFill"}};
   return kRenamedOperators;
 }
 
@@ -358,7 +359,8 @@ Caffe2Backend::get_special_operators() const {
               {"Upsample", &Caffe2Backend::CreateUpsample},
               {"Dropout", &Caffe2Backend::CreateDropout},
               {"LRN", &Caffe2Backend::CreateLRN},
-              {"DynamicSlice", &Caffe2Backend::CreateDynamicSlice}};
+              {"DynamicSlice", &Caffe2Backend::CreateDynamicSlice},
+              {"RandomNormal", &Caffe2Backend::CreateRandomNormal}};
   return kSpecialOperators;
 }
 
@@ -586,6 +588,30 @@ Caffe2Ops Caffe2Backend::CreateReshape(
   op->add_output(dummy_->NewDummyName());
 
   return c2_op;
+}
+
+Caffe2Ops Caffe2Backend::CreateRandomNormal(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  auto& attributes = onnx_node->attributes;
+
+  if (attributes.HasAttribute("seed")) {
+    CAFFE_THROW("Caffe2 GaussianFill does not support random seed");
+  }
+
+  if (attributes.HasAttribute("dtype")) {
+    if (attributes.get<int64_t>("dtype") != TensorProto::FLOAT) {
+      CAFFE_THROW("Caffe2 GaussianFill only support FLOAT dtype");
+    }
+    attributes.remove("dtype");
+  }
+  if (attributes.HasAttribute("scale")) {
+    auto scale = attributes.get<float>("scale");
+    auto* attr = attributes.AddRewrittenAttribute("std");
+    attr->set_f(scale);
+    attributes.remove("scale");
+  }
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
 }
 
 Caffe2Ops Caffe2Backend::CreateReciprocal(

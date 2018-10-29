@@ -150,9 +150,9 @@ void checkChainingAndRun(
       TextFormat::ParseFromString(spec, &net_def));
   {
     net_def.set_num_workers(4);
-    auto old = c10::FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { c10::FLAGS_caffe2_disable_chaining = old; });
-    c10::FLAGS_caffe2_disable_chaining = false;
+    auto old = FLAGS_caffe2_disable_chaining;
+    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
+    FLAGS_caffe2_disable_chaining = false;
 
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
@@ -177,9 +177,9 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
   }
 
   {
-    auto old = c10::FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { c10::FLAGS_caffe2_disable_chaining = old; });
-    c10::FLAGS_caffe2_disable_chaining = false;
+    auto old = FLAGS_caffe2_disable_chaining;
+    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
+    FLAGS_caffe2_disable_chaining = false;
 
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
@@ -572,9 +572,9 @@ TEST(NetTest, DISABLED_FailingOperator) {
 
   {
     net_def.set_num_workers(4);
-    auto old = c10::FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { c10::FLAGS_caffe2_disable_chaining = old; });
-    c10::FLAGS_caffe2_disable_chaining = false;
+    auto old = FLAGS_caffe2_disable_chaining;
+    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
+    FLAGS_caffe2_disable_chaining = false;
 
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     for (int i = 0; i < 10; i++) {
@@ -684,9 +684,9 @@ TEST(NetTest, ExecutorOverride) {
 
   {
     Workspace ws;
-    auto old = c10::FLAGS_caffe2_override_executor;
-    auto g = MakeGuard([&]() { c10::FLAGS_caffe2_override_executor = old; });
-    c10::FLAGS_caffe2_override_executor = "dag,async_scheduling";
+    auto old = FLAGS_caffe2_override_executor;
+    auto g = MakeGuard([&]() { FLAGS_caffe2_override_executor = old; });
+    FLAGS_caffe2_override_executor = "dag,async_scheduling";
 
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto async_net =
@@ -812,6 +812,44 @@ TEST(NetTest, PendingOpsAndNetFailure) {
   std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
 
   // net is not stuck and returns false
+  ASSERT_FALSE(net->Run());
+}
+
+class SetFinishErrorOp final : public Operator<CPUContext> {
+ public:
+  SetFinishErrorOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    event().SetFinished("error");
+    return true;
+  }
+
+  bool HasAsyncPart() const override {
+    return true;
+  }
+};
+
+REGISTER_CPU_OPERATOR(SetFinishErrorOp, SetFinishErrorOp);
+
+OPERATOR_SCHEMA(SetFinishErrorOp);
+
+TEST(NetTest, SetFinishErrorOpTest) {
+  const auto spec = R"DOC(
+        name: "example"
+        type: "async_scheduling"
+        op {
+          type: "SetFinishErrorOp"
+        }
+)DOC";
+
+  NetDef net_def;
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
+
+  Workspace ws;
+  std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+
+  // net run returns false
   ASSERT_FALSE(net->Run());
 }
 

@@ -395,25 +395,6 @@ Value* packOutputs(Graph& g, at::ArrayRef<Value*> values) {
   return g.insertNode(g.createTuple(values))->output();
 }
 
-c10::optional<std::vector<int64_t>> getIntListAttribute(
-    c10::optional<int32_t> N,
-    Value* input) {
-  auto list = constant_as<Shared<jit::IntList>>(input);
-  if(list)
-    return list.value()->elements();
-
-  // broadcast IntList[3] with value 4 -> {4, 4, 4}
-  if(!N)
-    return c10::nullopt;
-
-  auto r = constant_as<int64_t>(input);
-  if(!r)
-    return c10::nullopt;
-
-  // broadcast to attribute size
-  return std::vector<int64_t>(*N, *r);
-}
-
 at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   // small peephole optimization to ensure IntList attributes can still turn
   // into constants e.g. in x.expand([3, 4])
@@ -428,7 +409,7 @@ static inline bool isIntUsedAsIntList(
     const Argument& arg) {
   // Look for int[N]
   return value->type()->kind() == TypeKind::IntType &&
-         *arg.type == *ListType::ofInts() && arg.N;
+         *arg.type() == *ListType::ofInts() && arg.N();
 }
 
 inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
@@ -464,16 +445,16 @@ Value* tryMatchArgument(
   // also allow single ints to be passed in their place.
   // the single int is then repeated to the length of the list
   if (isIntUsedAsIntList(value, arg)) {
-    std::vector<Value*> repeated(*arg.N, value);
+    std::vector<Value*> repeated(*arg.N(), value);
     value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
   }
 
   TypePtr concrete_type;
   try {
-    concrete_type = matchTypeVariables(arg.type, value->type(), type_env);
+    concrete_type = matchTypeVariables(arg.type(), value->type(), type_env);
   } catch(TypeMatchError& e) {
     err() << "could not match type " << value->type()->str() << " to "
-          << arg.type->str() << " in argument '" << arg.name << "': " << e.what() << "\n"
+          << arg.type()->str() << " in argument '" << arg.name() << "': " << e.what() << "\n"
           << named_value.locOr(loc);
     return nullptr;
   }
@@ -486,13 +467,12 @@ Value* tryMatchArgument(
     value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
-  if (value->node()->kind() == prim::None){
-    if (concrete_type->isSubtypeOf(NumberType::get()))
-      value = graph.insertConstant(at::Scalar(NAN), loc);
-    else if (concrete_type->isSubtypeOf(GeneratorType::get())) {
+  if (value->type()->isSubtypeOf(NoneType::get())){
+    if (concrete_type->isSubtypeOf(GeneratorType::get())) {
       value = graph.insertNode(graph.createNoneGenerator())->output();
-    } else
+    } else if (concrete_type->isSubtypeOf(DynamicType::get())) {
       value = graph.insertNode(graph.createUndefined())->output();
+    }
   }
 
   //implicit conversion of tensors to scalars
@@ -505,7 +485,7 @@ Value* tryMatchArgument(
   }
 
   if(!value->type()->isSubtypeOf(concrete_type)) {
-    err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name << "' but found "
+    err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name() << "' but found "
           << value->type()->str() << "\n"
           << named_value.locOr(loc);
     return nullptr;
@@ -561,6 +541,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     const FunctionSchema& schema,
     const SourceRange& loc,
     Graph& graph,
+    c10::optional<NamedValue> self,
     at::ArrayRef<NamedValue> raw_args,
     at::ArrayRef<NamedValue> kwargs,
     std::ostream& failure_messages,
@@ -580,7 +561,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
   // NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
   // necessary to enforce linearization on effectful ops.
   std::vector<NamedValue> modifiedArgs(raw_args.begin(), raw_args.end());
-  if (schema.is_mutable) {
+  if (schema.has_world_token()) {
     // Add a dummy world token to be matched against
     const auto worldToken = graph.insertDummyWorld();
     modifiedArgs.insert(modifiedArgs.begin(), worldToken);
@@ -596,29 +577,31 @@ c10::optional<MatchedSchema> tryMatchSchema(
 
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
-
-  for (size_t schema_i = 0; schema_i < schema.arguments.size(); ++schema_i) {
-    const auto& arg = schema.arguments[schema_i];
+  for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
+    const auto& arg = schema.arguments()[schema_i];
     c10::optional<NamedValue> v;
-    if (!arg.kwarg_only && schema_i < modifiedArgs.size()) {
+    if (arg.name() == "self" && self) {
+      v = self;
+      self = c10::nullopt;
+    } else if (!arg.kwarg_only() && used_args < modifiedArgs.size()) {
       // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
-      if (arg.type->kind() == TypeKind::ListType && // the formal must be a list
-          !arg.N && // it must not be a broadcasting list like int[3], otherwise
+      if (arg.type()->kind() == TypeKind::ListType && // the formal must be a list
+          !arg.N() && // it must not be a broadcasting list like int[3], otherwise
                     // a single int is a valid input
-          (schema_i + 1 == schema.arguments.size() ||
-           schema.arguments[schema_i + 1]
-               .kwarg_only)) { // must be the last position argument
-        auto actual_type = modifiedArgs[schema_i].value(graph)->type();
+          (schema_i + 1 == schema.arguments().size() ||
+           schema.arguments()[schema_i + 1]
+               .kwarg_only())) { // must be the last position argument
+        auto actual_type = modifiedArgs[used_args].value(graph)->type();
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(
                 actual_type,
-                arg.type)) { // and the actual should not be a list already
-          auto elem_type = arg.type->expect<ListType>()->getElementType();
+                arg.type())) { // and the actual should not be a list already
+          auto elem_type = arg.type()->expect<ListType>()->getElementType();
           Value* list = tryCreateList(
               elem_type,
               graph,
               loc,
-              at::ArrayRef<NamedValue>(modifiedArgs).slice(schema_i),
+              at::ArrayRef<NamedValue>(modifiedArgs).slice(used_args),
               err,
               convert_tensors_to_nums,
               type_env);
@@ -630,9 +613,9 @@ c10::optional<MatchedSchema> tryMatchSchema(
         }
       }
 
-      v = modifiedArgs[schema_i];
+      v = modifiedArgs[used_args];
       used_args++;
-    } else if (auto idx = findInputWithName(arg.name, kwargs)) {
+    } else if (auto idx = findInputWithName(arg.name(), kwargs)) {
       const NamedValue& nv = kwargs[*idx];
       if (used_kwarg[*idx]) {
         err() << "argument " << nv.name()
@@ -642,10 +625,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
       }
       used_kwarg[*idx] = true;
       v = nv;
-    } else if (arg.default_value) {
-      v = NamedValue(*arg.default_value);
+    } else if (arg.default_value()) {
+      v = NamedValue(*arg.default_value());
     } else {
-      err() << "argument " << schema.arguments[schema_i].name
+      err() << "argument " << schema.arguments()[schema_i].name()
             << " not provided.\n"
             << loc;
       return c10::nullopt;
@@ -655,6 +638,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (!positional)
       return c10::nullopt;
     positional_inputs.push_back(positional);
+  }
+  // check for unused self argument
+  if(self != c10::nullopt) {
+    err() << "provided self argument not used in schema\n";
   }
 
   // check for unused positional arguments
@@ -676,8 +663,8 @@ c10::optional<MatchedSchema> tryMatchSchema(
       return c10::nullopt;
     }
   }
-  auto return_types = fmap(schema.returns, [&](const Argument& r) {
-    return evalTypeVariables(r.type, type_env);
+  auto return_types = fmap(schema.returns(), [&](const Argument& r) {
+    return evalTypeVariables(r.type(), type_env);
   });
   return MatchedSchema{std::move(positional_inputs), std::move(return_types)};
 }
@@ -721,6 +708,7 @@ Value* emitBuiltinCall(
   const SourceRange& loc,
   Graph& graph,
   Symbol name,
+  c10::optional<NamedValue> self,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
@@ -742,6 +730,7 @@ Value* emitBuiltinCall(
           op->schema(),
           loc,
           graph,
+          self,
           inputs,
           attributes,
           failure_messages,
@@ -756,6 +745,7 @@ Value* emitBuiltinCall(
               graph,
               loc,
               *method,
+              self,
               inputs,
               attributes,
               failure_messages,
@@ -789,15 +779,11 @@ static Value* ensureInt(const SourceRange& range, Value* v) {
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
     SourceRange loc,
     Method& m,
-    at::ArrayRef<NamedValue> inputs_,
+    at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  std::vector<NamedValue> inputs;
-  if (value)
-    inputs.push_back(*value);
-  inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
   return std::make_shared<SimpleValue>(emitBuiltinCall(
-      loc, *m.graph(), symbol, inputs, attributes, true));
+      loc, *m.graph(), symbol, self, inputs, attributes, true));
 }
 
 inline bool isSupportedListElementType(TypePtr type) {
@@ -832,7 +818,7 @@ struct to_ir {
       throw ErrorReport(def.decl().params().range()) << "methods must have a self argument";
     }
     auto expected_annotation_size = self ? def.decl().params().size() - 1 : def.decl().params().size();
-    if (schema.arguments.size() != expected_annotation_size) {
+    if (schema.arguments().size() != expected_annotation_size) {
       throw ErrorReport(def.decl().params().range()) << "Number of type annotations for"
         << " function parameters (" << arguments.size() << ")"
         << " does not match the number of parameters on the function ("
@@ -852,8 +838,8 @@ struct to_ir {
       environment_stack->setVar((*it).ident().range(), name, new_input);
 
       // Record the type for the schema and set the Type on the Value*
-      arguments.push_back(schema.arguments.at(arg_annotation_idx++));
-      new_input->setType(arguments.back().type);
+      arguments.push_back(schema.arguments().at(arg_annotation_idx++));
+      new_input->setType(arguments.back().type());
     }
     // body
     auto stmts = def.statements();
@@ -879,9 +865,9 @@ struct to_ir {
           results = createTupleUnpack(result).vec();
         }
       }
-      if (!schema.is_varret && schema.returns.size() != results.size()) {
+      if (!schema.is_varret() && schema.returns().size() != results.size()) {
         throw ErrorReport(def.range()) << "Number of type annotations for function"
-          << " return (" << schema.returns.size() << ") does not match"
+          << " return (" << schema.returns().size() << ") does not match"
           << " the number of returns from the function (" << results.size() << ")!";
       }
       auto range = return_stmt.range();
@@ -889,8 +875,8 @@ struct to_ir {
       for (auto& r : results) {
         graph->registerOutput(r);
         TypePtr type = DynamicType::get();
-        if (!schema.is_varret) {
-          type = schema.returns.at(return_type_idx).type;
+        if (!schema.is_varret()) {
+          type = schema.returns().at(return_type_idx).type();
           if (!r->type()->isSubtypeOf(type)) {
             throw ErrorReport(return_stmt.range()) << "Return value at position "
               << return_type_idx << " was annotated as having type " << type->str()
@@ -1493,11 +1479,25 @@ private:
 
   std::shared_ptr<SugaredValue> emitApplyExpr(Apply &apply, size_t n_binders) {
     auto sv = emitSugaredExpr(apply.callee(), 1);
-    auto inputs = getNamedValues(apply.inputs(), true);
     auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
       return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
     });
-    return sv->call(apply.callee().range(), method, inputs, attributes, n_binders);
+
+    auto loc = apply.callee().range();
+    if (auto fork_value = dynamic_cast<ForkValue*>(sv.get())) {
+      auto& trees = apply.inputs().tree()->trees();
+      if (trees.size() < 1) {
+        throw ErrorReport(loc) << "Expected at least one argument to fork()";
+      }
+
+      auto forked = emitSugaredExpr(Expr(trees[0]), 1);
+      TreeList sliced_trees(trees.begin() + 1, trees.end());
+      auto inputs = getNamedValues(sliced_trees, true);
+      return emitForkExpr(loc, forked, inputs, attributes);
+    } else {
+      auto inputs = getNamedValues(apply.inputs(), true);
+      return sv->call(loc, method, inputs, attributes, n_binders);
+    }
   }
 
   Value* emitExpr(Expr tree) {
@@ -1537,6 +1537,76 @@ private:
     }
   }
 
+  Value * emitNegate(const TreeRef& tree) {
+    const auto& inputs = tree->trees();
+    auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+
+    auto neg_val = emitBuiltinCall(
+               tree->range(),
+               *method.graph(),
+               aten::neg,
+               c10::nullopt,
+               named_values,
+               {},
+               /*required=*/true);
+
+    // constant fold the input if possible
+    auto maybe_constant_input = toIValue(neg_val->node()->input());
+    if (!maybe_constant_input) {
+      return neg_val;
+    }
+    auto op = getOperation(neg_val->node());
+    Stack stack;
+    stack.push_back(*maybe_constant_input);
+    op(stack);
+    JIT_ASSERT(stack.size() == 1);
+    return graph->insertConstant(stack[0], tree->range());
+  }
+
+  // This function extract a new graph from its original subgraph
+  std::shared_ptr<SugaredValue> emitForkExpr(
+      SourceRange loc,
+      const std::shared_ptr<SugaredValue> &forked,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes) {
+    // Build the fork node without inputs
+    auto fork_node = method.graph()->insertNode(method.graph()->create(prim::fork, 1))
+                ->setSourceLocation(std::make_shared<SourceRange>(loc));
+    auto body_block = fork_node->addBlock();
+
+    // Build a template of the graph to be executed
+    Value *node_output;
+    {
+      WithInsertPoint guard(body_block);
+      auto fn_sugared_output = forked->call(loc, method, inputs, attributes, 1);
+      auto fn_simple_output = fn_sugared_output->asValue(loc, method);
+      body_block->registerOutput(fn_simple_output);
+      node_output = fork_node->output()->setType(FutureType::create(fn_simple_output->type()));
+    }
+
+    // Fork a new graph from its orignal owning graph
+    auto forked_graph = std::make_shared<Graph>();
+
+    // Make sure we capture everything in the new graph.
+    // The uncaptured values will be added to the fork signature.
+    std::unordered_map<Value*, Value*> uncaptures_map;
+    auto env = [&](Value* v) -> Value* {
+      if (!uncaptures_map.count(v)) {
+        // Capture values for both graphs
+        uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
+        fork_node->addInput(v);
+      }
+      return uncaptures_map[v];
+    };
+    forked_graph->block()->cloneFrom(body_block, env);
+
+    // Separate the subgraph and clean up the orignal one
+    fork_node->g_(attr::Subgraph, forked_graph);
+    fork_node->eraseBlock(0);
+
+    return std::make_shared<SimpleValue>(node_output);
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree) {
     switch (tree->kind()) {
@@ -1553,8 +1623,7 @@ private:
       case '/':
       case '+':
       case '-':
-      case '%':
-      case TK_UNARY_MINUS: {
+      case '%': {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
@@ -1562,9 +1631,13 @@ private:
                    tree->range(),
                    *method.graph(),
                    kind,
+                   c10::nullopt,
                    named_values,
                    {},
                    /*required=*/true);
+      }
+      case TK_UNARY_MINUS: {
+        return emitNegate(tree);
       }
       case TK_AND:
       case TK_OR: {
@@ -1588,7 +1661,7 @@ private:
         return graph->insertConstant(false, tree->range());
       } break;
       case TK_NONE: {
-        return emitNone(tree->range());
+        return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_SUBSCRIPT: {
         const auto subscript = Subscript(tree);
@@ -1637,13 +1710,6 @@ private:
     }
   }
 
-  Value* emitNone(SourceRange range) {
-    auto& g = *method.graph();
-    return g.insertNode(
-        g.create(prim::None, {}, 1)->setSourceLocation(
-          std::make_shared<SourceRange>(range)))->output();
-  }
-
   Value* emitConst(const Const& c) {
     if (c.isFloatingPoint())
       return materializeConstant(c.asFloatingPoint(), *graph, c.range(), fp_constants);
@@ -1662,7 +1728,7 @@ private:
       int64_t dim,
       Value* index) {
     return emitBuiltinCall(
-        loc, *graph, aten::select,
+        loc, *graph, aten::select, c10::nullopt,
         {input, graph->insertConstant(dim, loc), index}, {}, true);
   }
 
@@ -1690,8 +1756,15 @@ private:
     if (has_end) {
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
+    if (input->type()->cast<TupleType>()) {
+      if (has_end) {
+        return emitTupleSlice(loc, args[0], args[1], /*end*/args[2]);
+      } else {
+        return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
+      }
+    }
     NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
+    return emitBuiltinCall(loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
 
   Value* emitIndex(
@@ -1700,7 +1773,7 @@ private:
       at::ArrayRef<Value*> indices) {
     auto* index = graph->insertNode(
         graph->createList(DynamicType::get(), indices))->output();
-    return emitBuiltinCall(loc, *graph, aten::index, {input, index}, {}, true);
+    return emitBuiltinCall(loc, *graph, aten::index, c10::nullopt,  {input, index}, {}, true);
   }
 
   // Emits multidimensional slicing with int and slice indices.
@@ -1809,6 +1882,62 @@ private:
     return emitSlice(loc, sliceable, maybe_dim, slice_exp);
   }
 
+  int64_t getTupleIndexVal(const SourceRange& loc,
+    const TupleTypePtr& tuple_type,
+      Value * idx_val,
+      bool allow_out_of_bounds) {
+     int64_t index;
+    at::optional<IValue> ivalue = toIValue(idx_val);
+    if (ivalue && ivalue->isInt()) {
+      index = ivalue->to<int64_t>();
+    } else {
+      throw ErrorReport(loc)
+        << "tuple indices must be integer constants";
+    }
+     // set index to be positive to simplify logic in runtime
+    int64_t adj_index = index;
+    int64_t tuple_len = tuple_type->elements().size();
+    if (index < 0) {
+      adj_index = tuple_len + index;
+    }
+    if (!allow_out_of_bounds && (adj_index >= tuple_len || adj_index < 0)) {
+      throw ErrorReport(loc)
+        << "Tuple index out of range. Tuple is length " << tuple_len
+        << " and index is " << index;
+    }
+    return adj_index;
+  }
+   Value* emitTupleIndex(const SourceRange& loc,
+      Value * tuple_val,
+      Value * idx_val) {
+    auto tuple_typ = tuple_val->type()->cast<TupleType>();
+    auto adj_index = getTupleIndexVal(loc, tuple_typ, idx_val, /*allow_out_of_bounds*/false);
+    return graph->insertNode(
+        graph->createTupleIndex(tuple_val, adj_index))->output();
+  }
+
+  Value* emitTupleSlice(const SourceRange& loc,
+      const NamedValue& tuple_val,
+      const NamedValue& beg_val,
+      const at::optional<NamedValue>& end_val) {
+    auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
+    int64_t beg = getTupleIndexVal(loc, tuple_type, beg_val.value(*graph), /*allow_out_of_bounds*/true);
+    int64_t end;
+    int64_t tuple_len = tuple_type->elements().size();
+    if (end_val) {
+      end = getTupleIndexVal(loc, tuple_type, end_val->value(*graph), true);
+    } else {
+      end = tuple_len;
+    }
+    // slicing does not throw out of bounds errors
+    end = std::min(std::max((int64_t)0, end), tuple_len);
+    beg = std::min(std::max((int64_t)0, beg), tuple_len);
+
+    return graph->insertNode(
+        graph->createTupleSlice(tuple_val.value(*graph), beg, end))->output();
+  }
+
+
   // Desugars gather syntactic sugar foo[i]
   Value* emitBasicGather(const Subscript& subscript) {
     const auto& loc = subscript.range();
@@ -1819,10 +1948,15 @@ private:
       // if it's a list, emit a regular index selection op
       auto* idx = emitExpr(subscript.subscript_exprs()[0]);
       return emitBuiltinCall(
-                 loc, *graph, aten::select, {gatherable, idx}, {}, true);
-    } else {
-      JIT_ASSERT(gatherable->type()->isSubtypeOf(DynamicType::get()));
+                 loc, *graph, aten::select, c10::nullopt, {gatherable, idx}, {}, true);
+    } else if (gatherable->type()->isSubtypeOf(DynamicType::get())) {
       return emitMultidimSlicing(loc, gatherable, subscript);
+    } else if (auto tuple_type = gatherable->type()->cast<TupleType>()) {
+      auto* idx = emitExpr(subscript.subscript_exprs()[0]);
+      return emitTupleIndex(loc, gatherable, idx);
+    } else {
+      throw ErrorReport(loc)
+        << "Indexing only supported on lists, tensors, and tuples.";
     }
   }
 };
@@ -1937,6 +2071,7 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
     {"int", IntType::get()},
     {"float", FloatType::get()},
     {"bool", BoolType::get()},
+    {"str", StringType::get()},
   };
   return map;
 }
@@ -1958,6 +2093,13 @@ const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscr
       }
       auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
       return ListType::create(elem_type);
+    }},
+    {"Optional", [](Subscript subscript) -> TypePtr {
+      if (subscript.subscript_exprs().size() != 1) {
+        throw ErrorReport(subscript) << " expected exactly one element type but found " << subscript.subscript_exprs().size();
+      }
+      auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+      return OptionalType::create(elem_type);
     }},
   };
   return map;

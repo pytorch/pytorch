@@ -19,13 +19,13 @@ void batch_gather_op_cpu_impl(
 
   vector<int64_t> shape;
   shape.push_back(data.dim(0));
-  shape.insert(shape.end(), indices.dims().begin(), indices.dims().end());
-  shape.insert(shape.end(), data.dims().begin() + 2, data.dims().end());
+  shape.insert(shape.end(), indices.sizes().begin(), indices.sizes().end());
+  shape.insert(shape.end(), data.sizes().begin() + 2, data.sizes().end());
   output->Resize(shape);
 
   auto block_size = data.size_from_dim(2);
   auto block_bytesize = block_size * data.meta().itemsize();
-  auto N = indices.size();
+  auto N = indices.numel();
   auto data_batch_bytesize = data.size_from_dim(1) * data.meta().itemsize();
   auto gathered_batch_bytesize =
       N * data.size_from_dim(2) * data.meta().itemsize();

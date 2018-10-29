@@ -1,8 +1,8 @@
 import unittest
 import sys
 
-import common
-from common import TEST_NUMBA, TEST_NUMPY
+import common_utils as common
+from common_utils import TEST_NUMBA, TEST_NUMPY
 from common_cuda import TEST_NUMBA_CUDA, TEST_CUDA, TEST_MULTIGPU
 
 import torch
@@ -67,14 +67,15 @@ class TestNumbaIntegration(common.TestCase):
 
             # Sparse CPU/CUDA tensors do not implement the interface
             if tp not in (torch.HalfTensor,):
-                sparse_t = torch.sparse_coo_tensor(cput[None, :], cput)
+                indices_t = torch.empty(1, cput.size(0), dtype=torch.long).clamp_(min=0)
+                sparse_t = torch.sparse_coo_tensor(indices_t, cput)
 
                 self.assertFalse(hasattr(sparse_t, "__cuda_array_interface__"))
                 self.assertRaises(
                     AttributeError, lambda: sparse_t.__cuda_array_interface__
                 )
 
-                sparse_cuda_t = torch.sparse_coo_tensor(cput[None, :], cput).cuda()
+                sparse_cuda_t = torch.sparse_coo_tensor(indices_t, cput).cuda()
 
                 self.assertFalse(hasattr(sparse_cuda_t, "__cuda_array_interface__"))
                 self.assertRaises(

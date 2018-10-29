@@ -37,7 +37,7 @@ TEST(CUDAContextTest, TestSetGetDeviceWithoutCaffeMode) {
 
 TEST(CUDAContextTest, TestSetGetDeviceWithCaffeMode) {
   // For a while, set full device control to be true.
-  c10::FLAGS_caffe2_cuda_full_device_control = true;
+  FLAGS_caffe2_cuda_full_device_control = true;
   for (int i = 0; i < NumCudaDevices(); ++i) {
     CaffeCudaSetDevice(i);
     EXPECT_EQ(CaffeCudaGetDevice(), i);
@@ -46,7 +46,7 @@ TEST(CUDAContextTest, TestSetGetDeviceWithCaffeMode) {
     CaffeCudaSetDevice(i);
     EXPECT_EQ(CaffeCudaGetDevice(), i);
   }
-  c10::FLAGS_caffe2_cuda_full_device_control = false;
+  FLAGS_caffe2_cuda_full_device_control = false;
 }
 
 TEST(CUDAContextTest, MemoryPoolAllocateDealloc) {
@@ -95,6 +95,39 @@ TEST(CUDAContextTest, TestSameThreadSameObject) {
       context_a.cuda_stream(), getStreamForHandle(context_b.cublas_handle()));
   // CuRAND generators are context-local.
   EXPECT_NE(context_a.curand_generator(), context_b.curand_generator());
+}
+
+TEST(CUDAContextTest, TestSameThreadTempObject) {
+  if (!HasCudaGPU())
+    return;
+  CUDAContext context_outer(0); // gpu id
+  context_outer.SwitchToDevice(0); // logical stream id
+
+  if (NumCudaDevices() >= 2) {
+    auto before_stream = context_outer.cuda_stream();
+
+    // try to mess up current device
+    CUDAContext context_different_device(1);
+    context_different_device.SwitchToDevice(10);
+
+    // go back
+    context_outer.SwitchToDevice(0); // logical stream id
+    EXPECT_EQ(context_outer.cuda_stream(), before_stream);
+
+    // do nothing - infers the current device and stream
+    CUDAContext context_noop;
+    EXPECT_EQ(context_outer.cuda_stream(), before_stream);
+    EXPECT_EQ(context_noop.cuda_stream(), before_stream);
+
+
+    // override stream - the previous context is not valid any more until
+    // SwitchToDevice is called again (needs to be refactored into proper guard)
+    CUDAContext context_override;
+    context_override.SwitchToDevice(1); // logical stream id
+    EXPECT_NE(context_override.cuda_stream(), before_stream);
+    // note, that accessing streams from context_outer and context_noop is not
+    // semantically valid any more
+  }
 }
 
 TEST(CUDAContextTest, TestSameThreadDifferntObjectIfDifferentDevices) {

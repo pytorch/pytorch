@@ -171,13 +171,15 @@ RegisterOperators reg({
         [](Node* node) -> Operation {
           return [](Stack& stack) {
             auto s = pop(stack).toString();
-            if (s->string() != "inf") {
+            if (s->string() == "inf")
+              push(stack, std::numeric_limits<double>::infinity());
+            else if (s->string() == "-inf")
+              push(stack, -std::numeric_limits<double>::infinity());
+            else
               AT_ERROR(
-                  "Only 'inf' can be cast to a float, but got '",
+                  "Only 'inf' or '-inf' can be cast to a float, but got '",
                   s->string(),
                   "'");
-            }
-            push(stack, std::numeric_limits<double>::infinity());
             return 0;
           };
         }),
@@ -198,7 +200,7 @@ RegisterOperators reg({
           return [](Stack& stack) {
             at::Tensor a;
             pop(stack, a);
-            push(stack, static_cast<int64_t>(a.dtype()));
+            push(stack, static_cast<int64_t>(a.scalar_type()));
             return 0;
           };
         }),
@@ -220,6 +222,14 @@ RegisterOperators reg({
             return 0;
           };
         }),
+    Operator(
+      prim::None,
+      [](Node* node) {
+        return [](Stack& stack) {
+          stack.push_back(IValue());
+          return 0;
+        };
+      }),
     Operator(
         prim::NoneGenerator,
         [](Node* node) {
@@ -367,6 +377,34 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::TupleSlice,
+        [](Node* node) {
+          int64_t beg_ind = node->i(attr::beg);
+          int64_t end_ind = node->i(attr::end);
+          return [=](Stack& stack) {
+            auto t = pop(stack).toTuple();
+            const auto & elems = t->elements();
+            std::vector<IValue> output_elems;
+            for (int64_t i = beg_ind; i < end_ind; ++i) {
+              output_elems.push_back(elems.at(i));
+            }
+            push(stack, Tuple::create(std::move(output_elems)));
+            return 0;
+          };
+        }),
+    Operator(
+      prim::TupleIndex,
+      [](Node* node) {
+        auto index = node->i(attr::index);
+        return [=](Stack& stack) {
+          auto tup = pop(stack).toTuple();
+          const auto & elems = tup->elements();
+          // index is normalized to be positive at compile time
+          stack.push_back(elems.at(index));
+          return 0;
+        };
+      }),
+    Operator(
         prim::TupleConstruct,
         [](Node* node) {
           size_t num_inputs = node->inputs().size();
@@ -496,6 +534,26 @@ RegisterOperators reg({
               return 0;
             };
           }
+        }),
+    Operator(
+        prim::fork,
+        [](Node* node) {
+          Code code(node->g(attr::Subgraph));
+          JIT_ASSERT(node->blocks().size() == 0);
+          JIT_ASSERT(node->hasAttribute(attr::Subgraph));
+          return [=](Stack& stack) {
+            InterpreterState(code).run(stack);
+            push(stack, Future(pop(stack)));
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::wait(Future(t) self) -> t",
+        [](Node* node) {
+          return [=](Stack& stack) {
+            push(stack, pop(stack).toFuture()->get());
+            return 0;
+          };
         }),
 });
 
@@ -706,7 +764,7 @@ RegisterOperators reg2({
         "aten::slice(" decl_type "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type "[]", \
         listSlice<Shared<c_type>, c_type::ElemType>), \
     Operator( \
-        "aten::append(World w, " decl_type "[] list, " decl_type " el) -> World", \
+        "aten::append(World w, " decl_type "[] self, " decl_type " el) -> World", \
         listAppend<Shared<c_type>, c_type::ElemType>), \
 
 
@@ -786,7 +844,7 @@ RegisterOperators reg2({
         };
       }),
     Operator(
-        "aten::neg(int a) -> int",
+        "aten::neg(int self) -> int",
         [](Node* node) {
           return [=](Stack& stack) {
             push(stack, -pop(stack).toInt());
@@ -794,7 +852,7 @@ RegisterOperators reg2({
           };
         }),
     Operator(
-        "aten::neg(float a) -> float",
+        "aten::neg(float self) -> float",
         [](Node* node) {
           return [=](Stack& stack) {
             push(stack, -pop(stack).toDouble());
@@ -802,7 +860,7 @@ RegisterOperators reg2({
           };
         }),
     Operator(
-        "aten::__not__(int a) -> int",
+        "aten::__not__(int self) -> int",
         [](Node* node) {
           return [=](Stack& stack) {
             push(stack, !pop(stack).toInt());
@@ -810,7 +868,7 @@ RegisterOperators reg2({
           };
         }),
     Operator(
-        "aten::_tensor_to_list(Tensor a) -> int[]",
+        "aten::_tensor_to_list(Tensor self) -> int[]",
         [](Node* node) {
           return [=](Stack& stack) {
             at::Tensor t;
@@ -824,7 +882,7 @@ RegisterOperators reg2({
           };
         }),
     Operator(
-        "aten::_list_to_tensor(int[] a) -> Tensor",
+        "aten::_list_to_tensor(int[] self) -> Tensor",
         [](Node* node) {
           return [=](Stack& stack) {
             std::vector<int64_t> l;
@@ -839,4 +897,18 @@ RegisterOperators reg2({
           };
         }),
 });
+
+
+at::Tensor leaky_relu(at::Tensor tensor, double scalar) {
+  return at::leaky_relu(tensor, scalar);
+}
+at::Tensor cat(std::vector<at::Tensor> tensors) {
+  return at::cat(tensors);
+}
+
+static auto reg3 =
+    torch::jit::RegisterOperators()
+        .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor", &leaky_relu)
+        .op("_test::cat(Tensor[] inputs) -> Tensor", &cat);
+
 }}} // torch::jit::anon

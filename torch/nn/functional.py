@@ -1,4 +1,5 @@
 r"""Functional interface"""
+from __future__ import division
 
 import warnings
 import math
@@ -9,11 +10,11 @@ import torch
 from torch._C import _infer_size, _add_docstr
 from . import _functions
 from .modules import utils
-from ._functions.padding import ConstantPadNd
 from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
+from .._jit_internal import weak_script
 
 _VF = torch._C._VariableFunctions
 
@@ -856,6 +857,7 @@ In-place version of :func:`~leaky_relu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def prelu(input, weight):
     r"""prelu(input, weight) -> Tensor
 
@@ -895,6 +897,7 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 """)
 
 
+@torch._jit_internal.weak_script
 def hardshrink(input, lambd=0.5):
     r"""
     hardshrink(input, lambd=0.5) -> Tensor
@@ -903,9 +906,11 @@ def hardshrink(input, lambd=0.5):
 
     See :class:`~torch.nn.Hardshrink` for more details.
     """
+    # type: (Tensor, float) -> Tensor
     return torch.hardshrink(input, lambd)
 
 
+@torch._jit_internal.weak_script
 def tanhshrink(input):
     r"""tanhshrink(input) -> Tensor
 
@@ -916,6 +921,7 @@ def tanhshrink(input):
     return input - input.tanh()
 
 
+@torch._jit_internal.weak_script
 def softsign(input):
     r"""softsign(input) -> Tensor
 
@@ -1230,6 +1236,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     intermediate embeddings.
 
     See :class:`torch.nn.EmbeddingBag` for more details.
+    .. include:: cuda_deterministic_backward.rst
 
     Args:
         input (LongTensor): Tensor containing bags of indices into the embedding matrix
@@ -1435,6 +1442,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
     See :class:`~torch.nn.CTCLoss` for details.
 
     .. include:: cudnn_deterministic.rst
+    .. include:: cuda_deterministic_backward.rst
 
     Args:
         log_probs: :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
@@ -1756,7 +1764,7 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
          >>> loss.backward()
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_string(size_average, reduce)
+        reduction = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction = _Reduction.get_enum(reduction)
 
@@ -1952,6 +1960,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         This function is deprecated in favor of :func:`torch.nn.functional.interpolate`.
         This is equivalent with ``nn.functional.interpolate(...)``.
 
+    .. include:: cuda_deterministic_backward.rst
 
     The algorithm used for upsampling is determined by :attr:`mode`.
 
@@ -2026,6 +2035,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         See :class:`~torch.nn.Upsample` for concrete examples on how this
         affects the outputs.
 
+    .. include:: cuda_deterministic_backward.rst
     """
     from numbers import Integral
     from .modules.utils import _ntuple
@@ -2111,6 +2121,8 @@ def upsample_nearest(input, size=None, scale_factor=None):
         size (int or Tuple[int, int] or Tuple[int, int, int]): output spatia
             size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
+
+    .. include:: cuda_deterministic_backward.rst
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
@@ -2132,6 +2144,8 @@ def upsample_bilinear(input, size=None, scale_factor=None):
         input (Tensor): input
         size (int or Tuple[int, int]): output spatial size.
         scale_factor (int or Tuple[int, int]): multiplier for spatial size
+
+    .. include:: cuda_deterministic_backward.rst
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.interpolate instead.")
@@ -2189,6 +2203,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
           ``x'' = -0.5``.
 
     .. Note:: This function is often used in building Spatial Transformer Networks.
+    .. include:: cuda_deterministic_backward.rst
 
     Args:
         input (Tensor): input of shape :math:`(N, C, H_\text{in}, W_\text{in})` (4-D case)
@@ -2251,6 +2266,8 @@ def pad(input, pad, mode='constant', value=0):
         3D input tensor. Reflect padding is only implemented for padding the last 2
         dimensions of 4D input tensor, or the last dimension of 3D input tensor.
 
+    .. include:: cuda_deterministic_backward.rst
+
     Args:
         input (Tensor): `Nd` tensor
         pad (tuple): m-elem tuple, where :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
@@ -2278,7 +2295,7 @@ def pad(input, pad, mode='constant', value=0):
     assert len(pad) % 2 == 0, 'Padding length must be divisible by 2'
     assert len(pad) // 2 <= input.dim(), 'Padding length too large'
     if mode == 'constant':
-        return ConstantPadNd.apply(input, pad, value)
+        return _VF.constant_pad_nd(input, pad, value)
     else:
         assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
         if input.dim() == 3:
@@ -2305,10 +2322,12 @@ def pad(input, pad, mode='constant', value=0):
 
 # distance
 
-def pairwise_distance(x1, x2, p=2, eps=1e-6, keepdim=False):
+@torch._jit_internal.weak_script
+def pairwise_distance(x1, x2, p=2., eps=1e-6, keepdim=False):
     r"""
     See :class:`torch.nn.PairwiseDistance` for details
     """
+    # type: (Tensor, Tensor, float, float, bool) -> Tensor
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 
@@ -2379,28 +2398,31 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
                                      swap, reduction)
 
 
-def normalize(input, p=2, dim=1, eps=1e-12):
+def normalize(input, p=2, dim=1, eps=1e-12, out=None):
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.
 
-    Does:
+    For a tensor :attr:`input` of sizes :math:`(n_0, ..., n_{dim}, ..., n_k)`, each
+    :math:`n_{dim}` -element vector :math:`v` along dimension :attr:`dim` is transformed as
 
     .. math::
-        v = \frac{v}{\max(\lVert v \rVert_p, \epsilon)}
+        v = \frac{v}{\max(\lVert v \rVert_p, \epsilon)}.
 
-    for each subtensor v over dimension dim of input. Each subtensor is
-    flattened into a vector, i.e. :math:`\lVert v \rVert_p` is not a matrix
-    norm.
-
-    With default arguments normalizes over the second dimension with Euclidean
-    norm.
+    With the default arguments it uses the Euclidean norm over vectors along dimension :math:`1` for normalization.
 
     Args:
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
         dim (int): the dimension to reduce. Default: 1
         eps (float): small value to avoid division by zero. Default: 1e-12
+        out (Tensor, optional): the output tensor. If :attr:`out` is used, this
+                                operation won't be differentiable.
     """
-    return input / input.norm(p, dim, True).clamp(min=eps).expand_as(input)
+    if out is None:
+        denom = input.norm(p, dim, True).clamp(min=eps).expand_as(input)
+        return input / denom
+    else:
+        denom = input.norm(p, dim, True).clamp_(min=eps).expand_as(input)
+        return torch.div(input, denom, out=out)
 
 
 def assert_int_or_pair(arg, arg_name, message):
