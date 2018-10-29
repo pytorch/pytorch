@@ -1,7 +1,7 @@
 #ifndef CAFFE2_CORE_EVENT_H_
 #define CAFFE2_CORE_EVENT_H_
 
-#include <ATen/core/DeviceType.h>
+#include <c10/DeviceType.h>
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/proto/caffe2_pb.h"

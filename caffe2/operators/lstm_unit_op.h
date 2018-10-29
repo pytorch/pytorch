@@ -171,7 +171,7 @@ class LSTMUnitOp : public Operator<Context> {
 
     const int32_t* seqLengths = nullptr;
     if (sequence_lengths_) {
-      CAFFE_ENFORCE_EQ(Input(SEQ_LENGTHS).size(), N);
+      CAFFE_ENFORCE_EQ(Input(SEQ_LENGTHS).numel(), N);
       seqLengths = Input(SEQ_LENGTHS).template data<int32_t>();
     }
 
@@ -262,7 +262,7 @@ class LSTMUnitGradientOp : public Operator<Context> {
 
     const int32_t* seqLengths = nullptr;
     if (sequence_lengths_) {
-      CAFFE_ENFORCE_EQ(Input(SEQ_LENGTHS).size(), N);
+      CAFFE_ENFORCE_EQ(Input(SEQ_LENGTHS).numel(), N);
       seqLengths = Input(SEQ_LENGTHS).template data<int32_t>();
     }
 

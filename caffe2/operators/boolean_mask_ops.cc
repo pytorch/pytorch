@@ -52,7 +52,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   auto* dataOut = Output(0);
   CAFFE_ENFORCE(data.ndim() >= 1);
   CAFFE_ENFORCE_EQ(mask.ndim(), 1);
-  CAFFE_ENFORCE(data.dims()[0] == mask.dims()[0]);
+  CAFFE_ENFORCE(data.sizes()[0] == mask.sizes()[0]);
 
   const auto* maskPtr = mask.template data<bool>();
   int numOutputs = 0;
@@ -64,7 +64,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   }
   std::vector<int64_t> outShape;
   outShape.push_back(numOutputs);
-  outShape.insert(outShape.end(), data.dims().begin() + 1, data.dims().end());
+  outShape.insert(outShape.end(), data.sizes().begin() + 1, data.sizes().end());
   dataOut->Resize(outShape);
   auto* outPtr = (char*)dataOut->raw_mutable_data(data.meta());
 

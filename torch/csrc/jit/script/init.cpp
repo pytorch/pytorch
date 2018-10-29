@@ -283,6 +283,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
      return std::make_shared<ConstantPythonTupleValue>(obj);
     }
   }
+
+  auto weak_obj =
+      py::module::import("torch.jit").attr("_try_get_weak_module")(obj);
+  if (!weak_obj.is_none()) {
+    obj = weak_obj;
+  }
   if (py::isinstance<Module>(obj)) {
     auto mod = py::cast<std::shared_ptr<Module>>(obj);
     // In the case that this Python object is not a submodule, inline *ONLY
@@ -297,6 +303,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
+  } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
+    return std::make_shared<ForkValue>();
   }
 
   py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);
@@ -363,17 +371,17 @@ FunctionSchema getSchemaWithDefaults(
     const FunctionSchema schema,
     const Def& def) {
   std::vector<Argument> new_args;
-  for (auto& arg : schema.arguments) {
-    auto it = default_args.find(arg.name);
+  for (auto& arg : schema.arguments()) {
+    auto it = default_args.find(arg.name());
     if (it != default_args.end()) {
       try {
-        IValue value = toIValue(it->second, arg.type);
+        IValue value = toIValue(it->second, arg.type());
         new_args.push_back(
-            Argument(arg.name, arg.type, arg.N, value, arg.kwarg_only));
+            Argument(arg.name(), arg.type(), arg.N(), value, arg.kwarg_only()));
       } catch (py::cast_error& e) {
         throw ErrorReport(def.range())
-            << "Expected a default value of type " << arg.type->str()
-            << " on parameter \"" << arg.name << "\"";
+            << "Expected a default value of type " << arg.type()->str()
+            << " on parameter \"" << arg.name() << "\"";
       }
     } else {
       new_args.push_back(arg);
@@ -381,11 +389,11 @@ FunctionSchema getSchemaWithDefaults(
   }
 
   return FunctionSchema(
-      schema.name,
+      schema.name(),
       new_args,
-      schema.returns,
-      schema.is_vararg,
-      schema.is_varret);
+      schema.returns(),
+      schema.is_vararg(),
+      schema.is_varret());
 }
 
 void initJitScriptBindings(PyObject* module) {

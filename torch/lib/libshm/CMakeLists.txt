@@ -4,9 +4,6 @@ CMAKE_POLICY(VERSION 2.6)
 
 include(${CMAKE_CURRENT_LIST_DIR}/../../../cmake/public/threads.cmake)
 
-FIND_PACKAGE(Caffe2 REQUIRED)
-INCLUDE_DIRECTORIES(${CAFFE2_INCLUDE_DIR})
-
 IF(NOT LIBSHM_INSTALL_LIB_SUBDIR)
   SET(LIBSHM_INSTALL_LIB_SUBDIR "lib" CACHE PATH "libshm install library directory")
 ENDIF()
@@ -25,13 +22,21 @@ ELSE ()
 ENDIF ()
 
 ADD_LIBRARY(shm SHARED core.cpp)
+
+target_include_directories(shm PRIVATE
+  ${CMAKE_SOURCE_DIR}/aten/src/TH # provides "THAllocator.h" to THCGeneral.h
+  ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
+  ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
+  ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC # provides "THCGeneral.h" to THC.h
+  )
+
 ADD_EXECUTABLE(torch_shm_manager manager.cpp)
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 ### Torch packages supposes libraries prefix is "lib"
 SET_TARGET_PROPERTIES(shm PROPERTIES
   PREFIX "lib"
   IMPORT_PREFIX "lib")
-TARGET_LINK_LIBRARIES(shm ${CAFFE2_LIBRARIES} ${C10_LIBRARIES})
+TARGET_LINK_LIBRARIES(shm caffe2 c10)
 
 if(UNIX AND NOT APPLE)
   include(CheckLibraryExists)

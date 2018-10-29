@@ -907,7 +907,7 @@ def GetCheckpointParams(model):
     return first_gpu_blobs.union(iteration_blobs)
 
 
-def FinalizeAfterCheckpoint(model, blobs=None):
+def FinalizeAfterCheckpoint(model, blobs=None, cpu_mode=False):
     '''
     This function should be called after loading parameters from a
     checkpoint / initial parameters file.
@@ -936,12 +936,14 @@ def FinalizeAfterCheckpoint(model, blobs=None):
                 model._device_grouped_blobs[name] = grouped
 
         model._checkpoint_net = core.Net("checkpoint_sync_net")
-        model._checkpoint_net.RunAllOnGPU()
+        if not cpu_mode:
+            model._checkpoint_net.RunAllOnGPU()
 
         checkpoint_init_net = None
         if (model._rendezvous is not None and model._rendezvous['num_shards'] > 1):
             checkpoint_init_net = core.Net("checkpoint_init_net")
-            checkpoint_init_net.RunAllOnGPU()
+            if not cpu_mode:
+                checkpoint_init_net.RunAllOnGPU()
 
         _SyncAllParams(
             devices,
