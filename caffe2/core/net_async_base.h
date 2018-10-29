@@ -116,13 +116,12 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   int num_workers_;
 
   // Exception/error handling
-  void setTaskErrorMessage(int task_id, const std::string& err_msg);
+  void handleChainError(
+      int task_id,
+      OperatorBase* op,
+      const char* err_msg,
+      bool save_exception = false);
   std::atomic<bool> success_;
-#ifdef CAFFE2_USE_EXCEPTION_PTR
-  // Mutex that protects caught_exception_
-  std::mutex exception_mutex_;
-  std::exception_ptr caught_exception_;
-#endif // CAFFE2_USE_EXCEPTION_PTR
 
   // Tracing
   std::shared_ptr<tracing::Tracer> tracer_;
@@ -143,8 +142,6 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   C10_DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
 
  private:
-  void storeExceptionPtr();
-
   TaskThreadPoolBase*
   poolGetter(PoolsMap& pools, int device_type, int device_id, int pool_size);
 

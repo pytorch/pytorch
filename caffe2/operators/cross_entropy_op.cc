@@ -76,7 +76,7 @@ bool SigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
   auto& targets = Input(1);
   CAFFE_ENFORCE_EQ(logits.sizes(), targets.sizes());
   const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
-  const auto outer_size = logits.size() / inner_size;
+  const auto outer_size = logits.numel() / inner_size;
 
   auto* out = Output(0);
   if (logits.ndim() == 0) {
@@ -118,8 +118,8 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::RunOnDevice() {
   auto& targets = Input(2);
   CAFFE_ENFORCE(logits.sizes() == targets.sizes());
   const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
-  const auto outer_size = logits.size() / inner_size;
-  CAFFE_ENFORCE(g.size() == outer_size);
+  const auto outer_size = logits.numel() / inner_size;
+  CAFFE_ENFORCE(g.numel() == outer_size);
 
   auto* out = Output(0);
   out->ResizeLike(logits);
@@ -158,7 +158,7 @@ bool WeightedSigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE(logits.sizes() == targets.sizes());
   CAFFE_ENFORCE(weights.sizes() == targets.sizes());
   const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
-  const auto outer_size = logits.size() / inner_size;
+  const auto outer_size = logits.numel() / inner_size;
 
   auto* out = Output(0);
   if (logits.ndim() == 0) {
@@ -196,8 +196,8 @@ bool WeightedSigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::
   CAFFE_ENFORCE(logits.sizes() == targets.sizes());
   CAFFE_ENFORCE(weights.sizes() == targets.sizes());
   const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
-  const auto outer_size = logits.size() / inner_size;
-  CAFFE_ENFORCE(g.size() == outer_size);
+  const auto outer_size = logits.numel() / inner_size;
+  CAFFE_ENFORCE(g.numel() == outer_size);
 
   auto* out = Output(0);
   out->ResizeLike(logits);
@@ -242,7 +242,7 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(dY.dim32(0), N);
   dX->ResizeLike(X);
   math::Set<float, CPUContext>(
-      dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
+      dX->numel(), 0.f, dX->template mutable_data<float>(), &context_);
   const float* Xdata = X.data<float>();
   const float* dYdata = dY.data<float>();
   const int* labelData = label.data<int>();
@@ -260,7 +260,7 @@ bool MakeTwoClassOp<float, CPUContext>::RunOnDevice() {
   auto* Y = Output(0);
   auto shape = X.sizes().vec();
   shape.push_back(2);
-  int64_t N = X.size();
+  int64_t N = X.numel();
   Y->Resize(shape);
   const auto* Xdata = X.data<float>();
   auto* Ydata = Y->template mutable_data<float>();
@@ -284,7 +284,7 @@ bool MakeTwoClassGradientOp<float, CPUContext>::RunOnDevice() {
   dX->Resize(shape);
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
-  int64_t N = dX->size();
+  int64_t N = dX->numel();
   // use eigen?
   for (int64_t i = 0; i < N; ++i) {
     dXdata[i] = dYdata[i * 2 + 1] - dYdata[i * 2];
@@ -350,7 +350,7 @@ bool CrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(dY.dim32(0), N);
   dX->ResizeLike(X);
   math::Set<float, CPUContext>(
-      dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
+      dX->numel(), 0.f, dX->template mutable_data<float>(), &context_);
   const float* Xdata = X.data<float>();
   const float* dYdata = dY.data<float>();
   const float* labelData = label.data<float>();

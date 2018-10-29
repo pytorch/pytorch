@@ -111,11 +111,6 @@
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
 #
-#   MKLDNN_LIB_DIR
-#   MKLDNN_LIBRARY
-#   MKLDNN_INCLUDE_DIR
-#     specify where MKLDNN is installed
-#
 #   NVTOOLSEXT_PATH (Windows only)
 #     specify where nvtoolsext is installed
 #
@@ -177,8 +172,6 @@ from tools.setup_helpers.miopen import (USE_MIOPEN, MIOPEN_LIBRARY,
                                         MIOPEN_LIB_DIR, MIOPEN_INCLUDE_DIR)
 from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_LIB_DIR, \
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
-from tools.setup_helpers.mkldnn import (USE_MKLDNN, MKLDNN_LIBRARY,
-                                        MKLDNN_LIB_DIR, MKLDNN_INCLUDE_DIR)
 from tools.setup_helpers.nnpack import USE_NNPACK
 from tools.setup_helpers.qnnpack import USE_QNNPACK
 from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
@@ -197,6 +190,7 @@ IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 
 BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
+USE_MKLDNN = check_env_flag('USE_MKLDNN')
 USE_CUDA_STATIC_LINK = check_env_flag('USE_CUDA_STATIC_LINK')
 RERUN_CMAKE = True
 
@@ -333,10 +327,7 @@ class create_version_file(PytorchCommand):
 ################################################################################
 
 # All libraries that torch could depend on
-dep_libs = [
-    'nccl', 'caffe2',
-    'libshm', 'libshm_windows'
-]
+dep_libs = ['caffe2']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -396,9 +387,6 @@ def build_libs(libs):
         my_env["MIOPEN_LIBRARY"] = MIOPEN_LIBRARY
         my_env["MIOPEN_INCLUDE_DIR"] = MIOPEN_INCLUDE_DIR
     if USE_MKLDNN:
-        my_env["MKLDNN_LIB_DIR"] = MKLDNN_LIB_DIR
-        my_env["MKLDNN_LIBRARY"] = MKLDNN_LIBRARY
-        my_env["MKLDNN_INCLUDE_DIR"] = MKLDNN_INCLUDE_DIR
         build_libs_cmd += ['--use-mkldnn']
     if USE_QNNPACK:
         build_libs_cmd += ['--use-qnnpack']
@@ -466,8 +454,6 @@ class build_deps(PytorchCommand):
         check_pydep('typing', 'typing')
 
         libs = []
-        if USE_NCCL and not USE_SYSTEM_NCCL:
-            libs += ['nccl']
         libs += ['caffe2']
         build_libs(libs)
 
@@ -610,7 +596,7 @@ class build_ext(build_ext_parent):
         else:
             print('-- Not using CUDA')
         if USE_MKLDNN:
-            print('-- Detected MKLDNN at ' + MKLDNN_LIBRARY + ', ' + MKLDNN_INCLUDE_DIR)
+            print('-- Using MKLDNN')
         else:
             print('-- Not using MKLDNN')
         if USE_NCCL and USE_SYSTEM_NCCL:
@@ -1040,10 +1026,9 @@ if USE_ROCM:
 
 if USE_NCCL:
     if USE_SYSTEM_NCCL:
-        main_link_args += [NCCL_SYSTEM_LIB]
         include_dirs.append(NCCL_INCLUDE_DIR)
     else:
-        main_link_args += [NCCL_LIB]
+        include_dirs.append("build/nccl/include")
     extra_compile_args += ['-DUSE_NCCL']
     main_sources += [
         "torch/csrc/cuda/nccl.cpp",

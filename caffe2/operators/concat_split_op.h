@@ -135,7 +135,7 @@ bool SplitOp<Context>::RunOnDevice() {
         "If you set split with an input blob, do not pass in "
         "split in the argument.");
     auto& split_tensor = this->template Input<Tensor>(1, CPU);
-    CAFFE_ENFORCE_EQ(split_tensor.size(), OutputSize());
+    CAFFE_ENFORCE_EQ(split_tensor.numel(), OutputSize());
     axis_data = split_tensor.template data<int>();
   } else if (split_.size() == 0) {
     CAFFE_ENFORCE_EQ(
@@ -200,7 +200,7 @@ template <class Context>
 bool SplitByLengthsOp<Context>::RunOnDevice() {
   auto& input = Input(0);
   auto& length = this->template Input<Tensor>(1, CPU);
-  auto length_length = length.size();
+  auto length_length = length.numel();
   CAFFE_ENFORCE_EQ(
       length_length % OutputSize(),
       0,
@@ -211,7 +211,7 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
   const int input_channels = input.dim32(canonical_axis);
   const auto* axis_data = length.template data<int>();
   CAFFE_ENFORCE_EQ(
-      std::accumulate(axis_data, axis_data + length.size(), 0),
+      std::accumulate(axis_data, axis_data + length.numel(), 0),
       input_channels,
       "Sum of split dimensions do not match: should be ",
       input_channels);
