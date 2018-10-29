@@ -457,6 +457,8 @@ void initPythonIRBindings(PyObject * module_) {
           return "VarType";
         case TypeKind::WorldType:
           return "WorldType";
+        case TypeKind::FutureType:
+          return "FutureType";
         }
         // not reachable, but some compilers complain
         AT_ERROR("Unknown Type Kind");

@@ -16,7 +16,11 @@ from torch._six import inf, nan
 
 from test_torch import TestTorch
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
-    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_WITH_ROCM
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_WITH_ROCM, load_tests
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 # We cannot import TEST_CUDA and TEST_MULTIGPU from common_cuda here,
 # because if we do that, the TEST_CUDNN line from common_cuda will be executed
@@ -471,7 +475,6 @@ tests = [
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('qr', large_2d_lapack, lambda t: [], 'big', float_types, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('inverse', new_t(20, 20), lambda t: [], None, float_types, False, "skipIfRocm:DoubleTensor,FloatTensor"),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('svd', new_t(10, 10), lambda t: [], 'square', float_types_no_half, False,
@@ -1498,6 +1501,11 @@ class TestCuda(TestCase):
     def _select_broadcastable_dims(dims_full=None):
         return TestTorch._select_broadcastable_dims(dims_full)
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_inverse(self):
+        TestTorch._test_inverse(self, lambda t: t.cuda())
+
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_pinverse(self):
         TestTorch._test_pinverse(self, lambda t: t.cuda())
@@ -2107,7 +2115,7 @@ if __name__ == '__main__':
     # skip TestTorch tests
     # hide in __name__ == '__main__' because we don't want this to be run when
     # someone imports test_cuda
-    def load_tests(loader, tests, pattern):
+    def load_tests(loader, tests, pattern):  # noqa: F811
         test_suite = unittest.TestSuite()
         for test_group in tests:
             for test in test_group:

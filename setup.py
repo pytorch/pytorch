@@ -460,6 +460,7 @@ class build_deps(PytorchCommand):
         check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'catch', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
+        check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
 
         check_pydep('yaml', 'pyyaml')
         check_pydep('typing', 'typing')

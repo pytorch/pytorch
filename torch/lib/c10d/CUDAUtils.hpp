@@ -12,7 +12,7 @@ class CUDAEvent {
  public:
   CUDAEvent(cudaEvent_t event, int device) : device_(device), event_(event) {}
 
-  CUDAEvent() : CUDAEvent(nullptr, 0) {}
+  CUDAEvent() {}
 
   ~CUDAEvent() noexcept(false);
 
@@ -44,8 +44,8 @@ class CUDAEvent {
   }
 
  protected:
-  int device_;
-  cudaEvent_t event_;
+  int device_ = 0;
+  cudaEvent_t event_ = nullptr;
 };
 
 } // namespace c10d

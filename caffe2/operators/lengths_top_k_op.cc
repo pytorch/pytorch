@@ -69,14 +69,14 @@ bool LengthsTopKOp<T, Context>::RunOnDevice() {
 template <typename T, class Context>
 bool LengthsTopKGradientOp<T, Context>::RunOnDevice() {
   auto& input_len = Input(LENGTH_IN);
-  int N = input_len.size();
+  int N = input_len.numel();
   auto& input_indices = Input(INDICES_IN);
   CAFFE_ENFORCE_GE(input_indices.ndim(), 2, "input dim must be >= 2");
   CAFFE_ENFORCE_EQ(
-      input_indices.size(), N * k_, "input_indices shape is not correct");
+      input_indices.numel(), N * k_, "input_indices shape is not correct");
   auto& input_topk = Input(DER_TOPK_IN);
   CAFFE_ENFORCE_EQ(
-      input_topk.size(), N * k_, "input_topk shape is not correct");
+      input_topk.numel(), N * k_, "input_topk shape is not correct");
   auto* X_out = Output(DER_X_OUT);
 
   const int* input_len_data = input_len.template data<int>();

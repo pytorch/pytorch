@@ -18,7 +18,7 @@ bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
   }
   int N = X.ndim() > 0 ? X.dim32(0) : 1;
   distance->Resize(N);
-  int D = N > 0 ? X.size() / N : 0;
+  int D = N > 0 ? X.numel() / N : 0;
   float* distance_data = distance->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
@@ -46,7 +46,7 @@ bool L1DistanceOp<float, CPUContext>::RunOnDevice() {
   }
   int N = X.ndim() > 0 ? X.dim32(0) : 1;
   distance->Resize(N);
-  int D = N > 0 ? X.size() / N : 0;
+  int D = N > 0 ? X.numel() / N : 0;
 
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
@@ -73,7 +73,7 @@ bool L1DistanceGradientOp<float, CPUContext>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
   int N = X.ndim() > 0 ? X.dim32(0) : 1;
-  int D = N > 0 ? X.size() / N : 0;
+  int D = N > 0 ? X.numel() / N : 0;
   CAFFE_ENFORCE(X.ndim() == Y.ndim());
   for (int i = 0; i < X.ndim(); ++i) {
     CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
@@ -213,9 +213,9 @@ bool DotProductOp<float, CPUContext>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i), "dimension at ", i);
   }
   int N, D;
-  if (X.size() > 0) {
+  if (X.numel() > 0) {
     N = X.ndim() > 0 ? X.dim32(0) : 1;
-    D = X.size() / N;
+    D = X.numel() / N;
   } else {
     N = 0;
     D = 0;
@@ -263,9 +263,9 @@ bool DotProductGradientOp<float, CPUContext>::RunOnDevice() {
   auto* dX = Output(DER_X_OUT);
   auto* dY = Output(DER_Y_OUT);
   int N, D;
-  if (X.size() > 0) {
+  if (X.numel() > 0) {
     N = X.ndim() > 0 ? X.dim32(0) : 1;
-    D = X.size() / N;
+    D = X.numel() / N;
   } else {
     N = 0;
     D = 0;
@@ -303,10 +303,10 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(X.dim32(0), Y.dim32(0));
 
   int N, D, DX, DY, restD;
-  if (X.size() > 0) {
+  if (X.numel() > 0) {
     N = X.ndim() > 0 ? X.dim32(0) : 1;
-    DX = X.size() / N;
-    DY = Y.size() / N;
+    DX = X.numel() / N;
+    DY = Y.numel() / N;
   } else {
     N = 0;
     DX = 0;

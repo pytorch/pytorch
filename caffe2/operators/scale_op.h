@@ -21,7 +21,7 @@ class ScaleOp final : public Operator<Context> {
     auto* Y = Output(0);
     Y->ResizeLike(X);
     math::Scale<float, T, Context>(
-        X.size(),
+        X.numel(),
         scale_,
         X.template data<T>(),
         Y->template mutable_data<T>(),

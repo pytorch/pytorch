@@ -10,14 +10,14 @@ bool LengthsTileOp<CPUContext>::RunOnDevice() {
 
   CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTHS must be 1-D");
   CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
-  CAFFE_ENFORCE_EQ(lengths.size(), data.dim(0));
+  CAFFE_ENFORCE_EQ(lengths.numel(), data.dim(0));
 
   // Context::CopyFrom and math::Sum need the same context to avoid race
   // conditions
   // why? CPUContext is not used in Sum
   lengths_host_.CopyFrom(lengths, &context_);
   context_.FinishDeviceComputation();
-  auto lengths_size = lengths_host_.size();
+  auto lengths_size = lengths_host_.numel();
   auto* lengths_data = lengths_host_.data<int32_t>();
 
   int32_t total_length = 0;
