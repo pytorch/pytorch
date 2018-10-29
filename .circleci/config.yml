@@ -17,29 +17,31 @@ install_official_git_client: &install_official_git_client
   no_output_timeout: "1h"
   command: |
     set -e
-    sudo apt-get update
-    sudo apt-get install -y openssh-client git
+    sudo apt-get -qq update
+    sudo apt-get -qq install openssh-client git
 
 setup_ci_environment: &setup_ci_environment
   name: Set Up CI Environment
   no_output_timeout: "1h"
   command: |
     set -e
-    sudo pip install awscli==1.16.35
-
-    sudo apt-get update
-    sudo apt-get remove linux-image-generic linux-headers-generic linux-generic
-    sudo apt-get install linux-headers-$(uname -r)
-    sudo apt-get install linux-image-generic
-    sudo apt-get install -y moreutils
 
     curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
     echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
     echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
     echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-    sudo apt-get update
-    sudo apt-get install -y nvidia-docker2
+
+    sudo apt-get -qq update
+    sudo apt-get -qq remove linux-image-generic linux-headers-generic linux-generic
+    sudo apt-get -qq install \
+      linux-headers-$(uname -r) \
+      linux-image-generic \
+      moreutils \
+      nvidia-docker2
+
     sudo pkill -SIGHUP dockerd
+
+    sudo pip -q install awscli==1.16.35
 
     if [[ "${JOB_BASE_NAME}" == *-test* ]]; then
       if [ -n "${CUDA_VERSION}" ]; then
@@ -84,8 +86,8 @@ pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
       no_output_timeout: "1h"
       command: |
         set -e
-        sudo apt-get update
-        sudo apt-get install -y moreutils
+        sudo apt-get -qq update
+        sudo apt-get -qq install moreutils
 
         export IN_CIRCLECI=1
         export COMMIT_SOURCE=${CIRCLE_BRANCH}
@@ -96,7 +98,7 @@ pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
         # This IAM user allows write access to S3 bucket for sccache
         export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V2}
         export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V2}
-        git submodule sync && git submodule update --init
+        git submodule sync && git submodule update -q --init
         .jenkins/pytorch/build.sh 2>&1 | ts
         .jenkins/pytorch/test.sh 2>&1 | ts
 
@@ -117,10 +119,10 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         set -e
         # Pull Docker image and run build
         echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-        docker pull ${DOCKER_IMAGE}
+        docker pull ${DOCKER_IMAGE} >/dev/null
         export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
-        git submodule sync && git submodule update --init
+        git submodule sync && git submodule update -q --init
 
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
@@ -161,7 +163,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         set -e
         source /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-        docker pull ${COMMIT_DOCKER_IMAGE}
+        docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
         if [ -n "${CUDA_VERSION}" ]; then
           id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         else
@@ -194,11 +196,11 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         set -ex
 
         # Need to checkout fetch PRs for onnxbot tracking PRs
-        git submodule update --init third_party/onnx || true
+        git submodule update -q --init third_party/onnx || true
         cd third_party/onnx && git fetch --tags origin +refs/pull/*:refs/remotes/origin/pr/* && cd -
 
         # Reinitialize submodules
-        git submodule sync && git submodule update --init --recursive
+        git submodule sync && git submodule update -q --init --recursive
 
         mkdir -p build
 
@@ -238,7 +240,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         chmod +x /home/circleci/project/ci_build_script.sh
 
         echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-        docker pull ${DOCKER_IMAGE}
+        docker pull ${DOCKER_IMAGE} >/dev/null
         export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
@@ -287,11 +289,11 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
         # See comments on https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
         if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
-          sudo pip uninstall -y hypothesis
+          sudo pip -q uninstall -y hypothesis
           # "pip install hypothesis==3.44.6" from official server is unreliable on CircleCI, so we host a copy on S3 instead
-          sudo pip install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
-          sudo pip install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
-          sudo pip install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
+          sudo pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
+          sudo pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
+          sudo pip -q install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
         fi
 
         # conda must be added to the path for Anaconda builds (this location must be
@@ -306,10 +308,10 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         fi
 
         # Upgrade SSL module to avoid old SSL warnings
-        pip install --user --upgrade pyOpenSSL ndg-httpsclient pyasn1
+        pip -q install --user --upgrade pyOpenSSL ndg-httpsclient pyasn1
 
-        pip install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
-        pip install --user future
+        pip -q install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+        pip -q install --user future
 
         # Build
         if test -x ".jenkins/caffe2/test.sh"; then
@@ -328,7 +330,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
 
         source /home/circleci/project/caffe2-ci-env/COMMIT_DOCKER_IMAGE
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-        docker pull ${COMMIT_DOCKER_IMAGE}
+        docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
         if [ -n "${CUDA_VERSION}" ]; then
           id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         else
@@ -356,7 +358,7 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
           brew install cmake
 
           # Reinitialize submodules
-          git submodule sync && git submodule update --init --recursive
+          git submodule sync && git submodule update -q --init --recursive
 
           # Reinitialize path (see man page for path_helper(8))
           eval `/usr/libexec/path_helper -s`
@@ -366,7 +368,7 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
             export PATH=/usr/local/opt/python/libexec/bin:/usr/local/bin:$PATH
           fi
 
-          pip install numpy
+          pip -q install numpy
 
           # Install Anaconda if we need to
           if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
@@ -600,7 +602,7 @@ jobs:
           set -e
           source /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          docker pull ${COMMIT_DOCKER_IMAGE}
+          docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           docker cp $id:/var/lib/jenkins/workspace/env /home/circleci/project/env
@@ -638,7 +640,7 @@ jobs:
           fi
           source /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          docker pull ${COMMIT_DOCKER_IMAGE}
+          docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           cat >/home/circleci/project/doc_push_script.sh <<EOL
@@ -659,7 +661,7 @@ jobs:
           pushd pytorch
           git clone https://github.com/pytorch/vision
           pushd vision
-          conda install -y pillow
+          conda install -q pillow
           time python setup.py install
           popd
           pushd docs
@@ -667,7 +669,7 @@ jobs:
           cp -r ../vision/docs/source source/torchvision
 
           # Build the docs
-          pip install -r requirements.txt || true
+          pip -q install -r requirements.txt || true
           make html
 
           # Move them into the docs repo
@@ -720,7 +722,7 @@ jobs:
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V2}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V2}
 
-            git submodule sync && git submodule update --init
+            git submodule sync && git submodule update -q --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh 2>&1 | ts
 
@@ -803,7 +805,7 @@ jobs:
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V2}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V2}
 
-            git submodule sync && git submodule update --init
+            git submodule sync && git submodule update -q --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh 2>&1 | ts
 
