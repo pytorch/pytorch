@@ -155,10 +155,10 @@ void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
 }
 
 // Roll a tensor along a dimension
-Tensor roll_cuda(const Tensor& self, IntList shift, IntList dims) {
+Tensor roll_cuda(const Tensor& self, IntList shifts, IntList dims) {
   // todo: support rolling along no or multiple dimensions as in numpy.roll.
   AT_CHECK(dims.size() == 1, "only single dimension roll currently supported");
-  AT_CHECK(shift.size() == dims.size(), "shifts and dimensions must align");
+  AT_CHECK(shifts.size() == dims.size(), "shifts and dimensions must align");
   // If the first dimension is zero, this is an empty tensor and rolls do nothing.
   // Return a clone so the caller can safely modify result, and avoid a div by
   // zero error below.
@@ -168,7 +168,7 @@ Tensor roll_cuda(const Tensor& self, IntList shift, IntList dims) {
   const int64_t N = self.numel();
   const int64_t dim = dims[0];
   const int64_t size = self.size(dim);
-  int64_t start = (size - shift[0]) % size;
+  int64_t start = (size - shifts[0]) % size;
   // Behavior of % is different in C++ vs Python for negative numbers. This
   // corrects the difference.
   if( start < 0 ) start = start + size;
@@ -189,7 +189,7 @@ Tensor roll_cuda(const Tensor& self, IntList shift, IntList dims) {
   AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "roll_cuda", [&] {
     roll_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
       self.data<scalar_t>(), out_tensor.data<scalar_t>(), N,
-      dim, shift[0], start,
+      dim, shifts[0], start,
       shape_t.toType(CUDA(kLong)).data<int64_t>(), total_dims);
   });
 

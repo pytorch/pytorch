@@ -1094,8 +1094,8 @@ inline Tensor & Tensor::transpose_(int64_t dim0, int64_t dim1) {
 inline Tensor Tensor::flip(IntList dims) const {
     return type().flip(*this, dims);
 }
-inline Tensor Tensor::roll(int64_t shift, IntList dims) const {
-    return type().roll(*this, shift, dims);
+inline Tensor Tensor::roll(IntList shifts, IntList dims) const {
+    return type().roll(*this, shifts, dims);
 }
 inline Tensor Tensor::rot90(int64_t k, IntList dims) const {
     return type().rot90(*this, k, dims);
