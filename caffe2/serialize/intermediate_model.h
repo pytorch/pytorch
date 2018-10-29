@@ -14,12 +14,18 @@
 namespace at {
 namespace serialize {
 
-// multiple tensor may point to the data
-// this class contains one unique pointer to the real data
+// multiple tensor may share the same content
+// SharedData contains:
+//    1) record id (i.e., the offset in the inline container)
+//    2) size, the size of the content
+//    3) data, in serialize, we don't have the ownership of the data
+//       in deserialize, the data pointer is returned by PyTorchFileReader,
+//       and SharedData owns the data
 class SharedData {
  public:
-  explicit SharedData(uint64_t record_id, at::DataPtr&& data_ptr)
-    : recordId_(record_id), dataPtr_(std::move(data_ptr)){}
+  // constructor
+  explicit SharedData(uint64_t record_id, at::DataPtr&& data_ptr, uint64_t size)
+    : recordId_(record_id), dataPtr_(std::move(data_ptr)), size_(size){}
 
   // getters
   void* rawData() {
@@ -53,18 +59,24 @@ class SharedData {
   uint64_t size_;
 };
 
+// IntermediateDeviceOption stores device related information
 struct IntermediateDeviceOption {
   int32_t deviceType = 0;
   bool hasDeviceId = false;
   int32_t deviceId;
 };
 
+// IntermediateTensor contains
+//   1) element type information
+//   2) shape information
+//   3) pointer to the data (including offset and strides)
 class IntermediateTensor final {
  public:
   // constructor
   IntermediateTensor() = default;
 
-  // update functions
+  // extract data from TensorProto,
+  // assume record id to data mapping is complete
   void update(caffe2::TensorProto* tensor_proto,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data) {
     AT_ASSERTM(tensor_proto->has_data_type(), "no data_type in TensorProto!");
@@ -138,10 +150,12 @@ class IntermediateTensor final {
     }
   }
 
+  // update the data pointer, invoked in serialize
   void updateData(std::shared_ptr<SharedData> data) {
     data_ = data;
   }
 
+  // dump data to TensorProto
   void dump(caffe2::TensorProto* tensor_proto) {
     for (auto dim : dims_) {
       tensor_proto->add_dims(dim);
@@ -216,7 +230,7 @@ class IntermediateTensor final {
 
 class IntermediateParameter final {
  public:
-  // constructor
+  // constructors
   IntermediateParameter() = default;
 
   explicit IntermediateParameter(torch::ParameterDef* param_def,
@@ -234,6 +248,7 @@ class IntermediateParameter final {
     }
   }
 
+  // dump data to ParameterDef
   void dump(torch::ParameterDef* param_def) {
     param_def->set_name(name_);
     param_def->set_is_buffer(isBuffer_);
@@ -280,6 +295,7 @@ class IntermediateParameter final {
 
 class IntermediateMethod final {
  public:
+  IntermediateMethod() = default;
   explicit IntermediateMethod(torch::MethodDef* method_def) {
     if (method_def->has_name()) {
       name_ = method_def->name();
@@ -295,9 +311,33 @@ class IntermediateMethod final {
     }
   }
 
+  // dump data to MethodDef
   void dump(torch::MethodDef* method_def) {
-    // TODO
-    AT_ERROR("Not implemented yet!");
+    AT_ASSERTM(name_.size() > 0, "IntermediateMethod has no name.");
+    method_def->set_name(name_);
+    if (graph_) {
+      method_def->set_allocated_graph(graph_.release());
+    } else {
+      method_def->set_torch_script(torchScript_);
+    }
+  }
+
+  // getters
+  const std::string& name() const {
+    return name_;
+  }
+
+  const std::string& torchScript() const {
+    return torchScript_;
+  }
+
+  // setters
+  void setName(const std::string& name) {
+    name_ = name;
+  }
+
+  void setTorchScript(const std::string& torch_script) {
+    torchScript_ = torch_script;
   }
 
  private:
@@ -308,14 +348,16 @@ class IntermediateMethod final {
 
 class IntermediateModule final {
  public:
-  // constructor
+  // constructors
   IntermediateModule() = default;
+
   explicit IntermediateModule(torch::ModuleDef* module_def,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data) {
     update(module_def, id_data);
   }
 
-  // update functions
+  // extract data from ModuleDef,
+  // assume record id to data mapping is complete
   void update(torch::ModuleDef* module_def,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data) {
     if (module_def->has_name()) {
@@ -339,6 +381,7 @@ class IntermediateModule final {
     }
   }
 
+  // dump data to ModuleDef
   void dump(torch::ModuleDef* module_def) {
     module_def->set_name(name_);
 
@@ -394,7 +437,8 @@ class IntermediateModel final {
   // constructor
   IntermediateModel() = default;
 
-  // update functions
+  // extract data from ModelDef,
+  // assume record id to data mapping is complete
   void update(torch::ModelDef* model_def,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data) {
     if (model_def->has_name()) {
@@ -420,6 +464,7 @@ class IntermediateModel final {
     }
   }
 
+  // dump data to ModelDef
   void dump(torch::ModelDef* model_def) {
     model_def->set_name(name_);
     model_def->set_producer_name(producerName_);
@@ -475,10 +520,10 @@ class IntermediateModel final {
 
 };
 
+// serialize an IntermediateModel through a PyTorchFileWriter
 void serializeIntermediateModel(IntermediateModel* imodel,
     torch::jit::PyTorchFileWriter* writer) {
   std::unordered_map<void*, uint64_t> data_id;
-  // TODO
   std::stack<IntermediateModule*> imodules;
   imodules.push(imodel->mutableMainModule());
   while (!imodules.empty()) {
@@ -505,7 +550,6 @@ void serializeIntermediateModel(IntermediateModel* imodel,
     }
   }
 
-  // TODO
   torch::ModelDef model_def;
   imodel->dump(&model_def);
   size_t proto_size = model_def.ByteSizeLong();
@@ -515,13 +559,14 @@ void serializeIntermediateModel(IntermediateModel* imodel,
   free(buffer);
 }
 
-// serialize functions
+// serialize an IntermediateModel to a given file
 void serializeIntermediateModel(IntermediateModel* imodel, const std::string& filename) {
   torch::jit::PyTorchFileWriter writer(filename);
   serializeIntermediateModel(imodel, &writer);
   writer.writeEndOfFile();
 }
 
+// deserialize an IntermediateModel through reader
 void deserializeIntermediateModel(IntermediateModel* imodel,
     torch::jit::PyTorchFileReader* reader) {
   std::unordered_map<uint64_t, std::shared_ptr<SharedData>> id_data;
@@ -536,7 +581,7 @@ void deserializeIntermediateModel(IntermediateModel* imodel,
         it->second->setDataPtr(std::move(data_ptr));
       } else {
         id_data[data_key] = std::make_shared<SharedData>(
-            data_key, std::move(data_ptr));
+            data_key, std::move(data_ptr), data_size);
       }
       continue;
     }
@@ -546,6 +591,7 @@ void deserializeIntermediateModel(IntermediateModel* imodel,
   }
 }
 
+// deserialize an IntermediateModel from a given file
 void deserializeIntermediateModel(IntermediateModel* imodel, const std::string& filename) {
   torch::jit::PyTorchFileReader reader(filename);
   deserializeIntermediateModel(imodel, &reader);
