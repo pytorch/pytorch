@@ -247,29 +247,6 @@ function path_remove {
   PATH=${PATH/%":$1"/} # delete any instance in the at the end
 }
 
-function build_nccl() {
-  mkdir -p build/nccl
-  pushd build/nccl
-  if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
-      ${CMAKE_COMMAND} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
-		       ${CMAKE_GENERATOR} \
-		       -DCMAKE_BUILD_TYPE=Release \
-		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-		       -DCMAKE_C_FLAGS="$C_FLAGS $USER_CFLAGS" \
-		       -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
-		       -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS" \
-		       -DCMAKE_UTILS_PATH="$BASE_DIR/cmake/public/utils.cmake" \
-		       -DNUM_JOBS="$MAX_JOBS"
-  fi
-  ${CMAKE_INSTALL} -j"$MAX_JOBS"
-  mkdir -p ${INSTALL_DIR}/lib
-  find lib -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "${INSTALL_DIR}/lib/"
-  popd
-  if [ -f "./nccl/nccl/src/nccl.h" ]; then
-    rm ./nccl/nccl/src/nccl.h
-  fi
-}
-
 # purposefully not using build() because we need Caffe2 to build the same
 # regardless of whether it is inside PyTorch or not, so it
 # cannot take any special flags
@@ -328,6 +305,7 @@ function build_caffe2() {
 		       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
 		       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
 		       -DUSE_MKLDNN=$USE_MKLDNN \
+		       -DNCCL_EXTERNAL=$USE_CUDA \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
 		       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
 		       -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
@@ -340,12 +318,6 @@ function build_caffe2() {
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
-  fi
-
-  # This is needed by the aten tests built with caffe2
-  if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.2" ]; then
-      # $SYNC_COMMAND root/torch/lib/tmp_install/libnccl root/build/lib/libnccl
-      find "${INSTALL_DIR}/lib" -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "lib/"
   fi
 
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
@@ -378,11 +350,7 @@ mkdir -p $INSTALL_DIR
 
 # Build
 for arg in "$@"; do
-    if [[ "$arg" == "nccl" ]]; then
-        pushd $THIRD_PARTY_DIR
-        build_nccl
-        popd
-    elif [[ "$arg" == "caffe2" ]]; then
+    if [[ "$arg" == "caffe2" ]]; then
         build_caffe2
     else
         pushd "$THIRD_PARTY_DIR"
