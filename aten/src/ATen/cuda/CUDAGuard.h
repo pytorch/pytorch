@@ -76,7 +76,13 @@ struct CUDAGuard {
   }
 
   /// Sets the CUDA device to the given one.
+  /// TODO: Deprecate this name
   void set_device(int32_t device) {
+    device_guard_.set_index(device);
+  }
+
+  /// Sets the CUDA device to the given one.
+  void set_index(int32_t device) {
     device_guard_.set_index(device);
   }
 

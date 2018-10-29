@@ -29,6 +29,7 @@
 #ifdef USE_CUDA
 #include <cuda.h>
 #include <THC/THC.h>
+#include <ATen/cuda/CUDAGuard.h>
 #endif
 
 namespace torch { namespace autograd {
