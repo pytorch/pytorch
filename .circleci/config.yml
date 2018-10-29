@@ -529,6 +529,13 @@ jobs:
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
+  pytorch_linux_xenial_py3_test:
+    environment:
+      JOB_BASE_NAME: pytorch-linux-xenial-py3-test
+      PYTHON_VERSION: "3.6"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
+
   pytorch_linux_xenial_cuda9_cudnn7_py2_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py2-build
@@ -1000,6 +1007,9 @@ workflows:
           requires:
             - pytorch_linux_xenial_cuda8_cudnn6_py3_build
       - pytorch_doc_push:
+          requires:
+            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      - pytorch_linux_xenial_py3_test:
           requires:
             - pytorch_linux_xenial_cuda8_cudnn6_py3_build
       - pytorch_linux_xenial_cuda9_cudnn7_py2_build
