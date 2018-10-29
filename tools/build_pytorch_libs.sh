@@ -114,7 +114,7 @@ fi
 
 BASE_DIR=$(cd $(dirname "$0")/.. && printf "%q\n" "$(pwd)")
 TORCH_LIB_DIR="$BASE_DIR/torch/lib"
-INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
+INSTALL_DIR="$TORCH_LIB_DIR"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
 
 C_FLAGS=""
@@ -271,39 +271,4 @@ function build_caffe2() {
 # In the torch/lib directory, create an installation directory
 mkdir -p $INSTALL_DIR
 
-# Build
-for arg in "$@"; do
-    if [[ "$arg" == "caffe2" ]]; then
-        build_caffe2
-    else
-        pushd "$THIRD_PARTY_DIR"
-        build $arg
-        popd
-    fi
-done
-
-pushd $TORCH_LIB_DIR
-
-# If all the builds succeed we copy the libraries, headers,
-# binaries to torch/lib
-echo "tools/build_pytorch_libs.sh succeeded at $(date)"
-echo "removing $INSTALL_DIR/lib/cmake and $INSTALL_DIR/lib/python"
-rm -rf "$INSTALL_DIR/lib/cmake"
-rm -rf "$INSTALL_DIR/lib/python"
-
-echo "Copying $INSTALL_DIR/lib to $(pwd)"
-$SYNC_COMMAND -r "$INSTALL_DIR/lib"/* .
-if [ -d "$INSTALL_DIR/lib64/" ]; then
-    $SYNC_COMMAND -r "$INSTALL_DIR/lib64"/* .
-fi
-echo "Copying $(cd ../.. && pwd)/aten/src/generic/THNN.h to $(pwd)"
-$SYNC_COMMAND ../../aten/src/THNN/generic/THNN.h .
-$SYNC_COMMAND ../../aten/src/THCUNN/generic/THCUNN.h .
-
-echo "Copying $INSTALL_DIR/include to $(pwd)"
-$SYNC_COMMAND -r "$INSTALL_DIR/include" .
-if [ -d "$INSTALL_DIR/bin/" ]; then
-    $SYNC_COMMAND -r "$INSTALL_DIR/bin/"/* .
-fi
-
-popd
+build_caffe2
