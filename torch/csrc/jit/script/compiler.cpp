@@ -467,13 +467,12 @@ Value* tryMatchArgument(
     value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
-  if (value->node()->kind() == prim::None){
-    if (concrete_type->isSubtypeOf(NumberType::get()))
-      value = graph.insertConstant(at::Scalar(NAN), loc);
-    else if (concrete_type->isSubtypeOf(GeneratorType::get())) {
+  if (value->type()->isSubtypeOf(NoneType::get())){
+    if (concrete_type->isSubtypeOf(GeneratorType::get())) {
       value = graph.insertNode(graph.createNoneGenerator())->output();
-    } else
+    } else if (concrete_type->isSubtypeOf(DynamicType::get())) {
       value = graph.insertNode(graph.createUndefined())->output();
+    }
   }
 
   //implicit conversion of tensors to scalars
@@ -562,7 +561,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
   // NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
   // necessary to enforce linearization on effectful ops.
   std::vector<NamedValue> modifiedArgs(raw_args.begin(), raw_args.end());
-  if (schema.is_mutable()) {
+  if (schema.has_world_token()) {
     // Add a dummy world token to be matched against
     const auto worldToken = graph.insertDummyWorld();
     modifiedArgs.insert(modifiedArgs.begin(), worldToken);
@@ -1480,11 +1479,25 @@ private:
 
   std::shared_ptr<SugaredValue> emitApplyExpr(Apply &apply, size_t n_binders) {
     auto sv = emitSugaredExpr(apply.callee(), 1);
-    auto inputs = getNamedValues(apply.inputs(), true);
     auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
       return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
     });
-    return sv->call(apply.callee().range(), method, inputs, attributes, n_binders);
+
+    auto loc = apply.callee().range();
+    if (auto fork_value = dynamic_cast<ForkValue*>(sv.get())) {
+      auto& trees = apply.inputs().tree()->trees();
+      if (trees.size() < 1) {
+        throw ErrorReport(loc) << "Expected at least one argument to fork()";
+      }
+
+      auto forked = emitSugaredExpr(Expr(trees[0]), 1);
+      TreeList sliced_trees(trees.begin() + 1, trees.end());
+      auto inputs = getNamedValues(sliced_trees, true);
+      return emitForkExpr(loc, forked, inputs, attributes);
+    } else {
+      auto inputs = getNamedValues(apply.inputs(), true);
+      return sv->call(loc, method, inputs, attributes, n_binders);
+    }
   }
 
   Value* emitExpr(Expr tree) {
@@ -1550,6 +1563,50 @@ private:
     return graph->insertConstant(stack[0], tree->range());
   }
 
+  // This function extract a new graph from its original subgraph
+  std::shared_ptr<SugaredValue> emitForkExpr(
+      SourceRange loc,
+      const std::shared_ptr<SugaredValue> &forked,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes) {
+    // Build the fork node without inputs
+    auto fork_node = method.graph()->insertNode(method.graph()->create(prim::fork, 1))
+                ->setSourceLocation(std::make_shared<SourceRange>(loc));
+    auto body_block = fork_node->addBlock();
+
+    // Build a template of the graph to be executed
+    Value *node_output;
+    {
+      WithInsertPoint guard(body_block);
+      auto fn_sugared_output = forked->call(loc, method, inputs, attributes, 1);
+      auto fn_simple_output = fn_sugared_output->asValue(loc, method);
+      body_block->registerOutput(fn_simple_output);
+      node_output = fork_node->output()->setType(FutureType::create(fn_simple_output->type()));
+    }
+
+    // Fork a new graph from its orignal owning graph
+    auto forked_graph = std::make_shared<Graph>();
+
+    // Make sure we capture everything in the new graph.
+    // The uncaptured values will be added to the fork signature.
+    std::unordered_map<Value*, Value*> uncaptures_map;
+    auto env = [&](Value* v) -> Value* {
+      if (!uncaptures_map.count(v)) {
+        // Capture values for both graphs
+        uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
+        fork_node->addInput(v);
+      }
+      return uncaptures_map[v];
+    };
+    forked_graph->block()->cloneFrom(body_block, env);
+
+    // Separate the subgraph and clean up the orignal one
+    fork_node->g_(attr::Subgraph, forked_graph);
+    fork_node->eraseBlock(0);
+
+    return std::make_shared<SimpleValue>(node_output);
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree) {
     switch (tree->kind()) {
@@ -1604,7 +1661,7 @@ private:
         return graph->insertConstant(false, tree->range());
       } break;
       case TK_NONE: {
-        return emitNone(tree->range());
+        return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_SUBSCRIPT: {
         const auto subscript = Subscript(tree);
@@ -1651,13 +1708,6 @@ private:
         throw ErrorReport(tree) << "NYI: " << tree;
         break;
     }
-  }
-
-  Value* emitNone(SourceRange range) {
-    auto& g = *method.graph();
-    return g.insertNode(
-        g.create(prim::None, {}, 1)->setSourceLocation(
-          std::make_shared<SourceRange>(range)))->output();
   }
 
   Value* emitConst(const Const& c) {
@@ -1869,7 +1919,7 @@ private:
   Value* emitTupleSlice(const SourceRange& loc,
       const NamedValue& tuple_val,
       const NamedValue& beg_val,
-      const at::optional<NamedValue&> end_val) {
+      const at::optional<NamedValue>& end_val) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
     int64_t beg = getTupleIndexVal(loc, tuple_type, beg_val.value(*graph), /*allow_out_of_bounds*/true);
     int64_t end;
@@ -2043,6 +2093,13 @@ const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscr
       }
       auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
       return ListType::create(elem_type);
+    }},
+    {"Optional", [](Subscript subscript) -> TypePtr {
+      if (subscript.subscript_exprs().size() != 1) {
+        throw ErrorReport(subscript) << " expected exactly one element type but found " << subscript.subscript_exprs().size();
+      }
+      auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+      return OptionalType::create(elem_type);
     }},
   };
   return map;

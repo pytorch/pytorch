@@ -17,19 +17,19 @@ bool SelectGradientOpBase<T, Context>::RunOnDevice() {
 
   const T* data = output.template data<T>();
   ConstEigenArrayMap<T> output_array(
-      output.template data<T>(), 1, output.size());
+      output.template data<T>(), 1, output.numel());
   ConstEigenArrayMap<T> grad_out_array(
-      grad_output.template data<T>(), 1, grad_output.size());
+      grad_output.template data<T>(), 1, grad_output.numel());
 
   for (int i = 0; i < OutputSize(); i++) {
     auto& input = Input(i + kInputStartOffset);
     ConstEigenArrayMap<T> input_array(
-        input.template data<T>(), 1, input.size());
+        input.template data<T>(), 1, input.numel());
 
     auto* grad_input = Output(i);
     grad_input->ResizeLike(input);
     EigenArrayMap<T> grad_in_array(
-        grad_input->template mutable_data<T>(), 1, grad_input->size());
+        grad_input->template mutable_data<T>(), 1, grad_input->numel());
     grad_in_array = grad_out_array *
         input_array.cwiseEqual(output_array).template cast<T>();
   }

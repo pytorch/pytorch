@@ -67,10 +67,10 @@ class NCCLTest : public NCCLTestBase {
     // and pass this along to the collective (since it uses the THC
     // getters to retrieve the current stream).
     //
-    streams_.resize(numDevices_);
+    streams_.reserve(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
-      streams_[i] = at::cuda::getStreamFromPool();
+      streams_.push_back(at::cuda::getStreamFromPool());
     }
   }
 

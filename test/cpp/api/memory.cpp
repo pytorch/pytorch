@@ -2,7 +2,7 @@
 
 #include <torch/csrc/utils/memory.h>
 
-#include <ATen/optional.h>
+#include <c10/util/Optional.h>
 
 struct TestValue {
   explicit TestValue(const int& x) : lvalue_(x) {}

@@ -29,7 +29,7 @@ bool UpsampleBilinearOp<float, CPUContext>::RunOnDevice() {
   if (InputSize() == 2) {
     const auto& scales = Input(1);
     CAFFE_ENFORCE_EQ(scales.ndim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
     const float* scales_data = scales.data<float>();
     height_scale_ = scales_data[0];
     width_scale_ = scales_data[1];
@@ -89,7 +89,7 @@ bool UpsampleBilinearGradientOp<float, CPUContext>::RunOnDevice() {
   if (InputSize() == 3) {
     const auto& scales = Input(2);
     CAFFE_ENFORCE_EQ(scales.ndim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
     const float* scales_data = scales.data<float>();
     height_scale_ = scales_data[0];
     width_scale_ = scales_data[1];
@@ -105,7 +105,7 @@ bool UpsampleBilinearGradientOp<float, CPUContext>::RunOnDevice() {
   const int output_width = X.dim32(3);
   dX->Resize(batch_size, num_channels, output_height, output_width);
   math::Set<float, CPUContext>(
-      dX->size(), 0.0f, dX->mutable_data<float>(), &context_);
+      dX->numel(), 0.0f, dX->mutable_data<float>(), &context_);
 
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();

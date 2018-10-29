@@ -332,8 +332,11 @@ PyObject* c10d_init(PyObject* _unused) {
            int,
            int,
            ::c10d::ProcessGroupGloo::Options>())
-      .def(py::init(
-          [](const std::shared_ptr<::c10d::Store>& store, int rank, int size) {
+      .def(
+          py::init([](const std::shared_ptr<::c10d::Store>& store,
+                      int rank,
+                      int size,
+                      std::chrono::milliseconds timeout) {
             ::c10d::ProcessGroupGloo::Options options;
 
             // By default, use the hostname to resolve the network address to
@@ -349,9 +352,14 @@ PyObject* c10d_init(PyObject* _unused) {
             attr.hostname = hostname.data();
             options.devices.push_back(
                 ::gloo::transport::tcp::CreateDevice(attr));
+            options.timeout = timeout;
             return std::make_shared<::c10d::ProcessGroupGloo>(
                 store, rank, size, options);
-          }));
+          }),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          py::arg("timeout") = std::chrono::milliseconds(10 * 1000));
 
 #ifdef USE_C10D_NCCL
   shared_ptr_class_<::c10d::ProcessGroupNCCL>(

@@ -64,10 +64,10 @@ class FullyConnectedOp final : public Operator<Context> {
     };
 
     // Error checking
-    CAFFE_ENFORCE(M == X.size() / K, dimErrorString());
-    CAFFE_ENFORCE(K == W.size() / N, dimErrorString());
+    CAFFE_ENFORCE(M == X.numel() / K, dimErrorString());
+    CAFFE_ENFORCE(K == W.numel() / N, dimErrorString());
     CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
-    CAFFE_ENFORCE(N == b.size(), dimErrorString());
+    CAFFE_ENFORCE(N == b.numel(), dimErrorString());
 
     Y_shape_cache_ = X.sizes().vec();
     // This is an invariant of canonical_axis, so we can DCHECK.
@@ -75,9 +75,9 @@ class FullyConnectedOp final : public Operator<Context> {
     Y_shape_cache_.resize(canonical_axis + 1);
     Y_shape_cache_[canonical_axis] = N;
     Y->Resize(Y_shape_cache_);
-    CAFFE_ENFORCE(M * N == Y->size(), dimErrorString());
+    CAFFE_ENFORCE(M * N == Y->numel(), dimErrorString());
 
-    if (X.size() == 0) {
+    if (X.numel() == 0) {
       // skip the rest of the computation if X is empty
       Y->template mutable_data<T_Y>();
       return true;
@@ -104,7 +104,7 @@ class FullyConnectedOp final : public Operator<Context> {
         &context_,
         math_type);
     // Add bias term
-    if (bias_multiplier_.size() != M) {
+    if (bias_multiplier_.numel() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(M);
       math::Set<T_B, Context>(
@@ -204,23 +204,23 @@ class FullyConnectedGradientOp : public Operator<Context> {
           K);
     };
 
-    CAFFE_ENFORCE(M * K == X.size(), dimErrorString());
-    CAFFE_ENFORCE(K * N == W.size(), dimErrorString());
+    CAFFE_ENFORCE(M * K == X.numel(), dimErrorString());
+    CAFFE_ENFORCE(K * N == W.numel(), dimErrorString());
 
     auto* dW = Output(0);
     auto* db = Output(1);
     dW->ResizeLike(W);
     db->Resize(N);
 
-    if (X.size() == 0) {
+    if (X.numel() == 0) {
       // generate a zero blob for db and dW when X is empty
       math::Set<T_DB, Context>(
-          db->size(),
+          db->numel(),
           convert::To<float, T_DB>(0),
           db->template mutable_data<T_DB>(),
           &context_);
       math::Set<T_DW, Context>(
-          dW->size(),
+          dW->numel(),
           convert::To<float, T_DW>(0),
           dW->template mutable_data<T_DW>(),
           &context_);
@@ -254,7 +254,7 @@ class FullyConnectedGradientOp : public Operator<Context> {
         dW->template mutable_data<T_DW>(),
         &context_,
         math_type);
-    if (bias_multiplier_.size() != M) {
+    if (bias_multiplier_.numel() != M) {
       // If the helper bias multiplier is not M, reshape and fill it
       // with one.
       bias_multiplier_.Resize(M);

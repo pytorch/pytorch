@@ -597,6 +597,14 @@ def adaptive_max_pool2d(g, input, output_size):
     return g.op("GlobalMaxPool", input), None
 
 
+@parse_args('v', 'is', 'f')
+def constant_pad_nd(g, input, padding, value):
+    from torch.autograd._functions.utils import prepare_onnx_paddings
+    mode = "constant"
+    paddings = prepare_onnx_paddings(len(input.type().sizes()), padding)
+    return g.op("Pad", input, pads_i=paddings, mode_s=mode, value_f=value)
+
+
 @parse_args('v', 'is')
 def reflection_pad(g, input, padding):
     from torch.autograd._functions.utils import prepare_onnx_paddings
@@ -833,15 +841,16 @@ def pow(g, self, exponent):
     return g.op("Pow", self, _if_scalar_type_as(g, exponent, self))
 
 
-@parse_args('v', 'f', 'f')
 def clamp(g, self, min, max):
-    # check min/max is NaN or not, and dispatch the call
-    # a != a means a == NaN
-    if min != min:
+    # min or max may be prim::None that we need to dispatch to
+    # Clip separately, as ONNX does not have None syntax
+    if min.node().kind() == "prim::None":
         return clamp_max(g, self, max)
-    elif max != max:
+    elif max.node().kind() == "prim::None":
         return clamp_min(g, self, min)
     else:
+        min = _parse_arg(min, 'f')
+        max = _parse_arg(max, 'f')
         return g.op("Clip", self, min_f=min, max_f=max)
 
 
@@ -1316,3 +1325,9 @@ def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total
     if batch_first:
         data = g.op('Transpose', data, perm_i=[1, 0, 2])
     return data, lengths
+
+
+def randn(g, *shapes):
+    shapes_list = list(shapes)
+    shape = _maybe_get_const(shapes_list[0], "is")
+    return g.op('RandomNormal', shape_i=shape)
