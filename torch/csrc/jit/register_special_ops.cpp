@@ -3,6 +3,7 @@
 #include "torch/csrc/jit/operator.h"
 
 #include <sstream>
+#include <regex>
 
 namespace torch {
 namespace jit {
@@ -30,8 +31,14 @@ RegisterOperators reg({
         "aten::format(str self, *str args) -> Tensor",
         [](Node* node) {
           size_t num_inputs = node->inputs().size();
-          return [num_inputs](Stack& stack) {
+          std::regex unsupported_options("\\{(.*)\\}");
+          return [num_inputs, unsupported_options](Stack& stack) {
             auto format = peek(stack, 0, num_inputs).toStringRef();
+
+            if (std::regex_search(format, unsupported_options)) {
+              AT_WARN("Format options are not supported.");
+            }
+
             auto args = last(stack, num_inputs - 1);
 
             size_t base = 0;
