@@ -1,9 +1,9 @@
 #pragma once
 
-#include "ATen/DeviceGuard.h"
 #include "ATen/cuda/ATenCUDAGeneral.h"
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/CUDAStream.h"
+#include "ATen/cuda/CUDAGuard.h"
 #include "ATen/cuda/Exceptions.h"
 #include "c10/util/Exception.h"
 
@@ -35,7 +35,13 @@ struct AT_CUDA_API CUDAEvent {
   ~CUDAEvent() {
     try {
       if (is_created_) {
+<<<<<<< dest:   0504088ae558 - ezyang: Add c10::Stream, make at::cuda::CUDASt...
         at::DeviceGuard device_guard{static_cast<int16_t>(device_index_)};
+||||||| base
+        at::DeviceGuard device_guard{(int)device_index_};
+=======
+        at::cuda::CUDAGuard device_guard(static_cast<int>(device_index_));
+>>>>>>> source: aa097875d8ce - ezyang: Delete DeviceGuard(int64_t) constructor.
         cudaEventDestroy(event_);
       }
     } catch (...) { /* No throw */ }
@@ -105,7 +111,7 @@ private:
   }
 
   void create(const int64_t device) {
-    at::DeviceGuard device_index_guard{static_cast<int16_t>(device)};
+    at::cuda::CUDAGuard device_index_guard(static_cast<int16_t>(device));
     AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
 
     is_created_ = true;

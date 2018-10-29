@@ -3,6 +3,7 @@
 #include "torch/csrc/jit/resource_guard.h"
 
 #include "ATen/cuda/CUDAContext.h"
+#include "ATen/cuda/CUDAGuard.h"
 #include "THC/THC.h"
 #include "THC/THCGenerator.hpp"
 #include "torch/csrc/cuda/cuda_check.h"
@@ -34,7 +35,7 @@ CUDAFusedKernel::CUDAFusedKernel(
   const std::string& name
 , AnnotatedGraph& agraph)
 : FusedKernel(name, agraph) {
-  at::DeviceGuard device_guard(agraph.device);
+  at::cuda::CUDAGuard device_guard(agraph.device);
 
   TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop, agraph.device));
   checkCUDAVersion(prop);

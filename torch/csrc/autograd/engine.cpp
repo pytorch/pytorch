@@ -200,9 +200,13 @@ Engine::Engine() = default;
 // This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
 
+// TODO: Engine is not written in a way that it can deal with anything that's
+// not CUDA.
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-  at::DeviceGuard guard(device);
+#ifdef USE_CUDA
+  at::cuda::CUDAGuard guard(device);
+#endif
   worker_device = device;
   thread_main(nullptr);
 }

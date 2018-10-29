@@ -10,7 +10,7 @@ MODULE_HEAD = """
 #include "THP.h"
 #include "torch/csrc/nn/type_checks.h"
 
-#include <ATen/DeviceGuard.h>
+#include <ATen/cuda/CUDAGuard.h>
 
 """
 REGISTER_METHOD_TEMPLATE = Template('  {"$name", (PyCFunction)$name, METH_STATIC | METH_VARARGS, NULL},\n')

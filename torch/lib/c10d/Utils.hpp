@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAGuard.h>
 
 #include <c10d/Types.hpp>
 
@@ -76,7 +77,7 @@ inline at::Tensor newLikeFlat(
       throw std::runtime_error("Expecting all tensors on the same device");
     }
   }
-  at::DeviceGuard gpuGuard(device);
+  at::cuda::CUDAGuard gpuGuard(device);
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors[deviceIdx].size())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   return at::empty(sizes, t.options());
@@ -87,7 +88,7 @@ inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
     throw std::runtime_error("Received an empty list");
   }
   auto& t = tensors[0];
-  at::DeviceGuard gpuGuard(t.is_cuda() ? t.get_device() : -1);
+  at::cuda::CUDAGuard gpuGuard(t.is_cuda() ? t.get_device() : -1);
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors.size())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   return at::empty(sizes, t.options());
