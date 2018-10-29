@@ -110,7 +110,7 @@ ${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formal
 TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
-    ${return_call} at::native::${native_type_method_dispatch}(/* actuals */ ${type_derived_call_actuals});
+    ${return_call} at::native::${native_type_method_dispatch}(/* actuals */ ${actuals});
 }
 """)
 TYPE_DERIVED_DEFINITION_NATIVE_MISSING = CodeTemplate("""\
@@ -499,6 +499,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'native_type_method_dispatch': str,
     # options should be List[FunctionOption]
     'options': Any,
+    'requires_tensor': bool,
     'return_call': str,
     'return_type': str,
     'return': ReturnDecl,
@@ -527,6 +528,7 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('returns', List[ReturnType]),
     ('inplace', bool),
     ('abstract', bool),
+    ('requires_tensor', bool),
     ('device_guard', bool),
     ('with_gil', bool),
     ('deprecated', bool),
@@ -559,9 +561,10 @@ def is_mutable_formal_argument(argument, option):
 
 
 def check_methods_do_not_start_with_underscore(name, is_method):
-    if name in {'_local_scalar', '_values', '_indices', '_nnz', '_sparseDims', '_denseDims'}:
+    if name in {'_local_scalar', '_values', '_indices', '_nnz', '_dimI',
+                '_dimV', '_coalesced_'}:
         return
-    if is_method and name.startswith('_') and not name.startswith('__'):
+    if is_method and name.startswith('_') and not name.startswith('__') and not name.startswith('_th_'):
         message = "Function '{}' starts with a single underscore and is ".format(name)
         message += "configured to have a method on Tensor. Functions that start with "
         message += " a single underscore should only be functions in the at:: "
@@ -923,6 +926,7 @@ def create_generic(top_env, declarations):
             inplace=option['inplace'],
             # See Note [Abstract ATen methods]
             abstract=abstract,
+            requires_tensor=option.get('requires_tensor', False),
             device_guard=option.get('device_guard', True),
             with_gil=option.get('with_gil', False),
             deprecated=option.get('deprecated', False)
@@ -968,6 +972,9 @@ def create_generic(top_env, declarations):
                     'Type': 'const Type &' if const else 'Type &',
                     'TensorOptions': 'const TensorOptions &' if const else 'TensorOptions &',
                 }
+
+            if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
+                argument['type'] = "c10::optional<{}>".format(argument['type'])
 
             if (option['inplace'] and argument['name'] == 'self') or argument.get('output', False):
                 argument['type'] = translate_map(False).get(argument['type'], argument['type'])
@@ -1040,14 +1047,20 @@ def create_generic(top_env, declarations):
                     return formal
             return None
 
+        assert find_formal('Type', formals) is None, \
+            "Found Type argument in {}({}). Use TensorOptions instead.".format(
+                option['name'], ", ".join(option['method_formals_with_defaults']))
+
         type_method_dispatch = option['type_method_definition_dispatch']
-        dispatch_tensor = find_dispatch_tensor(formals)
-        # we only dispatch via options if there is backend-specific dispatch (otherwise it's a factory function that
-        # can dispatch directly to the native function).
         backend_dispatch = isinstance(type_method_dispatch, dict)
+
+        # We only dispatch via options if there is backend-specific dispatch
+        # (otherwise it's a factory function that can dispatch directly to the
+        # native function).
         dispatch_options = (find_formal('TensorOptions', formals)
-                            if not dispatch_tensor and backend_dispatch
-                            else None)
+                            if backend_dispatch else None)
+        # Only dispatch via tensor if there is no Options argument
+        dispatch_tensor = None if dispatch_options else find_dispatch_tensor(formals)
 
         option['type_method_formals'] = [format_formal(f) for f in formals]
         option['type_method_actuals'] = [f['name'] for f in formals]
@@ -1160,6 +1173,7 @@ def create_generic(top_env, declarations):
             inplace=option['inplace'],
             # See Note [Abstract ATen methods]
             abstract=abstract,
+            requires_tensor=option.get('requires_tensor', False),
             device_guard=option.get('device_guard', True),
             with_gil=option.get('with_gil', False),
             deprecated=option['deprecated'],
@@ -1177,6 +1191,7 @@ def create_generic(top_env, declarations):
             except NYIError:
                 option['skip'] = True
         output_declarations.extend(output_options)
+
     return output_declarations
 
 
@@ -1572,15 +1587,8 @@ def create_derived(backend_type_env, declarations):
                         TYPE_DERIVED_DEFINITION_NATIVE_MISSING.substitute(env))
                 else:
                     option['native_type_method_dispatch'] = native_dispatch
-                    type_derived_call_actuals = []
-                    for actual, arg in zip(option['actuals'], option['arguments']):
-                        if arg.get('is_type_dispatched', False):
-                            type_derived_call_actuals.append('*this')
-                        else:
-                            type_derived_call_actuals.append(actual)
                     type_object_definitions.append(
-                        TYPE_DERIVED_DEFINITION_NATIVE.substitute(
-                            env, type_derived_call_actuals=type_derived_call_actuals))
+                        TYPE_DERIVED_DEFINITION_NATIVE.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:

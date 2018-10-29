@@ -329,7 +329,7 @@ std::pair<std::shared_ptr<script::Module>, std::string> ModuleDecoder::parseFull
 ModuleDecoder::ModuleDecoder(
     ModuleLookup module_lookup,
     std::istream& in) :
-    stream_reader_(in) {
+    stream_reader_(&in) {
   auto model_proto = onnx::ModelProto();
   auto record = stream_reader_.getLastRecord();
   model_proto.ParsePartialFromArray(std::get<0>(record).get(), std::get<1>(record));

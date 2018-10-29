@@ -172,10 +172,10 @@ class ConvPoolOpBase : public Operator<Context> {
     vector<int> dims;
     switch (order_) {
       case StorageOrder::NCHW:
-        dims.assign(input.dims().begin() + 2, input.dims().end());
+        dims.assign(input.sizes().begin() + 2, input.sizes().end());
         break;
       case StorageOrder::NHWC:
-        dims.assign(input.dims().begin() + 1, input.dims().end() - 1);
+        dims.assign(input.sizes().begin() + 1, input.sizes().end() - 1);
         break;
       default:
         CAFFE_THROW("Unknown storage order : ", order_);
@@ -189,15 +189,15 @@ class ConvPoolOpBase : public Operator<Context> {
     switch (order_) {
       case StorageOrder::NCHW:
         size = std::accumulate(
-            input.dims().begin() + 2,
-            input.dims().end(),
+            input.sizes().begin() + 2,
+            input.sizes().end(),
             1,
             std::multiplies<int>());
         break;
       case StorageOrder::NHWC:
         size = std::accumulate(
-            input.dims().begin() + 1,
-            input.dims().end() - 1,
+            input.sizes().begin() + 1,
+            input.sizes().end() - 1,
             1,
             std::multiplies<int>());
         break;
@@ -216,12 +216,12 @@ class ConvPoolOpBase : public Operator<Context> {
   // MKL operator. One can still call this function with dummy
   // Tensor objects in order to obtain the sizes.
   void SetOutputSize(const Tensor& input, Tensor* output, int output_channel) {
-    CAFFE_ENFORCE(input.size() > 0);
+    CAFFE_ENFORCE(input.numel() > 0);
     vector<int> output_dims;
     int N = input.dim32(0);
     bool channel_first;
     InferOutputSize(
-        input.dims(),
+        input.sizes(),
         output_channel,
         order_,
         global_pooling_,
@@ -334,7 +334,7 @@ class ConvPoolOpBase : public Operator<Context> {
   void SetDeviceTensor(const std::vector<int>& data, Tensor* tensor) {
     bool reset_tensor_device_ = false;
 
-    if (tensor->size() != data.size()) {
+    if (tensor->numel() != data.size()) {
       tensor->Resize(data.size());
       reset_tensor_device_ = true;
     } else {
@@ -355,7 +355,7 @@ class ConvPoolOpBase : public Operator<Context> {
 
   template <typename T>
   void SetBiasMultiplier(const int size, Tensor* bias_multiplier_) {
-    if (bias_multiplier_->size() != size) {
+    if (bias_multiplier_->numel() != size) {
       // If the helper bias multiplier is not image size, reshape and fill it
       // with one.
       bias_multiplier_->Resize(std::vector<int64_t>{size});

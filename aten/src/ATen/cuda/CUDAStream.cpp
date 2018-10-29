@@ -93,7 +93,7 @@ static void initGlobalStreamState() {
 static void initDeviceStreamState(const int64_t device) {
   // Switches to the requested device so streams are properly associated
   // with it.
-  at::DeviceGuard device_guard{(int)device};
+  at::DeviceGuard device_guard{static_cast<int16_t>(device)};
 
   for (auto i = decltype(kStreamsPerPool){0}; i < kStreamsPerPool; ++i) {
     auto& lowpri_stream = low_priority_streams[device][i];
@@ -162,7 +162,7 @@ static uint32_t get_idx(std::atomic<uint32_t> &counter) {
 // Returns a stream from the requested pool
 // Note: when called the first time on a device, this will create the
 // stream pools for that device.
-CUDAStreamInternals* CUDAStream_createStream(
+CUDAStreamInternals* CUDAStream_getStreamFromPool(
   const bool isHighPriority
 , int64_t device) {
   initCUDAStreamsOnce();

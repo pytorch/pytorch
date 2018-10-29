@@ -128,7 +128,7 @@ class TensorFetcher : public BlobFetcherBase {
         tensor.meta().name(),
         ".");
     std::vector<npy_intp> npy_dims;
-    for (const auto dim : tensor.dims()) {
+    for (const auto dim : tensor.sizes()) {
       npy_dims.push_back(dim);
     }
     result.copied = force_copy || NeedsCopy(&tensor, tensor.meta());

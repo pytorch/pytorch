@@ -90,7 +90,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int output_image_size = this->GetDimsSize(*Y);
 
   vector<int> img_shape;
-  img_shape.assign(X.dims().begin() + 1, X.dims().end());
+  img_shape.assign(X.sizes().begin() + 1, X.sizes().end());
 
   vector<int> buffer_shape;
   buffer_shape.push_back(C / group_ * kernel_dims_size);
@@ -103,7 +103,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   // image.
   const int input_offset = C / group_ * input_image_size;
   const int output_offset = M / group_ * output_image_size;
-  const int offset_offset = offset.size() / offset.dim32(0);
+  const int offset_offset = offset.numel() / offset.dim32(0);
   const int filter_offset = filter.size() / group_;
 
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
@@ -142,8 +142,8 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         DeformableIm2col(
             Xdata + group_id * input_offset,
             offset_data,
-            X.dims(),
-            col_buffer->dims(),
+            X.sizes(),
+            col_buffer->sizes(),
             col_buffer_data);
         // Weight term
         math::Gemm<T, Context>(

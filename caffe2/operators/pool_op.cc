@@ -639,9 +639,9 @@ bool PoolOp<T, Context, PoolType>::RunOnDeviceWithOrderNHWC() {
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, channels);
 
   EigenMatrixMap<float> Ymat(
-      Y->template mutable_data<float>(), channels, Y->size() / channels);
+      Y->template mutable_data<float>(), channels, Y->numel() / channels);
   ConstEigenMatrixMap<float> Xmat(
-      X.template data<float>(), channels, X.size() / channels);
+      X.template data<float>(), channels, X.numel() / channels);
   int pooled_height = Y->dim32(1);
   int pooled_width = kernel_.size() > 1 ? Y->dim32(2) : 1;
   int pooled_depth = kernel_.size() > 2 ? Y->dim32(3) : 1;
@@ -728,7 +728,7 @@ bool PoolOp<T, Context, PoolType>::RunOnDeviceWithOrderNHWC() {
   }
   return true;
 }
-const char* kAveragePoolDoc = R"DOC(
+const char kAveragePoolDoc[] = R"DOC(
 consumes an input blob and applies average pooling across the the blob according
 to kernel sizes, stride sizes, pad lengths and dilation. Average pooling consists
 of taking the average value of a subset of the input tensor according to the kernel
@@ -797,7 +797,7 @@ Y:
 
 )DOC";
 
-const char* kMaxPoolDoc = R"DOC(
+const char kMaxPoolDoc[] = R"DOC(
 consumes an input blob and applies max pooling across the the blob according to
 kernel sizes, stride sizes, pad lengths and dilation. Max pooling consists of
 taking the maximum value of a subset of the input tensor according to the kernel

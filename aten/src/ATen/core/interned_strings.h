@@ -45,6 +45,8 @@ namespace c10 {
   _(prim, Starred)                 \
   _(prim, TupleConstruct)          \
   _(prim, TupleUnpack)             \
+  _(prim, TupleIndex)              \
+  _(prim, TupleSlice)              \
   _(prim, ListConstruct)           \
   _(prim, ListUnpack)              \
   _(prim, BoolToTensor)            \
@@ -69,6 +71,7 @@ namespace c10 {
   _(prim, LoadWorld)               \
   _(prim, StoreWorld)              \
   _(prim, DummyWorld)              \
+  _(prim, fork)                    \
   _(aten, append)                  \
   _(aten, __not__)                 \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
@@ -122,7 +125,8 @@ namespace c10 {
   _(attr, transB)                  \
   _(attr, name)                    \
   _(attr, a)                       \
-  _(attr, b)
+  _(attr, b)                       \
+  _(attr, beg)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
@@ -277,5 +281,3 @@ struct hash<c10::Symbol> {
   }
 };
 }
-
-

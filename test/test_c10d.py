@@ -18,8 +18,11 @@ import torch.nn.functional as F
 import torch.distributed as c10d
 from torch.nn.parallel import DistributedDataParallel
 
-from common_utils import TestCase
+from common_utils import TestCase, load_tests
 
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 if not c10d.is_available():
     print('c10d not available, skipping tests')
@@ -144,8 +147,12 @@ class TCPStoreTest(TestCase, StoreTestBase):
         with self.assertRaisesRegex(RuntimeError, "^Address already in use$"):
             addr = 'localhost'
             port = common.find_free_port()
-            store1 = c10d.TCPStore(addr, port, True)
-            store2 = c10d.TCPStore(addr, port, True)
+
+            # Use noqa to silence flake8.
+            # Need to store in an unused variable here to ensure the first
+            # object is not destroyed before the second object is created.
+            store1 = c10d.TCPStore(addr, port, True)  # noqa: F841
+            store2 = c10d.TCPStore(addr, port, True)  # noqa: F841
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
@@ -489,6 +496,24 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             if i == self.rank:
                 continue
             self.assertEqual(torch.Tensor([i]), outputs[i])
+
+    def test_timeout_kwarg(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(
+            store,
+            self.rank,
+            self.world_size,
+            timeout=timedelta(seconds=0.5))
+
+        # Wait on barrier
+        self.assertTrue(pg.barrier().wait())
+
+        # Sleep on one of the processes to trigger barrier timeout
+        if self.rank == 0:
+            time.sleep(0.6)
+
+        # The barrier will now time output
+        self.assertFalse(pg.barrier().wait())
 
 
 class ProcessGroupNCCLTest(TestCase):
@@ -867,6 +892,24 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # The expected result of the allreduce should be the average
         self.assertEqual(local_grad_sum,
                          torch.ones(10) * (self.world_size + 1) / 2.0)
+
+    @skip_if_not_nccl
+    def test_sync_reduction(self):
+        # Set up process group.
+        store = c10d.FileStore(self.file.name)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        # Get this process' split of devices.
+        devices = gpus_for_rank(self.world_size)[self.rank]
+        grads_batch = [(torch.ones(10, device=torch.device('cuda', d)) *
+                       (self.rank + 1)).chunk(5)
+                       for d in devices]
+        work, local_grad_sum = c10d._queue_reduction(process_group,
+                                                     grads_batch,
+                                                     devices)
+        c10d._sync_reduction(work, grads_batch[0], local_grad_sum)
+        # The expected result of the allreduce should be the average
+        self.assertEqual(grads_batch[0], (torch.ones(10) * (self.world_size + 1) / 2.0).chunk(5))
 
 
 if __name__ == '__main__':

@@ -70,7 +70,7 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNCHW() {
 
   Eigen::DSizes<TensorIndex, 2> pre_contract_dims;
   pre_contract_dims[1] = kernel_h() * kernel_w() * C;
-  pre_contract_dims[0] = Y->size() / M;
+  pre_contract_dims[0] = Y->numel() / M;
 
   Eigen::DSizes<TensorIndex, 2> kernel_dims;
   kernel_dims[0] = kernel_h() * kernel_w() * C;
@@ -109,7 +109,7 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNCHW() {
     // It seems that the bias broadcast is still slower so let's do the
     // following for now.
     EigenArrayMap<T> Y_arr(
-        Y_tensor.data(), static_cast<int64_t>(M), Y->size() / M);
+        Y_tensor.data(), static_cast<int64_t>(M), Y->numel() / M);
     ConstEigenVectorArrayMap<T> bias_arr(bias.template data<T>(), M);
     Y_arr = Y_arr.colwise() + bias_arr;
   }
@@ -164,7 +164,7 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNHWC() {
 
   Eigen::DSizes<TensorIndex, 2> pre_contract_dims;
   pre_contract_dims[1] = kernel_h() * kernel_w() * C;
-  pre_contract_dims[0] = Y->size() / M;
+  pre_contract_dims[0] = Y->numel() / M;
 
   Eigen::DSizes<TensorIndex, 2> kernel_dims;
   kernel_dims[0] = kernel_h() * kernel_w() * C;
@@ -204,7 +204,7 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNHWC() {
     // It seems that the bias broadcast is still slower so let's do the
     // following for now.
     EigenArrayMap<T> Y_arr(
-        Y->template mutable_data<T>(), static_cast<int64_t>(M), Y->size() / M);
+        Y->template mutable_data<T>(), static_cast<int64_t>(M), Y->numel() / M);
     ConstEigenVectorArrayMap<T> bias_arr(bias.template data<T>(), M);
     Y_arr = Y_arr.colwise() + bias_arr;
   }

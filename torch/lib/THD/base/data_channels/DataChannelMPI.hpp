@@ -4,15 +4,16 @@
 
 #include <mpi.h>
 #include <memory>
-#include <utility>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace thd {
 
 struct DataChannelMPI : DataChannel {
   struct RequestMPI : DataChannel::Request {
-    friend class DataChannelMPI; // allows `DataChannelMPI` to access private members
+    friend class DataChannelMPI; // allows `DataChannelMPI` to access private
+                                 // members
 
     RequestMPI();
     virtual ~RequestMPI();
@@ -20,8 +21,8 @@ struct DataChannelMPI : DataChannel {
     virtual bool isCompleted() override;
     virtual void wait() override;
 
-  private:
-    template<typename T>
+   private:
+    template <typename T>
     void save_buffer(std::shared_ptr<T> ptr);
     void save_tensor_buffer(at::Tensor& t);
     MPI_Request& new_request();
@@ -40,31 +41,50 @@ struct DataChannelMPI : DataChannel {
   rank_type getRank() override;
   rank_type getNumProcesses() override;
 
-  void allGather(std::vector<at::Tensor>& output,
-                 std::vector<at::Tensor>& input,
-                 THDGroup group_id = THDGroupWORLD) override;
-  void allGather(std::vector<at::Tensor>& output, at::Tensor& input,
-                 THDGroup group_id = THDGroupWORLD) override;
-  void gather(std::vector<at::Tensor>& output, at::Tensor& input,
-              rank_type dst_rank, THDGroup group_id = THDGroupWORLD) override;
-  void scatter(std::vector<at::Tensor>& input, at::Tensor& output,
-               rank_type src_rank, THDGroup group_id = THDGroupWORLD) override;
-  void allReduce(std::vector<at::Tensor>& data,
-                 THDReduceOp operation,
-                 THDGroup group_id = THDGroupWORLD) override;
-  void allReduce(at::Tensor& data, THDReduceOp operation,
-                 THDGroup group_id = THDGroupWORLD) override;
-  void reduce(std::vector<at::Tensor>& data,
-              THDReduceOp operation,
-              rank_type dstRank,
-              THDGroup group_id = THDGroupWORLD) override;
-  void reduce(at::Tensor& data, THDReduceOp operation, rank_type dst_rank,
-              THDGroup group_id = THDGroupWORLD) override;
-  void broadcast(std::vector<at::Tensor>& data,
-                 rank_type srcRank,
-                 THDGroup group_id = THDGroupWORLD) override;
-  void broadcast(at::Tensor& data, rank_type src_rank,
-                 THDGroup group_id = THDGroupWORLD) override;
+  void allGather(
+      std::vector<at::Tensor>& output,
+      std::vector<at::Tensor>& input,
+      THDGroup group_id = THDGroupWORLD) override;
+  void allGather(
+      std::vector<at::Tensor>& output,
+      at::Tensor& input,
+      THDGroup group_id = THDGroupWORLD) override;
+  void gather(
+      std::vector<at::Tensor>& output,
+      at::Tensor& input,
+      rank_type dst_rank,
+      THDGroup group_id = THDGroupWORLD) override;
+  void scatter(
+      std::vector<at::Tensor>& input,
+      at::Tensor& output,
+      rank_type src_rank,
+      THDGroup group_id = THDGroupWORLD) override;
+  void allReduce(
+      std::vector<at::Tensor>& data,
+      THDReduceOp operation,
+      THDGroup group_id = THDGroupWORLD) override;
+  void allReduce(
+      at::Tensor& data,
+      THDReduceOp operation,
+      THDGroup group_id = THDGroupWORLD) override;
+  void reduce(
+      std::vector<at::Tensor>& data,
+      THDReduceOp operation,
+      rank_type dstRank,
+      THDGroup group_id = THDGroupWORLD) override;
+  void reduce(
+      at::Tensor& data,
+      THDReduceOp operation,
+      rank_type dst_rank,
+      THDGroup group_id = THDGroupWORLD) override;
+  void broadcast(
+      std::vector<at::Tensor>& data,
+      rank_type srcRank,
+      THDGroup group_id = THDGroupWORLD) override;
+  void broadcast(
+      at::Tensor& data,
+      rank_type src_rank,
+      THDGroup group_id = THDGroupWORLD) override;
   void send(Scalar& data, rank_type dst_rank) override;
   void send(at::Tensor& data, rank_type dst_rank) override;
   void receive(Scalar& data, rank_type src_rank) override;
@@ -77,7 +97,7 @@ struct DataChannelMPI : DataChannel {
   THDGroup newGroup(const std::vector<rank_type>& ranks) override;
   void clearGroupCache(THDGroup group_id = THDGroupWORLD) override;
 
-private:
+ private:
   at::Tensor _newLikeFlat(std::vector<at::Tensor>& tensors) const;
 
   rank_type _rank; // Current process' rank

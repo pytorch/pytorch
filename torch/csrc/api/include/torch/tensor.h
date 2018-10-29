@@ -13,6 +13,9 @@ using namespace at; // NOLINT
 using c10::optional;
 using c10::nullopt;
 
+using c10::optional;
+using c10::nullopt;
+
 using Dtype = at::ScalarType;
 
 /// Fixed width dtypes.

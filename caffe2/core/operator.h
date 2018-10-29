@@ -127,10 +127,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return BlobGetMutableTensor(outputs_.at(idx), type);
   }
 
-  inline Tensor* OutputTensor(
-      int idx,
-      const vector<int64_t>& dims,
-      const at::TensorOptions& options) {
+  inline Tensor*
+  OutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
     CAFFE_ENFORCE_WITH_CALLER(
         options.device_opt() != c10::nullopt,
         "device must be provided in option.");
@@ -149,6 +147,13 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   inline Blob* OutputBlob(int idx) {
     return outputs_.at(idx);
+  }
+
+  // Check whether output j is an alias of input i by comparing Blob pointers,
+  // note this does not check if the two Blobs points to the same Tensor, or if
+  // the Tensor pointers point to the same TensorImpl, or if the Storages alias
+  inline bool IsInputOutputAlias(int i, int j) {
+    return inputs_.at(i) == outputs_.at(j);
   }
 
   template <typename T>
@@ -241,13 +246,13 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       }
       return result;
     } catch (EnforceNotMet& err) {
-      SetEventFinished(err.what());
+      SetEventFinishedWithException(err.what());
       throw;
     } catch (const std::exception& err) {
-      SetEventFinished(err.what());
+      SetEventFinishedWithException(err.what());
       throw;
     } catch (...) {
-      SetEventFinished(getErrorMsg().c_str());
+      SetEventFinishedWithException(getErrorMsg().c_str());
       throw;
     }
   }
@@ -340,7 +345,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return !event_;
   }
 
-  virtual void FinishDeviceComputation() {
+  // Internal API invoked by observers. Normal callers shouldn't invoke it.
+  virtual void SyncDeviceBarrierForObservers() {
     CAFFE_NOT_IMPLEMENTED;
   }
 
@@ -395,6 +401,12 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   void SetEventFinished(const char* err_msg = nullptr) {
     if (event_) {
       event_->SetFinished(err_msg);
+    }
+  }
+
+  void SetEventFinishedWithException(const char* err_msg = nullptr) {
+    if (event_) {
+      event_->SetFinishedWithException(err_msg);
     }
   }
 
@@ -465,10 +477,7 @@ class Operator : public OperatorBase {
     return OperatorBase::template Input<Tensor>(idx, type);
   }
 
-  inline Tensor* Output(
-      int idx,
-      const vector<int64_t>& dims,
-      const at::TensorOptions& options) {
+  inline Tensor* Output(int idx, at::IntList dims, at::TensorOptions options) {
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::OutputTensor(
           idx, dims, at::TensorOptions(options).device(context_.device()));
@@ -560,17 +569,17 @@ class Operator : public OperatorBase {
             "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }
-      SetEventFinished(err.what());
+      SetEventFinishedWithException(err.what());
       this->RecordLastFailedOpNetPosition();
       StopAllObservers();
       throw;
     } catch (const std::exception& err) {
-      SetEventFinished(err.what());
+      SetEventFinishedWithException(err.what());
       this->RecordLastFailedOpNetPosition();
       StopAllObservers();
       throw;
     } catch (...) {
-      SetEventFinished(getErrorMsg().c_str());
+      SetEventFinishedWithException(getErrorMsg().c_str());
       this->RecordLastFailedOpNetPosition();
       StopAllObservers();
       throw;
@@ -590,6 +599,9 @@ class Operator : public OperatorBase {
   // to finished state by RunAsync.
   // Defaulting to the value from context (true for CUDA, false for CPU).
   // Override in case of async CPU operators
+  // Async CPU operators are expected to catch all exceptions in async parts
+  // and set Event to finished/failed state with Event::SetFinished or
+  // SetFinishedWithException call.
   bool HasAsyncPart() const override {
     return context_.HasAsyncPartDefault();
   }
@@ -611,7 +623,7 @@ class Operator : public OperatorBase {
     return HasAsyncPart() && context_.SupportsAsyncScheduling();
   }
 
-  void FinishDeviceComputation() override {
+  void SyncDeviceBarrierForObservers() override {
     context_.FinishDeviceComputation();
   }
 
@@ -638,7 +650,8 @@ class Operator : public OperatorBase {
   /* using override */ using OperatorBase::InputSize;               \
   /* using override */ using OperatorBase::Output;                  \
   /* using override */ using OperatorBase::Input;                   \
-  /* using override */ using OperatorBase::OutputSize
+  /* using override */ using OperatorBase::OutputSize;              \
+  /* using override */ using OperatorBase::IsInputOutputAlias
 
 #define USE_OPERATOR_FUNCTIONS(context)                    \
   USE_OPERATOR_BASE_FUNCTIONS;                             \
@@ -912,7 +925,8 @@ C10_DECLARE_REGISTRY(
   C10_REGISTER_CLASS(HIPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 #define REGISTER_MIOPEN_OPERATOR(name, ...) \
-  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__)
+  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__) \
+  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__) // Make CUDNN an alias of MIOPEN for HIP ops
 
 // StaticLinkingProtector is a helper class that ensures that the Caffe2
 // library is linked correctly with whole archives (in the case of static

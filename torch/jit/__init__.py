@@ -49,6 +49,10 @@ _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
 
+Future = torch._C.Future
+_fork = torch._C.fork
+_wait = torch._C.wait
+
 
 @contextlib.contextmanager
 def scope(scope_name):
@@ -823,14 +827,15 @@ class OrderedBufferDict(OrderedDictWrapper):
 _constant_types = (bool, float, int, types.FunctionType, torch.device, torch.layout, torch.dtype)
 
 
-def _get_valid_constant(v):
+def _get_valid_constant(attr, v):
     if isinstance(v, _constant_types):
         return v
     elif isinstance(v, tuple) or isinstance(v, list):
-        return tuple(_get_valid_constant(x) for x in v)
+        return tuple(_get_valid_constant(attr, x) for x in v)
     constants = ", ".join(typ.__name__ for typ in _constant_types)
     raise TypeError(
-        "'{}' object is not a valid constant.\n".format(type(v).__name__) +
+        "'{}' object for attribute '{}' ".format(type(v).__name__, attr) +
+        "is not a valid constant.\n" +
         "Valid constants are:\n" +
         "  1. a nn.ModuleList\n" +
         "  2. a value of type {{{}}}\n".format(constants) +
@@ -1049,7 +1054,7 @@ if _enabled:
             elif isinstance(value, Sequential):
                 super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
             else:
-                super(ScriptModule, self).__setattr__(attr, _get_valid_constant(value))
+                super(ScriptModule, self).__setattr__(attr, _get_valid_constant(attr, value))
 
         def __dir__(self):
             return sorted(Module.__dir__(self) + self._method_names())
@@ -1299,12 +1304,19 @@ _modules_containing_builtins = (torch, torch.nn.functional)
 
 # These functions don't have aten ops but have been converted to weak script, so
 # don't add them as builtins
-# TODO: delete this list and remove torch.nn.functional from builtins list once
-# everything in it has been converted to weak script
+# TODO: delete this list, _should_skip(), and remove torch.nn.functional from
+# builtins list once everything in it has been converted to weak script
 _builtin_blacklist = {
     'tanhshrink',
     'softsign',
+    'pairwise_distance',
+    'prelu',
+    'hardshrink',
 }
+
+
+def _should_skip(mod, name):
+    return mod is torch.nn.functional and name in _builtin_blacklist
 
 
 # lazily built to ensure the correct initialization order
@@ -1317,10 +1329,11 @@ def _get_builtin_table():
     def register_all(mod):
         for name in dir(mod):
             v = getattr(mod, name)
-            if callable(v) and name not in _builtin_blacklist:
+            if callable(v) and not _should_skip(mod, name):
                 _builtin_table[id(v)] = "aten::" + name
     for mod in _modules_containing_builtins:
         register_all(mod)
+    _builtin_table[id(warnings.warn)] = "aten::warn"
 
     return _builtin_table
 
@@ -1357,6 +1370,9 @@ _register_builtin(_construct_empty_tensor_list, 'aten::_construct_empty_tensor_l
 
 
 _register_builtin(len, 'aten::len')
+
+
+_register_builtin(_wait, 'aten::wait')
 
 
 class _disable_tracing(object):

@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/graph_node_list.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/resource_guard.h"
+#include "torch/csrc/jit/scope.h"
 #include "torch/csrc/jit/source_location.h"
 #include "torch/csrc/jit/source_range.h"
 #include "torch/csrc/jit/constants.h"
@@ -97,61 +98,6 @@ struct Use {
 // If you are looking for "use induced by an input", it's best to use
 // findUseForInput() to get it.
 
-
-// Scope is a node of a trie that represents the tree of nested scopes.
-// Individual scopes are pushed and popped from Graph, which holds a
-// pointer to the current scope. Each Node in Graph holds a pointer
-// to the scope that was current when the node was created.
-// The trie never needs to shrink, it only grows until it is disposed
-// of when Graph is deallocated. Hence, pointers to scopes held by nodes
-// will always be valid as long as Graph is alive.
-struct Scope;
-using ScopePtr = c10::intrusive_ptr<Scope>;
-
-struct TORCH_API Scope : public c10::intrusive_ptr_target {
-private:
-  ScopePtr parent_;
-  Symbol name_;
-  ScopePtr intrusive_from_this() {
-    c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
-                                           // from a raw `this` pointer
-                                           // so we need to bump the refcount
-                                           // to account for this ownership
-    return c10::intrusive_ptr<Scope>::reclaim(this);
-  }
-public:
-  Scope() {
-    name_ = Symbol::scope("");
-  }
-  Scope(ScopePtr parent, Symbol name) {
-    name_ = name;
-    parent_ = parent;
-  }
-  ScopePtr push(Symbol name);
-
-  ScopePtr parent() {
-    if (!parent_) {
-      throw std::runtime_error("Cannot get parent from Scope with no parent");
-    }
-    return parent_;
-  }
-  bool isRoot() const {
-    return !parent_;
-  }
-  bool isBlank() const {
-    static const Symbol blank = Symbol::scope("");
-    return isRoot() && name() == blank;
-  }
-
-  ScopePtr getRoot();
-
-  Symbol name() const {
-    return name_;
-  }
-
-  std::string namesFromRoot(const std::string& separator="/") const;
-};
-
 // the list types are intentionally simple, but we type-def
 // them here so if we need to change them, refactoring will be easier
 using node_list = std::vector<Node*>;
@@ -189,6 +135,10 @@ public:
   }
   bool isTensor() const {
     return type()->kind() == TypeKind::CompleteTensorType;
+  }
+  bool isNone() const {
+    return type()->kind() == TypeKind::NoneType;
+
   }
   size_t unique() const {
     return unique_;
@@ -259,10 +209,6 @@ private:
   // This list represents a topological sort
 
   Node* next_in_graph[2] = { nullptr, nullptr };
-  Node* & next() { return next_in_graph[kNextDirection]; }
-  Node* & prev() { return next_in_graph[kPrevDirection]; }
-  Node* const & next() const { return next_in_graph[kNextDirection]; }
-  Node* const & prev() const { return next_in_graph[kPrevDirection]; }
 
   const NodeKind kind_;
   std::vector<Value*> inputs_;
@@ -283,6 +229,11 @@ private:
 protected:
   TORCH_API Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
+  Node* & next() { return next_in_graph[kNextDirection]; }
+  Node* & prev() { return next_in_graph[kPrevDirection]; }
+  Node* const & next() const { return next_in_graph[kNextDirection]; }
+  Node* const & prev() const { return next_in_graph[kPrevDirection]; }
+
   NodeKind kind() const {
     return kind_;
   }
@@ -472,10 +423,10 @@ public:
   }
 
   // Is 'this' before 'n' in the topological order?
-  TORCH_API bool isBefore(Node * n) const;
+  TORCH_API bool isBefore(const Node * n) const;
 
   // Is 'this' after 'n' in the topological order?
-  TORCH_API bool isAfter(Node * n) const;
+  TORCH_API bool isAfter(const Node * n) const;
 
   // Insert unattached 'this' node before 'n' in the topological order.
   // Returns this (for chaining).
@@ -503,6 +454,9 @@ public:
 
   // Move 'this' (already in the graph) after 'n' in the topological order.
   //
+  // NOTE: Does not check that value dependencies are preserved, see
+  //   moveAfterTopologicallyValid
+  //
   // Given: %2 = f(%1)
   //        %3 = g(%1)
   // Execute: %2.moveAfter(%3)
@@ -511,7 +465,22 @@ public:
   //
   TORCH_API void moveAfter(Node * n);
 
-  // Move a node 'n' (already in the graph) before 'this' in the topological order.
+  // Move 'this' (already in the graph) after 'n' in the topological order.
+  //
+  // Tries to preserve value dependencies, so other nodes might be moved. We
+  // make two gurantees about the postcondition of the node list:
+  //   - `this` is directly after `n`.
+  //   - only nodes between `this` and `n` have been moved
+  //
+  // Returns `false` if it's impossible to move `this` after `n` without
+  // violating dependencies, otherwise executes the move and returns `true`
+  TORCH_API bool moveAfterTopologicallyValid(Node* n);
+
+  // Move a node 'n' (already in the graph) before 'this' in the topological
+  // order.
+  //
+  // NOTE: Does not check that value dependencies are preserved, see
+  //   moveBeforeTopologicallyValid
   //
   // Given: %2 = f(%1)
   //        %3 = g(%1)
@@ -519,6 +488,17 @@ public:
   // Result: %3 = g(%1)
   //         %2 = f(%1)
   TORCH_API void moveBefore(Node * n);
+
+  // Move 'this' (already in the graph) before 'n' in the topological order.
+  //
+  // Tries to preserve value dependencies, so other nodes might be moved. We
+  // make two gurantees about the postcondition of the node list:
+  //   - `this` is directly before `n`.
+  //   - only nodes between `this` and `n` have been moved
+  //
+  // Returns `false` if it's impossible to move `this` after `n` without
+  // violating dependencies, otherwise executes the move and returns `true`
+  TORCH_API bool moveBeforeTopologicallyValid(Node* n);
 
   // Remove the input at 'i' from this node.
   //
@@ -591,11 +571,17 @@ public:
       findSchema();
     return *schema_;
   }
+  const FunctionSchema* maybeSchema() const;
 
   void dump() const;
 
   virtual ~Node() = default;
-private:
+
+ private:
+  enum class MoveSide { BEFORE, AFTER };
+  bool tryMove(Node* movePoint, MoveSide moveSide);
+  void move(Node* movePoint, MoveSide moveSide);
+
   std::pair<Value*, const Argument&> findInput(Symbol name);
   void findSchema() const;
   // Lookup iterator in use list of _input i_ that corresponds to its use of _this_
@@ -844,8 +830,10 @@ public:
   TORCH_API Node* createFusionGroup(int device);
   TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
   TORCH_API Node* createTupleUnpack(Value * v);
+  TORCH_API Node* createTupleIndex(Value * tup, int64_t index);
+  TORCH_API Node* createTupleSlice(Value * tup, int64_t beg, int64_t end);
   TORCH_API Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values);
-  TORCH_API Node * createListUnpack(Value *v, size_t size);
+  TORCH_API Node* createListUnpack(Value *v, size_t size);
   TORCH_API Node* createNumToTensor(Value* value);
   TORCH_API Node* createBoolToTensor(Value* value);
   TORCH_API Node* createTensorToNum(const TypePtr& type, Value* value);
@@ -866,7 +854,8 @@ public:
 
   TORCH_API Value* insertConstant(
       IValue val,
-      c10::optional<SourceRange> loc = c10::nullopt);
+      c10::optional<SourceRange> loc = c10::nullopt,
+      c10::optional<ScopePtr> scope = c10::nullopt);
 
   TORCH_API Value* insertDummyWorld();
 

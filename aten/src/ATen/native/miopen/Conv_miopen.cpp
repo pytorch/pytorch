@@ -114,7 +114,7 @@ constexpr int max_dim = 3;
 // as conv_output_size loses information; this is why conv_input_size
 // takes an extra output_padding argument to resolve the ambiguity.
 
-std::vector<int64_t> conv_output_size(
+static std::vector<int64_t> conv_output_size(
     IntList input_size, IntList weight_size,
     IntList padding, IntList stride, IntList dilation, int64_t groups
 ) {
@@ -555,9 +555,10 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
   auto handle = getMiopenHandle();
   auto dataType = getMiopenDataType(*bias);
   Constant one(dataType, 1);
+  Constant zero(dataType, 0);
 
   MIOPEN_CHECK(miopenConvolutionForwardBias(handle, &one, bdesc.desc(), bias->data_ptr(),
-                                     &one, odesc.desc(), output->data_ptr()));
+                                     &zero, odesc.desc(), output->data_ptr()));
 }
 
 // see NOTE [ Convolution design ] in src/Aten/native/cudnn/Conv.cpp
