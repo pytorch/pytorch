@@ -50,7 +50,7 @@ class SumReduceDimsOp final : public Operator<Context> {
     T* out_data = Y->template mutable_data<T>();
 
     if (cols == 0 || rows == 0) {
-      math::Set(Y->size(), static_cast<T>(0), out_data, &context_);
+      math::Set(Y->numel(), static_cast<T>(0), out_data, &context_);
       return true;
     }
 
@@ -63,7 +63,7 @@ class SumReduceDimsOp final : public Operator<Context> {
           "Given lengths input, the number of reduce dimensions should be one.");
       const int batch_size = FIRSTDIMS ? cols : rows;
       CAFFE_ENFORCE(
-          lengths.size() == batch_size,
+          lengths.numel() == batch_size,
           "The size of lengths vector doesn't match the batch size.");
     }
 
@@ -115,7 +115,7 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
       // Copy first dims
       vector<int64_t> output_shape(
           shape_.template data<int64_t>(),
-          shape_.template data<int64_t>() + shape_.size());
+          shape_.template data<int64_t>() + shape_.numel());
       dX->Resize(output_shape);
     } else {
       // Input(1) is data tensor X
@@ -137,7 +137,7 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
           "Given lengths input, the number of reduce dimensions should be one.");
       const int batch_size = FIRSTDIMS ? cols : rows;
       CAFFE_ENFORCE(
-          lengths.size() == batch_size,
+          lengths.numel() == batch_size,
           "The size of lengths vector doesn't match the batch size.");
     }
 

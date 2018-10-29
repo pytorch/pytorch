@@ -383,6 +383,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tanh_
    .. automethod:: tolist
    .. automethod:: topk
+   .. automethod:: to_sparse
    .. automethod:: trace
    .. automethod:: transpose
    .. automethod:: transpose_

@@ -65,9 +65,9 @@ class BroadcastOp final : public Operator<Context> {
     }
 
     // Verify tensors all have same size
-    size_t size = Input(1).size();
+    size_t size = Input(1).numel();
     for (auto i = 2; i < InputSize(); i++) {
-      CAFFE_ENFORCE_EQ(Input(i).size(), size);
+      CAFFE_ENFORCE_EQ(Input(i).numel(), size);
     }
 
     // Verify tensors all have same size
@@ -98,7 +98,7 @@ class BroadcastOp final : public Operator<Context> {
       params.inputs[i] = Input(i + 1).raw_data();
       params.outputs[i] = Output(i)->raw_mutable_data();
     }
-    params.size = Output(0)->size();
+    params.size = Output(0)->numel();
     params.meta = Output(0)->meta();
   }
 

@@ -186,8 +186,8 @@ class BinaryElementwiseWithArgsGradientOp<
       const auto& C = Input(1);
       const auto& dC = Input(2);
       if (legacy_broadcast_) {
-        if (B.size() == 1) {
-          A_dims = {static_cast<int>(C.size())};
+        if (B.numel() == 1) {
+          A_dims = {static_cast<int>(C.numel())};
           B_dims = {1};
         } else {
           size_t pre, n, post;
@@ -215,8 +215,8 @@ class BinaryElementwiseWithArgsGradientOp<
       const auto& B = Input(2);
       const auto& C = Input(3);
       if (legacy_broadcast_) {
-        if (B.size() == 1) {
-          A_dims = {static_cast<int>(A.size())};
+        if (B.numel() == 1) {
+          A_dims = {static_cast<int>(A.numel())};
           B_dims = {1};
         } else {
           size_t pre, n, post;

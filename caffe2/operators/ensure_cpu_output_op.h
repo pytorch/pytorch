@@ -37,7 +37,7 @@ class EnsureCPUOutputOp : public Operator<Context> {
     output->ResizeLike(input);
     context_.CopyItemsToCPU(
         input.meta(),
-        input.size(),
+        input.numel(),
         input.raw_data(),
         output->raw_mutable_data(input.meta()));
     context_.FinishDeviceComputation();

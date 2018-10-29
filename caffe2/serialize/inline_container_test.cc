@@ -22,12 +22,14 @@ TEST(PyTorchFileWriterAndReader, SaveAndLoad) {
   for (int i = 0; i < data1.size(); ++i) {
     data1[i] = data1.size() - i;
   }
-  ASSERT_EQ(writer.writeRecord(data1.data(), data1.size()), writer.getCurrentSize());
+  uint64_t next_key = writer.getCurrentSize();
+  ASSERT_EQ(writer.writeRecord(data1.data(), data1.size()), next_key);
   std::array<char, 64> data2;
   for (int i = 0; i < data2.size(); ++i) {
     data2[i] = data2.size() - i;
   }
-  ASSERT_EQ(writer.writeRecord(data2.data(), data2.size()), writer.getCurrentSize());
+  next_key = writer.getCurrentSize();
+  ASSERT_EQ(writer.writeRecord(data2.data(), data2.size()), next_key);
   writer.writeEndOfFile();
   ASSERT_TRUE(writer.closed());
 

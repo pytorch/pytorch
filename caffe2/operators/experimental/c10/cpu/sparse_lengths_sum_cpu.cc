@@ -23,7 +23,7 @@ void sparse_lengths_sum_op_cpu_impl(
   const int64_t N = dataInput.dim(0);
   const int D = dataInput.size_from_dim(1);
   const int64_t M = lengthsInput.dim(0);
-  const int64_t indices_size = indicesInput.size();
+  const int64_t indices_size = indicesInput.numel();
 
   auto shape = dataInput.sizes().vec();
   shape[0] = M;
