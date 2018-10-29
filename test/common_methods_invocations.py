@@ -93,9 +93,9 @@ class NoArgsClass(object):
         return 0
 
 NO_ARGS = NoArgsClass()
-L = 20
-M = 10
-S = 5
+L = 7
+M = 5
+S = 3
 
 # (
 #   method name,
