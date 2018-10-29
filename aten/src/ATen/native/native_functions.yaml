@@ -2688,17 +2688,17 @@
   variants: method, function
   device_guard: false
 
-- func: addcmul_out(Tensor result, Tensor self, Tensor tensor1, Tensor tensor2, Scalar value=1) -> Tensor
+- func: addcmul_out(Tensor result, Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   device_guard: false
 
-- func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, Scalar value=1) -> Tensor
+- func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
   device_guard: false
 
-- func: addcdiv_out(Tensor result, Tensor self, Tensor tensor1, Tensor tensor2, Scalar value=1) -> Tensor
+- func: addcdiv_out(Tensor result, Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   device_guard: false
 
-- func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, Scalar value=1) -> Tensor
+- func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
   device_guard: false
 
@@ -2793,17 +2793,17 @@
   variants: method, function
   device_guard: false
 
-- func: btrifact_out(Tensor A_LU, Tensor pivots, Tensor self, bool pivot=true) -> (Tensor, Tensor)
+- func: btrifact_out(Tensor A_LU, Tensor pivots, Tensor self, *, bool pivot=true) -> (Tensor, Tensor)
   device_guard: false
 
-- func: btrifact(Tensor self, bool pivot=true) -> (Tensor, Tensor)
+- func: btrifact(Tensor self, *, bool pivot=true) -> (Tensor, Tensor)
   variants: method, function
   device_guard: false
 
-- func: btrifact_with_info_out(Tensor A_LU, Tensor pivots, Tensor info, Tensor self, bool pivot=true) -> (Tensor, Tensor, Tensor)
+- func: btrifact_with_info_out(Tensor A_LU, Tensor pivots, Tensor info, Tensor self, *, bool pivot=true) -> (Tensor, Tensor, Tensor)
   device_guard: false
 
-- func: btrifact_with_info(Tensor self, bool pivot=true) -> (Tensor, Tensor, Tensor)
+- func: btrifact_with_info(Tensor self, *, bool pivot=true) -> (Tensor, Tensor, Tensor)
   variants: method, function
   device_guard: false
 
@@ -2814,10 +2814,10 @@
   variants: method, function
   device_guard: false
 
-- func: multinomial_out(Tensor result, Tensor self, int64_t num_samples, bool replacement=false, Generator * generator=nullptr) -> Tensor
+- func: multinomial_out(Tensor result, Tensor self, int64_t num_samples, bool replacement=false, *, Generator* generator=nullptr) -> Tensor
   device_guard: false
 
-- func: multinomial(Tensor self, int64_t num_samples, bool replacement=false, Generator * generator=nullptr) -> Tensor
+- func: multinomial(Tensor self, int64_t num_samples, bool replacement=false, *, Generator* generator=nullptr) -> Tensor
   variants: method, function
   device_guard: false
 
