@@ -1866,7 +1866,10 @@ class TestJit(JitTestCase):
 
             traced = torch.jit.trace(test, (torch.randn(5, 3, 10), torch.LongTensor([3, 2, 1]), torch.randn(2, 3, 20)))
             imported = self.getExportImportCopy(traced)
-            x, lengths, h0 = torch.randn(5, 3, 10), torch.LongTensor([3, 3, 2]), torch.randn(2, 3, 20)
+            # NB: We make sure to pass in a batch with a different max sequence
+            # length to ensure that the argument stashing for pad_packed works
+            # properly.
+            x, lengths, h0 = torch.randn(7, 4, 10), torch.LongTensor([7, 3, 2, 1]), torch.randn(2, 4, 20)
             self.assertEqual(traced(x, lengths, h0), imported(x, lengths, h0))
 
     def test_export_lstm(self):
@@ -1889,7 +1892,7 @@ class TestJit(JitTestCase):
                                         (torch.randn(2, 3, 20), torch.randn(2, 3, 20))))
         imported = self.getExportImportCopy(traced)
         x, lengths, h0, c0 = \
-            torch.randn(5, 3, 10), torch.LongTensor([3, 3, 2]), torch.randn(2, 3, 20), torch.randn(2, 3, 20)
+            torch.randn(7, 3, 10), torch.LongTensor([7, 5, 2]), torch.randn(2, 3, 20), torch.randn(2, 3, 20)
         self.assertEqual(traced(x, lengths, (h0, c0)), imported(x, lengths, (h0, c0)))
 
     def test_trace_variable_instantiation(self):
