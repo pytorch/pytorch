@@ -173,7 +173,7 @@ class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
-        self.fc2 = nn.Linear(10, 50, bias=False)
+        self.fc2 = _FC2()
         self.fc3 = nn.Linear(50, 4, bias=False)
         self.relu = nn.ReLU()
 
