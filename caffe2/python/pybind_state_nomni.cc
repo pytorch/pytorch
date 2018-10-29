@@ -481,6 +481,7 @@ void addNomnigraphMethods(pybind11::module& m) {
           py::return_value_policy::reference)
       .def("setComponentLevels", &Caffe2Annotation::setComponentLevels)
       .def("getComponentLevels", &Caffe2Annotation::getComponentLevels)
+      .def("hasDeviceOption", &Caffe2Annotation::hasDeviceOption)
       .def_property(
           "device_option",
           [](Caffe2Annotation& annot) {
