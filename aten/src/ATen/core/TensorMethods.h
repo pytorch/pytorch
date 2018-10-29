@@ -35,7 +35,7 @@ inline Tensor Tensor::toBackend(Backend b) const {
 }
 
 inline TensorOptions Tensor::options() const {
-  return TensorOptions().dtype(scalar_type())
+  return TensorOptions().dtype(dtype())
                         .device(device())
                         .layout(layout())
                         .is_variable(is_variable());
