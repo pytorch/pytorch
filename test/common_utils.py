@@ -54,14 +54,6 @@ torch.manual_seed(SEED)
 
 
 def run_tests(argv=UNITTEST_ARGS):
-    runfile = os.path.realpath(__file__)
-
-    for name, obj in globals().items():
-        if isinstance(obj, unittest.TestCase):
-            assert inspect.getfile(obj) == runfile, "A unittest.TestCase class " \
-                "existing in top-level is not defined in the running script. " \
-                "Did you accidentally import a unittest.TestCase from another file?"
-
     unittest.main(argv=argv)
 
 PY3 = sys.version_info > (3, 0)
@@ -787,6 +779,28 @@ THESE_TAKE_WAY_TOO_LONG = {
     'test_multinomial_invalid_probs',
 }
 
+
+running_script_path = None
+
+
+def set_running_file():
+    global running_script_path
+    try:
+        running_script_path = os.path.abspath(os.path.realpath(sys.argv[0]))
+    except Exception:
+        pass
+
+
+def check_test_defined_in_running_script(test_case):
+    if running_script_path is None:
+        return
+    test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
+    assert test_case_class_file == running_script_path, "Class of loaded TestCase \"{}\" " \
+        "is not defined in the running script \"{}\", but in \"{}\". Did you " \
+        "accidentally import a unittest.TestCase from another file?".format(
+            test_case.id(), runfile, test_case_class_file)
+
+
 num_shards = os.environ.get('TEST_NUM_SHARDS', None)
 shard = os.environ.get('TEST_SHARD', None)
 if num_shards is not None and shard is not None:
@@ -794,9 +808,11 @@ if num_shards is not None and shard is not None:
     shard = int(shard)
 
     def load_tests(loader, tests, pattern):
+        set_running_file()
         test_suite = unittest.TestSuite()
         for test_group in tests:
             for test in test_group:
+                check_test_defined_in_running_script(test)
                 name = test.id().split('.')[-1]
                 if name in THESE_TAKE_WAY_TOO_LONG:
                     continue
@@ -805,4 +821,12 @@ if num_shards is not None and shard is not None:
                     test_suite.addTest(test)
         return test_suite
 else:
-    load_tests = None
+
+    def load_tests(loader, tests, pattern):
+        set_running_file()
+        test_suite = unittest.TestSuite()
+        for test_group in tests:
+            for test in test_group:
+                check_test_defined_in_running_script(test)
+                test_suite.addTest(test)
+        return test_suite
