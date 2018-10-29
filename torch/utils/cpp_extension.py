@@ -50,7 +50,7 @@ def _find_cuda_home():
     return cuda_home
 
 
-MINIMUM_GCC_VERSION = (4, 9)
+MINIMUM_GCC_VERSION = (4, 9, 0)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
 ABI_INCOMPATIBILITY_WARNING = '''
 
@@ -67,6 +67,23 @@ for instructions on how to install GCC 4.9 or higher.
 
                               !! WARNING !!
 '''
+WRONG_COMPILER_WARNING = '''
+
+                               !! WARNING !!
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Your compiler ({0}) is not compatible with the compiler Pytorch was built with
+for this platform, which is {1} on {2}. Please use {1} to to compile your
+extension. Alternatively, you may compile PyTorch from source using {0}, and
+then you can also use {0} to compile your extension.
+
+See https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md for help
+with compiling PyTorch from source.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+                              !! WARNING !!
+'''
+ACCEPTED_COMPILERS_FOR_PLATFORM = {'darwin': ['clang++', 'clang'], 'linux': ['g++', 'gcc']}
 CUDA_HOME = _find_cuda_home()
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
@@ -101,6 +118,26 @@ def get_default_build_root():
     return os.path.realpath(os.path.join(tempfile.gettempdir(), 'torch_extensions'))
 
 
+def check_compiler_ok_for_platform(compiler):
+    '''
+    Verifies that the compiler is the expected one for the current platform.
+
+    Arguments:
+        compiler (str): The compiler executable to check.
+
+    Returns:
+        True if the compiler is gcc/g++ on Linux or clang/clang++ on macOS,
+        and always True for Windows.
+    '''
+    if IS_WINDOWS:
+        return True
+    which = subprocess.check_output(['which', compiler], stderr=subprocess.STDOUT)
+    # Use os.path.realpath to resolve any symlinks, in particular from 'c++' to e.g. 'g++'.
+    compiler_path = os.path.realpath(which.decode().strip())
+    accepted_compilers = ACCEPTED_COMPILERS_FOR_PLATFORM[sys.platform]
+    return any(name in compiler_path for name in accepted_compilers)
+
+
 def check_compiler_abi_compatibility(compiler):
     '''
     Verifies that the given compiler is ABI-compatible with PyTorch.
@@ -117,39 +154,39 @@ def check_compiler_abi_compatibility(compiler):
         return True
     if os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') in ['ON', '1', 'YES', 'TRUE', 'Y']:
         return True
+
+    # First check if the compiler is one of the expected ones for the particular platform.
+    if not check_compiler_ok_for_platform(compiler):
+        warnings.warn(WRONG_COMPILER_WARNING.format(
+            compiler,
+            ACCEPTED_COMPILERS_FOR_PLATFORM[sys.platform][0],
+            sys.platform))
+        return False
+
+    if sys.platform == 'darwin':
+        # There is no particular minimum version we need for clang, so we're good here.
+        return True
     try:
-        check_cmd = '{}' if IS_WINDOWS else '{} --version'
-        info = subprocess.check_output(
-            check_cmd.format(compiler).split(), stderr=subprocess.STDOUT)
+        if sys.platform == 'linux':
+            minimum_required_version = MINIMUM_GCC_VERSION
+            version = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
+            version = version.split('.')
+        else:
+            minimum_required_version = MINIMUM_MSVC_VERSION
+            compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
+            match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info)
+            version = (0, 0, 0) if match is None else match.groups()
     except Exception:
         _, error, _ = sys.exc_info()
-        warnings.warn('Error checking compiler version: {}'.format(error))
-    else:
-        info = info.decode().lower()
-        if 'gcc' in info or 'g++' in info:
-            # Sometimes the version is given as "major.x" instead of semver.
-            version = re.search(r'(\d+)\.(\d+|x)', info)
-            if version is not None:
-                major, minor = version.groups()
-                minor = 0 if minor == 'x' else int(minor)
-                if (int(major), minor) >= MINIMUM_GCC_VERSION:
-                    return True
-                else:
-                    # Append the detected version for the warning.
-                    compiler = '{} {}'.format(compiler, version.group(0))
-        elif 'Microsoft' in info:
-            info = info.decode().lower()
-            version = re.search(r'(\d+)\.(\d+)\.(\d+)', info)
-            if version is not None:
-                major, minor, revision = version.groups()
-                if (int(major), int(minor),
-                        int(revision)) >= MINIMUM_MSVC_VERSION:
-                    return True
-                else:
-                    # Append the detected version for the warning.
-                    compiler = '{} {}'.format(compiler, version.group(0))
+        warnings.warn('Error checking compiler version for {}: {}'.format(compiler, error))
+        return False
 
+    if tuple(map(int, version)) >= minimum_required_version:
+        return True
+
+    compiler = '{} {}'.format(compiler, version.group(0))
     warnings.warn(ABI_INCOMPATIBILITY_WARNING.format(compiler))
+
     return False
 
 
