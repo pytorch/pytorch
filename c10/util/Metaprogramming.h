@@ -181,7 +181,7 @@ struct _identity final {
   using type = T;
 
   template <class T>
-  decltype(auto) operator()(T&& arg) {
+  decltype(std::forward<T>(std::declval<T&&>())) operator()(T&& arg) {
     return std::forward<T>(arg);
   }
 };
@@ -192,7 +192,7 @@ struct _if_constexpr;
 template <>
 struct _if_constexpr<true> final {
 template <class ThenCallback, class ElseCallback>
-static decltype(auto) call(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
+static decltype(std::declval<ThenCallback&&>()(_identity())) call(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
   // The _identity instance passed in can be used to delay evaluation of an expression,
   // because the compiler can't know that it's just the identity we're passing in.
   return thenCallback(_identity());
@@ -202,7 +202,7 @@ static decltype(auto) call(ThenCallback&& thenCallback, ElseCallback&& elseCallb
 template <>
 struct _if_constexpr<false> final {
 template <class ThenCallback, class ElseCallback>
-static decltype(auto) call(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
+static decltype(std::declval<ElseCallback&&>()(_identity())) call(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
   // The _identity instance passed in can be used to delay evaluation of an expression,
   // because the compiler can't know that it's just the identity we're passing in.
   return elseCallback(_identity());
@@ -211,7 +211,9 @@ static decltype(auto) call(ThenCallback&& thenCallback, ElseCallback&& elseCallb
 } // namespace details
 
 template <bool Condition, class ThenCallback, class ElseCallback>
-decltype(auto) if_constexpr(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
+decltype(details::_if_constexpr<Condition>::call(std::forward<ThenCallback>(std::declval<ThenCallback&&>()),
+                                               std::forward<ElseCallback>(std::declval<ElseCallback&&>())))
+if_constexpr(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
 return details::_if_constexpr<Condition>::call(std::forward<ThenCallback>(thenCallback),
                                                std::forward<ElseCallback>(elseCallback));
 }

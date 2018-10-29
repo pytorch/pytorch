@@ -216,12 +216,33 @@ namespace test_filter_map {
 
 namespace if_constexpr_test {
 
+template<class R>
+class ReturnFunctor final {
+private:
+  R value;
+public:
+  ReturnFunctor(R v): value(std::move(v)) {}
+
+  template<class T>
+  R operator()(T) {
+    return std::move(value);
+  }
+};
+
 TEST(MetaprogrammingTest, ifConstexpr_whenIsTrue_thenReturnsTrueCase) {
+#if __cpp_generic_lambdas >= 201304
   EXPECT_EQ(4, if_constexpr<true>([](auto) { return 4; }, [](auto) { return 5; }));
+#else
+  EXPECT_EQ(4, if_constexpr<true>(ReturnFunctor<int>{4}, ReturnFunctor<int>{5}));
+#endif
 }
 
 TEST(MetaprogrammingTest, ifConstexpr_whenIsFalse_thenReturnsFalseCase) {
+#if __cpp_generic_lambdas >= 201304
   EXPECT_EQ(5, if_constexpr<false>([](auto) { return 4; }, [](auto) { return 5; }));
+#else
+  EXPECT_EQ(5, if_constexpr<false>(ReturnFunctor<int>{4}, ReturnFunctor<int>{5}));
+#endif
 }
 
 struct MovableOnly final {
@@ -235,6 +256,7 @@ struct MovableOnly final {
 };
 
 TEST(MetaprogrammingTest, ifConstexpr_worksWithMovableOnlyTypes) {
+#if __cpp_generic_lambdas >= 201304
   EXPECT_EQ(
       4,
       if_constexpr<true>([](auto) { return MovableOnly(4); }, [](auto) { return MovableOnly(5); })
@@ -243,6 +265,16 @@ TEST(MetaprogrammingTest, ifConstexpr_worksWithMovableOnlyTypes) {
       5,
       if_constexpr<false>([](auto) { return MovableOnly(4); }, [](auto) { return MovableOnly(5); })
           .value);
+#else
+  EXPECT_EQ(
+      4,
+      if_constexpr<true>(ReturnFunctor<MovableOnly>{4}, ReturnFunctor<MovableOnly>{5})
+          .value);
+  EXPECT_EQ(
+      5,
+      if_constexpr<true>(ReturnFunctor<MovableOnly>{4}, ReturnFunctor<MovableOnly>{5})
+          .value);
+#endif
 }
 
 struct MyClass1 {
@@ -253,17 +285,41 @@ struct MyClass2 {
   int val;
 };
 
+template<class T>
+struct ExtractValue1 {
+  T t;
+  template<class U> int extract(U _) {
+    static_assert(std::is_same<U, c10::guts::details::_identity>::value, "");
+    return _(t).value;
+  }
+};
+template<class T>
+struct ExtractValue2 {
+  T t;
+  template<class U> int extract(U _) {
+    static_assert(std::is_same<U, c10::guts::details::_identity>::value, "");
+    return _(t).val;
+  }
+};
+
 template <class T>
 int func(T t) {
+#if __cpp_generic_lambdas >= 201304
   return if_constexpr<std::is_same<T, MyClass1>::value>(
       [&](auto _) { return _(t).value; }, // this code is invalid for T == MyClass2
       [&](auto _) { return _(t).val; }    // this code is invalid for T == MyClass1
   );
+#else
+  return if_constexpr<std::is_same<T, MyClass1>::value, ExtractValue1<T>, ExtractValue2<T>>(
+      ExtractValue1<T>{t},  // this code is invalid for T == MyClass2
+      ExtractValue2<T>{t}   // this code is invalid for T == MyClass1
+  );
+#endif
 }
 
 TEST(MetaprogrammingTest, ifConstexpr_otherCaseCanHaveInvalidCode) {
-  EXPECT_EQ(8, func(MyClass1{.value = 8}));
-  EXPECT_EQ(4, func(MyClass2{.val = 4}));
+  EXPECT_EQ(8, func(MyClass1{/*.value =*/ 8}));
+  EXPECT_EQ(4, func(MyClass2{/*.val =*/ 4}));
 }
 
 }
