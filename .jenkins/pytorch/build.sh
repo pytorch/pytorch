@@ -73,6 +73,11 @@ fi
 
 # TODO: Don't install this here
 if ! which conda; then
+  if ! which pip; then
+    wget https://bootstrap.pypa.io/get-pip.py
+    python get-pip.py --user
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
   pip install mkl mkl-devel
 fi
 
