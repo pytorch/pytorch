@@ -27,10 +27,11 @@ class B(nn.Module):
         return self.c(x)
 
 
-def test_dist():
+def test_dist(rank):
+    torch.cuda.set_device(rank)
     x = torch.ones((2, 3, 16, 16)).cuda()
     b = B().cuda()
-    dist_b = torch.nn.parallel.DistributedDataParallel(b, )
+    dist_b = torch.nn.parallel.DistributedDataParallel(b, device_ids=[rank], output_device=rank)
     optimizer = optim.SGD(dist_b.parameters(), lr=0.1, momentum=0.9, weight_decay=0)
     optimizer.zero_grad()
     l = dist_b(x).mean()
@@ -54,16 +55,15 @@ if __name__ == "__main__":
     # CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.launch --nproc_per_node=2 test_dist.py
     # original: IndexError: list assignment index out of range [bug](https://github.com/facebookresearch/maskrcnn-benchmark/issues/52)
     # now: result same as run $ python test_dist.py
-
     import argparse
 
     parser = argparse.ArgumentParser(description="")
     parser.add_argument('--local_rank', type=int)
     args = parser.parse_args()
-    dist.init_process_group("nccl", init_method="tcp://127.0.0.1:23469", rank=args.local_rank, world_size=2)
+    dist.init_process_group("nccl", init_method="tcp://127.0.0.1:23571", rank=args.local_rank, world_size=2)
 
 
-    print([x.sum() for x in test_dist()])
+    print([x.sum() for x in test_dist(args.local_rank)])
     """
     # python test_dist.py
     print([x.sum() for x in test_without_dist()])
