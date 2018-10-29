@@ -537,7 +537,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::fork,
-        [](Node* node) {
+        [](const Node* node) {
           Code code(node->g(attr::Subgraph));
           JIT_ASSERT(node->blocks().size() == 0);
           JIT_ASSERT(node->hasAttribute(attr::Subgraph));
@@ -549,7 +549,7 @@ RegisterOperators reg({
         }),
     Operator(
         "aten::wait(Future(t) self) -> t",
-        [](Node* node) {
+        [](const Node* node) {
           return [=](Stack& stack) {
             push(stack, pop(stack).toFuture()->get());
             return 0;
@@ -759,7 +759,7 @@ RegisterOperators reg2({
 #define DEFINE_STRING_OP(op_name, string_op, result)                           \
 Operator(                                                                      \
     #op_name "(str a, str b) ->" #result,                                \
-    [](Node* node) {                                                           \
+    [](const Node* node) {                                                     \
       return [=](Stack& stack) {                                               \
         auto b = pop(stack).toStringRef();                                     \
         auto a = pop(stack).toStringRef();                                     \

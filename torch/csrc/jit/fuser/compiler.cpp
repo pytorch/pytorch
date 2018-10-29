@@ -116,17 +116,19 @@ static void upfrontCompilation(KernelSpec& spec) {
   setInputChunkDescriptors(spec);
 }
 
-void registerFusion(int64_t& key, const Node* fusion_group) {
+int64_t registerFusion(const Node* fusion_group) {
   // Creates and stores the FusionSpec
   auto graph = fusion_group->g(attr::Subgraph)->copy();
   EraseShapeInformation(*graph);
-  key = store(graph);
+  const auto key = store(graph);
   
   if (canFuseOnCPU() || canFuseOnGPU()) {
     const auto maybe_spec = retrieve(key);
     JIT_ASSERT(maybe_spec);
     upfrontCompilation(**maybe_spec);
   }  
+
+  return key;
 }
 
 std::shared_ptr<FusedKernel> compileKernel(

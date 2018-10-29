@@ -48,7 +48,7 @@ private:
   //  Acquiring these values at launch time would be too slow
   int device_;
   int maxBlocks_;
-  cudaDeviceProp prop_;
+  cudaDeviceProp* prop_;
   std::vector<char> ptx_;
   CUmodule module_;
   CUfunction function_;

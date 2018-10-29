@@ -17,8 +17,8 @@
 namespace torch { namespace jit { namespace fuser {
 
 // Performs device-independent "upfront" compilation of the given fusion_group
-// Sets key to a key that can be used to run the fusion later
-TORCH_API void registerFusion(int64_t& key, const Node* fusion_group);
+// Returns a key that can be used to run the fusion later
+TORCH_API int64_t registerFusion(const Node* fusion_group);
 
 // Performs device-specific "runtime" compilation of the given kernel
 //  with the runtime arguments specified in ArgSpec.

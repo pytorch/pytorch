@@ -20,9 +20,7 @@ bool cpu_fuser_enabled = false;
 
 int64_t registerFusion(const Node* fusion_group) {
   #if USE_CUDA_FUSER || USE_CPU_FUSER
-    int64_t key;
-    fuser::registerFusion(key, fusion_group); 
-    return key;
+    return fuser::registerFusion(fusion_group);
   #else
     throw std::runtime_error("Fusion not supported for this build.");
   #endif // USE_CUDA_FUSER || USE_CPU_FUSER
@@ -77,8 +75,7 @@ std::vector<at::Tensor> debugLaunchGraph(
 
     // Creates the stack, registers and runs the fusion
     Stack stack = fmap<IValue>(inputs);
-    int64_t key;
-    fuser::registerFusion(key, fusion_group);
+    const auto key = fuser::registerFusion(fusion_group);
     fuser::runFusion(key, stack);
     return fmap(stack, [](const IValue& iv) { return iv.toTensor(); });
   #else 

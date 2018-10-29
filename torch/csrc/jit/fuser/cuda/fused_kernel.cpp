@@ -35,7 +35,7 @@ void checkCUDAVersion(
   }
 }
 
-static void getMajorMinor(const cudaDeviceProp& prop, int& major, int& minor) {
+static void getMajorMinor(const cudaDeviceProp* const prop, int& major, int& minor) {
   int nvrtc_major, nvrtc_minor;
   TORCH_NVRTC_CHECK(nvrtcVersion(&nvrtc_major, &nvrtc_minor));
 
@@ -45,21 +45,21 @@ static void getMajorMinor(const cudaDeviceProp& prop, int& major, int& minor) {
   // Major and minor is determined by device properties and 
   // possibly "downcompiled" to a lower (compatible) compute architecture
   // based on the NVRTC version
-  major = prop.major;
-  minor = prop.minor;
-  if (nvrtc_major <= 7 && prop.major > 5) { // 7 supports 2-5.x
+  major = prop->major;
+  minor = prop->minor;
+  if (nvrtc_major <= 7 && prop->major > 5) { // 7 supports 2-5.x
     major = 5;
     minor = 0;
-  } else if (nvrtc_major <= 8 && prop.major > 6) { // 8 supports 2-6.x
+  } else if (nvrtc_major <= 8 && prop->major > 6) { // 8 supports 2-6.x
     major = 6;
     minor = 0;
-  } else if (nvrtc_major <= 9 && prop.major >= 7) { // 9 supports 3-7.2
+  } else if (nvrtc_major <= 9 && prop->major >= 7) { // 9 supports 3-7.2
     major = 7;
-    if (prop.major == 7 && prop.minor <= 2) minor = prop.minor;
+    if (prop->major == 7 && prop->minor <= 2) minor = prop->minor;
     else minor = 0;
-  } else if (nvrtc_major <= 10 && prop.major >= 7) { // 10 supports 3-7.5
+  } else if (nvrtc_major <= 10 && prop->major >= 7) { // 10 supports 3-7.5
     major = 7;
-    if (prop.major == 7 && prop.minor <= 5) minor = prop.minor;
+    if (prop->major == 7 && prop->minor <= 5) minor = prop->minor;
     else minor = 0;
   }
 }
@@ -91,7 +91,7 @@ FusedKernelCUDA::FusedKernelCUDA(
   at::cuda::set_device(device_);
   
   // Acquires device and NVRTC properties (for compile arch and occupancy calculations)
-  TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop_, device_)); 
+  prop_ = at::cuda::getCurrentDeviceProperties(); 
   int major, minor;
   getMajorMinor(prop_, major, minor);
 
@@ -132,7 +132,7 @@ FusedKernelCUDA::FusedKernelCUDA(
   // Computes max blocks
   TORCH_CU_CHECK(cuOccupancyMaxActiveBlocksPerMultiprocessor(
     &maxBlocks_, function_, 128, 0));
-  maxBlocks_ *= prop_.multiProcessorCount;
+  maxBlocks_ *= prop_->multiProcessorCount;
 
   // Resets device (end of hacked at::DeviceGuard)
   at::cuda::set_device(prior_device);
