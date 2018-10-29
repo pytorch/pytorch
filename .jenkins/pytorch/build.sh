@@ -77,6 +77,9 @@ if ! which conda; then
     sudo chown -R jenkins /usr/local
     wget https://bootstrap.pypa.io/get-pip.py
     python get-pip.py
+    pip install numpy pyyaml future hypothesis protobuf pytest pillow typing
+    # TODO: This probably doesn't work on Python 3.7
+    pip install scipy==1.1.0 scikit-image
   fi
   pip install mkl mkl-devel
 fi
