@@ -2811,6 +2811,13 @@ a")
         ''')
         self.assertExpected(str(cu.foo.graph))
 
+    def test_string_ops(self):
+        def foo():
+            a = "a" + "b"
+            return a + a, "ab" == "b", "ab" != "b", "ab" == "ab", "ab" != "ab"
+
+        self.checkScript(foo, ())
+
     def test_string_new_line(self):
         with self.assertRaisesRegex(RuntimeError, "expected a valid token*"):
             torch.jit.CompilationUnit('''
