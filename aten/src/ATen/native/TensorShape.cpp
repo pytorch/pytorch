@@ -153,8 +153,8 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
 Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
   auto result = at::empty({0}, self.options());
   setStorage(
-      result.unsafeGetTensorImpl(),
-      self.storage().unsafeGetStorageImpl(),
+      result,
+      self.storage(),
       storage_offset,
       size,
       stride);
@@ -163,8 +163,8 @@ Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t stor
 
 Tensor &as_strided_(Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
   setStorage(
-      self.unsafeGetTensorImpl(),
-      self.storage().unsafeGetStorageImpl(),
+      self,
+      self.storage(),
       storage_offset,
       size,
       stride);

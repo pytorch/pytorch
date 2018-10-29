@@ -43,8 +43,8 @@ inline TensorImpl* resize_impl_cuda_(
     self->set_sizes_and_strides(size, *stride);
     // NB: storage size can be different from numel.
     for (size_t dim = 0; dim < size.size(); ++dim) {
-      // FIXME: Don't rely on storage_size being negative...
-      // This behavior was carried over from TH
+      // FIXME: Don't rely on storage_size being negative because this
+      // may not be true for some edge cases.
       storage_size += (size[dim] - 1) * stride.value()[dim];
     }
   } else {
