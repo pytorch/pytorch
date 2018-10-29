@@ -847,6 +847,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * preserves the DeviceType of the source tensor (so, e.g., if you allocate
    * a tensor on CPU and then CopyFrom a CUDA tensor, that will to a
    * CUDA-to-CPU transfer).
+   *
+   * If the function is invoked without `context` the copy would be synchronous
    */
   void CopyFrom(const TensorImpl& src, at::BaseContext* context = nullptr) {
     AT_ASSERT(!is_variable());

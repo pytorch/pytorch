@@ -72,8 +72,7 @@ void executeGpuBinaryOpTest(
 
   // Copy result to CPU so we can inspect it
   auto* tensory_host = BlobGetMutableTensor(bloby_host, CPU);
-  tensory_host->CopyFrom(*tensory, &context);
-  context.FinishDeviceComputation();
+  tensory_host->CopyFrom(*tensory);
 
   for (int i = 0; i < shapey; ++i) {
     EXPECT_EQ(tensory_host->data<float>()[i], correct_output(i));
@@ -126,8 +125,7 @@ TEST(MathUtilGPUTest, testAddStripedBatch) {
 
   // Copy result to CPU so we can inspect it
   auto* tensory_host = BlobGetMutableTensor(bloby_host, CPU);
-  tensory_host->CopyFrom(*tensory, &context);
-  context.FinishDeviceComputation();
+  tensory_host->CopyFrom(*tensory);
 
   for (int k = 0; k < 33; k++) {
     for (int i = 0; i < 25; i++) {
@@ -403,8 +401,7 @@ class ReduceTensorGPUTest : public testing::Test {
   void VerifyResult(const std::vector<float>& expected_output) {
     Blob* blob_y_host = ws_.CreateBlob("Y_host");
     auto* Y_host = BlobGetMutableTensor(blob_y_host, CPU);
-    Y_host->CopyFrom(*Y_, cuda_context_.get());
-    cuda_context_->FinishDeviceComputation();
+    Y_host->CopyFrom(*Y_);
     ASSERT_EQ(expected_output.size(), Y_host->size());
     for (std::size_t i = 0; i < expected_output.size(); ++i) {
       EXPECT_FLOAT_EQ(expected_output[i], Y_host->data<float>()[i]);
@@ -682,8 +679,7 @@ class BroadcastGPUTest : public testing::Test {
   void VerifyResult(const std::vector<float>& expected_output) {
     Blob* blob_y_host = ws_.CreateBlob("Y_host");
     auto* Y_host = BlobGetMutableTensor(blob_y_host, CPU);
-    Y_host->CopyFrom(*Y_, cuda_context_.get());
-    cuda_context_->FinishDeviceComputation();
+    Y_host->CopyFrom(*Y_);
     ASSERT_EQ(expected_output.size(), Y_host->size());
     for (std::size_t i = 0; i < expected_output.size(); ++i) {
       EXPECT_FLOAT_EQ(expected_output[i], Y_host->data<float>()[i]);
@@ -767,11 +763,10 @@ class MomentsGPUTest : public testing::Test {
       const std::vector<float>& variance_data) {
     Blob* blob_mean_host = ws_.CreateBlob("mean_host");
     auto* mean_host = BlobGetMutableTensor(blob_mean_host, CPU);
-    mean_host->CopyFrom(*mean_, cuda_context_.get());
+    mean_host->CopyFrom(*mean_);
     Blob* blob_variance_host = ws_.CreateBlob("variance_host");
     auto* variance_host = BlobGetMutableTensor(blob_variance_host, CPU);
-    variance_host->CopyFrom(*variance_, cuda_context_.get());
-    cuda_context_->FinishDeviceComputation();
+    variance_host->CopyFrom(*variance_);
 
     ASSERT_EQ(mean_data.size(), mean_host->size());
     for (std::size_t i = 0; i < mean_data.size(); ++i) {
@@ -891,8 +886,7 @@ class TransposeGPUTest : public testing::Test {
   void VerifyResult(const std::vector<float>& expected_output) {
     Blob* blob_y_host = ws_.CreateBlob("Y_host");
     auto* Y_host = BlobGetMutableTensor(blob_y_host, CPU);
-    Y_host->CopyFrom(*Y_, cuda_context_.get());
-    cuda_context_->FinishDeviceComputation();
+    Y_host->CopyFrom(*Y_);
     ASSERT_EQ(expected_output.size(), Y_host->size());
     for (std::size_t i = 0; i < expected_output.size(); ++i) {
       EXPECT_FLOAT_EQ(expected_output[i], Y_host->data<float>()[i]);
