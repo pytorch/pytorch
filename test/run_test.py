@@ -43,7 +43,7 @@ TESTS = [
 ]
 """
 
-TESTS = ['distributed']
+TESTS = ['distributed', 'thd_distributed']
 
 WINDOWS_BLACKLIST = [
     'distributed',
