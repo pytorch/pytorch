@@ -1313,6 +1313,18 @@ _builtin_blacklist = {
     'prelu',
     'hardshrink',
     'threshold',
+
+    # ops with inplace option
+    'relu',
+    'hardtanh',
+    'relu6',
+    'elu',
+    'selu',
+    'celu',
+    'leaky_relu',
+    'rrelu',
+    'tanh',
+    'sigmoid',
 }
 
 
