@@ -460,7 +460,7 @@ void addObjectMethods(py::module& m) {
           "Initialize this tensor to given shape and data type. "
           "Fail if the given data type cannot be accessed from python.")
       .def_property_readonly(
-          "_shape", [](const TensorCPU& t) { return t.dims().vec(); })
+          "_shape", [](const TensorCPU& t) { return t.sizes().vec(); })
       .def("_reshape", [](TensorCPU* t, std::vector<int64_t> dims) {
         t->Resize(dims);
       });
