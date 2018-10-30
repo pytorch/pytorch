@@ -176,6 +176,17 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
     }
     return result;
   }
+
+  Value* asValue(
+      SourceRange loc,
+      Method& m) override {
+    std::vector<Value*> values;
+    for (auto sugared_item : asTuple(loc, m)) {
+      values.push_back(sugared_item->asValue(loc, m));
+    }
+    auto node = m.graph()->createTuple(values);
+    return m.graph()->insertNode(node)->output();
+  }
 };
 
 // defines how modules/methods behave inside the script subset.
