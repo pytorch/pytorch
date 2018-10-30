@@ -346,16 +346,6 @@
     - THIndexTensor* index
 ]]
 [[
-  name: data_ptr
-  with_gil: True
-  device_guard: False
-  return: void*
-  cpu_half: True
-  cname: data
-  arguments:
-    - THTensor* self
-]]
-[[
   name: _th_equal
   cname: equal
   variants:

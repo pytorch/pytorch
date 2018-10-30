@@ -125,9 +125,6 @@ inline Tensor & Tensor::_th_scatter_add_(int64_t dim, const Tensor & index, cons
 inline Tensor Tensor::_th_gather(int64_t dim, const Tensor & index) const {
     return type()._th_gather(*this, dim, index);
 }
-inline void* Tensor::data_ptr() const {
-    return type().data_ptr(*this);
-}
 inline bool Tensor::_th_equal(const Tensor & other) const {
     return type()._th_equal(*this, other);
 }
@@ -1237,6 +1234,9 @@ inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) con
 }
 inline Scalar Tensor::_local_scalar() const {
     return type()._local_scalar(*this);
+}
+inline void* Tensor::data_ptr() const {
+    return type().data_ptr(*this);
 }
 inline Tensor & Tensor::set_(Storage source) {
     return type().set_(*this, source);
