@@ -303,7 +303,6 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 
   int64_t dim() const override;
   const at::Storage& storage() const override;
-  int64_t storage_offset() const override;
 
   std::shared_ptr<Function> get_grad_accumulator();
   virtual std::shared_ptr<Function>& get_grad_fn() {
@@ -375,6 +374,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   // get_grad_accumulator.
   std::mutex mutex_;
 
+  int64_t storage_offset() const override;
  private:
   int64_t get_device_slow() const override;
 };

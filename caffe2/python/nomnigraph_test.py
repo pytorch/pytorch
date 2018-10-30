@@ -373,6 +373,14 @@ class TestBindings(test_util.TestCase):
         d_2 = nn.controlFlow[0].annotation.device_option
         assert d == d_2
 
+    def test_has_device_option(self):
+        nn = ng.NNModule()
+        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        assert not node.annotation.hasDeviceOption()
+        d = caffe2_pb2.DeviceOption()
+        node.annotation.device_option = d
+        assert node.annotation.hasDeviceOption()
+
     def test_distributed_annotations(self):
         nn = ng.NNModule()
         key = nn.dataFlow.createNode(ng.NeuralNetData("key"))
