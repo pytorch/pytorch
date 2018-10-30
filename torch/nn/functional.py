@@ -899,7 +899,6 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 
 @torch._jit_internal.weak_script
 def hardshrink(input, lambd=0.5):
-    # type: (Tensor, float) -> Tensor
     r"""
     hardshrink(input, lambd=0.5) -> Tensor
 
@@ -907,6 +906,7 @@ def hardshrink(input, lambd=0.5):
 
     See :class:`~torch.nn.Hardshrink` for more details.
     """
+    # type: (Tensor, float) -> Tensor
     return torch.hardshrink(input, lambd)
 
 
