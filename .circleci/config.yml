@@ -126,7 +126,7 @@ pytorch_linux_cpu_build_defaults: &pytorch_linux_cpu_build_defaults
         # This IAM user allows write access to S3 bucket for sccache
         export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V2}
         export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V2}
-        git submodule sync && git submodule update --init
+        git submodule sync && git submodule update -q --init
         .jenkins/pytorch/build.sh 2>&1 | ts
 
 pytorch_linux_build_defaults: &pytorch_linux_build_defaults
