@@ -227,6 +227,10 @@ def sub(g, self, other, alpha=None):
     return g.op("Sub", self, _if_scalar_type_as(g, other, self))
 
 
+def rsub(g, self, other, alpha=None):
+    return sub(g, other, self, alpha=alpha)
+
+
 def mul(g, self, other):
     # See Note [Pointwise by scalar]
     other = _maybe_get_scalar(other)

@@ -612,6 +612,7 @@ _(aten, storage_offset) \
 _(aten, stride) \
 _(aten, strides) \
 _(aten, sub) \
+_(aten, rsub) \
 _(aten, sum) \
 _(aten, svd) \
 _(aten, symeig) \

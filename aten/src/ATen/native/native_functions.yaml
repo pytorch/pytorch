@@ -1900,6 +1900,13 @@
 - func: sub_(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   variants: method
 
+- func: rsub(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+
+# For C++ only, until we have conversion from C++ numbers to Tensor
+- func: rsub(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
+  variants: function
+
 - func: s_native_addmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   dispatch:
     CPU: s_addmm_out_sparse_dense_cpu
