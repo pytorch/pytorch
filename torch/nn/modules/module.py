@@ -574,6 +574,12 @@ class Module(object):
             object.__delattr__(self, name)
 
     def _register_state_dict_hook(self, hook):
+        r"""These hooks will be called with arguments: `self`, `state_dict`,
+        `prefix`, `local_metadata`, after the `state_dict` of `self` is set.
+        Note that only parameters and buffers of `self` or its children are
+        guaranteed to exist in `state_dict`. The hooks may modify `state_dict`
+        inplace or return a new one.
+        """
         handle = hooks.RemovableHandle(self._state_dict_hooks)
         self._state_dict_hooks[handle.id] = hook
         return handle
@@ -614,6 +620,11 @@ class Module(object):
         return destination
 
     def _register_load_state_dict_pre_hook(self, hook):
+        r"""These hooks will be called with arguments: `state_dict`, `prefix`,
+        `local_metadata`, `strict`, `missing_keys`, `unexpected_keys`,
+        `error_msgs`, before loading `state_dict` into `self`. These arguments
+        are exactly the same as those of `_load_from_state_dict`.
+        """
         handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
         self._load_state_dict_pre_hooks[handle.id] = hook
         return handle
