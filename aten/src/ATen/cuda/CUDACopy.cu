@@ -25,7 +25,7 @@ struct CopyOp {
           dst_val = static_cast<dst_T>(
               static_cast<inter_copy_type_t<dst_T>>(__ldg(&src_val)));
 #else
-          dst_val = static_cast<dst_T>(static_cast<inter_copy_type_t<dst_T>>(__ldg(src_val)));
+          dst_val = static_cast<dst_T>(static_cast<inter_copy_type_t<dst_T>>(src_val));
 #endif
         });
   }
@@ -54,13 +54,13 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
       ((src.is_contiguous() && dst.is_contiguous()) || (numel == 1)) &&
       same_type;
 
-  int16_t src_device = src.get_device();
-  int16_t dst_device = dst.get_device();
+  Device src_device = src.device();
+  Device dst_device = dst.device();
 
   // Try to enable p2p access. This also handles the case src_device ==
   // dst_device.
   bool p2pEnabled = THCState_getPeerToPeerAccess(
-      globalContext().getTHCState(), src_device, dst_device);
+      globalContext().getTHCState(), src_device.index(), dst_device.index());
 
   // We always perform the copy on the source device, using the
   // current stream on the source device.
@@ -73,7 +73,7 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
   // user to add needed synchronization on the dst device, since the
   // stream on the dst device that wishes to synchronize may not be
   // the same index as the one on the src device.
-  CUDAStream copy_stream = getCurrentCUDAStream(src_device);
+  CUDAStream copy_stream = getCurrentCUDAStream(src_device.index());
   if (src_device != dst_device && copy_stream == NULL) {
     // This is a cross-device copy on the default stream. We perform a
     // two-way barrier between both devices' default streams before
@@ -84,7 +84,7 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
     // src waits on dst barrier (src already waits on src)
     CUDAEvent dst_ready;
     DeviceGuard device_guard_dst{dst_device};
-    dst_ready.record(getDefaultCUDAStream(dst_device));
+    dst_ready.record(getDefaultCUDAStream(dst_device.index()));
 
     DeviceGuard device_guard_src{src_device};
     dst_ready.block(copy_stream);
@@ -161,7 +161,7 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
     src_ready.record(copy_stream);
 
     DeviceGuard device_guard{dst_device};
-    src_ready.block(getDefaultCUDAStream(dst_device));
+    src_ready.block(getDefaultCUDAStream(dst_device.index()));
   }
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -194,7 +194,7 @@ void copy_to_cpu(Tensor& dst, const Tensor& src) {
   Tensor dst_contig = dst.contiguous();
   Tensor src_contig = src.contiguous();
 
-  DeviceGuard device_guard{static_cast<int16_t>(src.get_device())};
+  DeviceGuard device_guard{src.device()};
   CUDAStream stream = getCurrentCUDAStream();
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_to_cpu", [&]() {
