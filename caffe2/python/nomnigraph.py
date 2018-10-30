@@ -75,6 +75,21 @@ class NNModule(object):
     def replaceNode(self, old_node, new_node):
         return self._NNModule.dataFlow().replaceNode(old_node, new_node)
 
+    def replaceProducer(self, tensor, new_producer):
+        C.replaceProducer(tensor, new_producer)
+
+    def replaceAllUsesWith(self, old_tensor, new_tensor):
+        C.replaceAllUsesWith(old_tensor, new_tensor)
+
+    def replaceAsConsumer(self, old_consumer, new_consumer):
+        C.replaceAsConsumer(old_consumer, new_consumer)
+
+    def replaceSubgraph(self, subgraph, new_node, inputs, outputs):
+        self._NNModule.replaceSubgraph(subgraph, new_node, inputs, outputs)
+
+    def deleteSubgraph(self, subgraph):
+        self._NNModule.deleteSubgraph(subgraph)
+
     def convertToCaffe2Proto(self, old_proto=None):
         if not old_proto:
             old_proto = caffe2_pb2.NetDef()

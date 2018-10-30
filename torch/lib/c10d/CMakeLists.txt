@@ -30,33 +30,10 @@ else()
   message(STATUS "Not able to find MPI, will compile c10d without MPI support")
 endif()
 
-if(C10D_USE_CUDA)
-  find_package(NCCL)
-  if(NCCL_FOUND)
-    message(STATUS "NCCL_LIBRARIES: ${NCCL_LIBRARIES}")
-    message(STATUS "NCCL_INCLUDE_DIRS: ${NCCL_INCLUDE_DIRS}")
-    if(NCCL_MAJOR_VERSION AND NOT (NCCL_MAJOR_VERSION LESS 2))
-      message(STATUS "NCCL Version 2 or higher found, will "
-        "compile with NCCL distributed backend")
-      set(DISTRIBUTED_NCCL_FOUND true)
-    else()
-      message(STATUS "Found NCCL, but the NCCL version is either not 2+ or not "
-        "determinable, will not compile with NCCL distributed "
-        "backend")
-    endif()
-  else()
-    message(STATUS "Not able to find NCCL, will not "
-      "compile with NCCL distributed backend")
-  endif()
-endif()
-
 function(copy_header file)
   configure_file(${file} ${CMAKE_BINARY_DIR}/include/c10d/${file} COPYONLY)
 endfunction()
 
-if(DISTRIBUTED_NCCL_FOUND)
-  option(USE_C10D_NCCL "USE C10D NCCL" ON)
-endif()
 if(MPI_FOUND)
   option(USE_C10D_MPI "USE C10D MPI" ON)
 endif()
@@ -84,9 +61,9 @@ else()
 endif()
 
 
-if(DISTRIBUTED_NCCL_FOUND)
+if(USE_NCCL)
   list(APPEND C10D_SRCS ProcessGroupNCCL.cpp)
-  list(APPEND C10D_LIBS ${NCCL_LIBRARIES})
+  list(APPEND C10D_LIBS __caffe2_nccl)
 endif()
 
 if(MPI_FOUND)
@@ -143,8 +120,7 @@ copy_header(Types.hpp)
 copy_header(Utils.hpp)
 copy_header(ProcessGroupGloo.hpp)
 
-if(DISTRIBUTED_NCCL_FOUND)
-  target_include_directories(c10d PUBLIC ${NCCL_INCLUDE_DIRS})
+if(USE_NCCL)
   copy_header(ProcessGroupNCCL.hpp)
   copy_header(NCCLUtils.hpp)
 endif()

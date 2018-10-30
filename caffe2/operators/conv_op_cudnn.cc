@@ -572,7 +572,7 @@ bool CudnnConvOp::DoRunWithType() {
       "If you set group, the number of output channels should be divisible "
       "by group.");
 
-  int group_offset_filter = filter.size() / group_;
+  int group_offset_filter = filter.numel() / group_;
 
   // Set up the cudnn algorithms & workspace if necessary
   bool input_changed = (X.sizes() != cudnn_input_dims_);
@@ -918,7 +918,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
       "If you set group, the number of output channels should be divisible "
       "by group.");
 
-  int group_offset_filter = filter.size() / group_;
+  int group_offset_filter = filter.numel() / group_;
   if (kernel_.size() == 1) {
     ConvPoolOpBase<CUDAContext>::ComputePads({H});
   } else if (kernel_.size() == 2) {

@@ -205,12 +205,11 @@ void TensorSerializer::Serialize(
         "created a tensor of non-zero shape but never filled its data via "
         "mutable_data() calls. This means that it makes no sense to serialize "
         "the tensor content.");
-  } else {
-    // Uncomment this when we try to remove this behavior entirely, see T35723601
-    //LOG(ERROR)
-    //    << "You're trying to serialize tensor with zero numel and no dtype. "
-    //    << "This is a legacy behavior and it WILL BREAK. Contact PyTorch team "
-    //    << "for details or see D10380678. Offending blob name: " << name;
+  } else if (!input.dtype_initialized()) {
+    C10_LOG_EVERY_MS(WARNING, 1000)
+        << "You're trying to serialize tensor with zero numel and no dtype. "
+        << "This is a legacy behavior and it WILL BREAK. Contact PyTorch team "
+        << "for details. Offending blob name: " << name;
   }
 
   TensorProto& proto = *proto_ptr;

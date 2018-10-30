@@ -43,7 +43,7 @@ struct FusedKernel {
   void launch(
     at::ArrayRef<at::Tensor> inputs
   , std::vector<at::Tensor>& outputs);
-  
+
   const std::vector<TensorDesc>& outputDescriptors() const {
     return output_desc;
   }
@@ -64,7 +64,7 @@ protected:
   virtual void launch_raw(uint32_t numel, void** arguments) = 0;
 
   virtual uint64_t get_rand_offset(uint32_t numel) = 0;
-  bool has_random;
+  bool has_random = false;
   std::string name;
   // We keep these around for debugging
   std::string compilation_unit;
@@ -82,7 +82,7 @@ protected:
   std::vector<PartitionDesc> chunk_desc;
 };
 
-} // namespace jit 
+} // namespace jit
 } // namespace torch
 
 #endif // USE_CPU_FUSER || USE_CUDA_FUSER

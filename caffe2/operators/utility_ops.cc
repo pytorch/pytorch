@@ -813,7 +813,7 @@ bool NanCheckOp<CPUContext>::RunOnDevice() {
   }
 
   if (&X != Y) {
-    Y->CopyFrom(X, &context_);
+    Y->CopyFrom(X);
   }
   return true;
 }

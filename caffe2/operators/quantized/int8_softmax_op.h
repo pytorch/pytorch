@@ -210,7 +210,7 @@ class Int8SoftmaxOp final : public Operator<CPUContext> {
     Int8Softmax(
         X.t.data<uint8_t>(),
         X.t.dim(0),
-        X.t.size() / X.t.dim(0),
+        X.t.numel() / X.t.dim(0),
         input_multiplier,
         input_left_shift,
         diff_min,
