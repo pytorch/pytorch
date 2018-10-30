@@ -667,8 +667,8 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
   graph->registerOutput(d.value());
   graph->registerOutput(e.value());
 
-  auto a_var = autograd::make_variable(at::CPU(at::kFloat).tensor(2, 2), true);
-  auto b_var = autograd::make_variable(at::CPU(at::kFloat).tensor(2, 2), false);
+  auto a_var = autograd::make_variable(at::empty_strided(2, 2, at::CPU(at::kFloat).options()), true);
+  auto b_var = autograd::make_variable(at::empty_strided(2, 2, at::CPU(at::kFloat).options()), false);
   setInputTypes(*graph, ArgumentSpec(true, {a_var, b_var}, 2));
   PropagateInputShapes(*graph);
   PropagateRequiresGrad(graph);
