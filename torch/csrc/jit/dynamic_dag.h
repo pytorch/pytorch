@@ -207,12 +207,12 @@ void DynamicDAG<T>::debugCheckInvariants() {
     const auto& vertex = vertices_.at(ord);
     if (!vertex) continue;
 
-    AT_ASSERTM(vertex->ord == ord, toString());
+    C10_ASSERT(vertex->ord == ord, toString());
     for (auto* v : vertex->in_edges()) {
-      AT_ASSERTM(v->ord < ord, toString());
+      C10_ASSERT(v->ord < ord, toString());
     }
     for (auto* v : vertex->out_edges()) {
-      AT_ASSERTM(v->ord > ord, toString());
+      C10_ASSERT(v->ord > ord, toString());
     }
   }
 }

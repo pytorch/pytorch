@@ -135,7 +135,7 @@ inline CAFFE2_API at::Device OptionToDevice(const caffe2::DeviceOption option) {
 inline void ExtractDeviceOption(
     DeviceOption* device_option,
     const at::Device& device) {
-  AT_ASSERT(device_option);
+  C10_ASSERT(device_option);
   device_option->CopyFrom(DeviceToOption(device));
 }
 

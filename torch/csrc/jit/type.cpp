@@ -152,7 +152,7 @@ TypePtr inferTypeFrom(const IValue& value) {
   } else if (value.isTuple()) {
     return TupleType::create(fmap(value.toTuple()->elements(), inferTypeFrom));
   }
-  AT_ASSERTM(false, "Unhandled IValue kind in inferTypeFrom");
+  C10_ASSERT(false, "Unhandled IValue kind in inferTypeFrom");
 }
 
 c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
@@ -263,7 +263,11 @@ TORCH_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::string
 
   if(auto vt = type->cast<VarType>()) {
     auto it = type_env.find(vt->name());
-    AT_ASSERTM(it != type_env.end(), "schema has unbound type variable '", vt->name(), "' in its return type");
+    C10_ASSERT(
+        it != type_env.end(),
+        "schema has unbound type variable '",
+        vt->name(),
+        "' in its return type");
     return it->second;
   } else {
     auto new_contained = fmap(type->containedTypes(), [&](TypePtr t) {

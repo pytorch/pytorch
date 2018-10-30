@@ -69,7 +69,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   // TODO(jerryzh): add a Get(DeviceType) function?
   template <class T>
   const T& Get() const {
-    AT_ASSERTM(
+    C10_ASSERT(
         IsType<T>(),
         "wrong type for the Blob instance. Blob contains ",
         meta_.name(),
@@ -186,7 +186,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
  private:
   void free_() {
     if (has_ownership_) {
-      AT_ASSERTM(pointer_ != nullptr, "Can't have ownership of nullptr");
+      C10_ASSERT(pointer_ != nullptr, "Can't have ownership of nullptr");
       (*meta_.deleteFn())(pointer_);
     }
   }

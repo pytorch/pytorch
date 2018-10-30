@@ -63,7 +63,7 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
       }
       return (*cpu_dispatch_ptr)(std::forward<ArgTypes>(args)...);
     } else if (device_type == DeviceType::CUDA) {
-      AT_ASSERTM(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
+      C10_ASSERT(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
       return (*cuda_dispatch_ptr)(std::forward<ArgTypes>(args)...);
     } else {
       AT_ERROR("DispatchStub: unsupported device type", device_type);
@@ -75,17 +75,17 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
     (void)capability;
 #ifdef HAVE_AVX2_CPU_DEFINITION
     if (capability >= static_cast<int>(CPUCapability::AVX2)) {
-      AT_ASSERTM(AVX2, "DispatchStub: missing AVX2 kernel");
+      C10_ASSERT(AVX2, "DispatchStub: missing AVX2 kernel");
       return AVX2;
     }
 #endif
 #ifdef HAVE_AVX_CPU_DEFINITION
     if (capability >= static_cast<int>(CPUCapability::AVX)) {
-      AT_ASSERTM(AVX, "DispatchStub: missing AVX kernel");
+      C10_ASSERT(AVX, "DispatchStub: missing AVX kernel");
       return AVX;
     }
 #endif
-    AT_ASSERTM(DEFAULT, "DispatchStub: missing default kernel");
+    C10_ASSERT(DEFAULT, "DispatchStub: missing default kernel");
     return DEFAULT;
   }
 

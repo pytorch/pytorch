@@ -304,13 +304,14 @@ function(target_enable_style_warnings TARGET)
             -Wno-strict-overflow
             -fdiagnostics-show-option
             -Wno-conversion
-            -Wpedantic
             -Wundef
             )
     # -Wno-gnu-zero-variadic-macro-arguments is not available in GCC-4.8.5. Set
     # only when using clang.
     # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
+    # Otherwise, we use an alternate but loose way by not specifying pedantic.
     if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+      list(APPEND WARNING_OPTIONS "-Wpedantic")
       list(APPEND WARNING_OPTIONS "-Wno-gnu-zero-variadic-macro-arguments")
     endif()
     set(WERROR $ENV{WERROR})

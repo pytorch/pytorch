@@ -106,7 +106,7 @@ class PyTorchStreamReader final {
     readAndValidateFileFooter();
     // Do this now since we're reasonably sure this is actually a PyT file from
     // the header.
-    AT_ASSERTM(
+    C10_ASSERT(
         file_size_ % kFieldAlignment == 0,
         "File length is not a multiple of the alignment"
         " size. Is this a valid PyTorch model file?");
@@ -127,19 +127,19 @@ class PyTorchStreamReader final {
     size_t size;
     size_t retkey;
     std::tie(retval, retkey, size) = getNextRecord();
-    AT_ASSERT(key == retkey);
+    C10_ASSERT(key == retkey);
     return std::tuple<at::DataPtr, size_t>(std::move(retval), size);
   }
 
   // return dataptr, key, size
   std::tuple<at::DataPtr, size_t, size_t> getNextRecord() {
     size_t key = cursor_;
-    AT_ASSERTM(hasNextRecord(), "No more record, but hasNextRecord is called.");
-    AT_ASSERTM(
+    C10_ASSERT(hasNextRecord(), "No more record, but hasNextRecord is called.");
+    C10_ASSERT(
         key % kFieldAlignment == 0,
         "Provided key is not divisible by the alignment size.");
     auto tag = read64BitIntegerLittleEndian();
-    AT_ASSERTM(
+    C10_ASSERT(
         tag == RecordTags::STORAGE,
         "Attempted to read a record of non-storage type");
     auto size = read64BitIntegerLittleEndian();
@@ -176,7 +176,7 @@ class PyTorchStreamReader final {
     // TODO endian swap on platforms that need it?
     in_->read(reinterpret_cast<char*>(&retval), 8);
     std::streamsize read_bytes = in_->gcount();
-    AT_ASSERTM(
+    C10_ASSERT(
         read_bytes == 8,
         "Expected to read 8 bytes but got %llu bytes",
         read_bytes);
@@ -198,13 +198,13 @@ class PyTorchStreamReader final {
     cursor_ = 0;
     in_->seekg(cursor_);
     uint64_t magic = read64BitIntegerLittleEndian();
-    AT_ASSERTM(
+    C10_ASSERT(
         magic == kFileMagicNumber,
         "Magic number mismatch in PyTorch file. File may"
         " be corrupted or is not actually a PyTorch file.");
     // magic number mismatch in PyTorch file.
     uint64_t file_format_version = read64BitIntegerLittleEndian();
-    AT_ASSERTM(
+    C10_ASSERT(
         file_format_version <= kMaxSupportedFileFormatVersion,
         "Attempted to read a PyTorch file with version "
         "%llu, but the maximum supported version for reading is "
@@ -220,11 +220,11 @@ class PyTorchStreamReader final {
     cursor_ = file_size_ - kFieldAlignment;
     in_->seekg(cursor_);
     auto tag = read64BitIntegerLittleEndian();
-    AT_ASSERTM(
+    C10_ASSERT(
         tag == RecordTags::FOOTER,
         "File footer has wrong record type. Is this file corrupted?");
     last_record_offset_ = read64BitIntegerLittleEndian();
-    AT_ASSERTM(
+    C10_ASSERT(
         last_record_offset_ < file_size_,
         "Offset of last record is higher than the size"
         " of the file! Is this file corrupted?");
@@ -241,7 +241,7 @@ class PyTorchStreamWriter final {
   }
 
   uint64_t writeRecord(const void* data, size_t size) {
-    AT_ASSERTM(!finalized_, "should not be finalized!");
+    C10_ASSERT(!finalized_, "should not be finalized!");
     uint64_t record_offset = cursor_;
     last_record_idx_ = record_offset;
     write64BitIntegerLittleEndian(RecordTags::STORAGE);
@@ -253,7 +253,7 @@ class PyTorchStreamWriter final {
   }
 
   void writeEndOfFile() {
-    AT_ASSERTM(!finalized_, "cannot finalize again!");
+    C10_ASSERT(!finalized_, "cannot finalize again!");
     writeFileFooter();
     finalized_ = true;
   }
@@ -351,14 +351,14 @@ class PyTorchFileWriter final {
       : out_(filename, std::ios_base::binary), stream_writer_(&out_) {}
 
   uint64_t writeRecord(const void* data, size_t size) {
-    AT_ASSERTM(
+    C10_ASSERT(
         !stream_writer_.finalized(),
         "cannot write to a finalized stream writer.");
     return stream_writer_.writeRecord(data, size);
   }
 
   void writeEndOfFile() {
-    AT_ASSERTM(
+    C10_ASSERT(
         !stream_writer_.finalized(),
         "cannot write end to a finalized stream writer.");
     stream_writer_.writeEndOfFile();

@@ -113,7 +113,7 @@ class CAFFE2_API BaseContext {
   }
 
   inline void EnforceMetaCopyOK() {
-    AT_ASSERTM(
+    C10_ASSERT(
         SupportsNonFundamentalTypes(), "Context requires fundamental types");
   }
 

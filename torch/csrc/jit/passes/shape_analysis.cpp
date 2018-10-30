@@ -898,7 +898,11 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
       case aten::_cast_Int: return at::kInt;
       case aten::_cast_Long: return at::kLong;
       case aten::_cast_Short: return at::kShort;
-      default: AT_ASSERTM(false, "unknown node kind in get_cast_scalar_type: ", node->kind().toQualString());
+      default:
+        C10_ASSERT(
+            false,
+            "unknown node kind in get_cast_scalar_type: ",
+            node->kind().toQualString());
     }
   };
   static const register_formula_for cast_ops {{

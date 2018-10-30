@@ -29,7 +29,7 @@ void SetAllocator(at::DeviceType t, at::Allocator* alloc) {
 
 at::Allocator* GetAllocator(const at::DeviceType& t) {
   auto* alloc = allocator_array[static_cast<int>(t)];
-  AT_ASSERTM(alloc, "Allocator for ", t, " is not set.");
+  C10_ASSERT(alloc, "Allocator for ", t, " is not set.");
   return alloc;
 }
 

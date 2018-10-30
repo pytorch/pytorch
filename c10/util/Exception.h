@@ -20,7 +20,7 @@ namespace c10 {
 /// The primary ATen error class.
 /// Provides a complete error message with source location information via
 /// `what()`, and a more concise message via `what_without_backtrace()`. Should
-/// primarily be used with the `AT_ERROR` macro.
+/// primarily be used with the `C10_ERROR` macro.
 ///
 /// NB: c10::Error is handled specially by the default torch to suppress the
 /// backtrace, see torch/csrc/Exceptions.h
@@ -110,44 +110,44 @@ C10_API std::string GetExceptionString(const std::exception& e);
 // TODO: variants that print the expression tested and thus don't require
 // strings
 // TODO: CAFFE_ENFORCE_WITH_CALLER style macro
-
-// TODO: move AT_ERROR to C10_ERROR
 // TODO: consolidate the enforce and assert messages. Assert is a bit confusing
 // as c++ assert quits, while this throws.
-// TODO: merge AT_CHECK with AT_ASSERTM. CHECK in fbcode means strict failure if
-// not met.
 
-#define AT_ERROR(...) \
+#define C10_ERROR(...) \
   throw ::c10::Error({__func__, __FILE__, __LINE__}, ::c10::str(__VA_ARGS__))
+#define AT_ERROR C10_ERROR
 
-#define AT_WARN(...) \
+#define C10_WARN(...) \
   ::c10::Warning::warn({__func__, __FILE__, __LINE__}, ::c10::str(__VA_ARGS__))
+#define AT_WARN C10_WARN
 
-#define AT_ASSERT(cond)                       \
-  if (!(cond)) {                              \
-    AT_ERROR(                                 \
-        #cond " ASSERT FAILED at ",           \
-        __FILE__,                             \
-        ":",                                  \
-        __LINE__,                             \
-        ", please report a bug to PyTorch."); \
+// C10_ASSERT is used to guard programming errors, not user errors. If it is
+// triggered, it should mean that a pytorch bug is found. For user error, use
+// C10_ENFORCE.
+// Note: strictly, this is wrong, because if we identify a programming error,
+// we should exit early and not continue execution. This is further complicated
+// by the fact that we are using the same error type (c10::Error) to notify
+// the user, and the only way to distinguish it is the string telling users to
+// report a bug. For errors that are not recoverable (like leading to a
+// corrupted internal state), consider directly CHECK instead of asserting.
+// TODO: move to CHECK explicitly in such cases.
+#define C10_ASSERT(cond, ...)                \
+  if (!(cond)) {                             \
+    C10_ERROR(                               \
+        #cond " ASSERT FAILED at ",          \
+        __FILE__,                            \
+        ":",                                 \
+        __LINE__,                            \
+        ", please report a bug to PyTorch.", \
+        ##__VA_ARGS__);                      \
   }
+#define AT_ASSERT C10_ASSERT
+#define AT_ASSERTM C10_ASSERT
 
-#define AT_ASSERTM(cond, ...)                 \
-  if (!(cond)) {                              \
-    AT_ERROR(::c10::str(                      \
-        #cond,                                \
-        " ASSERT FAILED at ",                 \
-        __FILE__,                             \
-        ":",                                  \
-        __LINE__,                             \
-        ", please report a bug to PyTorch. ", \
-        __VA_ARGS__));                        \
+#define C10_ENFORCE(cond, ...) \
+  if (!(cond)) {               \
+    C10_ERROR(__VA_ARGS__);    \
   }
-
-#define AT_CHECK(cond, ...)            \
-  if (!(cond)) {                       \
-    AT_ERROR(::c10::str(__VA_ARGS__)); \
-  }
+#define AT_CHECK C10_ENFORCE
 
 #endif // C10_UTIL_EXCEPTION_H_
