@@ -772,6 +772,17 @@ class TestSparse(TestCase):
         test_shape(1000, 100, 0, 0)
 
     @skipIfRocm
+    def test_sparse_addmm(self):
+        def test_shape(m, n, p, nnz):
+            D1 = torch.randn(n, p).requires_grad_(True)
+            D2 = torch.randn(m, p).requires_grad_(True)
+            S = self._gen_sparse(2, nnz, [n, m])[0]
+            S.requires_grad_(True)
+            y = torch.sparse.addmm(D1, S, D2).sum()
+
+        test_shape(7, 5, 3, 20)
+
+    @skipIfRocm
     def test_dsmm(self):
         def test_shape(di, dj, dk, nnz):
             x = self._gen_sparse(2, nnz, [di, dj])[0]
