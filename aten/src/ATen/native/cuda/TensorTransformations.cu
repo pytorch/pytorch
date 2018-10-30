@@ -130,26 +130,19 @@ template <typename scalar_t>
 __global__
 void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
                       int64_t roll_dim, int64_t shift, int64_t start,
-                      int64_t* shape, int64_t total_dims) {
+                      int64_t size, int64_t stride, int64_t total_dims) {
   int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
   if (linear_index >= N) {
     return;
   }
-
-  // amount by which to increment or decrement linear_index to shift that
-  // dimensions by 1.
-  int64_t roll_dim_multiplier = 1;
-  for (int64_t i = total_dims - 1; i  > roll_dim; i--) {
-    roll_dim_multiplier *= shape[i];
-  }
   // roll dim idx is the index of linear_index along the rolling dimension.
-  int64_t roll_dim_idx = linear_index % (roll_dim_multiplier * shape[roll_dim]) / roll_dim_multiplier;
+  int64_t roll_dim_idx = linear_index % (stride * size) / stride;
   // index into the source data to find appropriate value.
   int64_t source_idx = 0;
-  if( roll_dim_idx >= (shape[roll_dim] - start) ) {
-    source_idx = linear_index - (shift * roll_dim_multiplier);
+  if( roll_dim_idx >= (size - start) ) {
+    source_idx = linear_index - (shift * stride);
   } else {
-    source_idx = linear_index + (start * roll_dim_multiplier);
+    source_idx = linear_index + (start * stride);
   }
   out_tensor[linear_index] = in_tensor[source_idx];
 }
@@ -159,11 +152,14 @@ Tensor roll_cuda(const Tensor& self, IntList shifts, IntList dims) {
   // todo: support rolling along no or multiple dimensions as in numpy.roll.
   AT_CHECK(dims.size() == 1, "only single dimension roll currently supported");
   AT_CHECK(shifts.size() == dims.size(), "shifts and dimensions must align");
-  // If the first dimension is zero, this is an empty tensor and rolls do nothing.
-  // Return a clone so the caller can safely modify result, and avoid a div by
-  // zero error below.
-  if( self.size(0) == 0 ) {
-    return self.clone();
+
+  auto in_tensor = self;
+  if( ! self.is_contiguous() ) {
+    in_tensor = self.contiguous();
+  }
+  auto out_tensor = at::empty_like(in_tensor);
+  if (out_tensor.numel() == 0) {
+    return out_tensor;
   }
   const int64_t N = self.numel();
   const int64_t dim = dims[0];
@@ -181,16 +177,16 @@ Tensor roll_cuda(const Tensor& self, IntList shifts, IntList dims) {
   auto shape = self.sizes().vec();
   auto shape_t = at::CPU(kLong).tensorFromBlob(shape.data(), {static_cast<int64_t>(shape.size())});
 
-  auto out_tensor = at::empty_like(self);
-  if (out_tensor.numel() == 0) {
-    return out_tensor;
-  }
+  auto strides = self.strides().vec();
+  auto strides_t = at::CPU(kLong).tensorFromBlob(strides.data(), {static_cast<int64_t>(strides.size())});
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "roll_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "roll_cuda", [&] {
     roll_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-      self.data<scalar_t>(), out_tensor.data<scalar_t>(), N,
+      in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N,
       dim, shifts[0], start,
-      shape_t.toType(CUDA(kLong)).data<int64_t>(), total_dims);
+      size,
+      in_tensor.strides()[dim],
+      total_dims);
   });
 
   return out_tensor;
