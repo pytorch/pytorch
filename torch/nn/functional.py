@@ -1003,72 +1003,54 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
         return input.softmax(dim, dtype=dtype)
 
 
-def _sample_gumbel(shape, eps=1e-10, out=None):
-    """
-    Sample from Gumbel(0, 1)
-
-    based on
-    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
-    (MIT license)
-    """
-    U = out.resize_(shape).uniform_() if out is not None else torch.rand(shape)
-    return - torch.log(eps - torch.log(U + eps))
-
-
-def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
-    """
-    Draw a sample from the Gumbel-Softmax distribution
-
-    based on
-    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb
-    (MIT license)
-    """
-    dims = logits.dim()
-    gumbel_noise = _sample_gumbel(logits.size(), eps=eps, out=logits.data.new())
-    y = logits + gumbel_noise
-    return softmax(y / tau, dims - 1)
-
-
 def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
     r"""
-    Sample from the Gumbel-Softmax distribution and optionally discretize.
+    Samples from the `Gumbel-Softmax distribution`_ and optionally discretizes.
 
     Args:
-      logits: `[batch_size, num_features]` unnormalized log probabilities
+      logits: `[..., num_features]` unnormalized log probabilities
       tau: non-negative scalar temperature
       hard: if ``True``, the returned samples will be discretized as one-hot vectors,
             but will be differentiated as if it is the soft sample in autograd
+      eps: Deprecated parameter to avoid log(0). Now handled elsewhere.
 
     Returns:
-      Sampled tensor of shape ``batch_size x num_features`` from the Gumbel-Softmax distribution.
+      Sampled tensor of same shape as `logits` from the Gumbel-Softmax distribution.
       If ``hard=True``, the returned samples will be one-hot, otherwise they will
-      be probability distributions that sum to 1 across features
+      be probability distributions that sum to 1 across dim = -1.
 
-    Constraints:
+    Details:
+        This function is here for legacy reasons, may be removed from nn.Functional in the future.
 
-    - Currently only work on 2D input :attr:`logits` tensor of shape ``batch_size x num_features``
+    Examples::
+        >>> logits = torch.randn(20, 32)
+        >>> # Sample soft categorical using reparametrization trick:
+        >>> F.gumbel_softmax(logits, tau=1, hard=False)
+        >>> # Sample hard categorical using "Straight-through" trick:
+        >>> F.gumbel_softmax(logits, tau=1, hard=True)
 
-    Based on
-    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
-    (MIT license)
+    .. _Gumbel-Softmax distribution:
+        https://arxiv.org/abs/1611.00712
+        https://arxiv.org/abs/1611.01144
     """
-    shape = logits.size()
-    assert len(shape) == 2
-    y_soft = _gumbel_softmax_sample(logits, tau=tau, eps=eps)
+
+    if eps != 1e-10:
+        warnings.warn("`eps` parameter is deprecated.", DeprecationWarning)
+
+    y_soft = logits.new(logits.shape)
+    y_soft = (logits - y_soft.exponential_().log()) / tau  # Gumbel noise
+    y_soft = y_soft.softmax(-1)  # Gumbel softmax noise
+    # dist = torch.distributions.RelaxedOneHotCategorical(
+    #     temperature=tau, logits=logits, validate_args=False)
+    # y_soft = dist.rsample()
     if hard:
-        _, k = y_soft.max(-1)
-        # this bit is based on
-        # https://discuss.pytorch.org/t/stop-gradients-for-st-gumbel-softmax/530/5
-        y_hard = logits.new_zeros(*shape).scatter_(-1, k.view(-1, 1), 1.0)
-        # this cool bit of code achieves two things:
-        # - makes the output value exactly one-hot (since we add then
-        #   subtract y_soft value)
-        # - makes the gradient equal to y_soft gradient (since we strip
-        #   all other gradients)
-        y = y_hard - y_soft.detach() + y_soft
+        # Straight through.
+        _, index = y_soft.max(-1, keepdim=True)
+        y_hard = logits.new_zeros(*logits.shape).scatter_(-1, index, 1.0)
+        return y_hard - y_soft.detach() + y_soft
     else:
-        y = y_soft
-    return y
+        # Reparametrization trick.
+        return y_soft
 
 
 def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
