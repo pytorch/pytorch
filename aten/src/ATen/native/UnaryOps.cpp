@@ -89,11 +89,11 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
 }
 
 Tensor& fill_(Tensor& self, Scalar value) {
-  return at::_fill_(self, value);
+  return at::_th_fill_(self, value);
 }
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
-  return at::_fill_(self, value);
+  return at::_th_fill_(self, value);
 }
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {

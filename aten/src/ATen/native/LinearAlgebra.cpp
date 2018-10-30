@@ -358,7 +358,7 @@ Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) 
 Tensor dot(const Tensor& self, const Tensor& tensor) {
   check_1d(self, "self", "dot");
   check_1d(tensor, "tensor", "dot");
-  return at::_dot(self, tensor);
+  return at::_th_dot(self, tensor);
 }
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
