@@ -211,10 +211,10 @@
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
-- name: _cumprod(Tensor self, int64_t dim)
+- name: _th_cumprod(Tensor self, int64_t dim)
   self: cumprod_backward(grad, self, dim)
 
-- name: _cumsum(Tensor self, int64_t dim)
+- name: _th_cumsum(Tensor self, int64_t dim)
   self: cumsum_backward(grad, dim)
 
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad)
