@@ -7883,7 +7883,8 @@ new_module_tests = [
         constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
         input_size=(2, 4, 6),
         cudnn=True,
-        skip_double=TEST_WITH_ROCM,
+        test_cuda=(not TEST_WITH_ROCM),
+        decorator=skipIfRocm
     ),
     dict(
         fullname='ConvTranspose1d',
