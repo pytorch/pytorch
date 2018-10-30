@@ -83,16 +83,19 @@ int main(int argc, char *argv[]) {
   setsid();  // Daemonize the process
 
   std::unique_ptr<ManagerServerSocket> srv_socket;
+  char manager_socket_filename[] = "/tmp/fileXXXXXX";
+  const auto manager_fd = mkstemp(manager_socket_filename);
   try {
-    char tmpfile[L_tmpnam];
-    if (std::tmpnam(tmpfile) == NULL)
-      throw std::runtime_error("could not generate a random filename for manager socket");
+    if (manager_fd == -1) {
+      throw std::runtime_error(
+          "could not generate a random filename for manager socket");
+    }
     // TODO: better strategy for generating tmp names
     // TODO: retry on collisions - this can easily fail
-    srv_socket.reset(new ManagerServerSocket(std::string(tmpfile)));
+    srv_socket.reset(new ManagerServerSocket(std::string(manager_socket_filename)));
     register_fd(srv_socket->socket_fd);
-    print_init_message(tmpfile);
-    DEBUG("opened socket %s", tmpfile);
+    print_init_message(manager_socket_filename);
+    DEBUG("opened socket %s", manager_socket_filename);
   } catch(...) {
     print_init_message("ERROR");
     throw;
@@ -156,6 +159,9 @@ int main(int argc, char *argv[]) {
     DEBUG("freeing %s", obj_name.c_str());
     shm_unlink(obj_name.c_str());
   }
+
+  unlink(manager_socket_filename);
+  close(manager_fd);
 
   DEBUG("manager done");
   return 0;
