@@ -1031,29 +1031,24 @@ def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
 
 def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
     r"""
-    Sample from the Gumbel-Softmax distribution and optionally discretize.
+    Sample from the Gumbel-Softmax distribution and optionally discretize across the last Tensor dimension.
 
     Args:
-      logits: `[batch_size, num_features]` unnormalized log probabilities
+      logits: unnormalized log probabilities
       tau: non-negative scalar temperature
       hard: if ``True``, the returned samples will be discretized as one-hot vectors,
             but will be differentiated as if it is the soft sample in autograd
 
     Returns:
-      Sampled tensor of shape ``batch_size x num_features`` from the Gumbel-Softmax distribution.
+      Sampled tensor from the Gumbel-Softmax distribution.
       If ``hard=True``, the returned samples will be one-hot, otherwise they will
-      be probability distributions that sum to 1 across features
-
-    Constraints:
-
-    - Currently only work on 2D input :attr:`logits` tensor of shape ``batch_size x num_features``
+      be probability distributions that sum to 1 across the last dimension
 
     Based on
     https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
     (MIT license)
     """
     shape = logits.size()
-    assert len(shape) == 2
     y_soft = _gumbel_softmax_sample(logits, tau=tau, eps=eps)
     if hard:
         _, k = y_soft.max(-1)
