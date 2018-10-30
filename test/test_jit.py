@@ -4666,7 +4666,7 @@ a")
         tester = self
 
         class Foo(torch.jit.ScriptModule):
-            __constants__ = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
+            __constants__ = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']
 
             def __init__(self):
                 super(Foo, self).__init__(False)
@@ -4685,14 +4685,8 @@ a")
                     self.h = type(1)
                 with tester.assertRaisesRegex(TypeError, "not a valid constant"):
                     self.i = (3, 4, {})
-                self.j = (6, (1, 2, 3), 8)
-
-            @torch.jit.script_method
-            def forward(self, x):
-                return x + self.a + self.b + self.f[0] + self.j[1][2]
 
         f = Foo()
-        self.assertEqual(f(torch.ones(1)), torch.ones(1) + 1 + 1.2 + 3 + 3)
 
     def test_script_module_for(self):
         class M(torch.jit.ScriptModule):
@@ -5067,17 +5061,6 @@ a")
 
         v = torch.randn(1, device='cuda')
         self.assertEqual(foo(v), 0)
-
-    def test_script_storage_offset(self):
-        @torch.jit.script
-        def foo(a):
-            return a.storage_offset()
-
-        v = torch.randn(5)
-        self.assertEqual(foo(v), 0)
-
-        v.set_(v.storage(), 3, [1], [1])
-        self.assertEquals(foo(v), 3)
 
     def test_script_chunk(self):
         @torch.jit.script
@@ -7534,7 +7517,7 @@ a")
         ''')
 
         cu.foo(torch.tensor(0))
-        with self.assertRaisesRegex(torch.jit.Exception, "Exception"):
+        with self.assertRaisesRegex(torch.jit._Exception, "Exception"):
             cu.foo(torch.tensor(1))
 
         @torch.jit.script
@@ -7548,7 +7531,7 @@ a")
 
         foo(torch.tensor(0))
         # we don't currently validate the name of the exception
-        with self.assertRaisesRegex(torch.jit.Exception, "Exception"):
+        with self.assertRaisesRegex(torch.jit._Exception, "Exception"):
             foo(torch.tensor(1))
 
         @torch.jit.script
@@ -7556,9 +7539,19 @@ a")
             a = Exception()
             raise a
 
-        # Exception() creates a python call
-        with self.assertRaisesRegex(RuntimeError, "expected value of type Tensor"):
+        # a gets DCEd because the expression following raise is ignored
+        with self.assertRaisesRegex(torch.jit._Exception, "failed in interpreter"):
             foo()
+
+        @torch.jit.script
+        def foo_except_used():
+            a = Exception()
+            print(a)
+            raise a
+
+        # a not DCEd
+        with self.assertRaisesRegex(RuntimeError, "expected value of type Tensor"):
+            foo_except_used()
 
         # We don't validate the expr following raise
         @torch.jit.script
@@ -9349,6 +9342,7 @@ def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
             call_args_str = ', '.join(actuals)
             call = "self.submodule({})".format(call_args_str)
             script = script_method_template.format(method_args, call)
+            print(script)
 
             # Create module to use the script method
             class TheModule(torch.jit.ScriptModule):

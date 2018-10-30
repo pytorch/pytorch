@@ -1374,8 +1374,8 @@ _register_builtin(len, 'aten::len')
 
 _register_builtin(_wait, 'aten::wait')
 
-# torch.jit.Exception
-Exception = torch._C.JITException
+# torch.jit._Exception
+_Exception = torch._C.JITException
 
 
 class _disable_tracing(object):

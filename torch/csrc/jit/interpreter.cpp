@@ -668,10 +668,11 @@ struct InterpreterStateImpl {
           if (!instructions[pc].debug_location) {
             throw;
           }
-          if (JITException* jit_e = dynamic_cast<JITException *>(&e)) {
-            instructions[pc].debug_location->wrapAndRethrowException(*jit_e, "operation failed in interpreter");
+          auto msg = instructions[pc].debug_location->wrapException(e, "operation failed in interpreter");
+          if (dynamic_cast<JITException *>(&e)) {
+            throw JITException(msg);
           } else {
-            instructions[pc].debug_location->wrapAndRethrowException(e, "operation failed in interpreter");
+            throw std::runtime_error(msg);
           }
         }
     }
