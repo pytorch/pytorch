@@ -691,14 +691,18 @@ def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
     return f(input, p, training)
 
 
+@torch._jit_internal.weak_script
 def threshold(input, threshold, value, inplace=False):
     r"""Thresholds each element of the input Tensor.
 
     See :class:`~torch.nn.Threshold` for more details.
     """
+    # type: (Tensor, float, float, bool) -> Tensor
     if inplace:
-        return torch._C._nn.threshold_(input, threshold, value)
-    return torch._C._nn.threshold(input, threshold, value)
+        result = torch._C._nn.threshold_(input, threshold, value)
+    else:
+        result = torch._C._nn.threshold(input, threshold, value)
+    return result
 
 
 threshold_ = _add_docstr(torch._C._nn.threshold_, r"""

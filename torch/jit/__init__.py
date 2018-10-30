@@ -1300,7 +1300,7 @@ class _ConstSequential(_ConstModuleList):
 
 _builtin_table = None
 
-_modules_containing_builtins = (torch, torch.nn.functional)
+_modules_containing_builtins = (torch, torch.nn.functional, torch._C._nn)
 
 # These functions don't have aten ops but have been converted to weak script, so
 # don't add them as builtins
@@ -1312,6 +1312,7 @@ _builtin_blacklist = {
     'pairwise_distance',
     'prelu',
     'hardshrink',
+    'threshold',
 }
 
 
