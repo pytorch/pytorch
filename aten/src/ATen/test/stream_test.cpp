@@ -152,7 +152,7 @@ TEST(TestStream, CUDAGuardTest) {
   // Setting a stream changes the current device and the stream on that device
   {
     at::cuda::CUDAGuard guard(streams1[1]);
-    ASSERT_EQ_CUDA(guard.last_device(), 1);
+    ASSERT_EQ_CUDA(guard.last_device(), at::Device(at::kCUDA, 1));
     ASSERT_EQ_CUDA(at::cuda::current_device(), 1);
     ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(1), streams1[1]);
   }
@@ -164,7 +164,7 @@ TEST(TestStream, CUDAGuardTest) {
   // Setting only the device changes only the current device and not the stream
   {
     at::cuda::CUDAGuard guard(/*device=*/1);
-    ASSERT_EQ_CUDA(guard.last_device(), 1);
+    ASSERT_EQ_CUDA(guard.last_device(), at::Device(at::kCUDA, 1));
     ASSERT_EQ_CUDA(at::cuda::current_device(), 1);
     ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(1), streams1[0]);
   }
@@ -196,13 +196,13 @@ TEST(TestStream, CUDAGuardMovableTest) {
   first.set_device(1);
   at::cuda::CUDAGuard second(std::move(first));
   ASSERT_EQ_CUDA(second.original_streams().size(), device_count);
-  ASSERT_EQ_CUDA(second.original_device(), 0);
-  ASSERT_EQ_CUDA(second.last_device(), 1);
+  ASSERT_EQ_CUDA(second.original_device(), at::Device(at::kCUDA, 0));
+  ASSERT_EQ_CUDA(second.last_device(), at::Device(at::kCUDA, 1));
   at::cuda::CUDAGuard third;
   third = std::move(second);
   ASSERT_EQ_CUDA(third.original_streams().size(), device_count);
-  ASSERT_EQ_CUDA(third.original_device(), 0);
-  ASSERT_EQ_CUDA(third.last_device(), 1);
+  ASSERT_EQ_CUDA(third.original_device(), at::Device(at::kCUDA, 0));
+  ASSERT_EQ_CUDA(third.last_device(), at::Device(at::kCUDA, 1));
 }
 
 // Streampool Round Robin
