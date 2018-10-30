@@ -15,7 +15,7 @@ namespace torch { namespace autograd {
 struct CopyBackwards : public Function {
   variable_list apply(variable_list&& grads) override;
 
-  at::Type *src_type;
+  at::Type *src_type = nullptr; // initialized for safety.
   int32_t src_device = -1;
 };
 

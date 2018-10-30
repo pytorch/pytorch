@@ -150,7 +150,7 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
         if (i == 0) {
           out->CopyFrom(in);
         } else {
-          auto oldSize = out->size();
+          auto oldSize = out->numel();
 
           CAFFE_ENFORCE(
               in.ndim() > 0,
@@ -164,7 +164,7 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
           auto* dst =
               (char*)out->raw_mutable_data() + oldSize * in.meta().itemsize();
           context_.template CopyItems<Context, Context>(
-              in.meta(), in.size(), in.raw_data(), dst);
+              in.meta(), in.numel(), in.raw_data(), dst);
         }
       }
     }

@@ -31,6 +31,15 @@
 C10_DECLARE_int(caffe2_log_level);
 C10_DECLARE_bool(caffe2_use_fatal_for_enforce);
 
+// Some versions of GLOG support less-spammy version of LOG_EVERY_MS. If it's
+// not available - just short-circuit to the always working one one.
+// We define the C10_ name to avoid confusing other files
+#ifdef LOG_EVERY_MS
+#define C10_LOG_EVERY_MS(severity, ms) LOG_EVERY_MS(severity, ms)
+#else
+#define C10_LOG_EVERY_MS(severity, ms) LOG(severity)
+#endif
+
 namespace c10 {
 
 using std::string;

@@ -4665,7 +4665,7 @@ a")
         tester = self
 
         class Foo(torch.jit.ScriptModule):
-            __constants__ = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']
+            __constants__ = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
 
             def __init__(self):
                 super(Foo, self).__init__(False)
@@ -4684,8 +4684,14 @@ a")
                     self.h = type(1)
                 with tester.assertRaisesRegex(TypeError, "not a valid constant"):
                     self.i = (3, 4, {})
+                self.j = (6, (1, 2, 3), 8)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.a + self.b + self.f[0] + self.j[1][2]
 
         f = Foo()
+        self.assertEqual(f(torch.ones(1)), torch.ones(1) + 1 + 1.2 + 3 + 3)
 
     def test_script_module_for(self):
         class M(torch.jit.ScriptModule):
@@ -5060,6 +5066,17 @@ a")
 
         v = torch.randn(1, device='cuda')
         self.assertEqual(foo(v), 0)
+
+    def test_script_storage_offset(self):
+        @torch.jit.script
+        def foo(a):
+            return a.storage_offset()
+
+        v = torch.randn(5)
+        self.assertEqual(foo(v), 0)
+
+        v.set_(v.storage(), 3, [1], [1])
+        self.assertEquals(foo(v), 3)
 
     def test_script_chunk(self):
         @torch.jit.script
@@ -9281,7 +9298,6 @@ def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
             call_args_str = ', '.join(actuals)
             call = "self.submodule({})".format(call_args_str)
             script = script_method_template.format(method_args, call)
-            print(script)
 
             # Create module to use the script method
             class TheModule(torch.jit.ScriptModule):
