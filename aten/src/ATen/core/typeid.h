@@ -458,6 +458,12 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 
+inline std::ostream& operator<<(
+    std::ostream& stream,
+    caffe2::TypeMeta typeMeta) {
+  return stream << typeMeta.name();
+}
+
 /**
  * Register unique id for a type so it can be used in TypeMeta context, e.g. be
  * used as a type for Blob or for Tensor elements.
