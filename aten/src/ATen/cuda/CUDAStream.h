@@ -95,6 +95,8 @@ struct AT_CUDA_API CUDAStream {
   cudaStream_t stream() const { return detail::CUDAStream_stream(internals()); }
   CUDAStreamInternals* internals() const;
 
+  Stream unwrap() const { return stream_; }
+
   void synchronize_with(const CUDAEvent& event) const;
 
 private:

@@ -23,12 +23,12 @@ struct CUDAGuard {
 
   /// Sets the CUDA stream and its associated device as the current one (calls
   /// `set_stream`).
-  explicit CUDAGuard(const CUDAStream& stream) {
+  explicit CUDAGuard(const CUDAStream& stream) : device_guard_() {
     set_stream(stream);
   }
 
   /// Calls `set_device` with the given index.
-  explicit CUDAGuard(int32_t device) {
+  explicit CUDAGuard(int32_t device) : device_guard_() {
     set_device(device);
   }
 
@@ -94,12 +94,12 @@ struct CUDAGuard {
   }
 
   /// Returns the device that was set upon construction of the guard.
-  Device original_device() const noexcept {
+  optional<Device> original_device() const noexcept {
     return device_guard_.original_device();
   }
 
   /// Returns the last device that was set via `set_device`, if any.
-  Device last_device() const noexcept {
+  optional<Device> last_device() const noexcept {
     return device_guard_.last_device();
   }
 
