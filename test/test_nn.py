@@ -30,13 +30,16 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, TEST_WITH_ROCM, \
     TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, download_file, PY3, PY34, to_gpu, \
-    get_function_arglist, skipCUDAMemoryLeakCheckIf
+    get_function_arglist, skipCUDAMemoryLeakCheckIf, load_tests
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, loss_reference_fns, get_reduction, \
     get_weight, smoothl1loss_reference, kldivloss_reference, ctcloss_reference
 
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 if TEST_SCIPY:
     from scipy import stats
@@ -2652,17 +2655,6 @@ class TestNN(NNTestCase):
     def test_Conv2d_naive_groups_cuda(self, dtype=torch.float):
         self._test_Conv2d_naive_groups("cuda", dtype)
 
-    def test_batchnorm_grad(self):
-        self._test_batchnorm_grad()
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
-    def test_batchnorm_grad_cuda(self):
-        self._test_batchnorm_grad("cuda")
-        if TEST_CUDNN:
-            with torch.backends.cudnn.flags(enabled=False):
-                self._test_batchnorm_grad("cuda")
-
     def test_batchnorm_eval(self):
         self._test_batchnorm_eval()
 
@@ -2670,9 +2662,6 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_batchnorm_eval_cuda(self, dtype=torch.float):
         self._test_batchnorm_eval("cuda", dtype)
-        if TEST_CUDNN:
-            with torch.backends.cudnn.flags(enabled=False):
-                self._test_batchnorm_eval("cuda", dtype)
 
     def test_batchnorm_simple_average(self):
         self._test_batchnorm_simple_average()
@@ -2681,9 +2670,6 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_batchnorm_simple_average_cuda(self):
         self._test_batchnorm_simple_average(torch.cuda.FloatTensor)
-        if TEST_CUDNN:
-            with torch.backends.cudnn.flags(enabled=False):
-                self._test_batchnorm_simple_average(torch.cuda.FloatTensor)
 
     def test_MaxPool1d_indices(self):
         self._test_maxpool_indices(1)
@@ -4898,9 +4884,6 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_batchnorm_update_stats_cuda(self):
         self._test_batchnorm_update_stats("cuda", torch.float)
-        if TEST_CUDNN:
-            with torch.backends.cudnn.flags(enabled=False):
-                self._test_batchnorm_update_stats("cuda", torch.float)
 
     def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
         input = torch.rand(2, 10)
@@ -4935,18 +4918,6 @@ class TestNN(NNTestCase):
         for size in wrong_sizes:
             with self.assertRaises(RuntimeError):
                 F.batch_norm(input, running_mean, running_var, bias=Parameter(torch.rand(size)))
-
-    def _test_batchnorm_grad(self, device="cpu", dtype=torch.double):
-        bs, n_feat, size_feat = 4, 5, 6
-        input = torch.arange(bs * n_feat * size_feat, device=device,
-                             requires_grad=True, dtype=dtype).view(bs, n_feat, size_feat)
-        weight = torch.arange(1, n_feat + 1, device=device, requires_grad=True, dtype=dtype)
-        bias = torch.arange(n_feat, device=device, requires_grad=True, dtype=dtype)
-        running_mean = 1 - torch.arange(n_feat, device=device, dtype=dtype)
-        running_var = 2 * torch.arange(n_feat, device=device, dtype=dtype)
-        for training in [False, True]:
-            _assertGradAndGradgradChecks(self, F.batch_norm, (input, running_mean, running_var, weight, bias,
-                                                              training, 0.1, 0.0001))
 
     def _test_batchnorm_eval(self, device="cpu", dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)
@@ -9177,22 +9148,6 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
     return transform_tensor, transform_ary, grid_ary
 # end TestNN.test_affine_* helpers
-
-
-num_shards = os.environ.get('TEST_NN_NUM_SHARDS', None)
-shard = os.environ.get('TEST_NN_SHARD', None)
-if num_shards is not None and shard is not None:
-    num_shards = int(num_shards)
-    shard = int(shard)
-
-    def load_tests(loader, tests, pattern):
-        test_suite = unittest.TestSuite()
-        for test_group in tests:
-            for test in test_group:
-                hash_id = int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16)
-                if hash_id % num_shards == shard:
-                    test_suite.addTest(test)
-        return test_suite
 
 
 if __name__ == '__main__':

@@ -186,11 +186,11 @@ class DistributedDataParallel(Module):
             self.bucket_sizes.append(0)
             # Now, we transpose again, so we iterate over bucket_elems, but getting tuples
             # of params from each device.
-            for idx, param_tuple in enumerate(zip(*param_buckets_tuple)):
+            for param_tuple in zip(*param_buckets_tuple):
                 if not param_tuple[0].requires_grad:
                     continue
                 for p in param_tuple:
-                    self.bucket_map[p] = (bucket_idx, idx)
+                    self.bucket_map[p] = (bucket_idx, self.bucket_sizes[bucket_idx])
                 self.bucket_sizes[bucket_idx] += 1
 
         self.buckets = [[[None for _ in range(self.bucket_sizes[i])]

@@ -18,7 +18,7 @@ void flatten_op_cpu_impl(
   output->Resize(input.size_to_dim(axis), input.size_from_dim(axis));
   context->CopyItemsSameDevice(
       input.meta(),
-      input.size(),
+      input.numel(),
       input.raw_data(),
       output->raw_mutable_data(input.meta()));
 }

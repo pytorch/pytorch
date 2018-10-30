@@ -212,7 +212,7 @@ void NCCL<T>::AllReduce(const NCCLExecution& ex) {
         CAFFE_NCCL_CHECK(ncclAllReduce(
             ctx.src->raw_data(),
             ctx.dst->raw_mutable_data(),
-            ctx.dst->size(),
+            ctx.dst->numel(),
             ncclTypeWrapper<T>::type,
             ncclSum,
             comm,
@@ -231,7 +231,7 @@ void NCCL<T>::Broadcast(const NCCLExecution& ex) {
       [&ex](const NCCLElement& ctx, ncclComm_t comm, cudaStream_t stream) {
         CAFFE_NCCL_CHECK(ncclBcast(
             ctx.dst->raw_mutable_data(),
-            ctx.dst->size(),
+            ctx.dst->numel(),
             ncclTypeWrapper<T>::type,
             ex.root,
             comm,
@@ -253,7 +253,7 @@ void NCCL<T>::Reduce(const NCCLExecution& ex) {
         CAFFE_NCCL_CHECK(ncclReduce(
             ctx.src->raw_data(),
             ctx.dst ? ctx.dst->raw_mutable_data() : nullptr,
-            ctx.src->size(),
+            ctx.src->numel(),
             ncclTypeWrapper<T>::type,
             ncclSum,
             ex.root,
@@ -283,7 +283,7 @@ void NCCL<T>::AllGather(const NCCLExecution& ex) {
         CAFFE_NCCL_CHECK(ncclAllGather(
             ctx.src->raw_data(),
             ctx.dst->raw_mutable_data(),
-            ctx.src->size(),
+            ctx.src->numel(),
             ncclTypeWrapper<T>::type,
             comm,
             stream));
@@ -315,7 +315,7 @@ void NCCL<T>::ReduceScatter(const NCCLExecution& ex) {
         CAFFE_NCCL_CHECK(ncclReduceScatter(
             ctx.src->raw_data(),
             ctx.dst->raw_mutable_data(),
-            ctx.dst->size(),
+            ctx.dst->numel(),
             ncclTypeWrapper<T>::type,
             ncclSum,
             comm,

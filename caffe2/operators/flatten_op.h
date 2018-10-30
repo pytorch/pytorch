@@ -22,7 +22,7 @@ class FlattenOp : public Operator<Context> {
     output->Resize(input.size_to_dim(axis_), input.size_from_dim(axis_));
     context_.CopyItemsSameDevice(
         input.meta(),
-        input.size(),
+        input.numel(),
         input.raw_data(),
         output->raw_mutable_data(input.meta()));
     return true;

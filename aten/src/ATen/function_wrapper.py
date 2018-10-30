@@ -527,6 +527,7 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('buffers', Optional[List[str]]),
     ('returns', List[ReturnType]),
     ('inplace', bool),
+    ('is_factory_method', bool),
     ('abstract', bool),
     ('requires_tensor', bool),
     ('device_guard', bool),
@@ -564,7 +565,7 @@ def check_methods_do_not_start_with_underscore(name, is_method):
     if name in {'_local_scalar', '_values', '_indices', '_nnz', '_dimI',
                 '_dimV', '_coalesced_'}:
         return
-    if is_method and name.startswith('_') and not name.startswith('__'):
+    if is_method and name.startswith('_') and not name.startswith('__') and not name.startswith('_th_'):
         message = "Function '{}' starts with a single underscore and is ".format(name)
         message += "configured to have a method on Tensor. Functions that start with "
         message += " a single underscore should only be functions in the at:: "
@@ -924,6 +925,7 @@ def create_generic(top_env, declarations):
             buffers=buffer_names,
             returns=option['returns'],
             inplace=option['inplace'],
+            is_factory_method=False,
             # See Note [Abstract ATen methods]
             abstract=abstract,
             requires_tensor=option.get('requires_tensor', False),
@@ -1070,7 +1072,8 @@ def create_generic(top_env, declarations):
 
         is_method = 'method' in option['variants']
         is_namespace_function = 'function' in option['variants']
-        is_factory_method = find_formal('TensorOptions', formals) and not dispatch_options
+        is_factory_method = find_formal('TensorOptions', formals) and \
+            not dispatch_options and 'method' not in option['variants']
         is_deprecated_factory_method = len(formals) > 0 and \
             formals[0]['dynamic_type'] == 'Type' and \
             option['return_type'] == 'Tensor' and option['deprecated']
@@ -1171,6 +1174,7 @@ def create_generic(top_env, declarations):
             buffers=None,
             returns=option['returns'],
             inplace=option['inplace'],
+            is_factory_method=is_factory_method,
             # See Note [Abstract ATen methods]
             abstract=abstract,
             requires_tensor=option.get('requires_tensor', False),

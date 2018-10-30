@@ -4,6 +4,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor_int8.h"
+#include "caffe2/operators/quantized/int8_simd.h"
 #include "caffe2/operators/quantized/int8_utils.h"
 
 namespace caffe2 {
@@ -192,7 +193,7 @@ class Int8AddOp final : public Operator<CPUContext> {
 
     Int8Add(
         X0.t.template data<uint8_t>(),
-        X0.t.size() / X0.t.dim(X0.t.ndim() - 1),
+        X0.t.numel() / X0.t.dim(X0.t.ndim() - 1),
         X0.t.dim(X0.t.ndim() - 1),
         X0_offset,
         X0_multiplier,

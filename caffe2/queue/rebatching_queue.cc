@@ -46,19 +46,19 @@ void concat(
       }
 
       // Skip empty tensors
-      if (input.size() == 0) {
+      if (input.numel() == 0) {
         continue;
       }
 
       context.CopyItemsToCPU(
           input.meta(),
-          input.size(),
+          input.numel(),
           input.raw_data() /* src */,
           destinations[j] /* dst */
       );
 
       destinations[j] =
-          (char*)destinations[j] + input.size() * input.itemsize();
+          (char*)destinations[j] + input.numel() * input.itemsize();
     }
   }
 }

@@ -142,6 +142,23 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   }
 };
 
+struct TORCH_API ForkValue : public SugaredValue {
+  ForkValue() {}
+
+  std::string kind() const override {
+    return "fork";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      SourceRange loc,
+      Method& m,
+      at::ArrayRef<NamedValue> attributes,
+      at::ArrayRef<NamedValue> inputs,
+      size_t n_binders) override {
+    AT_ERROR("Cannot call a fork value directly");
+  }
+};
+
 using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>;
 
 inline std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m, const SourceRange& loc){

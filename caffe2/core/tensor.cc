@@ -132,7 +132,7 @@ struct TensorStatGetter : BlobStatGetter {
     auto nbytes = tensor.nbytes();
     if (nbytes > 0 && tensor.IsType<std::string>()) {
       const auto* data = tensor.data<std::string>();
-      for (int i = 0; i < tensor.size(); ++i) {
+      for (int i = 0; i < tensor.numel(); ++i) {
         nbytes += data[i].size();
       }
     }
