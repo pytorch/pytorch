@@ -8666,7 +8666,7 @@ def check_output_types(self, func, ref_outputs, args, kwargs):
 
 
 def check_against_reference(self, func, reference_func, args, kwargs=None,
-        allow_unused=True, check_types=True, no_grad=False):
+                            allow_unused=True, check_types=True, no_grad=False):
     kwargs = kwargs if kwargs else {}
 
     def allSum(vs):
@@ -9269,7 +9269,7 @@ def add_autograd_test(
 
 
 def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=(),
-        output_process_fn=lambda x: x, kwargs=None):
+                           output_process_fn=lambda x: x, kwargs=None):
     test_name = 'test_nn_' + name
 
     if variant_name != '':
