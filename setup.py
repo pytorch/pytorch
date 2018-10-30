@@ -190,7 +190,7 @@ IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 
 BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
-USE_MKLDNN = check_env_flag('USE_MKLDNN')
+USE_MKLDNN = check_env_flag('USE_MKLDNN', 'ON')
 USE_CUDA_STATIC_LINK = check_env_flag('USE_CUDA_STATIC_LINK')
 RERUN_CMAKE = True
 
