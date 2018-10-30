@@ -42,8 +42,8 @@ class Int8FCOp final : public Operator<CPUContext> {
     const auto K = X.t.size_from_dim(1);
     const auto N = W.t.dim(0);
     CHECK_EQ(K, W.t.dim(1));
-    CHECK_EQ(N, B.t.size());
-    const auto M = X.t.size() / K;
+    CHECK_EQ(N, B.t.numel());
+    const auto M = X.t.numel() / K;
     Y->t.Resize(M, N);
 
     runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
@@ -75,9 +75,9 @@ class Int8FCOp final : public Operator<CPUContext> {
 
       uint8_t* inputPtr = X.t.template mutable_data<uint8_t>();
       if (K < 8) {
-        buffer->Resize(std::vector<int64_t>{X.t.size() + 8});
+        buffer->Resize(std::vector<int64_t>{X.t.numel() + 8});
         inputPtr = buffer->template mutable_data<uint8_t>() + 8;
-        memcpy(inputPtr, X.t.template data<uint8_t>(), X.t.size());
+        memcpy(inputPtr, X.t.template data<uint8_t>(), X.t.numel());
       }
 
       if (lastBatchSize_ != static_cast<size_t>(M) ||

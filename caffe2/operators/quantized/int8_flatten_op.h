@@ -30,7 +30,7 @@ class Int8FlattenOp : public Operator<CPUContext> {
     Y->t.Resize(X.t.size_to_dim(axis_), X.t.size_from_dim(axis_));
     context_.CopyItemsToCPU(
         X.t.meta(),
-        X.t.size(),
+        X.t.numel(),
         X.t.raw_data(),
         Y->t.raw_mutable_data(X.t.meta()));
     return true;

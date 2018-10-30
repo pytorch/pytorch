@@ -29,8 +29,8 @@ class Int8ReluOp final : public Operator<CPUContext> {
         this->template GetSingleArgument<float>("Y_scale", 1.0f);
     CHECK_EQ(Y_offset, X.zero_point);
     CHECK_EQ(Y_scale, X.scale);
-    EigenVectorMap<uint8_t>(Y->t.mutable_data<uint8_t>(), X.t.size()) =
-        ConstEigenVectorMap<uint8_t>(X.t.data<uint8_t>(), X.t.size())
+    EigenVectorMap<uint8_t>(Y->t.mutable_data<uint8_t>(), X.t.numel()) =
+        ConstEigenVectorMap<uint8_t>(X.t.data<uint8_t>(), X.t.numel())
             .cwiseMax(QuantizeUint8(X.scale, X.zero_point, 0));
     return true;
   }
