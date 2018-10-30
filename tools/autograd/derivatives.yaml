@@ -717,6 +717,13 @@
 - name: sub(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
 
+- name: rsub(Tensor self, Tensor other, *, Scalar alpha)
+  self: -grad * alpha
+  other: grad
+
+- name: rsub(Tensor self, Scalar other, *, Scalar alpha)
+  self: -grad * alpha
+
 - name: sum(Tensor self)
   self: grad.expand(self.sizes())
 
