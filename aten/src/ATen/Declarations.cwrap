@@ -2226,7 +2226,7 @@
     result_->maybe_zero_dim(self_->dim() == 0);
 ]]
 [[
-  name: th_addmm
+  name: _th_addmm
   cname: addmm
   variants:
     - function
@@ -2247,7 +2247,7 @@
       - THTensor* mat2
 ]]
 [[
-  name: th_addmm_
+  name: _th_addmm_
   variants: [function]
   return: self
   options:

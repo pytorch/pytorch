@@ -50,7 +50,7 @@ DONT_RECORD_TRACE = {
 
 # These functions have their names recorded under trace renamed,
 RENAME_TRACE = {
-    'th_addmm': 'addmm',
+    '_th_addmm': 'addmm',
     's_native_addmm': 'addmm',
     'zero': 'zeros_like',
     'fill': 'full_like',
