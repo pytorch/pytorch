@@ -1170,7 +1170,8 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
         padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
                                          (initialized to zeros) whenever it encounters the index.
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
-                                    is renormalized to have norm :attr:`max_norm`. Note: this will modify :attr:`weight` in-place.
+                                    is renormalized to have norm :attr:`max_norm`.
+                                    Note: this will modify :attr:`weight` in-place.
         norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
         scale_grad_by_freq (boolean, optional): If given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
@@ -1244,8 +1245,10 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         offsets (LongTensor, optional): Only used when :attr:`input` is 1D. :attr:`offsets` determines
                              the starting index position of each bag (sequence) in :attr:`input`.
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
-                                    is renormalized to have norm :attr:`max_norm`. Note: this will modify :attr:`weight` in-place.
-        norm_type (float, optional): The ``p`` in the ``p``-norm to compute for the :attr:`max_norm` option. Default ``2``.
+                                    is renormalized to have norm :attr:`max_norm`.
+                                    Note: this will modify :attr:`weight` in-place.
+        norm_type (float, optional): The ``p`` in the ``p``-norm to compute for the :attr:`max_norm` option.
+                                     Default ``2``.
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
                                                 Note: this option is not supported when ``mode="max"``.
