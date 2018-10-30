@@ -103,9 +103,9 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
       uint8_t* inputPtr = X.t.template mutable_data<uint8_t>();
       if ((isDepthwise && this->group_ < 8) ||
           (!isDepthwise && C / this->group_ < 8)) {
-        buffer->Resize(std::vector<int64_t>{X.t.size() + 8});
+        buffer->Resize(std::vector<int64_t>{X.t.numel() + 8});
         inputPtr = buffer->template mutable_data<uint8_t>() + 8;
-        memcpy(inputPtr, X.t.template data<uint8_t>(), X.t.size());
+        memcpy(inputPtr, X.t.template data<uint8_t>(), X.t.numel());
       }
 
       if (lastBatchSize_ != static_cast<size_t>(X.t.dim(0)) ||

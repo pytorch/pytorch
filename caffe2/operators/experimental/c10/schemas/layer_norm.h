@@ -10,8 +10,8 @@ struct LayerNorm final {
   static constexpr const char* name = "LayerNorm";
 
   struct Cache final {
-    Tensor scratch_ = Tensor{CPU};
-    Tensor seg_indices_ = Tensor{CPU};
+    Tensor scale = Tensor{CPU};
+    Tensor bias = Tensor{CPU};
   };
 
   using Signature = void(
@@ -21,10 +21,11 @@ struct LayerNorm final {
       Tensor* output_stddev,
       int axis,
       float epsilon,
-      Cache* cache);
+      Cache* cache,
+      BaseContext* context);
 
-  static constexpr c10::guts::array<const char*, 7> parameter_names = {
-      {"input", "output", "output_mean", "output_stddev", "axis", "epsilon", "cache"}};
+  static constexpr c10::guts::array<const char*, 8> parameter_names = {
+      {"input", "output", "output_mean", "output_stddev", "axis", "epsilon", "cache", "context"}};
 };
 
 } // namespace ops

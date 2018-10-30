@@ -1,64 +1,84 @@
 #include "caffe2/core/dispatch/KernelRegistration.h"
 #include "caffe2/operators/experimental/c10/schemas/layer_norm.h"
 #include "caffe2/utils/eigen_utils.h"
+#include "caffe2/utils/math.h"
 
 using caffe2::Tensor;
-
-namespace {
-template <typename T>
-using EigenMatrixMapRowMajor = Eigen::Map<
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>;
-
-template <typename T>
-using ConstEigenMatrixMapRowMajor = Eigen::Map<
-    const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>;
-} // namespace
 
 namespace caffe2 {
 namespace {
 
+template <typename T>
+void ComputeStdDevAndFusedParams(
+    const int N,
+    const T* mean,
+    const T* var,
+    T* stddev,
+    T* scale,
+    T* bias,
+    float epsilon) {
+  ConstEigenVectorArrayMap<T> var_arr(var, N);
+  EigenVectorArrayMap<T> stddev_arr(stddev, N);
+  EigenVectorArrayMap<T> scale_arr(scale, N);
+  scale_arr = (var_arr + static_cast<T>(epsilon)).rsqrt();
+  stddev_arr = scale_arr * (var_arr + static_cast<T>(epsilon));
+  EigenVectorArrayMap<T>(bias, N) =
+      -scale_arr * ConstEigenVectorArrayMap<T>(mean, N);
+}
+
+template <typename T>
+void LayerNormForward(
+    const int M,
+    const int N,
+    const T* X,
+    const T* scale,
+    const T* bias,
+    T* Y) {
+  EigenArrayMap<T>(Y, N, M) =
+      (ConstEigenArrayMap<T>(X, N, M).rowwise() *
+       ConstEigenVectorArrayMap<T>(scale, M).transpose())
+          .rowwise() +
+      ConstEigenVectorArrayMap<T>(bias, M).transpose();
+}
+
 template <class DataType>
 void layer_norm_impl(
-    const Tensor& input,
-    Tensor* output,
+    const Tensor& X,
+    Tensor* Y,
     Tensor* mean,
-    Tensor* stdev,
+    Tensor* sig,
     int axis,
     float epsilon,
-    ops::LayerNorm::Cache* cache) {
-  CAFFE_ENFORCE_GE(input.dims().size(), 2, "LayerNorm requires input dim >= 2");
+    ops::LayerNorm::Cache* cache,
+    BaseContext* context) {
 
-  const auto canonical_axis = input.canonical_axis_index(axis);
-  const int left = input.size_to_dim(canonical_axis);
-  const int right = input.size_from_dim(canonical_axis);
+  CAFFE_ENFORCE_GE(X.ndim(), 2, "LayerNorm requires input dim >= 2.");
+  const int canonical_axis = X.canonical_axis_index(axis);
+  const int M = X.size_to_dim(canonical_axis);
+  const int N = X.size_from_dim(canonical_axis);
+  Y->ResizeLike(X);
+  std::vector<int> moments_dims(
+      X.dims().cbegin(), X.dims().cbegin() + canonical_axis);
+  moments_dims.push_back(1);
+  mean->Resize(moments_dims);
+  sig->Resize(moments_dims);
+  cache->scale.Resize(M);
+  cache->bias.Resize(M);
 
-  output->ResizeLike(input);
-  std::vector<int64_t> stats_dims(
-      input.dims().begin(), input.dims().begin() + canonical_axis);
-  stats_dims.push_back(1);
-  mean->Resize(stats_dims);
-  stdev->Resize(stats_dims);
+  const DataType* X_data = X.template data<DataType>();
+  DataType* Y_data = Y->template mutable_data<DataType>();
+  DataType* mean_data = mean->template mutable_data<DataType>();
+  DataType* sig_data = sig->template mutable_data<DataType>();
+  DataType* scale_data = cache->scale.template mutable_data<DataType>();
+  DataType* bias_data = cache->bias.template mutable_data<DataType>();
 
-  auto input_map = ConstEigenMatrixMapRowMajor<float>(
-      input.template data<float>(), left, right);
-  auto mean_map = EigenMatrixMapRowMajor<float>(
-      mean->template mutable_data<float>(), left, 1);
-  auto stdev_map = EigenMatrixMapRowMajor<float>(
-      stdev->template mutable_data<float>(), left, 1);
-  auto output_map = EigenMatrixMapRowMajor<float>(
-      output->template mutable_data<float>(), left, right);
-
-  auto sqr = [](float f) { return f * f; };
-  auto add_ep = [epsilon](float f) { return f + epsilon; };
-  auto fsqrt = [](float f) { return std::sqrt(f); };
-  // Calculate row-wise statistics
-  mean_map = input_map.rowwise().mean();
-  stdev_map =
-      (input_map.unaryExpr(sqr).rowwise().mean() - mean_map.unaryExpr(sqr))
-          .unaryExpr(add_ep)
-          .unaryExpr(fsqrt);
-  output_map = (input_map - mean_map.replicate(1, right))
-                   .cwiseQuotient(stdev_map.replicate(1, right));
+  const std::array<int, 2> dims = {M, N};
+  const int axis_ = 1;
+  math::Moments<DataType, CPUContext>(
+      2, dims.data(), 1, &axis_, X_data, mean_data, sig_data, static_cast<CPUContext*>(context));
+  ComputeStdDevAndFusedParams<DataType>(
+      M, mean_data, sig_data, sig_data, scale_data, bias_data, epsilon);
+  LayerNormForward<DataType>(M, N, X_data, scale_data, bias_data, Y_data);
 }
 } // namespace
 } // namespace caffe2

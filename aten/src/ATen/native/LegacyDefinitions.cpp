@@ -5,10 +5,6 @@ namespace at { namespace native {
 
 // Methods
 
-int64_t storage_offset(const Tensor& self) {
-  return self._th_storage_offset();
-}
-
 int64_t ndimension(const Tensor& self) {
   return self._th_ndimension();
 }

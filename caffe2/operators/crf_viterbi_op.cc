@@ -68,7 +68,7 @@ class ViterbiPathOp : public Operator<CPUContext> {
     }
     // Element-wise add of the result and the input matrix
     math::Add<float, CPUContext>(
-        mat.size(),
+        mat.numel(),
         resultData,
         mat.template data<float>(),
         resultData,

@@ -86,7 +86,6 @@ class ImageInputOp final
 
   unique_ptr<db::DBReader> owned_reader_;
   const db::DBReader* reader_;
-  CPUContext cpu_context_;
   Tensor prefetched_image_{CPU};
   Tensor prefetched_label_{CPU};
   vector<TensorCPU> prefetched_additional_outputs_;
@@ -1208,12 +1207,13 @@ bool ImageInputOp<Context>::Prefetch() {
   // If the context is not CPUContext, we will need to do a copy in the
   // prefetch function as well.
   if (!std::is_same<Context, CPUContext>::value) {
-    prefetched_image_on_device_.CopyFrom(prefetched_image_, &cpu_context_);
-    prefetched_label_on_device_.CopyFrom(prefetched_label_, &cpu_context_);
+    // do sync copies
+    prefetched_image_on_device_.CopyFrom(prefetched_image_);
+    prefetched_label_on_device_.CopyFrom(prefetched_label_);
 
     for (int i = 0; i < prefetched_additional_outputs_on_device_.size(); ++i) {
       prefetched_additional_outputs_on_device_[i].CopyFrom(
-          prefetched_additional_outputs_[i], &cpu_context_);
+          prefetched_additional_outputs_[i]);
     }
   }
 

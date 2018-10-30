@@ -404,6 +404,11 @@ inline std::string PythonArgs::string(int i) {
 
 inline int64_t PythonArgs::toInt64(int i) {
   if (!args[i]) return signature.params[i].default_int;
+  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
+    auto & var = THPVariable_Unpack(args[i]);
+    jit::tracer::ArgumentStash::stashValue(
+        signature.params[i].name, idx, var, jit::IntType::get());
+  }
   return THPUtils_unpackLong(args[i]);
 }
 

@@ -195,6 +195,7 @@ Tensor c10_layer_norm_dont_use_this_op_yet(
   // TODO weight/bias
   // TODO cudnn_enabled
   caffe2::ops::LayerNorm::Cache cache;
+  caffe2::CPUContext context;
   Tensor output = at::empty({0});
   Tensor output_mean = at::empty({0});
   Tensor output_stdev = at::empty({0});
@@ -202,7 +203,7 @@ Tensor c10_layer_norm_dont_use_this_op_yet(
   caffe2::Tensor caffe2_output = to_caffe2(output);
   caffe2::Tensor caffe2_output_mean = to_caffe2(output_mean);
   caffe2::Tensor caffe2_output_stdev = to_caffe2(output_stdev);
-  c10::Dispatcher<caffe2::ops::LayerNorm>::call(caffe2_input, &caffe2_output, &caffe2_output_mean, &caffe2_output_stdev, axis, (float)epsilon, &cache);
+  c10::Dispatcher<caffe2::ops::LayerNorm>::call(caffe2_input, &caffe2_output, &caffe2_output_mean, &caffe2_output_stdev, axis, (float)epsilon, &cache, static_cast<caffe2::BaseContext*>(&context));
   return output;
 }
 

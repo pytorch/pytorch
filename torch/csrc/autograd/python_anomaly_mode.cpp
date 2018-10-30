@@ -32,7 +32,8 @@ void PyAnomalyMetadata::print_stack() {
     throw std::runtime_error("Anomaly metadata is not a python dictionary.");
   }
 
-  THPObjectPtr stack(PyDict_GetItemString(dict(), ANOMALY_TRACE_KEY));
+  // PyDict_GetItemString returns a borrowed reference
+  PyObject* stack(PyDict_GetItemString(dict(), ANOMALY_TRACE_KEY));
   if (!stack) {
     AT_WARN("No forward pass information available. Enable detect anomaly "
             "during forward pass for more information.");
@@ -46,7 +47,7 @@ void PyAnomalyMetadata::print_stack() {
 
   // stack is a list of Python strings ending with newlines. Use join to convert
   // to a single string.
-  THPObjectPtr msg(PyUnicode_Join(empty_string, stack.get()));
+  THPObjectPtr msg(PyUnicode_Join(empty_string, stack));
   if (!msg) {
     throw python_error();
   }

@@ -138,7 +138,7 @@ std::unique_ptr<Blob> randomTensor(
   auto* t = BlobGetMutableTensor(blob.get(), CPU);
   t->Resize(dims);
   math::RandUniform<float, CPUContext>(
-      t->size(), -1.0, 1.0, t->template mutable_data<float>(), ctx);
+      t->numel(), -1.0, 1.0, t->template mutable_data<float>(), ctx);
   return blob;
 }
 

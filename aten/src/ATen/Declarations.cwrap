@@ -1,13 +1,4 @@
 [[
-  name: _th_storage_offset
-  cname: storageOffset
-  cpu_half: True
-  device_guard: False
-  return: long
-  arguments:
-    - THTensor* self
-]]
-[[
   name: _th_ndimension
   cname: nDimension
   cpu_half: True

@@ -9,7 +9,7 @@
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/source_range.h"
 #include <torch/csrc/utils/memory.h>
-#include <locale.h>
+#include <clocale>
 
 namespace torch {
 namespace jit {

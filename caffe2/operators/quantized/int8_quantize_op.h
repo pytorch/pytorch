@@ -78,7 +78,7 @@ class Int8QuantizeOp final : public Operator<CPUContext> {
     Int8Quantize(
         X.data<float>(),
         Y->t.mutable_data<uint8_t>(),
-        X.size(),
+        X.numel(),
         Y_scale,
         Y_offset);
     return true;
