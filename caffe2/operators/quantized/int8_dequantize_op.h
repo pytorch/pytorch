@@ -38,7 +38,7 @@ class Int8DequantizeOp final : public Operator<CPUContext> {
     Int8Dequantize(
         X.t.data<uint8_t>(),
         Y->mutable_data<float>(),
-        X.t.size(),
+        X.t.numel(),
         X_scale,
         X_offset);
     return true;

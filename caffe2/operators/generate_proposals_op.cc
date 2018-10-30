@@ -28,7 +28,7 @@ utils::ConstTensorView<T> GetSubTensorView(
     int dim0_start_index) {
   DCHECK_EQ(tensor.meta().itemsize(), sizeof(T));
 
-  if (tensor.size() == 0) {
+  if (tensor.numel() == 0) {
     return utils::ConstTensorView<T>(nullptr, {});
   }
 
