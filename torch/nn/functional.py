@@ -789,7 +789,7 @@ def relu6(input, inplace=False):
     See :class:`~torch.nn.ReLU6` for more details.
     """
     # type: (Tensor, bool) -> Tensor
-    return hardtanh(input, 0, 6, inplace)
+    return hardtanh(input, 0., 6., inplace)
 
 
 @torch._jit_internal.weak_script
@@ -799,7 +799,7 @@ def elu(input, alpha=1., inplace=False):
 
     See :class:`~torch.nn.ELU` for more details.
     """
-    # type: (Tensor, bool) -> Tensor
+    # type: (Tensor, float, bool) -> Tensor
     if inplace:
         result = torch._C._nn.elu_(input, alpha)
     else:
