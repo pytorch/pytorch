@@ -153,7 +153,7 @@ struct Method {
   }
 
   Method& setSchema(FunctionSchema schema_) {
-    schema.reset(new FunctionSchema(std::move(schema_)));
+    schema = torch::make_unique<FunctionSchema>(std::move(schema_));
     return *this;
   }
 
