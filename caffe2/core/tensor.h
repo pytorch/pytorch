@@ -70,65 +70,12 @@ class CAFFE2_API Tensor final {
   }
 
   /**
-   * context_for_copy is required to have the same DeviceType as src
-   */
-  Tensor(const Tensor& src, BaseContext* context_for_copy, DeviceType type)
-      : Tensor(
-            (context_for_copy && context_for_copy->device_type() == type)
-                ? context_for_copy->device()
-                : type) {
-    CopyFrom(src, context_for_copy);
-  }
-
-  /**
    * @brief: Create a Tensor of at::DeviceType `type` and initialize it with
    * src Tensor
    */
   Tensor(const Tensor& src, DeviceType type)
       : Tensor(type) {
     CopyFrom(src);
-  }
-
-  /**
-   * @brief Creates a tensor, and fills its contents with the given values.
-   * The type of tensor will be decided by the context parameter
-   * `context` must be provided(non-null)
-   */
-  template <typename T>
-  Tensor(
-      const vector<int64_t>& dims,
-      const vector<T>& values,
-      BaseContext* context)
-      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-        Storage(context->device(), TypeMeta::Make<T>()),
-        // TODO: Should pass in dtype here, if we ever want to dispatch on dtype specially
-        at::detail::computeTensorTypeId(at::device(context->device()).layout(at::kStrided)),
-        /*is_variable=*/ false
-      )) {
-    Resize(dims);
-    CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), size());
-    context->CopyItemsFromCPU(
-        storage().dtype(), size(), values.data(), mutable_data<T>());
-  }
-
-  /**
-   * @brief Creates a scalar tensor, and fills its content with the given value.
-   * The type of tensor will be decided by the context parameter
-   * `context` must be provided(non-null)
-   */
-  template <
-      typename T,
-      typename = typename std::enable_if<std::is_scalar<T>::value>::type>
-  Tensor(const T& value, BaseContext* context)
-      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-        Storage(context->device(), TypeMeta::Make<T>()),
-        // TODO: Should pass in dtype here, if we ever want to dispatch on dtype specially
-        at::detail::computeTensorTypeId(at::device(context->device()).layout(at::kStrided)),
-        /*is_variable=*/ false
-      )) {
-    Resize(std::vector<int64_t>{});
-    context->CopyItemsFromCPU(
-        storage().dtype(), size(), &value, mutable_data<T>());
   }
 
   Tensor Clone() const {
@@ -497,6 +444,22 @@ CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
 
 using TensorCPU = Tensor;
 
+/**
+ * @brief Creates a CPU tensor, and fills its contents with the given values.
+ * Values are copied in
+ */
+// TODO: can be unified with at::from_blob when Tensor is merged and string
+// types are supported
+template <typename T>
+Tensor TensorCPUFromValues(at::IntList dims, at::ArrayRef<T> values) {
+  Tensor r(dims, CPU);
+  CAFFE_ENFORCE_EQ(values.size(), r.size());
+  CPUContext context;
+  context.CopyItemsFromCPU(
+      r.storage().dtype(), values.size(), values.data(), r.mutable_data<T>());
+  return r;
+}
+
 constexpr int k_limit_default_ = 1000;
 
 // TODO: the following logic can be merged into regular Tensor class methods
@@ -551,7 +514,7 @@ void TensorPrinter::Print(const Tensor& tensor) {
   std::stringstream values_stream;
   // One most likely doesn't want to print int64-number of items for visual
   // inspection, so we cast down to int here.
-  int total_count = static_cast<int>(std::min(tensor.size(), int64_t(limit_)));
+  int total_count = static_cast<int>(std::min(tensor.numel(), int64_t(limit_)));
   const T* tensor_data = tensor.template data<T>();
   for (int i = 0; i < total_count - 1; ++i) {
     values_stream << tensor_data[i] << ",";

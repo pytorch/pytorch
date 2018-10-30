@@ -11,7 +11,8 @@ from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2
-from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, skipIfRocm, suppress_warnings
+from common_utils import (TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN,
+                          skipIfRocm, suppress_warnings, load_tests, IS_SANDCASTLE)
 from textwrap import dedent
 import os
 import io
@@ -35,6 +36,10 @@ from torch.jit import BatchTensor
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future
 from test_module.no_future_div import div_int_nofuture, div_float_nofuture
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 try:
     import torchvision
@@ -60,7 +65,6 @@ RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
-IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 
 
 def LSTMCellF(input, hx, cx, *params):
@@ -1862,7 +1866,10 @@ class TestJit(JitTestCase):
 
             traced = torch.jit.trace(test, (torch.randn(5, 3, 10), torch.LongTensor([3, 2, 1]), torch.randn(2, 3, 20)))
             imported = self.getExportImportCopy(traced)
-            x, lengths, h0 = torch.randn(5, 3, 10), torch.LongTensor([3, 3, 2]), torch.randn(2, 3, 20)
+            # NB: We make sure to pass in a batch with a different max sequence
+            # length to ensure that the argument stashing for pad_packed works
+            # properly.
+            x, lengths, h0 = torch.randn(7, 4, 10), torch.LongTensor([7, 3, 2, 1]), torch.randn(2, 4, 20)
             self.assertEqual(traced(x, lengths, h0), imported(x, lengths, h0))
 
     def test_export_lstm(self):
@@ -1885,7 +1892,7 @@ class TestJit(JitTestCase):
                                         (torch.randn(2, 3, 20), torch.randn(2, 3, 20))))
         imported = self.getExportImportCopy(traced)
         x, lengths, h0, c0 = \
-            torch.randn(5, 3, 10), torch.LongTensor([3, 3, 2]), torch.randn(2, 3, 20), torch.randn(2, 3, 20)
+            torch.randn(7, 3, 10), torch.LongTensor([7, 5, 2]), torch.randn(2, 3, 20), torch.randn(2, 3, 20)
         self.assertEqual(traced(x, lengths, (h0, c0)), imported(x, lengths, (h0, c0)))
 
     def test_trace_variable_instantiation(self):
@@ -2005,6 +2012,15 @@ class TestJit(JitTestCase):
         self.assertEqual(
             bool_fn(torch.ones(1), torch.tensor(1), torch.tensor(True)),
             torch.ones(1))
+
+        @torch.jit.script
+        def none_fn(x=None):
+            # type: (Optional[int]) -> Optional[int]
+            return x
+
+        self.assertExpectedGraph(none_fn.graph, "none")
+        self.assertEqual(none_fn(), None)
+        self.assertEqual(none_fn(1), 1)
 
         @torch.jit.script
         def hints(x, a=0.5, b=10):
@@ -2797,6 +2813,13 @@ a")
                 return a
         ''')
         self.assertExpected(str(cu.foo.graph))
+
+    def test_string_ops(self):
+        def foo():
+            a = "a" + "b"
+            return a + a, "ab" == "b", "ab" != "b", "ab" == "ab", "ab" != "ab"
+
+        self.checkScript(foo, ())
 
     def test_string_new_line(self):
         with self.assertRaisesRegex(RuntimeError, "expected a valid token*"):
@@ -4642,7 +4665,7 @@ a")
         tester = self
 
         class Foo(torch.jit.ScriptModule):
-            __constants__ = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']
+            __constants__ = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
 
             def __init__(self):
                 super(Foo, self).__init__(False)
@@ -4661,8 +4684,14 @@ a")
                     self.h = type(1)
                 with tester.assertRaisesRegex(TypeError, "not a valid constant"):
                     self.i = (3, 4, {})
+                self.j = (6, (1, 2, 3), 8)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.a + self.b + self.f[0] + self.j[1][2]
 
         f = Foo()
+        self.assertEqual(f(torch.ones(1)), torch.ones(1) + 1 + 1.2 + 3 + 3)
 
     def test_script_module_for(self):
         class M(torch.jit.ScriptModule):
@@ -5028,6 +5057,26 @@ a")
                 a, b = return3()
                 print(a)
                 print(b)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_script_get_device_cuda(self):
+        @torch.jit.script
+        def foo(a):
+            return a.get_device()
+
+        v = torch.randn(1, device='cuda')
+        self.assertEqual(foo(v), 0)
+
+    def test_script_storage_offset(self):
+        @torch.jit.script
+        def foo(a):
+            return a.storage_offset()
+
+        v = torch.randn(5)
+        self.assertEqual(foo(v), 0)
+
+        v.set_(v.storage(), 3, [1], [1])
+        self.assertEquals(foo(v), 3)
 
     def test_script_chunk(self):
         @torch.jit.script
@@ -7836,6 +7885,22 @@ a")
         weak_mod.weight = torch.nn.Parameter(torch.ones(5, 5) * 100)
         self.assertFalse(strong_mod(inp).allclose(weak_mod(inp)))
 
+    def test_inplace_add(self):
+
+        def foo(a, b):
+            c = a + b
+            c.add_(b)
+            return c
+        self.checkScript(foo, (torch.rand(3), torch.rand(3)))
+
+    def test_add_out(self):
+        def foo(a, b):
+            c = a + b
+            e = 2 * a
+            torch.add(c, b, out=e)
+            return e
+        self.checkScript(foo, (torch.rand(3), torch.rand(3)))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -8840,19 +8905,20 @@ class TestCustomOperators(JitTestCase):
         from torch._ops import _OpNamespace
         self.assertTrue(hasattr(torch, 'ops'))
 
-        torch.ops.__dict__.pop('aten')
+        if '_test' in torch.ops.__dict__:
+            torch.ops.__dict__.pop('_test')
 
         # Don't use `hasattr()` because it will call `__getattr__`.
-        self.assertNotIn('aten', torch.ops.__dict__)
-        torch.ops.aten
-        self.assertIn('aten', torch.ops.__dict__)
-        self.assertEqual(type(torch.ops.aten), _OpNamespace)
+        self.assertNotIn('_test', torch.ops.__dict__)
+        torch.ops._test
+        self.assertIn('_test', torch.ops.__dict__)
+        self.assertEqual(type(torch.ops._test), _OpNamespace)
 
-        self.assertNotIn('relu', torch.ops.aten.__dict__)
-        op = torch.ops.aten.relu
+        self.assertNotIn('leaky_relu', torch.ops._test.__dict__)
+        op = torch.ops._test.leaky_relu
         self.assertTrue(callable(op))
-        self.assertIn('relu', torch.ops.aten.__dict__)
-        op2 = torch.ops.aten.relu
+        self.assertIn('leaky_relu', torch.ops._test.__dict__)
+        op2 = torch.ops._test.leaky_relu
         self.assertEqual(op, op2)
 
     def test_simply_calling_an_operator(self):
@@ -8861,11 +8927,11 @@ class TestCustomOperators(JitTestCase):
         self.assertEqual(output, input.relu())
 
     def test_default_arguments_are_used(self):
-        output = torch.ops.aten.leaky_relu(torch.tensor([-1.0, 1.0]))
+        output = torch.ops._test.leaky_relu(torch.tensor([-1.0, 1.0]))
         self.assertEqual(output, torch.tensor([-0.01, 1]))
 
     def test_only_kwargs(self):
-        output = torch.ops.aten.leaky_relu(self=torch.tensor(-1.0))
+        output = torch.ops._test.leaky_relu(self=torch.tensor(-1.0))
         self.assertEqual(output, torch.tensor(-0.01))
 
     def test_passing_too_many_args(self):
@@ -8894,19 +8960,19 @@ class TestCustomOperators(JitTestCase):
             RuntimeError,
             "Argument 'self' specified both as positional and keyword argument"
         ):
-            torch.ops.aten.leaky_relu(torch.ones(5), self=torch.ones(5))
+            torch.ops._test.leaky_relu(torch.ones(5), self=torch.ones(5))
 
     def test_passing_unknown_kwargs(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Unknown keyword argument 'foo' for operator 'aten::leaky_relu'"
+            "Unknown keyword argument 'foo' for operator '_test::leaky_relu'"
         ):
-            torch.ops.aten.leaky_relu(torch.ones(5), foo=torch.ones(5))
+            torch.ops._test.leaky_relu(torch.ones(5), foo=torch.ones(5))
 
     def test_passing_and_returning_lists(self):
         # Replace with actual test once we support lists.
         a, b = torch.rand(5), torch.rand(5)
-        output = torch.ops.aten.cat([a, b])
+        output = torch.ops._test.cat([a, b])
         output_ref = torch.cat([a, b])
         self.assertEqual(output, output_ref)
 
@@ -9232,7 +9298,6 @@ def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
             call_args_str = ', '.join(actuals)
             call = "self.submodule({})".format(call_args_str)
             script = script_method_template.format(method_args, call)
-            print(script)
 
             # Create module to use the script method
             class TheModule(torch.jit.ScriptModule):
@@ -9268,6 +9333,96 @@ def post_add_test(test_name, skipTestIf, do_test):
     if not (TEST_WITH_UBSAN and test_name in UBSAN_BLACKLISTED_TESTS):
         setattr(TestJitGenerated, test_name, do_test)
 
+
+class TestAsync(JitTestCase):
+    def test_async_python(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.neg(x)
+
+        x = torch.rand(3, 4)
+        fut = torch.jit._fork(foo, x)
+        y_hat = foo(x)
+        y = torch.jit._wait(fut)
+        # assert nothing; only to make sure the fake python path works
+
+    def test_async_script(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.neg(x), x
+
+        x = torch.rand(3, 4)
+
+        @torch.jit.script
+        def wait_script(x):
+            fut = torch.jit._fork(foo, x)
+            y_hat = foo(x)
+            y = torch.jit._wait(fut)
+            return y, y_hat
+
+        y, y_hat = wait_script(x)
+
+        self.assertEqual(y, y_hat)
+
+    def test_async_script_capture(self):
+        class Module(torch.jit.ScriptModule):
+            __constants__ = ['const']
+
+            def __init__(self):
+                super(Module, self).__init__(False)
+                self.const = 42
+                self.param = nn.Parameter(torch.randn(2, 2))
+
+            @torch.jit.script_method
+            def foo(self, x1, x2):
+                return torch.neg(x1), self.param, self.const, torch.neg(x2), self.param
+
+            @torch.jit.script_method
+            def wait_script(self, x1, x2):
+                fut = torch.jit._fork(self.foo, x1, x2)
+                y_hat = self.foo(x1, x2)
+                y = torch.jit._wait(fut)
+                return y, y_hat
+
+        x1 = torch.rand(3, 4)
+        x2 = torch.rand(5, 6)
+
+        m = Module()
+        y, y_hat = m.wait_script(x1, x2)
+
+        self.assertEqual(y, y_hat)
+
+    def test_async_script_nested(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.neg(x), x
+
+        x = torch.rand(3, 4)
+
+        @torch.jit.script
+        def wait_script(x):
+            fut = torch.jit._fork(foo, x)
+            y_hat = foo(x)
+            y = torch.jit._wait(fut)
+            return y, y_hat
+
+        @torch.jit.script
+        def wait_script_nest(x):
+            fut = torch.jit._fork(wait_script, x)
+            return torch.jit._wait(fut)
+
+        y, y_hat = wait_script_nest(x)
+
+        self.assertEqual(y, y_hat)
+
+    def test_async_script_no_script_mod(self):
+        x = torch.rand(3, 4)
+
+        with self.assertRaisesRegex(RuntimeError, 'cannot call a value'):
+            @torch.jit.script
+            def wait_script(x):
+                fut = torch.jit._fork(x)
+                return fut
 
 for test in autograd_method_tests:
     add_autograd_test(*test)

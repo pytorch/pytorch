@@ -8,6 +8,7 @@
 #include "ATen/WrapDimUtils.h"
 #include "c10/util/Exception.h"
 #include "c10/util/Optional.h"
+#include "ATen/native/Resize.h"
 #include <ATen/SparseTensorUtils.h>
 #include <algorithm>
 #include <vector>
@@ -150,11 +151,24 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
-  return at::empty({0}, self.options()).set_(self.storage(), storage_offset, size, stride);
+  auto result = at::empty({0}, self.options());
+  setStorage(
+      result,
+      self.storage(),
+      storage_offset,
+      size,
+      stride);
+  return result;
 }
 
 Tensor &as_strided_(Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
-  return self.set_(self.storage(), storage_offset, size, stride);
+  setStorage(
+      self,
+      self.storage(),
+      storage_offset,
+      size,
+      stride);
+  return self;
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride) {
@@ -162,7 +176,7 @@ Tensor as_strided(const Tensor& self, IntList size, IntList stride) {
 }
 
 Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
-  return at::as_strided_(self, size, stride, self.storage_offset());
+  return self.as_strided_(size, stride, self.storage_offset());
 }
 
 Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length) {

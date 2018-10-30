@@ -23,8 +23,8 @@ void relu_op_cpu_impl(
       1,
       input.size());
 #else
-  caffe2::EigenVectorMap<float>(output->mutable_data<float>(), input.size()) =
-      caffe2::ConstEigenVectorMap<float>(input.data<float>(), input.size())
+  caffe2::EigenVectorMap<float>(output->mutable_data<float>(), input.numel()) =
+      caffe2::ConstEigenVectorMap<float>(input.data<float>(), input.numel())
           .cwiseMax(0.f);
 #endif
   /* Naive implementation

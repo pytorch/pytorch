@@ -18,8 +18,11 @@ import torch.nn.functional as F
 import torch.distributed as c10d
 from torch.nn.parallel import DistributedDataParallel
 
-from common_utils import TestCase
+from common_utils import TestCase, load_tests, run_tests
 
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 if not c10d.is_available():
     print('c10d not available, skipping tests')
@@ -144,8 +147,12 @@ class TCPStoreTest(TestCase, StoreTestBase):
         with self.assertRaisesRegex(RuntimeError, "^Address already in use$"):
             addr = 'localhost'
             port = common.find_free_port()
-            store1 = c10d.TCPStore(addr, port, True)
-            store2 = c10d.TCPStore(addr, port, True)
+
+            # Use noqa to silence flake8.
+            # Need to store in an unused variable here to ensure the first
+            # object is not destroyed before the second object is created.
+            store1 = c10d.TCPStore(addr, port, True)  # noqa: F841
+            store2 = c10d.TCPStore(addr, port, True)  # noqa: F841
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
@@ -908,4 +915,4 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 if __name__ == '__main__':
     assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
 
-    unittest.main()
+    run_tests()

@@ -112,7 +112,7 @@
   tensor1: grad * tensor2 * value
   tensor2: grad * tensor1 * value
 
-- name: th_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
+- name: _th_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
   mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
   mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
@@ -374,7 +374,7 @@
   self: at::zeros(self.sizes(), grad.options()).index_add_(dim, index, grad)
 
 - name: inverse(Tensor self)
-  self: -at::mm(result.t(), at::mm(grad, result.t()))
+  self: -at::matmul(result.transpose(-2, -1), at::matmul(grad, result.transpose(-2, -1)))
 
 - name: kthvalue(Tensor self, int64_t k, int64_t dim, bool keepdim)
   self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
@@ -439,7 +439,10 @@
   source: masked_scatter_backward(grad, mask, source.sizes())
 
 - name: masked_select(Tensor self, Tensor mask)
-  self: zeros_like(self).masked_scatter_(mask, grad)
+# normally broadcasting is handled implicitly, but here, because we call an inplace
+# function as an optimization and the LHS doesn't broadcast for inplace functions,
+# we need to explicitly broadcast.
+  self: zeros_like(self.expand(at::infer_size(self.sizes(), mask.sizes()))).masked_scatter_(mask, grad)
 
 - name: max(Tensor self, int64_t dim, bool keepdim)
   self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
@@ -561,7 +564,7 @@
   self: zeros_like(self)
 
 - name: potrf(Tensor self, bool upper)
-  self: potrf_backward(grad, upper, output)
+  self: potrf_backward(grad, upper, result)
 
 - name: potri(Tensor self, bool upper)
   self: not_implemented("potri")
@@ -737,10 +740,10 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type().scalarType())
 
 - name: svd(Tensor self, bool some, bool compute_uv)
-  self: svd_backward(grads, self, some, compute_uv, res1, res2, res3)  # resX are defined in Declarations.cwrap
+  self: svd_backward(grads, self, some, compute_uv, result0, result1, result2)
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
-  self: symeig_backward(grads, self, eigenvectors, upper, res1, res2)
+  self: symeig_backward(grads, self, eigenvectors, upper, result0, result1)
 
 - name: t(Tensor self)
   self: grad.t()
@@ -779,7 +782,7 @@
   self: grad.triu(diagonal)
 
 - name: trtrs(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular)
-  self, A: trtrs_backward(grads[0], grads[1], self, A, res1, upper, transpose, unitriangular, grad_input_mask)
+  self, A: trtrs_backward(grads[0], grads[1], self, A, result0, upper, transpose, unitriangular, grad_input_mask)
 
 - name: trunc(Tensor self)
   self: zeros_like(grad)
@@ -848,6 +851,9 @@
 # NN
 - name: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim)
   i1, i2, i3: _trilinear_backward(grad, i1, i2, i3, expand1, expand2, expand3, sumdim, unroll_dim, grad_input_mask)
+
+- name: constant_pad_nd(Tensor self, IntList pad, Scalar value)
+  self: constant_pad_nd_backward(grad, pad)
 
 - name: binary_cross_entropy_forward(Tensor self, Tensor target, Tensor weight, int64_t reduction)
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)

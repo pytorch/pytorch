@@ -245,8 +245,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   std::vector<CUDAEvent> eventVal;
   std::vector<at::cuda::CUDAStream> streamVal;
 
-  eventVal.resize(devices.size());
-  streamVal.resize(devices.size());
+  eventVal.reserve(devices.size());
+  streamVal.reserve(devices.size());
 
   // Create the NCCL communicators for each GPU
   C10D_NCCL_CHECK(ncclGroupStart());
@@ -260,12 +260,12 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
 
     // Also create the NCCL streams and events
-    streamVal[i] = at::cuda::getStreamFromPool();
+    streamVal.push_back(at::cuda::getStreamFromPool());
     // Event created using cudaEventDisableTiming flag and not
     // cudaEventBlockingSync flag will provide the best performance when used
     // with cudaStreamWaitEvent() and cudaEventQuery(). Since we here don't
     // measure the performance using cudaEvent, this should be set.
-    eventVal[i] = CUDAEvent::create(cudaEventDisableTiming);
+    eventVal.push_back(CUDAEvent::create(cudaEventDisableTiming));
   }
 
   C10D_NCCL_CHECK(ncclGroupEnd());

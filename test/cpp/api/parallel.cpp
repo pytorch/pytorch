@@ -189,7 +189,7 @@ TEST_F(
     auto output = parallel::data_parallel(
         m,
         input,
-        /*devices=*/c10::nullopt,
+        /*devices=*/torch::nullopt,
         /*output_device=*/torch::Device(torch::kCUDA, 1));
     ASSERT_TRUE(output.defined());
     ASSERT_TRUE(output.device().is_cuda());

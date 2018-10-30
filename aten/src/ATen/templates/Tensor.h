@@ -53,6 +53,9 @@ public:
   int64_t dim() const {
     return impl_->dim();
   }
+  int64_t storage_offset() const {
+    return impl_->storage_offset();
+  }
 
   TensorImpl * unsafeGetTensorImpl() const {
     return impl_.get();
@@ -143,7 +146,7 @@ public:
     return impl_->type_id();
   }
   ScalarType scalar_type() const {
-    return dataTypeToScalarType(impl_->dtype().id());
+    return typeMetaToScalarType(impl_->dtype());
   }
   const Storage& storage() const {
     return impl_->storage();
@@ -160,11 +163,20 @@ public:
   /// Returns a `Tensor`'s layout. Defined in Type.h
   Layout layout() const noexcept;
 
-  /// Returns a `Tensor`'s dtype (`ScalarType`). Defined in Type.h
-  ScalarType dtype() const noexcept;
+  /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.h
+  caffe2::TypeMeta dtype() const noexcept;
 
   /// Returns a `Tensor`'s device.
   Device device() const;
+
+  /// Returns a `Tensor`'s device index.
+  int64_t get_device() const;
+
+  /// Returns if a `Tensor` has CUDA backend.
+  bool is_cuda() const;
+
+  /// Returns if a `Tensor` has sparse backend.
+  bool is_sparse() const;
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
@@ -251,6 +263,18 @@ public:
   //example
   //Tensor * add(Tensor & b);
   ${tensor_method_declarations}
+
+  // We changed .dtype() to return a TypeMeta in #12766. Ideally, we want the
+  // at::kDouble and its friends to be TypeMeta's, but that hasn't happened yet.
+  // Before that change, we make this method to maintain BC for C++ usage like
+  // `x.to(y.dtype)`.
+  // TODO: remove following two after at::kDouble and its friends are TypeMeta's.
+  inline Tensor to(caffe2::TypeMeta type_meta, bool non_blocking=false, bool copy=false) const {
+    return this->to(/*scalar_type=*/typeMetaToScalarType(type_meta), non_blocking, copy);
+  }
+  inline Tensor to(Device device, caffe2::TypeMeta type_meta, bool non_blocking=false, bool copy=false) const {
+    return this->to(device, /*scalar_type=*/typeMetaToScalarType(type_meta), non_blocking, copy);
+  }
 
   template <typename F, typename... Args>
   auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {

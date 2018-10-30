@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from caffe2.proto import caffe2_pb2
 from caffe2.python import model_helper, workspace, core, rnn_cell
 from caffe2.python.attention import AttentionType
 
@@ -108,6 +109,94 @@ class TestRNNExecutor(unittest.TestCase):
 
             self._compare(model, forward_only)
 
+    def init_lstm_model(self, T, num_layers, forward_only, use_loss=True):
+        workspace.FeedBlob(
+            "seq_lengths",
+            np.array([T] * self.batch_size, dtype=np.int32)
+        )
+        workspace.FeedBlob("target", np.random.rand(
+            T, self.batch_size, self.hidden_dim).astype(np.float32))
+        workspace.FeedBlob("hidden_init", np.zeros(
+            [1, self.batch_size, self.hidden_dim], dtype=np.float32
+        ))
+        workspace.FeedBlob("cell_init", np.zeros(
+            [1, self.batch_size, self.hidden_dim], dtype=np.float32
+        ))
+
+        model = model_helper.ModelHelper(name="lstm")
+        model.net.AddExternalInputs(["input"])
+
+        init_blobs = []
+        for i in range(num_layers):
+            hidden_init, cell_init = model.net.AddExternalInputs(
+                "hidden_init_{}".format(i),
+                "cell_init_{}".format(i)
+            )
+            init_blobs.extend([hidden_init, cell_init])
+
+        output, last_hidden, _, last_state = rnn_cell.LSTM(
+            model=model,
+            input_blob="input",
+            seq_lengths="seq_lengths",
+            initial_states=init_blobs,
+            dim_in=self.input_dim,
+            dim_out=[self.hidden_dim] * num_layers,
+            scope="",
+            drop_states=True,
+            forward_only=forward_only,
+            return_last_layer_only=True,
+        )
+
+        if use_loss:
+            loss = model.AveragedLoss(
+                model.SquaredL2Distance([output, "target"], "dist"),
+                "loss"
+            )
+            # Add gradient ops
+            if not forward_only:
+                model.AddGradientOperators([loss])
+
+        # init
+        for init_blob in init_blobs:
+            workspace.FeedBlob(init_blob, np.zeros(
+                [1, self.batch_size, self.hidden_dim], dtype=np.float32
+            ))
+
+        return model, output
+
+    def test_empty_sequence(self):
+        '''
+        Test the RNN executor's handling of empty input sequences
+        '''
+        Tseq = [0, 1, 2, 3, 0, 1]
+        workspace.ResetWorkspace()
+        with core.DeviceScope(caffe2_pb2.DeviceOption()):
+            model, output = self.init_lstm_model(
+                T=4, num_layers=1, forward_only=True, use_loss=False)
+
+            workspace.RunNetOnce(model.param_init_net)
+
+            self.enable_rnn_executor(model.net, 1, True)
+
+            np.random.seed(10022015)
+            first_call = True
+            for seq_len in Tseq:
+                input_shape = [seq_len, self.batch_size, self.input_dim]
+                workspace.FeedBlob(
+                    "input", np.random.rand(*input_shape).astype(np.float32))
+                workspace.FeedBlob(
+                    "target",
+                    np.random.rand(
+                        seq_len, self.batch_size, self.hidden_dim
+                    ).astype(np.float32))
+                if first_call:
+                    workspace.CreateNet(model.net, overwrite=True)
+                    first_call = False
+
+                workspace.RunNet(model.net.Proto().name)
+                val = workspace.FetchBlob(output)
+                self.assertEqual(val.shape[0], seq_len)
+
     @given(
         num_layers=st.integers(1, 8),
         T=st.integers(4, 100),
@@ -125,57 +214,7 @@ class TestRNNExecutor(unittest.TestCase):
             print("Run with device: {}, forward only: {}".format(
                 gc, forward_only))
 
-            workspace.FeedBlob(
-                "seq_lengths",
-                np.array([T] * self.batch_size, dtype=np.int32)
-            )
-            workspace.FeedBlob("target", np.random.rand(
-                T, self.batch_size, self.hidden_dim).astype(np.float32))
-            workspace.FeedBlob("hidden_init", np.zeros(
-                [1, self.batch_size, self.hidden_dim], dtype=np.float32
-            ))
-            workspace.FeedBlob("cell_init", np.zeros(
-                [1, self.batch_size, self.hidden_dim], dtype=np.float32
-            ))
-
-            model = model_helper.ModelHelper(name="lstm")
-            model.net.AddExternalInputs(["input"])
-
-            init_blobs = []
-            for i in range(num_layers):
-                hidden_init, cell_init = model.net.AddExternalInputs(
-                    "hidden_init_{}".format(i),
-                    "cell_init_{}".format(i)
-                )
-                init_blobs.extend([hidden_init, cell_init])
-
-            output, last_hidden, _, last_state = rnn_cell.LSTM(
-                model=model,
-                input_blob="input",
-                seq_lengths="seq_lengths",
-                initial_states=init_blobs,
-                dim_in=self.input_dim,
-                dim_out=[self.hidden_dim] * num_layers,
-                scope="",
-                drop_states=True,
-                forward_only=forward_only,
-                return_last_layer_only=True,
-            )
-
-            loss = model.AveragedLoss(
-                model.SquaredL2Distance([output, "target"], "dist"),
-                "loss"
-            )
-            # Add gradient ops
-            if not forward_only:
-                model.AddGradientOperators([loss])
-
-            # init
-            for init_blob in init_blobs:
-                workspace.FeedBlob(init_blob, np.zeros(
-                    [1, self.batch_size, self.hidden_dim], dtype=np.float32
-                ))
-
+            model, _ = self.init_lstm_model(T, num_layers, forward_only)
             self._compare(model, forward_only)
 
     def _compare(self, model, forward_only):

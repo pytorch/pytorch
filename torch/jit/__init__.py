@@ -49,6 +49,10 @@ _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
 
+Future = torch._C.Future
+_fork = torch._C.fork
+_wait = torch._C.wait
+
 
 @contextlib.contextmanager
 def scope(scope_name):
@@ -1366,6 +1370,9 @@ _register_builtin(_construct_empty_tensor_list, 'aten::_construct_empty_tensor_l
 
 
 _register_builtin(len, 'aten::len')
+
+
+_register_builtin(_wait, 'aten::wait')
 
 
 class _disable_tracing(object):
