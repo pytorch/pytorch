@@ -2738,7 +2738,7 @@
       default: U
 ]]
 [[
-  name: _th_potrs
+  name: _potrs_single
   cname: potrs
   types:
     - Float
@@ -2747,7 +2747,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0
   arguments:

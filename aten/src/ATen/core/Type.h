@@ -351,7 +351,6 @@ struct CAFFE2_API Type {
   virtual std::tuple<Tensor,Tensor> _th_eig(const Tensor & self, bool eigenvectors) const = 0;
   virtual std::tuple<Tensor,Tensor,Tensor> _th_svd(const Tensor & self, bool some, bool compute_uv) const = 0;
   virtual Tensor _th_potrf(const Tensor & self, bool upper) const = 0;
-  virtual Tensor _th_potrs(const Tensor & self, const Tensor & input2, bool upper) const = 0;
   virtual Tensor _th_potri(const Tensor & self, bool upper) const = 0;
   virtual std::tuple<Tensor,Tensor> _th_pstrf(const Tensor & self, bool upper, Scalar tol) const = 0;
   virtual std::tuple<Tensor,Tensor> _th_qr(const Tensor & self) const = 0;

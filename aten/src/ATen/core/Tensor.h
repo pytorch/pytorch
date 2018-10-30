@@ -394,7 +394,6 @@ public:
   std::tuple<Tensor,Tensor> _th_eig(bool eigenvectors=false) const;
   std::tuple<Tensor,Tensor,Tensor> _th_svd(bool some=true, bool compute_uv=true) const;
   Tensor _th_potrf(bool upper=true) const;
-  Tensor _th_potrs(const Tensor & input2, bool upper=true) const;
   Tensor _th_potri(bool upper=true) const;
   std::tuple<Tensor,Tensor> _th_pstrf(bool upper=true, Scalar tol=-1) const;
   std::tuple<Tensor,Tensor> _th_qr() const;

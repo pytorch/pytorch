@@ -103,6 +103,8 @@ _(aten, _pack_padded_sequence_backward) \
 _(aten, _pad_packed_sequence) \
 _(aten, _pdist_backward) \
 _(aten, _pdist_forward) \
+_(aten, _potrs_helper) \
+_(aten, _potrs_single) \
 _(aten, _prod) \
 _(aten, _prodall) \
 _(aten, _range) \

@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "ATen/ExpandUtils.h"
 #include <limits>
 
 namespace at { namespace native {
@@ -52,8 +53,8 @@ static inline double _get_epsilon(const ScalarType& sc_type) {
   }
 }
 
-// Validates input shapes for gesv
-static inline void gesvCheckInputs(const Tensor& self, const Tensor& A) {
+// Validates input shapes for linear solve methods (gesv, potrs)
+static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
   AT_CHECK(A.size(-1) == A.size(-2),
            "A must be batches of square matrices, "
            "but they are ", A.size(-1), " by ", A.size(-2), " matrices");
@@ -87,34 +88,30 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
   }
 }
 
-#define GENERATE_LINALG_HELPER_1_ARGS(NAME, ARG, BACKEND) \
-  Tensor _##NAME##_helper_##BACKEND(const Tensor& ARG) { \
-    std::vector<int64_t> infos(batchCount(ARG), 0); \
-    auto ARG##_working_copy = cloneBatchedColumnMajor(ARG); \
-    AT_DISPATCH_FLOATING_TYPES(ARG.type(), #NAME, [&]{ \
-      apply_##NAME<scalar_t>(ARG##_working_copy, infos); \
-    }); \
-    batchCheckErrors(infos, #NAME); \
-    return ARG##_working_copy; \
-  }
-
-#define GENERATE_LINALG_HELPER_2_ARGS(NAME, ARG1, ARG2, BACKEND) \
-  std::tuple<Tensor, Tensor> _##NAME##_helper_##BACKEND(const Tensor& ARG1, const Tensor& ARG2) { \
-    std::vector<int64_t> infos(batchCount(ARG1), 0); \
-    auto ARG1##_working_copy = cloneBatchedColumnMajor(ARG1); \
-    auto ARG2##_working_copy = cloneBatchedColumnMajor(ARG2); \
-    AT_DISPATCH_FLOATING_TYPES(ARG1.type(), #NAME, [&]{ \
-      apply_##NAME<scalar_t>(ARG1##_working_copy, ARG2##_working_copy, infos); \
-    }); \
-    batchCheckErrors(infos, #NAME); \
-    return std::tuple<Tensor, Tensor>(ARG1##_working_copy, ARG2##_working_copy); \
-  }
-
 // Checks if all the Tensors in a TensorList are of the same dimensions
 static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
   for (auto &t : tensors) {
     AT_CHECK(t.dim() == dim, "Tensor dimension is ", t.dim(), ", expected ", dim, " instead.");
   }
+}
+
+static inline std::tuple<Tensor,Tensor> _linear_solve_broadcast_args(const Tensor& arg1, const Tensor& arg2) {
+  linearSolveCheckInputs(arg1, arg2);
+
+  // broadcast the batch dimensions of arg1 and arg2.
+  IntList arg1_batch_sizes(arg1.sizes().data(), arg1.ndimension() - 2);
+  IntList arg2_batch_sizes(arg2.sizes().data(), arg2.ndimension() - 2);
+  std::vector<int64_t> expand_batch_portion = infer_size(arg1_batch_sizes, arg2_batch_sizes);
+
+  std::vector<int64_t> arg1_expand_size({expand_batch_portion});
+  arg1_expand_size.insert(arg1_expand_size.end(), { arg1.size(-2), arg1.size(-1) });
+
+  std::vector<int64_t> arg2_expand_size({expand_batch_portion});
+  arg2_expand_size.insert(arg2_expand_size.end(), { arg2.size(-2), arg2.size(-1) });
+
+  Tensor arg1_broadcasted  = arg1.expand(arg1_expand_size);
+  Tensor arg2_broadcasted = arg2.expand(arg2_expand_size);
+  return std::make_tuple(arg1_broadcasted, arg2_broadcasted);
 }
 
 }}  // namespace at::native

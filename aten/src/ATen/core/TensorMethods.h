@@ -449,9 +449,6 @@ inline std::tuple<Tensor,Tensor,Tensor> Tensor::_th_svd(bool some, bool compute_
 inline Tensor Tensor::_th_potrf(bool upper) const {
     return type()._th_potrf(*this, upper);
 }
-inline Tensor Tensor::_th_potrs(const Tensor & input2, bool upper) const {
-    return type()._th_potrs(*this, input2, upper);
-}
 inline Tensor Tensor::_th_potri(bool upper) const {
     return type()._th_potri(*this, upper);
 }
