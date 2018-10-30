@@ -1972,7 +1972,7 @@
     - THTensor* self
 ]]
 [[
-  name: _cumsum
+  name: _th_cumsum
   cname: cumsum
   variants: function
   return: argument 0
@@ -1984,7 +1984,7 @@
       wrap_dim: self
 ]]
 [[
-  name: _cumprod
+  name: _th_cumprod
   cname: cumprod
   variants: function
   return: argument 0
