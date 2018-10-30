@@ -53,6 +53,9 @@ public:
   int64_t dim() const {
     return impl_->dim();
   }
+  int64_t storage_offset() const {
+    return impl_->storage_offset();
+  }
 
   TensorImpl * unsafeGetTensorImpl() const {
     return impl_.get();
@@ -259,7 +262,6 @@ public:
 
   //example
   //Tensor * add(Tensor & b);
-  int64_t _th_storage_offset() const;
   int64_t _th_ndimension() const;
   Tensor & _th_set_(Storage source);
   Tensor & _th_set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
@@ -655,7 +657,6 @@ public:
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
   Scalar _local_scalar() const;
-  int64_t storage_offset() const;
   Tensor & set_(Storage source);
   Tensor & set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
   Tensor & set_(const Tensor & source);

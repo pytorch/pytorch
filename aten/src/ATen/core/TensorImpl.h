@@ -646,6 +646,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * for example, an index into a tensor will have a non-zero storage_offset().
    *
    * WARNING: This is NOT computed in bytes.
+   *
+   * XXX: The only thing stopping this function from being virtual is Variable.
    */
   virtual int64_t storage_offset() const {
     return storage_offset_;

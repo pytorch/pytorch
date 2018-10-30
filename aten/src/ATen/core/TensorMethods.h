@@ -53,9 +53,6 @@ inline void Tensor::set_data(Tensor new_data) {
 }
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
-inline int64_t Tensor::_th_storage_offset() const {
-    return type()._th_storage_offset(*this);
-}
 inline int64_t Tensor::_th_ndimension() const {
     return type()._th_ndimension(*this);
 }
@@ -1240,9 +1237,6 @@ inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) con
 }
 inline Scalar Tensor::_local_scalar() const {
     return type()._local_scalar(*this);
-}
-inline int64_t Tensor::storage_offset() const {
-    return type().storage_offset(*this);
 }
 inline Tensor & Tensor::set_(Storage source) {
     return type().set_(*this, source);
