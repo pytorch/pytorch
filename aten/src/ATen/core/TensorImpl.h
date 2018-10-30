@@ -415,6 +415,15 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return get_device_slow();
   }
 
+  Layout layout() const {
+    // NB: This method is not virtual and avoid dispatches for perf.
+    if (is_sparse()) {
+      return kSparse;
+    } else {
+      return kStrided;
+    }
+  }
+
   /**
    * If `condition_when_zero_dim` is true, and the tensor is a 1-dim, 1-size
    * tensor, reshape the tensor into a 0-dim tensor (scalar).
