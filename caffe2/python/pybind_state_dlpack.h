@@ -36,7 +36,7 @@ class DLPackWrapper {
     tensor_context.device_type = *device_type_ptr;
     tensor_context.device_id = device_option.device_id();
 
-    if (tensor->size() <= 0) {
+    if (tensor->numel() <= 0) {
       tensor->Resize(0);
     }
     if (tensor->meta().id() == TypeIdentifier::uninitialized()) {
