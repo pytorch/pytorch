@@ -5,9 +5,6 @@
 
 namespace caffe2 {
 
-#define CONV_ALGORITHM_AUTO 0
-#define CONV_ALGORITHM_WINOGRAD 1
-
 class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
  public:
   IDEEPConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
