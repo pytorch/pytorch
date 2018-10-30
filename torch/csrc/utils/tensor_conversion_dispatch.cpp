@@ -21,7 +21,12 @@ at::Tensor dispatch_type_conversion(
   }
   AutoNoGIL no_gil;
 
-  at::DeviceGuard device_guard(self.device());
+  // TODO: Make this less CUDA specific
+  at::Device device = self.device();
+  if (device_index) {
+    device = at::Device(at::kCUDA, *device_index);
+  }
+  at::DeviceGuard device_guard(device);
 
   if (self.device().type() == type.device_type()) {
     switch (self.device().type()) {
