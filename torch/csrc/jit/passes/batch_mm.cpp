@@ -96,8 +96,8 @@ RegisterOperators mm_tree_reduction_reg({
       return [num_inputs](Stack& stack) {
         std::vector<at::Tensor> inputs;
         inputs.reserve(num_inputs);
-        for (IValue& v : last(stack, num_inputs)) {
-          inputs.push_back(std::move(v).toTensor());
+        for (auto it = stack.end() - num_inputs; it != stack.end(); ++it) {
+          inputs.push_back(std::move(*it).toTensor());
         }
         drop(stack, num_inputs);
 
@@ -178,7 +178,7 @@ struct TreeToken {
     Graph* graph = node->owningGraph();
     while (!queue.empty()) {
       auto n = queue.back(); queue.pop_back();
-      if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+      if (n->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
         matmuls.push_back(n);
       } else if (n->matches("aten::t(Tensor self) -> Tensor")) {
         Node * input_node = n->input()->node();
@@ -192,7 +192,7 @@ struct TreeToken {
         Value * BTAT = graph->insert(aten::mm, {BT, AT});
         n->output()->replaceAllUsesWith(BTAT);
         matmuls.push_back(BTAT->node());
-      } else if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
+      } else if (n->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
         queue.push_back(n->inputs()[0]->node());
         queue.push_back(n->inputs()[1]->node());
       } else {
@@ -247,7 +247,7 @@ void BatchMMBlock(Block* block) {
     if (!root || root.tree_size < min_fusion_size)
       continue;
     auto matmuls = root.removeTransposesAndGatherMatmuls();
-    WithInsertPoint insert_gurad {root.node};
+    WithInsertPoint insert_guard {root.node};
     Node * tree_reduce = graph->insertNode(graph->create(Symbol::prim("MMTreeReduce")));
     for (Node * matmul : matmuls) {
       tree_reduce->addInput(matmul->inputs().at(0));
