@@ -53,13 +53,13 @@ void given_tensor_fill_op_cpu_impl(
 
   // TODO T might not be the correct type to call, since float allows others.
 
-  DCHECK_EQ(output->size(), values.size())
-      << "output size: " << output->size() << " given size: " << values.size();
+  DCHECK_EQ(output->numel(), values.numel())
+      << "output size: " << output->numel()
+      << " given size: " << values.numel();
   auto* data = output->template mutable_data<Type>();
   const Type* values_data = values.template data<Type>();
-  if (output->size()) {
-    context->CopySameDevice(
-        output->size(), values_data, data);
+  if (output->numel()) {
+    context->CopySameDevice(output->numel(), values_data, data);
   }
 }
 
@@ -74,28 +74,28 @@ void constant_fill_op_cpu_impl(
     BaseContext* context) {
   filler_init(inputs, output, shape, extra_shape, input_as_shape);
 
-  if (output->size()) {
+  if (output->numel()) {
     if (dtype == caffe2::TensorProto_DataType_FLOAT) {
       caffe2::math::Set<float, CPUContext>(
-          output->size(),
+          output->numel(),
           value.as_float,
           output->template mutable_data<float>(),
           static_cast<CPUContext*>(context));
     } else if (dtype == caffe2::TensorProto_DataType_INT32) {
       caffe2::math::Set<int32_t, CPUContext>(
-          output->size(),
+          output->numel(),
           value.as_int32,
           output->template mutable_data<int32_t>(),
           static_cast<CPUContext*>(context));
     } else if (dtype == caffe2::TensorProto_DataType_INT64) {
       caffe2::math::Set<int64_t, CPUContext>(
-          output->size(),
+          output->numel(),
           value.as_int64,
           output->template mutable_data<int64_t>(),
           static_cast<CPUContext*>(context));
     } else if (dtype == caffe2::TensorProto_DataType_BOOL) {
       caffe2::math::Set<bool, CPUContext>(
-          output->size(),
+          output->numel(),
           value.as_bool,
           output->template mutable_data<bool>(),
           static_cast<CPUContext*>(context));
@@ -119,8 +119,8 @@ void uniform_fill_op_cpu_impl(
   filler_init(inputs, output, shape, extra_shape, input_as_shape);
 
   if (inputs.size() == 3) {
-    CAFFE_ENFORCE_EQ(1, inputs[1]->size(), "min blob must be scalar");
-    CAFFE_ENFORCE_EQ(1, inputs[2]->size(), "max blob must be scalar");
+    CAFFE_ENFORCE_EQ(1, inputs[1]->numel(), "min blob must be scalar");
+    CAFFE_ENFORCE_EQ(1, inputs[2]->numel(), "max blob must be scalar");
     min = *inputs[1]->template data<float>();
     max = *inputs[2]->template data<float>();
     if (min > max) {
@@ -132,7 +132,7 @@ void uniform_fill_op_cpu_impl(
     }
   }
   caffe2::math::RandUniform<float, CPUContext>(
-      output->size(),
+      output->numel(),
       min,
       max,
       output->template mutable_data<float>(),

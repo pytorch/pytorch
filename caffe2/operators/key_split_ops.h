@@ -21,7 +21,7 @@ class KeySplitOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& keys = Input(0);
-    int N = keys.size();
+    int N = keys.numel();
     const T* keys_data = keys.template data<T>();
     std::vector<int> counts(categorical_limit_);
     std::vector<int*> eids(categorical_limit_);

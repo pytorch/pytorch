@@ -14,13 +14,13 @@ bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
   Y->ResizeLike(X);
   float* Ydata = Y->template mutable_data<float>();
   // First, get scales
-  if (scale_.size() != N) {
+  if (scale_.numel() != N) {
     scale_.Resize(N);
   }
-  if (rowmax_.size() != N) {
+  if (rowmax_.numel() != N) {
     rowmax_.Resize(N);
   }
-  if (sum_multiplier_.size() != D) {
+  if (sum_multiplier_.numel() != D) {
     sum_multiplier_.Resize(D);
     math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
                                  &context_);
@@ -49,10 +49,10 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   const int N = Y.size_to_dim(canonical_axis);
   const int D = Y.size_from_dim(canonical_axis);
   // First, get scales
-  if (scale_.size() != N) {
+  if (scale_.numel() != N) {
     scale_.Resize(N);
   }
-  if (sum_multiplier_.size() != D) {
+  if (sum_multiplier_.numel() != D) {
     sum_multiplier_.Resize(D);
     math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
                                  &context_);
@@ -64,7 +64,7 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   if (N == 0) {
     return true;
   }
-  context_.CopySameDevice<float>(Y.size(), dYdata, dXdata);
+  context_.CopySameDevice<float>(Y.numel(), dYdata, dXdata);
   float* scaledata = scale_.mutable_data<float>();
   for (int i = 0; i < N; ++i) {
     math::Dot<float, CPUContext>(D, Ydata + i * D, dYdata + i * D,
@@ -73,8 +73,7 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   math::Gemm<float, CPUContext>(CblasNoTrans, CblasNoTrans, N, D, 1, -1,
                                 scaledata, sum_multiplier_.data<float>(), 1,
                                 dXdata, &context_);
-  math::Mul<float, CPUContext>(Y.size(), dXdata, Ydata, dXdata,
-                               &context_);
+  math::Mul<float, CPUContext>(Y.numel(), dXdata, Ydata, dXdata, &context_);
   return true;
 }
 

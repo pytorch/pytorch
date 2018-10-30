@@ -91,6 +91,73 @@ set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
 set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
   CACHE PATH "Confu-style dependencies binary directory")
 
+# ---[ QNNPACK
+if(USE_QNNPACK)
+  if (NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin)$"))
+    message(WARNING
+      "Target platform \"${CMAKE_SYSTEM_NAME}\" is not supported in QNNPACK. "
+      "Supported platforms are Android, iOS, Linux, and macOS. "
+      "Turn this warning off by USE_QNNPACK=OFF.")
+    set(USE_QNNPACK OFF)
+  endif()
+  if (NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64)$"))
+    message(WARNING
+      "Target architecture \"${CMAKE_SYSTEM_PROCESSOR}\" is not supported in QNNPACK. "
+      "Supported platforms are x86, x86-64, ARM, and ARM64. "
+      "Turn this warning off by USE_QNNPACK=OFF.")
+    set(USE_QNNPACK OFF)
+  endif()
+  if (USE_QNNPACK)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+
+    # Directories for QNNPACK dependencies submoduled in Caffe2
+    if (NOT DEFINED CPUINFO_SOURCE_DIR)
+      set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
+    endif()
+    if (NOT DEFINED QNNPACK_SOURCE_DIR)
+      set(QNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/QNNPACK" CACHE STRING "QNNPACK source directory")
+    endif()
+    if (NOT DEFINED FP16_SOURCE_DIR)
+      set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
+    endif()
+    if (NOT DEFINED FXDIV_SOURCE_DIR)
+      set(FXDIV_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FXdiv" CACHE STRING "FXdiv source directory")
+    endif()
+    if (NOT DEFINED PSIMD_SOURCE_DIR)
+      set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
+    endif()
+    if (NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+      set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+    endif()
+
+    if(NOT TARGET qnnpack)
+      set(QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
+      set(QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
+      set(QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
+      set(QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
+      set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
+      set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+      add_subdirectory(
+        "${QNNPACK_SOURCE_DIR}"
+        "${CONFU_DEPENDENCIES_BINARY_DIR}/QNNPACK")
+      # We build static versions of QNNPACK and pthreadpool but link
+      # them into a shared library for Caffe2, so they need PIC.
+      set_property(TARGET qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
+      set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+      set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+    endif()
+
+    list(APPEND Caffe2_DEPENDENCY_LIBS qnnpack)
+  endif()
+endif()
+
+# ---[ Caffe2 Int8 operators (enabled by USE_QNNPACK) depend on gemmlowp and neon2sse headers
+if(USE_QNNPACK)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
+  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/neon2sse")
+endif()
+
 # ---[ NNPACK
 if(USE_NNPACK)
   include(${CMAKE_CURRENT_LIST_DIR}/External/nnpack.cmake)
@@ -544,6 +611,7 @@ if(NOT BUILD_ATEN_MOBILE)
     list(APPEND HIP_HIPCC_FLAGS -DCUDA_HAS_FP16=1)
     list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
     list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
+    list(APPEND HIP_HIPCC_FLAGS -DHIP_VERSION=${HIP_VERSION_MAJOR})
     list(APPEND HIP_HIPCC_FLAGS -Wno-macro-redefined)
     list(APPEND HIP_HIPCC_FLAGS -Wno-inconsistent-missing-override)
     list(APPEND HIP_HIPCC_FLAGS -Wno-exceptions)
@@ -556,6 +624,7 @@ if(NOT BUILD_ATEN_MOBILE)
        list(APPEND HIP_HIPCC_FLAGS -g)
        list(APPEND HIP_HIPCC_FLAGS -O0)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
+    list(APPEND HIP_HIPCC_FLAGS -DCAFFE2_USE_MIOPEN)
 
     set(Caffe2_HIP_INCLUDES
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
@@ -865,46 +934,6 @@ if (NOT BUILD_ATEN_MOBILE)
     set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
   endif()
 
-  if (NOT MSVC)
-    set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
-  endif()
-
-  INCLUDE(CheckCXXSourceCompiles)
-
-  # disable some verbose warnings
-  IF (MSVC)
-    set(CMAKE_CXX_FLAGS "/wd4267 /wd4251 /wd4522 /wd4522 /wd4838 /wd4305 /wd4244 /wd4190 /wd4101 /wd4996 /wd4275 ${CMAKE_CXX_FLAGS}")
-  ENDIF()
-
-  # windef.h will define max/min macros if NOMINMAX is not defined
-  IF (MSVC)
-    add_definitions(/DNOMINMAX)
-  ENDIF()
-
-  #Check if certain std functions are supported. Sometimes
-  #_GLIBCXX_USE_C99 macro is not defined and some functions are missing.
-  CHECK_CXX_SOURCE_COMPILES("
-  #include <cmath>
-  #include <string>
-
-  int main() {
-    int a = std::isinf(3.0);
-    int b = std::isnan(0.0);
-    std::string s = std::to_string(1);
-
-    return 0;
-    }" SUPPORT_GLIBCXX_USE_C99)
-
-  if (NOT SUPPORT_GLIBCXX_USE_C99)
-    message(FATAL_ERROR
-            "The C++ compiler does not support required functions. "
-            "This is very likely due to a known bug in GCC 5 "
-            "(and maybe other versions) on Ubuntu 17.10 and newer. "
-            "For more information, see: "
-            "https://github.com/pytorch/pytorch/issues/5229"
-           )
-  endif()
-
   # Top-level build config
   ############################################
   # Flags
@@ -1049,24 +1078,6 @@ if (NOT BUILD_ATEN_MOBILE)
   IF (CORTEXA9_FOUND)
     MESSAGE(STATUS "Cortex-A9 Found with compiler flag : -mcpu=cortex-a9")
     add_compile_options(-mcpu=cortex-a9)
-  ENDIF()
-
-  # Check that our programs run.  This is different from the native CMake compiler
-  # check, which just tests if the program compiles and links.  This is important
-  # because with ASAN you might need to help the compiled library find some
-  # dynamic libraries.
-  CHECK_C_SOURCE_RUNS("
-  int main() { return 0; }
-  " COMPILER_WORKS)
-  IF (NOT COMPILER_WORKS)
-    # Force cmake to retest next time around
-    unset(COMPILER_WORKS CACHE)
-    MESSAGE(FATAL_ERROR
-        "Could not run a simple program built with your compiler. "
-        "If you are trying to use -fsanitize=address, make sure "
-        "libasan is properly installed on your system (you can confirm "
-        "if the problem is this by attempting to build and run a "
-        "small program.)")
   ENDIF()
 
   CHECK_INCLUDE_FILE(cpuid.h HAVE_CPUID_H)

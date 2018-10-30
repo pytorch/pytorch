@@ -224,11 +224,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else if (type_ == ParameterType::DOUBLE) {
     default_double = atof(str.c_str());
   } else if (type_ == ParameterType::SCALAR) {
-    if (str == "None") {
-      // This is a bit awkward, but convenient for clamp which takes Scalars,
-      // but allows None.
-      default_scalar = at::Scalar(NAN);
-    } else {
+    if (str != "None") {
       // we sometimes rely on integer-vs-float values, e.g. with arange.
       const auto as_integer = parse_as_integer(str);
       default_scalar = as_integer.has_value() ? at::Scalar(as_integer.value()) :
