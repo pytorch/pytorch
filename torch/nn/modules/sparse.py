@@ -18,12 +18,12 @@ class Embedding(Module):
         embedding_dim (int): the size of each embedding vector
         padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
                                          (initialized to zeros) whenever it encounters the index.
-        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
-                                    this before extracting.
+        max_norm (float, optional): If given, each embedding vector with norm larger than max_norm
+                                    is renormalized to have norm max_norm.
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option. Default ``2``.
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+        scale_grad_by_freq (boolean, optional): If given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
-        sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
+        sparse (bool, optional): If ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
                                  See Notes for more details regarding sparse gradients.
 
     Attributes:
