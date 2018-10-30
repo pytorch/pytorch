@@ -346,6 +346,11 @@ def expand(g, self, size, implicit):
     return None
 
 
+def expand_as(g, self, other):
+    shape = g.op("Shape", other)
+    return g.op("Expand", self, shape)
+
+
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
 
@@ -1092,6 +1097,11 @@ def to(g, self, *args):
     elif len(args) == 4:
         # aten::to(Tensor, Device, ScalarType, bool, bool)
         dtype = _get_const(args[1], 'i', 'dtype')
+        return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
+    elif len(args) == 5:
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool) -> Tensor
+        dtype = _get_const(args[0], 'i', 'dtype')
+        # Layout and device are ignored
         return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
     else:
         raise NotImplementedError("Unknown aten::to signature")
