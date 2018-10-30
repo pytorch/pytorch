@@ -2265,7 +2265,7 @@
       - THTensor* mat2
 ]]
 [[
-  name: _addmv
+  name: _th_addmv
   cname: addmv
   variants: function
   return: argument 0
@@ -2284,7 +2284,7 @@
     - THTensor* vec
 ]]
 [[
-  name: _addmv_
+  name: _th_addmv_
   cname: addmv
   variants: function
   return: self
@@ -2301,7 +2301,7 @@
     - THTensor* vec
 ]]
 [[
-  name: _addr
+  name: _th_addr
   cname: addr
   variants: function
   return: argument 0
@@ -2320,7 +2320,7 @@
     - THTensor* vec2
 ]]
 [[
-  name: _addr_
+  name: _th_addr_
   cname: addr
   return: self
   variants: function
@@ -2337,7 +2337,7 @@
     - THTensor* vec2
 ]]
 [[
-  name: _ger
+  name: _th_ger
   cname: addr
   variants: function
   return: argument 0
@@ -2354,7 +2354,7 @@
     - THTensor* vec2
 ]]
 [[
-  name: _mv
+  name: _th_mv
   cname: addmv
   variants: function
   return: argument 0
@@ -2370,7 +2370,7 @@
     - THTensor* vec
 ]]
 [[
-  name: _mm
+  name: _th_mm
   variants: function
   return: argument 0
   options:
