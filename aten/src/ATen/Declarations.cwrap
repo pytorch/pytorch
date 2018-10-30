@@ -3174,7 +3174,7 @@
         - THTensor* total
 ]]
 [[
-  name: tensor
+  name: _th_tensor
   return: THTensor*
   cpu_half: True
   variants: [function]
