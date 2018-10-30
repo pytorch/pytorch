@@ -152,24 +152,16 @@ inline IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_
         switch(elem_type->kind()) {
           //allows single int/float to be broadcasted to a fixed size list
           case TypeKind::IntType:
-            if (!N) {
+            if (!N || !py::isinstance<py::int_>(obj)) {
               return py::cast<std::vector<int64_t>>(obj);
-            } else if (!py::isinstance<py::int_>(obj)) {
-              auto vec = py::cast<std::vector<int64_t>>(obj);
-              JIT_ASSERTM(static_cast<int32_t>(vec.size()) == *N, "Input fixed length list has length ", vec.size(), " expected ", *N);
-              return vec;
             } else {
               double value = py::cast<int64_t>(obj);
               std::vector<double> repeated(*N, value);
               return repeated;
             }
           case TypeKind::FloatType:
-            if (!N) {
+            if (!N || !py::isinstance<py::float_>(obj)) {
               return py::cast<std::vector<double>>(obj);
-            } else if (!py::isinstance<py::float_>(obj)) {
-              auto vec = py::cast<std::vector<double>>(obj);
-              JIT_ASSERTM(static_cast<int32_t>(vec.size()) == *N, "Fixed length list has size ", vec.size(), " expected ", *N);
-              return vec;
             } else {
               double value = py::cast<double>(obj);
               std::vector<double> repeated(*N, value);

@@ -412,7 +412,7 @@ static inline bool isIntOrFloatUsedAsList(
   if (v_type != FloatType::get() && v_type != IntType::get())
     return false;
   auto list_type = arg.type()->cast<ListType>();
-  return (list_type && list_type->getElementType() == v_type && arg.N());
+  return list_type && list_type->getElementType() == v_type && arg.N();
 }
 
 inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
@@ -2079,58 +2079,23 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
   return map;
 }
 
+TypePtr parseTypeFromExpr(Expr expr);
 
-// TypePtr, and an optional statically known length for list types
-// the length is not (currently) part of the list type
-using TypeAndOptLen = std::pair<TypePtr, c10::optional<int32_t>>;
-TypeAndOptLen parseTypeFromExpr(Expr expr);
-
-
-int32_t getFixedLengthListSubscript(Subscript subscript) {
-  if (subscript.subscript_exprs().size() != 1) {
-    throw ErrorReport(subscript) << " expected exactly one element type but found " << subscript.subscript_exprs().size();
-  }
-  auto expr = *subscript.subscript_exprs().begin();
-  if (expr.kind () != TK_CONST) {
-    throw ErrorReport(expr) << "subscript of fixed length list must be constant integer";
-  }
-  auto constant = Const(expr);
-  if (!constant.isIntegral()) {
-    throw ErrorReport(expr) << "subscript of fixed length list must be constant integer";
-  }
-  return constant.asIntegral();
-}
-
-
-//since the optional length of a list is a member of Argument, and not a part of
-//the type information, a fixed length list cannot appear as a nested type
-//e.g. List[int[3]], because list is the arg
-const std::unordered_map<std::string, std::function<TypeAndOptLen(Subscript)>> &subscript_to_type_fns() {
-  static std::unordered_map<std::string, std::function<TypeAndOptLen(Subscript)>> map = {
-    {"Tuple", [](Subscript subscript) -> TypeAndOptLen {
+const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscript_to_type_fns() {
+  static std::unordered_map<std::string, std::function<TypePtr(Subscript)>> map = {
+    {"Tuple", [](Subscript subscript) -> TypePtr {
       std::vector<TypePtr> subscript_expr_types;
       for (auto expr : subscript.subscript_exprs()) {
-        auto type_pair = parseTypeFromExpr(expr);
-        if (type_pair.second)
-          throw ErrorReport(expr) << "fixed length lists cannot appear as a nested type";
-        subscript_expr_types.push_back(type_pair.first);
+        subscript_expr_types.push_back(parseTypeFromExpr(expr));
       }
-      return TypeAndOptLen(TupleType::create(subscript_expr_types), c10::nullopt);
+      return TupleType::create(subscript_expr_types);
     }},
-    {"List", [](Subscript subscript) -> TypeAndOptLen {
+    {"List", [](Subscript subscript) -> TypePtr {
       if (subscript.subscript_exprs().size() != 1) {
         throw ErrorReport(subscript) << " expected exactly one element type but found " << subscript.subscript_exprs().size();
       }
-      auto type_pair = parseTypeFromExpr(*subscript.subscript_exprs().begin());
-      if (type_pair.second)
-        throw ErrorReport(*subscript.subscript_exprs().begin()) << "fixed length lists cannot appear as a nested type";
-      return TypeAndOptLen(ListType::create(type_pair.first), c10::nullopt);
-    }},
-    {"int", [](Subscript subscript) -> TypeAndOptLen {
-      return TypeAndOptLen(ListType::ofInts(), getFixedLengthListSubscript(subscript));
-    }},
-    {"float", [](Subscript subscript) -> TypeAndOptLen {
-      return TypeAndOptLen(ListType::ofFloats(), getFixedLengthListSubscript(subscript));
+      auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+      return ListType::create(elem_type);
     }},
     {"Optional", [](Subscript subscript) -> TypePtr {
       if (subscript.subscript_exprs().size() != 1) {
@@ -2143,12 +2108,12 @@ const std::unordered_map<std::string, std::function<TypeAndOptLen(Subscript)>> &
   return map;
 }
 
-TypeAndOptLen parseTypeFromExpr(Expr expr) {
+TypePtr parseTypeFromExpr(Expr expr) {
   if (expr.kind() == TK_VAR) {
     auto ident = Var(expr).name();
     auto itr = ident_to_type_lut().find(ident.name());
     if (itr != ident_to_type_lut().end()) {
-      return TypeAndOptLen(itr->second, c10::nullopt);
+      return itr->second;
     }
     throw ErrorReport(expr.range()) << "Unknown type name " << ident.name();
   } else if (expr.kind() == TK_SUBSCRIPT) {
@@ -2165,11 +2130,49 @@ TypeAndOptLen parseTypeFromExpr(Expr expr) {
     auto select = Select(expr);
     if (select.value().kind() == TK_VAR && Var(select.value()).name().name() == "torch"
         && select.selector().name() == "Tensor") {
-      return TypeAndOptLen(ident_to_type_lut().at("Tensor"), c10::nullopt);
+      return ident_to_type_lut().at("Tensor");
     }
   }
   throw ErrorReport(expr.range()) << "Expression of type " << kindToString(expr.kind())
                                   << " cannot be used in a type expression";
+}
+
+
+c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
+  if (expr.kind() != TK_SUBSCRIPT)
+    return c10::nullopt;
+  auto subscript = Subscript(expr);
+  if (subscript.value().kind() != TK_VAR)
+    return c10::nullopt;
+  auto var = Var(subscript.value());
+  if (var.name().name() != "BroadcastingList")
+    return c10::nullopt;
+  if (subscript.subscript_exprs().size() != 2)
+    throw ErrorReport(subscript.subscript_exprs().range())
+      << "BroadcastingList must be subscripted by type & len";
+
+  auto typ = subscript.subscript_exprs()[0];
+  auto len = subscript.subscript_exprs()[1];
+
+  if (typ.kind() != TK_VAR)
+    throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
+
+  auto value_name = Var(typ).name().name();
+  if (value_name != "float" && value_name != "int")
+    throw ErrorReport(subscript.value().range()) << "Broadcastable lists only supported for int or float";
+
+  auto elem_ptr = ident_to_type_lut().find(value_name);
+  JIT_ASSERT(elem_ptr != ident_to_type_lut().end());
+  TypePtr list_ptr = ListType::create(elem_ptr->second);
+  if (len.kind () != TK_CONST)
+    throw ErrorReport(expr) << "subscript of Broadcastable list must be positive integer";
+
+  auto constant = Const(len);
+  if (!constant.isIntegral() || constant.asIntegral() <= 0)
+    throw ErrorReport(len) << "subscript of Broadcastable list must be positive integer";
+
+  auto len_v = constant.asIntegral();
+  return std::pair<TypePtr, int32_t>(list_ptr, len_v);
 }
 
 std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
@@ -2177,11 +2180,23 @@ std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
   size_t i = is_method ? 1 : 0;
   for (; i < decl.params().size(); ++i) {
     auto decl_arg = decl.params()[i];
-    auto type_optlen = parseTypeFromExpr(decl_arg.type());
+
+    TypePtr type;
+    c10::optional<int32_t> N;
+
+    //BroadcastList list can only appear at the argument level
+    if (auto maybe_broad_list = handleBroadcastList(decl_arg.type())) {
+      type = maybe_broad_list->first;
+      N = maybe_broad_list->second;
+    } else {
+      type = parseTypeFromExpr(decl_arg.type());
+      N = c10::nullopt;
+    }
+
     auto arg = Argument(
         decl_arg.ident().name(),
-        type_optlen.first,
-        type_optlen.second,
+        type,
+        N,
         /*default_value =*/c10::nullopt,
         /*kwarg_only =*/false);
     retval.push_back(arg);
@@ -2191,10 +2206,9 @@ std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
 
 std::vector<Argument> parseReturnsFromDecl(Decl decl) {
   JIT_ASSERT(decl.return_type().present());
-  auto type_optlen = parseTypeFromExpr(decl.return_type().get());
-  if (type_optlen.second)
-    throw ErrorReport(decl.return_type().range()) << "fixed length lists cannot appear as a return type";
-  auto parsed_type = type_optlen.first;
+  if (handleBroadcastList(decl.return_type().get()))
+    throw ErrorReport(decl.return_type().range()) << "Broadcastable lists cannot appear as a return type";
+  auto parsed_type = parseTypeFromExpr(decl.return_type().get());
   if (auto tuple_type = parsed_type->cast<TupleType>()) {
     // Flatten a single return type of type Tuple into its constituent types
     std::vector<Argument> retval;
