@@ -416,8 +416,8 @@ inline Tensor Tensor::_th_cross(const Tensor & other, int64_t dim) const {
 inline Tensor Tensor::_th_diag(int64_t diagonal) const {
     return type()._th_diag(*this, diagonal);
 }
-inline Tensor Tensor::addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const {
-    return type().addbmm(*this, batch1, batch2, beta, alpha);
+inline Tensor Tensor::_th_addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const {
+    return type()._th_addbmm(*this, batch1, batch2, beta, alpha);
 }
 inline Tensor & Tensor::_th_addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
     return type()._th_addbmm_(*this, batch1, batch2, beta, alpha);
@@ -1384,6 +1384,9 @@ inline Tensor & Tensor::remainder_(const Tensor & other) {
 }
 inline Tensor & Tensor::addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
     return type().addbmm_(*this, batch1, batch2, beta, alpha);
+}
+inline Tensor Tensor::addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const {
+    return type().addbmm(*this, batch1, batch2, beta, alpha);
 }
 inline Tensor & Tensor::addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
     return type().addcmul_(*this, tensor1, tensor2, value);

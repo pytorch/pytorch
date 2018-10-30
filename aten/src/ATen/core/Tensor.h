@@ -383,7 +383,7 @@ public:
   Tensor & _th_triu_(int64_t diagonal=0);
   Tensor _th_cross(const Tensor & other, int64_t dim=-1) const;
   Tensor _th_diag(int64_t diagonal=0) const;
-  Tensor addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
+  Tensor _th_addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & _th_addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
   Tensor _th_addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   Tensor & _th_addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
@@ -706,6 +706,7 @@ public:
   Tensor & remainder_(Scalar other);
   Tensor & remainder_(const Tensor & other);
   Tensor & addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
+  Tensor addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
   Tensor & addcdiv_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
   Tensor & random_(int64_t from, int64_t to, Generator * generator=nullptr);

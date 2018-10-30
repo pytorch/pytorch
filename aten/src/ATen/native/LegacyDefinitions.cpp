@@ -205,6 +205,14 @@ Tensor & addbmm_(Tensor& self, const Tensor & batch1, const Tensor & batch2, Sca
   return self._th_addbmm_(batch1, batch2, beta, alpha);
 }
 
+Tensor & addbmm_out(Tensor & result, const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
+  return at::_th_addbmm_out(result, self, batch1, batch2, beta, alpha);
+}
+
+Tensor addbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
+  return at::_th_addbmm(self, batch1, batch2, beta, alpha);
+}
+
 Tensor & addcmul_(Tensor& self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
   return self._th_addcmul_(tensor1, tensor2, value);
 }
