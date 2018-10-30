@@ -940,11 +940,13 @@ def from_column_list(
     """
     Given a list of names, types, and optionally values, construct a Schema.
     """
-    if col_types is None:
+    if not col_types:
         col_types = [None] * len(col_names)
-    if col_metadata is None:
+    else:
+        col_types = [np.dtype(type) for type in col_types]
+    if not col_metadata:
         col_metadata = [None] * len(col_names)
-    if col_blobs is None:
+    if not col_blobs:
         col_blobs = [None] * len(col_names)
     assert len(col_names) == len(col_types), (
         'col_names and col_types must have the same length.'
