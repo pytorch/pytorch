@@ -329,12 +329,13 @@ function build_caffe2() {
 		       -DANDROID_TOOLCHAIN=clang \
 		       -DUSE_OPENMP=OFF \
 		       -DANDROID_NDK=$ANDROID_NDK \
-		       -DANDROID_ABI="armeabi-v7a" \
+		       -DANDROID_ABI=x86 \
 		       -DANDROID_NATIVE_API_LEVEL=21 \
 		       -DANDROID_CPP_FEATURES="rtti exceptions" \
 		       -DUSE_MOBILE_OPENGL=OFF \
 		       $GLOO_FLAGS \
 		       ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
+		       # #"armeabi-v7a" \
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
@@ -346,7 +347,8 @@ function build_caffe2() {
   #    find "${INSTALL_DIR}/lib" -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "lib/"
   #fi
 
-  ${CMAKE_INSTALL} -j"$MAX_JOBS"
+  PATH=$PATH:$(pwd)/../build_host_protoc/build/:$(pwd)/../build_host_protoc/bin/
+  cmake  --build . -- -j"$MAX_JOBS"
 
   # Install Python proto files
   if [[ "$BUILD_PYTHON" == 'ON' ]]; then
