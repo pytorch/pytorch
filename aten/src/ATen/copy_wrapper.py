@@ -36,10 +36,8 @@ COPY_CPU = CodeTemplate("""\
 copy_cpu(dst, src);
 """)
 
-COPY = CodeTemplate("""\
-${THTensor}_copy${cuda}${src_scalar_name}(${state,}\
-dst.unsafeGetTensorImpl(), \
-src.unsafeGetTensorImpl());
+COPY_CUDA = CodeTemplate("""\
+cuda::copy_cuda(dst, src);
 """)
 
 COPY_ASYNC_CPU = CodeTemplate("""\
@@ -146,7 +144,7 @@ def create_one_copy(dst_type, all_types):
         if dst_type['Backend'] == 'CPU' and src_type['Backend'] == 'CPU':
             copies.append(COPY_CPU.substitute())
         else:
-            copies.append(COPY.substitute(body_env))
+            copies.append(COPY_CUDA.substitute())
 
         copy_body.append(CASE.substitute(body_env, copies=copies))
 
@@ -215,7 +213,7 @@ def create_one_copy_from(src_type, all_types):
         if dst_type['Backend'] == 'CPU' and src_type['Backend'] == 'CPU':
             copies.append(COPY_CPU.substitute())
         else:
-            copies.append(COPY.substitute(body_env))
+            copies.append(COPY_CUDA.substitute())
 
         copy_body.append(CASE.substitute(body_env, copies=copies))
 
@@ -239,6 +237,7 @@ def create(all_types, backend):
 
     if backend == 'CUDA':
         top_env['cuda_includes'].append(CUDA_INCLUDES)
+        top_env['copy_includes'].append('#include "ATen/cuda/CUDACopy.h"')
 
     # Headers to include
     for the_type in all_types:
