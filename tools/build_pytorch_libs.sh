@@ -244,6 +244,13 @@ function build_caffe2() {
   fi
 
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
+  if ls build.ninja 2>&1 >/dev/null; then
+      # workaround a cmake-ninja bug, which doesn't track the dependency
+      # between xxx-generated-xxx.cu and updating the timestamp of build.ninja,
+      # (the consequence being cmake is rerun on a next rebuild).
+      # this was surfaced after analyzing the outputs of `ninja -d explain install`
+      touch build.ninja
+  fi
 
   # Install Python proto files
   if [[ "$BUILD_PYTHON" == 'ON' ]]; then
