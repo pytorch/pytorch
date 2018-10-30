@@ -115,10 +115,10 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   ASSERT_EQ(loaded_tensor->mutableDeviceDetail()->deviceType, 0);
   ASSERT_EQ(loaded_tensor->noContent(), false);
   ASSERT_EQ(loaded_tensor->dataType(), caffe2::TensorProto_DataType_FLOAT);
-  ASSERT_EQ(loaded_tensor->data()->size(), raw_size);
-  ASSERT_EQ(std::memcmp(loaded_tensor->data()->rawData(),
+  ASSERT_EQ(loaded_tensor->data()->size, raw_size);
+  ASSERT_EQ(std::memcmp(loaded_tensor->data()->dataPtr.get(),
         data_vector.data(), raw_size), 0);
-  ASSERT_EQ(loaded_tensor->data()->recordId(), 64);
+  ASSERT_EQ(loaded_tensor->data()->recordId, 64);
 }
 
 }  // namespace

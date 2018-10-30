@@ -5,6 +5,7 @@
 #include <string>
 
 #include <ATen/core/Allocator.h>
+#include <c10/util/Optional.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/proto/caffe2_pb.h"
@@ -22,49 +23,20 @@ namespace serialize {
 //       in deserialize, the data pointer is returned by PyTorchFileReader,
 //       and IntermediateModel owns the data. The ownership later will be
 //       transferred to Tensor
-class SharedData {
- public:
+struct SharedData {
   // constructor
   explicit SharedData(uint64_t record_id, at::DataPtr&& data_ptr, uint64_t size)
-    : recordId_(record_id), dataPtr_(std::move(data_ptr)), size_(size){}
+    : recordId(record_id), dataPtr(std::move(data_ptr)), size(size){}
 
-  // getters
-  void* rawData() {
-    return dataPtr_.get();
-  }
-
-  uint64_t recordId() const {
-    return recordId_;
-  }
-
-  uint64_t size() const {
-    return size_;
-  }
-
-  // setters
-  void setDataPtr(at::DataPtr&& data_ptr) {
-    dataPtr_ = std::move(data_ptr);
-  }
-
-  void setRecordId(uint64_t record_id) {
-    recordId_ = record_id;
-  }
-
-  void setSize(uint64_t size) {
-    size_ = size;
-  }
-
- private:
-  uint64_t recordId_;
-  at::DataPtr dataPtr_;
-  uint64_t size_;
+  uint64_t recordId;
+  at::DataPtr dataPtr;
+  uint64_t size;
 };
 
 // IntermediateDeviceOption stores device related information
 struct IntermediateDeviceOption {
   int32_t deviceType = 0;
-  int32_t deviceId;
-  bool hasDeviceId = false;
+  c10::optional<int32_t> deviceId;
 };
 
 // IntermediateTensor contains
@@ -94,7 +66,6 @@ class IntermediateTensor final {
       const auto& device_detail = tensor_proto->device_detail();
       deviceDetail_.deviceType = device_detail.device_type();
       if (device_detail.has_device_id()) {
-        deviceDetail_.hasDeviceId = true;
         deviceDetail_.deviceId = device_detail.device_id();
       }
       if (device_detail.has_random_seed()) {
@@ -131,7 +102,8 @@ class IntermediateTensor final {
             int64_t record_id = std::stoul(external_data.record_id());
             auto it = id_data->find(record_id);
             if (it == id_data->end()) {
-              AT_ERROR("Tensor's data is missing in id_data, tensor name is %s, and record_id is %lld", name_, record_id);
+              AT_ERROR("Tensor's data is missing in id_data, tensor name is ",
+                  name_, ", and record_id is "); //, std::torecord_id);
             }
             data_ = it->second;
           } else if (source_type == caffe2::ExternalDataProto_SourceType_SIMPLE_FILE) {
@@ -170,15 +142,15 @@ class IntermediateTensor final {
     caffe2::ExternalDataProto* data_proto = tensor_proto->mutable_external_data();
     // NB: maybe later we support SIMPLE_FILE
     data_proto->set_source_type(caffe2::ExternalDataProto_SourceType_INLINE_CONTAINER);
-    data_proto->set_record_id(std::to_string(data_->recordId()));
+    data_proto->set_record_id(std::to_string(data_->recordId));
     data_proto->set_offset(offset_);
     for (auto stride : strides_) {
       data_proto->add_strides(stride);
     }
     caffe2::DeviceOption* device_detail = tensor_proto->mutable_device_detail();
     device_detail->set_device_type(deviceDetail_.deviceType);
-    if (deviceDetail_.hasDeviceId) {
-      device_detail->set_device_id(deviceDetail_.deviceId);
+    if (deviceDetail_.deviceId.has_value()) {
+      device_detail->set_device_id(deviceDetail_.deviceId.value());
     }
   }
 
@@ -529,14 +501,14 @@ void serializeIntermediateModel(IntermediateModel* imodel,
     auto* params = m->mutableParameters();
     for (int i = 0; i < params->size(); ++i) {
       std::shared_ptr<SharedData> dataptr = params->at(i).mutableTensor()->data();
-      void* data = dataptr->rawData();
-      size_t size = dataptr->size();
+      void* data = dataptr->dataPtr.get();
+      size_t size = dataptr->size;
       auto it = data_id.find(data);
       if (it != data_id.end()) {
-        dataptr->setRecordId(it->second);
+        dataptr->recordId = it->second;
       } else {
         uint64_t id = writer->writeRecord(data, size);
-        dataptr->setRecordId(id);
+        dataptr->recordId = id;
         data_id[data] = id;
       }
     }
@@ -577,7 +549,7 @@ void deserializeIntermediateModel(IntermediateModel* imodel,
     if (reader->hasNextRecord()) {
       auto it = id_data.find(data_key);
       if (it != id_data.end()) {
-        it->second->setDataPtr(std::move(data_ptr));
+        it->second->dataPtr = std::move(data_ptr);
       } else {
         id_data[data_key] = std::make_shared<SharedData>(
             data_key, std::move(data_ptr), data_size);
