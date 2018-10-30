@@ -141,7 +141,7 @@ void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor
   THArgCheck(!a_->is_empty() && a_->dim() == 2, 1, "A should be (non-empty) 2 dimensional");
   THArgCheck(!b_->is_empty() && b_->dim() == 2, 1, "b should be (non-empty) 2 dimensional");
   THArgCheck(a_->size(0) == b_->size(0), 2, "Expected A and b to have same size "
-      "at dim 0, but they have incompatible sizes");
+      "at dim 0, but A has %ld rows, B has %ld", a_->size(0), b_->size(0));
   THArgCheck(a_->size(0) >= a_->size(1), 2, "Expected A with shape (m x n) to have "
       "m >= n. The case for m < n is not implemented yet.");
 
