@@ -169,7 +169,7 @@ def find_factory_functions(declarations):
     FACTORY_FUNCTION_NAMES = set()
 
     for declaration in declarations:
-        if any(arg['simple_type'] == 'TensorOptions' for arg in declaration['arguments']):
+        if declaration['is_factory_method']:
             FACTORY_FUNCTION_NAMES.add(declaration['api_name'])
 
 
@@ -280,8 +280,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         # Factory methods usually do not appear in `VariableType` at all, since they
         # don't dispatch via `Type`; except in the case where the implementation is 'abstract'
         # in which case they do!
-        if (not declaration['abstract'] and
-                any(arg['simple_type'] == 'TensorOptions' for arg in declaration['arguments'])):
+        if declaration['is_factory_method']:
             continue
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:

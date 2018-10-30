@@ -253,7 +253,7 @@ void NCCL<T>::Reduce(const NCCLExecution& ex) {
         CAFFE_NCCL_CHECK(ncclReduce(
             ctx.src->raw_data(),
             ctx.dst ? ctx.dst->raw_mutable_data() : nullptr,
-            ctx.src->size(),
+            ctx.src->numel(),
             ncclTypeWrapper<T>::type,
             ncclSum,
             ex.root,
@@ -283,7 +283,7 @@ void NCCL<T>::AllGather(const NCCLExecution& ex) {
         CAFFE_NCCL_CHECK(ncclAllGather(
             ctx.src->raw_data(),
             ctx.dst->raw_mutable_data(),
-            ctx.src->size(),
+            ctx.src->numel(),
             ncclTypeWrapper<T>::type,
             comm,
             stream));

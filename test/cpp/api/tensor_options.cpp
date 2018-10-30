@@ -61,6 +61,9 @@ TEST(TensorOptionsTest, ConstructsWellFromCPUTypes) {
   options = TensorOptions({kCPU, 0});
   REQUIRE_OPTIONS(kCPU, 0, kFloat, kStrided);
 
+  options = TensorOptions("cpu:0");
+  REQUIRE_OPTIONS(kCPU, 0, kFloat, kStrided);
+
   options = TensorOptions(kInt);
   REQUIRE_OPTIONS(kCPU, -1, kInt, kStrided);
 
