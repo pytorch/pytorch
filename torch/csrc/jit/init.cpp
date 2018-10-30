@@ -23,6 +23,7 @@
 #include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/canonicalize_ops.h"
+#include "torch/csrc/jit/passes/remove_inplace_ops.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/to_batch.h"
@@ -99,6 +100,9 @@ void initJITBindings(PyObject *module) {
    })
    .def("_jit_pass_cse", [](std::shared_ptr<Graph>& g) {
      return EliminateCommonSubexpression(g); // overload resolution
+   })
+   .def("_jit_pass_remove_inplace_ops", [](std::shared_ptr<Graph> g) {
+      return RemoveInplaceOps(g);
    })
    .def("_jit_pass_constant_pooling", ConstantPooling)
    .def("_jit_pass_peephole", [](const std::shared_ptr<Graph>& g, bool addmm_fusion_enabled) {

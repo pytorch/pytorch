@@ -258,7 +258,7 @@ class StmtBuilder(Builder):
                                     "Performing multiple assignments in a single line isn't supported")
         py_lhs = stmt.targets[0]
         py_lhs_exprs = py_lhs.elts if isinstance(py_lhs, ast.Tuple) else [py_lhs]
-        return Assign([StmtBuilder.get_assign_lhs_expr(ctx, e) for e in py_lhs_exprs], '=', rhs)
+        return Assign([StmtBuilder.get_assign_lhs_expr(ctx, e) for e in py_lhs_exprs], rhs)
 
     @staticmethod
     def build_Return(ctx, stmt):
@@ -287,7 +287,7 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_AugAssign(ctx, stmt):
-        lhs = [StmtBuilder.get_assign_lhs_expr(ctx, stmt.target)]
+        lhs = StmtBuilder.get_assign_lhs_expr(ctx, stmt.target)
         rhs = build_expr(ctx, stmt.value)
         op = type(stmt.op)
         if op in StmtBuilder.augassign_map:
@@ -296,7 +296,7 @@ class StmtBuilder(Builder):
             raise NotSupportedError(
                 find_before(ctx, rhs.range().start, '=', offsets=(-1, 0)),
                 "unsupported kind of augumented assignment: " + op.__name__)
-        return Assign(lhs, op_token, rhs)
+        return AugAssign(lhs, op_token, rhs)
 
     @staticmethod
     def build_While(ctx, stmt):

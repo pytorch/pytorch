@@ -923,6 +923,9 @@ private:
         case TK_ASSIGN:
           emitAssignment(Assign(stmt));
           break;
+        case TK_AUG_ASSIGN:
+          emitAugAssignment(AugAssign(stmt));
+          break;
         case TK_GLOBAL:
           for (auto ident : Global(stmt).names()) {
             const auto& name = Ident(ident).name();
@@ -946,6 +949,9 @@ private:
           throw ErrorReport(stmt) << "return statements can appear only at the end "
                                   << "of the function body";
           break;
+        default:
+          throw ErrorReport(stmt)
+              << "Unrecognized statement kind " << kindToString(stmt.kind());
       }
     }
   }
@@ -1360,20 +1366,55 @@ private:
     return num_starred;
   }
 
-  void emitAssignment(const Assign& stmt) {
-    bool starred_unpack = calcNumStarredUnpack(stmt.lhs(), stmt.range());
-    if (stmt.reduction() != '=') {
-      if (stmt.lhs().size() != 1) {
-        throw ErrorReport(stmt)
-            << "reductions are only allowed when there is a single variable "
-            << "on the left-hand side.";
+  // Emit nodes for augmented assignments like `+=`
+  void emitAugAssignment(const AugAssign& stmt) {
+    auto lhs = Var(stmt.lhs());
+    auto lhsValue = environment_stack->getSugaredVar(lhs.name())
+                        ->asValue(lhs.range(), method);
+    if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
+      // for tensors, emit the corresponding in-place op
+      Symbol op;
+      switch (stmt.aug_op()) {
+        case '+':
+          op = aten::add_;
+          break;
+        case '-':
+          op = aten::sub_;
+          break;
+        case '/':
+          op = aten::div_;
+          break;
+        case '*':
+          op = aten::mul_;
+          break;
+        default:
+          throw ErrorReport(stmt) << "Unknown augmented assignment to Tensor: "
+                                  << kindToString(stmt.aug_op());
       }
-      Ident lhs = Var(stmt.lhs()[0]).name();
-      Expr expr = BinOp::create(stmt.range(), stmt.reduction(),
+
+      auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
+      auto self = NamedValue(lhs.range(), lhs.name().name(), lhsValue);
+      auto output = emitBuiltinCall(
+          stmt.range(),
+          *method.graph(),
+          op,
+          self,
+          {rhs},
+          {},
+          /*required=*/true);
+      environment_stack->setVar(lhs.range(), lhs.name().name(), output);
+    } else {
+      // for primitive types, desugar into a simple assignment
+      //   e.g. foo += 1 becomes foo.2 = foo + 1
+      Ident lhs = Var(stmt.lhs()).name();
+      Expr expr = BinOp::create(stmt.range(), stmt.aug_op(),
                                 Var::create(lhs.range(), lhs), stmt.rhs());
       environment_stack->setVar(lhs.range(), lhs.name(), emitExpr(expr));
-      return;
     }
+  }
+
+  void emitAssignment(const Assign& stmt) {
+    bool starred_unpack = calcNumStarredUnpack(stmt.lhs(), stmt.range());
 
     size_t n_binders = stmt.lhs().size();
     if(starred_unpack)
