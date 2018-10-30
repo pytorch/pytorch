@@ -8665,7 +8665,8 @@ def check_output_types(self, func, ref_outputs, args, kwargs):
             self.assertTrue(ref_type.isSubtypeOf(t))
 
 
-def check_against_reference(self, func, reference_func, args, kwargs=None, allow_unused=True, check_types=True):
+def check_against_reference(self, func, reference_func, args, kwargs=None,
+        allow_unused=True, check_types=True, no_grad=False):
     kwargs = kwargs if kwargs else {}
 
     def allSum(vs):
@@ -8692,6 +8693,10 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
 
     if check_types:
         check_output_types(self, func, outputs_test, nograd_inputs, kwargs)
+
+    if no_grad:
+        # skip grad tests
+        return
 
     # test single grad case
     outputs = reference_func(*recording_inputs, **kwargs)
@@ -9046,10 +9051,12 @@ nn_module_tests = [
 #   method name,
 #   input size/constructing fn,
 #   args (tuple represents shape of a tensor arg),
-#   test variant name (will be used at test name suffix),    // optional
+#   test variant name(will be used at test name suffix,
+#       'inplace' skips grad tests),                         // optional
 #   fn to determine if test should be skipped,               // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
 #   kwargs for function,                                     // optional
+#   is inplace? if so skip grad tests,                       // optional
 # )
 nn_functional_tests = [
     # TODO: default arguments for None type not supported, add
@@ -9253,9 +9260,11 @@ def add_autograd_test(
 def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=(),
         output_process_fn=lambda x: x, kwargs=None):
     test_name = 'test_nn_' + name
+
     if variant_name != '':
         test_name = test_name + '_' + variant_name
 
+    no_grad = variant_name == 'inplace'
 
     def do_test(self, name=name, args=args, test_name=test_name):
         torch.manual_seed(2)
@@ -9268,7 +9277,8 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
         self_tensor = deepcopy(self_variable.data)
         args_tensor = deepcopy(unpack_variables(args_variable))
 
-        output_variable = getattr(F, name)(self_variable, *args_variable, **kwargs_variable)
+        if not no_grad:
+            output_variable = getattr(F, name)(self_variable, *args_variable, **kwargs_variable)
 
         def fn(*inputs, **kwargs):
             output = getattr(F, name)(*inputs, **kwargs)
@@ -9280,7 +9290,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
         if test_name not in EXCLUDE_SCRIPT:
             check_against_reference(self,
                                     create_script_fn(self, name, 'nn_functional', output_process_fn),
-                                    fn, f_args_variable, kwargs_variable)
+                                    fn, f_args_variable, kwargs_variable, no_grad=no_grad)
 
     post_add_test(test_name, skipTestIf, do_test)
 
