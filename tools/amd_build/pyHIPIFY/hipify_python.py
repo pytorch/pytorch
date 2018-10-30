@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 """ The Python Hipify script.
 ##
 # Copyright (c) 2015-2016 Advanced Micro Devices, Inc. All rights reserved.
@@ -24,8 +24,8 @@
 # THE SOFTWARE.
 """
 
+from __future__ import absolute_import, division, print_function
 import argparse
-import constants
 import fnmatch
 import re
 import shutil
@@ -33,16 +33,27 @@ import sys
 import os
 import yaml
 
-from functools import reduce
 from enum import Enum
-from cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
-from cuda_to_hip_mappings import MATH_TRANSPILATIONS
+from pyHIPIFY import constants
+from pyHIPIFY.cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
+from pyHIPIFY.cuda_to_hip_mappings import MATH_TRANSPILATIONS
 
 # Hardcode the PyTorch template map
 """This dictionary provides the mapping from PyTorch kernel template types
 to their actual types."""
 PYTORCH_TEMPLATE_MAP = {"Dtype": "scalar_t", "T": "scalar_t"}
 CAFFE2_TEMPLATE_MAP = {}
+
+
+class InputError(Exception):
+    # Exception raised for errors in the input.
+
+    def __init__(self, message):
+        super(InputError, self).__init__(message)
+        self.message = message
+
+    def __str__(self):
+        return "{}: {}".format("Input error", self.message)
 
 
 def openf(filename, mode):
@@ -232,7 +243,13 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), hi
                 yield filepath
 
 
-def preprocess(all_files, show_detailed=False, show_progress=True, hipify_caffe2=False):
+def preprocess(
+        all_files,
+        show_detailed=False,
+        show_progress=True,
+        hipify_caffe2=False,
+        hip_suffix='cc',
+        extensions_to_hip_suffix=()):
     """
     Call preprocessor on selected files.
 
@@ -248,7 +265,7 @@ def preprocess(all_files, show_detailed=False, show_progress=True, hipify_caffe2
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
-        preprocessor(filepath, stats, hipify_caffe2)
+        preprocessor(filepath, stats, hipify_caffe2, hip_suffix, extensions_to_hip_suffix)
         # Update the progress
         if show_progress:
             print(filepath)
@@ -432,12 +449,12 @@ def find_closure_group(input_string, start, group):
          if group = ["(", ")"], then finds the first balanced parantheses.
          if group = ["{", "}"], then finds the first balanced bracket.
 
-    Given an input string, a starting position in the input string, and the group type, 
+    Given an input string, a starting position in the input string, and the group type,
     find_closure_group returns the positions of group[0] and group[1] as a tuple.
-    
+
     Example:
         find_closure_group("(hi)", 0, ["(", ")"])
-    
+
     Returns:
         0, 3
     """
@@ -536,10 +553,10 @@ def hip_header_magic(input_string):
     # If device logic found, provide the necessary header.
     if hasDeviceLogic:
         output_string = '#include "hip/hip_runtime.h"\n' + input_string
-    
+
     return output_string
 
-  
+
 def replace_extern_shared(input_string):
     """Match extern __shared__ type foo[]; syntax and use HIP_DYNAMIC_SHARED() MACRO instead.
        https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_kernel_language.md#__shared__
@@ -695,7 +712,7 @@ def disable_function(input_string, function, replace_style):
     return output_string
 
 
-def get_hip_file_path(filepath, hipify_caffe2):
+def get_hip_file_path(filepath, hipify_caffe2, hip_suffix, extensions_to_hip_suffix):
     """ Returns the new name of the hipified file """
     if not hipify_caffe2:
         return filepath
@@ -708,8 +725,9 @@ def get_hip_file_path(filepath, hipify_caffe2):
     else:
         filename_without_ext += '_hip'
 
-    if ext == '.cu':
-        ext = '.cc'
+    # extensions are either specified, or .cu
+    if ext in extensions_to_hip_suffix or ext == '.cu':
+        ext = '.' + hip_suffix
 
     return os.path.join(dirpath, 'hip', filename_without_ext + ext)
 
@@ -720,13 +738,13 @@ def is_caffe2_gpu_file(filepath):
     return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
 
-def preprocessor(filepath, stats, hipify_caffe2):
+def preprocessor(filepath, stats, hipify_caffe2, hip_suffix, extensions_to_hip_suffix):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = filepath
     with open(fin_path, 'r') as fin:
         output_source = fin.read()
 
-    fout_path = get_hip_file_path(filepath, hipify_caffe2)
+    fout_path = get_hip_file_path(filepath, hipify_caffe2, hip_suffix, extensions_to_hip_suffix)
     if not os.path.exists(os.path.dirname(fout_path)):
         os.makedirs(os.path.dirname(fout_path))
 
@@ -1093,12 +1111,14 @@ def main():
     parser = argparse.ArgumentParser(
         description="The Python Hipify Script.")
 
+    # required argument: user has to specify it before proceed
+    # this is to avoid accidentally hipify files that are not intended
     parser.add_argument(
         '--project-directory',
         type=str,
         default=os.getcwd(),
         help="The root of the project.",
-        required=False)
+        required=True)
 
     parser.add_argument(
         '--show-detailed',
@@ -1162,30 +1182,77 @@ def main():
         help="Whether to show the progress bar during the transpilation proecss.",
         required=False)
 
+    parser.add_argument(
+        '--hip-suffix',
+        type=str,
+        default='cc',
+        help="The suffix for the hipified files",
+        required=False)
+
+    parser.add_argument(
+        '--extensions-to-hip-suffix',
+        type=str,
+        default=('cc', 'cu'),
+        help="Specify the file extensions whose suffix will be changed "
+        + "to the new hip suffix",
+        required=False)
+
     args = parser.parse_args()
 
+    hipify(
+        project_directory=args.project_directory,
+        show_detailed=args.show_detailed,
+        extensions=args.extensions,
+        output_directory=args.output_directory,
+        includes=args.includes,
+        yaml_settings=args.yaml_settings,
+        add_static_casts_option=args.add_static_casts,
+        hipify_caffe2=args.hipify_caffe2,
+        ignores=args.ignores,
+        show_progress=args.show_progress,
+        hip_suffix=args.hip_suffix,
+        extensions_to_hip_suffix=args.extensions_to_hip_suffix)
+
+
+def hipify(
+    project_directory,
+    show_detailed=False,
+    extensions=(".cu", ".cuh", ".c", ".cpp", ".h", ".in", ".hpp"),
+    output_directory="",
+    includes=(),
+    yaml_settings="",
+    add_static_casts_option=False,
+    hipify_caffe2=False,
+    ignores=(),
+    show_progress=True,
+    hip_suffix='cc',
+    extensions_to_hip_suffix=(),
+):
+    if project_directory == "":
+        project_directory = os.getcwd()
+
     # Verify the project directory exists.
-    if not os.path.exists(args.project_directory):
+    if not os.path.exists(project_directory):
         print("The project folder specified does not exist.")
         sys.exit(1)
 
     # If no output directory, provide a default one.
-    if not args.output_directory:
-        args.project_directory.rstrip("/")
-        args.output_directory = args.project_directory + "_amd"
+    if not output_directory:
+        project_directory.rstrip("/")
+        output_directory = project_directory + "_amd"
 
     # Copy from project directory to output directory if not done already.
-    if not os.path.exists(args.output_directory):
-        shutil.copytree(args.project_directory, args.output_directory)
+    if not os.path.exists(output_directory):
+        shutil.copytree(project_directory, output_directory)
 
     # Open YAML file with disable information.
-    if args.yaml_settings != "":
-        with openf(args.yaml_settings, "r") as f:
+    if yaml_settings != "":
+        with openf(yaml_settings, "r") as f:
             yaml_data = yaml.load(f)
 
         # Disable functions in certain files according to YAML description
         for disable_info in yaml_data["disabled_functions"]:
-            filepath = os.path.join(args.output_directory, disable_info["path"])
+            filepath = os.path.join(output_directory, disable_info["path"])
             if "functions" in disable_info:
                 functions = disable_info["functions"]
             else:
@@ -1222,11 +1289,11 @@ def main():
         # Disable modules
         disable_modules = yaml_data["disabled_modules"]
         for module in disable_modules:
-            disable_module(os.path.join(args.output_directory, module))
+            disable_module(os.path.join(output_directory, module))
 
         # Disable unsupported HIP functions
         for disable in yaml_data["disable_unsupported_hip_calls"]:
-            filepath = os.path.join(args.output_directory, disable["path"])
+            filepath = os.path.join(output_directory, disable["path"])
             if "functions" in disable:
                 functions = disable["functions"]
             else:
@@ -1266,29 +1333,37 @@ def main():
                 f.write(txt)
                 f.truncate()
 
-    all_files = list(matched_files_iter(args.output_directory, includes=args.includes,
-                                        ignores=args.ignores, extensions=args.extensions,
-                                        hipify_caffe2=args.hipify_caffe2))
+    all_files = list(matched_files_iter(output_directory, includes=includes,
+                                        ignores=ignores, extensions=extensions,
+                                        hipify_caffe2=hipify_caffe2))
 
     # Start Preprocessor
     preprocess(
         all_files,
-        show_detailed=args.show_detailed,
-        show_progress=args.show_progress,
-        hipify_caffe2=args.hipify_caffe2)
+        show_detailed=show_detailed,
+        show_progress=show_progress,
+        hipify_caffe2=hipify_caffe2,
+        hip_suffix=hip_suffix,
+        extensions_to_hip_suffix=extensions_to_hip_suffix)
 
     # Extract all of the kernel parameter and template type information.
-    if args.add_static_casts:
+    if add_static_casts_option:
         KernelTemplateParams = {}
         for filepath in all_files:
             get_kernel_template_params(
                 filepath,
                 KernelTemplateParams,
-                CAFFE2_TEMPLATE_MAP if args.hipify_caffe2 else PYTORCH_TEMPLATE_MAP)
+                CAFFE2_TEMPLATE_MAP if hipify_caffe2 else PYTORCH_TEMPLATE_MAP)
 
         # Execute the Clang Tool to Automatically add static casts
         for filepath in all_files:
-            add_static_casts(get_hip_file_path(filepath, hipify_caffe2=args.hipify_caffe2), KernelTemplateParams)
+            add_static_casts(
+                get_hip_file_path(
+                    filepath,
+                    hipify_caffe2=hipify_caffe2,
+                    hip_suffix=hip_suffix,
+                    extensions_to_hip_suffix=extensions_to_hip_suffix),
+                KernelTemplateParams)
 
 
 if __name__ == '__main__':
