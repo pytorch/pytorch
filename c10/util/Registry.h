@@ -213,12 +213,21 @@ class Registerer {
 // dllexport are mixed, but the warning is fine and linker will be properly
 // exporting the symbol. Same thing happens in the gflags flag declaration and
 // definition caes.
+#ifdef _MSC_VER
+#define C10_DECLARE_TYPED_REGISTRY(                                        \
+    RegistryName, SrcType, ObjectType, PtrType, ...)                       \
+  ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* \
+  RegistryName();                                                          \
+  typedef ::c10::Registerer<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>   \
+      Registerer##RegistryName
+#else
 #define C10_DECLARE_TYPED_REGISTRY(                                        \
     RegistryName, SrcType, ObjectType, PtrType, ...)                       \
   C10_IMPORT ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* \
   RegistryName();                                                          \
   typedef ::c10::Registerer<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>   \
       Registerer##RegistryName
+#endif
 
 #define C10_DEFINE_TYPED_REGISTRY(                                         \
     RegistryName, SrcType, ObjectType, PtrType, ...)                       \
