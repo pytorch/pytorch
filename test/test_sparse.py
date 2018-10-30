@@ -5,10 +5,13 @@ import itertools
 import functools
 import random
 import unittest
-from common_utils import TestCase, run_tests, skipIfRocm
+from common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, do_test_empty_full, load_tests
 from common_cuda import TEST_CUDA
-from test_torch import TestTorch
 from numbers import Number
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 
 def cpu_only(inner):
@@ -243,6 +246,24 @@ class TestSparse(TestCase):
         x = self.SparseTensor(i, v, torch.Size([3, 4, 5, 0]))
         res = self.ValueTensor(3, 4, 5, 0)
         test_tensor(x, res)
+
+    @skipIfRocm  # see https://github.com/pytorch/pytorch/pull/12171#issuecomment-431069849
+    def test_to_sparse(self):
+        shape = [10, 5, 19, 8]
+        max_nnz = 1
+        for dim, dim_sz in enumerate(shape, 1):
+            max_nnz *= dim_sz
+            rnnz = torch.randint(2, max_nnz, (1,)).item()
+            for nnz in [0, 1, rnnz]:
+                expected, _, _ = self._gen_sparse(dim, nnz, shape)
+                d = expected.to_dense()
+                result = d.to_sparse(dim)
+                self.assertEqual(d, result.to_dense())  # == not implemented for sparse tensors yet
+                self.assertEqual(expected.size(), result.size())
+                self.assertEqual(dim, result.sparse_dim())
+
+        sp, _, _ = self._gen_sparse(2, 10, [3, 3, 3])
+        self.assertRaises(RuntimeError, lambda: sp.to_sparse())
 
     @skipIfRocm
     def test_shared(self):
@@ -585,9 +606,9 @@ class TestSparse(TestCase):
                 y = y.transpose(i, j)
                 self.assertEqual(self.safeToDense(x), y)
 
-        test_shape(4, 20, 5)
-        test_shape(4, 10, [100, 100, 100, 5, 5, 5, 0])
-        test_shape(4, 0, [0, 0, 100, 5, 5, 5, 0])
+        test_shape(4, 6, 3)
+        test_shape(4, 3, [7, 7, 7, 3, 3, 3, 0])
+        test_shape(4, 0, [0, 0, 7, 3, 3, 3, 0])
 
     @cpu_only
     def test_coalesce_transpose_mm(self):
@@ -918,6 +939,7 @@ class TestSparse(TestCase):
         self._test_basic_ops_shape(0, 0, [10, 10, 10], [2, 0])
         self._test_basic_ops_shape(0, 0, [10, 10, 0], [2, 0])
 
+    @skipIfRocm
     def test_add_dense_sparse_mismatch(self):
         def test_shape(dense_size, sparse_dims_shape, dense_dims_shape, sparse_size):
             x = torch.zeros(dense_size, dtype=self.value_dtype, device=self.device)
@@ -1529,17 +1551,17 @@ class TestSparse(TestCase):
     @cpu_only  # not really, but we only really want to run this once
     def test_dtypes(self):
         all_sparse_dtypes = [dtype for dtype in torch.testing.get_all_dtypes() if dtype != torch.float16]
-        TestTorch._test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
+        do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.is_available():
-            TestTorch._test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
+            do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
 
     @cpu_only  # not really, but we only really want to run this once
     def test_empty_full(self):
         all_sparse_dtypes = [dtype for dtype in torch.testing.get_all_dtypes() if dtype != torch.float16]
-        TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
+        do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
-            TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, None)
-            TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
+            do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, None)
+            do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
 
     def test_is_sparse(self):
         x = torch.randn(3, 3)

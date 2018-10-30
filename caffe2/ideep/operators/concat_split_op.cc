@@ -98,7 +98,7 @@ class IDEEPSplitOp final : public IDEEPOperator {
           "If you set split with an input blob, do not pass in "
           "split in the argument.");
       auto& axis_info = OperatorBase::Input<Tensor>(AXIS_INFO, CPU);
-      CAFFE_ENFORCE_EQ(axis_info.size(), OutputSize());
+      CAFFE_ENFORCE_EQ(axis_info.numel(), OutputSize());
       auto* axis_data = axis_info.template data<int>();
       axis_vdata.assign(axis_data, axis_data + OutputSize());
     } else if (axis_offset_.size() == 0) {

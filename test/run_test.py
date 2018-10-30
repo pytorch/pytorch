@@ -94,7 +94,7 @@ def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-def shell(command, cwd):
+def shell(command, cwd=None):
     sys.stdout.flush()
     sys.stderr.flush()
     return subprocess.call(

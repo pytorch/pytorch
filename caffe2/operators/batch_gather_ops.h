@@ -34,7 +34,7 @@ class BatchGatherOp final : public Operator<Context> {
 
     auto block_size = data.size_from_dim(2);
     auto block_bytesize = block_size * data.meta().itemsize();
-    auto N = indices.size();
+    auto N = indices.numel();
     auto data_batch_size = data.size_from_dim(1);
     auto gathered_batch_size = N * data.size_from_dim(2);
     auto data_batch_bytesize = data_batch_size * data.meta().itemsize();
@@ -115,7 +115,7 @@ class BatchGatherGradientOp final : public Operator<Context> {
 
     output->ResizeLike(data);
     TData* out_data = output->template mutable_data<TData>();
-    if (data.size() <= 0) {
+    if (data.numel() <= 0) {
       return true;
     }
 
@@ -124,7 +124,7 @@ class BatchGatherGradientOp final : public Operator<Context> {
     const TData* grad_data = grad.template data<TData>();
 
     auto block_size = data.size_from_dim(2);
-    auto N = indices.size();
+    auto N = indices.numel();
     auto data_batch_size = data.size_from_dim(1);
     auto gathered_batch_size = N * data.size_from_dim(2);
     const TInd* idxs = indices.template data<TInd>();

@@ -16,7 +16,11 @@ import warnings
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common_utils import IS_WINDOWS, IS_PPC, skipIfRocm
+from common_utils import IS_WINDOWS, IS_PPC, skipIfRocm, load_tests
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 HAS_CUDA = torch.cuda.is_available()
 

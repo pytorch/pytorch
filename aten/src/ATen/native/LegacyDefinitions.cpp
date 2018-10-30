@@ -419,4 +419,287 @@ Tensor nonzero(const Tensor & self) {
   return at::_th_nonzero(self);
 }
 
+Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index) {
+  return at::_th_gather_out(result, self, dim, index);
+}
+
+Tensor gather(const Tensor & self, int64_t dim, const Tensor & index) {
+  return at::_th_gather(self, dim, index);
+}
+
+Tensor & addcmul_out(Tensor & result, const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
+  return at::_th_addcmul_out(result, self, tensor1, tensor2, value);
+}
+
+Tensor addcmul(const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
+  return at::_th_addcmul(self, tensor1, tensor2, value);
+}
+
+Tensor & addcdiv_out(Tensor & result, const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
+  return at::_th_addcdiv_out(result, self, tensor1, tensor2, value);
+}
+
+Tensor addcdiv(const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
+  return at::_th_addcdiv(self, tensor1, tensor2, value);
+}
+
+std::tuple<Tensor &,Tensor &> gels_out(Tensor & X, Tensor & qr, const Tensor & self, const Tensor & A) {
+  return at::_th_gels_out(X, qr, self, A);
+}
+
+std::tuple<Tensor,Tensor> gels(const Tensor & self, const Tensor & A) {
+  return at::_th_gels(self, A);
+}
+
+std::tuple<Tensor &,Tensor &> trtrs_out(Tensor & X, Tensor & M, const Tensor & self, const Tensor & A, bool upper, bool transpose, bool unitriangular) {
+  return at::_th_trtrs_out(X, M, self, A, upper, transpose, unitriangular);
+}
+
+std::tuple<Tensor,Tensor> trtrs(const Tensor & self, const Tensor & A, bool upper, bool transpose, bool unitriangular) {
+  return at::_th_trtrs(self, A, upper, transpose, unitriangular);
+}
+
+std::tuple<Tensor &,Tensor &> symeig_out(Tensor & e, Tensor & V, const Tensor & self, bool eigenvectors, bool upper) {
+  return at::_th_symeig_out(e, V, self, eigenvectors, upper);
+}
+
+std::tuple<Tensor,Tensor> symeig(const Tensor & self, bool eigenvectors, bool upper) {
+  return at::_th_symeig(self, eigenvectors, upper);
+}
+
+std::tuple<Tensor &,Tensor &> eig_out(Tensor & e, Tensor & v, const Tensor & self, bool eigenvectors) {
+  return at::_th_eig_out(e, v, self, eigenvectors);
+}
+
+std::tuple<Tensor,Tensor> eig(const Tensor & self, bool eigenvectors) {
+  return at::_th_eig(self, eigenvectors);
+}
+
+std::tuple<Tensor &,Tensor &,Tensor &> svd_out(Tensor & U, Tensor & S, Tensor & V, const Tensor & self, bool some, bool compute_uv) {
+  return at::_th_svd_out(U, S, V, self, some, compute_uv);
+}
+
+std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some, bool compute_uv) {
+  return at::_th_svd(self, some, compute_uv);
+}
+
+Tensor & potrf_out(Tensor & result, const Tensor & self, bool upper) {
+  return at::_th_potrf_out(result, self, upper);
+}
+
+Tensor potrf(const Tensor & self, bool upper) {
+  return at::_th_potrf(self, upper);
+}
+
+Tensor & potrs_out(Tensor & result, const Tensor & self, const Tensor & input2, bool upper) {
+  return at::_th_potrs_out(result, self, input2, upper);
+}
+
+Tensor potrs(const Tensor & self, const Tensor & input2, bool upper) {
+  return at::_th_potrs(self, input2, upper);
+}
+
+Tensor & potri_out(Tensor & result, const Tensor & self, bool upper) {
+  return at::_th_potri_out(result, self, upper);
+}
+
+Tensor potri(const Tensor & self, bool upper) {
+  return at::_th_potri(self, upper);
+}
+
+std::tuple<Tensor &,Tensor &> pstrf_out(Tensor & u, Tensor & piv, const Tensor & self, bool upper, Scalar tol) {
+  return at::_th_pstrf_out(u, piv, self, upper, tol);
+}
+
+std::tuple<Tensor,Tensor> pstrf(const Tensor & self, bool upper, Scalar tol) {
+  return at::_th_pstrf(self, upper, tol);
+}
+
+std::tuple<Tensor &,Tensor &> qr_out(Tensor & Q, Tensor & R, const Tensor & self) {
+  return at::_th_qr_out(Q, R, self);
+}
+
+std::tuple<Tensor,Tensor> qr(const Tensor & self) {
+  return at::_th_qr(self);
+}
+
+std::tuple<Tensor &,Tensor &> geqrf_out(Tensor & result0, Tensor & result1, const Tensor & self) {
+  return at::geqrf_out(result0, result1, self);
+}
+
+std::tuple<Tensor,Tensor> geqrf(const Tensor & self) {
+  return at::_th_geqrf(self);
+}
+
+Tensor & orgqr_out(Tensor & result, const Tensor & self, const Tensor & input2) {
+  return at::_th_orgqr_out(result, self, input2);
+}
+
+Tensor orgqr(const Tensor & self, const Tensor & input2) {
+  return at::_th_orgqr(self, input2);
+}
+
+Tensor & ormqr_out(Tensor & result, const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose) {
+  return at::ormqr_out(result, self, input2, input3, left, transpose);
+}
+
+Tensor ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose) {
+  return at::_th_ormqr(self, input2, input3, left, transpose);
+}
+
+std::tuple<Tensor &,Tensor &> btrifact_out(Tensor & A_LU, Tensor & pivots, const Tensor & self, bool pivot) {
+  return at::_th_btrifact_out(A_LU, pivots, self, pivot);
+}
+
+std::tuple<Tensor,Tensor> btrifact(const Tensor & self, bool pivot) {
+  return at::_th_btrifact(self, pivot);
+}
+
+std::tuple<Tensor &,Tensor &,Tensor &> btrifact_with_info_out(Tensor & A_LU, Tensor & pivots, Tensor & info, const Tensor & self, bool pivot) {
+  return at::_th_btrifact_with_info_out(A_LU, pivots, info, self, pivot);
+}
+
+std::tuple<Tensor,Tensor,Tensor> btrifact_with_info(const Tensor & self, bool pivot) {
+  return at::_th_btrifact_with_info(self, pivot);
+}
+
+Tensor & btrisolve_out(Tensor & result, const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
+  return at::_th_btrisolve_out(result, self, LU_data, LU_pivots);
+}
+
+Tensor btrisolve(const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
+  return at::_th_btrisolve(self, LU_data, LU_pivots);
+}
+
+Tensor & multinomial_out(Tensor & result, const Tensor & self, int64_t num_samples, bool replacement, Generator * generator) {
+  return at::_th_multinomial_out(result, self, num_samples, replacement, generator);
+}
+
+Tensor multinomial(const Tensor & self, int64_t num_samples, bool replacement, Generator * generator) {
+  return at::_th_multinomial(self, num_samples, replacement, generator);
+}
+
+Tensor & lgamma_out(Tensor & result, const Tensor & self) {
+  return at::_th_lgamma_out(result, self);
+}
+
+Tensor lgamma(const Tensor & self) {
+  return at::_th_lgamma(self);
+}
+
+Tensor & digamma_out(Tensor & result, const Tensor & self) {
+  return at::_th_digamma_out(result, self);
+}
+Tensor digamma(const Tensor & self) {
+  return at::_th_digamma(self);
+}
+
+Tensor & polygamma_out(Tensor & result, int64_t n, const Tensor & self) {
+  return at::_th_polygamma_out(result, n, self);
+}
+
+Tensor polygamma(int64_t n, const Tensor & self) {
+  return at::_th_polygamma(n, self);
+}
+
+Tensor & erfinv_out(Tensor & result, const Tensor & self) {
+  return at::_th_erfinv_out(result, self);
+}
+
+Tensor erfinv(const Tensor & self) {
+  return at::_th_erfinv(self);
+}
+
+Tensor & frac_out(Tensor & result, const Tensor & self) {
+  return at::_th_frac_out(result, self);
+}
+
+Tensor frac(const Tensor & self) {
+  return at::_th_frac(self);
+}
+
+Tensor dist(const Tensor & self, const Tensor & other, Scalar p) {
+  return at::_th_dist(self, other, p);
+}
+
+Tensor & reciprocal_out(Tensor & result, const Tensor & self) {
+  return at::_th_reciprocal_out(result, self);
+}
+
+Tensor reciprocal(const Tensor & self) {
+  return at::_th_reciprocal(self);
+}
+
+Tensor & neg_out(Tensor & result, const Tensor & self) {
+  return at::_th_neg_out(result, self);
+}
+
+Tensor neg(const Tensor & self) {
+  return at::_th_neg(self);
+}
+
+Tensor & atan2_out(Tensor & result, const Tensor & self, const Tensor & other) {
+  return at::_th_atan2_out(result, self, other);
+}
+
+Tensor atan2(const Tensor & self, const Tensor & other) {
+  return at::_th_atan2(self, other);
+}
+
+Tensor & lerp_out(Tensor & result, const Tensor & self, const Tensor & end, Scalar weight) {
+  return at::_th_lerp_out(result, self, end, weight);
+}
+
+Tensor lerp(const Tensor & self, const Tensor & end, Scalar weight) {
+  return at::_th_lerp(self, end, weight);
+}
+
+Tensor & histc_out(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+  return at::_th_histc_out(result, self, bins, min, max);
+}
+
+Tensor histc(const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+  return at::_th_histc(self, bins, min, max);
+}
+
+Tensor & sign_out(Tensor & result, const Tensor & self) {
+  return at::_th_sign_out(result, self);
+}
+
+Tensor sign(const Tensor & self) {
+  return at::_th_sign(self);
+}
+
+Tensor & fmod_out(Tensor & result, const Tensor & self, Scalar other) {
+  return at::_th_fmod_out(result, self, other);
+}
+
+Tensor fmod(const Tensor & self, Scalar other) {
+  return at::_th_fmod(self, other);
+}
+
+Tensor & fmod_out(Tensor & result, const Tensor & self, const Tensor & other) {
+  return at::_th_fmod_out(result, self, other);
+}
+
+Tensor fmod(const Tensor & self, const Tensor & other) {
+  return at::_th_fmod(self, other);
+}
+
+Tensor & remainder_out(Tensor & result, const Tensor & self, Scalar other) {
+  return at::_th_remainder_out(result, self, other);
+}
+
+Tensor remainder(const Tensor & self, Scalar other) {
+  return at::_th_remainder(self, other);
+}
+
+Tensor & remainder_out(Tensor & result, const Tensor & self, const Tensor & other) {
+  return at::_th_remainder_out(result, self, other);
+}
+
+Tensor remainder(const Tensor & self, const Tensor & other) {
+  return at::_th_remainder(self, other);
+}
+
 }} // namespace at::native

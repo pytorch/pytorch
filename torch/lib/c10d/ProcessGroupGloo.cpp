@@ -104,9 +104,10 @@ const ::gloo::ReductionFunction<T>* reductionFunction(const ReduceOp& r) {
 
 #ifdef USE_CUDA
 std::vector<cudaStream_t> getStreamVector(AlgorithmEntry& entry) {
-  std::vector<cudaStream_t> streams(entry.streams.size());
-  for (size_t i = 0; i < entry.streams.size(); i++) {
-    streams[i] = entry.streams[i].stream();
+  std::vector<cudaStream_t> streams;
+  streams.reserve(entry.streams.size());
+  for (auto s : entry.streams) {
+    streams.push_back(s);
   }
   return streams;
 }
@@ -526,12 +527,12 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
 #ifdef USE_CUDA
   // If these are CUDA tensors, create streams and events
   if (key.type->is_cuda()) {
-    entry->streams.resize(key.devices.size());
-    entry->events.resize(key.devices.size());
+    entry->streams.reserve(key.devices.size());
+    entry->events.reserve(key.devices.size());
     for (size_t i = 0; i < key.devices.size(); i++) {
       deviceGuard.set_index(key.devices[i]);
-      entry->streams[i] = at::cuda::getStreamFromPool();
-      entry->events[i] = CUDAEvent::create();
+      entry->streams.push_back(at::cuda::getStreamFromPool());
+      entry->events.push_back(CUDAEvent::create());
     }
   }
 #endif
