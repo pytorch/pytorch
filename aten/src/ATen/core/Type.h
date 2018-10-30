@@ -168,7 +168,6 @@ struct CAFFE2_API Type {
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
-  virtual int64_t _th_storage_offset(const Tensor & self) const = 0;
   virtual int64_t _th_ndimension(const Tensor & self) const = 0;
   virtual Tensor & _th_set_(Tensor & self, Storage source) const = 0;
   virtual Tensor & _th_set_(Tensor & self, Storage source, int64_t storage_offset, IntList size, IntList stride) const = 0;
@@ -609,7 +608,6 @@ struct CAFFE2_API Type {
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, const Tensor & other, bool non_blocking, bool copy) const = 0;
   virtual Scalar _local_scalar(const Tensor & self) const = 0;
-  virtual int64_t storage_offset(const Tensor & self) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source, int64_t storage_offset, IntList size, IntList stride) const = 0;
   virtual Tensor & set_(Tensor & self, const Tensor & source) const = 0;

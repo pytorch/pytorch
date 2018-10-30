@@ -5061,6 +5061,17 @@ a")
         v = torch.randn(1, device='cuda')
         self.assertEqual(foo(v), 0)
 
+    def test_script_storage_offset(self):
+        @torch.jit.script
+        def foo(a):
+            return a.storage_offset()
+
+        v = torch.randn(5)
+        self.assertEqual(foo(v), 0)
+
+        v.set_(v.storage(), 3, [1], [1])
+        self.assertEquals(foo(v), 3)
+
     def test_script_chunk(self):
         @torch.jit.script
         def foo(a):
