@@ -217,7 +217,7 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   THArgCheck(b->dim() == 1 || b->dim() == 2, 1, "B should have 1 or 2 "
       "dimensions, but has %d", b->dim());
   THArgCheck(!b->is_empty(), 1, "B should not be empty");
-  THArgCheck(a->size(0) == b->size(0), 2, "A,B size incompatible - A has %ld "
+  THArgCheck(a->size(0) == b->size(0), 2, "A, B sizes are incompatible - A has %ld "
       "rows, B has %ld", a->size(0), b->size(0));
 
   if (THTensor_nDimensionLegacyAll(b) == 1) {
