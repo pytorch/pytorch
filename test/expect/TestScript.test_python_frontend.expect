@@ -69,11 +69,5 @@
           (list (variable (ident q)))
           (=)
           (variable (ident x)))))
-    (raise
-      (option
-        (apply
-          (variable (ident Exception))
-          (list (string_literal hello))
-          (list))))
     (return
       (list (variable (ident x))))))

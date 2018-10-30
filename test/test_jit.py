@@ -3844,9 +3844,22 @@ a")
                 m = x if not z else y
             while x < y > z:
                 q = x
-            raise Exception("hello")
             return x
 
+        ast = torch.jit.frontend.get_jit_ast(fn, is_method=False)
+        self.assertExpected(str(ast))
+
+    @unittest.skipIf(not PY2, "Requires python 2")
+    def test_python_frontend_py2(self):
+        def fn():
+            raise Exception("hello")
+        ast = torch.jit.frontend.get_jit_ast(fn, is_method=False)
+        self.assertExpected(str(ast))
+
+    @unittest.skipIf(PY2, "Requires python 3")
+    def test_python_frontend_py3(self):
+        def fn():
+            raise Exception("hello")
         ast = torch.jit.frontend.get_jit_ast(fn, is_method=False)
         self.assertExpected(str(ast))
 
