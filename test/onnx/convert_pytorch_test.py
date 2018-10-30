@@ -88,7 +88,7 @@ def convert_tests(testcases, sets=1):
                     with open(os.path.join(data_dir, "output_{}.pb".format(index)), "wb") as file:
                         file.write(tensor.SerializeToString())
                 input = gen_input(t)
-        except: # noqa: E722
+        except:  # noqa: E722
             traceback.print_exc()
             failed += 1
 
