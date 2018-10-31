@@ -267,6 +267,18 @@ class StmtBuilder(Builder):
         return Return(r, [build_expr(ctx, val) for val in values if val is not None])
 
     @staticmethod
+    def build_Raise(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("raise"))
+        if PY2:
+            if stmt.tback:
+                raise NotSupportedError(r, "tracebacks with exceptions is not supported")
+            # TODO use stmt.type once instantiating exceptions is supported
+            expr = build_expr(ctx, stmt.inst) if stmt.inst else None
+        else:
+            expr = build_expr(ctx, stmt.exc)
+        return Raise(r, expr)
+
+    @staticmethod
     def build_AugAssign(ctx, stmt):
         lhs = [StmtBuilder.get_assign_lhs_expr(ctx, stmt.target)]
         rhs = build_expr(ctx, stmt.value)

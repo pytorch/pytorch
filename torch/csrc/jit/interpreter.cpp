@@ -12,6 +12,7 @@
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/variable_tensor_functions.h"
+#include "torch/csrc/jit/script/jit_exception.h"
 
 #include <exception>
 #include <iostream>
@@ -664,10 +665,15 @@ struct InterpreterStateImpl {
           }
           pc = new_pc;
         } catch(std::exception & e) {
-          if(!instructions[pc].debug_location)
-            throw; // rethrow original exception
-          // throw a new exception with enhanced debugging information
-          instructions[pc].debug_location->wrapAndRethrowException(e, "operation failed in interpreter");
+          if (!instructions[pc].debug_location) {
+            throw;
+          }
+          auto msg = instructions[pc].debug_location->wrapException(e, "operation failed in interpreter");
+          if (dynamic_cast<JITException *>(&e)) {
+            throw JITException(msg);
+          } else {
+            throw std::runtime_error(msg);
+          }
         }
     }
     current_pc = pc;

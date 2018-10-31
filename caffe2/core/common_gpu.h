@@ -22,12 +22,12 @@
 #include <curand.h>
 #include <driver_types.h>
 
-#include "caffe2/core/logging.h"
 #include "caffe2/core/common.h"
+#include "caffe2/core/logging.h"
 
-// Defines CAFFE2_CUDA_EXPORT and CAFFE2_CUDA_IMPORT. On Windows, this corresponds to
-// different declarations (dllexport and dllimport). On Linux/Mac, it just
-// resolves to the same "default visibility" setting.
+// Defines CAFFE2_CUDA_EXPORT and CAFFE2_CUDA_IMPORT. On Windows, this
+// corresponds to different declarations (dllexport and dllimport). On
+// Linux/Mac, it just resolves to the same "default visibility" setting.
 #if defined(_MSC_VER)
 #if defined(CAFFE2_BUILD_SHARED_LIBS)
 #define CAFFE2_CUDA_EXPORT __declspec(dllexport)
@@ -60,7 +60,6 @@
 #define CAFFE2_CUDA_API CAFFE2_CUDA_IMPORT
 #endif
 
-
 // This is a macro defined for cuda fp16 support. In default, cuda fp16 is
 // supported by NVCC 7.5, but it is also included in the Tegra X1 platform with
 // a (custom?) NVCC 7.0. As a result, we would normally just check the cuda
@@ -70,8 +69,8 @@
 #ifndef CAFFE_HAS_CUDA_FP16
 #if CUDA_VERSION >= 7050
 #define CAFFE_HAS_CUDA_FP16
-#endif  // CUDA_VERSION >= 7050
-#endif  // CAFFE_HAS_CUDA_FP16
+#endif // CUDA_VERSION >= 7050
+#endif // CAFFE_HAS_CUDA_FP16
 
 #ifdef CAFFE_HAS_CUDA_FP16
 #include <cuda_fp16.h>
@@ -109,15 +108,17 @@ class TensorCoreEngine {};
 #endif
 
 #if CUDA_VERSION >= 10000
-  #define CAFFE2_CUDA_PTRATTR_MEMTYPE type
+#define CAFFE2_CUDA_PTRATTR_MEMTYPE type
 #else
-  #define CAFFE2_CUDA_PTRATTR_MEMTYPE memoryType
+#define CAFFE2_CUDA_PTRATTR_MEMTYPE memoryType
 #endif
 
 /**
  * A runtime function to report the cuda version that Caffe2 is built with.
  */
-inline int CudaVersion() { return CUDA_VERSION; }
+inline int CudaVersion() {
+  return CUDA_VERSION;
+}
 
 /**
  * Returns the number of devices.
@@ -138,7 +139,9 @@ CAFFE2_CUDA_API int NumCudaDevices();
  * CPU code, but want to test if cuda is later available or not. In this case,
  * one should use HasCudaRuntime() from common.h.
  */
-inline bool HasCudaGPU() { return NumCudaDevices() > 0; }
+inline bool HasCudaGPU() {
+  return NumCudaDevices() > 0;
+}
 
 /**
  * Gets the current GPU id. This is a simple wrapper around cudaGetDevice().
@@ -172,7 +175,7 @@ CAFFE2_CUDA_API void DeviceQuery(const int deviceid);
  * This function returns false if anything wrong happens during the query of
  * the GPU access pattern.
  */
-CAFFE2_CUDA_API bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern);
+CAFFE2_CUDA_API bool GetCudaPeerAccessPattern(vector<vector<bool>>* pattern);
 
 /**
  * Return the availability of TensorCores for math
@@ -190,18 +193,19 @@ CAFFE2_CUDA_API const char* cublasGetErrorString(cublasStatus_t error);
 CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
 
 // CUDA: various checks for different function calls.
-#define CUDA_ENFORCE(condition, ...)     \
-  do {                              \
-    cudaError_t error = condition;  \
-    CAFFE_ENFORCE_EQ(               \
-        error,                      \
-        cudaSuccess,                \
-        "Error at: ",               \
-        __FILE__,                   \
-        ":",                        \
-        __LINE__,                   \
-        ": ",                       \
-        cudaGetErrorString(error), ##__VA_ARGS__); \
+#define CUDA_ENFORCE(condition, ...) \
+  do {                               \
+    cudaError_t error = condition;   \
+    CAFFE_ENFORCE_EQ(                \
+        error,                       \
+        cudaSuccess,                 \
+        "Error at: ",                \
+        __FILE__,                    \
+        ":",                         \
+        __LINE__,                    \
+        ": ",                        \
+        cudaGetErrorString(error),   \
+        ##__VA_ARGS__);              \
   } while (0)
 #define CUDA_CHECK(condition)                                 \
   do {                                                        \
@@ -278,9 +282,9 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
 // See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
 #ifdef __APPLE__
 #define CUDA_KERNEL_ASSERT(...)
-#else  // __APPLE__
+#else // __APPLE__
 #define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
-#endif  // __APPLE__
+#endif // __APPLE__
 
 // The following helper functions are here so that you can write a kernel call
 // when you are not particularly interested in maxing out the kernels'
@@ -303,6 +307,10 @@ constexpr int CAFFE_CUDA_NUM_THREADS = 128;
 // the hardware at runtime, and pick the number of blocks that makes most
 // sense for the specific runtime environment. This is a todo item.
 constexpr int CAFFE_MAXIMUM_NUM_BLOCKS = 4096;
+
+constexpr int kCUDAGridDimMaxX = 2147483647;
+constexpr int kCUDAGridDimMaxY = 65535;
+constexpr int kCUDAGridDimMaxZ = 65535;
 
 /**
  * @brief Compute the number of blocks needed to run N threads.
@@ -375,7 +383,9 @@ constexpr int kCUDATensorMaxDims = 8;
         Func<T, 8>(__VA_ARGS__);                                  \
         break;                                                    \
       }                                                           \
-      default: { break; }                                         \
+      default: {                                                  \
+        break;                                                    \
+      }                                                           \
     }                                                             \
   } while (false)
 
@@ -415,7 +425,9 @@ constexpr int kCUDATensorMaxDims = 8;
         Func<T1, T2, 8>(__VA_ARGS__);                                  \
         break;                                                         \
       }                                                                \
-      default: { break; }                                              \
+      default: {                                                       \
+        break;                                                         \
+      }                                                                \
     }                                                                  \
   } while (false)
 
@@ -455,7 +467,9 @@ constexpr int kCUDATensorMaxDims = 8;
         Func<T1, T2, T3, 8>(__VA_ARGS__);                                  \
         break;                                                             \
       }                                                                    \
-      default: { break; }                                                  \
+      default: {                                                           \
+        break;                                                             \
+      }                                                                    \
     }                                                                      \
   } while (false)
 

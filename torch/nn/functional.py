@@ -899,6 +899,7 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 
 @torch._jit_internal.weak_script
 def hardshrink(input, lambd=0.5):
+    # type: (Tensor, float) -> Tensor
     r"""
     hardshrink(input, lambd=0.5) -> Tensor
 
@@ -906,7 +907,6 @@ def hardshrink(input, lambd=0.5):
 
     See :class:`~torch.nn.Hardshrink` for more details.
     """
-    # type: (Tensor, float) -> Tensor
     return torch.hardshrink(input, lambd)
 
 
@@ -1165,17 +1165,17 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
 
     Args:
         input (LongTensor): Tensor containing indices into the embedding matrix
-        weight (Tensor): The embedding matrix
-            Number of rows should correspond to the maximum possible index + 1,
-            number of columns is the embedding size
+        weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
+            and number of columns equal to the embedding size
         padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
                                          (initialized to zeros) whenever it encounters the index.
-        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
-                                    this before extracting. Note: this will modify :attr:`weight` in-place.
-        norm_type (float, optional): The p of the p-norm to compute for the max_norm option. Default ``2``.
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+        max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
+                                    is renormalized to have norm :attr:`max_norm`.
+                                    Note: this will modify :attr:`weight` in-place.
+        norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
+        scale_grad_by_freq (boolean, optional): If given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
-        sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
+        sparse (bool, optional): If ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
                                  :class:`torch.nn.Embedding` for more details regarding sparse gradients.
 
     Shape:
@@ -1240,14 +1240,15 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
 
     Args:
         input (LongTensor): Tensor containing bags of indices into the embedding matrix
-        weight (Tensor): The embedding matrix
-            Number of rows should correspond to the maximum possible index + 1,
-            number of columns is the embedding size
+        weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
+            and number of columns equal to the embedding size
         offsets (LongTensor, optional): Only used when :attr:`input` is 1D. :attr:`offsets` determines
                              the starting index position of each bag (sequence) in :attr:`input`.
-        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
-                                    this before extracting. Note: this will modify :attr:`weight` in-place.
-        norm_type (float, optional): The ``p`` in the ``p``-norm to compute for the max_norm option. Default ``2``.
+        max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
+                                    is renormalized to have norm :attr:`max_norm`.
+                                    Note: this will modify :attr:`weight` in-place.
+        norm_type (float, optional): The ``p`` in the ``p``-norm to compute for the :attr:`max_norm` option.
+                                     Default ``2``.
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
                                                 Note: this option is not supported when ``mode="max"``.
@@ -2324,10 +2325,10 @@ def pad(input, pad, mode='constant', value=0):
 
 @torch._jit_internal.weak_script
 def pairwise_distance(x1, x2, p=2., eps=1e-6, keepdim=False):
+    # type: (Tensor, Tensor, float, float, bool) -> Tensor
     r"""
     See :class:`torch.nn.PairwiseDistance` for details
     """
-    # type: (Tensor, Tensor, float, float, bool) -> Tensor
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 

@@ -30,6 +30,7 @@ namespace script {
 //       | Assign(List<Expr> lhs, AssignType maybe_reduce, Expr rhs)    TK_ASSIGN
 //       | Return(List<Expr> values)                                    TK_RETURN
 //       | ExprStmt(List<Expr> expr)                                    TK_EXPR_STMT
+//       | Raise(Expr expr)                                             TK_RAISE
 //
 // Expr  = TernaryIf(Expr cond, Expr true_expr, Expr false_expr)        TK_IF_EXPR
 //       | BinOp(Expr lhs, Expr rhs)
@@ -208,6 +209,7 @@ struct Stmt : public TreeView {
       case TK_ASSIGN:
       case TK_RETURN:
       case TK_EXPR_STMT:
+      case TK_RAISE:
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Stmt";
@@ -463,6 +465,19 @@ struct Return : public Stmt {
     return Return(Compound::create(TK_RETURN, range, {values}));
   }
 };
+
+struct Raise : public Stmt {
+  explicit Raise(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_RAISE);
+  }
+  Maybe<Expr> expr() const {
+    return Maybe<Expr>(subtree(0));
+  }
+  static Raise create(const SourceRange& range, const Maybe<Expr>& expr) {
+    return Raise(Compound::create(TK_RAISE, range, {expr}));
+  }
+};
+
 
 struct ExprStmt : public Stmt {
   explicit ExprStmt(const TreeRef& tree) : Stmt(tree) {

@@ -122,10 +122,10 @@ class ReshapeOp : public Operator<Context> {
     if (output != &input) {
       // If we are not doing in-place computation, a copy is needed.
       context_.CopyItemsSameDevice(
-          input.meta(),
+          input.dtype(),
           input.numel(),
           input.raw_data(),
-          output->raw_mutable_data(input.meta()));
+          output->raw_mutable_data(input.dtype()));
     }
   }
 

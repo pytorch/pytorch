@@ -125,7 +125,7 @@ Tensor& empty_out(Tensor& result, IntList size) {
 
 Tensor empty_strided(IntList size, IntList stride, const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return getFactoryType(options).tensor(size, stride);
+  return getFactoryType(options)._th_tensor(size, stride);
 }
 
 

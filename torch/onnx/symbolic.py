@@ -227,6 +227,10 @@ def sub(g, self, other, alpha=None):
     return g.op("Sub", self, _if_scalar_type_as(g, other, self))
 
 
+def rsub(g, self, other, alpha=None):
+    return sub(g, other, self, alpha=alpha)
+
+
 def mul(g, self, other):
     # See Note [Pointwise by scalar]
     other = _maybe_get_scalar(other)
@@ -344,6 +348,11 @@ def t(g, self):
 # There is no translation for it, but we don't want to raise an error yet
 def expand(g, self, size, implicit):
     return None
+
+
+def expand_as(g, self, other):
+    shape = g.op("Shape", other)
+    return g.op("Expand", self, shape)
 
 
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
@@ -1092,6 +1101,11 @@ def to(g, self, *args):
     elif len(args) == 4:
         # aten::to(Tensor, Device, ScalarType, bool, bool)
         dtype = _get_const(args[1], 'i', 'dtype')
+        return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
+    elif len(args) == 5:
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool) -> Tensor
+        dtype = _get_const(args[0], 'i', 'dtype')
+        # Layout and device are ignored
         return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
     else:
         raise NotImplementedError("Unknown aten::to signature")
