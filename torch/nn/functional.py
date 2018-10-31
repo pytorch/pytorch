@@ -1003,7 +1003,7 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
         return input.softmax(dim, dtype=dtype)
 
 
-def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
+def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     r"""
     Samples from the `Gumbel-Softmax distribution`_ and optionally discretizes.
 
@@ -1013,14 +1013,15 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
       hard: if ``True``, the returned samples will be discretized as one-hot vectors,
             but will be differentiated as if it is the soft sample in autograd
       eps: Deprecated parameter to avoid log(0). Now handled elsewhere.
+      dim (int): A dimension along which softmax will be computed.
 
     Returns:
       Sampled tensor of same shape as `logits` from the Gumbel-Softmax distribution.
       If ``hard=True``, the returned samples will be one-hot, otherwise they will
-      be probability distributions that sum to 1 across dim = -1.
+      be probability distributions that sum to 1 across `dim`.
 
-    Details:
-        This function is here for legacy reasons, may be removed from nn.Functional in the future.
+    .. note::
+      This function is here for legacy reasons, may be removed from nn.Functional in the future.
 
     Examples::
         >>> logits = torch.randn(20, 32)
@@ -1039,14 +1040,12 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
 
     y_soft = logits.new(logits.shape)
     y_soft = (logits - y_soft.exponential_().log()) / tau  # Gumbel noise
-    y_soft = y_soft.softmax(-1)  # Gumbel softmax noise
-    # dist = torch.distributions.RelaxedOneHotCategorical(
-    #     temperature=tau, logits=logits, validate_args=False)
-    # y_soft = dist.rsample()
+    y_soft = y_soft.softmax(dim)  # Gumbel softmax noise
+
     if hard:
         # Straight through.
-        _, index = y_soft.max(-1, keepdim=True)
-        y_hard = logits.new_zeros(*logits.shape).scatter_(-1, index, 1.0)
+        index = y_soft.max(dim, keepdim=True)[1]
+        y_hard = logits.new_zeros(logits.shape).scatter_(dim, index, 1.0)
         return y_hard - y_soft.detach() + y_soft
     else:
         # Reparametrization trick.
