@@ -5,7 +5,6 @@ namespace jit {
 
 using ::c10::ivalue::List;
 using ::c10::ivalue::Shared;
-using ::c10::ivalue::World;
 
 using ::c10::IValue;
 using ::c10::ivalue::Tuple;

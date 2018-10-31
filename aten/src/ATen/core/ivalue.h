@@ -63,10 +63,6 @@ struct C10_EXPORT List : c10::intrusive_ptr_target {
   }
 };
 
-struct World {
-  int64_t world_id;
-};
-
 struct Future;
 
 struct C10_EXPORT Tuple : public List<IValue> {
@@ -104,7 +100,6 @@ using GenericList = List<IValue>;
   _(TensorList) \
   _(Blob) \
   _(GenericList) \
-  _(World) \
   _(Future) \
 
 struct CAFFE2_API IValue final {
@@ -212,17 +207,6 @@ struct CAFFE2_API IValue final {
   double toDouble() const {
     AT_ASSERT(isDouble());
     return payload.as_double;
-  }
-
-  // World
-  IValue(ivalue::World w)
-  : tag(Tag::World), is_intrusive_ptr(false) {
-    payload.as_world = w;
-  }
-  bool isWorld() const { return Tag::World == tag; }
-  ivalue::World toWorld() const {
-    AT_ASSERT(isWorld());
-    return payload.as_world;
   }
 
   // Future
@@ -449,7 +433,6 @@ struct CAFFE2_API IValue final {
     double as_double;
     bool as_bool;
     c10::intrusive_ptr_target* as_intrusive_ptr;
-    ivalue::World as_world;
   } payload;
   Tag tag;
   bool is_intrusive_ptr;
@@ -501,7 +484,6 @@ DEFINE_TO(std::vector<bool>, toBoolListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
 DEFINE_TO(std::vector<IValue>, toGenericListRef)
 DEFINE_TO(std::string, toStringRef)
-DEFINE_TO(ivalue::World, toWorld)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(IValue, toIValue)
 

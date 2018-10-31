@@ -7,7 +7,6 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/jit/passes/annotate_effects.h"
 #include "torch/csrc/jit/passes/batch_mm.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_pooling.h"
@@ -331,17 +330,13 @@ struct GraphExecutorImpl {
   }
 
   GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
-    : graph(prepareGraph(graph))
-    , optimize(optimize)
-    , num_inputs(this->graph->inputs().size())
-    , num_flat_inputs(countFlatInputs(graph))
-    , num_outputs(this->graph->outputs().size()) {
-      // until we have correct alias analysis any use of mutable operators
-      // disables all optimization
-      if(hasMutableOperators(this->graph->block())) {
-        optimize = false;
-      }
-    }
+      : graph(prepareGraph(graph)),
+        // until we have correct alias analysis any use of mutable operators
+        // disables all optimization
+        optimize(!hasMutableOperators(this->graph->block())),
+        num_inputs(this->graph->inputs().size()),
+        num_flat_inputs(countFlatInputs(graph)),
+        num_outputs(this->graph->outputs().size()) {}
 
   // entry point where execution begins
   void run(Stack & stack) {
