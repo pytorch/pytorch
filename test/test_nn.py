@@ -1951,12 +1951,22 @@ class TestNN(NNTestCase):
         # should be bitwise equal
         self.assertEqual(input.grad, inputf.grad.to(dtype), prec=0)
 
+    def _test_gumbel_softmax_st_shapes(self, dtype, shape, dim, count_expected):
+        logits = torch.randn(shape, dtype = dtype)
+        y_draw = F.gumbel_softmax(logits, hard=True, dim=dim)
+
+        # All values positive
+        self.assertGreaterEqual(y_draw.min(), 0)
+        # Shape unchanged
+        self.assertTrue(y_draw.shape == logits.shape)
+        # One choice per draw
+        self.assertEqual(y_draw.sum(), count_expected, prec=prec=torch.finfo(y_draw.dtype).eps)
+
     def _test_gumbel_softmax_straight_through(self, cuda, dtype=torch.float):
         num_draws = 100
 
         logits = torch.tensor([[0.2, 0.8, 0.1]])
-        # to show it works with arbitrary dims.
-        logits = logits.reshape([1, 1, 3])
+        logits = logits.reshape([1, 3])
         logits = logits.to(dtype).requires_grad_()
         if cuda:
             logits = logits.cuda()
@@ -1967,18 +1977,17 @@ class TestNN(NNTestCase):
             y_draw = F.gumbel_softmax(logits, hard=True)
             counts = counts + y_draw
 
-        # check shapes
-        self.assertTrue(y_draw.size() == logits.size())
         # check that we have (some) gradient
         self.assertTrue(y_draw.requires_grad)
 
-        # sanity check
-        self.assertGreaterEqual(counts.min(), 0)
+        # All values positive
+        self.assertGreaterEqual(y_draw.min(), 0)
+        # Each experiment should result in 1 draw.
         self.assertEqual(counts.sum(), num_draws, prec=torch.finfo(counts.dtype).eps)
 
-        # check results asymptotically as expected.
+        # check results is asymptotically as expected.
         expected = probs * num_draws
-        # z is approximately normally distributed
+        # ~z is approximately N(0,1) for unbiased count
         z = (counts - expected) / (expected * (1 - probs)).sqrt()
         # A (lazy) approximate 99% two-sided test:
         # occurs with prob alpha~>=0.01 if unbiased
@@ -1986,6 +1995,11 @@ class TestNN(NNTestCase):
 
     @repeat_test_for_types(NO_HALF_TENSORTYPES)
     def test_gumbel_softmax(self, dtype=torch.float):
+        self._test_gumbel_softmax_st_shapes(dtype, shape=[5], dim=0, count_expected=5)
+        self._test_gumbel_softmax_st_shapes(dtype, shape=[5], dim=-1, count_expected=5)
+        self._test_gumbel_softmax_st_shapes(dtype, shape=[5, 4], dim=1, count_expected=5)
+        self._test_gumbel_softmax_st_shapes(dtype, shape=[5, 4, 3], dim=1, count_expected=5 * 3)
+        self._test_gumbel_softmax_st_shapes(dtype, shape=[5, 4, 3], dim=-1, count_expected=5 * 4)
         self._test_gumbel_softmax_straight_through(cuda=False, dtype=dtype)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
