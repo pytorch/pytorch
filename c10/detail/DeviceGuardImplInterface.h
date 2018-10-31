@@ -33,30 +33,30 @@ struct C10_API DeviceGuardImplInterface {
   /**
    * Return the type of device managed by this guard implementation.
    */
-  virtual DeviceType type() const;
+  virtual DeviceType type() const = 0;
 
   /**
    * Set the current device to Device, and return the previous Device.
    */
-  virtual Device exchangeDevice(Device) const;
+  virtual Device exchangeDevice(Device) const = 0;
 
   /**
    * Set the current device to Device.
    */
-  virtual void setDevice(Device) const;
+  virtual void setDevice(Device) const = 0;
 
   /**
    * Set the current device to Device, without checking for errors
    * (so, e.g., this can be called from a destructor).
    */
-  virtual void uncheckedSetDevice(Device) const noexcept;
+  virtual void uncheckedSetDevice(Device) const noexcept = 0;
 
   /**
    * Set a stream to be the thread local current stream for its device.
    * Return the previous stream for that device. You are NOT required
    * to set the current device to match the device of this stream.
    */
-  virtual Stream exchangeStream(Stream) const noexcept;
+  virtual Stream exchangeStream(Stream) const noexcept = 0;
 
   /**
    * Intended use of this class is to leak the DeviceGuardImpl at program end.
