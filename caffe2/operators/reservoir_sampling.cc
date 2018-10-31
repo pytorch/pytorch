@@ -30,7 +30,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
 
     bool output_initialized = output->numel() > 0 &&
         (static_cast<std::shared_ptr<std::vector<TensorCPU>>*>(
-             output->raw_mutable_data(input.meta()))[0] != nullptr);
+             output->raw_mutable_data(input.dtype()))[0] != nullptr);
 
     if (output_initialized) {
       CAFFE_ENFORCE_EQ(output->ndim(), input.ndim());
@@ -47,7 +47,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
       auto dims = input.sizes().vec();
       dims[0] = 0;
       output->Resize(dims);
-      output->raw_mutable_data(input.meta());
+      output->raw_mutable_data(input.dtype());
       output->ReserveSpace(numToCollect_);
     }
 
@@ -109,7 +109,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
     }
 
     auto* output_data =
-        static_cast<char*>(output->raw_mutable_data(input.meta()));
+        static_cast<char*>(output->raw_mutable_data(input.dtype()));
     auto* pos_to_object_data = pos_to_object
         ? pos_to_object->template mutable_data<int64_t>()
         : nullptr;
@@ -159,7 +159,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
       } else {
         // replace
         context_.CopyItemsSameDevice(
-            input.meta(),
+            input.dtype(),
             block_size,
             input_data + i * block_bytesize,
             output_data + pos * block_bytesize);

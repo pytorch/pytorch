@@ -38,7 +38,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
     CAFFE_ENFORCE_GE(input.ndim(), 1);
     bool output_initialized = output->numel() > 0 &&
         (static_cast<std::shared_ptr<std::vector<TensorCPU>>*>(
-             output->raw_mutable_data(input.meta()))[0] != nullptr);
+             output->raw_mutable_data(input.dtype()))[0] != nullptr);
     if (output_initialized) {
       CAFFE_ENFORCE_EQ(output->ndim(), input.ndim());
       for (size_t i = 1; i < input.ndim(); ++i) {
@@ -64,7 +64,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
       dims[0] = 0;
       output->Resize(dims);
       // pass meta to output
-      output->raw_mutable_data(input.meta());
+      output->raw_mutable_data(input.dtype());
       output->ReserveSpace(numToCollect_);
     }
 
@@ -87,7 +87,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
     }
 
     auto* output_data =
-        static_cast<char*>(output->raw_mutable_data(input.meta()));
+        static_cast<char*>(output->raw_mutable_data(input.dtype()));
 
     auto* next = Output(NEXT);
     CAFFE_ENFORCE_EQ(0, next->ndim());
@@ -104,7 +104,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
     if (num_entries > numToCollect_) {
       // just copy the last N rows
       context_.CopyItemsSameDevice(
-          input.meta(),
+          input.dtype(),
           num_to_copy * block_size,
           input_data + (num_entries - numToCollect_) * block_bytesize,
           output_data);
@@ -115,13 +115,13 @@ class LastNWindowCollectorOp : public Operator<Context> {
     auto first_chunk_size =
         std::min<size_t>(num_to_copy + start, numToCollect_) - start;
     context_.CopyItemsSameDevice(
-        input.meta(),
+        input.dtype(),
         first_chunk_size * block_size,
         input_data,
         output_data + start * block_bytesize);
 
     context_.CopyItemsSameDevice(
-        input.meta(),
+        input.dtype(),
         (num_to_copy - first_chunk_size) * block_size,
         input_data + first_chunk_size * block_bytesize,
         output_data);

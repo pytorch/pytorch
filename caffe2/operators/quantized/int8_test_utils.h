@@ -29,7 +29,7 @@ inline std::unique_ptr<int8::Int8TensorCPU> q(
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<uint8_t> dis;
-  for (auto i = 0; i < r->t.size(); ++i) {
+  for (auto i = 0; i < r->t.numel(); ++i) {
     r->t.mutable_data<uint8_t>()[i] = dis(gen);
   }
   return r;
@@ -45,7 +45,7 @@ inline std::unique_ptr<int8::Int8TensorCPU> biasq(
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_real_distribution<float> dis(-1, 1);
-  for (auto i = 0; i < r->t.size(); ++i) {
+  for (auto i = 0; i < r->t.numel(); ++i) {
     r->t.mutable_data<int32_t>()[i] =
         static_cast<int32_t>(dis(gen) / scale + r->zero_point);
   }
@@ -55,7 +55,7 @@ inline std::unique_ptr<int8::Int8TensorCPU> biasq(
 inline std::unique_ptr<TensorCPU> dq(const int8::Int8TensorCPU& XQ) {
   auto r = caffe2::make_unique<Tensor>(CPU);
   r->Resize(XQ.t.sizes());
-  for (auto i = 0; i < r->size(); ++i) {
+  for (auto i = 0; i < r->numel(); ++i) {
     r->mutable_data<float>()[i] =
         (static_cast<int32_t>(XQ.t.data<uint8_t>()[i]) - XQ.zero_point) *
         XQ.scale;
@@ -66,7 +66,7 @@ inline std::unique_ptr<TensorCPU> dq(const int8::Int8TensorCPU& XQ) {
 inline std::unique_ptr<TensorCPU> biasdq(const int8::Int8TensorCPU& XQ) {
   auto r = caffe2::make_unique<Tensor>(CPU);
   r->Resize(XQ.t.sizes());
-  for (auto i = 0; i < r->size(); ++i) {
+  for (auto i = 0; i < r->numel(); ++i) {
     r->mutable_data<float>()[i] =
         (XQ.t.data<int32_t>()[i] - XQ.zero_point) * XQ.scale;
   }
@@ -76,7 +76,7 @@ inline std::unique_ptr<TensorCPU> biasdq(const int8::Int8TensorCPU& XQ) {
 #define EXPECT_TENSOR_EQ(_YA, _YE)                                     \
   do {                                                                 \
     EXPECT_TRUE((_YA).sizes() == (_YE).sizes());                       \
-    for (auto i = 0; i < (_YA).size(); ++i) {                          \
+    for (auto i = 0; i < (_YA).numel(); ++i) {                         \
       EXPECT_FLOAT_EQ((_YA).data<float>()[i], (_YE).data<float>()[i]); \
     }                                                                  \
   } while (0);
@@ -84,7 +84,7 @@ inline std::unique_ptr<TensorCPU> biasdq(const int8::Int8TensorCPU& XQ) {
 #define EXPECT_TENSOR_APPROX_EQ(_YA, _YE, _tol)                            \
   do {                                                                     \
     EXPECT_TRUE((_YA).sizes() == (_YE).sizes());                           \
-    for (auto i = 0; i < (_YA).size(); ++i) {                              \
+    for (auto i = 0; i < (_YA).numel(); ++i) {                             \
       EXPECT_NEAR((_YA).data<float>()[i], (_YE).data<float>()[i], (_tol)); \
     }                                                                      \
   } while (0);

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/CUDAStream.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/core/ArrayRef.h>
 #include <ATen/cuda/CUDAContext.h>

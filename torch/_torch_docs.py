@@ -1207,7 +1207,7 @@ Examples::
 
 add_docstr(torch.digamma,
            r"""
-digamma(input) -> Tensor
+digamma(input, out=None) -> Tensor
 
 Computes the logarithmic derivative of the gamma function on `input`.
 
