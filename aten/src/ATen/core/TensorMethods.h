@@ -128,11 +128,11 @@ inline Tensor Tensor::_th_gather(int64_t dim, const Tensor & index) const {
 inline bool Tensor::_th_equal(const Tensor & other) const {
     return type()._th_equal(*this, other);
 }
-inline Tensor Tensor::__and__(Scalar other) const {
-    return type().__and__(*this, other);
+inline Tensor Tensor::_th_and(Scalar other) const {
+    return type()._th_and(*this, other);
 }
-inline Tensor Tensor::__and__(const Tensor & other) const {
-    return type().__and__(*this, other);
+inline Tensor Tensor::_th_and(const Tensor & other) const {
+    return type()._th_and(*this, other);
 }
 inline Tensor & Tensor::__iand__(Scalar other) {
     return type().__iand__(*this, other);
@@ -140,11 +140,11 @@ inline Tensor & Tensor::__iand__(Scalar other) {
 inline Tensor & Tensor::__iand__(const Tensor & other) {
     return type().__iand__(*this, other);
 }
-inline Tensor Tensor::__or__(Scalar other) const {
-    return type().__or__(*this, other);
+inline Tensor Tensor::_th_or(Scalar other) const {
+    return type()._th_or(*this, other);
 }
-inline Tensor Tensor::__or__(const Tensor & other) const {
-    return type().__or__(*this, other);
+inline Tensor Tensor::_th_or(const Tensor & other) const {
+    return type()._th_or(*this, other);
 }
 inline Tensor & Tensor::__ior__(Scalar other) {
     return type().__ior__(*this, other);
@@ -152,11 +152,11 @@ inline Tensor & Tensor::__ior__(Scalar other) {
 inline Tensor & Tensor::__ior__(const Tensor & other) {
     return type().__ior__(*this, other);
 }
-inline Tensor Tensor::__xor__(Scalar other) const {
-    return type().__xor__(*this, other);
+inline Tensor Tensor::_th_xor(Scalar other) const {
+    return type()._th_xor(*this, other);
 }
-inline Tensor Tensor::__xor__(const Tensor & other) const {
-    return type().__xor__(*this, other);
+inline Tensor Tensor::_th_xor(const Tensor & other) const {
+    return type()._th_xor(*this, other);
 }
 inline Tensor & Tensor::__ixor__(Scalar other) {
     return type().__ixor__(*this, other);
@@ -164,11 +164,11 @@ inline Tensor & Tensor::__ixor__(Scalar other) {
 inline Tensor & Tensor::__ixor__(const Tensor & other) {
     return type().__ixor__(*this, other);
 }
-inline Tensor Tensor::__lshift__(Scalar other) const {
-    return type().__lshift__(*this, other);
+inline Tensor Tensor::_th_lshift(Scalar other) const {
+    return type()._th_lshift(*this, other);
 }
-inline Tensor Tensor::__lshift__(const Tensor & other) const {
-    return type().__lshift__(*this, other);
+inline Tensor Tensor::_th_lshift(const Tensor & other) const {
+    return type()._th_lshift(*this, other);
 }
 inline Tensor & Tensor::__ilshift__(Scalar other) {
     return type().__ilshift__(*this, other);
@@ -176,11 +176,11 @@ inline Tensor & Tensor::__ilshift__(Scalar other) {
 inline Tensor & Tensor::__ilshift__(const Tensor & other) {
     return type().__ilshift__(*this, other);
 }
-inline Tensor Tensor::__rshift__(Scalar other) const {
-    return type().__rshift__(*this, other);
+inline Tensor Tensor::_th_rshift(Scalar other) const {
+    return type()._th_rshift(*this, other);
 }
-inline Tensor Tensor::__rshift__(const Tensor & other) const {
-    return type().__rshift__(*this, other);
+inline Tensor Tensor::_th_rshift(const Tensor & other) const {
+    return type()._th_rshift(*this, other);
 }
 inline Tensor & Tensor::__irshift__(Scalar other) {
     return type().__irshift__(*this, other);
@@ -1324,6 +1324,36 @@ inline Tensor & Tensor::ne_(Scalar other) {
 }
 inline Tensor & Tensor::ne_(const Tensor & other) {
     return type().ne_(*this, other);
+}
+inline Tensor Tensor::__and__(Scalar other) const {
+    return type().__and__(*this, other);
+}
+inline Tensor Tensor::__and__(const Tensor & other) const {
+    return type().__and__(*this, other);
+}
+inline Tensor Tensor::__or__(Scalar other) const {
+    return type().__or__(*this, other);
+}
+inline Tensor Tensor::__or__(const Tensor & other) const {
+    return type().__or__(*this, other);
+}
+inline Tensor Tensor::__xor__(Scalar other) const {
+    return type().__xor__(*this, other);
+}
+inline Tensor Tensor::__xor__(const Tensor & other) const {
+    return type().__xor__(*this, other);
+}
+inline Tensor Tensor::__lshift__(Scalar other) const {
+    return type().__lshift__(*this, other);
+}
+inline Tensor Tensor::__lshift__(const Tensor & other) const {
+    return type().__lshift__(*this, other);
+}
+inline Tensor Tensor::__rshift__(Scalar other) const {
+    return type().__rshift__(*this, other);
+}
+inline Tensor Tensor::__rshift__(const Tensor & other) const {
+    return type().__rshift__(*this, other);
 }
 inline Tensor & Tensor::lgamma_() {
     return type().lgamma_(*this);

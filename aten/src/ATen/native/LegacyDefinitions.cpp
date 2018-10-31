@@ -827,4 +827,44 @@ Tensor _dirichlet_grad(const Tensor & x, const Tensor & alpha, const Tensor & to
   return at::_th_dirichlet_grad(x, alpha, total);
 }
 
+Tensor __and__(const Tensor & self, Scalar other) {
+  return at::_th_and(self, other);
+}
+
+Tensor __and__(const Tensor & self, const Tensor & other) {
+  return at::_th_and(self, other);
+}
+
+Tensor __or__(const Tensor & self, Scalar other) {
+  return at::_th_or(self, other);
+}
+
+Tensor __or__(const Tensor & self, const Tensor & other) {
+  return at::_th_or(self, other);
+}
+
+Tensor __xor__(const Tensor & self, Scalar other) {
+  return at::_th_xor(self, other);
+}
+
+Tensor __xor__(const Tensor & self, const Tensor & other) {
+  return at::_th_or(self, other);
+}
+
+Tensor __lshift__(const Tensor & self, Scalar other) {
+  return at::_th_lshift(self, other);
+}
+
+Tensor __lshift__(const Tensor & self, const Tensor & other) {
+  return at::_th_lshift(self, other);
+}
+
+Tensor __rshift__(const Tensor & self, Scalar other) {
+  return at::_th_rshift(self, other);
+}
+
+Tensor __rshift__(const Tensor & self, const Tensor & other) {
+  return at::_th_rshift(self, other);
+}
+
 }} // namespace at::native
