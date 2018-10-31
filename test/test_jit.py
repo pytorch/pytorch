@@ -3502,7 +3502,7 @@ a")
 
     def test_tensor_len(self):
         def func(x):
-            return len(x) == 4
+            return len(x)
 
         self.checkScript(func, [torch.ones(4, 5, 6)])
 
