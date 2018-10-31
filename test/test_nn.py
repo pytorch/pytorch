@@ -1958,6 +1958,8 @@ class TestNN(NNTestCase):
         # to show it works with arbitrary dims.
         logits = logits.reshape([1, 1, 3])
         logits = logits.to(dtype).requires_grad_()
+        if cuda:
+            logits = logits.cuda()
         probs = logits.softmax(dim=-1)
 
         counts = torch.ones_like(logits)
@@ -1984,14 +1986,15 @@ class TestNN(NNTestCase):
         # occurs with prob alpha~>=0.01 if unbiased
         assert z.abs().max().item() < 2.58
 
-    def test_gumbel_softmax(self):
-        self._test_gumbel_softmax_straight_through(False)
+    @repeat_test_for_types(NO_HALF_TENSORTYPES)
+    def test_gumbel_softmax(self, dtype=torch.float):
+        self._test_gumbel_softmax_straight_through(cuda=False, dtype=dtype)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
     @skipIfRocm
     def test_gumbel_softmax_cuda(self, dtype=torch.float):
-        self._test_gumbel_softmax_straight_through(True, dtype=dtype)
+        self._test_gumbel_softmax_straight_through(cuda=True, dtype=dtype)
 
     def _test_EmbeddingBag(self, cuda, mode, sparse, dtype=torch.double):
         # check a known test example
