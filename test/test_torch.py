@@ -7215,6 +7215,19 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2), data.flip(0, 1))
         self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2), data.flip(0, 1, 2))
 
+        # test for shape
+        size = [2, 2, 2]
+        test_dims = []
+        for i in range(0, 3):
+            test_dims += combinations(range(len(size)), i)
+
+        for ds in test_dims:
+            data_flipped = data.clone()
+            for d in ds:
+                data_flipped = data_flipped.flip(d)
+            self.assesrtEqual(data_flipped, data.flip(ds))
+            self.assesrtEqual(data_flipped.size(), data.flip(ds).size())
+
         # check for wrap dim
         self.assertEqual(torch.tensor([2, 1, 4, 3, 6, 5, 8, 7]).view(2, 2, 2), data.flip(-1))
         # check for permute
