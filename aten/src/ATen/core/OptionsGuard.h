@@ -22,7 +22,7 @@ CAFFE2_API DefaultTensorOptions& mutateDefaultTensorOptions();
 /// for end users.
 struct OptionsGuard {
   /// Stores the current default options and sets them to the given ones.
-  explicit OptionsGuard(const TensorOptions& optionsw)
+  explicit OptionsGuard(const TensorOptions& options)
       : original_(getDefaultTensorOptions()) { // copy
     mutateDefaultTensorOptions().merge(options);
   }
@@ -42,7 +42,7 @@ struct OptionsGuard {
 
 struct OptionsGuard {
   template<typename T = void>
-  explicit OptionsGuard(const TensorOptions& optionsw) {
+  explicit OptionsGuard(const TensorOptions& options) {
       static_assert(!std::is_same<T, void>::value,
                     "OptionsGuard is not supported on mobile; please pass around TensorOptions manually");
   }

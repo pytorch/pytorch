@@ -637,6 +637,7 @@ class build_ext(build_ext_parent):
             print('-- Building NCCL library')
         else:
             print('-- Not using NCCL')
+        print ("HEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEELLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLOOOOOOOOOOOOOOOOOOOOOOOOOO###################################")
         if USE_DISTRIBUTED:
             print('-- Building with THD distributed package ')
             monkey_patch_THD_link_flags()

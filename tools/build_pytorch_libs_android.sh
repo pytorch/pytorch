@@ -201,6 +201,16 @@ function build() {
 		       -DTHS_LIBRARIES="$INSTALL_DIR/lib/libTHS$LD_POSTFIX" \
 		       -DTHC_LIBRARIES="$INSTALL_DIR/lib/libTHC$LD_POSTFIX" \
 		       -DTHCS_LIBRARIES="$INSTALL_DIR/lib/libTHCS$LD_POSTFIX" \
+		       -DNNPACK_INCLUDEs="$INSTALL_DIR/lib/include" \
+		       -DNNPACK_LIBRARIES="$INSTALL_DIR/lib/libnnpack$LD_POSTFIX $INSTALL_DIR/lib/libcpuinfo$LD_POSTFIX" \
+		       -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+		       -DUSE_AVX=OFF \
+		       -DANDROID_TOOLCHAIN=clang \
+		       -DUSE_OPENMP=OFF \
+		       -DANDROID_NDK=$ANDROID_NDK \
+		       -DANDROID_ABI=armeabi-v7a \
+		       -DANDROID_NATIVE_API_LEVEL=21 \
+		       -DANDROID_CPP_FEATURES="rtti exceptions" \
 		       -DTH_SO_VERSION=1 \
 		       -DTHC_SO_VERSION=1 \
 		       -DTHNN_SO_VERSION=1 \
@@ -209,7 +219,7 @@ function build() {
 		       -DUSE_CUDA=$USE_CUDA \
 		       -DBUILD_EXAMPLES=OFF \
 		       -DBUILD_TEST=$BUILD_TEST \
-		       -DNO_NNPACK=$((1-$USE_NNPACK)) \
+		       -DUSE_NNPACK=ON \
 		       -DNCCL_EXTERNAL=1 \
 		       -DCMAKE_DEBUG_POSTFIX="" \
 		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
@@ -305,7 +315,7 @@ function build_caffe2() {
 		       -DUSE_NUMPY=$USE_NUMPY \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \
-		       -DUSE_NNPACK=$USE_NNPACK \
+		       -DUSE_NNPACK=ON \
 		       -DUSE_LEVELDB=$USE_LEVELDB \
 		       -DUSE_LMDB=$USE_LMDB \
 		       -DUSE_OPENCV=$USE_OPENCV \
@@ -329,7 +339,7 @@ function build_caffe2() {
 		       -DANDROID_TOOLCHAIN=clang \
 		       -DUSE_OPENMP=OFF \
 		       -DANDROID_NDK=$ANDROID_NDK \
-		       -DANDROID_ABI=x86 \
+		       -DANDROID_ABI=armeabi-v7a \
 		       -DANDROID_NATIVE_API_LEVEL=21 \
 		       -DANDROID_CPP_FEATURES="rtti exceptions" \
 		       -DUSE_MOBILE_OPENGL=OFF \
