@@ -658,7 +658,7 @@ def upsample_bilinear2d(g, input, output_size, align_corners):
     scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
                                                     width_scale]))
     return g.op("Upsample", input, scales,
-                mode_s="linear")
+                mode_s="bilinear")
 
 
 def gt(g, input, other):
