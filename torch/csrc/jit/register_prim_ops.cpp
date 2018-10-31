@@ -258,7 +258,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::RaiseException,
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           return [](Stack& stack) {
             throw JITException(pop(stack).toStringRef());
             return 0;
