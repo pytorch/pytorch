@@ -1801,6 +1801,7 @@ class TestNN(NNTestCase):
                 # to same value at beginning for finite difference test to pass
                 saved_u = m.weight_u.clone()
                 saved_v = m.weight_v.clone()
+
                 def fn(input):
                     m.weight_u.data.copy_(saved_u)
                     m.weight_v.data.copy_(saved_v)
@@ -1849,6 +1850,7 @@ class TestNN(NNTestCase):
                 # to same value at beginning for finite difference test to pass
                 saved_u = m.weight_u.clone()
                 saved_v = m.weight_v.clone()
+
                 def fn(input):
                     m.weight_u.data.copy_(saved_u)
                     m.weight_v.data.copy_(saved_v)
