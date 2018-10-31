@@ -97,26 +97,42 @@ def print_to_stderr(message):
 def shell(command, cwd=None):
     sys.stdout.flush()
     sys.stderr.flush()
-    return subprocess.call(
-        shlex.split(command), universal_newlines=True, cwd=cwd)
+    # The folloing cool snippet is copied from Py3 subprocess.call with
+    # additional SIGINT propagation.
+    # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
+    with subprocess.Popen(shlex.split(command), universal_newlines=True, cwd=cwd) as p:
+        try:
+            return p.wait()
+        except KeyboardInterrupt:
+            # Give `p` a chance to handle KeyboardInterrupt. Without this,
+            # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
+            exit_status = p.wait(timeout=5)
+            if exit_status is not None:
+                return exit_status
+            else:
+                raise
+        except:
+            p.kill()
+            # We don't call p.wait() again as p.__exit__ does that for us.
+            raise
 
 
 def get_shell_output(command):
     return subprocess.check_output(shlex.split(command)).decode().strip()
 
 
-def run_test(python, test_module, test_directory, options):
+def run_test(executable, test_module, test_directory, options):
     unittest_args = options.additional_unittest_args
     if options.verbose:
         unittest_args.append('--verbose')
     unittest_args = ' '.join(unittest_args)
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    return shell('{} {}.py {}'.format(python, test_module, unittest_args),
+    return shell('{} {}.py {}'.format(executable, test_module, unittest_args),
                  test_directory)
 
 
-def test_cpp_extensions(python, test_module, test_directory, options):
+def test_cpp_extensions(executable, test_module, test_directory, options):
     try:
         cpp_extension.verify_ninja_availability()
     except RuntimeError:
@@ -124,7 +140,7 @@ def test_cpp_extensions(python, test_module, test_directory, options):
             'Ninja is not available. Skipping C++ extensions test. '
             "Install ninja with 'pip install ninja' or 'conda install ninja'.")
         return 0
-    return_code = shell('{} setup.py install --root ./install'.format(python),
+    return_code = shell('{} setup.py install --root ./install'.format(sys.executable),
                         os.path.join(test_directory, 'cpp_extensions'))
     if return_code != 0:
         return return_code
@@ -141,12 +157,12 @@ def test_cpp_extensions(python, test_module, test_directory, options):
 
         assert install_directory, 'install_directory must not be empty'
         os.environ['PYTHONPATH'] = os.pathsep.join([install_directory, python_path])
-        return run_test(python, test_module, test_directory, options)
+        return run_test(executable, test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
 
 
-def test_distributed(python, test_module, test_directory, options):
+def test_distributed(executable, test_module, test_directory, options):
     mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
     if options.verbose and not mpi_available:
         print_to_stderr(
@@ -184,12 +200,12 @@ def test_distributed(python, test_module, test_directory, options):
                         'mpiexec -n 1 --noprefix bash -c ""', shell=True,
                         stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
 
-                    mpiexec = 'mpiexec -n 3 {} {}'.format(noprefix_opt, python)
+                    mpiexec = 'mpiexec -n 3 {} {}'.format(noprefix_opt, executable)
 
                     return_code = run_test(mpiexec, test_module,
                                            test_directory, options)
                 else:
-                    return_code = run_test(python, test_module, test_directory,
+                    return_code = run_test(executable, test_module, test_directory,
                                            options)
                 if return_code != 0:
                     return return_code
@@ -227,7 +243,10 @@ def parse_args():
         action='store_true',
         help='print verbose information and test-by-test results')
     parser.add_argument(
-        '-p', '--python', help='the python interpreter to execute tests with')
+        '-pt', '--pytest', action='store_true',
+        help='If true, use `pytest` to execute the tests. E.g., this runs '
+             'TestTorch with pytest in verbose and coverage mode: '
+             'python run_test.py -vci torch -pt')
     parser.add_argument(
         '-c', '--coverage', action='store_true', help='enable coverage')
     parser.add_argument(
@@ -272,13 +291,14 @@ def parse_args():
     return parser.parse_args()
 
 
-def get_python_command(options):
+def get_executable_command(options):
     if options.coverage:
-        return 'coverage run --parallel-mode --source torch'
-    elif options.python:
-        return options.python
+        executable = 'coverage run --parallel-mode --source torch'
     else:
-        return os.environ.get('PYCMD', 'python')
+        executable = sys.executable
+    if options.pytest:
+        executable += ' -m pytest'
+    return executable
 
 
 def find_test_index(test, selected_tests, find_last_index=False):
@@ -358,7 +378,7 @@ def get_selected_tests(options):
 
 def main():
     options = parse_args()
-    python = get_python_command(options)
+    executable = get_executable_command(options)
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)
 
@@ -375,7 +395,7 @@ def main():
         # Printing the date here can help diagnose which tests are slow
         print_to_stderr('Running {} ... [{}]'.format(test_name, datetime.now()))
         handler = CUSTOM_HANDLERS.get(test_module, run_test)
-        return_code = handler(python, test_name, test_directory, options)
+        return_code = handler(executable, test_name, test_directory, options)
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool), 'Return code should be an integer'
         if return_code != 0:
