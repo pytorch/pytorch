@@ -3,6 +3,7 @@ import warnings
 
 from .._jit_internal import weak_script
 
+
 @weak_script
 def get_enum(reduction):
     # type: (str) -> int
