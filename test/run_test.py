@@ -97,24 +97,31 @@ def print_to_stderr(message):
 def shell(command, cwd=None):
     sys.stdout.flush()
     sys.stderr.flush()
-    # The folloing cool snippet is copied from Py3 subprocess.call only the
-    # with except KeyboardInterrupt block added for extra SIGINT handling.
+    # The folloing cool snippet is copied from Py3 core library subprocess.call
+    # only the with `except KeyboardInterrupt` block added for SIGINT handling.
+    #
+    # In Py2, subprocess.Popen doesn't return a context manager, so we must do
+    # p.wait() in a `final` block for the code to be portable.
+    #
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
-    with subprocess.Popen(shlex.split(command), universal_newlines=True, cwd=cwd) as p:
-        try:
-            return p.wait()
-        except KeyboardInterrupt:
-            # Give `p` a chance to handle KeyboardInterrupt. Without this,
-            # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
-            exit_status = p.wait(timeout=5)
-            if exit_status is not None:
-                return exit_status
-            else:
-                raise
-        except:  # noqa E722, copied from python core library
+    p = subprocess.Popen(shlex.split(command), universal_newlines=True, cwd=cwd)
+    try:
+        return p.wait()
+    except KeyboardInterrupt:
+        # Give `p` a chance to handle KeyboardInterrupt. Without this,
+        # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
+        exit_status = p.wait(timeout=5)
+        if exit_status is not None:
+            return exit_status
+        else:
             p.kill()
-            # We don't call p.wait() again as p.__exit__ does that for us.
             raise
+    except:  # noqa E722, copied from python core library
+        p.kill()
+        raise
+    finally:
+        # Always call p.wait() to ensure exit
+        p.wait()
 
 
 def get_shell_output(command):
