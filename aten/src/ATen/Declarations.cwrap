@@ -43,7 +43,7 @@
           default: {}
 ]]
 [[
-  name: _fill_
+  name: _th_fill_
   return: self
   cname: fill
   variants: function
@@ -175,7 +175,7 @@
     - THIndexTensor* index
 ]]
 [[
-  name: _indexCopy_
+  name: _th_index_copy_
   cname: indexCopy
   variants: function
   return: argument 0
@@ -260,7 +260,7 @@
     - long step
 ]]
 [[
-  name: _range
+  name: _th_range
   cname: range
   variants:
     - function
@@ -276,7 +276,7 @@
     - accreal step
 ]]
 [[
-  name: _arange
+  name: _th_arange
   variants:
     - function
   backends:
@@ -1907,7 +1907,7 @@
     - real weight
 ]]
 [[
-  name: _linspace
+  name: _th_linspace
   cname: linspace
   types:
     - Float
@@ -1926,7 +1926,7 @@
     - long steps
 ]]
 [[
-  name: _logspace
+  name: _th_logspace
   cname: logspace
   types:
     - Float
@@ -2139,7 +2139,7 @@
     - real max
 ]]
 [[
-  name: _dot
+  name: _th_dot
   backend_type_pairs: [[CUDA,floating_point], [CPU,all]]
   cname: dot
   variants: function
@@ -2544,7 +2544,7 @@
     - THTensor* tensor2
 ]]
 [[
-  name: _gesv_single
+  name: _th_gesv_single
   cname: gesv
   types:
     - Float
@@ -2699,7 +2699,7 @@
       default: S
 ]]
 [[
-  name: _getri_single
+  name: _th_getri_single
   cname: getri
   types:
     - Float
@@ -3213,7 +3213,7 @@
         - THTensor* self
 ]]
 [[
-  name: _copy_ignoring_overlaps_
+  name: _th_copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps
   return: self
   variants: function
@@ -3225,7 +3225,7 @@
 ]]
 
 [[
-  name: _cat
+  name: _th_cat
   cname: catArray
   variants: [function]
   return: self
