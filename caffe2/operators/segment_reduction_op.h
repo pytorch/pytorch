@@ -66,7 +66,7 @@ class AbstractSortedSegmentRangeOp : public Operator<Context> {
     OPERATOR_NEEDS_FEATURE(
         inputAccessor_.observeInput(dataInput),
         "Unsupported input type: ",
-        dataInput.meta().name(),
+        dataInput.dtype().name(),
         ".");
 
     const SIndex* s_ids = segment_ids.template data<SIndex>();
@@ -316,7 +316,7 @@ class AbstractReduceFrontOrBackOp : public Operator<Context> {
     OPERATOR_NEEDS_FEATURE(
         inputAccessor_.observeInput(data),
         "Unsupported input type: ",
-        data.meta().name(),
+        data.dtype().name(),
         ".");
 
     vector<int64_t> shape;
@@ -656,7 +656,7 @@ class AbstractSortedSegmentOp : public Operator<Context> {
     OPERATOR_NEEDS_FEATURE(
         inputAccessor_.observeInput(dataInput),
         "Unsupported input type: ",
-        dataInput.meta().name(),
+        dataInput.dtype().name(),
         ".");
 
     const SIndex* s_ids = segment_ids.template data<SIndex>();
@@ -1061,7 +1061,7 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
     OPERATOR_NEEDS_FEATURE(
         inputAccessor_.observeInput(data),
         "Unsupported input type: ",
-        data.meta().name(),
+        data.dtype().name(),
         ".");
 
     // determine the number of segments
@@ -1451,7 +1451,7 @@ class AbstractLengthsOp : public Operator<Context> {
     OPERATOR_NEEDS_FEATURE(
         inputAccessor_.observeInput(dataInput),
         "Unsupported input type: ",
-        dataInput.meta().name(),
+        dataInput.dtype().name(),
         ".");
 
     vector<int64_t> shape{outputSize};
