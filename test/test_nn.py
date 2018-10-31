@@ -1972,8 +1972,8 @@ class TestNN(NNTestCase):
         assert y_draw.requires_grad
 
         # sanity check
-        assert counts.max() <= num_draws
-        assert counts.min() > 0.
+        assert counts.max().item() <= num_draws
+        assert counts.min().item() > 0.
         assert counts.sum().int().item() == num_draws
 
         # check results asymptotically as expected.
@@ -1981,8 +1981,8 @@ class TestNN(NNTestCase):
         # z is approximately normally distributed
         z = (counts - expected) / (expected * (1 - probs)).sqrt()
         # A (lazy) approximate 99% two-sided test:
-        # occurs with prob ~>0.01 if unbiased
-        assert z.abs().max() < 2.58
+        # occurs with prob alpha~>=0.01 if unbiased
+        assert z.abs().max().item() < 2.58
 
     def test_gumbel_softmax(self):
         self._test_gumbel_softmax_straight_through(False)
