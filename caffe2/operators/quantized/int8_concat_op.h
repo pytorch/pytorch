@@ -73,7 +73,7 @@ class Int8ConcatOp final : public Operator<CPUContext> {
           Y->t.template mutable_data<uint8_t>() + C_offset,
           C_total * after,
           &context_,
-          Xi.t.meta().copy());
+          Xi.t.dtype().copy());
       C_offset += Ci * after * Xi.t.itemsize();
     }
     return true;
