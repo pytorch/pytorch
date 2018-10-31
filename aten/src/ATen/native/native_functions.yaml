@@ -431,7 +431,6 @@
   cpu_half: True
   dispatch:
     CPU: _copy__cpu
-    CUDA: _copy__cuda
 
 - func: cos(Tensor self) -> Tensor
   variants: function, method
