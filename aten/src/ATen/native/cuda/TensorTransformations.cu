@@ -174,11 +174,6 @@ Tensor roll_cuda(const Tensor& self, IntList shifts, IntList dims) {
   dim3 dim_grid((N + block_size - 1) / block_size);
 
   auto total_dims = self.dim();
-  auto shape = self.sizes().vec();
-  auto shape_t = at::CPU(kLong).tensorFromBlob(shape.data(), {static_cast<int64_t>(shape.size())});
-
-  auto strides = self.strides().vec();
-  auto strides_t = at::CPU(kLong).tensorFromBlob(strides.data(), {static_cast<int64_t>(strides.size())});
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "roll_cuda", [&] {
     roll_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
