@@ -7215,16 +7215,6 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2), data.flip(0, 1))
         self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2), data.flip(0, 1, 2))
 
-        # test for shape
-        data = torch.randn(2, 3, 4, device=device)
-        size = [2, 3, 4]
-        test_dims = []
-        for i in range(1, 3):
-            test_dims += combinations(range(len(size)), i)
-
-        for ds in test_dims:
-            self.assertEqual(size, list(data.flip(ds).size()))
-
         # check for wrap dim
         self.assertEqual(torch.tensor([2, 1, 4, 3, 6, 5, 8, 7]).view(2, 2, 2), data.flip(-1))
         # check for permute
@@ -7249,6 +7239,16 @@ class _TestTorchMixin(object):
             tranposed_data = torch.arange(1, 9).view(2, 2, 2).transpose(0, 1)
         self.assertEqual(torch.tensor([3, 3, 2, 2, 1, 1]).view(3, 2), expanded_data.flip(0))
         self.assertEqual(torch.tensor([8, 7, 4, 3, 6, 5, 2, 1]).view(2, 2, 2), tranposed_data.flip(0, 1, 2))
+
+        # test for shape
+        data = torch.randn(2, 3, 4, device=device)
+        size = [2, 3, 4]
+        test_dims = []
+        for i in range(1, 3):
+            test_dims += combinations(range(len(size)), i)
+
+        for ds in test_dims:
+            self.assertEqual(size, list(data.flip(ds).size()))
 
         # test rectangular case
         data = torch.tensor([1, 2, 3, 4, 5, 6]).view(2, 3)
