@@ -27,17 +27,20 @@ void THNN_(BatchNormalization_updateOutput)(
     scalar_t mean, invstd;
 
     if (train) {
-      // compute mean per input
+      // compute mean and variance by input with one-pass Welford's algorithm
+      mean = 0;
       accreal sum = 0;
-      TH_TENSOR_APPLY(scalar_t, in, sum += *in_data;);
+      ptrdiff_t cntr = 0;
 
-      mean = (scalar_t) sum / n;
-      THTensor_(set1d)(save_mean, f, (scalar_t) mean);
-
-      // compute variance per input
-      sum = 0;
       TH_TENSOR_APPLY(scalar_t, in,
-        sum += (*in_data - mean) * (*in_data - mean););
+        scalar_t delta = (*in_data - mean);
+        mean += delta / (cntr + 1);
+        scalar_t delta2 = (*in_data - mean);
+        sum += delta * delta2;
+        cntr++;
+      )
+
+      THTensor_(set1d)(save_mean, f, (scalar_t) mean);
 
       if (sum == 0 && eps == 0.0) {
         invstd = 0;
