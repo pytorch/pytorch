@@ -92,13 +92,12 @@ Tensor new_with_type_conversion(const Type& type, Tensor other, int32_t device_i
 Tensor new_with_tensor_copy(const Type& type, Tensor other, int32_t device_index) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  at::DeviceGuard device_guard;
-  if (type.is_cuda()) {
-    // TODO: It would be better if new_with_tensor_copy took an at::Device
-    // to begin with, but then we need to fix the situation with
-    // dispatch_type_conversion bleggg
-    device_guard.set_device(at::Device(at::kCUDA, device_index));
-  }
+  // TODO: It would be better if new_with_tensor_copy took an at::Device
+  // to begin with, but then we need to fix the situation with
+  // dispatch_type_conversion bleggg
+  at::DeviceGuard device_guard(type.is_cuda() ?
+                               c10::make_optional(at::Device(at::kCUDA, device_index)) :
+                               c10::nullopt);
   return type.copy(other);
 }
 
