@@ -196,7 +196,6 @@ struct CAFFE2_API Type {
   virtual Tensor & _th_scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) const = 0;
   virtual Tensor & _th_scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) const = 0;
   virtual Tensor _th_gather(const Tensor & self, int64_t dim, const Tensor & index) const = 0;
-  virtual void* data_ptr(const Tensor & self) const = 0;
   virtual bool _th_equal(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor __and__(const Tensor & self, Scalar other) const = 0;
   virtual Tensor s___and__(const Tensor & self, const Tensor & other) const = 0;
@@ -614,6 +613,7 @@ struct CAFFE2_API Type {
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, const Tensor & other, bool non_blocking, bool copy) const = 0;
   virtual Scalar _local_scalar(const Tensor & self) const = 0;
+  virtual void* data_ptr(const Tensor & self) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source, int64_t storage_offset, IntList size, IntList stride) const = 0;
   virtual Tensor & set_(Tensor & self, const Tensor & source) const = 0;
