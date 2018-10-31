@@ -1,4 +1,5 @@
 #include "ATen/native/TensorTransformations.h"
+#include "ATen/WrapDimUtilsMulti.h"
 
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Exception.h>
@@ -33,7 +34,6 @@ void inline flip_cpu_kernel(
       int64_t temp = cur_indices;
       cur_indices = cur_indices / stride_contiguous_d[d];
       rem = temp - cur_indices * stride_contiguous_d[d];
-      // flip the indices if it is in flip_dims
       for (int64_t j = 0; j < flip_dims_size; j++) {
         if (d == flip_dims_d[j]) cur_indices = sizes_d[d] - 1 - cur_indices;
       }
@@ -47,9 +47,13 @@ void inline flip_cpu_kernel(
 Tensor flip_cpu(const Tensor& self, IntList dims) {
   auto in_tensor = self;
   const int64_t total_dims = self.dim();
-  const int64_t numel = self.numel();
 
-  auto strides = self.strides();
+  dim_list_to_bitset(dims, total_dims);
+  auto flip_dims_v = dims.vec();
+  maybe_wrap_dims(flip_dims_v, total_dims);
+
+  const int64_t numel = in_tensor.numel();
+  auto strides = in_tensor.strides();
   auto strides_v = strides.vec();
   auto strides_t = at::CPU(kLong).tensorFromBlob(strides_v.data(), {static_cast<int64_t>(strides_v.size())});
 
@@ -58,13 +62,11 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
   auto sizes_t = at::CPU(kLong).tensorFromBlob(sizes_v.data(), {static_cast<int64_t>(sizes_v.size())});
 
   const int64_t flip_dims_size = dims.size();
-  auto flip_dims_v = dims.vec();
   auto flip_dims_t = at::CPU(kLong).tensorFromBlob(flip_dims_v.data(), {static_cast<int64_t>(flip_dims_v.size())});
 
-  flip_check_errors(total_dims, flip_dims_size, dims);
-  wrap_all_dims(flip_dims_v, total_dims);
-
   Tensor out_tensor = at::empty_like(in_tensor);
+
+  // create contiguous strides for input tensor
   Tensor stride_contiguous = at::zeros({total_dims}, kLong);
   int64_t* stride_contiguous_d = stride_contiguous.data<int64_t>();
   for (int64_t i = total_dims - 1; i >= 0; i--) {
