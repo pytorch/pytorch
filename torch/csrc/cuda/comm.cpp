@@ -41,7 +41,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
                              "first on devices list");
   std::vector<Tensor> tensors;
   tensors.reserve(devices.size());
-  at::DeviceGuard _device_guard;
+  at::cuda::CUDAGuard _device_guard;
 #ifdef USE_NCCL
   if (nccl::is_available({tensor})) {
     tensors.push_back(tensor);
@@ -82,7 +82,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
     o.reserve(tensors.size());
 
   unique_type_checker type_checker;
-  at::DeviceGuard device_guard(devices[0]);
+  at::cuda::CUDAGuard device_guard(devices[0]);
   for (auto & chunk : utils::take_tensors(tensors, buffer_size)) {
     auto & type = chunk.type();
     type_checker.show(type);

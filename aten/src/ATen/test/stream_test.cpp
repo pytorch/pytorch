@@ -127,7 +127,7 @@ TEST(TestStream, CUDAGuardTest) {
 
   std::vector<at::cuda::CUDAStream> streams1;
   {
-    at::DeviceGuard device_guard(1);
+    at::cuda::CUDAGuard device_guard(1);
     streams1.push_back(at::cuda::getDefaultCUDAStream());
     streams1.push_back(at::cuda::getStreamFromPool());
   }
@@ -237,7 +237,7 @@ TEST(TestStream, MultiGPUTest) {
 
   ASSERT_EQ_CUDA(s0, at::cuda::getCurrentCUDAStream());
 
-  at::DeviceGuard device_guard{1};
+  at::cuda::CUDAGuard device_guard{1};
   ASSERT_EQ_CUDA(s1, at::cuda::getCurrentCUDAStream());
 }
 

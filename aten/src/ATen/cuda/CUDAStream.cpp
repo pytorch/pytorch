@@ -1,7 +1,7 @@
 #include "ATen/cuda/CUDAStream.h"
-#include "ATen/DeviceGuard.h"
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/CUDAEvent.h"
+#include "ATen/cuda/CUDAGuard.h"
 #include "ATen/cuda/Exceptions.h"
 #include "c10/util/Exception.h"
 
@@ -185,7 +185,7 @@ static void initGlobalStreamState() {
 static void initDeviceStreamState(const int64_t device) {
   // Switches to the requested device so streams are properly associated
   // with it.
-  at::DeviceGuard device_guard{static_cast<int16_t>(device)};
+  at::cuda::CUDAGuard device_guard{static_cast<int16_t>(device)};
 
   for (auto i = decltype(kStreamsPerPool){0}; i < kStreamsPerPool; ++i) {
     auto& lowpri_stream = low_priority_streams[device][i];
