@@ -120,4 +120,5 @@ struct hash<c10::Device> {
 // TODO: Remove when we add global namespace include
 namespace at {
 using c10::Device;
+using c10::DeviceIndex;
 }
