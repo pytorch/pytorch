@@ -11,6 +11,8 @@ from datetime import timedelta
 from functools import wraps
 from collections import namedtuple
 
+from caffe2.python import core
+
 import torch
 import common_utils as common
 from torch import nn
