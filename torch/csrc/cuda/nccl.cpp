@@ -246,6 +246,7 @@ void broadcast(
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
     int device = tensors[i].get_device();
     device_guard.set_index(device);
+    // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
@@ -270,8 +271,8 @@ void reduce(
     std::vector<at::Tensor>& outputs,
     int32_t root,
     int32_t op,
-    const c10::optional<stream_list>& streams,
-    const c10::optional<std::vector<ncclComm_t>>& comms) {
+    const stream_list& streams,
+    const comm_list& user_comms) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   AT_CHECK(
@@ -284,22 +285,19 @@ void reduce(
 
   const auto count = inputs[0].numel();
   std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
-  auto comms_ref =
-      comms ? _get_communicators(inputs) : ArrayRef<ncclComm_t>(*comms);
+  auto comms_ref = user_comms.empty() ? _get_communicators(inputs)
+                                      : ArrayRef<ncclComm_t>(user_comms);
 
   at::DeviceGuard device_guard;
   AutoNcclGroup nccl_group_guard;
   for (size_t i = 0; i < len; i++) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
+    // Default to the current stream
+    const auto stream = (streams.empty() || !streams[i])
+        ? at::cuda::getCurrentCUDAStream(device).stream()
+        : streams[i]->stream();
 
-    // Default to the current  stream
-    cudaStream_t stream = at::cuda::getCurrentCUDAStream(device).stream();
-
-    // Two levels of optional! Wow!
-    if (streams && (*streams)[i]) {
-      stream = (*streams)[i]->stream();
-    }
     NCCL_CHECK(ncclReduce(
         inputs[i].data_ptr(),
         outputs[i].data_ptr(),
@@ -319,9 +317,9 @@ void reduce(
     std::vector<at::Tensor>& inputs,
     int32_t root,
     int32_t op,
-    const c10::optional<stream_list>& streams,
-    const c10::optional<std::vector<ncclComm_t>>& comms) {
-  reduce(inputs, /*outputs=*/inputs, root, op, streams, comms);
+    const stream_list& streams,
+    const comm_list& user_comms) {
+  reduce(inputs, /*outputs=*/inputs, root, op, streams, user_comms);
 }
 } // namespace nccl
 } // namespace cuda
