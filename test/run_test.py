@@ -97,8 +97,8 @@ def print_to_stderr(message):
 def shell(command, cwd=None):
     sys.stdout.flush()
     sys.stderr.flush()
-    # The folloing cool snippet is copied from Py3 subprocess.call with
-    # additional SIGINT propagation.
+    # The folloing cool snippet is copied from Py3 subprocess.call only the
+    # with except KeyboardInterrupt block added for extra SIGINT handling.
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
     with subprocess.Popen(shlex.split(command), universal_newlines=True, cwd=cwd) as p:
         try:
@@ -111,7 +111,7 @@ def shell(command, cwd=None):
                 return exit_status
             else:
                 raise
-        except:
+        except:  # noqa E722, copied from python core library
             p.kill()
             # We don't call p.wait() again as p.__exit__ does that for us.
             raise
