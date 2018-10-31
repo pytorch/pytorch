@@ -22,12 +22,12 @@ struct CUDAGuard {
 
   /// Sets the CUDA stream and its associated device as the current one (calls
   /// `set_stream`).
-  explicit CUDAGuard(const CUDAStream& stream) : device_guard_() {
+  explicit CUDAGuard(const CUDAStream& stream) {
     set_stream(stream);
   }
 
   /// Calls `set_device` with the given index.
-  explicit CUDAGuard(int32_t device) : device_guard_() {
+  explicit CUDAGuard(int32_t device) {
     set_device(device);
   }
 
@@ -104,7 +104,7 @@ struct CUDAGuard {
 
  private:
   /// The guard for the current device.
-  at::DeviceGuard device_guard_;
+  DeviceGuard device_guard_(DeviceType::CUDA);
   /// The original streams that were active on all devices.
   std::vector<CUDAStream> original_streams_;
 };
