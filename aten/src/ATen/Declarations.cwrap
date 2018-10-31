@@ -2411,7 +2411,8 @@
     - THTensor* mat2
 ]]
 [[
-  name: addbmm
+  name: _th_addbmm
+  cname: addbmm
   variants:
     - method
     - function

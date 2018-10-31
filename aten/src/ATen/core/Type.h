@@ -335,8 +335,8 @@ struct CAFFE2_API Type {
   virtual Tensor & _th_triu_(Tensor & self, int64_t diagonal) const = 0;
   virtual Tensor _th_cross(const Tensor & self, const Tensor & other, int64_t dim) const = 0;
   virtual Tensor _th_diag(const Tensor & self, int64_t diagonal) const = 0;
-  virtual Tensor s_addbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
-  virtual Tensor addbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
+  virtual Tensor s__th_addbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
+  virtual Tensor _th_addbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & _th_addbmm_(Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor s__th_addcmul(const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual Tensor _th_addcmul(const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
@@ -663,6 +663,7 @@ struct CAFFE2_API Type {
   virtual Tensor & remainder_(Tensor & self, Scalar other) const = 0;
   virtual Tensor & remainder_(Tensor & self, const Tensor & other) const = 0;
   virtual Tensor & addbmm_(Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
+  virtual Tensor addbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & addcmul_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual Tensor & addcdiv_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual Tensor & random_(Tensor & self, int64_t from, int64_t to, Generator * generator) const = 0;
