@@ -7542,7 +7542,7 @@ a")
         ''')
 
         cu.foo(torch.tensor(0))
-        with self.assertRaisesRegex(torch.jit._Exception, "Exception"):
+        with self.assertRaisesRegex(torch.jit.Error, "Exception"):
             cu.foo(torch.tensor(1))
 
         @torch.jit.script
@@ -7556,7 +7556,7 @@ a")
 
         foo(torch.tensor(0))
         # we don't currently validate the name of the exception
-        with self.assertRaisesRegex(torch.jit._Exception, "Exception"):
+        with self.assertRaisesRegex(torch.jit.Error, "Exception"):
             foo(torch.tensor(1))
 
         @torch.jit.script
@@ -7565,7 +7565,7 @@ a")
             raise a
 
         # a gets DCEd because the expression following raise is ignored
-        with self.assertRaisesRegex(torch.jit._Exception, "failed in interpreter"):
+        with self.assertRaisesRegex(torch.jit.Error, "failed in interpreter"):
             foo()
 
         @torch.jit.script
@@ -7601,7 +7601,7 @@ a")
         ''')
 
         cu.foo(torch.tensor(1))
-        with self.assertRaisesRegex(torch.jit._Exception, "Exception"):
+        with self.assertRaisesRegex(torch.jit.Error, "Exception"):
             cu.foo(torch.tensor(0))
 
         @torch.jit.script
@@ -7610,7 +7610,7 @@ a")
 
         foo(torch.tensor(1))
         # we don't currently validate the name of the exception
-        with self.assertRaisesRegex(torch.jit._Exception, "Exception"):
+        with self.assertRaisesRegex(torch.jit.Error, "Exception"):
             foo(torch.tensor(0))
 
     def test_weak_script_function(self):
