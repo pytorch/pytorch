@@ -521,9 +521,9 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 elif t == torch._C.ListType.ofInts():
                     unsqueezed = [g.op("Unsqueeze", input, axes_i=[0]) for input in inputs]
                     return g.op("Concat", *unsqueezed, axis_i=0)
-            elif op_name == "Undefined":
-                # Undefined is not an ONNX operator; keep it as prim::Undefined
-                # and let the exporter handle finally eliminating these
+            elif op_name == "Undefined" or op_name == "None":
+                # Undefined/None is not an ONNX operator; keep it as prim::Undefined/
+                # prim::None and let the exporter handle finally eliminating these
                 return None
             elif op_name == 'Loop' or op_name == 'If':
                 new_op_outputs = g.op(op_name, *inputs, outputs=n.outputsSize())

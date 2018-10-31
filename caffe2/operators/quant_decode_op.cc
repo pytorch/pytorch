@@ -6,7 +6,7 @@
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(QuantDecode, QuantDecodeOp<QuantDecodeRunTy::RUN_ALWAYS>);
-REGISTER_CPU_OPERATOR(QuantDecodeGradient, QuantDecodeGradientOp);
+REGISTER_CPU_GRADIENT_OPERATOR(QuantDecodeGradient, QuantDecodeGradientOp);
 #ifdef CAFFE2_USE_MPSCNN
 REGISTER_CPU_OPERATOR(
     MPSCNNQuantDecode,
@@ -42,7 +42,7 @@ Output:
     .Output(1, "decoded_1", "Decoded tensor for codes_1 (float)")
     .Output(2, "decoded_n", "Decoded tensor for codes_n (float)");
 
-OPERATOR_SCHEMA(QuantDecodeGradient)
+GRADIENT_OPERATOR_SCHEMA(QuantDecodeGradient)
     .NumInputs([](int in) { return in >= 3 && in % 2 == 1; })
     .NumOutputs(1);
 

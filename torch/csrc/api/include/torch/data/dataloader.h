@@ -116,6 +116,16 @@ class DataLoader {
     return options_;
   }
 
+  /// Returns the sampler currently used by the `DataLoader`.
+  const Sampler& sampler() const noexcept {
+    return sampler_;
+  }
+
+  /// Returns the sampler currently used by the `DataLoader`.
+  Sampler& sampler() noexcept {
+    return sampler_;
+  }
+
  private:
   /// Simple mix-in to give something a sequence number.
   struct Sequenced {

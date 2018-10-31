@@ -19,7 +19,8 @@ TYPED_TEST_CASE(TensorGPUDeathTest, TensorTypes);
 TYPED_TEST(TensorGPUTest, TensorInitializedEmpty) {
   if (!caffe2::HasCudaGPU()) return;
   Tensor tensor(CUDA);
-  EXPECT_EQ(tensor.ndim(), 0);
+  EXPECT_EQ(tensor.numel(), 0);
+  EXPECT_EQ(tensor.ndim(), 1);
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
@@ -117,7 +118,8 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
   if (!HasCudaGPU()) return;
   ::testing::FLAGS_gtest_death_test_style = "threadsafe";
   Tensor tensor(CUDA);
-  EXPECT_EQ(tensor.ndim(), 0);
+  EXPECT_EQ(tensor.ndim(), 1);
+  EXPECT_EQ(tensor.numel(), 0);
   EXPECT_THROW(tensor.data<TypeParam>(), EnforceNotMet);
 }
 
@@ -180,8 +182,8 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
   }
   for (int gpu_id = 0; gpu_id < NumCudaDevices(); ++gpu_id) {
     DeviceGuard guard(gpu_id);
-    CUDAContext context(gpu_id);
-    blob.Reset(new Tensor(tensor, &context, CUDA));
+    CUDAContext context(gpu_id); // switch to the current gpu
+    blob.Reset(new Tensor(tensor, CUDA));
     string serialized = SerializeBlob(blob, "test");
     BlobProto proto;
     CAFFE_ENFORCE(proto.ParseFromString(serialized));

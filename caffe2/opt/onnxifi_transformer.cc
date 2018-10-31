@@ -195,12 +195,12 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
       cpu_tensor->Resize(dims);
       if (t.data_type() == ::ONNX_NAMESPACE::TensorProto::FLOAT) {
         context.CopyBytesSameDevice(
-            cpu_tensor->size() * sizeof(float),
+            cpu_tensor->numel() * sizeof(float),
             static_cast<const void*>(t.raw_data().data()),
             cpu_tensor->raw_mutable_data(TypeMeta::Make<float>()));
       } else if (t.data_type() == ::ONNX_NAMESPACE::TensorProto::INT64) {
         context.CopyBytesSameDevice(
-            cpu_tensor->size() * sizeof(int64_t),
+            cpu_tensor->numel() * sizeof(int64_t),
             static_cast<const void*>(t.raw_data().data()),
             cpu_tensor->raw_mutable_data(TypeMeta::Make<int64_t>()));
       } else {
@@ -259,7 +259,11 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
 
   for (const auto& op : net.op()) {
     for (const auto& input : op.input()) {
-      if (total_inputs.emplace(input).second && weights_in_ws.count(input)) {
+      bool not_seen = total_inputs.emplace(input).second;
+      if (!not_seen) {
+        continue;
+      }
+      if (weights_in_ws.count(input)) {
         // We add weights as inputs too
         total_inputs_vec.emplace_back(input);
         initialization_list.emplace(input);

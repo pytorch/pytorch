@@ -6,6 +6,8 @@
 #include "cuda_runtime_api.h"
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
+#include <c10/util/Exception.h>
+#include <c10/Stream.h>
 
 /*
 * A CUDAStream interface. See CUDAStream.cpp for implementation details.
@@ -58,10 +60,10 @@ struct CUDAEvent;
 
 namespace detail {
 
-// Pointer-based API (for internal use)
+// Pointer-based API (for internal use, backwards compatibility with C-based API)
 AT_CUDA_API CUDAStreamInternals* CUDAStream_getDefaultStream(int64_t device = -1);
 
-AT_CUDA_API CUDAStreamInternals* CUDAStream_createStream(
+AT_CUDA_API CUDAStreamInternals* CUDAStream_getStreamFromPool(
   const bool isHighPriority = false
 , int64_t device = -1);
 
@@ -70,8 +72,8 @@ AT_CUDA_API CUDAStreamInternals* CUDAStream_getCurrentStream(int64_t device = -1
 AT_CUDA_API void CUDAStream_setStream(CUDAStreamInternals* internals);
 AT_CUDA_API void CUDAStream_uncheckedSetStream(CUDAStreamInternals* internals);
 
-AT_CUDA_API cudaStream_t CUDAStream_stream(CUDAStreamInternals*);
-AT_CUDA_API int64_t CUDAStream_device(CUDAStreamInternals*);
+AT_CUDA_API cudaStream_t CUDAStream_stream(const CUDAStreamInternals*);
+AT_CUDA_API int64_t CUDAStream_device(const CUDAStreamInternals*);
 
 } // namespace detail
 
@@ -79,31 +81,24 @@ AT_CUDA_API int64_t CUDAStream_device(CUDAStreamInternals*);
 // Allows use as a cudaStream_t, copying, moving, and metadata access.
 struct AT_CUDA_API CUDAStream {
 
-  // Constructors
-  CUDAStream() = default;
-  /* implicit */ CUDAStream(CUDAStreamInternals* internals_in)
-  : internals_{internals_in} { }
+  explicit CUDAStream(const CUDAStreamInternals*);
 
-  // Returns true if the CUDAStream is not null.
-  explicit operator bool() const noexcept { return internals_ != nullptr; }
-
-  // Implicit conversion to cudaStream_t
-  operator cudaStream_t() const { return detail::CUDAStream_stream(internals_); }
-
-  // Less than operator (to allow use in sets)
-  friend bool operator<(const CUDAStream& left, const CUDAStream& right) {
-    return left.internals_ < right.internals_;
+  explicit CUDAStream(Stream stream) : stream_(stream) {
+    AT_ASSERT(stream_.device_type() == DeviceType::CUDA);
   }
 
+  // Implicit conversion to cudaStream_t
+  operator cudaStream_t() const { return stream(); }
+
   // Getters
-  int64_t device() const { return detail::CUDAStream_device(internals_); }
-  cudaStream_t stream() const { return detail::CUDAStream_stream(internals_); }
-  CUDAStreamInternals* internals() const { return internals_; }
+  int64_t device_index() const { return stream_.device_index(); }
+  cudaStream_t stream() const { return detail::CUDAStream_stream(internals()); }
+  CUDAStreamInternals* internals() const;
 
   void synchronize_with(const CUDAEvent& event) const;
 
 private:
-  CUDAStreamInternals* internals_ = nullptr;
+  Stream stream_;
 };
 
 } // namespace cuda

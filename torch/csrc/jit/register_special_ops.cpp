@@ -2,6 +2,9 @@
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/operator.h"
 
+#include <sstream>
+#include <regex>
+
 namespace torch {
 namespace jit {
 
@@ -24,6 +27,41 @@ RegisterOperators reg({
         [](Stack& stack) {
           return 0;
         }),
+    Operator(
+        "aten::format(str self, *str args) -> str",
+        [](Node* node) {
+          size_t num_inputs = node->inputs().size();
+          std::regex unsupported_options("\\{(.*)\\}");
+          return [num_inputs, unsupported_options](Stack& stack) {
+            auto format = peek(stack, 0, num_inputs).toStringRef();
+
+            if (std::regex_search(format, unsupported_options)) {
+              AT_WARN("Format options are not supported.");
+            }
+
+            auto args = last(stack, num_inputs - 1);
+
+            size_t base = 0;
+            std::string format_arg = "{}";
+            size_t next = format.find(format_arg, base);
+            size_t used_args = 0;
+            std::stringstream ss;
+
+            while (next != std::string::npos) {
+              if (used_args == args.size()) {
+                AT_ERROR("Too few arguments for format string: ", format);
+              }
+              ss << format.substr(base, next - base);
+              ss << args[used_args++];
+              base = next + format_arg.length();
+              next = format.find(format_arg, base);
+            }
+
+            drop(stack, num_inputs);
+            stack.push_back(ss.str());
+            return 0;
+          };
+        })
 });
 }
 } // namespace jit

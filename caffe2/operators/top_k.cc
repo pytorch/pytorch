@@ -94,7 +94,7 @@ bool TopKOp<T, Context>::RunOnDevice() {
   auto* indices = Output(1);
   auto* flatten_indices = OutputSize() > 2 ? Output(2) : nullptr;
 
-  at::IntList input_dims = input.dims();
+  at::IntList input_dims = input.sizes();
   if (axis_ == -1) {
     axis_ = input_dims.size() - 1;
   }
@@ -106,7 +106,7 @@ bool TopKOp<T, Context>::RunOnDevice() {
   values->Resize(output_dims);
   indices->Resize(output_dims);
   if (flatten_indices != nullptr) {
-    flatten_indices->Resize(indices->size());
+    flatten_indices->Resize(indices->numel());
   }
   const T* input_data = input.template data<T>();
   T* values_data = values->template mutable_data<T>();
@@ -115,12 +115,12 @@ bool TopKOp<T, Context>::RunOnDevice() {
       ? nullptr
       : flatten_indices->template mutable_data<int64_t>();
   // init values as the default value
-  math::Set<T, Context>(values->size(), T(0), values_data, &context_);
+  math::Set<T, Context>(values->numel(), T(0), values_data, &context_);
   math::Set<int64_t, Context>(
-      indices->size(), int64_t(-1), indices_data, &context_);
+      indices->numel(), int64_t(-1), indices_data, &context_);
   if (flatten_indices_data != nullptr) {
     math::Set<int64_t, Context>(
-        flatten_indices->size(), int64_t(-1), flatten_indices_data, &context_);
+        flatten_indices->numel(), int64_t(-1), flatten_indices_data, &context_);
   }
 
   const int64_t prev_size = std::accumulate(
@@ -162,8 +162,8 @@ bool TopKGradientOp<T, Context>::RunOnDevice() {
   const auto& indices = Input(1);
   const auto& original_input = Input(2);
   auto* output = Output(0);
-  at::IntList values_dims = values.dims();
-  at::IntList origin_dims = original_input.dims();
+  at::IntList values_dims = values.sizes();
+  at::IntList origin_dims = original_input.sizes();
   CAFFE_ENFORCE_EQ(values_dims.size(), origin_dims.size());
   output->Resize(origin_dims);
   const T* values_data = values.template data<T>();
@@ -173,7 +173,7 @@ bool TopKGradientOp<T, Context>::RunOnDevice() {
     axis_ = values_dims.size() - 1;
   }
   const int k = values_dims[axis_];
-  math::Set<T, Context>(output->size(), T(0), output_data, &context_);
+  math::Set<T, Context>(output->numel(), T(0), output_data, &context_);
   const int64_t prev_size = std::accumulate(
       values_dims.cbegin(),
       values_dims.cbegin() + axis_,

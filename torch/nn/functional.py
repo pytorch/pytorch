@@ -10,7 +10,6 @@ import torch
 from torch._C import _infer_size, _add_docstr
 from . import _functions
 from .modules import utils
-from ._functions.padding import ConstantPadNd
 from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
@@ -858,6 +857,7 @@ In-place version of :func:`~leaky_relu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def prelu(input, weight):
     r"""prelu(input, weight) -> Tensor
 
@@ -897,7 +897,9 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 """)
 
 
+@torch._jit_internal.weak_script
 def hardshrink(input, lambd=0.5):
+    # type: (Tensor, float) -> Tensor
     r"""
     hardshrink(input, lambd=0.5) -> Tensor
 
@@ -1163,17 +1165,17 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
 
     Args:
         input (LongTensor): Tensor containing indices into the embedding matrix
-        weight (Tensor): The embedding matrix
-            Number of rows should correspond to the maximum possible index + 1,
-            number of columns is the embedding size
+        weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
+            and number of columns equal to the embedding size
         padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
                                          (initialized to zeros) whenever it encounters the index.
-        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
-                                    this before extracting. Note: this will modify :attr:`weight` in-place.
-        norm_type (float, optional): The p of the p-norm to compute for the max_norm option. Default ``2``.
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+        max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
+                                    is renormalized to have norm :attr:`max_norm`.
+                                    Note: this will modify :attr:`weight` in-place.
+        norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
+        scale_grad_by_freq (boolean, optional): If given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
-        sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
+        sparse (bool, optional): If ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
                                  :class:`torch.nn.Embedding` for more details regarding sparse gradients.
 
     Shape:
@@ -1238,14 +1240,15 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
 
     Args:
         input (LongTensor): Tensor containing bags of indices into the embedding matrix
-        weight (Tensor): The embedding matrix
-            Number of rows should correspond to the maximum possible index + 1,
-            number of columns is the embedding size
+        weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
+            and number of columns equal to the embedding size
         offsets (LongTensor, optional): Only used when :attr:`input` is 1D. :attr:`offsets` determines
                              the starting index position of each bag (sequence) in :attr:`input`.
-        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
-                                    this before extracting. Note: this will modify :attr:`weight` in-place.
-        norm_type (float, optional): The ``p`` in the ``p``-norm to compute for the max_norm option. Default ``2``.
+        max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
+                                    is renormalized to have norm :attr:`max_norm`.
+                                    Note: this will modify :attr:`weight` in-place.
+        norm_type (float, optional): The ``p`` in the ``p``-norm to compute for the :attr:`max_norm` option.
+                                     Default ``2``.
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
                                                 Note: this option is not supported when ``mode="max"``.
@@ -1779,7 +1782,13 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='elementwis
             return d
         return torch.mean(d) if reduction == 'elementwise_mean' else torch.sum(d)
     else:
-        return lambd_optimized(input, target, _Reduction.get_enum(reduction))
+        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+        return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
+
+
+def _smooth_l1_loss(input, target):
+    t = torch.abs(input - target)
+    return torch.where(t < 1, 0.5 * t ** 2, t - 0.5)
 
 
 def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
@@ -1789,10 +1798,10 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='ele
     See :class:`~torch.nn.SmoothL1Loss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
-    else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch._C._nn.smooth_l1_loss(input, target, reduction)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
+    return _pointwise_loss(
+        _smooth_l1_loss,
+        torch._C._nn.smooth_l1_loss, input, target, reduction)
 
 
 def l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
@@ -2293,7 +2302,7 @@ def pad(input, pad, mode='constant', value=0):
     assert len(pad) % 2 == 0, 'Padding length must be divisible by 2'
     assert len(pad) // 2 <= input.dim(), 'Padding length too large'
     if mode == 'constant':
-        return ConstantPadNd.apply(input, pad, value)
+        return _VF.constant_pad_nd(input, pad, value)
     else:
         assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
         if input.dim() == 3:
@@ -2320,7 +2329,9 @@ def pad(input, pad, mode='constant', value=0):
 
 # distance
 
-def pairwise_distance(x1, x2, p=2, eps=1e-6, keepdim=False):
+@torch._jit_internal.weak_script
+def pairwise_distance(x1, x2, p=2., eps=1e-6, keepdim=False):
+    # type: (Tensor, Tensor, float, float, bool) -> Tensor
     r"""
     See :class:`torch.nn.PairwiseDistance` for details
     """
@@ -2397,17 +2408,13 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
 def normalize(input, p=2, dim=1, eps=1e-12, out=None):
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.
 
-    Does:
+    For a tensor :attr:`input` of sizes :math:`(n_0, ..., n_{dim}, ..., n_k)`, each
+    :math:`n_{dim}` -element vector :math:`v` along dimension :attr:`dim` is transformed as
 
     .. math::
-        v = \frac{v}{\max(\lVert v \rVert_p, \epsilon)}
+        v = \frac{v}{\max(\lVert v \rVert_p, \epsilon)}.
 
-    for each subtensor v over dimension dim of input. Each subtensor is
-    flattened into a vector, i.e. :math:`\lVert v \rVert_p` is not a matrix
-    norm.
-
-    With default arguments normalizes over the second dimension with Euclidean
-    norm.
+    With the default arguments it uses the Euclidean norm over vectors along dimension :math:`1` for normalization.
 
     Args:
         input: input tensor of any shape

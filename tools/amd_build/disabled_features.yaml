@@ -33,28 +33,9 @@
         }
       },
       {
-        "path": "aten/src/ATen/Context.cpp",
-        "s_constants": {
-          "#ifdef USE_SSE3": "#if defined(USE_SSE3) && !defined(__HIP_DEVICE_COMPILE__)"
-        }
-      },
-      {
-        "path": "aten/src/ATen/native/Distributions.h",
-        "s_constants": {
-          "scalar_cast": "static_cast"
-        }
-      },
-      {
         "path": "aten/src/ATen/native/cuda/Distributions.cu",
         "s_constants": {
           "#include <nvfunctional>": ""
-        }
-      },
-      {
-        "path": "aten/src/THC/THCNumerics.cuh",
-        "s_constants": {
-          "#ifdef __CUDA_ARCH__": "#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)",
-          "#if CUDA_VERSION < 9000": "#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)"
         }
       },
       {
@@ -104,19 +85,17 @@
         }
       },
       {
-        "path": "aten/src/ATen/CUDAStream.cpp",
-        "s_constants": {
-            # FIXME: ROCm currently does not support multi-GPU setup; and getNumGPUs runs into a seg fault
-            # ROCm Pytorch issue: https://github.com/ROCmSoftwarePlatform/pytorch/issues/31
-            "getCUDAHooks().getNumGPUs()": "1",
-        }
-      },
-      {
         "path": "aten/src/ATen/Context.h",
         "s_constants": {
             # FIXME: ROCm currently does not support multi-GPU setup; and getNumGPUs runs into a seg fault
             # ROCm Pytorch issue: https://github.com/ROCmSoftwarePlatform/pytorch/issues/31
             "detail::getCUDAHooks().getNumGPUs()": "1",
+        }
+      },
+      {
+        "path": "aten/src/ATen/native/cuda/Unique.cu",
+        "s_constants": {
+            "inverse_indices_kernel<<<": "inverse_indices_kernel<scalar_t><<<",
         }
       }
     ],
@@ -144,8 +123,6 @@
     {
       "path": "aten/src/ATen/native/cuda/Distributions.cu",
       "functions": [
-        "_s_poisson_cuda",
-        "poisson_cuda_kernel",
         "gamma_cuda_kernel",
         "gamma_grad_cuda_kernel",
       ]
@@ -162,12 +139,6 @@
       "functions": [
         "THNN_(LookupTable_accGradParameters)",
         "THNN_(LookupTable_renorm)"
-      ]
-    },
-    {
-      "path": "aten/src/THCUNN/LookupTable.cu",
-      "functions": [
-        "calculate_norms_and_renorm"
       ]
     },
     {

@@ -89,9 +89,9 @@ class ElementwiseRTCOp final : public Operator<CUDAContext> {
     vector<size_t> argBuffer_vec(InputSize() + OutputSize() + 1);
     size_t* argBuffer = argBuffer_vec.data();
     CAFFE_ENFORCE(
-        Input(0).size() < std::numeric_limits<int>::max(),
+        Input(0).numel() < std::numeric_limits<int>::max(),
         "The kernel function currently only supports int index.");
-    argBuffer[0] = Input(0).size();
+    argBuffer[0] = Input(0).numel();
     void** ptr_buffer = reinterpret_cast<void**>(argBuffer + 1);
     for (int i = 0; i < InputSize(); ++i) {
       ptr_buffer[i] = const_cast<float*>(Input(i).data<float>());
@@ -106,9 +106,16 @@ class ElementwiseRTCOp final : public Operator<CUDAContext> {
       CU_LAUNCH_PARAM_BUFFER_SIZE, &argBufferSize,
       CU_LAUNCH_PARAM_END
     };
-    func_.LaunchEx(CAFFE_GET_BLOCKS(Input(0).size()), 1, 1,
-                   CAFFE_CUDA_NUM_THREADS, 1, 1,
-                   0, context_.cuda_stream(), config);
+    func_.LaunchEx(
+        CAFFE_GET_BLOCKS(Input(0).numel()),
+        1,
+        1,
+        CAFFE_CUDA_NUM_THREADS,
+        1,
+        1,
+        0,
+        context_.cuda_stream(),
+        config);
     return true;
   }
 

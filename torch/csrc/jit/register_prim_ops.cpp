@@ -8,6 +8,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/custom_operator.h"
+#include "torch/csrc/jit/script/jit_exception.h"
 
 #include "torch/csrc/variable_tensor_functions.h"
 
@@ -200,7 +201,7 @@ RegisterOperators reg({
           return [](Stack& stack) {
             at::Tensor a;
             pop(stack, a);
-            push(stack, static_cast<int64_t>(a.dtype()));
+            push(stack, static_cast<int64_t>(a.scalar_type()));
             return 0;
           };
         }),
@@ -222,6 +223,14 @@ RegisterOperators reg({
             return 0;
           };
         }),
+    Operator(
+      prim::None,
+      [](Node* node) {
+        return [](Stack& stack) {
+          stack.push_back(IValue());
+          return 0;
+        };
+      }),
     Operator(
         prim::NoneGenerator,
         [](Node* node) {
@@ -247,6 +256,15 @@ RegisterOperators reg({
             return 0;
           };
         }),
+    Operator(
+        prim::RaiseException,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            throw JITException(pop(stack).toStringRef());
+            return 0;
+          };
+        }),
+
     // Load x, y
     // loads values from registers onto the stack, the actual callback does
     // nothing since the stack manipulation is already encoded in inst.inputs
@@ -368,6 +386,34 @@ RegisterOperators reg({
             return 0;
           };
         }),
+    Operator(
+        prim::TupleSlice,
+        [](Node* node) {
+          int64_t beg_ind = node->i(attr::beg);
+          int64_t end_ind = node->i(attr::end);
+          return [=](Stack& stack) {
+            auto t = pop(stack).toTuple();
+            const auto & elems = t->elements();
+            std::vector<IValue> output_elems;
+            for (int64_t i = beg_ind; i < end_ind; ++i) {
+              output_elems.push_back(elems.at(i));
+            }
+            push(stack, Tuple::create(std::move(output_elems)));
+            return 0;
+          };
+        }),
+    Operator(
+      prim::TupleIndex,
+      [](Node* node) {
+        auto index = node->i(attr::index);
+        return [=](Stack& stack) {
+          auto tup = pop(stack).toTuple();
+          const auto & elems = tup->elements();
+          // index is normalized to be positive at compile time
+          stack.push_back(elems.at(index));
+          return 0;
+        };
+      }),
     Operator(
         prim::TupleConstruct,
         [](Node* node) {
@@ -498,6 +544,26 @@ RegisterOperators reg({
               return 0;
             };
           }
+        }),
+    Operator(
+        prim::fork,
+        [](Node* node) {
+          Code code(node->g(attr::Subgraph));
+          JIT_ASSERT(node->blocks().size() == 0);
+          JIT_ASSERT(node->hasAttribute(attr::Subgraph));
+          return [=](Stack& stack) {
+            InterpreterState(code).run(stack);
+            push(stack, Future(pop(stack)));
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::wait(Future(t) self) -> t",
+        [](Node* node) {
+          return [=](Stack& stack) {
+            push(stack, pop(stack).toFuture()->get());
+            return 0;
+          };
         }),
 });
 
@@ -700,6 +766,35 @@ Operation listSlice(Node* node) {
 
 RegisterOperators reg2({
 
+#define DEFINE_STRING_OP(op_name, string_op, result)                           \
+Operator(                                                                      \
+    #op_name "(str a, str b) ->" #result,                                      \
+    [](Node* node) {                                                           \
+      return [=](Stack& stack) {                                               \
+        auto b = pop(stack).toStringRef();                                     \
+        auto a = pop(stack).toStringRef();                                     \
+        push(stack, string_op);                                                \
+        return 0;                                                              \
+    };                                                                         \
+  }),
+
+  DEFINE_STRING_OP(aten::eq, a == b, bool)
+  DEFINE_STRING_OP(aten::ne, a != b, bool)
+  DEFINE_STRING_OP(aten::add, a + b, str)
+#undef DEFINE_STRING_OP
+
+    // tensor length op (size of 1st dimension)
+    Operator(
+      "aten::len(Tensor t) -> int",
+      [](Stack& stack) {
+        at::Tensor t = pop(stack).toTensor();
+        if (t.dim() == 0) {
+          AT_ERROR("len() of a 0-d tensor");
+        }
+        push(stack, t.sizes()[0]);
+        return 0;
+      }
+    ),
 #define CREATE_LIST_OPS(decl_type, c_type) \
     Operator("aten::select(" decl_type "[] a, int b) -> " decl_type, listSelect<Shared<c_type>>), \
     Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>), \
@@ -716,6 +811,7 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("float", DoubleList)
     CREATE_LIST_OPS("Tensor", TensorList)
     CREATE_LIST_OPS("t", GenericList)
+#undef CREATE_LIST_OPS
 
 
     Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
@@ -841,4 +937,18 @@ RegisterOperators reg2({
           };
         }),
 });
+
+
+at::Tensor leaky_relu(at::Tensor tensor, double scalar) {
+  return at::leaky_relu(tensor, scalar);
+}
+at::Tensor cat(std::vector<at::Tensor> tensors) {
+  return at::cat(tensors);
+}
+
+static auto reg3 =
+    torch::jit::RegisterOperators()
+        .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor", &leaky_relu)
+        .op("_test::cat(Tensor[] inputs) -> Tensor", &cat);
+
 }}} // torch::jit::anon

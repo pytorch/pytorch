@@ -69,8 +69,6 @@ void ConvImpl<D, Derived>::reset() {
 }
 
 Tensor Conv1dImpl::forward(Tensor input) {
-  AT_ASSERT(input.ndimension() == 3);
-
   if (options.transposed_) {
     return torch::conv_transpose1d(
         input,
@@ -93,8 +91,6 @@ Tensor Conv1dImpl::forward(Tensor input) {
 }
 
 Tensor Conv2dImpl::forward(Tensor input) {
-  AT_ASSERT(input.ndimension() == 4);
-
   if (options.transposed_) {
     return torch::conv_transpose2d(
         input,
@@ -117,8 +113,6 @@ Tensor Conv2dImpl::forward(Tensor input) {
 }
 
 Tensor Conv3dImpl::forward(Tensor input) {
-  AT_ASSERT(input.ndimension() == 5);
-
   if (options.transposed_) {
     return torch::conv_transpose3d(
         input,

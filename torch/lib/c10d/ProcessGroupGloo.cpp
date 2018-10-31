@@ -104,9 +104,10 @@ const ::gloo::ReductionFunction<T>* reductionFunction(const ReduceOp& r) {
 
 #ifdef USE_CUDA
 std::vector<cudaStream_t> getStreamVector(AlgorithmEntry& entry) {
-  std::vector<cudaStream_t> streams(entry.streams.size());
-  for (size_t i = 0; i < entry.streams.size(); i++) {
-    streams[i] = entry.streams[i].stream();
+  std::vector<cudaStream_t> streams;
+  streams.reserve(entry.streams.size());
+  for (auto s : entry.streams) {
+    streams.push_back(s);
   }
   return streams;
 }
@@ -114,7 +115,7 @@ std::vector<cudaStream_t> getStreamVector(AlgorithmEntry& entry) {
 // synchronizeStreams ensures that the private streams associated with
 // an algorithm entry wait for the public streams to complete.
 void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
-  at::DeviceGuard deviceGuard;
+  at::cuda::CUDAGuard deviceGuard;
   const auto& key = entry->key;
   for (size_t i = 0; i < key.devices.size(); i++) {
     const auto& device = key.devices[i];
@@ -196,7 +197,7 @@ void ProcessGroupGloo::WorkGloo::finish(const AlgorithmEntry& entry) {
       // Populate devices and events so that we can later synchronize
       // with the operation associated with this work finishing.
       if (cuda_) {
-        at::DeviceGuard deviceGuard;
+        at::cuda::CUDAGuard deviceGuard;
         devices_ = entry.key.devices;
         events_.resize(devices_.size());
         for (size_t i = 0; i < devices_.size(); i++) {
@@ -499,7 +500,9 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 // failure must be signaled through the Work future.
 //
 EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
-  at::DeviceGuard deviceGuard;
+#ifdef USE_CUDA
+  at::cuda::CUDAGuard deviceGuard;
+#endif
   auto entry = std::unique_ptr<AlgorithmEntry>(new AlgorithmEntry);
   entry->key = key;
 
@@ -518,7 +521,6 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
     if (key.type->is_cuda()) {
       throw std::runtime_error("ProcessGroupGloo is not built with CUDA");
     }
-    deviceGuard.set_index(-1);
 #endif
     entry->src[i] = at::empty(srcSizes[i], key.type->options());
   }
@@ -526,12 +528,12 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
 #ifdef USE_CUDA
   // If these are CUDA tensors, create streams and events
   if (key.type->is_cuda()) {
-    entry->streams.resize(key.devices.size());
-    entry->events.resize(key.devices.size());
+    entry->streams.reserve(key.devices.size());
+    entry->events.reserve(key.devices.size());
     for (size_t i = 0; i < key.devices.size(); i++) {
       deviceGuard.set_index(key.devices[i]);
-      entry->streams[i] = at::cuda::createCUDAStream();
-      entry->events[i] = CUDAEvent::create();
+      entry->streams.push_back(at::cuda::getStreamFromPool());
+      entry->events.push_back(CUDAEvent::create());
     }
   }
 #endif
