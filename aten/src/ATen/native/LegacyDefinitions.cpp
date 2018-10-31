@@ -815,4 +815,12 @@ Tensor alias(const Tensor & self) {
   return at::_th_alias(self);
 }
 
+Tensor & _dirichlet_grad_out(Tensor & output, const Tensor & x, const Tensor & alpha, const Tensor & total) {
+  return at::_th_dirichlet_grad_out(output, x, alpha, total);
+}
+
+Tensor _dirichlet_grad(const Tensor & x, const Tensor & alpha, const Tensor & total) {
+  return at::_th_dirichlet_grad(x, alpha, total);
+}
+
 }} // namespace at::native
