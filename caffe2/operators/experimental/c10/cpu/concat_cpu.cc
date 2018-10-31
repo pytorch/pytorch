@@ -25,11 +25,11 @@ void concat_op_cpu_impl(
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
   for (int i = 1; i < inputs.size(); ++i) {
     CAFFE_ENFORCE(
-        inputs[i]->meta() == inputs[0]->meta(),
+        inputs[i]->dtype() == inputs[0]->dtype(),
         "All inputs must have the same type, expected: ",
-        inputs[0]->meta().name(),
+        inputs[0]->dtype().name(),
         " but got: ",
-        inputs[i]->meta().name(),
+        inputs[i]->dtype().name(),
         " for input: ",
         i);
   }
@@ -91,11 +91,11 @@ void concat_op_cpu_impl(
         axis_dim * after,
         input.raw_data(),
         axis_dim * after,
-        static_cast<char*>(output->raw_mutable_data(inputs[0]->meta())) +
+        static_cast<char*>(output->raw_mutable_data(inputs[0]->dtype())) +
             output_offset,
         output_channels * after,
         static_cast<Context*>(context),
-        inputs[0]->meta().copy());
+        inputs[0]->dtype().copy());
     output_offset += axis_dim * after * input.itemsize();
   }
 }
