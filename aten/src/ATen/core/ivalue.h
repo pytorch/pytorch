@@ -627,25 +627,21 @@ inline optional<T> IValue::toOptional() {
 }
 
 inline bool IValue::isSameIdentity(IValue& rhs) {
-  // we choose to not use memcmp for payload check due to potenntial random padding characters on union type
-  if (this->tag != rhs.tag) {
-    return false;
+  // We choose to not use memcmp for payload check due to potenntial random padding characters on union type
+
+  // Semantics:
+  // 1. None is None, False is False, and True is True are all true
+  // 2. If it is a reference type (i.e. is_intrusive_ptr), then is is True when the pointed-to object is the same.
+  // 3. False for all other comparisons.
+  if (this->isNone() && rhs.isNone()) {
+    return true;
+  } else if (this->isBool() && rhs.isBool()) {
+    // for bool type, do equality check
+    return this->toBool() == rhs.toBool();
   } else {
-    // for primitive types, do equality check
-    if (this->isBool()) {
-      return this->toBool() == rhs.toBool();
-    } else if (this->isInt()) {
-      return this->toInt() == rhs.toInt();
-    } else if (this->isDouble()) {
-      return this->toDouble() == rhs.toDouble();
-    } else if (this->isString()) {
-      return this->toStringRef() == rhs.toStringRef();
-    }
-    else {
-      // for objects holding in IValue, do shallow compare on pointer address to testify the identity
-      return isNone() || (is_intrusive_ptr && rhs.is_intrusive_ptr
-          && this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr);
-    }
+    // for objects holding in IValue, do shallow compare on pointer address to testify the identity
+    return this->is_intrusive_ptr && rhs.is_intrusive_ptr
+        && this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
   }
 }
 
