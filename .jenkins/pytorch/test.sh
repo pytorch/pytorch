@@ -25,11 +25,14 @@ if [ -n "${IN_CIRCLECI}" ]; then
   fi
 fi
 
-# JIT C++ extensions require ninja.
-pip install -q ninja --user
+# --user breaks ppc64le builds and these packages are already in ppc64le docker
+if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
+  # JIT C++ extensions require ninja.
+  pip install -q ninja --user
 
-# TODO: move this to Docker
-pip install -q hypothesis --user
+  # TODO: move this to Docker
+  pip install -q hypothesis --user
+fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
