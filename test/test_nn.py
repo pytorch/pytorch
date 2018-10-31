@@ -1969,7 +1969,7 @@ class TestNN(NNTestCase):
             counts = counts + y_draw
 
         # check shapes
-        self.assertTrue(y_draw.size() == logits.size())  
+        self.assertTrue(y_draw.size() == logits.size())
         # check that we have (some) gradient
         self.assertTrue(y_draw.requires_grad)
 
@@ -1984,7 +1984,7 @@ class TestNN(NNTestCase):
         z = (counts - expected) / (expected * (1 - probs)).sqrt()
         # A (lazy) approximate 99% two-sided test:
         # occurs with prob alpha~>=0.01 if unbiased
-        self.assertLess(z.abs().max().item(),2.58)
+        self.assertLess(z.abs().max().item(), 2.58)
 
     @repeat_test_for_types(NO_HALF_TENSORTYPES)
     def test_gumbel_softmax(self, dtype=torch.float):
