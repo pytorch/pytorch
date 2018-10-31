@@ -24,11 +24,11 @@ with prim::DifferentiableGraph_0 = graph(%0 : Float(*, *)
   %11 : Float(*, *) = aten::t(%2)
   %Uz.1 : Float(*, *) = aten::mm(%3, %11)
   %13 : int = prim::Constant[value=1]()
-  %14 : Float(*, *), %15 : Float(*, *) = prim::FusionGroup_0[device=0](%6, %Uz.1, %5, %Wx.1, %4)
+  %14 : Float(*, *), %15 : Float(*, *) = prim::FusionGroup_0(%6, %Uz.1, %5, %Wx.1, %4)
   %16 : Dynamic[] = prim::ListConstruct(%14, %7)
   %17 : Dynamic[] = aten::broadcast_tensors(%16)
   %18 : Dynamic, %19 : Dynamic = prim::ListUnpack(%17)
-  %hy : Float(*, *), %21 : Float(*, *), %cy : Float(*, *), %outgate.1 : Float(*, *), %cellgate.1 : Float(*, *), %forgetgate.1 : Float(*, *), %ingate.1 : Float(*, *) = prim::FusionGroup_1[device=0](%8, %19, %18)
+  %hy : Float(*, *), %21 : Float(*, *), %cy : Float(*, *), %outgate.1 : Float(*, *), %cellgate.1 : Float(*, *), %forgetgate.1 : Float(*, *), %ingate.1 : Float(*, *) = prim::FusionGroup_1(%8, %19, %18)
   return (%cy, %hy, %9, %Wx.1, %11, %Uz.1, %15, %ingate.1, %forgetgate.1, %cellgate.1, %outgate.1, %21);
 }
 with prim::FusionGroup_0 = graph(%0 : Float(*)
