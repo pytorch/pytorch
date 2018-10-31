@@ -2966,3 +2966,101 @@
 - func: remainder(Tensor self, Tensor other) -> Tensor
   variants: method, function
   device_guard: false
+
+- func: min_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  device_guard: false
+
+- func: min(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: min(Tensor self) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: max_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  device_guard: false
+
+- func: max(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: max(Tensor self) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: median(Tensor self) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: sort_out(Tensor values, Tensor indices, Tensor self, int64_t dim=-1, bool descending=false) -> (Tensor, Tensor)
+  device_guard: false
+
+- func: sort(Tensor self, int64_t dim=-1, bool descending=false) -> (Tensor, Tensor)
+  variants: method, function
+  device_guard: false
+
+- func: topk_out(Tensor values, Tensor indices, Tensor self, int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) -> (Tensor, Tensor)
+  device_guard: false
+
+- func: topk(Tensor self, int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) -> (Tensor, Tensor)
+  variants: method, function
+  device_guard: false
+
+- func: all(Tensor self) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: any(Tensor self) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: renorm_out(Tensor result, Tensor self, Scalar p, int64_t dim, Scalar maxnorm) -> Tensor
+  device_guard: false
+
+- func: renorm(Tensor self, Scalar p, int64_t dim, Scalar maxnorm) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: unfold(Tensor self, int64_t dimension, int64_t size, int64_t step) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: equal(Tensor self, Tensor other) -> bool
+  variants: method, function
+  device_guard: false
+
+- func: pow_out(Tensor result, Tensor self, Tensor exponent) -> Tensor
+  device_guard: false
+
+- func: pow(Tensor self, Tensor exponent) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: pow_out(Tensor result, Scalar self, Tensor exponent) -> Tensor
+  device_guard: false
+
+- func: pow(Scalar self, Tensor exponent) -> Tensor
+  device_guard: false
+
+- func: normal_out(Tensor output, Tensor mean, double std=1, *, Generator* generator=nullptr) -> Tensor
+  device_guard: false
+
+- func: normal(Tensor mean, double std=1, *, Generator* generator=nullptr) -> Tensor
+  device_guard: false
+
+- func: normal_out(Tensor output, double mean, Tensor std, *, Generator* generator=nullptr) -> Tensor
+  device_guard: false
+
+- func: normal(double mean, Tensor std, *, Generator* generator=nullptr) -> Tensor
+  device_guard: false
+
+- func: normal_out(Tensor output, Tensor mean, Tensor std, *, Generator* generator=nullptr) -> Tensor
+  device_guard: false
+
+- func: normal(Tensor mean, Tensor std, *, Generator* generator=nullptr) -> Tensor
+  device_guard: false
+
+- func: alias(Tensor self) -> Tensor
+  variants: method, function
+  device_guard: false
