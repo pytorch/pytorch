@@ -213,14 +213,24 @@ Vec256<double> inline operator/(const Vec256<double>& a, const Vec256<double>& b
   return _mm256_div_pd(a, b);
 }
 
+// Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
+// either input is a NaN.
 template <>
-Vec256<double> inline max(const Vec256<double>& a, const Vec256<double>& b) {
-  return _mm256_max_pd(a, b);
+Vec256<double> inline maximum(const Vec256<double>& a, const Vec256<double>& b) {
+  Vec256<double> max = _mm256_max_pd(a, b);
+  Vec256<double> isnan = _mm256_cmp_pd(a, b, _CMP_UNORD_Q);
+  // Exploit the fact that all-ones is a NaN.
+  return _mm256_or_pd(max, isnan);
 }
 
+// Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
+// either input is a NaN.
 template <>
-Vec256<double> inline min(const Vec256<double>& a, const Vec256<double>& b) {
-  return _mm256_min_pd(a, b);
+Vec256<double> inline minimum(const Vec256<double>& a, const Vec256<double>& b) {
+  Vec256<double> min = _mm256_min_pd(a, b);
+  Vec256<double> isnan = _mm256_cmp_pd(a, b, _CMP_UNORD_Q);
+  // Exploit the fact that all-ones is a NaN.
+  return _mm256_or_pd(min, isnan);
 }
 
 template <>

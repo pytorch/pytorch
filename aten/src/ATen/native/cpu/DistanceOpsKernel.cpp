@@ -41,13 +41,13 @@ struct PDist {
   // TODO This is an inefficient way to compite sign, and can be much faster
   // using native SSE instructions that should be added to Vec256.
   static inline Vec sign(Vec val) {
-    return vec256::min(vec256::max(Vec(0), val.ceil()), Vec(1)) +
-      vec256::min(vec256::max(Vec(-1), val.floor()), Vec(0));
+    return vec256::minimum(vec256::maximum(Vec(0), val.ceil()), Vec(1)) +
+      vec256::minimum(vec256::maximum(Vec(-1), val.floor()), Vec(0));
   }
 
   // Zero norm
   struct zdist_calc {
-    static inline Vec map(const Vec& diff, const Vec& p) { return vec256::min(diff.abs().ceil(), Vec(1)); }
+    static inline Vec map(const Vec& diff, const Vec& p) { return vec256::minimum(diff.abs().ceil(), Vec(1)); }
     static inline Vec red(const Vec& agg, const Vec& up) { return agg + up; }
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
   };
@@ -85,11 +85,11 @@ struct PDist {
   // Info norm
   struct idist_calc {
     static inline Vec map(const Vec& diff, const Vec& p) { return diff; }
-    static inline Vec red(const Vec& agg, const Vec& up) { return vec256::max(agg, up); }
+    static inline Vec red(const Vec& agg, const Vec& up) { return vec256::maximum(agg, up); }
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
     // TODO This backward pass uses a very complext expression to compute (diff
     // == dist) that could be much faster if using SSE instructions.
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec256::min(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec256::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
   };
 
   template <typename F>
