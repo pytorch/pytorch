@@ -26,11 +26,7 @@ if [ -n "${IN_CIRCLECI}" ]; then
 fi
 
 # JIT C++ extensions require ninja.
-git clone https://github.com/ninja-build/ninja --quiet
-pushd ninja
-python ./configure.py --bootstrap
-export PATH="$PWD:$PATH"
-popd
+pip install ninja
 
 # TODO: move this to Docker
 pip install -q hypothesis

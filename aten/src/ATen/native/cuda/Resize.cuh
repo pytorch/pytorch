@@ -38,11 +38,13 @@ inline TensorImpl* resize_impl_cuda_(
     guard = DeviceGuard(self->storage().device().index());
   }
 
-  size_t storage_size = 1;
+  int64_t storage_size = 1;
   if (stride) {
     self->set_sizes_and_strides(size, *stride);
     // NB: storage size can be different from numel.
     for (size_t dim = 0; dim < size.size(); ++dim) {
+      // FIXME: Don't rely on storage_size being negative because this
+      // may not be true for some edge cases.
       storage_size += (size[dim] - 1) * stride.value()[dim];
     }
   } else {

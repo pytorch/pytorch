@@ -34,20 +34,20 @@ class TensorFiller {
     switch (dist_) {
       case FD_UNIFORM: {
         math::RandUniform<Type, Context>(
-            tensor->size(), min, max, data, context);
+            tensor->numel(), min, max, data, context);
         break;
       }
       case FD_FIXEDSUM: {
         auto fixed_sum = static_cast<Type>(fixed_sum_);
-        CAFFE_ENFORCE_LE(min * tensor->size(), fixed_sum);
-        CAFFE_ENFORCE_GE(max * tensor->size(), fixed_sum);
+        CAFFE_ENFORCE_LE(min * tensor->numel(), fixed_sum);
+        CAFFE_ENFORCE_GE(max * tensor->numel(), fixed_sum);
         math::RandFixedSum<Type, Context>(
-            tensor->size(), min, max, fixed_sum_, data, context);
+            tensor->numel(), min, max, fixed_sum_, data, context);
         break;
       }
       case FD_SYNTHETIC: {
         math::RandSyntheticData<Type, Context>(
-            tensor->size(), min, max, data, context);
+            tensor->numel(), min, max, data, context);
         break;
       }
     }
