@@ -1963,7 +1963,7 @@ class TestNN(NNTestCase):
         counts = torch.ones_like(logits)
 
         for draw in range(num_draws):
-            y_draw = gumbel_softmax(logits, hard=True)
+            y_draw = F.gumbel_softmax(logits, hard=True)
             counts = counts + y_draw
 
         # check shapes
