@@ -3,6 +3,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/core/ArrayRef.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/DeviceType.h>
 
 #include <cstddef>
 #include <vector>
@@ -104,7 +105,7 @@ struct CUDAGuard {
 
  private:
   /// The guard for the current device.
-  DeviceGuard device_guard_(DeviceType::CUDA);
+  DeviceGuard device_guard_{DeviceType::CUDA};
   /// The original streams that were active on all devices.
   std::vector<CUDAStream> original_streams_;
 };
