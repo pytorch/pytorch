@@ -1313,7 +1313,6 @@ _builtin_blacklist = {
     'prelu',
     'hardshrink',
     'ctc_loss',
-    '_Reduction',
 }
 
 
