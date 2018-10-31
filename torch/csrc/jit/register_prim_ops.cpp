@@ -768,7 +768,7 @@ RegisterOperators reg2({
 
 #define DEFINE_STRING_OP(op_name, string_op, result)                           \
 Operator(                                                                      \
-    #op_name "(str a, str b) ->" #result,                                \
+    #op_name "(str a, str b) ->" #result,                                      \
     [](Node* node) {                                                           \
       return [=](Stack& stack) {                                               \
         auto b = pop(stack).toStringRef();                                     \
@@ -781,8 +781,20 @@ Operator(                                                                      \
   DEFINE_STRING_OP(aten::eq, a == b, bool)
   DEFINE_STRING_OP(aten::ne, a != b, bool)
   DEFINE_STRING_OP(aten::add, a + b, str)
+#undef DEFINE_STRING_OP
 
-
+    // tensor length op (size of 1st dimension)
+    Operator(
+      "aten::len(Tensor t) -> int",
+      [](Stack& stack) {
+        at::Tensor t = pop(stack).toTensor();
+        if (t.dim() == 0) {
+          AT_ERROR("len() of a 0-d tensor");
+        }
+        push(stack, t.sizes()[0]);
+        return 0;
+      }
+    ),
 #define CREATE_LIST_OPS(decl_type, c_type) \
     Operator("aten::select(" decl_type "[] a, int b) -> " decl_type, listSelect<Shared<c_type>>), \
     Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>), \
@@ -799,6 +811,7 @@ Operator(                                                                      \
     CREATE_LIST_OPS("float", DoubleList)
     CREATE_LIST_OPS("Tensor", TensorList)
     CREATE_LIST_OPS("t", GenericList)
+#undef CREATE_LIST_OPS
 
 
     Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
