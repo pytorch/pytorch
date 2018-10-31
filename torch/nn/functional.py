@@ -693,11 +693,11 @@ def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
 
 @torch._jit_internal.weak_script
 def threshold(input, threshold, value, inplace=False):
+    # type: (Tensor, float, float, bool) -> Tensor
     r"""Thresholds each element of the input Tensor.
 
     See :class:`~torch.nn.Threshold` for more details.
     """
-    # type: (Tensor, float, float, bool) -> Tensor
     if inplace:
         result = torch._C._nn.threshold_(input, threshold, value)
     else:
@@ -714,12 +714,12 @@ In-place version of :func:`~threshold`.
 
 @torch._jit_internal.weak_script
 def relu(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""relu(input, inplace=False) -> Tensor
 
     Applies the rectified linear unit function element-wise. See
     :class:`~torch.nn.ReLU` for more details.
     """
-    # type: (Tensor, bool) -> Tensor
     if inplace:
         result = torch.relu_(input)
     else:
@@ -759,13 +759,13 @@ def glu(input, dim=-1):
 
 @torch._jit_internal.weak_script
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
+    # type: (Tensor, float, float, bool) -> Tensor
     r"""
     hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
 
     Applies the HardTanh function element-wise. See :class:`~torch.nn.Hardtanh` for more
     details.
     """
-    # type: (Tensor, float, float, bool) -> Tensor
     if inplace:
         result = torch._C._nn.hardtanh_(input, min_val, max_val)
     else:
@@ -782,24 +782,24 @@ In-place version of :func:`~hardtanh`.
 
 @torch._jit_internal.weak_script
 def relu6(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""relu6(input, inplace=False) -> Tensor
 
     Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`.
 
     See :class:`~torch.nn.ReLU6` for more details.
     """
-    # type: (Tensor, bool) -> Tensor
     return hardtanh(input, 0., 6., inplace)
 
 
 @torch._jit_internal.weak_script
 def elu(input, alpha=1., inplace=False):
+    # type: (Tensor, float, bool) -> Tensor
     r"""Applies element-wise,
     :math:`\text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))`.
 
     See :class:`~torch.nn.ELU` for more details.
     """
-    # type: (Tensor, float, bool) -> Tensor
     if inplace:
         result = torch._C._nn.elu_(input, alpha)
     else:
@@ -816,6 +816,7 @@ In-place version of :func:`~elu`.
 
 @torch._jit_internal.weak_script
 def selu(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""selu(input, inplace=False) -> Tensor
 
     Applies element-wise,
@@ -825,7 +826,6 @@ def selu(input, inplace=False):
 
     See :class:`~torch.nn.SELU` for more details.
     """
-    # type: (Tensor, bool) -> Tensor
     if inplace:
         result = torch.selu_(input)
     else:
@@ -842,6 +842,7 @@ In-place version of :func:`~selu`.
 
 @torch._jit_internal.weak_script
 def celu(input, alpha=1., inplace=False):
+    # type: (Tensor, float, bool) -> Tensor
     r"""celu(input, alpha=1., inplace=False) -> Tensor
 
     Applies element-wise,
@@ -849,7 +850,6 @@ def celu(input, alpha=1., inplace=False):
 
     See :class:`~torch.nn.CELU` for more details.
     """
-    # type: (Tensor, float, bool) -> Tensor
     if inplace:
         result = torch.celu_(input, alpha)
     else:
@@ -865,6 +865,7 @@ In-place version of :func:`~celu`.
 
 @torch._jit_internal.weak_script
 def leaky_relu(input, negative_slope=0.01, inplace=False):
+    # type: (Tensor, float, bool) -> Tensor
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
@@ -873,7 +874,6 @@ def leaky_relu(input, negative_slope=0.01, inplace=False):
 
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
-    # type: (Tensor, float, bool) -> Tensor
     if inplace:
         result = torch._C._nn.leaky_relu_(input, negative_slope)
     else:
@@ -890,6 +890,7 @@ In-place version of :func:`~leaky_relu`.
 
 @torch._jit_internal.weak_script
 def prelu(input, weight):
+    # type: (Tensor, Tensor) -> Tensor
     r"""prelu(input, weight) -> Tensor
 
     Applies element-wise the function
@@ -898,19 +899,18 @@ def prelu(input, weight):
 
     See :class:`~torch.nn.PReLU` for more details.
     """
-    # type: (Tensor, Tensor) -> Tensor
     return torch.prelu(input, weight)
 
 
 @torch._jit_internal.weak_script
 def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
+    # type: (Tensor, float, float, bool, bool) -> Tensor
     r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Tensor
 
     Randomized leaky ReLU.
 
     See :class:`~torch.nn.RReLU` for more details.
     """
-    # type: (Tensor, float, float, bool, bool) -> Tensor
     if inplace:
         result = torch.rrelu_(input, lower, upper, training)
     else:
@@ -935,6 +935,7 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 
 @torch._jit_internal.weak_script
 def hardshrink(input, lambd=0.5):
+    # type: (Tensor, float) -> Tensor
     r"""
     hardshrink(input, lambd=0.5) -> Tensor
 
@@ -942,7 +943,6 @@ def hardshrink(input, lambd=0.5):
 
     See :class:`~torch.nn.Hardshrink` for more details.
     """
-    # type: (Tensor, float) -> Tensor
     return torch.hardshrink(input, lambd)
 
 
@@ -2362,10 +2362,10 @@ def pad(input, pad, mode='constant', value=0):
 
 @torch._jit_internal.weak_script
 def pairwise_distance(x1, x2, p=2., eps=1e-6, keepdim=False):
+    # type: (Tensor, Tensor, float, float, bool) -> Tensor
     r"""
     See :class:`torch.nn.PairwiseDistance` for details
     """
-    # type: (Tensor, Tensor, float, float, bool) -> Tensor
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 
