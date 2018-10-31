@@ -87,7 +87,7 @@ int main(int argc, char *argv[]) {
 
   std::unique_ptr<ManagerServerSocket> srv_socket;
   const auto tempfile =
-      torch::try_make_tempfile(/*name_prefix=*/"torch-shm-file-");
+      torch::utils::try_make_tempfile(/*name_prefix=*/"torch-shm-file-");
   try {
     if (!tempfile.has_value()) {
       throw std::runtime_error(
