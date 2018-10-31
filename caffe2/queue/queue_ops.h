@@ -162,7 +162,7 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
 
           out->Extend(in.sizes()[0], kTensorGrowthPct, &context_);
           auto* dst =
-              (char*)out->raw_mutable_data() + oldSize * in.meta().itemsize();
+              (char*)out->raw_mutable_data() + oldSize * in.dtype().itemsize();
           context_.template CopyItems<Context, Context>(
               in.meta(), in.numel(), in.raw_data(), dst);
         }

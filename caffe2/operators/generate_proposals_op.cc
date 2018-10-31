@@ -26,7 +26,7 @@ template <class T>
 utils::ConstTensorView<T> GetSubTensorView(
     const TensorCPU& tensor,
     int dim0_start_index) {
-  DCHECK_EQ(tensor.meta().itemsize(), sizeof(T));
+  DCHECK_EQ(tensor.dtype().itemsize(), sizeof(T));
 
   if (tensor.numel() == 0) {
     return utils::ConstTensorView<T>(nullptr, {});
@@ -225,7 +225,7 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   auto* out_rois_probs = Output(1);
 
   CAFFE_ENFORCE_EQ(scores.ndim(), 4, scores.ndim());
-  CAFFE_ENFORCE(scores.template IsType<float>(), scores.meta().name());
+  CAFFE_ENFORCE(scores.template IsType<float>(), scores.dtype().name());
   const auto num_images = scores.dim(0);
   const auto A = scores.dim(1);
   const auto height = scores.dim(2);
@@ -242,11 +242,11 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   // im_info_tensor: (num_images, 3), format [height, width, scale; ...]
   CAFFE_ENFORCE_EQ(im_info_tensor.sizes(), (vector<int64_t>{num_images, 3}));
   CAFFE_ENFORCE(
-      im_info_tensor.template IsType<float>(), im_info_tensor.meta().name());
+      im_info_tensor.template IsType<float>(), im_info_tensor.dtype().name());
 
   // anchors: (A, box_dim)
   CAFFE_ENFORCE_EQ(anchors.sizes(), (vector<int64_t>{A, box_dim}));
-  CAFFE_ENFORCE(anchors.template IsType<float>(), anchors.meta().name());
+  CAFFE_ENFORCE(anchors.template IsType<float>(), anchors.dtype().name());
 
   // Broadcast the anchors to all pixels
   auto all_anchors_vec =
