@@ -1962,8 +1962,7 @@ class TestNN(NNTestCase):
             logits = logits.cuda()
         probs = logits.softmax(dim=-1)
 
-        counts = torch.ones_like(logits)
-
+        counts = torch.zeros_like(logits)
         for draw in range(num_draws):
             y_draw = F.gumbel_softmax(logits, hard=True)
             counts = counts + y_draw
