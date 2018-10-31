@@ -415,10 +415,11 @@ class MultiProcessTestCase(TestCase):
 
 
 class ProcessGroupGlooTest(MultiProcessTestCase):
-    def opts(self):
+    def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
-        opts.timeout = 1.0
         opts.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        opts.timeout = 1.0
+        opts.threads = threads
         return opts
 
     def test_broadcast_ops(self):
@@ -766,6 +767,68 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 work.wait()
                 if root == self.rank:
                     self.assertEqual(output, tmp)
+
+    def test_allreduce_checks(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        t1 = torch.zeros([1], dtype=torch.float32)
+        t2 = torch.zeros([1], dtype=torch.float64)
+        t3 = torch.zeros([2], dtype=torch.float32)
+
+        with self.assertRaisesRegex(ValueError, "requires non-empty tensor list"):
+            opts = c10d.AllreduceOptions()
+            pg.allreduce([], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor type"):
+            opts = c10d.AllreduceOptions()
+            pg.allreduce([t1, t2], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+            opts = c10d.AllreduceOptions()
+            pg.allreduce([t1, t3], opts)
+
+    def _test_allreduce_basics(self, fn):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        for (op, input, output) in simple_reduce_tests(self.rank, self.world_size):
+            opts = c10d.AllreduceOptions()
+            opts.reduceOp = op
+            tmp = fn(input)
+            work = pg.allreduce([tmp], opts)
+            work.wait()
+            self.assertEqual(output, tmp)
+
+    def test_allreduce_basics(self):
+        self._test_allreduce_basics(lambda t: t.clone())
+
+    @skip_if_not_multigpu
+    def test_allreduce_basics_cuda(self):
+        self._test_allreduce_basics(lambda t: t.clone().cuda())
+
+    def _test_allreduce_stress(self, inputs):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
+        work_handles = [pg.allreduce(inputs[i]) for i in range(len(inputs))]
+        for i, work_handle in enumerate(work_handles):
+            work_handle.wait()
+            self.assertEqual(
+                torch.Tensor([
+                    (i * self.world_size) +
+                    (self.world_size * (self.world_size - 1) / 2)
+                ]),
+                inputs[i],
+                "Mismatch in iteration %d" % i,
+            )
+
+    def test_allreduce_stress(self):
+        inputs = [torch.Tensor([i + self.rank]) for i in range(1000)]
+        self._test_allreduce_stress(inputs)
+
+    @skip_if_not_multigpu
+    def test_allreduce_stress_cuda(self):
+        inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
+        self._test_allreduce_stress(inputs)
 
     def test_send_recv_all_to_all(self):
         store = c10d.FileStore(self.file.name)
