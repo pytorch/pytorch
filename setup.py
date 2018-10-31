@@ -903,7 +903,6 @@ main_sources = [
     "torch/csrc/jit/script/lexer.cpp",
     "torch/csrc/jit/script/module.cpp",
     "torch/csrc/jit/script/python_tree_views.cpp",
-    "torch/csrc/nn/THNN.cpp",
     "torch/csrc/onnx/init.cpp",
     "torch/csrc/serialization.cpp",
     "torch/csrc/tensor/python_tensor.cpp",
@@ -987,7 +986,6 @@ if USE_CUDA:
         "torch/csrc/cuda/comm.cpp",
         "torch/csrc/cuda/python_comm.cpp",
         "torch/csrc/cuda/serialization.cpp",
-        "torch/csrc/nn/THCUNN.cpp",
     ]
 
 if USE_ROCM:
@@ -1021,7 +1019,6 @@ if USE_ROCM:
         "torch/csrc/cuda/comm.cpp",
         "torch/csrc/cuda/python_comm.cpp",
         "torch/csrc/cuda/serialization.cpp",
-        "torch/csrc/nn/THCUNN.cpp",
     ]
 
 if USE_NCCL:

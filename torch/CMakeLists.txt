@@ -67,8 +67,6 @@ configure_file("${TORCH_SRC_DIR}/_utils_internal.py"
 
 add_custom_command(
   OUTPUT
-  "${TORCH_SRC_DIR}/csrc/nn/THNN.cpp"
-  "${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"

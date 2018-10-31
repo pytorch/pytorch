@@ -458,15 +458,6 @@ void initModule(PyObject *module);
 }} // namespace torch::cuda
 #endif
 
-namespace torch { namespace nn {
-
-void init__THNN(PyObject*);
-#ifdef USE_CUDA
-void init__THCUNN(PyObject*);
-#endif
-
-}} // namespace torch::nn
-
 bool THDPDoubleStorage_init(PyObject *module);
 bool THDPFloatStorage_init(PyObject *module);
 //bool THDPHalfStorage_init(PyObject *module);
@@ -631,11 +622,6 @@ static PyObject* initModule() {
 
 #ifdef USE_NUMPY
   if (_import_array() < 0) return nullptr;
-#endif
-
-  torch::nn::init__THNN(module);
-#ifdef USE_CUDA
-  torch::nn::init__THCUNN(module);
 #endif
 
   return module;
