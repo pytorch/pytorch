@@ -681,7 +681,7 @@
   self: slogdet_backward(grads, self, result0, result1)
 
 - name: sort(Tensor self, int64_t dim, bool descending)
-  self: index_select_backward(grad, dim, indices, self.sizes(), true)
+  self: index_select_backward(grad, dim, result1, self.sizes(), true)
 
 - name: split(Tensor self, int64_t split_size, int64_t dim)
   self: split_backward(grads, split_size, dim, self.sizes(), self.type())
@@ -764,7 +764,7 @@
   self: _tanh_backward(grad, result)
 
 - name: topk(Tensor self, int64_t k, int64_t dim, bool largest, bool sorted)
-  self: index_select_backward(grad, dim, indices, self.sizes(), true)
+  self: index_select_backward(grad, dim, result1, self.sizes(), true)
 
 - name: trace(Tensor self)
   self: trace_backward(grad, self.sizes())
