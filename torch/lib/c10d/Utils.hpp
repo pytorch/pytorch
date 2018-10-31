@@ -60,6 +60,28 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   }
 }
 
+inline void assertTypeMatch(
+    std::function<void(const std::string&)> fn,
+    const at::Type& type,
+    const std::vector<at::Tensor>& tensors,
+    size_t index) {
+  if (tensors[index].type() != type) {
+    fn("invalid tensor type at index " + std::to_string(index) + " (expected " +
+       type.toString() + ", got " + tensors[index].type().toString() + ")");
+  }
+}
+
+inline void assertSizesMatch(
+    std::function<void(const std::string&)> fn,
+    const at::IntList& sizes,
+    const std::vector<at::Tensor>& tensors,
+    size_t index) {
+  if (tensors[index].sizes() != sizes) {
+    fn("invalid tensor size at index " + std::to_string(index) + " (expected " +
+       toString(sizes) + ", got " + toString(tensors[index].sizes()) + ")");
+  }
+}
+
 inline at::Tensor newLikeFlat(
     std::vector<std::vector<at::Tensor>>& tensors,
     size_t deviceIdx) {
@@ -113,11 +135,16 @@ inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
 }
 
 template <typename T>
+inline T* getDataPointer(const at::Tensor& tensor) {
+  // NB: This does NOT respect storage_offset from the tensor
+  return static_cast<T*>(tensor.storage().data());
+}
+
+template <typename T>
 std::vector<T*> getDataPointers(const std::vector<at::Tensor>& tensors) {
   std::vector<T*> ptrs(tensors.size());
   for (size_t i = 0; i < tensors.size(); i++) {
-    // NB: This does NOT respect storage_offset from the tensor
-    ptrs[i] = static_cast<T*>(tensors[i].storage().data());
+    ptrs[i] = getDataPointer<T>(tensors[i]);
   }
   return ptrs;
 }
