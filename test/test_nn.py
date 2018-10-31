@@ -1758,57 +1758,6 @@ class TestNN(NNTestCase):
             m = torch.nn.utils.spectral_norm(m)
             m = torch.nn.utils.spectral_norm(m)
 
-    def test_spectral_norm_load_state_dict(self):
-        inp = torch.randn(2, 3)
-        for activate_times in (0, 3):
-            # Test backward compatibility
-            # At version None -> 1: weight becomes not a buffer and v vector becomes a buffer
-            m = nn.Linear(3, 5)
-            snm = torch.nn.utils.spectral_norm(m)
-            snm.train()
-            for _ in range(activate_times):
-                snm(inp)
-
-            # craft a version None state_dict
-            version_none_state_dict = deepcopy(snm.state_dict())
-            self.assertEqual({'weight_orig', 'bias', 'weight_u', 'weight_v'}, set(version_none_state_dict.keys()))
-            self.assertIn('spectral_norm', version_none_state_dict._metadata[''])
-            del version_none_state_dict._metadata['']['spectral_norm']       # remove metadata info
-            del version_none_state_dict['weight_v']                          # remove v vector
-            version_none_state_dict['weight'] = snm.weight.detach().clone()  # set W as a buffer
-
-            # normal state_dict
-            version_latest_state_dict = deepcopy(snm.state_dict())
-
-            snm.eval()
-            out0_eval = snm(inp)
-            snm.train()
-            out1_train = snm(inp)
-            out2_train = snm(inp)
-            snm.eval()
-            out3_eval = snm(inp)
-
-            snm.load_state_dict(version_none_state_dict)
-            snm.eval()
-            self.assertEqual(out0_eval, snm(inp))
-            snm.train()
-            self.assertEqual(out1_train, snm(inp))
-            self.assertEqual(out2_train, snm(inp))
-            snm.eval()
-            self.assertEqual(out3_eval, snm(inp))
-
-            # Test normal loading
-            snm.load_state_dict(version_latest_state_dict)
-            snm.eval()
-            self.assertEqual(out0_eval, snm(inp))
-            snm.train()
-            self.assertEqual(out1_train, snm(inp))
-            self.assertEqual(out2_train, snm(inp))
-            snm.eval()
-            self.assertEqual(out3_eval, snm(inp))
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_spectral_norm_dp(self):
         for apply_dp in (True, False):
             if apply_dp and not TEST_MULTIGPU:
                 continue
@@ -1893,6 +1842,55 @@ class TestNN(NNTestCase):
                         return wrapped_m(input)
 
                     torch.autograd.gradcheck(fn, (m.weight_orig,))
+
+    def test_spectral_norm_load_state_dict(self):
+        inp = torch.randn(2, 3)
+        for activate_times in (0, 3):
+            # Test backward compatibility
+            # At version None -> 1: weight becomes not a buffer and v vector becomes a buffer
+            m = nn.Linear(3, 5)
+            snm = torch.nn.utils.spectral_norm(m)
+            snm.train()
+            for _ in range(activate_times):
+                snm(inp)
+
+            # craft a version None state_dict
+            version_none_state_dict = deepcopy(snm.state_dict())
+            self.assertEqual({'weight_orig', 'bias', 'weight_u', 'weight_v'}, set(version_none_state_dict.keys()))
+            self.assertIn('spectral_norm', version_none_state_dict._metadata[''])
+            del version_none_state_dict._metadata['']['spectral_norm']       # remove metadata info
+            del version_none_state_dict['weight_v']                          # remove v vector
+            version_none_state_dict['weight'] = snm.weight.detach().clone()  # set W as a buffer
+
+            # normal state_dict
+            version_latest_state_dict = deepcopy(snm.state_dict())
+
+            snm.eval()
+            out0_eval = snm(inp)
+            snm.train()
+            out1_train = snm(inp)
+            out2_train = snm(inp)
+            snm.eval()
+            out3_eval = snm(inp)
+
+            snm.load_state_dict(version_none_state_dict)
+            snm.eval()
+            self.assertEqual(out0_eval, snm(inp))
+            snm.train()
+            self.assertEqual(out1_train, snm(inp))
+            self.assertEqual(out2_train, snm(inp))
+            snm.eval()
+            self.assertEqual(out3_eval, snm(inp))
+
+            # Test normal loading
+            snm.load_state_dict(version_latest_state_dict)
+            snm.eval()
+            self.assertEqual(out0_eval, snm(inp))
+            snm.train()
+            self.assertEqual(out1_train, snm(inp))
+            self.assertEqual(out2_train, snm(inp))
+            snm.eval()
+            self.assertEqual(out3_eval, snm(inp))
 
     def test_spectral_norm_dim(self):
         inp = torch.randn(2, 3, 10, 12)

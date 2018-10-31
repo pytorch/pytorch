@@ -11,6 +11,10 @@ class SpectralNorm(object):
     #   u = normalize(W @ v)
 
     _version = 1
+    # At version 1:
+    #   made  `W` not a buffer,
+    #   added `v` as a buffer, and
+    #   made eval mode use `W = u @ W_orig @ v` rather than the stored `W`.
 
     def __init__(self, name='weight', n_power_iterations=1, dim=0, eps=1e-12):
         self.name = name
@@ -82,46 +86,12 @@ class SpectralNorm(object):
     def __call__(self, module, inputs):
         setattr(module, self.name, self.compute_weight(module, do_power_iteration=module.training))
 
-    def _state_dict_hook(self, module, state_dict, prefix, local_metadata):
-        if 'spectral_norm' not in local_metadata:
-            local_metadata['spectral_norm'] = {}
-        key = self.name + '.version'
-        if key in local_metadata['spectral_norm']:
-            raise RuntimeError("Unexpected key in metadata['spectral_norm']: {}".format(key))
-        local_metadata['spectral_norm'][key] = self._version
-
     def _solve_v_and_rescale(self, weight_mat, u, target_sigma):
         # Tries to returns a vector `v` s.t. `u = normalize(W @ v)`
         # (the invariant at top of this class) and `u @ W @ v = sigma`.
         # This uses pinverse in case W^T W is not invertible.
         v = torch.chain_matmul(weight_mat.t().mm(weight_mat).pinverse(), weight_mat.t(), u.unsqueeze(1)).squeeze(1)
         return v.mul_(target_sigma / torch.dot(u, torch.mv(weight_mat, v)))
-
-    def _load_state_dict_pre_hook(self, state_dict, prefix, local_metadata,
-                                  strict, missing_keys, unexpected_keys,
-                                  error_msgs):
-        version = local_metadata.get('spectral_norm', {}).get(self.name + '.version', None)
-        if version is None or version < 1:
-            # At version 1:
-            #   made  `W` not a buffer,
-            #   added `v` as a buffer, and
-            #   made eval mode use `W = u @ W_orig @ v` rather than the stored `W`.
-            #
-            # For the old state_dict, we have
-            #
-            #    u = normalize(W_orig @ v)
-            #    W = W_orig / sigma, where sigma = u @ W_orig @ v
-            #
-            # To compute `v`, we solve `W_orig @ x = u`, and let
-            #    v = x / (u @ W_orig @ x) * (W / W_orig).
-            with torch.no_grad():
-                weight_orig = state_dict[prefix + self.name + '_orig']
-                weight = state_dict.pop(prefix + self.name)
-                sigma = (weight_orig / weight).mean()
-                weight_mat = self.reshape_weight_to_matrix(weight_orig)
-                u = state_dict[prefix + self.name + '_u']
-                v = self._solve_v_and_rescale(weight_mat, u, sigma)
-                state_dict[prefix + self.name + '_v'] = v
 
     @staticmethod
     def apply(module, name, n_power_iterations, dim, eps):
@@ -155,9 +125,54 @@ class SpectralNorm(object):
 
         module.register_forward_pre_hook(fn)
 
-        module._register_state_dict_hook(fn._state_dict_hook)
-        module._register_load_state_dict_pre_hook(fn._load_state_dict_pre_hook)
+        module._register_state_dict_hook(SpectralNormStateDictHook(fn))
+        module._register_load_state_dict_pre_hook(SpectralNormLoadStateDictPreHook(fn))
         return fn
+
+
+# This is a top level class because Py2 pickle doesn't like inner class nor an
+# instancemethod.
+class SpectralNormLoadStateDictPreHook(object):
+    # See docstring of SpectralNorm._version on the changes to spectral_norm.
+    def __init__(self, fn):
+        self.fn = fn
+
+    # For state_dict with version None, we have
+    #
+    #    u = normalize(W_orig @ v)
+    #    W = W_orig / sigma, where sigma = u @ W_orig @ v
+    #
+    # To compute `v`, we solve `W_orig @ x = u`, and let
+    #    v = x / (u @ W_orig @ x) * (W / W_orig).
+    def __call__(self, state_dict, prefix, local_metadata, strict,
+                 missing_keys, unexpected_keys, error_msgs):
+        fn = self.fn
+        version = local_metadata.get('spectral_norm', {}).get(fn.name + '.version', None)
+        if version is None or version < 1:
+            with torch.no_grad():
+                weight_orig = state_dict[prefix + fn.name + '_orig']
+                weight = state_dict.pop(prefix + fn.name)
+                sigma = (weight_orig / weight).mean()
+                weight_mat = fn.reshape_weight_to_matrix(weight_orig)
+                u = state_dict[prefix + fn.name + '_u']
+                v = fn._solve_v_and_rescale(weight_mat, u, sigma)
+                state_dict[prefix + fn.name + '_v'] = v
+
+
+# This is a top level class because Py2 pickle doesn't like inner class nor an
+# instancemethod.
+class SpectralNormStateDictHook(object):
+    # See docstring of SpectralNorm._version on the changes to spectral_norm.
+    def __init__(self, fn):
+        self.fn = fn
+
+    def __call__(self, module, state_dict, prefix, local_metadata):
+        if 'spectral_norm' not in local_metadata:
+            local_metadata['spectral_norm'] = {}
+        key = self.fn.name + '.version'
+        if key in local_metadata['spectral_norm']:
+            raise RuntimeError("Unexpected key in metadata['spectral_norm']: {}".format(key))
+        local_metadata['spectral_norm'][key] = self.fn._version
 
 
 def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12, dim=None):
