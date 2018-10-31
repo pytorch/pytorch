@@ -640,6 +640,64 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             if i == self.rank:
                 self.assertEqual(expected, outputs)
 
+    def test_allgather_checks(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        t1 = torch.zeros([1], dtype=torch.float32)
+        t2 = torch.zeros([1], dtype=torch.float64)
+        t3 = torch.zeros([2], dtype=torch.float32)
+
+        with self.assertRaisesRegex(ValueError, "requires non-empty input tensor list"):
+            pg.allgather([], [])
+
+        with self.assertRaisesRegex(ValueError, "requires input/output tensor lists to have the same length"):
+            pg.allgather([], [t1])
+
+        with self.assertRaisesRegex(ValueError, "requires input/output tensor lists to have the same length"):
+            pg.allgather([[t1] * self.world_size, [t1] * self.world_size], [t1])
+
+        with self.assertRaisesRegex(ValueError, "invalid output tensor list"):
+            pg.allgather([[t1] * (self.world_size - 1)], [t1])
+
+        with self.assertRaisesRegex(ValueError, "invalid output tensor list"):
+            pg.allgather([[t1] * (self.world_size + 1)], [t1])
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor type"):
+            pg.allgather([[t1, t1] * (self.world_size), [t1, t1] * (self.world_size)], [t1, t2])
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+            pg.allgather([[t1, t1] * (self.world_size), [t1, t1] * (self.world_size)], [t1, t3])
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor type"):
+            pg.allgather([([t1, t2] * (self.world_size))[:self.world_size]], [t1])
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+            pg.allgather([([t1, t3] * (self.world_size))[:self.world_size]], [t1])
+
+    def test_allgather_basics(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        # Run with N input tensor per rank
+        for n in [1, 2, 3]:
+            input = [
+                torch.Tensor([n * self.rank + i]) for i in range(n)
+            ]
+            output = [
+                [
+                    torch.Tensor([-1]) for _ in range(n * self.world_size)
+                ] for _ in range(n)
+            ]
+            expected_output = [
+                [
+                    torch.Tensor([i]) for i in range(n * self.world_size)
+                ] for _ in range(n)
+            ]
+            work = pg.allgather(output, input)
+            work.wait()
+            self.assertEqual(expected_output, output)
+
     def test_send_recv_all_to_all(self):
         store = c10d.FileStore(self.file.name)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())

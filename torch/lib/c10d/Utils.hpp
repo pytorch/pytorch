@@ -33,6 +33,32 @@ inline std::string toString(at::IntList l) {
   return ss.str();
 }
 
+inline void assertSameType(
+    const at::Type& type,
+    const std::vector<at::Tensor>& tensors) {
+  for (size_t i = 0; i < tensors.size(); i++) {
+    if (tensors[i].type() != type) {
+      const std::string expected = type.toString();
+      const std::string actual = tensors[i].type().toString();
+      throw std::invalid_argument(
+          "mixed types (" + expected + " and " + actual + ")");
+    }
+  }
+}
+
+inline void assertSameSizes(
+    const at::IntList& sizes,
+    const std::vector<at::Tensor>& tensors) {
+  for (size_t i = 0; i < tensors.size(); i++) {
+    if (!tensors[i].sizes().equals(sizes)) {
+      const auto expected = toString(sizes);
+      const auto actual = toString(tensors[i].sizes());
+      throw std::invalid_argument(
+          "mixed sizes (" + expected + " and " + actual + ")");
+    }
+  }
+}
+
 inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   // Ensure we have at least one tensor
   if (tensors.size() == 0) {
@@ -80,6 +106,29 @@ inline void assertSizesMatch(
     fn("invalid tensor size at index " + std::to_string(index) + " (expected " +
        toString(sizes) + ", got " + toString(tensors[index].sizes()) + ")");
   }
+}
+
+// Copied from torch/csrc/utils/functional.h.
+template <typename F, typename T>
+inline auto fmap(T& inputs, const F& fn)
+    -> std::vector<decltype(fn(*inputs.begin()))> {
+  std::vector<decltype(fn(*inputs.begin()))> r;
+  r.reserve(inputs.size());
+  for (auto& input : inputs) {
+    r.push_back(fn(input));
+  }
+  return r;
+}
+
+// Copied from torch/csrc/utils/tensor_flatten.h.
+inline at::Tensor flattenDenseTensors(at::TensorList tensors) {
+  static const auto flatten = [](const at::Tensor& t) {
+    return t.contiguous().view({-1});
+  };
+  if (tensors.size() == 1) {
+    return flatten(tensors[0]);
+  }
+  return at::cat(fmap(tensors, flatten));
 }
 
 inline at::Tensor newLikeFlat(
