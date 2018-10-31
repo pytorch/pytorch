@@ -84,7 +84,9 @@ namespace script {
   _(TK_ARROW, "arrow", "->")                     \
   _(TK_DECL, "decl", "")                         \
   _(TK_SLICE_EXPR, "slice expr", "")             \
-  _(TK_TYPE_COMMENT, "type comment", "# type:")
+  _(TK_TYPE_COMMENT, "type comment", "# type:")  \
+  _(TK_RAISE, "raise", "raise")
+
 
 static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!";
 
