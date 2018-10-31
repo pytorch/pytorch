@@ -760,7 +760,7 @@ inline bool CUDA_tensor_apply1(at::Tensor a,
     // Ignore overlaps when copying back; if we use copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    at::_copy_ignoring_overlaps_(oldA, a);
+    at::_th_copy_ignoring_overlaps_(oldA, a);
   }
 
   return true;
@@ -917,14 +917,14 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
     // Ignore overlaps when copying back; if we use copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    at::_copy_ignoring_overlaps_(oldA, a);
+    at::_th_copy_ignoring_overlaps_(oldA, a);
   }
 
   if (oldB.defined()) {
     // Ignore overlaps when copying back; if we use copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    at::_copy_ignoring_overlaps_(oldB, b);
+    at::_th_copy_ignoring_overlaps_(oldB, b);
   }
 
   return true;
@@ -1113,7 +1113,7 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    at::_copy_ignoring_overlaps_(oldA, a);
+    at::_th_copy_ignoring_overlaps_(oldA, a);
     a = oldA;
   }
 
@@ -1121,7 +1121,7 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    at::_copy_ignoring_overlaps_(oldB, b);
+    at::_th_copy_ignoring_overlaps_(oldB, b);
     b = oldB;
   }
 
@@ -1129,7 +1129,7 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    at::_copy_ignoring_overlaps_(oldC, c);
+    at::_th_copy_ignoring_overlaps_(oldC, c);
     c = oldC;
   }
 
@@ -1357,28 +1357,28 @@ inline bool CUDA_tensor_apply4(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    at::_copy_ignoring_overlaps_(oldA, a);
+    at::_th_copy_ignoring_overlaps_(oldA, a);
   }
 
   if (oldB.defined()) {
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    at::_copy_ignoring_overlaps_(oldB, b);
+    at::_th_copy_ignoring_overlaps_(oldB, b);
   }
 
   if (oldC.defined()) {
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    at::_copy_ignoring_overlaps_(oldC, c);
+    at::_th_copy_ignoring_overlaps_(oldC, c);
   }
 
   if (oldD.defined()) {
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    at::_copy_ignoring_overlaps_(oldD, c);
+    at::_th_copy_ignoring_overlaps_(oldD, c);
   }
 
   return true;
