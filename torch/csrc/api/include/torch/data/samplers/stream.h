@@ -17,9 +17,9 @@ namespace torch {
 namespace data {
 namespace samplers {
 
-/// A wrapper around a batch size value, which implements the `CustomIndex`
+/// A wrapper around a batch size value, which implements the `CustomBatchIndex`
 /// interface.
-struct BatchSize : public CustomIndex {
+struct BatchSize : public CustomBatchIndex {
   explicit BatchSize(size_t size);
   size_t size() const noexcept override;
   operator size_t() const noexcept;
@@ -50,10 +50,10 @@ class StreamSampler : public Sampler<BatchSize> {
   void save(serialize::OutputArchive& archive) const override;
 
   /// Deserializes the `StreamSampler` from the `archive`.
-  void load(serialize::InputArchive& archive) override;;
+  void load(serialize::InputArchive& archive) override;
 
  private:
-  size_t index_{0};
+  size_t examples_retrieved_so_far_ = 0;
   size_t epoch_size_;
 };
 

@@ -21,35 +21,36 @@ BatchSize::operator size_t() const noexcept {
 StreamSampler::StreamSampler(size_t epoch_size) : epoch_size_(epoch_size) {}
 
 void StreamSampler::reset() {
-  index_ = 0;
+  examples_retrieved_so_far_ = 0;
 }
 
 optional<BatchSize> StreamSampler::next(size_t batch_size) {
-  AT_ASSERT(index_ <= epoch_size_);
-  if (index_ == epoch_size_) {
+  AT_ASSERT(examples_retrieved_so_far_ <= epoch_size_);
+  if (examples_retrieved_so_far_ == epoch_size_) {
     return nullopt;
   }
-  if (index_ + batch_size > epoch_size_) {
-    batch_size = epoch_size_ - index_;
+  if (examples_retrieved_so_far_ + batch_size > epoch_size_) {
+    batch_size = epoch_size_ - examples_retrieved_so_far_;
   }
-  index_ += batch_size;
+  examples_retrieved_so_far_ += batch_size;
   return BatchSize(batch_size);
 }
 
 void StreamSampler::save(serialize::OutputArchive& archive) const {
   archive.write(
-      "index",
-      torch::tensor(static_cast<int64_t>(index_), torch::kInt64),
+      "examples_retrieved_so_far",
+      torch::tensor(
+          static_cast<int64_t>(examples_retrieved_so_far_), torch::kInt64),
       /*is_buffer=*/true);
 }
 
 void StreamSampler::load(serialize::InputArchive& archive) {
   auto tensor = torch::empty(1, torch::kInt64);
   archive.read(
-      "index",
+      "examples_retrieved_so_far",
       tensor,
       /*is_buffer=*/true);
-  index_ = tensor.item<int64_t>();
+  examples_retrieved_so_far_ = tensor.item<int64_t>();
 }
 
 } // namespace samplers
