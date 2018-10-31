@@ -9,7 +9,6 @@ FILE = CodeTemplate("""\
 #include "TH/TH.h"
 ${cuda_includes}
 #include "ATen/Utils.h"
-#include "ATen/Copy.h"
 ${copy_includes}
 
 namespace at {
@@ -33,7 +32,7 @@ CUDA_INCLUDES = """\
 # on the surrounding code to establish the necessary invariants.)
 
 COPY_CPU = CodeTemplate("""\
-copy_cpu(dst, src);
+_copy_(dst, src);
 """)
 
 COPY = CodeTemplate("""\
