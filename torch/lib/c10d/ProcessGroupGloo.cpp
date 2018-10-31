@@ -119,6 +119,10 @@ void synchronizeStreams(AlgorithmEntry* entry) {
     auto privateStream = entry->streams[i];
     auto& event = entry->events[i];
     // Synchronizes private stream with public stream
+    std::cout << "synchronizeStreams() in ProcessGroupGloo.cpp" << std::endl;
+    std::cout << "event device: " << event.device() << std::endl;
+    std::cout << "public stream device: " << publicStream.device_index() << std::endl;
+    std::cout << "private stream device: " << privateStream.device_index() << std::endl;
     event.record(publicStream);
     event.block(privateStream);
   }
@@ -188,6 +192,7 @@ void ProcessGroupGloo::WorkGloo::finish(const AlgorithmEntry& entry) {
         events_.resize(devices_.size());
         for (size_t i = 0; i < devices_.size(); i++) {
           const auto& stream = entry.streams[i];
+          std::cout << "finish() in ProcessGroupGloo.cpp" << std::endl;
           events_[i].record(stream);
         }
       }
@@ -513,7 +518,10 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
     entry->streams.reserve(key.devices.size());
     entry->events.resize(key.devices.size());
     for (size_t i = 0; i < key.devices.size(); i++) {
+      // TODO: revisit
+      // entry->streams.push_back(at::cuda::getStreamFromPool(true, i));
       entry->streams.push_back(at::cuda::getStreamFromPool(true, key.devices[i]));
+
     }
   }
 #endif
