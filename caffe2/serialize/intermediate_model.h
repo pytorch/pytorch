@@ -28,7 +28,7 @@ struct SharedData {
   explicit SharedData(uint64_t record_id, at::DataPtr&& data_ptr, uint64_t size)
     : recordId(record_id), dataPtr(std::move(data_ptr)), size(size){}
 
-  uint64_t recordId;
+  c10::optional<uint64_t> recordId;
   at::DataPtr dataPtr;
   uint64_t size;
 };
@@ -47,6 +47,9 @@ class IntermediateTensor final {
  public:
   // constructor
   IntermediateTensor() = default;
+
+  explicit IntermediateTensor(int64_t dataType, const std::vector<int64_t>& dims,
+      int64_t offset): dataType_(dataType), dims_(dims), offset_(offset) {}
 
   // extract data from TensorProto, called in deserialize
   // assume record id to data mapping is complete
@@ -103,7 +106,7 @@ class IntermediateTensor final {
             auto it = id_data->find(record_id);
             if (it == id_data->end()) {
               AT_ERROR("Tensor's data is missing in id_data, tensor name is ",
-                  name_, ", and record_id is "); //, std::torecord_id);
+                  name_, ", and record_id is ", std::to_string(record_id));
             }
             data_ = it->second;
           } else if (source_type == caffe2::ExternalDataProto_SourceType_SIMPLE_FILE) {
@@ -111,7 +114,7 @@ class IntermediateTensor final {
             AT_ERROR("Storing data in separate file is not supported yet!");
           } else {
             // TODO
-            AT_ERROR("Unknown source_type: %lld!", source_type);
+            AT_ERROR("Unknown source_type: ", std::to_string(source_type));
           }
           break;
         }
@@ -121,7 +124,7 @@ class IntermediateTensor final {
           break;
         }
       default:
-        AT_ERROR("Uknown storage_type %lld", storage_type);
+        AT_ERROR("Uknown storage_type: ", std::to_string(storage_type));
     }
   }
 
@@ -142,7 +145,8 @@ class IntermediateTensor final {
     caffe2::ExternalDataProto* data_proto = tensor_proto->mutable_external_data();
     // NB: maybe later we support SIMPLE_FILE
     data_proto->set_source_type(caffe2::ExternalDataProto_SourceType_INLINE_CONTAINER);
-    data_proto->set_record_id(std::to_string(data_->recordId));
+    AT_ASSERTM(data_->recordId.has_value(), "recordId is required for SharedData!");
+    data_proto->set_record_id(std::to_string(data_->recordId.value()));
     data_proto->set_offset(offset_);
     for (auto stride : strides_) {
       data_proto->add_strides(stride);
@@ -155,47 +159,53 @@ class IntermediateTensor final {
   }
 
   // getters/setters
+  int64_t dataType() const {
+    return dataType_;
+  }
+
+  const std::vector<int64_t>& dims() const {
+    return dims_;
+  }
+
   std::shared_ptr<SharedData> data() {
     return data_;
+  }
+
+  int64_t offset() const {
+    return offset_;
   }
 
   const IntermediateDeviceOption& deviceDetail() const {
     return deviceDetail_;
   }
 
+  const std::vector<int64_t>& strides() const {
+    return strides_;
+  }
+
   bool noContent() const {
     return noContent_;
   }
 
-  int64_t dataType() const {
-    return dataType_;
-  }
-
-  std::vector<int64_t>* mutableDims() {
-    return &dims_;
-  }
-
-  std::vector<int64_t>* mutableStrides() {
-    return &strides_;
-  }
-
-  IntermediateDeviceOption* mutableDeviceDetail() {
-    return &deviceDetail_;
-  }
-
-  void setDataType(int64_t data_type) {
-    dataType_ = data_type;
-  }
 
   void setData(std::shared_ptr<SharedData> data) {
+    AT_ASSERTM(!noContent_, "noContent_ is true, but set content!");
     data_ = data;
+  }
+
+  void setStrides(const std::vector<int64_t>& strides) {
+    strides_ = strides;
+  }
+
+  void setDeviceDetail(const IntermediateDeviceOption& device_detail) {
+    deviceDetail_ = device_detail;
   }
 
  private:
   std::string name_;
   int64_t dataType_;
   std::vector<int64_t> dims_;
-  int64_t offset_;
+  int64_t offset_ = 0;
   std::vector<int64_t> strides_;
   // TODO: since we still have 2 different Tensor classes in Caffe2 and PyTorch
   // right now, let's just store the data pointer, and create Tensors
@@ -210,9 +220,12 @@ class IntermediateParameter final {
   // constructors
   IntermediateParameter() = default;
 
+  explicit IntermediateParameter(const std::string& name, bool is_buffer, bool require_gradient) :
+    name_(name), isBuffer_(is_buffer), requireGradient_(require_gradient) {}
+
   explicit IntermediateParameter(torch::ParameterDef* param_def,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data) {
-    AT_ASSERTM(param_def->has_name(), "ParameterDef has no name! %s",
+    AT_ASSERTM(param_def->has_name(), "ParameterDef has no name! ",
         param_def->DebugString());
     name_ = param_def->name();
     isBuffer_ = param_def->is_buffer();
@@ -264,10 +277,10 @@ class IntermediateParameter final {
   }
 
  private:
+  std::string name_;
   bool isBuffer_ = false;
   bool requireGradient_ = false;
   IntermediateTensor tensor_;
-  std::string name_;
 };
 
 class IntermediateMethod final {
@@ -289,7 +302,7 @@ class IntermediateMethod final {
 
   // dump data to MethodDef, called in serialize
   void dump(torch::MethodDef* method_def) {
-    AT_ASSERTM(name_.size() > 0, "IntermediateMethod's name is invalid. name: %s", name_.c_str());
+    AT_ASSERTM(name_.size() > 0, "IntermediateMethod's name is invalid. name: ", name_);
     method_def->set_name(name_);
     if (graph_) {
       method_def->set_allocated_graph(graph_.release());
@@ -546,19 +559,18 @@ void deserializeIntermediateModel(IntermediateModel* imodel,
     size_t data_key;
     size_t data_size;
     std::tie(data_ptr, data_key, data_size) = reader->getNextRecord();
-    if (reader->hasNextRecord()) {
-      auto it = id_data.find(data_key);
-      if (it != id_data.end()) {
-        it->second->dataPtr = std::move(data_ptr);
-      } else {
-        id_data[data_key] = std::make_shared<SharedData>(
-            data_key, std::move(data_ptr), data_size);
-      }
+    if (!reader->hasNextRecord()) {
+      // the last record is model data (ModelDef)
+      torch::ModelDef model_def = torch::ModelDef();
+      model_def.ParsePartialFromArray(data_ptr.get(), data_size);
+      imodel->update(&model_def, &id_data);
       continue;
     }
-    torch::ModelDef model_def = torch::ModelDef();
-    model_def.ParsePartialFromArray(data_ptr.get(), data_size);
-    imodel->update(&model_def, &id_data);
+    // first to the second last records are all tensor data
+    auto it = id_data.find(data_key);
+    AT_ASSERTM(it == id_data.end(), "record id should not be duplicated!");
+    id_data[data_key] = std::make_shared<SharedData>(
+        data_key, std::move(data_ptr), data_size);
   }
 }
 

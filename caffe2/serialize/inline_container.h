@@ -178,8 +178,8 @@ class PyTorchStreamReader final {
     std::streamsize read_bytes = in_->gcount();
     AT_ASSERTM(
         read_bytes == 8,
-        "Expected to read 8 bytes but got %llu bytes",
-        read_bytes);
+        "Expected to read 8 bytes but got ",
+        std::to_string(read_bytes), "bytes");
     cursor_ += read_bytes;
     return retval;
   }
@@ -206,11 +206,11 @@ class PyTorchStreamReader final {
     uint64_t file_format_version = read64BitIntegerLittleEndian();
     AT_ASSERTM(
         file_format_version <= kMaxSupportedFileFormatVersion,
-        "Attempted to read a PyTorch file with version "
-        "%llu, but the maximum supported version for reading is "
-        "%llu. Your PyTorch installation may be too old.",
-        file_format_version,
-        kMaxSupportedFileFormatVersion);
+        "Attempted to read a PyTorch file with version ",
+        std::to_string(file_format_version),
+        ", but the maximum supported version for reading is ",
+        std::to_string(kMaxSupportedFileFormatVersion),
+        ". Your PyTorch installation may be too old.");
     seekToNextAlignmentBoundary();
   }
 
