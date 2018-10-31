@@ -1974,9 +1974,8 @@ class TestNN(NNTestCase):
         self.assertTrue(y_draw.requires_grad)
 
         # sanity check
-        _num_draws = counts.new(1).fill_(num_draws)
         self.assertGreaterEqual(counts.min(), 0)
-        self.assertEqual(counts.sum(), _num_draws, prec=torch.finfo(counts.dtype).eps)
+        self.assertEqual(counts.sum(), num_draws, prec=torch.finfo(counts.dtype).eps)
 
         # check results asymptotically as expected.
         expected = probs * num_draws
