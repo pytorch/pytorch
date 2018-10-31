@@ -1,6 +1,5 @@
 #include <iostream>
 
-#include <c10d/CUDAUtils.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupNCCL.hpp>
 #include <c10d/private/CUDAUtils.hpp>

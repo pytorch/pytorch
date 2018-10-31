@@ -2,7 +2,6 @@
 
 #include <ATen/cuda/CUDAGuard.h>
 
-#include <c10d/CUDAUtils.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/private/CUDAUtils.hpp>
@@ -87,6 +86,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     // and pass this along to the collective (since it uses the THC
     // getters to retrieve the current stream).
     //
+    // Note: the above note is out of date
     at::DeviceGuard deviceGuard;
     streams_.reserve(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {

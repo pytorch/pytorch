@@ -11,10 +11,6 @@
 
 #include <gloo/transport/tcp/device.h>
 
-#ifdef USE_CUDA
-#include <c10d/CUDAUtils.hpp>
-#endif
-
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/test/TestUtils.hpp>
