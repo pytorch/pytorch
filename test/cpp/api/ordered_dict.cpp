@@ -1,14 +1,14 @@
 #include <gtest/gtest.h>
 
 #include <test/cpp/api/support.h>
-#include <torch/detail/ordered_dict.h>
+#include <torch/ordered_dict.h>
 
 template <typename T>
-using OrderedDict = torch::detail::OrderedDict<std::string, T>;
+using OrderedDict = torch::OrderedDict<std::string, T>;
 
 TEST(OrderedDictTest, IsEmptyAfterDefaultConstruction) {
   OrderedDict<int> dict;
-  ASSERT_EQ(dict.subject(), "Key");
+  ASSERT_EQ(dict.key_description(), "Key");
   ASSERT_TRUE(dict.is_empty());
   ASSERT_EQ(dict.size(), 0);
 }
@@ -24,23 +24,23 @@ TEST(OrderedDictTest, GetReturnsValuesWhenTheyArePresent) {
   OrderedDict<int> dict;
   dict.insert("a", 1);
   dict.insert("b", 2);
-  ASSERT_EQ(dict.get("a"), 1);
-  ASSERT_EQ(dict.get("b"), 2);
+  ASSERT_EQ(dict["a"], 1);
+  ASSERT_EQ(dict["b"], 2);
 }
 
 TEST(OrderedDictTest, GetThrowsWhenPassedKeysThatAreNotPresent) {
   OrderedDict<int> dict;
   dict.insert("a", 1);
   dict.insert("b", 2);
-  ASSERT_THROWS_WITH(dict.get("foo"), "Key 'foo' is not defined");
-  ASSERT_THROWS_WITH(dict.get(""), "Key '' is not defined");
+  ASSERT_THROWS_WITH(dict["foo"], "Key 'foo' is not defined");
+  ASSERT_THROWS_WITH(dict[""], "Key '' is not defined");
 }
 
 TEST(OrderedDictTest, CanInitializeFromList) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   ASSERT_EQ(dict.size(), 2);
-  ASSERT_EQ(dict.get("a"), 1);
-  ASSERT_EQ(dict.get("b"), 2);
+  ASSERT_EQ(dict["a"], 1);
+  ASSERT_EQ(dict["b"], 2);
 }
 
 TEST(OrderedDictTest, InsertThrowsWhenPassedElementsThatArePresent) {
@@ -51,14 +51,24 @@ TEST(OrderedDictTest, InsertThrowsWhenPassedElementsThatArePresent) {
 
 TEST(OrderedDictTest, FrontReturnsTheFirstItem) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
-  ASSERT_EQ(dict.front().key, "a");
-  ASSERT_EQ(dict.front().value, 1);
+  ASSERT_EQ(dict.front().key(), "a");
+  ASSERT_EQ(dict.front().value(), 1);
+}
+
+TEST(OrderedDictTest, FrontThrowsWhenEmpty) {
+  OrderedDict<int> dict;
+  ASSERT_THROWS_WITH(dict.front(), "Called front() on an empty OrderedDict");
 }
 
 TEST(OrderedDictTest, BackReturnsTheLastItem) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
-  ASSERT_EQ(dict.back().key, "b");
-  ASSERT_EQ(dict.back().value, 2);
+  ASSERT_EQ(dict.back().key(), "b");
+  ASSERT_EQ(dict.back().value(), 2);
+}
+
+TEST(OrderedDictTest, BackThrowsWhenEmpty) {
+  OrderedDict<int> dict;
+  ASSERT_THROWS_WITH(dict.back(), "Called back() on an empty OrderedDict");
 }
 
 TEST(OrderedDictTest, FindReturnsPointersToValuesWhenPresent) {
@@ -85,16 +95,16 @@ TEST(
     OrderedDictTest,
     SubscriptOperatorReturnsItemsPositionallyWhenPassedIntegers) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
-  ASSERT_EQ(dict[0].key, "a");
-  ASSERT_EQ(dict[0].value, 1);
-  ASSERT_EQ(dict[1].key, "b");
-  ASSERT_EQ(dict[1].value, 2);
+  ASSERT_EQ(dict[0].key(), "a");
+  ASSERT_EQ(dict[0].value(), 1);
+  ASSERT_EQ(dict[1].key(), "b");
+  ASSERT_EQ(dict[1].value(), 2);
 }
 
 TEST(OrderedDictTest, SubscriptOperatorsThrowswhenPassedKeysThatAreNotPresent) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
-  ASSERT_THROWS_WITH(dict.get("foo"), "Key 'foo' is not defined");
-  ASSERT_THROWS_WITH(dict.get(""), "Key '' is not defined");
+  ASSERT_THROWS_WITH(dict["foo"], "Key 'foo' is not defined");
+  ASSERT_THROWS_WITH(dict[""], "Key '' is not defined");
 }
 
 TEST(OrderedDictTest, UpdateInsertsAllItemsFromAnotherOrderedDict) {
@@ -117,12 +127,12 @@ TEST(OrderedDictTest, CanIterateItems) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
   auto iterator = dict.begin();
   ASSERT_NE(iterator, dict.end());
-  ASSERT_EQ(iterator->key, "a");
-  ASSERT_EQ(iterator->value, 1);
+  ASSERT_EQ(iterator->key(), "a");
+  ASSERT_EQ(iterator->value(), 1);
   ++iterator;
   ASSERT_NE(iterator, dict.end());
-  ASSERT_EQ(iterator->key, "b");
-  ASSERT_EQ(iterator->value, 2);
+  ASSERT_EQ(iterator->key(), "b");
+  ASSERT_EQ(iterator->value(), 2);
   ++iterator;
   ASSERT_EQ(iterator, dict.end());
 }
@@ -180,11 +190,31 @@ TEST(OrderedDictTest, CanInsertWithBraces) {
   ASSERT_EQ(dict["a"].second, 2);
 }
 
-TEST(OrderedDictTest, ErrorMessagesIncludeTheWhat) {
+TEST(OrderedDictTest, ErrorMessagesIncludeTheKeyDescription) {
   OrderedDict<int> dict("Penguin");
-  ASSERT_EQ(dict.subject(), "Penguin");
+  ASSERT_EQ(dict.key_description(), "Penguin");
   dict.insert("a", 1);
   ASSERT_FALSE(dict.is_empty());
-  ASSERT_THROWS_WITH(dict.get("b"), "Penguin 'b' is not defined");
+  ASSERT_THROWS_WITH(dict["b"], "Penguin 'b' is not defined");
   ASSERT_THROWS_WITH(dict.insert("a", 1), "Penguin 'a' already defined");
+}
+
+TEST(OrderedDictTest, KeysReturnsAllKeys) {
+  OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
+  ASSERT_EQ(dict.keys(), std::vector<std::string>({"a", "b"}));
+}
+
+TEST(OrderedDictTest, ValuesReturnsAllValues) {
+  OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
+  ASSERT_EQ(dict.values(), std::vector<int>({1, 2}));
+}
+
+TEST(OrderedDictTest, ItemsReturnsAllItems) {
+  OrderedDict<int> dict = {{"a", 1}, {"b", 2}};
+  std::vector<OrderedDict<int>::Item> items = dict.items();
+  ASSERT_EQ(items.size(), 2);
+  ASSERT_EQ(items[0].key(), "a");
+  ASSERT_EQ(items[0].value(), 1);
+  ASSERT_EQ(items[1].key(), "b");
+  ASSERT_EQ(items[1].value(), 2);
 }

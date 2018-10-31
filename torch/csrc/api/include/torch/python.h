@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/utils/pybind.h>
+#include <torch/ordered_dict.h>
 #include <torch/tensor.h>
 
 #include <iterator>
@@ -12,25 +13,10 @@
 namespace torch {
 namespace python {
 namespace detail {
-template <typename Cursor>
-std::vector<Tensor> cursor_to_vector(const Cursor& cursor) {
-  std::vector<Tensor> vector;
-  vector.reserve(cursor.size());
-  cursor.map(
-      std::back_inserter(vector), [](const Tensor& tensor) { return tensor; });
-  return vector;
-}
-
-template <typename Cursor>
-std::unordered_map<std::string, Tensor> cursor_to_map(const Cursor& cursor) {
-  std::unordered_map<std::string, Tensor> map;
-  map.reserve(cursor.size());
-  cursor.map_items(
-      std::inserter(map, map.end()),
-      [](const std::string& key, const Tensor& tensor) {
-        return std::make_pair(key, tensor);
-      });
-  return map;
+std::unordered_map<std::string, Tensor> cursor_to_map(
+    const OrderedDict<std::string, torch::Tensor>& dict) {
+  auto pairs = dict.pairs();
+  return {pairs.begin(), pairs.end()};
 }
 } // namespace detail
 
@@ -63,19 +49,15 @@ py::class_<M, Extra...> add_module_bindings(py::class_<M, Extra...> module) {
       .def("zero_grad", [](M& module) { module.zero_grad(); })
       .def("cuda", [](M& module) { module.to(torch::kCUDA); })
       .def("cpu", [](M& module) { module.to(torch::kCPU); })
-      .def(
-          "parameters",
-          [](M& module) {
-            return detail::cursor_to_vector(module.parameters());
-          })
+      .def("parameters", [](M& module) { return module.parameters(); })
       .def(
           "named_parameters",
-          [](M& module) { return detail::cursor_to_map(module.parameters()); })
-      .def(
-          "buffers",
-          [](M& module) { return detail::cursor_to_vector(module.buffers()); })
+          [](M& module) {
+            return detail::cursor_to_map(module.named_parameters());
+          })
+      .def("buffers", [](M& module) { return module.buffers(); })
       .def("named_buffers", [](M& module) {
-        return detail::cursor_to_map(module.buffers());
+        return detail::cursor_to_map(module.named_buffers());
       });
 }
 
@@ -100,9 +82,11 @@ py::class_<M, Extra...> add_module_bindings(py::class_<M, Extra...> module) {
 ///       .def("forward", &Net::forward);
 ///  }
 /// \endrst
-template <typename M, typename... Extra>
-py::class_<M, Extra...> bind_module(py::module module, const char* name) {
-  return add_module_bindings(py::class_<M, Extra...>(module, name));
+template <typename M>
+py::class_<M, std::shared_ptr<M>> bind_module(
+    py::module module,
+    const char* name) {
+  return add_module_bindings(py::class_<M, std::shared_ptr<M>>(module, name));
 }
 } // namespace python
 } // namespace torch
