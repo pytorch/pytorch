@@ -212,12 +212,6 @@ class RecurrentNetworkOp final : public Operator<Context> {
               recurrent_map,
               timestep_,
               ArgumentHelper(operator_def));
-    } else {
-      // Fix for legacy models that pass "rnn" type net
-      if (stepNetDef_.type() == "rnn") {
-        stepNetDef_.set_type("async_simple");
-      }
-      CAFFE_ENFORCE(stepNetDef_.type() != "async_dag");
     }
   }
 

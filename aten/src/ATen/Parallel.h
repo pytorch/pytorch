@@ -36,6 +36,14 @@ inline int get_thread_num() {
 #endif
 }
 
+inline bool in_parallel_region() {
+#ifdef _OPENMP
+  return omp_in_parallel();
+#else
+  return false;
+#endif
+}
+
 template <class F>
 inline void parallel_for(
     const int64_t begin,

@@ -242,6 +242,7 @@ void Node::lint() const {
     size_t i = 0;
     for (auto input : inputs_) {
       // WARNING: O(n^2)
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) != input->uses_.end());
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
       i++;

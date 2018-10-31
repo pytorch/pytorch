@@ -72,6 +72,16 @@ RegisterOperators reg({
       return 0;
   }
   ),
+  Operator(
+      "aten::storage_offset(Tensor self) -> int",
+      [](Stack & stack) {
+          autograd::profiler::RecordFunction record("storage_offset");
+          auto result = ((std::move(peek(stack, 0, 1))).toTensor()).storage_offset();
+          drop(stack, 1);
+          pack(stack, std::move(result));
+          return 0;
+      }
+  ),
 
   // Generated operators
   ${constructors}

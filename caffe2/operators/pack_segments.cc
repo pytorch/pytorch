@@ -57,7 +57,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   output->Resize(shape);
 
   // create output tensor
-  auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
+  auto* out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
 
   bool* presence_mask_data = nullptr;
   if (return_presence_mask_) {
@@ -90,7 +90,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   int64_t start = 0;
   for (int64_t i = 0; i < lengths.dim(0); ++i) {
     context_.CopyItemsSameDevice(
-        data.meta(),
+        data.dtype(),
         l[i] * block_size,
         d + block_bytesize * start,
         out + block_bytesize * max_length * i);
@@ -137,7 +137,7 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   shape[0] = total_l;
   output->Resize(shape);
   // create output tensor
-  auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
+  auto* out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
   if (!(data.dim(0) && data.dim(1))) {
     return true;
   }
@@ -147,7 +147,7 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   int64_t start = 0;
   for (int64_t i = 0; i < lengths.dim(0); ++i) {
     context_.CopyItemsSameDevice(
-        data.meta(),
+        data.dtype(),
         l[i] * block_size,
         d + block_bytesize * data.dim(1) * i,
         out + block_bytesize * start);

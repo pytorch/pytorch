@@ -28,9 +28,9 @@ bool LengthsTileOp<CPUContext>::RunOnDevice() {
   shape[0] = total_length;
   output->Resize(shape);
 
-  auto block_bytesize = data.size_from_dim(1) * data.meta().itemsize();
+  auto block_bytesize = data.size_from_dim(1) * data.dtype().itemsize();
   auto src = static_cast<const char*>(data.raw_data());
-  auto out = static_cast<char*>(output->raw_mutable_data(data.meta()));
+  auto out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
 
   for (int64_t i = 0; i < lengths_size; ++i) {
     auto length = lengths_data[i];

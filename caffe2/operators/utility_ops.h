@@ -216,10 +216,10 @@ class FlattenToVecOp : public Operator<Context> {
     output->Resize(input.numel());
 
     context_.CopyItemsSameDevice(
-        input.meta(),
+        input.dtype(),
         input.numel(),
         input.raw_data(),
-        output->raw_mutable_data(input.meta()));
+        output->raw_mutable_data(input.dtype()));
     return true;
   }
 };
@@ -238,10 +238,10 @@ class ResizeLikeOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(input0.numel(), input1.numel());
     output->ResizeLike(Input(1));
     context_.CopyItemsSameDevice(
-        input0.meta(),
+        input0.dtype(),
         input0.numel(),
         input0.raw_data(),
-        output->raw_mutable_data(input0.meta()));
+        output->raw_mutable_data(input0.dtype()));
     return true;
   }
 };
@@ -304,7 +304,7 @@ class SumOp : public Operator<Context> {
       CAFFE_THROW(
           "Sum operator only supports 32-bit float and ints, but",
           " input was of type ",
-          Input(0).meta().name());
+          Input(0).dtype().name());
     }
   }
 };
@@ -621,9 +621,9 @@ class ScatterAssignOp : public Operator<Context> {
     const auto& slices = Input(SLICES);
     auto& indices = Input(INDICES);
 
-    const auto dataType = TypeMetaToDataType(data.meta());
-    const auto slicesType = TypeMetaToDataType(slices.meta());
-    const auto indicesType = TypeMetaToDataType(indices.meta());
+    const auto dataType = TypeMetaToDataType(data.dtype());
+    const auto slicesType = TypeMetaToDataType(slices.dtype());
+    const auto indicesType = TypeMetaToDataType(indices.dtype());
     auto* output = Output(0);
 
     auto runner = GetRunner(dataType, slicesType, indicesType);
@@ -1036,10 +1036,10 @@ class GatherRangesOp : public Operator<Context> {
     outputData->Resize(outputSize);
 
     auto outputRawData =
-        static_cast<char*>(outputData->raw_mutable_data(data.meta()));
+        static_cast<char*>(outputData->raw_mutable_data(data.dtype()));
     VLOG(1) << "Copying data";
     size_t outputOffsetBytes = 0;
-    auto itemsize = data.meta().itemsize();
+    auto itemsize = data.dtype().itemsize();
     for (int i = 0; i < ranges.numel(); i += 2) {
       auto rangeStart = rangesData[i];
       auto rangeLength = rangesData[i + 1];
@@ -1050,7 +1050,7 @@ class GatherRangesOp : public Operator<Context> {
       CAFFE_ENFORCE(outputOffsetBytes < outputSize * itemsize);
       CAFFE_ENFORCE(rangeStart + rangeLength <= data.numel());
       context_.CopyItemsSameDevice(
-          data.meta(),
+          data.dtype(),
           rangeLength,
           rawData + rangeStart * itemsize,
           outputRawData + outputOffsetBytes);
@@ -1123,13 +1123,13 @@ class LengthsGatherOp : public Operator<Context> {
     auto src_base = static_cast<const char*>(items.raw_data());
     auto block_size = items.size_from_dim(1);
     auto block_bytesize = block_size * items.itemsize();
-    auto out = static_cast<char*>(output->raw_mutable_data(items.meta()));
+    auto out = static_cast<char*>(output->raw_mutable_data(items.dtype()));
 
     for (size_t i = 0; i < indices.numel(); ++i) {
       auto idx = indices_data[i];
       auto length = lengths_data[idx];
       context_.CopyItemsSameDevice(
-          items.meta(),
+          items.dtype(),
           length * block_size,
           src_base + offsets_[idx] * block_bytesize,
           out);
