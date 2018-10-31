@@ -27,7 +27,22 @@ std::unordered_set<Symbol> skip_list = {
   // where the constant tensor would be large but cheap to create.
  };
 
+// Evaluates aten::size on a statically known input.
+int64_t runSizeQuery(Node* n) {
+  const auto complete_tensor_type =
+      n->input(0)->type()->cast<CompleteTensorType>();
+  JIT_ASSERT(complete_tensor_type);
+  const auto tensor_sizes = complete_tensor_type->sizes();
+  const auto dim = n->get<int64_t>(attr::dim).value();
+  JIT_ASSERT(dim >= 0);
+  JIT_ASSERT(static_cast<size_t>(dim) < tensor_sizes.size());
+  return tensor_sizes[dim];
+}
+
 std::vector<IValue> runNode(Node* n) {
+  if (n->kind() == aten::size) {
+    return {runSizeQuery(n)};
+  }
   auto op = getOperation(n);
   Stack stack;
   for (auto input : n->inputs()) {
@@ -115,6 +130,13 @@ bool removeExtraNodeOutputs(Node *n) {
   return initial_outputs != true_block->outputs().size();
 }
 
+// Returns true if the size can be evaluated during trace optimization.
+bool isStaticSizeQuery(Node* n) {
+  return n->kind() == aten::size &&
+      n->input(0)->type()->cast<CompleteTensorType>() &&
+      n->get<int64_t>(attr::dim) && n->get<int64_t>(attr::dim).value() >= 0;
+}
+
 } // anonymous namespace
 
 void ConstantPropagation(Node* n, bool recurse) {
@@ -141,7 +163,7 @@ void ConstantPropagation(Node* n, bool recurse) {
     }
     //don't rerun run_blocks
     return;
-  } else if (constant_inputs && supported_node) {
+  } else if ((constant_inputs || isStaticSizeQuery(n)) && supported_node) {
     propagateNode(n);
   }
   //TODO handle loop nodes. Even if a loop node contains an if that is

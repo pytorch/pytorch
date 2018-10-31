@@ -1,0 +1,6 @@
+graph(%0 : Double(1, 4)
+      %1 : Double(2, 2)) {
+  %2 : int[] = prim::Constant[value=[2, 2]]()
+  %3 : Double(2, 2) = aten::view(%0, %2)
+  return (%3);
+}

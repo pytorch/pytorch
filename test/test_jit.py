@@ -1730,6 +1730,21 @@ class TestJit(JitTestCase):
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
 
+    def test_constant_prop_size(self):
+
+        def constant_prop(x, y):
+            return x.view([y.size(0), y.size(1)])
+
+        x = torch.randn(1, 4)
+        y = torch.randn(2, 2)
+        traced = torch.jit.trace(constant_prop, (x, y))
+        out_ref = traced(x, y)
+        graph = traced._get_method('forward').graph
+        self.run_pass('constant_propagation', graph)
+        out_test = traced(x, y)
+        self.assertEqual(out_ref, out_test)
+        self.assertExpected(canonical(graph))
+
     def test_trace_detach(self):
         def foo(x, w):
             return torch.matmul(x, w).detach()
