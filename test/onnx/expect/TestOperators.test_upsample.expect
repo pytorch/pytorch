@@ -22,7 +22,7 @@ graph {
     op_type: "Upsample"
     attribute {
       name: "mode"
-      s: "linear"
+      s: "bilinear"
       type: STRING
     }
   }
