@@ -90,8 +90,7 @@ Tensor read_targets(const std::string& root, bool train) {
   expect_int32(targets, kTargetMagicNumber);
   expect_int32(targets, count);
 
-  at::TensorOptions options;
-  auto tensor = torch::empty(count, options.dtype(at::kByte));
+  auto tensor = torch::empty(count, torch::kByte);
   targets.read(reinterpret_cast<char*>(tensor.data_ptr()), count);
   return tensor.to(torch::kInt64);
 }
