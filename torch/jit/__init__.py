@@ -1312,6 +1312,8 @@ _builtin_blacklist = {
     'pairwise_distance',
     'prelu',
     'hardshrink',
+    'ctc_loss',
+    '_Reduction',
 }
 
 

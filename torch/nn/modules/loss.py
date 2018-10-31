@@ -5,7 +5,7 @@ from .module import Module
 from .container import Sequential
 from .activation import LogSoftmax
 from .. import functional as F
-from ..functional import _Reduction
+from .. import _reduction as _Reduction
 
 
 class _Loss(Module):
