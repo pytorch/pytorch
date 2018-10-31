@@ -4436,6 +4436,7 @@ a")
 
     def test_not(self):
         # test not operator in python
+        # TODO: add more tests when bool conversions ready
         def test_not_op(a):
             return not bool(a > 1)
 
@@ -4458,7 +4459,11 @@ a")
                     "Failed with op: {}, lhs: {}, rhs: {}".format(op, args[0], args[1]))
 
         ops = ['is', 'is not']
-        type_literals = [1, 1.0, True, '"is"', None, torch.tensor(1), [1, 1], (1, 1)]
+        type_literals = [1, 1.0, True, '"is"', None, torch.tensor(1), [1, 1]]
+        # TODO: align the py2 and py3 "is" semantic difference on tuple
+        type_literals_py3_only = [(1, 1)]
+        if not PY2:
+            type_literals.extend(type_literals_py3_only)
 
         # do literals product to try any types combinations
         for op, lhs, rhs in product(ops, type_literals, type_literals):
