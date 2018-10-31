@@ -3511,6 +3511,12 @@ a")
         self.checkScriptRaisesRegex(bad_negative_index, (), IndexError,
                                     "list index out of range")
 
+    def test_tensor_len(self):
+        def func(x):
+            return len(x)
+
+        self.checkScript(func, [torch.ones(4, 5, 6)])
+
     def test_list_len(self):
         def func():
             a = [1, 2, 3]
