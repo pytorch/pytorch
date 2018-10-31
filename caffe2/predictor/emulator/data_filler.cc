@@ -1,5 +1,6 @@
 #include "caffe2/predictor/emulator/data_filler.h"
 #include "caffe2/predictor/emulator/utils.h"
+#include "caffe2/utils/filler_impl.h"
 
 namespace caffe2 {
 namespace emulator {
