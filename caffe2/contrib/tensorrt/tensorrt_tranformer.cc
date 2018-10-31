@@ -100,7 +100,7 @@ void BlobToTensorProto(
     CPUTensorToTensorProto(cpu_tensor, t);
   } else if (BlobIsTensorType(*blob, CUDA)) {
     const auto& cuda_tensor = blob->template Get<TensorCUDA>();
-    const auto cpu_tensor = TensorCPU(cuda_tensor, context);
+    const auto cpu_tensor = TensorCPU(cuda_tensor, context->device_type());
     context->FinishDeviceComputation();
     CPUTensorToTensorProto(cpu_tensor, t);
   } else {
@@ -474,7 +474,7 @@ void TensorRTTransformer::Transform(
   auto shape_hints = InferShapes(&mapped_ws, pred_net, &shape_hints_ordered);
 
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
-  onnx::OnnxExporter exporter(nullptr, true);
+  onnx::OnnxExporter exporter(nullptr);
   tensorrt::TrtLogger logger;
   auto trt_builder = tensorrt::TrtObject(nvinfer1::createInferBuilder(logger));
   auto trt_network = tensorrt::TrtObject(trt_builder->createNetwork());
@@ -505,7 +505,7 @@ void TensorRTTransformer::Transform(
   // but it should be OK as the cost is really small. We also need to keep the
   // same exporter throughout the process to avoid duplicated dummy name
   // generation
-  onnx::OnnxExporter exporter2(nullptr, true);
+  onnx::OnnxExporter exporter2(nullptr);
   auto trt_converter = [this, &mapped_ws, &shape_hints, &exporter2](
                            const caffe2::NetDef& net) mutable {
     return SubnetToTrtOp(net, &mapped_ws, &exporter2, &shape_hints);
