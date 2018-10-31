@@ -1,6 +1,7 @@
 # NB: Keep this file in sync with enums in THNN/Reduction.h
-from .._jit_internal import weak_script
+import warnings
 
+from .._jit_internal import weak_script
 
 @weak_script
 def get_enum(reduction):
@@ -42,4 +43,4 @@ def legacy_get_string(size_average, reduce, emit_warning=True):
 
 
 def legacy_get_enum(size_average, reduce, emit_warning=True):
-    return _Reduction.get_enum(_Reduction.legacy_get_string(size_average, reduce, emit_warning))
+    return get_enum(legacy_get_string(size_average, reduce, emit_warning))
