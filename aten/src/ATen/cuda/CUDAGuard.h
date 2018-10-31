@@ -62,7 +62,7 @@ struct CUDAGuard {
   /// Sets the current CUDA device to the device associated with the given
   /// stream, and then sets the current stream on that device to the one given.
   void set_stream(const CUDAStream& stream) {
-    device_guard_.set_index(stream.device());
+    device_guard_.set_index(stream.device_index());
     // If we haven't stored the current stream yet, store it now.
     if (original_streams_.empty()) {
       const size_t device_count = getNumGPUs();

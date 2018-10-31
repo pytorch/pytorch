@@ -152,9 +152,9 @@ std::vector<at::Tensor> scatter(
     const auto device_index = static_cast<int16_t>(devices[chunk]);
     if (streams && (*streams)[chunk]) {
       AT_CHECK(
-          (*streams)[chunk]->device() == device_index,
+          (*streams)[chunk]->device_index() == device_index,
           "Expected the device associated with the stream at index ",
-          chunk, " (was ", (*streams)[chunk]->device(), ") ",
+          chunk, " (was ", (*streams)[chunk]->device_index(), ") ",
           "to match the device supplied at that index ",
           "(expected ", device_index, ")");
       cuda_guard.set_stream(*(*streams)[chunk]);
