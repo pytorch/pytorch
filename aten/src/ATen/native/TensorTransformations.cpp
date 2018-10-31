@@ -92,7 +92,7 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
         dst_offset += cur_indices * strides[d];
         cur_indices = rem;
       }
-      out_tensor_d[i] = out_tensor_d[dst_offset];
+      out_tensor_d[i] = in_tensor_d[dst_offset];
     }
   });
 
