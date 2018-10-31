@@ -1917,6 +1917,17 @@ class TestJit(JitTestCase):
         x = torch.rand(3, 4)
         self.assertEqual(random_bar(x), (x + 1)[0:1])
 
+    def test_export_tensoroption_to(self):
+        def foo(x):
+            return x.new_tensor(x[0]).cpu() + x
+
+        traced = torch.jit.trace(foo, (torch.rand([2])))
+        example_outputs = traced(torch.rand([2]))
+
+        f = io.BytesIO()
+        self.assertExpected(torch.onnx._export_to_pretty_string(traced, (torch.rand([2]),), f,
+                                                                example_outputs=example_outputs))
+
     def test_pretty_printer(self):
         @torch.jit.script
         def if_test(a, b):
