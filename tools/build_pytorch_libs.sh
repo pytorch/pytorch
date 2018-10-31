@@ -245,10 +245,18 @@ function build_caffe2() {
 
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
   if ls build.ninja 2>&1 >/dev/null; then
-      # workaround a cmake-ninja bug, which doesn't track the dependency
-      # between xxx-generated-xxx.cu and updating the timestamp of build.ninja,
-      # (the consequence being cmake is rerun on a next rebuild).
-      # this was surfaced after analyzing the outputs of `ninja -d explain install`
+      # in cmake, .cu compilation involves generating certain intermediates
+      # such as .cu.o and .cu.depend, and these intermediates finally get compiled
+      # into the final .so.
+      # Ninja updates build.ninja's timestamp after all dependent files have been built,
+      # and re-kicks cmake on incremental builds if any of the dependent files
+      # have a timestamp newer than build.ninja's timestamp.
+      # There is a cmake bug with the Ninja backend, where the .cu.depend files
+      # are still compiling by the time the build.ninja timestamp is updated,
+      # so the .cu.depend file's newer timestamp is screwing with ninja's incremental
+      # build detector.
+      # This line works around that bug by manually updating the build.ninja timestamp
+      # after the entire build is finished.
       touch build.ninja
   fi
 
