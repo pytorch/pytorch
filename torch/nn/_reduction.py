@@ -7,9 +7,9 @@ def get_enum(reduction):
     # type: (str) -> int
     if reduction == 'none':
         ret = 0
-    if reduction == 'elementwise_mean':
+    elif reduction == 'elementwise_mean':
         ret = 1
-    if reduction == 'sum':
+    elif reduction == 'sum':
         ret = 2
     else:
         # TODO: remove this when jit support control flow
