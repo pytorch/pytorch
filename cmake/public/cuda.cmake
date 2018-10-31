@@ -101,10 +101,10 @@ else()
 endif()
 
 # Optionally, find TensorRT
-#if(CAFFE2_USE_TENSORRT)
-#
-#  find_package(TensorRT)
-#
+if(CAFFE2_USE_TENSORRT)
+
+  find_package(TensorRT)
+
 ##  find_path(TENSORRT_INCLUDE_DIR NvInfer.h
 ##    HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
 ##    PATH_SUFFIXES include)
@@ -146,18 +146,15 @@ endif()
 ##  include(FindPackageHandleStandardArgs)
 ##  find_package_handle_standard_args(
 ##    TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARY)
-#
-#  if(NOT TENSORRT_FOUND)
-#    message(WARNING
-#      "Caffe2: Cannot find TensorRT library. Turning the option off")
-#    set(CAFFE2_USE_TENSORRT OFF)
-#  else()
-#    set(TENSORRT_LIBRARY ${TENSORRT_LIBRARIES})
-#  endif()
-#endif()
 
-
-
+  if(NOT TENSORRT_FOUND)
+    message(WARNING
+      "Caffe2: Cannot find TensorRT library. Turning the option off")
+    set(CAFFE2_USE_TENSORRT OFF)
+  else()
+    set(TENSORRT_LIBRARY ${TENSORRT_LIBRARIES})
+  endif()
+endif()
 
 # ---[ Extract versions
 if(CAFFE2_USE_CUDNN)
@@ -278,24 +275,24 @@ set_property(
 #message("??????????????????????????????? ${TENSORRT_LIBRARY}")
 #
 ## TensorRT
-#if(CAFFE2_USE_TENSORRT)
-#
-#
-#  message("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! ${TENSORRT_LIBRARY}")
-#
-#
-#
-#  add_library(caffe2_tensorrt UNKNOWN IMPORTED)
-#  set_property(
-#      TARGET caffe2_tensorrt PROPERTY IMPORTED_LOCATION
-#      ${TENSORRT_LIBRARY})
-#  set_property(
-#      TARGET caffe2_tensorrt PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-#      ${TENSORRT_INCLUDE_DIR})
-#
-#  target_link_libraries(caffe2_tensorrt INTERFACE ${TENSORRT_LIBRARY})
-#
-#endif()
+if(CAFFE2_USE_TENSORRT)
+
+
+  message("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! ${TENSORRT_LIBRARY}")
+
+
+
+  add_library(caffe2::tensorrt UNKNOWN IMPORTED)
+  set_property(
+      TARGET caffe2::tensorrt PROPERTY IMPORTED_LOCATION
+      ${TENSORRT_LIBRARY})
+  set_property(
+      TARGET caffe2::tensorrt PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+      ${TENSORRT_INCLUDE_DIR})
+
+  target_link_libraries(caffe2::tensorrt INTERFACE ${TENSORRT_LIBRARY})
+
+endif()
 
 # cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
 # interface library similar to cudart.

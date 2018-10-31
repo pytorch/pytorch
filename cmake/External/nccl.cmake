@@ -32,6 +32,7 @@ if (NOT __NCCL_INCLUDED)
       INSTALL_COMMAND ""
       )
 
+    set(NCCL_EXTERNAL FALSE)
     set(NCCL_FOUND TRUE)
     add_library(__caffe2_nccl INTERFACE)
     # The following old-style variables are set so that other libs, such as Gloo,
