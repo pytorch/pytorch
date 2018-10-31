@@ -173,16 +173,6 @@ void THCTensor_(catArray)(THCState* state, THCTensor* result, THCTensor** inputs
     // the storage for the output Tensor.
     scalar_t* data = THCTensor_(data)(state, result);
 
-    // Kernel Parameter
-    size_t tensorMetadataSize = sizeof(CatArrInputTensor<
-                                       scalar_t,
-                                       unsigned int,
-                                       CAT_ARRAY_MAX_INPUT_DIMS>) *
-        CAT_ARRAY_BATCH_SIZE;
-    auto d_inputs = static_cast<
-        CatArrInputTensor<scalar_t, unsigned int, CAT_ARRAY_MAX_INPUT_DIMS>*>(
-        THCudaMalloc(state, tensorMetadataSize));
-
     TensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> param;
 
     // Next, let's initialize the size, stride arrays for the output Tensor.
@@ -193,11 +183,16 @@ void THCTensor_(catArray)(THCState* state, THCTensor* result, THCTensor** inputs
 
     THCStream* stream = THCState_getStream(state);
 
-    // Template Declarations for dim = 1, 2, 3, 4
+    if (pad) {
+    // Kernel Parameter
+    size_t tensorMetadataSize = sizeof(CatArrPadInputTensor<scalar_t, unsigned int, CAT_ARRAY_MAX_INPUT_DIMS>) * CAT_ARRAY_BATCH_SIZE;
+    auto d_inputs = static_cast<
+        CatArrPadInputTensor<scalar_t, unsigned int, CAT_ARRAY_MAX_INPUT_DIMS>*>(
+        THCudaMalloc(state, tensorMetadataSize));
 #define HANDLE_CASE(DIMS)                                     \
-  CatArrayBatchedCopy<scalar_t, unsigned int, DIMS>           \
+  CatArrayPadBatchedCopy<scalar_t, unsigned int, DIMS>           \
       <<<catGrid, applyBlock, 0, THCStream_stream(stream)>>>( \
-          data, d_inputs, param, dimension, pad, pad_value);
+          data, d_inputs, param, dimension, pad_value);
 
     // Now we loop
     offset = 0;
@@ -206,11 +201,7 @@ void THCTensor_(catArray)(THCState* state, THCTensor* result, THCTensor** inputs
       // hazard
       {
         auto stackInputs_owner = THCudaHostAlloc(state, tensorMetadataSize);
-        CatArrInputTensor<scalar_t, unsigned int, CAT_ARRAY_MAX_INPUT_DIMS>*
-            stackInputs = static_cast<CatArrInputTensor<
-                scalar_t,
-                unsigned int,
-                CAT_ARRAY_MAX_INPUT_DIMS>*>(stackInputs_owner.get());
+        CatArrPadInputTensor<scalar_t, unsigned int, CAT_ARRAY_MAX_INPUT_DIMS>*stackInputs = static_cast<CatArrPadInputTensor<scalar_t, unsigned int, CAT_ARRAY_MAX_INPUT_DIMS>*>(stackInputs_owner.get());
         cohortMax = 0;
         for (j = 0; j < CAT_ARRAY_BATCH_SIZE && (i + j) < numInputs; ++j) {
           THCTensor* curtensor = inputs[i + j];
@@ -229,11 +220,10 @@ void THCTensor_(catArray)(THCState* state, THCTensor* result, THCTensor** inputs
           stackInputs[j].input = THCTensor_(data)(state, curtensor);
           stackInputs[j].offset = offset;
           stackInputs[j].inputParam = inputParam;
-          stackInputs[j].nElements = THCTensor_(nElement)(state, curtensor);
-          stackInputs[j].nElementsOutput = THCTensor_(nElement)(state, nt);
-          cohortMax = cohortMax > (int)stackInputs[j].nElementsOutput
+          stackInputs[j].nElements = THCTensor_(nElement)(state, nt);
+          cohortMax = cohortMax > (int)stackInputs[j].nElements
               ? cohortMax
-              : (int)stackInputs[j].nElementsOutput;
+              : (int)stackInputs[j].nElements;
 
           THCTensor_(free)(state, nt);
           // update offset
@@ -244,7 +234,7 @@ void THCTensor_(catArray)(THCState* state, THCTensor* result, THCTensor** inputs
             d_inputs,
             stackInputs,
             j *
-                sizeof(CatArrInputTensor<
+                sizeof(CatArrPadInputTensor<
                        scalar_t,
                        unsigned int,
                        CAT_ARRAY_MAX_INPUT_DIMS>),
@@ -282,13 +272,81 @@ void THCTensor_(catArray)(THCState* state, THCTensor* result, THCTensor** inputs
     }
     THCudaFree(state, d_inputs);
 #undef HANDLE_CASE
+    } else {
+      // Kernel Parameter
+      size_t tensorMetadataSize = sizeof(CatArrInputTensor<scalar_t, unsigned int>) * CAT_ARRAY_BATCH_SIZE;
+      auto d_inputs = static_cast<CatArrInputTensor<scalar_t, unsigned int>*>(THCudaMalloc(state, tensorMetadataSize));
+// Template Declarations for dim = 1, 2, 3, 4
+#define HANDLE_CASE(DIMS) \
+  CatArrayBatchedCopy<scalar_t, unsigned int, DIMS><<<catGrid, applyBlock, 0, THCStream_stream(stream)>>>(data, d_inputs, param, dimension, param.tensorStride[dimension]);
+
+    // Now we loop
+    offset = 0;
+    for (i = 0; i < numInputs; i += CAT_ARRAY_BATCH_SIZE) {
+      // Re-allocate stackInputs every iteration to avoid read-after-write hazard
+      {
+        auto stackInputs_owner = THCudaHostAlloc(state, tensorMetadataSize);
+        CatArrInputTensor<scalar_t, unsigned int>* stackInputs = static_cast<CatArrInputTensor<scalar_t, unsigned int>*>(stackInputs_owner.get());
+        cohortMax = 0;
+        for (j = 0; j < CAT_ARRAY_BATCH_SIZE && (i+j) < numInputs; ++j) {
+          int64_t dimSize = THCTensor_(size)(state, inputs[i+j], dimension);
+
+          stackInputs[j].input = THCTensor_(data)(state, inputs[i+j]);
+          stackInputs[j].offset = offset;
+          stackInputs[j].dimSize = dimSize;
+          stackInputs[j].nElements = THCTensor_(nElement)(state, inputs[i+j]);
+          cohortMax = cohortMax > (int) stackInputs[j].nElements ? cohortMax : (int) stackInputs[j].nElements;
+
+          // update offset
+          offset += dimSize;
+        }
+        THCudaCheck(cudaMemcpyAsync(
+            d_inputs,
+            stackInputs,
+            j * sizeof(CatArrInputTensor<scalar_t, unsigned int>),
+            cudaMemcpyHostToDevice,
+            THCStream_stream(stream)));
+        THCudaHostRecord(state, stackInputs);
+      }
+
+      // Next, let's consider how we set our kernel launch parameters.
+      // We borrow from THCApply, which the kernel's internal indexing
+      // is based on.
+      dim3 applyBlock = getApplyBlock();
+
+      //Get grid where x dim fills half gpu and y dim is number of tensors.
+      //This will have cating two tensors fill the entire grid, but prevent
+      //many threads from needlessly load meta data if their sizes is small.
+      dim3 catGrid;
+      getCatGrid(state, j, catGrid);
+
+
+      switch (nDims) {
+        case 1:
+          HANDLE_CASE(1);
+          break;
+        case 2:
+          HANDLE_CASE(2);
+          break;
+        case 3:
+          HANDLE_CASE(3);
+          break;
+        case 4:
+          HANDLE_CASE(4);
+          break;
+      }
+      THCudaCheck(cudaGetLastError());
+    }
+    THCudaFree(state, d_inputs);
+#undef HANDLE_CASE
+    }
   } else {
     if (pad) {
       THCTensor_(fill)(state, result, pad_value);
     }
     offset = 0;
     for (j = 0; j < numInputs; j++) {
-      if (should_skip(inputs[j], pad)){
+      if (should_skip(inputs[j], pad)) {
         continue;
       }
       int64_t dimSize = THCTensor_(size)(state, inputs[j], dimension);
@@ -298,13 +356,7 @@ void THCTensor_(catArray)(THCState* state, THCTensor* result, THCTensor** inputs
           if (dimension == dim) {
             THCTensor_(narrow)(state, nt, NULL, dimension, offset, dimSize);
           } else {
-            THCTensor_(narrow)(
-                state,
-                nt,
-                NULL,
-                dim,
-                0,
-                THCTensor_(size)(state, inputs[j], dim));
+            THCTensor_(narrow)(state, nt, NULL, dim, 0, THCTensor_(size)(state, inputs[j], dim));
           }
         }
       } else {
@@ -384,7 +436,8 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_t k){
+void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_t k)
+{
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   int nDimension = THCTensor_(nDimensionLegacyNoScalars)(state, src_);
   THArgCheck((nDimension == 2) || (nDimension == 1), 1, "expected a matrix or a vector");

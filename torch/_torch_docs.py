@@ -751,8 +751,8 @@ of the dimensions sizes in the concatenating dimension, and the maximum of the
 dimension sizes in all other dimensions. If an input tensor needs to be
 logically expanded to fill out its place in the resulting tensor, it is
 padded with :attr:pad_value. For example, if we cat tensors with size
-(x0, x1, ..., xn) and (y0, y1, ..., yn) along 0 axis, the size of result tensor
-is (x0 + y0, max(x1, y1), ..., max(xn, yn)).
+(x0, x1, ..., xn) and (y0, y1, ..., yn) along dimension 0, the size of the
+result tensor is (x0 + y0, max(x1, y1), ..., max(xn, yn)).
 
 :func:`torch.cat` can be seen as an inverse operation for :func:`torch.split`
 and :func:`torch.chunk`.
@@ -765,7 +765,7 @@ Args:
         cat dimension.
     dim (int, optional): the dimension over which the tensors are concatenated
     pad_value (scalar, optional): The value is used in padding to expand
-        input tensors to same shape except in the concatenating dimension
+        input tensors to the same shape except in the concatenating dimension
         (see explanation above).
     out (Tensor, optional): the output tensor
 

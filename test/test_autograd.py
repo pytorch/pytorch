@@ -1990,9 +1990,9 @@ class TestAutograd(TestCase):
                               True, f_args_variable, f_args_tensor)
 
     def test_cat_padding(self):
-        f_args_variable = (torch.randn(1, 1, S, requires_grad=True),
-                           torch.randn(2, 2, S, requires_grad=True),
-                           torch.randn(3, 3, S, requires_grad=True),
+        f_args_variable = (torch.randn(1, 4, S, requires_grad=True),
+                           torch.randn(2, 3, S, requires_grad=True),
+                           torch.randn(3, 1, S, requires_grad=True),
                            0, 0)
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
         run_functional_checks(self, "test_cat_padding", "cat",

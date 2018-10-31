@@ -3,7 +3,13 @@
 
 // Copy the kth diagonal of a matrix B to a vector A.
 template <typename T>
-__global__ void THCTensor_copyFromDiagonal(T* a, T* b, ptrdiff_t start, ptrdiff_t size, ptrdiff_t strideSum, ptrdiff_t strideA) {
+__global__ void THCTensor_copyFromDiagonal(
+    T* a,
+    T* b,
+    ptrdiff_t start,
+    ptrdiff_t size,
+    ptrdiff_t strideSum,
+    ptrdiff_t strideA) {
   for (ptrdiff_t linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < size;
        linearIndex += gridDim.x * blockDim.x) {
@@ -14,7 +20,13 @@ __global__ void THCTensor_copyFromDiagonal(T* a, T* b, ptrdiff_t start, ptrdiff_
 
 // Copy vector B to the kth diagonal of a matrix A
 template <typename T>
-__global__ void THCTensor_copyToDiagonal(T* a, T* b, ptrdiff_t start, ptrdiff_t size, ptrdiff_t strideSum, ptrdiff_t strideB) {
+__global__ void THCTensor_copyToDiagonal(
+    T* a,
+    T* b,
+    ptrdiff_t start,
+    ptrdiff_t size,
+    ptrdiff_t strideSum,
+    ptrdiff_t strideB) {
   for (ptrdiff_t linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < size;
        linearIndex += gridDim.x * blockDim.x) {
@@ -31,34 +43,67 @@ inline bool getCatGrid(THCState* state, ptrdiff_t nTensors, dim3& grid) {
   cudaGetDevice(&curDevice);
 
   if (curDevice == -1) {
-     return false;
+    return false;
   }
 
   // Assume a reasonable number of SMs if no state is available
-  int numSM =
-        state ? THCState_getCurrentDeviceProperties(state)->multiProcessorCount : 15;
-  //X dim of grid for cat array cooperates on a single tensor in the cat.
-  //Given half of the GPU, full utilization will always occur.
-  grid = dim3( 2LL * numSM, (long long) nTensors );
+  int numSM = state
+      ? THCState_getCurrentDeviceProperties(state)->multiProcessorCount
+      : 15;
+  // X dim of grid for cat array cooperates on a single tensor in the cat.
+  // Given half of the GPU, full utilization will always occur.
+  grid = dim3(2LL * numSM, (long long)nTensors);
 
   return true;
 }
 
-template<typename IndexType, unsigned int MaxDims>
+template <typename IndexType, unsigned int MaxDims>
 struct TensorSizeStride {
   IndexType tensorSize[MaxDims];
   IndexType tensorStride[MaxDims];
 };
 
-template <typename T, typename IndexType, unsigned int MaxDims>
+// Similar to any other IndexToOffset calculation for copying along a given
+// dimension.
+template <typename IndexType, int Dims>
+struct CatArrIndexToOffset {
+  static inline __device__ IndexType compute(
+      const IndexType outputSize[Dims],
+      const IndexType outputStride[Dims],
+      const IndexType dimSize,
+      const unsigned int concatDim,
+      IndexType linearIndex) {
+    IndexType offset = 0;
+
+#pragma unroll
+    for (int i = Dims - 1; i >= 1; --i) {
+      IndexType curDimSize = i == concatDim ? dimSize : outputSize[i];
+      IndexType nextDimIndex = linearIndex / curDimSize;
+      IndexType curDimIndex = linearIndex - curDimSize * nextDimIndex;
+      IndexType curDimOffset = curDimIndex * outputStride[i];
+      offset += curDimOffset;
+      linearIndex = nextDimIndex;
+    }
+
+    return offset + linearIndex * outputStride[0];
+  }
+};
+
+template <typename T, typename IndexType>
 struct CatArrInputTensor {
   T* input;
   IndexType offset;
-  TensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> inputParam;
+  IndexType dimSize;
   IndexType nElements;
-  IndexType nElementsOutput;
 };
 
+template <typename T, typename IndexType, unsigned int MaxDims>
+struct CatArrPadInputTensor {
+  T* input;
+  IndexType offset;
+  TensorSizeStride<IndexType, MaxDims> inputParam;
+  IndexType nElements;
+};
 /**
  * Kernel used to concatenated grimDim.y tensors into an output tensor. Uses a
  * grid-stride loop based off of the blockIdx.x, threadIdx.x for each input to
@@ -75,56 +120,69 @@ struct CatArrInputTensor {
 template <typename T, typename IndexType, int Dims>
 __global__ void CatArrayBatchedCopy(
     T* output,
-    CatArrInputTensor<T, IndexType, CAT_ARRAY_MAX_INPUT_DIMS>* inputs,
+    CatArrInputTensor<T, IndexType>* inputs,
     TensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
     const int concatDim,
-    const int pad,
+    IndexType dimStride) {
+  IndexType tid = blockIdx.x * blockDim.x + threadIdx.x;
+  IndexType nElements = inputs[blockIdx.y].nElements;
+
+  if (tid >= nElements)
+    return;
+
+  T* data = inputs[blockIdx.y].input;
+  IndexType offset = inputs[blockIdx.y].offset;
+  IndexType dimSize = inputs[blockIdx.y].dimSize;
+  IndexType dataOffset = offset * dimStride;
+
+  IndexType stride = gridDim.x * blockDim.x;
+
+  while (tid < nElements) {
+    IndexType elementOffset = CatArrIndexToOffset<IndexType, Dims>::compute(
+        os.tensorSize, os.tensorStride, dimSize, concatDim, tid);
+    output[dataOffset + elementOffset] = data[tid];
+
+    tid += stride;
+  }
+}
+
+template <typename T, typename IndexType, int Dims>
+__global__ void CatArrayPadBatchedCopy(
+    T* output,
+    CatArrPadInputTensor<T, IndexType, CAT_ARRAY_MAX_INPUT_DIMS>* inputs,
+    TensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
+    const int concatDim,
     T pad_value) {
-  IndexType nElementsOutput = inputs[blockIdx.y].nElementsOutput;
+  IndexType nElements = inputs[blockIdx.y].nElements;
   T* data = inputs[blockIdx.y].input;
   IndexType dimOffset = inputs[blockIdx.y].offset;
   IndexType dataOffset = dimOffset * os.tensorStride[concatDim];
 
   for (IndexType linearIndex = (IndexType)blockIdx.x * blockDim.x + threadIdx.x;
-       linearIndex < nElementsOutput;
+       linearIndex < nElements;
        linearIndex += (IndexType)gridDim.x * blockDim.x) {
-    if (pad) {
-      IndexType tid = linearIndex;
-      IndexType inputOffset = 0;
-      IndexType outputOffset = 0;
-      bool inbound = true;
-      for (int i = Dims - 1; i >= 1; --i) {
-        IndexType inputDimSize = inputs[blockIdx.y].inputParam.tensorSize[i];
-        IndexType curDimSize = i == concatDim ? inputDimSize : os.tensorSize[i];
-        IndexType nextDimIndex = tid / curDimSize;
-        IndexType curDimIndex = tid - curDimSize * nextDimIndex;
-        inbound = inbound && curDimIndex < inputDimSize;
-        inputOffset +=
-            curDimIndex * inputs[blockIdx.y].inputParam.tensorStride[i];
-        outputOffset += curDimIndex * os.tensorStride[i];
-        tid = nextDimIndex;
-      }
-      inbound = inbound && tid < inputs[blockIdx.y].inputParam.tensorSize[0];
-      inputOffset += tid * inputs[blockIdx.y].inputParam.tensorStride[0];
-      outputOffset += tid * os.tensorStride[0];
-      if (inbound) {
-        output[dataOffset + outputOffset] = data[inputOffset];
-      } else {
-        output[dataOffset + outputOffset] = pad_value;
-      }
-    }else{
-      IndexType tid = linearIndex;
-      IndexType inputOffset = linearIndex;
-      IndexType outputOffset = 0;
-      for (int i = Dims - 1; i >= 1; --i) {
-        IndexType curDimSize = inputs[blockIdx.y].inputParam.tensorSize[i];;
-        IndexType nextDimIndex = tid / curDimSize;
-        IndexType curDimIndex = tid - curDimSize * nextDimIndex;
-        outputOffset += curDimIndex * os.tensorStride[i];
-        tid = nextDimIndex;
-      }
-      outputOffset += tid * os.tensorStride[0];
+    IndexType tid = linearIndex;
+    IndexType inputOffset = 0;
+    IndexType outputOffset = 0;
+    bool in_bounds = true;
+    for (int i = Dims - 1; i >= 1; --i) {
+      IndexType inputDimSize = inputs[blockIdx.y].inputParam.tensorSize[i];
+      IndexType curDimSize = i == concatDim ? inputDimSize : os.tensorSize[i];
+      IndexType nextDimIndex = tid / curDimSize;
+      IndexType curDimIndex = tid - curDimSize * nextDimIndex;
+      in_bounds = in_bounds && curDimIndex < inputDimSize;
+      inputOffset +=
+          curDimIndex * inputs[blockIdx.y].inputParam.tensorStride[i];
+      outputOffset += curDimIndex * os.tensorStride[i];
+      tid = nextDimIndex;
+    }
+    in_bounds = in_bounds && tid < inputs[blockIdx.y].inputParam.tensorSize[0];
+    inputOffset += tid * inputs[blockIdx.y].inputParam.tensorStride[0];
+    outputOffset += tid * os.tensorStride[0];
+    if (in_bounds) {
       output[dataOffset + outputOffset] = data[inputOffset];
+    } else {
+      output[dataOffset + outputOffset] = pad_value;
     }
   }
 }
