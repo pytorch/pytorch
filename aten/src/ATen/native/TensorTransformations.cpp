@@ -10,11 +10,13 @@
 namespace at {
 namespace native {
 
+constexpr size_t dim_bitset_size = 64;
+
 template <typename scalar_t>
 void inline flip_cpu_kernel(
   const int64_t total_dims,
   const int64_t* stride_contiguous_d,
-  const Tensor& flip_dims_t,
+  const std::bitset<dim_bitset_size>& flip_dims_b,
   const Tensor& in_tensor,
   Tensor& out_tensor
 ){
@@ -22,7 +24,6 @@ void inline flip_cpu_kernel(
   const int64_t numel = in_tensor.numel();
   const scalar_t* in_tensor_d = in_tensor.data<scalar_t>();
   scalar_t* out_tensor_d = out_tensor.data<scalar_t>();
-  const int64_t* flip_dims_d = flip_dims_t.data<int64_t>();
 
   #pragma omp parallel for private(i) if (numel > 1000)
   for (i = 0; i < numel; i++) {
@@ -34,9 +35,7 @@ void inline flip_cpu_kernel(
       int64_t temp = cur_indices;
       cur_indices = cur_indices / stride_contiguous_d[d];
       rem = temp - cur_indices * stride_contiguous_d[d];
-      for (int64_t j = 0; j < flip_dims_t.numel(); j++) {
-        if (d == flip_dims_d[j]) cur_indices = in_tensor.size(d) - 1 - cur_indices;
-      }
+      if (flip_dims_b[d]) cur_indices = in_tensor.size(d) - 1 - cur_indices;
       dst_offset += cur_indices * in_tensor.stride(d);
       cur_indices = rem;
     }
@@ -47,13 +46,7 @@ void inline flip_cpu_kernel(
 Tensor flip_cpu(const Tensor& self, IntList dims) {
   auto in_tensor = self;
   const int64_t total_dims = in_tensor.dim();
-
-  dim_list_to_bitset(dims, total_dims); // returned bitset is not used, here only check correctness of dims
-  auto flip_dims_v = dims.vec();
-  maybe_wrap_dims(flip_dims_v, total_dims);
-
-  auto sizes = in_tensor.sizes();
-  auto flip_dims_t = at::CPU(kLong).tensorFromBlob(flip_dims_v.data(), {static_cast<int64_t>(flip_dims_v.size())});
+  auto flip_dims_b = dim_list_to_bitset(dims, total_dims);
   Tensor out_tensor = at::empty_like(in_tensor);
 
   // create contiguous strides for input tensor
@@ -63,7 +56,7 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
     if (i == total_dims - 1) {
       stride_contiguous_d[i] = 1;
     } else {
-      stride_contiguous_d[i] = std::max<int64_t>(sizes[i + 1], 1) * stride_contiguous_d[i + 1];
+      stride_contiguous_d[i] = std::max<int64_t>(in_tensor.size(i + 1), 1) * stride_contiguous_d[i + 1];
     }
   }
 
@@ -71,7 +64,7 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
     flip_cpu_kernel<scalar_t>(
       total_dims,
       stride_contiguous_d,
-      flip_dims_t,
+      flip_dims_b,
       in_tensor,
       out_tensor
     );
