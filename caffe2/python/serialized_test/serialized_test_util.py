@@ -164,7 +164,8 @@ class SerializedTestCase(hu.HypothesisTestCase):
 
             op_proto = parse_proto(loaded_op)
             device_type = loaded['device_type']
-            device_option = caffe2_pb2.DeviceOption(device_type=int(device_type))
+            device_option = caffe2_pb2.DeviceOption(
+                device_type=int(device_type))
 
             outputs = hu.runOpOnInput(device_option, op_proto, loaded_inputs)
             grad_ops = _getGradientOrNone(op_proto)
@@ -190,13 +191,16 @@ class SerializedTestCase(hu.HypothesisTestCase):
             gradient_operator,
             op,
             device_option,
+            atol=1e-7,
+            rtol=1e-7,
     ):
         if self.should_serialize:
             if getattr(_output_context, 'should_generate_output', False):
                 self.serialize_test(
                     inputs, outputs, gradient_operator, op, device_option)
             else:
-                self.compare_test(inputs, outputs, gradient_operator)
+                self.compare_test(
+                    inputs, outputs, gradient_operator, atol, rtol)
 
     def assertReferenceChecks(
         self,
@@ -225,12 +229,17 @@ class SerializedTestCase(hu.HypothesisTestCase):
         )
         if not getattr(_output_context, 'disable_serialized_check', False):
             grad_ops = _getGradientOrNone(op)
+            rtol = threshold
+            if atol is None:
+                atol = threshold
             self.assertSerializedOperatorChecks(
                 inputs,
                 outs,
                 grad_ops,
                 op,
                 device_option,
+                atol,
+                rtol,
             )
 
 
