@@ -202,6 +202,15 @@ class Caffe2Frontend(object):
         else:
             initializer = []
 
+        # Check if value_info contains the types/shapes of all the blobs, in
+        # which case we don't need to infer them by running the net.
+        run_native_net = False
+        for op in predict_net.op:
+            for name in itertools.chain(op.input, op.output):
+                if name not in value_info:
+                    run_native_net = True
+                    break
+
         # Check whether we have got type shape info of all input
         missing = (set(list(predict_net.external_input)) -
                    set(value_info.keys()))
@@ -209,22 +218,25 @@ class Caffe2Frontend(object):
             raise RuntimeError('Could not find value info of inputs: {}'.format(
                 ', '.join(missing)))
 
-        inputs = {}
-        for name in predict_net.external_input:
-            elem_type, shape = value_info[name]
-            inputs[name] = np.random.randn(*shape).astype(
-                mapping.TENSOR_TYPE_TO_NP_TYPE[elem_type])
+        ws = None
+        outputs = None
+        if run_native_net:
+            inputs = {}
+            for name in predict_net.external_input:
+                elem_type, shape = value_info[name]
+                inputs[name] = np.random.randn(*shape).astype(
+                    mapping.TENSOR_TYPE_TO_NP_TYPE[elem_type])
 
-        ws, outputs = c2_native_run_net(
-            init_net,
-            predict_net,
-            inputs)
+            ws, outputs = c2_native_run_net(
+                init_net,
+                predict_net,
+                inputs)
 
-        for name in predict_net.external_output:
-            output = outputs[name]
-            elem_type = mapping.NP_TYPE_TO_TENSOR_TYPE[output.dtype]
-            shape = output.shape
-            value_info[name] = (elem_type, shape)
+            for name in predict_net.external_output:
+                output = outputs[name]
+                elem_type = mapping.NP_TYPE_TO_TENSOR_TYPE[output.dtype]
+                shape = output.shape
+                value_info[name] = (elem_type, shape)
 
         graph_def = GraphProto()
         graph_def.name = predict_net.name
@@ -242,9 +254,12 @@ class Caffe2Frontend(object):
         for op in predict_net.op:
             shapes = {}
             for name in itertools.chain(op.input, op.output):
-                blob = ws.FetchBlob(name)
-                if hasattr(blob, 'shape'):
-                    shapes[name] = blob.shape
+                if ws:
+                    blob = ws.FetchBlob(name)
+                    if hasattr(blob, 'shape'):
+                        shapes[name] = blob.shape
+                else:
+                    shapes[name] = value_info[name][1]
             nodes, const_tensors = cls.caffe2_op_to_onnx_node(op, shapes=shapes)
             graph_def.node.extend(nodes)
             graph_def.initializer.extend(const_tensors)
@@ -295,6 +310,8 @@ class Caffe2Frontend(object):
     @classmethod
     def _ssa_rewrite(cls, net, init_net, value_info):
         def ssa_name(name, version):
+            if version == 0:
+                return name
             return '{}_{}'.format(name, version)
 
         if init_net:

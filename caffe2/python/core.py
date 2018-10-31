@@ -1179,7 +1179,7 @@ def get_ssa(net, blob_versions=None):
                     blob_versions[i] = 0
         inputs = [(str(i), blob_versions.get(str(i), 0)) for i in op.input]
         for o in op.output:
-            blob_versions[str(o)] = blob_versions.get(str(o), 0) + 1
+            blob_versions[str(o)] = blob_versions.get(str(o), -1) + 1
         outputs = [(str(o), blob_versions[str(o)]) for o in op.output]
         ssa.append((inputs, outputs))
     return ssa, blob_versions
