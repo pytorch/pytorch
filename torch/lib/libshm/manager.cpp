@@ -9,6 +9,9 @@
 #include <memory>
 #include <unordered_map>
 
+#include <torch/csrc/utils/tempfile.h>
+#include <c10/util/Optional.h>
+
 #include "err.h"
 #include "socket.h"
 
@@ -83,20 +86,20 @@ int main(int argc, char *argv[]) {
   setsid();  // Daemonize the process
 
   std::unique_ptr<ManagerServerSocket> srv_socket;
-  char manager_socket_filename[] = "/tmp/fileXXXXXX";
-  const auto manager_fd = mkstemp(manager_socket_filename);
+  const auto tempfile =
+      torch::try_make_tempfile(/*name_prefix=*/"torch-shm-file-");
   try {
-    if (manager_fd == -1) {
+    if (!tempfile.has_value()) {
       throw std::runtime_error(
           "could not generate a random filename for manager socket");
     }
     // TODO: better strategy for generating tmp names
     // TODO: retry on collisions - this can easily fail
-    srv_socket.reset(new ManagerServerSocket(std::string(manager_socket_filename)));
+    srv_socket.reset(new ManagerServerSocket(tempfile->name));
     register_fd(srv_socket->socket_fd);
-    print_init_message(manager_socket_filename);
-    DEBUG("opened socket %s", manager_socket_filename);
-  } catch(...) {
+    print_init_message(tempfile->name.c_str());
+    DEBUG("opened socket %s", tempfile->name.c_str());
+  } catch (...) {
     print_init_message("ERROR");
     throw;
   }
@@ -159,9 +162,6 @@ int main(int argc, char *argv[]) {
     DEBUG("freeing %s", obj_name.c_str());
     shm_unlink(obj_name.c_str());
   }
-
-  unlink(manager_socket_filename);
-  close(manager_fd);
 
   DEBUG("manager done");
   return 0;
