@@ -27,7 +27,7 @@ template <typename Dataset, typename Sampler>
 class DataLoader {
  public:
   using Batch = typename Dataset::BatchType;
-  using Index = typename Sampler::IndexType;
+  using BatchIndex = typename Sampler::BatchIndexType;
 
   /// Constructs a new `DataLoader` from a `dataset` to sample from, `options`
   /// to configure the `DataLoader` with, and a `sampler` that specifies the
@@ -131,9 +131,9 @@ class DataLoader {
   struct Job : Sequenced {
     Job() = default;
     Job(QuitWorker q, size_t sqn) : Sequenced(sqn), quit(q) {}
-    Job(Index&& i, size_t sqn) : Sequenced(sqn), index_batch(std::move(i)) {}
+    Job(BatchIndex&& i, size_t sqn) : Sequenced(sqn), index_batch(std::move(i)) {}
     optional<QuitWorker> quit;
-    optional<Index> index_batch;
+    optional<BatchIndex> index_batch;
   };
 
   /// The finished result of a job.
@@ -214,7 +214,7 @@ class DataLoader {
     }
   }
 
-  optional<Index> get_index() {
+  optional<BatchIndex> get_index() {
     auto indices = sampler_.next(options_.batch_size);
     if (!indices ||
         (indices->size() < options_.batch_size && options_.drop_last)) {

@@ -17,10 +17,10 @@ template <typename SourceDataset, typename AppliedTransform>
 struct MapDataset : BatchDataset<
                         MapDataset<SourceDataset, AppliedTransform>,
                         typename AppliedTransform::OutputBatchType,
-                        typename SourceDataset::IndexType> {
+                        typename SourceDataset::BatchIndexType> {
   using DatasetType = SourceDataset;
   using TransformType = AppliedTransform;
-  using IndexType = typename SourceDataset::IndexType;
+  using BatchIndexType = typename SourceDataset::BatchIndexType;
   using OutputBatchType = typename TransformType::OutputBatchType;
 
   MapDataset(DatasetType dataset, TransformType transform)
@@ -28,7 +28,7 @@ struct MapDataset : BatchDataset<
 
   /// Gets a batch from the source dataset and applies the transform to it,
   /// returning the result.
-  OutputBatchType get_batch(IndexType indices) override {
+  OutputBatchType get_batch(BatchIndexType indices) override {
     return transform.apply_batch(dataset.get_batch(indices));
   }
 

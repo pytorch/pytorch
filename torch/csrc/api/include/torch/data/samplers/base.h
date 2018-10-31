@@ -17,10 +17,10 @@ namespace data {
 namespace samplers {
 /// A `Sampler` is an object that yields an index with which to access a
 /// dataset.
-template <typename Index = std::vector<size_t>>
+template <typename BatchIndex = std::vector<size_t>>
 class Sampler {
  public:
-  using IndexType = Index;
+  using BatchIndexType = BatchIndex;
 
   virtual ~Sampler() = default;
 
@@ -30,7 +30,7 @@ class Sampler {
 
   /// Returns the next index if possible, or an empty optional if the
   /// sampler is exhausted for this epoch.
-  virtual optional<Index> next(size_t batch_size) = 0;
+  virtual optional<BatchIndex> next(size_t batch_size) = 0;
 
   /// Serializes the `Sampler` to the `archive`.
   virtual void save(serialize::OutputArchive& archive) const = 0;

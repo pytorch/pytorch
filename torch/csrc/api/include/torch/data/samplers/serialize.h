@@ -7,19 +7,19 @@ namespace torch {
 namespace data {
 namespace samplers {
 /// Serializes a `Sampler` into an `OutputArchive`.
-template <typename Index>
+template <typename BatchIndex>
 serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
-    const Sampler<Index>& sampler) {
+    const Sampler<BatchIndex>& sampler) {
   sampler.save(archive);
   return archive;
 }
 
 /// Deserializes a `Sampler` from an `InputArchive`.
-template <typename Index>
+template <typename BatchIndex>
 serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
-    Sampler<Index>& sampler) {
+    Sampler<BatchIndex>& sampler) {
   sampler.load(archive);
   return archive;
 }
