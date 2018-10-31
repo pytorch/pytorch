@@ -3071,3 +3071,9 @@
 - func: alias(Tensor self) -> Tensor
   variants: method, function
   device_guard: false
+
+- func: _dirichlet_grad_out(Tensor output, Tensor x, Tensor alpha, Tensor total) -> Tensor
+  device_guard: false
+
+- func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
+  device_guard: false
