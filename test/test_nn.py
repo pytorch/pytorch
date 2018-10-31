@@ -1960,7 +1960,7 @@ class TestNN(NNTestCase):
         # Shape unchanged
         self.assertTrue(y_draw.shape == logits.shape)
         # One choice per draw
-        self.assertEqual(y_draw.sum(), count_expected, prec=prec=torch.finfo(y_draw.dtype).eps)
+        self.assertEqual(y_draw.sum(), count_expected, prec=torch.finfo(y_draw.dtype).eps)
 
     def _test_gumbel_softmax_straight_through(self, cuda, dtype=torch.float):
         num_draws = 100
