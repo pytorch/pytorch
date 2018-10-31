@@ -13,7 +13,7 @@
 using namespace at;
 
 // TODO: This might be generally helpful aliases elsewhere.
-at::Device CPUDevice(DeviceIndex index) {
+at::Device CPUDevice() {
   return at::Device(at::kCPU);
 }
 at::Device CUDADevice(DeviceIndex index) {
@@ -128,15 +128,15 @@ TEST(OptionsGuardTest, DeviceGuardOptionsGuardInteraction_MultiCUDA) {
 
 TEST(DeviceGuardTest, IsMovable_CUDA) {
   DeviceGuard first(CUDADevice(1));
-  ASSERT_EQ(first.original_index(), 0);
-  ASSERT_EQ(first.last_index(), 1);
+  ASSERT_EQ(first.original_device(), CUDADevice(0));
+  ASSERT_EQ(first.last_device(), CUDADevice(1));
   DeviceGuard second(std::move(first));
-  ASSERT_EQ(second.original_index(), 0);
-  ASSERT_EQ(second.last_index(), 1);
-  ASSERT_EQ(first.original_index(), -1);
+  ASSERT_EQ(second.original_device(), CUDADevice(0));
+  ASSERT_EQ(second.last_device(), CUDADevice(1));
+  ASSERT_EQ(first.original_device(), CPUDevice());
   DeviceGuard third;
   third = std::move(second);
-  ASSERT_EQ(third.original_index(), 0);
-  ASSERT_EQ(third.last_index(), 1);
-  ASSERT_EQ(second.original_index(), -1);
+  ASSERT_EQ(third.original_device(), CUDADevice(0));
+  ASSERT_EQ(third.last_device(), CUDADevice(1));
+  ASSERT_EQ(second.original_device(), CPUDevice());
 }
