@@ -25,6 +25,14 @@ namespace torch {
 namespace at {
 namespace serialize {
 
+enum DeserializeMode {
+  // In EAGER mode, we load the file from the beginning, and eagarly load the content of tensors
+  EAGER = 1,
+  // In LAZY mode, we only load the last record of the file, which is the model metadata
+  // And the data of the tensor will be loaded later
+  LAZY = 2,
+};
+
 // multiple tensor may share the same content
 // SharedData contains:
 //    1) record id (i.e., the offset in the inline container)
@@ -35,11 +43,15 @@ namespace serialize {
 //       transferred to Tensor
 struct SharedData {
   // constructor
+  explicit SharedData(uint64_t record_id) : recordId(record_id) {}
   explicit SharedData(uint64_t record_id, at::DataPtr&& data_ptr, uint64_t size)
-    : recordId(record_id), dataPtr(std::move(data_ptr)), size(size){}
+    : recordId(record_id), dataPtr(std::move(data_ptr)), size(size) {}
 
   c10::optional<uint64_t> recordId;
   at::DataPtr dataPtr;
+  // For deserialize:
+  //   1) in EAGER mode, size information is avaiable immediately
+  //   2) in LAZY mode, until we load the tensor data, size won't be available
   uint64_t size;
 };
 
@@ -64,7 +76,8 @@ class C10_API IntermediateTensor final {
   // extract data from TensorProto, called in deserialize
   // assume record id to data mapping is complete
   void update(caffe2::TensorProto* tensor_proto,
-      std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data);
+      std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
+      DeserializeMode mode);
 
   // update the data pointer, invoked in serialize
   void updateData(std::shared_ptr<SharedData> data) {
@@ -84,7 +97,7 @@ class C10_API IntermediateTensor final {
     return dims_;
   }
 
-  std::shared_ptr<SharedData> data() {
+  std::shared_ptr<SharedData> data() const {
     return data_;
   }
 
@@ -141,7 +154,8 @@ class C10_API IntermediateParameter final {
     name_(name), isBuffer_(is_buffer), requireGradient_(require_gradient) {}
 
   explicit IntermediateParameter(torch::ParameterDef* param_def,
-      std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data);
+      std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
+      DeserializeMode mode);
 
   // dump data to ParameterDef, invoked in serialize
   void dump(torch::ParameterDef* param_def);
@@ -157,6 +171,10 @@ class C10_API IntermediateParameter final {
 
   bool requireGradient() const {
     return requireGradient_;
+  }
+
+  const IntermediateTensor& tensor() const {
+    return tensor_;
   }
 
   IntermediateTensor* mutableTensor() {
@@ -222,12 +240,14 @@ class C10_API IntermediateModule final {
   IntermediateModule() = default;
 
   explicit IntermediateModule(torch::ModuleDef* module_def,
-      std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data);
+      std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
+      DeserializeMode mode);
 
   // extract data from ModuleDef, invoked in deserialize
   // assume record id to data mapping is complete
   void update(torch::ModuleDef* module_def,
-      std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data);
+      std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
+      DeserializeMode mode);
 
   // dump data to ModuleDef, called in serialize
   void dump(torch::ModuleDef* module_def);
@@ -247,6 +267,18 @@ class C10_API IntermediateModule final {
 
   std::vector<IntermediateMethod>* mutableMethods() {
     return &methods_;
+  }
+
+  const std::vector<IntermediateParameter>& parameters() const {
+    return parameters_;
+  }
+
+  const std::vector<IntermediateModule>& submodules() const {
+    return submodules_;
+  }
+
+  const std::vector<IntermediateMethod>& methods() const {
+    return methods_;
   }
 
   void setName(const std::string& name) {
@@ -270,7 +302,8 @@ class C10_API IntermediateModel final {
   // extract data from ModelDef, invoked in deserialize
   // assume record id to data mapping is complete
   void update(torch::ModelDef* model_def,
-      std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data);
+      std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
+      DeserializeMode mode);
 
   // dump data to ModelDef, called in serialize
   void dump(torch::ModelDef* model_def);
@@ -339,10 +372,11 @@ C10_API void serializeIntermediateModel(IntermediateModel* imodel, const std::st
 // serialize tensors' data first, and maintain the mappint from
 // record id to tensor data
 C10_API void deserializeIntermediateModel(IntermediateModel* imodel,
-    torch::jit::PyTorchFileReader* reader);
+    torch::jit::PyTorchFileReader* reader, DeserializeMode mode=DeserializeMode::EAGER);
 
 // deserialize an IntermediateModel from a given file
-C10_API void deserializeIntermediateModel(IntermediateModel* imodel, const std::string& filename);
+C10_API void deserializeIntermediateModel(IntermediateModel* imodel, const std::string& filename,
+    DeserializeMode mode=DeserializeMode::EAGER);
 
 }  // namespace serialize
 }  // namespace at
