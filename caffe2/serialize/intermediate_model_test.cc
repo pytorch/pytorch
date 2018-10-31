@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/proto/torch_pb.h"
 #include "caffe2/serialize/intermediate_model.h"
 
 namespace at {
