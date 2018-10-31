@@ -4165,6 +4165,14 @@ a")
         y = torch.arange(0., 8, 2, requires_grad=True)
         self.checkScript(func, [x, y], optimize=True, capture_output=True)
 
+    def test_format(self):
+        def func(x):
+            print("{}, I'm a {}".format("Hello", "test"))
+            return x + 1
+
+        x = torch.arange(4., requires_grad=True)
+        self.checkScript(func, [x], optimize=True, capture_output=True)
+
     def test_logical_short_circuit(self):
         @torch.jit.script
         def testNoThrows(t):
