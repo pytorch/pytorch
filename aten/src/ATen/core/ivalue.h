@@ -643,7 +643,8 @@ inline bool IValue::isSameIdentity(IValue& rhs) {
     }
     else {
       // for objects holding in IValue, do shallow compare on pointer address to testify the identity
-      return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+      return isNone() || (is_intrusive_ptr && rhs.is_intrusive_ptr
+          && this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr);
     }
   }
 }

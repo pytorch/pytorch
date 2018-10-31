@@ -900,24 +900,8 @@ Operator(                                                                      \
           };
         }),
     Operator(
-        "aten::__not__(int self) -> bool",
-        [](const Node* node) {
-          return [=](Stack& stack) {
-            push(stack, !pop(stack).toInt());
-            return 0;
-          };
-        }),
-    Operator(
-        "aten::__not__(float self) -> bool",
-        [](Node* node) {
-          return [=](Stack& stack) {
-            push(stack, !pop(stack).toDouble());
-            return 0;
-          };
-        }),
-    Operator(
         "aten::__not__(bool self) -> bool",
-        [](Node* node) {
+        [](const Node* node) {
           return [=](Stack& stack) {
             push(stack, !pop(stack).toBool());
             return 0;
@@ -925,7 +909,7 @@ Operator(                                                                      \
         }),
     Operator(
         "aten::__is__(t1 self, t2 obj) -> bool",
-        [](Node* node) {
+        [](const Node* node) {
           return [=](Stack& stack) {
             IValue self, obj;
             pop(stack, self, obj);
@@ -935,7 +919,7 @@ Operator(                                                                      \
         }),
     Operator(
         "aten::__isnot__(t1 self, t2 obj) -> bool",
-        [](Node* node) {
+        [](const Node* node) {
           return [=](Stack& stack) {
             IValue self, obj;
             pop(stack, self, obj);

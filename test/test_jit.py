@@ -4434,6 +4434,13 @@ a")
     def test_tensor_number_math_cuda(self):
         self._test_tensor_number_math(device='cuda')
 
+    def test_not(self):
+        # test not operator in python
+        def test_not_op(a):
+            return not bool(a > 1)
+
+        self.checkScript(test_not_op, (torch.tensor(2), ), optimize=True)
+
     def test_is_isnot(self):
         # test is and is not operator in python
         template = dedent('''
@@ -4447,7 +4454,8 @@ a")
             scope = {}
             exec(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
-            self.assertEqual(cu.func(), scope['func']())
+            self.assertEqual(cu.func(), scope['func'](),
+                    "Failed with op: {}, lhs: {}, rhs: {}".format(op, args[0], args[1]))
 
         ops = ['is', 'is not']
         type_literals = [1, 1.0, True, '"is"', None, torch.tensor(1), [1, 1], (1, 1)]
