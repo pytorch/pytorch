@@ -2332,6 +2332,10 @@
   variants: method
   device_guard: false
 
+- func: data_ptr(Tensor self) -> void*
+  variants: method
+  device_guard: false
+
 - func: set_(Tensor self, Storage source) -> Tensor
   variants: method
   device_guard: false

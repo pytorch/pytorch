@@ -286,7 +286,6 @@ public:
   Tensor & _th_scatter_(int64_t dim, const Tensor & index, Scalar value);
   Tensor & _th_scatter_add_(int64_t dim, const Tensor & index, const Tensor & src);
   Tensor _th_gather(int64_t dim, const Tensor & index) const;
-  void* data_ptr() const;
   bool _th_equal(const Tensor & other) const;
   Tensor __and__(Scalar other) const;
   Tensor __and__(const Tensor & other) const;
@@ -657,6 +656,7 @@ public:
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
   Scalar _local_scalar() const;
+  void* data_ptr() const;
   Tensor & set_(Storage source);
   Tensor & set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
   Tensor & set_(const Tensor & source);
