@@ -26,10 +26,10 @@ if [ -n "${IN_CIRCLECI}" ]; then
 fi
 
 # JIT C++ extensions require ninja.
-pip install ninja
+pip install -q ninja --user
 
 # TODO: move this to Docker
-pip install -q hypothesis
+pip install -q hypothesis --user
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
