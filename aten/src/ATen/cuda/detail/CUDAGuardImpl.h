@@ -21,7 +21,9 @@ struct CUDAGuardImpl final : public c10::detail::DeviceGuardImplInterface {
     AT_ASSERT(d.type() == DeviceType::CUDA);
     int old_device;
     AT_CUDA_CHECK(cudaGetDevice(&old_device));
-    AT_CUDA_CHECK(cudaSetDevice(d.index()));
+    if (old_device != d.index()) {
+      AT_CUDA_CHECK(cudaSetDevice(d.index()));
+    }
     return Device(DeviceType::CUDA, old_device);
   }
   void setDevice(Device d) const override {

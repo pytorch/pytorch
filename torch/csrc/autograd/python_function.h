@@ -15,7 +15,7 @@
 #include <memory>
 
 namespace at {
-struct DeviceGuard;
+class DeviceGuard;
 } // namespace at
 
 namespace torch { namespace jit { struct Graph; }}

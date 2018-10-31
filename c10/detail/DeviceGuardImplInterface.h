@@ -41,6 +41,11 @@ struct C10_API DeviceGuardImplInterface {
   virtual Device exchangeDevice(Device) const = 0;
 
   /**
+   * Get the current device.
+   */
+  virtual Device getDevice() const = 0;
+
+  /**
    * Set the current device to Device.
    */
   virtual void setDevice(Device) const = 0;

@@ -93,12 +93,12 @@ struct CUDAGuard {
   }
 
   /// Returns the device that was set upon construction of the guard.
-  optional<Device> original_device() const noexcept {
+  Device original_device() const noexcept {
     return device_guard_.original_device();
   }
 
   /// Returns the last device that was set via `set_device`, if any.
-  optional<Device> last_device() const noexcept {
+  Device last_device() const noexcept {
     return device_guard_.last_device();
   }
 
