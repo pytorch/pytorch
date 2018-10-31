@@ -20,15 +20,6 @@ def _addindent(s_, numSpaces):
     return s
 
 
-def _get_prev_function(var):
-    while not isinstance(var, torch.Tensor):
-        if isinstance(var, dict):
-            var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
-        else:
-            var = var[0]
-    return var.grad_fn
-
-
 def _ensure_tuple(obj):
     if isinstance(obj, tuple):
         return False, obj
@@ -506,12 +497,11 @@ class Module(object):
             backward_hooks = self._get_backward_hooks()
 
             if len(kwargs) > 0:
-                warning.warn("Backward hooks on {} will ignore keywords arguments.".format(
-                            self.__class__.__name__))
+                warning.warn("Backward hooks on {} will ignore keywords arguments."
+                             "".format(self.__class__.__name__))
             self._validate_backward_hook_args("input", input)
-            input = Noop.apply(*input)
+            noop_fn, input = Noop._apply_ret_self(*input)
 
-            noop_fn = _get_prev_function(input)
             if noop_fn is not None:
                 for hook in backward_hooks:
                     noop_fn.register_hook(hook.get_input_hook())
@@ -534,11 +524,10 @@ class Module(object):
             unpack_tuple, result = _ensure_tuple(result)
 
             self._validate_backward_hook_args("output", result)
-            result = Noop.apply(*result)
+            noop_fn, result = Noop._apply_ret_self(*result)
             if unpack_tuple:
                 result = result[0]
 
-            noop_fn = _get_prev_function(result)
             if noop_fn is not None:
                 for hook in backward_hooks:
                     noop_fn.register_hook(hook.get_output_hook())

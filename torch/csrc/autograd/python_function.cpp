@@ -700,9 +700,8 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
+PyObject *do_apply(PyObject *cls, PyObject *inputs, bool return_self)
 {
-  HANDLE_TH_ERRORS
   torch::autograd::profiler::RecordFunction record(((PyTypeObject*)cls)->tp_name);
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
@@ -728,7 +727,8 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   // Prepend ctx to input_tuple, in preparation for static method call
   auto num_args = PyTuple_GET_SIZE(inputs);
   THPObjectPtr ctx_input_tuple(PyTuple_New(num_args + 1));
-  PyTuple_SET_ITEM(ctx_input_tuple.get(), 0, ctx_obj.release());
+  Py_INCREF(ctx_obj);
+  PyTuple_SET_ITEM(ctx_input_tuple.get(), 0, ctx_obj);
   for (int i = 0; i < num_args; ++i) {
     PyObject *arg = PyTuple_GET_ITEM(unpacked_input.input_tuple.get(), i);
     Py_INCREF(arg);
@@ -745,8 +745,32 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
     if (!tensor_outputs) return nullptr;
   }
 
-  return process_outputs(cls, ctx, unpacked_input, inputs, std::move(tensor_outputs),
+  PyObject *outputs = process_outputs(cls, ctx, unpacked_input, inputs, std::move(tensor_outputs),
                          is_executable, node);
+
+  if (return_self) {
+    THPObjectPtr result(PyTuple_New(2));
+    PyObject *grad_fn = is_executable? ctx_obj.get(): Py_None;
+    Py_INCREF(grad_fn);
+    PyTuple_SET_ITEM(result.get(), 0, grad_fn);
+    PyTuple_SET_ITEM(result.get(), 1, outputs);
+    return result.release();
+  } else {
+    return outputs;
+  }
+}
+
+PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
+{
+  HANDLE_TH_ERRORS
+  return do_apply(cls, inputs, false);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPFunction_apply_ret_self(PyObject *cls, PyObject *inputs)
+{
+  HANDLE_TH_ERRORS
+  return do_apply(cls, inputs, true);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1014,6 +1038,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
 
 static struct PyMethodDef THPFunction_methods[] = {
   {(char*)"apply", (PyCFunction)THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
+  {(char*)"_apply_ret_self", (PyCFunction)THPFunction_apply_ret_self, METH_CLASS | METH_VARARGS, nullptr},
   {(char*)"_do_forward", (PyCFunction)THPFunction_do_forward, METH_VARARGS, nullptr},
   {(char*)"_do_backward", (PyCFunction)THPFunction_do_backward, METH_VARARGS, nullptr},
   {(char*)"_register_hook_dict", (PyCFunction)THPFunction__register_hook_dict, METH_O, nullptr},
