@@ -123,7 +123,7 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
   // improve performance
   std::vector<at::cuda::CUDAStream> workerStreams;
   for (size_t devIdx = 0; devIdx < devices.size(); ++devIdx) {
-    at::DeviceGuard guard(devices[devIdx]);
+    at::cuda::CUDAGuard guard(devices[devIdx]);
     events[devIdx].record();
     workerStreams.push_back(at::cuda::getStreamFromPool(false, devices[devIdx]));
     // Let the worker stream to wait for the default stream
@@ -138,7 +138,7 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
 
   std::vector<at::Tensor> gradsBatchCoalesced;
   for (size_t devIdx = 0; devIdx < devices.size(); ++devIdx) {
-    at::DeviceGuard guard(devices[devIdx]);
+    at::cuda::CUDAGuard guard(devices[devIdx]);
     gradsBatchCoalesced.push_back(
         torch::utils::flatten_dense_tensors(gradsBatch[devIdx]));
   }

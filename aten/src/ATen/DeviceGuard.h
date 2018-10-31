@@ -35,11 +35,6 @@ struct DeviceGuard {
     }
   }
 
-  /// Calls `set_index` with the given index.
-  explicit DeviceGuard(int16_t index) {
-    set_index(index);
-  }
-
   /// Sets the device to the index on which the given tensor is located.
   explicit DeviceGuard(const Tensor& tensor) {
     set_index_from(tensor);

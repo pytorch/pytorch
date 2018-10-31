@@ -7,7 +7,18 @@
 #include <ATen/core/ScalarType.h>
 #include <ATen/core/TensorOptions.h>
 
+// NB: This file is compiled even in CPU build (for some reason), so
+// make sure you don't include any CUDA only headers.
+
 using namespace at;
+
+// TODO: This might be generally helpful aliases elsewhere.
+at::Device CPUDevice(DeviceIndex index) {
+  return at::Device(at::kCPU);
+}
+at::Device CUDADevice(DeviceIndex index) {
+  return at::Device(at::kCUDA, index);
+}
 
 // A macro so we don't lose location information when an assertion fails.
 #define REQUIRE_OPTIONS(device_, index_, type_, layout_)                      \
@@ -54,14 +65,14 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
   if (at::globalContext().getNumGPUs() > 1) {
     Tensor tensor;
     {
-      DeviceGuard guard(1);
+      DeviceGuard guard(CUDADevice(1));
       tensor = empty(5, device(kCUDA));
     }
     options = tensor.options();
     REQUIRE_OPTIONS(kCUDA, 1, kFloat, kStrided);
 
     {
-      DeviceGuard guard(1);
+      DeviceGuard guard(CUDADevice(1));
       tensor = empty(5, device(kCUDA).layout(kSparse));
     }
     options = tensor.options();
@@ -94,7 +105,7 @@ TEST(OptionsGuardTest, DeviceGuardOptionsGuardInteraction_MultiCUDA) {
   Tensor tensor;
   {
     // Check that OptionsGuard respects any active device before construction.
-    DeviceGuard guard(1);
+    DeviceGuard guard(CUDADevice(1));
     {
       OptionsGuard guard(device(kCUDA));
       tensor = at::empty({10});
@@ -102,7 +113,7 @@ TEST(OptionsGuardTest, DeviceGuardOptionsGuardInteraction_MultiCUDA) {
       {
         // Check that OptionsGuard respects any active device after
         // construction.
-        DeviceGuard guard(0);
+        DeviceGuard guard(CUDADevice(0));
         tensor = at::empty({10});
         REQUIRE_TENSOR_OPTIONS(kCUDA, 0, kFloat, kStrided);
         {
@@ -116,7 +127,7 @@ TEST(OptionsGuardTest, DeviceGuardOptionsGuardInteraction_MultiCUDA) {
 }
 
 TEST(DeviceGuardTest, IsMovable_CUDA) {
-  DeviceGuard first(1);
+  DeviceGuard first(CUDADevice(1));
   ASSERT_EQ(first.original_index(), 0);
   ASSERT_EQ(first.last_index(), 1);
   DeviceGuard second(std::move(first));

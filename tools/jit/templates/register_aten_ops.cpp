@@ -44,11 +44,11 @@ using at::DeviceGuard;
 
 namespace {
 
-inline int deviceForInputs(Stack & stack, size_t N) {
+inline at::optional<at::Device> deviceForInputs(Stack & stack, size_t N) {
   if(N == 0)
-    return -1;
+    return c10::nullopt;
   auto t = (stack.end() - N)->toTensor();
-  return t.type().is_cuda() ? (int) t.get_device() : -1;
+  return c10::make_optional(t.device());
 }
 
 template<size_t N>
