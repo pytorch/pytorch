@@ -156,7 +156,7 @@ void TreeWalker::advance() {
 }
 
 std::vector<int64_t> TreeWalker::fieldDim(int fieldId) const {
-  auto tensorDim = input(fieldId).dims().vec();
+  auto tensorDim = input(fieldId).sizes().vec();
   tensorDim[0] = sizes_[lengthIdx(fieldId)];
   return tensorDim;
 }
@@ -185,7 +185,7 @@ void TreeWalker::gatherSizeLimits() {
   for (auto fieldId = 0; fieldId < cursor_.it.fields().size(); ++fieldId) {
     auto lengthFieldIdx = lengthIdx(fieldId);
     limits_[lengthFieldIdx] =
-        std::min(limits_[lengthFieldIdx], (TOffset)input(fieldId).dims()[0]);
+        std::min(limits_[lengthFieldIdx], (TOffset)input(fieldId).sizes()[0]);
   }
 }
 

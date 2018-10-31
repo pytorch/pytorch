@@ -39,17 +39,17 @@ class DLPackWrapper {
     if (tensor->numel() <= 0) {
       tensor->Resize(0);
     }
-    if (tensor->meta().id() == TypeIdentifier::uninitialized()) {
+    if (tensor->dtype().id() == TypeIdentifier::uninitialized()) {
       // treat uninitialized tensor as float tensor
       tensor->template mutable_data<float>();
     }
     CAFFE_ENFORCE_GT(tensor->ndim(), 0);
 
-    auto type_ptr = CaffeToDLType(tensor->meta());
+    auto type_ptr = CaffeToDLType(tensor->dtype());
     CAFFE_ENFORCE(
         type_ptr,
         "Tensor type is not supported in DLPack: ",
-        tensor->meta().name());
+        tensor->dtype().name());
     DLDataType tensor_type = *type_ptr;
 
     DLTensor dlTensor;

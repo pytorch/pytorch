@@ -92,7 +92,7 @@ bool QuantDecompZstdOp::RunOnDevice() {
       op_compressed.template IsType<uint8_t>() ||
           // array with one string
           op_compressed.template IsType<std::string>(),
-      op_compressed.meta().name());
+      op_compressed.dtype().name());
 
   // op_compressed: compressed data, 1d
   if (op_compressed.template IsType<uint8_t>()) {

@@ -1,6 +1,6 @@
 import collections
 
-from constants import *
+from pyHIPIFY.constants import *
 
 """ Mapping of CUDA functions, include files, constants, and types to ROCm/HIP equivalents
 This closely follows the implementation in hipify-clang

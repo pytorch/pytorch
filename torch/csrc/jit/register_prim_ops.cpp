@@ -8,6 +8,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/custom_operator.h"
+#include "torch/csrc/jit/script/jit_exception.h"
 
 #include "torch/csrc/variable_tensor_functions.h"
 
@@ -255,6 +256,15 @@ RegisterOperators reg({
             return 0;
           };
         }),
+    Operator(
+        prim::RaiseException,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            throw JITException(pop(stack).toStringRef());
+            return 0;
+          };
+        }),
+
     // Load x, y
     // loads values from registers onto the stack, the actual callback does
     // nothing since the stack manipulation is already encoded in inst.inputs
