@@ -1758,10 +1758,11 @@ class TestNN(NNTestCase):
             m = torch.nn.utils.spectral_norm(m)
             m = torch.nn.utils.spectral_norm(m)
 
+        # test correctness in training/eval modes and cpu/multi-gpu settings
         for apply_dp in (True, False):
-            if apply_dp and not TEST_MULTIGPU:
-                continue
             if apply_dp:
+                if not TEST_MULTIGPU:
+                    continue
                 device = torch.device('cuda:0')
 
                 def maybe_wrap(m):
@@ -1795,9 +1796,19 @@ class TestNN(NNTestCase):
                 if requires_grad:
                     torch.autograd.grad(out.sum(), m.weight_orig)
 
-                # test backward works
-                wrapped_m(input).sum().backward()
-                wrapped_m(input).sum().backward()
+                # test backward works with multiple forwards
+                # it uses training mode so we need to reset `u` and `v` vectors
+                # to same value at beginning for finite difference test to pass
+                saved_u = m.weight_u.clone()
+                saved_v = m.weight_v.clone()
+                def fn(input):
+                    m.weight_u.data.copy_(saved_u)
+                    m.weight_v.data.copy_(saved_v)
+                    out0 = wrapped_m(input)
+                    out1 = wrapped_m(input)
+                    return out0 + out1
+
+                torch.autograd.gradcheck(fn, (input.clone().requires_grad_(),))
 
                 # test removing
                 pre_remove_out = wrapped_m(input)
@@ -1832,9 +1843,26 @@ class TestNN(NNTestCase):
                 self.assertEqual(last_train_u, m.weight_u)
                 self.assertEqual(last_train_v, m.weight_v)
 
-                # test backward works
-                wrapped_m(input).sum().backward()
-                wrapped_m(input).sum().backward()
+                # test backward works with multiple forwards in mixed training
+                # and eval modes
+                # it uses training mode so we need to reset `u` and `v` vectors
+                # to same value at beginning for finite difference test to pass
+                saved_u = m.weight_u.clone()
+                saved_v = m.weight_v.clone()
+                def fn(input):
+                    m.weight_u.data.copy_(saved_u)
+                    m.weight_v.data.copy_(saved_v)
+                    wrapped_m.train()
+                    out0 = wrapped_m(input)
+                    wrapped_m.eval()
+                    out1 = wrapped_m(input)
+                    wrapped_m.train()
+                    out2 = wrapped_m(input)
+                    wrapped_m.eval()
+                    out3 = wrapped_m(input)
+                    return out0 + out1 + out2 + out3
+
+                torch.autograd.gradcheck(fn, (input.clone().requires_grad_(),))
 
                 # assert that backprop reaches weight_orig in eval
                 if requires_grad:

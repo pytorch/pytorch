@@ -35,7 +35,7 @@ class SpectralNorm(object):
         return weight_mat.reshape(height, -1)
 
     def compute_weight(self, module, do_power_iteration):
-        # NB: If `do_power_iteration` is set, the `_u` and `_v` vectors are
+        # NB: If `do_power_iteration` is set, the `u` and `v` vectors are
         #     updated in power iteration **in-place**. This is very important
         #     because in `DataParallel` forward, the vectors (being buffers) are
         #     broadcast from the parallelized module to each module replica,
@@ -57,6 +57,13 @@ class SpectralNorm(object):
         #     devices, simply updating the tensors in-place will make sure that
         #     the module replica on `device[0]` will update the _u vector on the
         #     parallized module (by shared storage).
+        #
+        #    However, after we update `u` and `v` in-place, we need to **clone**
+        #    them before using them to normalize the weight. This is to support
+        #    backproping through two forward passes, e.g., the common pattern in
+        #    GAN training: loss = D(real) - D(fake). Otherwise, engine will
+        #    complain that variables needed to do backward for the first forward
+        #    (i.e., the `u` and `v` vectors) are changed in the second forward.
         weight = getattr(module, self.name + '_orig')
         u = getattr(module, self.name + '_u')
         v = getattr(module, self.name + '_v')
@@ -70,18 +77,23 @@ class SpectralNorm(object):
                     # This power iteration produces approximations of `u` and `v`.
                     v = normalize(torch.mv(weight_mat.t(), u), dim=0, eps=self.eps, out=v)
                     u = normalize(torch.mv(weight_mat, v), dim=0, eps=self.eps, out=u)
+                if self.n_power_iterations > 0:
+                    # See above on why we need to clone
+                    u = u.clone()
+                    v = v.clone()
 
         sigma = torch.dot(u, torch.mv(weight_mat, v))
         weight = weight / sigma
         return weight
 
     def remove(self, module):
-        weight = self.compute_weight(module, do_power_iteration=False)
+        with torch.no_grad():
+            weight = self.compute_weight(module, do_power_iteration=False)
         delattr(module, self.name)
         delattr(module, self.name + '_u')
         delattr(module, self.name + '_v')
         delattr(module, self.name + '_orig')
-        module.register_parameter(self.name, torch.nn.Parameter(weight))
+        module.register_parameter(self.name, torch.nn.Parameter(weight.detach()))
 
     def __call__(self, module, inputs):
         setattr(module, self.name, self.compute_weight(module, do_power_iteration=module.training))
