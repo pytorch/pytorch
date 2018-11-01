@@ -152,6 +152,7 @@ public:
       return unique_name_;
     return std::to_string(unique());
   }
+  std::string uniqueNameBase() const;
   Node* node() {
     return node_;
   }
