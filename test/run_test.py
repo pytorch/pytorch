@@ -5,7 +5,6 @@ from __future__ import print_function
 import argparse
 from datetime import datetime
 import os
-import shlex
 import shutil
 import signal
 import subprocess
@@ -124,10 +123,6 @@ def shell(command, cwd=None):
     finally:
         # Always call p.wait() to ensure exit
         p.wait()
-
-
-def get_shell_output(command):
-    return subprocess.check_output(shlex.split(command)).decode().strip()
 
 
 def run_test(executable, test_module, test_directory, options):
