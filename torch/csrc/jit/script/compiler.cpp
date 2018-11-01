@@ -957,7 +957,10 @@ private:
         }
         break;
         case TK_RAISE:
-          emitRaise(Raise(stmt));
+          emitRaise(Raise(stmt).range());
+          break;
+        case TK_ASSERT:
+          emitAssert(Assert(stmt));
           break;
         case TK_RETURN:
           throw ErrorReport(stmt) << "return statements can appear only at the end "
@@ -1318,11 +1321,26 @@ private:
   // else
   //   raise Exception("Hi")
   // print(a)
-  void emitRaise(const Raise& stmt) {
+  void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
-    auto string_input = insertConstant(*graph, exception, stmt.range());
+    auto string_input = insertConstant(*graph, exception, loc);
     graph->insertNode(graph->create(prim::RaiseException, {string_input}, 0)
-                        ->setSourceLocation(std::make_shared<SourceRange>(stmt.range())));
+                        ->setSourceLocation(std::make_shared<SourceRange>(loc)));
+  }
+
+  void emitAssert(const Assert& stmt) {
+    Value* cond_value = emitCond(stmt.test());
+    Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
+
+    n->addInput(cond_value);
+    auto* true_block = n->addBlock();
+    auto* false_block = n->addBlock();
+
+    //if assert test is false throw exception
+    pushFrame(false_block);
+    WithInsertPoint guard(false_block);
+    emitRaise(stmt.range());
+    popFrame();
   }
 
 

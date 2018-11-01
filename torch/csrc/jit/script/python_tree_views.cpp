@@ -135,6 +135,10 @@ void initTreeViewBindings(PyObject *module) {
     .def(py::init([](const SourceRange& range, Expr *expr) {
       return Raise::create(range, wrap_maybe(range, expr));
     }));
+  py::class_<Assert, Stmt>(m, "Assert")
+    .def(py::init([](const SourceRange& range, const Expr& test, Expr *msg) {
+      return Assert::create(range, test, wrap_maybe(range, msg));
+    }));
   py::class_<If, Stmt>(m, "If")
     .def(py::init([](const SourceRange& range, const Expr& cond, std::vector<Stmt> true_branch, std::vector<Stmt> false_branch) {
       return If::create(range, cond,
