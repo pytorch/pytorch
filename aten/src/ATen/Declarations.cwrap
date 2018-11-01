@@ -379,7 +379,7 @@
         - THTensor* other
 ]]
 [[
-  name: __iand__
+  name: _th_iand_
   cname: __iand__
   variants:
     - method
@@ -420,7 +420,7 @@
         - THTensor* other
 ]]
 [[
-  name: __ior__
+  name: _th_ior_
   cname: __ior__
   variants:
     - method
@@ -461,7 +461,7 @@
         - THTensor* other
 ]]
 [[
-  name: __ixor__
+  name: _th_ixor_
   cname: __ixor__
   variants:
     - method
@@ -502,7 +502,7 @@
         - THTensor* other
 ]]
 [[
-  name: __ilshift__
+  name: _th_ilshift_
   cname:: __ilshift__
   variants:
     - method
@@ -543,7 +543,7 @@
         - THTensor* other
 ]]
 [[
-  name: __irshift__
+  name: _th_irshift_
   cname: __irshift__
   variants:
     - method

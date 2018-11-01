@@ -867,4 +867,44 @@ Tensor __rshift__(const Tensor & self, const Tensor & other) {
   return at::_th_rshift(self, other);
 }
 
+Tensor & __iand__(Tensor & self, Scalar other) {
+  return self._th_iand_(other);
+}
+
+Tensor & __iand__(Tensor & self, const Tensor & other) {
+  return self._th_iand_(other);
+}
+
+Tensor & __ior__(Tensor & self, Scalar other) {
+  return self._th_ior_(other);
+}
+
+Tensor & __ior__(Tensor & self, const Tensor & other) {
+  return self._th_ior_(other);
+}
+
+Tensor & __ixor__(Tensor & self, Scalar other) {
+  return self._th_ixor_(other);
+}
+
+Tensor & __ixor__(Tensor & self, const Tensor & other) {
+  return self._th_ixor_(other);
+}
+
+Tensor & __ilshift__(Tensor & self, Scalar other) {
+  return self._th_ilshift_(other);
+}
+
+Tensor & __ilshift__(Tensor & self, const Tensor & other) {
+  return self._th_ilshift_(other);
+}
+
+Tensor & __irshift__(Tensor & self, Scalar other) {
+  return self._th_irshift_(other);
+}
+
+Tensor & __irshift__(Tensor & self, const Tensor & other) {
+  return self._th_irshift_(other);
+}
+
 }} // namespace at::native
