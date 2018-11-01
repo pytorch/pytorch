@@ -216,7 +216,7 @@ void _copy__cuda(Tensor& dst, const Tensor& src) {
       copy_from_cpu(dst, srcf);
     } else {
       if (std::is_same<dst_T, scalar_t>::value) {
-        copy_to_cpu(dst, srcf);
+        copy_to_cpu(dst, src);
       }
       Tensor srcf = at::empty_like(src);
       copy_device_to_device<dst_T, scalar_t>(srcf, src);
