@@ -21,10 +21,10 @@ class FlattenOp : public Operator<Context> {
         input.sizes().size(), axis_, "The rank of the tensor must be >= axis.");
     output->Resize(input.size_to_dim(axis_), input.size_from_dim(axis_));
     context_.CopyItemsSameDevice(
-        input.meta(),
+        input.dtype(),
         input.numel(),
         input.raw_data(),
-        output->raw_mutable_data(input.meta()));
+        output->raw_mutable_data(input.dtype()));
     return true;
   }
 

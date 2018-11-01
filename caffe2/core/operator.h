@@ -758,7 +758,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Tensor& tensor) {                           \
-      return call<Op>(op, tensor.meta());                                      \
+      return call<Op>(op, tensor.dtype());                                     \
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Blob& blob) {                               \
@@ -774,7 +774,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Tensor& tensor) {                           \
-      return call<Op>(op, tensor.meta());                                      \
+      return call<Op>(op, tensor.dtype());                                     \
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Blob& blob) {                               \
@@ -792,7 +792,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Tensor& tensor) {                           \
-      return call<Op>(op, tensor.meta());                                      \
+      return call<Op>(op, tensor.dtype());                                     \
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Blob& blob) {                               \

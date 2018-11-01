@@ -30,7 +30,8 @@ class Int8TensorCPUSerializer : public BlobSerializerBase {
     proto.set_bias(tensor.zero_point);
     proto.set_is_signed(false);
 
-    const TensorProto::DataType data_type = TypeMetaToDataType(tensor.t.meta());
+    const TensorProto::DataType data_type =
+        TypeMetaToDataType(tensor.t.dtype());
     proto.set_data_type(data_type);
     switch (data_type) {
       case TensorProto_DataType_INT32:
