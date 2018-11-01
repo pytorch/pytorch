@@ -1313,6 +1313,10 @@ _builtin_blacklist = {
     'prelu',
     'hardshrink',
     'dropout',
+    'alpha_dropout',
+    'dropout2d',
+    'dropout3d',
+    'feature_alpha_dropout',
 }
 
 

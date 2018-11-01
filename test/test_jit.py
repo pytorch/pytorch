@@ -8680,11 +8680,12 @@ EXCLUDE_SCRIPT = {
     'test_norm_nuc',
     # skipped nn functional tests
     # ops involves sampling which could not test
+
     # 'test_nn_dropout',
-    'test_nn_alpha_dropout',
-    'test_nn_dropout2d',
-    'test_nn_dropout3d',
-    'test_nn_feature_alpha_dropout',
+    # 'test_nn_alpha_dropout',
+    # 'test_nn_dropout2d',
+    # 'test_nn_dropout3d',
+    # 'test_nn_feature_alpha_dropout',
 
     'test_nn_adaptive_max_pool1d',
     'test_nn_adaptive_max_pool2d',
