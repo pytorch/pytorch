@@ -415,7 +415,7 @@ void addObjectMethods(py::module& m) {
       .def_property_readonly(
           "data",
           [](TensorCPU* t) -> py::object {
-            if (t->meta() == TypeMeta{}) {
+            if (t->dtype() == TypeMeta{}) {
               // keep this behavior for backward compatibility
               t->mutable_data<float>();
             }

@@ -72,8 +72,10 @@ namespace c10 {
   _(prim, StoreWorld)              \
   _(prim, DummyWorld)              \
   _(prim, fork)                    \
+  _(prim, RaiseException)          \
   _(aten, append)                  \
   _(aten, __not__)                 \
+  _(aten, format)                  \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \

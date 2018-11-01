@@ -132,6 +132,10 @@ void addNomnigraphMethods(pybind11::module& m) {
           [](NNModule* nn) -> NNGraph* { return &nn->dataFlow; },
           py::return_value_policy::reference_internal)
       .def(
+          "createUniqueDataNode",
+          &NNModule::createUniqueDataNode,
+          py::return_value_policy::reference_internal)
+      .def(
           "convertToCaffe2Proto",
           [](NNModule& nn, py::object def) {
             CAFFE_ENFORCE(

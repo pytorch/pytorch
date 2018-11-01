@@ -124,6 +124,7 @@ void synchronizeStreams(AlgorithmEntry* entry) {
     std::cout << "public stream device: " << publicStream.device_index() << std::endl;
     std::cout << "private stream device: " << privateStream.device_index() << std::endl;
     event.record(publicStream);
+    std::cout << "event device after record: " << event.device() << std::endl;
     event.block(privateStream);
   }
 }
@@ -488,7 +489,9 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 // failure must be signaled through the Work future.
 //
 EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
-  at::DeviceGuard deviceGuard;
+#ifdef USE_CUDA
+  at::cuda::CUDAGuard deviceGuard;
+#endif
   auto entry = std::unique_ptr<AlgorithmEntry>(new AlgorithmEntry);
   entry->key = key;
 
@@ -507,7 +510,6 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
     if (key.type->is_cuda()) {
       throw std::runtime_error("ProcessGroupGloo is not built with CUDA");
     }
-    deviceGuard.set_index(-1);
 #endif
     entry->src[i] = at::empty(srcSizes[i], key.type->options());
   }

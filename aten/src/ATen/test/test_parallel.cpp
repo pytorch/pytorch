@@ -36,3 +36,19 @@ TEST(TestParallel, NestedParallel) {
     }
   });
 }
+
+TEST(TestParallel, Exceptions) {
+  // parallel case
+  ASSERT_THROW(
+    at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
+      throw std::runtime_error("exception");
+    }),
+    std::runtime_error);
+
+  // non-parallel case
+  ASSERT_THROW(
+    at::parallel_for(0, 1, 1000, [&](int64_t begin, int64_t end) {
+      throw std::runtime_error("exception");
+    }),
+    std::runtime_error);
+}

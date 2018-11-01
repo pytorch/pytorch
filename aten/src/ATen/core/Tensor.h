@@ -281,13 +281,12 @@ public:
   Tensor & _th_index_add_(int64_t dim, const Tensor & index, const Tensor & source);
   Tensor & _th_index_fill_(int64_t dim, const Tensor & index, Scalar value);
   Tensor & _th_index_fill_(int64_t dim, const Tensor & index, const Tensor & value);
-  Tensor unfold(int64_t dimension, int64_t size, int64_t step) const;
+  Tensor _th_unfold(int64_t dimension, int64_t size, int64_t step) const;
   Tensor & _th_scatter_(int64_t dim, const Tensor & index, const Tensor & src);
   Tensor & _th_scatter_(int64_t dim, const Tensor & index, Scalar value);
   Tensor & _th_scatter_add_(int64_t dim, const Tensor & index, const Tensor & src);
   Tensor _th_gather(int64_t dim, const Tensor & index) const;
-  void* data_ptr() const;
-  bool equal(const Tensor & other) const;
+  bool _th_equal(const Tensor & other) const;
   Tensor __and__(Scalar other) const;
   Tensor __and__(const Tensor & other) const;
   Tensor & __iand__(Scalar other);
@@ -332,15 +331,15 @@ public:
   Tensor _th_ne(const Tensor & other) const;
   Tensor & _th_ne_(Scalar other);
   Tensor & _th_ne_(const Tensor & other);
-  Tensor min(const Tensor & other) const;
-  Tensor min() const;
-  Tensor max(const Tensor & other) const;
-  Tensor max() const;
-  Tensor median() const;
-  std::tuple<Tensor,Tensor> sort(int64_t dim=-1, bool descending=false) const;
-  std::tuple<Tensor,Tensor> topk(int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) const;
-  Tensor all() const;
-  Tensor any() const;
+  Tensor _th_min(const Tensor & other) const;
+  Tensor _th_min() const;
+  Tensor _th_max(const Tensor & other) const;
+  Tensor _th_max() const;
+  Tensor _th_median() const;
+  std::tuple<Tensor,Tensor> _th_sort(int64_t dim=-1, bool descending=false) const;
+  std::tuple<Tensor,Tensor> _th_topk(int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) const;
+  Tensor _th_all() const;
+  Tensor _th_any() const;
   Tensor _th_lgamma() const;
   Tensor & _th_lgamma_();
   Tensor _th_digamma() const;
@@ -351,7 +350,7 @@ public:
   Tensor _th_erfinv() const;
   Tensor & _th_frac_();
   Tensor _th_frac() const;
-  Tensor renorm(Scalar p, int64_t dim, Scalar maxnorm) const;
+  Tensor _th_renorm(Scalar p, int64_t dim, Scalar maxnorm) const;
   Tensor & _th_renorm_(Scalar p, int64_t dim, Scalar maxnorm);
   Tensor _th_dist(const Tensor & other, Scalar p=2) const;
   Tensor _th_reciprocal() const;
@@ -360,7 +359,7 @@ public:
   Tensor & _th_neg_();
   Tensor _th_atan2(const Tensor & other) const;
   Tensor & _th_atan2_(const Tensor & other);
-  Tensor pow(const Tensor & exponent) const;
+  Tensor _th_pow(const Tensor & exponent) const;
   Tensor & _th_pow_(Scalar exponent);
   Tensor & _th_pow_(const Tensor & exponent);
   Tensor _th_lerp(const Tensor & end, Scalar weight) const;
@@ -383,7 +382,7 @@ public:
   Tensor & _th_triu_(int64_t diagonal=0);
   Tensor _th_cross(const Tensor & other, int64_t dim=-1) const;
   Tensor _th_diag(int64_t diagonal=0) const;
-  Tensor addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
+  Tensor _th_addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & _th_addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
   Tensor _th_addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   Tensor & _th_addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
@@ -415,7 +414,7 @@ public:
   Tensor & _th_log_normal_(double mean=1, double std=2, Generator * generator=nullptr);
   Tensor & _th_exponential_(double lambd=1, Generator * generator=nullptr);
   Tensor & _th_geometric_(double p, Generator * generator=nullptr);
-  Tensor alias() const;
+  Tensor _th_alias() const;
   Tensor abs() const;
   Tensor & abs_();
   Tensor acos() const;
@@ -657,6 +656,7 @@ public:
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
   Scalar _local_scalar() const;
+  void* data_ptr() const;
   Tensor & set_(Storage source);
   Tensor & set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
   Tensor & set_(const Tensor & source);
@@ -706,6 +706,7 @@ public:
   Tensor & remainder_(Scalar other);
   Tensor & remainder_(const Tensor & other);
   Tensor & addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
+  Tensor addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
   Tensor & addcdiv_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
   Tensor & random_(int64_t from, int64_t to, Generator * generator=nullptr);
@@ -774,6 +775,20 @@ public:
   Tensor fmod(const Tensor & other) const;
   Tensor remainder(Scalar other) const;
   Tensor remainder(const Tensor & other) const;
+  Tensor min(const Tensor & other) const;
+  Tensor min() const;
+  Tensor max(const Tensor & other) const;
+  Tensor max() const;
+  Tensor median() const;
+  std::tuple<Tensor,Tensor> sort(int64_t dim=-1, bool descending=false) const;
+  std::tuple<Tensor,Tensor> topk(int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) const;
+  Tensor all() const;
+  Tensor any() const;
+  Tensor renorm(Scalar p, int64_t dim, Scalar maxnorm) const;
+  Tensor unfold(int64_t dimension, int64_t size, int64_t step) const;
+  bool equal(const Tensor & other) const;
+  Tensor pow(const Tensor & exponent) const;
+  Tensor alias() const;
 
   // We changed .dtype() to return a TypeMeta in #12766. Ideally, we want the
   // at::kDouble and its friends to be TypeMeta's, but that hasn't happened yet.

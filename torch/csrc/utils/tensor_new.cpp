@@ -94,7 +94,10 @@ Tensor new_with_tensor_copy(const Type& type, Tensor other, int32_t device_index
   AutoNoGIL no_gil;
   at::DeviceGuard device_guard;
   if (type.is_cuda()) {
-    device_guard.set_index(device_index);
+    // TODO: It would be better if new_with_tensor_copy took an at::Device
+    // to begin with, but then we need to fix the situation with
+    // dispatch_type_conversion bleggg
+    device_guard.set_device(at::Device(at::kCUDA, device_index));
   }
   return type.copy(other);
 }
