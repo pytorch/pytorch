@@ -267,9 +267,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
     grad_fn->src_type = &src.type();
-    if (src.is_cuda()) {
-      grad_fn->src_device = src.get_device();
-    }
+    grad_fn->src_device = src.device();
   }
   if (self.is_sparse() && src.is_sparse()) baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
   else if (!self.is_sparse() && !src.is_sparse()) baseType->s_copy_(self_, src_, non_blocking);

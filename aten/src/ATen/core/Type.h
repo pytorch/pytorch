@@ -196,7 +196,6 @@ struct CAFFE2_API Type {
   virtual Tensor & _th_scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) const = 0;
   virtual Tensor & _th_scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) const = 0;
   virtual Tensor _th_gather(const Tensor & self, int64_t dim, const Tensor & index) const = 0;
-  virtual void* data_ptr(const Tensor & self) const = 0;
   virtual bool _th_equal(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor __and__(const Tensor & self, Scalar other) const = 0;
   virtual Tensor s___and__(const Tensor & self, const Tensor & other) const = 0;
@@ -335,8 +334,8 @@ struct CAFFE2_API Type {
   virtual Tensor & _th_triu_(Tensor & self, int64_t diagonal) const = 0;
   virtual Tensor _th_cross(const Tensor & self, const Tensor & other, int64_t dim) const = 0;
   virtual Tensor _th_diag(const Tensor & self, int64_t diagonal) const = 0;
-  virtual Tensor s_addbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
-  virtual Tensor addbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
+  virtual Tensor s__th_addbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
+  virtual Tensor _th_addbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & _th_addbmm_(Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor s__th_addcmul(const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual Tensor _th_addcmul(const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
@@ -614,6 +613,7 @@ struct CAFFE2_API Type {
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, const Tensor & other, bool non_blocking, bool copy) const = 0;
   virtual Scalar _local_scalar(const Tensor & self) const = 0;
+  virtual void* data_ptr(const Tensor & self) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source, int64_t storage_offset, IntList size, IntList stride) const = 0;
   virtual Tensor & set_(Tensor & self, const Tensor & source) const = 0;
@@ -663,6 +663,7 @@ struct CAFFE2_API Type {
   virtual Tensor & remainder_(Tensor & self, Scalar other) const = 0;
   virtual Tensor & remainder_(Tensor & self, const Tensor & other) const = 0;
   virtual Tensor & addbmm_(Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
+  virtual Tensor addbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & addcmul_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual Tensor & addcdiv_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual Tensor & random_(Tensor & self, int64_t from, int64_t to, Generator * generator) const = 0;

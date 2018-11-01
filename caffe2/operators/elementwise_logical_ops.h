@@ -54,13 +54,13 @@ class WhereOp final : public Operator<Context> {
         size_t offset = i * block_size;
         if (select_data[i]) {
           context_.CopyItemsSameDevice(
-              output->meta(),
+              output->dtype(),
               block_size,
               left_data + offset,
               output_data + offset);
         } else {
           context_.CopyItemsSameDevice(
-              output->meta(),
+              output->dtype(),
               block_size,
               right_data + offset,
               output_data + offset);

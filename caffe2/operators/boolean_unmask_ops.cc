@@ -8,7 +8,7 @@ template <>
 bool BooleanUnmaskOp<CPUContext>::RunOnDevice() {
   int maskSize = Input(0).numel();
   int numMasks = InputSize() / 2;
-  auto& valueMeta = Input(1).meta();
+  auto& valueMeta = Input(1).dtype();
 
   auto* valuesOut = Output(0);
   valuesOut->Resize(maskSize);

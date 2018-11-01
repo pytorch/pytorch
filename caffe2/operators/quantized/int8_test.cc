@@ -92,6 +92,31 @@ TEST(Int8, Softmax) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(YQ.scale));
 }
 
+TEST(Int8, Sigmoid) {
+  auto XQ = q({1, 2, 1, 3});
+  auto X = dq(*XQ);
+  auto xop = CreateOperatorDef("Sigmoid", "", {"X"}, {"Y"});
+  auto op = CreateOperatorDef(
+      "Int8Sigmoid",
+      "",
+      {"XQ"},
+      {"YQ"},
+      {MakeArgument<int>("Y_zero_point", 0),
+       MakeArgument<float>("Y_scale", 1.0 / 256)});
+  Workspace ws;
+  int8Copy(ws.CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>(), *XQ);
+  BlobGetMutableTensor(ws.CreateBlob("X"), CPU)->CopyFrom(*X);
+  ws.RunOperatorOnce(op);
+  ws.RunOperatorOnce(xop);
+  const auto& YQ = ws.GetBlob("YQ")->Get<int8::Int8TensorCPU>();
+  EXPECT_EQ(YQ.scale, 1.0 / 256);
+  EXPECT_EQ(YQ.zero_point, 0);
+
+  auto YA = dq(YQ);
+  const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
+  EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(YQ.scale));
+}
+
 TEST(Int8, MaxPool) {
   auto XQ = q({1, 25, 25, 16});
   auto X = dq(*XQ);

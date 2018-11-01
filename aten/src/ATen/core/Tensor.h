@@ -286,7 +286,6 @@ public:
   Tensor & _th_scatter_(int64_t dim, const Tensor & index, Scalar value);
   Tensor & _th_scatter_add_(int64_t dim, const Tensor & index, const Tensor & src);
   Tensor _th_gather(int64_t dim, const Tensor & index) const;
-  void* data_ptr() const;
   bool _th_equal(const Tensor & other) const;
   Tensor __and__(Scalar other) const;
   Tensor __and__(const Tensor & other) const;
@@ -383,7 +382,7 @@ public:
   Tensor & _th_triu_(int64_t diagonal=0);
   Tensor _th_cross(const Tensor & other, int64_t dim=-1) const;
   Tensor _th_diag(int64_t diagonal=0) const;
-  Tensor addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
+  Tensor _th_addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & _th_addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
   Tensor _th_addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   Tensor & _th_addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
@@ -657,6 +656,7 @@ public:
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
   Scalar _local_scalar() const;
+  void* data_ptr() const;
   Tensor & set_(Storage source);
   Tensor & set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
   Tensor & set_(const Tensor & source);
@@ -706,6 +706,7 @@ public:
   Tensor & remainder_(Scalar other);
   Tensor & remainder_(const Tensor & other);
   Tensor & addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
+  Tensor addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
   Tensor & addcdiv_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
   Tensor & random_(int64_t from, int64_t to, Generator * generator=nullptr);

@@ -2332,6 +2332,10 @@
   variants: method
   device_guard: false
 
+- func: data_ptr(Tensor self) -> void*
+  variants: method
+  device_guard: false
+
 - func: set_(Tensor self, Storage source) -> Tensor
   variants: method
   device_guard: false
@@ -2527,6 +2531,13 @@
 - func: addbmm_(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: method
   device_guard: false
+
+- func: addbmm_out(Tensor result, Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  device_guard: false
+
+- func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: method, function
+  device_gurad: false
 
 - func: addcmul_(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method
@@ -3063,4 +3074,10 @@
 
 - func: alias(Tensor self) -> Tensor
   variants: method, function
+  device_guard: false
+
+- func: _dirichlet_grad_out(Tensor output, Tensor x, Tensor alpha, Tensor total) -> Tensor
+  device_guard: false
+
+- func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
   device_guard: false
