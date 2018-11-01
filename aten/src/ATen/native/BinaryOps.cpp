@@ -122,6 +122,10 @@ Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
   return native::sub_out(self, self, other, alpha);
 }
 
+Tensor rsub(const Tensor& self, const Tensor& other, Scalar alpha) {
+  return native::sub(other, self, alpha);
+}
+
 // These are still needed because we don't have C++ conversions from number
 // types (int, float, etc.) to Tensor (only to Scalar). They're not exposed
 // to Python.
@@ -162,6 +166,10 @@ Tensor sub(const Tensor& self, Scalar other, Scalar alpha) {
 
 Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
   return native::sub_(self, scalar_tensor(other), alpha);
+}
+
+Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
+  return native::rsub(self, scalar_tensor(other), alpha);
 }
 
 }

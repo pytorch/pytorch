@@ -236,6 +236,7 @@ _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
 _(aten, chain_matmul) \
+_(aten, cholesky) \
 _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \
@@ -510,7 +511,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
-_(aten, potrf) \
 _(aten, potri) \
 _(aten, potrs) \
 _(aten, pow) \
@@ -612,6 +612,7 @@ _(aten, storage_offset) \
 _(aten, stride) \
 _(aten, strides) \
 _(aten, sub) \
+_(aten, rsub) \
 _(aten, sum) \
 _(aten, svd) \
 _(aten, symeig) \

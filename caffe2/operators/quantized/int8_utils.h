@@ -96,6 +96,41 @@ inline void QuantizeMultiplierSmallerThanOne(
   *quantized_multiplier = static_cast<int32_t>(q_fixed);
 }
 
+inline void QuantizeMultiplierGreaterThanOne(
+    double double_multiplier,
+    int32_t* quantized_multiplier,
+    int* left_shift) {
+  CHECK(double_multiplier > 1.);
+  const double q = std::frexp(double_multiplier, left_shift);
+  auto q_fixed = static_cast<int64_t>(Round(q * (1ll << 31)));
+  CHECK(q_fixed <= (1ll << 31));
+  if (q_fixed == (1ll << 31)) {
+    q_fixed /= 2;
+    ++*left_shift;
+  }
+  CHECK_GE(*left_shift, 0);
+  CHECK_LE(q_fixed, std::numeric_limits<int32_t>::max());
+  *quantized_multiplier = static_cast<int32_t>(q_fixed);
+}
+
+inline int32_t MultiplyByQuantizedMultiplierGreaterThanOne(
+    int32_t x,
+    int32_t quantized_multiplier,
+    int left_shift) {
+  using gemmlowp::SaturatingRoundingDoublingHighMul;
+  return SaturatingRoundingDoublingHighMul(
+      x * (1 << left_shift), quantized_multiplier);
+}
+
+inline int CalculateInputRadius(int input_integer_bits, int input_left_shift) {
+  const double max_input_rescaled = 1.0 * ((1 << input_integer_bits) - 1) *
+      (1ll << (31 - input_integer_bits)) / (1ll << input_left_shift);
+  // Tighten bound using floor.  Suppose that we could use the exact value.
+  // After scaling the difference, the result would be at the maximum.  Thus we
+  // must ensure that our value has lower magnitude.
+  return static_cast<int>(std::floor(max_input_rescaled));
+}
+
 // An adaptor to use the Caffe2 WorkersPool implementation for gemmlowp
 // multithreading functions.
 class C2GEMMContext : public gemmlowp::SingleThreadGemmContext {

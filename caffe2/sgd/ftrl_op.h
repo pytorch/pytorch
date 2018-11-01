@@ -49,7 +49,7 @@ class SparseFtrlOp final : public Operator<CPUContext> {
   bool RunOnDevice() override {
     // run time learning rate override
     if (ALPHA < InputSize()) {
-      CAFFE_ENFORCE_EQ(Input(ALPHA).size(), 1, "alpha should be real-valued");
+      CAFFE_ENFORCE_EQ(Input(ALPHA).numel(), 1, "alpha should be real-valued");
       params_.alphaInv = 1.0 / *(Input(ALPHA).template data<T>());
     }
     // Use run-time polymorphism
@@ -60,7 +60,7 @@ class SparseFtrlOp final : public Operator<CPUContext> {
       DoRun<int64_t>();
     } else {
       LOG(FATAL) << "Unsupported type of INDICES in SparseFtrlOp: "
-                      << indices.meta().name();
+                 << indices.dtype().name();
     }
     return true;
   }

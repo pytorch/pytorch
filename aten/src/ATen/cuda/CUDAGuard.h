@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/CUDAStream.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/core/ArrayRef.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -63,7 +62,7 @@ struct CUDAGuard {
   /// Sets the current CUDA device to the device associated with the given
   /// stream, and then sets the current stream on that device to the one given.
   void set_stream(const CUDAStream& stream) {
-    device_guard_.set_index(stream.device());
+    set_index(stream.device_index());
     // If we haven't stored the current stream yet, store it now.
     if (original_streams_.empty()) {
       const size_t device_count = getNumGPUs();
@@ -76,8 +75,14 @@ struct CUDAGuard {
   }
 
   /// Sets the CUDA device to the given one.
-  void set_device(int32_t device) {
-    device_guard_.set_index(device);
+  /// TODO: Deprecate this name
+  void set_device(int32_t device_index) {
+    set_index(device_index);
+  }
+
+  /// Sets the CUDA device to the given one.
+  void set_index(int32_t device_index) {
+    device_guard_.set_device(at::Device(at::kCUDA, device_index));
   }
 
   /// Returns the CUDA streams that were active in the first call to
@@ -88,13 +93,13 @@ struct CUDAGuard {
   }
 
   /// Returns the device that was set upon construction of the guard.
-  int32_t original_device() const noexcept {
-    return device_guard_.original_index();
+  Device original_device() const noexcept {
+    return device_guard_.original_device();
   }
 
   /// Returns the last device that was set via `set_device`, if any.
-  int32_t last_device() const noexcept {
-    return device_guard_.last_index();
+  Device last_device() const noexcept {
+    return device_guard_.last_device();
   }
 
  private:

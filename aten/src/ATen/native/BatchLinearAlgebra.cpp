@@ -114,7 +114,7 @@ std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
     // TODO: #7102: It's not necessary to have gesv (single) bindings for both
     // TH and ATen. We should remove the TH gesv bindings, especially
     // since the lapackGesv function is already in ATen.
-    return at::_gesv_single(self, A);
+    return at::_th_gesv_single(self, A);
   }
 
   gesvCheckInputs(self, A);
@@ -139,7 +139,7 @@ std::tuple<Tensor&,Tensor&> gesv_out(Tensor& solution, Tensor& lu, const Tensor&
   AT_CHECK(self.dim() == 2 && A.dim() == 2, 
            "torch.gesv() with the `out` keyword does not support batching. "
            "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
-  return at::_gesv_single_out(solution, lu, self, A);
+  return at::_th_gesv_single_out(solution, lu, self, A);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -192,7 +192,7 @@ Tensor inverse(const Tensor &self) {
     return at::empty_like(self);
   }
   if (self.dim() == 2) {
-    return at::_getri_single(self);
+    return at::_th_getri_single(self);
   }
   inverseCheckInputs(self);
   return at::_inverse_helper(self);

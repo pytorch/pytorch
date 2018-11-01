@@ -5,6 +5,7 @@
 namespace at {
 namespace native {
 
+// Note [Implicit conversion between signed and unsigned]
 // C and C++ have a lovely set of implicit conversion rules, where casting
 // signed integral values to unsigned integral values is always valid
 // (it basically treats the value as if using modulo arithmetic), however

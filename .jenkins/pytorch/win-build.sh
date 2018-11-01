@@ -91,7 +91,10 @@ if "%REBUILD%"=="" (
   .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\\Miniconda3
 )
 call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3
-if "%REBUILD%"=="" ( call conda install -y -q numpy cffi pyyaml boto3 )
+if "%REBUILD%"=="" (
+  :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
+  call conda install -y -q python=3.6.7 numpy cffi pyyaml boto3
+)
 
 :: Install ninja
 if "%REBUILD%"=="" ( pip install ninja )
