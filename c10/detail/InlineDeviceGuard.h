@@ -30,15 +30,15 @@ template <typename T>
 class InlineDeviceGuard {
 public:
   /// Default constructor, does nothing.
-  InlineDeviceGuard() = default;
+  explicit InlineDeviceGuard() {}
 
   /// Set the current device to the passed Device.
-  InlineDeviceGuard(Device device) {
+  explicit InlineDeviceGuard(Device device) {
     set_device(device); // In Optimizer We Trust
   }
 
   /// Set the current device to the passed Device
-  InlineDeviceGuard(optional<Device> device_opt) {
+  explicit InlineDeviceGuard(optional<Device> device_opt) {
     if (device_opt.has_value()) {
       set_device(device_opt.value());
     }
@@ -49,7 +49,7 @@ public:
 
   /// Set the current device index to the passed DeviceIndex.  (The
   /// device type is inferred from the template parameter T).
-  InlineDeviceGuard(DeviceIndex device_index)
+  explicit InlineDeviceGuard(DeviceIndex device_index)
     : InlineDeviceGuard(Device(T().type(), device_index)) {}
 
 
