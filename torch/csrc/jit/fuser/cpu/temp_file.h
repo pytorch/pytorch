@@ -1,21 +1,18 @@
-#include "torch/csrc/jit/fusers/Config.h"
-#if USE_CPU_FUSER
 #pragma once
-
-#include "torch/csrc/jit/assertions.h"
-
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/utils/disallow_copy.h"
+#include "torch/csrc/jit/fuser/config.h"
+#if USE_CPU_FUSER
 
 #include "ATen/ATen.h"
-
+#include "torch/csrc/WindowsTorchApiMacro.h"
+#include "torch/csrc/utils/disallow_copy.h"
+#include "torch/csrc/jit/assertions.h"
 
 #include "unistd.h"
 
 #include <string>
 #include <vector>
 
-namespace torch { namespace jit { namespace cpufuser {
+namespace torch { namespace jit { namespace fuser { namespace cpu {
 
 struct TempFile {
   TH_DISALLOW_COPY_AND_ASSIGN(TempFile);
@@ -63,7 +60,8 @@ private:
   std::string name_;
 };
 
-} // namespace cpufuser
+} // namespace cpu
+} // namespace fuser
 } // namespace jit 
 } // namespace torch
 

@@ -1,10 +1,12 @@
-#include "torch/csrc/jit/fusers/Config.h"
-#if USE_CPU_FUSER
 #pragma once
+#include "torch/csrc/jit/fuser/config.h"
+#if USE_CPU_FUSER
+
+#include "torch/csrc/jit/assertions.h"
 
 #include "dlfcn.h"
 
-namespace torch { namespace jit { namespace cpufuser {
+namespace torch { namespace jit { namespace fuser { namespace cpu {
 
 static void* checkDL(void* x) {
   if (!x) {
@@ -35,7 +37,8 @@ private:
   void* handle = nullptr;
 };
 
-} // namespace cpufuser
+} // namespace cpu
+} // namespace fuser
 } // namespace jit
 } // namespace torch
 
