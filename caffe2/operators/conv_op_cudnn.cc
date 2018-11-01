@@ -1250,7 +1250,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
           filter_desc_,
           bwd_filter_algo_,
           &bwd_filter_ws_size);
-      if(step == 0) {
+      if (step == 0) {
         if(_status == CUDNN_STATUS_SUCCESS) {
           break;
         }
