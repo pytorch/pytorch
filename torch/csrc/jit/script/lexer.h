@@ -9,7 +9,7 @@
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/source_range.h"
 #include <torch/csrc/utils/memory.h>
-#include <locale.h>
+#include <clocale>
 
 namespace torch {
 namespace jit {
@@ -84,7 +84,10 @@ namespace script {
   _(TK_ARROW, "arrow", "->")                     \
   _(TK_DECL, "decl", "")                         \
   _(TK_SLICE_EXPR, "slice expr", "")             \
-  _(TK_TYPE_COMMENT, "type comment", "# type:")
+  _(TK_TYPE_COMMENT, "type comment", "# type:")  \
+  _(TK_RAISE, "raise", "raise")                  \
+  _(TK_ASSERT, "assert", "assert")
+
 
 static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!";
 

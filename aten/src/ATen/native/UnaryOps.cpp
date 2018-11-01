@@ -89,11 +89,11 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
 }
 
 Tensor& fill_(Tensor& self, Scalar value) {
-  return at::_fill_(self, value);
+  return at::_th_fill_(self, value);
 }
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
-  return at::_fill_(self, value);
+  return at::_th_fill_(self, value);
 }
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
@@ -151,7 +151,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     result.resize_(self.sizes());                               \
-    return at::_##op##_out(result, self);                       \
+    return at::_th_##op##_out(result, self);                    \
   }
 
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple

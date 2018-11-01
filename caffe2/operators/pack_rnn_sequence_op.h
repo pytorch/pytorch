@@ -74,7 +74,7 @@ class PackRNNSequenceOpBase : public Operator<Context> {
         auto input_offset = Forward ? (offset + r) : (r * cols + c);
         auto output_offset = Forward ? (r * cols + c) : (offset + r);
         context_.CopyItemsSameDevice(
-            values.meta(),
+            values.dtype(),
             block_size,
             values_vec + input_offset * block_size,
             output_data + output_offset * block_size);

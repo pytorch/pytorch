@@ -1374,6 +1374,9 @@ _register_builtin(len, 'aten::len')
 
 _register_builtin(_wait, 'aten::wait')
 
+# torch.jit.Error
+Error = torch._C.JITException
+
 
 class _disable_tracing(object):
     def __enter__(self):

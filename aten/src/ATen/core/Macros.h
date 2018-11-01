@@ -5,7 +5,7 @@
 
 #include "c10/macros/Macros.h"
 
-#ifdef __CUDACC__
+#if defined(__CUDACC__) || defined(__HIPCC__)
 // Designates functions callable from the host (CPU) and the device (GPU)
 #define AT_HOST_DEVICE __host__ __device__
 #define AT_DEVICE __device__

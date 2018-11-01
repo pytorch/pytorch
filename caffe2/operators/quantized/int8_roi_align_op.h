@@ -286,7 +286,7 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
     Y->scale = Y_scale;
     Y->zero_point = Y_offset;
 
-    if (R.size() == 0) {
+    if (R.numel() == 0) {
       // Handle empty rois
       Y->t.Resize(0, pooled_height_, pooled_width_, X.t.dim32(3));
       // The following mutable_data calls are needed to allocate the tensors
@@ -302,7 +302,7 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
 
     // only supports NHWC now
     Y->t.Resize(R.dim32(0), pooled_height_, pooled_width_, X.t.dim32(3));
-    int output_size = Y->t.size();
+    int output_size = Y->t.numel();
 
     ROIAlignForward(
         output_size,

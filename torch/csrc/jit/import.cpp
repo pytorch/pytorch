@@ -301,11 +301,11 @@ at::Tensor ModuleDecoder::buildTensorCommon(
       size / at::CPU(type).typeMeta().itemsize(),
       nullptr);
     storage_map_.insert(std::make_pair(record_number, storage));
-    return at::CPU(type).tensor(*storage, storage_offset, dims, strides);
+    return at::CPU(type)._th_tensor(*storage, storage_offset, dims, strides);
   }
 
   auto storage = storage_it->second.get();
-  return at::CPU(type).tensor(*storage, storage_offset, dims, strides);
+  return at::CPU(type)._th_tensor(*storage, storage_offset, dims, strides);
 }
 
 // Given a full name of a parameter or method,

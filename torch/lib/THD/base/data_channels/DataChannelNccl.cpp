@@ -3,6 +3,7 @@
 #include "DataChannelUtils.hpp"
 
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAGuard.h>
 
 #include <THC/THC.h>
 #include <cuda.h>
@@ -148,7 +149,7 @@ void DataChannelNccl::destroy() {
   _destroySockets();
 
   // Guard GPU device
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
 
   /**
    * Destroy the CUDA and NCCL resources
@@ -173,7 +174,7 @@ void DataChannelNccl::_destroyNcclResources(THDGroup groupId) {
       // Devices used for this group ID
       auto devices = getDevicesList(_groupDevices[groupId][i]);
       // Guard GPU device
-      at::DeviceGuard gpuGuard;
+      at::cuda::CUDAGuard gpuGuard;
       // Destroy the CUDA events
       size_t idx = 0;
       for (auto& event : *(_groupNcclResources[groupId][i].ncclCudaEvents())) {
@@ -283,7 +284,7 @@ NcclResourcePair DataChannelNccl::_getNcclResourcePair(
   broadcastUniqueNcclId(&ncclId);
 
   // Guard GPU device
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
 
   // Now creating the CUDA events
   for (size_t i = 0; i < input.size(); ++i) {
@@ -408,7 +409,7 @@ void DataChannelNccl::allReduce(
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -457,7 +458,7 @@ void DataChannelNccl::allGather(
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -507,7 +508,7 @@ void DataChannelNccl::reduce(
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -559,7 +560,7 @@ void DataChannelNccl::broadcast(
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));

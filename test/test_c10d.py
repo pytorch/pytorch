@@ -18,7 +18,7 @@ import torch.nn.functional as F
 import torch.distributed as c10d
 from torch.nn.parallel import DistributedDataParallel
 
-from common_utils import TestCase, load_tests
+from common_utils import TestCase, load_tests, run_tests
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -915,4 +915,4 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 if __name__ == '__main__':
     assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
 
-    unittest.main()
+    run_tests()

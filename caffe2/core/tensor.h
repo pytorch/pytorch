@@ -70,17 +70,6 @@ class CAFFE2_API Tensor final {
   }
 
   /**
-   * context_for_copy is required to have the same DeviceType as src
-   */
-  Tensor(const Tensor& src, BaseContext* context_for_copy, DeviceType type)
-      : Tensor(
-            (context_for_copy && context_for_copy->device_type() == type)
-                ? context_for_copy->device()
-                : type) {
-    CopyFrom(src, context_for_copy);
-  }
-
-  /**
    * @brief: Create a Tensor of at::DeviceType `type` and initialize it with
    * src Tensor
    */
