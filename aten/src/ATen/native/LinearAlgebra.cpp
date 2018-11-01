@@ -307,9 +307,9 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
         });
     }
   } else if (at::hasMKL() && at::native::is_floating_point(self_or_result)
-	     && batch_items_contiguous_or_transposed(batch1)
-	     && batch_items_contiguous_or_transposed(batch2)
-	     && self_or_result.is_contiguous()) {
+            && batch_items_contiguous_or_transposed(batch1)
+            && batch_items_contiguous_or_transposed(batch2)
+            && self_or_result.is_contiguous()) {
     at::native::_baddbmm_mkl_(self_or_result, batch1, batch2, beta, alpha);
   } else { // split along batch dimension
     if (is_bmm_out) {
@@ -558,7 +558,9 @@ Tensor nuclear_norm(const Tensor& self, bool keepdim) {
       "Expected a tensor with 2 dimensions, but got a ",
       self.dim(),
       " dimensions tensor instead.");
-  return at::sum(std::get<1>(at::svd(self)), 0, keepdim);
+  bool self_need_grad = self.is_variable() && self.requires_grad();
+  auto S = std::get<1>(at::svd(self, /*some=*/true, /*compute_uv=*/self_need_grad));
+  return at::sum(S, 0, keepdim);
 }
 
 Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
@@ -567,7 +569,9 @@ Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
       "Expected a tensor with 2 dimensions, but got a ",
       self.dim(),
       " dimensions tensor instead.");
-  return at::sum_out(result, std::get<1>(at::svd(self)), 0, keepdim);
+  bool self_need_grad = self.is_variable() && self.requires_grad();
+  auto S = std::get<1>(at::svd(self, /*some=*/true, /*compute_uv=*/self_need_grad));
+  return at::sum_out(result, S, 0, keepdim);
 }
 
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {

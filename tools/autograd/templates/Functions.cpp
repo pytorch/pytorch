@@ -1643,7 +1643,8 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
     return grad * det * self.inverse().t();
   } else /* otherwise det = \prod(sigma) = 0, use svd */ {
     Tensor u, sigma, v;
-    std::tie(u, sigma, v) = self.svd();
+    bool self_need_grad = self.is_variable() && self.requires_grad();
+    std::tie(u, sigma, v) = self.svd(/*some=*/true, /*compute_uv=*/self_need_grad);
     auto gsigma = prod_backward(grad, sigma, det);
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   }
@@ -1655,7 +1656,8 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
     return grad * self.inverse().t();
   } else /* otherwise det = \prod(sigma) = 0, use svd */ {
     Tensor u, sigma, v;
-    std::tie(u, sigma, v) = self.svd();
+    bool self_need_grad = self.is_variable() && self.requires_grad();
+    std::tie(u, sigma, v) = self.svd(/*some=*/true, /*compute_uv=*/self_need_grad);
     // backward det = \sum log(sigma)
     auto gsigma = grad.div(sigma);
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
@@ -1671,7 +1673,8 @@ Tensor slogdet_backward(const std::vector<torch::autograd::Variable> &grads,
     return grads[1] * self.inverse().t();
   } else /* otherwise det = \prod(sigma) = 0, use svd */ {
     Tensor u, sigma, v;
-    std::tie(u, sigma, v) = self.svd();
+    bool self_need_grad = self.is_variable() && self.requires_grad();
+    std::tie(u, sigma, v) = self.svd(/*some=*/true, /*compute_uv=*/self_need_grad);
     // sigma has all non-negative entries (also with at least one zero entry)
     // so logabsdet = \sum log(abs(sigma))
     // but det = 0, so backward logabsdet = \sum log(sigma)
