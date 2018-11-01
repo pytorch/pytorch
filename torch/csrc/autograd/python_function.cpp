@@ -420,6 +420,16 @@ static void _wrap_outputs(THPFunction *self,
     }
   };
 
+  // First initialize cdata, rebase_history needs it
+  if (cdata) {
+    for (int i = 0; i < num_outputs; i++) {
+      PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
+      auto var = as_variable(obj, i);
+      auto output_nr = cdata->add_input_metadata(var);
+      AT_ASSERT(i == (int)output_nr);
+    }
+  }
+
   for (int i = 0; i < num_outputs; i++) {
     PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
 
@@ -430,10 +440,6 @@ static void _wrap_outputs(THPFunction *self,
     // Note that output Variables may be repeated. In that case, the last call
     // to set_history wins.
     auto var = as_variable(obj, i);
-    if (cdata) {
-      auto output_nr = cdata->add_input_metadata(var);
-      AT_ASSERT(i == (int)output_nr);
-    }
     set_history(var, i, is_input, is_modified, is_differentiable);
 
     if (is_executable) {
