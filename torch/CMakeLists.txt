@@ -585,9 +585,18 @@ if (BUILD_PYTHON)
   set(TORCH_PYTHON_LINK_FLAGS)
 
   if (MSVC)
-    list(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
+    list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
+      /Ox
+      /GL)
+    list(APPEND TORCH_PYTHON_LINK_FLAGS
+      /NODEFAULTLIB:LIBCMT.LIB
+      /NODEFAULTLIB:LIBUCRT.LIB
+      /LTCG)
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES
+      ucrt.lib)
   elseif (APPLE)
-    list(APPEND TORCH_PYTHON_LINK_FLAGS " -undefined dynamic_lookup")
+    list(APPEND TORCH_PYTHON_LINK_FLAGS
+      " -undefined dynamic_lookup")
   else()
     list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
       -fno-strict-aliasing
