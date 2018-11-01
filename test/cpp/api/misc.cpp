@@ -3,7 +3,7 @@
 #include <torch/csrc/utils/tempfile.h>
 #include <torch/nn/init.h>
 #include <torch/nn/modules/linear.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>

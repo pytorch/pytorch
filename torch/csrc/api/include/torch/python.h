@@ -5,7 +5,7 @@
 
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <iterator>
 #include <string>

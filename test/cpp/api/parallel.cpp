@@ -5,7 +5,7 @@
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/parallel/data_parallel.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <test/cpp/api/support.h>
 

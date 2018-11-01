@@ -4,7 +4,7 @@
 #include <torch/nn/cursor.h>
 #include <torch/nn/pimpl.h>
 #include <torch/serialize/archive.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <ATen/ATen.h>
 
