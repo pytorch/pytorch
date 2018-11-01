@@ -7246,7 +7246,7 @@ class TestTorch(TestCase):
     def test_roll(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
-            numbers = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=device)
+            numbers = torch.arange(1, 9, device=device)
 
             single_roll = numbers.roll(1, 0)
             expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device)
