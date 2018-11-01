@@ -1241,7 +1241,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
     // get workspace size for backwards filter algorithm
     size_t bwd_filter_ws_size, bwd_data_ws_size;
 
-    for(int step = 0; step < 2; ++step) {
+    for (int step = 0; step < 2; ++step) {
       cudnnStatus_t _status = cudnnGetConvolutionBackwardFilterWorkspaceSize(
           cudnn_wrapper_.inline_cudnn_handle(),
           bottom_desc_,
