@@ -43,7 +43,7 @@ enum DeserializeMode {
 //       transferred to Tensor
 struct SharedData {
   // constructor
-  explicit SharedData(uint64_t record_id) : recordId(record_id) {}
+  explicit SharedData(uint64_t record_id) : recordId(record_id), dataPtr() {}
   explicit SharedData(uint64_t record_id, at::DataPtr&& data_ptr, uint64_t size)
     : recordId(record_id), dataPtr(std::move(data_ptr)), size(size) {}
 
@@ -52,7 +52,7 @@ struct SharedData {
   // For deserialize:
   //   1) in EAGER mode, size information is avaiable immediately
   //   2) in LAZY mode, until we load the tensor data, size won't be available
-  uint64_t size;
+  uint64_t size = 0;
 };
 
 // IntermediateDeviceOption stores device related information
