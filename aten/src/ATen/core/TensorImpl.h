@@ -735,17 +735,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     storage_offset_ = storage_offset;
   }
 
-  /* Sets the storage of this tensor to be new_storage */
-  void set_storage(const Storage& new_storage) {
-    auto* new_storage_ = new_storage.unsafeGetStorageImpl();
-    auto* old_storage_ = storage_.unsafeGetStorageImpl();
-    AT_ASSERTM(old_storage_, "Tensor: invalid null storage");
-    if (new_storage_ == old_storage_) {
-      return;
-    }
-    storage_ = new_storage;
-  }
-
   /**
    * Like set_sizes_and_strides but assumes contiguous strides.
    *
