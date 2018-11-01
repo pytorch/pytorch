@@ -5129,6 +5129,24 @@ class TestNN(NNTestCase):
         self.assertEqual(F.mse_loss(i, t, reduction='none').size(), t.size())
         self.assertEqual(F.l1_loss(i, t, reduction='none').size(), t.size())
 
+    def test_pointwise_loss_broadcast(self):
+        losses = {
+            'mse_loss': lambda x, y, r: F.mse_loss(x, y, reduction=r),
+            'l1_loss': lambda x, y, r: F.l1_loss(x, y, reduction=r),
+            'smooth_l1_loss': lambda x, y, r: F.smooth_l1_loss(x, y, reduction=r),
+        }
+
+        input = torch.randn(2, 1, requires_grad=True)
+        for name, fn in losses.items():
+            for requires_grad in [True, False]:
+                # When target.requires_grad=True, its impl is in Python, while the other is in TH.
+                target = torch.randn(2, 10, requires_grad=requires_grad)
+                for reduction in ['none', 'elementwise_mean', 'sum']:
+                    l = fn(input, target, reduction)
+                    if reduction == 'none':
+                        self.assertEqual(l.size(), target.size())
+                    self.assertTrue(gradcheck(fn, (input, target, reduction)))
+
     def test_cosine_similarity(self):
         input1 = torch.randn(4, 4, requires_grad=True)
         input2 = torch.randn(4, 4, requires_grad=True)

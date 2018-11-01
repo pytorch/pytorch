@@ -3511,6 +3511,12 @@ a")
         self.checkScriptRaisesRegex(bad_negative_index, (), IndexError,
                                     "list index out of range")
 
+    def test_tensor_len(self):
+        def func(x):
+            return len(x)
+
+        self.checkScript(func, [torch.ones(4, 5, 6)])
+
     def test_list_len(self):
         def func():
             a = [1, 2, 3]
@@ -4164,6 +4170,14 @@ a")
         x = torch.arange(4., requires_grad=True)
         y = torch.arange(0., 8, 2, requires_grad=True)
         self.checkScript(func, [x, y], optimize=True, capture_output=True)
+
+    def test_format(self):
+        def func(x):
+            print("{}, I'm a {}".format("Hello", "test"))
+            return x + 1
+
+        x = torch.arange(4., requires_grad=True)
+        self.checkScript(func, [x], optimize=True, capture_output=True)
 
     def test_logical_short_circuit(self):
         @torch.jit.script
@@ -7952,6 +7966,16 @@ a")
         # Re-assignment is not tracked
         weak_mod.weight = torch.nn.Parameter(torch.ones(5, 5) * 100)
         self.assertFalse(strong_mod(inp).allclose(weak_mod(inp)))
+
+    def test_backend_cudnn_enabled(self):
+        # Only test that this compiles
+        @torch.jit.script
+        def fn(x):
+            if torch.backends.cudnn.enabled:
+                x = x + 2
+            else:
+                x = x + 3
+            return x
 
     def test_inplace_add(self):
 
