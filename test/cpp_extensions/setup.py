@@ -6,7 +6,7 @@ from torch.utils.cpp_extension import CUDA_HOME
 ext_modules = [
     CppExtension(
         'torch_test_cpp_extension.cpp', ['extension.cpp'],
-        extra_compile_args=['-g']),
+        extra_compile_args=['-g', '-Werror']),
 ]
 
 if torch.cuda.is_available() and CUDA_HOME is not None:
@@ -16,7 +16,7 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
             'cuda_extension_kernel.cu',
             'cuda_extension_kernel2.cu',
         ],
-        extra_compile_args={'cxx': ['-g'],
+        extra_compile_args={'cxx': ['-g', '-Werror'],
                             'nvcc': ['-O2']})
     ext_modules.append(extension)
 

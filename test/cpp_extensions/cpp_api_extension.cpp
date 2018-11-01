@@ -1,6 +1,4 @@
 #include <torch/extension.h>
-#include <torch/python.h>
-#include <torch/torch.h>
 
 struct Net : torch::nn::Module {
   Net(int64_t in, int64_t out)
