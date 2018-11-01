@@ -121,9 +121,6 @@ bool ProcessGroupNCCL::WorkNCCL::wait() {
 
 // Waiting on the work's corresponding CUDA events
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
-  // TODO: remove
-  // auto thcState = ::at::globalContext().lazyInitCUDA();
-  // at::cuda::CUDAGuard gpuGuard;
   for (size_t i = 0; i < devices_.size(); ++i) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream

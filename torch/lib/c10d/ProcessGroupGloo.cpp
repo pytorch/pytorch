@@ -514,10 +514,7 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
     entry->streams.reserve(key.devices.size());
     entry->events.resize(key.devices.size());
     for (size_t i = 0; i < key.devices.size(); i++) {
-      // TODO: revisit
-      // entry->streams.push_back(at::cuda::getStreamFromPool(true, i));
       entry->streams.push_back(at::cuda::getStreamFromPool(true, key.devices[i]));
-
     }
   }
 #endif
