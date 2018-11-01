@@ -456,13 +456,22 @@ private:
   }
 
   void runOptimization(std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
+    // Basic graph preprocessing to eliminate noise.
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
     ConstantPooling(graph);
-    UnrollLoops(graph);
+
     PeepholeOptimize(graph);
-    CheckInplace(graph);
+
+    // Unroll small loops, and eliminate expressions that are the same at every
+    // iteration.
+    UnrollLoops(graph);
+    EliminateCommonSubexpression(graph);
+
+    // Rewrite subgraphs with many MMs into expressions that batch them.
     BatchMM(graph);
+
+    CheckInplace(graph);
   }
 
   void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
