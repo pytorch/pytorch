@@ -6,6 +6,8 @@
 #include "ATen/detail/CUDAHooksInterface.h"
 
 #include <vector>
+#include "caffe2/operators/experimental/c10/schemas/layer_norm.h"
+#include "caffe2/core/dispatch/Dispatcher.h"
 
 static const int MIOPEN_DIM_MAX = 4;
 
@@ -179,6 +181,30 @@ Tensor layer_norm(const Tensor& input, IntList normalized_shape,
     } else {
       return out;
     }
+}
+
+caffe2::Tensor to_caffe2(const Tensor& tensor) {
+  return caffe2::Tensor(tensor.getIntrusivePtr());
+}
+
+Tensor c10_layer_norm_dont_use_this_op_yet(
+    const Tensor& input, IntList normalized_shape,
+    const Tensor& weight /* optional */, const Tensor& bias /* optional */,
+    double epsilon, bool cudnn_enabled) {
+  int axis = input.dim() - normalized_shape.size();
+  // TODO weight/bias
+  // TODO cudnn_enabled
+  caffe2::ops::LayerNorm::Cache cache;
+  caffe2::CPUContext context;
+  Tensor output = at::empty({0});
+  Tensor output_mean = at::empty({0});
+  Tensor output_stdev = at::empty({0});
+  caffe2::Tensor caffe2_input = to_caffe2(input);
+  caffe2::Tensor caffe2_output = to_caffe2(output);
+  caffe2::Tensor caffe2_output_mean = to_caffe2(output_mean);
+  caffe2::Tensor caffe2_output_stdev = to_caffe2(output_stdev);
+  c10::Dispatcher<caffe2::ops::LayerNorm>::call(caffe2_input, &caffe2_output, &caffe2_output_mean, &caffe2_output_stdev, axis, (float)epsilon, &cache, static_cast<caffe2::BaseContext*>(&context));
+  return output;
 }
 
 Tensor group_norm(const Tensor& input, int64_t num_groups,
