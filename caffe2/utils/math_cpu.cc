@@ -1527,40 +1527,6 @@ CAFFE2_SPECIALIZED_BROADCAST(double)
 
 namespace {
 
-#ifdef CAFFE2_USE_MKL
-
-template <typename T>
-C10_EXPORT void
-RowwiseMoments(const int rows, const int cols, const T* X, T* mean, T* var);
-
-#define DELEGATE_ROWWISE_MOMENTS_FUNCTION(T, prefix)                       \
-  template <>                                                              \
-  void RowwiseMoments<T>(                                                  \
-      const int rows, const int cols, const T* X, T* mean, T* var) {       \
-    VSLSSTaskPtr task;                                                     \
-    const auto x_storage = VSL_SS_MATRIX_STORAGE_ROWS;                     \
-    CAFFE_ENFORCE_EQ(                                                      \
-        vsl##prefix##SSNewTask(                                            \
-            &task, &rows, &cols, &x_storage, X, nullptr, nullptr),         \
-        VSL_STATUS_OK);                                                    \
-    CAFFE_ENFORCE_EQ(                                                      \
-        vsl##prefix##SSEditMoments(                                        \
-            task, mean, var, nullptr, nullptr, nullptr, nullptr, nullptr), \
-        VSL_STATUS_OK);                                                    \
-    constexpr int estimates = VSL_SS_MEAN | VSL_SS_2R_MOM;                 \
-    CAFFE_ENFORCE_EQ(                                                      \
-        vsl##prefix##SSCompute(task, estimates, VSL_SS_METHOD_1PASS),      \
-        VSL_STATUS_OK);                                                    \
-    CAFFE_ENFORCE_EQ(vslSSDeleteTask(&task), VSL_STATUS_OK);               \
-    EigenVectorArrayMap<T>(var, rows) -=                                   \
-        ConstEigenVectorArrayMap<T>(mean, rows).square();                  \
-  }
-DELEGATE_ROWWISE_MOMENTS_FUNCTION(float, s)
-DELEGATE_ROWWISE_MOMENTS_FUNCTION(double, d)
-#undef DELEGATE_ROWWISE_MOMENTS_FUNCTION
-
-#else // CAFFE2_USE_MKL
-
 template <typename T>
 C10_EXPORT void RowwiseMoments(
     const int rows,
@@ -1574,8 +1540,6 @@ C10_EXPORT void RowwiseMoments(
   mean_arr = X_arr.colwise().mean();
   var_arr = X_arr.square().colwise().mean() - mean_arr.square().transpose();
 }
-
-#endif // CAFFE2_USE_MKL
 
 template <typename T>
 C10_EXPORT void ColwiseMoments(
