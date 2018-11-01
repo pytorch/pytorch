@@ -83,6 +83,7 @@ def _check_module_exists(name):
         return loader is not None
     else:  # Python >= 3.4
         import importlib
+        import importlib.util
         spec = importlib.util.find_spec(name)
         return spec is not None
 

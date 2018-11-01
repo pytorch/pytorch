@@ -98,10 +98,10 @@ def shell(command, cwd=None):
     sys.stdout.flush()
     sys.stderr.flush()
     # The folloing cool snippet is copied from Py3 core library subprocess.call
-    # only the with `except KeyboardInterrupt` block added for SIGINT handling.
-    #
-    # In Py2, subprocess.Popen doesn't return a context manager, so we must do
-    # p.wait() in a `final` block for the code to be portable.
+    # only the with
+    #   1. `except KeyboardInterrupt` block added for SIGINT handling.
+    #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do
+    #      `p.wait()` in a `final` block for the code to be portable.
     #
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
     p = subprocess.Popen(shlex.split(command), universal_newlines=True, cwd=cwd)
@@ -386,6 +386,7 @@ def get_selected_tests(options):
 def main():
     options = parse_args()
     executable = get_executable_command(options)
+    print_to_stderr('Test executor: {}'.format(executable))
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)
 
