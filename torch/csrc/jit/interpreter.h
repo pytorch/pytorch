@@ -28,7 +28,7 @@ using Stack = std::vector<c10::IValue>;
 struct TORCH_API Code {
   Code()
     : pImpl(nullptr) {}
-  Code(std::shared_ptr<Graph>& graph);
+  Code(const std::shared_ptr<Graph>& graph);
   ~Code();
 
   const std::vector<GraphExecutor*>& grad_executors();

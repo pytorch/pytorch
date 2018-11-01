@@ -362,7 +362,7 @@ int relativeJump(int from_inst, int to_inst) {
 }
 
 struct CodeImpl {
-  CodeImpl(std::shared_ptr<Graph>& graph_)
+  CodeImpl(const std::shared_ptr<Graph>& graph_)
       : preprocess(*graph_) {
     graph = preprocess.graph;
     insertNodesFromBlock(graph->block());
@@ -730,7 +730,7 @@ std::ostream & operator<<(std::ostream & out, const Code & code) {
   return out;
 }
 
-Code::Code(std::shared_ptr<Graph>& graph)
+Code::Code(const std::shared_ptr<Graph>& graph)
     : pImpl(new CodeImpl(graph)) {}
 Code::~Code() = default;
 

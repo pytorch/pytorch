@@ -35,7 +35,7 @@
 #include "torch/csrc/jit/pybind_utils.h"
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/script/jit_exception.h"
 
 #include "caffe2/serialize/inline_container.h"

@@ -1,24 +1,58 @@
-#include "torch/csrc/jit/fusers/cpu/fused_kernel.h"
-
-#include "torch/csrc/jit/fusers/cpu/fusion_compiler.h"
-#include "torch/csrc/jit/fusers/cpu/temp_file.h"
-#include "torch/csrc/jit/fusers/cpu/dynamic_library.h"
-#include "torch/csrc/jit/fusers/common/annotated_graph.h"
+#include "torch/csrc/jit/fuser/cpu/fused_kernel.h"
 
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/code_template.h"
+#include "torch/csrc/jit/fuser/cpu/temp_file.h"
+#include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
 
 #include <sstream>
-#include <tuple>
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <stdexcept>
 
-
-namespace torch { namespace jit { namespace cpufuser {
+namespace torch { namespace jit { namespace fuser { namespace cpu {
 
 static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
 static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
+static const std::string check_exists_string = "which '${program}' > /dev/null";
+
+static bool programExists(const std::string& program) {
+  TemplateEnv env;
+  env.s("program", program);
+  std::string cmd = format(check_exists_string, env);
+  return (system(cmd.c_str()) == 0);
+}
+
+// A single compiler config is accessed through getConfig() (below)
+// Controls compilation options and may be updated based on the result
+// of compilation attempts.
+struct CompilerConfig {
+  CompilerConfig() {
+    const char* cxx_env = getenv("CXX");
+    if (cxx_env != nullptr) {
+      cxx = cxx_env;
+    }
+
+    if (!programExists(cxx)) {
+      cxx = "";
+    }
+    
+    const char* debug_env = getenv("PYTORCH_FUSION_DEBUG");
+    debug = debug_env && atoi(debug_env) != 0;
+  }
+
+  ~CompilerConfig() = default;
+
+  std::string cxx = "g++"; // compiler location
+  bool debug = false; // emit debugging information about fusions
+  bool openmp = true;
+};
+
+static CompilerConfig& getConfig() {
+  static CompilerConfig config;
+  return config;
+}
 
 // NB: -march=native not supported on PPC64 g++.  It's a bit annoying
 // to do a configure-style test to decide whether or not the g++
@@ -38,20 +72,20 @@ static const std::string compile_string =
   "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 
 static void runCompiler(
-  CPUFusionCompilerConfig& config
-, const std::string& cpp_file
+  const std::string& cpp_file
 , const std::string& so_file) {
+  auto& config = getConfig();
   TemplateEnv env;
   env.s("cxx", config.cxx);
   env.s("fopenmp", config.openmp ? "-fopenmp" : "");
-  env.s("cpp_file",cpp_file);
-  env.s("so_file",so_file);
+  env.s("cpp_file", cpp_file);
+  env.s("so_file", so_file);
   std::string result = format(compile_string, env);
   int r = system(result.c_str());
   if (config.openmp && r != 0) {
     std::cerr << "warning: pytorch jit fuser failed to compile with openmp, trying without it...\n";
     config.openmp = false; // disable for future compiles
-    return runCompiler(config, cpp_file, so_file);
+    return runCompiler(cpp_file, so_file);
   }
   JIT_ASSERTM(r == 0, "Failed to compile a fused CPU kernel");
 }
@@ -66,30 +100,29 @@ static void disas(const std::string& so_file) {
   JIT_ASSERT(r == 0);
 }
 
-CPUFusedKernel::CPUFusedKernel(
-  const std::string& name
-, AnnotatedGraph& agraph
-, CPUFusionCompilerConfig& config)
-: FusedKernel(name, agraph) {
+FusedKernelCPU::FusedKernelCPU(
+  const std::string& _name
+, const std::string& _code
+, const std::vector<TensorDesc> _input_desc
+, const std::vector<TensorDesc> _output_desc
+, const std::vector<PartitionDesc> _chunk_desc
+, const std::vector<PartitionDesc> _concat_desc
+, const bool _has_random)
+: FusedKernel{_name, _code, _input_desc, _output_desc, _chunk_desc, _concat_desc, _has_random} {
+  auto& config = getConfig();
   TempFile so_file(so_template, 3);
   TempFile cpp_file(cpp_template, 4);
-
-  std::stringstream cu;
-  std::tie(chunk_desc, concat_desc, has_random) = emitCompilationUnit(cu, name, agraph, false);
-  JIT_ASSERT(!has_random);
-  compilation_unit = cu.str();
-  cpp_file.write(compilation_unit);
+  cpp_file.write(code_);
   cpp_file.sync();
-  runCompiler(config, cpp_file.name(), so_file.name());
-  if (config.debug) {
-    disas(so_file.name());
-  }
+  runCompiler(cpp_file.name(), so_file.name());
+  if (config.debug) disas(so_file.name());
   so_lib.reset(new DynamicLibrary(so_file.name().c_str()));
   #pragma GCC diagnostic ignored "-Wpedantic"
-    kernel = reinterpret_cast<void(*)(uint32_t, void**)>(so_lib->sym(name.c_str()));
+    kernel = reinterpret_cast<void(*)(uint32_t, void**)>(so_lib->sym(name_.c_str()));
   #pragma GCC diagnostic pop
 }
 
-} // namespace cpufuser
+} // namespace cpu
+} // namespace fuser
 } // namespace jit
 } // namespace torch

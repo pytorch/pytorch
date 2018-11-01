@@ -29,7 +29,7 @@ RegisterOperators reg({
         }),
     Operator(
         "aten::format(str self, *str args) -> str",
-        [](Node* node) {
+        [](const Node* node) {
           size_t num_inputs = node->inputs().size();
           std::regex unsupported_options("\\{(.*)\\}");
           return [num_inputs, unsupported_options](Stack& stack) {
