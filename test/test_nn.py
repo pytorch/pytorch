@@ -7962,6 +7962,7 @@ new_module_tests = [
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
         cudnn=True,
+        decorator=skipIfRocm
     ),
     dict(
         fullname='Conv2d_groups_thnn',
