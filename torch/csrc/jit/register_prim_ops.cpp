@@ -187,7 +187,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::ToString,
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           return [](Stack& stack) {
             std::stringstream ss;
             ss << pop(stack);
