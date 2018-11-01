@@ -6,7 +6,7 @@
 namespace at {
 namespace serialize{
 
-void IntermediateTensor::update(caffe2::TensorProto* tensor_proto,
+C10_EXPORT void IntermediateTensor::update(caffe2::TensorProto* tensor_proto,
     std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
     DeserializeMode mode) {
   AT_ASSERTM(tensor_proto->has_data_type(), "no data_type in TensorProto!");
@@ -96,7 +96,7 @@ void IntermediateTensor::update(caffe2::TensorProto* tensor_proto,
 
 }
 
-void IntermediateTensor::dump(caffe2::TensorProto* tensor_proto) {
+C10_EXPORT void IntermediateTensor::dump(caffe2::TensorProto* tensor_proto) {
   for (auto dim : dims_) {
     tensor_proto->add_dims(dim);
   }
@@ -119,7 +119,7 @@ void IntermediateTensor::dump(caffe2::TensorProto* tensor_proto) {
   }
 }
 
-IntermediateParameter::IntermediateParameter(torch::ParameterDef* param_def,
+C10_EXPORT IntermediateParameter::IntermediateParameter(torch::ParameterDef* param_def,
     std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
     DeserializeMode mode) {
   AT_ASSERTM(param_def->has_name(), "ParameterDef has no name! ",
@@ -135,7 +135,7 @@ IntermediateParameter::IntermediateParameter(torch::ParameterDef* param_def,
   }
 }
 
-void IntermediateParameter::dump(torch::ParameterDef* param_def) {
+C10_EXPORT void IntermediateParameter::dump(torch::ParameterDef* param_def) {
   param_def->set_name(name_);
   param_def->set_is_buffer(isBuffer_);
   param_def->set_require_gradient(requireGradient_);
@@ -143,7 +143,7 @@ void IntermediateParameter::dump(torch::ParameterDef* param_def) {
   tensor_.dump(tensor_def);
 }
 
-IntermediateMethod::IntermediateMethod(torch::MethodDef* method_def) {
+C10_EXPORT IntermediateMethod::IntermediateMethod(torch::MethodDef* method_def) {
   AT_ASSERTM(method_def->has_name(), "name is required for MethodDef!");
   name_ = method_def->name();
   if (method_def->has_torch_script()) {
@@ -156,7 +156,7 @@ IntermediateMethod::IntermediateMethod(torch::MethodDef* method_def) {
 }
 
 
-void IntermediateMethod::dump(torch::MethodDef* method_def) {
+C10_EXPORT void IntermediateMethod::dump(torch::MethodDef* method_def) {
   AT_ASSERTM(name_.size() > 0, "IntermediateMethod's name is invalid. name: ", name_);
   method_def->set_name(name_);
   if (graph_) {
@@ -166,13 +166,13 @@ void IntermediateMethod::dump(torch::MethodDef* method_def) {
   }
 }
 
-IntermediateModule::IntermediateModule(torch::ModuleDef* module_def,
+C10_EXPORT IntermediateModule::IntermediateModule(torch::ModuleDef* module_def,
     std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
     DeserializeMode mode) {
   update(module_def, id_data, mode);
 }
 
-void IntermediateModule::update(torch::ModuleDef* module_def,
+C10_EXPORT void IntermediateModule::update(torch::ModuleDef* module_def,
     std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
     DeserializeMode mode) {
   AT_ASSERTM(module_def->has_name(), "name is required for ModuleDef!");
@@ -193,7 +193,7 @@ void IntermediateModule::update(torch::ModuleDef* module_def,
   }
 }
 
-void IntermediateModule::dump(torch::ModuleDef* module_def) {
+C10_EXPORT void IntermediateModule::dump(torch::ModuleDef* module_def) {
   module_def->set_name(name_);
 
   for (int i = 0; i < parameters_.size(); ++i) {
@@ -215,7 +215,7 @@ void IntermediateModule::dump(torch::ModuleDef* module_def) {
   }
 }
 
-void IntermediateModel::update(torch::ModelDef* model_def,
+C10_EXPORT void IntermediateModel::update(torch::ModelDef* model_def,
     std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
     DeserializeMode mode) {
   AT_ASSERTM(model_def->has_name(), "name is required for ModelDef.");
@@ -229,7 +229,7 @@ void IntermediateModel::update(torch::ModelDef* model_def,
   mainModule_.update(model_def->mutable_main_module(), id_data, mode);
 }
 
-void IntermediateModel::dump(torch::ModelDef* model_def) {
+C10_EXPORT void IntermediateModel::dump(torch::ModelDef* model_def) {
   model_def->set_name(name_);
   model_def->set_producer_name(producerName_);
   model_def->set_producer_version(producerVersion_);
@@ -237,7 +237,7 @@ void IntermediateModel::dump(torch::ModelDef* model_def) {
   mainModule_.dump(model_def->mutable_main_module());
 }
 
-void serializeIntermediateModel(IntermediateModel* imodel,
+C10_EXPORT void serializeIntermediateModel(IntermediateModel* imodel,
     torch::jit::PyTorchFileWriter* writer) {
   std::unordered_map<void*, uint64_t> data_id;
   std::stack<IntermediateModule*> imodules;
@@ -275,13 +275,13 @@ void serializeIntermediateModel(IntermediateModel* imodel,
   free(buffer);
 }
 
-void serializeIntermediateModel(IntermediateModel* imodel, const std::string& filename) {
+C10_EXPORT void serializeIntermediateModel(IntermediateModel* imodel, const std::string& filename) {
   torch::jit::PyTorchFileWriter writer(filename);
   serializeIntermediateModel(imodel, &writer);
   writer.writeEndOfFile();
 }
 
-void deserializeIntermediateModel(IntermediateModel* imodel,
+C10_EXPORT void deserializeIntermediateModel(IntermediateModel* imodel,
     torch::jit::PyTorchFileReader* reader, DeserializeMode mode) {
   std::unordered_map<uint64_t, std::shared_ptr<SharedData>> id_data;
   if (mode == DeserializeMode::LAZY) {
@@ -315,7 +315,7 @@ void deserializeIntermediateModel(IntermediateModel* imodel,
   }
 }
 
-void deserializeIntermediateModel(IntermediateModel* imodel, const std::string& filename, DeserializeMode mode) {
+C10_EXPORT void deserializeIntermediateModel(IntermediateModel* imodel, const std::string& filename, DeserializeMode mode) {
   torch::jit::PyTorchFileReader reader(filename);
   deserializeIntermediateModel(imodel, &reader, mode);
 }
