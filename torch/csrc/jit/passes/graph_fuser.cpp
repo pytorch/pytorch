@@ -16,10 +16,6 @@ namespace torch { namespace jit {
 
 namespace {
 
-// TODO TODO TODO TODO TODO: things to check before running
-// - same device
-// - same scalar types
-
 // What is a simple mappable operator?  It:
 //    - Has a single tensor output
 //    - Output and all tensor inputs have the same shape
@@ -292,7 +288,7 @@ struct GraphFuser {
     return group;
   }
 
-  // TODO TODO TODO TODO remove this and use WithInsertPoint instead
+  // TODO: remove this and use WithInsertPoint instead
   void insertAt(Node ** insertion_point, Node * n) {
     n->insertAfter(*insertion_point);
     *insertion_point = n;
