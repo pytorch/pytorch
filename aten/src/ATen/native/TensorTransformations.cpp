@@ -61,10 +61,8 @@ Tensor roll_cpu(const Tensor& self, IntList shifts, IntList dims) {
   // todo: support rolling along no or multiple dimensions as in numpy.roll.
   AT_CHECK(dims.size() == 1, "only single dimension roll currently supported");
   AT_CHECK(shifts.size() == dims.size(), "shifts and dimensions must align");
-  // If the first dimension is zero, this is an empty tensor and rolls do nothing.
-  // Return a clone so the caller can safely modify result, and avoid a div by
-  // zero error below.
-  if( self.size(0) == 0 ) {
+  // avoid a div zero error below.
+  if( self.numel() == 0 ) {
     return self.clone();
   }
   int64_t dim = dims[0];
