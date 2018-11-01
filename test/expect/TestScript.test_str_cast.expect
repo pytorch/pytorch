@@ -1,0 +1,14 @@
+graph(%a : Dynamic
+      %b : int
+      %c : bool
+      %d : float) {
+  %4 : string = prim::ToString(%a)
+   = prim::Print(%4)
+  %5 : string = prim::ToString(%b)
+   = prim::Print(%5)
+  %6 : string = prim::ToString(%c)
+   = prim::Print(%6)
+  %7 : string = prim::ToString(%d)
+   = prim::Print(%7)
+  return (%a);
+}
