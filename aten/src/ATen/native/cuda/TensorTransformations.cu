@@ -2,6 +2,7 @@
 
 #include "ATen/cuda/detail/IndexUtils.cuh"
 #include "ATen/NativeFunctions.h"
+#include "ATen/cuda/CUDAApplyUtils.cuh"
 #include "ATen/cuda/CUDAContext.h"
 
 #include <cstddef>
@@ -154,33 +155,33 @@ Tensor roll_cuda(const Tensor& self, IntList shifts, IntList dims) {
   AT_CHECK(shifts.size() == dims.size(), "shifts and dimensions must align");
 
   auto in_tensor = self;
-  if( ! self.is_contiguous() ) {
+  if(!self.is_contiguous()) {
     in_tensor = self.contiguous();
   }
   auto out_tensor = at::empty_like(in_tensor);
   if (out_tensor.numel() == 0) {
     return out_tensor;
   }
-  const int64_t N = self.numel();
+  const int64_t N = in_tensor.numel();
   const int64_t dim = dims[0];
-  const int64_t size = self.size(dim);
+  const int64_t size = in_tensor.size(dim);
   int64_t start = (size - shifts[0]) % size;
   // Behavior of % is different in C++ vs Python for negative numbers. This
   // corrects the difference.
   if( start < 0 ) start = start + size;
 
-  const int64_t block_size = 512;
-  dim3 dim_block(block_size);
-  dim3 dim_grid((N + block_size - 1) / block_size);
+  dim3 dim_block = cuda::getApplyBlock();
+  dim3 dim_grid;
+  AT_CHECK(cuda::getApplyGrid(N, dim_grid, in_tensor.get_device()), "unable to get dim grid");
 
-  auto total_dims = self.dim();
+  auto total_dims = in_tensor.dim();
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "roll_cuda", [&] {
     roll_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
       in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N,
       dim, shifts[0], start,
       size,
-      in_tensor.strides()[dim],
+      in_tensor.stride(dim),
       total_dims);
   });
 

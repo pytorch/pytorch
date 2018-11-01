@@ -7266,7 +7266,8 @@ class TestTorch(TestCase):
             self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device), numbers.roll(1, 0))
 
             # test non-contiguous
-            strided = numbers.as_strided(size=(4, 2), stride=(1, 4))
+            # strided equivalent to numbers.as_strided(size=(4, 2), stride=(1, 4))
+            strided = numbers.view(2, 4).transpose(0, 1)
             self.assertFalse(strided.is_contiguous(), "this test needs a non-contiguous tensor")
             expected = torch.tensor([4, 8, 1, 5, 2, 6, 3, 7]).view(4, 2)
             rolled = strided.roll(1, 0)

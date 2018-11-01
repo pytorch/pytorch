@@ -4629,8 +4629,9 @@ last position are re-introduced at the first position.
 
 Args:
     input (Tensor): the input tensor
-    shift (int): The number of places by which the elements of the tensor are shifted.
-    dims (a list or tuple): axis along which to roll
+    shifts (int or tuple of ints): The number of places by which the elements
+        of the tensor are shifted
+    dims (int or tuple of ints): Axis along which to roll
 
 Example::
 
