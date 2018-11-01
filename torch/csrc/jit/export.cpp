@@ -371,7 +371,7 @@ class GraphEncoder: public EncoderBase {
   }
 
  private:
-  virtual void EncodeTensor(
+  void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
       const c10::optional<std::string> external_ref = {}) override;
@@ -450,15 +450,15 @@ class ModuleEncoder: public EncoderBase {
                     script::Method &method,
                     const std::string prefix);
 
-  virtual void EncodeTensor(
+  void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
       const c10::optional<std::string> external_ref = {}) override;
 
-  virtual void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
+  void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
                                            const Value* n) override;
 
-  virtual void EncodeValueInfo(onnx::GraphProto *graph_proto,
+  void EncodeValueInfo(onnx::GraphProto *graph_proto,
                                onnx::ValueInfoProto* v,
                                const Value* n) override;
 

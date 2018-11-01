@@ -225,7 +225,7 @@ private:
   // the schema.
   // note: mutable because schema_ is effectively a cache
   mutable const FunctionSchema* schema_;
-  topo_position_t topo_position_;
+  topo_position_t topo_position_ = 0;
 protected:
   TORCH_API Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
