@@ -333,7 +333,7 @@ struct GraphExecutorImpl {
       : graph(prepareGraph(graph)),
         // until we have correct alias analysis any use of mutable operators
         // disables all optimization
-        optimize(!hasMutableOperators(this->graph->block())),
+        optimize(optimize && !hasMutableOperators(this->graph->block())),
         num_inputs(this->graph->inputs().size()),
         num_flat_inputs(countFlatInputs(graph)),
         num_outputs(this->graph->outputs().size()) {}

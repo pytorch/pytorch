@@ -624,7 +624,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (schema.is_vararg() && schema_i == schema.arguments().size() - 1) {
       // Freeze iteration to the last argument in the schema and keep going for
       // all of the provided arguments
-      if (used_args < modifiedArgs.size()) {
+      if (used_args < args.size()) {
         schema_i--;
       }
     }
@@ -1313,7 +1313,7 @@ private:
     Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
 
     n->addInput(cond_value);
-    auto* true_block = n->addBlock();
+    /* true_block =*/n->addBlock();
     auto* false_block = n->addBlock();
 
     //if assert test is false throw exception
