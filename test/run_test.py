@@ -131,7 +131,7 @@ def run_test(executable, test_module, test_directory, options):
         unittest_args.append('--verbose')
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    command = [executable, test_module + '.py'] + unittest_args
+    command = executable + [test_module + '.py'] + unittest_args
     return shell(command, test_directory)
 
 
@@ -203,7 +203,7 @@ def test_distributed(executable, test_module, test_directory, options):
                         'mpiexec -n 1 --noprefix bash -c ""', shell=True,
                         stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
 
-                    mpiexec = 'mpiexec -n 3 {} {}'.format(noprefix_opt, executable)
+                    mpiexec = ['mpiexec', '-n', '3', noprefix_opt] + executable
 
                     return_code = run_test(mpiexec, test_module,
                                            test_directory, options)
@@ -296,11 +296,11 @@ def parse_args():
 
 def get_executable_command(options):
     if options.coverage:
-        executable = 'coverage run --parallel-mode --source torch'
+        executable = ['coverage', 'run', '--parallel-mode', '--source torch']
     else:
-        executable = sys.executable
+        executable = [sys.executable]
     if options.pytest:
-        executable += ' -m pytest'
+        executable += ['-m', 'pytest']
     return executable
 
 
@@ -381,7 +381,7 @@ def get_selected_tests(options):
 
 def main():
     options = parse_args()
-    executable = get_executable_command(options)
+    executable = get_executable_command(options)  # this is a list
     print_to_stderr('Test executor: {}'.format(executable))
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)
