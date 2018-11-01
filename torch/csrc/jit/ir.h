@@ -846,8 +846,6 @@ public:
   TORCH_API Node* createIntToFloat(Value* value);
   TORCH_API Node* createFloatToInt(Value* value);
   TORCH_API Node* createStringToFloat(Value* value);
-  TORCH_API Node* createToString(Value* value);
-
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,

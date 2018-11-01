@@ -1302,12 +1302,6 @@ Node* Graph::createStringToFloat(Value* value) {
   return result;
 }
 
-Node* Graph::createToString(Value* value) {
-  auto* result = create(prim::ToString, {value});
-  result->output()->setType(StringType::get());
-  return result;
-}
-
 Node* Graph::createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks) {
   //n can be from a different graph
   Node * r = n->allocNewInstance(this);
