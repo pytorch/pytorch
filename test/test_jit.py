@@ -5316,7 +5316,6 @@ a")
                 # type: (int, Tuple[int, int[2]]) -> List[int]
                 return x
 
-
     def test_type_annotations(self):
         def fn(x, y):
             # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
