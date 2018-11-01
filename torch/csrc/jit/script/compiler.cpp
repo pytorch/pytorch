@@ -404,12 +404,15 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-static inline bool isIntUsedAsIntList(
+static inline bool isIntOrFloatUsedAsList(
     const Value* value,
     const Argument& arg) {
-  // Look for int[N]
-  return value->type()->kind() == TypeKind::IntType &&
-         *arg.type() == *ListType::ofInts() && arg.N();
+  // Look for int[N] or float[N]
+  auto v_type = value->type();
+  if (v_type != FloatType::get() && v_type != IntType::get())
+    return false;
+  auto list_type = arg.type()->cast<ListType>();
+  return list_type && list_type->getElementType() == v_type && arg.N();
 }
 
 inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
@@ -441,12 +444,12 @@ Value* tryMatchArgument(
     TypeEnv & type_env) {
   Value* value = named_value.value(graph);
 
-  // some functions that take lists of integers for fixed size arrays
-  // also allow single ints to be passed in their place.
-  // the single int is then repeated to the length of the list
-  if (isIntUsedAsIntList(value, arg)) {
+  // some functions that take lists of integers or floats for fixed size arrays
+  // also allow single ints/floats to be passed in their place.
+  // the single int/float is then repeated to the length of the list
+  if (isIntOrFloatUsedAsList(value, arg)) {
     std::vector<Value*> repeated(*arg.N(), value);
-    value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
+    value = graph.insertNode(graph.createList(value->type(), repeated))->output();
   }
 
   TypePtr concrete_type;
@@ -2184,15 +2187,66 @@ TypePtr parseTypeFromExpr(Expr expr) {
                                   << " cannot be used in a type expression";
 }
 
+
+c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
+  if (expr.kind() != TK_SUBSCRIPT)
+    return c10::nullopt;
+  auto subscript = Subscript(expr);
+  if (subscript.value().kind() != TK_VAR)
+    return c10::nullopt;
+  auto var = Var(subscript.value());
+  if (var.name().name() != "BroadcastingList")
+    return c10::nullopt;
+  if (subscript.subscript_exprs().size() != 2)
+    throw ErrorReport(subscript.subscript_exprs().range())
+      << "BroadcastingList must be subscripted by type & len";
+
+  auto typ = subscript.subscript_exprs()[0];
+  auto len = subscript.subscript_exprs()[1];
+
+  if (typ.kind() != TK_VAR)
+    throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
+
+  auto value_name = Var(typ).name().name();
+  if (value_name != "float" && value_name != "int")
+    throw ErrorReport(subscript.value().range()) << "Broadcastable lists only supported for int or float";
+
+  auto elem_ptr = ident_to_type_lut().find(value_name);
+  JIT_ASSERT(elem_ptr != ident_to_type_lut().end());
+  TypePtr list_ptr = ListType::create(elem_ptr->second);
+  if (len.kind () != TK_CONST)
+    throw ErrorReport(expr) << "subscript of Broadcastable list must be positive integer";
+
+  auto constant = Const(len);
+  if (!constant.isIntegral() || constant.asIntegral() <= 0)
+    throw ErrorReport(len) << "subscript of Broadcastable list must be positive integer";
+
+  auto len_v = constant.asIntegral();
+  return std::pair<TypePtr, int32_t>(list_ptr, len_v);
+}
+
 std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
   std::vector<Argument> retval;
   size_t i = is_method ? 1 : 0;
   for (; i < decl.params().size(); ++i) {
     auto decl_arg = decl.params()[i];
+
+    TypePtr type;
+    c10::optional<int32_t> N;
+
+    //BroadcastList list can only appear at the argument level
+    if (auto maybe_broad_list = handleBroadcastList(decl_arg.type())) {
+      type = maybe_broad_list->first;
+      N = maybe_broad_list->second;
+    } else {
+      type = parseTypeFromExpr(decl_arg.type());
+      N = c10::nullopt;
+    }
+
     auto arg = Argument(
         decl_arg.ident().name(),
-        parseTypeFromExpr(decl_arg.type()),
-        /*N =*/c10::nullopt,
+        type,
+        N,
         /*default_value =*/c10::nullopt,
         /*kwarg_only =*/false);
     retval.push_back(arg);
@@ -2202,6 +2256,8 @@ std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
 
 std::vector<Argument> parseReturnsFromDecl(Decl decl) {
   JIT_ASSERT(decl.return_type().present());
+  if (handleBroadcastList(decl.return_type().get()))
+    throw ErrorReport(decl.return_type().range()) << "Broadcastable lists cannot appear as a return type";
   auto parsed_type = parseTypeFromExpr(decl.return_type().get());
   if (auto tuple_type = parsed_type->cast<TupleType>()) {
     // Flatten a single return type of type Tuple into its constituent types
