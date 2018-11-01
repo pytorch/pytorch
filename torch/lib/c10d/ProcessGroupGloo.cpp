@@ -1,9 +1,15 @@
 #include "ProcessGroupGloo.hpp"
 
+#include <gloo/allgather.h>
+#include <gloo/allreduce.h>
 #include <gloo/allreduce_halving_doubling.h>
 #include <gloo/allreduce_ring_chunked.h>
 #include <gloo/barrier_all_to_one.h>
+#include <gloo/broadcast.h>
 #include <gloo/broadcast_one_to_all.h>
+#include <gloo/gather.h>
+#include <gloo/reduce.h>
+#include <gloo/scatter.h>
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAGuard.h>
@@ -136,7 +142,60 @@ void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
 }
 #endif
 
+template <typename T, typename O>
+void setInputs(O& opts, std::vector<at::Tensor>& tensors) {
+  opts.setInputs(getDataPointers<T>(tensors), tensors[0].numel());
+}
+
+template <typename T, typename O>
+void setInput(O& opts, at::Tensor& tensor) {
+  opts.setInput(getDataPointer<T>(tensor), tensor.numel());
+}
+
+template <typename T, typename O>
+void setOutputs(O& opts, std::vector<at::Tensor>& tensors) {
+  opts.setOutputs(getDataPointers<T>(tensors), tensors[0].numel());
+}
+
+template <typename T, typename O>
+void setOutput(O& opts, at::Tensor& tensor) {
+  opts.setOutput(getDataPointer<T>(tensor), tensor.numel());
+}
+
 } // namespace
+
+bool ProcessGroupGloo::AsyncWork::isCompleted() {
+  return completed_;
+}
+
+bool ProcessGroupGloo::AsyncWork::isSuccess() const {
+  return eptr_ == nullptr;
+}
+
+void ProcessGroupGloo::AsyncWork::synchronize() {}
+
+bool ProcessGroupGloo::AsyncWork::wait() {
+  std::unique_lock<std::mutex> lock(m_);
+  while (!completed_) {
+    cv_.wait(lock);
+  }
+  auto success = isSuccess();
+  if (success) {
+    synchronize();
+  }
+  return success;
+}
+
+const std::exception& ProcessGroupGloo::AsyncWork::exception() const {
+  std::rethrow_exception(eptr_);
+}
+
+void ProcessGroupGloo::AsyncWork::finish(std::exception_ptr eptr) {
+  std::unique_lock<std::mutex> lock(m_);
+  completed_ = true;
+  eptr_ = eptr;
+  cv_.notify_all();
+}
 
 ProcessGroupGloo::WorkGloo::WorkGloo()
     : completed_(false)
@@ -296,6 +355,7 @@ ProcessGroupGloo::ProcessGroupGloo(
     : ProcessGroup(rank, size),
       store_(new GlooStore(store)),
       stop_(false),
+      collectiveCounter_(0),
       cacheNumAlgorithmEntries_(options.cacheNumAlgorithmEntries) {
   auto& devices = options.devices;
   if (devices.empty()) {
@@ -334,6 +394,10 @@ ProcessGroupGloo::~ProcessGroupGloo() {
   }
 }
 
+uint32_t ProcessGroupGloo::nextTag() {
+  return collectiveCounter_++;
+}
+
 void ProcessGroupGloo::runLoop(void) {
   std::unique_lock<std::mutex> lock(queueMutex_);
 
@@ -346,6 +410,17 @@ void ProcessGroupGloo::runLoop(void) {
     auto tuple = std::move(queue_.front());
     queue_.pop_front();
     queueConsumeCV_.notify_one();
+
+    // If we're dealing with only a function, execute it here.
+    // This is the case for operations that use the AsyncWork infrastructure
+    // and have the work object bound to the function we're calling here.
+    if (std::get<0>(tuple) == nullptr) {
+      auto& fn = std::get<2>(tuple);
+      lock.unlock();
+      fn();
+      lock.lock();
+      continue;
+    }
 
     // Continue holding onto the lock; this ensures that we serialize
     // creation of Gloo algorithm instances for the context associated
@@ -575,9 +650,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::enqueue(
     AlgorithmEntry* entry) {
   auto work = std::make_shared<WorkGloo>();
   std::unique_lock<std::mutex> lock(queueMutex_);
-  queue_.push_back(std::make_tuple(entry, work));
+  queue_.push_back(std::make_tuple(entry, work, nullptr));
   queueProduceCV_.notify_one();
   return work;
+}
+
+void ProcessGroupGloo::enqueue(std::function<void()> fn) {
+  std::unique_lock<std::mutex> lock(queueMutex_);
+  queue_.push_back(std::make_tuple(nullptr, nullptr, fn));
+  queueProduceCV_.notify_one();
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
@@ -695,11 +776,92 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
   throw std::runtime_error("ProcessGroupGloo does not support gather");
 }
 
+namespace {
+
+class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
+ public:
+  AsyncScatterWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<at::Tensor>& outputs,
+      std::vector<std::vector<at::Tensor>>& inputs,
+      int root,
+      uint32_t tag)
+      : context(context),
+        outputs(outputs),
+        inputs(inputs),
+        root(root),
+        tag(tag) {}
+
+  std::shared_ptr<gloo::Context> context;
+  std::vector<at::Tensor> outputs;
+  std::vector<std::vector<at::Tensor>> inputs;
+  const int root;
+  const uint32_t tag;
+
+  void run() override {
+    const auto scalarType = outputs[0].type().scalarType();
+    gloo::ScatterOptions opts(context);
+    opts.setRoot(root);
+    opts.setTag(tag);
+
+    // Set list of input tensors on root process
+    if (context->rank == root) {
+      GENERATE_ALL_TYPES(scalarType, setInputs, opts, inputs[0]);
+    }
+
+    // Set single output tensor on all processes
+    GENERATE_ALL_TYPES(scalarType, setOutput, opts, outputs[0]);
+    gloo::scatter(opts);
+  }
+};
+
+} // namespace
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
-    std::vector<at::Tensor>& /* unused */,
-    std::vector<std::vector<at::Tensor>>& /* unused */,
-    const ScatterOptions& /* unused */) {
-  throw std::runtime_error("ProcessGroupGloo does not support scatter");
+    std::vector<at::Tensor>& outputs,
+    std::vector<std::vector<at::Tensor>>& inputs,
+    const ScatterOptions& opts) {
+  static auto invalidArgument = [](const std::string& msg) {
+    throw std::invalid_argument("ProcessGroupGloo::scatter: " + msg);
+  };
+
+  if (opts.rootRank < 0 || opts.rootRank >= size_) {
+    invalidArgument("invalid root rank: " + std::to_string(opts.rootRank));
+  }
+
+  if (outputs.size() != 1) {
+    invalidArgument("requires a single output tensor");
+  }
+
+  const auto& layout = outputs[0].layout();
+  const auto& device = outputs[0].device();
+  const auto& type = outputs[0].type();
+  const auto& sizes = outputs[0].sizes();
+  if (layout != at::kStrided || device.type() != at::kCPU) {
+    invalidArgument("only supports dense CPU tensors");
+  }
+
+  if (getRank() == opts.rootRank) {
+    if (inputs.size() != 1 || inputs[0].size() != getSize()) {
+      invalidArgument(
+          "requires single input tensor list, "
+          "itself containing <size> input tensors");
+    }
+    const auto& input = inputs[0];
+    for (size_t i = 0; i < input.size(); i++) {
+      assertTypeMatch(invalidArgument, type, input, i);
+      assertSizesMatch(invalidArgument, sizes, input, i);
+    }
+  } else {
+    if (inputs.size() != 0) {
+      invalidArgument("requires empty input on non-root");
+    }
+  }
+
+  auto work = std::make_shared<AsyncScatterWork>(
+      contexts_[0], outputs, inputs, opts.rootRank, nextTag());
+  enqueue(std::bind(AsyncWork::execute, work));
+  return work;
 }
 
 at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {

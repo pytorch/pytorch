@@ -461,6 +461,97 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         work.wait()
         self.assertEqual(torch.Tensor([float(self.world_size * (self.world_size + 1) / 2)]), x)
 
+    def test_scatter_checks(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        t1 = torch.zeros([1], dtype=torch.float32)
+        t2 = torch.zeros([1], dtype=torch.float64)
+        t3 = torch.zeros([2], dtype=torch.float32)
+
+        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = -1
+            pg.scatter([t1], [], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = self.world_size
+            pg.scatter([t1], [], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires a single output tensor"):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = 0
+            pg.scatter([], [], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires a single output tensor"):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = 0
+            pg.scatter([t1, t1], [], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires single input tensor list"):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = self.rank
+            pg.scatter([t1], [], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires single input tensor list"):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = self.rank
+            pg.scatter([t1], [[t1] * self.world_size, [t1] * self.world_size], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires single input tensor list"):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = self.rank
+            pg.scatter([t1], [[t1] * (self.world_size - 1)], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires single input tensor list"):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = self.rank
+            pg.scatter([t1], [[t1] * (self.world_size + 1)], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires single input tensor list"):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = self.rank
+            pg.scatter([t1], [[t1] * (self.world_size + 1)], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor type"):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = self.rank
+            pg.scatter([t1], [[t2] * self.world_size], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = self.rank
+            pg.scatter([t1], [[t3] * self.world_size], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires empty input on non-root"):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = (self.rank + 1) % self.world_size
+            pg.scatter([t1], [[t1] * self.world_size], opts)
+
+    def test_scatter_basics(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        # Preallocate tensors for input/output
+        input = [torch.Tensor([self.rank]) for _ in range(self.world_size)]
+        outputs = [torch.Tensor([-1]) for _ in range(self.world_size)]
+
+        # Take turns being the scatter root and accumulate work items
+        work = []
+        for i in range(self.world_size):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = i
+            if i == self.rank:
+                work.append(pg.scatter([outputs[i]], [input], opts))
+            else:
+                work.append(pg.scatter([outputs[i]], [], opts))
+
+        # Wait for work to complete
+        for i in range(self.world_size):
+            work[i].wait()
+            self.assertEqual(torch.Tensor([i]), outputs[i])
+
     def test_send_recv_all_to_all(self):
         store = c10d.FileStore(self.file.name)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
