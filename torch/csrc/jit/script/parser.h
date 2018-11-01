@@ -382,6 +382,23 @@ struct Parser {
         auto values = parseList(TK_NOTHING, ',', TK_NEWLINE, &Parser::parseExp);
         return Return::create(range, values);
       }
+      case TK_RAISE: {
+        auto range = L.next().range;
+        auto expr = parseExp();
+        L.expect(TK_NEWLINE);
+        return Raise::create(range, expr);
+      }
+      case TK_ASSERT: {
+        auto range = L.next().range;
+        auto cond = parseExp();
+        Maybe<Expr> maybe_first = Maybe<Expr>::create(range);
+        if (L.nextIf(','))  {
+          auto msg = parseExp();
+          maybe_first = Maybe<Expr>::create(range, Expr(msg));
+        }
+        L.expect(TK_NEWLINE);
+        return Assert::create(range, cond, maybe_first);
+      }
       default: {
         List<Expr> exprs = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
         if (L.cur().kind != TK_NEWLINE) {

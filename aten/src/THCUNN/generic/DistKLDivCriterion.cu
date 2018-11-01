@@ -35,7 +35,7 @@ void THNN_(DistKLDivCriterion_updateOutput)(
   thrust::device_ptr<scalar_t> target_data(THCTensor_(data)(state, target));
   sum = thrust::inner_product(input_data, input_data+size, target_data, (accreal) 0, thrust::plus<accreal>(), kl_functor<scalar_t, accreal>());
 
-  if (reduction == Reduction::ElementwiseMean)
+  if (reduction == Reduction::Mean)
     sum /= size;
 
   THCTensor_(free)(state, input);
@@ -70,7 +70,7 @@ void THNN_(DistKLDivCriterion_updateGradInput)(
   THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);
-  scalar_t norm = (reduction == Reduction::ElementwiseMean ? ScalarConvert<accreal, scalar_t>::to(accreal(1)/size) : ScalarConvert<int, scalar_t>::to(1));
+  scalar_t norm = (reduction == Reduction::Mean ? ScalarConvert<accreal, scalar_t>::to(accreal(1)/size) : ScalarConvert<int, scalar_t>::to(1));
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);

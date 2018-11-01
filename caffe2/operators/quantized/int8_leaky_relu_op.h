@@ -39,7 +39,7 @@ class Int8LeakyReluOp final : public Operator<CPUContext> {
     // For x < zero_point:
     //   (y - zero_point) * scale = alpha * (x - zero_point) * scale
     //   y = alpha * (x - zeropoint) + zero_point
-    for (int i = 0; i < X.t.size(); i++) {
+    for (int i = 0; i < X.t.numel(); i++) {
       if (Xdata[i] < X.zero_point) {
         int32_t out = MultiplyByQuantizedMultiplierSmallerThanOne(
                           Xdata[i] - X.zero_point, multiplier_, shift_) +

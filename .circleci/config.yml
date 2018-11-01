@@ -74,61 +74,6 @@ setup_ci_environment: &setup_ci_environment
     export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V2}
     eval $(aws ecr get-login --region us-east-1 --no-include-email)
 
-pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
-  resource_class: large
-  working_directory: /var/lib/jenkins/workspace
-  steps:
-  - run:
-      <<: *install_official_git_client
-  - checkout
-  - run:
-      name: Build And Test
-      no_output_timeout: "1h"
-      command: |
-        set -e
-        sudo apt-get -qq update
-        sudo apt-get -qq install moreutils
-
-        export IN_CIRCLECI=1
-        export COMMIT_SOURCE=${CIRCLE_BRANCH}
-        export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
-        export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
-        export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
-        export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
-        # This IAM user allows write access to S3 bucket for sccache
-        export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V2}
-        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V2}
-        git submodule sync && git submodule update -q --init
-        .jenkins/pytorch/build.sh 2>&1 | ts
-        .jenkins/pytorch/test.sh 2>&1 | ts
-
-pytorch_linux_cpu_build_defaults: &pytorch_linux_cpu_build_defaults
-  resource_class: large
-  working_directory: /var/lib/jenkins/workspace
-  steps:
-  - run:
-      <<: *install_official_git_client
-  - checkout
-  - run:
-      name: Build Only
-      no_output_timeout: "1h"
-      command: |
-        set -e
-        sudo apt-get update
-        sudo apt-get install -y moreutils
-
-        export IN_CIRCLECI=1
-        export COMMIT_SOURCE=${CIRCLE_BRANCH}
-        export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
-        export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
-        export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
-        export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
-        # This IAM user allows write access to S3 bucket for sccache
-        export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V2}
-        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V2}
-        git submodule sync && git submodule update --init
-        .jenkins/pytorch/build.sh 2>&1 | ts
-
 pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   resource_class: large
   machine:
@@ -155,32 +100,17 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
 
         ((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh') | docker exec -u jenkins -i "$id" bash) 2>&1 | ts
 
-        # Push intermediate Docker image and save COMMIT_DOCKER_IMAGE for next phase to use
-        mkdir -p /home/circleci/project/pytorch-ci-env
-        touch /home/circleci/project/pytorch-ci-env/.tmp  # Dummy file so that the persist_to_workspace step won't complain about not finding any file
-
+        # Push intermediate Docker image for next phase to use
         if [ -z "${BUILD_ONLY}" ]; then
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           docker commit "$id" ${COMMIT_DOCKER_IMAGE}
           docker push ${COMMIT_DOCKER_IMAGE}
-          echo "declare -x COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}" > /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
         fi
-  - persist_to_workspace:
-      root: /home/circleci/project/pytorch-ci-env
-      paths:
-        - "*"
 
 pytorch_linux_test_defaults: &pytorch_linux_test_defaults
   machine:
     image: default
   steps:
-  - run:
-      name: Prepare workspace
-      command: |
-        sudo mkdir -p /home/circleci/project/pytorch-ci-env
-        sudo chmod -R 777 /home/circleci/project/pytorch-ci-env
-  - attach_workspace:
-      at: /home/circleci/project/pytorch-ci-env
   - run:
       <<: *setup_ci_environment
   - run:
@@ -188,7 +118,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
       no_output_timeout: "1h"
       command: |
         set -e
-        source /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
+        export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
         if [ -n "${CUDA_VERSION}" ]; then
@@ -269,31 +199,17 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
 
         ((echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh') | docker exec -u jenkins -i "$id" bash) 2>&1 | ts
 
-        mkdir -p /home/circleci/project/caffe2-ci-env
-        touch /home/circleci/project/caffe2-ci-env/.tmp  # Dummy file so that the persist_to_workspace step won't complain about not finding any file
-
+        # Push intermediate Docker image for next phase to use
         if [ -z "${BUILD_ONLY}" ]; then
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           docker commit "$id" ${COMMIT_DOCKER_IMAGE}
           docker push ${COMMIT_DOCKER_IMAGE}
-          echo "declare -x COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}" > /home/circleci/project/caffe2-ci-env/COMMIT_DOCKER_IMAGE
         fi
-  - persist_to_workspace:
-      root: /home/circleci/project/caffe2-ci-env
-      paths:
-        - "*"
 
 caffe2_linux_test_defaults: &caffe2_linux_test_defaults
   machine:
     image: default
   steps:
-  - run:
-      name: Prepare workspace
-      command: |
-        sudo mkdir -p /home/circleci/project/caffe2-ci-env
-        sudo chmod -R 777 /home/circleci/project/caffe2-ci-env
-  - attach_workspace:
-      at: /home/circleci/project/caffe2-ci-env
   - run:
       <<: *setup_ci_environment
   - run:
@@ -351,7 +267,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         EOL
         chmod +x /home/circleci/project/ci_test_script.sh
 
-        source /home/circleci/project/caffe2-ci-env/COMMIT_DOCKER_IMAGE
+        export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
         if [ -n "${CUDA_VERSION}" ]; then
@@ -442,60 +358,95 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
 version: 2
 jobs:
   pytorch_linux_trusty_py2_7_9_build:
-    docker:
-      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:256
-        <<: *docker_config_defaults
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py2.7.9-build
-    <<: *pytorch_linux_cpu_build_defaults
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:256"
+    <<: *pytorch_linux_build_defaults
+
+  pytorch_linux_trusty_py2_7_9_test:
+    environment:
+      JOB_BASE_NAME: pytorch-linux-trusty-py2.7.9-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:256"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py2_7_build:
-    docker:
-      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:256
-        <<: *docker_config_defaults
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py2.7-build
-    <<: *pytorch_linux_cpu_build_defaults
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:256"
+    <<: *pytorch_linux_build_defaults
+
+  pytorch_linux_trusty_py2_7_test:
+    environment:
+      JOB_BASE_NAME: pytorch-linux-trusty-py2.7-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:256"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py3_5_build:
-    docker:
-      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:256
-        <<: *docker_config_defaults
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-py3.5-build
-    <<: *pytorch_linux_cpu_build_defaults
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:256"
+    <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_trusty_py3_6_gcc4_8_build_test:
-    docker:
-      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:256
-        <<: *docker_config_defaults
+  pytorch_linux_trusty_py3_5_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc4.8-build-test
-    <<: *pytorch_linux_cpu_build_test_defaults
+      JOB_BASE_NAME: pytorch-linux-trusty-py3.5-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:256"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_trusty_py3_6_gcc5_4_build_test:
-    docker:
-      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:256
-        <<: *docker_config_defaults
+  pytorch_linux_trusty_py3_6_gcc4_8_build:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc5.4-build-test
-    <<: *pytorch_linux_cpu_build_test_defaults
+      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc4.8-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:256"
+    <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_trusty_py3_6_gcc7_build_test:
-    docker:
-      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:256
-        <<: *docker_config_defaults
+  pytorch_linux_trusty_py3_6_gcc4_8_test:
     environment:
-      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc7-build-test
-    <<: *pytorch_linux_cpu_build_test_defaults
+      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc4.8-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:256"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
+
+  pytorch_linux_trusty_py3_6_gcc5_4_build:
+    environment:
+      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc5.4-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:256"
+    <<: *pytorch_linux_build_defaults
+
+  pytorch_linux_trusty_py3_6_gcc5_4_test:
+    environment:
+      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc5.4-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:256"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
+
+  pytorch_linux_trusty_py3_6_gcc7_build:
+    environment:
+      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc7-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:256"
+    <<: *pytorch_linux_build_defaults
+
+  pytorch_linux_trusty_py3_6_gcc7_test:
+    environment:
+      JOB_BASE_NAME: pytorch-linux-trusty-py3.6-gcc7-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:256"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_pynightly_build:
-    docker:
-      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:256
-        <<: *docker_config_defaults
     environment:
       JOB_BASE_NAME: pytorch-linux-trusty-pynightly-build
-    <<: *pytorch_linux_cpu_build_defaults
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:256"
+    <<: *pytorch_linux_build_defaults
+
+  pytorch_linux_trusty_pynightly_test:
+    environment:
+      JOB_BASE_NAME: pytorch-linux-trusty-pynightly-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:256"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
 
   pytorch_linux_xenial_py3_clang5_asan_build:
     environment:
@@ -507,6 +458,7 @@ jobs:
   pytorch_linux_xenial_py3_clang5_asan_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-py3-clang5-asan-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:256"
       PYTHON_VERSION: "3.6"
     resource_class: large
     <<: *pytorch_linux_test_defaults
@@ -522,6 +474,7 @@ jobs:
   pytorch_linux_xenial_cuda8_cudnn6_py3_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:256"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
     resource_class: gpu.medium
@@ -530,6 +483,7 @@ jobs:
   pytorch_linux_xenial_cuda8_cudnn6_py3_multigpu_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-multigpu-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:256"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
       MULTI_GPU: "1"
@@ -539,6 +493,7 @@ jobs:
   pytorch_linux_xenial_cuda8_cudnn6_py3_NO_AVX2_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-NO_AVX2-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:256"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
     resource_class: gpu.medium
@@ -547,6 +502,7 @@ jobs:
   pytorch_linux_xenial_cuda8_cudnn6_py3_NO_AVX_NO_AVX2_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-NO_AVX-NO_AVX2-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:256"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
     resource_class: gpu.medium
@@ -563,6 +519,7 @@ jobs:
   pytorch_linux_xenial_cuda9_cudnn7_py2_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py2-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:256"
       PYTHON_VERSION: "2.7"
       CUDA_VERSION: "9"
     resource_class: gpu.medium
@@ -579,6 +536,7 @@ jobs:
   pytorch_linux_xenial_cuda9_cudnn7_py3_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py3-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:256"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "9"
     resource_class: gpu.medium
@@ -595,6 +553,7 @@ jobs:
   pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:256"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "9.2"
     resource_class: gpu.medium
@@ -603,6 +562,7 @@ jobs:
   pytorch_short_perf_test_gpu:
     environment:
       JOB_BASE_NAME: pytorch-short-perf-test-gpu
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:256"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
     resource_class: gpu.medium
@@ -610,20 +570,13 @@ jobs:
       image: default
     steps:
     - run:
-        name: Prepare workspace
-        command: |
-          sudo mkdir -p /home/circleci/project/pytorch-ci-env
-          sudo chmod -R 777 /home/circleci/project/pytorch-ci-env
-    - attach_workspace:
-        at: /home/circleci/project/pytorch-ci-env
-    - run:
         <<: *setup_ci_environment
     - run:
         name: Perf Test
         no_output_timeout: "1h"
         command: |
           set -e
-          source /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -639,17 +592,11 @@ jobs:
   pytorch_doc_push:
     environment:
       JOB_BASE_NAME: pytorch-doc-push
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:256"
     resource_class: large
     machine:
       image: default
     steps:
-    - run:
-        name: Prepare workspace
-        command: |
-          sudo mkdir -p /home/circleci/project/pytorch-ci-env
-          sudo chmod -R 777 /home/circleci/project/pytorch-ci-env
-    - attach_workspace:
-        at: /home/circleci/project/pytorch-ci-env
     - run:
         <<: *setup_ci_environment
     - run:
@@ -661,7 +608,7 @@ jobs:
             echo "Skipping doc push..."
             exit 0
           fi
-          source /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -774,7 +721,6 @@ jobs:
             BUILD_ENVIRONMENT: pytorch-macos-10.13-py3
           no_output_timeout: "1h"
           command: |
-            # TODO: need to share source files from build to test, when macOS builds are enabled
             set -e
             export IN_CIRCLECI=1
             # moreutils installs a `parallel` executable by default, which conflicts with the executable from the `parallel` formulae
@@ -996,12 +942,33 @@ workflows:
   build:
     jobs:
       - pytorch_linux_trusty_py2_7_9_build
+      - pytorch_linux_trusty_py2_7_9_test:
+          requires:
+            - pytorch_linux_trusty_py2_7_9_build
       - pytorch_linux_trusty_py2_7_build
+      - pytorch_linux_trusty_py2_7_test:
+          requires:
+            - pytorch_linux_trusty_py2_7_build
       - pytorch_linux_trusty_py3_5_build
-      - pytorch_linux_trusty_py3_6_gcc4_8_build_test
-      - pytorch_linux_trusty_py3_6_gcc5_4_build_test
-      - pytorch_linux_trusty_py3_6_gcc7_build_test
+      - pytorch_linux_trusty_py3_5_test:
+          requires:
+            - pytorch_linux_trusty_py3_5_build
+      - pytorch_linux_trusty_py3_6_gcc4_8_build
+      - pytorch_linux_trusty_py3_6_gcc4_8_test:
+          requires:
+            - pytorch_linux_trusty_py3_6_gcc4_8_build
+      - pytorch_linux_trusty_py3_6_gcc5_4_build
+      - pytorch_linux_trusty_py3_6_gcc5_4_test:
+          requires:
+            - pytorch_linux_trusty_py3_6_gcc5_4_build
+      - pytorch_linux_trusty_py3_6_gcc7_build
+      - pytorch_linux_trusty_py3_6_gcc7_test:
+          requires:
+            - pytorch_linux_trusty_py3_6_gcc7_build
       - pytorch_linux_trusty_pynightly_build
+      - pytorch_linux_trusty_pynightly_test:
+          requires:
+            - pytorch_linux_trusty_pynightly_build
       - pytorch_linux_xenial_py3_clang5_asan_build
       - pytorch_linux_xenial_py3_clang5_asan_test:
           requires:

@@ -2204,7 +2204,28 @@ class TestTorchMixin(object):
                     assertEqual('cuda:1', lambda: torch.tensor(np.random.randn(2, 3), device='cuda:1'))
 
     def test_to(self):
+        def test_copy_behavior(t, non_blocking=False):
+            self.assertIs(t, t.to(t, non_blocking=non_blocking))
+            self.assertIs(t, t.to(t.dtype, non_blocking=non_blocking))
+            self.assertIs(t, t.to(torch.empty_like(t), non_blocking=non_blocking))
+            self.assertIsNot(t, t.to(t, non_blocking=non_blocking, copy=True))
+            self.assertIsNot(t, t.to(t.dtype, non_blocking=non_blocking, copy=True))
+            self.assertIsNot(t, t.to(torch.empty_like(t), non_blocking=non_blocking, copy=True))
+
+            devices = [t.device]
+            if t.device.type == 'cuda':
+                if t.device.index == -1:
+                    devices.append('cuda:{}'.format(torch.cuda.current_device()))
+                elif t.device.index == torch.cuda.current_device():
+                    devices.append('cuda')
+            for device in devices:
+                self.assertIs(t, t.to(device, non_blocking=non_blocking))
+                self.assertIs(t, t.to(device, t.dtype, non_blocking=non_blocking))
+                self.assertIsNot(t, t.to(device, non_blocking=non_blocking, copy=True))
+                self.assertIsNot(t, t.to(device, t.dtype, non_blocking=non_blocking, copy=True))
+
         a = torch.tensor(5)
+        test_copy_behavior(a)
         self.assertEqual(a.device, a.to('cpu').device)
         self.assertEqual(a.device, a.to('cpu', dtype=torch.float32).device)
         self.assertIs(torch.float32, a.to('cpu', dtype=torch.float32).dtype)
@@ -2219,6 +2240,7 @@ class TestTorchMixin(object):
             for non_blocking in [True, False]:
                 for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
                     b = torch.tensor(5., device=cuda)
+                    test_copy_behavior(b, non_blocking)
                     self.assertEqual(b.device, b.to(cuda, non_blocking=non_blocking).device)
                     self.assertEqual(a.device, b.to('cpu', non_blocking=non_blocking).device)
                     self.assertEqual(b.device, a.to(cuda, non_blocking=non_blocking).device)
@@ -3691,6 +3713,7 @@ class TestTorchMixin(object):
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
         self.assertRaises(RuntimeError, lambda: torch.cat([]))
+        self.assertRaisesRegex(TypeError, 'got None', lambda: torch.cat([x, None]))
 
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1)
@@ -7380,6 +7403,17 @@ class TestTorchMixin(object):
         self.assertEqual(a.size(), deepcopy(a).size())
         self.assertEqual(a, deepcopy(a))
 
+    def test_deepcopy_parameter(self):
+        from copy import deepcopy
+        l = torch.nn.Linear(10, 1)
+        s = l.state_dict(keep_vars=True)
+        self.assertEqual(torch.nn.Parameter, type(s['weight']))
+        self.assertEqual(torch.nn.Parameter, type(s['bias']))
+
+        s2 = deepcopy(s)
+        self.assertEqual(torch.nn.Parameter, type(s2['weight']))
+        self.assertEqual(torch.nn.Parameter, type(s2['bias']))
+
     def test_copy(self):
         from copy import copy
         a = torch.randn(5, 5)
@@ -9113,6 +9147,24 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(b.type(), b_copy.type())
         self.assertEqual(b.data.type(), b_copy.type())
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    def test_reverse_binary_ops_multiple_device(self):
+        self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to("cuda:1"))    # __radd__
+        self.assertEqual(2 - torch.tensor(3), 2 - torch.tensor(3).to("cuda:1"))    # __rsub__
+        self.assertEqual(2 * torch.tensor(3), 2 * torch.tensor(3).to("cuda:1"))    # __rmul__
+        self.assertEqual(2 / torch.tensor(3), 2 / torch.tensor(3).to("cuda:1"))    # __rtruediv__
+        self.assertEqual(2 // torch.tensor(3), 2 // torch.tensor(3).to("cuda:1"))  # __rfloordiv__
+
+        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
+            torch.tensor(2).to("cuda:1") + torch.tensor(3).to("cuda:0")
+        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
+            torch.tensor(2).to("cuda:1") - torch.tensor(3).to("cuda:0")
+        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
+            torch.tensor(2).to("cuda:1") * torch.tensor(3).to("cuda:0")
+        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
+            torch.tensor(2).to("cuda:1") / torch.tensor(3).to("cuda:0")
+        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
+            torch.tensor(2).to("cuda:1") // torch.tensor(3).to("cuda:0")
 
 # Functions to test negative dimension wrapping
 METHOD = 1

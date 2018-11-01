@@ -1498,6 +1498,7 @@ class TestCuda(TestCase):
         self.assertEqual(gpu_tensor1[0], 1)
         self.assertEqual(gpu_tensor0[0], 2)
 
+    @skipIfRocm
     def test_sum_noncontig(self):
         x = torch.randn(1, 75, 57, 20, device='cuda').permute(0, 3, 1, 2)
         y = x.cpu()

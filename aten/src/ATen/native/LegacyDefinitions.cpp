@@ -5,12 +5,12 @@ namespace at { namespace native {
 
 // Methods
 
-int64_t storage_offset(const Tensor& self) {
-  return self._th_storage_offset();
-}
-
 int64_t ndimension(const Tensor& self) {
   return self._th_ndimension();
+}
+
+void* data_ptr(const Tensor & self) {
+  return self.unsafeGetTensorImpl()->slow_data();
 }
 
 Tensor & set_(Tensor& self, Storage source) {
@@ -207,6 +207,14 @@ Tensor & remainder_(Tensor& self, const Tensor & other) {
 
 Tensor & addbmm_(Tensor& self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
   return self._th_addbmm_(batch1, batch2, beta, alpha);
+}
+
+Tensor & addbmm_out(Tensor & result, const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
+  return at::_th_addbmm_out(result, self, batch1, batch2, beta, alpha);
+}
+
+Tensor addbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
+  return at::_th_addbmm(self, batch1, batch2, beta, alpha);
 }
 
 Tensor & addcmul_(Tensor& self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
@@ -700,6 +708,123 @@ Tensor & remainder_out(Tensor & result, const Tensor & self, const Tensor & othe
 
 Tensor remainder(const Tensor & self, const Tensor & other) {
   return at::_th_remainder(self, other);
+}
+
+Tensor & min_out(Tensor & result, const Tensor & self, const Tensor & other) {
+  return at::_th_min_out(result, self, other);
+}
+
+Tensor min(const Tensor & self, const Tensor & other) {
+  return at::_th_min(self, other);
+}
+
+Tensor min(const Tensor & self) {
+  return at::_th_min(self);
+}
+
+Tensor & max_out(Tensor & result, const Tensor & self, const Tensor & other) {
+  return at::_th_max_out(result, self, other);
+}
+Tensor max(const Tensor & self, const Tensor & other) {
+  return at::_th_max(self, other);
+}
+
+Tensor max(const Tensor & self) {
+  return at::_th_max(self);
+}
+
+Tensor median(const Tensor & self) {
+  return at::_th_median(self);
+}
+
+std::tuple<Tensor &,Tensor &> sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {
+  return at::_th_sort_out(values, indices, self, dim, descending);
+}
+
+std::tuple<Tensor,Tensor> sort(const Tensor & self, int64_t dim, bool descending) {
+  return at::_th_sort(self, dim, descending);
+}
+std::tuple<Tensor &,Tensor &> topk_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
+  return at::_th_topk_out(values, indices, self, k, dim, largest, sorted);
+}
+
+std::tuple<Tensor,Tensor> topk(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
+  return at::_th_topk(self, k, dim, largest, sorted);
+}
+
+Tensor all(const Tensor & self) {
+  return at::_th_all(self);
+}
+
+Tensor any(const Tensor & self) {
+  return at::_th_any(self);
+}
+
+Tensor & renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
+  return at::_th_renorm_out(result, self, p, dim, maxnorm);
+}
+
+Tensor renorm(const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
+  return at::_th_renorm(self, p, dim, maxnorm);
+}
+
+Tensor unfold(const Tensor & self, int64_t dimension, int64_t size, int64_t step) {
+  return self._th_unfold(dimension, size, step);
+}
+
+bool equal(const Tensor & self, const Tensor & other) {
+  return at::_th_equal(self, other);
+}
+
+Tensor & pow_out(Tensor & result, const Tensor & self, const Tensor & exponent) {
+  return at::_th_pow_out(result, self, exponent);
+}
+
+Tensor pow(const Tensor & self, const Tensor & exponent) {
+  return at::_th_pow(self, exponent);
+}
+Tensor & pow_out(Tensor & result, Scalar self, const Tensor & exponent) {
+  return at::_th_pow_out(result, self, exponent);
+}
+
+Tensor pow(Scalar self, const Tensor & exponent) {
+  return at::_th_pow(self, exponent);
+}
+
+Tensor & normal_out(Tensor & output, const Tensor & mean, double std, Generator * generator) {
+  return at::_th_normal_out(output, mean, std, generator);
+}
+
+Tensor normal(const Tensor & mean, double std, Generator * generator) {
+  return at::_th_normal(mean, std, generator);
+}
+
+Tensor & normal_out(Tensor & output, double mean, const Tensor & std, Generator * generator) {
+  return at::_th_normal_out(output, mean, std, generator);
+}
+
+Tensor normal(double mean, const Tensor & std, Generator * generator) {
+  return at::_th_normal(mean, std, generator);
+}
+
+Tensor & normal_out(Tensor & output, const Tensor & mean, const Tensor & std, Generator * generator) {
+  return at::_th_normal_out(output, mean, std, generator);
+}
+
+Tensor normal(const Tensor & mean, const Tensor & std, Generator * generator) {
+  return at::_th_normal(mean, std, generator);
+}
+
+Tensor alias(const Tensor & self) {
+  return at::_th_alias(self);
+}
+
+Tensor & _dirichlet_grad_out(Tensor & output, const Tensor & x, const Tensor & alpha, const Tensor & total) {
+  return at::_th_dirichlet_grad_out(output, x, alpha, total);
+}
+
+Tensor _dirichlet_grad(const Tensor & x, const Tensor & alpha, const Tensor & total) {
+  return at::_th_dirichlet_grad(x, alpha, total);
 }
 
 }} // namespace at::native

@@ -210,7 +210,7 @@ void testBroadcast(const std::string& path, const at::Backend b) {
         at::DeviceGuard deviceGuard;
         for (auto l = 0; l < stride; l++) {
           if (b == at::Backend::CUDA) { // NB:wouldn't work with sparse
-            deviceGuard.set_index(l);
+            deviceGuard.set_device(at::Device(at::kCUDA, l));
           }
           inputs[k][l] = at::ones({16, 16}, b) * (k * stride + l);
         }

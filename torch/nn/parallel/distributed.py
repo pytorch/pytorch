@@ -141,7 +141,7 @@ class DistributedDataParallel(Module):
         MB = 1024 * 1024
 
         # used for intra-node param sync and inter-node sync as well
-        self.broadcast_bucket_size = 25 * MB
+        self.broadcast_bucket_size = 250 * MB
 
         # Sync params and buffers
         module_states = list(self.module.state_dict().values())

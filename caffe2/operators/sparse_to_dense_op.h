@@ -106,7 +106,7 @@ class SparseToDenseOp final : public Operator<Context> {
   bool DoRunWithOtherType2() {
     CAFFE_THROW(
         "SparseToDense is not implemented on tensor of type ",
-        Input(VALUES).meta().name(),
+        Input(VALUES).dtype().name(),
         "Consider adding it a type in the list DispatchHelper or implementing "
         "a generic version (which won't work for duplicated indices though)");
   }
