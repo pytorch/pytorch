@@ -105,7 +105,7 @@ def shell(command, cwd=None):
     #      `p.wait()` in a `final` block for the code to be portable.
     #
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
-    assert not isinstance(command, string_classes), "Command to shell should be a list or tuple of tokens"
+    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
     p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
     try:
         return p.wait()
