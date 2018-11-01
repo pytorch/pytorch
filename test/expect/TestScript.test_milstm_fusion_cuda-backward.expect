@@ -94,14 +94,14 @@ with prim::FusionGroup_1 = graph(%0 : Float(*, *)
 with prim::FusionGroup_2 = graph(%0 : Float(*, *)
       %1 : Float(*)
       %2 : Float(*, *)
-      %3 : Float(*, *)
-      %4 : Float(*)) {
+      %3 : Float(*)
+      %4 : Float(*, *)) {
   %5 : Float(*, *) = aten::mul(%2, %4)
   %6 : Float(*, *) = aten::mul(%2, %3)
-  %7 : Float(*, *) = aten::mul(%6, %1)
+  %7 : Float(*, *) = aten::mul(%5, %1)
   %8 : int = prim::Constant[value=1]()
   %9 : int = prim::Constant[value=1]()
-  %10 : Float(*, *) = aten::add(%5, %7, %9)
-  %11 : Float(*, *) = aten::mul(%6, %0)
-  return (%11, %10);
+  %10 : Float(*, *) = aten::add(%6, %7, %9)
+  %11 : Float(*, *) = aten::mul(%5, %0)
+  return (%11, %10, %5);
 }
