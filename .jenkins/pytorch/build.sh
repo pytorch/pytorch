@@ -61,10 +61,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
   export KMTHINLTO=1
 
-  # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
-  sudo apt-get -qq install libc++1
-  sudo apt-get -qq install libc++abi1
-
   # When hcc runs out of memory, it silently exits without stopping
   # the build process, leaving undefined symbols in the shared lib
   # which will cause undefined symbol errors when later running
