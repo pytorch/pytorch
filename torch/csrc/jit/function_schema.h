@@ -169,6 +169,9 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
       out << "*, ";
       seen_kwarg_only = true;
     }
+    if (schema.is_vararg() && i == schema.arguments().size() - 1) {
+      out << "*";
+    }
     out << schema.arguments()[i];
   }
 

@@ -92,6 +92,31 @@ TEST(Int8, Softmax) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(YQ.scale));
 }
 
+TEST(Int8, Sigmoid) {
+  auto XQ = q({1, 2, 1, 3});
+  auto X = dq(*XQ);
+  auto xop = CreateOperatorDef("Sigmoid", "", {"X"}, {"Y"});
+  auto op = CreateOperatorDef(
+      "Int8Sigmoid",
+      "",
+      {"XQ"},
+      {"YQ"},
+      {MakeArgument<int>("Y_zero_point", 0),
+       MakeArgument<float>("Y_scale", 1.0 / 256)});
+  Workspace ws;
+  int8Copy(ws.CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>(), *XQ);
+  BlobGetMutableTensor(ws.CreateBlob("X"), CPU)->CopyFrom(*X);
+  ws.RunOperatorOnce(op);
+  ws.RunOperatorOnce(xop);
+  const auto& YQ = ws.GetBlob("YQ")->Get<int8::Int8TensorCPU>();
+  EXPECT_EQ(YQ.scale, 1.0 / 256);
+  EXPECT_EQ(YQ.zero_point, 0);
+
+  auto YA = dq(YQ);
+  const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
+  EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(YQ.scale));
+}
+
 TEST(Int8, MaxPool) {
   auto XQ = q({1, 25, 25, 16});
   auto X = dq(*XQ);
@@ -316,7 +341,7 @@ TEST(Int8, SumRelu) {
 }
 
 void setq(int8::Int8TensorCPU* dst, const std::vector<float>& vs) {
-  CHECK_EQ(vs.size(), dst->t.size());
+  CHECK_EQ(vs.size(), dst->t.numel());
   for (auto i = 0; i < vs.size(); ++i) {
     uint8_t vq = std::max(
         std::numeric_limits<uint8_t>::min(),
@@ -329,7 +354,7 @@ void setq(int8::Int8TensorCPU* dst, const std::vector<float>& vs) {
 }
 
 void biassetq(int8::Int8TensorCPU* dst, const std::vector<float>& vs) {
-  CHECK_EQ(vs.size(), dst->t.size());
+  CHECK_EQ(vs.size(), dst->t.numel());
   for (auto i = 0; i < vs.size(); ++i) {
     int32_t vq = std::max(
         std::numeric_limits<int32_t>::min(),
@@ -405,7 +430,7 @@ TEST(Int8, Conv) {
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TRUE(
       (std::vector<uint8_t>(
-           YQ.t.data<uint8_t>(), YQ.t.data<uint8_t>() + YQ.t.size()) ==
+           YQ.t.data<uint8_t>(), YQ.t.data<uint8_t>() + YQ.t.numel()) ==
        std::vector<uint8_t>{
            145, 129, 132, 145, 129, 132, 144, 131, 130, 164, 131, 130}));
 
@@ -529,7 +554,7 @@ TEST(Int8, Conv2) {
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TRUE(
       (std::vector<uint8_t>(
-           YQ.t.data<uint8_t>(), YQ.t.data<uint8_t>() + YQ.t.size()) ==
+           YQ.t.data<uint8_t>(), YQ.t.data<uint8_t>() + YQ.t.numel()) ==
        std::vector<uint8_t>{157, 103, 167, 93}));
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, 1.0e-5);
 }
@@ -585,7 +610,7 @@ TEST(Int8, DepthwiseConv) {
   const auto& YQ = ws.GetBlob("YQ")->Get<int8::Int8TensorCPU>();
   auto YA = dq(YQ);
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
-  for (auto i = 0; i < YA->size(); ++i) {
+  for (auto i = 0; i < YA->numel(); ++i) {
     LOG(INFO) << YA->data<float>()[i];
     LOG(INFO) << YE.data<float>()[i];
   }
@@ -685,13 +710,13 @@ TEST(Int8, FC) {
   const auto& YQ = ws.GetBlob("YQ")->Get<int8::Int8TensorCPU>();
   auto YA = dq(YQ);
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
-  for (auto i = 0; i < YA->size(); ++i) {
+  for (auto i = 0; i < YA->numel(); ++i) {
     LOG(INFO) << YA->data<float>()[i];
     LOG(INFO) << YE.data<float>()[i];
   }
   EXPECT_TRUE(
       (std::vector<uint8_t>(
-           YQ.t.data<uint8_t>(), YQ.t.data<uint8_t>() + YQ.t.size()) ==
+           YQ.t.data<uint8_t>(), YQ.t.data<uint8_t>() + YQ.t.numel()) ==
        std::vector<uint8_t>{151, 152, 153, 185, 186, 187}));
 }
 
@@ -700,10 +725,10 @@ TEST(Int8, GivenTensorFill) {
   auto XQ = q(shape);
   auto X = dq(*XQ);
   vector<float> v(
-      X->template data<float>(), X->template data<float>() + X->size());
+      X->template data<float>(), X->template data<float>() + X->numel());
   std::string vq(
       XQ->t.template data<uint8_t>(),
-      XQ->t.template data<uint8_t>() + XQ->t.size());
+      XQ->t.template data<uint8_t>() + XQ->t.numel());
   auto op = CreateOperatorDef(
       "GivenTensorFill",
       "",
@@ -734,10 +759,10 @@ TEST(Int8, GivenIntTensorFill) {
   auto XQ = biasq(shape, 1. / 255 * 1. / 255);
   auto X = biasdq(*XQ);
   vector<float> v(
-      X->template data<float>(), X->template data<float>() + X->size());
+      X->template data<float>(), X->template data<float>() + X->numel());
   vector<int32_t> vq(
       XQ->t.template data<int32_t>(),
-      XQ->t.template data<int32_t>() + XQ->t.size());
+      XQ->t.template data<int32_t>() + XQ->t.numel());
   auto op = CreateOperatorDef(
       "GivenTensorFill",
       "",

@@ -830,6 +830,7 @@ if USE_ROCM:
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.2')
 C10D_LIB = os.path.join(lib_path, 'libc10d.a')
+GLOO_LIB = os.path.join(lib_path, 'libgloo.a')
 GLOO_CUDA_LIB = os.path.join(lib_path, 'libgloo_cuda.a')
 
 # static library only
@@ -943,6 +944,7 @@ if USE_DISTRIBUTED:
         extra_compile_args.append('-DUSE_C10D')
         main_sources.append('torch/csrc/distributed/c10d/init.cpp')
         main_link_args.append(C10D_LIB)
+        main_link_args.append(GLOO_LIB)
         if USE_CUDA:
             main_sources.append('torch/csrc/distributed/c10d/ddp.cpp')
             main_link_args.append(GLOO_CUDA_LIB)

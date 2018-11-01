@@ -95,7 +95,7 @@ inline Stack toStack(const py::tuple& inputs) {
   return toIValue(inputs).toTuple()->elements();
 }
 
-inline IValue toIValue(py::handle obj, const TypePtr& type);
+inline IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N = c10::nullopt);
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   std::vector<IValue> elems;
@@ -105,7 +105,7 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   return List<IValue>::create(std::move(elems));
 }
 
-inline IValue toIValue(py::handle obj, const TypePtr& type) {
+inline IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     switch (type->kind()) {
       case TypeKind::DynamicType:
       case TypeKind::TensorType:
@@ -150,10 +150,23 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
       case TypeKind::ListType: {
         const auto& elem_type = type->expect<ListType>()->getElementType();
         switch(elem_type->kind()) {
+          //allows single int/float to be broadcasted to a fixed size list
           case TypeKind::IntType:
-            return py::cast<std::vector<int64_t>>(obj);
+            if (!N || !py::isinstance<py::int_>(obj)) {
+              return py::cast<std::vector<int64_t>>(obj);
+            } else {
+              double value = py::cast<int64_t>(obj);
+              std::vector<double> repeated(*N, value);
+              return repeated;
+            }
           case TypeKind::FloatType:
-            return py::cast<std::vector<double>>(obj);
+            if (!N || !py::isinstance<py::float_>(obj)) {
+              return py::cast<std::vector<double>>(obj);
+            } else {
+              double value = py::cast<double>(obj);
+              std::vector<double> repeated(*N, value);
+              return repeated;
+            }
           case TypeKind::TensorType:
           case TypeKind::DynamicType:
             return py::cast<std::vector<at::Tensor>>(obj);
@@ -183,7 +196,7 @@ inline IValue argumentToIValue(
     py::handle object) {
   const auto& argument = schema.arguments().at(argumentPosition);
   try {
-    return toIValue(object, argument.type());
+    return toIValue(object, argument.type(), argument.N());
   } catch (const py::cast_error& error) {
     throw std::runtime_error(c10::str(
         schema.name(),

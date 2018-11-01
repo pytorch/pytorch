@@ -86,7 +86,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     auto& default_value = Input(DEFAULT);
     CAFFE_ENFORCE_EQ(default_value.ndim() + 1, sparse_values.ndim());
     CAFFE_ENFORCE_EQ(default_value.numel(), sparse_values.size_from_dim(1));
-    CAFFE_ENFORCE(sparse_values.meta() == default_value.meta());
+    CAFFE_ENFORCE(sparse_values.dtype() == default_value.dtype());
 
     const TInd* sparse_indices_vec = sparse_indices.template data<TInd>();
     const char* sparse_values_vec =
@@ -132,10 +132,10 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     // init
     // TODO: consider unrolling CopyItems to make elemental types copy faster
     char* output_data =
-        static_cast<char*>(output->raw_mutable_data(sparse_values.meta()));
+        static_cast<char*>(output->raw_mutable_data(sparse_values.dtype()));
     for (int i = 0; i < cols * rows; i++) {
       context_.CopyItemsSameDevice(
-          default_value.meta(),
+          default_value.dtype(),
           block_size,
           default_val,
           output_data + i * block_nbytes);
@@ -162,7 +162,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
         int idx = this->getFeatureIdx(sparse_index);
         if (idx != -1) {
           context_.CopyItemsSameDevice(
-              sparse_values.meta(),
+              sparse_values.dtype(),
               block_size,
               sparse_values_vec + (offset + c) * block_nbytes,
               output_data + (r * cols + idx) * block_nbytes);
@@ -251,7 +251,7 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
         static_cast<const char*>(gradient_output.raw_data());
 
     char* output_data =
-        static_cast<char*>(output->raw_mutable_data(gradient_output.meta()));
+        static_cast<char*>(output->raw_mutable_data(gradient_output.dtype()));
     math::Set<char, Context>(
         default_length * gradient_output.itemsize(), 0, output_data, &context_);
 
@@ -266,7 +266,7 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
         if (idx != -1 && !gradient_used[idx]) {
           gradient_used[idx] = true;
           context_.CopyItemsSameDevice(
-              gradient_output.meta(),
+              gradient_output.dtype(),
               block_size,
               gradient_output_vec + (r * cols + idx) * block_nbytes,
               output_data + (offset + c) * block_nbytes);
