@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "0.4"
 graph {
   node {
-    input: "x"
+    input: "input"
     output: "1"
     op_type: "Constant"
     attribute {
@@ -29,7 +29,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "x"
+    name: "input"
     type {
       tensor_type {
         elem_type: FLOAT

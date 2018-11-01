@@ -1730,7 +1730,10 @@ class TestJit(JitTestCase):
             return yeet
 
         traced = torch.jit.trace(foo, (torch.rand(3, 3), torch.rand(3, 3)))
-        self.assertExpectedGraph(traced.graph)
+        graph_str = str(traced.graph)
+        assert 'bar' in graph_str
+        assert 'baz' in graph_str
+        assert 'quick_brown_fox' in graph_str
 
     def test_constant_prop_if_constant(self):
         @torch.jit.script
