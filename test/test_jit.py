@@ -8867,8 +8867,6 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
     outputs = reference_func(*nograd_inputs, **kwargs)
     torch.set_rng_state(initial_rng_state)
     outputs_test = func(*nograd_inputs, **kwargs)
-
-
     self.assertEqual(outputs, outputs_test)
 
     if check_types:
