@@ -5,8 +5,8 @@
 namespace torch { namespace autograd {
 
 struct TORCH_API GradMode {
-  static bool is_enabled();
-  static void set_enabled(bool enabled);
+  static bool is_enabled() noexcept;
+  static void set_enabled(bool enabled) noexcept;
 };
 
 // A RAII, thread local (!) guard that enables or disables grad mode upon

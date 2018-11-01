@@ -42,9 +42,6 @@ struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
 
 template <typename... Args>
 inline bool compute_requires_grad(Args&&... args) {
-  if (!GradMode::is_enabled()) {
-    return false;
-  }
   return ComputeRequiresGrad().apply(std::forward<Args>(args)...).out;
 }
 

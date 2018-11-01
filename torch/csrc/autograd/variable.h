@@ -6,6 +6,7 @@
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable_version.h"
+#include "torch/csrc/autograd/grad_mode.h"
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -325,6 +326,9 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   }
 
   bool requires_grad() const override {
+    if (!GradMode::is_enabled()) {
+      return false;
+    }
     return requires_grad_ || grad_fn_ || (is_view_ && base().requires_grad());
   }
 
@@ -332,6 +336,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   Variable& grad() override {
     return grad_;
   }
+
   const Variable& grad() const override {
     return grad_;
   }
