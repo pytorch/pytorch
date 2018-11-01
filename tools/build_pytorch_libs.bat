@@ -118,8 +118,8 @@ FOR %%a IN (%_BUILD_ARGS%) DO (
   echo ^|  Building %%a
   echo ^|
   echo --------------------------------------------------------------------------------
-  
-  IF "%%a"=="caffe2" ( 
+
+  IF "%%a"=="caffe2" (
     call:build_caffe2 %%a
   ) ELSE (
     IF "%%a"=="libshm_windows" (
@@ -186,7 +186,7 @@ goto:eof
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
-  
+
   %MAKE_COMMAND%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
@@ -239,11 +239,11 @@ goto:eof
                   -DUSE_ROCM=%USE_ROCM%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
-  
+
   %MAKE_COMMAND%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
-  
+
   popd
   @endlocal
 

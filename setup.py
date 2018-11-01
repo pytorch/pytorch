@@ -769,7 +769,7 @@ if IS_WINDOWS:
                           '/EHa', '/DNOMINMAX',
                           '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
                           '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
-                          '/wd4275']
+                          '/wd4275', 'foobar']
     if sys.version_info[0] == 2:
         if not check_env_flag('FORCE_PY27_BUILD'):
             print('The support for PyTorch with Python 2.7 on Windows is very experimental.')
