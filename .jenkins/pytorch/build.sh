@@ -76,20 +76,18 @@ fi
 ###############################################################################
 # Update Valgrind
 ###############################################################################
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-* ]]; then
-  sudo apt-get remove -qq valgrind
-  mkdir valgrind_build && cd valgrind_build
-  wget http://valgrind.org/downloads/valgrind-3.14.0.tar.bz2
-  tar -xjf valgrind-3.14.0.tar.bz2
-  cd valgrind-3.14.0
-  ./configure --prefix=/usr/local
-  make
-  sudo make install
-  cd ../../
-  rm -rf valgrind_build
-  alias valgrind="/usr/local/bin/valgrind"
-  valgrind --version
-fi
+sudo apt-get remove -qq valgrind
+mkdir valgrind_build && cd valgrind_build
+wget http://valgrind.org/downloads/valgrind-3.14.0.tar.bz2
+tar -xjf valgrind-3.14.0.tar.bz2
+cd valgrind-3.14.0
+./configure --prefix=/usr/local
+make
+sudo make install
+cd ../../
+rm -rf valgrind_build
+alias valgrind="/usr/local/bin/valgrind"
+valgrind --version
 
 
 # TODO: Don't install this here
