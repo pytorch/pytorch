@@ -106,12 +106,12 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
   return self.select(dim, index);
 }
 
-static Variable sequenceToVariable(const at::Type& type, PyObject* seq) {
+static Variable sequenceToVariable(const Type& type, PyObject* seq) {
   auto& idx_type = type.toScalarType(kLong);
   return torch::utils::legacy_new_from_data(idx_type, c10::nullopt, seq);
 }
 
-static Variable valueToTensor(const at::Type & type, PyObject* value) {
+static Variable valueToTensor(const Type & type, PyObject* value) {
   if (THPVariable_Check(value)) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
