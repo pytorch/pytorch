@@ -20,15 +20,18 @@ _VF = torch._C._VariableFunctions
 
 
 class _Reduction:
-    # NB: Keep this class in sync with enums in THNN/Reduction.h
+    # NB: Keep this class in sync with enums in aten/src/ATen/core/Reduction.h
 
     @staticmethod
     def get_enum(reduction):
         if reduction == 'none':
             return 0
-        if reduction == 'elementwise_mean':
+        elif reduction == 'mean':
             return 1
-        if reduction == 'sum':
+        elif reduction == 'elementwise_mean':
+            warnings.warn("reduction='elementwise_mean' is deprecated, please use reduction='mean' instead.")
+            return 1
+        elif reduction == 'sum':
             return 2
         raise ValueError(reduction + " is not a valid value for reduction")
 
@@ -46,7 +49,7 @@ class _Reduction:
             reduce = True
 
         if size_average and reduce:
-            ret = 'elementwise_mean'
+            ret = 'mean'
         elif reduce:
             ret = 'sum'
         else:
@@ -1437,7 +1440,7 @@ def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
 # loss
 
 def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
-             reduction='elementwise_mean'):
+             reduction='mean'):
     r"""The Connectionist Temporal Classification loss.
 
     See :class:`~torch.nn.CTCLoss` for details.
@@ -1459,9 +1462,9 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
         blank (int, optional):
             Blank label. Default :math:`0`.
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
-            'elementwise_mean': the output losses will be divided by the target lengths and
-            then the mean over the batch is taken. Default: 'elementwise_mean'
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the output losses will be divided by the target lengths and
+            then the mean over the batch is taken. Default: 'mean'
 
     Example::
 
@@ -1476,7 +1479,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
 
 
 def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
-             reduce=None, reduction='elementwise_mean'):
+             reduce=None, reduction='mean'):
     r"""The negative log likelihood loss.
 
     See :class:`~torch.nn.NLLLoss` for details.
@@ -1503,11 +1506,11 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
-            'elementwise_mean': the sum of the output will be divided by the number of
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the sum of the output will be divided by the number of
             elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
+            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 
     Example::
 
@@ -1547,7 +1550,7 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
 
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=None, eps=1e-8,
-                     reduce=None, reduction='elementwise_mean'):
+                     reduce=None, reduction='mean'):
     r"""Poisson negative log likelihood loss.
 
     See :class:`~torch.nn.PoissonNLLLoss` for details.
@@ -1573,11 +1576,11 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
-            'elementwise_mean': the sum of the output will be divided by the number of
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the sum of the output will be divided by the number of
             elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
+            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 
     """
     if size_average is not None or reduce is not None:
@@ -1591,12 +1594,12 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
         loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
     if reduction is 'none':
         return loss
-    if reduction is 'elementwise_mean':
+    if reduction is 'mean':
         return torch.mean(loss)
     return torch.sum(loss)
 
 
-def kl_div(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
+def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
     r"""The `Kullback-Leibler divergence`_ Loss.
 
     See :class:`~torch.nn.KLDivLoss` for details.
@@ -1614,11 +1617,11 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='elementwise
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
-            'elementwise_mean': the sum of the output will be divided by the number of
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the sum of the output will be divided by the number of
             elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
+            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
     """
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_enum(size_average, reduce)
@@ -1628,7 +1631,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='elementwise
 
 
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
-                  reduce=None, reduction='elementwise_mean'):
+                  reduce=None, reduction='mean'):
     r"""This criterion combines `log_softmax` and `nll_loss` in a single
     function.
 
@@ -1656,11 +1659,11 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
-            'elementwise_mean': the sum of the output will be divided by the number of
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the sum of the output will be divided by the number of
             elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
+            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 
     Examples::
 
@@ -1675,7 +1678,7 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=None,
-                         reduce=None, reduction='elementwise_mean'):
+                         reduce=None, reduction='mean'):
     r"""Function that measures the Binary Cross Entropy
     between the target and the output.
 
@@ -1696,11 +1699,11 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
-            'elementwise_mean': the sum of the output will be divided by the number of
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the sum of the output will be divided by the number of
             elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
+            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 
     Examples::
 
@@ -1728,7 +1731,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
 
 
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=None,
-                                     reduce=None, reduction='elementwise_mean', pos_weight=None):
+                                     reduce=None, reduction='mean', pos_weight=None):
     r"""Function that measures Binary Cross Entropy between target and output
     logits.
 
@@ -1749,11 +1752,11 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
-            'elementwise_mean': the sum of the output will be divided by the number of
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the sum of the output will be divided by the number of
             elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
+            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
         pos_weight (Tensor, optional): a weight of positive examples.
                 Must be a vector with length equal to the number of classes.
 
@@ -1775,12 +1778,12 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction)
 
 
-def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='elementwise_mean'):
+def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
     if target.requires_grad:
         d = lambd(input, target)
         if reduction == 'none':
             return d
-        return torch.mean(d) if reduction == 'elementwise_mean' else torch.sum(d)
+        return torch.mean(d) if reduction == 'mean' else torch.sum(d)
     else:
         expanded_input, expanded_target = torch.broadcast_tensors(input, target)
         return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
@@ -1791,7 +1794,7 @@ def _smooth_l1_loss(input, target):
     return torch.where(t < 1, 0.5 * t ** 2, t - 0.5)
 
 
-def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
+def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     r"""Function that uses a squared term if the absolute
     element-wise error falls below 1 and an L1 term otherwise.
 
@@ -1804,8 +1807,8 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='ele
         torch._C._nn.smooth_l1_loss, input, target, reduction)
 
 
-def l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
-    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean') -> Tensor
+def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     Function that takes the mean element-wise absolute value difference.
 
@@ -1817,8 +1820,8 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='elementwis
                            input, target, reduction)
 
 
-def mse_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
-    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean') -> Tensor
+def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     Measures the element-wise mean squared error.
 
@@ -1830,8 +1833,8 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='elementwi
 
 
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=None,
-                        reduce=None, reduction='elementwise_mean'):
-    r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='elementwise_mean') -> Tensor
+                        reduce=None, reduction='mean'):
+    r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
     """  # noqa
@@ -1846,8 +1849,8 @@ def margin_ranking_loss(input1, input2, target, margin=0, size_average=None,
 
 
 def hinge_embedding_loss(input, target, margin=1.0, size_average=None,
-                         reduce=None, reduction='elementwise_mean'):
-    r"""hinge_embedding_loss(input, target, margin=1.0, size_average=None, reduce=None, reduction='elementwise_mean') -> Tensor
+                         reduce=None, reduction='mean'):
+    r"""hinge_embedding_loss(input, target, margin=1.0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
     """  # noqa
@@ -1858,8 +1861,8 @@ def hinge_embedding_loss(input, target, margin=1.0, size_average=None,
     return torch.hinge_embedding_loss(input, target, margin, reduction)
 
 
-def multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
-    r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean') -> Tensor
+def multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelMarginLoss` for details.
     """
@@ -1870,8 +1873,8 @@ def multilabel_margin_loss(input, target, size_average=None, reduce=None, reduct
     return torch._C._nn.multilabel_margin_loss(input, target, reduction)
 
 
-def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
-    r"""soft_margin_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean') -> Tensor
+def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    r"""soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
     """
@@ -1883,7 +1886,7 @@ def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='e
 
 
 def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
-                                reduce=None, reduction='elementwise_mean'):
+                                reduce=None, reduction='mean'):
     r"""multilabel_soft_margin_loss(input, target, weight=None, size_average=None) -> Tensor
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
@@ -1900,7 +1903,7 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
 
     if reduction == 'none':
         return loss
-    elif reduction == 'elementwise_mean':
+    elif reduction == 'mean':
         return loss.mean()
     elif reduction == 'sum':
         return loss.sum()
@@ -1909,8 +1912,8 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
 
 
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
-                          reduce=None, reduction='elementwise_mean'):
-    r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='elementwise_mean') -> Tensor
+                          reduce=None, reduction='mean'):
+    r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
     """  # noqa
@@ -1922,9 +1925,9 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
 
 
 def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
-                      reduce=None, reduction='elementwise_mean'):
+                      reduce=None, reduction='mean'):
     r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
-                          reduce=None, reduction='elementwise_mean') -> Tensor
+                          reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
@@ -2393,7 +2396,7 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
 
 
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False, size_average=None,
-                        reduce=None, reduction="elementwise_mean"):
+                        reduce=None, reduction="mean"):
     r"""
     See :class:`~torch.nn.TripletMarginLoss` for details
     """
