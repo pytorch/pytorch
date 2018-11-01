@@ -900,10 +900,30 @@ Operator(                                                                      \
           };
         }),
     Operator(
-        "aten::__not__(int self) -> int",
+        "aten::__not__(bool self) -> bool",
         [](const Node* node) {
           return [=](Stack& stack) {
-            push(stack, !pop(stack).toInt());
+            push(stack, !pop(stack).toBool());
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::__is__(t1 self, t2 obj) -> bool",
+        [](const Node* node) {
+          return [=](Stack& stack) {
+            IValue self, obj;
+            pop(stack, self, obj);
+            push(stack, self.isSameIdentity(obj));
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::__isnot__(t1 self, t2 obj) -> bool",
+        [](const Node* node) {
+          return [=](Stack& stack) {
+            IValue self, obj;
+            pop(stack, self, obj);
+            push(stack, !self.isSameIdentity(obj));
             return 0;
           };
         }),

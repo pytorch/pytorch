@@ -1485,6 +1485,10 @@ private:
         return aten::__and__;
       case TK_OR:
         return aten::__or__;
+      case TK_IS:
+        return aten::__is__;
+      case TK_ISNOT:
+        return aten::__isnot__;
       case TK_NOT:
         return aten::__not__;
       default:
@@ -1665,6 +1669,8 @@ private:
     switch (tree->kind()) {
       case '@':
       case TK_POW:
+      case TK_IS:
+      case TK_ISNOT:
       case TK_NOT:
       case TK_NE:
       case TK_EQ:

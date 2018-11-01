@@ -74,8 +74,10 @@ namespace c10 {
   _(prim, fork)                    \
   _(prim, RaiseException)          \
   _(aten, append)                  \
-  _(aten, __not__)                 \
   _(aten, format)                  \
+  _(aten, __not__)                 \
+  _(aten, __is__)                  \
+  _(aten, __isnot__)               \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \

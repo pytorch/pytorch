@@ -409,6 +409,9 @@ struct CAFFE2_API IValue final {
   template<typename T>
   optional<T> toOptional();
 
+  // this is a shallow comparison of two IValues to test the object identity
+  bool isSameIdentity(IValue& rhs);
+
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const IValue& v);
@@ -622,5 +625,25 @@ inline optional<T> IValue::toOptional() {
   }
   return this->to<T>();
 }
+
+inline bool IValue::isSameIdentity(IValue& rhs) {
+  // We choose to not use memcmp for payload check due to potenntial random padding characters on union type
+
+  // Semantics:
+  // 1. None is None, False is False, and True is True are all true
+  // 2. If it is a reference type (i.e. is_intrusive_ptr), then is is True when the pointed-to object is the same.
+  // 3. False for all other comparisons.
+  if (this->isNone() && rhs.isNone()) {
+    return true;
+  } else if (this->isBool() && rhs.isBool()) {
+    // for bool type, do equality check
+    return this->toBool() == rhs.toBool();
+  } else {
+    // for objects holding in IValue, do shallow compare on pointer address to testify the identity
+    return this->is_intrusive_ptr && rhs.is_intrusive_ptr
+        && this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+  }
+}
+
 
 } // namespace c10
