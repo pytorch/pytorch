@@ -57,7 +57,7 @@ void IntermediateTensor::update(caffe2::TensorProto* tensor_proto,
         if (source_type == caffe2::ExternalDataProto_SourceType_INLINE_CONTAINER) {
           AT_ASSERTM(external_data.has_record_id(), "no record_id in ExternalDataProto and source_type is INLINE_CONTAINER!");
           // only load the data of the tensor in EAGER mode
-          uint64_t record_id = std::stoul(external_data.record_id());
+          uint64_t record_id = caffe2::stoull(external_data.record_id());
           auto it = id_data->find(record_id);
           if (mode == DeserializeMode::EAGER) {
             // tensor data is only loaded in EAGER mode
@@ -159,6 +159,13 @@ IntermediateMethod::IntermediateMethod(const IntermediateMethod& method) {
   name_ = method.name_;
   graph_ = caffe2::make_unique<caffe2::NetDef>(*(method.graph_));
   torchScript_ = method.torchScript_;
+}
+
+IntermediateMethod& IntermediateMethod::operator =(const IntermediateMethod& method) {
+  name_ = method.name_;
+  graph_ = caffe2::make_unique<caffe2::NetDef>(*(method.graph_));
+  torchScript_ = method.torchScript_;
+  return *this;
 }
 
 void IntermediateMethod::dump(torch::MethodDef* method_def) {
@@ -273,11 +280,9 @@ void serializeIntermediateModel(IntermediateModel* imodel,
 
   torch::ModelDef model_def;
   imodel->dump(&model_def);
-  size_t proto_size = model_def.ByteSizeLong();
-  void* buffer = malloc(proto_size);
-  model_def.SerializeToArray(buffer, proto_size);
-  writer->writeRecord(buffer, proto_size);
-  free(buffer);
+  std::string buffer;
+  model_def.SerializeToString(&buffer);
+  writer->writeRecord(buffer.c_str(), buffer.size());
 }
 
 void serializeIntermediateModel(IntermediateModel* imodel, const std::string& filename) {
