@@ -461,7 +461,7 @@
     CPU: _cosh_out_cpu
     CUDA: _cosh_out_cuda
 
-- func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::Mean) -> Tensor
 
 - func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
   return:
@@ -568,10 +568,10 @@
 
 - func: cumprod_out(Tensor result, Tensor self, int64_t dim) -> Tensor
 
-- func: ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0, int64_t reduction=Reduction::Mean) -> Tensor
 
 # convenience function that converts to intlists for you
-- func: ctc_loss(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int64_t blank=0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: ctc_loss(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int64_t blank=0, int64_t reduction=Reduction::Mean) -> Tensor
 
 - func: _ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0) -> (Tensor, Tensor)
   dispatch:
@@ -831,7 +831,7 @@
 
 - func: hamming_window(int64_t window_length, bool periodic, double alpha, double beta, TensorOptions options={}) -> Tensor
 
-- func: hinge_embedding_loss(Tensor self, Tensor target, double margin=1.0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: hinge_embedding_loss(Tensor self, Tensor target, double margin=1.0, int64_t reduction=Reduction::Mean) -> Tensor
 
 - func: ger(Tensor self, Tensor vec2) -> Tensor
   variants: function, method
@@ -937,9 +937,9 @@
   variants: function, method
   device_guard: false
 
-- func: kl_div(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: kl_div(Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
 
-- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
   dispatch:
     CPU: kl_div_backward_cpu
     CUDA: kl_div_backward_cuda
@@ -1054,7 +1054,7 @@
 
 - func: logsumexp_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
 
-- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::Mean) -> Tensor
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -1699,7 +1699,7 @@
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim=1) -> Tensor
 
-- func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, double margin=1.0, double p=2, double eps=1e-6, bool swap=false, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, double margin=1.0, double p=2, double eps=1e-6, bool swap=false, int64_t reduction=Reduction::Mean) -> Tensor
 
 - func: trunc(Tensor self) -> Tensor
   variants: function, method
