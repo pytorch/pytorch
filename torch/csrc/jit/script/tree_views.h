@@ -42,10 +42,13 @@ namespace script {
 //       |     Le                                                       TK_LE
 //       |     Ge                                                       TK_GE
 //       |     Ne                                                       TK_NE
+//       |     Is                                                       TK_IS
+//       |     IsNot                                                    TK_ISNOT
 //       |     Add                                                      '+'
 //       |     Sub                                                      '-'
 //       |     Mul                                                      '*'
 //       |     Div                                                      '/'
+//       |     Mod                                                      '%'
 //       |     MatMult                                                  '@'
 //       |     Pow                                                      TK_POW
 //       | UnaryOp(Expr expr)
@@ -226,6 +229,8 @@ struct Expr : public TreeView {
       case TK_OR:
       case '<':
       case '>':
+      case TK_IS:
+      case TK_ISNOT:
       case TK_EQ:
       case TK_LE:
       case TK_GE:
@@ -522,6 +527,8 @@ struct BinOp : public Expr {
       case TK_OR:
       case '<':
       case '>':
+      case TK_IS:
+      case TK_ISNOT:
       case TK_EQ:
       case TK_LE:
       case TK_GE:

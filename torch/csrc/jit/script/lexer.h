@@ -53,6 +53,8 @@ namespace script {
   _(TK_WHILE, "while", "while")                  \
   _(TK_EXPR_STMT, "expression statement", "")    \
   _(TK_RETURN, "return", "return")               \
+  _(TK_IS, "is", "is")                           \
+  _(TK_ISNOT, "is not", "is not")                \
   _(TK_NE, "ne", "!=")                           \
   _(TK_EQ, "eq", "==")                           \
   _(TK_LE, "le", "<=")                           \
