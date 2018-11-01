@@ -1508,8 +1508,8 @@ inline std::tuple<Tensor,Tensor> Tensor::eig(bool eigenvectors) const {
 inline std::tuple<Tensor,Tensor,Tensor> Tensor::svd(bool some, bool compute_uv) const {
     return type().svd(*this, some, compute_uv);
 }
-inline Tensor Tensor::potrf(bool upper) const {
-    return type().potrf(*this, upper);
+inline Tensor Tensor::cholesky(bool upper) const {
+    return type().cholesky(*this, upper);
 }
 inline Tensor Tensor::potrs(const Tensor & input2, bool upper) const {
     return type().potrs(*this, input2, upper);

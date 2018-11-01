@@ -288,6 +288,7 @@ BLAS and LAPACK Operations
 .. autofunction:: btrisolve
 .. autofunction:: btriunpack
 .. autofunction:: chain_matmul
+.. autofunction:: cholesky
 .. autofunction:: dot
 .. autofunction:: eig
 .. autofunction:: gels
