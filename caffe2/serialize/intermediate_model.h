@@ -65,7 +65,7 @@ struct IntermediateDeviceOption {
 //   1) element type information
 //   2) shape information
 //   3) pointer to the data (including offset and strides)
-class C10_API IntermediateTensor final {
+class CAFFE2_API IntermediateTensor final {
  public:
   // constructor
   IntermediateTensor() = default;
@@ -145,7 +145,7 @@ class C10_API IntermediateTensor final {
   bool noContent_ = false;
 };
 
-class C10_API IntermediateParameter final {
+class CAFFE2_API IntermediateParameter final {
  public:
   // constructors
   IntermediateParameter() = default;
@@ -200,7 +200,7 @@ class C10_API IntermediateParameter final {
   IntermediateTensor tensor_;
 };
 
-class C10_API IntermediateMethod final {
+class CAFFE2_API IntermediateMethod final {
  public:
   // constructors
   IntermediateMethod() = default;
@@ -234,7 +234,7 @@ class C10_API IntermediateMethod final {
   std::string torchScript_;
 };
 
-class C10_API IntermediateModule final {
+class CAFFE2_API IntermediateModule final {
  public:
   // constructors
   IntermediateModule() = default;
@@ -294,7 +294,7 @@ class C10_API IntermediateModule final {
   // TODO handle pickle_arena
 };
 
-class C10_API IntermediateModel final {
+class CAFFE2_API IntermediateModel final {
  public:
   // constructor
   IntermediateModel() = default;
@@ -362,20 +362,20 @@ class C10_API IntermediateModel final {
 // serialize an IntermediateModel through a PyTorchFileWriter
 // we always put the model data at the end, so when serializing
 // model, the we assume the record_id in imodel is already updated
-C10_API void serializeIntermediateModel(IntermediateModel* imodel,
+CAFFE2_API void serializeIntermediateModel(IntermediateModel* imodel,
     torch::jit::PyTorchFileWriter* writer);
 
 // serialize an IntermediateModel to a given file
-C10_API void serializeIntermediateModel(IntermediateModel* imodel, const std::string& filename);
+CAFFE2_API void serializeIntermediateModel(IntermediateModel* imodel, const std::string& filename);
 
 // deserialize an IntermediateModel through a reader,
 // serialize tensors' data first, and maintain the mappint from
 // record id to tensor data
-C10_API void deserializeIntermediateModel(IntermediateModel* imodel,
+CAFFE2_API void deserializeIntermediateModel(IntermediateModel* imodel,
     torch::jit::PyTorchFileReader* reader, DeserializeMode mode=DeserializeMode::EAGER);
 
 // deserialize an IntermediateModel from a given file
-C10_API void deserializeIntermediateModel(IntermediateModel* imodel, const std::string& filename,
+CAFFE2_API void deserializeIntermediateModel(IntermediateModel* imodel, const std::string& filename,
     DeserializeMode mode=DeserializeMode::EAGER);
 
 }  // namespace serialize
