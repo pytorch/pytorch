@@ -47,14 +47,14 @@ graph(%0 : Double(1, 3, 224, 224)
   %49 : int[] = prim::ListConstruct(%47, %48), scope: AlexNet
   %50 : Double(1, 9216) = aten::view(%43, %49), scope: AlexNet
   %51 : float = prim::Constant[value=0.5](), scope: AlexNet/Sequential[classifier]/Dropout[0]
-  %52 : Double(1!, 9216) = aten::dropout(%50, %51, %26), scope: AlexNet/Sequential[classifier]/Dropout[0]
+  %52 : Double(1, 9216) = aten::dropout(%50, %51, %26), scope: AlexNet/Sequential[classifier]/Dropout[0]
   %53 : Double(9216!, 4096!) = aten::t(%11), scope: AlexNet/Sequential[classifier]/Linear[1]
   %54 : int = prim::Constant[value=4096](), scope: AlexNet/Sequential[classifier]/Linear[1]
   %55 : int[] = prim::ListConstruct(%21, %54), scope: AlexNet/Sequential[classifier]/Linear[1]
   %56 : Double(1, 4096) = aten::expand(%12, %55, %26), scope: AlexNet/Sequential[classifier]/Linear[1]
   %57 : Double(1, 4096) = aten::addmm(%56, %52, %53, %21, %21), scope: AlexNet/Sequential[classifier]/Linear[1]
   %58 : Double(1, 4096) = aten::threshold(%57, %24, %24), scope: AlexNet/Sequential[classifier]/ReLU[2]
-  %59 : Double(1!, 4096) = aten::dropout(%58, %51, %26), scope: AlexNet/Sequential[classifier]/Dropout[3]
+  %59 : Double(1, 4096) = aten::dropout(%58, %51, %26), scope: AlexNet/Sequential[classifier]/Dropout[3]
   %60 : Double(4096!, 4096!) = aten::t(%13), scope: AlexNet/Sequential[classifier]/Linear[4]
   %61 : Double(1, 4096) = aten::expand(%14, %55, %26), scope: AlexNet/Sequential[classifier]/Linear[4]
   %62 : Double(1, 4096) = aten::addmm(%61, %59, %60, %21, %21), scope: AlexNet/Sequential[classifier]/Linear[4]

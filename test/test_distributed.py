@@ -16,9 +16,9 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from common_utils import TestCase
+from common_utils import TestCase, run_tests
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
-from torch.autograd import Variable
+from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 import common_utils as common
 
 BACKEND = os.environ["BACKEND"]
@@ -33,11 +33,22 @@ if INIT_METHOD.startswith("file://"):
     FOLDER = INIT_METHOD[7:]
 
 
+class _FC2(nn.Module):
+    def __init__(self):
+        super(_FC2, self).__init__()
+        self.fc = nn.Linear(10, 50, bias=True)
+        self.fc.bias.requires_grad = False
+
+    def forward(self, x):
+        x = self.fc(x)
+        return x
+
+
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
-        self.fc2 = nn.Linear(10, 50, bias=False)
+        self.fc2 = _FC2()
         self.fc3 = nn.Linear(50, 4, bias=False)
         self.relu = nn.ReLU()
 
@@ -1131,8 +1142,9 @@ class _DistTestBase(object):
 
     def _model_step(self, model):
         for param in model.parameters():
-            param.data += param.grad
-            param.grad = None
+            if param.grad is not None:
+                param.data += param.grad
+                param.grad = None
 
     def _prepare_dummy_data(self, local_bs):
         # global_bs for DDP should be divisible by WORLD_SIZE
@@ -1293,8 +1305,9 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
         @classmethod
         def setUpClass(cls):
-            os.environ["MASTER_ADDR"] = MASTER_ADDR
-            os.environ["WORLD_SIZE"] = WORLD_SIZE
+            os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
+            os.environ["MASTER_PORT"] = str(MASTER_PORT)
+            os.environ["WORLD_SIZE"] = str(WORLD_SIZE)
             for attr in dir(cls):
                 if attr.startswith("test"):
                     fn = getattr(cls, attr)
@@ -1307,10 +1320,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             if INIT_METHOD.startswith("file://"):
                 _, filename = tempfile.mkstemp(prefix=FOLDER)
                 INIT_METHOD = "file://{}".format(filename)
-
-            if INIT_METHOD.startswith("env://"):
-                port = common.find_free_port()
-                os.environ["MASTER_PORT"] = str(port)
 
             self.processes = []
             self.rank = self.MANAGER_PROCESS_RANK
@@ -1362,9 +1371,12 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 getattr(fn, "skip_if_no_gpu", False) or
                 getattr(fn, "skip_if_small_worldsize", False)
             )
-            self.JOIN_TIMEOUT = get_timeout(self.id())
-            for p in self.processes:
-                p.join(self.JOIN_TIMEOUT)
+            join_timeout = get_timeout(self.id())
+            for rank, process in enumerate(self.processes):
+                process.join(join_timeout)
+                self.assertFalse(
+                    process.is_alive(),
+                    "Timeout waiting for rank %d to terminate" % rank)
 
             first_process = self.processes[0]
             for p in self.processes:
@@ -1408,4 +1420,4 @@ if __name__ == "__main__":
         not torch.cuda._initialized
     ), "test_distributed must not have initialized CUDA context on main process"
 
-    unittest.main()
+    run_tests()

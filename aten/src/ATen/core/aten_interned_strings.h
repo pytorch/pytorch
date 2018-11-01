@@ -82,9 +82,10 @@ _(aten, _fused_dropout) \
 _(aten, _ger) \
 _(aten, _gesv_helper) \
 _(aten, _gesv_single) \
-_(aten, _getri) \
+_(aten, _getri_single) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
+_(aten, _inverse_helper) \
 _(aten, _linspace) \
 _(aten, _local_scalar) \
 _(aten, _local_scalar_dense) \
@@ -235,12 +236,14 @@ _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
 _(aten, chain_matmul) \
+_(aten, cholesky) \
 _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \
 _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
+_(aten, constant_pad_nd) \
 _(aten, contiguous) \
 _(aten, conv1d) \
 _(aten, conv2d) \
@@ -508,7 +511,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
-_(aten, potrf) \
 _(aten, potri) \
 _(aten, potrs) \
 _(aten, pow) \
@@ -610,6 +612,7 @@ _(aten, storage_offset) \
 _(aten, stride) \
 _(aten, strides) \
 _(aten, sub) \
+_(aten, rsub) \
 _(aten, sum) \
 _(aten, svd) \
 _(aten, symeig) \
@@ -654,6 +657,7 @@ _(aten, threshold) \
 _(aten, threshold_backward) \
 _(aten, threshold_forward) \
 _(aten, to) \
+_(aten, to_sparse) \
 _(aten, to_dense) \
 _(aten, topk) \
 _(aten, trace) \

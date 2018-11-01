@@ -22,7 +22,7 @@ Scatter::Scatter(
     std::vector<at::Device> devices,
     const c10::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
-    const c10::optional<std::vector<at::cuda::CUDAStream>>& streams,
+    const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams,
     bool unsqueeze_scalars)
     : devices_(std::move(devices)),
       chunk_sizes_(chunk_sizes),

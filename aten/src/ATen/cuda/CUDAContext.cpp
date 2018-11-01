@@ -20,6 +20,10 @@ void set_device(int64_t device) {
   AT_CUDA_CHECK(cudaSetDevice((int)device));
 }
 
+int warp_size() {
+  return getCurrentDeviceProperties()->warpSize;
+}
+
 cudaDeviceProp* getCurrentDeviceProperties() {
   return THCState_getCurrentDeviceProperties(at::globalContext().getTHCState());
 }
@@ -32,14 +36,14 @@ cudaDeviceProp* getDeviceProperties(int64_t device) {
 CUDAStream getStreamFromPool(
   const bool isHighPriority
 , int64_t device) {
-  return detail::CUDAStream_getStreamFromPool(isHighPriority, device);
+  return CUDAStream(detail::CUDAStream_getStreamFromPool(isHighPriority, device));
 }
 
 CUDAStream getDefaultCUDAStream(int64_t device) {
-  return detail::CUDAStream_getDefaultStream(device);
+  return CUDAStream(detail::CUDAStream_getDefaultStream(device));
 }
 CUDAStream getCurrentCUDAStream(int64_t device) {
-  return detail::CUDAStream_getCurrentStream(device);
+  return CUDAStream(detail::CUDAStream_getCurrentStream(device));
 }
 
 void setCurrentCUDAStream(CUDAStream stream) {

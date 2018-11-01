@@ -141,7 +141,7 @@ class DistributedDataParallel(Module):
         MB = 1024 * 1024
 
         # used for intra-node param sync and inter-node sync as well
-        self.broadcast_bucket_size = 25 * MB
+        self.broadcast_bucket_size = 250 * MB
 
         # Sync params and buffers
         module_states = list(self.module.state_dict().values())
@@ -186,11 +186,11 @@ class DistributedDataParallel(Module):
             self.bucket_sizes.append(0)
             # Now, we transpose again, so we iterate over bucket_elems, but getting tuples
             # of params from each device.
-            for idx, param_tuple in enumerate(zip(*param_buckets_tuple)):
+            for param_tuple in zip(*param_buckets_tuple):
                 if not param_tuple[0].requires_grad:
                     continue
                 for p in param_tuple:
-                    self.bucket_map[p] = (bucket_idx, idx)
+                    self.bucket_map[p] = (bucket_idx, self.bucket_sizes[bucket_idx])
                 self.bucket_sizes[bucket_idx] += 1
 
         self.buckets = [[[None for _ in range(self.bucket_sizes[i])]
@@ -355,6 +355,9 @@ class DistributedDataParallel(Module):
         return distributed_data_parallel_hook
 
     def _queue_reduction(self, bucket_idx):
+        # _queue_reduction will use a seperate CUDA stream to coalesce
+        # the small tensors to achieve more parallelisms, before passing the
+        # coalesced tensor into the c10d CUDA stream for reduction
         result = dist._queue_reduction(self.process_group,
                                        self.buckets[bucket_idx],
                                        self.device_ids)
@@ -362,17 +365,13 @@ class DistributedDataParallel(Module):
         self.buckets_coalesced[bucket_idx] = result[1]
 
     def _sync_reduction_works(self):
-        # Now only work on the first GPU of self.device_ids, uncoalesce
-        # the gradients for each bucket
+        # Now only work on the first GPU of self.device_ids
+        # _sync_reduction will use a seperate CUDA stream to uncoalesce
+        # the coalesced tensors to achieve more parallelisms
         for bucket_idx, grads_batch in enumerate(self.buckets):
-            # wait will let current stream wait on the c10d reduction stream
-            self.reduction_works[bucket_idx].wait()
-
-            grads_batch_reduced = _unflatten_dense_tensors(
-                self.buckets_coalesced[bucket_idx], grads_batch[0])
-
-            for grad, reduced in zip(grads_batch[0], grads_batch_reduced):
-                grad.copy_(reduced)
+            dist._sync_reduction(self.reduction_works[bucket_idx],
+                                 grads_batch[0],
+                                 self.buckets_coalesced[bucket_idx])
 
         # Reset the module states
         self.next_bucket = len(self.bucket_sizes) - 1

@@ -73,7 +73,7 @@ bool ChannelShuffleOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const int G = group_;
   CAFFE_ENFORCE_EQ(C % G, 0);
   const int K = C / G;
-  const int HxW = X.size() / (N * C);
+  const int HxW = X.numel() / (N * C);
   const float* X_data = X.data<float>();
   float* Y_data = Y->mutable_data<float>();
   RunChannelShuffleNCHW<float>(N, G, K, HxW, X_data, Y_data, &context_);
@@ -91,7 +91,7 @@ bool ChannelShuffleOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const int G = group_;
   CAFFE_ENFORCE_EQ(C % G, 0);
   const int K = C / G;
-  const int HxW = X.size() / (N * C);
+  const int HxW = X.numel() / (N * C);
   const float* X_data = X.data<float>();
   float* Y_data = Y->mutable_data<float>();
   RunChannelShuffleNHWC<float>(N, G, K, HxW, X_data, Y_data, &context_);
@@ -108,7 +108,7 @@ bool ChannelShuffleGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const int G = group_;
   CAFFE_ENFORCE_EQ(C % G, 0);
   const int K = C / G;
-  const int HxW = dY.size() / (N * C);
+  const int HxW = dY.numel() / (N * C);
   const float* dY_data = dY.data<float>();
   float* dX_data = dX->mutable_data<float>();
   RunChannelShuffleNCHW<float>(N, K, G, HxW, dY_data, dX_data, &context_);
@@ -126,7 +126,7 @@ bool ChannelShuffleGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const int G = group_;
   CAFFE_ENFORCE_EQ(C % G, 0);
   const int K = C / G;
-  const int HxW = dY.size() / (N * C);
+  const int HxW = dY.numel() / (N * C);
   const float* dY_data = dY.data<float>();
   float* dX_data = dX->mutable_data<float>();
   RunChannelShuffleNHWC<float>(N, K, G, HxW, dY_data, dX_data, &context_);
@@ -134,7 +134,7 @@ bool ChannelShuffleGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
 }
 
 REGISTER_CPU_OPERATOR(ChannelShuffle, ChannelShuffleOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_GRADIENT_OPERATOR(
     ChannelShuffleGradient,
     ChannelShuffleGradientOp<float, CPUContext>);
 
@@ -143,7 +143,7 @@ OPERATOR_SCHEMA(ChannelShuffle)
     .NumInputs(1)
     .NumOutputs(1)
     .InheritOnnxSchema();
-OPERATOR_SCHEMA(ChannelShuffleGradient)
+GRADIENT_OPERATOR_SCHEMA(ChannelShuffleGradient)
     .IdenticalTypeAndShape()
     .NumInputs(1)
     .NumOutputs(1);

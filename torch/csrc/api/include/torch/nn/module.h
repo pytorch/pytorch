@@ -7,7 +7,6 @@
 #include <torch/tensor.h>
 
 #include <ATen/ATen.h>
-#include "c10/util/Optional.h"
 
 #include <map>
 #include <memory>
@@ -33,9 +32,9 @@ namespace nn {
 /// \rst
 /// .. note::
 ///   The design and implementation of this class is largely based on the Python
-///   API. You may want to consult [its
-///   documentation](https://pytorch.org/docs/master/nn.html#torch.nn.Module)
-///   for further clarification on certain methods or behavior.
+///   API. You may want to consult the python documentation for
+///   :py:class:`pytorch:torch.nn.Module` for further clarification on certain
+///   methods or behavior.
 /// \endrst
 ///
 /// A `Module` is an abstraction over the implementation of some function or
@@ -75,10 +74,10 @@ class Module {
   /// Tells the base `Module` about the name of the submodule.
   explicit Module(std::string name);
 
-  /// Constructs the base module without immediate knowledge of the submodule's
-  /// name. The name of the submodule is inferred via RTTI the first time
-  /// `.name()` is invoked.
-  Module() = default;
+  /// Constructs the module without immediate knowledge of the submodule's name.
+  /// The name of the submodule is inferred via RTTI (if possible) the first
+  /// time `.name()` is invoked.
+  Module();
 
   virtual ~Module() = default;
 
@@ -110,7 +109,7 @@ class Module {
   ///   easier-to-use polymorphic interface.
   /// \endrst
   virtual std::shared_ptr<Module> clone(
-      c10::optional<Device> device = c10::nullopt) const;
+      optional<Device> device = nullopt) const;
 
   /// Provides a means to traverse the `Module` tree.
   ///
@@ -214,6 +213,7 @@ class Module {
   /// This method is useful when calling `apply()` on a `ModuleCursor`.
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   void initialize_weights(nn::Module& module) {
   ///     torch::NoGradGuard no_grad;
   ///     if (auto* linear = module.as<nn::Linear>()) {
@@ -263,6 +263,7 @@ class Module {
   ///
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   MyModule::MyModule() {
   ///     weight_ = register_parameter("weight", torch::randn({A, B}));
   ///   }
@@ -280,6 +281,7 @@ class Module {
   ///
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   MyModule::MyModule() {
   ///     mean_ = register_buffer("mean", torch::empty({num_features_}));
   ///   }
@@ -293,6 +295,7 @@ class Module {
   ///
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   MyModule::MyModule() {
   ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
   ///   }
@@ -311,6 +314,7 @@ class Module {
   ///
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   MyModule::MyModule() {
   ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
   ///   }
@@ -334,7 +338,7 @@ class Module {
   // Private methods.
 
   /// Used in the implementation of `Cloneable`.
-  virtual void clone_(Module& other, c10::optional<Device> device);
+  virtual void clone_(Module& other, optional<Device> device);
 
   /// The implementation of the various `to()` methods.
   template <typename... Ts>
@@ -350,7 +354,7 @@ class Module {
   OrderedDict<std::shared_ptr<Module>> children_;
 
   /// The module's name (e.g. "LSTM").
-  mutable c10::optional<std::string> name_;
+  mutable optional<std::string> name_;
 
   /// Whether the module is in training mode.
   bool is_training_{true};
@@ -374,6 +378,12 @@ template <typename ModuleType>
 std::shared_ptr<ModuleType> Module::register_module(
     std::string name,
     std::shared_ptr<ModuleType> module) {
+  AT_CHECK(!name.empty(), "Submodule name must not be empty");
+  AT_CHECK(
+      name.find('.') == std::string::npos,
+      "Submodule name must not contain a dot (got '",
+      name,
+      "')");
   auto& base_module = children_.insert(std::move(name), std::move(module));
   return std::dynamic_pointer_cast<ModuleType>(base_module);
 }

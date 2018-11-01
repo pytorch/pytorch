@@ -15,7 +15,7 @@ namespace c10 {
 /// A DeviceIndex is not independently meaningful without knowing
 /// the DeviceType it is associated; try to use Device rather than
 /// DeviceIndex directly.
-using DeviceIndex = int32_t;
+using DeviceIndex = int16_t;
 
 /// Represents a a compute device on which a tensor is located. A device is
 /// uniquely identified by a type, which specifies the type of machine it is
@@ -120,4 +120,5 @@ struct hash<c10::Device> {
 // TODO: Remove when we add global namespace include
 namespace at {
 using c10::Device;
+using c10::DeviceIndex;
 }

@@ -176,6 +176,17 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
     }
     return result;
   }
+
+  Value* asValue(
+      SourceRange loc,
+      Method& m) override {
+    std::vector<Value*> values;
+    for (auto sugared_item : asTuple(loc, m)) {
+      values.push_back(sugared_item->asValue(loc, m));
+    }
+    auto node = m.graph()->createTuple(values);
+    return m.graph()->insertNode(node)->output();
+  }
 };
 
 // defines how modules/methods behave inside the script subset.
@@ -303,6 +314,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
+  } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
+    return std::make_shared<ForkValue>();
   }
 
   py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);

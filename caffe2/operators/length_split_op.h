@@ -36,18 +36,18 @@ class LengthsSplitOp final : public Operator<Context> {
     if (InputSize() > 1) {
       // We potentially have n_split specified as inputs as well
       CAFFE_ENFORCE(
-          Input(1).ndim() == 1 && Input(1).size() == 1,
+          Input(1).ndim() == 1 && Input(1).numel() == 1,
           "Input `n_split` should be a vector of size 1.");
 
       const auto& input1 = Input(1);
       context_.template CopyItems<Context, CPUContext>(
-          input1.meta(), 1, input1.raw_data(), &n_split_);
+          input1.dtype(), 1, input1.raw_data(), &n_split_);
     }
 
     CAFFE_ENFORCE(
         n_split_ > 0,
         "`n_split` must contain a positive value for defined behavior.");
-    const auto M = L.size();
+    const auto M = L.numel();
 
     auto* Y = Output(0);
     Y->Resize(M * n_split_);

@@ -194,10 +194,10 @@ endmacro()
 
 
 ##############################################################################
-# Add ATen compile options.
+# Add standard compile options.
 # Usage:
-#   aten_compile_options(lib_name)
-function(aten_compile_options libname)
+#   torch_compile_options(lib_name)
+function(torch_compile_options libname)
   target_compile_options(${libname}
     PRIVATE
     -Wall
@@ -216,10 +216,10 @@ endfunction()
 
 
 ##############################################################################
-# Set ATen target properties.
+# Set standard target properties.
 # Usage:
-#   aten_set_target_props(lib_name)
-function(aten_set_target_props libname)
+#   torch_set_target_props(lib_name)
+function(torch_set_target_props libname)
   if(MSVC AND AT_MKL_MT)
     set_target_properties(${libname} PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
     set_target_properties(${libname} PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")

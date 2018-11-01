@@ -7,7 +7,6 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
-#include "c10/util/Optional.h"
 
 #include <cstddef>
 #include <functional>
@@ -62,7 +61,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
 
   explicit RNNImplBase(
       RNNOptionsBase options_,
-      c10::optional<CuDNNMode> cudnn_mode = c10::nullopt,
+      optional<CuDNNMode> cudnn_mode = nullopt,
       int64_t number_of_gates = 1);
 
   /// Initializes the parameters of the RNN module.
@@ -128,7 +127,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   int64_t number_of_gates_;
 
   /// The cuDNN RNN mode, if this RNN subclass has any.
-  c10::optional<CuDNNMode> cudnn_mode_;
+  optional<CuDNNMode> cudnn_mode_;
 
   /// The cached result of the latest `flat_weights()` call.
   std::vector<Tensor> flat_weights_;

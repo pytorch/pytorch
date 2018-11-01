@@ -24,7 +24,7 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
     default:
       AT_ERROR(
           "Unknown device: ",
-          static_cast<int32_t>(d),
+          static_cast<int16_t>(d),
           ". If you have recently updated the caffe2.proto file to add a new "
           "device type, did you forget to update the DeviceTypeName() "
           "function to reflect such recent changes?");

@@ -127,8 +127,8 @@ CAFFE2_YF_READ_INPUT(GRAD, grad)
 #undef CAFFE2_YF_READ_OUTPUT
 
 CAFFE_ENFORCE(OperatorBase::InputIsTensorType(ITER, CPU));
-CAFFE_ENFORCE_EQ(lr_avg_tensor.size(), 1);
-CAFFE_ENFORCE_EQ(mu_avg_tensor.size(), 1);
+CAFFE_ENFORCE_EQ(lr_avg_tensor.numel(), 1);
+CAFFE_ENFORCE_EQ(mu_avg_tensor.numel(), 1);
 CAFFE_ENFORCE_EQ(param_tensor.ndim(), moment_tensor.ndim());
 CAFFE_ENFORCE_EQ(param_tensor.ndim(), g_avg_tensor.ndim());
 CAFFE_ENFORCE_EQ(param_tensor.ndim(), g2_avg_tensor.ndim());
@@ -142,7 +142,7 @@ for (int i = 0; i < param_tensor.ndim(); ++i) {
 
     iter_ = OperatorBase::Input<Tensor>(ITER, CPU).template data<int64_t>()[0];
 
-    D_ = param_tensor.size();
+    D_ = param_tensor.numel();
 
     // Input data - persistent memory for internal scalars
     // Note: Memory for these scalars is being allocated during initialization

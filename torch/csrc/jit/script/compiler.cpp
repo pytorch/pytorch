@@ -404,12 +404,15 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-static inline bool isIntUsedAsIntList(
+static inline bool isIntOrFloatUsedAsList(
     const Value* value,
     const Argument& arg) {
-  // Look for int[N]
-  return value->type()->kind() == TypeKind::IntType &&
-         *arg.type() == *ListType::ofInts() && arg.N();
+  // Look for int[N] or float[N]
+  auto v_type = value->type();
+  if (v_type != FloatType::get() && v_type != IntType::get())
+    return false;
+  auto list_type = arg.type()->cast<ListType>();
+  return list_type && list_type->getElementType() == v_type && arg.N();
 }
 
 inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
@@ -441,12 +444,12 @@ Value* tryMatchArgument(
     TypeEnv & type_env) {
   Value* value = named_value.value(graph);
 
-  // some functions that take lists of integers for fixed size arrays
-  // also allow single ints to be passed in their place.
-  // the single int is then repeated to the length of the list
-  if (isIntUsedAsIntList(value, arg)) {
+  // some functions that take lists of integers or floats for fixed size arrays
+  // also allow single ints/floats to be passed in their place.
+  // the single int/float is then repeated to the length of the list
+  if (isIntOrFloatUsedAsList(value, arg)) {
     std::vector<Value*> repeated(*arg.N(), value);
-    value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
+    value = graph.insertNode(graph.createList(value->type(), repeated))->output();
   }
 
   TypePtr concrete_type;
@@ -467,13 +470,12 @@ Value* tryMatchArgument(
     value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
-  if (value->node()->kind() == prim::None){
-    if (concrete_type->isSubtypeOf(NumberType::get()))
-      value = graph.insertConstant(at::Scalar(NAN), loc);
-    else if (concrete_type->isSubtypeOf(GeneratorType::get())) {
+  if (value->type()->isSubtypeOf(NoneType::get())){
+    if (concrete_type->isSubtypeOf(GeneratorType::get())) {
       value = graph.insertNode(graph.createNoneGenerator())->output();
-    } else
+    } else if (concrete_type->isSubtypeOf(DynamicType::get())) {
       value = graph.insertNode(graph.createUndefined())->output();
+    }
   }
 
   //implicit conversion of tensors to scalars
@@ -562,7 +564,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
   // NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
   // necessary to enforce linearization on effectful ops.
   std::vector<NamedValue> modifiedArgs(raw_args.begin(), raw_args.end());
-  if (schema.is_mutable()) {
+  if (schema.has_world_token()) {
     // Add a dummy world token to be matched against
     const auto worldToken = graph.insertDummyWorld();
     modifiedArgs.insert(modifiedArgs.begin(), worldToken);
@@ -639,6 +641,14 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (!positional)
       return c10::nullopt;
     positional_inputs.push_back(positional);
+
+    if (schema.is_vararg() && schema_i == schema.arguments().size() - 1) {
+      // Freeze iteration to the last argument in the schema and keep going for
+      // all of the provided arguments
+      if (used_args < modifiedArgs.size()) {
+        schema_i--;
+      }
+    }
   }
   // check for unused self argument
   if(self != c10::nullopt) {
@@ -949,6 +959,12 @@ private:
           }
         }
         break;
+        case TK_RAISE:
+          emitRaise(Raise(stmt).range());
+          break;
+        case TK_ASSERT:
+          emitAssert(Assert(stmt));
+          break;
         case TK_RETURN:
           throw ErrorReport(stmt) << "return statements can appear only at the end "
                                   << "of the function body";
@@ -1295,6 +1311,42 @@ private:
     emitLoopCommon(stmt.range(), {}, {cond}, stmt.body(), {});
   }
 
+
+  // Currently we do not support assigning exceptions to variables,
+  // a = Exception("hi")
+  // raise a
+  //
+  // We ignore the expression following raise
+  //
+  // NYI: add exception logic to control-flow nodes
+  // if True:
+  //   a = 1
+  // else
+  //   raise Exception("Hi")
+  // print(a)
+  void emitRaise(const SourceRange& loc) {
+    const std::string exception = "Exception";
+    auto string_input = insertConstant(*graph, exception, loc);
+    graph->insertNode(graph->create(prim::RaiseException, {string_input}, 0)
+                        ->setSourceLocation(std::make_shared<SourceRange>(loc)));
+  }
+
+  void emitAssert(const Assert& stmt) {
+    Value* cond_value = emitCond(stmt.test());
+    Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
+
+    n->addInput(cond_value);
+    auto* true_block = n->addBlock();
+    auto* false_block = n->addBlock();
+
+    //if assert test is false throw exception
+    pushFrame(false_block);
+    WithInsertPoint guard(false_block);
+    emitRaise(stmt.range());
+    popFrame();
+  }
+
+
   // Validate that the `lhs` Expr's in an assignment statement are valid. That
   // is:
   //
@@ -1480,11 +1532,25 @@ private:
 
   std::shared_ptr<SugaredValue> emitApplyExpr(Apply &apply, size_t n_binders) {
     auto sv = emitSugaredExpr(apply.callee(), 1);
-    auto inputs = getNamedValues(apply.inputs(), true);
     auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
       return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
     });
-    return sv->call(apply.callee().range(), method, inputs, attributes, n_binders);
+
+    auto loc = apply.callee().range();
+    if (auto fork_value = dynamic_cast<ForkValue*>(sv.get())) {
+      auto& trees = apply.inputs().tree()->trees();
+      if (trees.size() < 1) {
+        throw ErrorReport(loc) << "Expected at least one argument to fork()";
+      }
+
+      auto forked = emitSugaredExpr(Expr(trees[0]), 1);
+      TreeList sliced_trees(trees.begin() + 1, trees.end());
+      auto inputs = getNamedValues(sliced_trees, true);
+      return emitForkExpr(loc, forked, inputs, attributes);
+    } else {
+      auto inputs = getNamedValues(apply.inputs(), true);
+      return sv->call(loc, method, inputs, attributes, n_binders);
+    }
   }
 
   Value* emitExpr(Expr tree) {
@@ -1550,6 +1616,50 @@ private:
     return graph->insertConstant(stack[0], tree->range());
   }
 
+  // This function extract a new graph from its original subgraph
+  std::shared_ptr<SugaredValue> emitForkExpr(
+      SourceRange loc,
+      const std::shared_ptr<SugaredValue> &forked,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes) {
+    // Build the fork node without inputs
+    auto fork_node = method.graph()->insertNode(method.graph()->create(prim::fork, 1))
+                ->setSourceLocation(std::make_shared<SourceRange>(loc));
+    auto body_block = fork_node->addBlock();
+
+    // Build a template of the graph to be executed
+    Value *node_output;
+    {
+      WithInsertPoint guard(body_block);
+      auto fn_sugared_output = forked->call(loc, method, inputs, attributes, 1);
+      auto fn_simple_output = fn_sugared_output->asValue(loc, method);
+      body_block->registerOutput(fn_simple_output);
+      node_output = fork_node->output()->setType(FutureType::create(fn_simple_output->type()));
+    }
+
+    // Fork a new graph from its orignal owning graph
+    auto forked_graph = std::make_shared<Graph>();
+
+    // Make sure we capture everything in the new graph.
+    // The uncaptured values will be added to the fork signature.
+    std::unordered_map<Value*, Value*> uncaptures_map;
+    auto env = [&](Value* v) -> Value* {
+      if (!uncaptures_map.count(v)) {
+        // Capture values for both graphs
+        uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
+        fork_node->addInput(v);
+      }
+      return uncaptures_map[v];
+    };
+    forked_graph->block()->cloneFrom(body_block, env);
+
+    // Separate the subgraph and clean up the orignal one
+    fork_node->g_(attr::Subgraph, forked_graph);
+    fork_node->eraseBlock(0);
+
+    return std::make_shared<SimpleValue>(node_output);
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree) {
     switch (tree->kind()) {
@@ -1604,7 +1714,7 @@ private:
         return graph->insertConstant(false, tree->range());
       } break;
       case TK_NONE: {
-        return emitNone(tree->range());
+        return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_SUBSCRIPT: {
         const auto subscript = Subscript(tree);
@@ -1651,13 +1761,6 @@ private:
         throw ErrorReport(tree) << "NYI: " << tree;
         break;
     }
-  }
-
-  Value* emitNone(SourceRange range) {
-    auto& g = *method.graph();
-    return g.insertNode(
-        g.create(prim::None, {}, 1)->setSourceLocation(
-          std::make_shared<SourceRange>(range)))->output();
   }
 
   Value* emitConst(const Const& c) {
@@ -1869,7 +1972,7 @@ private:
   Value* emitTupleSlice(const SourceRange& loc,
       const NamedValue& tuple_val,
       const NamedValue& beg_val,
-      const at::optional<NamedValue&> end_val) {
+      const at::optional<NamedValue>& end_val) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
     int64_t beg = getTupleIndexVal(loc, tuple_type, beg_val.value(*graph), /*allow_out_of_bounds*/true);
     int64_t end;
@@ -2044,6 +2147,13 @@ const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscr
       auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
       return ListType::create(elem_type);
     }},
+    {"Optional", [](Subscript subscript) -> TypePtr {
+      if (subscript.subscript_exprs().size() != 1) {
+        throw ErrorReport(subscript) << " expected exactly one element type but found " << subscript.subscript_exprs().size();
+      }
+      auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+      return OptionalType::create(elem_type);
+    }},
   };
   return map;
 }
@@ -2077,15 +2187,66 @@ TypePtr parseTypeFromExpr(Expr expr) {
                                   << " cannot be used in a type expression";
 }
 
+
+c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
+  if (expr.kind() != TK_SUBSCRIPT)
+    return c10::nullopt;
+  auto subscript = Subscript(expr);
+  if (subscript.value().kind() != TK_VAR)
+    return c10::nullopt;
+  auto var = Var(subscript.value());
+  if (var.name().name() != "BroadcastingList")
+    return c10::nullopt;
+  if (subscript.subscript_exprs().size() != 2)
+    throw ErrorReport(subscript.subscript_exprs().range())
+      << "BroadcastingList must be subscripted by type & len";
+
+  auto typ = subscript.subscript_exprs()[0];
+  auto len = subscript.subscript_exprs()[1];
+
+  if (typ.kind() != TK_VAR)
+    throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
+
+  auto value_name = Var(typ).name().name();
+  if (value_name != "float" && value_name != "int")
+    throw ErrorReport(subscript.value().range()) << "Broadcastable lists only supported for int or float";
+
+  auto elem_ptr = ident_to_type_lut().find(value_name);
+  JIT_ASSERT(elem_ptr != ident_to_type_lut().end());
+  TypePtr list_ptr = ListType::create(elem_ptr->second);
+  if (len.kind () != TK_CONST)
+    throw ErrorReport(expr) << "subscript of Broadcastable list must be positive integer";
+
+  auto constant = Const(len);
+  if (!constant.isIntegral() || constant.asIntegral() <= 0)
+    throw ErrorReport(len) << "subscript of Broadcastable list must be positive integer";
+
+  auto len_v = constant.asIntegral();
+  return std::pair<TypePtr, int32_t>(list_ptr, len_v);
+}
+
 std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
   std::vector<Argument> retval;
   size_t i = is_method ? 1 : 0;
   for (; i < decl.params().size(); ++i) {
     auto decl_arg = decl.params()[i];
+
+    TypePtr type;
+    c10::optional<int32_t> N;
+
+    //BroadcastList list can only appear at the argument level
+    if (auto maybe_broad_list = handleBroadcastList(decl_arg.type())) {
+      type = maybe_broad_list->first;
+      N = maybe_broad_list->second;
+    } else {
+      type = parseTypeFromExpr(decl_arg.type());
+      N = c10::nullopt;
+    }
+
     auto arg = Argument(
         decl_arg.ident().name(),
-        parseTypeFromExpr(decl_arg.type()),
-        /*N =*/c10::nullopt,
+        type,
+        N,
         /*default_value =*/c10::nullopt,
         /*kwarg_only =*/false);
     retval.push_back(arg);
@@ -2095,6 +2256,8 @@ std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
 
 std::vector<Argument> parseReturnsFromDecl(Decl decl) {
   JIT_ASSERT(decl.return_type().present());
+  if (handleBroadcastList(decl.return_type().get()))
+    throw ErrorReport(decl.return_type().range()) << "Broadcastable lists cannot appear as a return type";
   auto parsed_type = parseTypeFromExpr(decl.return_type().get());
   if (auto tuple_type = parsed_type->cast<TupleType>()) {
     // Flatten a single return type of type Tuple into its constituent types

@@ -19,19 +19,19 @@ void batch_gather_op_cpu_impl(
 
   vector<int64_t> shape;
   shape.push_back(data.dim(0));
-  shape.insert(shape.end(), indices.dims().begin(), indices.dims().end());
-  shape.insert(shape.end(), data.dims().begin() + 2, data.dims().end());
+  shape.insert(shape.end(), indices.sizes().begin(), indices.sizes().end());
+  shape.insert(shape.end(), data.sizes().begin() + 2, data.sizes().end());
   output->Resize(shape);
 
   auto block_size = data.size_from_dim(2);
-  auto block_bytesize = block_size * data.meta().itemsize();
-  auto N = indices.size();
-  auto data_batch_bytesize = data.size_from_dim(1) * data.meta().itemsize();
+  auto block_bytesize = block_size * data.dtype().itemsize();
+  auto N = indices.numel();
+  auto data_batch_bytesize = data.size_from_dim(1) * data.dtype().itemsize();
   auto gathered_batch_bytesize =
-      N * data.size_from_dim(2) * data.meta().itemsize();
+      N * data.size_from_dim(2) * data.dtype().itemsize();
   const TInd* idxs = indices.template data<TInd>();
   auto src_base = static_cast<const char*>(data.raw_data());
-  auto out = static_cast<char*>(output->raw_mutable_data(data.meta()));
+  auto out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
 
   for (auto batch = 0; batch < data.dim(0); ++batch) {
     for (auto i = 0; i < N; ++i) {
@@ -44,8 +44,7 @@ void batch_gather_op_cpu_impl(
           data.dim(1));
       auto src = src_base + idx * block_bytesize + batch * data_batch_bytesize;
       auto dst = out + i * block_bytesize + batch * gathered_batch_bytesize;
-      context->CopyItemsSameDevice(
-          data.meta(), block_size, src, dst);
+      context->CopyItemsSameDevice(data.dtype(), block_size, src, dst);
     }
   }
 }

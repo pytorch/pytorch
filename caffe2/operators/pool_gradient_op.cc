@@ -73,7 +73,7 @@ bool PoolGradientOp<T, Context, PoolType>::RunOnDeviceWithOrderNCHW() {
   // TODO(Yangqing): Add shape checks.
   dX->ResizeLike(X);
   math::Set<float, CPUContext>(
-      X.size(), 0, dX->template mutable_data<float>(), &context_);
+      X.numel(), 0, dX->template mutable_data<float>(), &context_);
   const float* Xdata = X.template data<float>();
   const float* Ydata = Y.template data<float>();
   const float* dYdata = dY.template data<float>();
@@ -83,7 +83,7 @@ bool PoolGradientOp<T, Context, PoolType>::RunOnDeviceWithOrderNCHW() {
   int height = X.dim32(2);
   int width = kernel_.size() > 1 ? X.dim32(3) : 1;
   int depth = kernel_.size() > 2 ? X.dim32(4) : 1;
-  vector<int> dims(X.dims().begin() + 2, X.dims().end());
+  vector<int> dims(X.sizes().begin() + 2, X.sizes().end());
   ConvPoolOpBase<CPUContext>::ComputePads(dims);
   int pooled_height = dY.dim32(2);
   int pooled_width = kernel_.size() > 1 ? dY.dim32(3) : 1;
@@ -207,18 +207,18 @@ bool PoolGradientOp<T, Context, PoolType>::RunOnDeviceWithOrderNHWC() {
   int channels = X.dim32(X.ndim() - 1);
   CAFFE_ENFORCE_EQ(channels, dY.dim32(dY.ndim() - 1));
   ConstEigenArrayMap<T> Ymat(
-      Y.template data<float>(), channels, Y.size() / channels);
+      Y.template data<float>(), channels, Y.numel() / channels);
   ConstEigenArrayMap<float> dYmat(
-      dY.template data<float>(), channels, Y.size() / channels);
+      dY.template data<float>(), channels, Y.numel() / channels);
   ConstEigenArrayMap<float> Xmat(
-      X.template data<float>(), channels, X.size() / channels);
+      X.template data<float>(), channels, X.numel() / channels);
   EigenArrayMap<float> dXmat(
-      dX->template mutable_data<float>(), channels, X.size() / channels);
+      dX->template mutable_data<float>(), channels, X.numel() / channels);
   dXmat.setZero();
   int height = X.dim32(1);
   int width = kernel_.size() > 1 ? X.dim32(2) : 1;
   int depth = kernel_.size() > 2 ? X.dim32(3) : 1;
-  vector<int> dims(X.dims().begin() + 1, X.dims().end() - 1);
+  vector<int> dims(X.sizes().begin() + 1, X.sizes().end() - 1);
   ConvPoolOpBase<CPUContext>::ComputePads(dims);
   int pooled_height = dY.dim32(1);
   int pooled_width = kernel_.size() > 1 ? dY.dim32(2) : 1;

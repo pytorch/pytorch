@@ -28,6 +28,17 @@ def div(a : ${Scalar}, b : Tensor) -> Tensor:
   return torch.reciprocal(b) * a
 )SCRIPT");
 
+auto python_builtins_source = R"SCRIPT(
+def warn(string: str):
+  print(string)
+)SCRIPT";
+
+auto _ntuple_ops = CodeTemplate(
+R"SCRIPT(
+def _${name}(x: BroadcastingList[${Scalar}, ${Length}]) -> List[${Scalar}]:
+  return x
+)SCRIPT");
+
 struct BuiltinFunctionRegistry {
 
   const std::vector<Method*>& getAllBuiltinFunctionsFor(Symbol name) {
@@ -67,6 +78,24 @@ private:
       TemplateEnv env;
       env.s("Scalar", scalar);
       loadSource(scalar_operators_source.format(env));
+    }
+    loadSource(python_builtins_source);
+
+    using str_pair = std::pair<std::string, std::string>;
+    const std::vector<str_pair> name_len = {
+      str_pair("single", "1"),
+      str_pair("pair", "2"),
+      str_pair("triple", "3"),
+      str_pair("quadruple", "4"),
+    };
+    for(auto scalar: {"float", "int"}) {
+      for (auto pair: name_len) {
+        TemplateEnv env;
+        env.s("Scalar", scalar);
+        env.s("name", pair.first);
+        env.s("Length", pair.second);
+        loadSource(_ntuple_ops.format(env));
+      }
     }
   }
   enum {UNINITIALIZED, INTIIALIZING, INITIALIZED} state = UNINITIALIZED;

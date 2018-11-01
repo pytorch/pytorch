@@ -85,12 +85,20 @@ void Variable::Impl::set_storage_offset(int64_t storage_offset) {
   AT_ERROR("variable impl does not have set_storage_offset");
 }
 
+void* Variable::Impl::slow_data() const {
+  return data_.unsafeGetTensorImpl()->slow_data();
+}
+
 const at::Storage& Variable::Impl::storage() const {
   return data_.storage();
 }
 
 int64_t Variable::Impl::storage_offset() const {
   return data_.storage_offset();
+}
+
+int64_t Variable::Impl::get_device_slow() const {
+  return data_.get_device();
 }
 
 std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {

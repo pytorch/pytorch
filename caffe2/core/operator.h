@@ -246,13 +246,13 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       }
       return result;
     } catch (EnforceNotMet& err) {
-      SetEventFinished(err.what());
+      SetEventFinishedWithException(err.what());
       throw;
     } catch (const std::exception& err) {
-      SetEventFinished(err.what());
+      SetEventFinishedWithException(err.what());
       throw;
     } catch (...) {
-      SetEventFinished(getErrorMsg().c_str());
+      SetEventFinishedWithException(getErrorMsg().c_str());
       throw;
     }
   }
@@ -345,7 +345,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return !event_;
   }
 
-  virtual void FinishDeviceComputation() {
+  // Internal API invoked by observers. Normal callers shouldn't invoke it.
+  virtual void SyncDeviceBarrierForObservers() {
     CAFFE_NOT_IMPLEMENTED;
   }
 
@@ -400,6 +401,12 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   void SetEventFinished(const char* err_msg = nullptr) {
     if (event_) {
       event_->SetFinished(err_msg);
+    }
+  }
+
+  void SetEventFinishedWithException(const char* err_msg = nullptr) {
+    if (event_) {
+      event_->SetFinishedWithException(err_msg);
     }
   }
 
@@ -562,17 +569,17 @@ class Operator : public OperatorBase {
             "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }
-      SetEventFinished(err.what());
+      SetEventFinishedWithException(err.what());
       this->RecordLastFailedOpNetPosition();
       StopAllObservers();
       throw;
     } catch (const std::exception& err) {
-      SetEventFinished(err.what());
+      SetEventFinishedWithException(err.what());
       this->RecordLastFailedOpNetPosition();
       StopAllObservers();
       throw;
     } catch (...) {
-      SetEventFinished(getErrorMsg().c_str());
+      SetEventFinishedWithException(getErrorMsg().c_str());
       this->RecordLastFailedOpNetPosition();
       StopAllObservers();
       throw;
@@ -592,6 +599,9 @@ class Operator : public OperatorBase {
   // to finished state by RunAsync.
   // Defaulting to the value from context (true for CUDA, false for CPU).
   // Override in case of async CPU operators
+  // Async CPU operators are expected to catch all exceptions in async parts
+  // and set Event to finished/failed state with Event::SetFinished or
+  // SetFinishedWithException call.
   bool HasAsyncPart() const override {
     return context_.HasAsyncPartDefault();
   }
@@ -613,7 +623,7 @@ class Operator : public OperatorBase {
     return HasAsyncPart() && context_.SupportsAsyncScheduling();
   }
 
-  void FinishDeviceComputation() override {
+  void SyncDeviceBarrierForObservers() override {
     context_.FinishDeviceComputation();
   }
 
@@ -748,7 +758,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Tensor& tensor) {                           \
-      return call<Op>(op, tensor.meta());                                      \
+      return call<Op>(op, tensor.dtype());                                     \
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Blob& blob) {                               \
@@ -764,7 +774,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Tensor& tensor) {                           \
-      return call<Op>(op, tensor.meta());                                      \
+      return call<Op>(op, tensor.dtype());                                     \
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Blob& blob) {                               \
@@ -782,7 +792,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Tensor& tensor) {                           \
-      return call<Op>(op, tensor.meta());                                      \
+      return call<Op>(op, tensor.dtype());                                     \
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Blob& blob) {                               \
@@ -915,7 +925,8 @@ C10_DECLARE_REGISTRY(
   C10_REGISTER_CLASS(HIPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 #define REGISTER_MIOPEN_OPERATOR(name, ...) \
-  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__)
+  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__) \
+  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__) // Make CUDNN an alias of MIOPEN for HIP ops
 
 // StaticLinkingProtector is a helper class that ensures that the Caffe2
 // library is linked correctly with whole archives (in the case of static

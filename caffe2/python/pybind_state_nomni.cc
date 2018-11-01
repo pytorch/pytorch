@@ -121,11 +121,19 @@ void addNomnigraphMethods(pybind11::module& m) {
         return caffe2::convertToNNModule(proto, m);
       });
 
+  m.def("replaceProducer", &nn::replaceProducer);
+  m.def("replaceAllUsesWith", &nn::replaceAllUsesWith);
+  m.def("replaceAsConsumer", &nn::replaceAsConsumer);
+
   py::class_<NNModule> nnmodule(m, "NNModule");
   nnmodule.def(py::init<>())
       .def(
           "dataFlow",
           [](NNModule* nn) -> NNGraph* { return &nn->dataFlow; },
+          py::return_value_policy::reference_internal)
+      .def(
+          "createUniqueDataNode",
+          &NNModule::createUniqueDataNode,
           py::return_value_policy::reference_internal)
       .def(
           "convertToCaffe2Proto",
@@ -157,7 +165,9 @@ void addNomnigraphMethods(pybind11::module& m) {
             }
             return out;
           },
-          py::return_value_policy::reference_internal);
+          py::return_value_policy::reference_internal)
+      .def("replaceSubgraph", &NNModule::replaceSubgraph)
+      .def("deleteSubgraph", &NNModule::deleteSubgraph);
 
   auto getTensors = [](NNGraph* g) {
     return nn::nodeIterator<nom::repr::Tensor>(*g);
@@ -475,6 +485,7 @@ void addNomnigraphMethods(pybind11::module& m) {
           py::return_value_policy::reference)
       .def("setComponentLevels", &Caffe2Annotation::setComponentLevels)
       .def("getComponentLevels", &Caffe2Annotation::getComponentLevels)
+      .def("hasDeviceOption", &Caffe2Annotation::hasDeviceOption)
       .def_property(
           "device_option",
           [](Caffe2Annotation& annot) {
@@ -490,12 +501,33 @@ void addNomnigraphMethods(pybind11::module& m) {
           [](Caffe2Annotation& annot, py::object& def) {
             CAFFE_ENFORCE(
                 pybind11::hasattr(def, "SerializeToString"),
-                "convertToCaffe2Proto takes either no args",
-                "a NetDef");
+                "device_option can only be set to a DeviceOption");
             auto str = def.attr("SerializeToString")();
             caffe2::DeviceOption proto;
             proto.ParseFromString(py::bytes(str));
             annot.setDeviceOption(proto);
+          },
+          py::return_value_policy::reference)
+      .def_property(
+          "operator_def",
+          [](Caffe2Annotation& annot) {
+            auto opDef = py::module::import("caffe2.proto.caffe2_pb2")
+                                    .attr("OperatorDef");
+            auto proto = annot.getOperatorDef();
+            std::string serialized_proto;
+            proto.SerializeToString(&serialized_proto);
+            auto py_op_def= opDef();
+            py_op_def.attr("ParseFromString")(py::bytes(serialized_proto));
+            return py_op_def;
+          },
+          [](Caffe2Annotation& annot, py::object& def) {
+            CAFFE_ENFORCE(
+                pybind11::hasattr(def, "SerializeToString"),
+                "operator_def can only be set to an OperatorDef");
+            auto str = def.attr("SerializeToString")();
+            caffe2::OperatorDef proto;
+            proto.ParseFromString(py::bytes(str));
+            annot.setOperatorDef(proto);
           },
           py::return_value_policy::reference);
 }

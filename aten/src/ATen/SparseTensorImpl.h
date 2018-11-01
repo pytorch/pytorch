@@ -181,6 +181,12 @@ public:
   // NB: This used to be able to avoid a refcount bump, but I was too lazy to
   // make it happen
   void set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values);
+
+ private:
+  int64_t get_device_slow() const override {
+    return values_.get_device();
+  }
+
 };
 
 } // namespace at
