@@ -134,7 +134,7 @@ TEST(DeviceGuardTest, IsMovable_CUDA) {
   ASSERT_EQ(second.original_device(), CUDADevice(0));
   ASSERT_EQ(second.current_device(), CUDADevice(1));
   ASSERT_EQ(first.original_device(), CPUDevice());
-  DeviceGuard third(at::kCUDA);
+  DeviceGuard third(c10::nullopt);
   third = std::move(second);
   ASSERT_EQ(third.original_device(), CUDADevice(0));
   ASSERT_EQ(third.current_device(), CUDADevice(1));
