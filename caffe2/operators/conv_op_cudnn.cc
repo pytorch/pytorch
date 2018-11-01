@@ -767,7 +767,7 @@ bool CudnnConvOp::DoRunWithType() {
           top_desc_,
           algo_,
           &cudnn_ws_nbytes_);
-      if(step == 0) {
+      if (step == 0) {
         if(_status == CUDNN_STATUS_SUCCESS) {
           break;
         }
