@@ -75,17 +75,9 @@ void syncStreams(
   for (size_t i = 0; i < devices.size(); ++i) {
     at::cuda::CUDAStream& ncclStream = ncclStreams[i];
     at::cuda::CUDAEvent& ncclEvent = ncclEvents[i];
-    std::cout << " trying to access devices[i].index(): " << devices[i].index() << std::endl;
-    std::cout << "ProcessGroupNCCL syncStreams() record()" << std::endl;
-    std::cout << "device: " << devices[i].index() << std::endl;
-    std::cout << "ncclStream device: " << ncclStream.device_index() << std::endl;
-    std::cout << "ncclEvent device: " << ncclEvent.device() << std::endl;
     ncclEvent.record(at::cuda::getCurrentCUDAStream(devices[i].index()));
-    std::cout << "After record" << std::endl;
     ncclEvent.block(ncclStream);
   }
-
-  std::cout << "ProcessGroupNCCL syncStreams() end " << std::endl;
 }
 
 } // namespace
