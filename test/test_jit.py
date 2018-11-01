@@ -5316,6 +5316,18 @@ a")
                 # type: (int, Tuple[int, int[2]]) -> List[int]
                 return x
 
+    def test_ntuple_builtins(self):
+        from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
+
+        def test_ints():
+            return _single(1), _pair(2), _triple(3), _quadruple(4)
+
+        def test_floats():
+            return _single(1), _pair(2.1), _triple(3.1), _quadruple(4.1)
+
+        self.checkScript(test_ints, ())
+        self.checkScript(test_floats, ())
+
     def test_type_annotations(self):
         def fn(x, y):
             # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
