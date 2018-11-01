@@ -4455,8 +4455,12 @@ a")
             scope = {}
             exec(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
-            self.assertEqual(cu.func(), scope['func'](),
-                    "Failed with op: {}, lhs: {}, rhs: {}".format(op, args[0], args[1]))
+            self.assertEqual(
+                cu.func(),
+                scope['func'](),
+                "Failed with op: {}, lhs: {}, rhs: {}"
+                .format(op, args[0], args[1])
+            )
 
         ops = ['is', 'is not']
         type_literals = [True, False, None, [1, 1]]
