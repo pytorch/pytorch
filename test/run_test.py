@@ -13,6 +13,7 @@ import sys
 import tempfile
 
 import torch
+import torch._six
 from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM
 import torch.distributed as dist
@@ -104,9 +105,7 @@ def shell(command, cwd=None):
     #      `p.wait()` in a `final` block for the code to be portable.
     #
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
-    if not isinstance(command, (list, tuple)):
-        command = shlex.split(command)
-    print_to_stderr('cmd: {}\ncwd: {}'.format(command, cwd))
+    assert not isinstance(command, string_classes), "Command to shell should be a list or tuple of tokens"
     p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
     try:
         return p.wait()
@@ -149,7 +148,7 @@ def test_cpp_extensions(executable, test_module, test_directory, options):
             'Ninja is not available. Skipping C++ extensions test. '
             "Install ninja with 'pip install ninja' or 'conda install ninja'.")
         return 0
-    return_code = shell('{} setup.py install --root ./install'.format(sys.executable),
+    return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
                         os.path.join(test_directory, 'cpp_extensions'))
     if return_code != 0:
         return return_code
@@ -396,7 +395,7 @@ def main():
         print_to_stderr('Selected tests: {}'.format(', '.join(selected_tests)))
 
     if options.coverage:
-        shell('coverage erase')
+        shell(['coverage', 'erase'])
 
     for test in selected_tests:
         test_name = 'test_{}'.format(test)
@@ -418,8 +417,8 @@ def main():
             raise RuntimeError(message)
 
     if options.coverage:
-        shell('coverage combine')
-        shell('coverage html')
+        shell(['coverage', 'combine'])
+        shell(['coverage', 'html'])
 
 
 if __name__ == '__main__':
