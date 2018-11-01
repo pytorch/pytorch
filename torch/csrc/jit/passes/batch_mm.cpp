@@ -268,7 +268,7 @@ bool shape_is_fast_for_side(const at::Tensor& other_side_input) {
 RegisterOperators mm_batch_side_reg({
   Operator(
     Symbol::prim("MMBatchSide"),
-    [](Node* node) {
+    [](const Node* node) {
       size_t num_other_side_inputs = node->inputs().size() - 1;
       Side single_side = static_cast<Side>(node->i(Symbol::attr("side")));
       return [num_other_side_inputs, single_side](Stack& stack) {
