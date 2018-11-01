@@ -39,7 +39,7 @@ TEST(UtilityOpTest, testReshapeWithScalar) {
   Blob* XNew = ws.GetBlob("XNew");
   const TensorCPU& XNewTensor = XNew->Get<Tensor>();
   EXPECT_EQ(1, XNewTensor.ndim());
-  EXPECT_EQ(1, XNewTensor.size());
+  EXPECT_EQ(1, XNewTensor.numel());
 }
 
 } // namespace caffe2

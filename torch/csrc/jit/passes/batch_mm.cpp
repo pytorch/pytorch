@@ -72,9 +72,7 @@ static constexpr size_t min_fusion_size = 2;
 
 static std::array<int64_t, 2> as_array(at::IntList sizes) {
   JIT_ASSERT(sizes.size() == 2);
-  std::array<int64_t, 2> arr;
-  arr[0] = sizes[0];
-  arr[1] = sizes[1];
+  std::array<int64_t, 2> arr = {sizes[0], sizes[1]};
   return arr;
 }
 
@@ -85,8 +83,8 @@ static std::array<int64_t, 2> as_array(at::IntList sizes) {
 // and build a larger tree.
 struct TreeToken {
   uint64_t tree_size = 0; // NOTE: measured in number of leaves i.e. mm ops
-  std::array<int64_t, 2> lhs_sizes;
-  std::array<int64_t, 2> rhs_sizes;
+  std::array<int64_t, 2> lhs_sizes{{0, 0}};
+  std::array<int64_t, 2> rhs_sizes{{0, 0}};
   Node *node = nullptr;
   bool is_root = false;
 

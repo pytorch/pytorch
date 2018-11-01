@@ -32,9 +32,9 @@ namespace nn {
 /// \rst
 /// .. note::
 ///   The design and implementation of this class is largely based on the Python
-///   API. You may want to consult [its
-///   documentation](https://pytorch.org/docs/master/nn.html#torch.nn.Module)
-///   for further clarification on certain methods or behavior.
+///   API. You may want to consult the python documentation for
+///   :py:class:`pytorch:torch.nn.Module` for further clarification on certain
+///   methods or behavior.
 /// \endrst
 ///
 /// A `Module` is an abstraction over the implementation of some function or
@@ -213,6 +213,7 @@ class Module {
   /// This method is useful when calling `apply()` on a `ModuleCursor`.
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   void initialize_weights(nn::Module& module) {
   ///     torch::NoGradGuard no_grad;
   ///     if (auto* linear = module.as<nn::Linear>()) {
@@ -262,6 +263,7 @@ class Module {
   ///
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   MyModule::MyModule() {
   ///     weight_ = register_parameter("weight", torch::randn({A, B}));
   ///   }
@@ -279,6 +281,7 @@ class Module {
   ///
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   MyModule::MyModule() {
   ///     mean_ = register_buffer("mean", torch::empty({num_features_}));
   ///   }
@@ -292,6 +295,7 @@ class Module {
   ///
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   MyModule::MyModule() {
   ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
   ///   }
@@ -310,6 +314,7 @@ class Module {
   ///
   /// \rst
   /// .. code-block:: cpp
+  ///
   ///   MyModule::MyModule() {
   ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
   ///   }

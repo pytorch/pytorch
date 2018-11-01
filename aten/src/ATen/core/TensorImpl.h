@@ -314,7 +314,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // could not have been created without initializing the Type first.
     // TODO: This is not actually true via the Caffe2 codepath!  Make
     // it so.
-    return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(type_id()), dataTypeToScalarType(dtype().id()), is_variable());
+    return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(type_id()), typeMetaToScalarType(dtype()), is_variable());
   }
 
   /**
@@ -613,6 +613,15 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
+   * This is just like data(), except it works with Variables.
+   * This function will go away once Variable and Tensor are merged.
+   * See Note [We regret making Variable hold a Tensor]
+   */
+  virtual void* slow_data() const {
+    return data();
+  }
+
+  /**
    * Like data<T>(), but performs no checks.  You are responsible for ensuring
    * that all invariants required by data() are upheld here.
    *
@@ -646,6 +655,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * for example, an index into a tensor will have a non-zero storage_offset().
    *
    * WARNING: This is NOT computed in bytes.
+   *
+   * XXX: The only thing stopping this function from being virtual is Variable.
    */
   virtual int64_t storage_offset() const {
     return storage_offset_;
@@ -847,6 +858,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * preserves the DeviceType of the source tensor (so, e.g., if you allocate
    * a tensor on CPU and then CopyFrom a CUDA tensor, that will to a
    * CUDA-to-CPU transfer).
+   *
+   * If the function is invoked without `context` the copy would be synchronous
    */
   void CopyFrom(const TensorImpl& src, at::BaseContext* context = nullptr) {
     AT_ASSERT(!is_variable());
@@ -1191,12 +1204,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       }
       const at::Allocator* allocator = storage_.allocator();
       // TODO: Get rid of StaticContext
-      AT_ASSERTM(
-          allocator == nullptr,
-          "Allocator in storage_ is not used within Caffe2 functions. \
-           we are using global function to get the allocator based on device \
-           type.");
-      allocator = caffe2::GetAllocator(storage_.device_type());
+      if (allocator == nullptr) {
+        allocator = caffe2::GetAllocator(storage_.device_type());
+      }
       if (meta.placementNew()) {
         // For types that need placement new, we will call it, as well as
         // making sure that when the data is freed, it calls the right

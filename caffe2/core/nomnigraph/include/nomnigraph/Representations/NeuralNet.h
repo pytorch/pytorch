@@ -475,8 +475,6 @@ CAFFE2_API std::set<NNGraph::NodeRef> getOutputs(const NNSubgraph& sg);
 // Get the name of the node regardless of underlying type.
 CAFFE2_API std::string getName(NNGraph::NodeRef n);
 
-CAFFE2_API void deleteSubgraph(NNModule* nn, NNGraph::SubgraphType& sg);
-
 // Replace the producer of the first argument with the second argument
 CAFFE2_API void replaceProducer(
     NNGraph::NodeRef tensorNode,

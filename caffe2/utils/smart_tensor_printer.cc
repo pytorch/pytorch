@@ -30,7 +30,7 @@ struct ProxyPrinter {
         int16_t,
         int64_t,
         double,
-        char>>::call(this, tensor->meta());
+        char>>::call(this, tensor->dtype());
   }
 
   const Tensor* tensor;

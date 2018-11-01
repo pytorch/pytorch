@@ -45,9 +45,9 @@ class CTCOp final : public Operator<Context> {
   bool RunOnDevice() override {
     // inputs
     const auto& inputs = Input(INPUTS);
-    const auto maxTimeSteps = inputs.dim(0);
-    const auto minibatchSize = inputs.dim(1);
-    const auto alphabetSize = inputs.dim(2);
+    const auto maxTimeSteps = inputs.size(0);
+    const auto minibatchSize = inputs.size(1);
+    const auto alphabetSize = inputs.size(2);
     const auto& labels = OperatorBase::template Input<Tensor>(LABELS, CPU);
     const auto& labelLengths =
         OperatorBase::template Input<Tensor>(LABEL_LENGTHS, CPU);
@@ -93,7 +93,7 @@ class CTCOp final : public Operator<Context> {
     workspace->Resize(workspaceSizeBytes);
     auto* workspaceData = workspace->template mutable_data<uint8_t>();
 
-    if (is_test_ && labels.dim(0) == 0) {
+    if (is_test_ && labels.size(0) == 0) {
       // compute_ctc_loss doesn't handle empty labels well
       T* costsData = costs->template mutable_data<T>();
       for (int i = 0; i < costs->numel(); ++i) {

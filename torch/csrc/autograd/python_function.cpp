@@ -45,15 +45,13 @@ namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
   : type(&var.type())
+  , device(var.device())
   , size(var.sizes().vec())
   , requires_grad(var.requires_grad()) {
-  if (var.type().is_cuda()) {
-    device = var.get_device();
-  }
 }
 
 Variable VariableInfo::zeros(at::DeviceGuard& device_guard) const {
-  device_guard.set_index(device);
+  device_guard.set_device(device);
   return at::zeros(size, type->options());
 }
 

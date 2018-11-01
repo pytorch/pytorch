@@ -638,6 +638,14 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (!positional)
       return c10::nullopt;
     positional_inputs.push_back(positional);
+
+    if (schema.is_vararg() && schema_i == schema.arguments().size() - 1) {
+      // Freeze iteration to the last argument in the schema and keep going for
+      // all of the provided arguments
+      if (used_args < modifiedArgs.size()) {
+        schema_i--;
+      }
+    }
   }
   // check for unused self argument
   if(self != c10::nullopt) {
@@ -948,6 +956,9 @@ private:
           }
         }
         break;
+        case TK_RAISE:
+          emitRaise(Raise(stmt));
+          break;
         case TK_RETURN:
           throw ErrorReport(stmt) << "return statements can appear only at the end "
                                   << "of the function body";
@@ -1293,6 +1304,27 @@ private:
     auto cond = stmt.cond();
     emitLoopCommon(stmt.range(), {}, {cond}, stmt.body(), {});
   }
+
+
+  // Currently we do not support assigning exceptions to variables,
+  // a = Exception("hi")
+  // raise a
+  //
+  // We ignore the expression following raise
+  //
+  // NYI: add exception logic to control-flow nodes
+  // if True:
+  //   a = 1
+  // else
+  //   raise Exception("Hi")
+  // print(a)
+  void emitRaise(const Raise& stmt) {
+    const std::string exception = "Exception";
+    auto string_input = insertConstant(*graph, exception, stmt.range());
+    graph->insertNode(graph->create(prim::RaiseException, {string_input}, 0)
+                        ->setSourceLocation(std::make_shared<SourceRange>(stmt.range())));
+  }
+
 
   // Validate that the `lhs` Expr's in an assignment statement are valid. That
   // is:
