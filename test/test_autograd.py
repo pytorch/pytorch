@@ -2683,6 +2683,30 @@ class TestAutograd(TestCase):
         gradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
         gradgradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
 
+    def test_inplace_function_detection(self):
+        # Invalid Function that change inplace and has two inputs/outputs
+        class BadFunction(Function):
+            @staticmethod
+            def forward(ctx, inp1, inp2):
+                # Inplace change has been made
+                ctx.mark_dirty(inp1, inp2)
+                return inp1, inp2
+
+            @staticmethod
+            def backward(ctx, gout1, gout2):
+                return gout1, gout2
+
+        inp1 = torch.rand(5, requires_grad=True).clone()
+        inp2 = torch.rand(5, requires_grad=True).clone()
+
+        # This should work fine
+        outs = BadFunction.apply(inp1, inp2)
+
+        inp1 = inp1.view_as(inp1)
+        with self.assertRaisesRegex(RuntimeError, "Functions which modify views in-place"
+                                                  " must return a single Variable"):
+            outs = BadFunction.apply(inp1, inp2)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
