@@ -85,7 +85,7 @@ bool shape_is_fast(const at::Tensor& lhs, const at::Tensor& rhs) {
   size_t m = lhs.size(1);
   size_t r = rhs.size(1);
   // Numbers obtained by some simple benchmarks of fp32 gemms on a TITAN V
-  return m < 512 || ((m < 256 && r < 256) || (m > 256 && r > 256));
+  return m < 512 || ((l < 256 && r < 256) || (l > 256 && r > 256));
 }
 
 RegisterOperators mm_tree_reduction_reg({
