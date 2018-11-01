@@ -1244,8 +1244,15 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_cat_empty(self, use_cuda=True)
 
     def test_bernoulli(self):
-        _TestTorchMixin._test_bernoulli(self, torch.double, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.half, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.float32, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.float32, torch.float16, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.float16, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.float16, torch.float16, 'cuda')
+        # test that it works with integral tensors
+        _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float16, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
 
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1).cuda()

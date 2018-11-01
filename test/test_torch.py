@@ -7489,7 +7489,7 @@ class _TestTorchMixin(object):
         self.assertEqual(result, expected)
 
     @staticmethod
-    def _test_bernoulli(self, p_dtype, device):
+    def _test_bernoulli(self, t_dtype, p_dtype, device):
         for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
             x = torch.tensor(trivial_p, dtype=p_dtype, device=device)
             self.assertEqual(x.bernoulli().tolist(), trivial_p)
@@ -7511,8 +7511,7 @@ class _TestTorchMixin(object):
         torch.bernoulli(torch.rand_like(p), out=p)
         self.assertTrue(isBinary(p))
 
-        # test that it works with integral tensors
-        t = torch.empty(10, 10, dtype=torch.uint8, device=device)
+        t = torch.empty(10, 10, dtype=t_dtype, device=device)
 
         t.fill_(2)
         t.bernoulli_(0.5)
@@ -7532,7 +7531,9 @@ class _TestTorchMixin(object):
         self.assertTrue(isBinary(t))
 
     def test_bernoulli(self):
-        self._test_bernoulli(self, torch.double, 'cpu')
+        self._test_bernoulli(self, torch.float32, torch.float64, 'cpu')
+        # test that it works with integral tensors
+        self._test_bernoulli(self, torch.uint8, torch.float64, 'cpu')
 
     def test_normal(self):
         q = torch.Tensor(100, 100)
