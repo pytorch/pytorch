@@ -1348,13 +1348,13 @@ private:
     size_t num_normal_assign = 0;
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
-      if (assignee.kind() == TK_VAR) {
+      if (assignee.kind() == TK_VAR || assignee.kind() == TK_SUBSCRIPT) {
         num_normal_assign++;
       } else if (assignee.kind() == TK_STARRED) {
         num_starred++;
       } else {
-        throw ErrorReport(assignee)
-            << "lhs of assignment must be a variable or starred expression.";
+        throw ErrorReport(assignee) << "lhs of assignment must be a variable, "
+                                    << "subscript, or starred expression.";
       }
     }
 
@@ -1372,46 +1372,111 @@ private:
     return num_starred;
   }
 
-  // Emit nodes for augmented assignments like `+=`
-  void emitAugAssignment(const AugAssign& stmt) {
-    auto lhs = Var(stmt.lhs());
-    if (lhs.kind() != TK_VAR) {
-      throw ErrorReport(lhs) << "expected a variable on the left-hand side";
-    }
-    auto lhsValue = environment_stack->getSugaredVar(lhs.name())
-                        ->asValue(lhs.range(), method);
-    if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
-      // for tensors, emit the corresponding in-place op
-      Symbol op;
+  // Get the appropriate builtin op for this augmented assignment
+  // If the RHS is a tensor, return the corresponding ATen in-place op
+  // If it's a list of scalars, then return the corresponding list augment op
+  Symbol getAugOp(const AugAssign& stmt, bool isTensor) {
       switch (stmt.aug_op()) {
         case '+':
-          op = aten::add_;
-          break;
+          return isTensor ? aten::add_ : aten::add;
         case '-':
-          op = aten::sub_;
-          break;
+          return isTensor ? aten::sub_ : aten::sub;
         case '/':
-          op = aten::div_;
-          break;
+          return isTensor ? aten::div_ : aten::div;
         case '*':
-          op = aten::mul_;
-          break;
+          return isTensor ? aten::mul_ : aten::mul;
         default:
-          throw ErrorReport(stmt) << "Unknown augmented assignment to Tensor: "
+          throw ErrorReport(stmt) << "Unknown augmented assignment: "
                                   << kindToString(stmt.aug_op());
       }
+  }
 
-      auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
-      auto self = NamedValue(lhs.range(), lhs.name().name(), lhsValue);
-      auto output = emitBuiltinCall(
+  // Emit nodes for augmented assignments like `+=`
+  void emitAugAssignment(const AugAssign& stmt) {
+    // auto lhs = Var(stmt.lhs());
+    // if (lhs.kind() != TK_VAR) {
+    //   throw ErrorReport(lhs) << "expected a variable on the left-hand side";
+    // }
+    // auto lhsValue = environment_stack->getSugaredVar(lhs.name())
+    //                     ->asValue(lhs.range(), method);
+    const auto lhsValue = emitExpr(stmt.lhs());
+    if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
+      // for tensors, emit the corresponding in-place op
+
+      const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
+      const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
+      const auto output = emitBuiltinCall(
           stmt.range(),
           *method.graph(),
-          op,
+          getAugOp(stmt, /*isTensor=*/true),
           self,
           {rhs},
           {},
           /*required=*/true);
-      environment_stack->setVar(lhs.range(), lhs.name().name(), output);
+
+      if (stmt.lhs().kind() == TK_VAR) {
+        // if the lhs was a simple tensor variable, bind a new version of that
+        // variable to the op output.
+        const auto lhs = Var(stmt.lhs()).name();
+        environment_stack->setVar(lhs.range(), lhs.name(), output);
+      }
+    } else if (stmt.lhs().kind() == TK_SUBSCRIPT) {
+      // If it's a subscript expr that doesn't ultimately evaluate to tensor,
+      // it's a list of primitive types.
+
+      // Process the base list value
+      const auto lhs = Subscript(stmt.lhs());
+      const auto listExpr = lhs.value();
+      const auto listValue = emitExpr(listExpr);
+      const auto listType = listValue->type()->cast<ListType>();
+      JIT_ASSERT(listType != nullptr);
+      JIT_ASSERT(
+          listType->getElementType() == IntType::get() ||
+          listType->getElementType() == FloatType::get());
+
+      // Get the idx to augment
+      const auto subscriptExprs = lhs.subscript_exprs();
+      if (subscriptExprs.size() != 1) {
+        throw ErrorReport(subscriptExprs)
+            << "Sliced expression not yet supported for"
+            << " subscripted list augmented assignment. "
+            << "File a bug if you want this.";
+      }
+      const auto idxValue = emitExpr(subscriptExprs[0]);
+
+      const auto listArg = NamedValue(listExpr.range(), "list", listValue);
+      const auto idxArg = NamedValue(subscriptExprs.range(), "idx", idxValue);
+      const auto valueArg =
+          NamedValue(stmt.rhs().range(), "value", emitExpr(stmt.rhs()));
+
+      // Lower this into list.setitem(getitem(idx).add(value)), similar to how
+      // Python handles this case.
+      const auto getItem = emitBuiltinCall(
+          stmt.range(),
+          *method.graph(),
+          aten::select,
+          c10::nullopt,
+          {listArg, idxArg},
+          {},
+          /*required=*/true);
+
+      const auto augmentedItem = emitBuiltinCall(
+          stmt.range(),
+          *method.graph(),
+          getAugOp(stmt, /*isTensor=*/false),
+          {},
+          {getItem, valueArg},
+          {},
+          /*required=*/true);
+
+      emitBuiltinCall(
+          stmt.range(),
+          *method.graph(),
+          aten::_set_item,
+          c10::nullopt,
+          {listArg, idxArg, augmentedItem},
+          {},
+          /*required=*/true);
     } else {
       // for primitive types, desugar into a simple assignment
       //   e.g. foo += 1 becomes foo.2 = foo + 1
@@ -1422,13 +1487,69 @@ private:
     }
   }
 
+  // Emit mutating assignments like `foo[0] = bar`
+  void emitSetItemAssignment(
+      const SourceRange& stmtRange,
+      const Subscript& lhs,
+      const Expr& rhs) {
+    emitSetItemAssignment(
+        stmtRange, lhs, NamedValue(rhs.range(), emitExpr(rhs)));
+  }
+
+  void emitSetItemAssignment(
+      const SourceRange& stmtRange,
+      const Subscript& lhs,
+      const NamedValue& rhs) {
+    // First check the subscripted value.
+    auto lhsBaseValue = emitExpr(lhs.value());
+
+    // If it's a tensor, we can just assign directly to the lvalue
+    if (lhsBaseValue->type()->isSubtypeOf(DynamicType::get())) {
+      std::vector<NamedValue> args;
+      args.emplace_back(lhs.range(), "t", emitExpr(lhs));
+      args.emplace_back(rhs.loc(), "other", rhs.value(*graph));
+      emitBuiltinCall(
+          stmtRange,
+          *method.graph(),
+          aten::copy_,
+          c10::nullopt,
+          args,
+          {},
+          true);
+
+    // Otherwise, this is a list. Dispatch to aten::_set_item to both select and
+    // assign
+    } else {
+      const auto subscript = lhs.subscript_exprs();
+      if (subscript.size() != 1 || subscript[0].kind() == TK_SLICE_EXPR) {
+        throw ErrorReport(subscript)
+            << "Sliced expression not yet supported for"
+            << " subscripted list assignment. "
+            << "File a bug if you want this.";
+      }
+
+      std::vector<NamedValue> args;
+      args.emplace_back(lhs.value().range(), "list", emitExpr(lhs.value()));
+      args.emplace_back(
+          lhs.subscript_exprs().range(), "idx", emitExpr(subscript[0]));
+      args.push_back(rhs);
+      emitBuiltinCall(
+          stmtRange,
+          *method.graph(),
+          aten::_set_item,
+          c10::nullopt,
+          args,
+          {},
+          true);
+    }
+  }
+
   void emitTupleAssign(const TupleLiteral& tl, const Expr& rhs) {
     size_t n_binders = tl.inputs().size();
     bool starred_unpack = calcNumStarredUnpack(tl.inputs(), tl.range());
     if(starred_unpack)
       n_binders--;
     auto output = emitSugaredExpr(rhs, n_binders);
-
     auto outputs = output->asTuple(
         rhs.range(),
         method,
@@ -1446,7 +1567,15 @@ private:
     }
     int i = 0;
     for (auto assignee : tl.inputs()) {
-      switch(assignee.kind()) {
+      switch (assignee.kind()) {
+        case TK_SUBSCRIPT:
+          emitSetItemAssignment(
+              rhs.range(),
+              Subscript(assignee),
+              NamedValue(
+                  rhs.range(), outputs.at(i)->asValue(rhs.range(), method)));
+          i++;
+          break;
         case TK_VAR:
           environment_stack->setSugaredVar(assignee.range(), Var(assignee).name().name(), outputs.at(i));
           i++;

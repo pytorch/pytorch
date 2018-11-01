@@ -3128,7 +3128,7 @@ a")
             c = 1
             return c.add(1)
         with self.assertRaisesRegex(RuntimeError, 'Cannot call methods on numbers'):
-                    torch.jit.script(func)
+            torch.jit.script(func)
 
     # testing implicit conversion of tensors to scalars to match function arguments
     def test_scalar_to_num_conversions(self):
@@ -8242,6 +8242,48 @@ a")
             return 3
 
         self.checkScript(foo, (True,))
+
+    def test_lhs_indexing(self):
+        def foo(a, b):
+            a = a.clone()
+            a[0] = b
+            return a
+        self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
+
+    def test_lhs_indexing_list(self):
+        def foo(a, b):
+            ls = [a]
+            ls[0] = b
+            return ls
+        self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
+
+    def test_lhs_indexing_increment(self):
+        def foo(a, b):
+            a[0] += b
+            return a
+        self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
+
+    def test_lhs_indexing_increment_list(self):
+        def foo(a, b):
+            a = a.clone()
+            ls = [a, b]
+            ls[0] += b
+            return ls
+        self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
+
+    def test_lhs_indexing_increment_list_prim(self):
+        def foo():
+            ls = [1, 2, 3]
+            ls[0] += 5
+            return ls
+        self.checkScript(foo, ())
+
+    def test_lhs_indexing_multi(self):
+        def foo(a, b):
+            a = a.clone()
+            foo, a[0], bar = (1, b, 3)
+            return foo, a, bar
+        self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
 
 class MnistNet(nn.Module):
