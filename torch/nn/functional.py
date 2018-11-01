@@ -20,15 +20,18 @@ _VF = torch._C._VariableFunctions
 
 
 class _Reduction:
-    # NB: Keep this class in sync with enums in THNN/Reduction.h
+    # NB: Keep this class in sync with enums in aten/src/ATen/core/Reduction.h
 
     @staticmethod
     def get_enum(reduction):
         if reduction == 'none':
             return 0
-        if reduction == 'mean':
+        elif reduction == 'mean':
             return 1
-        if reduction == 'sum':
+        elif reduction == 'elementwise_mean':
+            warnings.warn("reduction='elementwise_mean' is deprecated, please use reduction='mean' instead.")
+            return 1
+        elif reduction == 'sum':
             return 2
         raise ValueError(reduction + " is not a valid value for reduction")
 
