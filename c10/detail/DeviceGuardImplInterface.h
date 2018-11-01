@@ -104,7 +104,9 @@ public:
   static ::c10::detail::DeviceGuardImplRegistrar C10_ANONYMOUS_VARIABLE(g_##DeviceType)(::c10::DeviceType::DevType, new DeviceGuardImpl());
 
 inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
-  return device_guard_impl_registry[static_cast<size_t>(type)].load();
+  auto p = device_guard_impl_registry[static_cast<size_t>(type)].load();
+  AT_ASSERTM(p, "DeviceGuardImpl for ", type, " is not available");
+  return p;
 }
 
 }} // namespace c10::detail
