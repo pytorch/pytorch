@@ -771,7 +771,7 @@ bool CudnnConvOp::DoRunWithType() {
         if (_status == CUDNN_STATUS_SUCCESS) {
           break;
         }
-        if(_status == CUDNN_STATUS_NOT_SUPPORTED) {
+        if (_status == CUDNN_STATUS_NOT_SUPPORTED) {
           cudnnConvolutionFwdAlgo_t new_algo = deterministic_ ?
               CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM :
               CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM;
