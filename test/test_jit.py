@@ -8071,18 +8071,6 @@ a")
             return e
         self.checkScript(foo, (torch.rand(3), torch.rand(3)))
 
-    def test_str_cast(self):
-        def foo(a, b, c, d):
-            # type: (Tensor, int, bool, float) -> Tensor
-            print(str(a))
-            print(str(b))
-            print(str(c))
-            print(str(d))
-            return a
-
-        self.checkScript(foo, (torch.tensor(0), 2, True, 2.5), capture_output=True)
-        self.assertExpectedGraph(torch.jit.script(foo).graph)
-
 
 class MnistNet(nn.Module):
     def __init__(self):

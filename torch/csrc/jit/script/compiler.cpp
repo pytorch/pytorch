@@ -83,8 +83,6 @@ static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
     n = graph.createIntToFloat(value);
   } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(StringType::get())) {
     n = graph.createStringToFloat(value);
-  } else if (dst->isSubtypeOf(StringType::get())) {
-    n = graph.createToString(value);
   } else {
     throw ErrorReport(loc) << "Cannot cast type '" << orig->str() << "' to type '"
       << dst->str() << "'.";
@@ -326,7 +324,6 @@ struct Environment {
         {"float", std::make_shared<CastValue>(FloatType::get())},
         {"int", std::make_shared<CastValue>(IntType::get())},
         {"bool", std::make_shared<CastValue>(BoolType::get())},
-        {"str", std::make_shared<CastValue>(StringType::get())},
         // todo(zach): remove when we can correctly export torch.full via ONNX
         // or we have implicit conversion that can convert numbers to tensors
         {"_to_tensor", std::make_shared<CastValue>(DynamicType::get()) },
