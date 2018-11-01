@@ -1,23 +1,21 @@
-# NB: Keep this file in sync with enums in THNN/Reduction.h
 import warnings
-
 from .._jit_internal import weak_script
+
+# NB: Keep this class in sync with enums in aten/src/ATen/core/Reduction.h
 
 
 @weak_script
 def get_enum(reduction):
-    # type: (str) -> int
     if reduction == 'none':
-        ret = 0
+        return 0
+    elif reduction == 'mean':
+        return 1
     elif reduction == 'elementwise_mean':
-        ret = 1
+        warnings.warn("reduction='elementwise_mean' is deprecated, please use reduction='mean' instead.")
+        return 1
     elif reduction == 'sum':
-        ret = 2
-    else:
-        # TODO: remove this when jit support control flow
-        ret = -1
-        raise ValueError(reduction + " is not a valid value for reduction")
-    return ret
+        return 2
+    raise ValueError(reduction + " is not a valid value for reduction")
 
 # In order to support previous versions, accept boolean size_average and reduce
 # and convert them into the new constants for now
@@ -33,7 +31,7 @@ def legacy_get_string(size_average, reduce, emit_warning=True):
         reduce = True
 
     if size_average and reduce:
-        ret = 'elementwise_mean'
+        ret = 'mean'
     elif reduce:
         ret = 'sum'
     else:
@@ -44,4 +42,4 @@ def legacy_get_string(size_average, reduce, emit_warning=True):
 
 
 def legacy_get_enum(size_average, reduce, emit_warning=True):
-    return get_enum(legacy_get_string(size_average, reduce, emit_warning))
+    return _Reduction.get_enum(_Reduction.legacy_get_string(size_average, reduce, emit_warning))

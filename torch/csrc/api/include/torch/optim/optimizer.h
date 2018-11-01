@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+// Forward declarations confuse Doxygen
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace at {
 class Tensor;
 } // namespace at
@@ -22,6 +24,7 @@ class OutputArchive;
 class InputArchive;
 } // namespace serialize
 } // namespace torch
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 namespace torch {
 namespace optim {

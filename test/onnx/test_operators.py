@@ -75,6 +75,7 @@ class TestOperators(TestCase):
             import test_onnx_common
             model_def = onnx.ModelProto.FromString(onnx_model_pb)
             onnx.checker.check_model(model_def)
+
             if _onnx_test:
                 test_function = inspect.stack()[1][0].f_code.co_name
                 test_name = test_function[0:4] + "_operator" + test_function[4:]
