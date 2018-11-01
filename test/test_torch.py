@@ -5303,19 +5303,19 @@ class TestTorchMixin(object):
         A = torch.mm(x, x.t())
 
         # default Case
-        C = torch.potrf(A)
-        B = torch.mm(C.t(), C)
+        C = torch.cholesky(A)
+        B = torch.mm(C, C.t())
         self.assertEqual(A, B, 1e-14)
 
         # test Upper Triangular
-        U = torch.potrf(A, True)
+        U = torch.cholesky(A, True)
         B = torch.mm(U.t(), U)
-        self.assertEqual(A, B, 1e-14, 'potrf (upper) did not allow rebuilding the original matrix')
+        self.assertEqual(A, B, 1e-14, 'cholesky (upper) did not allow rebuilding the original matrix')
 
         # test Lower Triangular
-        L = torch.potrf(A, False)
+        L = torch.cholesky(A, False)
         B = torch.mm(L, L.t())
-        self.assertEqual(A, B, 1e-14, 'potrf (lower) did not allow rebuilding the original matrix')
+        self.assertEqual(A, B, 1e-14, 'cholesky (lower) did not allow rebuilding the original matrix')
 
     @skipIfNoLapack
     def test_potrs(self):
@@ -5332,12 +5332,12 @@ class TestTorchMixin(object):
         a = torch.mm(a, a.t())
 
         # upper Triangular Test
-        U = torch.potrf(a)
-        x = torch.potrs(b, U)
+        U = torch.cholesky(a, True)
+        x = torch.potrs(b, U, True)
         self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
 
         # lower Triangular Test
-        L = torch.potrf(a, False)
+        L = torch.cholesky(a, False)
         x = torch.potrs(b, L, False)
         self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
 
@@ -5356,17 +5356,17 @@ class TestTorchMixin(object):
         inv0 = torch.inverse(a)
 
         # default case
-        chol = torch.potrf(a)
-        inv1 = torch.potri(chol)
+        chol = torch.cholesky(a)
+        inv1 = torch.potri(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # upper Triangular Test
-        chol = torch.potrf(a, True)
+        chol = torch.cholesky(a, True)
         inv1 = torch.potri(chol, True)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # lower Triangular Test
-        chol = torch.potrf(a, False)
+        chol = torch.cholesky(a, False)
         inv1 = torch.potri(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 

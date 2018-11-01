@@ -525,6 +525,13 @@ ceil_() -> Tensor
 In-place version of :meth:`~Tensor.ceil`
 """)
 
+add_docstr_all('cholesky',
+               r"""
+cholesky(upper=False) -> Tensor
+
+See :func:`torch.cholesky`
+""")
+
 add_docstr_all('clamp',
                r"""
 clamp(min, max) -> Tensor
@@ -1617,13 +1624,6 @@ Example:
     torch.Size([2, 3, 5])
     >>> x.permute(2, 0, 1).size()
     torch.Size([5, 2, 3])
-""")
-
-add_docstr_all('potrf',
-               r"""
-potrf(upper=True) -> Tensor
-
-See :func:`torch.potrf`
 """)
 
 add_docstr_all('potri',

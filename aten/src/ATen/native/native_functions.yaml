@@ -2785,10 +2785,10 @@
   variants: method, function
   device_guard: false
 
-- func: potrf_out(Tensor result, Tensor self, bool upper=true) -> Tensor
+- func: cholesky_out(Tensor result, Tensor self, bool upper=false) -> Tensor
   device_guard: false
 
-- func: potrf(Tensor self, bool upper=true) -> Tensor
+- func: cholesky(Tensor self, bool upper=false) -> Tensor
   variants: method, function
   device_guard: false
 

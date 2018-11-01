@@ -825,6 +825,51 @@ Example::
     tensor([-2.1763, -0.4713, -0.6986,  1.3702])
 """)
 
+add_docstr(torch.cholesky, r"""
+cholesky(a, upper=False, out=None) -> Tensor
+
+Computes the Cholesky decomposition of a symmetric positive-definite
+matrix :math:`A`.
+
+If :attr:`upper` is ``True``, the returned matrix `U` is upper-triangular, and
+the decomposition has the form:
+
+.. math::
+
+  A = U^TU
+
+If :attr:`upper` is ``False``, the returned matrix `L` is lower-triangular, and
+the decomposition has the form:
+
+.. math::
+
+    A = LL^T
+
+Args:
+    a (Tensor): the input 2-D tensor, a symmetric positive-definite matrix
+    upper (bool, optional): flag that indicates whether to return the
+                            upper or lower triangular matrix. Default: ``False``
+    out (Tensor, optional): the output matrix
+
+Example::
+
+    >>> a = torch.randn(3, 3)
+    >>> a = torch.mm(a, a.t()) # make symmetric positive definite
+    >>> l = torch.cholesky(a)
+    >>> a
+    tensor([[ 2.4112, -0.7486,  1.4551],
+            [-0.7486,  1.3544,  0.1294],
+            [ 1.4551,  0.1294,  1.6724]])
+    >>> l
+    tensor([[ 1.5528,  0.0000,  0.0000],
+            [-0.4821,  1.0592,  0.0000],
+            [ 0.9371,  0.5487,  0.7023]])
+    >>> torch.mm(l, l.t())
+    tensor([[ 2.4112, -0.7486,  1.4551],
+            [-0.7486,  1.3544,  0.1294],
+            [ 1.4551,  0.1294,  1.6724]])
+""")
+
 add_docstr(torch.clamp,
            r"""
 clamp(input, min, max, out=None) -> Tensor
@@ -3249,51 +3294,6 @@ Args:
 
 """)
 
-add_docstr(torch.potrf, r"""
-potrf(a, upper=True, out=None) -> Tensor
-
-Computes the Cholesky decomposition of a symmetric positive-definite
-matrix :math:`A`.
-
-If :attr:`upper` is ``True``, the returned matrix `U` is upper-triangular, and
-the decomposition has the form:
-
-.. math::
-
-  A = U^TU
-
-If :attr:`upper` is ``False``, the returned matrix `L` is lower-triangular, and
-the decomposition has the form:
-
-.. math::
-
-    A = LL^T
-
-Args:
-    a (Tensor): the input 2-D tensor, a symmetric positive-definite matrix
-    upper (bool, optional): flag that indicates whether to return the
-                            upper or lower triangular matrix
-    out (Tensor, optional): the output matrix
-
-Example::
-
-    >>> a = torch.randn(3, 3)
-    >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.potrf(a)
-    >>> a
-    tensor([[ 2.4112, -0.7486,  1.4551],
-            [-0.7486,  1.3544,  0.1294],
-            [ 1.4551,  0.1294,  1.6724]])
-    >>> u
-    tensor([[ 1.5528, -0.4821,  0.9371],
-            [ 0.0000,  1.0592,  0.5486],
-            [ 0.0000,  0.0000,  0.7023]])
-    >>> torch.mm(u.t(), u)
-    tensor([[ 2.4112, -0.7486,  1.4551],
-            [-0.7486,  1.3544,  0.1294],
-            [ 1.4551,  0.1294,  1.6724]])
-""")
-
 add_docstr(torch.potri, r"""
 potri(u, upper=True, out=None) -> Tensor
 
@@ -3322,7 +3322,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.potrf(a)
+    >>> u = torch.cholesky(a)
     >>> a
     tensor([[  0.9935,  -0.6353,   1.5806],
             [ -0.6353,   0.8769,  -1.7183],
@@ -3367,7 +3367,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.potrf(a)
+    >>> u = torch.cholesky(a)
     >>> a
     tensor([[ 0.7747, -1.9549,  1.3086],
             [-1.9549,  6.7546, -5.4114],

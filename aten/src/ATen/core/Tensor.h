@@ -747,7 +747,7 @@ public:
   std::tuple<Tensor,Tensor> symeig(bool eigenvectors=false, bool upper=true) const;
   std::tuple<Tensor,Tensor> eig(bool eigenvectors=false) const;
   std::tuple<Tensor,Tensor,Tensor> svd(bool some=true, bool compute_uv=true) const;
-  Tensor potrf(bool upper=true) const;
+  Tensor cholesky(bool upper=false) const;
   Tensor potrs(const Tensor & input2, bool upper=true) const;
   Tensor potri(bool upper=true) const;
   std::tuple<Tensor,Tensor> pstrf(bool upper=true, Scalar tol=-1) const;
