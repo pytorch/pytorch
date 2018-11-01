@@ -897,6 +897,7 @@
 - name: relu(Tensor self)
   self: threshold_backward(grad, self, 0)
 
+# NB: `output` instead of `self` saves memory. It avoids saving a copy of self.
 - name: relu_(Tensor self)
   self: threshold_backward(grad, output, 0)
 
