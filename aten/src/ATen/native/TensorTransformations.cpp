@@ -85,8 +85,7 @@ Tensor roll_cpu(const Tensor& self, IntList shifts, IntList dims) {
     vec[index++] = tensors[i];
   }
 
-  auto stacked = at::stack(vec, dim);
-  return stacked;
+  return at::stack(vec, dim);
 }
 
 Tensor rot90(const Tensor& self, int64_t k, IntList dims) {
