@@ -560,7 +560,7 @@ TEST(TensorTest, Tensor64BitDimension) {
       static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
   Tensor tensor(vector<int64_t>{large_number}, CPU);
   EXPECT_EQ(tensor.ndim(), 1);
-  EXPECT_EQ(tensor.dim(0), large_number);
+  EXPECT_EQ(tensor.size(0), large_number);
   EXPECT_EQ(tensor.numel(), large_number);
   try {
     EXPECT_TRUE(tensor.mutable_data<char>() != nullptr);
@@ -582,8 +582,8 @@ TEST(TensorTest, Tensor64BitDimension) {
   // do not have a large enough memory.
   tensor.Resize(large_number, 100);
   EXPECT_EQ(tensor.ndim(), 2);
-  EXPECT_EQ(tensor.dim(0), large_number);
-  EXPECT_EQ(tensor.dim(1), 100);
+  EXPECT_EQ(tensor.size(0), large_number);
+  EXPECT_EQ(tensor.size(1), 100);
   EXPECT_EQ(tensor.numel(), large_number * 100);
 }
 
@@ -592,7 +592,7 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
       static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
   Tensor tensor(vector<int64_t>{large_number}, CPU);
   EXPECT_EQ(tensor.ndim(), 1);
-  EXPECT_EQ(tensor.dim(0), large_number);
+  EXPECT_EQ(tensor.size(0), large_number);
   ASSERT_THROW(tensor.dim32(0), EnforceNotMet);
 }
 
@@ -623,8 +623,8 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
     EXPECT_TRUE(BlobIsTensorType(new_blob, CPU));                         \
     const TensorCPU& new_tensor = blob.Get<TensorCPU>();                  \
     EXPECT_EQ(new_tensor.ndim(), 2);                                      \
-    EXPECT_EQ(new_tensor.dim(0), 2);                                      \
-    EXPECT_EQ(new_tensor.dim(1), 3);                                      \
+    EXPECT_EQ(new_tensor.size(0), 2);                                     \
+    EXPECT_EQ(new_tensor.size(1), 3);                                     \
     for (int i = 0; i < 6; ++i) {                                         \
       EXPECT_EQ(                                                          \
           tensor->data<TypeParam>()[i], new_tensor.data<TypeParam>()[i]); \
@@ -652,8 +652,8 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
     EXPECT_TRUE(BlobIsTensorType(new_blob, CPU));                         \
     const TensorCPU& new_tensor = blob.Get<TensorCPU>();                  \
     EXPECT_EQ(new_tensor.ndim(), 2);                                      \
-    EXPECT_EQ(new_tensor.dim(0), 0);                                      \
-    EXPECT_EQ(new_tensor.dim(1), 3);                                      \
+    EXPECT_EQ(new_tensor.size(0), 0);                                     \
+    EXPECT_EQ(new_tensor.size(1), 3);                                     \
   }
 
 TEST_SERIALIZATION_WITH_TYPE(bool, int32_data)
@@ -683,8 +683,8 @@ TEST(TensorTest, TensorSerialization_CustomType) {
   EXPECT_TRUE(BlobIsTensorType(new_blob, CPU));
   const TensorCPU& new_tensor = blob.Get<TensorCPU>();
   EXPECT_EQ(new_tensor.ndim(), 2);
-  EXPECT_EQ(new_tensor.dim(0), 2);
-  EXPECT_EQ(new_tensor.dim(1), 3);
+  EXPECT_EQ(new_tensor.size(0), 2);
+  EXPECT_EQ(new_tensor.size(1), 3);
   for (int i = 0; i < 6; ++i) {
     EXPECT_EQ(
         new_tensor.data<BlobTestFoo>()[i].val,
@@ -726,7 +726,7 @@ TEST(TensorTest, Half) {
   EXPECT_TRUE(BlobIsTensorType(new_blob, CPU));
   const TensorCPU& new_tensor = blob.Get<TensorCPU>();
   EXPECT_EQ(new_tensor.ndim(), 1);
-  EXPECT_EQ(new_tensor.dim(0), kSize);
+  EXPECT_EQ(new_tensor.size(0), kSize);
   for (int i = 0; i < kSize; ++i) {
     EXPECT_EQ(new_tensor.data<at::Half>()[i].x, i % 10000);
   }
@@ -915,8 +915,8 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
     const auto& new_tensor = new_blob->Get<TensorCPU>();
 
     EXPECT_EQ(new_tensor.ndim(), d1);
-    EXPECT_EQ(new_tensor.dim(0), d1);
-    EXPECT_EQ(new_tensor.dim(1), d2);
+    EXPECT_EQ(new_tensor.size(0), d1);
+    EXPECT_EQ(new_tensor.size(1), d2);
     for (int64_t i = 0; i < size; ++i) {
       EXPECT_EQ(static_cast<TypeParam>(i), new_tensor.data<TypeParam>()[i]);
     }
