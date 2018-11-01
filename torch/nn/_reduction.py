@@ -6,16 +6,20 @@ from .._jit_internal import weak_script
 
 @weak_script
 def get_enum(reduction):
+    # type: (str) -> int
     if reduction == 'none':
-        return 0
+        ret = 0
     elif reduction == 'mean':
-        return 1
+        ret = 1
     elif reduction == 'elementwise_mean':
         warnings.warn("reduction='elementwise_mean' is deprecated, please use reduction='mean' instead.")
-        return 1
+        ret = 1
     elif reduction == 'sum':
-        return 2
-    raise ValueError(reduction + " is not a valid value for reduction")
+        ret = 2
+    else:
+        ret = -1  # TODO: remove once JIT exceptions support control flow
+        raise ValueError(reduction + " is not a valid value for reduction")
+    return ret
 
 # In order to support previous versions, accept boolean size_average and reduce
 # and convert them into the new constants for now
