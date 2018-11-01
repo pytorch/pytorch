@@ -156,9 +156,6 @@ def _optimize_graph(graph, operator_export_type):
         torch._C._jit_pass_lint(graph)
         torch._C._jit_pass_onnx_peephole(graph)
         torch._C._jit_pass_lint(graph)
-        # remove implicit expand in case if it involves dynamic
-        # input/output from scripting frontend that are not removed
-        torch._C._jit_pass_remove_expands(graph)
 
     torch._C._jit_pass_dce(graph)
     torch._C._jit_pass_lint(graph)
