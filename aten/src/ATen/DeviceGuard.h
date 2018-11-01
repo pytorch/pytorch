@@ -24,59 +24,37 @@ namespace at {
 /// leaves the device in the same state that DeviceGuard set it.  In DEBUG mode,
 /// we check for this invariant.
 ///
-/// It's invalid to call `set_device` with devices from different device types;
-/// a DeviceGuard only ever handles setting/resetting device for a single
-/// device type.  A DeviceGuard always knows what device type it is associated
-/// with, which is why we don't provide a nullary constructor (how would it know
-/// which device type you want to operate on?)
+/// If a DeviceGuard is constructed without specifying a device type (this
+/// can occur if you, e.g., pass a nullopt to the constructor), it behaves as if
+/// it were a no-op "CPU" guard; e.g., current_device() reports that the current
+/// device is kCPU.  This is different from passing Device(kCUDA, -1), which
+/// says to use the current CUDA device; in this case, we will correctly query
+/// what the current CUDA device is, but won't change it.
 class DeviceGuard {
 public:
-  DeviceGuard(DeviceType type) {
-    init_device_type(type);
-  }
-
   /// Set the current device to the passed Device.
   explicit DeviceGuard(Device device) {
     init_device(device);
   }
 
   /// Set the current device to the passed Device, if not nullopt;
-  /// otherwise do nothing.  It is NOT valid to call set_device
-  /// on the resulting device guard.  (See commented out constructor
-  /// below if this is ruining your day.)
+  /// otherwise do nothing.
   explicit DeviceGuard(optional<Device> device_opt) {
     if (device_opt.has_value()) {
       init_device(device_opt.value());
-    } else {
-      init_device_type(kCPU);
     }
   }
-
-  /*
-  /// In principle, this constructor could be useful if you need the
-  /// optional<Device> constructor, but you also might want to call
-  /// set_device later.  But I don't think anyone will actually need
-  /// it in practice.  Feel free to uncomment this if you need it.
-  explicit DeviceGuard(DeviceType device_type, optional<Device> device_opt) {
-    if (device_opt.has_value()) {
-      AT_ASSERT(device_type == device_opt->type());
-      init_device(device_opt.value());
-    } else {
-      init_device_type(device_type);
-    }
-  }
-  */
 
   /// Sets the current device to the device on which the given tensor is located.
   explicit DeviceGuard(const Tensor& tensor) {
-    init_device(tensor.device());
+    init_device_from(tensor);
   }
 
   /// Sets the current device to the device on which the first tensor in the list is
   /// located. If the list is empty, does nothing.
   explicit DeviceGuard(const TensorList& tensors) {
     if (!tensors.empty()) {
-      init_device(tensors.front().device());
+      init_device_from(tensors.front());
     }
   }
 
@@ -108,7 +86,7 @@ public:
     // Swapping works fine though.
     std::swap(this->impl_, other.impl_);
     std::swap(this->original_device_, other.original_device_);
-    std::swap(this->last_device_, other.last_device_);
+    std::swap(this->current_device_, other.current_device_);
     return *this;
   }
 
@@ -117,84 +95,62 @@ public:
   ~DeviceGuard() {
 #ifdef DEBUG
     // The getDevice call is costly, and also violates noexcept in destructor,
-    // so don't test for it outside of DEBUG mode
-    AT_ASSERT(impl_->getDevice() == last_device_);
+    // so don't test for it outside of DEBUG mode.  If impl_ is nullptr,
+    // that indicates CPU; no need to check anything.
+    AT_ASSERT(!impl_ || impl_->getDevice() == current_device_);
 #endif
-    if (original_device_ != last_device_) {
+    if (original_device_ != current_device_) {
       impl_->uncheckedSetDevice(original_device_);
     }
   }
 
-  /// Calls `set_device` with the `Tensor`'s current device, if it is not a
-  /// CPU tensor. Does nothing if the `tensor` is not defined.
-  void set_device_from(const Tensor& tensor) {
-    if (tensor.defined()) {
-      set_device(tensor.device());
-    }
-  }
-
-  /// Returns the device that was set upon construction of the guard.
+  /// Returns the device that was set prior to construction of the guard.
   Device original_device() const noexcept {
     return original_device_;
   }
 
-  /// Returns the last device that was set via `set_device`, if any.
-  Device last_device() const noexcept {
-    return last_device_;
-  }
-
-  /// Sets the device to the given one.
-  void set_device(at::Device device) {
-    AT_ASSERTM(original_device_.type() == device.type(),
-               "DeviceGuard was originally used to change the device for ",
-               original_device_.type(), ", but set_device() was subsequently ",
-               "used to change the device for ", device.type(), ".  To change ",
-               "current device for a different device type, you must use a fresh "
-               "DeviceGuard.");
-    if (device.type() == at::kCPU) return;
-    if (device.index() == -1) return;
-    AT_ASSERT(device.index() >= 0);
-    impl_->setDevice(device);
-    last_device_ = device;
+  /// Returns the device that was set after construction of the guard.
+  Device current_device() const noexcept {
+    return current_device_;
   }
 
  private:
-  void init_device_type(DeviceType device_type) {
-    if (device_type == at::kCPU) return;
-    impl_ = detail::getDeviceGuardImpl(device_type);
-    original_device_ = impl_->getDevice();
-    last_device_ = original_device_;
-  }
-
-  // NB: It would be nice if we could unconditionally reuse
-  // the init_device_type() logic here, but that would result in
-  // two vcalls on impl_ in the common case, when we only need one.
   void init_device(Device device) {
-    if (device.index() == -1) {
-      init_device_type(device.type());
-      return;
-    }
     if (device.type() == at::kCPU) {
       return;
     }
     impl_ = detail::getDeviceGuardImpl(device.type());
-    original_device_ = impl_->exchangeDevice(device);
-    last_device_ = device;
+    if (device.index() == -1) {
+      original_device_ = impl_->getDevice();
+      current_device_ = original_device_;
+    } else {
+      original_device_ = impl_->exchangeDevice(device);
+      current_device_ = device;
+    }
+  }
+
+  void init_device_from(const Tensor& tensor) {
+    if (tensor.defined()) {
+      init_device(tensor.device());
+    }
   }
 
   /// The original device that was active at construction of this object,
-  /// for the device type that this DeviceGuard is changing.
+  /// for the device type that this DeviceGuard is changing.  Defaults to
+  /// kCPU if no device type is specified for DeviceGuard.
   Device original_device_ = at::kCPU;
 
   /// The last device that was set via `set_device`, or the previous
-  /// device, if no device was set.
-  Device last_device_ = at::kCPU;
+  /// device, if no device was set.  Defaults to kCPU if no device type is
+  /// specified for DeviceGuard.
 
-  // Cached pointer to the interface which actually implements the operations
-  // needed for the DeviceGuard.
+  Device current_device_ = at::kCPU;
+
+  /// Cached pointer to the interface which actually implements the operations
+  /// needed for the DeviceGuard.  This is nullptr if the guard is for CPU.
   const detail::DeviceGuardImplInterface* impl_ = nullptr;
 
   // Member invariants:
-  //    !impl_ <==> original_device_ == at::kCPU <==> last_device_ == at::kCPU
+  //    !impl_ <==> original_device_ == at::kCPU <==> current_device_ == at::kCPU
 };
 } // namespace at

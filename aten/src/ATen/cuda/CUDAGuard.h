@@ -3,7 +3,9 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/core/ArrayRef.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/CUDAGuardImpl.h>
 #include <c10/DeviceType.h>
+#include <c10/detail/InlineDeviceGuard.h>
 
 #include <cstddef>
 #include <vector>
@@ -94,19 +96,21 @@ struct CUDAGuard {
   }
 
   /// Returns the device that was set upon construction of the guard.
-  Device original_device() const noexcept {
+  Device original_device() {
     return device_guard_.original_device();
   }
 
   /// Returns the last device that was set via `set_device`, if any.
-  Device last_device() const noexcept {
-    return device_guard_.last_device();
+  Device current_device() {
+    return device_guard_.current_device();
   }
 
  private:
   /// The guard for the current device.
-  DeviceGuard device_guard_{DeviceType::CUDA};
+  c10::detail::InlineDeviceGuard<detail::CUDAGuardImpl> device_guard_;
   /// The original streams that were active on all devices.
+  /// TODO: Consider making stream handling another class, so we don't need
+  /// to goop up the generated code with stream saving...
   std::vector<CUDAStream> original_streams_;
 };
 
