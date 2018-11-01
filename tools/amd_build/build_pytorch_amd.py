@@ -12,7 +12,11 @@ proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
 
 includes = [
     "aten/*",
-    "torch/*"
+    "torch/*",
+]
+
+ignores = [
+    "aten/src/ATen/core/*",
 ]
 
 # List of operators currently disabled
@@ -66,6 +70,7 @@ hipify_python.hipify(
     project_directory=proj_dir,
     output_directory=proj_dir,
     includes=includes,
+    ignores=ignores,
     yaml_settings=yaml_file,
     add_static_casts_option=True,
     show_progress=False)

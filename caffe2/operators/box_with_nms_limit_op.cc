@@ -21,7 +21,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   } else {
     CAFFE_ENFORCE_EQ(tscores.ndim(), 2, tscores.ndim());
   }
-  CAFFE_ENFORCE(tscores.template IsType<float>(), tscores.meta().name());
+  CAFFE_ENFORCE(tscores.template IsType<float>(), tscores.dtype().name());
   // tboxes: (num_boxes, num_classes * box_dim)
   if (tboxes.ndim() == 4) {
     CAFFE_ENFORCE_EQ(tboxes.dim(2), 1, tboxes.dim(2));
@@ -29,7 +29,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   } else {
     CAFFE_ENFORCE_EQ(tboxes.ndim(), 2, tboxes.ndim());
   }
-  CAFFE_ENFORCE(tboxes.template IsType<float>(), tboxes.meta().name());
+  CAFFE_ENFORCE(tboxes.template IsType<float>(), tboxes.dtype().name());
 
   int N = tscores.dim(0);
   int num_classes = tscores.dim(1);

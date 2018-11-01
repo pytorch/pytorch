@@ -66,7 +66,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   outShape.push_back(numOutputs);
   outShape.insert(outShape.end(), data.sizes().begin() + 1, data.sizes().end());
   dataOut->Resize(outShape);
-  auto* outPtr = (char*)dataOut->raw_mutable_data(data.meta());
+  auto* outPtr = (char*)dataOut->raw_mutable_data(data.dtype());
 
   int64_t* out_vec = nullptr;
   if (OutputSize() == 2) {
@@ -79,7 +79,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
     return true;
   }
   const auto innerSize = data.size_from_dim(1);
-  const auto innerSizeBytes = innerSize * data.meta().itemsize();
+  const auto innerSizeBytes = innerSize * data.dtype().itemsize();
 
   int64_t lastStart = -1;
   const auto* inPtr = (char*)data.raw_data();
@@ -91,7 +91,8 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
       const auto* src = inPtr + lastStart * innerSizeBytes;
       auto* dst = outPtr + outStart * innerSizeBytes;
       int numItems = i - lastStart;
-      context_.CopyItemsSameDevice(data.meta(), numItems * innerSize, src, dst);
+      context_.CopyItemsSameDevice(
+          data.dtype(), numItems * innerSize, src, dst);
       outStart += numItems;
       lastStart = -1;
     }

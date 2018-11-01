@@ -164,7 +164,7 @@ std::vector<int64_t> TreeWalker::fieldDim(int fieldId) const {
 void* TreeWalker::fieldPtr(int fieldId) const {
   auto& in = input(fieldId);
   return (char*)in.raw_data() +
-      offset(fieldId) * in.size_from_dim(1) * in.meta().itemsize();
+      offset(fieldId) * in.size_from_dim(1) * in.dtype().itemsize();
 }
 
 void TreeWalker::gatherLengthData() {
@@ -376,7 +376,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
 
         // Checks to ensure that dimensions/sizes match
         CAFFE_ENFORCE_EQ(outputDims[j].size(), input.ndim());
-        CAFFE_ENFORCE(*metas[j] == input.meta());
+        CAFFE_ENFORCE(*metas[j] == input.dtype());
         // We look from first dimension, because we concat on the first.
         for (int k = 1; k < input.ndim(); ++k) {
           CAFFE_ENFORCE_EQ(input.sizes()[k], outputDims[j][k]);
@@ -429,7 +429,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
     for (int i = 0; i < numTensors; ++i) {
       outputDims[i] = inputZero->at(i).sizes().vec();
       outputDims[i][0] = 0;
-      metas[i] = &inputZero->at(i).meta();
+      metas[i] = &inputZero->at(i).dtype();
     }
   }
 
@@ -443,7 +443,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
       const auto& input = Input(i + 1);
       outputDims[i] = input.sizes().vec();
       outputDims[i][0] = 0;
-      metas[i] = &input.meta();
+      metas[i] = &input.dtype();
     }
   }
 
@@ -513,12 +513,12 @@ class ReadNextBatchOp : public Operator<CPUContext> {
       auto* out = Output(i);
       out->Resize(outDim);
       void* src =
-          (char*)in.raw_data() + offset * innerSize * in.meta().itemsize();
-      void* dst = out->raw_mutable_data(in.meta()); // create the tensor
+          (char*)in.raw_data() + offset * innerSize * in.dtype().itemsize();
+      void* dst = out->raw_mutable_data(in.dtype()); // create the tensor
       if (out->numel() == 0) {
         continue;
       }
-      context_.CopyItemsSameDevice(in.meta(), out->numel(), src, dst);
+      context_.CopyItemsSameDevice(in.dtype(), out->numel(), src, dst);
     }
     return true;
   }
@@ -720,9 +720,9 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
       if (out->numel() == 0) {
         continue;
       }
-      auto dst = static_cast<char*>(out->raw_mutable_data(in.meta()));
+      auto dst = static_cast<char*>(out->raw_mutable_data(in.dtype()));
       int block_size = in.numel() / in.dim(0);
-      auto block_bytesize = in.size_from_dim(1) * in.meta().itemsize();
+      auto block_bytesize = in.size_from_dim(1) * in.dtype().itemsize();
       CAFFE_ENFORCE(
           block_bytesize == in.nbytes() / in.dim(0),
           "block_bytesize should be consistent with data dim");
@@ -739,7 +739,7 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
         // copy data
         auto src = src_base + offset * block_bytesize;
         context_.CopyItemsSameDevice(
-            in.meta(), size * block_size, src, dst + start * block_bytesize);
+            in.dtype(), size * block_size, src, dst + start * block_bytesize);
         start += size;
         idx++;
       }
@@ -771,14 +771,14 @@ class AppendOp final : public Operator<Context> {
     CAFFE_ENFORCE(&a == c, "First argument must be in-place.");
     CAFFE_ENFORCE(c->ndim() == b.ndim());
     CAFFE_ENFORCE(b.ndim() == c->ndim());
-    CAFFE_ENFORCE(a.meta() == b.meta());
+    CAFFE_ENFORCE(a.dtype() == b.dtype());
     for (int i = 1; i < a.ndim(); ++i) {
       CAFFE_ENFORCE(a.sizes()[i] == b.sizes()[i]);
     }
     auto oldSize = c->numel();
     c->Extend(b.sizes()[0], kDatasetGrowthPct, &context_);
-    auto* dst = (char*)c->raw_mutable_data() + oldSize * b.meta().itemsize();
-    context_.CopyItemsSameDevice(b.meta(), b.numel(), b.raw_data(), dst);
+    auto* dst = (char*)c->raw_mutable_data() + oldSize * b.dtype().itemsize();
+    context_.CopyItemsSameDevice(b.dtype(), b.numel(), b.raw_data(), dst);
     return true;
   }
 };
@@ -810,7 +810,7 @@ class AtomicAppendOp final : public Operator<Context> {
           (void*)&a == (void*)c, "Appended-to arguments must be in-place.");
       CAFFE_ENFORCE(c->ndim() == b.ndim());
       CAFFE_ENFORCE(b.ndim() == c->ndim());
-      CAFFE_ENFORCE(a.meta() == b.meta());
+      CAFFE_ENFORCE(a.dtype() == b.dtype());
       for (int j = 1; j < a.ndim(); ++j) {
         CAFFE_ENFORCE(a.sizes()[j] == b.sizes()[j]);
       }
@@ -827,8 +827,8 @@ class AtomicAppendOp final : public Operator<Context> {
       }
       auto oldSize = c->numel();
       c->Extend(b.sizes()[0], kDatasetGrowthPct, &context_);
-      auto* dst = (char*)c->raw_mutable_data() + oldSize * b.meta().itemsize();
-      context_.CopyItemsSameDevice(b.meta(), b.numel(), b.raw_data(), dst);
+      auto* dst = (char*)c->raw_mutable_data() + oldSize * b.dtype().itemsize();
+      context_.CopyItemsSameDevice(b.dtype(), b.numel(), b.raw_data(), dst);
     }
     return true;
   }
@@ -890,17 +890,17 @@ class ConcatTensorVectorOp final : public Operator<Context> {
       for (int j = 1; j < tensorVector->at(i).ndim(); j++) {
         CAFFE_ENFORCE(outputDims[j] == tensorVector->at(i).sizes()[j]);
       }
-      CAFFE_ENFORCE(tensorVector->at(0).meta() == tensorVector->at(i).meta());
+      CAFFE_ENFORCE(tensorVector->at(0).dtype() == tensorVector->at(i).dtype());
       outputDims[0] += tensorVector->at(i).sizes()[0];
     }
 
     tensor->Resize(outputDims);
     int64_t offset = 0;
-    auto* dst = (char*)tensor->raw_mutable_data(tensorVector->at(0).meta());
+    auto* dst = (char*)tensor->raw_mutable_data(tensorVector->at(0).dtype());
 
     for (const auto& t : *tensorVector) {
       context_.CopyItemsSameDevice(
-          t.meta(), t.numel(), t.raw_data(), dst + offset);
+          t.dtype(), t.numel(), t.raw_data(), dst + offset);
       offset += t.nbytes();
     }
 
