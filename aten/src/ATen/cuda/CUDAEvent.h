@@ -71,6 +71,7 @@ struct AT_CUDA_API CUDAEvent {
     if (!was_recorded_) record(stream);
   }
 
+  // Note: cudaEventRecord must be called on the same device as the STREAM
   void record(const CUDAStream& stream) {
     at::cuda::CUDAGuard device_index_guard(static_cast<int16_t>(stream.device_index()));
     
@@ -86,12 +87,14 @@ struct AT_CUDA_API CUDAEvent {
     was_recorded_ = true;
   }
 
-  void block (const CUDAStream& stream) {
+  // Note: cudaStreamWaitEvent must be called on the same device as the STREAM
+  //  The event has no actual GPU resources associated with it
+  void block(const CUDAStream& stream) {
     if (is_created_) {
+      at::cuda::CUDAGuard device_index_guard(static_cast<int16_t>(stream.device_index()));
       AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
     }
   }
-
 
 private:
   unsigned int flags_ = DEFAULT_FLAGS;

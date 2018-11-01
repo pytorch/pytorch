@@ -84,7 +84,9 @@ void syncStreams(
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
     : devices_(devices) {
-  // Creates the CUDA events with DEFAULT_FLAGS = cudaEventDisableTiming
+  // Creates the CUDA event wrappers
+  // Note: The actual events are lazily created when first recorded to with 
+  // DEFAULT_FLAGS = cudaEventDisableTiming.
   cudaEvents_.resize(devices.size());
 }
 
