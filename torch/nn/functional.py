@@ -3,6 +3,7 @@ from __future__ import division
 
 import warnings
 import math
+import types
 from operator import mul
 from functools import reduce
 
@@ -16,7 +17,15 @@ from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
 from .._jit_internal import weak_script
 
-_VF = torch._C._VariableFunctions
+
+class _VFModule(types.ModuleType):
+    def __init__(self):
+        pass
+
+    def __getattr__(self, attr):
+        return getattr(torch._C._VariableFunctions, attr)
+
+_VF = _VFModule()
 
 
 class _Reduction:
@@ -608,7 +617,9 @@ def adaptive_avg_pool3d(input, output_size):
 
 
 # Activation functions
+@torch._jit_internal.weak_script
 def dropout(input, p=0.5, training=True, inplace=False):
+    # type: (Tensor, float, bool, bool) -> Tensor
     r"""
     During training, randomly zeroes some of the elements of the input
     tensor with probability :attr:`p` using samples from a Bernoulli
@@ -621,11 +632,14 @@ def dropout(input, p=0.5, training=True, inplace=False):
         training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if p < 0 or p > 1:
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.dropout_ if inplace else _VF.dropout
-    return f(input, p, training)
+    if inplace:
+        ret = _VF.dropout_(input, p, training)
+    else:
+        ret = _VF.dropout(input, p, training)
+    return ret
 
 
 def alpha_dropout(input, p=0.5, training=False, inplace=False):

@@ -1312,6 +1312,7 @@ _builtin_blacklist = {
     'pairwise_distance',
     'prelu',
     'hardshrink',
+    'dropout',
 }
 
 
