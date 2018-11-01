@@ -2,10 +2,8 @@
 #include "ATen/ATen.h"
 
 #include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/alias_info.h"
-#include "torch/csrc/jit/assertions.h"
 
 namespace torch { namespace jit {
 
