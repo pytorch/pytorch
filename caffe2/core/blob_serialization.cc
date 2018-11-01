@@ -219,7 +219,7 @@ void TensorSerializer::Serialize(
   for (int i = 0; i < input.ndim(); ++i) {
     proto.add_dims(input.dim(i));
   }
-  const TensorProto::DataType data_type = TypeMetaToDataType(input.meta());
+  const TensorProto::DataType data_type = TypeMetaToDataType(input.dtype());
   proto.set_data_type(data_type);
   StoreDeviceDetail(input, &proto);
   auto uniq_ptr = CreateContext(input.GetDevice());
@@ -330,8 +330,8 @@ void TensorSerializer::Serialize(
       if (chunkSize > 0) {
         const char* raw_data = static_cast<const char*>(input.raw_data());
         for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
-          proto.add_string_data(
-              SerializeBlob(raw_data + i * input.itemsize(), input.meta(), ""));
+          proto.add_string_data(SerializeBlob(
+              raw_data + i * input.itemsize(), input.dtype(), ""));
         }
       }
     } break;

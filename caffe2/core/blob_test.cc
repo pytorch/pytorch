@@ -195,7 +195,7 @@ TEST(TensorNonTypedTest, TensorChangeType) {
   auto* ptr = tensor.mutable_data<int>();
   EXPECT_TRUE(ptr != nullptr);
   EXPECT_TRUE(tensor.data<int>() != nullptr);
-  EXPECT_TRUE(tensor.meta().Match<int>());
+  EXPECT_TRUE(tensor.dtype().Match<int>());
 
   // int and float are same size, so should retain the pointer
   // NB: this is only true when the use_count of the underlying Storage is 1, if
@@ -203,12 +203,12 @@ TEST(TensorNonTypedTest, TensorChangeType) {
   // new Storage when the data type changes
   EXPECT_TRUE(tensor.mutable_data<float>() == (float*)ptr);
   EXPECT_TRUE(tensor.data<float>() == (const float*)ptr);
-  EXPECT_TRUE(tensor.meta().Match<float>());
+  EXPECT_TRUE(tensor.dtype().Match<float>());
 
   // at::Half is smaller, so still should share buffer
   EXPECT_TRUE(tensor.mutable_data<at::Half>() == (at::Half*)ptr);
   EXPECT_TRUE(tensor.data<at::Half>() == (const at::Half*)ptr);
-  EXPECT_TRUE(tensor.meta().Match<at::Half>());
+  EXPECT_TRUE(tensor.dtype().Match<at::Half>());
 
   // share the data with other tensor so that the pointer won't be reused
   // when we reallocate
@@ -219,7 +219,7 @@ TEST(TensorNonTypedTest, TensorChangeType) {
   EXPECT_TRUE(doubleptr != (double*)ptr);
   EXPECT_TRUE(doubleptr != nullptr);
   EXPECT_TRUE(tensor.data<double>() != nullptr);
-  EXPECT_TRUE(tensor.meta().Match<double>());
+  EXPECT_TRUE(tensor.dtype().Match<double>());
 }
 
 TEST(TensorNonTypedTest, NonDefaultConstructible) {
