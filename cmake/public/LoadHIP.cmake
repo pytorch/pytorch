@@ -150,20 +150,11 @@ IF(HIP_FOUND)
   find_package_and_print_version(miopen REQUIRED)
   find_package_and_print_version(miopengemm REQUIRED)
   find_package_and_print_version(rocfft REQUIRED)
-  #find_package_and_print_version(hipsparse REQUIRED)
+  find_package_and_print_version(hipsparse REQUIRED)
   find_package_and_print_version(rocsparse REQUIRED)
 
-  # TODO: hip_hcc has an interface include flag "-hc" which is only
-  # recognizable by hcc, but not gcc and clang. Right now in our
-  # setup, hcc is only used for linking, but it should be used to
-  # compile the *_hip.cc files as well.
   FIND_LIBRARY(PYTORCH_HIP_HCC_LIBRARIES hip_hcc HINTS ${HIP_PATH}/lib)
-  # TODO: miopen_LIBRARIES should return fullpath to the library file,
-  # however currently it's just the lib name
   FIND_LIBRARY(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
-  FIND_LIBRARY(hiprand_LIBRARIES hiprand HINTS ${HIPRAND_PATH}/lib)
-  FIND_LIBRARY(rocsparse_LIBRARIES rocsparse HINTS ${ROCSPARSE_PATH}/lib)
-  FIND_LIBRARY(hipsparse_LIBRARIES hipsparse HINTS ${HIPSPARSE_PATH}/lib)
 
 
   # Necessary includes for building PyTorch since we include HIP headers that depend on hcc/hsa headers.

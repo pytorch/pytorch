@@ -633,14 +633,10 @@ if(NOT BUILD_ATEN_MOBILE)
     hip_include_directories(${Caffe2_HIP_INCLUDES})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
-    # Additional libraries required by PyTorch AMD that aren't used by Caffe2 (not in Caffe2's docker image)
-    if(NOT BUILD_ATEN_MOBILE)
-      set(Caffe2_HIP_DEPENDENCY_LIBS ${Caffe2_HIP_DEPENDENCY_LIBS} ${hipsparse_LIBRARIES})
-    endif()
-    # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
+      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipsparse_LIBRARIES})
+    # TODO: There is a bug in rocblas and rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES} and ${rocfft_LIBRARIES} respectively
     list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
-      roc::rocblas)
+      roc::rocblas roc::rocfft)
 
     # TODO: Currently pytorch hipify script uses a feature called
     # "disabled_modules" that effectively ifdef out a file, but
