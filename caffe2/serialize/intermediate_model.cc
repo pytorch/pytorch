@@ -155,6 +155,11 @@ IntermediateMethod::IntermediateMethod(torch::MethodDef* method_def) {
   }
 }
 
+IntermediateMethod::IntermediateMethod(const IntermediateMethod& method) {
+  name_ = method.name_;
+  graph_ = caffe2::make_unique<caffe2::NetDef>(*(method.graph_));
+  torchScript_ = method.torchScript_;
+}
 
 void IntermediateMethod::dump(torch::MethodDef* method_def) {
   AT_ASSERTM(name_.size() > 0, "IntermediateMethod's name is invalid. name: ", name_);
