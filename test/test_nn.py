@@ -5141,7 +5141,7 @@ class TestNN(NNTestCase):
             for requires_grad in [True, False]:
                 # When target.requires_grad=True, its impl is in Python, while the other is in TH.
                 target = torch.randn(2, 10, requires_grad=requires_grad)
-                for reduction in ['none', 'elementwise_mean', 'sum']:
+                for reduction in ['none', 'mean', 'sum']:
                     l = fn(input, target, reduction)
                     if reduction == 'none':
                         self.assertEqual(l.size(), target.size())
@@ -6827,7 +6827,7 @@ new_criterion_tests = [
         input_size=(),
         target_size=(),
         reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
-                                      (i.numel() if get_reduction(m) == 'elementwise_mean' else 1)),
+                                      (i.numel() if get_reduction(m) == 'mean' else 1)),
         check_sum_reduction=True,
         desc='scalar'
     ),
@@ -6836,7 +6836,7 @@ new_criterion_tests = [
         input_fn=lambda: torch.ones(5, 68, 64, 64, dtype=torch.float) / 10,
         target_fn=lambda: torch.zeros(5, 68, 64, 64, dtype=torch.float),
         reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
-                                      (i.numel() if get_reduction(m) == 'elementwise_mean' else 1)),
+                                      (i.numel() if get_reduction(m) == 'mean' else 1)),
         check_forward_only=True,
         desc='prec',
     ),
@@ -6846,7 +6846,7 @@ new_criterion_tests = [
         input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.rand(()).gt(0).double(),
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
-            (i.numel() if get_reduction(m) == 'elementwise_mean' else 1),
+            (i.numel() if get_reduction(m) == 'mean' else 1),
         desc='scalar_weights',
         check_gradgrad=False,
     ),
@@ -6873,7 +6873,7 @@ new_criterion_tests = [
         input_fn=lambda: torch.randn(5, 10),
         target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
         reference_fn=lambda i, t, m: -((t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * get_weight(m)).sum() /
-            (i.numel() if get_reduction(m) == 'elementwise_mean' else i.size(1) if get_reduction(m) == 'sum' else 1),
+            (i.numel() if get_reduction(m) == 'mean' else i.size(1) if get_reduction(m) == 'sum' else 1),
         desc='weights',
         check_sum_reduction=True,
         check_gradgrad=False,

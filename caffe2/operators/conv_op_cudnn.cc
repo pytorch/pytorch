@@ -846,7 +846,7 @@ bool CudnnConvOp::RunOnDevice() {
   } else {
     LOG(FATAL) << "Only float (32bit) and Half are supported by "
                << "cudnn convolution, but input " << debug_def().input(0)
-               << " has [" << Input(0).meta().name() << "]";
+               << " has [" << Input(0).dtype().name() << "]";
   }
   return true;
 }

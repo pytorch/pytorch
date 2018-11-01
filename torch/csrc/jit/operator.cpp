@@ -213,8 +213,8 @@ struct SchemaParser {
           return static_cast<int64_t>(at::Device::Type::CPU);
         } else if("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
-        } else if("ElementwiseMean" == text) {
-          return static_cast<int64_t>(Reduction::ElementwiseMean);
+        } else if("Mean" == text) {
+          return static_cast<int64_t>(Reduction::Mean);
         } else {
           throw ErrorReport(L.cur().range) << "invalid numeric default value";
         }

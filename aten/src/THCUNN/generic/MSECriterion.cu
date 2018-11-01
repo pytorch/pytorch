@@ -30,7 +30,7 @@ void THNN_(MSECriterion_updateOutput)(
       input_data, input_data+size, target_data, (accreal) 0,
       thrust::plus<accreal>(), mse_functor<scalar_t, accreal>());
 
-    if (reduction == Reduction::ElementwiseMean)
+    if (reduction == Reduction::Mean)
       sum /= size;
 
     THCTensor_(free)(state, input);
@@ -64,7 +64,7 @@ void THNN_(MSECriterion_updateGradInput)(
     ptrdiff_t size = THCTensor_(nElement)(state, input);
 
     THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
-    accreal norm = reduction == Reduction::ElementwiseMean ? (accreal)(2)/size : (accreal)(2);
+    accreal norm = reduction == Reduction::Mean ? (accreal)(2)/size : (accreal)(2);
     norm *= ScalarConvert<scalar_t, accreal>::to(THCTensor_(get1d)(state, gradOutput, 0));
 
     input = THCTensor_(newContiguous)(state, input);

@@ -72,10 +72,11 @@ WRONG_COMPILER_WARNING = '''
                                !! WARNING !!
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-Your compiler ({0}) is not compatible with the compiler Pytorch was built with
-for this platform, which is {1} on {2}. Please use {1} to to compile your
-extension. Alternatively, you may compile PyTorch from source using {0}, and
-then you can also use {0} to compile your extension.
+Your compiler ({user_compiler}) is not compatible with the compiler Pytorch was
+built with for this platform, which is {pytorch_compiler} on {platform}. Please
+use {pytorch_compiler} to to compile your extension. Alternatively, you may
+compile PyTorch from source using {user_compiler}, and then you can also use
+{user_compiler} to compile your extension.
 
 See https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md for help
 with compiling PyTorch from source.
@@ -158,9 +159,9 @@ def check_compiler_abi_compatibility(compiler):
     # First check if the compiler is one of the expected ones for the particular platform.
     if not check_compiler_ok_for_platform(compiler):
         warnings.warn(WRONG_COMPILER_WARNING.format(
-            compiler,
-            ACCEPTED_COMPILERS_FOR_PLATFORM[sys.platform][0],
-            sys.platform))
+            user_compiler=compiler,
+            pytorch_compiler=ACCEPTED_COMPILERS_FOR_PLATFORM[sys.platform][0],
+            platform=sys.platform))
         return False
 
     if sys.platform == 'darwin':

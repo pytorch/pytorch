@@ -415,7 +415,7 @@ def signature(decl):
                 .replace('}}', ']') \
                 .replace('true', 'True') \
                 .replace('false', 'False') \
-                .replace('Reduction::ElementwiseMean', 'ElementwiseMean') \
+                .replace('Reduction::Mean', 'Mean') \
                 .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
                 .replace('{', '[') \
                 .replace('}', ']')
