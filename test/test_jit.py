@@ -8681,12 +8681,6 @@ EXCLUDE_SCRIPT = {
     # skipped nn functional tests
     # ops involves sampling which could not test
 
-    # 'test_nn_dropout',
-    # 'test_nn_alpha_dropout',
-    # 'test_nn_dropout2d',
-    # 'test_nn_dropout3d',
-    # 'test_nn_feature_alpha_dropout',
-
     'test_nn_adaptive_max_pool1d',
     'test_nn_adaptive_max_pool2d',
     'test_nn_adaptive_max_pool3d',
@@ -8870,12 +8864,10 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
     # keep same rng state between calls
     initial_rng_state = torch.get_rng_state()
     # test no gradients case
-    torch.set_rng_state(initial_rng_state)
     outputs = reference_func(*nograd_inputs, **kwargs)
-
     torch.set_rng_state(initial_rng_state)
     outputs_test = func(*nograd_inputs, **kwargs)
-    torch.set_rng_state(initial_rng_state)
+
 
     self.assertEqual(outputs, outputs_test)
 
