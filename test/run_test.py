@@ -104,7 +104,10 @@ def shell(command, cwd=None):
     #      `p.wait()` in a `final` block for the code to be portable.
     #
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
-    p = subprocess.Popen(shlex.split(command), universal_newlines=True, cwd=cwd)
+    if not isinstance(command, (list, tuple)):
+        command = shlex.split(command)
+    print_to_stderr('cmd: {}\ncwd: {}'.format(command, cwd))
+    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
     try:
         return p.wait()
     except KeyboardInterrupt:
@@ -132,11 +135,10 @@ def run_test(executable, test_module, test_directory, options):
     unittest_args = options.additional_unittest_args
     if options.verbose:
         unittest_args.append('--verbose')
-    unittest_args = ' '.join(unittest_args)
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    return shell('{} {}.py {}'.format(executable, test_module, unittest_args),
-                 test_directory)
+    command = [executable, test_module + '.py'] + unittest_args
+    return shell(command, test_directory)
 
 
 def test_cpp_extensions(executable, test_module, test_directory, options):
