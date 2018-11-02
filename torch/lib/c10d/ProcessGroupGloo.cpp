@@ -1,9 +1,15 @@
 #include "ProcessGroupGloo.hpp"
 
+#include <gloo/allgather.h>
+#include <gloo/allreduce.h>
 #include <gloo/allreduce_halving_doubling.h>
 #include <gloo/allreduce_ring_chunked.h>
 #include <gloo/barrier_all_to_one.h>
+#include <gloo/broadcast.h>
 #include <gloo/broadcast_one_to_all.h>
+#include <gloo/gather.h>
+#include <gloo/reduce.h>
+#include <gloo/scatter.h>
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAGuard.h>
@@ -135,7 +141,7 @@ std::vector<cudaStream_t> getStreamVector(AlgorithmEntry& entry) {
 // synchronizeStreams ensures that the private streams associated with
 // an algorithm entry wait for the public streams to complete.
 void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
-  at::DeviceGuard deviceGuard;
+  at::cuda::CUDAGuard deviceGuard;
   const auto& key = entry->key;
   for (size_t i = 0; i < key.devices.size(); i++) {
     const auto& device = key.devices[i];
@@ -270,7 +276,7 @@ void ProcessGroupGloo::WorkGloo::finish(const AlgorithmEntry& entry) {
       // Populate devices and events so that we can later synchronize
       // with the operation associated with this work finishing.
       if (cuda_) {
-        at::DeviceGuard deviceGuard;
+        at::cuda::CUDAGuard deviceGuard;
         devices_ = entry.key.devices;
         events_.resize(devices_.size());
         for (size_t i = 0; i < devices_.size(); i++) {
@@ -589,7 +595,9 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 // failure must be signaled through the Work future.
 //
 EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
-  at::DeviceGuard deviceGuard;
+#ifdef USE_CUDA
+  at::cuda::CUDAGuard deviceGuard;
+#endif
   auto entry = std::unique_ptr<AlgorithmEntry>(new AlgorithmEntry);
   entry->key = key;
 
@@ -608,7 +616,6 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
     if (key.type->is_cuda()) {
       throw std::runtime_error("ProcessGroupGloo is not built with CUDA");
     }
-    deviceGuard.set_index(-1);
 #endif
     entry->src[i] = at::empty(srcSizes[i], key.type->options());
   }
@@ -775,7 +782,7 @@ namespace {
 class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncReduceWork(
-      std::shared_ptr<gloo::Context> context,
+      const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
       int rootRank,
       int rootTensor,
@@ -841,8 +848,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
     invalidArgument("requires a single input/output tensor");
   }
 
-  const auto& type = inputs[0].type();
-  if (type.backend() != at::Backend::CPU) {
+  const auto& layout = inputs[0].layout();
+  const auto& device = inputs[0].device();
+  if (layout != at::kStrided || device.type() != at::kCPU) {
     invalidArgument("only supports dense CPU tensors");
   }
 
@@ -862,7 +870,7 @@ namespace {
 class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncAllgatherWork(
-      std::shared_ptr<gloo::Context> context,
+      const std::shared_ptr<gloo::Context>& context,
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       uint32_t tag)
@@ -925,9 +933,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
     }
   }
 
+  const auto& layout = inputs[0].layout();
+  const auto& device = inputs[0].device();
   const auto& type = inputs[0].type();
   const auto& sizes = inputs[0].sizes();
-  if (type.backend() != at::Backend::CPU) {
+  if (layout != at::kStrided || device.type() != at::kCPU) {
     invalidArgument("only supports dense CPU tensors");
   }
 
@@ -956,7 +966,7 @@ namespace {
 class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncGatherWork(
-      std::shared_ptr<gloo::Context> context,
+      const std::shared_ptr<gloo::Context>& context,
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       int root,
@@ -1018,9 +1028,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
     invalidArgument("requires a single input tensor");
   }
 
+  const auto& layout = inputs[0].layout();
+  const auto& device = inputs[0].device();
   const auto& type = inputs[0].type();
   const auto& sizes = inputs[0].sizes();
-  if (type.backend() != at::Backend::CPU) {
+  if (layout != at::kStrided || device.type() != at::kCPU) {
     invalidArgument("only supports dense CPU tensors");
   }
 
@@ -1052,7 +1064,7 @@ namespace {
 class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncScatterWork(
-      std::shared_ptr<gloo::Context> context,
+      const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs,
       int root,
@@ -1104,9 +1116,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
     invalidArgument("requires a single output tensor");
   }
 
+  const auto& layout = outputs[0].layout();
+  const auto& device = outputs[0].device();
   const auto& type = outputs[0].type();
   const auto& sizes = outputs[0].sizes();
-  if (type.backend() != at::Backend::CPU) {
+  if (layout != at::kStrided || device.type() != at::kCPU) {
     invalidArgument("only supports dense CPU tensors");
   }
 

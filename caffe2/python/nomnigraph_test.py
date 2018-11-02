@@ -238,6 +238,18 @@ class TestBindings(test_util.TestCase):
         e = g.createEdge(n1, n2)
         ng.render(g)
 
+    def test_createUniqueDataNode(self):
+        net = core.Net("name")
+        nn = ng.NNModule(net)
+        n1 = nn.createUniqueDataNode("a")
+        self.assertEqual(n1.name[0], "a")
+        n2 = nn.dataFlow.createNode(ng.Operator("test1"))
+        nn.createEdge(n1, n2)
+        n3 = nn.createUniqueDataNode("a")
+        nn.createEdge(n2, n3)
+        self.assertEqual(n3.name[0], "a")
+        self.assertNotEqual(n1.name, n3.name)
+
     def test_convertToProto(self):
         net = core.Net("name")
         net.FC(["X", "W"], ["Y"])

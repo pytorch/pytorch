@@ -39,6 +39,14 @@ except ImportError:
         return isinstance(ann, TupleInstance)
 
 
+# allows BroadcastingList instance to be subscriptable
+class BroadcastingListCls(object):
+    def __getitem__(self, types):
+        return
+
+BroadcastingList = BroadcastingListCls()
+
+
 class Module(object):
     def __init__(self, name, members):
         self.name = name

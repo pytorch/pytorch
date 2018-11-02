@@ -1,5 +1,7 @@
 #include "CUDAUtils.hpp"
 
+#include <ATen/cuda/CUDAGuard.h>
+
 #include <c10d/private/CUDAUtils.hpp>
 
 namespace c10d {
@@ -17,7 +19,7 @@ CUDAEvent::~CUDAEvent() noexcept(false) {
   if (event_ != nullptr) {
     // cudaEventDestroy must run on the same device of the event,
     // otherwise it creates a context on default device as well.
-    at::DeviceGuard guard(device_);
+    at::cuda::CUDAGuard guard(device_);
 
     C10D_CUDA_CHECK(cudaEventDestroy(event_));
   }

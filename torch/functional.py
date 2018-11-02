@@ -4,6 +4,7 @@ from torch._six import inf
 from operator import mul
 from functools import reduce
 import math
+import warnings
 
 __all__ = [
     'argmax',
@@ -19,6 +20,7 @@ __all__ = [
     'isnan',
     'norm',
     'meshgrid',
+    'potrf',
     'split',
     'stft',
     'tensordot',
@@ -761,3 +763,20 @@ def chain_matmul(*matrices):
     .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
     """
     return torch._C._VariableFunctions.chain_matmul(matrices)
+
+
+def potrf(a, upper=True, out=None):
+    r"""Computes the Cholesky decomposition of a symmetric positive-definite
+    matrix :math:`A`.
+
+    For more information, regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
+
+    .. warning::
+        torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next
+        release. Please use torch.cholesky instead and note that the :attr:`upper` argument in
+        torch.cholesky defaults to ``False``.
+    """
+    warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next "
+                  "release. Please use torch.cholesky instead and note that the :attr:`upper` argument in"
+                  " torch.cholesky defaults to ``False``.", stacklevel=2)
+    return torch.cholesky(a, upper=upper, out=out)

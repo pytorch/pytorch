@@ -85,7 +85,8 @@ namespace script {
   _(TK_DECL, "decl", "")                         \
   _(TK_SLICE_EXPR, "slice expr", "")             \
   _(TK_TYPE_COMMENT, "type comment", "# type:")  \
-  _(TK_RAISE, "raise", "raise")
+  _(TK_RAISE, "raise", "raise")                  \
+  _(TK_ASSERT, "assert", "assert")
 
 
 static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!";
@@ -151,11 +152,13 @@ struct SharedParserData {
   }
 #ifdef _WIN32
   double strtod_c(const char * str, char** end) {
+    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
     static _locale_t loc = _create_locale(LC_ALL, "C");
     return _strtod_l(str, end, loc);
   }
 #else
   double strtod_c(const char * str, char** end) {
+    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
     static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
     return strtod_l(str, end, loc);
   }
