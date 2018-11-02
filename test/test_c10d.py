@@ -422,7 +422,57 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         opts.threads = threads
         return opts
 
-    def test_broadcast_ops(self):
+    def test_broadcast_checks(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        t1 = torch.zeros([1], dtype=torch.float32)
+        t2 = torch.zeros([1], dtype=torch.float64)
+        t3 = torch.zeros([2], dtype=torch.float32)
+
+        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+            opts = c10d.BroadcastOptions()
+            opts.rootRank = -1
+            opts.rootTensor = 0
+            pg.broadcast([t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+            opts = c10d.BroadcastOptions()
+            opts.rootRank = self.world_size
+            opts.rootTensor = 0
+            pg.broadcast([t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid root tensor"):
+            opts = c10d.BroadcastOptions()
+            opts.rootRank = self.rank
+            opts.rootTensor = -1
+            pg.broadcast([t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid root tensor"):
+            opts = c10d.BroadcastOptions()
+            opts.rootRank = self.rank
+            opts.rootTensor = 1
+            pg.broadcast([t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid root tensor"):
+            opts = c10d.BroadcastOptions()
+            opts.rootRank = self.rank
+            opts.rootTensor = 0
+            pg.broadcast([], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor type"):
+            opts = c10d.BroadcastOptions()
+            opts.rootRank = self.rank
+            opts.rootTensor = 0
+            pg.broadcast([t1, t2], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+            opts = c10d.BroadcastOptions()
+            opts.rootRank = self.rank
+            opts.rootTensor = 0
+            pg.broadcast([t1, t3], opts)
+
+    def _test_broadcast_basics(self, fn):
         store = c10d.FileStore(self.file.name)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
@@ -433,23 +483,63 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work = pg.broadcast(xs, opts)
             work.wait()
 
-        # Every rank is root once, every tensor index is root once
+        # Every rank is root once
         for i in range(self.world_size):
-            for j in range(2):
+            # Run with 1 input tensor
+            x = fn(torch.Tensor([self.rank]))
+            broadcast([x], i, 0)
+            self.assertEqual(torch.Tensor([i]), x)
+
+            # Run with 2 input tensors
+            num = 2
+            for j in range(num):
                 xs = [
-                    torch.Tensor([self.rank * self.world_size + 0.0]),
-                    torch.Tensor([self.rank * self.world_size + 1.0]),
+                    fn(torch.Tensor([self.rank * num + 0.0])),
+                    fn(torch.Tensor([self.rank * num + 1.0])),
                 ]
 
                 broadcast(xs, i, j)
-                self.assertEqual(torch.Tensor([i * self.world_size + j]), xs[0])
-                self.assertEqual(torch.Tensor([i * self.world_size + j]), xs[1])
+                self.assertEqual(torch.Tensor([i * num + j]), xs[0])
+                self.assertEqual(torch.Tensor([i * num + j]), xs[1])
 
         # Test overloaded convenience function
         x = torch.Tensor([self.rank + 1.0])
         work = pg.broadcast(x, root=0)
         work.wait()
         self.assertEqual(torch.Tensor([1.0]), x)
+
+    def test_broadcast_basics(self):
+        self._test_broadcast_basics(lambda t: t.clone())
+
+    @skip_if_not_multigpu
+    def test_broadcast_basics_cuda(self):
+        self._test_broadcast_basics(lambda t: t.clone().cuda())
+
+    def _test_broadcast_stress(self, inputs):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
+        work_handles = [
+            pg.broadcast(inputs[i], root=(i % self.world_size))
+            for i in range(len(inputs))
+        ]
+        for i, work_handle in enumerate(work_handles):
+            work_handle.wait()
+            self.assertEqual(
+                torch.Tensor([
+                    (i * self.world_size) + (i % self.world_size)
+                ]),
+                inputs[i],
+                "Mismatch in iteration %d" % i,
+            )
+
+    def test_broadcast_stress(self):
+        inputs = [torch.Tensor([i * self.world_size + self.rank]) for i in range(1000)]
+        self._test_broadcast_stress(inputs)
+
+    @skip_if_not_multigpu
+    def test_broadcast_stress_cuda(self):
+        inputs = [torch.Tensor([i * self.world_size + self.rank]).cuda() for i in range(1000)]
+        self._test_broadcast_stress(inputs)
 
     def test_allreduce_checks(self):
         store = c10d.FileStore(self.file.name)
