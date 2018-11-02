@@ -29,7 +29,7 @@ class StringJoinOpTest : public testing::Test {
     EXPECT_TRUE(BlobIsTensorType(*output, CPU));
     const auto& outputTensor = output->Get<TensorCPU>();
     EXPECT_EQ(outputTensor.ndim(), 1);
-    EXPECT_EQ(outputTensor.dim(0), outputSize);
+    EXPECT_EQ(outputTensor.size(0), outputSize);
     EXPECT_EQ(outputTensor.numel(), outputSize);
     return outputTensor.data<std::string>();
   }
