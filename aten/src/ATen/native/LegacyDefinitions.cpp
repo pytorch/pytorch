@@ -848,7 +848,7 @@ Tensor __xor__(const Tensor & self, Scalar other) {
 }
 
 Tensor __xor__(const Tensor & self, const Tensor & other) {
-  return at::_th_or(self, other);
+  return at::_th_xor(self, other);
 }
 
 Tensor __lshift__(const Tensor & self, Scalar other) {
