@@ -1,6 +1,5 @@
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/passes/annotate_effects.h"
 #include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/interpreter.h"
@@ -545,30 +544,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
     const SourceRange& loc,
     Graph& graph,
     c10::optional<NamedValue> self,
-    at::ArrayRef<NamedValue> raw_args,
+    at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     std::ostream& failure_messages,
     bool convert_tensors_to_nums) {
-  // Match against a potentially mutable schema.
-  //
-  // We need to treat mutable schemas differently because the IR explicitly
-  // expresses effects by including a world token in mutable ops. Users do not
-  // know about the world token, so we need to generate a dummy one and add
-  // it to the inputs for schema matching.
-  //
-  // Example:
-  //   append(int[] list, int el)
-  // becomes
-  //   append(World w, int[] list, int el)
-  //
-  // NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
-  // necessary to enforce linearization on effectful ops.
-  std::vector<NamedValue> modifiedArgs(raw_args.begin(), raw_args.end());
-  if (schema.has_world_token()) {
-    // Add a dummy world token to be matched against
-    const auto worldToken = graph.insertDummyWorld();
-    modifiedArgs.insert(modifiedArgs.begin(), worldToken);
-  }
   auto err = [&]() -> std::ostream& {
     failure_messages << "\nfor operator " << schema << ":\n";
     return failure_messages;
@@ -586,7 +565,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (arg.name() == "self" && self) {
       v = self;
       self = c10::nullopt;
-    } else if (!arg.kwarg_only() && used_args < modifiedArgs.size()) {
+    } else if (!arg.kwarg_only() && used_args < args.size()) {
       // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
       if (arg.type()->kind() == TypeKind::ListType && // the formal must be a list
           !arg.N() && // it must not be a broadcasting list like int[3], otherwise
@@ -594,7 +573,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
           (schema_i + 1 == schema.arguments().size() ||
            schema.arguments()[schema_i + 1]
                .kwarg_only())) { // must be the last position argument
-        auto actual_type = modifiedArgs[used_args].value(graph)->type();
+        auto actual_type = args[used_args].value(graph)->type();
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(
                 actual_type,
@@ -604,19 +583,19 @@ c10::optional<MatchedSchema> tryMatchSchema(
               elem_type,
               graph,
               loc,
-              at::ArrayRef<NamedValue>(modifiedArgs).slice(used_args),
+              at::ArrayRef<NamedValue>(args).slice(used_args),
               err,
               convert_tensors_to_nums,
               type_env);
           if (!list)
             return c10::nullopt;
-          used_args = modifiedArgs.size();
+          used_args = args.size();
           positional_inputs.push_back(list);
           continue;
         }
       }
 
-      v = modifiedArgs[used_args];
+      v = args[used_args];
       used_args++;
     } else if (auto idx = findInputWithName(arg.name(), kwargs)) {
       const NamedValue& nv = kwargs[*idx];
@@ -645,7 +624,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (schema.is_vararg() && schema_i == schema.arguments().size() - 1) {
       // Freeze iteration to the last argument in the schema and keep going for
       // all of the provided arguments
-      if (used_args < modifiedArgs.size()) {
+      if (used_args < args.size()) {
         schema_i--;
       }
     }
@@ -656,9 +635,9 @@ c10::optional<MatchedSchema> tryMatchSchema(
   }
 
   // check for unused positional arguments
-  if (used_args < modifiedArgs.size()) {
+  if (used_args < args.size()) {
     err() << "expected at most " << used_args << " arguments "
-          << "but found " << modifiedArgs.size() << " positional arguments.\n"
+          << "but found " << args.size() << " positional arguments.\n"
           << loc << "\n";
     return c10::nullopt;
   }
@@ -900,8 +879,6 @@ struct to_ir {
     }
 
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
-    // annotate effects to prevent reordering
-    AnnotateEffects(graph);
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(graph);
     ConstantPooling(graph);
@@ -1336,7 +1313,7 @@ private:
     Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
 
     n->addInput(cond_value);
-    auto* true_block = n->addBlock();
+    /* true_block =*/n->addBlock();
     auto* false_block = n->addBlock();
 
     //if assert test is false throw exception

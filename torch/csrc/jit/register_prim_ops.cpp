@@ -275,37 +275,12 @@ RegisterOperators reg({
     // nothing since the stack manipulation is already encoded in inst.inputs
     // and inst.outputs
     Operator(prim::Store, noop),
-
     Operator(
         prim::Drop,
         [](const Node* node) {
           auto N = node->inputs().size();
           return [=](Stack& stack) {
             drop(stack, N);
-            return 0;
-          };
-        }),
-    Operator(
-        prim::LoadWorld,
-        [](const Node* node) {
-          return [](Stack& stack) {
-            push(stack, World{0});
-            return 0;
-          };
-        }),
-    Operator(
-        prim::StoreWorld,
-        [](const Node* node) {
-          return [](Stack& stack) {
-            drop(stack, 1);
-            return 0;
-          };
-        }),
-    Operator(
-        prim::DummyWorld,
-        [](const Node* node) {
-          return [](Stack& stack) {
-            AT_ERROR("Encountered a dummy world during graph execution.");
             return 0;
           };
         }),
@@ -631,6 +606,7 @@ Operation listAppend(const Node* node) {
     pop(stack, a, el);
 
     a->elements().push_back(el);
+    push(stack, a);
 
     return 0;
   };
@@ -803,7 +779,7 @@ Operator(                                                                      \
         "aten::slice(" decl_type "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type "[]", \
         listSlice<Shared<c_type>, c_type::ElemType>), \
     Operator( \
-        "aten::append(World w, " decl_type "[] self, " decl_type " el) -> World", \
+        "aten::append(" decl_type "[](a!) self, " decl_type " el) -> " decl_type "[](a!)", \
         listAppend<Shared<c_type>, c_type::ElemType>), \
 
 
