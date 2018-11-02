@@ -43,7 +43,8 @@ enum DeserializeMode {
 //       transferred to Tensor
 struct SharedData {
   // constructor
-  explicit SharedData(uint64_t record_id, uint64_t size) : recordId(record_id), size(size), dataPtr() {}
+  explicit SharedData(uint64_t record_id, uint64_t size)
+    : recordId(record_id), size(size), dataPtr() {}
   explicit SharedData(uint64_t record_id, uint64_t size, at::DataPtr&& data_ptr)
     : recordId(record_id), size(size), dataPtr(std::move(data_ptr)) {}
 
