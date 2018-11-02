@@ -34,6 +34,8 @@ message ExternalDataProto {
   optional int64 offset = 3 [default = 0];
   // the strides of the content
   repeated int64 strides = 4;
+  // the size of the record
+  optional uint64 size = 5;
 }
 
 // TensorProto stores serialized Tensor objects.
