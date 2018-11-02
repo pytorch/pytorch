@@ -1,12 +1,12 @@
 #pragma once
 
+#include <fbgemm/Fbgemm.h>
+#include <fbgemm/src/FbgemmI8Depthwise.h>
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/operators/quantized/server/caffe2_dnnlowp_utils.h"
 #include "caffe2/operators/quantized/server/conv_pool_dnnlowp_op_base.h"
 #include "caffe2/operators/quantized/server/dnnlowp.h"
-#include <fbgemm/Fbgemm.h>
-#include <fbgemm/src/FbgemmI8Depthwise.h>
 #include "caffe2/operators/quantized/server/op_wrapper.h"
 
 namespace caffe2 {
