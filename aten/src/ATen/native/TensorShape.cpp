@@ -46,13 +46,13 @@ static void check_cat_no_zero_dim(TensorList tensors) {
 Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat_out(result, tensors, dim);
+  return at::_th_cat_out(result, tensors, dim);
 }
 
 Tensor cat(TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat(tensors, dim);
+  return at::_th_cat(tensors, dim);
 }
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
@@ -151,23 +151,17 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
-  auto result = at::empty({0}, self.options());
-  setStorage(
-      result,
-      self.storage(),
-      storage_offset,
-      size,
-      stride);
+  auto tid = self.type_id();
+  AT_CHECK(
+      tid == CPUTensorId() || tid == CUDATensorId(),
+      "as_strided is only implemented for strided CPU and CUDA tensors.");
+  auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), tid, false);
+  setStrided(result, size, stride, storage_offset);
   return result;
 }
 
 Tensor &as_strided_(Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
-  setStorage(
-      self,
-      self.storage(),
-      storage_offset,
-      size,
-      stride);
+  setStrided(self, size, stride, storage_offset);
   return self;
 }
 

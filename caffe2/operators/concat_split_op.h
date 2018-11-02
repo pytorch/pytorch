@@ -186,10 +186,10 @@ bool SplitOp<Context>::RunOnDevice() {
         axis_dim * after,
         static_cast<const char*>(input.raw_data()) + input_offset,
         input.dim32(canonical_axis) * after,
-        output->raw_mutable_data(input.meta()),
+        output->raw_mutable_data(input.dtype()),
         axis_dim * after,
         &context_,
-        input.meta().copy());
+        input.dtype().copy());
     input_offset += axis_dim * after * input.itemsize();
   }
   return true;
@@ -232,10 +232,10 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
         axis_dim * after,
         static_cast<const char*>(input.raw_data()) + input_offset,
         input.dim32(canonical_axis) * after,
-        output->raw_mutable_data(input.meta()),
+        output->raw_mutable_data(input.dtype()),
         axis_dim * after,
         &context_,
-        input.meta().copy());
+        input.dtype().copy());
     input_offset += axis_dim * after * input.itemsize();
   }
   return true;
@@ -253,11 +253,11 @@ bool ConcatOp<Context>::RunOnDevice() {
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
   for (int i = 1; i < InputSize(); ++i) {
     CAFFE_ENFORCE(
-        Input(i).meta() == input_zero.meta(),
+        Input(i).dtype() == input_zero.dtype(),
         "All inputs must have the same type, expected: ",
-        input_zero.meta().name(),
+        input_zero.dtype().name(),
         " but got: ",
-        Input(i).meta().name(),
+        Input(i).dtype().name(),
         " for input: ",
         i);
   }
@@ -319,11 +319,11 @@ bool ConcatOp<Context>::RunOnDevice() {
         axis_dim * after,
         input.raw_data(),
         axis_dim * after,
-        static_cast<char*>(output->raw_mutable_data(input_zero.meta())) +
+        static_cast<char*>(output->raw_mutable_data(input_zero.dtype())) +
             output_offset,
         output_channels * after,
         &context_,
-        input_zero.meta().copy());
+        input_zero.dtype().copy());
     output_offset += axis_dim * after * input.itemsize();
   }
   return true;

@@ -8,6 +8,8 @@
 #include <string>
 #include <type_traits>
 
+// Forward declarations confuse Doxygen
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 // Forward declarations.
 namespace torch {
 namespace detail {
@@ -18,6 +20,7 @@ namespace nn {
 class Module;
 } // namespace nn
 } // namespace torch
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 namespace torch {
 namespace detail {

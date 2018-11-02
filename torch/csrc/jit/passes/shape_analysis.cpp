@@ -38,6 +38,12 @@ int64_t wrapDim(int64_t dim, at::IntList sizes) {
   return dim;
 }
 
+// TODO: Would be better to make JIT not assume that CUDA devices
+// are the only thing that exist.
+static at::Device jitDeviceIndexToDevice(int device) {
+  return device == -1 ? at::kCPU : at::Device(at::kCUDA, device);
+}
+
 IValue representativeValue(Value* v) {
   TypePtr type_ = v->type();
   // if the value is actually constant, just use it!
@@ -46,7 +52,7 @@ IValue representativeValue(Value* v) {
   }
   if (CompleteTensorTypePtr type = type_->cast<CompleteTensorType>()) {
     auto backend = type->device() == -1 ? at::Backend::CPU : at::Backend::CUDA;
-    at::DeviceGuard device_guard(type->device());
+    at::DeviceGuard device_guard(jitDeviceIndexToDevice(type->device()));
     auto& attype = at::getNonVariableType(backend, type->scalarType());
     auto t = at::empty_strided(type->sizes(), type->strides(), attype.options()).zero_();
     return autograd::make_variable(t, /*requires_grad=*/false);

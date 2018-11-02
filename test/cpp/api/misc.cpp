@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <torch/csrc/utils/tempfile.h>
 #include <torch/nn/init.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/tensor.h>
@@ -50,4 +51,9 @@ TEST(NNInitTest, CanInitializeTensorThatRequiresGrad) {
       "a leaf Variable that requires grad "
       "has been used in an in-place operation");
   ASSERT_EQ(torch::nn::init::ones_(tensor).sum().item<int32_t>(), 12);
+}
+
+TEST(TempFileTest, MatchesExpectedPattern) {
+  torch::utils::TempFile pattern = torch::utils::make_tempfile("test-pattern-");
+  ASSERT_NE(pattern.name.find("test-pattern-"), std::string::npos);
 }

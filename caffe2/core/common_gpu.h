@@ -280,7 +280,7 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
 // CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
 // kernels. This is not supported by Apple platforms so we special case it.
 // See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__HIPCC__)
 #define CUDA_KERNEL_ASSERT(...)
 #else // __APPLE__
 #define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)

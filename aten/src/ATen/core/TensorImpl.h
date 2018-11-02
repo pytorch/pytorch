@@ -613,6 +613,15 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
+   * This is just like data(), except it works with Variables.
+   * This function will go away once Variable and Tensor are merged.
+   * See Note [We regret making Variable hold a Tensor]
+   */
+  virtual void* slow_data() const {
+    return data();
+  }
+
+  /**
    * Like data<T>(), but performs no checks.  You are responsible for ensuring
    * that all invariants required by data() are upheld here.
    *
@@ -724,17 +733,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual void set_storage_offset(int64_t storage_offset) {
     storage_offset_ = storage_offset;
-  }
-
-  /* Sets the storage of this tensor to be new_storage */
-  void set_storage(const Storage& new_storage) {
-    auto* new_storage_ = new_storage.unsafeGetStorageImpl();
-    auto* old_storage_ = storage_.unsafeGetStorageImpl();
-    AT_ASSERTM(old_storage_, "Tensor: invalid null storage");
-    if (new_storage_ == old_storage_) {
-      return;
-    }
-    storage_ = new_storage;
   }
 
   /**
@@ -1206,12 +1204,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       }
       const at::Allocator* allocator = storage_.allocator();
       // TODO: Get rid of StaticContext
-      AT_ASSERTM(
-          allocator == nullptr,
-          "Allocator in storage_ is not used within Caffe2 functions. \
-           we are using global function to get the allocator based on device \
-           type.");
-      allocator = caffe2::GetAllocator(storage_.device_type());
+      if (allocator == nullptr) {
+        allocator = caffe2::GetAllocator(storage_.device_type());
+      }
       if (meta.placementNew()) {
         // For types that need placement new, we will call it, as well as
         // making sure that when the data is freed, it calls the right
