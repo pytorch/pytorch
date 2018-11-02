@@ -45,7 +45,7 @@ public:
     if (device_opt.has_value()) {
       set_device(device_opt.value());
     } else {
-      initialize()
+      initialize();
     }
   }
 

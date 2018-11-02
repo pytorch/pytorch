@@ -101,6 +101,7 @@ public:
       // the devices are unrelated, so just terminate the
       // current guard and then move other in
       if (original_device_ != current_device_) {
+        AT_ASSERT(impl_); // see member invariant
         impl_->setDevice(original_device_);
       }
       impl_ = other.impl_;
@@ -119,6 +120,7 @@ public:
     // This optimization is sound if we are guaranteed not to have
     // any unmanaged setDevice calls inside the body of the guard.
     // if (original_device_ == current_device_) return;
+    if (!impl_) return;
     impl_->uncheckedSetDevice(original_device_);
   }
 
