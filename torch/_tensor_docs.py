@@ -890,7 +890,7 @@ See :func:`torch.flip`
 
 add_docstr_all('roll',
                r"""
-roll(shift, dims) -> Tensor
+roll(shifts, dims) -> Tensor
 
 See :func:`torch.roll`
 """)
