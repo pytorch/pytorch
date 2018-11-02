@@ -2025,13 +2025,13 @@ class TestAutograd(TestCase):
                               True, f_args_variable, f_args_tensor)
 
     @skipIfNoLapack
-    def test_potrf(self):
-        root = Variable(torch.tril(torch.rand(S, S)), requires_grad=True)
+    def test_cholesky(self):
+        root = torch.tril(torch.rand(S, S)).requires_grad_()
 
         def run_test(upper):
             def func(root):
                 x = torch.mm(root, root.t())
-                return torch.potrf(x, upper)
+                return torch.cholesky(x, upper)
 
             gradcheck(func, [root])
             gradgradcheck(func, [root])

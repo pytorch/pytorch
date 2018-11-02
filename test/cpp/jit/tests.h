@@ -35,7 +35,7 @@
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/dynamic_dag.h"
-#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"

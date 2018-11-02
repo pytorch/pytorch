@@ -82,3 +82,6 @@
 [submodule "third_party/neon2sse"]
 	path = third_party/neon2sse
 	url = https://github.com/intel/ARM_NEON_2_x86_SSE.git
+[submodule "third_party/fbgemm"]
+	path = third_party/fbgemm
+	url = https://github.com/pytorch/fbgemm
