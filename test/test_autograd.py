@@ -589,11 +589,13 @@ class TestAutograd(TestCase):
         dense = torch.randn(size, requires_grad=True)
 
         z = sparse.mm(dense)
-        with self.assertRaisesRegex(RuntimeError, "calculating the gradient of a sparse Tensor argument to mm is not supported."):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
             z.sum().backward()
 
         z = dense.addmm(sparse, dense)
-        with self.assertRaisesRegex(RuntimeError, "calculating the gradient of a sparse Tensor argument to mm is not supported."):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
             z.sum().backward()
 
     @skipIfRocm
