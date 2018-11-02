@@ -1,7 +1,7 @@
 import warnings
 from .._jit_internal import weak_script
 
-# NB: Keep this class in sync with enums in aten/src/ATen/core/Reduction.h
+# NB: Keep this file in sync with enums in aten/src/ATen/core/Reduction.h
 
 
 @weak_script
