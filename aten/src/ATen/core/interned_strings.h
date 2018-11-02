@@ -68,9 +68,6 @@ namespace c10 {
   _(prim, NoneGenerator)           \
   _(aten, floordiv)                \
   _(prim, MemoryFence)             \
-  _(prim, LoadWorld)               \
-  _(prim, StoreWorld)              \
-  _(prim, DummyWorld)              \
   _(prim, fork)                    \
   _(prim, RaiseException)          \
   _(aten, append)                  \

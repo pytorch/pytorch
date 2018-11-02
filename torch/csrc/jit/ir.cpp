@@ -263,12 +263,6 @@ void Node::lint() const {
   // Node subclass invariants
   IR_IF(this,Constant)
     JIT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIF(LoadWorld)
-    JIT_ASSERT(inputs_.size() == 0);
-    JIT_ASSERT(outputs_.size() == 1);
-  IR_ELSEIF(StoreWorld)
-    JIT_ASSERT(inputs_.size() == 1);
-    JIT_ASSERT(outputs_.size() == 0);
   IR_ELSEIF(Return)
     // Return uses is zero
     JIT_ASSERT(outputs().size() == 0);
@@ -406,7 +400,6 @@ void Graph::lint() const {
       for (auto n : b->nodes()) {
         JIT_ASSERT(n->kind_ != prim::Param);
         JIT_ASSERT(n->kind_ != prim::Return);
-        JIT_ASSERT(n->kind_ != prim::DummyWorld);
         check_node(n);
       }
 
@@ -1325,12 +1318,6 @@ Value* Graph::insertConstant(
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   return jit::insertConstant(*this, std::move(val), loc, scope);
-}
-
-Value* Graph::insertDummyWorld() {
-  auto node = create(prim::DummyWorld, 1);
-  node->output()->setType(WorldType::get());
-  return insertNode(node)->output();
 }
 
 std::string Graph::toString() const {

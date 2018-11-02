@@ -573,8 +573,6 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("StringType");
   } else if (kind == TypeKind::VarType) {
     type_proto->set_denotation("TypeVar:" + type->expect<VarType>()->name());
-  } else if (kind == TypeKind::WorldType) {
-    type_proto->set_denotation("WorldType");
   } else {
     throw std::runtime_error("unexpected type kind");
   }
