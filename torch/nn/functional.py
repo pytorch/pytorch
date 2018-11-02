@@ -15,17 +15,8 @@ from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
+from . import _VF
 from .._jit_internal import weak_script
-
-
-class _VFModule(types.ModuleType):
-    def __init__(self):
-        pass
-
-    def __getattr__(self, attr):
-        return getattr(torch._C._VariableFunctions, attr)
-
-_VF = _VFModule()
 
 
 class _Reduction:
