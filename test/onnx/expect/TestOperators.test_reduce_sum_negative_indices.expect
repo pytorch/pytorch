@@ -8,7 +8,7 @@ graph {
     op_type: "ReduceSum"
     attribute {
       name: "axes"
-      ints: 1
+      ints: -1
       type: INTS
     }
     attribute {

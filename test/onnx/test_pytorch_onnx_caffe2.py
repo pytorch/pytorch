@@ -959,6 +959,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.zeros(3, 4)
         self.run_model_test(ZerosFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_implicit_expand(self):
         class ImplicitExpandExportMod(torch.nn.Module):
             def forward(self, x):
