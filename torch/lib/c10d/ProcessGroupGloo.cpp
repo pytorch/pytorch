@@ -114,7 +114,7 @@ const ::gloo::ReductionFunction<T>* reductionFunction(const ReduceOp& r) {
 typedef void (*ReduceFunc)(void*, const void*, const void*, size_t);
 
 template <typename T>
-const ReduceFunc toFunction(const ReduceOp& r) {
+ReduceFunc toFunction(const ReduceOp& r) {
   switch (r) {
     case ReduceOp::SUM:
       return ReduceFunc(&::gloo::sum<T>);
@@ -728,6 +728,8 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
+#ifdef USE_CUDA
+
 class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
  public:
   AsyncBroadcastCUDAWork(
@@ -799,6 +801,8 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
   std::vector<at::cuda::CUDAEvent> events;
 };
 
+#endif
+
 } // namespace
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
@@ -820,9 +824,18 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
   const auto& device = inputs[0].device();
   const auto& type = inputs[0].type();
   const auto& sizes = inputs[0].sizes();
-  if (layout != at::kStrided ||
-      (device.type() != at::kCPU && device.type() != at::kCUDA)) {
-    invalidArgument("only supports dense CPU and CUDA tensors");
+  if (layout != at::kStrided) {
+    invalidArgument("only supports dense tensors");
+  }
+
+  switch (device.type()) {
+    case at::kCPU:
+#ifdef USE_CUDA
+    case at::kCUDA:
+#endif
+      break;
+    default:
+      invalidArgument("unsupported device type");
   }
 
   // Expect all input tensors to have the same type and sizes
@@ -833,12 +846,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
 
   std::shared_ptr<AsyncBroadcastWork> work;
   auto& context = contexts_[0];
-  if (type.backend() == at::Backend::CPU) {
+  if (device.type() == at::kCPU) {
     work = std::make_shared<AsyncBroadcastWork>(
         context, inputs, opts.rootRank, opts.rootTensor, nextTag());
-  } else if (type.backend() == at::Backend::CUDA) {
+#ifdef USE_CUDA
+  } else if (device.type() == at::kCUDA) {
     work = std::make_shared<AsyncBroadcastCUDAWork>(
         context, inputs, opts.rootRank, opts.rootTensor, nextTag());
+#endif
   } else {
     throw std::runtime_error("Invalid backend");
   }
@@ -889,6 +904,8 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     return fn;
   }
 };
+
+#ifdef USE_CUDA
 
 class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
  public:
@@ -958,6 +975,8 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
   std::vector<at::cuda::CUDAEvent> events;
 };
 
+#endif
+
 } // namespace
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
@@ -975,9 +994,18 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   const auto& device = inputs[0].device();
   const auto& type = inputs[0].type();
   const auto& sizes = inputs[0].sizes();
-  if (layout != at::kStrided ||
-      (device.type() != at::kCPU && device.type() != at::kCUDA)) {
-    invalidArgument("only supports dense CPU tensors");
+  if (layout != at::kStrided) {
+    invalidArgument("only supports dense tensors");
+  }
+
+  switch (device.type()) {
+    case at::kCPU:
+#ifdef USE_CUDA
+    case at::kCUDA:
+#endif
+      break;
+    default:
+      invalidArgument("unsupported device type");
   }
 
   // Expect all input tensors to have the same type and sizes
@@ -988,12 +1016,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
 
   std::shared_ptr<AsyncAllreduceWork> work;
   auto& context = contexts_[0];
-  if (type.backend() == at::Backend::CPU) {
+  if (device.type() == at::kCPU) {
     work = std::make_shared<AsyncAllreduceWork>(
         context, inputs, opts.reduceOp, nextTag());
-  } else if (type.backend() == at::Backend::CUDA) {
+#ifdef USE_CUDA
+  } else if (device.type() == at::kCUDA) {
     work = std::make_shared<AsyncAllreduceCUDAWork>(
         context, inputs, opts.reduceOp, nextTag());
+#endif
   } else {
     throw std::runtime_error("Invalid backend");
   }
