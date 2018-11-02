@@ -4300,6 +4300,12 @@ a")
         self.checkScript(one_return, [a], optimize=True)
         self.checkScript(multiple_returns, [a], optimize=True)
 
+        with self.assertRaisesRegex(RuntimeError, "Expected 1 return value"):
+            @torch.jit.script
+            def no_return_bad_annotation(a):
+                # type: (Tensor) -> Tensor
+                a + 1
+
     def test_error(self):
         @torch.jit.script
         def foo(a):
