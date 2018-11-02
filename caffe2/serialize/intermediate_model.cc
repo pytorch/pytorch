@@ -68,6 +68,7 @@ void IntermediateTensor::update(caffe2::TensorProto* tensor_proto,
             }
             data_ = it->second;
             AT_ASSERT(data_->recordId.value() == record_id);
+            AT_ASSERT(data_->size == size);
           } else {
             AT_ASSERTM(mode == DeserializeMode::HEADER_ONLY, "unkonw deserialize mode.");
             if (it == id_data->end()) {
