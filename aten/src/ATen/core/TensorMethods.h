@@ -1714,7 +1714,7 @@ inline Layout Tensor::layout() const noexcept {
 }
 
 inline Device Tensor::device() const {
-  return Device(impl_->storage().device_type(), is_cuda() ? get_device() : -1);
+  return impl_->device();
 }
 
 inline int64_t Tensor::get_device() const {
