@@ -22,6 +22,11 @@
 #define THRUST_SUPPORTS_PER_THREAD
 #endif // THRUST_VERSION >= 100800
 
+#ifdef __HIPCC__
+// rocblas doesn't fully support fp16 yet
+#define ROCBLAS_FP16 0
+#endif
+
 namespace caffe2 {
 namespace math {
 
@@ -50,6 +55,7 @@ DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Mul, *)
 DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Div, /)
 #undef DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR
 
+#ifndef __HIPCC__
 template <typename T>
 __global__ void SinCosCUDAKernel(const int N, const T* X, T* S, T* C) {
   CUDA_1D_KERNEL_LOOP(i, N) {
@@ -60,6 +66,7 @@ __global__ void SinCosCUDAKernel(const int N, const T* X, T* S, T* C) {
 #endif
   }
 }
+#endif //__HIPCC__
 
 template <typename TIn, typename TOut, class BinaryOperator>
 __global__ void SimpleBinaryOpCUDAKernel(
@@ -76,13 +83,21 @@ __global__ void SimpleBinaryOpCUDAKernel(
 template <typename TIn, typename TOut, class BinaryOperator, bool broadcast_1st>
 __global__ void RowwiseBinaryOpCUDAKenel(
     const int size,
+#ifndef __HIPCC__
     const FixedDivisor<int> cols,
+#else
+    const int cols,
+#endif
     const BinaryOperator op,
     const TIn* A,
     const TIn* B,
     TOut* C) {
   CUDA_1D_KERNEL_LOOP(C_index, size) {
+#ifndef __HIPCC__
     const int j = cols.Mod(C_index);
+#else
+    const int j = C_index % cols;
+#endif
     const int A_index = broadcast_1st ? j : C_index;
     const int B_index = broadcast_1st ? C_index : j;
     C[C_index] = op(A[A_index], B[B_index]);
@@ -92,13 +107,21 @@ __global__ void RowwiseBinaryOpCUDAKenel(
 template <typename TIn, typename TOut, class BinaryOperator, bool broadcast_1st>
 __global__ void ColwiseBinaryOpCUDAKenel(
     const int size,
+#ifndef __HIPCC__
     const FixedDivisor<int> cols,
+#else
+    const int cols,
+#endif
     const BinaryOperator op,
     const TIn* A,
     const TIn* B,
     TOut* C) {
   CUDA_1D_KERNEL_LOOP(C_index, size) {
+#ifndef __HIPCC__
     const int i = cols.Div(C_index);
+#else
+    const int i = C_index / cols;
+#endif
     const int A_index = broadcast_1st ? i : C_index;
     const int B_index = broadcast_1st ? C_index : i;
     C[C_index] = op(A[A_index], B[B_index]);
@@ -145,7 +168,11 @@ CAFFE2_CUDA_EXPORT void BinaryOpWith2DBroadcasting(
     return;
   }
   const int size = rows * cols;
+#ifndef __HIPCC__
   const FixedDivisor<int> cols_div(cols);
+#else
+  const const int cols_div = cols;
+#endif
   if (rowwise_broadcast) {
     if (broadcast_1st) {
       RowwiseBinaryOpCUDAKenel<TIn, TOut, BinaryOperator, true>
@@ -361,6 +388,7 @@ DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Inv, utils::Inv<double>)
 
 #undef DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION
 
+#ifndef __HIPCC__
 #define CAFFE2_SPECIALIZED_CUDA_SINCOS(T)                            \
   template <>                                                        \
   CAFFE2_CUDA_EXPORT void SinCos<T, CUDAContext>(                    \
@@ -374,6 +402,32 @@ DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Inv, utils::Inv<double>)
 CAFFE2_SPECIALIZED_CUDA_SINCOS(float)
 CAFFE2_SPECIALIZED_CUDA_SINCOS(double)
 #undef CAFFE2_SPECIALIZED_CUDA_SINCOS
+#else
+#define DELEGATE_SINCOS_HIP_FUNCTION(T, fn)                         \
+  __global__ void _Kernel_##T##_##SinCos(                           \
+      const int N, const T* x, T* ys, T* yc) {                      \
+    HIP_1D_KERNEL_LOOP(i, N) {                                      \
+      fn(__ldg(x + i), ys + i, yc + i);                             \
+    }                                                               \
+  }                                                                 \
+  template <>                                                       \
+  void SinCos<T, HIPContext>(                                       \
+      const int N, const T* x, T* ys, T* yc, HIPContext* context) { \
+    hipLaunchKernelGGL(                                             \
+        (_Kernel_##T##_##SinCos),                                   \
+        CAFFE_GET_BLOCKS(N),                                        \
+        CAFFE_HIP_NUM_THREADS,                                      \
+        0,                                                          \
+        context->hip_stream(),                                      \
+        N,                                                          \
+        x,                                                          \
+        ys,                                                         \
+        yc);                                                        \
+  }
+
+DELEGATE_SINCOS_HIP_FUNCTION(float, sincosf)
+DELEGATE_SINCOS_HIP_FUNCTION(double, sincos)
+#endif
 
 #define DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op) \
   template <>                                                     \
@@ -443,6 +497,7 @@ DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
 
 #undef DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION
 
+#ifndef __HIPCC__
 #define DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op)   \
   template <>                                                             \
   CAFFE2_CUDA_EXPORT void Rowwise##Func<TIn, CUDAContext, true>(          \
@@ -520,6 +575,81 @@ DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
            0,                                                             \
            context->cuda_stream()>>>(size, cols_div, Op<TIn>(), A, B, C); \
   }
+#else
+#define DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op)   \
+  template <>                                                             \
+  CAFFE2_CUDA_EXPORT void Rowwise##Func<TIn, CUDAContext, true>(          \
+      const int rows,                                                     \
+      const int cols,                                                     \
+      const TIn* A,                                                       \
+      const TIn* B,                                                       \
+      TOut* C,                                                            \
+      CUDAContext* context) {                                             \
+    if (rows == 0 || cols == 0) {                                         \
+      return;                                                             \
+    }                                                                     \
+    const int size = rows * cols;                                         \
+    RowwiseBinaryOpCUDAKenel<TIn, TOut, Op<TIn>, true>                    \
+        <<<CAFFE_GET_BLOCKS(size),                                        \
+           CAFFE_CUDA_NUM_THREADS,                                        \
+           0,                                                             \
+           context->cuda_stream()>>>(size, cols, Op<TIn>(), A, B, C); \
+  }                                                                       \
+  template <>                                                             \
+  CAFFE2_CUDA_EXPORT void Rowwise##Func<TIn, CUDAContext, false>(         \
+      const int rows,                                                     \
+      const int cols,                                                     \
+      const TIn* A,                                                       \
+      const TIn* B,                                                       \
+      TOut* C,                                                            \
+      CUDAContext* context) {                                             \
+    if (rows == 0 || cols == 0) {                                         \
+      return;                                                             \
+    }                                                                     \
+    const int size = rows * cols;                                         \
+    RowwiseBinaryOpCUDAKenel<TIn, TOut, Op<TIn>, false>                   \
+        <<<CAFFE_GET_BLOCKS(size),                                        \
+           CAFFE_CUDA_NUM_THREADS,                                        \
+           0,                                                             \
+           context->cuda_stream()>>>(size, cols, Op<TIn>(), A, B, C); \
+  }                                                                       \
+  template <>                                                             \
+  CAFFE2_CUDA_EXPORT void Colwise##Func<TIn, CUDAContext, true>(          \
+      const int rows,                                                     \
+      const int cols,                                                     \
+      const TIn* A,                                                       \
+      const TIn* B,                                                       \
+      TOut* C,                                                            \
+      CUDAContext* context) {                                             \
+    if (rows == 0 || cols == 0) {                                         \
+      return;                                                             \
+    }                                                                     \
+    const int size = rows * cols;                                         \
+    ColwiseBinaryOpCUDAKenel<TIn, TOut, Op<TIn>, true>                    \
+        <<<CAFFE_GET_BLOCKS(size),                                        \
+           CAFFE_CUDA_NUM_THREADS,                                        \
+           0,                                                             \
+           context->cuda_stream()>>>(size, cols, Op<TIn>(), A, B, C); \
+  }                                                                       \
+  template <>                                                             \
+  CAFFE2_CUDA_EXPORT void Colwise##Func<TIn, CUDAContext, false>(         \
+      const int rows,                                                     \
+      const int cols,                                                     \
+      const TIn* A,                                                       \
+      const TIn* B,                                                       \
+      TOut* C,                                                            \
+      CUDAContext* context) {                                             \
+    if (rows == 0 || cols == 0) {                                         \
+      return;                                                             \
+    }                                                                     \
+    const int size = rows * cols;                                         \
+    ColwiseBinaryOpCUDAKenel<TIn, TOut, Op<TIn>, false>                   \
+        <<<CAFFE_GET_BLOCKS(size),                                        \
+           CAFFE_CUDA_NUM_THREADS,                                        \
+           0,                                                             \
+           context->cuda_stream()>>>(size, cols, Op<TIn>(), A, B, C); \
+  }
+#endif
 
 #define DEFINE_2D_BROADCAST_CUDA_COMPARE_FUNCTION(Func, Op)                \
   DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(std::int32_t, bool, Func, Op) \
@@ -724,6 +854,10 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
     at::Half* C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
+#ifdef __HIPCC__
+  CAFFE_THROW("Unsupported math type");
+#endif
+#ifndef ROCBLAS_FP16
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
   const int lda = (trans_A == CblasNoTrans) ? K : M;
@@ -779,6 +913,7 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
     // fail
     CAFFE_THROW("Unsupported math type");
   }
+#endif // ROCBLAS_FP16
 }
 
 template <>
@@ -818,7 +953,7 @@ CAFFE2_CUDA_EXPORT void GemmBatched<float, CUDAContext>(
     float** C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if __CUDACC_VER_MAJOR__ < 8
+#if __CUDACC_VER_MAJOR__ < 8  || defined(__HIPCC__)
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     Gemm<float, CUDAContext>(
@@ -887,7 +1022,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<float, CUDAContext>(
     const int C_stride,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if __CUDACC_VER_MAJOR__ < 8
+#if __CUDACC_VER_MAJOR__ < 8 && !defined(__HIPCC__)
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     Gemm<float, CUDAContext>(
@@ -945,6 +1080,10 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     at::Half** C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
+#ifdef __HIPCC__
+  CAFFE_THROW("Unsupported math type");
+#endif
+#ifndef ROCBLAS_FP16
 #if __CUDACC_VER_MAJOR__ < 9
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
@@ -1057,6 +1196,7 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     CAFFE_THROW("Unsupported math type");
   }
 #endif
+#endif // ROCBLAS_FP16
 }
 
 template <>
@@ -1077,6 +1217,10 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
     const int C_stride,
     CUDAContext* context,
     TensorProto::DataType math_type) {
+#ifdef __HIPCC__
+  CAFFE_THROW("Unsupported math type");
+#endif
+#ifndef ROCBLAS_FP16
 #if __CUDACC_VER_MAJOR__ < 8
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
@@ -1163,8 +1307,10 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
     CAFFE_THROW("Unsupported math type");
   }
 #endif
+#endif
 }
 
+#ifndef __HIPCC__
 #if CUDA_VERSION >= 9000
 
 // No change, but required. Defer to default CUDA engine
@@ -1322,6 +1468,7 @@ GemmStridedBatched<at::Half, CUDAContext, TensorCoreEngine>(
 }
 
 #endif // CUDA_VERSION >= 9000
+#endif // __HIPCC__
 
 template <>
 CAFFE2_CUDA_EXPORT void GemmEx<float, CUDAContext>(
@@ -1448,6 +1595,10 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
     at::Half* y,
     CUDAContext* context,
     TensorProto::DataType math_type) {
+#ifdef __HIPCC__
+  CAFFE_THROW("Unsupported math type");
+#endif
+#ifndef ROCBLAS_FP16
   const cublasOperation_t cu_trans_A =
       (trans_A == CblasNoTrans) ? CUBLAS_OP_T : CUBLAS_OP_N;
 
@@ -1502,6 +1653,7 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
     // fail
     CAFFE_THROW("Unsupported math type");
   }
+#endif // ROCBLAS_FP16
 }
 
 namespace {
@@ -1544,6 +1696,7 @@ CAFFE2_SPECIALIZED_CUDA_SET(uint8_t);
 CAFFE2_SPECIALIZED_CUDA_SET(uint16_t);
 #undef CAFFE2_SPECIALIZED_CUDA_SET
 
+#ifndef __HIPCC__
 template <>
 CAFFE2_CUDA_EXPORT void Set<at::Half, CUDAContext>(
     const size_t N,
@@ -1558,6 +1711,7 @@ CAFFE2_CUDA_EXPORT void Set<at::Half, CUDAContext>(
            context->cuda_stream()>>>(N, alpha, Y);
   }
 }
+#endif
 
 namespace {
 template <typename T>
@@ -1692,6 +1846,8 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
     const at::Half* b,
     at::Half* y,
     CUDAContext* context) {
+  CAFFE_THROW("Unsupported math type");
+#ifndef ROCBLAS_FP16
   // execute with 32-bit math
   CUBLAS_ENFORCE(cublasSetPointerMode(
       context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
@@ -1707,6 +1863,7 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
       y,
       CUDA_R_16F,
       CUDA_R_32F));
+#endif // ROCBLAS_FP16
 }
 
 // A previous version of caffe2 used Thrust but it turns out that thrust
@@ -1954,6 +2111,7 @@ CAFFE2_CUDA_EXPORT void Select<at::Half, CUDAContext>(
 
 namespace {
 
+#ifndef __HIPCC__
 template <typename TAlpha, typename TData>
 __global__ void
 ScaleCUDAKernel(const int n, const TAlpha alpha, const TData* x, TData* y) {
@@ -1977,6 +2135,73 @@ ScaleCUDAKernel(const int n, const TAlpha* alpha, const TData* x, TData* y) {
 #endif
   }
 }
+#else
+template <typename TAlpha, typename TData>
+__global__ void
+ScaleKernel(const int n, const TAlpha alpha, const TData* x, TData* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = x[i] * static_cast<TData>(alpha);
+  }
+}
+
+template <typename TAlpha, typename TData>
+__global__ void
+ScaleKernel(const int n, const TAlpha* alpha, const TData* x, TData* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = x[i] * static_cast<TData>(*alpha);
+  }
+}
+
+template <>
+__global__ void ScaleKernel<at::Half, at::Half>(
+    const int n,
+    const at::Half alpha,
+    const at::Half* x,
+    at::Half* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * convert::To<at::Half, float>(alpha));
+  }
+}
+
+template <>
+__global__ void ScaleKernel<at::Half, at::Half>(
+    const int n,
+    const at::Half* alpha,
+    const at::Half* x,
+    at::Half* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) *
+        convert::To<at::Half, float>(*alpha));
+  }
+}
+
+// fp16 specialization
+template <>
+__global__ void ScaleKernel<float, at::Half>(
+    const int n,
+    const float alpha,
+    const at::Half* x,
+    at::Half* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] =
+        convert::To<float, at::Half>(convert::To<at::Half, float>(x[i]) * alpha);
+  }
+}
+
+template <>
+__global__ void ScaleKernel<float, at::Half>(
+    const int n,
+    const float* alpha,
+    const at::Half* x,
+    at::Half* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * (*alpha));
+  }
+}
+#endif //__HIPCC__
 
 template <typename T>
 __global__ void PowKernel(const int n, const T* x, const T exponent, T* y) {
@@ -2001,6 +2226,7 @@ CAFFE2_CUDA_EXPORT void Powx<float, CUDAContext>(
       context->cuda_stream()>>>(N, a, b, y);
 }
 
+#ifndef __HIPCC__
 #define DELEGATE_CUBLAS_SCALE_FUNCTION(TAlpha, TData, CuBLASFunc)            \
   template <>                                                                \
   CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>(                 \
@@ -2225,6 +2451,52 @@ CAFFE2_CUDA_EXPORT void Scale<float, at::Half, CUDAContext>(
       1,
       CUDA_R_32F));
 }
+#else
+#define CAFFE2_SPECIALIZED_HIP_SCALE(TAlpha, TData) \
+  template <>                                       \
+  void Scale<TAlpha, TData, HIPContext>(            \
+      const int n,                                  \
+      const TAlpha alpha,                           \
+      const TData* x,                               \
+      TData* y,                                     \
+      HIPContext* context) {                        \
+    hipLaunchKernelGGL(                             \
+        (ScaleKernel<TAlpha, TData>),               \
+        dim3(CAFFE_GET_BLOCKS(n)),                  \
+        dim3(CAFFE_HIP_NUM_THREADS),                \
+        0,                                          \
+        context->hip_stream(),                      \
+        n,                                          \
+        alpha,                                      \
+        x,                                          \
+        y);                                         \
+  }                                                 \
+  template <>                                       \
+  void Scale<TAlpha, TData, HIPContext>(            \
+      const int n,                                  \
+      const TAlpha* alpha,                          \
+      const TData* x,                               \
+      TData* y,                                     \
+      HIPContext* context) {                        \
+    hipLaunchKernelGGL(                             \
+        (ScaleKernel<TAlpha, TData>),               \
+        dim3(CAFFE_GET_BLOCKS(n)),                  \
+        dim3(CAFFE_HIP_NUM_THREADS),                \
+        0,                                          \
+        context->hip_stream(),                      \
+        n,                                          \
+        alpha,                                      \
+        x,                                          \
+        y);                                         \
+  }
+CAFFE2_SPECIALIZED_HIP_SCALE(float, float)
+CAFFE2_SPECIALIZED_HIP_SCALE(at::Half, at::Half)
+CAFFE2_SPECIALIZED_HIP_SCALE(float, at::Half)
+CAFFE2_SPECIALIZED_HIP_SCALE(double, double)
+CAFFE2_SPECIALIZED_HIP_SCALE(std::int32_t, std::int32_t)
+CAFFE2_SPECIALIZED_HIP_SCALE(std::int64_t, std::int64_t)
+#undef CAFFE2_SPECIALIZED_HIP_SCALE
+#endif // __HIPCC__
 
 template <>
 CAFFE2_CUDA_EXPORT void Axpy<float, CUDAContext>(
@@ -2259,6 +2531,8 @@ CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
     const at::Half* X,
     at::Half* Y,
     CUDAContext* context) {
+  CAFFE_THROW("Unsupported math type");
+#ifndef ROCBLAS_FP16
   CUBLAS_ENFORCE(
       cublasSetPointerMode(context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
   CUBLAS_ENFORCE(cublasAxpyEx(
@@ -2273,6 +2547,7 @@ CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
       CUDA_R_16F,
       1,
       CUDA_R_32F));
+#endif
 }
 
 template <>
@@ -2294,6 +2569,8 @@ CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
     const at::Half* X,
     at::Half* Y,
     CUDAContext* context) {
+  CAFFE_THROW("Unsupported math type");
+#ifndef ROCBLAS_FP16
   CUBLAS_ENFORCE(cublasSetPointerMode(
       context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
   CUBLAS_ENFORCE(cublasAxpyEx(
@@ -2308,6 +2585,7 @@ CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
       CUDA_R_16F,
       1,
       CUDA_R_32F));
+#endif
 }
 
 namespace {
@@ -2451,7 +2729,7 @@ __global__ void Im2ColNCHWCUDAKernel(
       for (int j = 0; j < kernel_w; ++j) {
         const int h = h_in + dh;
         const int w = w_in + dw;
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
         *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
                 utils::IsAGeZeroAndALtB(w, input_w)
             ? __ldg(img_data_ptr + dh * input_w + dw)
@@ -2502,7 +2780,7 @@ __global__ void Im2ColNHWCCUDAKernel(
       for (int j = 0; j < kernel_w; ++j) {
         const int h = h_in + dh;
         const int w = w_in + dw;
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
         *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
                 utils::IsAGeZeroAndALtB(w, input_w)
             ? __ldg(img_data + (h * input_w + w) * channels + channel_in)
@@ -2564,7 +2842,7 @@ __global__ void Col2ImNCHWCUDAKernel(
               (((c * patch_h + h_k) * patch_w + w_k) * output_h + h_col) *
                   output_w +
               w_col;
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
           val += __ldg(col_data + col_data_index);
 #else
           val += col_data[col_data_index];
@@ -2616,7 +2894,7 @@ __global__ void Col2ImNHWCCUDAKernel(
           h_k /= dilation_h;
           w_k /= dilation_w;
           const int c_col = (h_k * patch_w + w_k) * channels + c;
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
           val += __ldg(
               col_data + (h_col * output_w + w_col) * channels_col + c_col);
 #else
@@ -2668,7 +2946,7 @@ __global__ void Im2ColNdNCHWCUDAKernel(
         is_padding |= !utils::IsAGeZeroAndALtB(d_img, img_shape.data[d_i + 1]);
         img_index = img_index * img_shape.data[d_i + 1] + d_img;
       }
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
       if (!kCol2Im) {
         Y_data[col_index] = is_padding ? 0 : __ldg(X_data + img_index);
       } else if (!is_padding) {
@@ -3477,7 +3755,11 @@ template <typename T, int D>
 __global__ void BroadcastCUDAKernel(
     const int Y_size,
     const SimpleArray<int, D> X_strides,
+  #ifndef __HIPCC__
     const SimpleArray<FixedDivisor<int>, D> Y_dims,
+  #else
+    const SimpleArray<int, D> Y_dims,
+  #endif
     const T alpha,
     const T* X,
     T* Y) {
@@ -3486,11 +3768,18 @@ __global__ void BroadcastCUDAKernel(
     int Y_index_val = Y_index;
 #pragma unroll
     for (int i = D - 1; i >= 0; --i) {
+    #ifndef __HIPCC__
       int d;
       Y_dims.data[i].DivMod(Y_index_val, &Y_index_val, &d);
       X_index += d * X_strides.data[i];
+    #else
+      X_index += X_strides.data[i] == 0
+          ? 0
+          : (Y_index_val % Y_dims.data[i]) * X_strides.data[i];
+      Y_index_val /= Y_dims.data[i];
+    #endif
     }
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
     Y[Y_index] = __ldg(X + X_index) * alpha;
 #else
     Y[Y_index] = X[X_index] * alpha;
@@ -3508,7 +3797,11 @@ CAFFE2_CUDA_EXPORT void BroadcastCUDAImpl(
     T* Y,
     CUDAContext* context) {
   SimpleArray<int, D> X_strides_array;
+#ifndef __HIPCC__
   SimpleArray<FixedDivisor<int>, D> Y_dims_array;
+#else
+  SimpleArray<int, D> Y_dims_array;
+#endif
   const int d = D - X_ndim;
   std::fill(X_strides_array.data, X_strides_array.data + d, 0);
   int cur_stride = 1;
@@ -3517,12 +3810,16 @@ CAFFE2_CUDA_EXPORT void BroadcastCUDAImpl(
     X_strides_array.data[i] = X_dims[i - d] == 1 ? 0 : cur_stride;
     cur_stride *= X_dims[i - d];
   }
+#ifndef __HIPCC__
   for (int i = 0; i < D; ++i) {
     if (Y_dims[i] == 0) {
       return;
     }
     Y_dims_array.data[i] = FixedDivisor<int>(Y_dims[i]);
   }
+#else
+  std::copy_n(Y_dims, D, Y_dims_array.data);
+#endif
   const int Y_size =
       std::accumulate(Y_dims, Y_dims + D, 1, std::multiplies<int>());
   BroadcastCUDAKernel<T, D>
@@ -3582,7 +3879,7 @@ __global__ void RowwiseMomentsCUDAKernel(
     T v_val = 0;
     for (int j = threadIdx.x; j < cols; j += blockDim.x) {
       const int X_index = i * cols + j;
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
       m_val += __ldg(X + X_index);
       v_val += __ldg(X + X_index) * __ldg(X + X_index);
 #else
@@ -3616,7 +3913,7 @@ __global__ void ColwiseMomentsCUDAKernel(
     T v_val = 0;
     for (int j = threadIdx.x; j < rows; j += blockDim.x) {
       const int X_index = j * cols + i;
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
       m_val += __ldg(X + X_index);
       v_val += __ldg(X + X_index) * __ldg(X + X_index);
 #else
@@ -3659,7 +3956,7 @@ __global__ void MomentsCUDAKernel(
         Y_dims.data[d].DivMod(Y_index, &Y_index, &r);
         X_index += r * X_strides.data[d];
       }
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
       m_val += __ldg(X + X_index);
       v_val += __ldg(X + X_index) * __ldg(X + X_index);
 #else
@@ -3866,7 +4163,7 @@ __global__ void BatchTranspose2DCUDAKernel(
     int y = r * kTileDim + threadIdx.y;
     if (x < W) {
       for (int j = 0; j < kTileDim && y + j < H; j += kBlockRows) {
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
         tile[threadIdx.y + j][threadIdx.x] =
             __ldg(X + offset + (y + j) * W + x);
 #else
@@ -3902,7 +4199,7 @@ __global__ void TransposeCUDAKernel(
       Y_dims.data[i].DivMod(Y_index_val, &Y_index_val, &d);
       X_index += d * X_strides.data[i];
     }
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
     Y[Y_index] = __ldg(X + X_index);
 #else
     Y[Y_index] = X[X_index];
@@ -3987,7 +4284,7 @@ __global__ void AffineChannelCUDAKernel(
     T* Y) {
   CUDA_1D_KERNEL_LOOP(i, size) {
     const int c = kOrder == StorageOrder::NCHW ? i / HxW % C : i % C;
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
     Y[i] = __ldg(scale + c) * __ldg(X + i) + __ldg(bias + c);
 #else
     Y[i] = scale[c] * X[i] + bias[c];

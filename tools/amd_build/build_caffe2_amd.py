@@ -22,6 +22,7 @@ includes = [
     "caffe2/**/*_test*",
     "caffe2/core/*",
     "caffe2/db/*",
+    "caffe2/utils/math_gpu*",
 ]
 
 ignores = [
