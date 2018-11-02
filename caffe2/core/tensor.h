@@ -482,6 +482,8 @@ class CAFFE2_API Tensor final {
   }
 };
 
+void ReinitializeTensor(Tensor* t, at::IntList dims, at::TensorOptions options);
+
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
 
 using TensorCPU = Tensor;
