@@ -162,7 +162,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/passes/annotate_effects.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
@@ -180,6 +179,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/lower_tuples.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/remove_inplace_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/shape_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/requires_grad_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp

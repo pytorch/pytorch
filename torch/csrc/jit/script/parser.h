@@ -127,7 +127,7 @@ struct Parser {
     }
     return prefix;
   }
-  TreeRef parseOptionalReduction() {
+  TreeRef parseAssignmentOp() {
     auto r = L.cur().range;
     switch (L.cur().kind) {
       case TK_PLUS_EQ:
@@ -356,12 +356,23 @@ struct Parser {
   // 'first' has already been parsed since expressions can exist
   // alone on a line:
   // first[,other,lhs] = rhs
-  Assign parseAssign(List<Expr> list) {
-    auto red = parseOptionalReduction();
+  TreeRef parseAssign(List<Expr> lhs) {
+    auto op = parseAssignmentOp();
     auto rhs = parseExpOrExpTuple(TK_NEWLINE);
     L.expect(TK_NEWLINE);
-    return Assign::create(list.range(), list, AssignKind(red), Expr(rhs));
+    if (op->kind() == '=') {
+      return Assign::create(lhs.range(), lhs, Expr(rhs));
+    } else {
+      // this is an augmented assignment
+      if (lhs.size() != 1) {
+        throw ErrorReport(lhs.range())
+            << " augmented assignment can only have one LHS expression";
+      }
+      return AugAssign::create(
+          lhs.range(), lhs[0], AugAssignKind(op), Expr(rhs));
+    }
   }
+
   TreeRef parseStmt() {
     switch (L.cur().kind) {
       case TK_IF:
