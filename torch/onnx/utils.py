@@ -156,7 +156,6 @@ def _optimize_graph(graph, operator_export_type):
         torch._C._jit_pass_lint(graph)
         torch._C._jit_pass_onnx_peephole(graph)
         torch._C._jit_pass_lint(graph)
-
     torch._C._jit_pass_dce(graph)
     torch._C._jit_pass_lint(graph)
     torch._C._jit_pass_fixup_onnx_loops(graph)
