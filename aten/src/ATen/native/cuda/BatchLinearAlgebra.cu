@@ -293,7 +293,7 @@ Tensor _potrs_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "potrs", [&]{
     apply_potrs<scalar_t>(self_working_copy, A_working_copy, upper, info);
   });
-  AT_CHECK(info < 0, "potrs : invalid argument: ", -info);
+  AT_CHECK(info == 0, "MAGMA potrs : invalid argument: ", -info);
   return self_working_copy;
 }
 

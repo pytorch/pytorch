@@ -5319,8 +5319,8 @@ class _TestTorchMixin(object):
         B = torch.mm(L, L.t())
         self.assertEqual(A, B, 1e-14, 'cholesky (lower) did not allow rebuilding the original matrix')
 
-    @skipIfNoLapack
-    def test_potrs(self):
+    @staticmethod
+    def _test_potrs(self, cast):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
                           (-0.45, 2.58, -2.70, 0.27, 9.04),
@@ -5332,6 +5332,7 @@ class _TestTorchMixin(object):
 
         # make sure 'a' is symmetric PSD
         a = torch.mm(a, a.t())
+        a, b = cast(a), cast(b)
 
         # upper Triangular Test
         U = torch.cholesky(a, True)
@@ -5342,6 +5343,66 @@ class _TestTorchMixin(object):
         L = torch.cholesky(a, False)
         x = torch.potrs(b, L, False)
         self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
+
+    @skipIfNoLapack
+    def test_potrs(self):
+        self._test_potrs(self, lambda t: t)
+
+    @staticmethod
+    def _test_potrs_batched(self, cast):
+        from common_utils import random_symmetric_pd_matrix
+
+        # TODO: This function should be replaced after batch potrf is ready
+        def get_cholesky(bmat, upper):
+            n = bmat.size(-1)
+            cholesky = torch.stack([m.cholesky(upper) for m in bmat.reshape(-1, n, n)])
+            return cholesky.reshape_as(bmat)
+
+        for upper in [True, False]:
+            # test against potrs: one batch with both choices of upper
+            A = cast(random_symmetric_pd_matrix(5, 1))
+            L = get_cholesky(A, upper)
+            b = cast(torch.randn(1, 5, 10))
+            x_exp = torch.potrs(b.squeeze(0), L.squeeze(0), upper=upper)
+            x = torch.potrs(b, L, upper=upper)
+            self.assertEqual(x, x_exp.unsqueeze(0))
+
+            # test against potrs in a loop: four batches with both choices of upper
+            A = cast(random_symmetric_pd_matrix(5, 4))
+            L = get_cholesky(A, upper)
+            b = cast(torch.randn(4, 5, 10))
+
+            x_exp_list = list()
+            for i in range(4):
+                x_exp = torch.potrs(b[i], L[i], upper=upper)
+                x_exp_list.append(x_exp)
+            x_exp = torch.stack(x_exp_list)
+
+            x = torch.potrs(b, L, upper=upper)
+            self.assertEqual(x, x_exp)
+
+            # basic correctness test
+            A = cast(random_symmetric_pd_matrix(5, 3))
+            L = get_cholesky(A, upper)
+            b = cast(torch.randn(3, 5, 10))
+            x = torch.potrs(b, L, upper)
+            self.assertLessEqual(b.dist(torch.matmul(A, x)), 1e-12)
+
+            # Test non-contiguous inputs.
+            if not TEST_NUMPY:
+                return
+            import numpy
+            from numpy.linalg import solve
+            A = cast(random_symmetric_pd_matrix(2, 2)).permute(0, 2, 1)
+            b = cast(torch.randn(2, 2, 2)).permute(2, 1, 0)
+            L = get_cholesky(A, upper)
+            x = torch.potrs(b, L, upper=upper)
+            x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
+            self.assertEqual(x.data, cast(x_exp))
+
+    @skipIfNoLapack
+    def test_potrs_batched(self):
+        self._test_potrs_batched(self, lambda t: t)
 
     @skipIfNoLapack
     def test_potri(self):
