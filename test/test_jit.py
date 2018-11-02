@@ -9431,7 +9431,6 @@ def add_nn_functional_test(name, self_size, args, skipTestIf=(), output_process_
 
     def do_test(self, name=name, args=args, test_name=test_name):
         torch.manual_seed(2)
-        initial_rng_state = torch.get_rng_state()
 
         self_variable = create_input((self_size,))[0][0]
 
@@ -9442,7 +9441,6 @@ def add_nn_functional_test(name, self_size, args, skipTestIf=(), output_process_
         args_tensor = deepcopy(unpack_variables(args_variable))
 
         output_variable = getattr(F, name)(self_variable, *args_variable, **kwargs_variable)
-        torch.set_rng_state(initial_rng_state)
 
         def fn(*inputs, **kwargs):
             output = getattr(F, name)(*inputs, **kwargs)
