@@ -22,11 +22,6 @@
 #define THRUST_SUPPORTS_PER_THREAD
 #endif // THRUST_VERSION >= 100800
 
-#ifdef __HIPCC__
-// rocblas doesn't fully support fp16 yet
-#define ROCBLAS_FP16 0
-#endif
-
 namespace caffe2 {
 namespace math {
 
