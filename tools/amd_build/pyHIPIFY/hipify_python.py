@@ -371,8 +371,7 @@ def processKernelLaunches(string, stats):
 
             # Handle Kernel Name
             if status != AT_TEMPLATE:
-                if string[i] == "(" or string[i] == ")" or string[i] == "_" or \
-                   string[i].isalnum() or string[i] == ":" or string[i] == "#":
+                if string[i].isalnum() or string[i] in  {'(', ')', '_', ':', '#'}:
                     if status != AT_KERNEL_NAME:
                         status = AT_KERNEL_NAME
                         pos["kernel_name"]["end"] = i
@@ -1350,15 +1349,11 @@ def hipify(
     # Extract all of the kernel parameter and template type information.
     if add_static_casts_option:
         KernelTemplateParams = {}
-        # ignore caffe2/utils/math_gpu.cu for static_casts as PowKernel
-        # conflicts with kernel in caffe2/operators/pow_op.cu.
-        # Need to figure out a long-term solution.
         for filepath in all_files:
-            if "math_gpu.cu" not in os.path.basename(filepath):
-                get_kernel_template_params(
-                    filepath,
-                    KernelTemplateParams,
-                    CAFFE2_TEMPLATE_MAP if args.hipify_caffe2 else PYTORCH_TEMPLATE_MAP)
+            get_kernel_template_params(
+                filepath,
+                KernelTemplateParams,
+                CAFFE2_TEMPLATE_MAP if hipify_caffe2 else PYTORCH_TEMPLATE_MAP)
 
         # Execute the Clang Tool to Automatically add static casts
         for filepath in all_files:
