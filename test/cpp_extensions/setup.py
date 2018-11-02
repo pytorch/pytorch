@@ -1,3 +1,4 @@
+import sys
 import torch.cuda
 from setuptools import setup
 from torch.utils.cpp_extension import CppExtension, CUDAExtension
