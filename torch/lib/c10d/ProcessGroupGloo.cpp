@@ -111,7 +111,7 @@ const ::gloo::ReductionFunction<T>* reductionFunction(const ReduceOp& r) {
 typedef void (*ReduceFunc)(void*, const void*, const void*, size_t);
 
 template <typename T>
-const ReduceFunc toFunction(const ReduceOp& r) {
+ReduceFunc toFunction(const ReduceOp& r) {
   switch (r) {
     case ReduceOp::SUM:
       return ReduceFunc(&::gloo::sum<T>);
