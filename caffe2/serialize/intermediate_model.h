@@ -121,6 +121,18 @@ class CAFFE2_API IntermediateTensor final {
     data_ = data;
   }
 
+  void setDataType(int64_t data_type) {
+    dataType_ = data_type;
+  }
+
+  void setDims(const std::vector<int64_t>& dims) {
+    dims_ = dims;
+  }
+
+  void setOffset(int64_t offset) {
+    offset_ = offset;
+  }
+
   void setStrides(const std::vector<int64_t>& strides) {
     strides_ = strides;
   }
