@@ -378,7 +378,8 @@ class JitTestCase(TestCase):
         self.assertEqual(self.runAndSaveRNG(m.forward, inputs),
                          self.runAndSaveRNG(m_import.forward, inputs))
 
-    def runAndSaveRNG(self, func, inputs, kwargs={}):
+    def runAndSaveRNG(self, func, inputs, kwargs=None):
+        kwargs = kwargs if kwargs else {}
         initial_rng_state = torch.get_rng_state()
         results = func(*inputs, **kwargs)
         torch.set_rng_state(initial_rng_state)
