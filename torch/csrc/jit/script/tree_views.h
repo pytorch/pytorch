@@ -27,7 +27,8 @@ namespace script {
 //       | While(Expr cond, List<Stmt> body)                            TK_WHILE
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
 //       -- NB: the only type of Expr's allowed on lhs are Starred and Var
-//       | Assign(List<Expr> lhs, AssignType maybe_reduce, Expr rhs)    TK_ASSIGN
+//       | Assign(List<Expr> lhs, Expr rhs)                             TK_ASSIGN
+//       | AugAssign(Expr lhs, AugAssignKind aug_op, Expr rhs)          TK_AUG_ASSIGN
 //       | Return(List<Expr> values)                                    TK_RETURN
 //       | ExprStmt(List<Expr> expr)                                    TK_EXPR_STMT
 //       | Raise(Expr expr)                                             TK_RAISE
@@ -69,7 +70,7 @@ namespace script {
 //        (List as a value, not type constructor)
 // Attribute = Attribute(Ident name, Expr value)                        TK_ATTRIBUTE
 //
-// AssignKind = Regular()                                               '='
+// AugAssignKind =
 //            | Add()                                                   TK_PLUS_EQ
 //            | Sub()                                                   TK_MINUS_EQ
 //            | Mul()                                                   TK_TIMES_EQ
@@ -210,6 +211,7 @@ struct Stmt : public TreeView {
       case TK_WHILE:
       case TK_GLOBAL:
       case TK_ASSIGN:
+      case TK_AUG_ASSIGN:
       case TK_RETURN:
       case TK_EXPR_STMT:
       case TK_RAISE:
@@ -422,21 +424,44 @@ struct Global : public Stmt {
   }
 };
 
-struct AssignKind : public TreeView {
-  explicit AssignKind(const TreeRef& tree) : TreeView(tree) {
+struct AugAssignKind : public TreeView {
+  explicit AugAssignKind(const TreeRef& tree) : TreeView(tree) {
     switch (tree->kind()) {
-      case '=':
       case '+':
       case '-':
       case '*':
       case '/':
-      case '%':
         return;
       default:
-        throw ErrorReport(tree) << "is not a valid AssignKind";
+        throw ErrorReport(tree) << "is not a valid AugAssignKind";
     }
   }
 };
+
+// Augmented assignment, like "foo += bar"
+struct AugAssign : public Stmt {
+  explicit AugAssign(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_AUG_ASSIGN);
+  }
+  static AugAssign create(
+      const SourceRange& range,
+      const Expr& lhs,
+      const AugAssignKind& aug_op,
+      const Expr& rhs) {
+    return AugAssign(
+        Compound::create(TK_AUG_ASSIGN, range, {lhs, aug_op, rhs}));
+  }
+  Expr lhs() const {
+    return Expr(subtree(0));
+  }
+  int aug_op() const {
+    return subtree(1)->kind();
+  }
+  Expr rhs() const {
+    return Expr(subtree(2));
+  }
+};
+
 
 struct Assign : public Stmt {
   explicit Assign(const TreeRef& tree) : Stmt(tree) {
@@ -445,18 +470,14 @@ struct Assign : public Stmt {
   static Assign create(
       const SourceRange& range,
       const List<Expr>& lhs,
-      const AssignKind& reduction,
       const Expr& rhs) {
-    return Assign(Compound::create(TK_ASSIGN, range, {lhs, reduction, rhs}));
+    return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs}));
   }
   List<Expr> lhs() const {
     return List<Expr>(subtree(0));
   }
-  int reduction() const {
-    return subtree(1)->kind();
-  }
   Expr rhs() const {
-    return Expr(subtree(2));
+    return Expr(subtree(1));
   }
 };
 

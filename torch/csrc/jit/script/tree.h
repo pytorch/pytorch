@@ -76,7 +76,7 @@ struct Tree : std::enable_shared_from_this<Tree> {
     if (kind() != k) {
       std::stringstream ss;
       ss << filename << ":" << lineno << ": expecting kind '" << kindToString(k)
-         << "' but found '" << kind() << "'\n";
+         << "' but found '" << kindToString(kind()) << "'\n";
       range().highlight(ss);
       throw std::runtime_error(ss.str());
     }
