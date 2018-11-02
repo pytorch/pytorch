@@ -3,19 +3,22 @@
 
 #include "torch/csrc/jit/type.h"
 #include "torch/csrc/jit/ivalue.h"
+#include "torch/csrc/jit/alias_info.h"
 
 namespace torch { namespace jit {
 
 // schema as used in the compiler for resolving function calls and reporting
 // errors. These objects should be constructed from C10 schema once those
 // are available.
+
 struct Argument {
   Argument(
       std::string name = "",
       TypePtr type = nullptr,
       c10::optional<int32_t> N = c10::nullopt,
       c10::optional<IValue> default_value = c10::nullopt,
-      bool kwarg_only = false)
+      bool kwarg_only = false,
+      c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
         type_(type ? type : DynamicType::get()),
         N_(std::move(N)),
@@ -24,7 +27,7 @@ struct Argument {
   const std::string& name() const {
     return name_;
   }
-  const TypePtr& type() const {
+  TypePtr type() const {
     return type_;
   }
   c10::optional<int32_t> N() const {
@@ -36,10 +39,20 @@ struct Argument {
   bool kwarg_only() const {
     return kwarg_only_;
   }
+  const AliasInfo& alias_info() const {
+    if(!alias_info_) {
+      alias_info_ = createBlankAliasInfo(type_);
+    }
+    return *alias_info_;
+  }
 private:
+  static AliasInfo createBlankAliasInfo(TypePtr typ) {
+    auto contained = fmap(typ->containedTypes(), createBlankAliasInfo);
+    return AliasInfo({}, std::move(contained));
+  }
   std::string name_;
   TypePtr type_;
-
+  mutable c10::optional<AliasInfo> alias_info_;
   // for list types, an optional statically known length for the list
   // e.g. for int[3]: type = ListType::ofInts(), N = 3
   // If present, this will allow scalars to be broadcast to this length to
@@ -57,29 +70,28 @@ struct FunctionSchema {
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
       bool is_vararg = false,
-      bool is_varret = false)
+      bool is_varret = false,
+      std::vector<Symbol> writes = {})
       : name_(std::move(name)),
         arguments_(std::move(arguments)),
         returns_(std::move(returns)),
         is_vararg_(is_vararg),
         is_varret_(is_varret),
-        is_mutable_(calcMutable()) {
-    validate();
-  }
+        writes_(std::move(writes)) {}
   FunctionSchema(
       Symbol name,
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
       bool is_vararg = false,
-      bool is_varret = false)
+      bool is_varret = false,
+      std::vector<std::string> writes = {})
       : FunctionSchema(
             name.toQualString(),
             std::move(std::move(arguments)),
             std::move(std::move(returns)),
             is_vararg,
-            is_varret) {
-    validate();
-  }
+            is_varret) {}
+
 private:
   const std::string name_;
   const std::vector<Argument> arguments_;
@@ -90,7 +102,9 @@ private:
   // arguments are not checked by schema
   const bool is_vararg_;
   const bool is_varret_;
-  const bool is_mutable_;
+
+  // set of alias sets in Arguments that are written to by this op
+  const std::vector<Symbol> writes_;
 public:
   const std::string& name() const {
     return name_;
@@ -101,6 +115,9 @@ public:
   const std::vector<Argument>& returns() const {
     return returns_;
   }
+  const std::vector<Symbol>& writes() const {
+    return writes_;
+  }
   bool is_vararg() const {
     return is_vararg_;
   }
@@ -108,7 +125,7 @@ public:
     return is_varret_;
   }
   bool is_mutable() const {
-    return is_mutable_;
+    return writes().size() > 0;
   }
   c10::optional<int> argumentIndexWithName(const std::string& name) const {
     for(size_t i = 0; i < arguments().size(); ++i) {
@@ -119,21 +136,6 @@ public:
   }
 
  private:
-  bool calcMutable() const {
-    return std::any_of(
-        arguments().cbegin(), arguments().cend(), [](const Argument& arg) {
-          return arg.type() == WorldType::get();
-        });
-  }
-
-  void validate() const {
-    if (is_mutable()) {
-      // Mutable schemas should have a world token as the first argument
-      // and return.
-      JIT_ASSERT(arguments().at(0).type() == WorldType::get());
-      JIT_ASSERT(returns().at(0).type() == WorldType::get());
-    }
-  }
 };
 
 // for debugging, make sure we can describe the call site
@@ -156,6 +158,12 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
       seen_kwarg_only = true;
     }
     out << schema.arguments()[i];
+  }
+
+  if(schema.is_vararg()) {
+    if(schema.arguments().size() > 0)
+      out << ", ";
+    out << "...";
   }
 
   out << ") -> ";

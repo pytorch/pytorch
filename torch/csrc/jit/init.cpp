@@ -23,6 +23,7 @@
 #include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/canonicalize_ops.h"
+#include "torch/csrc/jit/passes/remove_inplace_ops.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/to_batch.h"
@@ -35,7 +36,8 @@
 #include "torch/csrc/jit/pybind_utils.h"
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/script/jit_exception.h"
 
 #include "caffe2/serialize/inline_container.h"
 
@@ -49,6 +51,13 @@
 #include <utility>
 
 namespace torch  { namespace jit {
+
+// TODO: make a fake future for python
+namespace detail {
+class Future {
+
+};
+}
 
 namespace {
 
@@ -77,6 +86,8 @@ std::string runJITCPPTests();
 void initJITBindings(PyObject *module) {
   auto m = py::handle(module).cast<py::module>();
 
+  py::register_exception<JITException>(m, "JITException");
+
   py::class_<python::IODescriptor>(m, "IODescriptor");
 
   m.def("_jit_init", loadPythonClasses)
@@ -90,8 +101,13 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_cse", [](std::shared_ptr<Graph>& g) {
      return EliminateCommonSubexpression(g); // overload resolution
    })
+   .def("_jit_pass_remove_inplace_ops", [](std::shared_ptr<Graph> g) {
+      return RemoveInplaceOps(g);
+   })
    .def("_jit_pass_constant_pooling", ConstantPooling)
-   .def("_jit_pass_peephole", PeepholeOptimize, py::arg("graph"), py::arg("addmm_fusion_enabled") = false)
+   .def("_jit_pass_peephole", [](const std::shared_ptr<Graph>& g, bool addmm_fusion_enabled) {
+     return PeepholeOptimize(g, addmm_fusion_enabled);
+   }, py::arg("graph"), py::arg("addmm_fusion_enabled") = false)
    .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
      return Canonicalize(g);
    })
@@ -237,20 +253,26 @@ void initJITBindings(PyObject *module) {
         return createPyObjectForStack(std::move(stack));
       });
 
-    py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
+  py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
-      .def("write_record", &PyTorchFileWriter::writeRecord)
+      .def(
+          "write_record",
+          [](PyTorchFileWriter& self, const char* data, size_t size) {
+            return self.writeRecord(data, size);
+          })
       .def("write_end_of_file", &PyTorchFileWriter::writeEndOfFile);
 
-    py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
+  py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
-      .def("get_record_with_key", [](PyTorchFileReader &self, uint64_t key) {
-        at::DataPtr data;
-        size_t size;
-        std::tie(data, size) = self.getRecordWithKey(key);
-        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
-      })
-      .def("get_last_record", [](PyTorchFileReader &self){
+      .def(
+          "get_record_with_key",
+          [](PyTorchFileReader& self, uint64_t key) {
+            at::DataPtr data;
+            size_t size;
+            std::tie(data, size) = self.getRecordWithKey(key);
+            return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+          })
+      .def("get_last_record", [](PyTorchFileReader& self) {
         at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getLastRecord();
@@ -302,6 +324,17 @@ void initJITBindings(PyObject *module) {
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
         return op->schema();
       });
+  });
+
+  py::class_<detail::Future>(m, "Future");
+
+  m.def("fork", [](script::Module &sm, py::args args) {
+    // TODO: this is a fake stub
+    return detail::Future();
+  });
+
+  m.def("wait", [](detail::Future &fut) {
+    // TODO: this is a fake stub
   });
 
 

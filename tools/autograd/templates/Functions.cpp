@@ -17,6 +17,7 @@
 #include <ciso646>
 #include <algorithm>
 #include <numeric>
+#include <functional>
 
 // ${generated_comment}
 
@@ -625,7 +626,7 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntList
   return mask_selected.view(sizes);
 }
 
-Tensor potrf_backward(Tensor grad, bool upper, Tensor L) {
+Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   // cf. Iain Murray (2016); arXiv 1602.07527
   if (upper) {
     L = L.t();
@@ -722,7 +723,7 @@ Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input
 
 Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
   auto result = kl_div_backward(grad, input, target, Reduction::None);
-  if (reduction == Reduction::ElementwiseMean) {
+  if (reduction == Reduction::Mean) {
     return result.mean();
   } else if (reduction == Reduction::Sum) {
     return result.sum();
@@ -736,7 +737,7 @@ Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, in
   if (reduction == Reduction::None) {
     return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
   }
-  if (reduction == Reduction::ElementwiseMean) {
+  if (reduction == Reduction::Mean) {
     return grad_output.mul(target.log().add_(1).sub_(self)).div_(target.numel()).masked_fill_(target == 0, 0.);
   }
   return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
@@ -754,7 +755,7 @@ Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_outpu
     grad_target.mul_(weight);
   }
 
-  if (reduction == Reduction::ElementwiseMean) {
+  if (reduction == Reduction::Mean) {
     grad_target.div_(target.numel());
   }
 
@@ -790,7 +791,7 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
 
 Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
   auto output = l1_loss_backward(grad, input, target, Reduction::None);
-  if (reduction == Reduction::ElementwiseMean) {
+  if (reduction == Reduction::Mean) {
     return output.mean();
   } else if (reduction == Reduction::Sum) {
     return output.sum();
@@ -801,7 +802,7 @@ Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & i
 Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
   auto d = (input - target).abs();
   auto grad_input = grad * (d < 1).toType(grad.type());
-  if (reduction == Reduction::ElementwiseMean) {
+  if (reduction == Reduction::Mean) {
     grad_input /= input.numel();
   }
   return grad_input;
@@ -839,7 +840,7 @@ Tensor diagonal_backward(const Tensor & grad, IntList input_sizes, int64_t offse
 
 Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, int64_t reduction) {
   auto grad_input = 2 * grad;
-  if (reduction == Reduction::ElementwiseMean) {
+  if (reduction == Reduction::Mean) {
     grad_input /= input.numel();
   }
   return grad_input;
@@ -857,7 +858,7 @@ Tensor soft_margin_loss_double_backward(const Tensor & grad, const Tensor & inpu
   auto z = (input * -target).exp();
   auto zplus1 = z + 1;
   auto grad_input = grad * (target * target) * z / (zplus1 * zplus1);
-  if (reduction == Reduction::ElementwiseMean) {
+  if (reduction == Reduction::Mean) {
     grad_input /= input.numel();
   }
   return grad_input;
@@ -1860,7 +1861,7 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     bool training,
     double eps,
     const Tensor & save_mean,
-    const Tensor & save_invstd,
+    const Tensor & save_std,
     std::array<bool,3> output_mask) {
 
   bool affine = gamma.defined();
@@ -1884,12 +1885,9 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   for (auto s : input.sizes().slice(2)) {
     M *= s;
   }
-  // for half inputs, save_mean, save_invstd are float (ideally, we would cast
-  // everything else, but not now)
-  auto mu = unsqueeze_dim1(training ? save_mean.to(input.dtype()) : running_mean, input);
+  auto mu = unsqueeze_dim1(training ? save_mean : running_mean, input);
   auto input_sub_mu = input - mu;
-  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(training ? save_invstd.to(input.dtype())
-					            : running_var.add(Scalar(eps)).pow(-0.5), input);
+  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(training ? save_std : running_var.add(Scalar(eps)).pow(-0.5), input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
   auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
 
@@ -2008,6 +2006,13 @@ Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const T
   auto flattened_dense_grad = dense_grad.view(flattened_grad_shape);
   auto flattened_indices = at::sparse::flatten_indices(indices, full_size);
   return flattened_dense_grad.index_select(0, flattened_indices);
+}
+
+// Because the backward of pad(input, pads) is just pad(grad_output, [-p for p in pads])
+Tensor constant_pad_nd_backward(const Tensor& grad, IntList pad) {
+  auto negated_pad = pad.vec();
+  std::transform(negated_pad.cbegin(), negated_pad.cend(), negated_pad.begin(), std::negate<int64_t>());
+  return at::constant_pad_nd(grad, negated_pad, 0);
 }
 
 } // anonymous namespace

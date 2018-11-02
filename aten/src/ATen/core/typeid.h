@@ -351,7 +351,7 @@ class CAFFE2_API TypeMeta {
  private:
   // TypeMeta can only be created by Make, making sure that we do not
   // create incorrectly mixed up TypeMeta objects.
-  constexpr TypeMeta(const detail::TypeMetaData* data) noexcept : data_(data) {}
+  explicit constexpr TypeMeta(const detail::TypeMetaData* data) noexcept : data_(data) {}
 
  public:
   /**
@@ -456,6 +456,12 @@ inline bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 }
 inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
+}
+
+inline std::ostream& operator<<(
+    std::ostream& stream,
+    caffe2::TypeMeta typeMeta) {
+  return stream << typeMeta.name();
 }
 
 /**

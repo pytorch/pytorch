@@ -119,7 +119,11 @@ struct ReduceConfig {
     if (!should_global_reduce()) {
       return 0;
     }
-    return element_size_bytes * num_outputs * ctas_per_output;
+    int size = element_size_bytes * num_outputs * ctas_per_output;
+    if (!should_warp_reduce()) {
+      size *= block().x;
+    }
+    return size;
   }
 
   int semaphore_size() const {
@@ -318,6 +322,7 @@ struct ReduceOp {
   AT_DEVICE bool mark_block_finished() const {
     extern __shared__ int is_last_block_done_shared[];
 
+    __syncthreads();
     if (threadIdx.x == 0 && threadIdx.y == 0) {
       int prev_blocks_finished = atomicAdd(&semaphores[blockIdx.x], 1);
       is_last_block_done_shared[0] = (prev_blocks_finished == gridDim.y - 1);

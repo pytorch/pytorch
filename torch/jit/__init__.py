@@ -8,6 +8,7 @@ from torch._six import raise_from, with_metaclass, get_function_from_type
 from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
     COMPILATION_PENDING
+from ..nn.modules.utils import _single, _pair, _triple, _quadruple
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
@@ -48,6 +49,10 @@ _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
+
+Future = torch._C.Future
+_fork = torch._C.fork
+_wait = torch._C.wait
 
 
 @contextlib.contextmanager
@@ -1329,7 +1334,12 @@ def _get_builtin_table():
                 _builtin_table[id(v)] = "aten::" + name
     for mod in _modules_containing_builtins:
         register_all(mod)
+
     _builtin_table[id(warnings.warn)] = "aten::warn"
+    _builtin_table[id(_single)] = "aten::_single"
+    _builtin_table[id(_pair)] = "aten::_pair"
+    _builtin_table[id(_triple)] = "aten::_triple"
+    _builtin_table[id(_quadruple)] = "aten::_quadruple"
 
     return _builtin_table
 
@@ -1366,6 +1376,12 @@ _register_builtin(_construct_empty_tensor_list, 'aten::_construct_empty_tensor_l
 
 
 _register_builtin(len, 'aten::len')
+
+
+_register_builtin(_wait, 'aten::wait')
+
+# torch.jit.Error
+Error = torch._C.JITException
 
 
 class _disable_tracing(object):

@@ -7,13 +7,11 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/jit/passes/annotate_effects.h"
 #include "torch/csrc/jit/passes/batch_mm.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/erase_number_types.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/inplace_check.h"
 #include "torch/csrc/jit/passes/peephole.h"
@@ -252,7 +250,7 @@ void packGradient(Gradient gradient, Node *dnode) {
        ->is_(attr::df_output_vjps, fmap<int64_t>(gradient.df_output_vjps));
 }
 
-Gradient getGradient(Node *n) {
+Gradient getGradient(const Node *n) {
   JIT_ASSERT(n->kind() == prim::DifferentiableGraph);
   Gradient grad;
   grad.f = n->g(attr::Subgraph);
@@ -270,7 +268,7 @@ Gradient getGradient(Node *n) {
 RegisterOperators reg_graph_executor_ops({
   Operator(
     prim::DifferentiableGraph,
-    [](Node *n) -> Operation {
+    [](const Node *n) -> Operation {
       return DifferentiableGraphOp(getGradient(n));
     })
 });
@@ -318,12 +316,26 @@ struct GraphExecutorImpl {
     return total;
   }
 
+  inline bool hasMutableOperators(Block* block) {
+    for(auto n : block->nodes()) {
+      if(n->kind().is_aten() && n->schema().is_mutable())
+        return true;
+      for(auto b : n->blocks()) {
+        if(hasMutableOperators(b))
+          return true;
+      }
+    }
+    return false;
+  }
+
   GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
-    : graph(prepareGraph(graph))
-    , optimize(optimize)
-    , num_inputs(this->graph->inputs().size())
-    , num_flat_inputs(countFlatInputs(graph))
-    , num_outputs(this->graph->outputs().size()) {}
+      : graph(prepareGraph(graph)),
+        // until we have correct alias analysis any use of mutable operators
+        // disables all optimization
+        optimize(optimize && !hasMutableOperators(this->graph->block())),
+        num_inputs(this->graph->inputs().size()),
+        num_flat_inputs(countFlatInputs(graph)),
+        num_outputs(this->graph->outputs().size()) {}
 
   // entry point where execution begins
   void run(Stack & stack) {

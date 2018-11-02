@@ -20,14 +20,20 @@ struct SchemaParser {
     }
     std::vector<Argument> arguments;
     std::vector<Argument> returns;
+    std::vector<Symbol> writes;
     bool kwarg_only = false;
+    bool is_vararg = false;
     size_t idx = 0;
     parseList('(', ',', ')', [&] {
-      if(L.nextIf('*')) {
+      if(is_vararg)
+        throw ErrorReport(L.cur()) << "... must be the last element of the argument list";
+      if (L.nextIf('*')) {
         kwarg_only = true;
+      } else if(L.nextIf(TK_DOTS)) {
+        is_vararg = true;
       } else {
         arguments.push_back(parseArgument(
-            idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only));
+            idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only, writes));
       }
     });
     idx = 0;
@@ -35,13 +41,14 @@ struct SchemaParser {
     if (L.cur().kind == '(') {
       parseList('(', ',', ')', [&] {
         returns.push_back(
-            parseArgument(idx++, /*is_return=*/true, /*kwarg_only=*/false));
+            parseArgument(idx++, /*is_return=*/true, /*kwarg_only=*/false, writes));
       });
     } else {
       returns.push_back(
-          parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
+          parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false, writes));
     }
-    return FunctionSchema { name, arguments, returns };
+    return FunctionSchema { name, std::move(arguments), std::move(returns),
+                            is_vararg, false, std::move(writes) };
   }
 
   std::vector<FunctionSchema> parseDeclarations() {
@@ -67,7 +74,6 @@ struct SchemaParser {
       {"float", FloatType::get() },
       {"int", IntType::get() },
       {"bool", BoolType::get() },
-      {"World", WorldType::get() },
     };
     auto tok = L.expect(TK_IDENT);
     auto text = tok.text();
@@ -82,33 +88,55 @@ struct SchemaParser {
     }
     return it->second;
   }
-  TypePtr parseType() {
+  static void addToWrites(std::vector<Symbol>& writes, const Symbol& alias_set) {
+    auto it = std::find(writes.begin(), writes.end(), alias_set);
+    if(it == writes.end())
+      writes.push_back(alias_set);
+  }
+  // Examples:
+  // Tensor(a) // Tensor is in set a
+  // Tensor(a!) // it is also written to
+  // Tensor!  // shorthand for Tensor(fresh_identifier!)
+  std::vector<Symbol> parseAliasAnnotation(std::vector<Symbol>& writes) {
+    std::vector<Symbol> sets;
+    if(L.nextIf('(')) {
+      // optional 'alias set annotation'
+      sets.push_back(Symbol::fromQualString("alias::"+L.expect(TK_IDENT).text()));
+      if(L.nextIf('!')) {
+        addToWrites(writes, sets.back());
+      }
+      L.expect(')');
+    } else if(L.nextIf('!')) {
+      sets.push_back(Symbol::fromQualString("alias::$"+std::to_string(next_id++)));
+      addToWrites(writes, sets.back());
+    }
+    return sets;
+  }
+  std::pair<TypePtr, AliasInfo> parseType(std::vector<Symbol>& writes) {
     TypePtr value;
+    AliasInfo alias_info;
     if (L.cur().kind == '(') {
       std::vector<TypePtr> types;
+      std::vector<AliasInfo> alias_infos;
       parseList('(', ',', ')', [&]{
-        types.push_back(parseType());
+        auto r = parseType(writes);
+        types.push_back(std::move(r.first));
+        alias_infos.push_back(std::move(r.second));
       });
       value = TupleType::create(std::move(types));
+      alias_info = AliasInfo({}, std::move(alias_infos));
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
       L.next(); // Future
       L.expect('(');
-      TypePtr subtype = parseType();
+      auto p = parseType(writes);
+      auto subtype = std::move(p.first);
+      auto subalias = std::move(p.second);
       L.expect(')');
-      throw ErrorReport(L.cur()) << "Futures are not yet implemented";
+      value = FutureType::create(subtype);
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
+      L.next();
       value = DynamicType::get();
-      auto range = L.next().range; // Tensor
-      if(L.nextIf('(')) {
-        // optional 'alias set annotation'
-        auto bt = parseBaseType();
-        if (bt->kind() != TypeKind::VarType) {
-          throw ErrorReport(range)
-              << "expected type variable but found " << bt->str();
-        }
-        L.expect(')');
-        // annotation itself is currently unused
-      }
+      alias_info = AliasInfo(parseAliasAnnotation(writes));
     } else {
       value = parseBaseType();
     }
@@ -117,30 +145,31 @@ struct SchemaParser {
         L.next(); // [
         L.next(); // ]
         value = ListType::create(value);
+        alias_info = AliasInfo(parseAliasAnnotation(writes), {std::move(alias_info)});
       } else if(L.nextIf('?')) {
         value = OptionalType::create(value);
       } else {
         break;
       }
     }
-    return value;
+    return std::make_pair(std::move(value), std::move(alias_info));
   }
 
-  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
+  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only, std::vector<Symbol>& writes) {
     Argument result;
-    auto type = parseType();
+    auto p = parseType(writes);
+    auto type = std::move(p.first);
+    auto alias_info = std::move(p.second);
     c10::optional<int32_t> N;
     c10::optional<IValue> default_value;
+    c10::optional<std::string> alias_set;
     std::string name;
     if(L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
       type = ListType::create(type);
       N = std::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
-    }
-    if(L.nextIf('!')) {
-      // pass - currently ignored but will be used to annotate where we write to a
-      // tensor
+      alias_info = AliasInfo(parseAliasAnnotation(writes), {std::move(alias_info)});
     }
     if(is_return) {
       // optionally named return values
@@ -155,7 +184,7 @@ struct SchemaParser {
         default_value = parseDefaultValue(type, N);
       }
     }
-    return Argument(std::move(name), std::move(type), N, std::move(default_value), !is_return && kwarg_only);
+    return Argument(std::move(name), std::move(type), N, std::move(default_value), !is_return && kwarg_only, std::move(alias_info));
   }
   IValue parseSingleConstant(TypeKind kind) {
     switch(L.cur().kind) {
@@ -177,8 +206,8 @@ struct SchemaParser {
           return static_cast<int64_t>(at::Device::Type::CPU);
         } else if("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
-        } else if("ElementwiseMean" == text) {
-          return static_cast<int64_t>(Reduction::ElementwiseMean);
+        } else if("Mean" == text) {
+          return static_cast<int64_t>(Reduction::Mean);
         } else {
           throw ErrorReport(L.cur().range) << "invalid numeric default value";
         }
@@ -276,6 +305,7 @@ struct SchemaParser {
       L.expect(end);
   }
   Lexer L;
+  size_t next_id = 0;
 };
 
 } // namespace script

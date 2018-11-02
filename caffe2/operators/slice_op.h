@@ -25,15 +25,15 @@ bool SliceImpl(
 
   CAFFE_ENFORCE_EQ(starts.ndim(), 1);
   CAFFE_ENFORCE_EQ(ends.ndim(), 1);
-  CAFFE_ENFORCE_GE(data.ndim(), starts.size());
-  CAFFE_ENFORCE_EQ(starts.size(), ends.size());
+  CAFFE_ENFORCE_GE(data.ndim(), starts.numel());
+  CAFFE_ENFORCE_EQ(starts.numel(), ends.numel());
 
   std::vector<SIndex> starts_idx(data.ndim());
   std::vector<SIndex> ends_idx(data.ndim());
   std::vector<SIndex> dst_sizes(data.ndim());
 
   for (int i = 0; i < data.ndim(); ++i) {
-    if (i >= starts.size()) {
+    if (i >= starts.numel()) {
       starts_idx[i] = 0;
       ends_idx[i] = data.sizes()[i];
       continue;
@@ -66,11 +66,11 @@ bool SliceImpl(
     }
   }
 
-  if (data.size() <= 0) {
+  if (data.numel() <= 0) {
     // When the input is empty, we do not need to do copy.
     if (!backward) {
       output->Resize(dst_sizes);
-      output->raw_mutable_data(data.meta());
+      output->raw_mutable_data(data.dtype());
     }
     return true;
   }
@@ -107,11 +107,11 @@ bool SliceImpl(
     gdata->ResizeLike(data);
   }
 
-  size_t itemsize = data.meta().itemsize();
+  size_t itemsize = data.dtype().itemsize();
 
   if (!backward) {
     char* src_bytes = (char*)data.raw_data();
-    char* dst_bytes = (char*)output->raw_mutable_data(data.meta());
+    char* dst_bytes = (char*)output->raw_mutable_data(data.dtype());
 
     size_t src_nbytes = data.nbytes();
     size_t dst_nbytes = output->nbytes();
@@ -141,14 +141,14 @@ bool SliceImpl(
           static_cast<void*>(local_dst_offset_bytes + dst_block_size_bytes),
           static_cast<void*>(dst_bytes + dst_nbytes));
       context->CopyItemsSameDevice(
-          data.meta(),
+          data.dtype(),
           dst_block_size,
           (void*)local_src_offset_bytes,
           (void*)local_dst_offset_bytes);
     }
   } else {
     char* src_bytes = (char*)go->raw_data();
-    char* dst_bytes = (char*)gdata->raw_mutable_data(go->meta());
+    char* dst_bytes = (char*)gdata->raw_mutable_data(go->dtype());
 
     size_t src_nbytes = go->nbytes();
     size_t dst_nbytes = gdata->nbytes();
@@ -187,7 +187,7 @@ bool SliceImpl(
           local_dst_offset_bytes + src_block_size_bytes,
           dst_bytes + dst_nbytes);
       context->CopyItemsSameDevice(
-          go->meta(),
+          go->dtype(),
           src_block_size,
           (void*)local_src_offset_bytes,
           (void*)local_dst_offset_bytes);

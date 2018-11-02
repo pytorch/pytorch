@@ -28,9 +28,9 @@ class ReservoirSamplingOp final : public Operator<Context> {
 
     CAFFE_ENFORCE_GE(input.ndim(), 1);
 
-    bool output_initialized = output->size() > 0 &&
+    bool output_initialized = output->numel() > 0 &&
         (static_cast<std::shared_ptr<std::vector<TensorCPU>>*>(
-             output->raw_mutable_data(input.meta()))[0] != nullptr);
+             output->raw_mutable_data(input.dtype()))[0] != nullptr);
 
     if (output_initialized) {
       CAFFE_ENFORCE_EQ(output->ndim(), input.ndim());
@@ -47,7 +47,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
       auto dims = input.sizes().vec();
       dims[0] = 0;
       output->Resize(dims);
-      output->raw_mutable_data(input.meta());
+      output->raw_mutable_data(input.dtype());
       output->ReserveSpace(numToCollect_);
     }
 
@@ -71,7 +71,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
     }
 
     auto* num_visited_tensor = Output(NUM_VISITED);
-    CAFFE_ENFORCE_EQ(1, num_visited_tensor->size());
+    CAFFE_ENFORCE_EQ(1, num_visited_tensor->numel());
     auto* num_visited = num_visited_tensor->template mutable_data<int64_t>();
     if (!output_initialized) {
       *num_visited = 0;
@@ -91,10 +91,10 @@ class ReservoirSamplingOp final : public Operator<Context> {
     if (InputSize() > OBJECT_ID) {
       const auto& object_id = Input(OBJECT_ID);
       CAFFE_ENFORCE_EQ(object_id.ndim(), 1);
-      CAFFE_ENFORCE_EQ(object_id.size(), num_entries);
+      CAFFE_ENFORCE_EQ(object_id.numel(), num_entries);
       object_id_data = object_id.template data<int64_t>();
       unique_object_ids.insert(
-          object_id_data, object_id_data + object_id.size());
+          object_id_data, object_id_data + object_id.numel());
     }
 
     const auto num_new_entries = countNewEntries(unique_object_ids);
@@ -109,7 +109,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
     }
 
     auto* output_data =
-        static_cast<char*>(output->raw_mutable_data(input.meta()));
+        static_cast<char*>(output->raw_mutable_data(input.dtype()));
     auto* pos_to_object_data = pos_to_object
         ? pos_to_object->template mutable_data<int64_t>()
         : nullptr;
@@ -159,7 +159,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
       } else {
         // replace
         context_.CopyItemsSameDevice(
-            input.meta(),
+            input.dtype(),
             block_size,
             input_data + i * block_bytesize,
             output_data + pos * block_bytesize);

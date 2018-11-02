@@ -63,7 +63,7 @@ bool RemovePaddingOp<CPUContext>::DoRunWithType() {
   if (InputSize() > 1) {
     const auto& lengths = Input(1);
     lengths_ptr = lengths.data<int32_t>();
-    lengths_size = lengths.size();
+    lengths_size = lengths.numel();
   }
 
   auto* out = Output(0);
@@ -171,16 +171,16 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
   auto* out_lengths = Output(0);
   int needPadding = 0;
   int sumLen = 0;
-  for (int i = 0; i < lengths.size(); ++i) {
+  for (int i = 0; i < lengths.numel(); ++i) {
     if (lengthsPtr[i] == 0) {
       needPadding++;
     }
     sumLen += lengthsPtr[i];
   }
 
-  out_lengths->Resize(lengths.size());
+  out_lengths->Resize(lengths.numel());
   auto* outLengthsPtr = out_lengths->template mutable_data<int32_t>();
-  for (int i = 0; i < lengths.size(); ++i) {
+  for (int i = 0; i < lengths.numel(); ++i) {
     if (lengthsPtr[i] == 0) {
       outLengthsPtr[i] = 1;
     } else {
@@ -200,30 +200,30 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
     outDim.at(0) += needPadding;
     out_features->Resize(outDim);
     auto dst =
-        static_cast<char*>(out_features->raw_mutable_data(features.meta()));
+        static_cast<char*>(out_features->raw_mutable_data(features.dtype()));
     auto src_base = static_cast<const char*>(features.raw_data());
     // copy data and add padding index as zero
     Tensor zero{CPU};
     zero.Resize(block_size);
     auto zeroPtr =
-        static_cast<const char*>(zero.raw_mutable_data(features.meta()));
+        static_cast<const char*>(zero.raw_mutable_data(features.dtype()));
     int start_dest = 0;
     int start_src = 0;
-    for (int i = 0; i < lengths.size(); ++i) {
+    for (int i = 0; i < lengths.numel(); ++i) {
       if (lengthsPtr[i] == 0) {
         context_.CopyItemsSameDevice(
-            features.meta(),
+            features.dtype(),
             block_size,
             zeroPtr,
-            dst + start_dest * features.meta().itemsize());
+            dst + start_dest * features.dtype().itemsize());
         start_dest += block_size;
       } else {
-        auto src = src_base + start_src * features.meta().itemsize();
+        auto src = src_base + start_src * features.dtype().itemsize();
         context_.CopyItemsSameDevice(
-            features.meta(),
+            features.dtype(),
             lengthsPtr[i] * block_size,
             src,
-            dst + start_dest * features.meta().itemsize());
+            dst + start_dest * features.dtype().itemsize());
         start_src += lengthsPtr[i] * block_size;
         start_dest += lengthsPtr[i] * block_size;
       }

@@ -482,7 +482,7 @@ ModuleEncoder::ModuleEncoder(
     const script::Module &module,
     std::ostream& out)
     : EncoderBase(onnx_torch::OperatorExportTypes::RAW, false),
-      stream_writer_(out) {
+      stream_writer_(&out) {
   model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
   EncodeModule(model_proto_.mutable_graph(), module);
 }
@@ -573,8 +573,6 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("StringType");
   } else if (kind == TypeKind::VarType) {
     type_proto->set_denotation("TypeVar:" + type->expect<VarType>()->name());
-  } else if (kind == TypeKind::WorldType) {
-    type_proto->set_denotation("WorldType");
   } else {
     throw std::runtime_error("unexpected type kind");
   }
@@ -692,7 +690,7 @@ void ModuleEncoder::EncodeTensor(
       // NB: This new tensor is created to support cuda tensors.
       // Storages can be mutated when converting tensors from cuda to cpu,
       // and we need a cpu tensor to copy data from.
-      t = at::getType(tensor).tensor(
+      t = at::getType(tensor)._th_tensor(
           tensor.storage(),
           /* storageOffset = */ 0,
           /* size = */ { static_cast<int64_t>(tensor.storage().size()) },

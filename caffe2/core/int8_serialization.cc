@@ -30,19 +30,20 @@ class Int8TensorCPUSerializer : public BlobSerializerBase {
     proto.set_bias(tensor.zero_point);
     proto.set_is_signed(false);
 
-    const TensorProto::DataType data_type = TypeMetaToDataType(tensor.t.meta());
+    const TensorProto::DataType data_type =
+        TypeMetaToDataType(tensor.t.dtype());
     proto.set_data_type(data_type);
     switch (data_type) {
       case TensorProto_DataType_INT32:
         detail::CopyToProtoAsIs(
-            tensor.t.size(),
+            tensor.t.numel(),
             tensor.t.template data<int32_t>(),
             proto.mutable_data(),
             &this->context_);
         break;
       case TensorProto_DataType_UINT8:
         detail::CopyToProtoWithCast(
-            tensor.t.size(),
+            tensor.t.numel(),
             tensor.t.template data<uint8_t>(),
             proto.mutable_data(),
             &this->context_);
@@ -73,14 +74,14 @@ class Int8TensorCPUDeserializer : public TensorDeserializer {
     switch (proto.data_type()) {
       case TensorProto_DataType_INT32:
         detail::CopyFromProtoAsIs(
-            tensor->t.size(),
+            tensor->t.numel(),
             proto.data(),
             tensor->t.template mutable_data<int32_t>(),
             &this->context_);
         break;
       case TensorProto_DataType_UINT8:
         detail::CopyFromProtoWithCast(
-            tensor->t.size(),
+            tensor->t.numel(),
             proto.data(),
             tensor->t.template mutable_data<uint8_t>(),
             &this->context_);

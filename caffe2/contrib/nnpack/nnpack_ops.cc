@@ -131,7 +131,7 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
     CAFFE_ENFORCE(filter.dim32(1) == C / this->group_, "");
     CAFFE_ENFORCE(filter.dim32(2) == this->kernel_h(), "");
     CAFFE_ENFORCE(filter.dim32(3) == this->kernel_w(), "");
-    CAFFE_ENFORCE(bias.size() == M, "");
+    CAFFE_ENFORCE(bias.numel() == M, "");
 
     ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
     const int oH = Y->dim32(2), oW = Y->dim32(3);
@@ -180,8 +180,8 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
             kernel_size,
             output_subsample,
             X.template data<float>() + g * H * W * (C / group_),
-            filter.template data<float>() + filter.size() / group_ * g,
-            bias.template data<float>() + bias.size() / group_ * g,
+            filter.template data<float>() + filter.numel() / group_ * g,
+            bias.template data<float>() + bias.numel() / group_ * g,
             Y->template mutable_data<float>() + g * oH * oW * (M / group_),
             nnpack_threadpool(),
             nullptr);
@@ -199,8 +199,8 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
             padding,
             kernel_size,
             X.template data<float>() + g * H * W * (C / group_),
-            filter.template data<float>() + filter.size() / group_ * g,
-            bias.template data<float>() + bias.size() / group_ * g,
+            filter.template data<float>() + filter.numel() / group_ * g,
+            bias.template data<float>() + bias.numel() / group_ * g,
             Y->template mutable_data<float>() + g * oH * oW * (M / group_),
             nnpack_threadpool(),
             nullptr);
@@ -306,7 +306,7 @@ class NNPACKReluOp final : public Operator<CPUContext> {
     auto* Y = Output(0);
     const auto status = nnp_relu_output(
         1,
-        X.size(),
+        X.numel(),
         X.template data<float>(),
         Y->template mutable_data<float>(),
         0.0,
@@ -332,7 +332,7 @@ class NNPACKLeakyReluOp final : public LeakyReluOp<float, CPUContext> {
     auto* Y = Output(0);
     const auto status = nnp_relu_output(
         1,
-        X.size(),
+        X.numel(),
         X.template data<float>(),
         Y->template mutable_data<float>(),
         alpha_,

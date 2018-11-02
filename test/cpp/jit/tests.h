@@ -35,7 +35,7 @@
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/dynamic_dag.h"
-#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
@@ -667,8 +667,8 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
   graph->registerOutput(d.value());
   graph->registerOutput(e.value());
 
-  auto a_var = autograd::make_variable(at::CPU(at::kFloat).tensor(2, 2), true);
-  auto b_var = autograd::make_variable(at::CPU(at::kFloat).tensor(2, 2), false);
+  auto a_var = autograd::make_variable(at::empty_strided(2, 2, at::CPU(at::kFloat).options()), true);
+  auto b_var = autograd::make_variable(at::empty_strided(2, 2, at::CPU(at::kFloat).options()), false);
   setInputTypes(*graph, ArgumentSpec(true, {a_var, b_var}, 2));
   PropagateInputShapes(*graph);
   PropagateRequiresGrad(graph);
@@ -1149,20 +1149,18 @@ void testSchemaParser() {
                                             ->getElementType()
                                             ->expect<ListType>()
                                             ->getElementType()));
-  // futures
-  try {
-    parseSchema("at::what(Future(int) foo) -> ()");
-    ASSERT_TRUE(false);
-  } catch (script::ErrorReport& er) {
-    ASSERT_TRUE(
-        std::string(er.what()).find("Futures are not yet implemented") !=
-        std::string::npos);
-  }
+
   // named returns
   parseSchema("at::what(Tensor! i_will_be_written_to) -> ()");
   auto s3 = parseSchema("at::what() -> (Tensor the_return, Tensor the_return2)");
   ASSERT_TRUE(s3.returns().at(0).name() == "the_return");
   ASSERT_TRUE(s3.returns().at(1).name() == "the_return2");
+
+  // futures
+  auto s4 = parseSchema("at::what(Future(int) foo) -> ()");
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s4.arguments().at(0)
+                                          .type()->expect<FutureType>()
+                                          ->getElementType()));
 
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(t) foo) -> (Tensor(t))");
@@ -1411,6 +1409,244 @@ void testDynamicDAG() {
   testRemoveVertexBasic();
   testContractEdgeBasic();
   testContractEdgeCycleDetection();
+}
+
+// Fixture to set up a graph and make assertions clearer
+struct TopoMoveTestFixture {
+  TopoMoveTestFixture() {
+    createGraph();
+  }
+
+  // Nodes are named after their output.
+  // e.g. "a" is an alias for "the node that outputs the value `a`"
+  void createGraph() {
+    createNode("a", {});
+    createNode("b", {"a"});
+    createNode("c", {});
+    createNode("d", {"a", "b"});
+    createNode("e", {"c", "b"});
+    createNode("f", {"e"});
+    createNode("g", {"e"});
+    createNode("h", {"g"});
+    createNode("i", {"g"});
+    createNode("j", {"i"});
+    createNode("k", {"i"});
+    createNode("l", {"a"});
+    createNode("m", {}, {"l"}); // block depends on l
+    createNode("n", {"m"});
+    createNode("o", {"n"});
+    createNode("p", {});
+    createNode("q", {});
+    createNode("r", {"q"});
+    createNode("s", {"q"});
+
+    graph.lint();
+  }
+
+  void createNode(
+      const std::string& name,
+      const std::vector<std::string>& inputNames,
+      const std::vector<std::string>& blockInputNames = {}) {
+    std::vector<Value*> inputs;
+    for (const auto name : inputNames) {
+      inputs.push_back(nodes.at(name)->output());
+    }
+    auto node = graph.appendNode(graph.create(prim::Undefined, inputs));
+    node->output()->setUniqueName(name);
+    nodes[name] = node;
+
+    if (blockInputNames.size() != 0) {
+      node->addBlock();
+      std::vector<Value*> blockDeps;
+      for (const auto name : blockInputNames) {
+        blockDeps.push_back(nodes.at(name)->output());
+      }
+
+      auto block = node->blocks().at(0);
+      block->appendNode(graph.create(prim::Undefined, blockDeps));
+    }
+  }
+
+  bool moveBeforeTopologicallyValid(
+      const std::string& toInsert,
+      const std::string& insertPoint) {
+    std::function<bool(Node*, Node*)> func = [](Node* toInsert,
+                                                Node* insertPoint) {
+      return toInsert->moveBeforeTopologicallyValid(insertPoint);
+    };
+    return moveWithChecks(toInsert, insertPoint, func);
+  }
+
+  bool moveAfterTopologicallyValid(
+      const std::string& toInsert,
+      const std::string& insertPoint) {
+    std::function<bool(Node*, Node*)> func = [](Node* toInsert,
+                                                Node* insertPoint) {
+      return toInsert->moveAfterTopologicallyValid(insertPoint);
+    };
+    return moveWithChecks(toInsert, insertPoint, func);
+  }
+
+  bool moveWithChecks(
+      const std::string& toInsert,
+      const std::string& insertPoint,
+      std::function<bool(Node*, Node*)> func) {
+    auto n = nodes.at(toInsert);
+    auto insert = nodes.at(insertPoint);
+    bool isAfter = n->isAfter(insert);
+
+    std::vector<Node*> originalOrdering;
+    Node* original = isAfter ? n->next() : n->prev();
+
+    auto curNode = original;
+    while (curNode != n->owningBlock()->return_node()) {
+      originalOrdering.push_back(curNode);
+      if (isAfter) {
+        curNode = curNode->next();
+      } else {
+        curNode = curNode->prev();
+      }
+    }
+
+    const auto couldMove = func(n, insert);
+    // Check the graph is okay
+    graph.lint();
+
+    // If this is the picture of nodes
+    // <some nodes> ... toInsert ... <some more nodes> ... insertPoint
+    // ^----------^ check that these nodes haven't moved
+    curNode = original;
+    size_t idx = 0;
+    while (curNode != n->owningBlock()->return_node()) {
+      JIT_ASSERT(originalOrdering[idx] == curNode);
+      if (isAfter) {
+        curNode = curNode->next();
+      } else {
+        curNode = curNode->prev();
+      }
+      idx++;
+    }
+
+    return couldMove;
+  }
+
+  void checkPostCondition(
+      const std::string& toInsert,
+      const std::string& insertPoint,
+      bool after) {
+    if (after) {
+      JIT_ASSERT(nodes.at(toInsert)->prev() == nodes.at(insertPoint));
+    } else {
+      JIT_ASSERT(nodes.at(toInsert)->next() == nodes.at(insertPoint));
+    }
+  }
+
+  Graph graph;
+  std::unordered_map<std::string, Node*> nodes;
+};
+
+void testTopologicalMove() {
+  {
+    // Check that we are removing `this`'s deps properly when we need to split
+    // `this` and deps (see code for what the hell that means)
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("q", "s"));
+    fixture.checkPostCondition("q", "s", false);
+  }
+  // Move after
+  {
+    // Simple move backward
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveAfterTopologicallyValid("c", "a"));
+    fixture.checkPostCondition("c", "a", true);
+  }
+  {
+    // simple invalid move backward
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(!fixture.moveAfterTopologicallyValid("d", "a"));
+  }
+  {
+    // doesn't actually move anything
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveAfterTopologicallyValid("f", "e"));
+    fixture.checkPostCondition("f", "e", true);
+  }
+  {
+    // move backward with multiple dependencies
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveAfterTopologicallyValid("e", "c"));
+    fixture.checkPostCondition("e", "c", true);
+  }
+  {
+    // Move backward with non-zero working set
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveAfterTopologicallyValid("k", "f"));
+    fixture.checkPostCondition("k", "f", true);
+  }
+  {
+    // Simple move forward
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveAfterTopologicallyValid("c", "d"));
+    fixture.checkPostCondition("c", "d", true);
+  }
+  {
+    // Move forward with non-zero working set
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveAfterTopologicallyValid("f", "l"));
+    fixture.checkPostCondition("f", "l", true);
+  }
+
+  // Move before
+  {
+    // Simple move forward
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("b", "d"));
+    fixture.checkPostCondition("b", "d", false);
+  }
+  {
+    // Simple move backward
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("c", "a"));
+    fixture.checkPostCondition("c", "a", false);
+  }
+  {
+    // doesn't actually move anything
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("a", "b"));
+    fixture.checkPostCondition("a", "b", false);
+  }
+  {
+    // move forward with deps
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("f", "m"));
+    fixture.checkPostCondition("f", "m", false);
+  }
+  {
+    // move backward with deps
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("l", "f"));
+    fixture.checkPostCondition("l", "f", false);
+  }
+
+  // check that dependencies in blocks are recognized
+  {
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(!fixture.moveAfterTopologicallyValid("l", "m"));
+    JIT_ASSERT(!fixture.moveBeforeTopologicallyValid("m", "l"));
+    JIT_ASSERT(!fixture.moveAfterTopologicallyValid("n", "l"));
+    JIT_ASSERT(!fixture.moveBeforeTopologicallyValid("l", "n"));
+  }
+
+  // Test that moveAfter(n) and moveBefore(n->next()) are not necessarily
+  // equivalent. Here, the dependency ordering is n -> o -> p.  So we can't
+  // move `n` after `o`, but we can move `n` before `p` (which pushes `o` after
+  // `p`)
+  {
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(!fixture.moveAfterTopologicallyValid("n", "o"));
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("o", "p"));
+    fixture.checkPostCondition("o", "p", false);
+  }
 }
 } // namespace
 } // namespace jit

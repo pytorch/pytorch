@@ -53,16 +53,16 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   auto shape =
       data.sizes().vec(); // Shape of output is batch_size x max_len x ...
   shape[0] = max_length;
-  shape.insert(shape.begin(), lengths.size());
+  shape.insert(shape.begin(), lengths.numel());
   output->Resize(shape);
 
   // create output tensor
-  auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
+  auto* out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
 
   bool* presence_mask_data = nullptr;
   if (return_presence_mask_) {
     // Shape of presence is batch_size x max_len
-    std::vector<int64_t> presence_shape{lengths.size(), max_length};
+    std::vector<int64_t> presence_shape{lengths.numel(), max_length};
     presence_mask->Resize(presence_shape);
     presence_mask_data = presence_mask->template mutable_data<bool>();
   }
@@ -75,13 +75,13 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   // Do padding
   if (output->template IsType<float>()) {
     math::Set<float, CPUContext>(
-        output->size(),
+        output->numel(),
         padding_,
         output->template mutable_data<float>(),
         &context_);
   }
   if (return_presence_mask_) {
-    memset(presence_mask_data, (int)false, presence_mask->size());
+    memset(presence_mask_data, (int)false, presence_mask->numel());
   }
 
   auto block_size = data.size_from_dim(1);
@@ -90,7 +90,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   int64_t start = 0;
   for (int64_t i = 0; i < lengths.dim(0); ++i) {
     context_.CopyItemsSameDevice(
-        data.meta(),
+        data.dtype(),
         l[i] * block_size,
         d + block_bytesize * start,
         out + block_bytesize * max_length * i);
@@ -137,7 +137,7 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   shape[0] = total_l;
   output->Resize(shape);
   // create output tensor
-  auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
+  auto* out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
   if (!(data.dim(0) && data.dim(1))) {
     return true;
   }
@@ -147,7 +147,7 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   int64_t start = 0;
   for (int64_t i = 0; i < lengths.dim(0); ++i) {
     context_.CopyItemsSameDevice(
-        data.meta(),
+        data.dtype(),
         l[i] * block_size,
         d + block_bytesize * data.dim(1) * i,
         out + block_bytesize * start);

@@ -825,6 +825,51 @@ Example::
     tensor([-2.1763, -0.4713, -0.6986,  1.3702])
 """)
 
+add_docstr(torch.cholesky, r"""
+cholesky(a, upper=False, out=None) -> Tensor
+
+Computes the Cholesky decomposition of a symmetric positive-definite
+matrix :math:`A`.
+
+If :attr:`upper` is ``True``, the returned matrix `U` is upper-triangular, and
+the decomposition has the form:
+
+.. math::
+
+  A = U^TU
+
+If :attr:`upper` is ``False``, the returned matrix `L` is lower-triangular, and
+the decomposition has the form:
+
+.. math::
+
+    A = LL^T
+
+Args:
+    a (Tensor): the input 2-D tensor, a symmetric positive-definite matrix
+    upper (bool, optional): flag that indicates whether to return the
+                            upper or lower triangular matrix. Default: ``False``
+    out (Tensor, optional): the output matrix
+
+Example::
+
+    >>> a = torch.randn(3, 3)
+    >>> a = torch.mm(a, a.t()) # make symmetric positive definite
+    >>> l = torch.cholesky(a)
+    >>> a
+    tensor([[ 2.4112, -0.7486,  1.4551],
+            [-0.7486,  1.3544,  0.1294],
+            [ 1.4551,  0.1294,  1.6724]])
+    >>> l
+    tensor([[ 1.5528,  0.0000,  0.0000],
+            [-0.4821,  1.0592,  0.0000],
+            [ 0.9371,  0.5487,  0.7023]])
+    >>> torch.mm(l, l.t())
+    tensor([[ 2.4112, -0.7486,  1.4551],
+            [-0.7486,  1.3544,  0.1294],
+            [ 1.4551,  0.1294,  1.6724]])
+""")
+
 add_docstr(torch.clamp,
            r"""
 clamp(input, min, max, out=None) -> Tensor
@@ -1207,7 +1252,7 @@ Examples::
 
 add_docstr(torch.digamma,
            r"""
-digamma(input) -> Tensor
+digamma(input, out=None) -> Tensor
 
 Computes the logarithmic derivative of the gamma function on `input`.
 
@@ -1989,15 +2034,18 @@ add_docstr(torch.inverse,
            r"""
 inverse(input, out=None) -> Tensor
 
-Takes the inverse of the square matrix :attr:`input`.
+Takes the inverse of the square matrix :attr:`input`. :attr:`input` can be batches
+of 2D square tensors, in which case this function would return a tensor composed of
+individual inverses.
 
 .. note::
 
-    Irrespective of the original strides, the returned matrix will be
-    transposed, i.e. with strides `(1, m)` instead of `(m, 1)`
+    Irrespective of the original strides, the returned tensors will be
+    transposed, i.e. with strides like `input.contiguous().transpose(-2, -1).strides()`
 
 Args:
-    input (Tensor): the input 2-D square tensor
+    input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+                    batch dimensions
     out (Tensor, optional): the optional output tensor
 
 Example::
@@ -2010,9 +2058,14 @@ Example::
             [ 0.0000,  1.0000,  0.0000,  0.0000],
             [ 0.0000,  0.0000,  1.0000,  0.0000],
             [ 0.0000, -0.0000, -0.0000,  1.0000]])
-    >>> torch.max(torch.abs(z - torch.eye(4))) # Max nonzero
-    tensor(1.00000e-07 *
-           1.1921)
+    >>> torch.max(torch.abs(z - torch.eye(4))) # Max non-zero
+    tensor(1.1921e-07)
+    >>> # Batched inverse example
+    >>> x = torch.randn(2, 3, 4, 4)
+    >>> y = torch.inverse(x)
+    >>> z = torch.matmul(x, y)
+    >>> torch.max(torch.abs(z - torch.eye(4).expand_as(x))) # Max non-zero
+    tensor(1.9073e-06)
 """)
 
 add_docstr(torch.kthvalue,
@@ -2400,7 +2453,8 @@ Returns the matrix raised to the power :attr:`n` for square matrices.
 For batch of matrices, each individual matrix is raised to the power :attr:`n`.
 
 If :attr:`n` is negative, then the inverse of the matrix (if invertible) is
-raised to the power :attr:`n`. If :attr:`n` is 0, then an identity matrix
+raised to the power :attr:`n`.  For a batch of matrices, the batched inverse
+(if invertible) is raised to the power :attr:`n`. If :attr:`n` is 0, then an identity matrix
 is returned.
 
 Args:
@@ -3240,51 +3294,6 @@ Args:
 
 """)
 
-add_docstr(torch.potrf, r"""
-potrf(a, upper=True, out=None) -> Tensor
-
-Computes the Cholesky decomposition of a symmetric positive-definite
-matrix :math:`A`.
-
-If :attr:`upper` is ``True``, the returned matrix `U` is upper-triangular, and
-the decomposition has the form:
-
-.. math::
-
-  A = U^TU
-
-If :attr:`upper` is ``False``, the returned matrix `L` is lower-triangular, and
-the decomposition has the form:
-
-.. math::
-
-    A = LL^T
-
-Args:
-    a (Tensor): the input 2-D tensor, a symmetric positive-definite matrix
-    upper (bool, optional): flag that indicates whether to return the
-                            upper or lower triangular matrix
-    out (Tensor, optional): the output matrix
-
-Example::
-
-    >>> a = torch.randn(3, 3)
-    >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.potrf(a)
-    >>> a
-    tensor([[ 2.4112, -0.7486,  1.4551],
-            [-0.7486,  1.3544,  0.1294],
-            [ 1.4551,  0.1294,  1.6724]])
-    >>> u
-    tensor([[ 1.5528, -0.4821,  0.9371],
-            [ 0.0000,  1.0592,  0.5486],
-            [ 0.0000,  0.0000,  0.7023]])
-    >>> torch.mm(u.t(), u)
-    tensor([[ 2.4112, -0.7486,  1.4551],
-            [-0.7486,  1.3544,  0.1294],
-            [ 1.4551,  0.1294,  1.6724]])
-""")
-
 add_docstr(torch.potri, r"""
 potri(u, upper=True, out=None) -> Tensor
 
@@ -3313,7 +3322,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.potrf(a)
+    >>> u = torch.cholesky(a)
     >>> a
     tensor([[  0.9935,  -0.6353,   1.5806],
             [ -0.6353,   0.8769,  -1.7183],
@@ -3358,7 +3367,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.potrf(a)
+    >>> u = torch.cholesky(a)
     >>> a
     tensor([[ 0.7747, -1.9549,  1.3086],
             [-1.9549,  6.7546, -5.4114],

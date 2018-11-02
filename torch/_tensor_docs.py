@@ -525,6 +525,13 @@ ceil_() -> Tensor
 In-place version of :meth:`~Tensor.ceil`
 """)
 
+add_docstr_all('cholesky',
+               r"""
+cholesky(upper=False) -> Tensor
+
+See :func:`torch.cholesky`
+""")
+
 add_docstr_all('clamp',
                r"""
 clamp(min, max) -> Tensor
@@ -1619,13 +1626,6 @@ Example:
     torch.Size([5, 2, 3])
 """)
 
-add_docstr_all('potrf',
-               r"""
-potrf(upper=True) -> Tensor
-
-See :func:`torch.potrf`
-""")
-
 add_docstr_all('potri',
                r"""
 potri(upper=True) -> Tensor
@@ -2458,6 +2458,30 @@ add_docstr_all('topk',
 topk(k, dim=None, largest=True, sorted=True) -> (Tensor, LongTensor)
 
 See :func:`torch.topk`
+""")
+
+add_docstr_all('to_sparse',
+               r"""
+to_sparse(sparseDims) -> Tensor
+Returns a sparse copy of the tensor.  PyTorch supports sparse tensors in
+:ref:`coordinate format <sparse-docs>`.
+Args:
+    sparseDims (int, optional): the number of sparse dimensions to include in the new sparse tensor
+Example::
+    >>> d = torch.tensor([[0, 0, 0], [9, 0, 10], [0, 0, 0]])
+    >>> d
+    tensor([[ 0,  0,  0],
+            [ 9,  0, 10],
+            [ 0,  0,  0]])
+    >>> d.to_sparse()
+    tensor(indices=tensor([[1, 1],
+                           [0, 2]]),
+           values=tensor([ 9, 10]),
+           size=(3, 3), nnz=2, layout=torch.sparse_coo)
+    >>> d.to_sparse(1)
+    tensor(indices=tensor([[1]]),
+           values=tensor([[ 9,  0, 10]]),
+           size=(3, 3), nnz=1, layout=torch.sparse_coo)
 """)
 
 add_docstr_all('trace',

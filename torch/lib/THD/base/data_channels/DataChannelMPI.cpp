@@ -140,7 +140,7 @@ at::Tensor DataChannelMPI::_newLikeFlat(
   if (tensors.size() == 0)
     throw std::runtime_error("received an empty list");
   auto& t = tensors[0];
-  at::DeviceGuard gpu_guard(t.is_cuda() ? t.get_device() : -1);
+  at::DeviceGuard gpu_guard(t.device());
   std::vector<int64_t> sizes{static_cast<int64_t>(
       tensors.size())}; // sizes = [output.size()] + input.sizes()
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());

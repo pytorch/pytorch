@@ -63,9 +63,7 @@ struct C10_EXPORT List : c10::intrusive_ptr_target {
   }
 };
 
-struct World {
-  int64_t world_id;
-};
+struct Future;
 
 struct C10_EXPORT Tuple : public List<IValue> {
   using List<IValue>::List;
@@ -102,7 +100,7 @@ using GenericList = List<IValue>;
   _(TensorList) \
   _(Blob) \
   _(GenericList) \
-  _(World) \
+  _(Future) \
 
 struct CAFFE2_API IValue final {
   IValue()
@@ -211,15 +209,17 @@ struct CAFFE2_API IValue final {
     return payload.as_double;
   }
 
-  // World
-  IValue(ivalue::World w)
-  : tag(Tag::World), is_intrusive_ptr(false) {
-    payload.as_world = w;
+  // Future
+  IValue(c10::intrusive_ptr<ivalue::Future> v);
+  IValue(ivalue::Future&& future);
+  bool isFuture() const { return Tag::Future == tag; }
+  c10::intrusive_ptr<ivalue::Future> toFuture() && {
+    AT_ASSERT(isFuture());
+    return moveToIntrusivePtr<ivalue::Future>();
   }
-  bool isWorld() const { return Tag::World == tag; }
-  ivalue::World toWorld() const {
-    AT_ASSERT(isWorld());
-    return payload.as_world;
+  c10::intrusive_ptr<ivalue::Future> toFuture() const & {
+    AT_ASSERT(isFuture());
+    return toIntrusivePtr<ivalue::Future>();
   }
 
   // Int
@@ -338,7 +338,7 @@ struct CAFFE2_API IValue final {
   }
 
   // None
-  bool isNone() {
+  bool isNone() const {
     return Tag::None == tag;
   }
   std::string toNone() const {
@@ -353,7 +353,7 @@ struct CAFFE2_API IValue final {
       *this = s.toLong();
     }
   }
-  bool isScalar() {
+  bool isScalar() const {
     return isDouble() || isInt() || isBool();
   }
   at::Scalar toScalar() const {
@@ -392,6 +392,9 @@ struct CAFFE2_API IValue final {
 
   template<typename T>
   optional<T> toOptional();
+
+  // this is a shallow comparison of two IValues to test the object identity
+  bool isSameIdentity(IValue& rhs);
 
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
@@ -433,10 +436,26 @@ struct CAFFE2_API IValue final {
     double as_double;
     bool as_bool;
     c10::intrusive_ptr_target* as_intrusive_ptr;
-    ivalue::World as_world;
   } payload;
   Tag tag;
   bool is_intrusive_ptr;
+};
+
+// Future
+struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
+  explicit Future(IValue result_) : result(result_), ready(true) {}
+
+  IValue get() const {
+    AT_ASSERT(ready);
+    return result;
+  }
+
+  CAFFE2_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const Future& v);
+
+  IValue result;
+  bool ready = false;
 };
 
 #undef TORCH_FORALL_TAGS
@@ -468,7 +487,7 @@ DEFINE_TO(std::vector<bool>, toBoolListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
 DEFINE_TO(std::vector<IValue>, toGenericListRef)
 DEFINE_TO(std::string, toStringRef)
-DEFINE_TO(ivalue::World, toWorld)
+DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(IValue, toIValue)
 
 #undef DEFINE_TO
@@ -549,6 +568,13 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericList> v)
 inline IValue::IValue(std::vector<IValue> v)
 : IValue(ivalue::GenericList::create(std::move(v))) {}
 
+inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
+: tag(Tag::Future), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+inline IValue::IValue(ivalue::Future&& future)
+: IValue(c10::make_intrusive<ivalue::Future>(std::move(future))) {}
+
 
 inline const std::vector<int64_t>& IValue::toIntListRef() const {
   return toIntList()->elements();
@@ -581,5 +607,25 @@ inline optional<T> IValue::toOptional() {
   }
   return this->to<T>();
 }
+
+inline bool IValue::isSameIdentity(IValue& rhs) {
+  // We choose to not use memcmp for payload check due to potenntial random padding characters on union type
+
+  // Semantics:
+  // 1. None is None, False is False, and True is True are all true
+  // 2. If it is a reference type (i.e. is_intrusive_ptr), then is is True when the pointed-to object is the same.
+  // 3. False for all other comparisons.
+  if (this->isNone() && rhs.isNone()) {
+    return true;
+  } else if (this->isBool() && rhs.isBool()) {
+    // for bool type, do equality check
+    return this->toBool() == rhs.toBool();
+  } else {
+    // for objects holding in IValue, do shallow compare on pointer address to testify the identity
+    return this->is_intrusive_ptr && rhs.is_intrusive_ptr
+        && this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+  }
+}
+
 
 } // namespace c10

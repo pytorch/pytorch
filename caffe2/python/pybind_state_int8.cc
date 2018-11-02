@@ -35,7 +35,7 @@ class Int8TensorFetcher : public BlobFetcherBase {
 #ifdef USE_NUMPY
     const caffe2::int8::Int8TensorCPU& src =
         blob.template Get<caffe2::int8::Int8TensorCPU>();
-    const int numpy_type = CaffeToNumpyType(src.t.meta());
+    const int numpy_type = CaffeToNumpyType(src.t.dtype());
     CAFFE_ENFORCE(numpy_type != -1, "Int8Tensor contains unknown type data");
     std::vector<npy_intp> npy_dims;
     for (const auto dim : src.t.sizes()) {

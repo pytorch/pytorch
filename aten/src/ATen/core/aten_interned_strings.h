@@ -82,9 +82,10 @@ _(aten, _fused_dropout) \
 _(aten, _ger) \
 _(aten, _gesv_helper) \
 _(aten, _gesv_single) \
-_(aten, _getri) \
+_(aten, _getri_single) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
+_(aten, _inverse_helper) \
 _(aten, _linspace) \
 _(aten, _local_scalar) \
 _(aten, _local_scalar_dense) \
@@ -187,6 +188,7 @@ _(aten, adaptive_max_pool3d) \
 _(aten, adaptive_max_pool3d_backward) \
 _(aten, adaptive_max_pool3d_forward) \
 _(aten, add) \
+_(aten, add_) \
 _(aten, addbmm) \
 _(aten, addcdiv) \
 _(aten, addcmul) \
@@ -235,12 +237,14 @@ _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
 _(aten, chain_matmul) \
+_(aten, cholesky) \
 _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \
 _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
+_(aten, constant_pad_nd) \
 _(aten, contiguous) \
 _(aten, conv1d) \
 _(aten, conv2d) \
@@ -286,6 +290,7 @@ _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
 _(aten, div) \
+_(aten, div_) \
 _(aten, dot) \
 _(aten, dropout) \
 _(aten, eig) \
@@ -464,6 +469,7 @@ _(aten, mse_loss) \
 _(aten, mse_loss_backward) \
 _(aten, mse_loss_forward) \
 _(aten, mul) \
+_(aten, mul_) \
 _(aten, multi_margin_loss) \
 _(aten, multi_margin_loss_backward) \
 _(aten, multi_margin_loss_forward) \
@@ -475,8 +481,6 @@ _(aten, mv) \
 _(aten, mvlgamma) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
-_(aten, native_batch_norm) \
-_(aten, native_batch_norm_backward) \
 _(aten, native_clone) \
 _(aten, native_get_device) \
 _(aten, native_norm) \
@@ -510,7 +514,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
-_(aten, potrf) \
 _(aten, potri) \
 _(aten, potrs) \
 _(aten, pow) \
@@ -612,6 +615,8 @@ _(aten, storage_offset) \
 _(aten, stride) \
 _(aten, strides) \
 _(aten, sub) \
+_(aten, sub_) \
+_(aten, rsub) \
 _(aten, sum) \
 _(aten, svd) \
 _(aten, symeig) \
@@ -628,6 +633,9 @@ _(aten, th_pow) \
 _(aten, th_resize_as) \
 _(aten, th_tensor) \
 _(aten, th_zero) \
+_(aten, thnn_batch_norm) \
+_(aten, thnn_batch_norm_backward) \
+_(aten, thnn_batch_norm_forward) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
@@ -652,6 +660,7 @@ _(aten, thnn_conv_transpose3d_forward) \
 _(aten, threshold) \
 _(aten, threshold_backward) \
 _(aten, to) \
+_(aten, to_sparse) \
 _(aten, to_dense) \
 _(aten, topk) \
 _(aten, trace) \

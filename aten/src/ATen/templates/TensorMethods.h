@@ -59,8 +59,8 @@ inline bool Tensor::is_variable() const noexcept {
   return type().is_variable();
 }
 
-inline ScalarType Tensor::dtype() const noexcept {
-  return type().scalarType();
+inline caffe2::TypeMeta Tensor::dtype() const noexcept {
+  return impl_->dtype();
 }
 
 inline Layout Tensor::layout() const noexcept {
