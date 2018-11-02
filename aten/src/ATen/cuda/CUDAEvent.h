@@ -61,6 +61,7 @@ struct AT_CUDA_API CUDAEvent {
   int64_t device() const { return device_index_; }
   cudaEvent_t event() const { return event_; }
 
+  // Note: cudaEventQuery can be safely called from any device
   bool happened() const {
     return (was_recorded_ && cudaEventQuery(event_) == cudaSuccess);
   }

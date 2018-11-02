@@ -99,12 +99,9 @@ bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
 
 // Helper that checks if the NCCL kernels are completed on the GPUs
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() const {
-  at::cuda::CUDAGuard gpuGuard;
   for (size_t i = 0; i < devices_.size(); ++i) {
-    gpuGuard.set_index(devices_[i].index());
-    auto& cudaEvent = cudaEvents_[i];
     // Checking the work's corresponding CUDA events' status
-    auto ret = cudaEventQuery(cudaEvent);
+    auto ret = cudaEventQuery(cudaEvents_[i]);
     if (ret != cudaSuccess && ret != cudaErrorNotReady) {
       C10D_CUDA_CHECK(ret);
     }
