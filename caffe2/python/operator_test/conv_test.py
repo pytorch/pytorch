@@ -337,7 +337,7 @@ class TestConvolution(serial.SerializedTestCase):
                                  gc, dc):
         if hiputl.run_in_hip(gc, dc):
             # currently miopen only supports 2d conv
-            assume(engine != 'CUDNN') # CUDNN is aliased to MIOPEN for HIP
+            assume(engine != 'CUDNN')  # CUDNN is aliased to MIOPEN for HIP
 
         self._nd_convolution_nchw(
             1, input_channels, output_channels, batch_size, stride, size,
