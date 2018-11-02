@@ -1,6 +1,5 @@
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/passes/annotate_effects.h"
 #include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/interpreter.h"
@@ -404,12 +403,15 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-static inline bool isIntUsedAsIntList(
+static inline bool isIntOrFloatUsedAsList(
     const Value* value,
     const Argument& arg) {
-  // Look for int[N]
-  return value->type()->kind() == TypeKind::IntType &&
-         *arg.type() == *ListType::ofInts() && arg.N();
+  // Look for int[N] or float[N]
+  auto v_type = value->type();
+  if (v_type != FloatType::get() && v_type != IntType::get())
+    return false;
+  auto list_type = arg.type()->cast<ListType>();
+  return list_type && list_type->getElementType() == v_type && arg.N();
 }
 
 inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
@@ -441,12 +443,12 @@ Value* tryMatchArgument(
     TypeEnv & type_env) {
   Value* value = named_value.value(graph);
 
-  // some functions that take lists of integers for fixed size arrays
-  // also allow single ints to be passed in their place.
-  // the single int is then repeated to the length of the list
-  if (isIntUsedAsIntList(value, arg)) {
+  // some functions that take lists of integers or floats for fixed size arrays
+  // also allow single ints/floats to be passed in their place.
+  // the single int/float is then repeated to the length of the list
+  if (isIntOrFloatUsedAsList(value, arg)) {
     std::vector<Value*> repeated(*arg.N(), value);
-    value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
+    value = graph.insertNode(graph.createList(value->type(), repeated))->output();
   }
 
   TypePtr concrete_type;
@@ -542,30 +544,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
     const SourceRange& loc,
     Graph& graph,
     c10::optional<NamedValue> self,
-    at::ArrayRef<NamedValue> raw_args,
+    at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     std::ostream& failure_messages,
     bool convert_tensors_to_nums) {
-  // Match against a potentially mutable schema.
-  //
-  // We need to treat mutable schemas differently because the IR explicitly
-  // expresses effects by including a world token in mutable ops. Users do not
-  // know about the world token, so we need to generate a dummy one and add
-  // it to the inputs for schema matching.
-  //
-  // Example:
-  //   append(int[] list, int el)
-  // becomes
-  //   append(World w, int[] list, int el)
-  //
-  // NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
-  // necessary to enforce linearization on effectful ops.
-  std::vector<NamedValue> modifiedArgs(raw_args.begin(), raw_args.end());
-  if (schema.has_world_token()) {
-    // Add a dummy world token to be matched against
-    const auto worldToken = graph.insertDummyWorld();
-    modifiedArgs.insert(modifiedArgs.begin(), worldToken);
-  }
   auto err = [&]() -> std::ostream& {
     failure_messages << "\nfor operator " << schema << ":\n";
     return failure_messages;
@@ -583,7 +565,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (arg.name() == "self" && self) {
       v = self;
       self = c10::nullopt;
-    } else if (!arg.kwarg_only() && used_args < modifiedArgs.size()) {
+    } else if (!arg.kwarg_only() && used_args < args.size()) {
       // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
       if (arg.type()->kind() == TypeKind::ListType && // the formal must be a list
           !arg.N() && // it must not be a broadcasting list like int[3], otherwise
@@ -591,7 +573,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
           (schema_i + 1 == schema.arguments().size() ||
            schema.arguments()[schema_i + 1]
                .kwarg_only())) { // must be the last position argument
-        auto actual_type = modifiedArgs[used_args].value(graph)->type();
+        auto actual_type = args[used_args].value(graph)->type();
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(
                 actual_type,
@@ -601,19 +583,19 @@ c10::optional<MatchedSchema> tryMatchSchema(
               elem_type,
               graph,
               loc,
-              at::ArrayRef<NamedValue>(modifiedArgs).slice(used_args),
+              at::ArrayRef<NamedValue>(args).slice(used_args),
               err,
               convert_tensors_to_nums,
               type_env);
           if (!list)
             return c10::nullopt;
-          used_args = modifiedArgs.size();
+          used_args = args.size();
           positional_inputs.push_back(list);
           continue;
         }
       }
 
-      v = modifiedArgs[used_args];
+      v = args[used_args];
       used_args++;
     } else if (auto idx = findInputWithName(arg.name(), kwargs)) {
       const NamedValue& nv = kwargs[*idx];
@@ -642,7 +624,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (schema.is_vararg() && schema_i == schema.arguments().size() - 1) {
       // Freeze iteration to the last argument in the schema and keep going for
       // all of the provided arguments
-      if (used_args < modifiedArgs.size()) {
+      if (used_args < args.size()) {
         schema_i--;
       }
     }
@@ -653,9 +635,9 @@ c10::optional<MatchedSchema> tryMatchSchema(
   }
 
   // check for unused positional arguments
-  if (used_args < modifiedArgs.size()) {
+  if (used_args < args.size()) {
     err() << "expected at most " << used_args << " arguments "
-          << "but found " << modifiedArgs.size() << " positional arguments.\n"
+          << "but found " << args.size() << " positional arguments.\n"
           << loc << "\n";
     return c10::nullopt;
   }
@@ -897,8 +879,6 @@ struct to_ir {
     }
 
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
-    // annotate effects to prevent reordering
-    AnnotateEffects(graph);
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(graph);
     ConstantPooling(graph);
@@ -957,7 +937,10 @@ private:
         }
         break;
         case TK_RAISE:
-          emitRaise(Raise(stmt));
+          emitRaise(Raise(stmt).range());
+          break;
+        case TK_ASSERT:
+          emitAssert(Assert(stmt));
           break;
         case TK_RETURN:
           throw ErrorReport(stmt) << "return statements can appear only at the end "
@@ -1318,11 +1301,26 @@ private:
   // else
   //   raise Exception("Hi")
   // print(a)
-  void emitRaise(const Raise& stmt) {
+  void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
-    auto string_input = insertConstant(*graph, exception, stmt.range());
+    auto string_input = insertConstant(*graph, exception, loc);
     graph->insertNode(graph->create(prim::RaiseException, {string_input}, 0)
-                        ->setSourceLocation(std::make_shared<SourceRange>(stmt.range())));
+                        ->setSourceLocation(std::make_shared<SourceRange>(loc)));
+  }
+
+  void emitAssert(const Assert& stmt) {
+    Value* cond_value = emitCond(stmt.test());
+    Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
+
+    n->addInput(cond_value);
+    /* true_block =*/n->addBlock();
+    auto* false_block = n->addBlock();
+
+    //if assert test is false throw exception
+    pushFrame(false_block);
+    WithInsertPoint guard(false_block);
+    emitRaise(stmt.range());
+    popFrame();
   }
 
 
@@ -1464,6 +1462,10 @@ private:
         return aten::__and__;
       case TK_OR:
         return aten::__or__;
+      case TK_IS:
+        return aten::__is__;
+      case TK_ISNOT:
+        return aten::__isnot__;
       case TK_NOT:
         return aten::__not__;
       default:
@@ -1644,6 +1646,8 @@ private:
     switch (tree->kind()) {
       case '@':
       case TK_POW:
+      case TK_IS:
+      case TK_ISNOT:
       case TK_NOT:
       case TK_NE:
       case TK_EQ:
@@ -2166,15 +2170,66 @@ TypePtr parseTypeFromExpr(Expr expr) {
                                   << " cannot be used in a type expression";
 }
 
+
+c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
+  if (expr.kind() != TK_SUBSCRIPT)
+    return c10::nullopt;
+  auto subscript = Subscript(expr);
+  if (subscript.value().kind() != TK_VAR)
+    return c10::nullopt;
+  auto var = Var(subscript.value());
+  if (var.name().name() != "BroadcastingList")
+    return c10::nullopt;
+  if (subscript.subscript_exprs().size() != 2)
+    throw ErrorReport(subscript.subscript_exprs().range())
+      << "BroadcastingList must be subscripted by type & len";
+
+  auto typ = subscript.subscript_exprs()[0];
+  auto len = subscript.subscript_exprs()[1];
+
+  if (typ.kind() != TK_VAR)
+    throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
+
+  auto value_name = Var(typ).name().name();
+  if (value_name != "float" && value_name != "int")
+    throw ErrorReport(subscript.value().range()) << "Broadcastable lists only supported for int or float";
+
+  auto elem_ptr = ident_to_type_lut().find(value_name);
+  JIT_ASSERT(elem_ptr != ident_to_type_lut().end());
+  TypePtr list_ptr = ListType::create(elem_ptr->second);
+  if (len.kind () != TK_CONST)
+    throw ErrorReport(expr) << "subscript of Broadcastable list must be positive integer";
+
+  auto constant = Const(len);
+  if (!constant.isIntegral() || constant.asIntegral() <= 0)
+    throw ErrorReport(len) << "subscript of Broadcastable list must be positive integer";
+
+  auto len_v = constant.asIntegral();
+  return std::pair<TypePtr, int32_t>(list_ptr, len_v);
+}
+
 std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
   std::vector<Argument> retval;
   size_t i = is_method ? 1 : 0;
   for (; i < decl.params().size(); ++i) {
     auto decl_arg = decl.params()[i];
+
+    TypePtr type;
+    c10::optional<int32_t> N;
+
+    //BroadcastList list can only appear at the argument level
+    if (auto maybe_broad_list = handleBroadcastList(decl_arg.type())) {
+      type = maybe_broad_list->first;
+      N = maybe_broad_list->second;
+    } else {
+      type = parseTypeFromExpr(decl_arg.type());
+      N = c10::nullopt;
+    }
+
     auto arg = Argument(
         decl_arg.ident().name(),
-        parseTypeFromExpr(decl_arg.type()),
-        /*N =*/c10::nullopt,
+        type,
+        N,
         /*default_value =*/c10::nullopt,
         /*kwarg_only =*/false);
     retval.push_back(arg);
@@ -2184,6 +2239,8 @@ std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
 
 std::vector<Argument> parseReturnsFromDecl(Decl decl) {
   JIT_ASSERT(decl.return_type().present());
+  if (handleBroadcastList(decl.return_type().get()))
+    throw ErrorReport(decl.return_type().range()) << "Broadcastable lists cannot appear as a return type";
   auto parsed_type = parseTypeFromExpr(decl.return_type().get());
   if (auto tuple_type = parsed_type->cast<TupleType>()) {
     // Flatten a single return type of type Tuple into its constituent types

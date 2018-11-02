@@ -67,7 +67,7 @@ struct C10_API DeviceGuardImplInterface {
    * Intended use of this class is to leak the DeviceGuardImpl at program end.
    * So you better not call the destructor, buster!
    */
-  virtual ~DeviceGuardImplInterface() {}
+  virtual ~DeviceGuardImplInterface() = default;
 };
 
 // The registry is NON-owning.  Each stored pointer is std::atomic so

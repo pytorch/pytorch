@@ -42,10 +42,13 @@ namespace script {
 //       |     Le                                                       TK_LE
 //       |     Ge                                                       TK_GE
 //       |     Ne                                                       TK_NE
+//       |     Is                                                       TK_IS
+//       |     IsNot                                                    TK_ISNOT
 //       |     Add                                                      '+'
 //       |     Sub                                                      '-'
 //       |     Mul                                                      '*'
 //       |     Div                                                      '/'
+//       |     Mod                                                      '%'
 //       |     MatMult                                                  '@'
 //       |     Pow                                                      TK_POW
 //       | UnaryOp(Expr expr)
@@ -210,6 +213,7 @@ struct Stmt : public TreeView {
       case TK_RETURN:
       case TK_EXPR_STMT:
       case TK_RAISE:
+      case TK_ASSERT:
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Stmt";
@@ -225,6 +229,8 @@ struct Expr : public TreeView {
       case TK_OR:
       case '<':
       case '>':
+      case TK_IS:
+      case TK_ISNOT:
       case TK_EQ:
       case TK_LE:
       case TK_GE:
@@ -478,6 +484,24 @@ struct Raise : public Stmt {
   }
 };
 
+struct Assert : public Stmt {
+  explicit Assert(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_ASSERT);
+  }
+  Expr test() const {
+    return Expr(subtree(0));
+  }
+  Maybe<Expr> msg() const {
+    return Maybe<Expr>(subtree(1));
+  }
+  static Assert create(
+      const SourceRange& range,
+      const Expr& test,
+      const Maybe<Expr>& msg) {
+    return Assert(Compound::create(TK_ASSERT, range, {test, msg}));
+  }
+};
+
 
 struct ExprStmt : public Stmt {
   explicit ExprStmt(const TreeRef& tree) : Stmt(tree) {
@@ -503,6 +527,8 @@ struct BinOp : public Expr {
       case TK_OR:
       case '<':
       case '>':
+      case TK_IS:
+      case TK_ISNOT:
       case TK_EQ:
       case TK_LE:
       case TK_GE:

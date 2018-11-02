@@ -29,8 +29,11 @@ namespace detail {
 template <typename T>
 class InlineDeviceGuard {
 public:
-  /// Default constructor, does nothing.
-  explicit InlineDeviceGuard() {}
+  /// Default constructor, reads the current device so that
+  /// we may reset the device to the current device on destruction.
+  explicit InlineDeviceGuard() {
+    initialize();
+  }
 
   /// Set the current device to the passed Device.
   explicit InlineDeviceGuard(Device device) {
@@ -41,10 +44,9 @@ public:
   explicit InlineDeviceGuard(optional<Device> device_opt) {
     if (device_opt.has_value()) {
       set_device(device_opt.value());
+    } else {
+      initialize()
     }
-#ifdef DEBUG
-    initialize_if_needed();
-#endif
   }
 
   /// Set the current device index to the passed DeviceIndex.  (The
@@ -68,36 +70,27 @@ public:
   /// moved-from `InlineDeviceGuard` is modified such that its destruction has no
   /// effect (does not reset the device).
   InlineDeviceGuard& operator=(InlineDeviceGuard<T>&& other) noexcept {
-    initialized_ = other.initialized_;
     original_device_ = other.original_device_;
     current_device_ = other.current_device_;
-    other.initialized_ = false;
+    other.original_device_ = DeviceType::CPU;
+    other.current_device_ = DeviceType::CPU;
     return *this;
   } 
 
   ~InlineDeviceGuard() {
-    debug_sanity_check();
-    if (initialized_ && original_device_ != current_device_) {
-      T().uncheckedSetDevice(original_device_);
-    }
+    if (original_device_ == DeviceType::CPU) return;
+    // if (original_device_ == current_device_) return;
+    T().uncheckedSetDevice(original_device_);
   }
 
   /// Sets the device to the given one.
   void set_device(at::Device device) {
-    debug_sanity_check();
     auto index = device.index();
     if (index == -1) return;
     AT_ASSERT(index >= 0);
-    if (initialized_) {
-      if (current_device_ != device) {
-        T().setDevice(device);
-        current_device_ = device;
-      }
-    } else {
-      initialized_ = true;
-      original_device_ = T().exchangeDevice(device);
-      current_device_ = device;
-    }
+    // if (current_device_ == device) return;
+    T().setDevice(device);
+    current_device_ = device;
   }
 
   /// Sets the device index to the given one.
@@ -107,46 +100,37 @@ public:
 
   /// Returns the device that was set at the time the guard was constructed.
   Device original_device() {
-    initialize_if_needed();
+    AT_ASSERTM(original_device_ != DeviceType::CPU,
+               "This device guard was moved-out from and is no longer valid");
     return original_device_;
   }
 
   /// Returns the device that is currently set as the current device by this
   /// guard.  Note that this may not actually be the current device, if there
-  /// was an intervening DeviceGuard set.
+  /// was an intervening DeviceGuard.
   Device current_device() {
-    initialize_if_needed();
+    AT_ASSERTM(current_device_ != DeviceType::CPU,
+               "This device guard was moved-out from and is no longer valid");
     return current_device_;
   }
 
 private:
-  void initialize_if_needed() {
-    debug_sanity_check();
-    if (!initialized_) {
-      original_device_ = T().getDevice();
-      current_device_ = original_device_;
-    }
+  void initialize() {
+    original_device_ = T().getDevice();
+    current_device_ = original_device_;
   }
 
-  void debug_sanity_check() {
-#ifdef DEBUG
-    // In DEBUG mode, InlineDeviceGuard is always initialized.  (This is not
-    // true in non-DEBUG mode.)
-    AT_ASSERT(initialized_);
-    AT_ASSERT(T().getDevice() == current_device_);
-#endif
-  }
-
-  bool initialized_ = false;
-  Device original_device_ = at::kCPU;
-  Device current_device_ = at::kCPU;
-
-  // original_device_ and current_device_ are only valid if initialized == true
-  // I could have put original_device_ and current_device_ in optional, but that
-  // adds some illegal states representable (original_device_.has_value() !=
-  // current_device_.has_value()) and would run afoul of
-  // https://github.com/pytorch/pytorch/issues/12117 so on balance, it seemed
-  // better to do it this way.
+  // In principle, these could have been done alternately as optional<Device>,
+  // but that runs afoul the lgenfe bug
+  // (https://github.com/pytorch/pytorch/issues/12117) so I've instead
+  // plundered CPU for the default value.
+  //
+  // The CPU state can only occur when you have moved out from a
+  // device guard and so it is now "inert."  Note that a default
+  // constructed device guard is not inert; it will reset to the
+  // current device at construction time when it dies.
+  Device original_device_ = DeviceType::CPU;
+  Device current_device_ = DeviceType::CPU;
 };
 
 }} // namespace c10::detail

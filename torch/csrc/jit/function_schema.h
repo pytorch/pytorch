@@ -2,10 +2,8 @@
 #include "ATen/ATen.h"
 
 #include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/alias_info.h"
-#include "torch/csrc/jit/assertions.h"
 
 namespace torch { namespace jit {
 
@@ -79,9 +77,7 @@ struct FunctionSchema {
         returns_(std::move(returns)),
         is_vararg_(is_vararg),
         is_varret_(is_varret),
-        writes_(std::move(writes)) {
-    validate();
-  }
+        writes_(std::move(writes)) {}
   FunctionSchema(
       Symbol name,
       std::vector<Argument> arguments,
@@ -94,9 +90,8 @@ struct FunctionSchema {
             std::move(std::move(arguments)),
             std::move(std::move(returns)),
             is_vararg,
-            is_varret) {
-    validate();
-  }
+            is_varret) {}
+
 private:
   const std::string name_;
   const std::vector<Argument> arguments_;
@@ -129,10 +124,6 @@ public:
   bool is_varret() const {
     return is_varret_;
   }
-  bool has_world_token() const {
-    // todo: mutable if writes_.size() > 0;
-    return arguments().size() > 0 && arguments().front().type() == WorldType::get();
-  }
   bool is_mutable() const {
     return writes().size() > 0;
   }
@@ -145,11 +136,6 @@ public:
   }
 
  private:
-  void validate() const {
-    if(has_world_token()) {
-      JIT_ASSERT(returns().at(0).type() == WorldType::get());
-    }
-  }
 };
 
 // for debugging, make sure we can describe the call site

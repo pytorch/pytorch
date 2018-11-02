@@ -139,7 +139,7 @@ static detail::DynamicDAG<Node*> make_dependency_graph(Block * block) {
 
 static void find_differentiable_groups(
     detail::DynamicDAG<Node*>& dep_graph,
-    size_t distance_threshold=64,
+    size_t distance_threshold=256,
     size_t producer_edge_threshold=16) {
   // A Vertex contains a Node* or a differentiable group of Node*.
   // Perform graph contraction on dep_graph: contract two vertices(x, y) if

@@ -15,21 +15,13 @@ namespace at {
 /// changes it back to the device (for that device type) that was originally
 /// active upon destruction.
 ///
-/// If the device is changed via this guard to a different one than the
-/// active one at construction time, this guard will reset it to the one
-/// that was active at the time of construction of the guard.  WARNING: if
-/// you change the current device out-of-band, e.g., by directly calling
-/// cudaSetDevice(), DeviceGuard is NOT guaranteed to reset it upon
-/// exiting this scope.  The contract required by DeviceGuard is that inner code
-/// leaves the device in the same state that DeviceGuard set it.  In DEBUG mode,
-/// we check for this invariant.
-///
-/// If a DeviceGuard is constructed without specifying a device type (this
-/// can occur if you, e.g., pass a nullopt to the constructor), it behaves as if
-/// it were a no-op "CPU" guard; e.g., current_device() reports that the current
+/// If a DeviceGuard is constructed without specifying a device type (this can
+/// occur if you, e.g., pass a nullopt to the constructor), it behaves as if it
+/// were a no-op "CPU" guard; e.g., current_device() reports that the current
 /// device is kCPU.  This is different from passing Device(kCUDA, -1), which
 /// says to use the current CUDA device; in this case, we will correctly query
-/// what the current CUDA device is, but won't change it.
+/// what the current CUDA device is, won't change it, but WILL reset it
+/// at the end of DeviceGuard.
 class DeviceGuard {
 public:
   /// Set the current device to the passed Device.
@@ -62,46 +54,72 @@ public:
   DeviceGuard(const DeviceGuard&) = delete;
   DeviceGuard& operator=(const DeviceGuard&) = delete;
 
-  /// Move-constructs this `DeviceGuard` from another `DeviceGuard`. The
-  /// moved-from `DeviceGuard` is modified such that its destruction has no
-  /// effect (does not reset the device).
+  /// Move-constructs this `DeviceGuard` from another `DeviceGuard`.
+  /// This can be used to terminate the lifetime of a `DeviceGuard`
+  /// early; for example, in:
+  ///
+  ///     // current device is d0
+  ///     DeviceGuard g1(d1);
+  ///     // current device is d1
+  ///     {
+  ///       DeviceGuard g2(std::move(g1));
+  ///     }
+  ///     // current device is d0!!
+  ///
+  /// It is undefined behavior if you move a device guard across
+  /// an intervening DeviceGuard.
+  ///
+  ///     DeviceGuard g1(d1);
+  ///     DeviceGuard g2(d2);
+  ///     DeviceGuard g3(std::move(g1)); // UB!
+  ///
   DeviceGuard(DeviceGuard&& other) noexcept {
-    // Reuse move assignment implementation
-    *this = std::move(other);
+    // Default construction leaves this uninitialized
+    std::swap(impl_, other.impl_);
+    std::swap(original_device_, other.original_device_);
+    std::swap(current_device_, other.current_device_);
   }
 
-  /// Move-assigns this `DeviceGuard` from another `DeviceGuard`. The
-  /// moved-from `DeviceGuard` is modified such that its destruction has no
-  /// effect (does not reset the device).
+  /// Move-assigns this `DeviceGuard` from another `DeviceGuard`. This
+  /// `DeviceGuard` is immediately terminated.  This allows
+  /// you to implement a modest performance optimization: if the device
+  /// type of the previous DeviceGuard and the new DeviceGuard match,
+  /// then skips the otherwise unnecessary setDevice from the previous
+  /// device guard.
+  ///
+  /// As with the move constructor, it is undefined behavior if you
+  /// move a device guard across an intervening DeviceGuard.
+  ///
   DeviceGuard& operator=(DeviceGuard&& other) noexcept {
-    // We cannot use the default move assignment here.  Quoth the standard:
-    //
-    //    constexpr optional( optional&& other )
-    //
-    //    If other contains a value, then depending on whether *this contains a
-    //    value, the contained value is either direct-initialized or assigned from
-    //    *other (2) or std::move(*other) (3). Note that a moved-from optional
-    //    still contains a value.
-    //
-    // Swapping works fine though.
-    std::swap(this->impl_, other.impl_);
-    std::swap(this->original_device_, other.original_device_);
-    std::swap(this->current_device_, other.current_device_);
+    if (other.original_device_.type() == original_device_.type()) {
+      // other has already set the device to the desired new value;
+      // cancel its destruction and update current_device.  Don't
+      // update original_device, since we are still obligated
+      // to restore to it at the very end.
+      current_device_ = other.current_device_;
+    } else {
+      // the devices are unrelated, so just terminate the
+      // current guard and then move other in
+      if (original_device_ != current_device_) {
+        impl_->setDevice(original_device_);
+      }
+      impl_ = other.impl_;
+      original_device_ = other.original_device_;
+      current_device_ = other.current_device_;
+    }
+    other.impl_ = nullptr;
+    other.current_device_ = at::kCPU;
+    other.original_device_ = at::kCPU;
     return *this;
   }
 
   /// Resets the device to the device that was active at construction of the
   /// guard.
   ~DeviceGuard() {
-#ifdef DEBUG
-    // The getDevice call is costly, and also violates noexcept in destructor,
-    // so don't test for it outside of DEBUG mode.  If impl_ is nullptr,
-    // that indicates CPU; no need to check anything.
-    AT_ASSERT(!impl_ || impl_->getDevice() == current_device_);
-#endif
-    if (original_device_ != current_device_) {
-      impl_->uncheckedSetDevice(original_device_);
-    }
+    // This optimization is sound if we are guaranteed not to have
+    // any unmanaged setDevice calls inside the body of the guard.
+    // if (original_device_ == current_device_) return;
+    impl_->uncheckedSetDevice(original_device_);
   }
 
   /// Returns the device that was set prior to construction of the guard.
@@ -143,7 +161,6 @@ public:
   /// The last device that was set via `set_device`, or the previous
   /// device, if no device was set.  Defaults to kCPU if no device type is
   /// specified for DeviceGuard.
-
   Device current_device_ = at::kCPU;
 
   /// Cached pointer to the interface which actually implements the operations

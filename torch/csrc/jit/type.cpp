@@ -1,15 +1,17 @@
-#include <ATen/core/jit_type.h>
+#include "torch/csrc/jit/type.h"
+
+#include "torch/csrc/jit/assertions.h"
 
 #include <iostream>
 
-namespace c10 {
+namespace torch { namespace jit {
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
   if(auto value = t.cast<CompleteTensorType>()) {
     out << at::toString(value->scalarType()) << "(";
     auto& sizes = value->sizes();
     auto& strides = value->strides();
-    AT_ASSERT(sizes.size() == strides.size());
+    JIT_ASSERT(sizes.size() == strides.size());
     for (size_t i = 0; i < sizes.size(); i++) {
       if (i > 0) {
         out << ", ";
@@ -60,8 +62,6 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << "Generator";
   } else if(t.kind() == TypeKind::VarType) {
     out << t.expect<VarType>()->name();
-  } else if(t.kind() == TypeKind::WorldType) {
-    out << "World";
   } else if(t.kind() == TypeKind::FutureType) {
     auto elem = t.cast<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
@@ -101,10 +101,6 @@ NoneTypePtr NoneType::get() {
 }
 GeneratorTypePtr GeneratorType::get() {
   static auto value = GeneratorType::create();
-  return value;
-}
-WorldTypePtr WorldType::get() {
-  static auto value = WorldType::create();
   return value;
 }
 StringTypePtr StringType::get() {
@@ -255,7 +251,7 @@ TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
 }
 
 // change return types like List[List[t]] into List[List[int]]
-CAFFE2_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::string, TypePtr>& type_env) {
+TORCH_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::string, TypePtr>& type_env) {
   if(!type->hasFreeVariables())
     return type;
 
@@ -271,4 +267,4 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::strin
   }
 }
 
-} // namespace c10
+}} // namespace torch::jit

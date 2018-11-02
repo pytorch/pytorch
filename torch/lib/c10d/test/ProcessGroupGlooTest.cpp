@@ -208,6 +208,7 @@ void testBroadcast(const std::string& path, const at::Backend b) {
       for (auto k = 0; k < size; k++) {
         inputs[k].resize(stride);
         for (auto l = 0; l < stride; l++) {
+          // This won't work if we ever support sparse CUDA
           at::DeviceGuard deviceGuard(
               b == at::Backend::CUDA ?
               c10::make_optional(at::Device(at::kCUDA, l)) :
