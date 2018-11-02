@@ -2452,6 +2452,86 @@
   variants: method
   device_guard: false
 
+- func: __and__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __and__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __iand__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __iand__(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __or__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __or__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __ior__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __ior__(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __xor__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __xor__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __ixor__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __ixor__(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __lshift__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __lshift__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __ilshift__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __ilshift__(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __rshift__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __rshift__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __irshift__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __irshift__(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
 - func: lgamma_(Tensor self) -> Tensor
   variants: method
   device_guard: false
