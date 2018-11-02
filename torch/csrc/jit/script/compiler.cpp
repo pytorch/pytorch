@@ -620,18 +620,16 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (!positional)
       return c10::nullopt;
     positional_inputs.push_back(positional);
-
-    if (schema.is_vararg() && schema_i == schema.arguments().size() - 1) {
-      // Freeze iteration to the last argument in the schema and keep going for
-      // all of the provided arguments
-      if (used_args < args.size()) {
-        schema_i--;
-      }
-    }
   }
   // check for unused self argument
   if(self != c10::nullopt) {
     err() << "provided self argument not used in schema\n";
+  }
+
+  if (schema.is_vararg()) {
+    for(;used_args < args.size(); ++used_args) {
+      positional_inputs.push_back(args[used_args].value(graph));
+    }
   }
 
   // check for unused positional arguments
