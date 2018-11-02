@@ -98,7 +98,8 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
 
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
-        ((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh') | docker exec -u jenkins -i "$id" bash) 2>&1 | ts
+        export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+        script -c "${COMMAND}" /dev/null | ts
 
         # Push intermediate Docker image for next phase to use
         if [ -z "${BUILD_ONLY}" ]; then
@@ -127,10 +128,11 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
           id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         fi
         if [ -n "${MULTI_GPU}" ]; then
-          ((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh') | docker exec -u jenkins -i "$id" bash) 2>&1 | ts
+          export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         else
-          ((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash) 2>&1 | ts
+          export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         fi
+        script -c "${COMMAND}" /dev/null | ts
 
 caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   resource_class: large
@@ -197,7 +199,8 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
-        ((echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh') | docker exec -u jenkins -i "$id" bash) 2>&1 | ts
+        export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+        script -c "${COMMAND}" /dev/null | ts
 
         # Push intermediate Docker image for next phase to use
         if [ -z "${BUILD_ONLY}" ]; then
@@ -277,7 +280,8 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         fi
         docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
 
-        ((echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh') | docker exec -u jenkins -i "$id" bash) 2>&1 | ts
+        export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+        script -c "${COMMAND}" /dev/null | ts
 
 caffe2_macos_build_defaults: &caffe2_macos_build_defaults
   macos:
@@ -342,12 +346,12 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
 
           # Build
           if [ "${BUILD_IOS:-0}" -eq 1 ]; then
-            scripts/build_ios.sh 2>&1 | ts
+            script -q /dev/null scripts/build_ios.sh 2>&1 | ts
           elif [ -n "${CAFFE2_USE_ANACONDA}" ]; then
             # All conda build logic should be in scripts/build_anaconda.sh
-            scripts/build_anaconda.sh 2>&1 | ts
+            script -q /dev/null scripts/build_anaconda.sh 2>&1 | ts
           else
-            scripts/build_local.sh 2>&1 | ts
+            script -q /dev/null scripts/build_local.sh 2>&1 | ts
           fi
 
           # Show sccache stats if it is running
@@ -587,7 +591,8 @@ jobs:
           echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_PERF_TEST_S3_BUCKET_V2}" >> /home/circleci/project/env
           docker cp /home/circleci/project/env $id:/var/lib/jenkins/workspace/env
 
-          ((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/short-perf-test-gpu.sh') | docker exec -u jenkins -i "$id" bash) 2>&1 | ts
+          export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/short-perf-test-gpu.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          script -c "${COMMAND}" /dev/null | ts
 
   pytorch_doc_push:
     environment:
@@ -663,7 +668,8 @@ jobs:
           chmod +x /home/circleci/project/doc_push_script.sh
           docker cp /home/circleci/project/doc_push_script.sh $id:/var/lib/jenkins/workspace/doc_push_script.sh
 
-          ((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh') | docker exec -u jenkins -i "$id" bash) 2>&1 | ts
+          export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          script -c "${COMMAND}" /dev/null | ts
 
   pytorch_macos_10_13_py3_build:
     macos:
@@ -694,7 +700,7 @@ jobs:
 
             git submodule sync && git submodule update -q --init
             chmod a+x .jenkins/pytorch/macos-build.sh
-            .jenkins/pytorch/macos-build.sh 2>&1 | ts
+            script -q /dev/null .jenkins/pytorch/macos-build.sh 2>&1 | ts
 
             mkdir -p /Users/distiller/pytorch-ci-env/workspace
             cp -r /Users/distiller/project/. /Users/distiller/pytorch-ci-env/workspace
@@ -729,7 +735,7 @@ jobs:
             cp -r /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
 
             chmod a+x .jenkins/pytorch/macos-test.sh
-            .jenkins/pytorch/macos-test.sh 2>&1 | ts
+            script -q /dev/null .jenkins/pytorch/macos-test.sh 2>&1 | ts
 
   pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
     macos:
@@ -776,7 +782,7 @@ jobs:
 
             git submodule sync && git submodule update -q --init
             chmod a+x .jenkins/pytorch/macos-build.sh
-            .jenkins/pytorch/macos-build.sh 2>&1 | ts
+            script -q /dev/null .jenkins/pytorch/macos-build.sh 2>&1 | ts
 
   caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build:
     environment:
