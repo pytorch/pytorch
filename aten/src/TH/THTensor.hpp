@@ -11,7 +11,6 @@
 
 inline at::Tensor THTensor_wrap(THTensor* tensor) {
   c10::raw::intrusive_ptr::incref(tensor);
-  auto ptr = c10::intrusive_ptr<at::TensorImpl>::reclaim(tensor);
   return at::Tensor(c10::intrusive_ptr<at::TensorImpl>::reclaim(tensor));
 }
 
