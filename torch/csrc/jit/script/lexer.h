@@ -90,7 +90,8 @@ namespace script {
   _(TK_TYPE_COMMENT, "type comment", "# type:")  \
   _(TK_RAISE, "raise", "raise")                  \
   _(TK_ASSERT, "assert", "assert")               \
-  _(TK_DOTS, "dots", "...")
+  _(TK_DOTS, "dots", "...")                      \
+  _(TK_PASS, "pass", "pass")
 
 
 static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!";

@@ -216,6 +216,7 @@ struct Stmt : public TreeView {
       case TK_EXPR_STMT:
       case TK_RAISE:
       case TK_ASSERT:
+      case TK_PASS:
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Stmt";
@@ -520,6 +521,16 @@ struct Assert : public Stmt {
       const Expr& test,
       const Maybe<Expr>& msg) {
     return Assert(Compound::create(TK_ASSERT, range, {test, msg}));
+  }
+};
+
+struct Pass : public Stmt {
+  explicit Pass(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_PASS);
+  }
+  static Pass create(
+      const SourceRange& range) {
+    return Pass(Compound::create(TK_PASS, range, {}));
   }
 };
 
