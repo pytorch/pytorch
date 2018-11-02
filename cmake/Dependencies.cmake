@@ -87,6 +87,36 @@ else()
   message(FATAL_ERROR "Unrecognized blas option:" ${BLAS})
 endif()
 
+
+if (NOT BUILD_ATEN_MOBILE)
+  set(AT_MKL_ENABLED 0)
+  set(AT_MKL_MT 0)
+  set(USE_BLAS 1)
+  if(NOT (ATLAS_FOUND OR OPENBLAS_FOUND OR MKL_FOUND OR VECLIB_FOUND))
+    find_package(BLAS)
+    if (NOT BLAS_FOUND)
+      set(USE_BLAS 0)
+    endif()
+  endif()
+
+  if (MKL_FOUND)
+    ADD_DEFINITIONS(-DTH_BLAS_MKL)
+    if(NOT MKL_INCLUDE_DIR)
+      MESSAGE(FATAL_ERROR "MKL is used, but MKL header files are not found. \
+        You can get them by `conda install mkl-include` if using conda (if \
+        it is missing, run `conda upgrade -n root conda` first), and \
+        `pip install mkl-devel` if using pip. If build fails with header files \
+        available in the system, please make sure that CMake will search the \
+        directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
+	endif()
+    if (MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
+      ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
+      set(AT_MKL_MT 1)
+    endif()
+    set(AT_MKL_ENABLED 1)
+  endif()
+endif()
+
 # Directory where NNPACK and cpuinfo will download and build all dependencies
 set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
   CACHE PATH "Confu-style dependencies source directory")
@@ -1191,30 +1221,6 @@ if (NOT BUILD_ATEN_MOBILE)
   IF (WIN32 AND NOT CYGWIN)
     SET(BLAS_INSTALL_LIBRARIES "OFF"
       CACHE BOOL "Copy the required BLAS DLLs into the TH install dirs")
-  ENDIF()
-
-  FIND_PACKAGE(BLAS)
-  SET(AT_MKL_ENABLED 0)
-  SET(AT_MKL_MT 0)
-  IF (BLAS_FOUND)
-    SET(USE_BLAS 1)
-    IF (BLAS_INFO STREQUAL "mkl")
-      ADD_DEFINITIONS(-DTH_BLAS_MKL)
-      IF(NOT BLAS_INCLUDE_DIR)
-        MESSAGE(FATAL_ERROR "MKL is used, but MKL header files are not found. \
-          You can get them by `conda install mkl-include` if using conda (if \
-          it is missing, run `conda upgrade -n root conda` first), and \
-          `pip install mkl-devel` if using pip. If build fails with header files \
-          available in the system, please make sure that CMake will search the \
-          directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
-      ENDIF()
-      IF (MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
-        ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
-        SET(AT_MKL_MT 1)
-      ENDIF()
-      INCLUDE_DIRECTORIES(SYSTEM ${BLAS_INCLUDE_DIR})  # include MKL headers
-      SET(AT_MKL_ENABLED 1)
-    ENDIF()
   ENDIF()
 
   FIND_PACKAGE(LAPACK)
