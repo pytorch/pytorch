@@ -391,7 +391,7 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
   }
   for(size_t i = 1; i < n->blocks()[0]->inputs().size(); i++){
     auto input = n->blocks()[0]->inputs()[i];
-    auto name = input->uniqueName();
+    auto name = input->hasUniqueName() ? input->uniqueName() : "v" + input->uniqueName();
     for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
       loop_block->addInput(name + "_" + EXP_BTENSOR_NAME[j]);
     }

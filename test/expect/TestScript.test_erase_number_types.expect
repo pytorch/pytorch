@@ -4,7 +4,7 @@ graph(%a : Dynamic) {
   %3 : Long() = prim::Constant[value={3}]()
   %4 : Long() = aten::add(%1, %2)
   %b : Long() = aten::add(%4, %3)
-  %c.1 : Dynamic = aten::add(%a, %b, %2)
-  %c : Dynamic = aten::add(%c.1, %b, %2)
+  %c_1 : Dynamic = aten::add(%a, %b, %2)
+  %c : Dynamic = aten::add(%c_1, %b, %2)
   return (%c);
 }

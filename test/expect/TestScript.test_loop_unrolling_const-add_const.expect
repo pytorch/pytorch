@@ -1,15 +1,15 @@
 graph() {
-  %y.1 : int = prim::Constant[value=0]()
+  %y_1 : int = prim::Constant[value=0]()
   %1 : int = prim::Constant[value=1]()
-  %y.11 : int = aten::add(%y.1, %1)
-  %y.2 : int = aten::add(%y.11, %1)
-  %y.3 : int = aten::add(%y.2, %1)
-  %y.4 : int = aten::add(%y.3, %1)
-  %y.5 : int = aten::add(%y.4, %1)
-  %y.6 : int = aten::add(%y.5, %1)
-  %y.7 : int = aten::add(%y.6, %1)
-  %y.8 : int = aten::add(%y.7, %1)
-  %y.9 : int = aten::add(%y.8, %1)
-  %y.10 : int = aten::add(%y.9, %1)
-  return (%y.10);
+  %y_11 : int = aten::add(%y_1, %1)
+  %y_2 : int = aten::add(%y_11, %1)
+  %y_3 : int = aten::add(%y_2, %1)
+  %y_4 : int = aten::add(%y_3, %1)
+  %y_5 : int = aten::add(%y_4, %1)
+  %y_6 : int = aten::add(%y_5, %1)
+  %y_7 : int = aten::add(%y_6, %1)
+  %y_8 : int = aten::add(%y_7, %1)
+  %y_9 : int = aten::add(%y_8, %1)
+  %y_10 : int = aten::add(%y_9, %1)
+  return (%y_10);
 }

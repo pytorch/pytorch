@@ -249,6 +249,7 @@ void initPythonIRBindings(PyObject * module_) {
     .VS(unique)
     .VS(uniqueName)
     .VS(setUniqueName)
+    .VS(unsafeSetUniqueName)
     .VS(offset)
     .VS(uses)
     .VS(replaceAllUsesWith)

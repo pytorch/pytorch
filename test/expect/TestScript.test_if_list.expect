@@ -3,12 +3,12 @@ graph(%x : Double(*, *)) {
   %2 : bool = prim::Constant[value=1]()
   %c : Dynamic[] = prim::If(%2)
     block0() {
-      %c.1 : Dynamic[] = prim::ListConstruct(%x, %x)
-      -> (%c.1)
+      %c_1 : Dynamic[] = prim::ListConstruct(%x, %x)
+      -> (%c_1)
     }
     block1() {
-      %c.2 : Dynamic[] = prim::ListConstruct(%x, %x, %x)
-      -> (%c.2)
+      %c_2 : Dynamic[] = prim::ListConstruct(%x, %x, %x)
+      -> (%c_2)
     }
   %6 : Dynamic = aten::cat(%c, %1)
   return (%6);

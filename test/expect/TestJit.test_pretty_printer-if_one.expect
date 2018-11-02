@@ -1,8 +1,8 @@
-def script(c2, c1):
-  t2 = aten::lt(c2, c1)
+def script(c_2, c_1):
+  t2 = aten::lt(c_2, c_1)
   t3 = prim::TensorToBool(t2)
   if t3:
-    c = c2
+    c = c_2
   else:
-    c = c1
+    c = c_1
   return c

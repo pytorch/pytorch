@@ -5,11 +5,11 @@ ModelProto {
   graph:
     GraphProto {
       name: "torch-jit-export"
-      inputs: [{name: "x.1", type:Tensor dims: 1 10}]
+      inputs: [{name: "x_1", type:Tensor dims: 1 10}]
       outputs: [{name: "8", type:Tensor dims: 10 1}]
       initializers: []
       nodes: [
-        Node {type: "Add", inputs: [x.1,x.1], outputs: [1], attributes: []},
+        Node {type: "Add", inputs: [x_1,x_1], outputs: [1], attributes: []},
         Node {type: "ReduceSum", inputs: [1], outputs: [2], attributes: [{ name: 'keepdims', type: int, value: 0}]},
         Node {type: "Constant", inputs: [], outputs: [3], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
         Node {type: "Greater", inputs: [2,3], outputs: [4], attributes: []},

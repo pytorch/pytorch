@@ -519,11 +519,28 @@ std::shared_ptr<Graph> Graph::copy() {
   return new_g;
 }
 
-Value* Value::setUniqueName(const std::string & name) {
-  if (name.size() > 0 && name.find_first_not_of("0123456789") == std::string::npos) {
-    throw std::runtime_error("names may not be integers: " + name);
-  }
+static bool isValidIdentifierChar(char c, size_t pos) {
+  return islower(c) || isupper(c) || c == '_' ||  (pos > 0 && isdigit(c));
+}
 
+static bool isValidIdentifier(const std::string & name) {
+  if (name.size() == 0)
+    return false;
+  for (size_t i = 0; i < name.size(); ++i) {
+    if (!isValidIdentifierChar(name[i], i))
+      return false;
+  }
+  return true;
+}
+
+Value* Value::setUniqueName(const std::string& name) {
+  if (name != "" && !isValidIdentifier(name)) {
+    AT_ERROR("names must be valid python and C identifiers: ", name);
+  }
+  return unsafeSetUniqueName(name);
+}
+
+Value* Value::unsafeSetUniqueName(const std::string & name) {
   auto & names = node()->owningGraph()->unique_names_;
 
   // clear any old name from the map
@@ -541,7 +558,7 @@ Value* Value::setUniqueName(const std::string & name) {
   if(old_owner_of_name != names.end()) {
     size_t suffix = 1;
     std::string name_base = name;
-    auto last_dot_pos = name.find_last_of('.');
+    auto last_dot_pos = name.find_last_of('_');
     if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
       if (name.find_first_not_of("0123456789", last_dot_pos + 1) == std::string::npos) {
         suffix = std::stoll(name.substr(last_dot_pos + 1));
@@ -551,10 +568,10 @@ Value* Value::setUniqueName(const std::string & name) {
     std::string replacement_name;
     do {
       std::stringstream ss;
-      ss << name_base << "." << suffix++;
+      ss << name_base << "_" << suffix++;
       replacement_name = ss.str();
     } while(names.count(replacement_name) > 0);
-    old_owner_of_name->second->setUniqueName(replacement_name);
+    old_owner_of_name->second->unsafeSetUniqueName(replacement_name);
   }
 
   names[name] = this;
@@ -565,7 +582,7 @@ Value* Value::setUniqueName(const std::string & name) {
 Value* Value::copyMetadata(Value * from) {
   setType(from->type());
   if (from->hasUniqueName())
-    setUniqueName(from->uniqueName());
+    unsafeSetUniqueName(from->uniqueName());
   return this;
 }
 

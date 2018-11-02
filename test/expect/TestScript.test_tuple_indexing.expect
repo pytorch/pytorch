@@ -5,12 +5,12 @@ graph(%a : Dynamic) {
   %4 : bool = prim::TensorToBool(%a)
   %b : Tuple = prim::If(%4)
     block0() {
-      %b.1 : Tuple = prim::TupleConstruct(%1, %2)
-      -> (%b.1)
+      %b_1 : Tuple = prim::TupleConstruct(%1, %2)
+      -> (%b_1)
     }
     block1() {
-      %b.2 : Tuple = prim::TupleConstruct(%3, %2)
-      -> (%b.2)
+      %b_2 : Tuple = prim::TupleConstruct(%3, %2)
+      -> (%b_2)
     }
   %8 : int = prim::TupleIndex[index=0](%b)
   %9 : int = prim::TupleIndex[index=1](%b)

@@ -147,6 +147,11 @@ public:
     return !unique_name_.empty();
   }
   TORCH_API Value* setUniqueName(const std::string & name);
+
+  // sets the unique name without checking it is a valid identifier.
+  // only used as a hack in ONNX export. calling this on a graph
+  // not destine for onnx export make it non-serializable.
+  TORCH_API Value* unsafeSetUniqueName(const std::string & name);
   std::string uniqueName() const {
     if (hasUniqueName())
       return unique_name_;

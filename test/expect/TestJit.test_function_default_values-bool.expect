@@ -1,15 +1,15 @@
-graph(%result.1 : Dynamic
+graph(%result_1 : Dynamic
       %a : Dynamic
       %flag : Dynamic) {
   %3 : int = prim::Constant[value=1]()
   %4 : bool = prim::TensorToBool(%flag)
   %result : Dynamic = prim::If(%4)
     block0() {
-      -> (%result.1)
+      -> (%result_1)
     }
     block1() {
-      %result.2 : Dynamic = aten::add(%result.1, %a, %3)
-      -> (%result.2)
+      %result_2 : Dynamic = aten::add(%result_1, %a, %3)
+      -> (%result_2)
     }
   return (%result);
 }
