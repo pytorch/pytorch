@@ -3,6 +3,8 @@
 #include "ATen/ATen.h"
 #include "THC/THCTensor.hpp"
 
+#include "ATen/cuda/CUDAGuard.h"
+
 namespace at { namespace native {
 
 // These functions are called by native::resize_ as well as (legacy) THC resize.
@@ -33,9 +35,9 @@ inline TensorImpl* resize_impl_cuda_(
   }
 
   // NB: We don't need to hold the device guard when calling from TH
-  c10::optional<DeviceGuard> guard;
+  c10::optional<cuda::CUDAGuard> guard;
   if (device_guard) {
-    guard = DeviceGuard(self->storage().device().index());
+    guard = cuda::CUDAGuard(self->storage().device().index());
   }
 
   int64_t storage_size = 1;

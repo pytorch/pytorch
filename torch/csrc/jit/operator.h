@@ -22,7 +22,7 @@ namespace torch { namespace jit {
 
 TORCH_API FunctionSchema parseSchema(const std::string& schema);
 
-using OperationCreator = std::function<Operation(Node*)>;
+using OperationCreator = std::function<Operation(const Node*)>;
 
 struct TORCH_API Operator {
   Operator(FunctionSchema schema, OperationCreator op_creator)
@@ -50,7 +50,7 @@ struct TORCH_API Operator {
 
   bool matches(const Node* node) const;
 
-  Operation getOperation(Node* node = nullptr) const {
+  Operation getOperation(const Node* node = nullptr) const {
     if (op_) {
       return *op_;
     }
@@ -84,7 +84,7 @@ TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbo
 std::shared_ptr<Operator> findOperatorFor(const Node* node);
 const Operator& getOperatorFor(const Node* node);
 
-inline Operation getOperation(Node* node) {
+inline Operation getOperation(const Node* node) {
   // note: getOperatorFor ensures that getOperatorFor(node).matches(node) == true
   // so the call to selectVariant is always valid.
   return getOperatorFor(node).getOperation(node);

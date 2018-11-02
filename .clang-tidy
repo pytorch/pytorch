@@ -15,6 +15,9 @@ Checks: '
   ,-cppcoreguidelines-special-member-functions
   ,-cppcoreguidelines-interfaces-global-init
   ,-cppcoreguidelines-owning-memory
+  ,hicpp-signed-bitwise
+  ,hicpp-exception-baseclass
+  ,hicpp-avoid-goto
   '
 WarningsAsErrors: '*'
 HeaderFilterRegex: 'torch/csrc/.*'

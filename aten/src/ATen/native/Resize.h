@@ -79,21 +79,16 @@ static inline void checkInBoundsForStorage(
 }
 
 /**
- * Set self's storage to be new_storage with sizes, strides, and storage_offset.
- * (size, stride, storage_offset) must be in bounds for the new storage.
+ * Set self's sizes, strides, and storage_offset.
+ * (size, stride, storage_offset) must be in bounds for self's storage.
  */
-inline void setStorage(
+inline void setStrided(
     const Tensor& self,
-    const Storage& new_storage,
-    int64_t storage_offset,
     IntList size,
-    IntList stride) {
-  checkInBoundsForStorage(size, stride, storage_offset, new_storage);
-
+    IntList stride,
+    int64_t storage_offset) {
   auto* self_ = self.unsafeGetTensorImpl();
-
-  /* storage */
-  self_->set_storage(new_storage);
+  checkInBoundsForStorage(size, stride, storage_offset, self_->storage());
 
   /* storage offset */
   AT_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
