@@ -847,7 +847,6 @@ inline TypePtr CompleteTensorType::fromBoolType() {
   return CompleteTensorType::create(at::kLong, -1, {});
 }
 
-
 // Attempt to find the correct supertype of t1 and t2. If none is found then
 // nullopt will be returned. If t1 == t2, or t1 is a type refinement of t2,
 // then t2 will be returned (and vice versa).
