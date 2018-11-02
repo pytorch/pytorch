@@ -25,14 +25,14 @@ Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
     : TensorImpl(data.type().type_id(), data.type().typeMeta(), data.type().allocator(), /* is variable */ true),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
-      requires_grad_(false),
+      accumulates_grad_(false),
       is_view_(false),
       output_nr_(gradient_edge.input_nr),
       pyobj_(nullptr) {
   // set_requires_grad also checks error conditions.
   set_requires_grad(requires_grad);
   AT_CHECK(
-      !grad_fn_ || !requires_grad_,
+      !grad_fn_ || !accumulates_grad_,
       "requires_grad should be false if grad_fn is set");
   if (!data_.defined()) {
     throw std::runtime_error("data is undefined");
@@ -106,7 +106,7 @@ std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
     throw std::logic_error(
         "get_grad_accumulator() should be only called on leaf Variables");
   }
-  if (!requires_grad_) {
+  if (!accumulates_grad_) {
     return nullptr;
   }
 

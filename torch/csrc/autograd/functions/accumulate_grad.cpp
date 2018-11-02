@@ -30,7 +30,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     return {};
   if (variable.grad_fn())
     throw std::logic_error("leaf variable has been moved into the graph interior");
-  if (!variable.requires_grad())
+  if (!variable.accumulates_grad())
     return {};
 
   auto new_grad = std::move(grads[0]);

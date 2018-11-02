@@ -149,6 +149,10 @@ struct TORCH_API Variable : public at::Tensor {
   /// Gets the raw gradient function pointer, whatever it currently is.
   Function* grad_fn_unsafe() const;
 
+  /// Returns whether this `Variable` should accumulate gradient. Only
+  /// meaningful if this is a leaf.
+  bool accumulates_grad() const noexcept;
+
   /// Set the gradient accumulator of the `Variable`. This is only applicable to
   /// leaf variables. Interior variables should call `set_gradient_edge()`.
   void set_grad_accumulator(std::weak_ptr<Function> grad_accumulator);
@@ -315,21 +319,31 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
     throw std::runtime_error("Can't get base of non-view Variable");
   }
 
-  /// Sets the `requires_grad` property of `Variable`. This should be true for
-  /// leaf variables that want to accumulate gradients, and false for all other
-  /// variables.
-  void set_requires_grad(bool requires_grad) override {
+  /// Sets the `requires_grad` property of `Variable`.
+  ///
+  /// For non-leaf variables, this is completely determined by `GradMode`,
+  /// `grad_fn_`, etc. (see `requires_grad` below). So this raises if the target
+  /// flag is not equal to the existing `requires_grad` property for a
+  /// non-leaf variable.
+  ///
+  /// For leaf variables, this sets the `accumulates_grad_` property, which
+  /// should be `false` for non-leaf variables.
+  void set_requires_grad(bool requires_grad_) override {
     AT_CHECK(
-        !requires_grad || at::isFloatingType(type().scalarType()),
+        !requires_grad_ || at::isFloatingType(type().scalarType()),
         "Only Tensors of floating point dtype can require gradients");
-    requires_grad_ = requires_grad;
+    auto is_leaf_ = !grad_fn_;
+    AT_CHECK(
+        is_leaf_ || requires_grad_ == requires_grad(),
+        "Only requires_grad flags of leaf variables can be changed")
+    if (is_leaf_) accumulates_grad_ = requires_grad_;
   }
 
   bool requires_grad() const override {
     if (!GradMode::is_enabled()) {
       return false;
     }
-    return requires_grad_ || grad_fn_ || (is_view_ && base().requires_grad());
+    return accumulates_grad_ || grad_fn_ || (is_view_ && base().requires_grad());
   }
 
   /// Accesses the gradient `Variable` of this `Variable`.
@@ -364,7 +378,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
 
   // Only meaningful on leaf variables (must be false otherwise)
-  bool requires_grad_;
+  bool accumulates_grad_;
 
   bool is_view_;
 
@@ -574,6 +588,10 @@ inline const std::shared_ptr<Function>& Variable::grad_fn() const {
 
 inline Function* Variable::grad_fn_unsafe() const {
   return get()->grad_fn_.get();
+}
+
+inline bool Variable::accumulates_grad() const noexcept {
+  return get()->accumulates_grad_;
 }
 
 inline void Variable::set_grad_accumulator(
