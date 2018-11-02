@@ -298,15 +298,55 @@ with the equivalent call in C++:
 Pretty close!
 
 Conversion
-----------
+==========
 
-Notes on how to use Tensor::to()
+Just as we can use ``TensorOptions`` to configure how new tensors should be
+created, we can also use ``TensorOptions`` to convert a tensor from one set of
+properties to a new set of properties. Such a conversion usually creates a new
+tensor and does not occur in-place. For example, if we have a ``tensor``
+created with
+
+.. code-block:: cpp
+
+  torch::Tensor tensor = torch::randn({2, 3}, torch::kInt64);
+
+we can convert it from ``int64`` to ``float32``:
+
+.. code-block:: cpp
+
+  torch::Tensor float_tensor = tensor.to(torch::kFloat32);
+
+It is important to note that ``float_tensor`` is a new tensor pointing to new
+memory, unrelated to the source ``tensor``. We can then move it from CPU memory
+to GPU memory:
+
+.. code-block:: cpp
+
+  torch::Tensor gpu_tensor = float_tensor.to(torch::kCUDA);
+
+If you have multiple CUDA devices available, the above code will copy the
+tensor to the *default* CUDA device, which you can configure with a
+``torch::DeviceGuard``. If no ``DeviceGuard`` is in place, this will be GPU
+``1``. If you would like to specify a different GPU index, you can pass it to
+the ``Device`` constructor:
+
+.. code-block:: cpp
+
+  torch::Tensor gpu_two_tensor = float_tensor.to(torch::Device(torch::kCUDA, 1));
+
+In the case of CPU to GPU copy and reverse, we can also configure the memory
+copy to be *asynchronous* by passing `/*non_blocking=*/false` as the last
+argument to ``to()``:
+
+.. code-block:: cpp
+
+  torch::Tensor async_cpu_tensor = gpu_tensor.to(torch::kCPU, /*non_blocking=*/true);
 
 Conclusion
 ----------
 
-This note hopefully gave you a good understanding of how to create tensors in
-an idiomatic fashion using the PyTorch C++ API. If you have any further
-questions or suggestions, please use our `forum
+This note hopefully gave you a good understanding of how to create and convert
+tensors in an idiomatic fashion using the PyTorch C++ API. If you have any
+further questions or suggestions, please use our `forum
 <https://discuss.pytorch.org/>`_ or `GitHub issues
 <https://github.com/pytorch/pytorch/issues>`_ to get in touch.
