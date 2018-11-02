@@ -4,7 +4,6 @@
 #include <thread>
 
 namespace c10 {
-namespace details {
 
 // LeftRight wait-free readers synchronization primitive
 // https://hal.archives-ouvertes.fr/hal-01207881/document
@@ -68,5 +67,4 @@ class LeftRight {
   T data_[2];
 };
 
-} // namespace details
 } // namespace c10

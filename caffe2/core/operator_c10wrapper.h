@@ -1,6 +1,6 @@
 #pragma once
 
-#include "caffe2/core/dispatch/Dispatcher.h"
+#include <c10/core/dispatch/Dispatcher.h>
 #include "caffe2/core/operator.h"
 #include <ATen/core/ArrayRef.h>
 #include <c10/util/Metaprogramming.h>

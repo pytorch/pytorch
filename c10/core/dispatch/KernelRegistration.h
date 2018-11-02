@@ -1,8 +1,8 @@
 #pragma once
 
-#include "c10/util/Optional.h"
-#include "caffe2/core/dispatch/Dispatcher.h"
-#include "caffe2/core/dispatch/OpSchema.h"
+#include <c10/util/Optional.h>
+#include <c10/core/dispatch/Dispatcher.h>
+#include <c10/core/dispatch/OpSchema.h>
 
 /**
  * To register your own kernel for an operator, do in one (!) cpp file:

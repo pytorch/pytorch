@@ -2,6 +2,11 @@
 
 #include <iostream>
 
+namespace caffe2 {
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(5, at::Half)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(8, at::ComplexHalf)
+}  // namespace caffe2
+
 namespace at {
 
 static_assert(

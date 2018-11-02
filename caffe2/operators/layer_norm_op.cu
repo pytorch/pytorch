@@ -180,13 +180,15 @@ void LayerNormOp<CUDAContext>::ComputeStdDevAndFusedParams(
     const T* var,
     T* stddev,
     T* scale,
-    T* bias) {
+    T* bias,
+    float epsilon,
+    CUDAContext* context) {
   ComputeStdDevAndFusedParamsCUDAKernel<T>
       <<<CAFFE_GET_BLOCKS(N),
          CAFFE_CUDA_NUM_THREADS,
          0,
-         context_.cuda_stream()>>>(
-          N, static_cast<T>(epsilon_), mean, var, stddev, scale, bias);
+         context->cuda_stream()>>>(
+          N, static_cast<T>(epsilon), mean, var, stddev, scale, bias);
 }
 
 template <>
@@ -197,12 +199,13 @@ void LayerNormOp<CUDAContext>::LayerNormForward(
     const T* X,
     const T* scale,
     const T* bias,
-    T* Y) {
+    T* Y,
+    CUDAContext* context) {
   LayerNormForwardCUDAKernel<T>
       <<<std::min(M, CAFFE_MAXIMUM_NUM_BLOCKS),
          CAFFE_CUDA_NUM_THREADS,
          0,
-         context_.cuda_stream()>>>(M, N, X, scale, bias, Y);
+         context->cuda_stream()>>>(M, N, X, scale, bias, Y);
 }
 
 REGISTER_CUDA_OPERATOR(LayerNorm, LayerNormOp<CUDAContext>);

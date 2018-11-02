@@ -2,7 +2,7 @@
 
 #include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 
 #include <unordered_map>
 

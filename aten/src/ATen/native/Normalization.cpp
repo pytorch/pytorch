@@ -7,7 +7,7 @@
 
 #include <vector>
 #include "caffe2/operators/experimental/c10/schemas/layer_norm.h"
-#include "caffe2/core/dispatch/Dispatcher.h"
+#include <c10/core/dispatch/Dispatcher.h>
 
 static const int MIOPEN_DIM_MAX = 4;
 

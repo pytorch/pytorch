@@ -7,7 +7,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 #include "caffe2/proto/caffe2_pb.h"
 #include <ATen/core/Half.h>
 

@@ -14,7 +14,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 
 #include <ATen/core/Allocator.h>
 #include <c10/Device.h>
