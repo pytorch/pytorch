@@ -89,7 +89,8 @@ namespace script {
   _(TK_SLICE_EXPR, "slice expr", "")             \
   _(TK_TYPE_COMMENT, "type comment", "# type:")  \
   _(TK_RAISE, "raise", "raise")                  \
-  _(TK_ASSERT, "assert", "assert")
+  _(TK_ASSERT, "assert", "assert")               \
+  _(TK_DOTS, "dots", "...")
 
 
 static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!";
