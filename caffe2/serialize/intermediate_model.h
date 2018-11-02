@@ -26,11 +26,11 @@ namespace at {
 namespace serialize {
 
 enum DeserializeMode {
-  // In EAGER mode, we load the file from the beginning, and eagarly load the content of tensors
-  EAGER = 1,
-  // In LAZY mode, we only load the last record of the file, which is the model metadata
+  // In LOADER_TENSOR_DATA mode, we load the file from the beginning, and eagarly load the content of tensors
+  LOADER_TENSOR_DATA = 1,
+  // In HEADER_ONLY mode, we only load the last record of the file, which is the model metadata
   // And the data of the tensor will be loaded later
-  LAZY = 2,
+  HEADER_ONLY = 2,
 };
 
 // multiple tensor may share the same content
@@ -50,8 +50,8 @@ struct SharedData {
   c10::optional<uint64_t> recordId;
   at::DataPtr dataPtr;
   // For deserialize:
-  //   1) in EAGER mode, size information is avaiable immediately
-  //   2) in LAZY mode, until we load the tensor data, size won't be available
+  //   1) in LOADER_TENSOR_DATA mode, size information is avaiable immediately
+  //   2) in HEADER_ONLY mode, until we load the tensor data, size won't be available
   uint64_t size = 0;
 };
 
@@ -375,11 +375,11 @@ CAFFE2_API void serializeIntermediateModel(IntermediateModel* imodel, const std:
 // serialize tensors' data first, and maintain the mappint from
 // record id to tensor data
 CAFFE2_API void deserializeIntermediateModel(IntermediateModel* imodel,
-    torch::jit::PyTorchFileReader* reader, DeserializeMode mode=DeserializeMode::EAGER);
+    torch::jit::PyTorchFileReader* reader, DeserializeMode mode=DeserializeMode::LOADER_TENSOR_DATA);
 
 // deserialize an IntermediateModel from a given file
 CAFFE2_API void deserializeIntermediateModel(IntermediateModel* imodel, const std::string& filename,
-    DeserializeMode mode=DeserializeMode::EAGER);
+    DeserializeMode mode=DeserializeMode::LOADER_TENSOR_DATA);
 
 }  // namespace serialize
 }  // namespace at

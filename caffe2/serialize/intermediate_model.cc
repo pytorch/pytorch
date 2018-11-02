@@ -56,11 +56,11 @@ void IntermediateTensor::update(caffe2::TensorProto* tensor_proto,
         int64_t source_type = external_data.source_type();
         if (source_type == caffe2::ExternalDataProto_SourceType_INLINE_CONTAINER) {
           AT_ASSERTM(external_data.has_record_id(), "no record_id in ExternalDataProto and source_type is INLINE_CONTAINER!");
-          // only load the data of the tensor in EAGER mode
+          // only load the data of the tensor in LOADER_TENSOR_DATA mode
           uint64_t record_id = caffe2::stoull(external_data.record_id());
           auto it = id_data->find(record_id);
-          if (mode == DeserializeMode::EAGER) {
-            // tensor data is only loaded in EAGER mode
+          if (mode == DeserializeMode::LOADER_TENSOR_DATA) {
+            // tensor data is only loaded in LOADER_TENSOR_DATA mode
             if (it == id_data->end()) {
               AT_ERROR("Tensor's data is missing in id_data, tensor name is ",
                   name_, ", and record_id is ", caffe2::to_string(record_id));
@@ -68,7 +68,7 @@ void IntermediateTensor::update(caffe2::TensorProto* tensor_proto,
             data_ = it->second;
             AT_ASSERT(data_->recordId.value() == record_id);
           } else {
-            AT_ASSERTM(mode == DeserializeMode::LAZY, "unkonw deserialize mode.");
+            AT_ASSERTM(mode == DeserializeMode::HEADER_ONLY, "unkonw deserialize mode.");
             if (it == id_data->end()) {
               data_ = std::make_shared<SharedData>(record_id);
               (*id_data)[record_id] = data_;
@@ -257,9 +257,8 @@ void serializeIntermediateModel(IntermediateModel* imodel,
   while (!imodules.empty()) {
     IntermediateModule* m = imodules.top();
     imodules.pop();
-    auto* params = m->mutableParameters();
-    for (int i = 0; i < params->size(); ++i) {
-      std::shared_ptr<SharedData> dataptr = params->at(i).mutableTensor()->data();
+    for (auto& param : *(m->mutableParameters())) {
+      std::shared_ptr<SharedData> dataptr = param.mutableTensor()->data();
       void* data = dataptr->dataPtr.get();
       size_t size = dataptr->size;
       auto it = data_id.find(data);
@@ -272,9 +271,8 @@ void serializeIntermediateModel(IntermediateModel* imodel,
       }
     }
 
-    auto* subms = m->mutableSubmodules();
-    for (int i = 0; i < subms->size(); ++i) {
-      imodules.push(&subms->at(i));
+    for (auto& sub : *(m->mutableSubmodules())) {
+      imodules.push(&sub);
     }
   }
 
@@ -294,7 +292,7 @@ void serializeIntermediateModel(IntermediateModel* imodel, const std::string& fi
 void deserializeIntermediateModel(IntermediateModel* imodel,
     torch::jit::PyTorchFileReader* reader, DeserializeMode mode) {
   std::unordered_map<uint64_t, std::shared_ptr<SharedData>> id_data;
-  if (mode == DeserializeMode::LAZY) {
+  if (mode == DeserializeMode::HEADER_ONLY) {
     // only load model meta data, no tensor data
     at::DataPtr data_ptr;
     size_t data_size;
@@ -304,7 +302,7 @@ void deserializeIntermediateModel(IntermediateModel* imodel,
     imodel->update(&model_def, &id_data, mode);
     return;
   }
-  AT_ASSERT(mode == DeserializeMode::EAGER);
+  AT_ASSERT(mode == DeserializeMode::LOADER_TENSOR_DATA);
   while (reader->hasNextRecord()) {
     at::DataPtr data_ptr;
     size_t data_key;
@@ -313,9 +311,9 @@ void deserializeIntermediateModel(IntermediateModel* imodel,
     if (!reader->hasNextRecord()) {
       // the last record is model data (ModelDef)
       torch::ModelDef model_def = torch::ModelDef();
-      model_def.ParsePartialFromArray(data_ptr.get(), data_size);
+      AT_ASSERTM(model_def.ParseFromArray(data_ptr.get(), data_size), "parse metadata (i.e., ModelDef) failed.");
       imodel->update(&model_def, &id_data, mode);
-      continue;
+      break;
     }
     // first to the second last records are all tensor data
     auto it = id_data.find(data_key);

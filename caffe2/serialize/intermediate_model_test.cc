@@ -138,9 +138,9 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   ASSERT_EQ(loaded_tensor2.data()->dataPtr.get(), loaded_tensor1.data()->dataPtr.get());
   // TODO test shared data between tensors
 
-  // load the serialized model in LAZY mode
+  // load the serialized model in HEADER_ONLY mode
   serialize::IntermediateModel lazy_model;
-  serialize::deserializeIntermediateModel(&lazy_model, tmp_name, serialize::DeserializeMode::LAZY);
+  serialize::deserializeIntermediateModel(&lazy_model, tmp_name, serialize::DeserializeMode::HEADER_ONLY);
   ASSERT_EQ(lazy_model.name(), model_name);
   ASSERT_EQ(lazy_model.mainModule().name(), module_name);
   const auto& lazy_params = lazy_model.mainModule().parameters();
