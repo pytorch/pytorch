@@ -861,8 +861,6 @@ public:
       c10::optional<SourceRange> loc = c10::nullopt,
       c10::optional<ScopePtr> scope = c10::nullopt);
 
-  TORCH_API Value* insertDummyWorld();
-
 
   // schema-driven insert
   // this inserts a node into the graph with inputs determined from args and kwargs using Python
