@@ -77,9 +77,15 @@ __global__ void SoftmaxFocalLossKernel(
     if (label >= 0) {
       int offset = a * num_classes;
       int idx = n * (H * W * D) + (offset + label) * (H * W) + y * W + x;
+      #ifdef __HIP_PLATFORM_HCC__
+      losses[i] =
+          -(pow(1.0f - Pdata[idx], gamma) *
+          log(fmaxf(Pdata[idx], FLT_MIN))) * z;
+      #else
       losses[i] =
           -(pow(1.0f - Pdata[idx], gamma) *
           log(max(Pdata[idx], FLT_MIN))) * z;
+      #endif
     }
   }
 }
@@ -107,9 +113,15 @@ __global__ void SoftmaxFocalLossGradientWeightKernel(
       int idx = n * (H * W * D) + (offset + label) * (H * W) + y * W + x;
       float onemp = 1. - Pdata[idx];
       float p = Pdata[idx];
+      #ifdef __HIP_PLATFORM_HCC__
+      buff[i] =
+          (-pow(onemp, gamma) +
+          gamma * pow(onemp, gamma - 1) * p * log(fmaxf(p, FLT_MIN))) * z;
+      #else
       buff[i] =
           (-pow(onemp, gamma) +
           gamma * pow(onemp, gamma - 1) * p * log(max(p, FLT_MIN))) * z;
+      #endif
     }
   }
 }

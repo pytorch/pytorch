@@ -38,7 +38,11 @@ __global__ void SelectSmoothL1Kernel(
       float y_hat = Y_hat[ind];
       float y = Y[i * 4 + j];
       float val = y_hat - y;
+      #ifdef __HIP_PLATFORM_HCC__
+      float abs_val = fabsf(val);
+      #else
       float abs_val = abs(val);
+      #endif
       if (abs_val < beta) {
         out[ind] = (0.5 * val * val / beta) / max(S[0], 1.0);
       } else {
@@ -75,7 +79,11 @@ __global__ void SelectSmoothL1GradientKernel(
       float y_hat = Y_hat[ind];
       float y = Y[i * 4 + j];
       float val = y_hat - y;
+      #ifdef __HIP_PLATFORM_HCC__
+      float abs_val = fabsf(val);
+      #else
       float abs_val = abs(val);
+      #endif
       if (abs_val < beta) {
         out[ind] = norm * d_loss * val / beta / max(S[0], 1.0);
       } else {
