@@ -30,6 +30,7 @@ TESTS = [
     'indexing',
     'jit',
     'multiprocessing',
+    'multiprocessing_spawn',
     'nccl',
     'nn',
     'numba_integration',
