@@ -175,6 +175,8 @@ class DistributedDataParallel(Module):
         # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
         param_buckets = []
         # Split the parameters into buckets and by types as well
+        # TODO: use take_tensor finegrained to provide better overlapping for
+        # mixed precision training
         param_buckets = [list(_take_tensors(m.parameters(), bucket_bytes_cap)) for m in self._module_copies]
 
         self.bucket_sizes = []
