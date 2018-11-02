@@ -150,42 +150,11 @@ void THTensor_(copy)(THTensor *tensor, THTensor *src)
   }
 }
 
-#ifndef INTER_COPY_TYPE_DEFINED
-#define INTER_COPY_TYPE_DEFINED
-
-// See Note [Implicit conversion between signed and unsigned]
-// in ATen/native/Copy.h
-
-template<typename T>
-struct inter_copy_type {
-  using type = T;
-};
-
-template<>
-struct inter_copy_type<uint8_t> {
-  using type = int64_t;
-};
-
-template<typename T>
-using inter_copy_type_t = typename inter_copy_type<T>::type;
-
-#endif
-
-#define IMPLEMENT_THTensor_COPY(TYPENAMESRC, TYPE_SRC) \
-void THTensor_(copy##TYPENAMESRC)(THTensor *tensor, TH##TYPENAMESRC##Tensor *src) \
+void THTensor_(copyPointwise)(THTensor *tensor, THTensor *src)
 { \
-  TH_TENSOR_APPLY2(scalar_t, tensor, TYPE_SRC, src, \
-                   *tensor_data = static_cast<scalar_t>( \
-                       static_cast<inter_copy_type_t<scalar_t>>(*src_data));) \
+  at::Tensor tensor_t = THTensor_wrap(tensor);
+  at::Tensor src_t = THTensor_wrap(src);
+  at::_copy_(tensor_t, src_t);
 }
-
-IMPLEMENT_THTensor_COPY(Byte, uint8_t)
-IMPLEMENT_THTensor_COPY(Char, int8_t)
-IMPLEMENT_THTensor_COPY(Short, int16_t)
-IMPLEMENT_THTensor_COPY(Int, int32_t)
-IMPLEMENT_THTensor_COPY(Long, int64_t)
-IMPLEMENT_THTensor_COPY(Float, float)
-IMPLEMENT_THTensor_COPY(Double, double)
-IMPLEMENT_THTensor_COPY(Half, at::Half)
 
 #endif

@@ -34,7 +34,7 @@ void THCTensor_(copy##TYPEC)(THCState *state, THCTensor *self, struct TH##TYPEC#
   } else {                                                              \
     THTensor *srcf = THTensor_(newWithSize)(src->sizes(), {});          \
                                                                         \
-    THTensor_(copy##TYPEC)(srcf, src);                                  \
+    THTensor_(copyPointwise)(srcf, src);                                \
     THCTensor_(copyCPU)(state, self, srcf);                             \
                                                                         \
     c10::raw::intrusive_ptr::decref(srcf);                                              \
@@ -94,9 +94,9 @@ void THTensor_(copyCuda)(THCState *state, THTensor *self, struct THCTensor *src)
       THTensor *srcf = THTensor_(newWithSize)(src->sizes(), {});          \
                                                                           \
       THTensor_(copyCuda)(state, srcf, src);                              \
-      TH_CONCAT_4(TH,TYPEC,Tensor_copy,Real)(self, srcf);                 \
+      THTensor_(copyPointwise)(self, srcf);                               \
                                                                           \
-      c10::raw::intrusive_ptr::decref(srcf);                                              \
+      c10::raw::intrusive_ptr::decref(srcf);                              \
     }                                                                     \
   }
 

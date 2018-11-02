@@ -9,6 +9,12 @@
 #include <atomic>
 #include <ATen/ATen.h>
 
+inline at::Tensor THTensor_wrap(THTensor* tensor) {
+  c10::raw::intrusive_ptr::incref(tensor);
+  auto ptr = c10::intrusive_ptr<at::TensorImpl>::reclaim(tensor);
+  return at::Tensor(c10::intrusive_ptr<at::TensorImpl>::reclaim(tensor));
+}
+
 inline const int64_t* THTensor_getSizePtr(THTensor* tensor) {
   return tensor->sizes().data();
 }
