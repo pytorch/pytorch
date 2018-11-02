@@ -22,7 +22,7 @@ using function_constructor = std::function<std::shared_ptr<Function>(edge_list&&
 TORCH_API variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
                                      function_constructor ctr);
 
-///  Checks that inputs contains exactly `args` items and that the first `required_args`
+/// Checks that inputs contains exactly `args` items and that the first `required_args`
 /// items are not nullptr. If not specified, `required_args` defaults to `args`.
 TORCH_API void check_input_variables(const char* name, const variable_list& inputs, int args, int required_args=-1);
 

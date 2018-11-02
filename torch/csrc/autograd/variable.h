@@ -149,8 +149,8 @@ struct TORCH_API Variable : public at::Tensor {
   /// Gets the raw gradient function pointer, whatever it currently is.
   Function* grad_fn_unsafe() const;
 
-  /// Returns whether this `Variable` should accumulate gradient. Only
-  /// meaningful if this is a leaf.
+  /// Returns whether this `Variable` should accumulate gradient. This can be
+  /// true only if this is a leaf.
   bool accumulates_grad() const noexcept;
 
   /// Set the gradient accumulator of the `Variable`. This is only applicable to
