@@ -189,10 +189,10 @@ Now, you may be thinking: do I really need to specify each axis for every new
 tensor I create? Fortunately not, as every axis has a default value. These
 defaults are:
 
-- `kFloat32` for the dtype,
-- `kStrided` for the layout,
-- `kCPU` for the device,
-- `false` for `requires_grad`.
+- ``kFloat32`` for the dtype,
+- ``kStrided`` for the layout,
+- ``kCPU`` for the device,
+- ``false`` for `requires_grad`.
 
 What this means is that any axis you omit during the construction of a
 ``TensorOptions`` object will take on its default value. For example, this is
@@ -335,7 +335,7 @@ the ``Device`` constructor:
   torch::Tensor gpu_two_tensor = float_tensor.to(torch::Device(torch::kCUDA, 1));
 
 In the case of CPU to GPU copy and reverse, we can also configure the memory
-copy to be *asynchronous* by passing `/*non_blocking=*/false` as the last
+copy to be *asynchronous* by passing ``/*non_blocking=*/false` as the last
 argument to ``to()``:
 
 .. code-block:: cpp
