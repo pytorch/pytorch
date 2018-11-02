@@ -46,6 +46,7 @@ namespace script {
   _(TK_INFERRED, "inferred", "")                 \
   _(TK_ACCESS, "access", "")                     \
   _(TK_ASSIGN, "assign", "")                     \
+  _(TK_AUG_ASSIGN, "aug_assign", "")             \
   _(TK_ATTRIBUTE, "attribute", "")               \
   _(TK_IF, "if", "if")                           \
   _(TK_ELSE, "else", "else")                     \
