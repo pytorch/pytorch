@@ -375,12 +375,14 @@ class JitTestCase(TestCase):
 
     def assertExportImportModule(self, m, inputs):
         m_import = self.getExportImportCopy(m)
+        self.assertEqual(self.runAndSaveRNG(m.forward, inputs),
+                         self.runAndSaveRNG(m_import.forward, inputs))
+
+    def runAndSaveRNG(self, func, inputs, kwargs={}):
         initial_rng_state = torch.get_rng_state()
-        results = m.forward(*inputs)
+        results = func(*inputs, **kwargs)
         torch.set_rng_state(initial_rng_state)
-        imported_results = m_import.forward(*inputs)
-        torch.set_rng_state(initial_rng_state)
-        self.assertEqual(results, imported_results)
+        return results
 
 
 class TestJit(JitTestCase):
@@ -8861,25 +8863,20 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
     nograd_inputs, nograd_tensors = clone_inputs(False)
     recording_inputs, recording_tensors = clone_inputs(True)
 
-    # keep same rng state between calls
-    initial_rng_state = torch.get_rng_state()
     # test no gradients case
-    outputs = reference_func(*nograd_inputs, **kwargs)
-    torch.set_rng_state(initial_rng_state)
-    outputs_test = func(*nograd_inputs, **kwargs)
+    outputs = self.runAndSaveRNG(reference_func, nograd_inputs, kwargs)
+    outputs_test = self.runAndSaveRNG(func, nograd_inputs, kwargs)
     self.assertEqual(outputs, outputs_test)
 
     if check_types:
         check_output_types(self, func, outputs_test, nograd_inputs, kwargs)
 
     # test single grad case
-    torch.set_rng_state(initial_rng_state)
-    outputs = reference_func(*recording_inputs, **kwargs)
+    outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
     grads = torch.autograd.grad(allSum(outputs), recording_tensors,
                                 allow_unused=allow_unused)
 
-    torch.set_rng_state(initial_rng_state)
-    outputs_test = func(*recording_inputs, **kwargs)
+    outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
     grads_test = torch.autograd.grad(allSum(outputs_test), recording_tensors,
                                      allow_unused=allow_unused)
     self.assertEqual(outputs, outputs_test)
@@ -8889,8 +8886,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
     if self._testMethodName in nn_functional_single_grad:
         return
 
-    torch.set_rng_state(initial_rng_state)
-    outputs = reference_func(*recording_inputs, **kwargs)
+    outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
     l1 = allSum(outputs)
     grads = torch.autograd.grad(l1, recording_tensors, create_graph=True,
                                 allow_unused=allow_unused)
@@ -8899,8 +8895,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
 
     recording_inputs, recording_tensors = clone_inputs(True)
 
-    torch.set_rng_state(initial_rng_state)
-    outputs_test = func(*recording_inputs, **kwargs)
+    outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
     l1_test = allSum(outputs_test)
     grads_test = torch.autograd.grad(
         l1_test, recording_tensors, create_graph=True, allow_unused=allow_unused)
