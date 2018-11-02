@@ -9,7 +9,7 @@
 /// If you are writing a compute bound kernel, you can use the CUDA half
 /// intrinsics directly on the Half type from device code.
 
-#include <ATen/core/Macros.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
 
 #include <cmath>
@@ -47,18 +47,18 @@ struct alignas(2) Half {
 
   // HIP wants __host__ __device__ tag, CUDA does not
 #ifdef __HIP_PLATFORM_HCC__
-  AT_HOST_DEVICE Half() = default;
+  C10_HOST_DEVICE Half() = default;
 #else
   Half() = default;
 #endif
 
-  constexpr AT_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits){};
-  inline AT_HOST_DEVICE Half(float value);
-  inline AT_HOST_DEVICE operator float() const;
+  constexpr C10_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits){};
+  inline C10_HOST_DEVICE Half(float value);
+  inline C10_HOST_DEVICE operator float() const;
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  inline AT_HOST_DEVICE Half(const __half& value);
-  inline AT_HOST_DEVICE operator __half() const;
+  inline C10_HOST_DEVICE Half(const __half& value);
+  inline C10_HOST_DEVICE operator __half() const;
 #endif
 };
 
