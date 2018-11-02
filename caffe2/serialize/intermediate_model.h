@@ -43,16 +43,13 @@ enum DeserializeMode {
 //       transferred to Tensor
 struct SharedData {
   // constructor
-  explicit SharedData(uint64_t record_id) : recordId(record_id), dataPtr() {}
-  explicit SharedData(uint64_t record_id, at::DataPtr&& data_ptr, uint64_t size)
-    : recordId(record_id), dataPtr(std::move(data_ptr)), size(size) {}
+  explicit SharedData(uint64_t record_id, uint64_t size) : recordId(record_id), size(size), dataPtr() {}
+  explicit SharedData(uint64_t record_id, uint64_t size, at::DataPtr&& data_ptr)
+    : recordId(record_id), size(size), dataPtr(std::move(data_ptr)) {}
 
   c10::optional<uint64_t> recordId;
+  uint64_t size = 0; // the size of the record
   at::DataPtr dataPtr;
-  // For deserialize:
-  //   1) in LOADER_TENSOR_DATA mode, size information is avaiable immediately
-  //   2) in HEADER_ONLY mode, until we load the tensor data, size won't be available
-  uint64_t size = 0;
 };
 
 // IntermediateDeviceOption stores device related information

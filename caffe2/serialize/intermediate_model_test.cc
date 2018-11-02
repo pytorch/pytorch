@@ -68,7 +68,7 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   }
   at::DataPtr data_ptr(data_vector.data(), at::kCPU);
   std::shared_ptr<serialize::SharedData> data =
-    std::make_shared<serialize::SharedData>(0, std::move(data_ptr), raw_size);
+    std::make_shared<serialize::SharedData>(0, raw_size, std::move(data_ptr));
   tensor1->setData(data);
   tensor1->setStrides(strides);
   // prepare second parameter, share the data with first parameter
@@ -150,13 +150,13 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   const auto& lazy_tensor1 = lazy_param1.tensor();
   ASSERT_EQ(lazy_tensor1.data()->recordId.value(), loaded_tensor1.data()->recordId.value());
   ASSERT_EQ(lazy_tensor1.data()->dataPtr.get(), nullptr);
-  ASSERT_EQ(lazy_tensor1.data()->size, 0);
+  ASSERT_EQ(lazy_tensor1.data()->size, loaded_tensor1.data()->size);
   const auto& lazy_param2 = lazy_params.at(1);
   ASSERT_EQ(lazy_param2.name(), loaded_param2.name());
   const auto& lazy_tensor2 = lazy_param2.tensor();
   ASSERT_EQ(lazy_tensor2.data()->recordId.value(), loaded_tensor2.data()->recordId.value());
   ASSERT_EQ(lazy_tensor2.data()->dataPtr.get(), nullptr);
-  ASSERT_EQ(lazy_tensor2.data()->size, 0);
+  ASSERT_EQ(lazy_tensor2.data()->size, loaded_tensor2.data()->size);
   ASSERT_EQ(lazy_tensor2.data()->recordId, lazy_tensor1.data()->recordId);
 
   std::remove(tmp_name.c_str());
