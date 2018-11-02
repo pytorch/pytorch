@@ -952,6 +952,14 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_model_test(WhereMethod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_data_dependent_zeros_factory(self):
+        class ZerosFactory(torch.nn.Module):
+            def forward(self, input):
+                return torch.cat([input, torch.zeros(input.size(0), 1).type_as(input)], dim=1)
+
+        x = torch.zeros(3, 4)
+        self.run_model_test(ZerosFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
 
 # a bit of metaprogramming to set up all the rnn tests
 
