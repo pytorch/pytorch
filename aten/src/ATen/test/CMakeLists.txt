@@ -5,6 +5,7 @@ IF (MSVC)
 ENDIF(MSVC)
 
 list(APPEND ATen_CPU_TEST_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/DeviceGuard_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/scalar_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/apply_utils_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/basic.cpp

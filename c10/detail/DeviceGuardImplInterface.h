@@ -39,6 +39,18 @@ struct C10_API DeviceGuardImplInterface {
    * Set the current device to Device, and return the previous Device.
    */
   virtual Device exchangeDevice(Device) const = 0;
+  // NB: Implementations of exchangeDevice can be a bit boilerplatey.  You might
+  // consider replacing exchangeDevice with a non-virtual function with a baked
+  // in implementation; however, note that this will triple the number of
+  // virtual calls (when you implement exchangeDevice in a final subclass,
+  // the compiler gets to devirtualize everything; it won't do that if you don't
+  // define it in the subclass!)  A common way to solve this problem is to use
+  // some sort of CRTP; however, we can template DeviceGuardImplInterface since
+  // we really *do* need it to be virtual.  A little boilerplate seems easiest
+  // to explain.  (Another way around this problem is to provide inline
+  // functions that provide the default implementations, but this seems a little
+  // hard to explain.  In any case, we're only going to have on order of ten
+  // implementations of this anyway.)
 
   /**
    * Get the current device.
@@ -61,7 +73,7 @@ struct C10_API DeviceGuardImplInterface {
    * Return the previous stream for that device. You are NOT required
    * to set the current device to match the device of this stream.
    */
-  virtual Stream exchangeStream(Stream) const noexcept = 0;
+  // virtual Stream exchangeStream(Stream) const noexcept = 0;
 
   /**
    * Intended use of this class is to leak the DeviceGuardImpl at program end.

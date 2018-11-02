@@ -11,6 +11,7 @@
 #include <cstddef>
 
 namespace at {
+
 /// RAII guard that sets a certain default device in its constructor, and
 /// changes it back to the device (for that device type) that was originally
 /// active upon destruction.
@@ -48,6 +49,12 @@ public:
     if (!tensors.empty()) {
       init_device_from(tensors.front());
     }
+  }
+
+  /// A constructor for testing; permits explicitly passing in the
+  /// DeviceGuardImpl.
+  explicit DeviceGuard(Device device, const detail::DeviceGuardImplInterface* impl) {
+    init_device(device, impl);
   }
 
   /// Copy is disallowed.
@@ -91,6 +98,7 @@ public:
   /// move a device guard across an intervening DeviceGuard.
   ///
   DeviceGuard& operator=(DeviceGuard&& other) noexcept {
+    if (this == &other) return *this;
     if (other.original_device_.type() == original_device_.type()) {
       // other has already set the device to the desired new value;
       // cancel its destruction and update current_device.  Don't
@@ -135,11 +143,14 @@ public:
   }
 
  private:
-  void init_device(Device device) {
+  void init_device(Device device, const detail::DeviceGuardImplInterface* impl = nullptr) {
     if (device.type() == at::kCPU) {
       return;
     }
-    impl_ = detail::getDeviceGuardImpl(device.type());
+    impl_ = impl ? impl : detail::getDeviceGuardImpl(device.type());
+    if (impl) {
+      AT_ASSERT(impl->type() == device.type());
+    }
     if (device.index() == -1) {
       original_device_ = impl_->getDevice();
       current_device_ = original_device_;

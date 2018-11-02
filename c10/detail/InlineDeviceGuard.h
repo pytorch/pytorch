@@ -1,5 +1,9 @@
 #pragma once
 
+#include <c10/Device.h>
+#include <c10/detail/DeviceGuardImplInterface.h>
+#include <c10/util/Optional.h>
+
 namespace c10 {
 namespace detail {
 
@@ -38,12 +42,14 @@ public:
   /// Set the current device to the passed Device.
   explicit InlineDeviceGuard(Device device) {
     set_device(device); // In Optimizer We Trust
+    if (!initialized()) initialize();
   }
 
   /// Set the current device to the passed Device
   explicit InlineDeviceGuard(optional<Device> device_opt) {
     if (device_opt.has_value()) {
       set_device(device_opt.value());
+      if (!initialized()) initialize();
     } else {
       initialize();
     }
@@ -70,8 +76,12 @@ public:
   /// moved-from `InlineDeviceGuard` is modified such that its destruction has no
   /// effect (does not reset the device).
   InlineDeviceGuard& operator=(InlineDeviceGuard<T>&& other) noexcept {
+    if (this == &other) return *this;
     // NB: Do NOT override the original_device: you're still
     // on the hook for reverting to it!
+    if (!initialized()) {
+      original_device_ = other.original_device_;
+    }
     current_device_ = other.current_device_;
     other.original_device_ = DeviceType::CPU;
     other.current_device_ = DeviceType::CPU;
@@ -90,7 +100,11 @@ public:
     if (index == -1) return;
     AT_ASSERT(index >= 0);
     // if (current_device_ == device) return;
-    T().setDevice(device);
+    if (original_device_ == DeviceType::CPU) {
+      original_device_ = T().exchangeDevice(device);
+    } else {
+      T().setDevice(device);
+    }
     current_device_ = device;
   }
 
@@ -113,6 +127,12 @@ public:
     AT_ASSERTM(current_device_ != DeviceType::CPU,
                "This device guard was moved-out from and is no longer valid");
     return current_device_;
+  }
+
+  /// Returns whether or not the device guard is initialized.  A device guard
+  /// becomes uninitialized when it is is moved out from.
+  bool initialized() {
+    return original_device_ != DeviceType::CPU;
   }
 
 private:

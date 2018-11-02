@@ -34,10 +34,11 @@ struct CUDAGuardImpl final : public c10::detail::DeviceGuardImplInterface {
     AT_ASSERT(d.type() == DeviceType::CUDA);
     AT_CUDA_CHECK(cudaSetDevice(d.index()));
   }
-  void uncheckedSetDevice(Device device) const noexcept override {
-    cudaSetDevice(device.index());
+  void uncheckedSetDevice(Device d) const noexcept override {
+    cudaSetDevice(d.index());
   }
   // NB: These do NOT set the current device
+  /*
   Stream exchangeStream(Stream s) const noexcept override {
     CUDAStream cs(s);
     // TODO: Don't go through internals if not necessary
@@ -45,6 +46,7 @@ struct CUDAGuardImpl final : public c10::detail::DeviceGuardImplInterface {
     CUDAStream_setStream(cs.internals());
     return old_stream.unwrap();
   }
+  */
 };
 
 }}} // namespace at::cuda::detail
