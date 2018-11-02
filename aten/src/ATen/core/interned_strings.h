@@ -6,11 +6,11 @@
 #include <algorithm>
 
 #include <ATen/core/aten_interned_strings.h>
-#include <ATen/core/Macros.h>
+#include <c10/macros/Macros.h>
 
 namespace c10 {
 
-#if !AT_MOBILE
+#if !C10_MOBILE
 #define FORALL_NS_SYMBOLS(_)       \
   _(namespaces, prim)              \
   _(namespaces, aten)              \
