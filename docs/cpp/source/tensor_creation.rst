@@ -279,8 +279,8 @@ and can finally be shortened to
   torch::ones(10, torch::kFloat32)
 
 Of course, it is not possible to modify further properties of the
-``TensorOptions`` instance, but if all we needed was to change one property,
-this is quite practical.
+``TensorOptions`` instance with this short syntax,, but if all we needed was to
+change one property, this is quite practical.
 
 In conclusion, we can now compare how ``TensorOptions`` defaults, together with
 the abbreviated API for creating ``TensorOptions`` using free functions, allow
@@ -296,6 +296,11 @@ with the equivalent call in C++:
   torch::randn({3, 4}, torch::dtype(torch::kFloat32).device({torch::kCUDA, 1}).requires_grad(true))
 
 Pretty close!
+
+Conversion
+----------
+
+Notes on how to use Tensor::to()
 
 Conclusion
 ----------
