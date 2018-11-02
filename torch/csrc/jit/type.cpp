@@ -62,8 +62,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << "Generator";
   } else if(t.kind() == TypeKind::VarType) {
     out << t.expect<VarType>()->name();
-  } else if(t.kind() == TypeKind::WorldType) {
-    out << "World";
+  } else if(t.kind() == TypeKind::FutureType) {
+    auto elem = t.cast<FutureType>()->getElementType();
+    out << "Future[" << *elem << "]";
   } else {
     AT_ERROR("unknown type kind");
   }
@@ -100,10 +101,6 @@ NoneTypePtr NoneType::get() {
 }
 GeneratorTypePtr GeneratorType::get() {
   static auto value = GeneratorType::create();
-  return value;
-}
-WorldTypePtr WorldType::get() {
-  static auto value = WorldType::create();
   return value;
 }
 StringTypePtr StringType::get() {
@@ -237,6 +234,15 @@ TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
     } else {
       std::stringstream ss;
       ss << "cannot match a tuple to " << actual->str();
+      throw TypeMatchError(ss.str());
+    }
+  } else if (auto lt_formal = formal->cast<FutureType>()) {
+    if (auto lt_actual = actual->cast<FutureType>()) {
+      return FutureType::create(matchTypeVariables(
+          lt_formal->getElementType(), lt_actual->getElementType(), type_env));
+    } else {
+      std::stringstream ss;
+      ss << "cannot match a future to " << actual->str();
       throw TypeMatchError(ss.str());
     }
   }

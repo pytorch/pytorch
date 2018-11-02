@@ -154,8 +154,8 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
     EXPECT_TRUE(BlobIsTensorType(new_blob, CUDA));                         \
     Tensor new_cpu_tensor(blob.Get<Tensor>(), CPU);                        \
     EXPECT_EQ(new_cpu_tensor.ndim(), 2);                                   \
-    EXPECT_EQ(new_cpu_tensor.dim(0), 2);                                   \
-    EXPECT_EQ(new_cpu_tensor.dim(1), 3);                                   \
+    EXPECT_EQ(new_cpu_tensor.size(0), 2);                                  \
+    EXPECT_EQ(new_cpu_tensor.size(1), 3);                                  \
     for (int i = 0; i < 6; ++i) {                                          \
       EXPECT_EQ(                                                           \
           cpu_tensor.data<TypeParam>()[i],                                 \
@@ -182,8 +182,8 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
   }
   for (int gpu_id = 0; gpu_id < NumCudaDevices(); ++gpu_id) {
     DeviceGuard guard(gpu_id);
-    CUDAContext context(gpu_id);
-    blob.Reset(new Tensor(tensor, &context, CUDA));
+    CUDAContext context(gpu_id); // switch to the current gpu
+    blob.Reset(new Tensor(tensor, CUDA));
     string serialized = SerializeBlob(blob, "test");
     BlobProto proto;
     CAFFE_ENFORCE(proto.ParseFromString(serialized));

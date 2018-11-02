@@ -35,7 +35,7 @@
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/dynamic_dag.h"
-#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
@@ -667,8 +667,8 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
   graph->registerOutput(d.value());
   graph->registerOutput(e.value());
 
-  auto a_var = autograd::make_variable(at::CPU(at::kFloat).tensor(2, 2), true);
-  auto b_var = autograd::make_variable(at::CPU(at::kFloat).tensor(2, 2), false);
+  auto a_var = autograd::make_variable(at::empty_strided(2, 2, at::CPU(at::kFloat).options()), true);
+  auto b_var = autograd::make_variable(at::empty_strided(2, 2, at::CPU(at::kFloat).options()), false);
   setInputTypes(*graph, ArgumentSpec(true, {a_var, b_var}, 2));
   PropagateInputShapes(*graph);
   PropagateRequiresGrad(graph);
@@ -1149,20 +1149,18 @@ void testSchemaParser() {
                                             ->getElementType()
                                             ->expect<ListType>()
                                             ->getElementType()));
-  // futures
-  try {
-    parseSchema("at::what(Future(int) foo) -> ()");
-    ASSERT_TRUE(false);
-  } catch (script::ErrorReport& er) {
-    ASSERT_TRUE(
-        std::string(er.what()).find("Futures are not yet implemented") !=
-        std::string::npos);
-  }
+
   // named returns
   parseSchema("at::what(Tensor! i_will_be_written_to) -> ()");
   auto s3 = parseSchema("at::what() -> (Tensor the_return, Tensor the_return2)");
   ASSERT_TRUE(s3.returns().at(0).name() == "the_return");
   ASSERT_TRUE(s3.returns().at(1).name() == "the_return2");
+
+  // futures
+  auto s4 = parseSchema("at::what(Future(int) foo) -> ()");
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s4.arguments().at(0)
+                                          .type()->expect<FutureType>()
+                                          ->getElementType()));
 
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(t) foo) -> (Tensor(t))");

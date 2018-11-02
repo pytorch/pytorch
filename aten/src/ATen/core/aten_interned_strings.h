@@ -82,9 +82,10 @@ _(aten, _fused_dropout) \
 _(aten, _ger) \
 _(aten, _gesv_helper) \
 _(aten, _gesv_single) \
-_(aten, _getri) \
+_(aten, _getri_single) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
+_(aten, _inverse_helper) \
 _(aten, _linspace) \
 _(aten, _local_scalar) \
 _(aten, _local_scalar_dense) \
@@ -235,6 +236,7 @@ _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
 _(aten, chain_matmul) \
+_(aten, cholesky) \
 _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \
@@ -476,8 +478,6 @@ _(aten, mv) \
 _(aten, mvlgamma) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
-_(aten, native_batch_norm) \
-_(aten, native_batch_norm_backward) \
 _(aten, native_clone) \
 _(aten, native_get_device) \
 _(aten, native_norm) \
@@ -511,7 +511,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
-_(aten, potrf) \
 _(aten, potri) \
 _(aten, potrs) \
 _(aten, pow) \
@@ -613,6 +612,7 @@ _(aten, storage_offset) \
 _(aten, stride) \
 _(aten, strides) \
 _(aten, sub) \
+_(aten, rsub) \
 _(aten, sum) \
 _(aten, svd) \
 _(aten, symeig) \
@@ -629,6 +629,9 @@ _(aten, th_pow) \
 _(aten, th_resize_as) \
 _(aten, th_tensor) \
 _(aten, th_zero) \
+_(aten, thnn_batch_norm) \
+_(aten, thnn_batch_norm_backward) \
+_(aten, thnn_batch_norm_forward) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \

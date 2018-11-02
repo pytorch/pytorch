@@ -26,7 +26,7 @@ class BatchMomentsOp final : public Operator<Context> {
     const int ndim = X.ndim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
-    const int HxW = X.size() / (N * C);
+    const int HxW = X.numel() / (N * C);
     mu->Resize(C);
     var->Resize(C);
     const T* X_data = X.template data<T>();
@@ -77,7 +77,7 @@ class BatchMomentsGradientOp final : public Operator<Context> {
     const int ndim = X.ndim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
-    const int HxW = X.size() / (N * C);
+    const int HxW = X.numel() / (N * C);
     dX->ResizeLike(X);
     const T* dmu_data = dmu.template data<T>();
     const T* dvar_data = dvar.template data<T>();

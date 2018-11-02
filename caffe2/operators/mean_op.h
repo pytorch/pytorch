@@ -70,7 +70,7 @@ class MeanOp final : public Operator<Context> {
       CAFFE_THROW(
           "Mean operator only supports 32-bit float, but",
           " input was of type ",
-          Input(0).meta().name());
+          Input(0).dtype().name());
     }
   }
 };
@@ -115,7 +115,7 @@ class MeanGradientOp : public Operator<Context> {
       CAFFE_THROW(
           "Mean operator only supports 32-bit float, but",
           " input was of type ",
-          Input(0).meta().name());
+          Input(0).dtype().name());
     }
   }
 };

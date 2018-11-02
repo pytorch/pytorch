@@ -43,7 +43,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
       auto& key = Input(KEY);
       CAFFE_ENFORCE_EQ(key.ndim(), 1, "Key has to be 1-D");
       CAFFE_ENFORCE(
-          key.meta().template Match<int64_t>(), "Key has to be type int64_t");
+          key.dtype().template Match<int64_t>(), "Key has to be type int64_t");
     }
     CAFFE_ENFORCE_EQ(
         ranges.dim(1),
@@ -59,7 +59,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
     auto* rawData = static_cast<const char*>(data.raw_data());
     auto* rangesData = ranges.template data<Index>();
     int rangesDataOffset = 0;
-    auto itemsize = data.meta().itemsize();
+    auto itemsize = data.dtype().itemsize();
 
     auto batchSize = ranges.dim(0);
     vector<int64_t> outputDims{batchSize, 0};
@@ -68,7 +68,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
       auto* output = Output(i);
       outputDims[1] = lengths_[i];
       output->Resize(outputDims);
-      char* ptr = static_cast<char*>(output->raw_mutable_data(data.meta()));
+      char* ptr = static_cast<char*>(output->raw_mutable_data(data.dtype()));
       memset(ptr, 0, output->nbytes());
       outputRawData.push_back(ptr);
     }
@@ -89,7 +89,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
 
         if (InputSize() == 2) {
           context_.CopyItemsSameDevice(
-              data.meta(),
+              data.dtype(),
               rangeLength,
               rawData + rangeStart * itemsize,
               outputRawData[j] + i * itemsize * lengths_[j]);

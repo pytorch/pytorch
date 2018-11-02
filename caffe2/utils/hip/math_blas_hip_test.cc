@@ -60,8 +60,7 @@ TEST(MathROCBLASTest, GemmNoTransNoTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom(*tensorY, &context);
-  context.FinishDeviceComputation();
+  tensorY_host->CopyFrom(*tensorY);
   EXPECT_EQ(tensorY_host->size(), 30);
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 10) << i;
@@ -81,8 +80,7 @@ TEST(MathROCBLASTest, GemmNoTransNoTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom(*tensorY, &context);
-  context.FinishDeviceComputation();
+  tensorY_host->CopyFrom(*tensorY);
   EXPECT_EQ(tensorY_host->size(), 30);
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 15) << i;
@@ -102,8 +100,7 @@ TEST(MathROCBLASTest, GemmNoTransNoTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom(*tensorY, &context);
-  context.FinishDeviceComputation();
+  tensorY_host->CopyFrom(*tensorY);
   EXPECT_EQ(tensorY_host->size(), 30);
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 20) << i;
@@ -160,8 +157,7 @@ TEST(MathROCBLASTest, GemmNoTransTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom(*tensorY, &context);
-  context.FinishDeviceComputation();
+  tensorY_host->CopyFrom(*tensorY);
   EXPECT_EQ(tensorY_host->size(), 30);
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 10) << i;
@@ -181,8 +177,7 @@ TEST(MathROCBLASTest, GemmNoTransTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom(*tensorY, &context);
-  context.FinishDeviceComputation();
+  tensorY_host->CopyFrom(*tensorY);
   EXPECT_EQ(tensorY_host->size(), 30);
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 15) << i;
@@ -201,8 +196,7 @@ TEST(MathROCBLASTest, GemmNoTransTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom(*tensorY, &context);
-  context.FinishDeviceComputation();
+  tensorY_host->CopyFrom(*tensorY);
   EXPECT_EQ(tensorY_host->size(), 30);
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 20) << i;
@@ -256,8 +250,7 @@ TEST(MathROCBLASTest, GemvNoTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom(*tensorY, &context);
-  context.FinishDeviceComputation();
+  tensorY_host->CopyFrom(*tensorY);
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 10) << i;
   }
@@ -274,8 +267,7 @@ TEST(MathROCBLASTest, GemvNoTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom(*tensorY, &context);
-  context.FinishDeviceComputation();
+  tensorY_host->CopyFrom(*tensorY);
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 15) << i;
   }
@@ -292,8 +284,7 @@ TEST(MathROCBLASTest, GemvNoTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom(*tensorY, &context);
-  context.FinishDeviceComputation();
+  tensorY_host->CopyFrom(*tensorY);
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 20) << i;
   }
@@ -346,8 +337,7 @@ TEST(MathROCBLASTest, GemvTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom(*tensorY, &context);
-  context.FinishDeviceComputation();
+  tensorY_host->CopyFrom(*tensorY);
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 6) << i;
   }
@@ -364,8 +354,7 @@ TEST(MathROCBLASTest, GemvTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom(*tensorY, &context);
-  context.FinishDeviceComputation();
+  tensorY_host->CopyFrom(*tensorY);
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 9) << i;
   }
@@ -382,8 +371,7 @@ TEST(MathROCBLASTest, GemvTrans) {
       tensorY->mutable_data<float>(),
       &context);
   context.FinishDeviceComputation();
-  tensorY_host->CopyFrom(*tensorY, &context);
-  context.FinishDeviceComputation();
+  tensorY_host->CopyFrom(*tensorY);
   for (int i = 0; i < tensorY_host->size(); ++i) {
     CHECK_EQ(tensorY_host->data<float>()[i], 12) << i;
   }

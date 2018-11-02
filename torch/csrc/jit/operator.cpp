@@ -22,11 +22,22 @@ struct SchemaParser {
     std::vector<Argument> returns;
     std::vector<Symbol> writes;
     bool kwarg_only = false;
+    bool is_vararg = false;
     size_t idx = 0;
     parseList('(', ',', ')', [&] {
-      if(L.nextIf('*')) {
-        kwarg_only = true;
+      if (L.nextIf('*')) {
+        auto tok = L.cur();
+        if (tok.kind == TK_IDENT) {
+          is_vararg = true;
+          arguments.push_back(parseArgument(
+              idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only, writes));
+        } else {
+          kwarg_only = true;
+        }
       } else {
+        if (is_vararg) {
+          AT_ERROR("Found argument after varargs declaration");
+        }
         arguments.push_back(parseArgument(
             idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only, writes));
       }
@@ -43,7 +54,7 @@ struct SchemaParser {
           parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false, writes));
     }
     return FunctionSchema { name, std::move(arguments), std::move(returns),
-                            false, false, std::move(writes) };
+                            is_vararg, false, std::move(writes) };
   }
 
   std::vector<FunctionSchema> parseDeclarations() {
@@ -69,7 +80,6 @@ struct SchemaParser {
       {"float", FloatType::get() },
       {"int", IntType::get() },
       {"bool", BoolType::get() },
-      {"World", WorldType::get() },
     };
     auto tok = L.expect(TK_IDENT);
     auto text = tok.text();
@@ -128,7 +138,7 @@ struct SchemaParser {
       auto subtype = std::move(p.first);
       auto subalias = std::move(p.second);
       L.expect(')');
-      throw ErrorReport(L.cur()) << "Futures are not yet implemented";
+      value = FutureType::create(subtype);
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
       L.next();
       value = DynamicType::get();
@@ -202,8 +212,8 @@ struct SchemaParser {
           return static_cast<int64_t>(at::Device::Type::CPU);
         } else if("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
-        } else if("ElementwiseMean" == text) {
-          return static_cast<int64_t>(Reduction::ElementwiseMean);
+        } else if("Mean" == text) {
+          return static_cast<int64_t>(Reduction::Mean);
         } else {
           throw ErrorReport(L.cur().range) << "invalid numeric default value";
         }

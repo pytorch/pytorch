@@ -16,17 +16,8 @@ std::unordered_set<Symbol> skip_list = {
   prim::If,
   prim::Loop, //TODO: handle Loop
   prim::Print,
+  prim::RaiseException,
   prim::PythonOp, //may have side effects
-  prim::LoadWorld,
-  prim::StoreWorld,
-  //all the rand functions from native_functions.yaml
-  aten::rand,
-  aten::rand_like,
-  aten::randint,
-  aten::randint_like,
-  aten::randn,
-  aten::randn_like,
-  aten::randperm,
   prim::Constant,
   prim::Undefined,
   prim::NoneGenerator,
@@ -129,7 +120,8 @@ void ConstantPropagation(Node* n, bool recurse) {
       std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
         return v->node()->kind() == prim::Constant;
       });
-  bool supported_node = !n->kind().is_onnx() && skip_list.count(n->kind()) == 0;
+  bool supported_node = !n->kind().is_onnx() && skip_list.count(n->kind()) == 0
+    && !n->isNondeterministic();
   auto run_blocks = [&]() {
     if (recurse) {
       for (Block * block : n->blocks()) {

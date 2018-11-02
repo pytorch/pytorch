@@ -80,13 +80,19 @@ void applyOffsetAlias(
   const int32_t startDstTimestep =
       oc.offset >= 0 ? oc.offset : src->dim(0) + oc.offset;
   const int32_t numDstTimesteps = src->dim(0) - startDstTimestep;
-  CAFFE_ENFORCE(
-      numDstTimesteps >= 1, "Invalid number of timesteps: ", numDstTimesteps);
-  dims[0] = numDstTimesteps;
-  dst->Resize(dims);
-  CAFFE_ENFORCE(timestep == dst->numel() / numDstTimesteps, "Invalid offset");
-  dst->ShareExternalPointer(
-      src->template mutable_data<T>() + startDstTimestep * timestep);
+  if (numDstTimesteps >= 1) {
+    dims[0] = numDstTimesteps;
+    dst->Resize(dims);
+    CAFFE_ENFORCE(timestep == dst->numel() / numDstTimesteps, "Invalid offset");
+    dst->ShareExternalPointer(
+        src->template mutable_data<T>() + startDstTimestep * timestep);
+  } else {
+    CAFFE_ENFORCE_EQ(
+        numDstTimesteps, 0, "Invalid number of timesteps: ", numDstTimesteps);
+    dims[0] = 0;
+    dst->Resize(dims);
+    dst->template mutable_data<T>();
+  }
 }
 
 template <typename T, class Context>
@@ -206,12 +212,6 @@ class RecurrentNetworkOp final : public Operator<Context> {
               recurrent_map,
               timestep_,
               ArgumentHelper(operator_def));
-    } else {
-      // Fix for legacy models that pass "rnn" type net
-      if (stepNetDef_.type() == "rnn") {
-        stepNetDef_.set_type("async_simple");
-      }
-      CAFFE_ENFORCE(stepNetDef_.type() != "async_dag");
     }
   }
 

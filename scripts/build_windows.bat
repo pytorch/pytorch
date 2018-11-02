@@ -45,7 +45,7 @@ if NOT DEFINED CMAKE_GENERATOR (
     :: In default we use win64 VS 2015.
     :: Main reason is that currently, cuda 9 does not support VS 2017 newest
     :: version. To use cuda you will have to use 2015.
-    set CMAKE_GENERATOR="Visual Studio 14 2015 Win64"
+    set CMAKE_GENERATOR="Visual Studio 15 2017 Win64"
   )
 )
 

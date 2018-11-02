@@ -38,7 +38,15 @@ thread_local std::shared_ptr<TracingState> tracing_state;
 
 } // namespace detail
 
-void addInputs(Node *n, const char * name, int64_t value)            { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, int64_t value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value * v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else {
+    detail::genericAddInput(n, value);
+  }
+}
 void addInputs(Node *n, const char * name, bool value)               { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, double value)             { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, const at::Scalar& value)  { detail::genericAddInput(n, value); }
@@ -81,7 +89,7 @@ void addInputs(Node *n, const char * name, at::TensorList value) {
 
 void addInputs(Node* n, const char * name, const at::TensorOptions& options) {
   // [TensorOptions in script] - update this when you change how we schematize TensorOptions
-  addInputs(n, name, options.dtype());
+  addInputs(n, name, at::typeMetaToScalarType(options.dtype()));
   addInputs(n, name, options.layout());
   addInputs(n, name, options.device());
 }
@@ -182,6 +190,19 @@ void ArgumentStash::stashIntListElem(const std::string& arg_name, size_t size, s
                    ->insertAfter(ten->node())
                    ->output();
   list_trace[idx] = prim;
+}
+
+void ArgumentStash::stashValue(const std::string& arg_name, size_t idx, const Variable& var, TypePtr type) {
+  if (!isTracing()) return;
+
+  Value* ten = getValueTrace(var);
+  if (type) {
+    auto& g = *ten->owningGraph();
+    ten = g.createTensorToNum(type, ten)
+                     ->insertAfter(ten->node())
+                     ->output();
+  }
+  stash.values.emplace(arg_name, ten);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

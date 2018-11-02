@@ -44,7 +44,7 @@ void TensorPrinter::PrintMeta(const Tensor& tensor) {
 std::string TensorPrinter::MetaStr(const Tensor& tensor) {
   std::stringstream meta_stream;
   meta_stream << "Tensor " << tensor_name_ << " of type "
-              << tensor.meta().name() << ". Dims: (";
+              << tensor.dtype().name() << ". Dims: (";
   for (const auto dim : tensor.sizes()) {
     meta_stream << dim << ",";
   }
@@ -54,7 +54,7 @@ std::string TensorPrinter::MetaStr(const Tensor& tensor) {
 
 TypeMeta GetTensorType(const void* c) {
   const Tensor* tc = static_cast<const Tensor*>(c);
-  return tc->meta();
+  return tc->dtype();
 }
 
 // TODO(jerryzh): Remove
@@ -120,7 +120,7 @@ void TensorVectorResize(
 Tensor empty(at::IntList dims, at::TensorOptions options) {
   // TODO: merge this with at::empty after Tensor is merged
   auto tensor = Tensor(dims, options.device().type());
-  tensor.raw_mutable_data(scalarTypeToTypeMeta(options.dtype()));
+  tensor.raw_mutable_data(options.dtype());
   return tensor;
 }
 

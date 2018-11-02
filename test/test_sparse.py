@@ -606,9 +606,9 @@ class TestSparse(TestCase):
                 y = y.transpose(i, j)
                 self.assertEqual(self.safeToDense(x), y)
 
-        test_shape(4, 20, 5)
-        test_shape(4, 10, [100, 100, 100, 5, 5, 5, 0])
-        test_shape(4, 0, [0, 0, 100, 5, 5, 5, 0])
+        test_shape(4, 6, 3)
+        test_shape(4, 3, [7, 7, 7, 3, 3, 3, 0])
+        test_shape(4, 0, [0, 0, 7, 3, 3, 3, 0])
 
     @cpu_only
     def test_coalesce_transpose_mm(self):

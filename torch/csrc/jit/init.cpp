@@ -35,7 +35,8 @@
 #include "torch/csrc/jit/pybind_utils.h"
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/script/jit_exception.h"
 
 #include "caffe2/serialize/inline_container.h"
 
@@ -49,6 +50,13 @@
 #include <utility>
 
 namespace torch  { namespace jit {
+
+// TODO: make a fake future for python
+namespace detail {
+class Future {
+
+};
+}
 
 namespace {
 
@@ -77,6 +85,8 @@ std::string runJITCPPTests();
 void initJITBindings(PyObject *module) {
   auto m = py::handle(module).cast<py::module>();
 
+  py::register_exception<JITException>(m, "JITException");
+
   py::class_<python::IODescriptor>(m, "IODescriptor");
 
   m.def("_jit_init", loadPythonClasses)
@@ -91,7 +101,9 @@ void initJITBindings(PyObject *module) {
      return EliminateCommonSubexpression(g); // overload resolution
    })
    .def("_jit_pass_constant_pooling", ConstantPooling)
-   .def("_jit_pass_peephole", PeepholeOptimize, py::arg("graph"), py::arg("addmm_fusion_enabled") = false)
+   .def("_jit_pass_peephole", [](const std::shared_ptr<Graph>& g, bool addmm_fusion_enabled) {
+     return PeepholeOptimize(g, addmm_fusion_enabled);
+   }, py::arg("graph"), py::arg("addmm_fusion_enabled") = false)
    .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
      return Canonicalize(g);
    })
@@ -308,6 +320,17 @@ void initJITBindings(PyObject *module) {
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
         return op->schema();
       });
+  });
+
+  py::class_<detail::Future>(m, "Future");
+
+  m.def("fork", [](script::Module &sm, py::args args) {
+    // TODO: this is a fake stub
+    return detail::Future();
+  });
+
+  m.def("wait", [](detail::Future &fut) {
+    // TODO: this is a fake stub
   });
 
 

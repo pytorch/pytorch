@@ -4,6 +4,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor_int8.h"
+#include "caffe2/operators/quantized/int8_simd.h"
 #include "caffe2/operators/quantized/int8_utils.h"
 
 namespace caffe2 {
@@ -77,7 +78,7 @@ class Int8QuantizeOp final : public Operator<CPUContext> {
     Int8Quantize(
         X.data<float>(),
         Y->t.mutable_data<uint8_t>(),
-        X.size(),
+        X.numel(),
         Y_scale,
         Y_offset);
     return true;

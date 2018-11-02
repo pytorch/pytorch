@@ -5,10 +5,10 @@ namespace jit {
 
 using ::c10::ivalue::List;
 using ::c10::ivalue::Shared;
-using ::c10::ivalue::World;
 
 using ::c10::IValue;
 using ::c10::ivalue::Tuple;
+using ::c10::ivalue::Future;
 
 using ::c10::ivalue::BoolList;
 using ::c10::ivalue::DoubleList;

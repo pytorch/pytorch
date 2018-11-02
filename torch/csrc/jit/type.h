@@ -23,6 +23,7 @@ _(TupleType) \
 _(ListType) \
 _(NumberType) \
 _(FloatType) \
+_(FutureType) \
 _(IntType) \
 _(NoneType) \
 _(StringType) \
@@ -30,7 +31,6 @@ _(GeneratorType) \
 _(BoolType) \
 _(OptionalType) \
 _(VarType) \
-_(WorldType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -418,31 +418,6 @@ private:
   std::vector<int64_t> strides_;
 };
 
-// This type is a token used to represent effectful computation in the IR.
-// See the AnnotateEffects pass for how it is used.
-struct WorldType;
-using WorldTypePtr = std::shared_ptr<WorldType>;
-struct TORCH_API WorldType : public Type {
-  static WorldTypePtr create() {
-    return WorldTypePtr(new WorldType());
-  }
-  bool operator==(const Type& rhs) const override {
-    return rhs.kind() == kind();
-  }
-  std::string str() const override {
-    return "world";
-  }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    return *this == *rhs;
-  }
-  static const TypeKind Kind = TypeKind::WorldType;
-  // global singleton
-  static WorldTypePtr get();
-
- private:
-  WorldType() : Type(TypeKind::WorldType) {}
-};
-
 // common base for all types that have a single sub element
 // e.g. Future[T], Option[T], List[T]
 template<TypeKind K, typename T>
@@ -507,6 +482,54 @@ struct TORCH_API ListType : public SingleElementType<TypeKind::ListType, ListTyp
   static ListTypePtr ofBools();
 private:
   using SingleElementType::SingleElementType;
+};
+
+struct FutureType;
+using FutureTypePtr = std::shared_ptr<FutureType>;
+
+struct TORCH_API FutureType : public Type {
+  // It's not exactly a singleton, but there should be exactly once instance of
+  // Future[T] for every T
+  static constexpr bool is_singleton = true;
+  friend struct Type;
+  template<typename ... T>
+  static FutureTypePtr create(TypePtr elem) {
+    return FutureTypePtr(new FutureType(std::move(elem))); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    if (auto rhs_ = rhs.cast<FutureType>()) {
+      return *getElementType() == *rhs_->getElementType();
+    }
+    return false;
+  }
+  bool requires_grad() const override {
+    return elem->requires_grad();
+  }
+  std::string str() const override {
+    std::stringstream ss;
+    ss << "Future(" << getElementType()->str() << ")";
+    return ss.str();
+  }
+  std::string python_str() const override {
+    std::stringstream ss;
+    ss << "Future[" << getElementType()->python_str() << "]";
+    return ss.str();
+  }
+  TypePtr getElementType() const {
+    return elem;
+  }
+  bool hasFreeVariables() const override {
+    return has_free_variables_;
+  }
+
+  static const TypeKind Kind = TypeKind::FutureType;
+private:
+  FutureType(TypePtr elem)
+  : Type(TypeKind::FutureType)
+  , elem(std::move(elem))
+  , has_free_variables_(getElementType()->hasFreeVariables()) {}
+  TypePtr elem;
+  bool has_free_variables_;
 };
 
 struct TupleType;
