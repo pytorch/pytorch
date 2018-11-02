@@ -15,11 +15,9 @@
   (list
     (assign
       (list (variable (ident q)))
-      (=)
       (None))
     (assign
       (list (variable (ident q)))
-      (=)
       (-
         (+
           (variable (ident x))
@@ -38,7 +36,6 @@
           (list))))
     (assign
       (list (variable (ident w)))
-      (=)
       (unary minus
         (variable (ident z))))
     (if
@@ -50,7 +47,6 @@
       (list
         (assign
           (list (variable (ident m)))
-          (=)
           (if
             (not (variable (ident z)))
             (variable (ident x))
@@ -67,7 +63,9 @@
       (list
         (assign
           (list (variable (ident q)))
-          (=)
           (variable (ident x)))))
+    (assert
+      (eq (const 1) (const 1))
+      (option (string_literal hello)))
     (return
       (list (variable (ident x))))))

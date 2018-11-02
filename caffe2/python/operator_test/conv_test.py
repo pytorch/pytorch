@@ -276,7 +276,7 @@ class TestConvolution(serial.SerializedTestCase):
 
     def _nd_convolution_nchw(self, n, input_channels, output_channels,
                              batch_size, stride, size, kernel, dilation, pad,
-                             use_bias, force_algo_fwd, force_algo_dgrad,
+                             use_bias, engine, force_algo_fwd, force_algo_dgrad,
                              force_algo_wgrad, gc, dc):
         dkernel = dilation * (kernel - 1) + 1
         for op_type in ["Conv", "Conv" + str(n) + "D"]:
@@ -289,7 +289,7 @@ class TestConvolution(serial.SerializedTestCase):
                 dilations=[dilation] * n,
                 pads=[pad] * n * 2,
                 order="NCHW",
-                engine="",
+                engine=engine,
                 force_algo_fwd=force_algo_fwd,
                 force_algo_dgrad=force_algo_dgrad,
                 force_algo_wgrad=force_algo_wgrad,
@@ -324,19 +324,20 @@ class TestConvolution(serial.SerializedTestCase):
            dilation=st.integers(1, 3),
            pad=st.integers(0, 3),
            use_bias=st.booleans(),
+           engine=st.sampled_from(["", "CUDNN"]),
            force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
            force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
            force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
            **hu.gcs)
     def test_1d_convolution_nchw(self, input_channels, output_channels,
                                  batch_size, stride, size, kernel, dilation,
-                                 pad, use_bias,
+                                 pad, use_bias, engine,
                                  force_algo_fwd, force_algo_dgrad,
                                  force_algo_wgrad,
                                  gc, dc):
         self._nd_convolution_nchw(
             1, input_channels, output_channels, batch_size, stride, size,
-            kernel, dilation, pad, use_bias, force_algo_fwd, force_algo_dgrad,
+            kernel, dilation, pad, use_bias, engine, force_algo_fwd, force_algo_dgrad,
             force_algo_wgrad, gc, dc
         )
 
@@ -349,19 +350,20 @@ class TestConvolution(serial.SerializedTestCase):
            dilation=st.integers(1, 2),
            pad=st.integers(0, 2),
            use_bias=st.booleans(),
+           engine=st.sampled_from([""]), # TODO: add "CUDNN"
            force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
            force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
            force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
            **hu.gcs)
     def test_3d_convolution_nchw(self, input_channels, output_channels,
                                  batch_size, stride, size, kernel, dilation,
-                                 pad, use_bias,
+                                 pad, use_bias, engine,
                                  force_algo_fwd, force_algo_dgrad,
                                  force_algo_wgrad,
                                  gc, dc):
         self._nd_convolution_nchw(
             3, input_channels, output_channels, batch_size, stride, size,
-            kernel, dilation, pad, use_bias, force_algo_fwd, force_algo_dgrad,
+            kernel, dilation, pad, use_bias, engine, force_algo_fwd, force_algo_dgrad,
             force_algo_wgrad, gc, dc
         )
 

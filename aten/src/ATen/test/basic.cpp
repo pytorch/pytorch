@@ -271,7 +271,7 @@ static void test(Type& type) {
   CATCH_SECTION("dispatch") {
     Tensor tensor = randn({20, 20});
     Tensor other = randn({20, 20});
-    auto result = tensor.m(relu).m(mse_loss, other, Reduction::ElementwiseMean);
+    auto result = tensor.m(relu).m(mse_loss, other, Reduction::Mean);
     CATCH_REQUIRE(result.allclose(mse_loss(relu(tensor), other)));
   }
   CATCH_SECTION("core") {

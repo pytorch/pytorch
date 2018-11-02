@@ -491,11 +491,11 @@ std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some, bool comput
   return at::_th_svd(self, some, compute_uv);
 }
 
-Tensor & potrf_out(Tensor & result, const Tensor & self, bool upper) {
+Tensor & cholesky_out(Tensor & result, const Tensor & self, bool upper) {
   return at::_th_potrf_out(result, self, upper);
 }
 
-Tensor potrf(const Tensor & self, bool upper) {
+Tensor cholesky(const Tensor & self, bool upper) {
   return at::_th_potrf(self, upper);
 }
 

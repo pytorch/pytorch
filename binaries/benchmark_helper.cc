@@ -203,6 +203,12 @@ void fillInputBlob(
     }
     // todo: support gpu and make this function a tempalte
     int protos_size = tensor_kv.second.protos_size();
+    if (protos_size == 1 && iteration > 0) {
+      // Do not override the input data if there is only one input data,
+      // since it will clear all caches. Rely on wipe_cache to
+      // clear caches
+      continue;
+    }
     caffe2::TensorProto* tensor_proto =
         tensor_kv.second.mutable_protos(iteration % protos_size);
     if (tensor_proto->data_type() == caffe2::TensorProto::STRING) {
