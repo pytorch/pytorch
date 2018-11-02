@@ -11,6 +11,7 @@
 
 #include <ATen/core/Macros.h>
 #include <c10/util/C++17.h>
+#include "typeid.h"
 
 #include <cmath>
 #include <cstdint>
@@ -181,5 +182,17 @@ To checked_convert(From f, const char* name) {
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Half& value);
 
 } // namespace at
+
+// Make at::Half a fundamental type.
+namespace std {
+template<>
+struct is_fundamental<at::Half> : std::true_type {
+};
+}  // namespace std
+
+namespace caffe2 {
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(5, at::Half)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(8, at::ComplexHalf)
+} // namespace caffe2
 
 #include "ATen/core/Half-inl.h"

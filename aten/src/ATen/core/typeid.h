@@ -17,14 +17,11 @@
 
 #include <exception>
 
-#include "ATen/core/Backtrace.h"
-#include "ATen/core/Half.h"
-#include "ATen/core/Macros.h"
+#include "c10/util/Backtrace.h"
+#include "c10/macros/Macros.h"
 #include "c10/util/C++17.h"
 #include "c10/util/Exception.h"
 #include "c10/util/IdWrapper.h"
-#include "caffe2/core/macros.h"
-
 #include "c10/util/Type.h"
 
 /*
@@ -43,13 +40,6 @@
 // called.  This requires us to fix all of the call-sites, which I want to do
 // later.  So the namespace is not fixed at the moment.
 
-// Make at::Half a fundamental type.
-namespace std {
-template<>
-struct is_fundamental<at::Half> : std::true_type {
-};
-}  // namespace std
-
 namespace caffe2 {
 
 /**
@@ -59,7 +49,7 @@ namespace caffe2 {
  * dtype of tensors.
  */
 class CAFFE2_API TypeIdentifier final
-    : public at::IdWrapper<TypeIdentifier, uint16_t> {
+    : public c10::IdWrapper<TypeIdentifier, uint16_t> {
  public:
   static TypeIdentifier createTypeId();
 
@@ -563,10 +553,10 @@ CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(1, int8_t)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(2, int16_t)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(3, int)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(4, int64_t)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(5, at::Half)
+// 5 = Half (defined in Half.h)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(6, float)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(7, double)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(8, at::ComplexHalf)
+// 8 = ComplexHalf (defined in Half.h)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(9, std::complex<float>)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(10, std::complex<double>)
 // 11 = undefined type id
