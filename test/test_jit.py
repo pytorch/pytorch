@@ -4194,6 +4194,9 @@ a")
     def test_format(self):
         def func(x):
             print("{}, I'm a {}".format("Hello", "test"))
+            print("format blank".format())
+            print("stuff before {}".format("hi"))
+            print("{} stuff after".format("hi"))
             return x + 1
 
         x = torch.arange(4., requires_grad=True)
@@ -9544,7 +9547,6 @@ def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
             call_args_str = ', '.join(actuals)
             call = "self.submodule({})".format(call_args_str)
             script = script_method_template.format(method_args, call)
-            print(script)
 
             # Create module to use the script method
             class TheModule(torch.jit.ScriptModule):
