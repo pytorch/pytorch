@@ -1446,6 +1446,8 @@ protected:
 
 };
 
+#if !defined _MSC_VER || !defined(_DEBUG)
+
 // Note [TensorImpl size constraints]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Changed the size of TensorImpl?  If the size went down, good for
@@ -1500,5 +1502,7 @@ static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
               sizeof(TensorImpl) == sizeof(int64_t) * 24,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
+
+#endif // !defined _MSC_VER || !defined(_DEBUG)
 
 } // namespace at
