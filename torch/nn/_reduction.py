@@ -46,4 +46,4 @@ def legacy_get_string(size_average, reduce, emit_warning=True):
 
 
 def legacy_get_enum(size_average, reduce, emit_warning=True):
-    return _Reduction.get_enum(_Reduction.legacy_get_string(size_average, reduce, emit_warning))
+    return get_enum(legacy_get_string(size_average, reduce, emit_warning))
