@@ -80,8 +80,8 @@ class TestConvolution(serial.SerializedTestCase):
             self, op_type, stride_h, stride_w, pad_t, pad_l, pad_b, pad_r,
             kernel, size, input_channels, output_channels, batch_size, group,
             order, engine, shared_buffer, use_bias, gc, dc):
-        if order == "NHWC":
-            group = 1
+        # TODO: Group conv in NHWC not implemented for GPU yet.
+        assume(group == 1 or order == "NCHW" or gc.device_type != caffe2_pb2.CUDA)
 
         input_channels *= group
         output_channels *= group
@@ -205,8 +205,12 @@ class TestConvolution(serial.SerializedTestCase):
             self, op_type, stride, pad, kernel, dilation, size, input_channels,
             output_channels, batch_size, group, order, engine, use_bias,
             force_algo_fwd, force_algo_dgrad, force_algo_wgrad, gc, dc):
-        if order == "NHWC" or engine == "MKLDNN":
-            group = 1
+        # TODO: Group conv in NHWC not implemented for GPU yet.
+        assume(
+            group == 1
+            or (order == "NCHW" or gc.device_type != caffe2_pb2.CUDA)
+            and engine != "MKLDNN"
+        )
 
         input_channels *= group
         output_channels *= group
@@ -740,5 +744,4 @@ class TestConvolution(serial.SerializedTestCase):
 
 
 if __name__ == "__main__":
-    import unittest
     unittest.main()
