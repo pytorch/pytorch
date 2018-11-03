@@ -81,7 +81,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     ivalue_captures.reserve(capture_size);
   }
 
-  virtual variable_list apply(variable_list&& inputs) override {
+  variable_list apply(variable_list&& inputs) override {
     Stack stack;
     stack.reserve(is_var_capture.size() + inputs.size());
     stack.insert(stack.end(), std::make_move_iterator(inputs.begin()),
@@ -90,7 +90,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     auto ivalue_capture_it = ivalue_captures.begin();
     for (bool is_var : is_var_capture) {
       if (is_var) {
-        stack.push_back(var_capture_it->unpack(this->shared_from_this()));
+        stack.emplace_back(var_capture_it->unpack(this->shared_from_this()));
         ++var_capture_it;
       } else {
         stack.push_back(*ivalue_capture_it);
@@ -108,9 +108,9 @@ struct DifferentiableGraphBackward : public autograd::Function {
         auto output = std::move(stack[i]).toTensor();
         const auto & edge = next_edge(i);
         if (output.defined()) {
-          outputs.push_back(std::move(output));
+          outputs.emplace_back(std::move(output));
         } else if (edge.is_valid()) {
-          outputs.push_back(edge.function->input_metadata(edge.input_nr).zeros_like());
+          outputs.emplace_back(edge.function->input_metadata(edge.input_nr).zeros_like());
         } else {
           outputs.emplace_back();
         }

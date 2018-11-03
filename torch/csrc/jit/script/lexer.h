@@ -352,7 +352,7 @@ SharedParserData& sharedParserData();
 struct Token {
   int kind;
   SourceRange range;
-  Token(int kind, const SourceRange& range) : kind(kind), range(range) {}
+  Token(int kind, SourceRange range) : kind(kind), range(std::move(range)) {}
   std::string text() {
     return range.text();
   }

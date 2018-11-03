@@ -27,7 +27,7 @@ static c10::optional<std::vector<int64_t>> getMapSize(
   const KernelSpec& spec
 , at::TensorList args
 , at::IntList arg_subset) {
-  
+
   int64_t dim_after_broadcast = 0;
   for (const auto arg_idx : arg_subset) {
     dim_after_broadcast = std::max(dim_after_broadcast, args[arg_idx].dim());
@@ -38,9 +38,9 @@ static c10::optional<std::vector<int64_t>> getMapSize(
   // should be straightforward.
   // Note: left unitialized since empty shape is broadcastable to any shape
   std::vector<int64_t> map_size;
-  for (size_t i = 0; i < arg_subset.size(); ++i) {
-    auto& arg = args.at(arg_subset[i]);
-    auto& chunk_desc = spec.inputChunks().at(arg_subset[i]);
+  for (const auto arg_idx : arg_subset) {
+    auto& arg = args.at(arg_idx);
+    auto& chunk_desc = spec.inputChunks().at(arg_idx);
     if (chunk_desc.nSubTensors() == 1) {
       try {
         map_size = at::infer_size(map_size, arg.sizes());
@@ -91,7 +91,7 @@ static c10::optional<std::vector<int64_t>> canRunKernel(
 }
 
 // Arguments are expanded to a common shape, referred to as the "map size,"
-// (see above). 
+// (see above).
 // Note: Arguments are mutated by this call, although map_size is restored
 // to its original value.
 static void expandArgs(
@@ -117,8 +117,8 @@ static void expandArgs(
 // Note: assumes that inputs are 32-bit addressable
 static uint32_t computeNumel(const at::ArrayRef<int64_t>& sizes) {
   uint32_t result = 1;
-  
-  for (const auto& size : sizes) 
+
+  for (const auto& size : sizes)
     result *= size;
 
   return result;
@@ -177,7 +177,7 @@ void launchFusion(
     else // CPU
       outputs.push_back(at::empty({0}, ref_type.options().dtype(od.scalar_type).device(at::Device{at::DeviceType::CPU})));
   }
-  
+
   // Fails if fusion and given inputs disagree
   JIT_ASSERT(inputs.size() == fusion.inputDesc().size());
 
@@ -188,8 +188,8 @@ void launchFusion(
     flat_inputs_size += c.nSubTensors();
   for (const auto& c : fusion.concatDesc())
     flat_outputs_size += c.nSubTensors();
-  
-  // Fails if the elements of the first (any) tensor are not expressable as 
+
+  // Fails if the elements of the first (any) tensor are not expressable as
   // a 32-bit integer.
   // Note: this code assumes that inputs are 32-bit addressable
   // Note: this code assumes that all inputs are of the same size
@@ -321,7 +321,7 @@ bool runFusion(
 
   // Validates sizes and expands inputs as needed
   auto maybe_map_size = canRunKernel(spec, inputs);
-  
+
   // Tries to run fallback if map size can't be computed
   if (!maybe_map_size) return false;
   expandArgs(spec, inputs, *maybe_map_size);

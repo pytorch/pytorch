@@ -745,13 +745,13 @@ struct GraphFuser {
       chunked_op->copyAttributes(*producer_for_chunk_node);
       chunked_op->output()->setType(chunk_sel->type());
       auto chunked_inputs_it = chunked_inputs.begin();
-      for (size_t i = 0; i < original_inputs.size(); ++i) {
-        if (original_inputs[i]->type()->isSubtypeOf(DynamicType::get())) {
+      for (Value* original_input : original_inputs) {
+        if (original_input->type()->isSubtypeOf(DynamicType::get())) {
           JIT_ASSERT(chunked_inputs_it != chunked_inputs.end());
           chunked_op->addInput(chunked_inputs_it->at(chunk_sel->offset()));
           ++chunked_inputs_it;
         } else {
-          chunked_op->addInput(original_inputs[i]);
+          chunked_op->addInput(original_input);
         }
       }
       insertAt(&insertion_point, chunked_op);

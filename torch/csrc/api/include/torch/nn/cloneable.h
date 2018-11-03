@@ -86,7 +86,7 @@ class Cloneable : public virtual Module {
   }
 
  private:
-  void clone_(Module& other, optional<Device> device) final override {
+  void clone_(Module& other, optional<Device> device) final {
     // Here we are *pretty* certain that `other's` type is `Derived` (because it
     // was registered under the same name as `this`), but you never know what
     // crazy things `reset()` does, so `dynamic_cast` just to be safe.
