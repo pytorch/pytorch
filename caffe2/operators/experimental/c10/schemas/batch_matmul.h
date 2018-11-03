@@ -20,18 +20,16 @@ struct BatchMatmul final {
       int trans_a,
       int trans_b,
       int broadcast,
-      int use_scratch,
       State* state,
       BaseContext* context);
 
-  static constexpr c10::guts::array<const char*, 9> parameter_names = {
+  static constexpr c10::guts::array<const char*, 8> parameter_names = {
       {"A",
        "B",
        "output",
        "trans_a",
        "trans_b",
        "broadcast",
-       "use_scratch",
        "state",
        "context"}};
 };

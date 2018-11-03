@@ -18,7 +18,6 @@ void batch_matmul_op_cpu_impl(
     int trans_a,
     int trans_b,
     int broadcast,
-    int use_scratch,
     caffe2::ops::BatchMatmul::State* state,
     BaseContext* context) {
   using Engine = caffe2::DefaultEngine;
