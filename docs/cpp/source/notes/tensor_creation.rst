@@ -1,5 +1,5 @@
 Tensor Creation API
--------------------
+===================
 
 This note describes how to create tensors in the PyTorch C++ API. It highlights
 the available factory functions, which populate new tensors according to some
@@ -7,7 +7,7 @@ algorithm, and lists the options available to configure the shape, data type,
 device and other properties of a new tensor.
 
 Factory Functions
-=================
+-----------------
 
 A *factory function* is a function that produces a new tensor. There are many
 factory functions available in PyTorch (both in Python and C++), which differ
@@ -21,39 +21,36 @@ functions adhere to the following general "schema":
 Let's bisect the various parts of this "schema":
 
 1. ``<function-name>`` is the name of the function you would like to invoke,
-2. ``<functions-specific-options>`` are any required or optional parameters a
-particular factory function accepts,
-3. ``<sizes>`` is an object of type ``IntList`` and specifies the shape of the
-resulting tensor,
-4. ``<tensor-options>`` is an instance of ``TensorOptions`` and configures the
-data type, device, layout and other properties of the resulting tensor.
+2. ``<functions-specific-options>`` are any required or optional parameters a particular factory function accepts,
+3. ``<sizes>`` is an object of type ``IntList`` and specifies the shape of the resulting tensor,
+4. ``<tensor-options>`` is an instance of ``TensorOptions`` and configures the data type, device, layout and other properties of the resulting tensor.
 
 Picking a Factory Function
----------------------------
+**************************
 
 The following factory functions are available at the time of this writing (the
 hyperlinks lead to the corresponding Python functions, since they often have
 more eloquent documentation -- the options are the same in C++):
 
-- `arange <https://pytorch.org/docs/stable/torch.html#torch.arange>`_
-- `empty <https://pytorch.org/docs/stable/torch.html#torch.empty>`_
-- `eye <https://pytorch.org/docs/stable/torch.html#torch.eye>`_
-- `full <https://pytorch.org/docs/stable/torch.html#torch.full>`_
-- `linspace <https://pytorch.org/docs/stable/torch.html#torch.linspace>`_
-- `logspace <https://pytorch.org/docs/stable/torch.html#torch.logspace>`_
-- `ones <https://pytorch.org/docs/stable/torch.html#torch.ones>`_
-- `rand <https://pytorch.org/docs/stable/torch.html#torch.rand>`_
-- `randint <https://pytorch.org/docs/stable/torch.html#torch.randint>`_
-- `randn <https://pytorch.org/docs/stable/torch.html#torch.randn>`_
-- `randperm <https://pytorch.org/docs/stable/torch.html#torch.randperm>`_
-- `zeros <https://pytorch.org/docs/stable/torch.html#torch.zeros>`_
+- `arange <https://pytorch.org/docs/stable/torch.html#torch.arange>`_: Returns a tensor with a sequence of integers,
+- `empty <https://pytorch.org/docs/stable/torch.html#torch.empty>`_: Returns a tensor with uninitialized values,
+- `eye <https://pytorch.org/docs/stable/torch.html#torch.eye>`_: Returns an identity matrix,
+- `full <https://pytorch.org/docs/stable/torch.html#torch.full>`_: Returns a tensor filled with a single value,
+- `linspace <https://pytorch.org/docs/stable/torch.html#torch.linspace>`_: Returns a tensor with values linearly spaced in some interval,
+- `logspace <https://pytorch.org/docs/stable/torch.html#torch.logspace>`_: Returns a tensor with values logarithmically spaced in some interval,
+- `ones <https://pytorch.org/docs/stable/torch.html#torch.ones>`_: Returns a tensor filled with all ones,
+- `rand <https://pytorch.org/docs/stable/torch.html#torch.rand>`_: Returns a tensor filled with values drawn from a uniform distribution on ``[0, 1)``.
+- `randint <https://pytorch.org/docs/stable/torch.html#torch.randint>`_: Returns a tensor with integers randomly drawn from an interval,
+- `randn <https://pytorch.org/docs/stable/torch.html#torch.randn>`_: Returns a tensor filled with values drawn from a unit normal distribution,
+- `randperm <https://pytorch.org/docs/stable/torch.html#torch.randperm>`_: Returns a tensor filled with a random permutation of integers in some interval,
+- `zeros <https://pytorch.org/docs/stable/torch.html#torch.zeros>`_: Returns a tensor filled with all zeros.
 
 Specifying a Size
------------------
+*****************
 
 Functions that do not require specific arguments by nature of how they fill the
 tensor can be invoked with just a size. For example, the following line creates
-a vector with 5 components, initially all set to ``1``:
+a vector with 5 components, initially all set to 1:
 
 .. code-block:: cpp
 
@@ -75,15 +72,15 @@ tensor filled with values from a unit normal distribution by writing:
 .. code-block:: cpp
 
   torch::Tensor tensor = torch::randn({3, 4, 5});
-  std::cout << tensor.sizes() << std::endl;
+  assert(tensor.sizes() == torch::IntList{3, 4, 5})
 
 Notice how we use ``tensor.sizes()`` to get back an ``IntList`` containing the
 sizes we passed to the tensor. You can also write ``tensor.size(i)`` to access
 a single dimension, which is equivalent to but preferred over
-``tensor.sizes()[i]``).
+``tensor.sizes()[i]``.
 
 Passing Function-Specific Parameters
-------------------------------------
+************************************
 
 Neither ``ones`` nor ``randn`` accept any additional parameters to change their
 behavior. One function which does require further configuration is ``randint``,
@@ -116,7 +113,7 @@ but aid readability just like keyword arguments in Python.
   arguments -- the lower and upper bound of a range of integers.
 
 Configuring Properties of the Tensor
-------------------------------------
+************************************
 
 The previous section discussed function-specific arguments. Function-specific
 arguments can only change the values with which tensors are filled, and
@@ -136,25 +133,26 @@ These construction axes are:
 - The ``device``, which represents a compute device on which a tensor is stored (like a CPU or CUDA GPU),
 - The ``requires_grad`` boolean to enable or disable gradient recording for a tensor,
 
-and the allowed values at the moment are:
+If you are used to PyTorch in Python, these axes will sound very familiar. The
+allowed values for these axes at the moment are:
 
 - For ``dtype``: ``kUInt8``, ``kInt8``, ``kInt16``, ``kInt32``, ``kInt64``, ``kFloat32`` and ``kFloat64``,
 - For ``layout``: ``kStrided`` and ``kSparse``,
 - For ``device``: Either ``kCPU``, or ``kCUDA`` (which accepts an optional device index),
 - For ``requires_grad``: either true or false.
+
 .. tip::
 
 	There exist "Rust-style" shorthands for dtypes, like ``kF32`` instead of
-	``Float32``. See `here
+	``kFloat32``. See `here
 	<https://github.com/pytorch/pytorch/blob/master/torch/csrc/api/include/torch/tensor.h#L30>`_
-	to see the full list.
+	for the full list.
 
 
-If you are used to PyTorch in Python, these axes will sound very familiar. An
-instance of ``TensorOptions`` stores a concrete value for each of these axes.
-Here is an example of creating a ``TensorOptions`` object that represents a
-64-bit float, strided tensor that requires a gradient, and lives on CUDA device
-1:
+An instance of ``TensorOptions`` stores a concrete value for each of these
+axes. Here is an example of creating a ``TensorOptions`` object that represents
+a 64-bit float, strided tensor that requires a gradient, and lives on CUDA
+device 1:
 
 .. code-block:: cpp
 
@@ -177,22 +175,20 @@ properties:
 
   assert(tensor.dtype() == torch::kFloat32);
   assert(tensor.layout() == torch::kStrided);
-  assert(tensor.device().type() == torch::kCUDA);
-  // or
-  assert(tensor.device().is_cuda()); // and !is_cpu()
+  assert(tensor.device().type() == torch::kCUDA); // or device().is_cuda()
   assert(tensor.device().index() == 1);
   assert(tensor.requires_grad())
 
   assert(tensor.options() == options)
 
 Now, you may be thinking: do I really need to specify each axis for every new
-tensor I create? Fortunately not, as every axis has a default value. These
-defaults are:
+tensor I create? Fortunately, the answer is "no", as **every axis has a default
+value**. These defaults are:
 
 - ``kFloat32`` for the dtype,
 - ``kStrided`` for the layout,
 - ``kCPU`` for the device,
-- ``false`` for `requires_grad`.
+- ``false`` for ``requires_grad``.
 
 What this means is that any axis you omit during the construction of a
 ``TensorOptions`` object will take on its default value. For example, this is
@@ -211,7 +207,7 @@ In fact, we can even omit all axes to get an entirely defaulted
   auto options = torch::TensorOptions(); // or `torch::TensorOptions options;`
 
 A nice consequence of this is that the ``TensorOptions`` object we just spoke
-so much about can actually be entirely omitted from any tensor factory call:
+so much about can be entirely omitted from any tensor factory call:
 
 .. code-block:: cpp
 
@@ -221,10 +217,10 @@ so much about can actually be entirely omitted from any tensor factory call:
 
 But the sugar gets sweeter: In the API presented here so far, you may have
 noticed that the initial ``torch::TensorOptions()`` is quite a mouthful to
-write. The good news, is that for every construction axis (dtype, layout,
-device and ``requires_grad``), there is one *free function* in the ``torch::``
-namespace which you can pass a value for that axis, and which then returns a
-``TensorOptions`` object preconfigured with that axis, but allowing even
+write. The good news is that for every construction axis (dtype, layout, device
+and ``requires_grad``), there is one *free function* in the ``torch::``
+namespace which you can pass a value for that axis. Each function then returns
+a ``TensorOptions`` object preconfigured with that axis, but allowing even
 further modification via the builder-style methods shown above. For example,
 
 .. code-block:: cpp
@@ -279,7 +275,7 @@ and can finally be shortened to
   torch::ones(10, torch::kFloat32)
 
 Of course, it is not possible to modify further properties of the
-``TensorOptions`` instance with this short syntax,, but if all we needed was to
+``TensorOptions`` instance with this short syntax, but if all we needed was to
 change one property, this is quite practical.
 
 In conclusion, we can now compare how ``TensorOptions`` defaults, together with
@@ -316,9 +312,12 @@ we can convert it from ``int64`` to ``float32``:
 
   torch::Tensor float_tensor = tensor.to(torch::kFloat32);
 
-It is important to note that ``float_tensor`` is a new tensor pointing to new
-memory, unrelated to the source ``tensor``. We can then move it from CPU memory
-to GPU memory:
+.. attention::
+
+	The result of the conversion, ``float_tensor``, is a new tensor pointing to
+	new memory, unrelated to the source ``tensor``.
+
+We can then move it from CPU memory to GPU memory:
 
 .. code-block:: cpp
 
@@ -327,7 +326,7 @@ to GPU memory:
 If you have multiple CUDA devices available, the above code will copy the
 tensor to the *default* CUDA device, which you can configure with a
 ``torch::DeviceGuard``. If no ``DeviceGuard`` is in place, this will be GPU
-``1``. If you would like to specify a different GPU index, you can pass it to
+1. If you would like to specify a different GPU index, you can pass it to
 the ``Device`` constructor:
 
 .. code-block:: cpp
@@ -335,7 +334,7 @@ the ``Device`` constructor:
   torch::Tensor gpu_two_tensor = float_tensor.to(torch::Device(torch::kCUDA, 1));
 
 In the case of CPU to GPU copy and reverse, we can also configure the memory
-copy to be *asynchronous* by passing ``/*non_blocking=*/false` as the last
+copy to be *asynchronous* by passing ``/*non_blocking=*/false`` as the last
 argument to ``to()``:
 
 .. code-block:: cpp
@@ -343,7 +342,7 @@ argument to ``to()``:
   torch::Tensor async_cpu_tensor = gpu_tensor.to(torch::kCPU, /*non_blocking=*/true);
 
 Conclusion
-----------
+**********
 
 This note hopefully gave you a good understanding of how to create and convert
 tensors in an idiomatic fashion using the PyTorch C++ API. If you have any
