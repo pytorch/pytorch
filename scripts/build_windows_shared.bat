@@ -9,7 +9,7 @@ set CAFFE2_ROOT=%~dp0%..
 
 rem Should build folder be deleted and build start from scratch?
 if NOT DEFINED CLEAR_BUILD_FOLDER_AND_START_AGAIN (
-    set CLEAR_BUILD_FOLDER_AND_START_AGAIN=1
+    set CLEAR_BUILD_FOLDER_AND_START_AGAIN=0
 )
 
 rem Debug build enabled by default
@@ -82,16 +82,17 @@ if %BUILD_DEBUG% EQU 1 (
     )   
     cd %CAFFE2_ROOT%\build\Debug
     
-    cmake %CAFFE2_ROOT% -G%CMAKE_GENERATOR% -DUSE_OPENCV=OFF ^
+    if %CMAKE_GENERATOR% EQU "Visual Studio 14 2015 Win64" (
+
+        cmake %CAFFE2_ROOT% -G%CMAKE_GENERATOR% -DUSE_OPENCV=OFF ^
                                  -DCMAKE_BUILD_TYPE=Debug ^
                                  -DCMAKE_INSTALL_PREFIX=%CAFFE2_ROOT%\build\Debug\install ^
                                  -DCMAKE_CXX_COMPILER=%CMAKE_CXX_COMPILER% ^
                                  -DCMAKE_C_COMPILER=%CMAKE_C_COMPILER% ^
                                  -DCMAKE_LINKER=%CMAKE_C_COMPILER% ^
+                                 -DINCLUDE_EXPERIMENTAL_C10_OPS=OFF ^
                                  -DBUILD_BINARY=ON
-                                 
-    if %CMAKE_GENERATOR% EQU "Visual Studio 14 2015 Win64" (
-        
+                                     
         call %VC_BIN_ROOT%\vcvars64.bat
                 
     ) else (
