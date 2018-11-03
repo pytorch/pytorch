@@ -350,6 +350,7 @@ struct GraphExecutorImpl {
   }
 
   std::shared_ptr<Graph> graphFor(const Stack& stack) const {
+    JIT_ASSERT(stack.size() >= num_inputs);
     auto inputs = last(stack, num_inputs);
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
 
