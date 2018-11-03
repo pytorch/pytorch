@@ -28,8 +28,8 @@ using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 struct NoneValue : SugaredValue {
-  NoneValue() {}
-  virtual std::string kind() const override {
+  NoneValue() = default;
+  std::string kind() const override {
     return "None";
   }
 };
@@ -96,7 +96,7 @@ static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
 // expressions like int(x)
 struct CastValue : public SugaredValue {
   CastValue(TypePtr type)
-  : type(type) {}
+  : type(std::move(type)) {}
   std::string kind() const override {
     std::stringstream ss;
     ss << "<" << type->str() << " cast primitive>";
@@ -152,7 +152,7 @@ private:
 //      delete unnecessary ones later with replaceAllusesWith().
 struct Environment {
   Environment(Method & method, Resolver resolver, Block* b, std::shared_ptr<Environment> next = nullptr)
-      : method(method), resolver(std::move(resolver)), b(b), next(next) {}
+      : method(method), resolver(std::move(resolver)), b(b), next(std::move(next)) {}
 
   Method & method;
   Resolver resolver;
@@ -872,7 +872,7 @@ struct to_ir {
           }
           return_type_idx++;
         }
-        returns.push_back({"", type});
+        returns.emplace_back("", type);
       }
     }
 
@@ -1523,12 +1523,11 @@ private:
         auto starred = Starred(tree);
         auto entries = emitSugaredExpr(starred.expr(), 1)->asTuple(starred.range(), method);
         for(auto entry : entries) {
-          values.push_back(NamedValue(
-              tree->range(), entry->asValue(starred.range(), method)));
+          values.emplace_back(
+              tree->range(), entry->asValue(starred.range(), method));
         }
       } else {
-        values.push_back(NamedValue(
-            tree->range(), emitExpr(Expr(tree))));
+        values.emplace_back(tree->range(), emitExpr(Expr(tree)));
       }
     }
     return values;

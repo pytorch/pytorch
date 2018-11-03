@@ -125,7 +125,7 @@ public:
   // list of types this type contains, e.g. for a List then element type of a list
   // for a tuple, the types of the tuple elements
   virtual at::ArrayRef<TypePtr> containedTypes() const {
-    return at::ArrayRef<TypePtr>();
+    return {};
   }
   // create a new version of this type, replacing its contained types with
   // contained_types
@@ -815,7 +815,7 @@ struct VarType : public Type {
   }
 private:
   VarType(std::string name_)
-  : Type(TypeKind::VarType), name_(name_) {}
+  : Type(TypeKind::VarType), name_(std::move(name_)) {}
   std::string name_;
 };
 

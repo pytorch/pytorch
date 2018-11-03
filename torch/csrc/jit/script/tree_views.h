@@ -88,7 +88,7 @@ namespace script {
 //    than both in the parser and in this code.
 // XXX: these structs should have no fields to prevent slicing when passing by value
 struct TreeView {
-  explicit TreeView(const TreeRef& tree_) : tree_(tree_) {}
+  explicit TreeView(TreeRef tree) : tree_(std::move(tree)) {}
   TreeRef tree() const {
     return tree_;
   }

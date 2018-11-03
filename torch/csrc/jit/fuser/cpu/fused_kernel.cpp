@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/fuser/cpu/temp_file.h"
 #include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
+#include "torch/csrc/utils/memory.h"
 
 #include <sstream>
 #include <cstdlib>
@@ -37,7 +38,7 @@ struct CompilerConfig {
     if (!programExists(cxx)) {
       cxx = "";
     }
-    
+
     const char* debug_env = getenv("PYTORCH_FUSION_DEBUG");
     debug = debug_env && atoi(debug_env) != 0;
   }
@@ -101,14 +102,21 @@ static void disas(const std::string& so_file) {
 }
 
 FusedKernelCPU::FusedKernelCPU(
-  const std::string& _name
-, const std::string& _code
-, const std::vector<TensorDesc> _input_desc
-, const std::vector<TensorDesc> _output_desc
-, const std::vector<PartitionDesc> _chunk_desc
-, const std::vector<PartitionDesc> _concat_desc
-, const bool _has_random)
-: FusedKernel{_name, _code, _input_desc, _output_desc, _chunk_desc, _concat_desc, _has_random} {
+    std::string name,
+    std::string code,
+    std::vector<TensorDesc> input_desc,
+    std::vector<TensorDesc> output_desc,
+    std::vector<PartitionDesc> chunk_desc,
+    std::vector<PartitionDesc> concat_desc,
+    bool has_random)
+    : FusedKernel(
+          std::move(name),
+          std::move(code),
+          std::move(input_desc),
+          std::move(output_desc),
+          std::move(chunk_desc),
+          std::move(concat_desc),
+          has_random) {
   auto& config = getConfig();
   TempFile so_file(so_template, 3);
   TempFile cpp_file(cpp_template, 4);
@@ -116,7 +124,7 @@ FusedKernelCPU::FusedKernelCPU(
   cpp_file.sync();
   runCompiler(cpp_file.name(), so_file.name());
   if (config.debug) disas(so_file.name());
-  so_lib.reset(new DynamicLibrary(so_file.name().c_str()));
+  so_lib = make_unique<DynamicLibrary>(so_file.name().c_str());
   #pragma GCC diagnostic ignored "-Wpedantic"
     kernel = reinterpret_cast<void(*)(uint32_t, void**)>(so_lib->sym(name_.c_str()));
   #pragma GCC diagnostic pop
