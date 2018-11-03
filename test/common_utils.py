@@ -667,7 +667,7 @@ def random_symmetric_pd_matrix(l, *batches):
         A = torch.randn(l, l)
         return A.mm(A.transpose(0, 1)) + torch.eye(l) * 1e-5
     else:
-        A = torch.randn(*batches, l, l)
+        A = torch.randn(*(batches + (l, l)))
         return A.matmul(A.transpose(-2, -1)) + torch.eye(l) * 1e-5
 
 
