@@ -269,7 +269,7 @@ Tensor _potrs_helper_cpu(const Tensor& self, const Tensor& A, bool upper) {
 // Supports arbitrary batch dimensions for self and A
 Tensor potrs(const Tensor& self, const Tensor& A, bool upper) {
   if (self.dim() <= 2 && A.dim() <= 2) {
-    return at::_potrs_single(self, A, upper);
+    return at::_th_potrs_single(self, A, upper);
   }
 
   Tensor self_broadcasted, A_broadcasted;
@@ -281,7 +281,7 @@ Tensor& potrs_out(Tensor& result, const Tensor& self, const Tensor& A, bool uppe
   AT_CHECK(self.dim() == 2 && A.dim() == 2,
            "torch.potrs() with the `out` keyword does not support batching. "
            "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
-  return at::_potrs_single_out(result, self, A, upper);
+  return at::_th_potrs_single_out(result, self, A, upper);
 }
 
 }}  // namespace at::native

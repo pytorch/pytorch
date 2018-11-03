@@ -5404,6 +5404,57 @@ class _TestTorchMixin(object):
     def test_potrs_batched(self):
         self._test_potrs_batched(self, lambda t: t)
 
+    @staticmethod
+    def _test_potrs_batched_dims(self, cast):
+        if not TEST_NUMPY:
+            return
+
+        from numpy.linalg import solve
+        from common_utils import random_symmetric_pd_matrix
+
+        for upper in [True, False]:
+            # TODO: This function should be replaced after batch potrf is ready
+            def get_cholesky(bmat, upper):
+                n = bmat.size(-1)
+                cholesky = torch.stack([m.cholesky(upper) for m in bmat.reshape(-1, n, n)])
+                return cholesky.reshape_as(bmat)
+
+            # test against numpy.linalg.solve
+            A = cast(random_symmetric_pd_matrix(4, 2, 1, 3))
+            b = cast(torch.randn(2, 1, 3, 4, 6))
+            L = get_cholesky(A, upper)
+            x = torch.potrs(b, L, upper=upper)
+            x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
+            self.assertEqual(x.data, cast(x_exp))
+
+            # broadcasting b
+            A = cast(random_symmetric_pd_matrix(4, 2, 1, 3))
+            b = cast(torch.randn(4, 6))
+            L = get_cholesky(A, upper)
+            x = torch.potrs(b, L, upper=upper)
+            x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
+            self.assertEqual(x.data, cast(x_exp))
+
+            # broadcasting A
+            A = cast(random_symmetric_pd_matrix(4))
+            b = cast(torch.randn(2, 1, 3, 4, 2))
+            L = get_cholesky(A, upper)
+            x = torch.potrs(b, L, upper=upper)
+            x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
+            self.assertEqual(x.data, cast(x_exp))
+
+            # broadcasting both A & b
+            A = cast(random_symmetric_pd_matrix(4, 1, 3, 1))
+            b = cast(torch.randn(2, 1, 3, 4, 5))
+            L = get_cholesky(A, upper)
+            x = torch.potrs(b, L, upper=upper)
+            x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
+            self.assertEqual(x.data, cast(x_exp))
+
+    @skipIfNoLapack
+    def test_potrs_batched_dims(self):
+        self._test_potrs_batched_dims(self, lambda t: t)
+
     @skipIfNoLapack
     def test_potri(self):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),

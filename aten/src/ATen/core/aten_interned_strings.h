@@ -81,8 +81,6 @@ _(aten, _floor) \
 _(aten, _fused_dropout) \
 _(aten, _ger) \
 _(aten, _gesv_helper) \
-_(aten, _gesv_single) \
-_(aten, _getri_single) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
 _(aten, _inverse_helper) \
@@ -104,7 +102,6 @@ _(aten, _pad_packed_sequence) \
 _(aten, _pdist_backward) \
 _(aten, _pdist_forward) \
 _(aten, _potrs_helper) \
-_(aten, _potrs_single) \
 _(aten, _prod) \
 _(aten, _prodall) \
 _(aten, _range) \
