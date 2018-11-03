@@ -8,8 +8,8 @@
 
 #include <x86intrin.h>
 
-#include "caffe2/utils/cpuid.h"
 #include "caffe2/operators/quantized/server/dynamic_histogram.h"
+#include "caffe2/utils/cpuid.h"
 
 namespace dnnlowp {
 

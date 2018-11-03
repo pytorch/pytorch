@@ -1,7 +1,7 @@
-#include "caffe2/caffe2/operators/elementwise_add_op.h"
+#include "caffe2/operators/elementwise_add_op.h"
+#include "caffe2/operators/quantized/server/sigmoid.h"
 #include "elementwise_dnnlowp_op.h"
 #include "op_wrapper.h"
-#include "caffe2/operators/quantized/server/sigmoid.h"
 
 namespace caffe2 {
 

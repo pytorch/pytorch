@@ -1,8 +1,8 @@
 #pragma once
 
 #include "caffe2/core/operator.h"
-#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/operators/quantized/server/dnnlowp.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace dnnlowp {
 

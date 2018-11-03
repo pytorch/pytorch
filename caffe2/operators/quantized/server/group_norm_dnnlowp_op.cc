@@ -7,8 +7,8 @@
 
 #include <omp.h>
 
-#include "caffe2/caffe2/utils/eigen_utils.h"
-#include "caffe2/caffe2/utils/math.h"
+#include "caffe2/utils/eigen_utils.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
