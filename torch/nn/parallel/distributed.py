@@ -263,7 +263,7 @@ class DistributedDataParallel(Module):
             module.train(mode)
 
     def _dist_broadcast_coalesced(self, tensors, buffer_size):
-        dist._dist_broadcast_coalesced(self.process_group, tensors, buffer_size)
+        dist._dist_broadcast_coalesced(self.process_group, tensors, buffer_size, False)
 
     def _sync_params(self):
         if len(self.device_ids) > 1:
