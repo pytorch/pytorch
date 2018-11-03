@@ -175,6 +175,7 @@ enum DeviceTypeProto {
   PROTO_OPENCL = 4;                 // OpenCL
   PROTO_IDEEP = 5;                  // IDEEP.
   PROTO_HIP = 6;                    // AMD HIP
+
   // Change the following number if you add more devices in the code.
   PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 7;
   PROTO_ONLY_FOR_TEST = 20901;   // This device type is only for test.
