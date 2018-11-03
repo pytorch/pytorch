@@ -17,6 +17,11 @@ if NOT DEFINED BUILD_DEBUG (
     set BUILD_DEBUG=1
 )
 
+rem Debug build enabled by default
+if NOT DEFINED BUILD_RELEASE (
+    set BUILD_RELEASE=1
+)
+
 rem msbuild /m: option value
 if NOT DEFINED NUM_BUILD_PROC (
     set NUM_BUILD_PROC=6
@@ -91,6 +96,7 @@ if %BUILD_DEBUG% EQU 1 (
                                  -DCMAKE_C_COMPILER=%CMAKE_C_COMPILER% ^
                                  -DCMAKE_LINKER=%CMAKE_C_COMPILER% ^
                                  -DINCLUDE_EXPERIMENTAL_C10_OPS=OFF ^
+                                 -DBUILD_DETECTRON_WITH_MSVC=ON ^
                                  -DBUILD_BINARY=ON
                                      
         call %VC_BIN_ROOT%\vcvars64.bat
@@ -103,6 +109,39 @@ if %BUILD_DEBUG% EQU 1 (
     )
     
     msbuild /p:Configuration=Debug /p:Platform=x64 /m:%NUM_BUILD_PROC% INSTALL.vcxproj /p:PreferredToolArchitecture=x64
+)
+
+
+rem Building Release in %CAFFE2_ROOT%\build\Release
+if %BUILD_RELEASE% EQU 1 (
+
+    if not exist %CAFFE2_ROOT%\build\Release (
+        mkdir %CAFFE2_ROOT%\build\Release
+    )   
+    cd %CAFFE2_ROOT%\build\Release
+    
+    if %CMAKE_GENERATOR% EQU "Visual Studio 14 2015 Win64" (
+
+        cmake %CAFFE2_ROOT% -G%CMAKE_GENERATOR% -DUSE_OPENCV=OFF ^
+                                 -DCMAKE_BUILD_TYPE=Release ^
+                                 -DCMAKE_INSTALL_PREFIX=%CAFFE2_ROOT%\build\Release\install ^
+                                 -DCMAKE_CXX_COMPILER=%CMAKE_CXX_COMPILER% ^
+                                 -DCMAKE_C_COMPILER=%CMAKE_C_COMPILER% ^
+                                 -DCMAKE_LINKER=%CMAKE_C_COMPILER% ^
+                                 -DINCLUDE_EXPERIMENTAL_C10_OPS=OFF ^
+                                 -DBUILD_DETECTRON_WITH_MSVC=ON ^
+                                 -DBUILD_BINARY=ON
+                                     
+        call %VC_BIN_ROOT%\vcvars64.bat
+                
+    ) else (
+        echo "Error: Script supports only Visual Studio 14 2015 Win64 generator"
+        echo "Exiting..."
+        cd %ORIGINAL_DIR%
+        exit
+    )
+    
+    msbuild /p:Configuration=Release /p:Platform=x64 /m:%NUM_BUILD_PROC% INSTALL.vcxproj /p:PreferredToolArchitecture=x64
 )
 
 cd %ORIGINAL_DIR%
