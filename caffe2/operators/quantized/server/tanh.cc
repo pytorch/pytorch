@@ -23,7 +23,6 @@ static int GetPassRegionEnd_(
 
   // largest x s.t. |tanh(x) - x| < max_abs_err_
   int in_pos_qmax = (1 << (num_in_bits - 1)) - 1;
-  float quantization_error = out_qparams.scale/2;
 
   float scale_multiplier = in_qparams.scale / out_qparams.scale;
   int log2_scale_multiplier = (int)round(log2(scale_multiplier));
