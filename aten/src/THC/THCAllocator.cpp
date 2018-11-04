@@ -21,3 +21,4 @@ at::DataPtr THCIpcDeleter::makeDataPtr(void* data, int device) {
 }
 
 THCIpcDeleter::THCIpcDeleter(void* data, int device) : data_(data), device_(device) {}
+
