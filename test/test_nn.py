@@ -4016,7 +4016,10 @@ class TestNN(NNTestCase):
 
         self.assertEqual(x_leaf.grad, grad_x, dtype2prec[dtype])
         for p1, p2 in zip(lstm.parameters(), lstm2.parameters()):
-            self.assertEqual(p1.grad, p2.grad, dtype2prec[dtype])
+            prec = dtype2prec[dtype]
+            if dtype == torch.float16:
+                prec = 2e-2
+            self.assertEqual(p1.grad, p2.grad, prec)
 
     def test_variable_sequence(self):
         self._test_variable_sequence()
