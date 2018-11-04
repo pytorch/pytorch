@@ -1446,6 +1446,7 @@ protected:
 
 };
 
+// sizeof(TensorImpl) != sizeof(int64_t) * 12 in VS2015 debug build 
 #if !defined _MSC_VER || !defined(_DEBUG)
 
 // Note [TensorImpl size constraints]
