@@ -411,6 +411,9 @@ static void _wrap_outputs(THPFunction *self,
         var.rebase_history({cdata, output_nr});
       }
     } else if (is_input) {
+      if (num_outputs > 1) {
+        throw std::runtime_error("Functions which return an input must return a single Variable");
+      }
       // An input has been returned, but it wasn't modified. Return it as a view
       // so that we can attach a new grad_fn to the Variable.
       var = var.view_as(var);

@@ -2684,8 +2684,8 @@ class TestAutograd(TestCase):
         gradgradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
 
     def test_inplace_function_detection(self):
-        # Invalid Function that change inplace and has two inputs/outputs
-        class BadFunction(Function):
+        # Invalid Function that change inplace and has two outputs
+        class BadFunction1(Function):
             @staticmethod
             def forward(ctx, inp1, inp2):
                 # Inplace change has been made
@@ -2696,16 +2696,31 @@ class TestAutograd(TestCase):
             def backward(ctx, gout1, gout2):
                 return gout1, gout2
 
+        # Invalid Function that return an input and has two outputs
+        class BadFunction1(Function):
+            @staticmethod
+            def forward(ctx, inp1, inp2):
+                return inp1, inp2.clone()
+
+            @staticmethod
+            def backward(ctx, gout1, gout2):
+                return gout1, gout2
+
         inp1 = torch.rand(5, requires_grad=True).clone()
         inp2 = torch.rand(5, requires_grad=True).clone()
 
         # This should work fine
-        outs = BadFunction.apply(inp1, inp2)
+        outs = BadFunction1.apply(inp1, inp2)
+        outs.sum().backward()
 
-        inp1 = inp1.view_as(inp1)
+        inp1_view = inp1.view_as(inp1)
         with self.assertRaisesRegex(RuntimeError, "Functions which modify views in-place"
                                                   " must return a single Variable"):
-            outs = BadFunction.apply(inp1, inp2)
+            outs = BadFunction1.apply(inp1_view, inp2)
+
+        with self.assertRaisesRegex(RuntimeError, "Functions which return an input must "
+                                                  "return a single Variable"):
+            outs = BadFunction2.apply(inp1_view, inp2)
 
 
 def index_variable(shape, max_indices):
