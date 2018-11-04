@@ -72,7 +72,7 @@ void syncStreams(
     const std::vector<at::Device>& devices,
     std::vector<CUDAEvent>& ncclEvents,
     std::vector<at::cuda::CUDAStream>& ncclStreams) {
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
   for (size_t i = 0; i < devices.size(); ++i) {
     gpuGuard.set_index(devices[i].index());
     auto currentThcStream =
@@ -90,7 +90,7 @@ void syncStreams(
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
     : devices_(devices) {
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
   cudaEvents_.resize(devices.size());
   // Now create the CUDA events
   for (size_t i = 0; i < devices.size(); ++i) {
@@ -108,7 +108,7 @@ bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
 
 // Helper that checks if the NCCL kernels are completed on the GPUs
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() const {
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
   for (size_t i = 0; i < devices_.size(); ++i) {
     gpuGuard.set_index(devices_[i].index());
     auto& cudaEvent = cudaEvents_[i];
@@ -133,7 +133,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait() {
 // Waiting on the work's corresponding CUDA events
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
   auto thcState = ::at::globalContext().lazyInitCUDA();
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
   for (size_t i = 0; i < devices_.size(); ++i) {
     gpuGuard.set_index(devices_[i].index());
     auto thcStream =
@@ -240,7 +240,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // Broadcast so that each process can have a unique NCCL ID
   broadcastUniqueNCCLID(&ncclID);
 
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
 
   std::vector<CUDAEvent> eventVal;
   std::vector<at::cuda::CUDAStream> streamVal;
@@ -370,7 +370,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -419,7 +419,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -469,7 +469,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -539,7 +539,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  at::DeviceGuard gpuGuard;
+  at::cuda::CUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));

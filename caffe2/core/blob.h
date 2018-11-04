@@ -34,7 +34,7 @@ BlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
           // Resize when the dims doesn't match
           tensor->Resize(dims);
         }
-        if (tensor->meta() == options.dtype()) {
+        if (tensor->dtype() == options.dtype()) {
           tensor->raw_mutable_data();
         } else {
           // create a new Tensor when the data_type doesn't match

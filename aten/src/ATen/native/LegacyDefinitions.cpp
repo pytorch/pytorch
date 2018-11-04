@@ -9,6 +9,10 @@ int64_t ndimension(const Tensor& self) {
   return self._th_ndimension();
 }
 
+void* data_ptr(const Tensor & self) {
+  return self.unsafeGetTensorImpl()->slow_data();
+}
+
 Tensor & set_(Tensor& self, Storage source) {
   return self._th_set_(source);
 }
@@ -203,6 +207,14 @@ Tensor & remainder_(Tensor& self, const Tensor & other) {
 
 Tensor & addbmm_(Tensor& self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
   return self._th_addbmm_(batch1, batch2, beta, alpha);
+}
+
+Tensor & addbmm_out(Tensor & result, const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
+  return at::_th_addbmm_out(result, self, batch1, batch2, beta, alpha);
+}
+
+Tensor addbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
+  return at::_th_addbmm(self, batch1, batch2, beta, alpha);
 }
 
 Tensor & addcmul_(Tensor& self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
@@ -479,11 +491,11 @@ std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some, bool comput
   return at::_th_svd(self, some, compute_uv);
 }
 
-Tensor & potrf_out(Tensor & result, const Tensor & self, bool upper) {
+Tensor & cholesky_out(Tensor & result, const Tensor & self, bool upper) {
   return at::_th_potrf_out(result, self, upper);
 }
 
-Tensor potrf(const Tensor & self, bool upper) {
+Tensor cholesky(const Tensor & self, bool upper) {
   return at::_th_potrf(self, upper);
 }
 
@@ -805,6 +817,94 @@ Tensor normal(const Tensor & mean, const Tensor & std, Generator * generator) {
 
 Tensor alias(const Tensor & self) {
   return at::_th_alias(self);
+}
+
+Tensor & _dirichlet_grad_out(Tensor & output, const Tensor & x, const Tensor & alpha, const Tensor & total) {
+  return at::_th_dirichlet_grad_out(output, x, alpha, total);
+}
+
+Tensor _dirichlet_grad(const Tensor & x, const Tensor & alpha, const Tensor & total) {
+  return at::_th_dirichlet_grad(x, alpha, total);
+}
+
+Tensor __and__(const Tensor & self, Scalar other) {
+  return at::_th_and(self, other);
+}
+
+Tensor __and__(const Tensor & self, const Tensor & other) {
+  return at::_th_and(self, other);
+}
+
+Tensor __or__(const Tensor & self, Scalar other) {
+  return at::_th_or(self, other);
+}
+
+Tensor __or__(const Tensor & self, const Tensor & other) {
+  return at::_th_or(self, other);
+}
+
+Tensor __xor__(const Tensor & self, Scalar other) {
+  return at::_th_xor(self, other);
+}
+
+Tensor __xor__(const Tensor & self, const Tensor & other) {
+  return at::_th_xor(self, other);
+}
+
+Tensor __lshift__(const Tensor & self, Scalar other) {
+  return at::_th_lshift(self, other);
+}
+
+Tensor __lshift__(const Tensor & self, const Tensor & other) {
+  return at::_th_lshift(self, other);
+}
+
+Tensor __rshift__(const Tensor & self, Scalar other) {
+  return at::_th_rshift(self, other);
+}
+
+Tensor __rshift__(const Tensor & self, const Tensor & other) {
+  return at::_th_rshift(self, other);
+}
+
+Tensor & __iand__(Tensor & self, Scalar other) {
+  return self._th_iand_(other);
+}
+
+Tensor & __iand__(Tensor & self, const Tensor & other) {
+  return self._th_iand_(other);
+}
+
+Tensor & __ior__(Tensor & self, Scalar other) {
+  return self._th_ior_(other);
+}
+
+Tensor & __ior__(Tensor & self, const Tensor & other) {
+  return self._th_ior_(other);
+}
+
+Tensor & __ixor__(Tensor & self, Scalar other) {
+  return self._th_ixor_(other);
+}
+
+Tensor & __ixor__(Tensor & self, const Tensor & other) {
+  return self._th_ixor_(other);
+}
+
+Tensor & __ilshift__(Tensor & self, Scalar other) {
+  return self._th_ilshift_(other);
+}
+
+Tensor & __ilshift__(Tensor & self, const Tensor & other) {
+  return self._th_ilshift_(other);
+}
+
+Tensor & __irshift__(Tensor & self, Scalar other) {
+  return self._th_irshift_(other);
+}
+
+Tensor & __irshift__(Tensor & self, const Tensor & other) {
+  return self._th_irshift_(other);
 }
 
 }} // namespace at::native

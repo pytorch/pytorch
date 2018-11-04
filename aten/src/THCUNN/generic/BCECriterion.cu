@@ -57,7 +57,7 @@ void THNN_(BCECriterion_updateOutput)(
     );
   }
 
-  if (reduction == Reduction::ElementwiseMean)
+  if (reduction == Reduction::Mean)
     sum /= size;
 
   THCTensor_(free)(state, input);
@@ -95,7 +95,7 @@ void THNN_(BCECriterion_updateGradInput)(
   THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);
-  scalar_t norm = ScalarConvert<accreal, scalar_t>::to((reduction == Reduction::ElementwiseMean ? accreal(1)/size : accreal(1)) * THCTensor_(get1d)(state, gradOutput, 0));
+  scalar_t norm = ScalarConvert<accreal, scalar_t>::to((reduction == Reduction::Mean ? accreal(1)/size : accreal(1)) * THCTensor_(get1d)(state, gradOutput, 0));
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);
