@@ -264,6 +264,8 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           group_);
       // Weight term
       for (int group_id = 0; group_id < group_; ++group_id) {
+        // col_buffer_data in G (H W) (R S C/G) layout
+        // filter_data in G K/G (R S C/G) layout
         math::GemmEx<T, Context>(
             CblasNoTrans,
             CblasTrans,
