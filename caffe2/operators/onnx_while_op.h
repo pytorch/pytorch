@@ -159,13 +159,13 @@ class ONNXWhileOp final : public Operator<Context> {
                   ->template Get<Tensor>();
           auto* scan_output_target = Output(i + num_loop_carried_deps);
           if (itr == 0) {
-            auto dims = scan_output.dims().vec();
+            auto dims = scan_output.sizes().vec();
             scan_outputs_sizes.push_back(dims);
             dims.insert(dims.begin(), 1);
             scan_output_target->Resize(dims);
             scan_output_target->CopyFrom(scan_output);
           } else {
-            auto dims = scan_output.dims().vec();
+            auto dims = scan_output.sizes().vec();
             CAFFE_ENFORCE_EQ(
                 dims,
                 scan_outputs_sizes[i],
@@ -179,7 +179,7 @@ class ONNXWhileOp final : public Operator<Context> {
             }
 
             const void* src_data = scan_output.raw_data();
-            auto& sot_meta = scan_output_target->meta();
+            auto& sot_meta = scan_output_target->dtype();
             void* dst_data =
                 (char*)scan_output_target->raw_mutable_data(sot_meta) +
                 timestep_size * scan_output.itemsize() * itr;

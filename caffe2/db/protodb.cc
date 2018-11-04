@@ -20,7 +20,10 @@ class ProtoDBCursor : public Cursor {
   void SeekToFirst() override { iter_ = 0; }
   void Next() override { ++iter_; }
   string key() override { return proto_->protos(iter_).name(); }
-  string value() override { return proto_->protos(iter_).SerializeAsString(); }
+  string value() override {
+    return
+      SerializeAsString_EnforceCheck(proto_->protos(iter_), "ProtoDBCursor");
+  }
   bool Valid() override { return iter_ < proto_->protos_size(); }
 
  private:

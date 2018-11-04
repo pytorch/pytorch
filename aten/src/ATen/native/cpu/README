@@ -1,6 +1,6 @@
 TODO: Clarify and add more documentation all around.
 
-All of the *.cpp files in this folder will be compiled under all compiler 
+All of the *.cpp files in this folder will be compiled under all compiler
 flags specified by CPU_CAPABILITY_FLAGS in aten/src/ATen/CMakeLists.txt.
 
 The purpose of this is to allow the compilation with various compiler
@@ -23,7 +23,7 @@ ReduceOpsKernel.cpp uses the CPU_CAPABILITY_* macros to "know" under which
 compiler flags it is currently compiled. This allows the programmer to write
 generic code, which will be compiled under multipled compilation settings.
 
-../ReduceOps.cpp now includes the header ReduceOpsKernel.h, which contains 
+../ReduceOps.cpp now includes the header ReduceOpsKernel.h, which contains
 a generic definition of sumImplAll. This function allows the user to reduce
 over a dimension or all dimensions. The appropiate capability is chosen at
 runtime using cpuinfo. If the current platform has avx, sumImpl will be set

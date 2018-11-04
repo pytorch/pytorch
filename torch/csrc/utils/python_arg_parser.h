@@ -125,6 +125,7 @@ struct PythonArgs {
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
   inline c10::optional<at::ScalarType> scalartypeOptional(int i);
+  inline c10::optional<at::Scalar> scalarOptional(int i);
   inline const THPLayout& layout(int i);
   inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
   inline at::Device device(int i);
@@ -239,6 +240,11 @@ inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar
   return at::Scalar(THPUtils_unpackDouble(args[i]));
 }
 
+inline c10::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
+  if (!args[i]) return c10::nullopt;
+  return scalar(i);
+}
+
 inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   if (!args[i]) return std::vector<at::Tensor>();
   PyObject* arg = args[i];
@@ -249,7 +255,7 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
       throw TypeError("expected Tensor as element %d in argument %d, but got %s",
-                 idx, i, Py_TYPE(args[i])->tp_name);
+                 idx, i, Py_TYPE(obj)->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
@@ -270,7 +276,7 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
       throw TypeError("expected Tensor as element %d in argument %d, but got %s",
-                 idx, i, Py_TYPE(args[i])->tp_name);
+                 idx, i, Py_TYPE(obj)->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
@@ -398,6 +404,11 @@ inline std::string PythonArgs::string(int i) {
 
 inline int64_t PythonArgs::toInt64(int i) {
   if (!args[i]) return signature.params[i].default_int;
+  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
+    auto & var = THPVariable_Unpack(args[i]);
+    jit::tracer::ArgumentStash::stashValue(
+        signature.params[i].name, idx, var, jit::IntType::get());
+  }
   return THPUtils_unpackLong(args[i]);
 }
 

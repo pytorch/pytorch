@@ -10,7 +10,7 @@ namespace {
 template <class DataType>
 void enforce_finite_op_impl_cpu(const Tensor& input) {
   const DataType* input_data = input.template data<DataType>();
-  auto size = input.size();
+  auto size = input.numel();
 
   for (auto i = 0; i < size; i++) {
     CAFFE_ENFORCE(

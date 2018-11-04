@@ -797,6 +797,15 @@ class TestCaffe2Backend(unittest.TestCase):
             input = torch.ones(*dims, requires_grad=True)
             self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
 
+    def test_randn(self):
+        x = torch.randn(1, 2, 3, 4)
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return (torch.randn(1, 2, 3, 4) + x).shape
+        self.run_model_test(MyModule(), train=False, input=(x),
+                            batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_convtranspose(self):
         model = nn.ConvTranspose2d(3, 3, 3, stride=3, bias=False, padding=1, output_padding=2)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE, atol=1e-7)
@@ -942,6 +951,14 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(3, 4)
         self.run_model_test(WhereMethod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_data_dependent_zeros_factory(self):
+        class ZerosFactory(torch.nn.Module):
+            def forward(self, input):
+                return torch.cat([input, torch.zeros(input.size(0), 1).type_as(input)], dim=1)
+
+        x = torch.zeros(3, 4)
+        self.run_model_test(ZerosFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
 
 # a bit of metaprogramming to set up all the rnn tests

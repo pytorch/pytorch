@@ -166,7 +166,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
       size_t kernelDims,
       size_t dilationDims,
       cudnnConvolutionDescriptor_t copy) {
-    if (kernelDims == 2) {
+    if (kernelDims == 1 || kernelDims == 2) {
       cudnnConvolutionMode_t mode;
       cudnnDataType_t dataType;
       int pad_height = 0;
@@ -277,15 +277,15 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
 
   void SetConvDescFromArguments() {
 #if CUDNN_VERSION_MIN(6, 0, 0)
-    if (kernel_.size() == 2) {
+    if (kernel_.size() == 1 || kernel_.size() == 2) {
       CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
           conv_desc_,
           pad_t(),
-          pad_l(),
+          kernel_.size() == 1 ? 0 : pad_l(),
           stride_h(),
-          stride_w(),
+          kernel_.size() == 1 ? 1 : stride_w(),
           dilation_h(),
-          dilation_w(),
+          kernel_.size() == 1 ? 1 : dilation_w(),
           CUDNN_CROSS_CORRELATION,
           compute_type_));
     } else {
@@ -572,21 +572,21 @@ bool CudnnConvOp::DoRunWithType() {
       "If you set group, the number of output channels should be divisible "
       "by group.");
 
-  int group_offset_filter = filter.size() / group_;
+  int group_offset_filter = filter.numel() / group_;
 
   // Set up the cudnn algorithms & workspace if necessary
-  bool input_changed = (X.dims() != cudnn_input_dims_);
-  bool filter_changed = (filter.dims() != cudnn_filter_dims_);
+  bool input_changed = (X.sizes() != cudnn_input_dims_);
+  bool filter_changed = (filter.sizes() != cudnn_filter_dims_);
   if (input_changed || filter_changed) {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
-      cudnn_input_dims_ = X.dims().vec();
+      cudnn_input_dims_ = X.sizes().vec();
       SetTensorNdDescriptorWithGroup<T_X>(
           X.ndim(), bottom_desc_, N, C, H, W, D);
     }
     if (filter_changed) {
-      cudnn_filter_dims_ = filter.dims().vec();
-      if (kernel_.size() == 2) {
+      cudnn_filter_dims_ = filter.sizes().vec();
+      if (kernel_.size() == 1 || kernel_.size() == 2) {
 #if CUDNN_VERSION_MIN(7, 0, 0)
         const int MM = M;
 #else
@@ -599,9 +599,9 @@ bool CudnnConvOp::DoRunWithType() {
             MM,
             C / group_,
             kernel_h(),
-            kernel_w()));
+            kernel_.size() == 1 ? 1 : kernel_w()));
       } else {
-        vector<int> dims(filter.dims().begin(), filter.dims().end());
+        vector<int> dims(filter.sizes().begin(), filter.sizes().end());
 #if !CUDNN_VERSION_MIN(7, 0, 0)
         // We only need to divide dims by group_ when CUDNN version < 7.0
         // see CUDA group convolution doc: https://fburl.com/dgj6dvpd
@@ -616,7 +616,7 @@ bool CudnnConvOp::DoRunWithType() {
             dims.data()));
       }
       if (InputSize() == 3) {
-        if (kernel_.size() == 2) {
+        if (kernel_.size() == 1 || kernel_.size() == 2) {
           CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
               bias_desc_,
               GetCudnnTensorFormat(order_),
@@ -642,7 +642,7 @@ bool CudnnConvOp::DoRunWithType() {
     SetTensorNdDescriptorWithGroup<T_Y>(
         X.ndim(), top_desc_, N, M, H_out, W_out, D_out);
     // Set the output with descriptor useful for bias addition in one run.
-    if (kernel_.size() == 2) {
+    if (kernel_.size() == 1 || kernel_.size() == 2) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           top_desc_for_bias_,
           GetCudnnTensorFormat(order_),
@@ -692,7 +692,7 @@ bool CudnnConvOp::DoRunWithType() {
         SetConvDescComputeType(conv_desc_, kComputeTypesToTry[i]);
 
         algosToCompare[i] = algo_cache_.getAlgorithm(
-            X.dims(), filter.dims(), kComputeTypesToTry[i], [&]() {
+            X.sizes(), filter.sizes(), kComputeTypesToTry[i], [&]() {
               VLOG(1) << "CUDNN Convolution fwd: doing exhaustive "
                       << "search for " << kComputePassNames[i];
               // When we do an exhaustive search, we will ignore the workspace
@@ -758,14 +758,32 @@ bool CudnnConvOp::DoRunWithType() {
           cudnn_ws_nbytes_limit_,
           &algo_));
     }
-    CUDNN_ENFORCE(cudnnGetConvolutionForwardWorkspaceSize(
-        cudnn_wrapper_.inline_cudnn_handle(),
-        bottom_desc_,
-        filter_desc_,
-        conv_desc_,
-        top_desc_,
-        algo_,
-        &cudnn_ws_nbytes_));
+    for (int step = 0; step < 2; ++step) {
+      cudnnStatus_t _status = cudnnGetConvolutionForwardWorkspaceSize(
+          cudnn_wrapper_.inline_cudnn_handle(),
+          bottom_desc_,
+          filter_desc_,
+          conv_desc_,
+          top_desc_,
+          algo_,
+          &cudnn_ws_nbytes_);
+      if (step == 0) {
+        if (_status == CUDNN_STATUS_SUCCESS) {
+          break;
+        }
+        if (_status == CUDNN_STATUS_NOT_SUPPORTED) {
+          cudnnConvolutionFwdAlgo_t new_algo = deterministic_
+              ? CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM
+              : CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM;
+          VLOG(1) << "Forward algorithm " << (int)algo_
+                  << " is not currently supported for given parameters."
+                  << " Trying the default algorithm " << (int)new_algo;
+          algo_ = new_algo;
+          continue;
+        }
+      }
+      CUDNN_ENFORCE(_status);
+    }
     VLOG(1) << "CuDNN algorithm: " << algo_;
     VLOG(1) << "CuDNN workspace size: " << cudnn_ws_nbytes_;
   }
@@ -846,7 +864,7 @@ bool CudnnConvOp::RunOnDevice() {
   } else {
     LOG(FATAL) << "Only float (32bit) and Half are supported by "
                << "cudnn convolution, but input " << debug_def().input(0)
-               << " has [" << Input(0).meta().name() << "]";
+               << " has [" << Input(0).dtype().name() << "]";
   }
   return true;
 }
@@ -918,7 +936,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
       "If you set group, the number of output channels should be divisible "
       "by group.");
 
-  int group_offset_filter = filter.size() / group_;
+  int group_offset_filter = filter.numel() / group_;
   if (kernel_.size() == 1) {
     ConvPoolOpBase<CUDAContext>::ComputePads({H});
   } else if (kernel_.size() == 2) {
@@ -931,18 +949,18 @@ bool CudnnConvGradientOp::DoRunWithType() {
   dfilter->ResizeLike(filter);
 
   // Set up the cudnn algorithms & workspace if necessary
-  bool input_changed = (X.dims() != cudnn_input_dims_);
-  bool filter_changed = (filter.dims() != cudnn_filter_dims_);
+  bool input_changed = (X.sizes() != cudnn_input_dims_);
+  bool filter_changed = (filter.sizes() != cudnn_filter_dims_);
   if (input_changed || filter_changed) {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
-      cudnn_input_dims_ = X.dims().vec();
+      cudnn_input_dims_ = X.sizes().vec();
       SetTensorNdDescriptorWithGroup<T_X>(
           X.ndim(), bottom_desc_, N, C, H, W, D);
     }
     if (filter_changed) {
-      cudnn_filter_dims_ = filter.dims().vec();
-      if (kernel_.size() == 2) {
+      cudnn_filter_dims_ = filter.sizes().vec();
+      if (kernel_.size() == 1 || kernel_.size() == 2) {
 #if CUDNN_VERSION_MIN(7, 0, 0)
         const int MM = M;
 #else
@@ -955,9 +973,9 @@ bool CudnnConvGradientOp::DoRunWithType() {
             MM,
             C / group_,
             kernel_h(),
-            kernel_w()));
+            kernel_.size() == 1 ? 1 : kernel_w()));
       } else {
-        vector<int> dims(filter.dims().begin(), filter.dims().end());
+        vector<int> dims(filter.sizes().begin(), filter.sizes().end());
 #if !CUDNN_VERSION_MIN(7, 0, 0)
         // We only need to divide dims by group_ when CUDNN version < 7.0
         // see CUDA group convolution doc: https://fburl.com/dgj6dvpd
@@ -973,7 +991,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
             dims.data()));
       }
       if (!no_bias_) {
-        if (kernel_.size() == 2) {
+        if (kernel_.size() == 1 || kernel_.size() == 2) {
           CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
               bias_desc_,
               GetCudnnTensorFormat(order_),
@@ -999,7 +1017,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
     SetTensorNdDescriptorWithGroup<T_DX>(
         X.ndim(), top_desc_, N, M, H_out, W_out, D_out);
     // Set the output with descriptor useful for bias addition in one run.
-    if (kernel_.size() == 2) {
+    if (kernel_.size() == 1 || kernel_.size() == 2) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           top_desc_for_bias_,
           GetCudnnTensorFormat(order_),
@@ -1059,7 +1077,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
         SetConvDescComputeType(bwd_filter_conv_desc_, kComputeTypesToTry[i]);
 
         algosToCompare[i] = filter_algo_cache_.getAlgorithm(
-            X.dims(), filter.dims(), kComputeTypesToTry[i], [&]() {
+            X.sizes(), filter.sizes(), kComputeTypesToTry[i], [&]() {
               VLOG(1) << "CUDNN Convolution bwd: doing filter exhaustive"
                       << "search for " << kComputePassNames[i];
               // When we do an exhaustive search, we will ignore the workspace
@@ -1146,7 +1164,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
           SetConvDescComputeType(bwd_data_conv_desc_, kComputeTypesToTry[i]);
 
           algosToCompare[i] = data_algo_cache_.getAlgorithm(
-              X.dims(), filter.dims(), kComputeTypesToTry[i], [&]() {
+              X.sizes(), filter.sizes(), kComputeTypesToTry[i], [&]() {
                 VLOG(1) << "CUDNN Convolution bwd: doing data exhaustive"
                         << "search for " << kComputePassNames[i];
                 int returned_algo_count;
@@ -1223,24 +1241,61 @@ bool CudnnConvGradientOp::DoRunWithType() {
     // get workspace size for backwards filter algorithm
     size_t bwd_filter_ws_size, bwd_data_ws_size;
 
-    CUDNN_ENFORCE(cudnnGetConvolutionBackwardFilterWorkspaceSize(
-        cudnn_wrapper_.inline_cudnn_handle(),
-        bottom_desc_,
-        top_desc_,
-        bwd_filter_conv_desc_,
-        filter_desc_,
-        bwd_filter_algo_,
-        &bwd_filter_ws_size));
+    for (int step = 0; step < 2; ++step) {
+      cudnnStatus_t _status = cudnnGetConvolutionBackwardFilterWorkspaceSize(
+          cudnn_wrapper_.inline_cudnn_handle(),
+          bottom_desc_,
+          top_desc_,
+          bwd_filter_conv_desc_,
+          filter_desc_,
+          bwd_filter_algo_,
+          &bwd_filter_ws_size);
+      if (step == 0) {
+        if (_status == CUDNN_STATUS_SUCCESS) {
+          break;
+        }
+        if (_status == CUDNN_STATUS_NOT_SUPPORTED) {
+          cudnnConvolutionBwdFilterAlgo_t new_algo = deterministic_
+              ? CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1
+              : CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0;
+          VLOG(1) << "Backward Filter algorithm " << (int)bwd_filter_algo_
+                  << " is not currently supported for given parameters."
+                  << " Trying the default algorithm " << (int)new_algo;
+          bwd_filter_algo_ = new_algo;
+          continue;
+        }
+      }
+      CUDNN_ENFORCE(_status);
+    }
+
     if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
       // get workspace size for backwards data algorithm
-      CUDNN_ENFORCE(cudnnGetConvolutionBackwardDataWorkspaceSize(
-          cudnn_wrapper_.inline_cudnn_handle(),
-          filter_desc_,
-          top_desc_,
-          bwd_data_conv_desc_,
-          bottom_desc_,
-          bwd_data_algo_,
-          &bwd_data_ws_size));
+      for (int step = 0; step < 2; ++step) {
+        cudnnStatus_t _status = cudnnGetConvolutionBackwardDataWorkspaceSize(
+            cudnn_wrapper_.inline_cudnn_handle(),
+            filter_desc_,
+            top_desc_,
+            bwd_data_conv_desc_,
+            bottom_desc_,
+            bwd_data_algo_,
+            &bwd_data_ws_size);
+        if (step == 0) {
+          if (_status == CUDNN_STATUS_SUCCESS) {
+            break;
+          }
+          if (_status == CUDNN_STATUS_NOT_SUPPORTED) {
+            cudnnConvolutionBwdDataAlgo_t new_algo = deterministic_
+                ? CUDNN_CONVOLUTION_BWD_DATA_ALGO_1
+                : CUDNN_CONVOLUTION_BWD_DATA_ALGO_0;
+            VLOG(1) << "Backward Data algorithm " << (int)bwd_data_algo_
+                    << " is not currently supported for given parameters."
+                    << " Trying the default algorithm " << (int)new_algo;
+            bwd_data_algo_ = new_algo;
+            continue;
+          }
+        }
+        CUDNN_ENFORCE(_status);
+      }
     } else {
       bwd_data_ws_size = 0;
     }

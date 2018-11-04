@@ -155,7 +155,6 @@ class Caffe2Backend(Backend):
     # In most cases, this should be empty - as the effort of ONNX is
     # to unify the operator definitions.
     _renamed_operators = {
-        'Caffe2ConvTranspose':   'ConvTranspose',
         'GlobalMaxPool':         'MaxPool',
         'GlobalAveragePool':     'AveragePool',
         'Pad':                   'PadImage',
@@ -172,6 +171,7 @@ class Caffe2Backend(Backend):
         'Unsqueeze':             'ExpandDims',
         'Loop':                  'ONNXWhile',
         'Tile':                  'NumpyTile',
+        'RandomNormal':          'GaussianFill',
     }
 
     _global_renamed_attrs = {'kernel_shape': 'kernels'}
@@ -197,6 +197,7 @@ class Caffe2Backend(Backend):
         'Loop': '_create_loop',
         'If': '_create_if',
         'Upsample': '_create_upsample',
+        'RandomNormal': '_create_gaussian_fill'
     }
 
     # Dummy name generator
@@ -391,6 +392,22 @@ class Caffe2Backend(Backend):
                 raise ValueError("The first two elements in the scales argument must be 1")
             c2_op.arg.extend([caffe2.python.utils.MakeArgument('height_scale', n.attrs['scales'][2])])
             c2_op.arg.extend([caffe2.python.utils.MakeArgument('width_scale', n.attrs['scales'][3])])
+
+        return c2_op
+
+    @classmethod
+    def _create_gaussian_fill(cls, init_model, pred_model, n, opset_version):
+        c2_op = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n,
+                                                   opset_version)
+        if "seed" in n.attrs:
+            raise ValueError("Caffe2 does not support random seed")
+
+        if "dtype" in n.attrs and n.attrs['dtype'] != onnx.TensorProtoDataType.FLOAT:
+            raise ValueError("Caffe2 does not support no-float dtype")
+
+        if "scale" in n.attrs:
+            c2_op.arg.extend([caffe2.python.utils.MakeArgument('std',
+                                                           n.attrs['scale'])])
 
         return c2_op
 

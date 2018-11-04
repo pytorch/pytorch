@@ -20,14 +20,20 @@ struct SchemaParser {
     }
     std::vector<Argument> arguments;
     std::vector<Argument> returns;
+    std::vector<Symbol> writes;
     bool kwarg_only = false;
+    bool is_vararg = false;
     size_t idx = 0;
     parseList('(', ',', ')', [&] {
-      if(L.nextIf('*')) {
+      if(is_vararg)
+        throw ErrorReport(L.cur()) << "... must be the last element of the argument list";
+      if (L.nextIf('*')) {
         kwarg_only = true;
+      } else if(L.nextIf(TK_DOTS)) {
+        is_vararg = true;
       } else {
         arguments.push_back(parseArgument(
-            idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only));
+            idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only, writes));
       }
     });
     idx = 0;
@@ -35,13 +41,14 @@ struct SchemaParser {
     if (L.cur().kind == '(') {
       parseList('(', ',', ')', [&] {
         returns.push_back(
-            parseArgument(idx++, /*is_return=*/true, /*kwarg_only=*/false));
+            parseArgument(idx++, /*is_return=*/true, /*kwarg_only=*/false, writes));
       });
     } else {
       returns.push_back(
-          parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
+          parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false, writes));
     }
-    return FunctionSchema { name, arguments, returns };
+    return FunctionSchema { name, std::move(arguments), std::move(returns),
+                            is_vararg, false, std::move(writes) };
   }
 
   std::vector<FunctionSchema> parseDeclarations() {
@@ -67,7 +74,6 @@ struct SchemaParser {
       {"float", FloatType::get() },
       {"int", IntType::get() },
       {"bool", BoolType::get() },
-      {"World", WorldType::get() },
     };
     auto tok = L.expect(TK_IDENT);
     auto text = tok.text();
@@ -82,33 +88,55 @@ struct SchemaParser {
     }
     return it->second;
   }
-  TypePtr parseType() {
+  static void addToWrites(std::vector<Symbol>& writes, const Symbol& alias_set) {
+    auto it = std::find(writes.begin(), writes.end(), alias_set);
+    if(it == writes.end())
+      writes.push_back(alias_set);
+  }
+  // Examples:
+  // Tensor(a) // Tensor is in set a
+  // Tensor(a!) // it is also written to
+  // Tensor!  // shorthand for Tensor(fresh_identifier!)
+  std::vector<Symbol> parseAliasAnnotation(std::vector<Symbol>& writes) {
+    std::vector<Symbol> sets;
+    if(L.nextIf('(')) {
+      // optional 'alias set annotation'
+      sets.push_back(Symbol::fromQualString("alias::"+L.expect(TK_IDENT).text()));
+      if(L.nextIf('!')) {
+        addToWrites(writes, sets.back());
+      }
+      L.expect(')');
+    } else if(L.nextIf('!')) {
+      sets.push_back(Symbol::fromQualString("alias::$"+std::to_string(next_id++)));
+      addToWrites(writes, sets.back());
+    }
+    return sets;
+  }
+  std::pair<TypePtr, AliasInfo> parseType(std::vector<Symbol>& writes) {
     TypePtr value;
+    AliasInfo alias_info;
     if (L.cur().kind == '(') {
       std::vector<TypePtr> types;
+      std::vector<AliasInfo> alias_infos;
       parseList('(', ',', ')', [&]{
-        types.push_back(parseType());
+        auto r = parseType(writes);
+        types.push_back(std::move(r.first));
+        alias_infos.push_back(std::move(r.second));
       });
       value = TupleType::create(std::move(types));
+      alias_info = AliasInfo({}, std::move(alias_infos));
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
       L.next(); // Future
       L.expect('(');
-      TypePtr subtype = parseType();
+      auto p = parseType(writes);
+      auto subtype = std::move(p.first);
+      auto subalias = std::move(p.second);
       L.expect(')');
-      throw ErrorReport(L.cur()) << "Futures are not yet implemented";
+      value = FutureType::create(subtype);
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
+      L.next();
       value = DynamicType::get();
-      auto range = L.next().range; // Tensor
-      if(L.nextIf('(')) {
-        // optional 'alias set annotation'
-        auto bt = parseBaseType();
-        if (bt->kind() != TypeKind::VarType) {
-          throw ErrorReport(range)
-              << "expected type variable but found " << bt->str();
-        }
-        L.expect(')');
-        // annotation itself is currently unused
-      }
+      alias_info = AliasInfo(parseAliasAnnotation(writes));
     } else {
       value = parseBaseType();
     }
@@ -117,43 +145,46 @@ struct SchemaParser {
         L.next(); // [
         L.next(); // ]
         value = ListType::create(value);
+        alias_info = AliasInfo(parseAliasAnnotation(writes), {std::move(alias_info)});
       } else if(L.nextIf('?')) {
-        // pass - currently ignored but optional types would go here when implemented
+        value = OptionalType::create(value);
       } else {
         break;
       }
     }
-    return value;
+    return std::make_pair(std::move(value), std::move(alias_info));
   }
 
-  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
+  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only, std::vector<Symbol>& writes) {
     Argument result;
-    result.type = parseType();
+    auto p = parseType(writes);
+    auto type = std::move(p.first);
+    auto alias_info = std::move(p.second);
+    c10::optional<int32_t> N;
+    c10::optional<IValue> default_value;
+    c10::optional<std::string> alias_set;
+    std::string name;
     if(L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
-      result.type = ListType::create(result.type);
-      result.N = std::stoll(L.expect(TK_NUMBER).text());
+      type = ListType::create(type);
+      N = std::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
-    }
-    if(L.nextIf('!')) {
-      // pass - currently ignored but will be used to annotate where we write to a
-      // tensor
+      alias_info = AliasInfo(parseAliasAnnotation(writes), {std::move(alias_info)});
     }
     if(is_return) {
       // optionally named return values
       if(L.cur().kind == TK_IDENT) {
-        result.name = L.next().text();
+        name = L.next().text();
       } else {
-        result.name = "ret" + std::to_string(idx);
+        name = "ret" + std::to_string(idx);
       }
     } else {
-      result.kwarg_only = kwarg_only;
-      result.name = L.expect(TK_IDENT).text();
+      name = L.expect(TK_IDENT).text();
       if(L.nextIf('=')) {
-        parseDefaultValue(result);
+        default_value = parseDefaultValue(type, N);
       }
     }
-    return result;
+    return Argument(std::move(name), std::move(type), N, std::move(default_value), !is_return && kwarg_only, std::move(alias_info));
   }
   IValue parseSingleConstant(TypeKind kind) {
     switch(L.cur().kind) {
@@ -175,8 +206,8 @@ struct SchemaParser {
           return static_cast<int64_t>(at::Device::Type::CPU);
         } else if("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
-        } else if("ElementwiseMean" == text) {
-          return static_cast<int64_t>(Reduction::ElementwiseMean);
+        } else if("Mean" == text) {
+          return static_cast<int64_t>(Reduction::Mean);
         } else {
           throw ErrorReport(L.cur().range) << "invalid numeric default value";
         }
@@ -229,34 +260,36 @@ struct SchemaParser {
     L.expect(TK_NONE);
     return IValue();
   }
-  void parseDefaultValue(Argument& arg) {
+  IValue parseDefaultValue(TypePtr arg_type, c10::optional<int32_t> arg_N) {
     auto range = L.cur().range;
-    switch(arg.type->kind()) {
+    switch(arg_type->kind()) {
       case TypeKind::DynamicType:
       case TypeKind::GeneratorType: {
-        arg.default_value = parseTensorDefault(range);
+        return parseTensorDefault(range);
       }  break;
+      case TypeKind::OptionalType:
       case TypeKind::NumberType:
       case TypeKind::IntType:
       case TypeKind::BoolType:
       case TypeKind::FloatType:
-        arg.default_value = parseSingleConstant(arg.type->kind());
+        return parseSingleConstant(arg_type->kind());
         break;
       case TypeKind::ListType: {
-        auto elem_kind = arg.type->cast<ListType>()->getElementType();
+        auto elem_kind = arg_type->cast<ListType>()->getElementType();
         if(L.cur().kind == TK_IDENT) {
-          arg.default_value = parseTensorDefault(range);
-        } else if(arg.N && L.cur().kind != '[') {
+          return parseTensorDefault(range);
+        } else if(arg_N && L.cur().kind != '[') {
           IValue v = parseSingleConstant(elem_kind->kind());
-          std::vector<IValue> repeated(*arg.N, v);
-          arg.default_value = convertToList(elem_kind->kind(), range, repeated);
+          std::vector<IValue> repeated(*arg_N, v);
+          return convertToList(elem_kind->kind(), range, repeated);
         } else {
-          arg.default_value = parseConstantList(elem_kind->kind());
+          return parseConstantList(elem_kind->kind());
         }
       } break;
       default:
         throw ErrorReport(range) << "unexpected type, file a bug report";
     }
+    return IValue(); // silence warnings
   }
 
   void parseList(int begin, int sep, int end, std::function<void()> callback) {
@@ -272,6 +305,7 @@ struct SchemaParser {
       L.expect(end);
   }
   Lexer L;
+  size_t next_id = 0;
 };
 
 } // namespace script
@@ -281,28 +315,28 @@ namespace {
 std::string canonicalSchemaString(const FunctionSchema& schema) {
   std::ostringstream out;
 
-  out << schema.name;
+  out << schema.name();
   out << "(";
 
   bool seen_kwarg_only = false;
-  for(size_t i = 0; i < schema.arguments.size(); ++i) {
+  for(size_t i = 0; i < schema.arguments().size(); ++i) {
     if (i > 0) out << ", ";
-    if (schema.arguments[i].kwarg_only && !seen_kwarg_only) {
+    if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
       out << "*, ";
       seen_kwarg_only = true;
     }
-    const auto & arg = schema.arguments[i];
-    out << arg.type->str() << " " << arg.name;
+    const auto & arg = schema.arguments()[i];
+    out << arg.type()->str() << " " << arg.name();
   }
 
   out << ") -> ";
-  if (schema.returns.size() == 1) {
-    out << schema.returns.at(0).type->str();
-  } else if (schema.returns.size() > 1) {
+  if (schema.returns().size() == 1) {
+    out << schema.returns().at(0).type()->str();
+  } else if (schema.returns().size() > 1) {
     out << "(";
-    for (size_t i = 0; i < schema.returns.size(); ++i) {
+    for (size_t i = 0; i < schema.returns().size(); ++i) {
       if (i > 0) out << ", ";
-      out << schema.returns[i].type->str();
+      out << schema.returns()[i].type()->str();
     }
     out << ")";
   }
@@ -321,7 +355,7 @@ private:
   // Basically, every function schema is assigned a unique string you can use to match it. However,
   // parsing those strings or comparing and hashing them character by character would be very slow, so
   // we use a trick here! Every string literal in your program is guaranteed to have static storage
-  // duration and so its address won't change at runtime. This allows us to memoize answerts for every
+  // duration and so its address won't change at runtime. This allows us to memoize answers for every
   // pointer, which is done by the operators_by_sig_literal map. Still, this map is initially
   // empty, and so we still need to do the complete string matching at the first time, which is implemented
   // by performing a lookup in the operators_by_sig map.
@@ -331,7 +365,7 @@ private:
   // XXX - caller must be holding lock
   void registerPendingOperators() {
     for(auto op : to_register) {
-      Symbol sym = Symbol::fromQualString(op->schema().name);
+      Symbol sym = Symbol::fromQualString(op->schema().name());
       operators[sym].push_back(op);
       operators_by_sig[canonicalSchemaString(op->schema())] = op;
     }
@@ -401,11 +435,11 @@ FunctionSchema parseSchema(const std::string& schema) {
 
 bool Operator::matches(const Node* node) const {
   // wrong name
-  if (node->kind().toQualString() != schema().name) {
+  if (node->kind().toQualString() != schema().name()) {
     return false;
   }
   at::ArrayRef<const Value*> actuals = node->inputs();
-  const auto& formals = schema().arguments;
+  const auto& formals = schema().arguments();
 
   // not enough inputs
   if(actuals.size() < formals.size())
@@ -415,7 +449,7 @@ bool Operator::matches(const Node* node) const {
   TypeEnv type_env;
   for(size_t i = 0; i < formals.size(); ++i) {
     try {
-      TypePtr formal = matchTypeVariables(formals[i].type, actuals[i]->type(), type_env);
+      TypePtr formal = matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
       // mismatched input type
       if (!actuals[i]->type()->isSubtypeOf(formal)) {
         return false;
@@ -426,7 +460,7 @@ bool Operator::matches(const Node* node) const {
   }
 
   // too many inputs
-  if(!schema().is_vararg && actuals.size() != formals.size()) {
+  if(!schema().is_vararg() && actuals.size() != formals.size()) {
     // std::cout << "not all inputs used\n" << input_i << " " << inputs_size << "\n";
     return false;
   }
@@ -471,7 +505,7 @@ OperatorSet::OperatorSet(std::initializer_list<const char *> sig_literals) {
   auto & registry = getRegistry();
   for (const char * sig : sig_literals) {
     auto op = registry.lookupByLiteral(sig);
-    ops[Symbol::fromQualString(op->schema().name)].push_back(op);
+    ops[Symbol::fromQualString(op->schema().name())].push_back(op);
   }
 }
 

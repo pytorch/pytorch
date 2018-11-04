@@ -49,7 +49,7 @@ class TransposeOp final : public Operator<Context> {
     } else {
       CAFFE_ENFORCE_EQ(ndim, axes_.size());
     }
-    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
     std::vector<int> Y_dims(ndim);
     for (int i = 0; i < ndim; ++i) {
       Y_dims[i] = X_dims[axes_[i]];

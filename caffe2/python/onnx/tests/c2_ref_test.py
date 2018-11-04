@@ -45,7 +45,7 @@ class TestCaffe2Basic(TestCase):
         bad_node_def = make_node("Add", inputs=["X", "Y"], outputs=["Z"], foo=42, bar=56)
         with self.assertRaisesRegexp(
                 RuntimeError,
-                ".*?Don't know how to map unexpected argument (foo|bar) \(from operator .*?\).*$"):
+                "Don't know how to map unexpected argument (foo|bar)"):
             b2.convert_node(bad_node_def.SerializeToString())
 
     def test_relu_graph(self):

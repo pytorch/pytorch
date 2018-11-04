@@ -1,7 +1,6 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
 # TODO(jiayq): once we have unified CMake entry, remove this module path.
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules ${CMAKE_MODULE_PATH})
-SET(Gloo_USE_CUDA TRUE)
 
 ################################################################################
 # Helper functions
@@ -43,9 +42,6 @@ ENDIF(NOT HAS_THREAD_LOCAL)
 
 FIND_PACKAGE(MPI)
 
-FIND_PACKAGE(Gloo)
-
-FIND_PACKAGE(Caffe2 REQUIRED)
 INCLUDE_DIRECTORIES(${CAFFE2_INCLUDE_DIR})
 
 IF(NOT USE_CUDA)
@@ -58,8 +54,6 @@ ELSE()
 
     ADD_DEFINITIONS(-DUSE_CUDA=1)
   ENDIF()
-
-  FIND_PACKAGE(NCCL)
 ENDIF()
 
 IF(MPI_FOUND)
@@ -67,9 +61,8 @@ IF(MPI_FOUND)
   MESSAGE(STATUS "MPI_LIBRARIES: ${MPI_LIBRARIES}")
 ENDIF()
 
-IF(GLOO_FOUND)
+IF(USE_GLOO AND USE_CUDA)
   ADD_DEFINITIONS(-DWITH_GLOO=1)
-  MESSAGE(STATUS "Found Gloo, will compile with Gloo distributed backend")
   IF(USE_GLOO_IBVERBS)
     MESSAGE(STATUS "Building the gloo backend with both TCP and infiniband support")
     ADD_DEFINITIONS(-DUSE_GLOO_IBVERBS=1)
@@ -77,25 +70,6 @@ IF(GLOO_FOUND)
     MESSAGE(STATUS "Building the gloo backend with TCP support only")
   ENDIF()
 ENDIF()
-
-IF(NCCL_FOUND)
-  MESSAGE(STATUS "NCCL_LIBRARIES: ${NCCL_LIBRARIES}")
-  IF(NCCL_MAJOR_VERSION AND NOT (NCCL_MAJOR_VERSION LESS 2))
-    MESSAGE(STATUS "NCCL Version 2 or higher found, will "
-                   "compile with NCCL distributed backend")
-    SET(DISTRIBUTED_NCCL_FOUND TRUE)
-    ADD_DEFINITIONS(-DUSE_DISTRIBUTED_NCCL=1)
-  ELSE()
-    MESSAGE(STATUS "Found NCCL, but the NCCL version is either not 2+ or not "
-                   "determinable, will not compile with NCCL distributed "
-                   "backend")
-  ENDIF()
-ELSE()
-  MESSAGE(STATUS "Not able to find NCCL, will not "
-                 "compile with NCCL distributed backend")
-ENDIF()
-
-ADD_DEFINITIONS(-D_THD_CORE=1)
 
 # Can be compiled standalone
 IF(NOT THD_INSTALL_BIN_DIR OR NOT THD_INSTALL_LIB_DIR OR NOT THD_INSTALL_INCLUDE_DIR)
@@ -115,14 +89,14 @@ IF(NOT MPI_FOUND)
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_mpi_smoke.cpp")
 ENDIF()
 
-IF(NOT GLOO_FOUND)
+IF(NOT USE_GLOO OR NOT USE_CUDA)
   LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/DataChannelGloo.cpp")
   LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/Store.cpp")
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_gloo_store.cpp")
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_gloo_cache.cpp")
 ENDIF()
 
-IF(NOT DISTRIBUTED_NCCL_FOUND)
+IF(NOT USE_NCCL)
   LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/DataChannelNccl.cpp")
 ENDIF()
 
@@ -131,22 +105,25 @@ SET(all_h THD.h ${base_h} ${process_group_h})
 
 EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
 
-# Need to include external NCCL first
-IF(DISTRIBUTED_NCCL_FOUND)
-  INCLUDE_DIRECTORIES(${NCCL_INCLUDE_DIRS})
-  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${NCCL_LIBRARIES};")
-ENDIF()
-
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 
 ADD_LIBRARY(THD STATIC ${all_cpp})
-set_property(TARGET THD PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-FILE(WRITE "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${CAFFE2_LIBRARIES};")
+TARGET_COMPILE_DEFINITIONS(THD PRIVATE "_THD_CORE=1")
+
+ADD_DEPENDENCIES(THD caffe2)
+
+target_include_directories(THD PRIVATE
+  ${CMAKE_SOURCE_DIR}/aten/src/TH # provides "THAllocator.h" to THCGeneral.h
+  ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
+  ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
+  ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC # provides "THCGeneral.h" to THC.h
+  )
+
+set_property(TARGET THD PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 IF(MPI_FOUND)
   INCLUDE_DIRECTORIES(${MPI_INCLUDE_PATH})
-  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${MPI_LIBRARIES};")
 
   IF(MPI_COMPILE_FLAGS)
     MESSAGE(STATUS "MPI_COMPILE_FLAGS: ${MPI_COMPILE_FLAGS}")
@@ -159,10 +136,13 @@ IF(MPI_FOUND)
   ENDIF()
 ENDIF()
 
-IF(GLOO_FOUND)
-  INCLUDE_DIRECTORIES(${GLOO_INCLUDE_DIR})
-  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${Gloo_LIBRARY};")
-  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${Gloo_NATIVE_LIBRARY};")
+# TODO we shouldn't need the USE_CUDA condition here. See https://github.com/pytorch/pytorch/issues/13101
+IF(USE_GLOO AND USE_CUDA)
+  ADD_DEPENDENCIES(THD gloo)
+ENDIF()
+
+IF(USE_NCCL)
+  TARGET_LINK_LIBRARIES(THD PUBLIC __caffe2_nccl)
 ENDIF()
 
 # Test executables

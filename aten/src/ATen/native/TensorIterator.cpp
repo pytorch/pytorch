@@ -1,53 +1,81 @@
-#include "TensorIterator.h"
+#include <ATen/native/TensorIterator.h>
 
+#include <array>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 
 namespace at {
 
+struct DimCounter {
+  DimCounter(IntList shape, Range range);
+
+  void increment(const std::array<int64_t, 2>& step);
+  bool is_done() const;
+  std::array<int64_t, 2> max_step() const;
+
+  IntList shape;
+  Range range;
+  DimVector values;
+  int64_t offset;
+};
+
+using DimMask = TensorIterator::DimMask;
+using PtrVector = TensorIterator::PtrVector;
+using loop_t = TensorIterator::loop_t;
+using loop2d_t = TensorIterator::loop2d_t;
+
 void TensorIterator::reorder_dimensions() {
-  // Sort the dimensions based on the sum-of-strides in ascending order. NOTE:
-  // that this inverts the order of C-contiguous tensors. strides[0] is the
-  // fastest moving dimension instead of strides[ndim - 1].
+  // Sort the dimensions based on strides in ascending order with reduced dims
+  // at the front. NOTE: that this inverts the order of C-contiguous tensors.
+  // strides[0] is the fastest moving dimension instead of strides[ndim - 1].
 
-  auto sum_of_strides = SmallVector<double, 6>(ndim(), 0.0);
-  for (int dim = 0; dim < ndim(); dim++) {
-    double sum = 0.0;
-    for (const auto& op : operands_) {
-      if (op.stride_bytes.size() == 0) continue;
-      sum += op.stride_bytes[dim];
-    }
-
-    // Weight each dimension by its index. Given two dimensions with equal
-    // some of strides, this preserves the given relative ordering.
-    sum += (ndim() - dim - 1) / (double)ndim();
-
-    sum_of_strides[dim] = sum;
-  }
-
-  // initialize perm with 0, 1, 2, ...
+  // initialize perm with n-1, n-2, ..., 1, 0
   perm_.resize(ndim());
-  std::iota(std::begin(perm_), std::end(perm_), 0);
+  std::iota(perm_.rbegin(), perm_.rend(), 0);
 
-  std::sort(std::begin(perm_), std::end(perm_), [&](size_t i1, size_t i2) {
-    return sum_of_strides[i1] < sum_of_strides[i2];
-  });
-
-  auto reorder = [](IntList data, IntList perm_) {
-    auto res = DimVector(data.size(), 0);
-    for (size_t i = 0; i < perm_.size(); i++) {
-      res[i] = data[perm_[i]];
+  // returns 1 if the dim0 should come after dim1, -1 if dim0 should come
+  // before dim1, and 0 if the comparison is ambiguous.
+  auto should_swap = [&](int dim0, int dim1) {
+    int ret = 0;
+    for (int arg = 0; arg < ntensors(); arg++) {
+      if (operands_[arg].stride_bytes.empty()) {
+        continue;
+      }
+      int stride0 = operands_[arg].stride_bytes[dim0];
+      int stride1 = operands_[arg].stride_bytes[dim1];
+      if (operands_[arg].is_output) {
+        // move reduced dimensions to the front
+        if ((stride0 == 0) != (stride1 == 0)) {
+          return stride1 == 0 ? 1 : -1;
+        }
+      }
+      if (stride0 == 0 || stride1 == 0) {
+        continue;
+      } else if (stride0 <= stride1) {
+        return -1;
+      } else {
+        ret = 1;
+      }
     }
-    return res;
+    return ret;
   };
 
-  // Update shape and strides
-  shape_ = reorder(shape_, perm_);
-  for (auto& op : operands_) {
-    if (op.stride_bytes.size() > 0) {
-      op.stride_bytes = reorder(op.stride_bytes, perm_);
+  // insertion sort with support for ambiguous comparisons
+  for (int i = 1; i < ndim(); i++) {
+    int dim1 = i;
+    for (int dim0 = i - 1; dim0 >= 0; dim0--) {
+      int comparison = should_swap(perm_[dim0], perm_[dim1]);
+      if (comparison > 0) {
+        std::swap(perm_[dim0], perm_[dim1]);
+        dim1 = dim0;
+      } else if (comparison < 0) {
+        break;
+      }
     }
   }
+
+  // perform re-ordering of shape and strides
+  permute_dimensions(perm_);
 }
 
 template <typename F>
@@ -56,14 +84,14 @@ compute_result_type(at::ArrayRef<OperandInfo> operands, const F& predicate) {
   auto result_type = ScalarType::Undefined;
   auto backend = Backend::Undefined;
   for (auto& op : operands) {
-    if (!op.tensor->defined()) continue;
-    if (!predicate(*op.tensor)) continue;
-    auto dtype = op.tensor->type().scalarType();;
+    if (!op.tensor.defined()) continue;
+    if (!predicate(op.tensor)) continue;
+    auto dtype = op.tensor.type().scalarType();;
     result_type = (result_type == ScalarType::Undefined
         ? dtype
         : promoteTypes(result_type, dtype));
     backend = (backend == Backend::Undefined
-        ? op.tensor->type().backend()
+        ? op.tensor.type().backend()
         : backend);
   }
   return std::make_tuple(result_type, backend);
@@ -109,10 +137,9 @@ void TensorIterator::compute_common_type() {
   for (auto& op : operands_) {
     if (!op.type) {
       op.type = &type;
-      op.needs_cast = needs_cast(*op.tensor, type);
-      if (op.needs_cast && op.tensor->dim() == 0 && !op.is_output) {
-        cast_tensors_.emplace_back(op.tensor->toType(type));
-        op.tensor = &(cast_tensors_.back());
+      op.needs_cast = needs_cast(op.tensor, type);
+      if (op.needs_cast && op.tensor.dim() == 0 && !op.is_output) {
+        op.tensor = op.tensor.toType(type);
         op.needs_cast = false;
       }
     }
@@ -121,11 +148,10 @@ void TensorIterator::compute_common_type() {
 
 DimVector TensorIterator::compatible_stride(int element_size) const {
   auto stride = DimVector();
-  if (ndim() > 0) {
-    stride.push_back(element_size);
-  }
-  for (int i = 0; i < ndim() - 1; i++) {
-    stride.push_back(shape_[i] * stride[i]);
+  int64_t next_stride = element_size;
+  for (int dim = 0; dim < ndim(); dim++) {
+    stride.push_back(next_stride);
+    next_stride *= shape_[dim];
   }
   return stride;
 }
@@ -144,7 +170,7 @@ DimVector TensorIterator::invert_perm(IntList input) const {
 void TensorIterator::allocate_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
     auto& op = operands_[i];
-    if (!op.tensor->defined()) {
+    if (!op.tensor.defined()) {
       int element_size = op.type->elementSizeInBytes();
       op.stride_bytes = compatible_stride(element_size);
 
@@ -153,7 +179,7 @@ void TensorIterator::allocate_outputs() {
       for (int dim = 0; dim < ndim(); dim++) {
         tensor_stride[dim] /= element_size;
       }
-      *op.tensor = at::empty_strided(tensor_shape, tensor_stride, op.type->options());
+      op.tensor = at::empty_strided(tensor_shape, tensor_stride, op.type->options());
     }
   }
 }
@@ -219,21 +245,21 @@ int64_t TensorIterator::numel() const {
   return numel;
 }
 
-DimVector TensorIterator::get_inner_strides() const {
+DimVector TensorIterator::get_dim_strides(int dim) const {
   auto dims = ndim();
   auto inner_strides = DimVector();
   for (auto& op : operands_) {
-    inner_strides.push_back(dims == 0 ? 0 : op.stride_bytes[0]);
+    inner_strides.push_back(dims == 0 ? 0 : op.stride_bytes[dim]);
   }
   return inner_strides;
 }
 
 SmallVector<char*, 4> TensorIterator::get_data_ptrs(ArrayRef<char*> base, IntList counter) const {
   auto ptrs = SmallVector<char*, 4>(base);
-  for (int i = 0; i < ntensors(); i++) {
-    auto& stride = operands_[i].stride_bytes;
-    for (int dim = 0; dim < ndim(); dim++) {
-      ptrs[i] += counter[dim] * stride[dim];
+  for (int dim = 0; dim < ndim(); dim++) {
+    int64_t value = counter[dim];
+    for (int arg = 0; arg < ntensors(); arg++) {
+      ptrs[arg] += value * operands_[arg].stride_bytes[dim];
     }
   }
   return ptrs;
@@ -247,50 +273,118 @@ SmallVector<char*, 4> TensorIterator::get_base_ptrs() const {
   return ptrs;
 }
 
-DimVector TensorIterator::make_counter(int64_t linear_offset) const {
-  auto counter = DimVector();
-  int64_t x = linear_offset;
-  for (auto size : shape_) {
-    counter.push_back(x % size);
-    x /= size;
+bool TensorIterator::is_dim_reduced(int dim) const {
+  for (auto& op : operands_) {
+    if (op.is_output && op.stride_bytes[dim] == 0 && shape_[dim] > 1) {
+      return true;
+    }
   }
-  AT_ASSERT(x == 0);
-  return counter;
+  return false;
 }
 
-void TensorIterator::increment_counter(DimVector& counter, int64_t n) const {
-  int64_t overflow = n;
-  for (int i = 0; i < ndim(); i++) {
-    auto size = shape_[i];
-    auto value = counter[i];
-    value += overflow;
-    overflow = value / size;
-    counter[i] = value % size;
+void TensorIterator::permute_dimensions(IntList perm) {
+  AT_ASSERT(perm.size() == ndim());
+
+  auto reorder = [perm](IntList data) {
+    auto res = DimVector(data.size(), 0);
+    for (size_t i = 0; i < perm.size(); i++) {
+      res[i] = data[perm[i]];
+    }
+    return res;
+  };
+
+  // Update shape and strides
+  shape_ = reorder(shape_);
+  for (auto& op : operands_) {
+    if (op.stride_bytes.size() > 0) {
+      op.stride_bytes = reorder(op.stride_bytes);
+    }
   }
 }
 
-void TensorIterator::for_each(loop_t loop) {
-  auto inner_strides = get_inner_strides();
-  auto base_ptrs = get_base_ptrs();
-
-  at::parallel_for(0, numel(), internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
-    serial_for_each(loop, base_ptrs, inner_strides, begin, end - begin);
-  });
+int64_t TensorIterator::num_output_elements() const {
+  int64_t elem = 1;
+  for (int dim = 0; dim < ndim(); dim++) {
+    if (operands_[0].stride_bytes[dim] != 0 || shape_[dim] == 0)  {
+      elem *= shape_[dim];
+    }
+  }
+  return elem;
 }
 
-void TensorIterator::serial_for_each(loop_t loop, ArrayRef<char*> base_ptrs, IntList inner_strides, int64_t start, int64_t n) {
-  if (ndim() <= 1) {
-    auto ptrs = get_data_ptrs(base_ptrs, { start });
-    loop(ntensors(), ptrs.data(), inner_strides.data(), n);
+int TensorIterator::num_reduce_dims() const {
+  int count = 0;
+  for (int dim = 0; dim < ndim(); dim++) {
+    if (operands_[0].stride_bytes[dim] == 0) {
+      count++;
+    }
+  }
+  return count;
+}
+static loop2d_t loop_wrapper(const loop_t& loop) {
+  return [loop](int ntensor, char** base, const int64_t* strides, int64_t size0, int64_t size1) {
+    auto data = PtrVector(base, base + ntensor);
+    const int64_t* outer_strides = &strides[ntensor];
+
+    for (int64_t i = 0; i < size1; i++) {
+      if (i > 0) {
+        for (int arg = 0; arg < ntensor; arg++) {
+          data[arg] += outer_strides[arg];
+        }
+      }
+      loop(ntensor, data.data(), strides, size0);
+    }
+  };
+}
+
+void TensorIterator::for_each(const loop_t& loop) {
+  for_each(loop_wrapper(loop));
+}
+
+void TensorIterator::for_each(const loop2d_t& loop) {
+  int64_t numel = this->numel();
+  if (numel == 0) {
+    return;
+  } else if (numel < internal::GRAIN_SIZE || at::get_max_threads() == 1) {
+    return serial_for_each(loop, {0, numel});
   } else {
-    auto counter = make_counter(start);
-    while (n > 0) {
-      auto ptrs = get_data_ptrs(base_ptrs, counter);
-      int64_t loop_size = std::min(n, shape_[0] - counter[0]);
-      loop(ntensors(), ptrs.data(), inner_strides.data(), loop_size);
-      n -= loop_size;
-      if (n == 0) break;
-      increment_counter(counter, loop_size);
+    at::parallel_for(0, numel, internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
+      serial_for_each(loop, {begin, end});
+    });
+  }
+}
+
+DimVector TensorIterator::get_strides() const {
+  DimVector strides;
+  for (int dim = 0; dim < ndim(); dim++) {
+    for (int arg = 0; arg < ntensors(); arg++) {
+      strides.push_back(operands_[arg].stride_bytes[dim]);
+    }
+  }
+  return strides;
+}
+
+void TensorIterator::serial_for_each(const loop_t& loop, Range range) const {
+  serial_for_each(loop_wrapper(loop), range);
+}
+
+void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
+  auto strides = get_strides();
+  while (strides.size() < 2 * ntensors()) {
+    strides.push_back(0);
+  }
+
+  auto base_ptrs = get_base_ptrs();
+  if (ndim() <= 1) {
+    auto ptrs = get_data_ptrs(base_ptrs, { range.begin });
+    loop(ntensors(), ptrs.data(), strides.data(), range.size(), 1);
+  } else {
+    auto counter = DimCounter(shape_, range);
+    while (!counter.is_done()) {
+      auto ptrs = get_data_ptrs(base_ptrs, counter.values);
+      auto step = counter.max_step();
+      loop(ntensors(), ptrs.data(), strides.data(), step[0], step[1]);
+      counter.increment(step);
     }
   }
 }
@@ -311,7 +405,7 @@ bool TensorIterator::is_scalar(int arg) const {
 }
 
 bool TensorIterator::is_cpu_scalar(int arg) const {
-  return is_scalar(arg) && operands_[arg].tensor->type().backend() == at::Backend::CPU;
+  return is_scalar(arg) && operands_[arg].tensor.type().backend() == at::Backend::CPU;
 }
 
 void* TensorIterator::data_ptr(int arg) const {
@@ -320,6 +414,19 @@ void* TensorIterator::data_ptr(int arg) const {
 
 void TensorIterator::remove_operand(int arg) {
   operands_.erase(operands_.begin() + arg);
+}
+
+void TensorIterator::replace_operand(int arg, void* data, IntList stride) {
+  operands_[arg].data = data;
+  operands_[arg].stride_bytes = stride;
+}
+
+void TensorIterator::remove_dimension(int dim) {
+  AT_ASSERT(dim >= 0 && dim < ndim());
+  shape_.erase(shape_.begin() + dim);
+  for (auto& op : operands_) {
+    op.stride_bytes.erase(op.stride_bytes.begin() + dim);
+  }
 }
 
 void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
@@ -335,21 +442,35 @@ void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
 
 std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   auto builder = TensorIterator::Builder();
+  if (a.device().is_cuda() && b.device().is_cuda()) {
+    AT_CHECK(a.device() == b.device(),
+      "binary_op(): expected both inputs to be on same device, but input a "
+      "is on ", a.device(), " and input b is on ", b.device());
+  }
   builder.add_output(out);
   builder.add_input(a);
   builder.add_input(b);
   return builder.build();
 }
 
+std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
+  AT_ASSERT(out.defined());
+  auto builder = TensorIterator::Builder();
+  builder.add_output(out);
+  builder.add_input(a);
+  builder.iter_->resize_outputs_ = false;
+  return builder.build();
+}
+
 void TensorIterator::mark_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
     operands_[i].is_output = true;
-    auto output = *operands_[i].tensor;
+    auto output = operands_[i].tensor;
     if (!output.defined()) continue;
 
     // check if output is also an input
     for (int arg = num_outputs_; arg < ntensors(); arg++) {
-      auto input = *operands_[arg].tensor;
+      auto input = operands_[arg].tensor;
       if (output.is_same(input)) {
         operands_[i].is_read_write = true;
       }
@@ -359,14 +480,14 @@ void TensorIterator::mark_outputs() {
 
 void TensorIterator::compute_shape() {
   for (auto& op : operands_) {
-    if (!op.tensor->defined()) continue;
+    if (!op.tensor.defined()) continue;
 
     // For now, don't include output tensors that are not also input tensors.
     // This preserves the legacy behavior where torch.add(..., out=dst) resizes
     // the destination tensor.
     if (op.is_output && !op.is_read_write) continue;
 
-    auto shape = op.tensor->sizes();
+    auto shape = op.tensor.sizes();
     if (shape_.empty()) {
       shape_ = shape;
     } else if (!shape.equals(shape_)) {
@@ -379,8 +500,8 @@ void TensorIterator::compute_shape() {
   // our legacy behavior that functions with `out=` arguments resize their
   // outputs.
   for (int i = 0; i < num_outputs_; i++) {
-    auto& tensor = *operands_[i].tensor;
-    if (tensor.defined() && !tensor.sizes().equals(shape_)) {
+    auto& tensor = operands_[i].tensor;
+    if (resize_outputs_ && tensor.defined() && !tensor.sizes().equals(shape_)) {
       if (!operands_[i].is_read_write) {
         // Preserve legacy resizing behavior of out=... arguments
         // TODO: issue warning
@@ -413,8 +534,8 @@ static DimVector compute_stride(const Tensor& tensor, IntList shape) {
 
 void TensorIterator::compute_strides() {
   for (auto& op : operands_) {
-    if (op.tensor->defined()) {
-      op.stride_bytes = compute_stride(*op.tensor, shape_);
+    if (op.tensor.defined()) {
+      op.stride_bytes = compute_stride(op.tensor, shape_);
     }
   }
 }
@@ -422,8 +543,8 @@ void TensorIterator::compute_strides() {
 void TensorIterator::check_type_conversions() {
   for (auto& op : operands_) {
     if (op.needs_cast) {
-      AT_ERROR("TensorIterator expected type ", type().toString(), " but got ", op.tensor->type().toString(),
-            op.tensor->sizes());
+      AT_ERROR("TensorIterator expected type ", type().toString(), " but got ",
+          op.tensor.type().toString());
     }
   }
 }
@@ -445,17 +566,36 @@ bool TensorIterator::can_use_32bit_indexing() const {
   return true;
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::split() {
-  AT_ASSERT(ndim() >= 1 && shape().back() >= 2);
+std::unique_ptr<TensorIterator> TensorIterator::split(int dim) {
+  AT_ASSERT(dim >= 0 && dim < ndim() && shape()[dim] >= 2);
   std::unique_ptr<TensorIterator> copy(new TensorIterator(*this));
 
-  int last_dim = ndim() - 1;
-  auto copy_size = shape().back() / 2;
-  auto this_size = shape().back() - copy_size;
-  this->narrow(last_dim, 0, this_size);
-  copy->narrow(last_dim, this_size, copy_size);
+  bool overlaps = is_dim_reduced(dim);
+  auto copy_size = shape_[dim] / 2;
+  auto this_size = shape_[dim] - copy_size;
+  copy->narrow(dim, 0, copy_size);
+  this->narrow(dim, copy_size, this_size);
+  this->accumulate_ |= overlaps;
 
   return copy;
+}
+
+int TensorIterator::get_dim_to_split() const {
+  AT_ASSERT(ndim() >= 1 && shape()[ndim() - 1] >= 2);
+  int64_t max_extent = -1;
+  int dim_to_split = -1;
+  for (int dim = ndim() - 1; dim >= 0; dim--) {
+    int64_t size = shape_[dim];
+    for (auto& op : operands_) {
+      int64_t extent = (size - 1) * op.stride_bytes[dim];
+      if (extent > max_extent) {
+        max_extent = extent;
+        dim_to_split = dim;
+      }
+    }
+  }
+  AT_ASSERT(max_extent >= 0);
+  return dim_to_split;
 }
 
 SplitUntil32Bit TensorIterator::with_32bit_indexing() const {
@@ -479,8 +619,8 @@ std::unique_ptr<TensorIterator> TensorIterator::Builder::build() {
   iter_->coalesce_dimensions();
 
   for (auto& op : iter_->operands_) {
-    AT_ASSERT(op.tensor->defined());
-    op.data = op.tensor->data_ptr();
+    AT_ASSERT(op.tensor.defined());
+    op.data = op.tensor.data_ptr();
   }
 
   iter_->check_type_conversions();
@@ -500,7 +640,9 @@ SplitUntil32Bit::iterator::iterator(const TensorIterator& iter) {
 SplitUntil32Bit::iterator& SplitUntil32Bit::iterator::operator++() {
   vec.pop_back();
   while (!vec.empty() && !vec.back()->can_use_32bit_indexing()) {
-    vec.emplace_back(vec.back()->split());
+    auto& iter = *vec.back();
+    int64_t split_dim = iter.get_dim_to_split();
+    vec.emplace_back(iter.split(split_dim));
   }
   return *this;
 }
@@ -515,6 +657,60 @@ SplitUntil32Bit::iterator SplitUntil32Bit::begin() const {
 
 SplitUntil32Bit::iterator SplitUntil32Bit::end() const {
   return SplitUntil32Bit::iterator();
+}
+
+DimCounter::DimCounter(IntList shape, Range range)
+  : shape(shape)
+  , range(range)
+  , values(shape.size(), 0)
+  , offset(range.begin) {
+  int64_t linear_offset = range.begin;
+  int64_t ndim = values.size();
+  for (int dim = 0; dim < ndim; dim++) {
+    int64_t size = shape[dim];
+    values[dim] = linear_offset % size;
+    linear_offset /= size;
+  }
+  AT_ASSERT(linear_offset == 0);
+}
+
+bool DimCounter::is_done() const {
+  return offset >= range.end;
+}
+
+void DimCounter::increment(const std::array<int64_t, 2>& step) {
+  offset += step[0] * step[1];
+  int64_t ndim = values.size();
+  int64_t overflow = step[0];
+  int i = 0;
+  if (step[1] != 1) {
+    AT_ASSERT(step[0] == shape[0] && values[0] == 0);
+    i = 1;
+    overflow = step[1];
+  }
+  for (; i < ndim && overflow > 0; i++) {
+    auto size = shape[i];
+    auto prev = values[i];
+    auto value = prev + overflow;
+    if (value >= size) {
+      overflow = 1;
+      value -= size;
+      AT_ASSERT(value < size);
+    } else {
+      overflow = 0;
+    }
+    values[i] = value;
+  }
+  AT_ASSERT(overflow == 0 || overflow == 1);
+}
+
+std::array<int64_t, 2> DimCounter::max_step() const {
+  int64_t step0 = std::min(shape[0] - values[0], range.end - offset);
+  int64_t step1 = 1;
+  if (step0 == shape[0] && shape.size() >= 1) {
+    step1 = std::min(shape[1] - values[1], (range.end - offset) / shape[0]);
+  }
+  return {step0, step1};
 }
 
 }  // namespace at

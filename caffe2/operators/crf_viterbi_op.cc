@@ -50,10 +50,10 @@ class ViterbiPathOp : public Operator<CPUContext> {
     CAFFE_ENFORCE(
         0 <= rowIndex && rowIndex < data.dim(0),
         "rowIndex is out of DATA bounds");
-    auto out = static_cast<char*>(outRow->raw_mutable_data(data.meta()));
+    auto out = static_cast<char*>(outRow->raw_mutable_data(data.dtype()));
     auto src_base = static_cast<const char*>(data.raw_data());
     auto src = src_base + rowIndex * block_bytesize;
-    context_.CopyItemsSameDevice(data.meta(), block_size, src, out);
+    context_.CopyItemsSameDevice(data.dtype(), block_size, src, out);
   }
 
   void
@@ -68,7 +68,7 @@ class ViterbiPathOp : public Operator<CPUContext> {
     }
     // Element-wise add of the result and the input matrix
     math::Add<float, CPUContext>(
-        mat.size(),
+        mat.numel(),
         resultData,
         mat.template data<float>(),
         resultData,
@@ -91,9 +91,9 @@ class ViterbiPathOp : public Operator<CPUContext> {
     auto seqLen = predictions.dim32(0);
 
     viterbiPath->Resize(seqLen);
-    auto block_size = predictions.size() / predictions.dim(0);
+    auto block_size = predictions.numel() / predictions.dim(0);
     auto block_bytesize =
-        predictions.size_from_dim(1) * predictions.meta().itemsize();
+        predictions.size_from_dim(1) * predictions.dtype().itemsize();
     Tensor backpointers(CPU);
     backpointers.ResizeLike(predictions);
 
@@ -113,7 +113,7 @@ class ViterbiPathOp : public Operator<CPUContext> {
 
       GatherRow(predictions, i, block_size, block_bytesize, &trellis);
       math::Add<float, CPUContext>(
-          trellis.size(),
+          trellis.numel(),
           trellis.template data<float>(),
           dpMax.template data<float>(),
           trellis.template mutable_data<float>(),
@@ -125,7 +125,7 @@ class ViterbiPathOp : public Operator<CPUContext> {
     ColwiseMaxAndArg(
         trellis.template data<float>(),
         1,
-        trellis.size(),
+        trellis.numel(),
         tMax.template mutable_data<float>(),
         tArgMax.template mutable_data<int32_t>());
 
@@ -133,7 +133,7 @@ class ViterbiPathOp : public Operator<CPUContext> {
     viterbiVec.push_back(tArgMax.template data<int32_t>()[0]);
     Tensor bpEntry(std::vector<int64_t>{block_size}, CPU);
     block_bytesize =
-        backpointers.size_from_dim(1) * backpointers.meta().itemsize();
+        backpointers.size_from_dim(1) * backpointers.dtype().itemsize();
     for (auto i = seqLen - 1; i > 0; i--) {
       GatherRow(backpointers, i, block_size, block_bytesize, &bpEntry);
       viterbiVec.push_back(bpEntry.template data<int32_t>()[viterbiVec.back()]);
@@ -165,7 +165,7 @@ class SwapBestPathOp : public Operator<CPUContext> {
     updatedData->ResizeLike(data);
     float* outData = updatedData->template mutable_data<float>();
     context_.CopyItemsSameDevice(
-        data.meta(), data.size(), data.template data<float>(), outData);
+        data.dtype(), data.numel(), data.template data<float>(), outData);
 
     Tensor bestScores(CPU);
     bestScores.ResizeLike(newBestIdicies);
@@ -179,7 +179,7 @@ class SwapBestPathOp : public Operator<CPUContext> {
         bestScores.template mutable_data<float>(),
         oldBestIndices.template mutable_data<int32_t>());
 
-    auto block_size = data.size() / data.dim(0);
+    auto block_size = data.numel() / data.dim(0);
 
     const int32_t* oldBestIdx = oldBestIndices.template data<int32_t>();
     const int32_t* newIdx = newBestIdicies.template data<int32_t>();

@@ -8,7 +8,7 @@
 #include <cuda_fp16.h>
 #endif
 
-#if defined(__HIP_DEVICE_COMPILE__)
+#ifdef __HIPCC__
 #include <hip/hip_fp16.h>
 #endif
 
@@ -34,7 +34,7 @@ inline AT_HOST_DEVICE Half::operator float() const {
 #endif
 }
 
-#ifdef __CUDACC__
+#if defined(__CUDACC__) || defined(__HIPCC__)
 inline AT_HOST_DEVICE Half::Half(const __half& value) {
   x = *reinterpret_cast<const unsigned short*>(&value);
 }

@@ -162,7 +162,7 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
 
 NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
     const caffe2::NetDef& net,
-    const Workspace& mapped_ws,
+    const std::unordered_set<std::string>& weights_in_ws,
     Workspace* ws,
     onnx::OnnxExporter* exporter,
     std::unordered_map<std::string, TensorShape>* shape_hints) {
@@ -195,12 +195,12 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
       cpu_tensor->Resize(dims);
       if (t.data_type() == ::ONNX_NAMESPACE::TensorProto::FLOAT) {
         context.CopyBytesSameDevice(
-            cpu_tensor->size() * sizeof(float),
+            cpu_tensor->numel() * sizeof(float),
             static_cast<const void*>(t.raw_data().data()),
             cpu_tensor->raw_mutable_data(TypeMeta::Make<float>()));
       } else if (t.data_type() == ::ONNX_NAMESPACE::TensorProto::INT64) {
         context.CopyBytesSameDevice(
-            cpu_tensor->size() * sizeof(int64_t),
+            cpu_tensor->numel() * sizeof(int64_t),
             static_cast<const void*>(t.raw_data().data()),
             cpu_tensor->raw_mutable_data(TypeMeta::Make<int64_t>()));
       } else {
@@ -240,13 +240,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
   }
 
   // Convert inputs and figure out weights
-  std::unordered_set<std::string> weights;
-  const std::vector<string>& ws_blobs = mapped_ws.Blobs();
-  for (const auto& s : ws_blobs) {
-    VLOG(2) << "Add weights: " << s;
-    weights.emplace(s);
-  }
-
   std::unordered_set<std::string> total_inputs;
   std::unordered_set<std::string> initialization_list;
   std::vector<std::string> total_inputs_vec;
@@ -266,11 +259,15 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
 
   for (const auto& op : net.op()) {
     for (const auto& input : op.input()) {
-      if (total_inputs.emplace(input).second && weights.count(input)) {
+      bool not_seen = total_inputs.emplace(input).second;
+      if (!not_seen) {
+        continue;
+      }
+      if (weights_in_ws.count(input)) {
         // We add weights as inputs too
         total_inputs_vec.emplace_back(input);
         initialization_list.emplace(input);
-        VLOG(2) << "Add input weights: " << input;
+        VLOG(2) << "Add weights: " << input;
       } else if (boundary_inputs.count(input)) {
         VLOG(2) << "Adding boundary input: " << input;
         total_inputs_vec.emplace_back(input);
@@ -308,10 +305,9 @@ CaffeMap<std::string, TensorShape> OnnxifiTransformer::SsaRewriteAndMapNames(
     NetDef* pred_net,
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
   input_mapping_ = onnx::SsaRewrite(nullptr, pred_net);
-  std::unordered_map<std::string, std::string> input_reverse_mapping;
   std::vector<std::string> external_inputs;
   for (const auto kv : input_mapping_) {
-    input_reverse_mapping.emplace(kv.second, kv.first);
+    reverse_input_mapping_.emplace(kv.second, kv.first);
     if (!ws->HasBlob(kv.second)) {
       external_inputs.emplace_back(kv.first);
     }
@@ -321,8 +317,8 @@ CaffeMap<std::string, TensorShape> OnnxifiTransformer::SsaRewriteAndMapNames(
   }
   CaffeMap<std::string, TensorShape> shape_hints_ordered;
   for (const auto& kv : input_shape_hints) {
-    const auto it = input_reverse_mapping.find(kv.first);
-    if (it != input_reverse_mapping.end()) {
+    const auto it = reverse_input_mapping_.find(kv.first);
+    if (it != reverse_input_mapping_.end()) {
       shape_hints_ordered.emplace(it->second, kv.second);
     } else {
       shape_hints_ordered.emplace(kv.first, kv.second);
@@ -336,6 +332,7 @@ CaffeMap<std::string, TensorShape> OnnxifiTransformer::SsaRewriteAndMapNames(
 void OnnxifiTransformer::Transform(
     Workspace* ws,
     NetDef* pred_net,
+    const std::vector<std::string>& external_inputs,
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
   CAFFE_ENFORCE(ws);
   auto shape_hints_ordered =
@@ -404,9 +401,23 @@ void OnnxifiTransformer::Transform(
   // same exporter throughout the process to avoid duplicated dummy name
   // generation
   onnx::OnnxExporter exporter2(nullptr);
-  auto trt_converter = [this, ws, &mapped_ws, &shape_hints, &exporter2](
+  std::unordered_set<std::string> weights;
+  std::unordered_set<std::string> input_set;
+  for (const auto& i : external_inputs) {
+    const auto it = reverse_input_mapping_.find(i);
+    if (it != reverse_input_mapping_.end()) {
+      input_set.emplace(it->second);
+    }
+  }
+  const std::vector<string>& ws_blobs = mapped_ws.Blobs();
+  for (const auto& s : ws_blobs) {
+    if (!input_set.count(s)) {
+      weights.emplace(s);
+    }
+  }
+  auto trt_converter = [this, ws, &weights, &shape_hints, &exporter2](
                            const caffe2::NetDef& net) mutable {
-    return SubnetToOnnxifiOp(net, mapped_ws, ws, &exporter2, &shape_hints);
+    return SubnetToOnnxifiOp(net, weights, ws, &exporter2, &shape_hints);
   };
 
   NetDef net_opt = opt::OptimizeForBackend(*pred_net, supports, trt_converter);

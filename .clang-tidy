@@ -1,10 +1,26 @@
 ---
-# NOTE: there must be no spaces before the '-', so put the comma first.
+# NOTE there must be no spaces before the '-', so put the comma first.
 Checks: '
   -*
-  ,modernize-deprecated-headers
   ,bugprone-*
   ,-bugprone-macro-parentheses
+  ,-bugprone-forward-declaration-namespace
+  ,cppcoreguidelines-*
+  ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
+  ,-cppcoreguidelines-pro-type-static-cast-downcast
+  ,-cppcoreguidelines-pro-bounds-pointer-arithmetic
+  ,-cppcoreguidelines-pro-bounds-constant-array-index
+  ,-cppcoreguidelines-pro-type-reinterpret-cast
+  ,-cppcoreguidelines-special-member-functions
+  ,-cppcoreguidelines-interfaces-global-init
+  ,-cppcoreguidelines-owning-memory
+  ,hicpp-signed-bitwise
+  ,hicpp-exception-baseclass
+  ,hicpp-avoid-goto
+  ,modernize-*
+  ,-modernize-use-default-member-init
+  ,-modernize-return-braced-init-list
+  ,-modernize-use-auto
   '
 WarningsAsErrors: '*'
 HeaderFilterRegex: 'torch/csrc/.*'

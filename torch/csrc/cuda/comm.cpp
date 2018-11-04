@@ -41,7 +41,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
                              "first on devices list");
   std::vector<Tensor> tensors;
   tensors.reserve(devices.size());
-  at::DeviceGuard _device_guard;
+  at::cuda::CUDAGuard _device_guard;
 #ifdef USE_NCCL
   if (nccl::is_available({tensor})) {
     tensors.push_back(tensor);
@@ -82,6 +82,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
     o.reserve(tensors.size());
 
   unique_type_checker type_checker;
+  at::cuda::CUDAGuard device_guard(devices[0]);
   for (auto & chunk : utils::take_tensors(tensors, buffer_size)) {
     auto & type = chunk.type();
     type_checker.show(type);
@@ -92,7 +93,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
       std::vector<at::Tensor> broadcast_values = broadcast(flat_tuple.second, devices);
       results.reserve(devices.size());
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
-        at::DeviceGuard device_guard(devices[i]);
+        device_guard.set_index(devices[i]);
         auto & device_outputs = outputs[i];
         auto & inds = broadcast_indices[i];
         auto & vals = broadcast_values[i];
@@ -100,7 +101,6 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
           device_outputs.push_back(std::move(t));
       }
     } else {
-      at::DeviceGuard device_guard(devices[0]);
       std::vector<Tensor> results = broadcast(utils::flatten_dense_tensors(chunk.tensors),
                                               devices);
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
@@ -125,7 +125,7 @@ std::vector<at::Tensor> scatter(
     at::IntList devices,
     const c10::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
-    const c10::optional<std::vector<at::cuda::CUDAStream>>& streams) {
+    const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams) {
   std::vector<at::Tensor> chunks;
   if (chunk_sizes) {
     const int64_t chunk_size_sum =
@@ -149,15 +149,15 @@ std::vector<at::Tensor> scatter(
   }
   at::cuda::CUDAGuard cuda_guard;
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
-    const auto device_index = static_cast<int32_t>(devices[chunk]);
-    if (streams) {
+    const auto device_index = static_cast<int16_t>(devices[chunk]);
+    if (streams && (*streams)[chunk]) {
       AT_CHECK(
-          (*streams)[chunk].device() == device_index,
+          (*streams)[chunk]->device_index() == device_index,
           "Expected the device associated with the stream at index ",
-          chunk, " (was ", (*streams)[chunk].device(), ") ",
+          chunk, " (was ", (*streams)[chunk]->device_index(), ") ",
           "to match the device supplied at that index ",
           "(expected ", device_index, ")");
-      cuda_guard.set_stream(at::cuda::CUDAStream((*streams)[chunk]));
+      cuda_guard.set_stream(*(*streams)[chunk]);
     }
     chunks[chunk] = chunks[chunk].contiguous().to(
         {at::DeviceType::CUDA, device_index}, /*non_blocking=*/true);

@@ -78,7 +78,7 @@ class PowOp : public Operator<Context> {
       auto* Cdata =
           C->template mutable_data<typename TypeMap::template type<T>>();
       functor_.template Run<true, T, float, T>(
-          A.size(), Adata, NULL, exponent_, Cdata, &context_);
+          A.numel(), Adata, NULL, exponent_, Cdata, &context_);
     } else if (InputSize() == 2) { // BinaryElementwiseOp
       const auto& A = Input(0);
       const auto& B = Input(1);
@@ -93,14 +93,14 @@ class PowOp : public Operator<Context> {
           C->template mutable_data<typename TypeMap::template type<T>>();
       if (!enable_broadcast_) {
         CAFFE_ENFORCE_EQ(
-            A.dims(),
-            B.dims(),
+            A.sizes(),
+            B.sizes(),
             "Dimension mismatch - did you forget to set broadcast=1?");
         functor_.template Run<false, T, T, T>(
-            A.size(), Adata, Bdata, 0, Cdata, &context_);
-      } else if (B.size() == 1) {
+            A.numel(), Adata, Bdata, 0, Cdata, &context_);
+      } else if (B.numel() == 1) {
         functor_.template Run<true, T, T, T>(
-            A.size(), Adata, Bdata, 0, Cdata, &context_);
+            A.numel(), Adata, Bdata, 0, Cdata, &context_);
       } else {
         size_t pre, n, post;
         std::tie(pre, n, post) =

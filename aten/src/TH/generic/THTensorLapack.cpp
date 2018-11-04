@@ -217,8 +217,8 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   THArgCheck(b->dim() == 1 || b->dim() == 2, 1, "B should have 1 or 2 "
       "dimensions, but has %d", b->dim());
   THArgCheck(!b->is_empty(), 1, "B should not be empty");
-  THArgCheck(a->size(0) == b->size(0), 2, "A,B size incompatible - A has %ld "
-      "rows, B has %ld", a->size(0), b->size(0));
+  AT_CHECK(a->size(0) == b->size(0), "Expected A and b to have same size "
+      "at dim 0, but A has ", a->size(0), " rows and B has ", b->size(0), " rows");
 
   if (THTensor_nDimensionLegacyAll(b) == 1) {
     b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
@@ -464,7 +464,7 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   scalar_t *rv__data = NULL;
 
   rs__ = THTensor_(newContiguous)(rs_);
-  rs__data = rs__->data<scalar_t>();  
+  rs__data = rs__->data<scalar_t>();
   if (*compute_uv != 'N') {
     /* guard against someone passing a correct size, but wrong stride */
     ru__ = THTensor_(newTransposedContiguous)(ru_);

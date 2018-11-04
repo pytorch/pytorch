@@ -5,7 +5,6 @@
 #include <torch/utils.h>
 
 #include <c10/util/Exception.h>
-#include "c10/util/Optional.h"
 
 #include <array>
 #include <cmath>
@@ -31,11 +30,11 @@ RNNOptionsBase::RNNOptionsBase(int64_t input_size, int64_t hidden_size)
 template <typename Derived>
 RNNImplBase<Derived>::RNNImplBase(
     RNNOptionsBase options_,
-    c10::optional<CuDNNMode> cudnn_mode,
+    optional<CuDNNMode> cudnn_mode,
     int64_t number_of_gates)
     : options(options_),
       number_of_gates_(number_of_gates),
-      cudnn_mode_(cudnn_mode) {
+      cudnn_mode_(std::move(cudnn_mode)) {
   reset();
 }
 
