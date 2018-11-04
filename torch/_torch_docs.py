@@ -1113,10 +1113,9 @@ add_docstr(torch.diag_embed,
 diag_embed(input, offset=0, dim1=-2, dim2=-1) -> Tensor
 
 Creates a tensor whose diagonals of certain 2D planes (specified by
-:attr:`dim1` and :attr:`dim2`) are filled by :attr:`input`. By default, the
-new dimensions are put at the end of the Tensor to facilitate creating
-batches of diagonal matrices, but this can be specified using :attr:`dim1`
-and :attr:`dim2`.
+:attr:`dim1` and :attr:`dim2`) are filled by :attr:`input`.
+To facilitate creating batched diagonal matrices, the 2D planes formed by
+the last two dimensions of the returned tensor are chosen by default.
 
 The argument :attr:`offset` controls which diagonal to consider:
 
@@ -1127,7 +1126,7 @@ The argument :attr:`offset` controls which diagonal to consider:
 The size of the new matrix will be calculated to make the specified diagonal
 of the size of the last input dimension.
 Note that for :attr:`offset` other than :math:`0`, the order of :attr:`dim1`
-and :attr:`dim2` matters, exchanging them is equivalent to changing the
+and :attr:`dim2` matters. Exchanging them is equivalent to changing the
 sign of :attr:`offset`.
 
 Applying :meth:`torch.diagonal` to the output of this function with
