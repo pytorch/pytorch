@@ -147,6 +147,11 @@ If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 7.5 or above
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v6.x or above
 
+Make sure your cuDNN environment variable at set
+
+    export CUDNN_INCLUDE_DIR=<path-to libcudnn.*>
+    export CUDNN_LIB_DIR=<path-to cudnn.h>
+
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 Other potentially useful environment variables may be found in `setup.py`.
 
