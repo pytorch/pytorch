@@ -96,7 +96,6 @@ if %BUILD_DEBUG% EQU 1 (
                                  -DCMAKE_C_COMPILER=%CMAKE_C_COMPILER% ^
                                  -DCMAKE_LINKER=%CMAKE_C_COMPILER% ^
                                  -DINCLUDE_EXPERIMENTAL_C10_OPS=OFF ^
-                                 -DBUILD_DETECTRON_WITH_MSVC=ON ^
                                  -DBUILD_BINARY=ON
                                      
         call %VC_BIN_ROOT%\vcvars64.bat
@@ -129,7 +128,6 @@ if %BUILD_RELEASE% EQU 1 (
                                  -DCMAKE_C_COMPILER=%CMAKE_C_COMPILER% ^
                                  -DCMAKE_LINKER=%CMAKE_C_COMPILER% ^
                                  -DINCLUDE_EXPERIMENTAL_C10_OPS=OFF ^
-                                 -DBUILD_DETECTRON_WITH_MSVC=ON ^
                                  -DBUILD_BINARY=ON
                                      
         call %VC_BIN_ROOT%\vcvars64.bat
