@@ -81,7 +81,9 @@ class TestConvolution(serial.SerializedTestCase):
             kernel, size, input_channels, output_channels, batch_size, group,
             order, engine, shared_buffer, use_bias, gc, dc):
         # TODO: Group conv in NHWC not implemented for GPU yet.
-        assume(group == 1 or order == "NCHW" or gc.device_type != caffe2_pb2.CUDA)
+        assume(group == 1 or order == "NCHW" or gc.device_type == caffe2_pb2.CPU)
+        if group != 1 and order == "NHWC":
+            dc = [d for d in dc if d.device_type == caffe2_pb2.CPU]
 
         input_channels *= group
         output_channels *= group
@@ -208,9 +210,11 @@ class TestConvolution(serial.SerializedTestCase):
         # TODO: Group conv in NHWC not implemented for GPU yet.
         assume(
             group == 1
-            or (order == "NCHW" or gc.device_type != caffe2_pb2.CUDA)
+            or (order == "NCHW" or gc.device_type == caffe2_pb2.CPU)
             and engine != "MKLDNN"
         )
+        if group != 1 and order == "NHWC":
+            dc = [d for d in dc if d.device_type == caffe2_pb2.CPU]
 
         input_channels *= group
         output_channels *= group
