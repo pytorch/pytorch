@@ -45,13 +45,21 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
         FLAGS_dnnlowp_enforce_default_caffe2_operators) &&
       dequantize_output_) {
     if (!GetCpuId().avx2()) {
-      LOG_FIRST_N(WARNING, 32) <<
-          "Falling back to the default Caffe2 operator because AVX2 "
-          "instruction is not available";
+      static int log_occurences = 0;
+      if (log_occurences < 32) {
+        ++log_occurences;
+        LOG(WARNING) <<
+            "Falling back to the default Caffe2 operator because AVX2 "
+            "instruction is not available";
+      }
     } else {
-      LOG_FIRST_N(WARNING, 32) <<
-          "Falling back to the default Caffe2 operator because "
-          "dnnlowp_enforce_default_caffe2_operators option is on";
+      static int log_occurences = 0;
+      if (log_occurences < 32) {
+        ++log_occurences;
+        LOG(WARNING) <<
+            "Falling back to the default Caffe2 operator because "
+            "dnnlowp_enforce_default_caffe2_operators option is on";
+      }
     }
 
     Fp32Op_()->DequantizeInput();

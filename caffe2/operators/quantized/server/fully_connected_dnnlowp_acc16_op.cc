@@ -2,8 +2,8 @@
 
 #include <fbgemm/src/RefImplementations.h>
 
-DECLARE_int32(dnnlowp_nbits_in_non_outlier);
-DECLARE_int32(dnnlowp_copy_to_32bit_frequency);
+C10_DECLARE_int32(dnnlowp_nbits_in_non_outlier);
+C10_DECLARE_int32(dnnlowp_copy_to_32bit_frequency);
 
 namespace caffe2 {
 
@@ -46,8 +46,12 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
   // Pack W if needed
   if (!Wq_acc16_packed_ || !is_weight_constant_) {
     if (!Wq_acc16_packed_ && nbits_in_non_outlier_ < 8) {
-      LOG_FIRST_N(WARNING, 32)
-          << "FC DNNLOWP_ACC16 using outlier-aware quantization";
+      static int log_occurences = 0;
+      if (log_occurences < 32) {
+        ++log_occurences;
+        LOG(WARNING)
+            << "FC DNNLOWP_ACC16 using outlier-aware quantization";
+      }
 
       // Separate out outliers
       CAFFE_ENFORCE(!W_quantized_.empty());

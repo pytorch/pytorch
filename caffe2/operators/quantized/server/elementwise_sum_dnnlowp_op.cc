@@ -91,15 +91,17 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
       __m256i permute_mask_v = _mm256_set_epi32(
           0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00);
 
+#ifdef _OPENMP
 #pragma omp parallel
+#endif
       {
         constexpr int VLEN = 8;
 
         int j_begin, j_end;
         tie(j_begin, j_end) = Get1DPartition(
             len,
-            omp_get_num_threads(),
-            omp_get_thread_num(),
+            dnnlowp_get_num_threads(),
+            dnnlowp_get_thread_num(),
             VLEN);
 
         int j = j_begin;
@@ -173,11 +175,13 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
         input_data[i] = InputTensorCPU_(i).template data<T>();
       }
 
+#ifdef _OPENMP
 #pragma omp parallel
+#endif
       {
         int j_begin, j_end;
         tie(j_begin, j_end) = Get1DPartition(
-            len, omp_get_num_threads(), omp_get_thread_num());
+            len, dnnlowp_get_num_threads(), dnnlowp_get_thread_num());
 
         for (int j = j_begin; j < j_end; ++j) {
           int32_t acc = 0;
@@ -201,11 +205,13 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
       input_data[i] = InputTensorCPU_(i).template data<float>();
     }
 
+#ifdef _OPENMP
 #pragma omp parallel
+#endif
     {
       int j_begin, j_end;
       tie(j_begin, j_end) = Get1DPartition(
-          len, omp_get_num_threads(), omp_get_thread_num());
+          len, dnnlowp_get_num_threads(), dnnlowp_get_thread_num());
 
       for (int j = j_begin; j < j_end; ++j) {
         int32_t acc = 0;

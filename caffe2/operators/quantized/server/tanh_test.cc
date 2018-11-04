@@ -2,8 +2,8 @@
 #include <iostream>
 #include <random>
 
-#include <glog/logging.h>
 #include <gtest/gtest.h>
+#include "caffe2/core/logging.h"
 
 using namespace dnnlowp;
 using namespace std;
