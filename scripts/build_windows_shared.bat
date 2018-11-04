@@ -17,7 +17,7 @@ if NOT DEFINED BUILD_DEBUG (
     set BUILD_DEBUG=1
 )
 
-rem Debug build enabled by default
+rem Release build enabled by default
 if NOT DEFINED BUILD_RELEASE (
     set BUILD_RELEASE=1
 )
