@@ -4288,7 +4288,7 @@ class TestNN(NNTestCase):
 
             # input and hiddens are not at the same device
             with self.assertRaisesRegex(RuntimeError,
-                                        r"Expected object of backend CPU but got backend CUDA for argument"):
+                                        r"Input and hidden tensors are not at the same device"):
                 if mode is 'LSTM':
                     model(input, (hidden.to('cuda:0'), hidden.to('cuda:0')))
                 else:
