@@ -3339,6 +3339,8 @@ C10_EXPORT void Im2Col<float, CPUContext, StorageOrder::NHWC>(
       h_pad += stride_h;
     } // h
   } else {
+    // img_data in N H W G C/G layout
+    // col_data in N G H W R S C/G layout
     const int C_per_G = C / groups;
     for (int h = 0; h < output_h; ++h) {
       int w_pad = -pad_l;
