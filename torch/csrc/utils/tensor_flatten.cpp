@@ -1,14 +1,16 @@
 #include "torch/csrc/utils/tensor_flatten.h"
 
-#include <unordered_map>
 #include <map>
+#include <unordered_map>
 
 namespace torch { namespace utils {
 
 using namespace at;
 
 std::vector<TensorGroup> take_tensors(
-    TensorList tensors, size_t size_limit, bool fine_grained) {
+    TensorList tensors,
+    size_t size_limit,
+    bool fine_grained) {
   std::vector<TensorGroup> results;
   // an overapproximation, but at least we won't have to copy stuff around
   results.reserve(tensors.size());
@@ -34,7 +36,7 @@ std::vector<TensorGroup> take_tensors(
       cur_group_size += tensor_size;
       // Regardless the type, the current total size exceeds the limit
       if (cur_group_size >= size_limit) {
-        // Spill all types to seperate groups in results
+        // Spill all types to separate groups in results
         for (auto& entry : groups) {
           auto& group = entry.second;
           results.emplace_back(std::move(group));

@@ -60,7 +60,9 @@ struct TensorGroup {
 // the accumulated tensors into different groups by data types, therefore:
 // it will output: {{tensor_a}, {tensor_b}, {tensor_c}}
 std::vector<TensorGroup> take_tensors(
-    at::TensorList tensors, size_t size_limit, bool fine_grained = false);
+    at::TensorList tensors,
+    size_t size_limit,
+    bool fine_grained = false);
 
 void reorder_tensors_like(std::vector<at::Tensor>& tensors, at::TensorList order);
 
