@@ -12,7 +12,11 @@
 #include <gloo/scatter.h>
 
 #ifdef USE_CUDA
+#include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CUDAGuard.h>
+#include <ATen/cuda/CUDAStream.h>
+#include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/PinnedMemoryAllocator.h>
 
 #include <gloo/cuda_allreduce_halving_doubling.h>
 #include <gloo/cuda_allreduce_ring_chunked.h>
@@ -181,6 +185,42 @@ template <typename T, typename O>
 void setOutput(O& opts, at::Tensor& tensor) {
   opts.setOutput(getDataPointer<T>(tensor), tensor.numel());
 }
+
+#ifdef USE_CUDA
+
+at::Tensor pinnedLike(at::Tensor& tensor) {
+  auto& type = tensor.type().toBackend(at::Backend::CPU);
+  auto* allocator = at::cuda::getPinnedMemoryAllocator();
+  return type.tensorWithAllocator(tensor.sizes(), tensor.strides(), allocator);
+}
+
+// This function initializes a vector of CUDA streams, one for every
+// tensor in the input vector, and ensures that these streams are
+// synchronized with the current default streams. This is needed so
+// that new work on the new streams is serialized w.r.t. all operations
+// on the tensors in the input vector.
+void initializeStreamsEvents(
+    at::cuda::CUDAGuard& guard,
+    std::vector<at::Tensor>& inputs,
+    std::vector<at::cuda::CUDAStream>& streams,
+    std::vector<at::cuda::CUDAEvent>& events) {
+  streams.reserve(inputs.size());
+  events.resize(inputs.size());
+  for (size_t i = 0; i < inputs.size(); i++) {
+    guard.set_device(inputs[i].get_device());
+    // Record event on current stream
+    events[i].record(at::cuda::getCurrentCUDAStream());
+    // Get a non-default stream to execute asynchronous CUDA operations
+    // on for this input. This ensures that the default stream used
+    // by the caller is not occupied by c10d related operations.
+    streams.push_back(at::cuda::getStreamFromPool(
+        /* isHighPriority */ true, inputs[i].get_device()));
+    // Ensure the new stream is synchronized with the current stream.
+    events[i].block(streams[i]);
+  }
+}
+
+#endif
 
 } // namespace
 
@@ -730,51 +770,160 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
   return enqueue(entry);
 }
 
+namespace {
+
+class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
+ public:
+  AsyncAllreduceWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<at::Tensor>& inputs,
+      ReduceOp reduceOp,
+      uint32_t tag)
+      : context(context), inputs(inputs), reduceOp(reduceOp), tag(tag) {}
+
+  std::shared_ptr<gloo::Context> context;
+  std::vector<at::Tensor> inputs;
+  const ReduceOp reduceOp;
+  const uint32_t tag;
+
+  void allreduce(std::vector<at::Tensor>& tensors) {
+    const auto& scalarType = tensors[0].scalar_type();
+    gloo::AllreduceOptions opts(context);
+    opts.setReduceFunction(getFunction(scalarType, reduceOp));
+    opts.setTag(tag);
+    GENERATE_ALL_TYPES(scalarType, setOutputs, opts, tensors);
+    gloo::allreduce(opts);
+  }
+
+  void run() override {
+    allreduce(inputs);
+  }
+
+  template <typename T>
+  void getFunction(gloo::AllreduceOptions::Func& fn, const ReduceOp op) {
+    fn = toFunction<T>(op);
+  }
+
+  gloo::AllreduceOptions::Func getFunction(
+      const at::ScalarType& dtype,
+      const ReduceOp op) {
+    gloo::AllreduceOptions::Func fn;
+    GENERATE_ALL_TYPES(dtype, getFunction, fn, op);
+    return fn;
+  }
+};
+
+#ifdef USE_CUDA
+
+class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
+ public:
+  AsyncAllreduceCUDAWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<at::Tensor>& inputs,
+      ReduceOp reduceOp,
+      uint32_t tag)
+      : AsyncAllreduceWork(context, inputs, reduceOp, tag) {
+    at::cuda::CUDAGuard guard;
+    initializeStreamsEvents(guard, inputs, streams, events);
+
+    // Kick off copy from CUDA tensors to pinned CPU tensors.
+    tmp.reserve(inputs.size());
+    for (size_t i = 0; i < inputs.size(); i++) {
+      guard.set_stream(streams[i]);
+      tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
+    }
+  }
+
+  void run() override {
+    at::cuda::CUDAGuard guard;
+
+    // Synchronize with copy operations.
+    for (size_t i = 0; i < inputs.size(); i++) {
+      guard.set_device(inputs[i].get_device());
+      AT_CUDA_CHECK(cudaStreamSynchronize(streams[i]));
+    }
+
+    // Run allreduce on host side tensors.
+    allreduce(tmp);
+
+    // Kick off copy back to the CUDA tensors.
+    for (size_t i = 0; i < inputs.size(); i++) {
+      guard.set_stream(streams[i]);
+      inputs[i].copy_(tmp[i], /* non_blocking */ true);
+      events[i].record(streams[i]);
+    }
+  }
+
+  void synchronize() override {
+    at::cuda::CUDAGuard guard;
+
+    // Synchronize with the copy back to CUDA tensors.
+    for (size_t i = 0; i < inputs.size(); i++) {
+      guard.set_device(inputs[i].get_device());
+      events[i].block(at::cuda::getCurrentCUDAStream());
+    }
+  }
+
+  std::vector<at::Tensor> tmp;
+  std::vector<at::cuda::CUDAStream> streams;
+  std::vector<at::cuda::CUDAEvent> events;
+};
+
+#endif
+
+} // namespace
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
-    std::vector<at::Tensor>& tensors,
+    std::vector<at::Tensor>& inputs,
     const AllreduceOptions& opts) {
-  assertSameSizeAndType(tensors);
+  static auto invalidArgument = [](const std::string& msg) {
+    throw std::invalid_argument("ProcessGroupGloo::allreduce: " + msg);
+  };
 
-  AlgorithmKey key;
-  key.collectiveType = CollectiveType::ALLREDUCE;
-  key.type = &tensors[0].type();
-  key.srcSizes = getSizes(tensors);
-  key.devices = getDevices(tensors);
-  key.reduceOp = opts.reduceOp;
-
-  // Retrieve (create or wait for) cache entry
-  auto entry = checkout(key);
-
-  // Copy input tensors
-  for (size_t i = 0; i < tensors.size(); i++) {
-    entry->src[i].copy_(tensors[i]);
+  if (inputs.size() == 0) {
+    invalidArgument("requires non-empty tensor list");
   }
 
+  const auto& layout = inputs[0].layout();
+  const auto& device = inputs[0].device();
+  const auto& type = inputs[0].type();
+  const auto& sizes = inputs[0].sizes();
+  if (layout != at::kStrided) {
+    invalidArgument("only supports dense tensors");
+  }
+
+  switch (device.type()) {
+    case at::kCPU:
 #ifdef USE_CUDA
-  // In case of CUDA, ensure that operations that are queued after
-  // this collective wait for the collective to complete.
-  if (key.type->is_cuda()) {
-    auto thcState = ::at::globalContext().lazyInitCUDA();
-    synchronizeStreams(thcState, entry);
-    entry->run = [=]() mutable {
-      entry->algorithm->run();
-      for (size_t i = 0; i < tensors.size(); i++) {
-        at::cuda::CUDAGuard guard(entry->streams[i]);
-        tensors[i].copy_(entry->src[i]);
-      }
-    };
+    case at::kCUDA:
+#endif
+      break;
+    default:
+      invalidArgument("unsupported device type");
+  }
+
+  // Expect all input tensors to have the same type and sizes
+  for (size_t i = 1; i < inputs.size(); i++) {
+    assertTypeMatch(invalidArgument, type, inputs, i);
+    assertSizesMatch(invalidArgument, sizes, inputs, i);
+  }
+
+  std::shared_ptr<AsyncAllreduceWork> work;
+  auto& context = contexts_[0];
+  if (device.type() == at::kCPU) {
+    work = std::make_shared<AsyncAllreduceWork>(
+        context, inputs, opts.reduceOp, nextTag());
+#ifdef USE_CUDA
+  } else if (device.type() == at::kCUDA) {
+    work = std::make_shared<AsyncAllreduceCUDAWork>(
+        context, inputs, opts.reduceOp, nextTag());
+#endif
   } else {
-#endif
-    entry->run = [=]() mutable {
-      entry->algorithm->run();
-      for (size_t i = 0; i < tensors.size(); i++) {
-        tensors[i].copy_(entry->src[i]);
-      }
-    };
-#ifdef USE_CUDA
+    throw std::runtime_error("Invalid backend");
   }
-#endif
-  return enqueue(entry);
+
+  enqueue(std::bind(AsyncWork::execute, work));
+  return work;
 }
 
 namespace {
