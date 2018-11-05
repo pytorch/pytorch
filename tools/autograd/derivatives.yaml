@@ -184,6 +184,9 @@
 - name: ceil(Tensor self)
   self: zeros_like(grad)
 
+- name: cholesky(Tensor self, bool upper)
+  self: cholesky_backward(grad, upper, result)
+
 # For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
 - name: clamp(Tensor self, Scalar? min, Scalar? max)
@@ -325,11 +328,7 @@
   self: grad.mv(vec2)
   vec2: grad.t().mv(self)
 
-- name: _th_gesv_single(Tensor self, Tensor A)
-  self: gesv_backward_self(grad, self, A)
-  A: gesv_backward_A(grad, self, A, solution)
-
-- name: _gesv_helper(Tensor self, Tensor A)
+- name: gesv(Tensor self, Tensor A)
   self: gesv_backward_self(grad, self, A)
   A: gesv_backward_A(grad, self, A, result0)
 
@@ -563,9 +562,6 @@
 - name: poisson(Tensor self, Generator generator)
   self: zeros_like(self)
 
-- name: potrf(Tensor self, bool upper)
-  self: potrf_backward(grad, upper, result)
-
 - name: potri(Tensor self, bool upper)
   self: not_implemented("potri")
 
@@ -750,6 +746,9 @@
 
 - name: flip(Tensor self, IntList dims)
   self: grad.flip(dims)
+
+- name: roll(Tensor self, IntList shifts, IntList dims)
+  self: grad.roll( -shifts[0], dims)
 
 - name: rot90(Tensor self, int64_t k, IntList dims)
   self: grad.rot90(-k, dims)

@@ -58,8 +58,8 @@ class BisectPercentileOp final : public Operator<Context> {
     // Input
     const auto& raw = Input(RAW);
     CAFFE_ENFORCE_EQ(raw.ndim(), 2);
-    const auto batch_size = raw.dim(0);
-    const auto num_features = raw.dim(1);
+    const auto batch_size = raw.size(0);
+    const auto num_features = raw.size(1);
     CAFFE_ENFORCE_EQ(num_features, pct_lens_.size());
     const float* raw_data = raw.template data<float>();
 

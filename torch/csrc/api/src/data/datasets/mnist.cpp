@@ -31,8 +31,8 @@ bool check_is_little_endian() {
 }
 
 constexpr uint32_t flip_endianness(uint32_t value) {
-  return ((value & 0xff) << 24) | ((value & 0xff00) << 8) |
-      ((value & 0xff0000) >> 8) | ((value & 0xff000000) >> 24);
+  return ((value & 0xffu) << 24u) | ((value & 0xff00u) << 8u) |
+      ((value & 0xff0000u) >> 8u) | ((value & 0xff000000u) >> 24u);
 }
 
 uint32_t read_int32(std::ifstream& stream) {

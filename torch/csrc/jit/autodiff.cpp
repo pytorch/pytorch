@@ -308,8 +308,9 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         squeezed_dims.push_back(i);
       }
       SymbolicVariable returned_grad = grads.at(0);
-      for (auto it = squeezed_dims.begin(); it != squeezed_dims.end(); ++it)
-        returned_grad = returned_grad.unsqueeze(*it);
+      for (const auto& dim : squeezed_dims) {
+        returned_grad = returned_grad.unsqueeze(dim);
+      }
       return {returned_grad};
 
     } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor", /*const_inputs=*/attr::dim)) {
@@ -333,7 +334,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       // of equal sizes. We can use a single split operation to handle that.
       if (std::all_of(tensor_inputs.begin(), tensor_inputs.end(), has_first_sizes)) {
         auto tensor_grads = grads.at(0).chunk(tensor_inputs.size(), dim);
-        tensor_grads.push_back(nullptr); // for attr::dim
+        tensor_grads.emplace_back(nullptr); // for attr::dim
         return tensor_grads;
       } else {
         size_t offset = 0;
@@ -343,7 +344,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
           tensor_grads.push_back(grad.narrow(dim, offset, input.sizes()[dim]));
           offset += input.sizes()[dim];
         }
-        tensor_grads.push_back(nullptr); // for attr::dim
+        tensor_grads.emplace_back(nullptr); // for attr::dim
         return tensor_grads;
       }
     } else if (comparison_ops.find(node)) {

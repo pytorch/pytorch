@@ -4,8 +4,7 @@
 
 namespace torch {
 namespace jit {
-
-TORCH_API void AnnotateEffects(std::shared_ptr<Graph>& graph);
-
+// see .cpp for docs
+TORCH_API void RemoveInplaceOps(std::shared_ptr<Graph> graph);
 } // namespace jit
 } // namespace torch

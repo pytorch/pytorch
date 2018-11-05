@@ -77,12 +77,13 @@ def _check_module_exists(name):
             return True
         except ImportError:
             return False
-    elif PY34:  # Python [3, 3.4)
+    elif not PY34:  # Python [3, 3.4)
         import importlib
         loader = importlib.find_loader(name)
         return loader is not None
     else:  # Python >= 3.4
         import importlib
+        import importlib.util
         spec = importlib.util.find_spec(name)
         return spec is not None
 

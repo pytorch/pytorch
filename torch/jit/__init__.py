@@ -8,6 +8,7 @@ from torch._six import raise_from, with_metaclass, get_function_from_type
 from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
     COMPILATION_PENDING
+from ..nn.modules.utils import _single, _pair, _triple, _quadruple
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
@@ -1333,7 +1334,12 @@ def _get_builtin_table():
                 _builtin_table[id(v)] = "aten::" + name
     for mod in _modules_containing_builtins:
         register_all(mod)
+
     _builtin_table[id(warnings.warn)] = "aten::warn"
+    _builtin_table[id(_single)] = "aten::_single"
+    _builtin_table[id(_pair)] = "aten::_pair"
+    _builtin_table[id(_triple)] = "aten::_triple"
+    _builtin_table[id(_quadruple)] = "aten::_quadruple"
 
     return _builtin_table
 

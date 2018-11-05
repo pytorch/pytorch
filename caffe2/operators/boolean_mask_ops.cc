@@ -393,7 +393,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
   // product of dims from 1 to batch
   const int batch_dim =
       (canonical_batch >= 0
-           ? input->size_to_dim(canonical_batch) * input->dim(canonical_batch)
+           ? input->size_to_dim(canonical_batch) * input->size(canonical_batch)
            : -1);
 
   T fill_val = convert::To<float, T>(grad_ ? 0.0f : fill_val_);

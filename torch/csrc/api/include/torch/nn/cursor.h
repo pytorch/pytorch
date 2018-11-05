@@ -51,7 +51,7 @@ class CursorBase {
 
   /// A `(key, value)` pair exposed by cursor iterators.
   struct Item {
-    Item(const std::string& key_, T& value_);
+    Item(std::string key_, T& value_);
 
     T& operator*();
     const T& operator*() const;
