@@ -46,22 +46,22 @@ class GatherRangesToDenseOp final : public Operator<Context> {
           key.dtype().template Match<int64_t>(), "Key has to be type int64_t");
     }
     CAFFE_ENFORCE_EQ(
-        ranges.dim(1),
+        ranges.size(1),
         lengths_.size(),
         "Nummber of ranges should match number of lengths");
     CAFFE_ENFORCE_EQ(
-        ranges.dim(1),
+        ranges.size(1),
         OutputSize(),
         "Nummber of ranges should match number of outputs");
     CAFFE_ENFORCE_EQ(
-        ranges.dim(2), 2, "Ranges last dimension should be of size 2");
+        ranges.size(2), 2, "Ranges last dimension should be of size 2");
 
     auto* rawData = static_cast<const char*>(data.raw_data());
     auto* rangesData = ranges.template data<Index>();
     int rangesDataOffset = 0;
     auto itemsize = data.dtype().itemsize();
 
-    auto batchSize = ranges.dim(0);
+    auto batchSize = ranges.size(0);
     vector<int64_t> outputDims{batchSize, 0};
     vector<char*> outputRawData;
     for (int i = 0; i < OutputSize(); ++i) {

@@ -20,24 +20,24 @@ ComputeLegacyBroadcastSizes(const Tensor& A, const Tensor& B, int axis) {
       axis);
 
   int b_dim_start = 0;
-  while (b_dim_start < B.ndim() && B.dim(b_dim_start) == 1) {
+  while (b_dim_start < B.ndim() && B.size(b_dim_start) == 1) {
     ++b_dim_start;
   }
   int b_dim_end = B.ndim() - 1;
-  while (b_dim_end >= b_dim_start && B.dim(b_dim_end) == 1) {
+  while (b_dim_end >= b_dim_start && B.size(b_dim_end) == 1) {
     --b_dim_end;
   }
   size_t pre = 1, n = 1, post = 1;
   for (int i = 0; i < axis + b_dim_start; ++i) {
-    pre *= A.dim(i);
+    pre *= A.size(i);
   }
   for (int i = b_dim_start; i <= b_dim_end; ++i) {
     CAFFE_ENFORCE_EQ(
-        A.dim(i + axis), B.dim(i), "Broadcast dimension mismatch.");
-    n *= B.dim(i);
+        A.size(i + axis), B.size(i), "Broadcast dimension mismatch.");
+    n *= B.size(i);
   }
   for (int i = axis + b_dim_end + 1; i < A.ndim(); ++i) {
-    post *= A.dim(i);
+    post *= A.size(i);
   }
   return std::make_tuple(pre, n, post);
 }
