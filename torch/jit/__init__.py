@@ -1412,14 +1412,28 @@ class ContextProp(object):
 
 
 class JITModule(types.ModuleType):
+    __inited = False
+
     def __init__(self, m):
-        # You have to retain the old module, otherwise it will
-        # get GC'ed and a lot of things will break.  See:
-        # https://stackoverflow.com/questions/47540722/how-do-i-use-the-sys-modules-replacement-trick-in-init-py-on-python-2
         self.__old_mod = m
+        self.__inited = True
 
     def __getattr__(self, name):
-        return self.__old_mod.__getattribute__(name)
+        if self.__inited:
+            return self.__old_mod.__getattribute__(name)
+        else:
+            return super(JITModule, self).__getattr__(name)
+
+    def __setattr__(self, name, val):
+        if not self.__inited or (hasattr(self, name) and not hasattr(self.__old_mod, name)):
+            # assign to self if the object is not initialized, or it is a plain
+            # attribute on this object (i.e., `getattr(self, name)` works but
+            # not `getattr(self.__old_mod, name)`).
+            return super(JITModule, self).__setattr__(name, val)
+        else:
+            # otherwise, propagate change to `self.__old_mod` because things may
+            # still read from it, e.g., getter of `JITModule.enabled`.
+            return self.__old_mod.__setattr__(name, val)
 
     @staticmethod
     def __raise(ex):
@@ -1432,6 +1446,7 @@ class JITModule(types.ModuleType):
         ``PYTORCH_JIT`` is set.
         """,
     )
+
 
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273

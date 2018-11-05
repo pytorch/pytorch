@@ -458,9 +458,8 @@ class TestJit(JitTestCase):
             torch.jit.enabled = False
 
         torch.jit._enabled = False
+        self.assertFalse(torch.jit.enabled)
         try:
-            self.assertFalse(torch.jit.enabled)
-
             def f(x, y):
                 return x + y
 
