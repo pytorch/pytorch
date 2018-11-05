@@ -291,6 +291,9 @@ Tensor & VariableType::resize_(Tensor & self, IntList size) const {
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
+  if (!as_variable_ref(self).allow_shape_or_storage_change()) {
+    AT_ERROR("resize_ is not allowed on Tensor created from .data or .detach()");
+  }
   if (torch::jit::tracer::isTracing()) {
     jit::tracer::ArgumentStash::popIntList("size");
     jit::tracer::warn("resize_", jit::tracer::WARN_RESIZE);
@@ -305,6 +308,9 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
+  }
+  if (!as_variable_ref(self).allow_shape_or_storage_change()) {
+    AT_ERROR("resize_as_ is not allowed on Tensor created from .data or .detach()");
   }
   if (torch::jit::tracer::isTracing()) {
     jit::tracer::warn("resize_as_", jit::tracer::WARN_RESIZE);
@@ -349,6 +355,72 @@ Tensor & VariableType::detach_(Tensor & self) const {
   as_variable_ref(self).detach_();
   // </NON_GENERATED_CODE>
   if (jit::tracer::isTracing()) {
+    jit::tracer::addOutput(node, self);
+  }
+  return self;
+}
+
+Tensor & VariableType::set_(Tensor & self, Storage source) const {
+  profiler::RecordFunction profiler("set_", Function::peek_at_next_sequence_nr());
+  if (!as_variable_ref(self).allow_shape_or_storage_change()) {
+    AT_ERROR("set_ is not allowed on Tensor created from .data or .detach()");
+  }
+  TypeDefault::set_(self, source);
+  return self;
+}
+Tensor & VariableType::set_(Tensor & self, Storage source, int64_t storage_offset, IntList size, IntList stride) const {
+  profiler::RecordFunction profiler("set_", Function::peek_at_next_sequence_nr());
+  if (!as_variable_ref(self).allow_shape_or_storage_change()) {
+    AT_ERROR("set_ is not allowed on Tensor created from .data or .detach()");
+  }
+  TypeDefault::set_(self, source, storage_offset, size, stride);
+  return self;
+}
+Tensor & VariableType::set_(Tensor & self, const Tensor & source) const {
+  profiler::RecordFunction profiler("set_", Function::peek_at_next_sequence_nr());
+  if (!as_variable_ref(self).allow_shape_or_storage_change()) {
+    AT_ERROR("set_ is not allowed on Tensor created from .data or .detach()");
+  }
+  torch::jit::Node* node = nullptr;
+  std::shared_ptr<jit::tracer::TracingState> tracer_state;
+  if (jit::tracer::isTracing()) {
+    tracer_state = jit::tracer::getTracingState();
+    const static auto op_name = jit::Symbol::fromQualString("aten::set");
+    node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    jit::tracer::addInputs(node, "source", source);
+    tracer_state->graph->appendNode(node);
+    jit::tracer::ensureUnique("set_", self);
+    jit::tracer::setTracingState(nullptr);
+  }
+  TypeDefault::set_(self, source);
+  if (tracer_state) {
+    jit::tracer::setTracingState(std::move(tracer_state));
+    jit::tracer::addOutput(node, self);
+  }
+  return self;
+}
+Tensor & VariableType::set_(Tensor & self) const {
+  profiler::RecordFunction profiler("set_", Function::peek_at_next_sequence_nr());
+  if (!as_variable_ref(self).allow_shape_or_storage_change()) {
+    AT_ERROR("set_ is not allowed on Tensor created from .data or .detach()");
+  }
+  torch::jit::Node* node = nullptr;
+  std::shared_ptr<jit::tracer::TracingState> tracer_state;
+  if (jit::tracer::isTracing()) {
+    tracer_state = jit::tracer::getTracingState();
+    const static auto op_name = jit::Symbol::fromQualString("aten::set");
+    node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    tracer_state->graph->appendNode(node);
+    jit::tracer::ensureUnique("set_", self);
+    jit::tracer::setTracingState(nullptr);
+  }
+  TypeDefault::set_(self);
+  if (tracer_state) {
+    jit::tracer::setTracingState(std::move(tracer_state));
     jit::tracer::addOutput(node, self);
   }
   return self;

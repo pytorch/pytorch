@@ -9335,6 +9335,27 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
             torch.tensor(2).to("cuda:1") // torch.tensor(3).to("cuda:0")
 
+    def test_allow_shape_or_storage_change(self):
+        def do_test(t):
+            a = torch.tensor([[1, 2]])
+            with self.assertRaisesRegex(RuntimeError, "resize_ is not allowed on Tensor created from .data or .detach()"):
+                t.resize_((1, 2))
+            with self.assertRaisesRegex(RuntimeError, "resize_as_ is not allowed on Tensor created from .data or .detach()"):
+                t.resize_as_(a)
+            with self.assertRaisesRegex(RuntimeError, "set_ is not allowed on Tensor created from .data or .detach()"):
+                t.set_()
+            with self.assertRaisesRegex(RuntimeError, "set_ is not allowed on Tensor created from .data or .detach()"):
+                t.set_(a)
+            with self.assertRaisesRegex(RuntimeError, "set_ is not allowed on Tensor created from .data or .detach()"):
+                t.set_(a.storage())
+            with self.assertRaisesRegex(RuntimeError, "set_ is not allowed on Tensor created from .data or .detach()"):
+                t.set_(source=a.storage(), storage_offset=0, size=(1, 1), stride=(1, 1))
+            with self.assertRaisesRegex(RuntimeError, "share_memory_ is not allowed on Tensor created from .data or .detach()"):
+                t.share_memory_()
+
+        do_test(torch.tensor(1).data)
+        do_test(torch.tensor(1).detach())
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2

@@ -178,6 +178,8 @@ class Tensor(torch._C._TensorBase):
       Returned Tensor uses the same data tensor as the original one.
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
+      In-place shape or storage changes (such as `resize_` / `resize_as_` / `set_` / `share_memory_`)
+      on the returned tensor are disallowed, to ensure consistency with the original tensor.
     """)
 
     detach_ = _add_docstr(_C._TensorBase.detach_, r"""
@@ -225,6 +227,8 @@ class Tensor(torch._C._TensorBase):
         This is a no-op if the underlying storage is already in shared memory
         and for CUDA tensors. Tensors in shared memory cannot be resized.
         """
+        if not self.allow_shape_or_storage_change:
+            raise RuntimeError("share_memory_ is not allowed on Tensor created from .data or .detach()")
         self.storage().share_memory_()
         return self
 
