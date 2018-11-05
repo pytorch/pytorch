@@ -183,7 +183,7 @@ class SparseAdamOp final : public Operator<Context> {
     const auto correction =
         std::sqrt(T(1.) - std::pow(beta2_, t)) / (T(1.) - std::pow(beta1_, t));
 
-    auto block_size = Input(PARAM).numel() / Input(PARAM).dim(0);
+    auto block_size = Input(PARAM).numel() / Input(PARAM).size(0);
     auto n = Input(GRAD).numel() / block_size;
 
     const auto* paramIn = Input(PARAM).template data<T>();
@@ -353,7 +353,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
     const auto correction =
         std::sqrt(T(1.) - std::pow(beta2_, t)) / (T(1.) - std::pow(beta1_, t));
 
-    auto block_size = Input(PARAM).numel() / Input(PARAM).dim(0);
+    auto block_size = Input(PARAM).numel() / Input(PARAM).size(0);
     auto n = Input(GRAD).numel() / block_size;
 
     const auto* paramIn = Input(PARAM).template data<T>();

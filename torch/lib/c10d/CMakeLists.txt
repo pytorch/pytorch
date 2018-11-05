@@ -146,7 +146,7 @@ install(TARGETS c10d
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib)
 
-option(BUILD_EXAMPLES "Build examples" ON)
+option(BUILD_EXAMPLES "Build examples" OFF)
 if(BUILD_EXAMPLES)
   add_subdirectory(example)
 endif()

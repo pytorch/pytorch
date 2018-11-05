@@ -382,7 +382,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
           CAFFE_ENFORCE_EQ(input.sizes()[k], outputDims[j][k]);
         }
 
-        outputDims[j][0] += input.dim(0);
+        outputDims[j][0] += input.size(0);
       }
     }
 
@@ -721,10 +721,10 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
         continue;
       }
       auto dst = static_cast<char*>(out->raw_mutable_data(in.dtype()));
-      int block_size = in.numel() / in.dim(0);
+      int block_size = in.numel() / in.size(0);
       auto block_bytesize = in.size_from_dim(1) * in.dtype().itemsize();
       CAFFE_ENFORCE(
-          block_bytesize == in.nbytes() / in.dim(0),
+          block_bytesize == in.nbytes() / in.size(0),
           "block_bytesize should be consistent with data dim");
       auto src_base = static_cast<const char*>(in.raw_data());
       int start = 0;
@@ -764,7 +764,7 @@ class AppendOp final : public Operator<Context> {
     auto& b = Input(1);
     auto* c = Output(0);
     CAFFE_ENFORCE(b.ndim() >= 1);
-    if (a.numel() == 0 && a.dim(0) == 0) {
+    if (a.numel() == 0 && a.size(0) == 0) {
       c->CopyFrom(b);
       return true;
     }
@@ -821,7 +821,7 @@ class AtomicAppendOp final : public Operator<Context> {
       auto& a = Input(1 + i);
       auto& b = Input(1 + i + numFields);
       auto* c = Output(i);
-      if (a.numel() == 0 && a.dim(0) == 0) {
+      if (a.numel() == 0 && a.size(0) == 0) {
         c->CopyFrom(b);
         continue;
       }

@@ -188,6 +188,7 @@ _(aten, adaptive_max_pool3d) \
 _(aten, adaptive_max_pool3d_backward) \
 _(aten, adaptive_max_pool3d_forward) \
 _(aten, add) \
+_(aten, add_) \
 _(aten, addbmm) \
 _(aten, addcdiv) \
 _(aten, addcmul) \
@@ -283,12 +284,14 @@ _(aten, data_ptr) \
 _(aten, det) \
 _(aten, detach) \
 _(aten, diag) \
+_(aten, diag_embed) \
 _(aten, diagflat) \
 _(aten, diagonal) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
 _(aten, div) \
+_(aten, div_) \
 _(aten, dot) \
 _(aten, dropout) \
 _(aten, eig) \
@@ -467,6 +470,7 @@ _(aten, mse_loss) \
 _(aten, mse_loss_backward) \
 _(aten, mse_loss_forward) \
 _(aten, mul) \
+_(aten, mul_) \
 _(aten, multi_margin_loss) \
 _(aten, multi_margin_loss_backward) \
 _(aten, multi_margin_loss_forward) \
@@ -612,6 +616,7 @@ _(aten, storage_offset) \
 _(aten, stride) \
 _(aten, strides) \
 _(aten, sub) \
+_(aten, sub_) \
 _(aten, rsub) \
 _(aten, sum) \
 _(aten, svd) \

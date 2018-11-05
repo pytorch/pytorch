@@ -27,7 +27,7 @@ class BatchGatherOp final : public Operator<Context> {
     CAFFE_ENFORCE_GE(data.ndim(), 2, "DATA should be at least 2-D");
 
     vector<int64_t> shape;
-    shape.push_back(data.dim(0));
+    shape.push_back(data.size(0));
     shape.insert(shape.end(), indices.sizes().begin(), indices.sizes().end());
     shape.insert(shape.end(), data.sizes().begin() + 2, data.sizes().end());
     output->Resize(shape);
@@ -47,18 +47,18 @@ class BatchGatherOp final : public Operator<Context> {
     for (auto i = 0; i < N; ++i) {
       auto idx = idxs[i];
       CAFFE_ENFORCE(
-          0 <= idx && idx < data.dim(1),
+          0 <= idx && idx < data.size(1),
           "INDICES element is out of DATA bounds, id=",
           idx,
           " data_dim=",
-          data.dim(1));
+          data.size(1));
     }
 
     if (data.template IsType<float>() && block_size == 1) {
       auto src = data.template data<float>();
       auto dst = output->template mutable_data<float>();
 
-      for (auto batch = 0; batch < data.dim(0); ++batch) {
+      for (auto batch = 0; batch < data.size(0); ++batch) {
         auto src_batch_base = src + batch * data_batch_size;
         auto out_batch_base = dst + batch * gathered_batch_size;
 
@@ -68,7 +68,7 @@ class BatchGatherOp final : public Operator<Context> {
         }
       }
     } else {
-      for (auto batch = 0; batch < data.dim(0); ++batch) {
+      for (auto batch = 0; batch < data.size(0); ++batch) {
         auto src_batch_base = src_base + batch * data_batch_bytesize;
         auto out_batch_base = out + batch * gathered_batch_bytesize;
 
@@ -112,7 +112,7 @@ class BatchGatherGradientOp final : public Operator<Context> {
 
     CAFFE_ENFORCE_GE(data.ndim(), 2, "DATA should be at least 2-D");
     CAFFE_ENFORCE_EQ(
-        data.dim(0), grad.dim(0), "batch sizes should be the same");
+        data.size(0), grad.size(0), "batch sizes should be the same");
 
     output->ResizeLike(data);
     TData* out_data = output->template mutable_data<TData>();
@@ -133,14 +133,14 @@ class BatchGatherGradientOp final : public Operator<Context> {
     for (auto i = 0; i < N; ++i) {
       auto idx = idxs[i];
       CAFFE_ENFORCE(
-          0 <= idx && idx < data.dim(1),
+          0 <= idx && idx < data.size(1),
           "INDICES element is out of DATA bounds, id=",
           idx,
           " data_dim=",
-          data.dim(1));
+          data.size(1));
     }
 
-    for (auto batch = 0; batch < grad.dim(0); ++batch) {
+    for (auto batch = 0; batch < grad.size(0); ++batch) {
       auto src_batch_base = grad_data + batch * gathered_batch_size;
       auto out_batch_base = out_data + batch * data_batch_size;
 

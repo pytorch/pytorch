@@ -44,7 +44,7 @@ class LengthsPadOp : public Operator<Context> {
     math::Sum<int32_t, CPUContext>(
         lengths_size, lengths_data, &total_length, &cpuContext);
 
-    CAFFE_ENFORCE_EQ(total_length, data.dim(0));
+    CAFFE_ENFORCE_EQ(total_length, data.size(0));
 
     auto shape = data.sizes().vec();
     shape[0] = lengths_size * target_length_;

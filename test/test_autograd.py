@@ -2669,6 +2669,13 @@ class TestAutograd(TestCase):
         # check one of them is using the computed buffer
         self.assertTrue(p_a == p_g or p_b == p_g)
 
+    def test_gradcheck_single_input(self):
+        def f(inp):
+            return inp.mul(5)
+
+        gradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
+        gradgradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):

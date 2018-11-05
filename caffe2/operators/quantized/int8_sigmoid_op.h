@@ -211,7 +211,7 @@ class Int8SigmoidOp final : public Operator<CPUContext> {
         input_range_radius,
         input_multiplier,
         input_left_shift,
-        X.t.numel() / X.t.dim(0));
+        X.t.numel() / X.t.size(0));
     return true;
   }
 };

@@ -780,6 +780,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    @unittest.expectedFailure
     def test_comparison_gt_lt_cuda(self):
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
@@ -790,6 +791,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    @unittest.expectedFailure
     def test_comparison_ge_le_cuda(self):
         def f(x, y):
             mask = (x >= 0).type_as(x)
@@ -807,6 +809,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    @unittest.expectedFailure
     def test_comparison_eq_ne(self):
         def f(x, y):
             mask = (x == 0).type_as(x)
@@ -892,6 +895,23 @@ class TestJit(JitTestCase):
                     fusion_output.sum(), local_fusion_inputs, allow_unused=True, retain_graph=True)
                 grads_half = [t.half() for t in grads]
                 self.assertEqual(grads_half, fusion_grads)
+
+    def test_canonicalize_tensor_iterator(self):
+        x = torch.randn(4, 4)
+
+        def f(x):
+            x = x + 2
+            x = x - 4
+            x = x * 6
+            x = x / 8
+            return x
+
+        traced = torch.jit.trace(f, (x,))
+        f(x)
+        graph = traced.graph_for(x)
+        # There should be 4 int constants for the right sides of operators, plus two
+        # for alpha arguments for add and sub
+        self.assertTrue(str(traced.graph_for(x)).count(': int = prim::Constant'), 6)
 
     # TODO: adapt this test to check that GraphExecutor treats them differently
     @unittest.skip("Need to be adjusted to Graph Executor")
@@ -2473,7 +2493,7 @@ class TestBatched(TestCase):
                    b_i, b_f, b_o, b_c, w_hs, b_s, iter_num):
             iter_count = torch.zeros_like(iter_num)
             while bool(iter_count < iter_num):
-                iter_count += 1
+                iter_count = iter_count + 1
                 # LSTM Cell
                 i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
                 f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
@@ -2539,7 +2559,7 @@ class TestBatched(TestCase):
             iter_count = torch.zeros_like(iter_num)
             max_len = idx.size(2)
             while bool(iter_count < iter_num):
-                iter_count += 1
+                iter_count = iter_count + 1
                 # LSTM Cell
                 i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
                 f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
@@ -2681,7 +2701,15 @@ class TestScript(JitTestCase):
             ge = torch.jit.script(script, optimize)
             ge(*inputs)
 
-    def checkScript(self, script, inputs, optimize=True, outputs=None, name='func', capture_output=False, frames_up=1):
+    def checkScript(self,
+                    script,
+                    inputs,
+                    optimize=True,
+                    outputs=None,
+                    name='func',
+                    capture_output=False,
+                    frames_up=1,
+                    check_expected=False):
         if isinstance(script, str):
             cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
             ge = getattr(cu, name)
@@ -2693,7 +2721,15 @@ class TestScript(JitTestCase):
                 outputs = script(*inputs)
             # Check the string frontend first
             source = textwrap.dedent(inspect.getsource(script))
-            self.checkScript(source, inputs, optimize, outputs, script.__name__, capture_output, frames_up=2)
+            self.checkScript(
+                source,
+                inputs,
+                optimize,
+                outputs,
+                script.__name__,
+                capture_output,
+                frames_up=2,
+                check_expected=check_expected)
             # Continue checking the Python frontend
             ge = torch.jit.script(script, optimize, _frames_up=1)
 
@@ -2705,6 +2741,9 @@ class TestScript(JitTestCase):
         else:
             outputs_ge = ge(*inputs)
         self.assertEqual(outputs, outputs_ge)
+
+        if check_expected:
+            self.assertExpectedGraph(ge.graph)
 
         return ge
 
@@ -2899,7 +2938,9 @@ a")
 
             c = s(a, b)
             c.sum().backward()
-            self.assertAllFused(backward_graph(s))
+            graph = backward_graph(s)
+            self.assertEqual(set([node.kind() for node in graph.nodes()]),
+                             set(['prim::Constant', 'aten::ge', 'aten::le', 'aten::type_as', 'prim::FusionGroup']))
 
     def test_mul(self):
         def func(a, b):
@@ -4175,6 +4216,9 @@ a")
     def test_format(self):
         def func(x):
             print("{}, I'm a {}".format("Hello", "test"))
+            print("format blank".format())
+            print("stuff before {}".format("hi"))
+            print("{} stuff after".format("hi"))
             return x + 1
 
         x = torch.arange(4., requires_grad=True)
@@ -4433,6 +4477,41 @@ a")
     @skipIfRocm
     def test_tensor_number_math_cuda(self):
         self._test_tensor_number_math(device='cuda')
+
+    def test_not(self):
+        # test not operator in python
+        # TODO: add more tests when bool conversions ready
+        def test_not_op(a):
+            return not bool(a > 1)
+
+        self.checkScript(test_not_op, (torch.tensor(2), ), optimize=True)
+
+    def test_is_isnot(self):
+        # test is and is not operator in python
+        template = dedent('''
+        def func():
+            # type: () -> bool
+            return {lhs} {op} {rhs}
+        ''')
+
+        def test(op, args):
+            code = template.format(lhs=args[0], rhs=args[1], op=op)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            self.assertEqual(
+                cu.func(),
+                scope['func'](),
+                "Failed with op: {}, lhs: {}, rhs: {}"
+                .format(op, args[0], args[1])
+            )
+
+        ops = ['is', 'is not']
+        type_literals = [True, False, None, [1, 1]]
+
+        # do literals product to try any types combinations
+        for op, lhs, rhs in product(ops, type_literals, type_literals):
+            test(op, [lhs, rhs])
 
     def test_python_call(self):
         def pyfunc(a):
@@ -6299,6 +6378,7 @@ a")
             return c
 
         graph = torch.jit.script(func).graph
+        self.run_pass('remove_inplace_ops', graph)
         self.run_pass('erase_number_types', graph)
         self.assertExpectedGraph(graph)
 
@@ -6479,8 +6559,9 @@ a")
             ''')
 
     def test_multi_reduction(self):
-        with self.assertRaisesRegex(RuntimeError, 'reductions are only allowed when there is a single variable on'
-                                                  ' the left-hand side'):
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'augmented assignment can only have one LHS expression'):
             cu = torch.jit.CompilationUnit('''
             def multi_reduction(x):
                 a, b += x
@@ -8082,6 +8163,15 @@ a")
             return e
         self.checkScript(foo, (torch.rand(3), torch.rand(3)))
 
+    def test_augmented_assign(self):
+        def foo(a, b):
+            a += b
+            a -= b
+            a /= b
+            a *= b
+            return a, b
+        self.checkScript(foo, (torch.rand(3), torch.rand(3)), check_expected=True)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -9065,7 +9155,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         def fn(x, k):
             y = x * 1.1
             if bool(k):
-                k += y
+                k = k + y
             z = y * k
             return z, k
 
@@ -9479,7 +9569,6 @@ def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
             call_args_str = ', '.join(actuals)
             call = "self.submodule({})".format(call_args_str)
             script = script_method_template.format(method_args, call)
-            print(script)
 
             # Create module to use the script method
             class TheModule(torch.jit.ScriptModule):

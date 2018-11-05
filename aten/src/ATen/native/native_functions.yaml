@@ -586,6 +586,9 @@
 - func: det(Tensor self) -> Tensor
   variants: function, method
 
+- func: diag_embed(Tensor self, int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) -> Tensor
+  variants: function, method
+
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
   variants: function, method
 
@@ -1693,6 +1696,12 @@
     CPU: flip_cpu
     CUDA: flip_cuda
 
+- func: roll(Tensor self, IntList[1] shifts, IntList[1] dims) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: roll_cpu
+    CUDA: roll_cuda
+
 # default IntList value {0,1} should not add space after comma, since native_parse.py uses ', ' to split args
 - func: rot90(Tensor self, int64_t k=1, IntList dims={0,1}) -> Tensor
   variants: function, method
@@ -2449,6 +2458,86 @@
   device_guard: false
 
 - func: ne_(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __and__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __and__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __iand__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __iand__(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __or__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __or__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __ior__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __ior__(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __xor__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __xor__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __ixor__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __ixor__(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __lshift__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __lshift__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __ilshift__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __ilshift__(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __rshift__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __rshift__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __irshift__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __irshift__(Tensor self, Tensor other) -> Tensor
   variants: method
   device_guard: false
 

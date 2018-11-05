@@ -14,9 +14,9 @@ bool ElementwiseLinearOp<float, CPUContext>::RunOnDevice(){
   const int D = X.size_from_dim(canonical_axis);
 
   CAFFE_ENFORCE_EQ(a.ndim(), 1, a.ndim());
-  CAFFE_ENFORCE_EQ(a.dim(0), D, a.ndim());
+  CAFFE_ENFORCE_EQ(a.size(0), D, a.ndim());
   CAFFE_ENFORCE_EQ(b.ndim(), 1, b.ndim());
-  CAFFE_ENFORCE_EQ(b.dim(0), D, b.ndim());
+  CAFFE_ENFORCE_EQ(b.size(0), D, b.ndim());
 
   Y->ResizeLike(X);
 
@@ -46,7 +46,7 @@ bool ElementwiseLinearGradientOp<float, CPUContext>::RunOnDevice(){
   const int D = X.size_from_dim(canonical_axis);
 
   CAFFE_ENFORCE_EQ(a.ndim(), 1, a.ndim());
-  CAFFE_ENFORCE_EQ(a.dim(0), D, a.ndim());
+  CAFFE_ENFORCE_EQ(a.size(0), D, a.ndim());
 
   auto* g_X = Output(0);
   auto *g_a = Output(1);

@@ -2017,8 +2017,6 @@ class TestNN(NNTestCase):
         es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse).to(device, dtype)
         es.weight.data.copy_(torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
         input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=torch.long)
-
-        # Empty list is only handled in CPU for now
         offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
 
         grad_output = torch.tensor(
@@ -2089,6 +2087,16 @@ class TestNN(NNTestCase):
             es_weight_grad = es.weight.grad.to_dense()
         self.assertEqual(output, expected_output)
         self.assertEqual(es_weight_grad, expected_grad_weight, dtype2prec[dtype])
+
+        # test all empty bags
+        es.zero_grad()
+        inputs = torch.tensor([], dtype=torch.long, device=device)
+        offsets = torch.tensor([0, 0, 0, 0], device=device)
+        es(inputs, offsets).sum().backward()
+        dense_grad = es.weight.grad
+        if dense_grad.is_sparse:
+            dense_grad = dense_grad.to_dense()
+        self.assertEqual(dense_grad, torch.zeros_like(es.weight))
 
         # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
         def _test_vs_Embedding(N, D, B, L, max_norm=None):

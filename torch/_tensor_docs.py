@@ -687,6 +687,13 @@ diag(diagonal=0) -> Tensor
 See :func:`torch.diag`
 """)
 
+add_docstr_all('diag_embed',
+               r"""
+diag_embed(offset=0, dim1=-2, dim2=-1) -> Tensor
+
+See :func:`torch.diag_embed`
+""")
+
 add_docstr_all('diagflat',
                r"""
 diagflat(diagonal=0) -> Tensor
@@ -893,6 +900,13 @@ add_docstr_all('flip',
 flip(dims) -> Tensor
 
 See :func:`torch.flip`
+""")
+
+add_docstr_all('roll',
+               r"""
+roll(shifts, dims) -> Tensor
+
+See :func:`torch.roll`
 """)
 
 add_docstr_all('floor_',
