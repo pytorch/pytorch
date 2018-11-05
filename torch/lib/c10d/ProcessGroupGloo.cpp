@@ -108,6 +108,26 @@ const ::gloo::ReductionFunction<T>* reductionFunction(const ReduceOp& r) {
   throw std::runtime_error("Unhandled ReduceOp");
 }
 
+typedef void (*ReduceFunc)(void*, const void*, const void*, size_t);
+
+template <typename T>
+ReduceFunc toFunction(const ReduceOp& r) {
+  switch (r) {
+    case ReduceOp::SUM:
+      return ReduceFunc(&::gloo::sum<T>);
+    case ReduceOp::PRODUCT:
+      return ReduceFunc(&::gloo::product<T>);
+    case ReduceOp::MIN:
+      return ReduceFunc(&::gloo::min<T>);
+    case ReduceOp::MAX:
+      return ReduceFunc(&::gloo::max<T>);
+    case ReduceOp::UNUSED:
+      break;
+  }
+
+  throw std::runtime_error("Unhandled ReduceOp");
+}
+
 #ifdef USE_CUDA
 std::vector<cudaStream_t> getStreamVector(AlgorithmEntry& entry) {
   std::vector<cudaStream_t> streams;
@@ -757,10 +777,92 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   return enqueue(entry);
 }
 
+namespace {
+
+class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
+ public:
+  AsyncReduceWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<at::Tensor>& inputs,
+      int rootRank,
+      int rootTensor,
+      ReduceOp reduceOp,
+      uint32_t tag)
+      : context(context),
+        inputs(inputs),
+        rootRank(rootRank),
+        rootTensor(rootTensor),
+        reduceOp(reduceOp),
+        tag(tag) {}
+
+  std::shared_ptr<gloo::Context> context;
+  std::vector<at::Tensor> inputs;
+  const int rootRank;
+  const int rootTensor;
+  const ReduceOp reduceOp;
+  const uint32_t tag;
+
+  void run() override {
+    const auto& scalarType = inputs[0].scalar_type();
+    gloo::ReduceOptions opts(context);
+    opts.setRoot(rootRank);
+    opts.setTag(tag);
+    opts.setReduceFunction(getFunction(scalarType, reduceOp));
+    GENERATE_ALL_TYPES(scalarType, setOutput, opts, inputs[0]);
+    gloo::reduce(opts);
+  }
+
+ protected:
+  template <typename T>
+  void getFunction(gloo::ReduceOptions::Func& fn, const ReduceOp op) {
+    fn = toFunction<T>(op);
+  }
+
+  gloo::ReduceOptions::Func getFunction(
+      const at::ScalarType& dtype,
+      const ReduceOp op) {
+    gloo::ReduceOptions::Func fn;
+    GENERATE_ALL_TYPES(dtype, getFunction, fn, op);
+    return fn;
+  }
+};
+
+} // namespace
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
-    std::vector<at::Tensor>& /* unused */,
-    const ReduceOptions& /* unused */) {
-  throw std::runtime_error("ProcessGroupGloo does not support reduce");
+    std::vector<at::Tensor>& inputs,
+    const ReduceOptions& opts) {
+  static auto invalidArgument = [](const std::string& msg) {
+    throw std::invalid_argument("ProcessGroupGloo::reduce: " + msg);
+  };
+
+  if (opts.rootRank < 0 || opts.rootRank >= size_) {
+    invalidArgument("invalid root rank: " + std::to_string(opts.rootRank));
+  }
+
+  if (opts.rootTensor < 0 || opts.rootTensor >= inputs.size()) {
+    invalidArgument("invalid root tensor: " + std::to_string(opts.rootTensor));
+  }
+
+  if (inputs.size() != 1) {
+    invalidArgument("requires a single input/output tensor");
+  }
+
+  const auto& layout = inputs[0].layout();
+  const auto& device = inputs[0].device();
+  if (layout != at::kStrided || device.type() != at::kCPU) {
+    invalidArgument("only supports dense CPU tensors");
+  }
+
+  auto work = std::make_shared<AsyncReduceWork>(
+      contexts_[0],
+      inputs,
+      opts.rootRank,
+      opts.rootTensor,
+      opts.reduceOp,
+      nextTag());
+  enqueue(std::bind(AsyncWork::execute, work));
+  return work;
 }
 
 namespace {

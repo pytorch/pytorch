@@ -80,6 +80,31 @@ def gpus_for_rank(world_size):
     return gpus_for_rank
 
 
+def simple_reduce_tests(rank, world_size):
+    return [
+        (
+            c10d.ReduceOp.SUM,
+            torch.Tensor([rank + 1.0]),
+            torch.Tensor([float(world_size * (world_size + 1) / 2)]),
+        ),
+        (
+            c10d.ReduceOp.PRODUCT,
+            torch.Tensor([rank + 1.0]),
+            torch.Tensor([float(math.factorial(world_size))]),
+        ),
+        (
+            c10d.ReduceOp.MIN,
+            torch.Tensor([rank + 1.0]),
+            torch.Tensor([1.0]),
+        ),
+        (
+            c10d.ReduceOp.MAX,
+            torch.Tensor([rank + 1.0]),
+            torch.Tensor([world_size]),
+        ),
+    ]
+
+
 class StoreTestBase(object):
     def _create_store(self, i):
         raise RuntimeError("not implemented")
@@ -697,6 +722,50 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work = pg.allgather(output, input)
             work.wait()
             self.assertEqual(expected_output, output)
+
+    def test_reduce_checks(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        t1 = torch.zeros([1], dtype=torch.float32)
+
+        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+            opts = c10d.ReduceOptions()
+            opts.rootRank = -1
+            opts.rootTensor = 0
+            pg.reduce([t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+            opts = c10d.ReduceOptions()
+            opts.rootRank = self.world_size
+            opts.rootTensor = 0
+            pg.reduce([t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid root tensor"):
+            opts = c10d.ReduceOptions()
+            opts.rootRank = self.rank
+            opts.rootTensor = 1
+            pg.reduce([t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires a single input/output tensor"):
+            opts = c10d.ReduceOptions()
+            opts.rootRank = self.rank
+            opts.rootTensor = 0
+            pg.reduce([t1, t1], opts)
+
+    def test_reduce_basics(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        for (op, input, output) in simple_reduce_tests(self.rank, self.world_size):
+            for root in range(self.world_size):
+                opts = c10d.ReduceOptions()
+                opts.reduceOp = op
+                opts.rootRank = root
+                tmp = input.clone()
+                work = pg.reduce([tmp], opts)
+                work.wait()
+                if root == self.rank:
+                    self.assertEqual(output, tmp)
 
     def test_send_recv_all_to_all(self):
         store = c10d.FileStore(self.file.name)
