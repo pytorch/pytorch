@@ -626,11 +626,9 @@ def dropout(input, p=0.5, training=True, inplace=False):
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    if inplace:
-        ret = _VF.dropout_(input, p, training)
-    else:
-        ret = _VF.dropout(input, p, training)
-    return ret
+    return (_VF.dropout_(input, p, training)
+            if inplace
+            else _VF.dropout(input, p, training))
 
 
 @torch._jit_internal.weak_script
@@ -643,11 +641,9 @@ def alpha_dropout(input, p=0.5, training=False, inplace=False):
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    if inplace:
-        ret = _VF.alpha_dropout_(input, p, training)
-    else:
-        ret = _VF.alpha_dropout(input, p, training)
-    return ret
+    return (_VF.alpha_dropout_(input, p, training)
+            if inplace
+            else _VF.alpha_dropout(input, p, training))
 
 
 @torch._jit_internal.weak_script
@@ -670,11 +666,9 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    if inplace:
-        ret = _VF.feature_dropout_(input, p, training)
-    else:
-        ret = _VF.feature_dropout(input, p, training)
-    return ret
+    return (_VF.feature_dropout_(input, p, training)
+            if inplace
+            else _VF.feature_dropout(input, p, training))
 
 
 @torch._jit_internal.weak_script
@@ -699,11 +693,9 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    if inplace:
-        ret = _VF.feature_dropout_(input, p, training)
-    else:
-        ret = _VF.feature_dropout(input, p, training)
-    return ret
+    return (_VF.feature_dropout_(input, p, training)
+            if inplace
+            else _VF.feature_dropout(input, p, training))
 
 
 @torch._jit_internal.weak_script
@@ -712,11 +704,9 @@ def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    if inplace:
-        ret = _VF.feature_alpha_dropout_(input, p, training)
-    else:
-        ret = _VF.feature_alpha_dropout(input, p, training)
-    return ret
+    return (_VF.feature_alpha_dropout_(input, p, training)
+            if inplace
+            else _VF.feature_alpha_dropout(input, p, training))
 
 
 def threshold(input, threshold, value, inplace=False):
