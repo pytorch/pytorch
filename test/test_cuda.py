@@ -1085,6 +1085,7 @@ class TestCuda(TestCase):
             self.assertEqual(rc.type(), r.type())
 
         # Since we have both cuda:0 and cuda:1 inputs, the outputs must be new.
+        # We can check that they have different version counters.
         # NOTE [ Version Counter in comm.*_coalesced ]
         versions = [t._version for t in rc_tensors]
         for old_version, t in zip(versions, rc_tensors):
