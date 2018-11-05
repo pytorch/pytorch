@@ -552,6 +552,94 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work[i].wait()
             self.assertEqual(torch.Tensor([i]), outputs[i])
 
+    def test_gather_checks(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        t1 = torch.zeros([1], dtype=torch.float32)
+        t2 = torch.zeros([1], dtype=torch.float64)
+        t3 = torch.zeros([2], dtype=torch.float32)
+
+        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+            opts = c10d.GatherOptions()
+            opts.rootRank = -1
+            pg.gather([], [t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid root rank"):
+            opts = c10d.GatherOptions()
+            opts.rootRank = self.world_size
+            pg.gather([], [t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires a single input tensor"):
+            opts = c10d.GatherOptions()
+            opts.rootRank = 0
+            pg.gather([], [], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires a single input tensor"):
+            opts = c10d.GatherOptions()
+            opts.rootRank = 0
+            pg.gather([], [t1, t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires single output tensor list"):
+            opts = c10d.GatherOptions()
+            opts.rootRank = self.rank
+            pg.gather([], [t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires single output tensor list"):
+            opts = c10d.GatherOptions()
+            opts.rootRank = self.rank
+            pg.gather([[t1] * self.world_size, [t1] * self.world_size], [t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires single output tensor list"):
+            opts = c10d.GatherOptions()
+            opts.rootRank = self.rank
+            pg.gather([[t1] * (self.world_size - 1)], [t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires single output tensor list"):
+            opts = c10d.GatherOptions()
+            opts.rootRank = self.rank
+            pg.gather([[t1] * (self.world_size + 1)], [t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor type"):
+            opts = c10d.GatherOptions()
+            opts.rootRank = self.rank
+            pg.gather([[t2] * self.world_size], [t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+            opts = c10d.GatherOptions()
+            opts.rootRank = self.rank
+            pg.gather([[t3] * self.world_size], [t1], opts)
+
+        with self.assertRaisesRegex(ValueError, "requires empty output on non-root"):
+            opts = c10d.GatherOptions()
+            opts.rootRank = (self.rank + 1) % self.world_size
+            pg.gather([[t1] * self.world_size], [t1], opts)
+
+    def test_gather_basics(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        # Preallocate tensors for input/output
+        input = [torch.Tensor([self.rank])]
+        outputs = [torch.Tensor([-1]) for _ in range(self.world_size)]
+
+        # Take turns being the gather root and accumulate work items
+        work = []
+        for i in range(self.world_size):
+            opts = c10d.GatherOptions()
+            opts.rootRank = i
+            if i == self.rank:
+                work.append(pg.gather([outputs], input, opts))
+            else:
+                work.append(pg.gather([], input, opts))
+
+        # Wait for work to complete
+        expected = [torch.Tensor([rank]) for rank in range(self.world_size)]
+        for i in range(self.world_size):
+            work[i].wait()
+            if i == self.rank:
+                self.assertEqual(expected, outputs)
+
     def test_send_recv_all_to_all(self):
         store = c10d.FileStore(self.file.name)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
