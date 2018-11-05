@@ -200,7 +200,12 @@ static PyObject *THPVariable_is_leaf(THPVariable *self)
 static PyObject * THPVariable_get_data(THPVariable *self)
 {
   HANDLE_TH_ERRORS
-  return THPVariable_Wrap(make_variable(self->cdata.data(), false));
+  auto var = make_variable(self->cdata.data(), false);
+  /// NOTE: we need to set `allow_size_or_storage_change_` to false, because changing
+  /// size or storage of `tensor.data` will not update `tensor` in the near future
+  /// when VariableImpl and TensorImpl are merged.
+  var.data().unsafeGetTensorImpl()->set_allow_size_or_storage_change(false);
+  return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
 

@@ -83,6 +83,7 @@ int64_t SparseTensorImpl::storage_offset() const {
   AT_ERROR("sparse tensors do not have storage");
 }
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
+  AT_CHECK(allow_size_or_storage_change(), "set_indices_and_values_unsafe is not allowed on Tensor created from .data");
   AT_ASSERT(!indices.is_variable() && !values.is_variable());  // They should be plain tensors!
 
   AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
