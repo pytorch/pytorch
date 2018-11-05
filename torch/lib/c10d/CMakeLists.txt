@@ -34,6 +34,10 @@ function(copy_header file)
   configure_file(${file} ${CMAKE_BINARY_DIR}/include/c10d/${file} COPYONLY)
 endfunction()
 
+if(USE_NCCL)
+  option(USE_C10D_NCCL "USE C10D NCCL" ON)
+endif()
+
 if(MPI_FOUND)
   option(USE_C10D_MPI "USE C10D MPI" ON)
 endif()
@@ -142,7 +146,7 @@ install(TARGETS c10d
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib)
 
-option(BUILD_EXAMPLES "Build examples" ON)
+option(BUILD_EXAMPLES "Build examples" OFF)
 if(BUILD_EXAMPLES)
   add_subdirectory(example)
 endif()

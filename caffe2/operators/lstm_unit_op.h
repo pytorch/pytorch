@@ -158,11 +158,11 @@ class LSTMUnitOp : public Operator<Context> {
     const size_t TIMESTEP = SEQ_LENGTHS + (sequence_lengths_ ? 1 : 0);
 
     // Extract N
-    const auto N = Input(CELL_T_M_1).dim(1);
+    const auto N = Input(CELL_T_M_1).size(1);
 
     // Gates: 1xNxG
-    const auto G = Input(GATES).dim(2);
-    const auto D = Input(CELL_T_M_1).dim(2);
+    const auto G = Input(GATES).size(2);
+    const auto D = Input(CELL_T_M_1).size(2);
 
     CAFFE_ENFORCE_EQ(4 * D, G);
     const auto* H_prev = Input(HIDDEN_T_M_1).template data<T>();
@@ -243,11 +243,11 @@ class LSTMUnitGradientOp : public Operator<Context> {
     const size_t CELL_T_GRAD = inputOffset + 4;
 
     // Extract N
-    const auto N = Input(CELL_T_M_1).dim(1);
+    const auto N = Input(CELL_T_M_1).size(1);
 
     // Gates: 1xNxG
-    const auto G = Input(GATES).dim(2);
-    const auto D = Input(CELL_T_M_1).dim(2);
+    const auto G = Input(GATES).size(2);
+    const auto D = Input(CELL_T_M_1).size(2);
 
     CAFFE_ENFORCE_EQ(4 * D, G);
     const auto* C_prev = Input(CELL_T_M_1).template data<T>();

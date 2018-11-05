@@ -94,7 +94,9 @@ class BytesIOContext(io.BytesIO):
         pass
 
 
-class TestTorchMixin(object):
+# This is intentionally prefixed by an underscore. Otherwise pytest will try to
+# run its methods as test cases.
+class _TestTorchMixin(object):
     def _check_sum_dim(tensors, dim):
         for tensor in tensors:
             expected = tensor.numpy().sum(dim)
@@ -2645,6 +2647,20 @@ class TestTorchMixin(object):
         self.assertTrue(np.allclose(expected, result.numpy()))
 
     @staticmethod
+    def _test_diag_embed(self, dtype, device):
+        x = torch.arange(3 * 4, dtype=dtype, device=device).view(3, 4)
+        result = torch.diag_embed(x)
+        expected = torch.stack([torch.diag(r) for r in x], 0)
+        self.assertEqual(result, expected)
+
+        result = torch.diag_embed(x, offset=1, dim1=0, dim2=2)
+        expected = torch.stack([torch.diag(r, 1) for r in x], 1)
+        self.assertEqual(result, expected)
+
+    def test_diag_embed(self):
+        self._test_diag_embed(self, dtype=torch.float32, device='cpu')
+
+    @staticmethod
     def _test_diagflat(self, dtype, device):
         # Basic sanity test
         x = torch.randn((100,), dtype=dtype, device=device)
@@ -2833,7 +2849,7 @@ class TestTorchMixin(object):
                      "spawn start method is not supported in Python 2, \
                      but we need it for for testing failure case for CPU RNG on Windows")
     def test_multinomial_invalid_probs(self):
-        test_method = TestTorchMixin._test_multinomial_invalid_probs
+        test_method = _TestTorchMixin._test_multinomial_invalid_probs
         self._spawn_method(test_method, torch.Tensor([1, -1, 1]))
         self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
         self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
@@ -3713,6 +3729,7 @@ class TestTorchMixin(object):
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
         self.assertRaises(RuntimeError, lambda: torch.cat([]))
+        self.assertRaisesRegex(TypeError, 'got None', lambda: torch.cat([x, None]))
 
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1)
@@ -5302,19 +5319,19 @@ class TestTorchMixin(object):
         A = torch.mm(x, x.t())
 
         # default Case
-        C = torch.potrf(A)
-        B = torch.mm(C.t(), C)
+        C = torch.cholesky(A)
+        B = torch.mm(C, C.t())
         self.assertEqual(A, B, 1e-14)
 
         # test Upper Triangular
-        U = torch.potrf(A, True)
+        U = torch.cholesky(A, True)
         B = torch.mm(U.t(), U)
-        self.assertEqual(A, B, 1e-14, 'potrf (upper) did not allow rebuilding the original matrix')
+        self.assertEqual(A, B, 1e-14, 'cholesky (upper) did not allow rebuilding the original matrix')
 
         # test Lower Triangular
-        L = torch.potrf(A, False)
+        L = torch.cholesky(A, False)
         B = torch.mm(L, L.t())
-        self.assertEqual(A, B, 1e-14, 'potrf (lower) did not allow rebuilding the original matrix')
+        self.assertEqual(A, B, 1e-14, 'cholesky (lower) did not allow rebuilding the original matrix')
 
     @skipIfNoLapack
     def test_potrs(self):
@@ -5331,12 +5348,12 @@ class TestTorchMixin(object):
         a = torch.mm(a, a.t())
 
         # upper Triangular Test
-        U = torch.potrf(a)
-        x = torch.potrs(b, U)
+        U = torch.cholesky(a, True)
+        x = torch.potrs(b, U, True)
         self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
 
         # lower Triangular Test
-        L = torch.potrf(a, False)
+        L = torch.cholesky(a, False)
         x = torch.potrs(b, L, False)
         self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
 
@@ -5355,17 +5372,17 @@ class TestTorchMixin(object):
         inv0 = torch.inverse(a)
 
         # default case
-        chol = torch.potrf(a)
-        inv1 = torch.potri(chol)
+        chol = torch.cholesky(a)
+        inv1 = torch.potri(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # upper Triangular Test
-        chol = torch.potrf(a, True)
+        chol = torch.cholesky(a, True)
         inv1 = torch.potri(chol, True)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # lower Triangular Test
-        chol = torch.potrf(a, False)
+        chol = torch.cholesky(a, False)
         inv1 = torch.potri(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
@@ -6288,7 +6305,7 @@ class TestTorchMixin(object):
         idx_size = [m, n, o]
         idx_size[dim] = elems_per_row
         idx = torch.LongTensor().resize_(*idx_size)
-        TestTorchMixin._fill_indices(self, idx, dim, src.size(dim), elems_per_row, m, n, o)
+        _TestTorchMixin._fill_indices(self, idx, dim, src.size(dim), elems_per_row, m, n, o)
 
         src = cast(src)
         idx = cast(idx)
@@ -6326,7 +6343,7 @@ class TestTorchMixin(object):
         idx_size = [m, n, o]
         idx_size[dim] = elems_per_row
         idx = cast(torch.LongTensor().resize_(*idx_size))
-        TestTorchMixin._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
+        _TestTorchMixin._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
 
         if is_scalar:
             src = random.random()
@@ -6546,7 +6563,7 @@ class TestTorchMixin(object):
         self.assertEqual(tensor.view(1, 6, 2, 1), contig_tensor.view(1, 6, 2, 1))
 
     def test_view(self):
-        TestTorchMixin._test_view(self, lambda x: x)
+        _TestTorchMixin._test_view(self, lambda x: x)
 
     def test_view_empty(self):
         x = torch.randn(0, 6)
@@ -6689,6 +6706,10 @@ class TestTorchMixin(object):
             # flip
             self.assertEqual(x, x.flip(0))
             self.assertEqual(x, x.flip(2))
+
+            # roll
+            self.assertEqual(x, x.roll(0, 1).roll(0, -1))
+            self.assertEqual(x, x.roll(1, x.size(1)))
 
             # unbind
             self.assertEqual((), x.unbind(0))
@@ -7261,6 +7282,37 @@ class TestTorchMixin(object):
     def test_flip(self):
         self._test_flip(self, use_cuda=False)
 
+    def test_roll(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            numbers = torch.arange(1, 9, device=device)
+
+            single_roll = numbers.roll(1, 0)
+            expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device)
+            self.assertEqual(single_roll, expected, "{} did not equal expected result".format(single_roll))
+
+            data = numbers.view(2, 2, 2)
+            rolled = data.roll(1, 0)
+            expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], device=device).view(2, 2, 2)
+            self.assertEqual(expected, rolled, "{} did not equal expected result: {}".format(rolled, expected))
+
+            data = data.view(2, 4)
+            # roll a loop until back where started
+            loop_rolled = data.roll(2, 0).roll(4, 1)
+            self.assertEqual(data, loop_rolled, "{} did not equal the original: {}".format(loop_rolled, data))
+            # multiple inverse loops
+            self.assertEqual(data, data.roll(-20, 0).roll(-40, 1))
+            self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device), numbers.roll(1, 0))
+
+            # test non-contiguous
+            # strided equivalent to numbers.as_strided(size=(4, 2), stride=(1, 4))
+            strided = numbers.view(2, 4).transpose(0, 1)
+            self.assertFalse(strided.is_contiguous(), "this test needs a non-contiguous tensor")
+            expected = torch.tensor([4, 8, 1, 5, 2, 6, 3, 7]).view(4, 2)
+            rolled = strided.roll(1, 0)
+            self.assertEqual(expected, rolled,
+                             "non contiguous tensor rolled to {} instead of {} ".format(rolled, expected))
+
     def test_reversed(self):
         val = torch.arange(0, 10)
         self.assertEqual(reversed(val), torch.arange(9, -1, -1))
@@ -7402,6 +7454,17 @@ class TestTorchMixin(object):
         self.assertEqual(a.size(), deepcopy(a).size())
         self.assertEqual(a, deepcopy(a))
 
+    def test_deepcopy_parameter(self):
+        from copy import deepcopy
+        l = torch.nn.Linear(10, 1)
+        s = l.state_dict(keep_vars=True)
+        self.assertEqual(torch.nn.Parameter, type(s['weight']))
+        self.assertEqual(torch.nn.Parameter, type(s['bias']))
+
+        s2 = deepcopy(s)
+        self.assertEqual(torch.nn.Parameter, type(s2['weight']))
+        self.assertEqual(torch.nn.Parameter, type(s2['bias']))
+
     def test_copy(self):
         from copy import copy
         a = torch.randn(5, 5)
@@ -7475,7 +7538,7 @@ class TestTorchMixin(object):
         self.assertEqual(result, expected)
 
     @staticmethod
-    def _test_bernoulli(self, p_dtype, device):
+    def _test_bernoulli(self, t_dtype, p_dtype, device):
         for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
             x = torch.tensor(trivial_p, dtype=p_dtype, device=device)
             self.assertEqual(x.bernoulli().tolist(), trivial_p)
@@ -7497,8 +7560,7 @@ class TestTorchMixin(object):
         torch.bernoulli(torch.rand_like(p), out=p)
         self.assertTrue(isBinary(p))
 
-        # test that it works with integral tensors
-        t = torch.empty(10, 10, dtype=torch.uint8, device=device)
+        t = torch.empty(10, 10, dtype=t_dtype, device=device)
 
         t.fill_(2)
         t.bernoulli_(0.5)
@@ -7518,7 +7580,9 @@ class TestTorchMixin(object):
         self.assertTrue(isBinary(t))
 
     def test_bernoulli(self):
-        self._test_bernoulli(self, torch.double, 'cpu')
+        self._test_bernoulli(self, torch.float32, torch.float64, 'cpu')
+        # test that it works with integral tensors
+        self._test_bernoulli(self, torch.uint8, torch.float64, 'cpu')
 
     def test_normal(self):
         q = torch.Tensor(100, 100)
@@ -9135,6 +9199,24 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(b.type(), b_copy.type())
         self.assertEqual(b.data.type(), b_copy.type())
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    def test_reverse_binary_ops_multiple_device(self):
+        self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to("cuda:1"))    # __radd__
+        self.assertEqual(2 - torch.tensor(3), 2 - torch.tensor(3).to("cuda:1"))    # __rsub__
+        self.assertEqual(2 * torch.tensor(3), 2 * torch.tensor(3).to("cuda:1"))    # __rmul__
+        self.assertEqual(2 / torch.tensor(3), 2 / torch.tensor(3).to("cuda:1"))    # __rtruediv__
+        self.assertEqual(2 // torch.tensor(3), 2 // torch.tensor(3).to("cuda:1"))  # __rfloordiv__
+
+        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
+            torch.tensor(2).to("cuda:1") + torch.tensor(3).to("cuda:0")
+        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
+            torch.tensor(2).to("cuda:1") - torch.tensor(3).to("cuda:0")
+        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
+            torch.tensor(2).to("cuda:1") * torch.tensor(3).to("cuda:0")
+        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
+            torch.tensor(2).to("cuda:1") / torch.tensor(3).to("cuda:0")
+        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
+            torch.tensor(2).to("cuda:1") // torch.tensor(3).to("cuda:0")
 
 # Functions to test negative dimension wrapping
 METHOD = 1
@@ -9236,13 +9318,14 @@ def add_neg_dim_tests():
 
         test_name = 'test_' + name + '_neg_dim'
 
-        assert not hasattr(TestTorchMixin, test_name), "Duplicated test name: " + test_name
-        setattr(TestTorchMixin, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
+        assert not hasattr(_TestTorchMixin, test_name), "Duplicated test name: " + test_name
+        setattr(_TestTorchMixin, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
 
 add_neg_dim_tests()
 
-if __name__ == '__main__':
-    class TestTorch(TestCase, TestTorchMixin):
-        pass
 
+class TestTorch(TestCase, _TestTorchMixin):
+    pass
+
+if __name__ == '__main__':
     run_tests()

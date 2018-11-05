@@ -525,6 +525,13 @@ ceil_() -> Tensor
 In-place version of :meth:`~Tensor.ceil`
 """)
 
+add_docstr_all('cholesky',
+               r"""
+cholesky(upper=False) -> Tensor
+
+See :func:`torch.cholesky`
+""")
+
 add_docstr_all('clamp',
                r"""
 clamp(min, max) -> Tensor
@@ -678,6 +685,13 @@ add_docstr_all('diag',
 diag(diagonal=0) -> Tensor
 
 See :func:`torch.diag`
+""")
+
+add_docstr_all('diag_embed',
+               r"""
+diag_embed(offset=0, dim1=-2, dim2=-1) -> Tensor
+
+See :func:`torch.diag_embed`
 """)
 
 add_docstr_all('diagflat',
@@ -886,6 +900,13 @@ add_docstr_all('flip',
 flip(dims) -> Tensor
 
 See :func:`torch.flip`
+""")
+
+add_docstr_all('roll',
+               r"""
+roll(shifts, dims) -> Tensor
+
+See :func:`torch.roll`
 """)
 
 add_docstr_all('floor_',
@@ -1617,13 +1638,6 @@ Example:
     torch.Size([2, 3, 5])
     >>> x.permute(2, 0, 1).size()
     torch.Size([5, 2, 3])
-""")
-
-add_docstr_all('potrf',
-               r"""
-potrf(upper=True) -> Tensor
-
-See :func:`torch.potrf`
 """)
 
 add_docstr_all('potri',

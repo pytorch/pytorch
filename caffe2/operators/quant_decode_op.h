@@ -84,7 +84,7 @@ inline void DecodeGeneral(
                         REGISTER_DECODER(float, uint16_t),
                         REGISTER_DECODER(float, int32_t)};
 
-  gDecoderMapper.at({codebook.meta().id(), codes.meta().id()})(
+  gDecoderMapper.at({codebook.dtype().id(), codes.dtype().id()})(
       codebook, codes, gradient, outDecoded, resizeOnly);
 }
 
@@ -113,7 +113,7 @@ class QuantDecodeOp final : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(InputSize(), OutputSize() + 1);
 
     const auto& codebook = Input(0);
-    CAFFE_ENFORCE(codebook.template IsType<float>(), codebook.meta().name());
+    CAFFE_ENFORCE(codebook.template IsType<float>(), codebook.dtype().name());
 
     for (int i = 0; i < OutputSize(); i++) {
       auto& ci = Input(i + 1);
@@ -149,7 +149,7 @@ class QuantDecodeGradientOp final : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(OutputSize(), 1);
 
     const auto& codebook = Input(0);
-    CAFFE_ENFORCE(codebook.template IsType<float>(), codebook.meta().name());
+    CAFFE_ENFORCE(codebook.template IsType<float>(), codebook.dtype().name());
 
     auto* gradient = Output(0);
     gradient->ResizeLike(codebook);

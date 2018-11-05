@@ -63,8 +63,8 @@ struct ArgumentSpec {
     hash_code = num_flat_inputs;
     args.resize(num_flat_inputs);
     size_t offset = 0;
-    for (size_t i = 0; i < inputs.size(); ++i) {
-      addInput(inputs[i], offset, with_grad);
+    for (const auto& i : inputs) {
+      addInput(i, offset, with_grad);
     }
     JIT_ASSERT(offset == num_flat_inputs);
   }
@@ -192,7 +192,7 @@ struct CompleteArgumentSpec {
     data.resize(ninputs + all_dims*2);
 
     // and reinterpret our data array as these structs
-    CompleteArgumentInfoPOD * pods = reinterpret_cast<CompleteArgumentInfoPOD*>(data.data());
+    auto* pods = reinterpret_cast<CompleteArgumentInfoPOD*>(data.data());
     int64_t * next_dim = sizes_strides();
     int32_t total_dims = 0;
     for(int32_t i = 0; i < num_inputs; i++) {

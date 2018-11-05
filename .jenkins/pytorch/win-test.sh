@@ -51,7 +51,8 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 )
 call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3
 if NOT "%BUILD_ENVIRONMENT%"=="" (
-    call conda install -y -q numpy mkl cffi pyyaml boto3
+    :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
+    call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3
 )
 pip install ninja future hypothesis
 

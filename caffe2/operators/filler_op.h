@@ -370,9 +370,9 @@ class DiagonalFillOp final : public FillerOp<Context> {
   int64_t GetStepSize(Tensor* output) {
     int64_t step;
     if (output->ndim() == 2) {
-      step = output->dim(1) + 1;
+      step = output->size(1) + 1;
     } else {
-      int64_t prev_i = output->dim(0);
+      int64_t prev_i = output->size(0);
       for (auto i : output->sizes()) {
         if (i != prev_i) {
           CAFFE_THROW("All dimensions of input must be of equal length");

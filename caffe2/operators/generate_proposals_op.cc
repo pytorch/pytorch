@@ -26,7 +26,7 @@ template <class T>
 utils::ConstTensorView<T> GetSubTensorView(
     const TensorCPU& tensor,
     int dim0_start_index) {
-  DCHECK_EQ(tensor.meta().itemsize(), sizeof(T));
+  DCHECK_EQ(tensor.dtype().itemsize(), sizeof(T));
 
   if (tensor.numel() == 0) {
     return utils::ConstTensorView<T>(nullptr, {});
@@ -37,7 +37,7 @@ utils::ConstTensorView<T> GetSubTensorView(
   auto st_idx = ComputeStartIndex(tensor, start_dims);
   auto ptr = tensor.data<T>() + st_idx;
 
-  auto input_dims = tensor.dims();
+  auto input_dims = tensor.sizes();
   std::vector<int> ret_dims(input_dims.begin() + 1, input_dims.end());
 
   utils::ConstTensorView<T> ret(ptr, ret_dims);
@@ -54,8 +54,8 @@ ERMatXf ComputeAllAnchors(
     int width,
     float feat_stride) {
   const auto K = height * width;
-  const auto A = anchors.dim(0);
-  const auto box_dim = anchors.dim(1);
+  const auto A = anchors.size(0);
+  const auto box_dim = anchors.size(1);
   CAFFE_ENFORCE(box_dim == 4 || box_dim == 5);
 
   ERMatXf shift_x = (ERVecXf::LinSpaced(width, 0.0, width - 1.0) * feat_stride)
@@ -225,13 +225,13 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   auto* out_rois_probs = Output(1);
 
   CAFFE_ENFORCE_EQ(scores.ndim(), 4, scores.ndim());
-  CAFFE_ENFORCE(scores.template IsType<float>(), scores.meta().name());
-  const auto num_images = scores.dim(0);
-  const auto A = scores.dim(1);
-  const auto height = scores.dim(2);
-  const auto width = scores.dim(3);
+  CAFFE_ENFORCE(scores.template IsType<float>(), scores.dtype().name());
+  const auto num_images = scores.size(0);
+  const auto A = scores.size(1);
+  const auto height = scores.size(2);
+  const auto width = scores.size(3);
   const auto K = height * width;
-  const auto box_dim = anchors.dim(1);
+  const auto box_dim = anchors.size(1);
   CAFFE_ENFORCE(box_dim == 4 || box_dim == 5);
 
   // bbox_deltas: (num_images, A * box_dim, H, W)
@@ -242,11 +242,11 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   // im_info_tensor: (num_images, 3), format [height, width, scale; ...]
   CAFFE_ENFORCE_EQ(im_info_tensor.sizes(), (vector<int64_t>{num_images, 3}));
   CAFFE_ENFORCE(
-      im_info_tensor.template IsType<float>(), im_info_tensor.meta().name());
+      im_info_tensor.template IsType<float>(), im_info_tensor.dtype().name());
 
   // anchors: (A, box_dim)
   CAFFE_ENFORCE_EQ(anchors.sizes(), (vector<int64_t>{A, box_dim}));
-  CAFFE_ENFORCE(anchors.template IsType<float>(), anchors.meta().name());
+  CAFFE_ENFORCE(anchors.template IsType<float>(), anchors.dtype().name());
 
   // Broadcast the anchors to all pixels
   auto all_anchors_vec =
@@ -255,8 +255,8 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
 
   Eigen::Map<const ERArrXXf> im_info(
       im_info_tensor.data<float>(),
-      im_info_tensor.dim(0),
-      im_info_tensor.dim(1));
+      im_info_tensor.size(0),
+      im_info_tensor.size(1));
 
   const int roi_col_count = box_dim + 1;
   out_rois->Resize(0, roi_col_count);

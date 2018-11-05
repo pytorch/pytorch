@@ -5,9 +5,9 @@ def script(a1, i1):
   i = i1
   t6 = t5
   while t6:
-    i2 = aten::add(i, 1, 1)
+    i2 = aten::add_(i, 1, 1)
     t13 = aten::lt(i2, 3)
     t6 = prim::TensorToBool(t13)
-    a = aten::mul(a, a)
+    a = aten::mul_(a, a)
     i = i2
   return a

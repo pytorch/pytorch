@@ -47,9 +47,9 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
 
     CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    const int64_t N = dataInput.dim(0);
+    const int64_t N = dataInput.size(0);
     const int D = dataInput.size_from_dim(1);
-    const int64_t M = lengthsInput.dim(0);
+    const int64_t M = lengthsInput.size(0);
     const int64_t indices_size = indicesInput.numel();
 
     auto* output = Output(0);

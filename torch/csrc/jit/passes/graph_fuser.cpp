@@ -1,7 +1,8 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/assertions.h"
 #include "ATen/ExpandUtils.h"
@@ -15,171 +16,81 @@ namespace torch { namespace jit {
 
 namespace {
 
-// What is a simple mappable operator?  It is:
-//    - Has an output with the same sizes as its input
-//    - Single output
-//    - Can handle non-contiguous input
-//    - Produces contiguous output
+// What is a simple mappable operator?  It:
+//    - Has a single tensor output
+//    - Output and all tensor inputs have the same shape
+//    - Output and all tensor inputs have the same scalar type
+//    - Output and all tensor inputs should be on the same device
+//    - Produces contiguous outputs
 // Some of these restrictions may be relaxable, but you should
 // carefully read the code first, as we rely on these assumptions.
-std::unordered_set<NodeKind> simple_mappable = {
-  aten::__and__,
-  aten::__lshift__,
-  aten::__or__,
-  aten::__rshift__,
-  aten::__xor__,
-  aten::abs,
-  aten::acos,
-  aten::add,
-  aten::asin,
-  aten::atan,
-  aten::atan2,
-  aten::ceil,
-  aten::cos,
-  aten::cosh,
-  aten::div,
-  aten::eq,
-  aten::exp,
-  aten::expm1,
-  aten::floor,
-  aten::fmod,
-  aten::frac,
-  aten::ge,
-  aten::gt,
-  aten::le,
-  aten::lgamma,
-  aten::log,
-  aten::log10,
-  aten::log1p,
-  aten::log2,
-  aten::lt,
-  aten::max,
-  aten::min,
-  aten::mul,
-  aten::ne,
-  aten::neg,
-  aten::pow,
-  aten::reciprocal,
-  aten::relu,
-  aten::remainder,
-  aten::round,
-  aten::rsqrt,
-  aten::sigmoid,
-  aten::sin,
-  aten::sinh,
-  aten::sqrt,
-  aten::sub,
-  aten::tan,
-  aten::tanh,
-  aten::trunc,
-  aten::type_as,
-  aten::_sigmoid_backward,
-  aten::_tanh_backward,
-  aten::clamp,
-  // TODO support those
-  //aten::lerp,
-  aten::rand_like,
-};
-
 bool isSimpleMap(Node *node) {
-  // TODO: use signature matching
-  if(simple_mappable.count(node->kind()) == 0)
+  static OperatorSet simple_mappable {{
+    "aten::abs(Tensor self) -> Tensor",
+    "aten::acos(Tensor self) -> Tensor",
+    "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+    "aten::asin(Tensor self) -> Tensor",
+    "aten::atan(Tensor self) -> Tensor",
+    "aten::atan2(Tensor self, Tensor other) -> Tensor",
+    "aten::ceil(Tensor self) -> Tensor",
+    "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
+    "aten::cos(Tensor self) -> Tensor",
+    "aten::cosh(Tensor self) -> Tensor",
+    "aten::div(Tensor self, Tensor other) -> Tensor",
+    "aten::exp(Tensor self) -> Tensor",
+    "aten::expm1(Tensor self) -> Tensor",
+    "aten::floor(Tensor self) -> Tensor",
+    "aten::fmod(Tensor self, Tensor other) -> Tensor",
+    "aten::frac(Tensor self) -> Tensor",
+    "aten::lgamma(Tensor self) -> Tensor",
+    "aten::log(Tensor self) -> Tensor",
+    "aten::log10(Tensor self) -> Tensor",
+    "aten::log1p(Tensor self) -> Tensor",
+    "aten::log2(Tensor self) -> Tensor",
+    "aten::max(Tensor self, Tensor other) -> Tensor",
+    "aten::min(Tensor self, Tensor other) -> Tensor",
+    "aten::mul(Tensor self, Tensor other) -> Tensor",
+    "aten::neg(Tensor self) -> Tensor",
+    "aten::pow(Tensor self, Tensor exponent) -> Tensor",
+    "aten::rand_like(Tensor self) -> Tensor",
+    "aten::reciprocal(Tensor self) -> Tensor",
+    "aten::relu(Tensor self) -> Tensor",
+    "aten::remainder(Tensor self, Tensor other) -> Tensor",
+    "aten::round(Tensor self) -> Tensor",
+    "aten::rsqrt(Tensor self) -> Tensor",
+    "aten::sigmoid(Tensor self) -> Tensor",
+    "aten::sin(Tensor self) -> Tensor",
+    "aten::sinh(Tensor self) -> Tensor",
+    "aten::sqrt(Tensor self) -> Tensor",
+    "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+    "aten::tan(Tensor self) -> Tensor",
+    "aten::tanh(Tensor self) -> Tensor",
+    "aten::trunc(Tensor self) -> Tensor",
+    "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+    "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+    "aten::mul(Tensor self, Scalar other) -> Tensor",
+    "aten::div(Tensor self, Scalar other) -> Tensor",
+  }};
+  if (!simple_mappable.find(node)) {
     return false;
-  if((node->kind() == aten::min || node->kind() == aten::max) && node->inputs().size() == 1)
-    return false;
+  }
+  // Check that all non-tensor inputs are constant
+  for (Value * input : node->inputs()) {
+    if (input->type()->isSubtypeOf(DynamicType::get())) {
+      continue;
+    }
+    if (input->node()->kind() != prim::Constant) {
+      return false;
+    }
+  }
   return true;
 }
-
-enum class DeviceType { Unknown, AnyDevice, CPU, CUDA };
-
-struct Device {
-
-  DeviceType type() {
-    return type_;
-  }
-
-  int index() {
-    JIT_ASSERT(can_have_index(type_));
-    return index_;
-  }
-
-  static Device fromIndex(int index) {
-    JIT_ASSERT(index >= kCPUDevice);
-    if (index == kCPUDevice) {
-      return Device(DeviceType::CPU, index);
-    }
-    return Device(DeviceType::CUDA, index);
-  }
-
-  static Device AnyDevice() {
-    return Device(DeviceType::AnyDevice, 0);
-  }
-
-  static Device Unknown() {
-    return Device(DeviceType::Unknown, 0);
-  }
-
-private:
-  DeviceType type_;
-  int index_;
-
-  Device(DeviceType type, int index)
-  : type_(type), index_(index) {}
-
-  bool can_have_index(DeviceType type) {
-    return type == DeviceType::CPU || type == DeviceType::CUDA;
-  }
-};
-
 
 struct GraphFuser {
   Block * block;
 
   GraphFuser(Block * block)
-  : block(block) {}
-
-  Device getDevice(Node * node) {
-    if(node->kind() == prim::FusionGroup) {
-      return Device::fromIndex(node->i(attr::device));
-    }
-    if(auto tt = node->output()->type()->cast<TensorType>()) {
-      return Device::fromIndex(tt->device());
-    }
-    if (node->output()->type()->isSubtypeOf(NumberType::get())) {
-      return Device::AnyDevice();
-    }
-    return Device::Unknown();
-  }
-
-  // TODO: the fusion compiler has a lot of float-specific codegen
-  // so for now we only consider nodes that operate on floating point numbers
-  // and half values when running on a GPU with sufficient CUDA arch
-  bool hasSupportedType(Value* node) {
-    if (auto tt = node->type()->cast<TensorType>()) {
-      if (tt->scalarType() == at::kFloat) return true;
-      #ifdef USE_CUDA
-        // Checks for half tensor on GPU
-        if (tt->device() != kCPUDevice
-          && CUDA_VERSION >= 9
-          && tt->scalarType() == at::ScalarType::Half) {
-          return true;
-        }
-      #endif
-    }
-    return false;
-  }
-
-  bool hasSupportedType(Node* node) {
-    return haveSupportedType(node->inputs()) &&
-           haveSupportedType(node->outputs());
-  }
-
-  bool haveSupportedType(at::ArrayRef<Value*> list) {
-    for (Value *v : list) {
-      if (!hasSupportedType(v)) return false;
-    }
-    return true;
-  }
+    : block(block) {}
 
   value_list tensorInputs(Node * node) {
     return filter(node->inputs(), [](Value * v) {
@@ -187,52 +98,11 @@ struct GraphFuser {
     });
   }
 
-  // Checks if the node is fusible into a FusionGroup. A node is fusible if:
-  // - it is a FusionGroup
-  // - it is a simple map op and its inputs/outputs have compatible types.
-  // NB: two nodes that are fusible might not be fused together
-  // if they don't have compatible map_size.
   bool isFusable(Node * node) {
+    // We don't want to bother with cross-block node movements, as they
+    // are not necessarily correct.
     if (node->owningBlock() != block) return false;
-    if (node->kind() == prim::FusionGroup) return true;
-    if (!isSimpleMap(node)) return false;
-
-    if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-          /*const_inputs=*/attr::alpha) ||
-        node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-          /*const_inputs=*/{attr::other, attr::alpha}) ||
-        node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-          /*const_inputs=*/attr::alpha) ||
-        node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-          /*const_inputs=*/{attr::other, attr::alpha}) ||
-        node->matches("aten::mul(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
-        node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
-        node->matches("aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor", /*const_inputs=*/{attr::min, attr::max})) {
-      auto inputs = tensorInputs(node);
-      return haveSupportedType(inputs);
-    }
-    else if (
-        node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::lt(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
-        node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::le(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
-        node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::gt(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
-        node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::ge(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
-        node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::eq(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
-        node->matches("aten::ne(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::ne(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other)) {
-      // comparison operators produce Byte type, and it's ok, check only inputs
-      auto inputs = tensorInputs(node);
-      return haveSupportedType(inputs);
-    } else if (node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
-      // type_as can have different input types as long as output is float, check only output
-      return haveSupportedType(node->outputs());
-    } else {
-      return hasSupportedType(node);
-    }
+    return node->kind() == prim::FusionGroup || isSimpleMap(node);
   }
 
   bool isFusableCatNode(Node * node) {
@@ -240,13 +110,12 @@ struct GraphFuser {
       return false;
     if (!node->is_constant(attr::dim))
       return false;
-
     auto tensors_node = node->namedInput(attr::tensors)->node();
     if (tensors_node->kind() != prim::ListConstruct) return false;
     // NB: Note that technically other uses of the list aren't a big problem for us.
     // It would be enough to place the prim::FusedConcat before the prim::ListConstruct, and
     // allUsersAreThisConsumerOrOccurAfterIt would still be satisfied. However, I don't expect this
-    // to be necessary any time soon, and so we're simply assuming that we don't have to deal with that.
+    // to be necessary any time soon, and so we're simply assuming that we don't have to deal with it.
     if (tensors_node->output()->uses().size() > 1) return false;
     return true;
   }
@@ -263,21 +132,6 @@ struct GraphFuser {
     return isFusableCatNode(node) || node->kind() == prim::FusedConcat;
   }
 
-  // necessary condition for fusion. If all of the uses of producer are consumer
-  // then it is safe to merge producer into consumer, because it doesn't have any other uses
-  // If there are other uses, but they occur _after_ consumer, then we can still merge in producer
-  // with consumer, by rewriting those later uses to use the version of producer generated by the fused blob
-  // In this case, producer becomes an output of the fusion group.
-  bool allUsersAreThisConsumerOrOccurAfterIt(Node * consumer, Value * producer) {
-    auto defining_node = producer->node();
-    for(auto o : defining_node->outputs()) {
-      for(auto u : o->uses()) {
-        if(u.user != consumer && consumer->isAfter(u.user))
-          return false;
-      }
-    }
-    return true;
-  }
   bool allUsersAreThisConsumer(Node * consumer, Value * producer) {
     auto defining_node = producer->node();
     for(auto o : defining_node->outputs()) {
@@ -296,55 +150,6 @@ struct GraphFuser {
     auto subgraph = producer->node()->g(attr::Subgraph);
     auto * node = subgraph->outputs().at(producer->offset())->node();
     return isFusableOnlyAsExitNode(node);
-  }
-
-  // unknown (u) any (a) cpu (c) cuda (g) compatibility:
-  // x u a c g   y = yes
-  // u . . . .   . = no
-  // a . . y y
-  // c . y y .
-  // g . y . y
-  bool compatibleDevices(Node * consumer, Value * producer) {
-    auto consumer_device = getDevice(consumer);
-    auto producer_device = getDevice(producer->node());
-
-    if (consumer_device.type() == DeviceType::Unknown ||
-        producer_device.type() == DeviceType::Unknown) {
-      return false;
-    }
-
-    if (consumer_device.type() == DeviceType::CUDA &&
-        producer_device.type() == DeviceType::CPU) {
-      return false;
-    } else if (producer_device.type() == DeviceType::CUDA &&
-               consumer_device.type() == DeviceType::CPU) {
-      return false;
-    } else if (producer_device.type() == DeviceType::AnyDevice &&
-               consumer_device.type() == DeviceType::AnyDevice) {
-      // XXX: This case means we're fusing operations on non-constant numbers.
-      // The graph fuser doesn't support this at the moment (#9940).
-      return false;
-    }
-
-    // At this point, the devices are matched. Last thing to check
-    // is that if we're compiling on CPU, the fusion compiler works.
-    if (consumer_device.type() == DeviceType::CPU ||
-        producer_device.type() == DeviceType::CPU) {
-      return canFuseOnCPU();
-    }
-    return true;
-  }
-
-  bool shouldFuse(Node * consumer, Value * producer) {
-    // this handles cases where producer can be moved _into_ the fusion group of consumer.
-    // TODO: extend to fusion of consumer into _producer's_ fusion blob
-    // if the consumer allInputsAreThisProducer(consumer,producer)
-    // we can move the consumer up into the producer.
-    // but this requires better handling of merging fusion groups so it is not done now
-    Node *real_consumer = consumer->kind() == aten::cat ? consumer->namedInput(attr::tensors)->node() : consumer;
-    return isFusable(producer->node()) &&
-      allUsersAreThisConsumerOrOccurAfterIt(real_consumer, producer) &&
-      compatibleDevices(consumer, producer);
   }
 
   Graph & getSubgraph(Node * n) {
@@ -470,7 +275,7 @@ struct GraphFuser {
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   Node * createSingletonFusionGroup(Node * n) {
-    auto group = block->owningGraph()->createFusionGroup(getDevice(n).index());
+    auto group = block->owningGraph()->createFusionGroup();
     // propogate position information for the new node so we can always
     // have a valid mapping
     group->insertBefore(n);
@@ -482,16 +287,33 @@ struct GraphFuser {
     n->destroy();
     return group;
   }
-  void insertAfter(Node * n, Node * after) {
-    n->insertAfter(after);
-  }
 
+  // TODO: remove this and use WithInsertPoint instead
   void insertAt(Node ** insertion_point, Node * n) {
-    insertAfter(n, *insertion_point);
+    n->insertAfter(*insertion_point);
     *insertion_point = n;
   }
 
-  Node * fuse(Node * consumer, Value * producer) {
+  at::optional<Node*> tryFuse(Node * consumer, Value * producer) {
+    // this handles cases where producer can be moved _into_ the fusion group of consumer.
+    // TODO: extend to fusion of consumer into _producer's_ fusion blob
+    // if the consumer allInputsAreThisProducer(consumer,producer)
+    // we can move the consumer up into the producer.
+    // but this requires better handling of merging fusion groups so it is not done now
+    Node* real_consumer = consumer->kind() == aten::cat
+        ? consumer->namedInput(attr::tensors)->node()
+        : consumer;
+    bool shouldFuse = isFusable(producer->node()) &&
+        // Rearrange nodes such that all uses of producer are after the
+        // consumer. Fusion will rewrite those later uses to use the version of
+        // producer generated by the fused blob. In this case, producer becomes
+        // an output of the fusion group.
+        producer->node()->moveBeforeTopologicallyValid(real_consumer);
+
+    if (!shouldFuse) {
+      return at::nullopt;
+    }
+
     auto group = consumer;
     if (consumer->kind() == aten::cat) {
       Graph * graph = consumer->owningGraph();
@@ -737,9 +559,8 @@ struct GraphFuser {
 
       chunked_inputs.emplace_back(); // alas, to not be C++17
       for (auto chunk_sel : chunk->outputs()) {
-          auto chunk_sel_type = chunk_sel->type()->expect<TensorType>();
           Value * input_chunk_sel = input_chunk->addOutput();
-          input_chunk_sel->setType(chunk_sel_type);
+          input_chunk_sel->setType(chunk_sel->type());
           chunked_inputs.back().push_back(input_chunk_sel);
       }
     }
@@ -752,13 +573,13 @@ struct GraphFuser {
       chunked_op->copyAttributes(*producer_for_chunk_node);
       chunked_op->output()->setType(chunk_sel->type());
       auto chunked_inputs_it = chunked_inputs.begin();
-      for (size_t i = 0; i < original_inputs.size(); ++i) {
-        if (original_inputs[i]->type()->isSubtypeOf(DynamicType::get())) {
+      for (Value* original_input : original_inputs) {
+        if (original_input->type()->isSubtypeOf(DynamicType::get())) {
           JIT_ASSERT(chunked_inputs_it != chunked_inputs.end());
           chunked_op->addInput(chunked_inputs_it->at(chunk_sel->offset()));
           ++chunked_inputs_it;
         } else {
-          chunked_op->addInput(original_inputs[i]);
+          chunked_op->addInput(original_input);
         }
       }
       insertAt(&insertion_point, chunked_op);
@@ -787,11 +608,11 @@ struct GraphFuser {
           // we scan this consumer again to perform the fusion
           return std::make_pair(consumer->reverseIterator(), true);
         }
-        if(shouldFuse(consumer, producer)) {
-          auto fusion_group = fuse(consumer,producer);
-          // after fusion, consumer moves into a FusionGroup, so inputs is no longer valid
-          // so we rescan the new FusionGroup for more fusions...
-          return std::make_pair(fusion_group->reverseIterator(), true);
+        auto fusion_group = tryFuse(consumer, producer);
+        if (fusion_group) {
+          // after fusion, consumer moves into a FusionGroup, so inputs is no
+          // longer valid so we rescan the new FusionGroup for more fusions...
+          return std::make_pair(fusion_group.value()->reverseIterator(), true);
         }
       }
     }

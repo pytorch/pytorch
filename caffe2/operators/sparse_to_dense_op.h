@@ -68,7 +68,7 @@ class SparseToDenseOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(sparse_indices.ndim(), 1);
     auto& sparse_values = Input(VALUES);
     CAFFE_ENFORCE_GE(sparse_values.ndim(), 1);
-    CAFFE_ENFORCE_EQ(sparse_indices.numel(), sparse_values.dim(0));
+    CAFFE_ENFORCE_EQ(sparse_indices.numel(), sparse_values.size(0));
 
     const TInd* sparse_indices_vec = sparse_indices.template data<TInd>();
     const int32_t sparse_indices_len = sparse_indices.dim32(0);
@@ -106,7 +106,7 @@ class SparseToDenseOp final : public Operator<Context> {
   bool DoRunWithOtherType2() {
     CAFFE_THROW(
         "SparseToDense is not implemented on tensor of type ",
-        Input(VALUES).meta().name(),
+        Input(VALUES).dtype().name(),
         "Consider adding it a type in the list DispatchHelper or implementing "
         "a generic version (which won't work for duplicated indices though)");
   }

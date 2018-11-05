@@ -1832,6 +1832,11 @@ class TestNN(NNTestCase):
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
+    def test_threshold_int(self):
+        x = torch.tensor([-3, -2, -1, 0, 1, 2, 3])
+        expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
+        self.assertEqual(F.threshold(x, 0, 99), expected)
+
     def test_embedding_sparse_basic(self):
         embedding = nn.Embedding(10, 20, sparse=True)
         input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
@@ -2017,8 +2022,6 @@ class TestNN(NNTestCase):
         es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse).to(device, dtype)
         es.weight.data.copy_(torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
         input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=torch.long)
-
-        # Empty list is only handled in CPU for now
         offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
 
         grad_output = torch.tensor(
@@ -2089,6 +2092,16 @@ class TestNN(NNTestCase):
             es_weight_grad = es.weight.grad.to_dense()
         self.assertEqual(output, expected_output)
         self.assertEqual(es_weight_grad, expected_grad_weight, dtype2prec[dtype])
+
+        # test all empty bags
+        es.zero_grad()
+        inputs = torch.tensor([], dtype=torch.long, device=device)
+        offsets = torch.tensor([0, 0, 0, 0], device=device)
+        es(inputs, offsets).sum().backward()
+        dense_grad = es.weight.grad
+        if dense_grad.is_sparse:
+            dense_grad = dense_grad.to_dense()
+        self.assertEqual(dense_grad, torch.zeros_like(es.weight))
 
         # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
         def _test_vs_Embedding(N, D, B, L, max_norm=None):
@@ -5129,6 +5142,24 @@ class TestNN(NNTestCase):
         self.assertEqual(F.mse_loss(i, t, reduction='none').size(), t.size())
         self.assertEqual(F.l1_loss(i, t, reduction='none').size(), t.size())
 
+    def test_pointwise_loss_broadcast(self):
+        losses = {
+            'mse_loss': lambda x, y, r: F.mse_loss(x, y, reduction=r),
+            'l1_loss': lambda x, y, r: F.l1_loss(x, y, reduction=r),
+            'smooth_l1_loss': lambda x, y, r: F.smooth_l1_loss(x, y, reduction=r),
+        }
+
+        input = torch.randn(2, 1, requires_grad=True)
+        for name, fn in losses.items():
+            for requires_grad in [True, False]:
+                # When target.requires_grad=True, its impl is in Python, while the other is in TH.
+                target = torch.randn(2, 10, requires_grad=requires_grad)
+                for reduction in ['none', 'mean', 'sum']:
+                    l = fn(input, target, reduction)
+                    if reduction == 'none':
+                        self.assertEqual(l.size(), target.size())
+                    self.assertTrue(gradcheck(fn, (input, target, reduction)))
+
     def test_cosine_similarity(self):
         input1 = torch.randn(4, 4, requires_grad=True)
         input2 = torch.randn(4, 4, requires_grad=True)
@@ -6809,7 +6840,7 @@ new_criterion_tests = [
         input_size=(),
         target_size=(),
         reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
-                                      (i.numel() if get_reduction(m) == 'elementwise_mean' else 1)),
+                                      (i.numel() if get_reduction(m) == 'mean' else 1)),
         check_sum_reduction=True,
         desc='scalar'
     ),
@@ -6818,7 +6849,7 @@ new_criterion_tests = [
         input_fn=lambda: torch.ones(5, 68, 64, 64, dtype=torch.float) / 10,
         target_fn=lambda: torch.zeros(5, 68, 64, 64, dtype=torch.float),
         reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
-                                      (i.numel() if get_reduction(m) == 'elementwise_mean' else 1)),
+                                      (i.numel() if get_reduction(m) == 'mean' else 1)),
         check_forward_only=True,
         desc='prec',
     ),
@@ -6828,7 +6859,7 @@ new_criterion_tests = [
         input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.rand(()).gt(0).double(),
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
-            (i.numel() if get_reduction(m) == 'elementwise_mean' else 1),
+            (i.numel() if get_reduction(m) == 'mean' else 1),
         desc='scalar_weights',
         check_gradgrad=False,
     ),
@@ -6855,7 +6886,7 @@ new_criterion_tests = [
         input_fn=lambda: torch.randn(5, 10),
         target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
         reference_fn=lambda i, t, m: -((t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * get_weight(m)).sum() /
-            (i.numel() if get_reduction(m) == 'elementwise_mean' else i.size(1) if get_reduction(m) == 'sum' else 1),
+            (i.numel() if get_reduction(m) == 'mean' else i.size(1) if get_reduction(m) == 'sum' else 1),
         desc='weights',
         check_sum_reduction=True,
         check_gradgrad=False,

@@ -46,13 +46,13 @@ static void check_cat_no_zero_dim(TensorList tensors) {
 Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat_out(result, tensors, dim);
+  return at::_th_cat_out(result, tensors, dim);
 }
 
 Tensor cat(TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat(tensors, dim);
+  return at::_th_cat(tensors, dim);
 }
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
@@ -126,6 +126,22 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   return self.as_strided(sizes, strides, storage_offset);
 }
 
+Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_) {
+  int64_t nDims = self.dim() + 1;
+  int64_t dim1 = maybe_wrap_dim(dim1_, nDims);
+  int64_t dim2 = maybe_wrap_dim(dim2_, nDims);
+  AT_CHECK(dim1 != dim2, "diagonal dimensions cannot be identical ", dim1_, ", ", dim2_);
+  int64_t new_dim_len = std::abs(offset) + self.size(-1);
+  auto sizes = self.sizes().vec();
+  sizes.pop_back();
+  sizes.insert(sizes.begin() + std::min(dim1, dim2), new_dim_len);
+  sizes.insert(sizes.begin() + std::max(dim1, dim2), new_dim_len);
+  auto result = at::zeros(sizes, self.options());
+  auto diag = result.diagonal(offset, dim1, dim2);
+  diag.copy_(self);
+  return result;
+}
+
 Tensor expand(const Tensor& self, IntList size, bool implicit) {
   // [expand implicit]
   // The implicit flag is set to true for any expand calls inserted by broadcast
@@ -151,23 +167,17 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
-  auto result = at::empty({0}, self.options());
-  setStorage(
-      result,
-      self.storage(),
-      storage_offset,
-      size,
-      stride);
+  auto tid = self.type_id();
+  AT_CHECK(
+      tid == CPUTensorId() || tid == CUDATensorId(),
+      "as_strided is only implemented for strided CPU and CUDA tensors.");
+  auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), tid, false);
+  setStrided(result, size, stride, storage_offset);
   return result;
 }
 
 Tensor &as_strided_(Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
-  setStorage(
-      self,
-      self.storage(),
-      storage_offset,
-      size,
-      stride);
+  setStrided(self, size, stride, storage_offset);
   return self;
 }
 

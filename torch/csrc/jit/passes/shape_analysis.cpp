@@ -38,6 +38,12 @@ int64_t wrapDim(int64_t dim, at::IntList sizes) {
   return dim;
 }
 
+// TODO: Would be better to make JIT not assume that CUDA devices
+// are the only thing that exist.
+static at::Device jitDeviceIndexToDevice(int device) {
+  return device == -1 ? at::kCPU : at::Device(at::kCUDA, device);
+}
+
 IValue representativeValue(Value* v) {
   TypePtr type_ = v->type();
   // if the value is actually constant, just use it!
@@ -46,9 +52,9 @@ IValue representativeValue(Value* v) {
   }
   if (CompleteTensorTypePtr type = type_->cast<CompleteTensorType>()) {
     auto backend = type->device() == -1 ? at::Backend::CPU : at::Backend::CUDA;
-    at::DeviceGuard device_guard(type->device());
+    at::DeviceGuard device_guard(jitDeviceIndexToDevice(type->device()));
     auto& attype = at::getNonVariableType(backend, type->scalarType());
-    auto t = attype.tensor(type->sizes(), type->strides()).zero_();
+    auto t = at::empty_strided(type->sizes(), type->strides(), attype.options()).zero_();
     return autograd::make_variable(t, /*requires_grad=*/false);
   } else if (type_->isSubtypeOf(FloatType::get())) {
     return 0.f;
@@ -348,6 +354,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     }
     case prim::PythonOp:
     case prim::Print:
+    case prim::RaiseException:
     case prim::Undefined: {
       setUnshapedType(node);
       return;
@@ -429,7 +436,6 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::t(Tensor self) -> Tensor",
     "aten::sigmoid(Tensor self) -> Tensor",
     "aten::tanh(Tensor self) -> Tensor",
-    "aten::exp(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
     "aten::asin(Tensor self) -> Tensor",
     "aten::atan(Tensor self) -> Tensor",
@@ -531,8 +537,6 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::mul(Tensor self, Tensor other) -> Tensor",
     "aten::div(Tensor self, Tensor other) -> Tensor",
     "aten::pow(Tensor self, Tensor exponent) -> Tensor",
-    "aten::min(Tensor self, Tensor other) -> Tensor",
-    "aten::max(Tensor self, Tensor other) -> Tensor",
     "aten::fmod(Tensor self, Tensor other) -> Tensor",
     "aten::remainder(Tensor self, Tensor other) -> Tensor",
     "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",

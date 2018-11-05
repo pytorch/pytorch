@@ -1,16 +1,22 @@
-import shutil
-import subprocess
+from __future__ import absolute_import, division, print_function
+
 import os
+import subprocess
 import sys
-from shutil import copytree, ignore_patterns
 from functools import reduce
+
+from pyHIPIFY import hipify_python
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
 
 includes = [
     "aten/*",
-    "torch/*"
+    "torch/*",
+]
+
+ignores = [
+    "aten/src/ATen/core/*",
 ]
 
 # List of operators currently disabled
@@ -60,15 +66,11 @@ for root, _directories, files in os.walk(os.path.join(proj_dir, "torch")):
                 f.flush()
                 os.fsync(f)
 
-# Execute the Hipify Script.
-args = (["--project-directory", proj_dir] +
-        ["--output-directory", proj_dir] +
-        ["--includes"] + includes +
-        ["--yaml-settings", yaml_file] +
-        ["--add-static-casts", "True"] +
-        ["--show-progress", "False"])
-
-subprocess.check_call([
-    sys.executable,
-    os.path.join(amd_build_dir, "pyHIPIFY", "hipify-python.py")
-] + args)
+hipify_python.hipify(
+    project_directory=proj_dir,
+    output_directory=proj_dir,
+    includes=includes,
+    ignores=ignores,
+    yaml_settings=yaml_file,
+    add_static_casts_option=True,
+    show_progress=False)

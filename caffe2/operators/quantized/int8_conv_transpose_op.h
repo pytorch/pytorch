@@ -46,18 +46,18 @@ class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
     Y->scale = Y_scale;
     Y->zero_point = Y_offset;
 
-    const auto N = X.t.dim(0);
-    const auto IH = X.t.dim(1);
-    const auto IW = X.t.dim(2);
-    const auto IC = X.t.dim(3);
+    const auto N = X.t.size(0);
+    const auto IH = X.t.size(1);
+    const auto IW = X.t.size(2);
+    const auto IC = X.t.size(3);
 
-    CHECK_EQ(IC, W.t.dim(0));
-    const auto KH = W.t.dim(1);
-    const auto KW = W.t.dim(2);
-    const auto OC = W.t.dim(3);
+    CHECK_EQ(IC, W.t.size(0));
+    const auto KH = W.t.size(1);
+    const auto KW = W.t.size(2);
+    const auto OC = W.t.size(3);
 
     ConvTransposeUnpoolBase<CPUContext>::SetOutputSize(X.t, &(Y->t), OC);
-    CHECK_EQ(OC, Y->t.dim(3));
+    CHECK_EQ(OC, Y->t.size(3));
 
     runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
       initQNNPACK();
@@ -106,28 +106,28 @@ class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
         memcpy(inputPtr, X.t.template data<uint8_t>(), X.t.numel());
       }
 
-      if (lastBatchSize_ != static_cast<size_t>(X.t.dim(0)) ||
-          lastInputHeight_ != static_cast<size_t>(X.t.dim(1)) ||
-          lastInputWidth_ != static_cast<size_t>(X.t.dim(2)) ||
+      if (lastBatchSize_ != static_cast<size_t>(X.t.size(0)) ||
+          lastInputHeight_ != static_cast<size_t>(X.t.size(1)) ||
+          lastInputWidth_ != static_cast<size_t>(X.t.size(2)) ||
           lastInputPointer_ != inputPtr ||
           lastOutputPointer_ != Y->t.template mutable_data<uint8_t>()) {
         const qnnp_status setupStatus = qnnp_setup_deconvolution2d_nhwc_q8(
             this->qnnpackObject_,
-            X.t.dim(0),
-            X.t.dim(1),
-            X.t.dim(2),
+            X.t.size(0),
+            X.t.size(1),
+            X.t.size(2),
             inputPtr,
-            X.t.dim(3) /* input pixel stride */,
+            X.t.size(3) /* input pixel stride */,
             Y->t.template mutable_data<uint8_t>(),
-            Y->t.dim(3) /* output pixel stride */,
+            Y->t.size(3) /* output pixel stride */,
             nullptr /* threadpool */);
         CAFFE_ENFORCE(
             setupStatus == qnnp_status_success,
             "failed to setup QNNPACK convolution object");
 
-        lastBatchSize_ = static_cast<size_t>(X.t.dim(0));
-        lastInputHeight_ = static_cast<size_t>(X.t.dim(1));
-        lastInputWidth_ = static_cast<size_t>(X.t.dim(2));
+        lastBatchSize_ = static_cast<size_t>(X.t.size(0));
+        lastInputHeight_ = static_cast<size_t>(X.t.size(1));
+        lastInputWidth_ = static_cast<size_t>(X.t.size(2));
         lastInputPointer_ = inputPtr;
         lastOutputPointer_ = Y->t.template mutable_data<uint8_t>();
       }
