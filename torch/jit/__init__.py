@@ -10,6 +10,7 @@ from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     COMPILATION_PENDING
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple
 import torch.testing
+import torch.jit._utils
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
 import warnings
@@ -1354,26 +1355,9 @@ def _find_builtin(fn):
 
 # Python equivalents for the empty list construction builtins. We need
 # these otherwise the tests won't execute in regular Python mode.
-def _construct_empty_int_list():
-    return []
-
-
-_register_builtin(_construct_empty_int_list, 'aten::_construct_empty_int_list')
-
-
-def _construct_empty_float_list():
-    return []
-
-
-_register_builtin(_construct_empty_float_list, 'aten::_construct_empty_float_list')
-
-
-def _construct_empty_tensor_list():
-    return []
-
-
-_register_builtin(_construct_empty_tensor_list, 'aten::_construct_empty_tensor_list')
-
+_register_builtin(torch.jit._utils._construct_empty_int_list, 'aten::_construct_empty_int_list')
+_register_builtin(torch.jit._utils._construct_empty_float_list, 'aten::_construct_empty_float_list')
+_register_builtin(torch.jit._utils._construct_empty_tensor_list, 'aten::_construct_empty_tensor_list')
 
 _register_builtin(len, 'aten::len')
 
