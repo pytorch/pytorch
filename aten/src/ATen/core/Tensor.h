@@ -583,7 +583,7 @@ public:
   Tensor & squeeze_();
   Tensor & squeeze_(int64_t dim);
   Tensor sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
-  Tensor stft(int64_t n_fft, c10::optional<int64_t> hop_length, c10::optional<int64_t> win_length, const Tensor & window={}, bool normalized=false, bool onesided=true) const;
+  Tensor stft(int64_t n_fft, c10::optional<int64_t> hop_length=c10::nullopt, c10::optional<int64_t> win_length=c10::nullopt, const Tensor & window={}, bool normalized=false, bool onesided=true) const;
   int64_t stride(int64_t dim) const;
   Tensor sum(ScalarType dtype) const;
   Tensor sum() const;

@@ -1344,7 +1344,7 @@ static inline int64_t _min_storage_size(IntList sizes, IntList strides, int64_t 
 }
 
 // See NOTE [ as_strided Backward and layout-aware/agnostic autograd ] for explanation
-Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, optional<int64_t> storage_offset) {
+Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, int64_t storage_offset) {
   // For output geometry,
   //   check for size 0 dimensions,
   //   skip size 1 dimensions,
@@ -1409,9 +1409,9 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   //       more sensible to raise here.
 
   // Step (1): create underlying tensor as "storage"
-  auto shared_offset = std::min(input_geometry.storage_offset(), *storage_offset);
+  auto shared_offset = std::min(input_geometry.storage_offset(), storage_offset);
   auto inp_effective_offset = input_geometry.storage_offset() - shared_offset;
-  auto out_effective_offset = *storage_offset - shared_offset;
+  auto out_effective_offset = storage_offset - shared_offset;
   auto base_size = std::max(
     _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
     _min_storage_size(out_sizes_, out_strides_, out_effective_offset)

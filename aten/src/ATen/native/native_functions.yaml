@@ -1567,7 +1567,7 @@
 # missing the `pad_mode` and `center` arguments, which are taken care of at
 # `torch.functional.py`. They shall be moved here once we have mapping between
 # Python strings and C++ Enum in codegen.
-- func: stft(Tensor self, int64_t n_fft, int64_t? hop_length, int64_t? win_length, Tensor? window={}, bool normalized=false, bool onesided=true) -> Tensor
+- func: stft(Tensor self, int64_t n_fft, int64_t? hop_length=None, int64_t? win_length=None, Tensor? window={}, bool normalized=false, bool onesided=true) -> Tensor
   variants: function, method
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
