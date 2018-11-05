@@ -172,7 +172,28 @@ static PyObject *THPModule_setWorkerPIDs(PyObject *module, PyObject *args) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject *THPModule_removeWorkerPIDs(PyObject *module, PyObject *loader_id) {
+static PyObject *THPModule_removeWorkerPID(PyObject *module, PyObject *args) {
+  HANDLE_TH_ERRORS
+  if (PyTuple_GET_SIZE(args) != 2) {
+    throw TypeError("_remove_worker_pid expectes exactly 2 arguments.");
+  }
+
+  int64_t key = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 0));
+  auto it = worker_pids.find(key);
+  if (it == worker_pids.end()) {
+    throw ValueError("Cannot find worker information for _DataLoaderIter with id %ld.", key);
+  }
+
+  int64_t child_pid = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
+  if (it->second.erase(static_cast<pid_t>(child_pid)) == 0) {
+    throw ValueError("PID %ld is not a registered PID for _DataLoaderIter with id %ld.", child_pid, key);
+  };
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject *THPModule_removeAllWorkerPIDs(PyObject *module, PyObject *loader_id) {
   HANDLE_TH_ERRORS
 
   int64_t key = THPUtils_unpackLong(loader_id);
@@ -199,7 +220,11 @@ static PyObject *THPModule_setWorkerPIDs(PyObject *module, PyObject *_ignored) {
   Py_RETURN_NONE;
 }
 
-static PyObject *THPModule_removeWorkerPIDs(PyObject *module, PyObject *_ignored) {
+static PyObject *THPModule_removeWorkerPID(PyObject *module, PyObject *_ignored) {
+  Py_RETURN_NONE;
+}
+
+static PyObject *THPModule_removeAllWorkerPIDs(PyObject *module, PyObject *_ignored) {
   Py_RETURN_NONE;
 }
 
@@ -212,7 +237,8 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *_ig
 PyMethodDef DataLoaderMethods[] = {
   {"_set_worker_signal_handlers",  (PyCFunction)THPModule_setWorkerSignalHandlers,  METH_NOARGS,   nullptr},
   {"_set_worker_pids",             (PyCFunction)THPModule_setWorkerPIDs,            METH_VARARGS,  nullptr},
-  {"_remove_worker_pids",          (PyCFunction)THPModule_removeWorkerPIDs,         METH_O,        nullptr},
+  {"_remove_worker_pid",           (PyCFunction)THPModule_removeWorkerPID,          METH_VARARGS,  nullptr},
+  {"_remove_all_worker_pids",      (PyCFunction)THPModule_removeAllWorkerPIDs,      METH_O,        nullptr},
   {"_error_if_any_worker_fails",   (PyCFunction)THPModule_errorIfAnyWorkerFails,    METH_NOARGS,   nullptr},
   {nullptr, nullptr, 0, nullptr}
 };

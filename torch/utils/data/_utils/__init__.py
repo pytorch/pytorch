@@ -10,6 +10,7 @@ folder.
 import sys
 import traceback
 import atexit
+import itertools
 
 
 IS_WINDOWS = sys.platform == "win32"
@@ -56,6 +57,37 @@ def _set_python_exit_flag():
     python_exit_status = True
 
 atexit.register(_set_python_exit_flag)
+
+
+from .. import Sampler
+
+
+class ConstantSampler(Sampler):
+    r"""A sampler that always return the same value :attr:`value` infinitely or
+    for :attr:`length` times. This is like ``itertools.repeat(value, length)``
+    but is a subclass of :class:`torch.utils.data.Sampler`.
+
+    .. note:: This is used as the dummy sampler when the dataset is an
+    :class:`torch.utils.data.IterableDataset`.
+
+    Arguments:
+        value: the value that is always returned
+        length: the length of this sampler. If ``None`` (default), this sampler
+                is infinite.
+    """
+
+    def __init__(self, value, length=None):
+        self.value = value
+        self.length = length
+        self.iterable = itertools.repeat(value, length)
+
+    def __iter__(self):
+        return iter(self.iterable)
+
+    def __len__(self):
+        if self.length is None:
+            raise NotImplementedError
+        return self.length
 
 
 from . import worker, signal_handling, pin_memory, collate

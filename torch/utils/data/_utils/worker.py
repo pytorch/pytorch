@@ -88,7 +88,14 @@ def get_worker_info():
     return _worker_info
 
 
-def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed, init_fn, worker_id):
+class IterableDatasetStopIteration(object):
+    r"""Dummy class used to signal the end of an IterableDataset"""
+    def __init__(self, worker_id):
+        self.worker_id = worker_id
+
+
+def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
+                 collate_fn, seed, init_fn, worker_id):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 
@@ -114,6 +121,25 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
         if init_fn is not None:
             init_fn(worker_id)
 
+        from torch.utils.data import DataLoaderMode
+
+        if mode == DataLoaderMode.Iterable:
+            dataset_iter = iter(dataset)
+
+        # When using Iterable mode, some worker can exit earlier than others due
+        # to the IterableDataset behaving differently for different workers.
+        # When such things happen, an `IterableDatasetStopIteration` object is
+        # sent over to the main process with the ID of this worker, so that the
+        # main process won't send more tasks to this worker, and will send
+        # `None` to this worker to properly exit it.
+        #
+        # Note that we cannot set `done_event` from a worker as it is shared
+        # among all processes. Instead, we set the `iteration_end` flag to
+        # signify that the iterator is exhausted. When either `done_event` or
+        # `iteration_end` is set, we skip all processing step and just wait for
+        # `None`.
+        iteration_end = False
+
         watchdog = ManagerWatchdog()
 
         while watchdog.is_alive():
@@ -123,23 +149,34 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
                 continue
             if r is None:
                 # Received the final signal
-                assert done_event.is_set()
+                assert done_event.is_set() or iteration_end
                 return
-            elif done_event.is_set():
+            elif done_event.is_set() or iteration_end:
                 # Done event is set. But I haven't received the final signal
                 # (None) yet. I will keep continuing until get it, and skip the
                 # processing steps.
                 continue
-            idx, batch_indices = r
+            idx, index = r
             try:
-                samples = collate_fn([dataset[i] for i in batch_indices])
+                if mode == DataLoaderMode.Iterable:
+                    try:
+                        data = convert_fn(next(dataset_iter))
+                    except StopIteration:
+                        data = IterableDatasetStopIteration(worker_id)
+                        iteration_end = True  # don't waste resource in future iter
+                elif mode == DataLoaderMode.Map:
+                    data = convert_fn(dataset[index])
+                else:
+                    # mode == DataLoaderMode.MapWithBatchedRead:
+                    data = collate_fn([convert_fn(dataset[i]) for i in index])
             except Exception:
                 # It is important that we don't store exc_info in a variable,
                 # see NOTE [ Python Traceback Reference Cycle Problem ]
                 data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
             else:
-                data_queue.put((idx, samples))
-                del samples
+                data_queue.put((idx, data))
+                del data
+            del idx, index, r
     except KeyboardInterrupt:
         # Main process will raise KeyboardInterrupt anyways.
         pass

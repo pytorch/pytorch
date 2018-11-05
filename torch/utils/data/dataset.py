@@ -1,12 +1,13 @@
 import bisect
 import warnings
+import itertools
 
 from torch._utils import _accumulate
 from torch import randperm
 
 
 class Dataset(object):
-    """An abstract class representing a Dataset.
+    r"""An abstract class representing a :class:`Dataset`.
 
     All other datasets should subclass it. All subclasses should override
     ``__len__``, that provides the size of the dataset, and ``__getitem__``,
@@ -23,8 +24,26 @@ class Dataset(object):
         return ConcatDataset([self, other])
 
 
+class IterableDataset(Dataset):
+    r"""An iterable Dataset.
+
+    All other datasets should subclass it. All subclasses should override
+    ``__len__``, that provides the size of the dataset, and ``__getitem__``,
+    supporting integer indexing in range from 0 to len(self) exclusive.
+    """
+
+    def __iter__(self):
+        raise NotImplementedError
+
+    def __len__(self):
+        raise NotImplementedError
+
+    def __add__(self, other):
+        return itertools.chain(self, other)
+
+
 class TensorDataset(Dataset):
-    """Dataset wrapping tensors.
+    r"""Dataset wrapping tensors.
 
     Each sample will be retrieved by indexing tensors along the first dimension.
 
@@ -44,7 +63,7 @@ class TensorDataset(Dataset):
 
 
 class ConcatDataset(Dataset):
-    """
+    r"""
     Dataset to concatenate multiple datasets.
     Purpose: useful to assemble different existing datasets, possibly
     large-scale datasets as the concatenation operation is done in an
@@ -88,7 +107,7 @@ class ConcatDataset(Dataset):
 
 
 class Subset(Dataset):
-    """
+    r"""
     Subset of a dataset at specified indices.
 
     Arguments:
@@ -107,7 +126,7 @@ class Subset(Dataset):
 
 
 def random_split(dataset, lengths):
-    """
+    r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
 
     Arguments:

@@ -13,7 +13,7 @@ import subprocess
 import itertools
 import warnings
 from torch import multiprocessing as mp
-from torch.utils.data import _utils, Dataset, TensorDataset, DataLoader, ConcatDataset
+from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC,
@@ -246,6 +246,16 @@ class SeedDataset(Dataset):
         return self.size
 
 
+class WorkerSpecificIterableDataset(IterableDataset):
+    def __init__(self, sizes_for_all_workers):
+        self.sizes_for_all_workers = sizes_for_all_workers
+
+    def __iter__(self):
+        worker_info = torch.utils.data.get_worker_info()
+        assert worker_info is not None
+        return iter(range(self.sizes_for_all_workers[worker_info.id]))
+
+
 # Inspired by https://stackoverflow.com/a/26703365
 # If all workers will call `sync_once`, they will be blocked until all workers
 # reach the call (i.e., acting like a barrier).
@@ -313,7 +323,7 @@ def _test_segfault():
     _ = next(iter(dataloader))
 
 
-class TestProperExitDataset(object):
+class TestProperExitDataset(Dataset):
     def __init__(self, size, error_event):
         self.size = size
         self.error_event = error_event
@@ -327,9 +337,32 @@ class TestProperExitDataset(object):
         return torch.tensor([idx])
 
 
+class TestProperExitIterableDataset(IterableDataset):
+    def __init__(self, size, error_event):
+        self.error_event = error_event
+        self.size = size
+        self.remaining = size
+
+    def __len__(self):
+        return self.size
+
+    def __iter__(self):
+        if self.error_event is not None and self.error_event.is_set():
+            raise RuntimeError('Worker error')
+        return self
+
+    def __next__(self):
+        if self.error_event is not None and self.error_event.is_set():
+            raise RuntimeError('Worker error')
+        self.remaining -= 1
+        if self.remaining < 0:
+            raise StopIteration
+        return torch.tensor(-1000)
+
+
 # See TestDataLoader.test_proper_exit for usage
-def _test_proper_exit(use_workers, pin_memory, exit_method, hold_iter_reference,
-                      loader_setup_event, tester_setup_event):
+def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
+                      hold_iter_reference, loader_setup_event, tester_setup_event):
     num_workers = 2 if use_workers else 0
 
     if exit_method == 'worker_error' or exit_method == 'worker_kill':
@@ -340,16 +373,28 @@ def _test_proper_exit(use_workers, pin_memory, exit_method, hold_iter_reference,
     else:
         worker_error_event = None
 
-    ds = TestProperExitDataset(12, worker_error_event)
+    if is_iterable_dataset:
+        ds = TestProperExitIterableDataset(5, worker_error_event)
+    else:
+        ds = TestProperExitDataset(12, worker_error_event)
 
     loader = DataLoader(ds, batch_size=1, shuffle=False,
                         num_workers=num_workers, pin_memory=pin_memory)
+
     error_it = 2
 
     if use_workers:
         # 2 is the magical per-worker prefetch number...
         # FIXME: change this after the number becomes configurable.
-        assert len(loader) > (error_it + 2 + 1) * num_workers
+        if is_iterable_dataset:
+            assert len(ds) > (error_it + 2 + 1)
+        else:
+            assert len(loader) > (error_it + 2 + 1) * num_workers
+    else:
+        if is_iterable_dataset:
+            assert len(ds) > error_it + 1
+        else:
+            assert len(loader) > error_it + 1
 
     it = iter(loader)
     if use_workers:
@@ -562,6 +607,16 @@ class TestDataLoader(TestCase):
             finally:
                 p.terminate()
 
+    def test_iterable_dataset(self):
+        num_workers = 3
+        sizes_for_all_workers = [0, 4, 20]
+        expected = set(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
+        dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
+        dataloader = DataLoader(dataset, num_workers=num_workers)
+        retrieved = set(d.item() for d in dataloader)
+        self.assertEqual(retrieved, expected)
+
     def test_worker_seed(self):
         num_workers = 6
         batch_size = 1
@@ -772,7 +827,9 @@ class TestDataLoader(TestCase):
         # TODO: test the case where the pin_memory_thread triggers an
         #       error/fatal signal. I haven't found out how to properly do that.
 
-        for use_workers, pin_memory, hold_iter_reference in itertools.product([True, False], repeat=3):
+        for is_iterable_dataset, use_workers, pin_memory, hold_iter_reference in \
+                itertools.product([True, False], repeat=4):
+
             # `hold_iter_reference` specifies whether we hold a reference to the
             # iterator. This is interesting because Python3 error traces holds a
             # reference to the frames, which hold references to all the local
@@ -814,9 +871,9 @@ class TestDataLoader(TestCase):
                 tester_setup_event = mp.Event()
 
                 loader_p = ErrorTrackingProcess(target=_test_proper_exit,
-                                                args=(use_workers, pin_memory, exit_method,
-                                                      hold_iter_reference, loader_setup_event,
-                                                      tester_setup_event))
+                                                args=(is_iterable_dataset, use_workers, pin_memory,
+                                                      exit_method, hold_iter_reference,
+                                                      loader_setup_event, tester_setup_event))
                 loader_p.start()
 
                 # Wait for loader process to set everything up, e.g., starting
