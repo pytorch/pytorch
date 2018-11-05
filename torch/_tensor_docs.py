@@ -687,6 +687,13 @@ diag(diagonal=0) -> Tensor
 See :func:`torch.diag`
 """)
 
+add_docstr_all('diag_embed',
+               r"""
+diag_embed(offset=0, dim1=-2, dim2=-1) -> Tensor
+
+See :func:`torch.diag_embed`
+""")
+
 add_docstr_all('diagflat',
                r"""
 diagflat(diagonal=0) -> Tensor

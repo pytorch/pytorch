@@ -586,6 +586,9 @@
 - func: det(Tensor self) -> Tensor
   variants: function, method
 
+- func: diag_embed(Tensor self, int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) -> Tensor
+  variants: function, method
+
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
   variants: function, method
 

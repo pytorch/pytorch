@@ -2647,6 +2647,20 @@ class _TestTorchMixin(object):
         self.assertTrue(np.allclose(expected, result.numpy()))
 
     @staticmethod
+    def _test_diag_embed(self, dtype, device):
+        x = torch.arange(3 * 4, dtype=dtype, device=device).view(3, 4)
+        result = torch.diag_embed(x)
+        expected = torch.stack([torch.diag(r) for r in x], 0)
+        self.assertEqual(result, expected)
+
+        result = torch.diag_embed(x, offset=1, dim1=0, dim2=2)
+        expected = torch.stack([torch.diag(r, 1) for r in x], 1)
+        self.assertEqual(result, expected)
+
+    def test_diag_embed(self):
+        self._test_diag_embed(self, dtype=torch.float32, device='cpu')
+
+    @staticmethod
     def _test_diagflat(self, dtype, device):
         # Basic sanity test
         x = torch.randn((100,), dtype=dtype, device=device)
