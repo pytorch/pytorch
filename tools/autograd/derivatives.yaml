@@ -214,11 +214,17 @@
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
-- name: _th_cumprod(Tensor self, int64_t dim)
+- name: cumprod(Tensor self, int64_t dim)
   self: cumprod_backward(grad, self, dim)
 
-- name: _th_cumsum(Tensor self, int64_t dim)
+- name: cumprod(Tensor self, int64_t dim, *, ScalarType dtype)
+  self: cumprod_backward(grad, self, dim, dtype)
+
+- name: cumsum(Tensor self, int64_t dim)
   self: cumsum_backward(grad, dim)
+
+- name: cumsum(Tensor self, int64_t dim, *, ScalarType dtype)
+  self: cumsum_backward(grad, dim, self.type().scalarType())
 
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad)
   self, weight, bias: conv_tbc_backward(grad, self, weight, bias, pad)
