@@ -769,11 +769,102 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   throw std::runtime_error("ProcessGroupGloo does not support allgather");
 }
 
+namespace {
+
+class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
+ public:
+  AsyncGatherWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<std::vector<at::Tensor>>& outputs,
+      std::vector<at::Tensor>& inputs,
+      int root,
+      uint32_t tag)
+      : context(context),
+        outputs(outputs),
+        inputs(inputs),
+        root(root),
+        tag(tag) {}
+
+  std::shared_ptr<gloo::Context> context;
+  std::vector<std::vector<at::Tensor>> outputs;
+  std::vector<at::Tensor> inputs;
+  const int root;
+  const uint32_t tag;
+
+  void run() override {
+    const auto scalarType = inputs[0].type().scalarType();
+    gloo::GatherOptions opts(context);
+    opts.setRoot(root);
+    opts.setTag(tag);
+
+    // Set single temporary tensor on root process.
+    // This is later scattered to the separate output tensors.
+    at::Tensor flatOutputTensor;
+    if (context->rank == root) {
+      flatOutputTensor = newLikeFlat(outputs[0]);
+      GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
+    }
+
+    // Set single input tensor on all processes.
+    GENERATE_ALL_TYPES(scalarType, setInput, opts, inputs[0]);
+    gloo::gather(opts);
+
+    // Unflatten into output tensors on root process.
+    if (context->rank == root) {
+      for (size_t i = 0; i < outputs[0].size(); i++) {
+        outputs[0][i].copy_(flatOutputTensor[i]);
+      }
+    }
+  }
+};
+
+} // namespace
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
-    std::vector<std::vector<at::Tensor>>& /* unused */,
-    std::vector<at::Tensor>& /* unused */,
-    const GatherOptions& /* unused */) {
-  throw std::runtime_error("ProcessGroupGloo does not support gather");
+    std::vector<std::vector<at::Tensor>>& outputs,
+    std::vector<at::Tensor>& inputs,
+    const GatherOptions& opts) {
+  static auto invalidArgument = [](const std::string& msg) {
+    throw std::invalid_argument("ProcessGroupGloo::gather: " + msg);
+  };
+
+  if (opts.rootRank < 0 || opts.rootRank >= size_) {
+    invalidArgument("invalid root rank: " + std::to_string(opts.rootRank));
+  }
+
+  if (inputs.size() != 1) {
+    invalidArgument("requires a single input tensor");
+  }
+
+  const auto& layout = inputs[0].layout();
+  const auto& device = inputs[0].device();
+  const auto& type = inputs[0].type();
+  const auto& sizes = inputs[0].sizes();
+  if (layout != at::kStrided || device.type() != at::kCPU) {
+    invalidArgument("only supports dense CPU tensors");
+  }
+
+  if (getRank() == opts.rootRank) {
+    if (outputs.size() != 1 || outputs[0].size() != getSize()) {
+      invalidArgument(
+          "requires single output tensor list, "
+          "itself containing <size> output tensors");
+    }
+    const auto& output = outputs[0];
+    for (size_t i = 0; i < output.size(); i++) {
+      assertTypeMatch(invalidArgument, type, output, i);
+      assertSizesMatch(invalidArgument, sizes, output, i);
+    }
+  } else {
+    if (outputs.size() != 0) {
+      invalidArgument("requires empty output on non-root");
+    }
+  }
+
+  auto work = std::make_shared<AsyncGatherWork>(
+      contexts_[0], outputs, inputs, opts.rootRank, nextTag());
+  enqueue(std::bind(AsyncWork::execute, work));
+  return work;
 }
 
 namespace {
