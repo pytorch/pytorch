@@ -721,53 +721,166 @@ void ProcessGroupGloo::enqueue(std::function<void()> fn) {
   queueProduceCV_.notify_one();
 }
 
+namespace {
+
+class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
+ public:
+  AsyncBroadcastWork(
+      std::shared_ptr<gloo::Context>& context,
+      std::vector<at::Tensor>& inputs,
+      int rootRank,
+      int rootTensor,
+      uint32_t tag)
+      : context(context),
+        inputs(inputs),
+        rootRank(rootRank),
+        rootTensor(rootTensor),
+        tag(tag) {}
+
+  std::shared_ptr<gloo::Context> context;
+  std::vector<at::Tensor> inputs;
+  const int rootRank;
+  const int rootTensor;
+  const uint32_t tag;
+
+  void broadcast(at::Tensor& tensor) {
+    const auto& scalarType = tensor.scalar_type();
+    gloo::BroadcastOptions opts(context);
+    opts.setRoot(rootRank);
+    opts.setTag(tag);
+    GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensor);
+    gloo::broadcast(opts);
+  }
+
+  void run() override {
+    broadcast(inputs[rootTensor]);
+
+    // Copy to non-root tensors
+    for (size_t i = 0; i < inputs.size(); i++) {
+      if (i == rootTensor) {
+        continue;
+      }
+      inputs[i].copy_(inputs[rootTensor]);
+    }
+  }
+};
+
+#ifdef USE_CUDA
+
+class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
+ public:
+  AsyncBroadcastCUDAWork(
+      std::shared_ptr<gloo::Context>& context,
+      std::vector<at::Tensor>& inputs,
+      int rootRank,
+      int rootTensor,
+      uint32_t tag)
+      : AsyncBroadcastWork(context, inputs, rootRank, rootTensor, tag) {
+    at::cuda::CUDAGuard guard;
+    initializeStreamsEvents(guard, inputs, streams, events);
+
+    // Create pinned host side tensors.
+    tmp = pinnedLike(inputs[rootTensor]);
+    if (context->rank == rootRank) {
+      guard.set_stream(streams[rootTensor]);
+      tmp.copy_(inputs[rootTensor], /* non_blocking */ true);
+    }
+  }
+
+  void run() override {
+    at::cuda::CUDAGuard guard;
+
+    // Synchronize with copy operation if applicable.
+    if (context->rank == rootRank) {
+      guard.set_stream(streams[rootTensor]);
+      AT_CUDA_CHECK(cudaStreamSynchronize(streams[rootTensor]));
+    }
+
+    // Run broadcast on host side tensors.
+    broadcast(tmp);
+
+    // Kick off copy back to the CUDA tensors.
+    for (size_t i = 0; i < inputs.size(); i++) {
+      guard.set_stream(streams[i]);
+      inputs[i].copy_(tmp, /* non_blocking */ true);
+      events[i].record(streams[i]);
+    }
+  }
+
+  void synchronize() override {
+    at::cuda::CUDAGuard guard;
+
+    // Synchronize with the copy back to CUDA tensors.
+    for (size_t i = 0; i < inputs.size(); i++) {
+      guard.set_device(inputs[i].get_device());
+      events[i].block(at::cuda::getCurrentCUDAStream());
+    }
+  }
+
+  at::Tensor tmp;
+  std::vector<at::cuda::CUDAStream> streams;
+  std::vector<at::cuda::CUDAEvent> events;
+};
+
+#endif
+
+} // namespace
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
-    std::vector<at::Tensor>& tensors,
+    std::vector<at::Tensor>& inputs,
     const BroadcastOptions& opts) {
-  assertSameSizeAndType(tensors);
+  static auto invalidArgument = [](const std::string& msg) {
+    throw std::invalid_argument("ProcessGroupGloo::broadcast: " + msg);
+  };
 
-  AlgorithmKey key;
-  key.collectiveType = CollectiveType::BROADCAST;
-  key.type = &tensors[0].type();
-  key.devices = getDevices(tensors);
-  key.srcSizes = getSizes(tensors);
-  key.srcRank = opts.rootRank;
-  key.srcTensor = opts.rootTensor;
-
-  // Retrieve (create or wait for) pointer to cache entry
-  auto entry = checkout(key);
-
-  // Only copy root tensor
-  if (getRank() == opts.rootRank) {
-    entry->src[opts.rootTensor].copy_(tensors[opts.rootTensor]);
+  if (opts.rootRank < 0 || opts.rootRank >= size_) {
+    invalidArgument("invalid root rank: " + std::to_string(opts.rootRank));
   }
 
+  if (opts.rootTensor < 0 || opts.rootTensor >= inputs.size()) {
+    invalidArgument("invalid root tensor: " + std::to_string(opts.rootTensor));
+  }
+
+  const auto& layout = inputs[0].layout();
+  const auto& device = inputs[0].device();
+  const auto& type = inputs[0].type();
+  const auto& sizes = inputs[0].sizes();
+  if (layout != at::kStrided) {
+    invalidArgument("only supports dense tensors");
+  }
+
+  switch (device.type()) {
+    case at::kCPU:
 #ifdef USE_CUDA
-  // In case of CUDA, ensure that operations that are queued after
-  // this collective wait for the collective to complete.
-  if (key.type->is_cuda()) {
-    auto thcState = ::at::globalContext().lazyInitCUDA();
-    synchronizeStreams(thcState, entry);
-    entry->run = [=]() mutable {
-      entry->algorithm->run();
-      for (size_t i = 0; i < tensors.size(); i++) {
-        at::cuda::CUDAGuard guard(entry->streams[i]);
-        tensors[i].copy_(entry->src[i]);
-      }
-    };
+    case at::kCUDA:
+#endif
+      break;
+    default:
+      invalidArgument("unsupported device type");
+  }
+
+  // Expect all input tensors to have the same type and sizes
+  for (size_t i = 1; i < inputs.size(); i++) {
+    assertTypeMatch(invalidArgument, type, inputs, i);
+    assertSizesMatch(invalidArgument, sizes, inputs, i);
+  }
+
+  std::shared_ptr<AsyncBroadcastWork> work;
+  auto& context = contexts_[0];
+  if (device.type() == at::kCPU) {
+    work = std::make_shared<AsyncBroadcastWork>(
+        context, inputs, opts.rootRank, opts.rootTensor, nextTag());
+#ifdef USE_CUDA
+  } else if (device.type() == at::kCUDA) {
+    work = std::make_shared<AsyncBroadcastCUDAWork>(
+        context, inputs, opts.rootRank, opts.rootTensor, nextTag());
+#endif
   } else {
-#endif
-    entry->run = [=]() mutable {
-      entry->algorithm->run();
-      for (size_t i = 0; i < tensors.size(); i++) {
-        tensors[i].copy_(entry->src[i]);
-      }
-    };
-#ifdef USE_CUDA
+    throw std::runtime_error("Invalid backend");
   }
-#endif
 
-  return enqueue(entry);
+  enqueue(std::bind(AsyncWork::execute, work));
+  return work;
 }
 
 namespace {
