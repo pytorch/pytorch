@@ -146,9 +146,13 @@ needed to represent neural network models in Torch.
     ScriptModules, you can use this flag to force everything to run using native
     Python. This allows the use of tools like ``pdb`` to debug code.
 
-    :func:`torch.jit.is_enabled` can be used to query whether JIT is enabled.
+.. attribute:: torch.jit.enabled
 
-.. autofunction:: torch.jit.is_enabled
+    :attr:`torch.jit.enabled` can be used to query whether JIT is enabled.
+
+    .. note::
+        Currently, this flag is *read-only*. In future, we may allow writing it
+        to dynamically enable/disable JIT.
 
 Types
 ~~~~~
@@ -571,7 +575,7 @@ Disable JIT for Debugging
     and we will be able to step into the ``@script`` function as a normal Python
     function.
 
-    Additionally, :func:`torch.jit.is_enabled` can be used to query whether JIT
+    Additionally, :attr:`torch.jit.enabled` can be used to query whether JIT
     is enabled.
 
 
