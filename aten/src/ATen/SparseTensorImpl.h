@@ -63,6 +63,7 @@ public:
   // WARNING: This function does NOT preserve invariants of sparse_dim/dense_dim with
   // respect to indices and values
   void raw_resize_(int64_t sparse_dim, int64_t dense_dim, IntList size) {
+    AT_CHECK(allow_size_or_storage_change(), "raw_resize_ is not allowed on Tensor created from .data");
     size_ = size.vec();
     sparse_dim_ = sparse_dim;
     dense_dim_ = dense_dim;
@@ -92,6 +93,7 @@ public:
   // 4. When we attempt to shrink the size of any of the sparse dimensions on a non-empty sparse tensor
   // (this could make some of the stored indices out-of-bound and thus unsafe).
   void resize_(int64_t sparse_dim, int64_t dense_dim, IntList size) {
+    AT_CHECK(allow_size_or_storage_change(), "resize_ is not allowed on Tensor created from .data");
     AT_CHECK(sparse_dim + dense_dim == size.size(), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
     if (nnz() > 0) {
       auto alt_options_msg = "You could try the following options:\n\
@@ -149,6 +151,7 @@ public:
 
   // NOTE: this function will resize the sparse tensor and also set `indices` and `values` to empty.
   void resize_and_clear_(int64_t sparse_dim, int64_t dense_dim, IntList size) {
+    AT_CHECK(allow_size_or_storage_change(), "resize_and_clear_ is not allowed on Tensor created from .data");
     AT_CHECK(sparse_dim + dense_dim == size.size(), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
 
     size_ = size.vec();
@@ -164,10 +167,14 @@ public:
     refresh_numel();
   }
 
-  void set_coalesced(bool coalesced) { coalesced_ = coalesced; }
+  void set_coalesced(bool coalesced) {
+    AT_CHECK(allow_size_or_storage_change(), "set_coalesced is not allowed on Tensor created from .data");
+    coalesced_ = coalesced;
+  }
 
   // NOTE: this function is only used internally and not exposed to Python frontend
   void set_nnz_and_narrow(int64_t new_nnz) {
+    AT_CHECK(allow_size_or_storage_change(), "set_nnz_and_narrow is not allowed on Tensor created from .data");
     AT_ASSERT(new_nnz <= nnz());
     indices_ = indices_.narrow(1, 0, new_nnz);
     values_ = values_.narrow(0, 0, new_nnz);

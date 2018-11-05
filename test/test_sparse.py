@@ -1847,6 +1847,16 @@ class TestSparse(TestCase):
         with self.assertRaisesRegex(RuntimeError, "bool value of Tensor with no values is ambiguous"):
             torch.sparse_coo_tensor(([0, 1],), self.ValueTensor(2, 0), (4, 0)).is_nonzero()
 
+    def test_allow_size_or_storage_change(self):
+        def do_test(t):
+            a = self.SparseTensor(3, 3)
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+                t.resize_as_(a)
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+                t.transpose_(0, 1)
+
+        do_test(self.SparseTensor(3, 0).data)
+
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):

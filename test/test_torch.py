@@ -9414,6 +9414,26 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
             torch.tensor(2).to("cuda:1") // torch.tensor(3).to("cuda:0")
 
+    def test_allow_size_or_storage_change(self):
+        def do_test(t):
+            a = torch.tensor([[1], [2]])
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+                t.resize_((2, 1))
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+                t.resize_as_(a)
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+                t.set_()
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+                t.set_(a)
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+                t.set_(a.storage())
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+                t.set_(source=a.storage(), storage_offset=0, size=(1, 1), stride=(1, 1))
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+                t.transpose_(0, 1)
+
+        do_test(torch.tensor([[1, 2]]).data)
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2

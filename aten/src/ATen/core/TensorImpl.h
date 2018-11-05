@@ -729,6 +729,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void resize_dim(int64_t ndim) {
+    AT_CHECK(allow_size_or_storage_change(), "resize_dim is not allowed on Tensor created from .data");
     sizes_.resize(ndim, 0);
     strides_.resize(ndim, 0);
     refresh_numel();
@@ -744,6 +745,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_size(int64_t dim, int64_t new_size) {
+    AT_CHECK(allow_size_or_storage_change(), "set_size is not allowed on Tensor created from .data");
     sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
@@ -756,6 +758,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_stride(int64_t dim, int64_t new_stride) {
+    AT_CHECK(allow_size_or_storage_change(), "set_stride is not allowed on Tensor created from .data");
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
@@ -769,6 +772,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * (and resizing if necessary.)
    */
   virtual void set_storage_offset(int64_t storage_offset) {
+    AT_CHECK(allow_size_or_storage_change(), "set_storage_offset is not allowed on Tensor created from .data");
     storage_offset_ = storage_offset;
   }
 
@@ -783,6 +787,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_contiguous(at::IntList new_size) {
+    AT_CHECK(allow_size_or_storage_change(), "set_sizes_contiguous is not allowed on Tensor created from .data");
     AT_ASSERT(!is_variable());
     auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
@@ -807,6 +812,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_and_strides(at::IntList new_size, at::IntList new_stride) {
+    AT_CHECK(allow_size_or_storage_change(), "set_sizes_and_strides is not allowed on Tensor created from .data");
     AT_ASSERT(!is_variable());
     AT_CHECK(
         new_size.size() == new_stride.size(),
@@ -860,6 +866,20 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
    */
   bool is_variable() const { return is_variable_; };
+
+  /**
+   * Set whether a tensor allows size or storage changes.
+   */
+  void set_allow_size_or_storage_change(bool value) {
+    allow_size_or_storage_change_ = value;
+  }
+
+  /**
+   * True if a tensor allows size or storage changes.
+   */
+  bool allow_size_or_storage_change() const {
+    return allow_size_or_storage_change_;
+  }
 
   // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
   // because it requires unique ownership.
@@ -1465,6 +1485,7 @@ protected:
   bool is_contiguous_ = true;
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
+  bool allow_size_or_storage_change_ = true;
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
   // The logic is that if Extend() or ReserveSpace() were ever called,
