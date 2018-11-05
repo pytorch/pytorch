@@ -4620,6 +4620,39 @@ Example::
              [ 0,  1]]])
 """)
 
+add_docstr(torch.roll,
+           r"""
+roll(input, shifts, dims) -> Tensor
+
+Roll the tensor along the given dimension. Elements that are shifted beyond the
+last position are re-introduced at the first position.
+
+Args:
+    input (Tensor): the input tensor
+    shifts (int or tuple of ints): The number of places by which the elements
+        of the tensor are shifted
+    dims (int or tuple of ints): Axis along which to roll
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8]).view(4, 2)
+    >>> x
+    tensor([[1, 2],
+            [3, 4],
+            [5, 6],
+            [7, 8]])
+    >>> torch.roll(x, 1, 0)
+    tensor([[7, 8],
+            [1, 2],
+            [3, 4],
+            [5, 6]])
+    >>> torch.roll(x, -1, 0)
+    tensor([[3, 4],
+            [5, 6],
+            [7, 8],
+            [1, 2]])
+""")
+
 add_docstr(torch.rot90,
            r"""
 rot90(input, k, dims) -> Tensor

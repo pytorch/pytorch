@@ -6693,6 +6693,10 @@ class _TestTorchMixin(object):
             self.assertEqual(x, x.flip(0))
             self.assertEqual(x, x.flip(2))
 
+            # roll
+            self.assertEqual(x, x.roll(0, 1).roll(0, -1))
+            self.assertEqual(x, x.roll(1, x.size(1)))
+
             # unbind
             self.assertEqual((), x.unbind(0))
             self.assertEqual((torch.empty((0, 1, 0), device=device), torch.empty((0, 1, 0), device=device)),
@@ -7263,6 +7267,37 @@ class _TestTorchMixin(object):
 
     def test_flip(self):
         self._test_flip(self, use_cuda=False)
+
+    def test_roll(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            numbers = torch.arange(1, 9, device=device)
+
+            single_roll = numbers.roll(1, 0)
+            expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device)
+            self.assertEqual(single_roll, expected, "{} did not equal expected result".format(single_roll))
+
+            data = numbers.view(2, 2, 2)
+            rolled = data.roll(1, 0)
+            expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], device=device).view(2, 2, 2)
+            self.assertEqual(expected, rolled, "{} did not equal expected result: {}".format(rolled, expected))
+
+            data = data.view(2, 4)
+            # roll a loop until back where started
+            loop_rolled = data.roll(2, 0).roll(4, 1)
+            self.assertEqual(data, loop_rolled, "{} did not equal the original: {}".format(loop_rolled, data))
+            # multiple inverse loops
+            self.assertEqual(data, data.roll(-20, 0).roll(-40, 1))
+            self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device), numbers.roll(1, 0))
+
+            # test non-contiguous
+            # strided equivalent to numbers.as_strided(size=(4, 2), stride=(1, 4))
+            strided = numbers.view(2, 4).transpose(0, 1)
+            self.assertFalse(strided.is_contiguous(), "this test needs a non-contiguous tensor")
+            expected = torch.tensor([4, 8, 1, 5, 2, 6, 3, 7]).view(4, 2)
+            rolled = strided.roll(1, 0)
+            self.assertEqual(expected, rolled,
+                             "non contiguous tensor rolled to {} instead of {} ".format(rolled, expected))
 
     def test_reversed(self):
         val = torch.arange(0, 10)
