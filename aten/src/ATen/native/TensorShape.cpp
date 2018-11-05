@@ -88,11 +88,11 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
   // We now need to move the indices of each
   // input tensor up along `dim` by an appropriate amount.
   // E.g., if t1 has indices [[2,3,4],[5,6,7]], 
-  // and sizes [7, 10]
+  // and sizes [10, 7]
   // then torch.cat((t1,t1,t1),1) should have indices
-  // [[2,3,4,2,3,4,2,3,4],[5,6,7,10,11,12,15,16,17]],
-  // so we need to increase idxs[1][3:6] by 5 
-  // and idxs[1][6:9] by 10.
+  // [[2,3,4,2,3,4,2,3,4],[5,6,7,12,13,14,19,20,21]],
+  // so we need to increase idxs[1][3:6] by 7 
+  // and idxs[1][6:9] by 14.
   int64_t col = 0;
   int64_t cumulative_offset = 0;
   for (size_t i = 0; i < tensors.size(); ++i) {
