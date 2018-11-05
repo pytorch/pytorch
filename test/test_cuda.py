@@ -1008,6 +1008,13 @@ class TestCuda(TestCase):
             self.assertEqual(bt.get_device(), bct.get_device())
             self.assertIsInstance(bct, type(bt))
 
+        # check that the tensors have different version counters
+        versions = [t._version for t in bc_tensors_t]
+        for old_version, t in zip(versions, bc_tensors_t):
+            self.assertEqual(t._version, old_version)
+            t_()
+            self.assertEqual(t._version, old_version + 1)
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @skipIfRocm
     def test_broadcast_coalesced(self):
