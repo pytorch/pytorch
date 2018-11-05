@@ -12,7 +12,7 @@
 #include <hip/hip_fp16.h>
 #endif
 
-namespace at {
+namespace c10 {
 
 /// Constructors
 
@@ -219,14 +219,14 @@ inline C10_HOST_DEVICE Half operator/(int64_t a, Half b) {
 }
 
 /// NOTE: we do not define comparisons directly and instead rely on the implicit
-/// conversion from at::Half to float.
+/// conversion from c10::Half to float.
 
-} // namespace at
+} // namespace c10
 
 namespace std {
 
 template <>
-class numeric_limits<at::Half> {
+class numeric_limits<c10::Half> {
  public:
   static constexpr bool is_specialized = true;
   static constexpr bool is_signed = true;
@@ -253,32 +253,32 @@ class numeric_limits<at::Half> {
   static constexpr auto traps = numeric_limits<float>::traps;
   static constexpr auto tinyness_before =
       numeric_limits<float>::tinyness_before;
-  static constexpr at::Half min() {
-    return at::Half(0x0400, at::Half::from_bits);
+  static constexpr c10::Half min() {
+    return c10::Half(0x0400, c10::Half::from_bits);
   }
-  static constexpr at::Half lowest() {
-    return at::Half(0xFBFF, at::Half::from_bits);
+  static constexpr c10::Half lowest() {
+    return c10::Half(0xFBFF, c10::Half::from_bits);
   }
-  static constexpr at::Half max() {
-    return at::Half(0x7BFF, at::Half::from_bits);
+  static constexpr c10::Half max() {
+    return c10::Half(0x7BFF, c10::Half::from_bits);
   }
-  static constexpr at::Half epsilon() {
-    return at::Half(0x1400, at::Half::from_bits);
+  static constexpr c10::Half epsilon() {
+    return c10::Half(0x1400, c10::Half::from_bits);
   }
-  static constexpr at::Half round_error() {
-    return at::Half(0x3800, at::Half::from_bits);
+  static constexpr c10::Half round_error() {
+    return c10::Half(0x3800, c10::Half::from_bits);
   }
-  static constexpr at::Half infinity() {
-    return at::Half(0x7C00, at::Half::from_bits);
+  static constexpr c10::Half infinity() {
+    return c10::Half(0x7C00, c10::Half::from_bits);
   }
-  static constexpr at::Half quiet_NaN() {
-    return at::Half(0x7E00, at::Half::from_bits);
+  static constexpr c10::Half quiet_NaN() {
+    return c10::Half(0x7E00, c10::Half::from_bits);
   }
-  static constexpr at::Half signaling_NaN() {
-    return at::Half(0x7D00, at::Half::from_bits);
+  static constexpr c10::Half signaling_NaN() {
+    return c10::Half(0x7D00, c10::Half::from_bits);
   }
-  static constexpr at::Half denorm_min() {
-    return at::Half(0x0001, at::Half::from_bits);
+  static constexpr c10::Half denorm_min() {
+    return c10::Half(0x0001, c10::Half::from_bits);
   }
 };
 
