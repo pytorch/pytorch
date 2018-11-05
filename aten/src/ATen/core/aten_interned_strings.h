@@ -660,7 +660,6 @@ _(aten, thnn_conv_transpose3d_backward) \
 _(aten, thnn_conv_transpose3d_forward) \
 _(aten, threshold) \
 _(aten, threshold_backward) \
-_(aten, threshold_forward) \
 _(aten, to) \
 _(aten, to_sparse) \
 _(aten, to_dense) \

@@ -700,11 +700,11 @@ def threshold(input, threshold, value, inplace=False):
     See :class:`~torch.nn.Threshold` for more details.
     """
     if inplace:
-        return torch._C._nn.threshold_(input, threshold, value)
-    return torch._C._nn.threshold(input, threshold, value)
+        return _VF.threshold_(input, threshold, value)
+    return _VF.threshold(input, threshold, value)
 
 
-threshold_ = _add_docstr(torch._C._nn.threshold_, r"""
+threshold_ = _add_docstr(_VF.threshold_, r"""
 threshold_(input, threshold, value) -> Tensor
 
 In-place version of :func:`~threshold`.
