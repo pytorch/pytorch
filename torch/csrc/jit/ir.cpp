@@ -1177,10 +1177,9 @@ Node * Graph::createNoneGenerator() {
   return n;
 }
 
-Node * Graph::createFusionGroup(int device) {
+Node * Graph::createFusionGroup() {
   auto n = create(prim::FusionGroup, 0);
   n->g_(attr::Subgraph,std::make_shared<Graph>(current_scope()));
-  n->i_(attr::device, device);
   return n;
 }
 
