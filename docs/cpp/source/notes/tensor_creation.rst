@@ -110,7 +110,8 @@ but aid readability just like keyword arguments in Python.
 
   Sometimes a function does not need a size at all. For example, the size of
   the tensor returned by ``arange`` is fully specified by its function-specific
-  arguments -- the lower and upper bound of a range of integers.
+  arguments -- the lower and upper bound of a range of integers. In that case
+  the function does not take a ``size`` parameter.
 
 Configuring Properties of the Tensor
 ************************************
@@ -120,7 +121,8 @@ arguments can only change the values with which tensors are filled, and
 sometimes the size of the tensor. They never change things like the data type
 (e.g. ``float32`` or ``int64``) of the tensor being created, or whether it
 lives in CPU or GPU memory. The specification of these properties is left to
-the very last argument to every factory function: a ``TensorOptions`` object.
+the very last argument to every factory function: a ``TensorOptions`` object,
+discussed below.
 
 ``TensorOptions`` is a class that encapsulates the construction axes of a
 Tensor. With *construction axis* we mean a particular property of a Tensor that
@@ -139,13 +141,13 @@ allowed values for these axes at the moment are:
 - For ``dtype``: ``kUInt8``, ``kInt8``, ``kInt16``, ``kInt32``, ``kInt64``, ``kFloat32`` and ``kFloat64``,
 - For ``layout``: ``kStrided`` and ``kSparse``,
 - For ``device``: Either ``kCPU``, or ``kCUDA`` (which accepts an optional device index),
-- For ``requires_grad``: either true or false.
+- For ``requires_grad``: either ``true`` or ``false``.
 
 .. tip::
 
 	There exist "Rust-style" shorthands for dtypes, like ``kF32`` instead of
 	``kFloat32``. See `here
-	<https://github.com/pytorch/pytorch/blob/master/torch/csrc/api/include/torch/tensor.h#L30>`_
+	<https://github.com/pytorch/pytorch/blob/master/torch/csrc/api/include/torch/types.h>`_
 	for the full list.
 
 
@@ -250,13 +252,13 @@ should barely, if ever, have to write out ``torch::TensorOptions``. Instead use
 the ``torch::dtype()``, ``torch::device()``, ``torch::layout()`` and
 ``torch::requires_grad()`` functions.
 
-A final bit of convenience is that the ``TensorOptions`` constructor is
-implicitly constructible from particular axis values. This means that whenever
-a function has a parameter of type ``TensorOptions``, like all factory
-functions do, we can directly pass a value like ``torch::kFloat32`` or
-``torch::kStrided`` in place of the full object. Therefore, when there is only
-a single axis we would like to change compared to its default value, we can
-pass only that value. As such, what was
+A final bit of convenience is that ``TensorOptions`` is implicitly
+constructible from individual values. This means that whenever a function has a
+parameter of type ``TensorOptions``, like all factory functions do, we can
+directly pass a value like ``torch::kFloat32`` or ``torch::kStrided`` in place
+of the full object. Therefore, when there is only a single axis we would like
+to change compared to its default value, we can pass only that value. As such,
+what was
 
 .. code-block:: cpp
 
@@ -294,28 +296,28 @@ with the equivalent call in C++:
 Pretty close!
 
 Conversion
-==========
+----------
 
 Just as we can use ``TensorOptions`` to configure how new tensors should be
 created, we can also use ``TensorOptions`` to convert a tensor from one set of
 properties to a new set of properties. Such a conversion usually creates a new
-tensor and does not occur in-place. For example, if we have a ``tensor``
+tensor and does not occur in-place. For example, if we have a ``source_tensor``
 created with
 
 .. code-block:: cpp
 
-  torch::Tensor tensor = torch::randn({2, 3}, torch::kInt64);
+  torch::Tensor source_tensor = torch::randn({2, 3}, torch::kInt64);
 
 we can convert it from ``int64`` to ``float32``:
 
 .. code-block:: cpp
 
-  torch::Tensor float_tensor = tensor.to(torch::kFloat32);
+  torch::Tensor float_tensor = source_tensor.to(torch::kFloat32);
 
 .. attention::
 
 	The result of the conversion, ``float_tensor``, is a new tensor pointing to
-	new memory, unrelated to the source ``tensor``.
+	new memory, unrelated to the source ``source_tensor``.
 
 We can then move it from CPU memory to GPU memory:
 
@@ -342,7 +344,7 @@ argument to ``to()``:
   torch::Tensor async_cpu_tensor = gpu_tensor.to(torch::kCPU, /*non_blocking=*/true);
 
 Conclusion
-**********
+----------
 
 This note hopefully gave you a good understanding of how to create and convert
 tensors in an idiomatic fashion using the PyTorch C++ API. If you have any
