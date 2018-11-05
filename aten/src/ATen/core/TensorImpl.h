@@ -441,11 +441,16 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   Device device() const {
     // Special case the common case for performance reasons
-    const auto& mystorage = storage();
-    if (mystorage) {
-      return mystorage.device();
-    }
+    // TODO: This is a little convoluted so it would be good to investigate
+    // caching device on TensorImpl (#12934) to speed up device() calls in all cases.
     const auto tid = type_id();
+    if (tid == CPUTensorId() || tid == CUDATensorId()) {
+      // NB: storage(), not storage_, b/c of Variable.
+      const auto& mystorage = storage();
+      if (mystorage) {
+        return mystorage.device();
+      }
+    }
     const auto device_type = detail::computeDeviceType(tid);
     bool is_cuda = device_type == DeviceType::CUDA;
     return Device(device_type, is_cuda ? get_device() : -1);
