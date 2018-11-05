@@ -148,7 +148,7 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
         pass
 
 
-def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
+def _pin_memory_loop(in_queue, out_queue, device_id, done_event, pin_fn):
     torch.cuda.set_device(device_id)
 
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
@@ -569,7 +569,7 @@ class _DataLoaderIter(object):
                 pin_memory_thread = threading.Thread(
                     target=_pin_memory_loop,
                     args=(self.worker_result_queue, self.data_queue,
-                          torch.cuda.current_device(), self.done_event))
+                          torch.cuda.current_device(), self.done_event, self.pin_fn))
                 pin_memory_thread.daemon = True
                 pin_memory_thread.start()
                 # Similar to workers (see comment above), we only register
