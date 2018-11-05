@@ -411,22 +411,6 @@ TH_API void THNN_(SparseLinear_legacyUpdateParameters)(
           THTensor *lastInput,
           accreal learningRate);
 
-TH_API void THNN_(Threshold_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          accreal threshold,
-          accreal val,
-          bool inplace);
-TH_API void THNN_(Threshold_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          accreal threshold,
-          accreal val,
-          bool inplace);
-
 TH_API void THNN_(TemporalRowConvolution_updateOutput)(
           THNNState *state,
           THTensor *input,

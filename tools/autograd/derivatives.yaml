@@ -899,7 +899,11 @@
   self: soft_margin_loss_backward(grad, self, target, reduction)
 
 - name: relu(Tensor self)
-  self: threshold_backward(grad, self, 0, 0)
+  self: threshold_backward(grad, self, 0)
+
+# NB: `output` instead of `self` saves memory. It avoids saving a copy of self.
+- name: relu_(Tensor self)
+  self: threshold_backward(grad, output, 0)
 
 - name: elu_forward(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale)
   self: elu_backward(grad, alpha, scale, input_scale, output)
@@ -953,11 +957,11 @@
 - name: softshrink_forward(Tensor self, Scalar lambd)
   self: softshrink_backward(grad, self, lambd)
 
-- name: threshold_forward(Tensor self, Scalar threshold, Scalar value)
-  self: threshold_backward(grad, self, threshold, value)
+- name: threshold(Tensor self, Scalar threshold, Scalar value)
+  self: threshold_backward(grad, self, threshold)
 
-- name: threshold_forward_(Tensor self, Scalar threshold, Scalar value)
-  self: threshold_backward(grad, output, threshold, value)
+- name: threshold_(Tensor self, Scalar threshold, Scalar value)
+  self: threshold_backward(grad, output, threshold)
 
 - name: reflection_pad1d_forward(Tensor self, IntList padding)
   self: reflection_pad1d_backward(grad, self, padding)
@@ -1207,8 +1211,8 @@
   grad_output: softshrink_backward(grad, self, lambd)
   self: zeros_like(grad)
 
-- name: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold, Scalar value)
-  grad_output: threshold_backward(grad, self, threshold, value)
+- name: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold)
+  grad_output: threshold_backward(grad, self, threshold)
   self: zeros_like(grad)
 
 - name: upsample_linear1d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
