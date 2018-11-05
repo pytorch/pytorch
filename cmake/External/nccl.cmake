@@ -7,6 +7,7 @@ if (NOT __NCCL_INCLUDED)
       add_library(__caffe2_nccl INTERFACE)
       target_link_libraries(__caffe2_nccl INTERFACE ${NCCL_LIBRARIES})
       target_include_directories(__caffe2_nccl INTERFACE ${NCCL_INCLUDE_DIRS})
+      caffe2_update_option(NCCL_EXTERNAL OFF)
   else()
     if (TORCH_CUDA_ARCH_LIST)
       torch_cuda_get_nvcc_gencode_flag(NVCC_GENCODE)
@@ -34,7 +35,6 @@ if (NOT __NCCL_INCLUDED)
       INSTALL_COMMAND ""
       )
 
-    set(NCCL_EXTERNAL FALSE)
     set(NCCL_FOUND TRUE)
     add_library(__caffe2_nccl INTERFACE)
     # The following old-style variables are set so that other libs, such as Gloo,

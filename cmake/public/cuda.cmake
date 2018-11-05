@@ -151,8 +151,6 @@ if(CAFFE2_USE_TENSORRT)
     message(WARNING
       "Caffe2: Cannot find TensorRT library. Turning the option off")
     set(CAFFE2_USE_TENSORRT OFF)
-  else()
-    set(TENSORRT_LIBRARY ${TENSORRT_LIBRARIES})
   endif()
 endif()
 
@@ -270,28 +268,18 @@ set_property(
     TARGET caffe2::cufft PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
-
-
-#message("??????????????????????????????? ${TENSORRT_LIBRARY}")
-#
-## TensorRT
+# TensorRT
 if(CAFFE2_USE_TENSORRT)
+  add_library(caffe2::tensorrt INTERFACE IMPORTED)
+#  set_property(
+#      TARGET caffe2::tensorrt PROPERTY IMPORTED_LOCATION
+#      ${TENSORRT_LIBRARIES})
 
+target_link_libraries(caffe2::tensorrt INTERFACE ${TENSORRT_LIBRARIES})
 
-  message("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! ${TENSORRT_LIBRARY}")
-
-
-
-  add_library(caffe2::tensorrt UNKNOWN IMPORTED)
-  set_property(
-      TARGET caffe2::tensorrt PROPERTY IMPORTED_LOCATION
-      ${TENSORRT_LIBRARY})
-  set_property(
+set_property(
       TARGET caffe2::tensorrt PROPERTY INTERFACE_INCLUDE_DIRECTORIES
       ${TENSORRT_INCLUDE_DIR})
-
-  target_link_libraries(caffe2::tensorrt INTERFACE ${TENSORRT_LIBRARY})
-
 endif()
 
 # cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
