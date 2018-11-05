@@ -30,17 +30,17 @@ namespace datasets {
 template <
     typename Self,
     typename Batch = std::vector<Example<>>,
-    typename BatchIndex = ArrayRef<size_t>>
+    typename BatchRequest = ArrayRef<size_t>>
 class BatchDataset {
  public:
   using SelfType = Self;
   using BatchType = Batch;
-  using BatchIndexType = BatchIndex;
+  using BatchRequestType = BatchRequest;
 
   virtual ~BatchDataset() = default;
 
   /// Returns a batch of data given an index.
-  virtual Batch get_batch(BatchIndex index) = 0;
+  virtual Batch get_batch(BatchRequest request) = 0;
 
   /// Returns the size of the dataset, or an empty optional if it is unsized.
   virtual optional<size_t> size() const = 0;
@@ -90,7 +90,7 @@ class Dataset : public BatchDataset<Self, std::vector<SingleExample>> {
 /// It takes as batch index only a number, which is the batch size, and yields
 /// that many elements from the stream.
 template <typename Self, typename Batch = std::vector<Example<>>>
-using StreamDataset = BatchDataset<Self, Batch, /*BatchIndex=*/size_t>;
+using StreamDataset = BatchDataset<Self, Batch, /*BatchRequest=*/size_t>;
 } // namespace datasets
 } // namespace data
 } // namespace torch

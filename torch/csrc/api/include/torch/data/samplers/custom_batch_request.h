@@ -6,8 +6,8 @@ namespace torch {
 namespace data {
 namespace samplers {
 /// A base class for custom index types.
-struct CustomBatchIndex {
-  virtual ~CustomBatchIndex() = default;
+struct CustomBatchRequest {
+  virtual ~CustomBatchRequest() = default;
 
   /// The number of elements accessed by this index.
   virtual size_t size() const = 0;

@@ -538,7 +538,7 @@ TEST(DataTest, DataShuttlePopResultTimesOut) {
   ASSERT_THROWS_WITH(shuttle.pop_result(10 * kMillisecond), "Timeout");
 }
 
-struct TestIndex : public torch::data::samplers::CustomBatchIndex {
+struct TestIndex : public torch::data::samplers::CustomBatchRequest {
   explicit TestIndex(size_t offset, std::vector<size_t> index)
       : offset(offset), index(std::move(index)) {}
   size_t size() const override {

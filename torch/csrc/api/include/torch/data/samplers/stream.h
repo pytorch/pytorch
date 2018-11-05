@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/data/samplers/base.h>
-#include <torch/data/samplers/custom_index.h>
+#include <torch/data/samplers/custom_batch_request.h>
 #include <torch/tensor.h>
 
 #include <cstddef>
@@ -17,9 +17,9 @@ namespace torch {
 namespace data {
 namespace samplers {
 
-/// A wrapper around a batch size value, which implements the `CustomBatchIndex`
+/// A wrapper around a batch size value, which implements the `CustomBatchRequest`
 /// interface.
-struct BatchSize : public CustomBatchIndex {
+struct BatchSize : public CustomBatchRequest {
   explicit BatchSize(size_t size);
   size_t size() const noexcept override;
   operator size_t() const noexcept;
