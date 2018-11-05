@@ -16,6 +16,7 @@
 #include <ATen/cuda/CUDAGuard.h>
 #include <ATen/cuda/CUDAStream.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/PinnedMemoryAllocator.h>
 
 #include <gloo/cuda_allreduce_halving_doubling.h>
 #include <gloo/cuda_allreduce_ring_chunked.h>
@@ -184,6 +185,16 @@ template <typename T, typename O>
 void setOutput(O& opts, at::Tensor& tensor) {
   opts.setOutput(getDataPointer<T>(tensor), tensor.numel());
 }
+
+#ifdef USE_CUDA
+
+at::Tensor pinnedLike(at::Tensor& tensor) {
+  auto& type = tensor.type().toBackend(at::Backend::CPU);
+  auto* allocator = at::cuda::getPinnedMemoryAllocator();
+  return type.tensorWithAllocator(tensor.sizes(), tensor.strides(), allocator);
+}
+
+#endif
 
 } // namespace
 
@@ -803,11 +814,11 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
           /* isHighPriority */ true, inputs[i].get_device()));
     }
 
-    // Kick off copy from CUDA tensors to CPU tensors.
+    // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmp.reserve(inputs.size());
     for (size_t i = 0; i < inputs.size(); i++) {
       guard.set_stream(streams[i]);
-      tmp.push_back(inputs[i].to(at::Device(at::kCPU, 0), true));
+      tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
   }
 
