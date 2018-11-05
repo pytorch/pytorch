@@ -150,11 +150,4 @@ void THTensor_(copy)(THTensor *tensor, THTensor *src)
   }
 }
 
-void THTensor_(copyPointwise)(THTensor *tensor, THTensor *src)
-{ \
-  at::Tensor tensor_t = THTensor_wrap(tensor);
-  at::Tensor src_t = THTensor_wrap(src);
-  at::_copy_(tensor_t, src_t);
-}
-
 #endif

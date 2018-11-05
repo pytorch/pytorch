@@ -5,6 +5,5 @@
 /* Support for copy between different Tensor types */
 
 TH_API void THTensor_(copy)(THTensor *tensor, THTensor *src);
-TH_API void THTensor_(copyPointwise)(THTensor *tensor, THTensor *src);
 
 #endif
