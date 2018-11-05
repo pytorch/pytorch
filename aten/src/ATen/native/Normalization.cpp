@@ -49,7 +49,7 @@ Tensor batch_norm(
   }
 
   bool use_cudnn = false;
-  use_cudnn = (input.type().is_cuda()
+  use_cudnn = (input.is_cuda()
                && (input.type().scalarType() != at::kHalf
                  || weight.type().scalarType() == at::kFloat)
                && weight.defined() && bias.defined()
@@ -68,7 +68,7 @@ Tensor batch_norm(
                         training, momentum, eps));
   }
 
-  bool use_miopen = (input.type().is_cuda()
+  bool use_miopen = (input.is_cuda()
                && input.dim() <= MIOPEN_DIM_MAX
                && input.type().scalarType() != at::kDouble
                && (input.type().scalarType() == weight.type().scalarType())
