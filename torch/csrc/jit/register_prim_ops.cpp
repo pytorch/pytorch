@@ -520,6 +520,7 @@ RegisterOperators reg({
             };
           }
         }),
+    Operator("aten::_unwrap_optional(t? optional) -> t", noop),
     Operator(
         prim::fork,
         [](const Node* node) {
