@@ -9,6 +9,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
+sudo apt-get install -y --no-install-recommends libc6-dbg
+
 if [ -n "${IN_CIRCLECI}" ]; then
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
     # TODO: move this to Docker
