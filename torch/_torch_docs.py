@@ -4692,7 +4692,9 @@ add_docstr(torch.roll,
 roll(input, shifts, dims) -> Tensor
 
 Roll the tensor along the given dimension. Elements that are shifted beyond the
-last position are re-introduced at the first position.
+last position are re-introduced at the first position. If a dimension is not
+specified, the tensor will be flattened before rolling and then restored
+to the original shape.
 
 Args:
     input (Tensor): the input tensor
