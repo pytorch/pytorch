@@ -132,9 +132,8 @@ class PrintOp final : public Operator<Context> {
     if (this->InputIsTensorType(0, CPU)) {
       tensor = &this->template Input<Tensor>(0, CPU);
     } else {
-      tensor_copy_if_needed.CopyFrom(Input(0), &context_);
-      // Make sure that the copy is finished.
-      context_.FinishDeviceComputation();
+      // sync copy
+      tensor_copy_if_needed.CopyFrom(Input(0));
       tensor = &tensor_copy_if_needed;
     }
     tensor_printer_.Print<T>(*tensor);
@@ -217,10 +216,10 @@ class FlattenToVecOp : public Operator<Context> {
     output->Resize(input.numel());
 
     context_.CopyItemsSameDevice(
-        input.meta(),
+        input.dtype(),
         input.numel(),
         input.raw_data(),
-        output->raw_mutable_data(input.meta()));
+        output->raw_mutable_data(input.dtype()));
     return true;
   }
 };
@@ -239,10 +238,10 @@ class ResizeLikeOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(input0.numel(), input1.numel());
     output->ResizeLike(Input(1));
     context_.CopyItemsSameDevice(
-        input0.meta(),
+        input0.dtype(),
         input0.numel(),
         input0.raw_data(),
-        output->raw_mutable_data(input0.meta()));
+        output->raw_mutable_data(input0.dtype()));
     return true;
   }
 };
@@ -305,7 +304,7 @@ class SumOp : public Operator<Context> {
       CAFFE_THROW(
           "Sum operator only supports 32-bit float and ints, but",
           " input was of type ",
-          Input(0).meta().name());
+          Input(0).dtype().name());
     }
   }
 };
@@ -513,7 +512,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
     CAFFE_ENFORCE_GT(X0.ndim(), 0, "X0 has to be at least the vector");
     CAFFE_ENFORCE_EQ(weight0.numel(), 1);
     int64_t M = X0.numel();
-    int64_t N = X0.dim(0);
+    int64_t N = X0.size(0);
     int64_t K = indices.numel();
     int64_t block_size = M / N;
     T* data = output->template mutable_data<T>();
@@ -622,9 +621,9 @@ class ScatterAssignOp : public Operator<Context> {
     const auto& slices = Input(SLICES);
     auto& indices = Input(INDICES);
 
-    const auto dataType = TypeMetaToDataType(data.meta());
-    const auto slicesType = TypeMetaToDataType(slices.meta());
-    const auto indicesType = TypeMetaToDataType(indices.meta());
+    const auto dataType = TypeMetaToDataType(data.dtype());
+    const auto slicesType = TypeMetaToDataType(slices.dtype());
+    const auto indicesType = TypeMetaToDataType(indices.dtype());
     auto* output = Output(0);
 
     auto runner = GetRunner(dataType, slicesType, indicesType);
@@ -665,7 +664,7 @@ class ScatterAssignOp : public Operator<Context> {
 
     CAFFE_ENFORCE_GT(input.ndim(), 0, "X0 has to be at least the vector");
     int64_t M = input.numel();
-    int64_t N = input.dim(0);
+    int64_t N = input.size(0);
     int64_t K = indices.numel();
     int64_t block_size = M / N;
     CAFFE_ENFORCE_EQ(slices.numel(), block_size * K);
@@ -782,10 +781,10 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
       CAFFE_ENFORCE_GE(Input(1).ndim(), 1);
       CAFFE_ENFORCE_LE(
           num_segments,
-          Input(1).dim(0),
+          Input(1).size(0),
           "The number of segments inferred should *NOT* be larger "
           "than the size of Input(1)'s first dimension");
-      num_segments = Input(1).dim(0);
+      num_segments = Input(1).size(0);
     }
     CAFFE_ENFORCE(0 <= num_segments, "Indices must be in 0..K-1 range");
     output->Resize(num_segments);
@@ -833,10 +832,10 @@ class SegmentIdsToRangesOp : public Operator<Context> {
       CAFFE_ENFORCE_GE(Input(1).ndim(), 1);
       CAFFE_ENFORCE_LE(
           num_segments,
-          Input(1).dim(0),
+          Input(1).size(0),
           "The number of segments inferred should *NOT* be larger "
           "than the size of Input(1)'s first dimension");
-      num_segments = Input(1).dim(0);
+      num_segments = Input(1).size(0);
     }
     CAFFE_ENFORCE(0 <= num_segments, "Indices must be in 0..K-1 range");
     output->Resize(num_segments, 2);
@@ -1013,12 +1012,12 @@ class GatherRangesOp : public Operator<Context> {
     auto* outputData = Output(0);
     auto* outputLengths = Output(1);
 
-    auto batchSize = ranges.dim(0);
+    auto batchSize = ranges.size(0);
     CAFFE_ENFORCE(data.ndim() == 1, "Data has to be 1-D");
     CAFFE_ENFORCE(ranges.ndim() == 3, "Ranges must be 3-D");
-    CAFFE_ENFORCE(ranges.dim(1) > 0, "There has to be at least one range");
+    CAFFE_ENFORCE(ranges.size(1) > 0, "There has to be at least one range");
     CAFFE_ENFORCE_EQ(
-        ranges.dim(2), 2, "Ranges last dimention should be of size 2");
+        ranges.size(2), 2, "Ranges last dimention should be of size 2");
 
     auto* rawData = static_cast<const char*>(data.raw_data());
     auto* rangesData = ranges.template data<Index>();
@@ -1037,10 +1036,10 @@ class GatherRangesOp : public Operator<Context> {
     outputData->Resize(outputSize);
 
     auto outputRawData =
-        static_cast<char*>(outputData->raw_mutable_data(data.meta()));
+        static_cast<char*>(outputData->raw_mutable_data(data.dtype()));
     VLOG(1) << "Copying data";
     size_t outputOffsetBytes = 0;
-    auto itemsize = data.meta().itemsize();
+    auto itemsize = data.dtype().itemsize();
     for (int i = 0; i < ranges.numel(); i += 2) {
       auto rangeStart = rangesData[i];
       auto rangeLength = rangesData[i + 1];
@@ -1051,7 +1050,7 @@ class GatherRangesOp : public Operator<Context> {
       CAFFE_ENFORCE(outputOffsetBytes < outputSize * itemsize);
       CAFFE_ENFORCE(rangeStart + rangeLength <= data.numel());
       context_.CopyItemsSameDevice(
-          data.meta(),
+          data.dtype(),
           rangeLength,
           rawData + rangeStart * itemsize,
           outputRawData + outputOffsetBytes);
@@ -1117,20 +1116,20 @@ class LengthsGatherOp : public Operator<Context> {
       running_offset += lengths_data[i];
     }
     CAFFE_ENFORCE_EQ(
-        items.dim(0),
+        items.size(0),
         running_offset,
         "LENGTHS must match the first dimension of ITEMS");
 
     auto src_base = static_cast<const char*>(items.raw_data());
     auto block_size = items.size_from_dim(1);
     auto block_bytesize = block_size * items.itemsize();
-    auto out = static_cast<char*>(output->raw_mutable_data(items.meta()));
+    auto out = static_cast<char*>(output->raw_mutable_data(items.dtype()));
 
     for (size_t i = 0; i < indices.numel(); ++i) {
       auto idx = indices_data[i];
       auto length = lengths_data[idx];
       context_.CopyItemsSameDevice(
-          items.meta(),
+          items.dtype(),
           length * block_size,
           src_base + offsets_[idx] * block_bytesize,
           out);

@@ -8,7 +8,7 @@
 // To explicitly use interned strings as symbols in your code, you must add
 // them to this list.
 
-#if !AT_MOBILE
+#if !C10_MOBILE
 #define FORALL_ATEN_BASE_SYMBOLS(_) \
 _(aten, RoiPooling2d_backward) \
 _(aten, RoiPooling2d_forward) \
@@ -188,6 +188,7 @@ _(aten, adaptive_max_pool3d) \
 _(aten, adaptive_max_pool3d_backward) \
 _(aten, adaptive_max_pool3d_forward) \
 _(aten, add) \
+_(aten, add_) \
 _(aten, addbmm) \
 _(aten, addcdiv) \
 _(aten, addcmul) \
@@ -236,6 +237,7 @@ _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
 _(aten, chain_matmul) \
+_(aten, cholesky) \
 _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \
@@ -282,12 +284,14 @@ _(aten, data_ptr) \
 _(aten, det) \
 _(aten, detach) \
 _(aten, diag) \
+_(aten, diag_embed) \
 _(aten, diagflat) \
 _(aten, diagonal) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
 _(aten, div) \
+_(aten, div_) \
 _(aten, dot) \
 _(aten, dropout) \
 _(aten, eig) \
@@ -466,6 +470,7 @@ _(aten, mse_loss) \
 _(aten, mse_loss_backward) \
 _(aten, mse_loss_forward) \
 _(aten, mul) \
+_(aten, mul_) \
 _(aten, multi_margin_loss) \
 _(aten, multi_margin_loss_backward) \
 _(aten, multi_margin_loss_forward) \
@@ -512,7 +517,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
-_(aten, potrf) \
 _(aten, potri) \
 _(aten, potrs) \
 _(aten, pow) \
@@ -614,6 +618,8 @@ _(aten, storage_offset) \
 _(aten, stride) \
 _(aten, strides) \
 _(aten, sub) \
+_(aten, sub_) \
+_(aten, rsub) \
 _(aten, sum) \
 _(aten, svd) \
 _(aten, symeig) \
@@ -653,7 +659,6 @@ _(aten, thnn_conv_transpose3d_backward) \
 _(aten, thnn_conv_transpose3d_forward) \
 _(aten, threshold) \
 _(aten, threshold_backward) \
-_(aten, threshold_forward) \
 _(aten, to) \
 _(aten, to_sparse) \
 _(aten, to_dense) \

@@ -127,9 +127,6 @@
 #include "generic/Tanh.c"
 #include "THGenerateFloatTypes.h"
 
-#include "generic/Threshold.c"
-#include "THGenerateFloatTypes.h"
-
 #include "generic/TemporalRowConvolution.c"
 #include "THGenerateFloatTypes.h"
 

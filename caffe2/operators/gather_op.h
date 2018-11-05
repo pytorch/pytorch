@@ -31,27 +31,27 @@ class GatherOp : public Operator<Context> {
     output->Resize(shape);
 
     int block_size = data.size_from_dim(1);
-    auto block_bytesize = data.size_from_dim(1) * data.meta().itemsize();
+    auto block_bytesize = data.size_from_dim(1) * data.dtype().itemsize();
     int N = indices.numel();
 
     auto src_base = static_cast<const char*>(data.raw_data());
     const Index* idxs = indices.template data<Index>();
-    auto out = static_cast<char*>(output->raw_mutable_data(data.meta()));
+    auto out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
 
     for (int i = 0; i < N; ++i) {
       auto idx = idxs[i];
       if (idx < 0) {
-        idx = idx + data.dim(0);
+        idx = idx + data.size(0);
       }
       CAFFE_ENFORCE(
-          0 <= idx && idx < data.dim(0),
+          0 <= idx && idx < data.size(0),
           "INDICES element is out of DATA bounds, id=",
           idx,
           " data_dim=",
-          data.dim(0));
+          data.size(0));
       auto src = src_base + idx * block_bytesize;
       context_.template CopyItems<Context, Context>(
-          data.meta(), block_size, src, out + block_bytesize * i);
+          data.dtype(), block_size, src, out + block_bytesize * i);
     }
     return true;
   }

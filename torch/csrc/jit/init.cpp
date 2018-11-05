@@ -23,6 +23,7 @@
 #include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/canonicalize_ops.h"
+#include "torch/csrc/jit/passes/remove_inplace_ops.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/to_batch.h"
@@ -35,7 +36,8 @@
 #include "torch/csrc/jit/pybind_utils.h"
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/script/jit_exception.h"
 
 #include "caffe2/serialize/inline_container.h"
 
@@ -84,6 +86,8 @@ std::string runJITCPPTests();
 void initJITBindings(PyObject *module) {
   auto m = py::handle(module).cast<py::module>();
 
+  py::register_exception<JITException>(m, "JITException");
+
   py::class_<python::IODescriptor>(m, "IODescriptor");
 
   m.def("_jit_init", loadPythonClasses)
@@ -97,8 +101,13 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_cse", [](std::shared_ptr<Graph>& g) {
      return EliminateCommonSubexpression(g); // overload resolution
    })
+   .def("_jit_pass_remove_inplace_ops", [](std::shared_ptr<Graph> g) {
+      return RemoveInplaceOps(g);
+   })
    .def("_jit_pass_constant_pooling", ConstantPooling)
-   .def("_jit_pass_peephole", PeepholeOptimize, py::arg("graph"), py::arg("addmm_fusion_enabled") = false)
+   .def("_jit_pass_peephole", [](const std::shared_ptr<Graph>& g, bool addmm_fusion_enabled) {
+     return PeepholeOptimize(g, addmm_fusion_enabled);
+   }, py::arg("graph"), py::arg("addmm_fusion_enabled") = false)
    .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
      return Canonicalize(g);
    })

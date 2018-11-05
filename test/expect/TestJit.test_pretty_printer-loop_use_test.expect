@@ -7,7 +7,7 @@ def script(y1):
   z = z1
   t11 = t10
   while t11:
-    y2 = aten::add(y, 1, 1)
+    y2 = aten::add_(y, 1, 1)
     t17 = aten::lt(y2, 8)
     t11 = prim::TensorToBool(t17)
     y = y2

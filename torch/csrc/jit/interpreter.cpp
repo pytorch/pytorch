@@ -12,6 +12,7 @@
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/variable_tensor_functions.h"
+#include "torch/csrc/jit/script/jit_exception.h"
 
 #include <exception>
 #include <iostream>
@@ -313,17 +314,17 @@ public:
   ContainerTensor()
   : TensorImpl(at::UndefinedTensorId(), caffe2::TypeMeta(), nullptr, /* is_variable */ false) {}
 
-  virtual ~ContainerTensor() = default;
-  virtual at::IntList sizes() const override {
+  ~ContainerTensor() override = default;
+  at::IntList sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
-  virtual at::IntList strides() const override {
+  at::IntList strides() const override {
     throw std::runtime_error("strides() on ContainerTensor");
   }
-  virtual int64_t dim() const override {
+  int64_t dim() const override {
     throw std::runtime_error("dim() on ContainerTensor");
   }
-  virtual const at::Storage& storage() const override {
+  const at::Storage& storage() const override {
     throw std::runtime_error("storage() on ContainerTensor");
   }
 };
@@ -347,6 +348,7 @@ struct UseList {
 };
 
 // one instruction plus meta-data
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Instruction {
   Operation callback;
   UseList inputs;
@@ -361,7 +363,7 @@ int relativeJump(int from_inst, int to_inst) {
 }
 
 struct CodeImpl {
-  CodeImpl(std::shared_ptr<Graph>& graph_)
+  CodeImpl(const std::shared_ptr<Graph>& graph_)
       : preprocess(*graph_) {
     graph = preprocess.graph;
     insertNodesFromBlock(graph->block());
@@ -664,10 +666,15 @@ struct InterpreterStateImpl {
           }
           pc = new_pc;
         } catch(std::exception & e) {
-          if(!instructions[pc].debug_location)
-            throw; // rethrow original exception
-          // throw a new exception with enhanced debugging information
-          instructions[pc].debug_location->wrapAndRethrowException(e, "operation failed in interpreter");
+          if (!instructions[pc].debug_location) {
+            throw;
+          }
+          auto msg = instructions[pc].debug_location->wrapException(e, "operation failed in interpreter");
+          if (dynamic_cast<JITException *>(&e)) {
+            throw JITException(msg);
+          } else {
+            throw std::runtime_error(msg);
+          }
         }
     }
     current_pc = pc;
@@ -724,7 +731,7 @@ std::ostream & operator<<(std::ostream & out, const Code & code) {
   return out;
 }
 
-Code::Code(std::shared_ptr<Graph>& graph)
+Code::Code(const std::shared_ptr<Graph>& graph)
     : pImpl(new CodeImpl(graph)) {}
 Code::~Code() = default;
 
