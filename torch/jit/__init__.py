@@ -1426,9 +1426,9 @@ class JITModule(types.ModuleType):
 
     def __setattr__(self, name, val):
         if not self.__inited or (hasattr(self, name) and not hasattr(self.__old_mod, name)):
-            # assign to self if the object is not initialized, or it is a plain
-            # attribute on this object (i.e., `getattr(self, name)` works but
-            # not `getattr(self.__old_mod, name)`).
+            # assign to this object if it is not fully initialized, or if `name`
+            # is already a plain attribute on this object (i.e.,
+            # `getattr(self, name)` works but not `getattr(self.__old_mod, name)`).
             return super(JITModule, self).__setattr__(name, val)
         else:
             # otherwise, propagate change to `self.__old_mod` because things may
