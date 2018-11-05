@@ -55,12 +55,12 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   params->emplace_back(param1_name, is_buffer, require_gradient);
   serialize::IntermediateTensor* tensor1 = params->at(0).mutableTensor();
   size_t raw_size = sizeof(float);
-  std::vector<int64_t> dims = {2, 3, 4};
-  for (auto dim : dims) {
+  std::vector<int64_t> dims1 = {2, 3, 4};
+  for (auto dim : dims1) {
     raw_size *= dim;
   }
-  std::vector<int64_t> strides = {12, 4, 1};
-  *tensor1 = serialize::IntermediateTensor(caffe2::TensorProto_DataType_FLOAT, dims, 0);
+  std::vector<int64_t> strides1 = {12, 4, 1};
+  *tensor1 = serialize::IntermediateTensor(caffe2::TensorProto_DataType_FLOAT, dims1, 0);
   std::vector<char> data_vector;
   data_vector.resize(raw_size);
   for (size_t i = 0; i < data_vector.size(); ++i) {
@@ -70,14 +70,17 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   std::shared_ptr<serialize::SharedData> data =
     std::make_shared<serialize::SharedData>(0, raw_size, std::move(data_ptr));
   tensor1->setData(data);
-  tensor1->setStrides(strides);
+  tensor1->setStrides(strides1);
   // prepare second parameter, share the data with first parameter
   std::string param2_name = "Test-Parameter-2-Name";
+  std::vector<int64_t> dims2 = {3, 4};
+  std::vector<int64_t> strides2 = {12, 4, 1};
+  int64_t offset2 = 12;
   params->emplace_back(param2_name, is_buffer, require_gradient);
   serialize::IntermediateTensor* tensor2 = params->at(1).mutableTensor();
-  *tensor2 = serialize::IntermediateTensor(caffe2::TensorProto_DataType_FLOAT, dims, 0);
+  *tensor2 = serialize::IntermediateTensor(caffe2::TensorProto_DataType_FLOAT, dims2, offset2);
   tensor2->setData(data);
-  tensor2->setStrides(strides);
+  tensor2->setStrides(strides1);
 
 
   // serialize the prepared model
@@ -114,8 +117,9 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   ASSERT_EQ(loaded_param1.isBuffer(), is_buffer);
   ASSERT_EQ(loaded_param1.requireGradient(), require_gradient);
   const auto& loaded_tensor1 = loaded_param1.tensor();
-  ASSERT_EQ(loaded_tensor1.dims(), dims);
-  ASSERT_EQ(loaded_tensor1.strides(), strides);
+  ASSERT_EQ(loaded_tensor1.dims(), dims1);
+  ASSERT_EQ(loaded_tensor1.strides(), strides1);
+  ASSERT_EQ(loaded_tensor1.offset(), 0);
   ASSERT_EQ(loaded_tensor1.deviceDetail().deviceType, 0);
   ASSERT_EQ(loaded_tensor1.noContent(), false);
   ASSERT_EQ(loaded_tensor1.dataType(), caffe2::TensorProto_DataType_FLOAT);
@@ -128,8 +132,9 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   ASSERT_EQ(loaded_param2.isBuffer(), is_buffer);
   ASSERT_EQ(loaded_param2.requireGradient(), require_gradient);
   const auto& loaded_tensor2 = loaded_param2.tensor();
-  ASSERT_EQ(loaded_tensor2.dims(), dims);
-  ASSERT_EQ(loaded_tensor2.strides(), strides);
+  ASSERT_EQ(loaded_tensor2.dims(), dims2);
+  ASSERT_EQ(loaded_tensor2.strides(), strides2);
+  ASSERT_EQ(loaded_tensor2.offset(), offset2);
   ASSERT_EQ(loaded_tensor2.deviceDetail().deviceType, 0);
   ASSERT_EQ(loaded_tensor2.noContent(), false);
   ASSERT_EQ(loaded_tensor2.dataType(), caffe2::TensorProto_DataType_FLOAT);
@@ -148,12 +153,14 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   const auto& lazy_param1 = lazy_params.at(0);
   ASSERT_EQ(lazy_param1.name(), loaded_param1.name());
   const auto& lazy_tensor1 = lazy_param1.tensor();
+  ASSERT_EQ(lazy_tensor1.offset(), 0);
   ASSERT_EQ(lazy_tensor1.data()->recordId.value(), loaded_tensor1.data()->recordId.value());
   ASSERT_EQ(lazy_tensor1.data()->dataPtr.get(), nullptr);
   ASSERT_EQ(lazy_tensor1.data()->size, loaded_tensor1.data()->size);
   const auto& lazy_param2 = lazy_params.at(1);
   ASSERT_EQ(lazy_param2.name(), loaded_param2.name());
   const auto& lazy_tensor2 = lazy_param2.tensor();
+  ASSERT_EQ(lazy_tensor2.offset(), offset2);
   ASSERT_EQ(lazy_tensor2.data()->recordId.value(), loaded_tensor2.data()->recordId.value());
   ASSERT_EQ(lazy_tensor2.data()->dataPtr.get(), nullptr);
   ASSERT_EQ(lazy_tensor2.data()->size, loaded_tensor2.data()->size);

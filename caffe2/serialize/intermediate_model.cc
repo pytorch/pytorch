@@ -58,7 +58,7 @@ void IntermediateTensor::update(caffe2::TensorProto* tensor_proto,
           AT_ASSERTM(external_data.has_record_id(), "no record_id in ExternalDataProto and source_type is INLINE_CONTAINER!");
           // only load the data of the tensor in LOADER_TENSOR_DATA mode
           uint64_t record_id = caffe2::stoull(external_data.record_id());
-          uint64_t size = external_data.size();
+          uint64_t record_size = external_data.record_size();
           auto it = id_data->find(record_id);
           if (mode == DeserializeMode::LOADER_TENSOR_DATA) {
             // tensor data is only loaded in LOADER_TENSOR_DATA mode
@@ -68,11 +68,11 @@ void IntermediateTensor::update(caffe2::TensorProto* tensor_proto,
             }
             data_ = it->second;
             AT_ASSERT(data_->recordId.value() == record_id);
-            AT_ASSERT(data_->size == size);
+            AT_ASSERT(data_->size == record_size);
           } else {
             AT_ASSERTM(mode == DeserializeMode::HEADER_ONLY, "unkonw deserialize mode.");
             if (it == id_data->end()) {
-              data_ = std::make_shared<SharedData>(record_id, size);
+              data_ = std::make_shared<SharedData>(record_id, record_size);
               (*id_data)[record_id] = data_;
             } else {
               data_ = it->second;
@@ -110,7 +110,7 @@ void IntermediateTensor::dump(caffe2::TensorProto* tensor_proto) {
   data_proto->set_source_type(caffe2::ExternalDataProto_SourceType_INLINE_CONTAINER);
   AT_ASSERTM(data_->recordId.has_value(), "recordId is required for SharedData!");
   data_proto->set_record_id(caffe2::to_string(data_->recordId.value()));
-  data_proto->set_size(data_->size);
+  data_proto->set_record_size(data_->size);
   data_proto->set_offset(offset_);
   for (auto stride : strides_) {
     data_proto->add_strides(stride);
