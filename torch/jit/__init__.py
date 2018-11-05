@@ -10,8 +10,6 @@ from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     COMPILATION_PENDING
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple
 import torch.testing
-from torch.jit._utils import _construct_empty_int_list, \
-    _construct_empty_float_list, _construct_empty_tensor_list
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
 import warnings
@@ -1356,12 +1354,24 @@ def _find_builtin(fn):
 
 # Python equivalents for the empty list construction builtins. We need
 # these otherwise the tests won't execute in regular Python mode.
+def _construct_empty_int_list():
+    return []
+
 _register_builtin(_construct_empty_int_list, 'aten::_construct_empty_int_list')
+
+
+def _construct_empty_float_list():
+    return []
+
 _register_builtin(_construct_empty_float_list, 'aten::_construct_empty_float_list')
+
+
+def _construct_empty_tensor_list():
+    return []
+
 _register_builtin(_construct_empty_tensor_list, 'aten::_construct_empty_tensor_list')
 
 _register_builtin(len, 'aten::len')
-
 
 _register_builtin(_wait, 'aten::wait')
 
@@ -1401,16 +1411,15 @@ class ContextProp(object):
         self.setter(val)
 
 
-class JITModule(object):
+class JITModule(types.ModuleType):
     def __init__(self, m):
-        self.__dict__ = m.__dict__
         # You have to retain the old module, otherwise it will
         # get GC'ed and a lot of things will break.  See:
         # https://stackoverflow.com/questions/47540722/how-do-i-use-the-sys-modules-replacement-trick-in-init-py-on-python-2
         self.__old_mod = m
 
     def __getattr__(self, name):
-        return getattr(self.__old_mod, name)
+        return self.__old_mod.__getattribute__(name)
 
     @staticmethod
     def __raise(ex):

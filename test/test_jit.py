@@ -32,7 +32,6 @@ import random
 
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
-import torch.jit._utils as _utils
 
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future
@@ -3467,7 +3466,7 @@ a")
 
         @torch.jit.script
         def foo2(x):
-            return torch.cat(_utils._construct_empty_tensor_list(), dim=1)
+            return torch.cat(torch.jit._construct_empty_tensor_list(), dim=1)
 
         @torch.jit.script
         def foo3(x):
@@ -3502,13 +3501,13 @@ a")
             self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
-            x = _utils._construct_empty_int_list()
+            x = torch.jit._construct_empty_int_list()
             if True:
                 x = [1, 2, 3]
-            y = _utils._construct_empty_float_list()
+            y = torch.jit._construct_empty_float_list()
             if True:
                 y = [1.0, 2.0, 3.0]
-            z = _utils._construct_empty_tensor_list()
+            z = torch.jit._construct_empty_tensor_list()
             if True:
                 z = [torch.randn([1])]
             return
@@ -3523,7 +3522,7 @@ a")
             self.checkScript(reassign_bad_type, (), optimize=False)
 
         def reassign_nested():
-            x = _utils._construct_empty_int_list()
+            x = torch.jit._construct_empty_int_list()
             if True:
                 x = [1, 2, 3]
                 if True:
@@ -3573,7 +3572,7 @@ a")
         self.checkScript(func, ())
 
         def func2():
-            a = _utils._construct_empty_tensor_list()
+            a = torch.jit._construct_empty_tensor_list()
             return len(a) == 0
 
         self.checkScript(func2, ())
@@ -3629,7 +3628,7 @@ a")
 
         def test_list_add_empty():
             a = [1, 2, 3]
-            b = _utils._construct_empty_int_list()
+            b = torch.jit._construct_empty_int_list()
             c = a + b
             return c == [1, 2, 3]
 
@@ -3686,7 +3685,7 @@ a")
 
         def test_backward_slice():
             a = [0, 1, 2, 3, 4]
-            return a[3:2] == _utils._construct_empty_int_list()
+            return a[3:2] == torch.jit._construct_empty_int_list()
         self.checkScript(test_backward_slice, ())
 
         def test_over_slice():
@@ -3727,7 +3726,7 @@ a")
         self.checkScript(test_append_if_else, ())
 
         def test_append_loop():
-            a = _utils._construct_empty_int_list()
+            a = torch.jit._construct_empty_int_list()
             for i in range(5):
                 a.append(i)
 
@@ -3735,7 +3734,7 @@ a")
         self.checkScript(test_append_loop, ())
 
         def test_append_loop_if():
-            a = _utils._construct_empty_int_list()
+            a = torch.jit._construct_empty_int_list()
             for i in range(5):
                 if i > 3:
                     a.append(i)
@@ -3746,7 +3745,7 @@ a")
         self.checkScript(test_append_loop_if, ())
 
         def test_nested_loop():
-            a = _utils._construct_empty_int_list()
+            a = torch.jit._construct_empty_int_list()
             for i in range(2):
                 for j in range(2):
                     a.append(i + j)
