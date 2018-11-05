@@ -4,7 +4,7 @@
 #include <torch/data/detail/data_shuttle.h>
 #include <torch/data/detail/sequencers.h>
 #include <torch/data/iterator.h>
-#include <torch/data/samplers/random.h>
+#include <torch/data/samplers.h>
 #include <torch/data/worker_exception.h>
 #include <torch/tensor.h>
 
@@ -24,6 +24,7 @@
 
 namespace torch {
 namespace data {
+
 template <typename Dataset, typename Sampler>
 class DataLoader {
  public:
@@ -56,6 +57,37 @@ class DataLoader {
       }
     } else {
       main_thread_dataset_ = torch::make_unique<Dataset>(std::move(dataset));
+    }
+  }
+
+  /// Constructs a new `DataLoader` from a `dataset`, `options`, and `Sampler`.
+  /// This constructor must be used with a chunk data set. The `Sampler` is
+  /// default to `BatchSizeSampler` for the dataloader, please check
+  /// `make_chunk_data_loader` below. However, a regular sampler and a chunk
+  /// sampler need to be provided to the `dataset` for it to function properly.
+  /// The data loader simply retrives batches using the batch size.
+  DataLoader(
+      Dataset dataset,
+      DataLoaderOptions options,
+      Sampler sampler,
+      bool chunk_loading)
+      : options_(std::move(options)),
+        sampler_(std::move(sampler)),
+        sequencer_(new_sequencer()) {
+    // clang-format off
+    AT_CHECK(
+        chunk_loading == true,
+        "A chunk data set along with the chunk_loading  == true ",
+        "must be used with this constructor.");
+    // clang-format on
+
+    // Unlike the regular data loader, here we share a dataset between threads.
+    main_thread_dataset_ = torch::make_unique<Dataset>(std::move(dataset));
+
+    if (options_.workers > 0) {
+      for (size_t w = 0; w < options_.workers; ++w) {
+        workers_.emplace_back([this] { this->chunk_loading_worker_thread(); });
+      }
     }
   }
 
@@ -225,6 +257,25 @@ class DataLoader {
     }
   }
 
+  /// The function that worker threads run when in chunk loading mode.
+  /// Note: this method uses the main_thread_dataset as it is shared between the
+  /// worker threads.
+  void chunk_loading_worker_thread() {
+    while (true) {
+      auto job = shuttle_.pop_job();
+      if (job.quit) {
+        break;
+      }
+      try {
+        auto batch =
+            main_thread_dataset_->get_batch(std::move(*job.index_batch));
+        shuttle_.push_result({std::move(batch), job.sequence_number});
+      } catch (...) {
+        shuttle_.push_result({std::current_exception(), job.sequence_number});
+      }
+    }
+  }
+
   optional<IndexBatch> get_index_batch() {
     auto indices = sampler_.next(options_.batch_size);
     if (!indices ||
@@ -286,6 +337,16 @@ std::unique_ptr<DataLoader<Dataset, Sampler>> make_data_loader(
     Sampler sampler) {
   return torch::make_unique<DataLoader<Dataset, Sampler>>(
       std::move(dataset), std::move(options), std::move(sampler));
+}
+
+/// Creates a new `DataLoader`, with chunk loading support.
+template <typename Dataset, typename Sampler =  samplers::BatchSizeSampler>
+std::unique_ptr<DataLoader<Dataset, Sampler>> make_chunk_data_loader(
+    Dataset dataset,
+    DataLoaderOptions options,
+    Sampler sampler) {
+  return torch::make_unique<DataLoader<Dataset, Sampler>>(
+      std::move(dataset), std::move(options), std::move(sampler), true);
 }
 
 /// Creates a new `DataLoader`, inferring the necessary template types from
