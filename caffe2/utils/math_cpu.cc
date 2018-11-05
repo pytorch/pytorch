@@ -3137,7 +3137,9 @@ C10_EXPORT void Im2ColNd<float, CPUContext, StorageOrder::NCHW>(
     const int* pad,
     const float* img_data,
     float* col_data,
-    CPUContext* /* context */) {
+    CPUContext* /* context */,
+    const int /* groups */) {
+  // In NCHW, the number of groups doesn't affect Im2Col.
   if (N == 3) {
     const int channels =
         col_shape[0] / kernel_shape[0] / kernel_shape[1] / kernel_shape[2];
@@ -3192,7 +3194,9 @@ C10_EXPORT void Col2ImNd<float, CPUContext, StorageOrder::NCHW>(
     const int* pad,
     const float* col_data,
     float* img_data,
-    CPUContext* /* context */) {
+    CPUContext* /* context */,
+    const int /* groups */) {
+  // In NCHW, the number of groups doesn't affect Col2Im.
   Im2ColNdNCHWImpl<float, true>(
       N,
       img_size,
@@ -3247,7 +3251,7 @@ C10_EXPORT void Im2Col<float, CPUContext, StorageOrder::NCHW>(
 
   // Baseline
   const int output_h =
-      (H + pad_b + pad_t - (dilation_h * (kernel_h - 1) + 1)) / stride_h + 1;
+      (H + pad_t + pad_b - (dilation_h * (kernel_h - 1) + 1)) / stride_h + 1;
   const int output_w =
       (W + pad_l + pad_r - (dilation_w * (kernel_w - 1) + 1)) / stride_w + 1;
   const int output_size = output_h * output_w;
@@ -3311,7 +3315,7 @@ C10_EXPORT void Im2Col<float, CPUContext, StorageOrder::NHWC>(
 
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
-  const int output_h = (H + pad_b + pad_t - dkernel_h) / stride_h + 1;
+  const int output_h = (H + pad_t + pad_b - dkernel_h) / stride_h + 1;
   const int output_w = (W + pad_l + pad_r - dkernel_w) / stride_w + 1;
   int h_pad = -pad_t;
   if (groups == 1) {
@@ -3339,8 +3343,12 @@ C10_EXPORT void Im2Col<float, CPUContext, StorageOrder::NHWC>(
       h_pad += stride_h;
     } // h
   } else {
-    // img_data in N H W G C/G layout
-    // col_data in N G H W R S C/G layout
+    /**
+     * img_data in N H W G C/G layout
+     * col_data in N G H W R S C/G layout
+     * Note that groups are pulled out to an outer dimension so that we can use
+     * GEMMs efficiently.
+     */
     const int C_per_G = C / groups;
     for (int h = 0; h < output_h; ++h) {
       int w_pad = -pad_l;
@@ -3372,6 +3380,134 @@ C10_EXPORT void Im2Col<float, CPUContext, StorageOrder::NHWC>(
       } // w
       h_pad += stride_h;
     } // h
+  }
+}
+
+/**
+ * The layout of the result is N H W G R S C/G.
+ * Note that groups are pulled out to an outer dimension so that we can use
+ * GEMMs efficiently.
+ */
+template <typename TData>
+C10_EXPORT void Im2Col3dNHWCImpl(
+    const int C,
+    const int T,
+    const int H,
+    const int W,
+    const int kernel_t,
+    const int kernel_h,
+    const int kernel_w,
+    const int dilation_t,
+    const int dilation_h,
+    const int dilation_w,
+    const int pad_p, // previous frame
+    const int pad_t, // top
+    const int pad_l, // left
+    const int pad_n, // next frame
+    const int pad_b, // bottom
+    const int pad_r, // right
+    const int stride_t,
+    const int stride_h,
+    const int stride_w,
+    const TData* img_data,
+    TData* col_data,
+    const int groups) {
+  const int dkernel_t = dilation_t * (kernel_t - 1) + 1;
+  const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
+  const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
+  const int output_t = (T + pad_p + pad_n - dkernel_t) / stride_t + 1;
+  const int output_h = (H + pad_t + pad_b - dkernel_h) / stride_h + 1;
+  const int output_w = (W + pad_l + pad_r - dkernel_w) / stride_w + 1;
+  const int C_per_G = C / groups;
+  int t_pad = -pad_p;
+  for (int t = 0; t < output_t; ++t) {
+    int h_pad = -pad_t;
+    for (int h = 0; h < output_h; ++h) {
+      int w_pad = -pad_l;
+      for (int w = 0; w < output_w; ++w) {
+        int q = 0;
+        for (int it = t_pad; it < t_pad + dkernel_t; it += dilation_t, ++q) {
+          int r = 0;
+          for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h, ++r) {
+            int s = 0;
+            for (int iw = w_pad; iw < w_pad + dkernel_w;
+                 iw += dilation_w, ++s) {
+              if (utils::IsAGeZeroAndALtB(it, T) &&
+                  utils::IsAGeZeroAndALtB(ih, H) &&
+                  utils::IsAGeZeroAndALtB(iw, W)) {
+                for (int g = 0; g < groups; ++g) {
+                  std::memcpy(
+                      col_data +
+                          (((g * kernel_t + q) * kernel_h + r) * kernel_w + s) *
+                              C_per_G,
+                      img_data + ((it * H + ih) * W + iw) * C + g * C_per_G,
+                      sizeof(TData) * C_per_G);
+                }
+              } else {
+                for (int g = 0; g < groups; ++g) {
+                  std::memset(
+                      col_data +
+                          (((g * kernel_t + q) * kernel_h + r) * kernel_w + s) *
+                              C_per_G,
+                      0,
+                      sizeof(TData) * C_per_G);
+                }
+              }
+            } // iw
+          } // ih
+        } // it
+        col_data += kernel_t * kernel_h * kernel_w * C;
+        w_pad += stride_w;
+      } // w
+      h_pad += stride_h;
+    } // h
+    t_pad += stride_t;
+  } // t
+}
+
+template <>
+C10_EXPORT void Im2ColNd<float, CPUContext, StorageOrder::NHWC>(
+    const int N,
+    const int /*img_size*/,
+    const int /*col_size*/,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const float* img_data,
+    float* col_data,
+    CPUContext* /* context */,
+    const int groups) {
+  if (N == 3) {
+    const int channels =
+        col_shape[3] / kernel_shape[0] / kernel_shape[1] / kernel_shape[2];
+    Im2Col3dNHWCImpl<float>(
+        channels,
+        img_shape[0],
+        img_shape[1],
+        img_shape[2],
+        kernel_shape[0],
+        kernel_shape[1],
+        kernel_shape[2],
+        dilation[0],
+        dilation[1],
+        dilation[2],
+        pad[0],
+        pad[1],
+        pad[2],
+        pad[3],
+        pad[4],
+        pad[5],
+        stride[0],
+        stride[1],
+        stride[2],
+        img_data,
+        col_data,
+        groups);
+  } else {
+    CAFFE_NOT_IMPLEMENTED;
   }
 }
 
@@ -3535,6 +3671,132 @@ C10_EXPORT void Col2Im<float, CPUContext, StorageOrder::NHWC>(
       } // w
       h_pad += stride_h;
     } // h
+  }
+}
+
+/**
+ * The layout of the result is N H W G R S C/G.
+ * Note that groups are pulled out to an outer dimension so that we can use
+ * GEMMs efficiently.
+ */
+template <typename TData>
+C10_EXPORT void Col2Im3dNHWCImpl(
+    const int C,
+    const int T,
+    const int H,
+    const int W,
+    const int kernel_t,
+    const int kernel_h,
+    const int kernel_w,
+    const int dilation_t,
+    const int dilation_h,
+    const int dilation_w,
+    const int pad_p, // previous frame
+    const int pad_t, // top
+    const int pad_l, // left
+    const int pad_n, // next frame
+    const int pad_b, // bottom
+    const int pad_r, // right
+    const int stride_t,
+    const int stride_h,
+    const int stride_w,
+    const TData* col_data,
+    TData* img_data,
+    CPUContext* context,
+    const int groups) {
+  Set<float, CPUContext>(T * H * W * C, 0, img_data, context);
+  const int dkernel_t = dilation_t * (kernel_t - 1) + 1;
+  const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
+  const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
+  const int output_t = (T + pad_p + pad_n - dkernel_t) / stride_t + 1;
+  const int output_h = (H + pad_t + pad_b - dkernel_h) / stride_h + 1;
+  const int output_w = (W + pad_l + pad_r - dkernel_w) / stride_w + 1;
+  const int C_per_G = C / groups;
+
+  int t_pad = -pad_p;
+  for (int t = 0; t < output_t; ++t) {
+    int h_pad = -pad_t;
+    for (int h = 0; h < output_h; ++h) {
+      int w_pad = -pad_l;
+      for (int w = 0; w < output_w; ++w) {
+        int q = 0;
+        for (int it = t_pad; it < t_pad + dkernel_t; it += dilation_t, ++q) {
+          int r = 0;
+          for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h, ++r) {
+            int s = 0;
+            for (int iw = w_pad; iw < w_pad + dkernel_w;
+                 iw += dilation_w, ++s) {
+              if (utils::IsAGeZeroAndALtB(it, T) &&
+                  utils::IsAGeZeroAndALtB(ih, H) &&
+                  utils::IsAGeZeroAndALtB(iw, W)) {
+                float* img_data_patch = img_data + ((it * T + ih) * W + iw) * C;
+                for (int g = 0; g < groups; ++g) {
+                  Add<float, CPUContext>(
+                      C_per_G,
+                      img_data_patch + g * C_per_G,
+                      col_data +
+                          (((g * kernel_t + q) * kernel_h + r) * kernel_w + s) *
+                              C_per_G,
+                      img_data_patch + g * C_per_G,
+                      context);
+                }
+              }
+            } // iw
+          } // ih
+        } // it
+        col_data += kernel_t * kernel_h * kernel_w * C;
+        w_pad += stride_w;
+      } // w
+      h_pad += stride_h;
+    } // h
+    t_pad += stride_t;
+  } // t
+}
+
+template <>
+C10_EXPORT void Col2ImNd<float, CPUContext, StorageOrder::NHWC>(
+    const int N,
+    const int /*img_size*/,
+    const int /*col_size*/,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const float* col_data,
+    float* img_data,
+    CPUContext* context,
+    const int groups) {
+  if (N == 3) {
+    const int channels =
+        col_shape[3] / kernel_shape[0] / kernel_shape[1] / kernel_shape[2];
+    Col2Im3dNHWCImpl<float>(
+        channels,
+        img_shape[0],
+        img_shape[1],
+        img_shape[2],
+        kernel_shape[0],
+        kernel_shape[1],
+        kernel_shape[2],
+        dilation[0],
+        dilation[1],
+        dilation[2],
+        pad[0],
+        pad[1],
+        pad[2],
+        pad[3],
+        pad[4],
+        pad[5],
+        stride[0],
+        stride[1],
+        stride[2],
+        col_data,
+        img_data,
+        context,
+        groups);
+  } else {
+    CAFFE_NOT_IMPLEMENTED;
   }
 }
 
