@@ -143,9 +143,14 @@ std::vector<float> convertOneImage(std::string& filename) {
   assert(filename[0] != '~');
 
   std::cout << "Converting " << filename << std::endl;
+  
   // Load image
   cv::Mat img = cv::imread(
-      filename, FLAGS_color ? cv::IMREAD_COLOR : cv::IMREAD_GRAYSCALE);
+#if CV_MAJOR_VERSION <= 3
+  filename, FLAGS_color ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
+#else
+  filename, FLAGS_color ? cv::IMREAD_COLOR : cv::IMREAD_GRAYSCALE);
+#endif
 
   cv::Mat crop = cropToSquare(img);
 
