@@ -74,6 +74,18 @@ inline Value* getValueTrace(const Variable& var) {
   return it->second;
 }
 
+inline Value* getNestedValueTrace(const std::shared_ptr<TracingState>& state, const IValue &v) {
+  if (v.isTensorList()) {
+    return state->graph->insertNode(state->graph->createList(
+        DynamicType::get(),
+        fmap(v.toTensorListRef(), [&](const IValue &v) {
+          return getNestedValueTrace(state, v);
+	)))->output();
+  }
+  return getValueTrace(v.toTensor());
+}
+
+
 inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const Variable& var, size_t output_no) {
   if (!var.defined()) {
     Node *n = state->graph->createUndefined();

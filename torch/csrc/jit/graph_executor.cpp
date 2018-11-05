@@ -495,8 +495,8 @@ private:
   void runTraced(Stack & stack) {
     auto state = tracer::getTracingState();
     auto inputs = last(stack, num_inputs);
-    auto input_values = fmap(inputs, [](const IValue & v) {
-      return tracer::getValueTrace(v.toTensor());
+    auto input_values = fmap(inputs, [&](const IValue & v) {
+      return tracer::getNestedValueTrace(state, v);
     });
 
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
