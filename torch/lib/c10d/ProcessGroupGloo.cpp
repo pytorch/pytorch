@@ -194,6 +194,32 @@ at::Tensor pinnedLike(at::Tensor& tensor) {
   return type.tensorWithAllocator(tensor.sizes(), tensor.strides(), allocator);
 }
 
+// This function initializes a vector of CUDA streams, one for every
+// tensor in the input vector, and ensures that these streams are
+// synchronized with the current default streams. This is needed so
+// that new work on the new streams is serialized w.r.t. all operations
+// on the tensors in the input vector.
+void initializeStreamsEvents(
+    at::cuda::CUDAGuard& guard,
+    std::vector<at::Tensor>& inputs,
+    std::vector<at::cuda::CUDAStream>& streams,
+    std::vector<at::cuda::CUDAEvent>& events) {
+  streams.reserve(inputs.size());
+  events.resize(inputs.size());
+  for (size_t i = 0; i < inputs.size(); i++) {
+    guard.set_device(inputs[i].get_device());
+    // Record event on current stream
+    events[i].record(at::cuda::getCurrentCUDAStream());
+    // Get a non-default stream to execute asynchronous CUDA operations
+    // on for this input. This ensures that the default stream used
+    // by the caller is not occupied by c10d related operations.
+    streams.push_back(at::cuda::getStreamFromPool(
+        /* isHighPriority */ true, inputs[i].get_device()));
+    // Ensure the new stream is synchronized with the current stream.
+    events[i].block(streams[i]);
+  }
+}
+
 #endif
 
 } // namespace
@@ -751,21 +777,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
       uint32_t tag)
       : AsyncBroadcastWork(context, inputs, rootRank, rootTensor, tag) {
     at::cuda::CUDAGuard guard;
-
-    // Record events on the current streams.
-    events.resize(inputs.size());
-    for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_device(inputs[i].get_device());
-      events[i].record(at::cuda::getCurrentCUDAStream());
-    }
-
-    // Grab streams we can use for copying tensors to/from the host.
-    // The running assumption is that they are placed on different devices,
-    streams.reserve(inputs.size());
-    for (size_t i = 0; i < inputs.size(); i++) {
-      streams.push_back(at::cuda::getStreamFromPool(
-          /* isHighPriority */ true, inputs[i].get_device()));
-    }
+    initializeStreamsEvents(guard, inputs, streams, events);
 
     // Create pinned host side tensors.
     tmp = pinnedLike(inputs[rootTensor]);
@@ -925,21 +937,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
       uint32_t tag)
       : AsyncAllreduceWork(context, inputs, reduceOp, tag) {
     at::cuda::CUDAGuard guard;
-
-    // Record events on the current streams.
-    events.resize(inputs.size());
-    for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_device(inputs[i].get_device());
-      events[i].record(at::cuda::getCurrentCUDAStream());
-    }
-
-    // Grab streams we can use for copying tensors to/from the host.
-    // The running assumption is that they are placed on different devices,
-    streams.reserve(inputs.size());
-    for (size_t i = 0; i < inputs.size(); i++) {
-      streams.push_back(at::cuda::getStreamFromPool(
-          /* isHighPriority */ true, inputs[i].get_device()));
-    }
+    initializeStreamsEvents(guard, inputs, streams, events);
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmp.reserve(inputs.size());
