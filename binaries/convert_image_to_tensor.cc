@@ -99,9 +99,9 @@ std::vector<float> convertToVector(cv::Mat& img) {
     } else if (step == "normalize") {
       normalize = {255, 255, 255};
     } else if (step == "mean") {
-      mean = {0.406, 0.456, 0.485};
+      mean = {0.406f, 0.456f, 0.485f};
     } else if (step == "std") {
-      std = {0.225, 0.224, 0.229};
+      std = {0.225f, 0.224f, 0.229f};
     } else if (step == "bgrtorgb") {
       bgrtorgb = true;
     } else {
@@ -145,7 +145,7 @@ std::vector<float> convertOneImage(std::string& filename) {
   std::cout << "Converting " << filename << std::endl;
   // Load image
   cv::Mat img = cv::imread(
-      filename, FLAGS_color ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
+      filename, FLAGS_color ? cv::IMREAD_COLOR : cv::IMREAD_GRAYSCALE);
 
   cv::Mat crop = cropToSquare(img);
 
