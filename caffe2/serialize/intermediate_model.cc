@@ -158,15 +158,15 @@ IntermediateMethod::IntermediateMethod(torch::MethodDef* method_def) {
   }
 }
 
-IntermediateMethod::IntermediateMethod(const IntermediateMethod& method) {
+IntermediateMethod::IntermediateMethod(IntermediateMethod&& method) noexcept {
   name_ = method.name_;
-  graph_ = caffe2::make_unique<caffe2::NetDef>(*(method.graph_));
+  graph_ = std::move(method.graph_);
   torchScript_ = method.torchScript_;
 }
 
-IntermediateMethod& IntermediateMethod::operator =(const IntermediateMethod& method) {
+IntermediateMethod& IntermediateMethod::operator =(IntermediateMethod&& method) noexcept{
   name_ = method.name_;
-  graph_ = caffe2::make_unique<caffe2::NetDef>(*(method.graph_));
+  graph_ = std::move(method.graph_);
   torchScript_ = method.torchScript_;
   return *this;
 }
