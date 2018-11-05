@@ -59,12 +59,11 @@ void overrideCanFuseOnCPU(bool value) {
 // node as a fusion group.
 std::vector<at::Tensor> debugLaunchGraph(
   Graph& graph
-, int device
 , at::ArrayRef<at::Tensor> inputs) {
   #if USE_CUDA_FUSER || USE_CPU_FUSER
     // Creates a fusion group node
     auto wrapper_graph = std::make_shared<Graph>();
-    Node* fusion_group = wrapper_graph->insertNode(wrapper_graph->createFusionGroup(device));
+    Node* fusion_group = wrapper_graph->insertNode(wrapper_graph->createFusionGroup());
     fusion_group->g_(attr::Subgraph, graph.copy());
     for (size_t i = 0; i < graph.inputs().size(); ++i) {
       fusion_group->addInput(wrapper_graph->addInput());

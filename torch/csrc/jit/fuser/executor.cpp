@@ -305,15 +305,22 @@ bool runFusion(
     return i.toTensor();
   });
 
-  // Determines device to dispatch to
-  // Note assumes all inputs are on at most one GPU device and/or the CPU
-  int32_t device = kCPUDevice;
-  for (const auto& t : inputs) {
-    const auto cur_device = t.device().index();
-    if (cur_device < 0) continue;
-    if (device < 0) device = cur_device;
-    else JIT_ASSERT(device == cur_device);
+  // Determines device to dispatch to. If there's a device mismatch in the inputs,
+  // we use the fallback (which should give a nice error message).
+  int32_t device = inputs.at(0).device().index();
+  at::ScalarType dtype = inputs[0].type().scalarType();
+  for (const auto& t : at::TensorList(inputs).slice(1)) {
+    if (t.device().index() != device) {
+      return false;
+    }
+    if (t.type().scalarType() != dtype) {
+      return false;
+    }
   }
+
+  // The codegen only supports float and half inputs at the moment, so bail out
+  // if we see anything else.
+  if (dtype != at::kFloat && dtype != at::kHalf) return false;
 
   // Attempts to run fallback if device fusion is disabled
   if (device != kCPUDevice && !canFuseOnGPU()) return false;

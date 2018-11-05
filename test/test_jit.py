@@ -780,6 +780,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    @unittest.expectedFailure
     def test_comparison_gt_lt_cuda(self):
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
@@ -790,6 +791,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    @unittest.expectedFailure
     def test_comparison_ge_le_cuda(self):
         def f(x, y):
             mask = (x >= 0).type_as(x)
@@ -807,6 +809,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    @unittest.expectedFailure
     def test_comparison_eq_ne(self):
         def f(x, y):
             mask = (x == 0).type_as(x)
@@ -892,6 +895,23 @@ class TestJit(JitTestCase):
                     fusion_output.sum(), local_fusion_inputs, allow_unused=True, retain_graph=True)
                 grads_half = [t.half() for t in grads]
                 self.assertEqual(grads_half, fusion_grads)
+
+    def test_canonicalize_tensor_iterator(self):
+        x = torch.randn(4, 4)
+
+        def f(x):
+            x = x + 2
+            x = x - 4
+            x = x * 6
+            x = x / 8
+            return x
+
+        traced = torch.jit.trace(f, (x,))
+        f(x)
+        graph = traced.graph_for(x)
+        # There should be 4 int constants for the right sides of operators, plus two
+        # for alpha arguments for add and sub
+        self.assertTrue(str(traced.graph_for(x)).count(': int = prim::Constant'), 6)
 
     # TODO: adapt this test to check that GraphExecutor treats them differently
     @unittest.skip("Need to be adjusted to Graph Executor")
@@ -2918,7 +2938,9 @@ a")
 
             c = s(a, b)
             c.sum().backward()
-            self.assertAllFused(backward_graph(s))
+            graph = backward_graph(s)
+            self.assertEqual(set([node.kind() for node in graph.nodes()]),
+                             set(['prim::Constant', 'aten::ge', 'aten::le', 'aten::type_as', 'prim::FusionGroup']))
 
     def test_mul(self):
         def func(a, b):
