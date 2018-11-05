@@ -69,7 +69,10 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
   return tensors;
 }
 
-// NOTE [ Version Counter in broadcast_coalesced ]
+// NOTE [ Version Counter in comm.*_coalesced ]
+//
+// broadcast_coalesced
+// ~~~~~~~~~~~~~~~~~~~
 //
 // In broadcast_coalesced, multiple variables may be coalesced into a single
 // large one, broadcast to other devices, and the get split according to the
@@ -88,8 +91,14 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
 // what is equivalent to .data in Python), and give them individual version
 // counters.
 //
-// NB: For `device[0]`, we always return the input Variables as-is, so
-//     **do not** re-wrap them.
+// NB: For `device[0]` in broadcast_coalesced, the input Variables are always
+//     returned as-is, so **do not** re-wrap them.
+//
+// reduce_add_coalesced
+// ~~~~~~~~~~~~~~~~~~~~
+//
+// Similarly for reduce_add_coalesced, when the output are newly created
+// Variables.
 tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t buffer_size) {
   if (!std::all_of(tensors.begin(), tensors.end(),
                    [&](const at::Tensor& t) { return t.get_device() == devices[0]; })) {
@@ -121,7 +130,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
         auto & inds = broadcast_indices[i];
         auto & vals = broadcast_values[i];
         for (auto & t : utils::unflatten_sparse_tensors(inds, vals, chunk.tensors)) {
-          // See NOTE [ Version Counter in broadcast_coalesced ]
+          // See NOTE [ Version Counter in comm.*_coalesced ]
           AT_ASSERT(t.is_variable());
           Variable var = t;
           device_outputs.push_back(std::move(make_variable(var.data(), false)));
@@ -134,7 +143,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
         device_guard.set_index(devices[i]);
         auto & device_outputs = outputs[i];
         for (auto & t : utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
-          // See NOTE [ Version Counter in broadcast_coalesced ]
+          // See NOTE [ Version Counter in comm.*_coalesced ]
           AT_ASSERT(t.is_variable());
           Variable var = t;
           device_outputs.push_back(std::move(make_variable(var.data(), false)));
