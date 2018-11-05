@@ -198,11 +198,6 @@ TEST(TestStream, CUDAGuardMovableTest) {
   ASSERT_EQ_CUDA(second.original_streams().size(), device_count);
   ASSERT_EQ_CUDA(second.original_device(), at::Device(at::kCUDA, 0));
   ASSERT_EQ_CUDA(second.current_device(), at::Device(at::kCUDA, 1));
-  at::cuda::CUDAGuard third;
-  third = std::move(second);
-  ASSERT_EQ_CUDA(third.original_streams().size(), device_count);
-  ASSERT_EQ_CUDA(third.original_device(), at::Device(at::kCUDA, 0));
-  ASSERT_EQ_CUDA(third.current_device(), at::Device(at::kCUDA, 1));
 }
 
 // Streampool Round Robin

@@ -69,24 +69,13 @@ public:
   /// moved-from `InlineDeviceGuard` is modified such that its destruction has no
   /// effect (does not reset the device).
   InlineDeviceGuard(InlineDeviceGuard<T>&& other) noexcept {
-    *this = std::move(other);
+    // Default construction leaves this uninitialized
+    std::swap(original_device_, other.original_device_);
+    std::swap(current_device_, other.current_device_);
   }
 
-  /// Move-assigns this `InlineDeviceGuard` from another `InlineDeviceGuard`. The
-  /// moved-from `InlineDeviceGuard` is modified such that its destruction has no
-  /// effect (does not reset the device).
-  InlineDeviceGuard& operator=(InlineDeviceGuard<T>&& other) noexcept {
-    if (this == &other) return *this;
-    // NB: Do NOT override the original_device: you're still
-    // on the hook for reverting to it!
-    if (!initialized()) {
-      original_device_ = other.original_device_;
-    }
-    current_device_ = other.current_device_;
-    other.original_device_ = DeviceType::CPU;
-    other.current_device_ = DeviceType::CPU;
-    return *this;
-  } 
+  // See Note [Move assignment for RAII guards is tricky]
+  InlineDeviceGuard& operator=(InlineDeviceGuard<T>&& other) noexcept = delete;
 
   ~InlineDeviceGuard() {
     if (original_device_ == DeviceType::CPU) return;

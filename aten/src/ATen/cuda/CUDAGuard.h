@@ -42,15 +42,8 @@ struct CUDAGuard {
   /// effect (does not reset the stream or device).
   CUDAGuard(CUDAGuard&& other) noexcept = default;
 
-  /// Move-assigns this `CUDAGuard` from another `CUDAGuard`. The
-  /// moved-from `CUDAGuard` is modified such that its destruction has no
-  /// effect (does not reset the stream or device).
-  CUDAGuard& operator=(CUDAGuard&& other) {
-    device_guard_ = std::move(other.device_guard_);
-    original_streams_ = std::move(other.original_streams_);
-    other.original_streams_.clear();
-    return *this;
-  }
+  // See Note [Move assignment for RAII guards is tricky]
+  CUDAGuard& operator=(CUDAGuard&& other) = delete;
 
   /// Resets the CUDA stream on each device to the one that was active upon
   /// construction.

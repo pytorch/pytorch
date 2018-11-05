@@ -99,6 +99,7 @@ TEST(InlineDeviceGuard, MoveConstructorFromTemporary) {
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i);
 }
 
+/*
 TEST(InlineDeviceGuard, MoveAssignment) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
@@ -140,6 +141,7 @@ TEST(InlineDeviceGuard, MoveAssignmentSelf) {
   ASSERT_EQ(g.current_device(), dev(i));
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i);
 }
+*/
 
 TEST(InlineDeviceGuard, SetDevice) {
   DeviceIndex init_i = 0;
