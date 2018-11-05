@@ -895,6 +895,13 @@ flip(dims) -> Tensor
 See :func:`torch.flip`
 """)
 
+add_docstr_all('roll',
+               r"""
+roll(shifts, dims) -> Tensor
+
+See :func:`torch.roll`
+""")
+
 add_docstr_all('floor_',
                r"""
 floor_() -> Tensor

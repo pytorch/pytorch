@@ -566,6 +566,7 @@ struct CAFFE2_API Type {
   virtual Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) const = 0;
   virtual Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) const = 0;
   virtual Tensor flip(const Tensor & self, IntList dims) const = 0;
+  virtual Tensor roll(const Tensor & self, IntList shifts, IntList dims) const = 0;
   virtual Tensor rot90(const Tensor & self, int64_t k, IntList dims) const = 0;
   virtual Tensor trunc(const Tensor & self) const = 0;
   virtual Tensor & trunc_(Tensor & self) const = 0;

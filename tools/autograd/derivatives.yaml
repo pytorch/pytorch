@@ -747,6 +747,9 @@
 - name: flip(Tensor self, IntList dims)
   self: grad.flip(dims)
 
+- name: roll(Tensor self, IntList shifts, IntList dims)
+  self: grad.roll( -shifts[0], dims)
+
 - name: rot90(Tensor self, int64_t k, IntList dims)
   self: grad.rot90(-k, dims)
 

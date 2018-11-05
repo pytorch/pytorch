@@ -1693,6 +1693,12 @@
     CPU: flip_cpu
     CUDA: flip_cuda
 
+- func: roll(Tensor self, IntList[1] shifts, IntList[1] dims) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: roll_cpu
+    CUDA: roll_cuda
+
 # default IntList value {0,1} should not add space after comma, since native_parse.py uses ', ' to split args
 - func: rot90(Tensor self, int64_t k=1, IntList dims={0,1}) -> Tensor
   variants: function, method
