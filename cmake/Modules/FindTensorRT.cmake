@@ -53,12 +53,12 @@ find_library(TENSORRT_LIBRARY_2 nvcaffe_parser
 find_library(TENSORRT_LIBRARY_3 nvinfer_plugin
         HINTS ${TENSORRT_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
         PATH_SUFFIXES lib lib64 lib/x64)
-find_library(TENSORRT_LIBRARY_4 nvonnxparser
-        HINTS ${TENSORRT_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
-        PATH_SUFFIXES lib lib64 lib/x64)
-find_library(TENSORRT_LIBRARY_5 nvonnxparser_runtime
-        HINTS ${TENSORRT_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
-        PATH_SUFFIXES lib lib64 lib/x64)
+#find_library(TENSORRT_LIBRARY_4 nvonnxparser
+#        HINTS ${TENSORRT_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
+#        PATH_SUFFIXES lib lib64 lib/x64)
+#find_library(TENSORRT_LIBRARY_5 nvonnxparser_runtime
+#        HINTS ${TENSORRT_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
+#        PATH_SUFFIXES lib lib64 lib/x64)
 find_library(TENSORRT_LIBRARY_6 nvparsers
         HINTS ${TENSORRT_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
         PATH_SUFFIXES lib lib64 lib/x64)
