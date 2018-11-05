@@ -146,7 +146,18 @@ PyObject* c10d_init(PyObject* _unused) {
               "allreduce",
               &::c10d::ProcessGroup::allreduce,
               py::call_guard<py::gil_scoped_release>())
-
+          .def(
+              "allreduce",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& xs,
+                 ::c10d::ReduceOp op) {
+                ::c10d::AllreduceOptions opts;
+                opts.reduceOp = op;
+                return pg.allreduce(xs, opts);
+              },
+              py::arg("tensors"),
+              py::arg("op") = ::c10d::ReduceOp::SUM,
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "allreduce",
               [](::c10d::ProcessGroup& pg, at::Tensor& x, ::c10d::ReduceOp op) {
