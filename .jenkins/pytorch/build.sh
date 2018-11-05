@@ -11,7 +11,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
   sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
 fi
 
-sudo apt-get -y --no-install-recommends libc6-dbg
+sudo apt-get install -y --no-install-recommends libc6-dbg
 
 if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
   # TODO: move this to Docker
