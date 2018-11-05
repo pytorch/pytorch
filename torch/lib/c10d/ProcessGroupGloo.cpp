@@ -763,10 +763,100 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
   throw std::runtime_error("ProcessGroupGloo does not support reduce");
 }
 
+namespace {
+
+class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
+ public:
+  AsyncAllgatherWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<std::vector<at::Tensor>>& outputs,
+      std::vector<at::Tensor>& inputs,
+      uint32_t tag)
+      : context(context), outputs(outputs), inputs(inputs), tag(tag) {}
+
+  std::shared_ptr<gloo::Context> context;
+  std::vector<std::vector<at::Tensor>> outputs;
+  std::vector<at::Tensor> inputs;
+  const uint32_t tag;
+
+  void run() override {
+    const auto& scalarType = inputs[0].scalar_type();
+    gloo::AllgatherOptions opts(context);
+    opts.setTag(tag);
+
+    // Use single flattened input tensor.
+    at::Tensor flatInputTensor = flattenDenseTensors(inputs);
+    GENERATE_ALL_TYPES(scalarType, setInput, opts, flatInputTensor);
+
+    // Use single flat output tensor.
+    // The first dimension corresponds to the index into outputs[N],
+    // so copying into the actual output later is easy.
+    at::Tensor flatOutputTensor = newLikeFlat(outputs[0]);
+    GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
+    gloo::allgather(opts);
+
+    // Unflatten into output tensors.
+    for (size_t i = 0; i < outputs.size(); i++) {
+      for (size_t j = 0; j < outputs[i].size(); j++) {
+        outputs[i][j].copy_(flatOutputTensor[j]);
+      }
+    }
+  }
+};
+
+} // namespace
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
-    std::vector<std::vector<at::Tensor>>& /* unused */,
-    std::vector<at::Tensor>& /* unused */) {
-  throw std::runtime_error("ProcessGroupGloo does not support allgather");
+    std::vector<std::vector<at::Tensor>>& outputs,
+    std::vector<at::Tensor>& inputs) {
+  static auto invalidArgument = [](const std::string& msg) {
+    throw std::invalid_argument("ProcessGroupGloo::allgather: " + msg);
+  };
+
+  if (inputs.size() == 0) {
+    invalidArgument("requires non-empty input tensor list");
+  }
+
+  if (inputs.size() != outputs.size()) {
+    invalidArgument(
+        "requires input/output tensor lists to have the same length");
+  }
+
+  for (size_t i = 0; i < outputs.size(); i++) {
+    if (outputs[i].size() != inputs.size() * getSize()) {
+      invalidArgument(
+          "invalid output tensor list at index " + std::to_string(i) +
+          " (expected length " + std::to_string(getSize()) + ", got " +
+          std::to_string(outputs[i].size()) + ")");
+    }
+  }
+
+  const auto& layout = inputs[0].layout();
+  const auto& device = inputs[0].device();
+  const auto& type = inputs[0].type();
+  const auto& sizes = inputs[0].sizes();
+  if (layout != at::kStrided || device.type() != at::kCPU) {
+    invalidArgument("only supports dense CPU tensors");
+  }
+
+  // Expect all input tensors to have the same type and sizes
+  for (size_t i = 1; i < inputs.size(); i++) {
+    assertTypeMatch(invalidArgument, type, inputs, i);
+    assertSizesMatch(invalidArgument, sizes, inputs, i);
+  }
+
+  // Expect all output tensors to have the same type and sizes
+  for (size_t i = 0; i < outputs.size(); i++) {
+    for (size_t j = 1; j < outputs[i].size(); j++) {
+      assertTypeMatch(invalidArgument, type, outputs[i], j);
+      assertSizesMatch(invalidArgument, sizes, outputs[i], j);
+    }
+  }
+
+  auto work = std::make_shared<AsyncAllgatherWork>(
+      contexts_[0], outputs, inputs, nextTag());
+  enqueue(std::bind(AsyncWork::execute, work));
+  return work;
 }
 
 namespace {
