@@ -143,7 +143,7 @@ std::vector<float> convertOneImage(std::string& filename) {
   assert(filename[0] != '~');
 
   std::cout << "Converting " << filename << std::endl;
-  
+
   // Load image
   cv::Mat img = cv::imread(
 #if CV_MAJOR_VERSION <= 3
