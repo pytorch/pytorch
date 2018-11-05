@@ -679,7 +679,7 @@ class TestSparse(TestCase):
         # shapes: list of tuples (sparse_dims, nnz, sizes)
         def test_shapes(shapes, dim, fail_message=None):
             inputs = [self._gen_sparse(shape[0], shape[1], shape[2])[0]
-                    for shape in shapes]
+                      for shape in shapes]
             if fail_message:
                 with self.assertRaisesRegex(RuntimeError, fail_message):
                     torch.cat(inputs, dim)
@@ -688,24 +688,25 @@ class TestSparse(TestCase):
                 dense_result = torch.cat([t.to_dense() for t in inputs], dim)
                 self.assertEqual(dense_result, result.to_dense())
 
-        test_shapes([(3, 10, [2,3,4]), (3, 10, [2,1,4]), (3, 10, [2,4,4])], 1)
-        test_shapes([(3, 10, [2,3,4]), (3, 10, [2,1,4])], 0,
-                "can't be concatenated.*along dimension 0")
+        test_shapes(
+            [(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4]), (3, 10, [2, 4, 4])], 1)
+        test_shapes([(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4])], 0,
+                    "can't be concatenated.*along dimension 0")
         # hybrid sparse/dense
-        test_shapes([(2, 10, [2,3,4]), (2, 10, [2,1,4]), (2, 10, [2,4,4])], 1)
-        test_shapes([(2, 10, [2,3,4]), (2, 10, [2,1,4])], 2,
-                "Can't cat.*along non-sparse dimension 2")
+        test_shapes(
+            [(2, 10, [2, 3, 4]), (2, 10, [2, 1, 4]), (2, 10, [2, 4, 4])], 1)
+        test_shapes([(2, 10, [2, 3, 4]), (2, 10, [2, 1, 4])], 2,
+                    "Can't cat.*along non-sparse dimension 2")
         # mismatched dimensions
-        test_shapes([(2, 10, [2,3,4]), (3, 10, [2,3,4])], 0,
-                "Can't cat with tensor of dimensions")
+        test_shapes([(2, 10, [2, 3, 4]), (3, 10, [2, 3, 4])], 0,
+                    "Can't cat with tensor of dimensions")
 
         # sparse with dense
-        sp = self._gen_sparse(3, 10, [2,3,4])[0]
+        sp = self._gen_sparse(3, 10, [2, 3, 4])[0]
         dn = sp.to_dense()
         with self.assertRaisesRegex(RuntimeError,
-                "Can't cat dense tensor.*with sparse"):
+                                    "Can't cat dense tensor.*with sparse"):
             torch.cat((sp, dn))
-
 
     @cpu_only
     def test_mm(self):
