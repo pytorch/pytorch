@@ -1,12 +1,12 @@
-#include <ATen/core/Half.h>
+#include <c10/Half.h>
 
 #include <iostream>
 
-namespace at {
+namespace c10 {
 
 static_assert(
     std::is_standard_layout<Half>::value,
-    "at::Half must be standard layout.");
+    "c10::Half must be standard layout.");
 
 namespace detail {
 
@@ -102,4 +102,4 @@ std::ostream& operator<<(std::ostream& out, const Half& value) {
   return out;
 }
 
-} // namespace at
+} // namespace c10
