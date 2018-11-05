@@ -22,11 +22,11 @@ class NormalizePlanarYUVOp : public Operator<CPUContext> {
     CAFFE_ENFORCE(X.sizes().size() == 4);
 
     const auto N = X.dim32(0);
-    auto C = X.dim(1);
-    const auto H = X.dim(2);
-    const auto W = X.dim(3);
-    CAFFE_ENFORCE(C == M.dim(1));
-    CAFFE_ENFORCE(C == S.dim(1));
+    auto C = X.size(1);
+    const auto H = X.size(2);
+    const auto W = X.size(3);
+    CAFFE_ENFORCE(C == M.size(1));
+    CAFFE_ENFORCE(C == S.size(1));
     const auto* Xdata = X.data<float>();
     auto* Zdata = Z->template mutable_data<float>();
 

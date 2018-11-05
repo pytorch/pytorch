@@ -55,7 +55,7 @@ class GatherByKeyOp : public Operator<CPUContext> {
           outShape.begin() + keysShape.size(),
           outShape.end(),
           input.sizes().begin() + 1));
-      totalSize += input.dim(0);
+      totalSize += input.size(0);
     }
     CAFFE_ENFORCE_EQ(keysTensor.numel(), totalSize);
 
@@ -145,8 +145,8 @@ class PartitionOpBase : public Operator<CPUContext> {
             i);
         for (int j = 0; j < main_input.ndim(); ++j) {
           CAFFE_ENFORCE_GE(
-              input.dim(j),
-              main_input.dim(j),
+              input.size(j),
+              main_input.size(j),
               "Prefix of extra input's shape must match main input's shape, ",
               "input: ",
               i,
