@@ -87,39 +87,54 @@ public:
     std::swap(current_device_, other.current_device_);
   }
 
-  /// Move-assigns this `DeviceGuard` from another `DeviceGuard`. This
-  /// `DeviceGuard` is immediately terminated.  This allows
-  /// you to implement a modest performance optimization: if the device
-  /// type of the previous DeviceGuard and the new DeviceGuard match,
-  /// then skips the otherwise unnecessary setDevice from the previous
-  /// device guard.
-  ///
-  /// As with the move constructor, it is undefined behavior if you
-  /// move a device guard across an intervening DeviceGuard.
-  ///
-  DeviceGuard& operator=(DeviceGuard&& other) noexcept {
-    if (this == &other) return *this;
-    if (other.original_device_.type() == original_device_.type()) {
-      // other has already set the device to the desired new value;
-      // cancel its destruction and update current_device.  Don't
-      // update original_device, since we are still obligated
-      // to restore to it at the very end.
-      current_device_ = other.current_device_;
-    } else {
-      // the devices are unrelated, so just terminate the
-      // current guard and then move other in
-      if (original_device_ != current_device_) {
-        impl_->setDevice(original_device_);
-      }
-      impl_ = other.impl_;
-      original_device_ = other.original_device_;
-      current_device_ = other.current_device_;
-    }
-    other.impl_ = nullptr;
-    other.current_device_ = at::kCPU;
-    other.original_device_ = at::kCPU;
-    return *this;
-  }
+  // Note [Move assignment for RAII guards is tricky]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // Move assignment is deleted, because you need to know which guard was
+  // defined "first", as that guard's original_device_ wins--with the current
+  // representation, we have no way of telling which is the case.  (Move
+  // construction does not have this problem, as one guard is always
+  // uninitialized.)
+  //
+  // We can make this clear by way of a pair of examples:
+  //
+  // Example 1:
+  //
+  //  // initial device is n0
+  //  {
+  //    CUDAGuard g1(n1);
+  //    {
+  //      CUDAGuard g2(n2);
+  //      // current device should be n2
+  //      g1 = std::move(g2);
+  //      // current device should still be n2
+  //    }
+  //    // current device should still be n2
+  //  }
+  //  // current device should be n0
+  //
+  //  Example 2 (flip the order of the two guards):
+  //
+  //  // initial device is n0
+  //  {
+  //    CUDAGuard g2(n2);
+  //    {
+  //      CUDAGuard g1(n1);
+  //      // current device should be n1
+  //      g1 = std::move(g2);
+  //      // current device should be n2
+  //    }
+  //    // current device should be n0 (since g2 has been vacated)
+  //  }
+  //
+  // In both examples, we need g1 to restore to n0 after move assignment.
+  // However, in example 1, this is determined by the  restore value of g1
+  // (prior to the move). In example 2, however, it is determined by the the
+  // restore value of g2(!!). We don't know which one should win, without having
+  // a way of telling which guard was allocated first.
+  //
+  // We could solve this with an extra thread-local variable.  But no one is
+  // actually using move-assignment.  So just get rid of it.
+  DeviceGuard& operator=(DeviceGuard&& other) = delete;
 
   /// Resets the device to the device that was active at construction of the
   /// guard.
