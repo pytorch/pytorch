@@ -30,7 +30,7 @@ _cudart = None
 def find_cuda_windows_lib():
     proc = Popen(['where', 'cudart64*.dll'], stdout=PIPE, stderr=PIPE, stdin=PIPE)
     out, err = proc.communicate()
-    out = out.decode().strip()
+    out = out.strip()
     if len(out) > 0:
         if out.find('\r\n') != -1:
             out = out.split('\r\n')[0]
