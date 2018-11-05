@@ -550,7 +550,7 @@ if (BUILD_PYTHON)
         caffe2_pybind11_state_gpu caffe2_library caffe2_gpu_library)
     if (WIN32)
       target_link_libraries(caffe2_pybind11_state_gpu ${PYTHON_LIBRARIES})
-      target_link_libraries(caffe2_pybind11_state onnx_proto)
+      target_link_libraries(caffe2_pybind11_state_gpu onnx_proto)
     endif(WIN32)
 
     # Install with same rpath as non-gpu caffe2_pybind11_state
