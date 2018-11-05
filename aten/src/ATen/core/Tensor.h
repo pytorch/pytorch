@@ -469,6 +469,7 @@ public:
   Tensor cumprod(int64_t dim, ScalarType dtype) const;
   Tensor cumprod(int64_t dim) const;
   Tensor det() const;
+  Tensor diag_embed(int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) const;
   Tensor diagflat(int64_t offset=0) const;
   Tensor diagonal(int64_t offset=0, int64_t dim1=0, int64_t dim2=1) const;
   Tensor div(const Tensor & other) const;

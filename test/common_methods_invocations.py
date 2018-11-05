@@ -541,6 +541,7 @@ method_tests = [
     ('diag', (M,), NO_ARGS, '1d'),
     ('diag', (M, M), (1,), '2d_1'),
     ('diag', (M, M), (2,), '2d_2'),
+    ('diag_embed', (S, S), NO_ARGS),
     ('diagonal', (M, M), NO_ARGS, '2d'),
     ('diagonal', (3, 5), NO_ARGS, '2d_wide'),
     ('diagonal', (3, 5), (2,), '2d_wide_pos'),
