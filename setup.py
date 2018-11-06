@@ -326,9 +326,6 @@ class create_version_file(PytorchCommand):
 # Building dependent libraries
 ################################################################################
 
-# All libraries that torch could depend on
-dep_libs = ['caffe2']
-
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
 Please install it via `conda install {module}` or `pip install {module}`
@@ -345,7 +342,7 @@ def check_pydep(importname, module):
 # Calls build_pytorch_libs.sh/bat with the correct env variables
 def build_libs(libs):
     for lib in libs:
-        assert lib in dep_libs, 'invalid lib: {}'.format(lib)
+        assert lib == 'caffe2', 'invalid lib: {}'.format(lib)
     if IS_WINDOWS:
         build_libs_cmd = ['tools\\build_pytorch_libs.bat']
     else:
@@ -479,31 +476,6 @@ class build_deps(PytorchCommand):
         self.copy_tree('torch/lib/tmp_install/share', 'torch/share')
         self.copy_tree('third_party/pybind11/include/pybind11/',
                        'torch/lib/include/pybind11')
-
-
-build_dep_cmds = {}
-rebuild_dep_cmds = {}
-
-for lib in dep_libs:
-    # wrap in function to capture lib
-    class build_dep(build_deps):
-        description = 'Build {} external library'.format(lib)
-
-        def run(self):
-            build_libs([self.lib])
-    build_dep.lib = lib
-    build_dep_cmds['build_' + lib.lower()] = build_dep
-
-    class rebuild_dep(build_deps):
-        description = 'Rebuild {} external library'.format(lib)
-
-        def run(self):
-            global RERUN_CMAKE
-            RERUN_CMAKE = False
-            build_libs([self.lib])
-    rebuild_dep.lib = lib
-    rebuild_dep_cmds['rebuild_' + lib.lower()] = rebuild_dep
-
 
 class build_module(PytorchCommand):
     def run(self):
@@ -1149,8 +1121,6 @@ cmdclass = {
     'install': install,
     'clean': clean,
 }
-cmdclass.update(build_dep_cmds)
-cmdclass.update(rebuild_dep_cmds)
 
 entry_points = {
     'console_scripts': [
@@ -1234,7 +1204,7 @@ if __name__ == '__main__':
                 'share/cmake/Torch/*.cmake',
             ],
             'caffe2': [
-                rel_site_packages + '/caffe2/**/*.py'
+                'cpp_tests/*',
             ]
         },
     )

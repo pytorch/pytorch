@@ -112,9 +112,11 @@ if [ "$(uname)" == 'Darwin' ]; then
   fi
 fi
 
+# Pytorch repo root dir
 BASE_DIR=$(cd $(dirname "$0")/.. && printf "%q\n" "$(pwd)")
+BUILD_DIR="$BASE_DIR/build"
 TORCH_LIB_DIR="$BASE_DIR/torch/lib"
-INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
+TMP_INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
 
 C_FLAGS=""
@@ -170,155 +172,145 @@ function path_remove {
   PATH=${PATH/%":$1"/} # delete any instance in the at the end
 }
 
-# purposefully not using build() because we need Caffe2 to build the same
-# regardless of whether it is inside PyTorch or not, so it
-# cannot take any special flags
-# special flags need to be part of the Caffe2 build itself
-#
-# However, we do explicitly pass library paths when setup.py has already
-# detected them (to ensure that we have a consistent view between the
-# PyTorch and Caffe2 builds.)
-function build_caffe2() {
-  # pwd is pytorch_root/build
-
-  # TODO change these to CMAKE_ARGS for consistency
-  if [[ -z $EXTRA_CAFFE2_CMAKE_FLAGS ]]; then
-    EXTRA_CAFFE2_CMAKE_FLAGS=()
-  fi
-  if [[ -n $CCACHE_WRAPPER_PATH ]]; then
-    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_C_COMPILER=$CCACHE_WRAPPER_PATH/gcc")
-    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_CXX_COMPILER=$CCACHE_WRAPPER_PATH/g++")
-  fi
-  if [[ -n $CMAKE_PREFIX_PATH ]]; then
-    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH")
-  fi
-
-  if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
-      ${CMAKE_COMMAND} $BASE_DIR \
-		       ${CMAKE_GENERATOR} \
-		       -DPYTHON_EXECUTABLE=$PYTORCH_PYTHON \
-		       -DPYTHON_LIBRARY="${PYTORCH_PYTHON_LIBRARY}" \
-		       -DPYTHON_INCLUDE_DIR="${PYTORCH_PYTHON_INCLUDE_DIR}" \
-		       -DBUILDING_WITH_TORCH_LIBS=ON \
-		       -DTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION" \
-		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-		       -DBUILD_TORCH=$BUILD_TORCH \
-		       -DBUILD_PYTHON=$BUILD_PYTHON \
-		       -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \
-		       -DBUILD_BINARY=$BUILD_BINARY \
-		       -DBUILD_TEST=$BUILD_TEST \
-		       -DINSTALL_TEST=$INSTALL_TEST \
-		       -DBUILD_CAFFE2_OPS=$BUILD_CAFFE2_OPS \
-		       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
-		       -DUSE_CUDA=$USE_CUDA \
-		       -DUSE_DISTRIBUTED=$USE_DISTRIBUTED \
-		       -DUSE_NUMPY=$USE_NUMPY \
-		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
-		       -DUSE_ROCM=$USE_ROCM \
-		       -DUSE_NNPACK=$USE_NNPACK \
-		       -DUSE_LEVELDB=$USE_LEVELDB \
-		       -DUSE_LMDB=$USE_LMDB \
-		       -DUSE_OPENCV=$USE_OPENCV \
-		       -DUSE_QNNPACK=$USE_QNNPACK \
-		       -DUSE_FFMPEG=$USE_FFMPEG \
-		       -DUSE_GLOG=OFF \
-		       -DUSE_GFLAGS=OFF \
-		       -DUSE_SYSTEM_EIGEN_INSTALL=OFF \
-		       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
-		       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
-		       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
-		       -DUSE_MKLDNN=$USE_MKLDNN \
-		       -DNCCL_EXTERNAL=$USE_CUDA \
-		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-		       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
-		       -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
-		       -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
-		       -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
-		       $GLOO_FLAGS \
-		       -DTHD_SO_VERSION=1 \
-		       $THD_FLAGS \
-		       ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
-      # STOP!!! Are you trying to add a C or CXX flag?  Add it
-      # to CMakeLists.txt and aten/CMakeLists.txt, not here.
-      # We need the vanilla cmake build to work.
-  fi
-
-  ${CMAKE_INSTALL} -j"$MAX_JOBS"
-  if ls build.ninja 2>&1 >/dev/null; then
-      # in cmake, .cu compilation involves generating certain intermediates
-      # such as .cu.o and .cu.depend, and these intermediates finally get compiled
-      # into the final .so.
-      # Ninja updates build.ninja's timestamp after all dependent files have been built,
-      # and re-kicks cmake on incremental builds if any of the dependent files
-      # have a timestamp newer than build.ninja's timestamp.
-      # There is a cmake bug with the Ninja backend, where the .cu.depend files
-      # are still compiling by the time the build.ninja timestamp is updated,
-      # so the .cu.depend file's newer timestamp is screwing with ninja's incremental
-      # build detector.
-      # This line works around that bug by manually updating the build.ninja timestamp
-      # after the entire build is finished.
-      touch build.ninja
-  fi
-
-  # Install Python proto files
-  if [[ "$BUILD_PYTHON" == 'ON' ]]; then
-      echo "Copying Caffe2 proto files from $(pwd)/caffe2/proto to  $(cd .. && pwd)/caffe2/proto"
-      echo "All the files in caffe2/proto are $(find caffe2/proto)"
-      for proto_file in $(pwd)/caffe2/proto/*.py; do
-          cp $proto_file "$(pwd)/../caffe2/proto/"
-      done
-  fi
-
-
-  # Fix rpaths of shared libraries
-  if [[ $(uname) == 'Darwin' ]]; then
-      # root/torch/lib/tmp_install/lib
-      echo "Updating all install_names in $INSTALL_DIR/lib"
-      pushd "$INSTALL_DIR/lib"
-      for lib in *.dylib; do
-          echo "Updating install_name for $(pwd)/$lib"
-          install_name_tool -id @rpath/$lib $lib
-      done
-      popd
-  fi
-}
-
 # In the torch/lib directory, create an installation directory
-mkdir -p $INSTALL_DIR
+mkdir -p $TMP_INSTALL_DIR
 
 # Build
-for arg in "$@"; do
-    if [[ "$arg" == "caffe2" ]]; then
-        build_caffe2
-    else
-        pushd "$THIRD_PARTY_DIR"
-        build $arg
-        popd
-    fi
-done
+# pwd is pytorch_root/build
 
-pushd $TORCH_LIB_DIR
+if [[ -z $CMAKE_ARGS ]]; then
+  CMAKE_ARGS=()
+fi
+if [[ -n $CCACHE_WRAPPER_PATH ]]; then
+  CMAKE_ARGS+=("-DCMAKE_C_COMPILER=$CCACHE_WRAPPER_PATH/gcc")
+  CMAKE_ARGS+=("-DCMAKE_CXX_COMPILER=$CCACHE_WRAPPER_PATH/g++")
+fi
+if [[ -n $CMAKE_PREFIX_PATH ]]; then
+  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH")
+fi
+
+if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
+    ${CMAKE_COMMAND} $BASE_DIR \
+	       ${CMAKE_GENERATOR} \
+	       -DPYTHON_EXECUTABLE=$PYTORCH_PYTHON \
+	       -DPYTHON_LIBRARY="${PYTORCH_PYTHON_LIBRARY}" \
+	       -DPYTHON_INCLUDE_DIR="${PYTORCH_PYTHON_INCLUDE_DIR}" \
+	       -DBUILDING_WITH_TORCH_LIBS=ON \
+	       -DTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION" \
+	       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+	       -DBUILD_TORCH=$BUILD_TORCH \
+	       -DBUILD_PYTHON=$BUILD_PYTHON \
+	       -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \
+	       -DBUILD_BINARY=$BUILD_BINARY \
+	       -DBUILD_TEST=$BUILD_TEST \
+	       -DINSTALL_TEST=$INSTALL_TEST \
+	       -DBUILD_CAFFE2_OPS=$BUILD_CAFFE2_OPS \
+	       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
+	       -DUSE_CUDA=$USE_CUDA \
+	       -DUSE_DISTRIBUTED=$USE_DISTRIBUTED \
+	       -DUSE_NUMPY=$USE_NUMPY \
+	       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
+	       -DUSE_ROCM=$USE_ROCM \
+	       -DUSE_NNPACK=$USE_NNPACK \
+	       -DUSE_LEVELDB=$USE_LEVELDB \
+	       -DUSE_LMDB=$USE_LMDB \
+	       -DUSE_OPENCV=$USE_OPENCV \
+	       -DUSE_QNNPACK=$USE_QNNPACK \
+	       -DUSE_FFMPEG=$USE_FFMPEG \
+	       -DUSE_GLOG=OFF \
+	       -DUSE_GFLAGS=OFF \
+	       -DUSE_SYSTEM_EIGEN_INSTALL=OFF \
+	       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
+	       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
+	       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
+	       -DUSE_MKLDNN=$USE_MKLDNN \
+	       -DNCCL_EXTERNAL=$USE_CUDA \
+	       -DCMAKE_INSTALL_PREFIX="$TMP_INSTALL_DIR" \
+	       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
+	       -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
+	       -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
+	       -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
+	       $GLOO_FLAGS \
+	       -DTHD_SO_VERSION=1 \
+	       $THD_FLAGS \
+	       ${CMAKE_ARGS[@]}
+    # STOP!!! Are you trying to add a C or CXX flag?  Add it
+    # to CMakeLists.txt and aten/CMakeLists.txt, not here.
+    # We need the vanilla cmake build to work.
+fi
+
+${CMAKE_INSTALL} -j"$MAX_JOBS"
+if ls build.ninja 2>&1 >/dev/null; then
+    # in cmake, .cu compilation involves generating certain intermediates
+    # such as .cu.o and .cu.depend, and these intermediates finally get compiled
+    # into the final .so.
+    # Ninja updates build.ninja's timestamp after all dependent files have been built,
+    # and re-kicks cmake on incremental builds if any of the dependent files
+    # have a timestamp newer than build.ninja's timestamp.
+    # There is a cmake bug with the Ninja backend, where the .cu.depend files
+    # are still compiling by the time the build.ninja timestamp is updated,
+    # so the .cu.depend file's newer timestamp is screwing with ninja's incremental
+    # build detector.
+    # This line works around that bug by manually updating the build.ninja timestamp
+    # after the entire build is finished.
+    touch build.ninja
+fi
+
+# Install Python proto files
+if [[ "$BUILD_PYTHON" == 'ON' ]]; then
+    echo "Copying Caffe2 proto files from $BUILD_DIR/caffe2/proto to $BASE_DIR/caffe2/proto"
+    echo "All the files in $BUILD_DIR/caffe2/proto are $(find $BUILD_DIR/caffe2/proto)"
+    for proto_file in $BUILD_DIR/caffe2/proto/*.py; do
+        cp $proto_file "$BASE_DIR/caffe2/proto/"
+    done
+fi
+
+# Fix rpaths of shared libraries
+if [[ $(uname) == 'Darwin' ]]; then
+    # root/torch/lib/tmp_install/lib
+    echo "Updating all install_names in $TMP_INSTALL_DIR/lib"
+    for lib in $TMP_INSTALL_DIR/lib/*.dylib; do
+        echo "Updating install_name for $TMP_INSTALL_DIR/lib/$lib"
+        install_name_tool -id @rpath/$lib $TMP_INSTALL_DIR/lib/$lib
+    done
+fi
 
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
 echo "tools/build_pytorch_libs.sh succeeded at $(date)"
-echo "removing $INSTALL_DIR/lib/cmake and $INSTALL_DIR/lib/python"
-rm -rf "$INSTALL_DIR/lib/cmake"
-rm -rf "$INSTALL_DIR/lib/python"
+echo "removing $TMP_INSTALL_DIR/lib/cmake and $TMP_INSTALL_DIR/lib/python"
+rm -rf "$TMP_INSTALL_DIR/lib/cmake"
+rm -rf "$TMP_INSTALL_DIR/lib/python"
 
-echo "Copying $INSTALL_DIR/lib to $(pwd)"
-$SYNC_COMMAND -r "$INSTALL_DIR/lib"/* .
-if [ -d "$INSTALL_DIR/lib64/" ]; then
-    $SYNC_COMMAND -r "$INSTALL_DIR/lib64"/* .
-fi
-echo "Copying $(cd ../.. && pwd)/aten/src/generic/THNN.h to $(pwd)"
-$SYNC_COMMAND ../../aten/src/THNN/generic/THNN.h .
-$SYNC_COMMAND ../../aten/src/THCUNN/generic/THCUNN.h .
-
-echo "Copying $INSTALL_DIR/include to $(pwd)"
-$SYNC_COMMAND -r "$INSTALL_DIR/include" .
-if [ -d "$INSTALL_DIR/bin/" ]; then
-    $SYNC_COMMAND -r "$INSTALL_DIR/bin/"/* .
+echo "Copying $TMP_INSTALL_DIR/lib to $TORCH_LIB_DIR"
+$SYNC_COMMAND -r "$TMP_INSTALL_DIR/lib"/* "$TORCH_LIB_DIR"
+if [ -d "$TMP_INSTALL_DIR/lib64/" ]; then
+    $SYNC_COMMAND -r "$TMP_INSTALL_DIR/lib64"/* "$TORCH_LIB_DIR"
 fi
 
-popd
+echo "Copying $BASE_DIR/aten/src/generic/THNN.h to $TORCH_LIB_DIR"
+$SYNC_COMMAND $BASE_DIR/aten/src/THNN/generic/THNN.h "$TORCH_LIB_DIR"
+$SYNC_COMMAND $BASE_DIR/aten/src/THCUNN/generic/THCUNN.h "$TORCH_LIB_DIR"
+
+echo "Copying $TMP_INSTALL_DIR/include to $TORCH_LIB_DIR"
+$SYNC_COMMAND -r "$TMP_INSTALL_DIR/include" "$TORCH_LIB_DIR"
+if [ -d "$TMP_INSTALL_DIR/bin/" ]; then
+    $SYNC_COMMAND -r "$TMP_INSTALL_DIR/bin/"/* "$TORCH_LIB_DIR"
+fi
+
+# Copy the cpp_test files to pytorch/caffe2 manually
+# They were built in pytorch/torch/lib/tmp_install/cpp_tests
+# Why do we do this? So, setup.py has this section called 'package_data' which
+# you need to specify to include non-default files (usually .py files).
+# package_data takes a map from 'python package' to 'globs of files to
+# include'. By 'python package', it means a folder with an __init__.py file
+# that's not excluded in the find_packages call earlier in setup.py. So to
+# include our cpp_tests into the site-packages folder in
+# site-packages/caffe2/cpp_tests, we have to copy the cpp_tests folder into the
+# root caffe2 folder and then tell setup.py to include them. Having another
+# folder like site-packages/caffe2_cpp_tests would also be possible by adding a
+# caffe2_cpp_tests folder to pytorch with an __init__.py in it.
+if [[ "$INSTALL_TEST" == "ON" ]]; then
+    echo "Copying $TMP_INSTALL_DIR/cpp_tests to $BASE_DIR/caffe2"
+    $SYNC_COMMAND -r "$TMP_INSTALL_DIR/cpp_tests" "$BASE_DIR/caffe2"
+fi

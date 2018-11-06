@@ -2,6 +2,12 @@
 
 set -ex
 
+# Skip tests in environments where they are not built/applicable
+if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
+  echo 'Skipping tests'
+  exit 0
+fi
+
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT_DIR=$(cd "$LOCAL_DIR"/../.. && pwd)
 TEST_DIR=$ROOT_DIR/caffe2_tests
@@ -12,33 +18,20 @@ if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
   PYTHON="python${BASH_REMATCH[1]}"
 fi
 
-# The prefix must mirror the setting from build.sh
-INSTALL_PREFIX="/usr/local/caffe2"
+# Moved from .circleci/config.yaml so that we can install protoc first
+# TODO but why is future here?
+pip -q install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+pip -q install --user future
 
-# Anaconda builds have a special install prefix and python
-if [[ "$BUILD_ENVIRONMENT" == conda* ]]; then
-  # This path comes from install_anaconda.sh which installs Anaconda into the
-  # docker image
-  PYTHON="/opt/conda/bin/python"
-  INSTALL_PREFIX="/opt/conda/"
-fi
+# Find where Caffe2 is installed. This will be the absolute path to the
+# site-packages of the active Python installation
+INSTALLED_SITE_PACKAGES=$($PYTHON -c "from distutils import sysconfig; print(sysconfig.get_python_lib())")
+CAFFE2_PYPATH="$INSTALLED_SITE_PACKAGES/caffe2"
+echo "Testing the Caffe2 installed in $INSTALLED_SITE_PACKAGES"
 
-# Add the site-packages in the caffe2 install prefix to the PYTHONPATH
-SITE_DIR=$($PYTHON -c "from distutils import sysconfig; print(sysconfig.get_python_lib(prefix=''))")
-INSTALL_SITE_DIR="${INSTALL_PREFIX}/${SITE_DIR}"
-
-# Skip tests in environments where they are not built/applicable
-if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
-  echo 'Skipping tests'
-  exit 0
-fi
-
-# Set PYTHONPATH and LD_LIBRARY_PATH so that python can find the installed
-# Caffe2. This shouldn't be done on Anaconda, as Anaconda should handle this.
-if [[ "$BUILD_ENVIRONMENT" != conda* ]]; then
-  export PYTHONPATH="${PYTHONPATH}:$INSTALL_SITE_DIR"
-  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${INSTALL_PREFIX}/lib"
-fi
+# Quick smoke test to make sure that Caffe2 is indeed installed here
+echo "Trying to import Caffe2 from this Python"
+cd / && python -c 'from caffe2.python import core'
 
 cd "$ROOT_DIR"
 
@@ -70,20 +63,18 @@ echo "Running C++ tests.."
 gtest_reports_dir="${TEST_DIR}/cpp"
 junit_reports_dir="${TEST_DIR}/junit_reports"
 mkdir -p "$gtest_reports_dir" "$junit_reports_dir"
-for test in $(find "${INSTALL_PREFIX}/test" -executable -type f); do
+for test in $(find "${CAFFE2_PYPATH}/cpp_tests" -executable -type f); do
   case "$test" in
     # skip tests we know are hanging or bad
     */mkl_utils_test|*/aten/integer_divider_test)
       continue
       ;;
     */scalar_tensor_test|*/basic|*/native_test)
-	  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-		continue
-	  else
-	    "$test"
-	  fi
-	  ;;
-	*)
+	    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+	      "$test"
+	    fi
+	    ;;
+	  *)
       # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
       # planning to migrate to gtest as the common PyTorch c++ test suite, we
       # currently do NOT use the xml test reporter, because Catch doesn't
@@ -99,9 +90,6 @@ for test in $(find "${INSTALL_PREFIX}/test" -executable -type f); do
       ;;
   esac
 done
-
-# Get the relative path to where the caffe2 python module was installed
-CAFFE2_PYPATH="$INSTALL_SITE_DIR/caffe2"
 
 # Collect additional tests to run (outside caffe2/python)
 EXTRA_TESTS=()
@@ -152,8 +140,6 @@ pip install --user pytest-sugar
   ${rocm_ignore_test[@]} \
   "$CAFFE2_PYPATH/python" \
   "${EXTRA_TESTS[@]}"
-
-cd ${INSTALL_PREFIX}
 
 if [[ -n "$INTEGRATED" ]]; then
   pip install --user torchvision
