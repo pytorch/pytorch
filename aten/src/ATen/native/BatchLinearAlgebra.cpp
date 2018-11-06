@@ -40,12 +40,12 @@ void lapackGesv(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, i
 }
 
 template<class scalar_t>
-void lapackGetrf(int m, int n, scalar_t* a, int lda, int* ipiv, int* info) {
+void lapackGetrf(int m, int n, scalar_t *a, int lda, int *ipiv, int *info) {
   AT_ERROR("getrf only takes float or double Tensors");
 }
 
 template<class scalar_t>
-void lapackGetri(int n, scalar_t* a, int lda, int* ipiv, scalar_t* work, int lwork, int* info) {
+void lapackGetri(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, int lwork, int *info) {
   AT_ERROR("getri only takes float or double Tensors");
 }
 
@@ -55,11 +55,11 @@ void lapackPotrs(char uplo, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, 
 }
 
 #ifdef USE_LAPACK
-template<> void lapackGesv<double>(int n, int nrhs, double* a, int lda, int* ipiv, double* b, int ldb, int* info) {
+template<> void lapackGesv<double>(int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
   dgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 
-template<> void lapackGesv<float>(int n, int nrhs, float* a, int lda, int* ipiv, float* b, int ldb, int* info) {
+template<> void lapackGesv<float>(int n, int nrhs, float *a, int lda, int *ipiv, float *b, int ldb, int *info) {
   sgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 

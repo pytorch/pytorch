@@ -46,7 +46,7 @@ void magmaGetriBatched(
 template<class scalar_t>
 void magmaPotrsBatched(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda,
-    scalar_t** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magmaq_queue) {
+    scalar_t** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   AT_ERROR("potrs only takes float or double Tensors");
 }
 
@@ -259,7 +259,7 @@ AT_ERROR("potrs: MAGMA library not found in "
   magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
 
-  magma_int_t info_t;
+  magma_int_t info_tmp;
   magma_int_t* ipiv_data;
   magma_int_t** ipiv_array;
   scalar_t** A_array;
@@ -280,9 +280,9 @@ AT_ERROR("potrs: MAGMA library not found in "
   MAGMAQueue magma_queue(b.get_device());
   magmaPotrsBatched<scalar_t>(
       uplo, n, nrhs, A_array, n, b_array, n,
-      info_t, batch_size, magma_queue);
+      info_tmp, batch_size, magma_queue);
 
-  info = info_t;
+  info = info_tmp;
 #endif
 }
 
