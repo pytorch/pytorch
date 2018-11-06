@@ -12,7 +12,7 @@ from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2
 from common_utils import (TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN,
-                          skipIfRocm, suppress_warnings, load_tests, IS_SANDCASTLE)
+                          skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE)
 from textwrap import dedent
 import os
 import io
@@ -8752,6 +8752,7 @@ class TestPytorchExportModes(JitTestCase):
         shutil.rmtree(d)
 
     @skipIfRocm
+    @skipIfNoLapack
     def test_aten_fallback(self):
         class ModelWithAtenNotONNXOp(nn.Module):
             def forward(self, x, y):
