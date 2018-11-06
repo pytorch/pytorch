@@ -8178,6 +8178,19 @@ a")
             return a, b
         self.checkScript(foo, (torch.rand(3), torch.rand(3)), check_expected=True)
 
+    def test_pass(self):
+        def foo(x):
+            # type: (bool) -> int
+            for _i in range(3):
+                pass
+            if x:
+                pass
+            else:
+                pass
+            return 3
+
+        self.checkScript(foo, (True,))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
