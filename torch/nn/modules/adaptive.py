@@ -220,7 +220,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         return out
 
     def log_prob(self, input):
-        """ Computes log probabilities for all :math:`n\_classes`
+        r""" Computes log probabilities for all :math:`n\_classes`
 
         Args:
             input (Tensor): a minibatch of examples
@@ -240,7 +240,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         return self._get_full_log_prob(input, head_output)
 
     def predict(self, input):
-        """ This is equivalent to `self.log_pob(input).argmax(dim=1)`,
+        r""" This is equivalent to `self.log_pob(input).argmax(dim=1)`,
         but is more efficient in some cases.
 
         Args:

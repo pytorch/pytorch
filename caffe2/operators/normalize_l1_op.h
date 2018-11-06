@@ -23,7 +23,7 @@ class NormalizeL1Op final : public Operator<Context> {
     const auto canonical_axis = x.canonical_axis_index(
         this->template GetSingleArgument<int>("axis", -1));
     const int m = x.dim32(canonical_axis);
-    const int n = x.size() / m;
+    const int n = x.numel() / m;
     const int sf = x.size_from_dim(canonical_axis + 1);
     DoNormalize(xData, yData, m, n, sf);
     return true;

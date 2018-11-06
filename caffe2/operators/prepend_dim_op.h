@@ -26,25 +26,25 @@ class PrependDimOp : public Operator<Context> {
 
     CAFFE_ENFORCE(input.ndim() > 0, "Input must be at least 1D.");
     CAFFE_ENFORCE(
-        input.dim(0) % dim_size_ == 0,
+        input.size(0) % dim_size_ == 0,
         "First dimension must be multiple of prepend_dim. Current first dimension: ",
-        input.dim(0));
+        input.size(0));
 
     vector<int64_t> actual_new_shape(input.ndim() + 1);
     actual_new_shape[0] = dim_size_;
-    actual_new_shape[1] = input.dim(0) / dim_size_;
-    for (int i = 1; i < input.dims().size(); ++i) {
-      actual_new_shape[i + 1] = input.dim(i);
+    actual_new_shape[1] = input.size(0) / dim_size_;
+    for (int i = 1; i < input.sizes().size(); ++i) {
+      actual_new_shape[i + 1] = input.size(i);
     }
     output->Resize(actual_new_shape);
 
     if (output != &input) {
       // If we are not doing in-place computation, a copy is needed.
       context_.CopyItemsSameDevice(
-          input.meta(),
-          input.size(),
+          input.dtype(),
+          input.numel(),
           input.raw_data(),
-          output->raw_mutable_data(input.meta()));
+          output->raw_mutable_data(input.dtype()));
     }
     return true;
   }
@@ -67,19 +67,19 @@ class MergeDimOp : public Operator<Context> {
     CAFFE_ENFORCE(input.ndim() > 1, "Input must be at least 2D.");
 
     vector<int64_t> actual_new_shape(input.ndim() - 1);
-    actual_new_shape[0] = input.dim(0) * input.dim(1);
-    for (int i = 1; i < input.dims().size() - 1; ++i) {
-      actual_new_shape[i] = input.dim(i + 1);
+    actual_new_shape[0] = input.size(0) * input.size(1);
+    for (int i = 1; i < input.sizes().size() - 1; ++i) {
+      actual_new_shape[i] = input.size(i + 1);
     }
     output->Resize(actual_new_shape);
 
     if (output != &input) {
       // If we are not doing in-place computation, a copy is needed.
       context_.CopyItemsSameDevice(
-          input.meta(),
-          input.size(),
+          input.dtype(),
+          input.numel(),
           input.raw_data(),
-          output->raw_mutable_data(input.meta()));
+          output->raw_mutable_data(input.dtype()));
     }
     return true;
   }

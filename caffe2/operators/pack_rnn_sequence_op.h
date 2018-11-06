@@ -35,7 +35,7 @@ class PackRNNSequenceOpBase : public Operator<Context> {
 
     auto& lengths = Input(LENGTHS);
     CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
-    const auto cols = lengths.size();
+    const auto cols = lengths.numel();
     const int32_t* lengths_vec = lengths.template data<int32_t>();
     // the total number of rows is defined as the max number from lengths
     // if when the lengths is empty, we set rows = 0 to support zero lengths
@@ -58,7 +58,7 @@ class PackRNNSequenceOpBase : public Operator<Context> {
     }
     // insert the dim for the feature
     shape.insert(
-        shape.end(), values.dims().begin() + dim_offset, values.dims().end());
+        shape.end(), values.sizes().begin() + dim_offset, values.sizes().end());
 
     auto* output = Output(OUTPUTVALUE);
     output->Resize(shape);
@@ -66,7 +66,7 @@ class PackRNNSequenceOpBase : public Operator<Context> {
     auto output_data = output->template mutable_data<ValT>();
     // initialize output_data with zero, as it is the default value for padding
     // when certain length is smaller than rows
-    math::Set<ValT, Context>(output->size(), 0, output_data, &context_);
+    math::Set<ValT, Context>(output->numel(), 0, output_data, &context_);
 
     int32_t offset = 0;
     for (int c = 0; c < cols; c++) {
@@ -74,7 +74,7 @@ class PackRNNSequenceOpBase : public Operator<Context> {
         auto input_offset = Forward ? (offset + r) : (r * cols + c);
         auto output_offset = Forward ? (r * cols + c) : (offset + r);
         context_.CopyItemsSameDevice(
-            values.meta(),
+            values.dtype(),
             block_size,
             values_vec + input_offset * block_size,
             output_data + output_offset * block_size);

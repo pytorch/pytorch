@@ -138,12 +138,10 @@ class DistributedDataParallel(Module):
         self.output_device = _get_device_index(output_device, True)
         self.broadcast_buffers = broadcast_buffers
 
-        self.allreduce_opts = dist.AllreduceOptions()
-
         MB = 1024 * 1024
 
         # used for intra-node param sync and inter-node sync as well
-        self.broadcast_bucket_size = 25 * MB
+        self.broadcast_bucket_size = 250 * MB
 
         # Sync params and buffers
         module_states = list(self.module.state_dict().values())
@@ -177,6 +175,8 @@ class DistributedDataParallel(Module):
         # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
         param_buckets = []
         # Split the parameters into buckets and by types as well
+        # TODO: use take_tensor finegrained to provide better overlapping for
+        # mixed precision training
         param_buckets = [list(_take_tensors(m.parameters(), bucket_bytes_cap)) for m in self._module_copies]
 
         self.bucket_sizes = []
@@ -188,11 +188,11 @@ class DistributedDataParallel(Module):
             self.bucket_sizes.append(0)
             # Now, we transpose again, so we iterate over bucket_elems, but getting tuples
             # of params from each device.
-            for idx, param_tuple in enumerate(zip(*param_buckets_tuple)):
+            for param_tuple in zip(*param_buckets_tuple):
                 if not param_tuple[0].requires_grad:
                     continue
                 for p in param_tuple:
-                    self.bucket_map[p] = (bucket_idx, idx)
+                    self.bucket_map[p] = (bucket_idx, self.bucket_sizes[bucket_idx])
                 self.bucket_sizes[bucket_idx] += 1
 
         self.buckets = [[[None for _ in range(self.bucket_sizes[i])]
@@ -207,25 +207,38 @@ class DistributedDataParallel(Module):
         self.next_bucket = len(self.bucket_sizes) - 1
         self.ready_buckets_not_reduced = set()
         self.reduction_works = [None for _ in range(len(self.bucket_sizes))]
-
         self.devs_ready = [0 for _ in range(len(self.bucket_sizes))]
-
-        # default stream tracking to launch nccl reduce kernels
-        self.default_streams = []
-        for dev_id in self.device_ids:
-            with torch.cuda.device(dev_id):
-                self.default_streams.append(torch.cuda.current_stream())
-
         self._register_grad_hooks()
 
     def __getstate__(self):
+        self._check_default_group()
         attrs = copy.copy(self.__dict__)
-        del attrs['_grad_accs']
+        del attrs['process_group'], \
+            attrs['allreduce_opts'], \
+            attrs['default_streams'], \
+            attrs['_grad_accs']
         return attrs
 
     def __setstate__(self, state):
+        # If serializable, then the process group should be the default one
+        self.process_group = dist.get_default_group()
         super(DistributedDataParallel, self).__setstate__(state)
         self._register_grad_hooks()
+
+    def _check_default_group(self):
+        pickle_not_supported = False
+        try:
+            if self.process_group != dist.get_default_group():
+                pickle_not_supported = True
+        except RuntimeError:
+            pickle_not_supported = True
+
+        if pickle_not_supported:
+            raise RuntimeError("DDP Pickling/Unpickling are only supported "
+                               "when using DDP with the default process "
+                               "group. That is, when you have called "
+                               "init_process_group and have not passed "
+                               "process_group argument to DDP constructor")
 
     def forward(self, *inputs, **kwargs):
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
@@ -250,7 +263,7 @@ class DistributedDataParallel(Module):
             module.train(mode)
 
     def _dist_broadcast_coalesced(self, tensors, buffer_size):
-        dist._dist_broadcast_coalesced(tensors, buffer_size, self.process_group)
+        dist._dist_broadcast_coalesced(self.process_group, tensors, buffer_size, False)
 
     def _sync_params(self):
         if len(self.device_ids) > 1:
@@ -279,6 +292,15 @@ class DistributedDataParallel(Module):
 
     def _register_grad_hooks(self):
         self._grad_accs = []  # need to keep them in scope
+
+        # default stream tracking to launch nccl reduce kernels
+        self.default_streams = []
+        for dev_id in self.device_ids:
+            with torch.cuda.device(dev_id):
+                self.default_streams.append(torch.cuda.current_stream())
+
+        self.allreduce_opts = dist.AllreduceOptions()
+
         for device_idx, module in enumerate(self._module_copies):
             for p in module.parameters():
                 if p.requires_grad:
@@ -335,40 +357,23 @@ class DistributedDataParallel(Module):
         return distributed_data_parallel_hook
 
     def _queue_reduction(self, bucket_idx):
-        grads_batch = self.buckets[bucket_idx]
-        grads_batch_coalesced = []
-
-        # coalesce the bucket
-        for dev_id, dev_grads_batch in zip(self.device_ids, grads_batch):
-            with torch.cuda.device(dev_id):
-                dev_grads_batch_coalesced = _flatten_dense_tensors(dev_grads_batch)
-                grads_batch_coalesced.append(dev_grads_batch_coalesced)
-
-        # reduce to the first GPU in self.device_ids
-        if len(self.device_ids) > 1:
-            nccl.reduce(grads_batch_coalesced, root=0, streams=self.default_streams)
-
-        # divide by the number of processes here to reduce chances of overflow
-        grads_batch_coalesced[0] /= self.process_group.size()
-
-        # now work on the first gpu
-        reduction_work = self.process_group.allreduce([grads_batch_coalesced[0]],
-                                                      self.allreduce_opts)
-        self.reduction_works[bucket_idx] = reduction_work
-        self.buckets_coalesced[bucket_idx] = grads_batch_coalesced[0]
+        # _queue_reduction will use a seperate CUDA stream to coalesce
+        # the small tensors to achieve more parallelisms, before passing the
+        # coalesced tensor into the c10d CUDA stream for reduction
+        result = dist._queue_reduction(self.process_group,
+                                       self.buckets[bucket_idx],
+                                       self.device_ids)
+        self.reduction_works[bucket_idx] = result[0]
+        self.buckets_coalesced[bucket_idx] = result[1]
 
     def _sync_reduction_works(self):
-        # Now only work on the first GPU of self.device_ids, uncoalesce
-        # the gradients for each bucket
+        # Now only work on the first GPU of self.device_ids
+        # _sync_reduction will use a seperate CUDA stream to uncoalesce
+        # the coalesced tensors to achieve more parallelisms
         for bucket_idx, grads_batch in enumerate(self.buckets):
-            # wait will let current stream wait on the c10d reduction stream
-            self.reduction_works[bucket_idx].wait()
-
-            grads_batch_reduced = _unflatten_dense_tensors(
-                self.buckets_coalesced[bucket_idx], grads_batch[0])
-
-            for grad, reduced in zip(grads_batch[0], grads_batch_reduced):
-                grad.copy_(reduced)
+            dist._sync_reduction(self.reduction_works[bucket_idx],
+                                 grads_batch[0],
+                                 self.buckets_coalesced[bucket_idx])
 
         # Reset the module states
         self.next_bucket = len(self.bucket_sizes) - 1

@@ -759,7 +759,7 @@ void Gemm<float, HIPContext>(
       ? rocblas_operation_none
       : rocblas_operation_transpose;
   ROCBLAS_ENFORCE(rocblas_sgemm(
-      context->rocblas_handle(),
+      context->rocblashandle(),
       cuTransB,
       cuTransA,
       N,
@@ -803,7 +803,7 @@ void Gemm<at::Half, HIPContext>(
       : rocblas_operation_transpose;
   if (math_type == TensorProto_DataType_FLOAT) {
     ROCBLAS_CHECK(rocblas_sgemmEx(
-        context->rocblas_handle(),
+        context->rocblashandle(),
         cuTransB,
         cuTransA,
         N,
@@ -828,7 +828,7 @@ void Gemm<at::Half, HIPContext>(
 
     // call cublasHgemm
     ROCBLAS_CHECK(cublasHgemm(
-        context->rocblas_handle(),
+        context->rocblashandle(),
         cuTransB,
         cuTransA,
         N,
@@ -933,7 +933,7 @@ void GemmStridedBatched<float, HIPContext>(
       ? rocblas_operation_none
       : rocblas_operation_transpose;
   ROCBLAS_ENFORCE(rocblas_sgemm_strided_batched(
-      context->rocblas_handle(),
+      context->rocblashandle(),
       cuTransB,
       cuTransA,
       N,
@@ -1004,7 +1004,7 @@ void GemmStridedBatched<at::Half, HIPContext>(
     __half alpha_fp16 = at::Half(alpha);
     __half beta_fp16 = at::Half(beta);
     ROCBLAS_ENFORCE(cublasHgemmStridedBatched(
-        context->rocblas_handle(),
+        context->rocblashandle(),
         cuTransB,
         cuTransA,
         N,
@@ -1051,7 +1051,7 @@ void GemmEx<float, HIPContext>(
       ? rocblas_operation_none
       : rocblas_operation_transpose;
   ROCBLAS_ENFORCE(rocblas_sgemm(
-      context->rocblas_handle(),
+      context->rocblashandle(),
       cuTransB,
       cuTransA,
       N,
@@ -1083,7 +1083,7 @@ void Gemv<float, HIPContext>(
       ? rocblas_operation_transpose
       : rocblas_operation_none;
   ROCBLAS_ENFORCE(rocblas_sgemv(
-      context->rocblas_handle(),
+      context->rocblashandle(),
       cuTransA,
       N,
       M,
@@ -1170,7 +1170,7 @@ void Gemv<at::Half, HIPContext>(
 
   if (math_type == TensorProto_DataType_FLOAT) {
     ROCBLAS_CHECK(cublasSgemmEx(
-        context->rocblas_handle(),
+        context->rocblashandle(),
         cuTransA,
         rocblas_operation_none,
         m,
@@ -1192,7 +1192,7 @@ void Gemv<at::Half, HIPContext>(
     __half beta_fp16 = at::Half(beta);
 
     ROCBLAS_CHECK(cublasHgemm(
-        context->rocblas_handle(),
+        context->rocblashandle(),
         cuTransA,
         rocblas_operation_none,
         m,
@@ -1390,7 +1390,7 @@ void Dot<float, HIPContext>(
     HIPContext* context) {
   float result;
   ROCBLAS_ENFORCE(
-      rocblas_sdot(context->rocblas_handle(), n, a, 1, b, 1, &result));
+      rocblas_sdot(context->rocblashandle(), n, a, 1, b, 1, &result));
   context->CopyFromCPU<float>(1, &result, y);
 }
 
@@ -1406,7 +1406,7 @@ void Dot<at::Half, HIPContext>(
   at::Half result;
   // execute with 32-bit math
   ROCBLAS_CHECK(cublasDotEx(
-      context->rocblas_handle(),
+      context->rocblashandle(),
       n,
       a,
       CUDA_R_16F,
@@ -1879,7 +1879,7 @@ void Axpy<float, HIPContext>(
     float* Y,
     HIPContext* context) {
   ROCBLAS_ENFORCE(
-      rocblas_saxpy(context->rocblas_handle(), N, &alpha, X, 1, Y, 1));
+      rocblas_saxpy(context->rocblashandle(), N, &alpha, X, 1, Y, 1));
 }
 
 template <>
@@ -1891,7 +1891,7 @@ void Axpy<double, HIPContext>(
     HIPContext* context) {
   double alpha_d{alpha};
   ROCBLAS_ENFORCE(
-      rocblas_daxpy(context->rocblas_handle(), N, &alpha_d, X, 1, Y, 1));
+      rocblas_daxpy(context->rocblashandle(), N, &alpha_d, X, 1, Y, 1));
 }
 
 template <>
@@ -1904,7 +1904,7 @@ void Axpy<at::Half, HIPContext>(
   CAFFE_THROW("Unsupported math type");
 #if ROCBLAS_FP16
   ROCBLAS_CHECK(cublasAxpyEx(
-      context->rocblas_handle(),
+      context->rocblashandle(),
       N,
       &alpha,
       CUDA_R_16F,
@@ -2521,6 +2521,7 @@ void Col2Im<float, HIPContext, StorageOrder::NCHW>(
     float* img_data,
     HIPContext* context,
     const int /* groups */) {
+  // In NCHW, the number of groups doesn't affect Im2Col.
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2611,7 +2612,9 @@ void Im2ColNd<float, HIPContext, StorageOrder::NCHW>(
     const int* pad,
     const float* img_data,
     float* col_data,
-    HIPContext* context) {
+    HIPContext* context,
+    const int /* groups */) {
+  // In NCHW, the number of groups doesn't affect Im2Col.
   DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
       N,
       Im2ColNdNCHWHIPImpl,
@@ -2630,6 +2633,24 @@ void Im2ColNd<float, HIPContext, StorageOrder::NCHW>(
 }
 
 template <>
+void Im2ColNd<float, HIPContext, StorageOrder::NHWC>(
+    const int N,
+    const int img_size,
+    const int col_size,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const float* img_data,
+    float* col_data,
+    HIPContext* context,
+    const int groups) {
+  CAFFE_NOT_IMPLEMENTED;
+}
+
+template <>
 void Col2ImNd<float, HIPContext, StorageOrder::NCHW>(
     const int N,
     const int img_size,
@@ -2642,7 +2663,9 @@ void Col2ImNd<float, HIPContext, StorageOrder::NCHW>(
     const int* pad,
     const float* col_data,
     float* img_data,
-    HIPContext* context) {
+    HIPContext* context,
+    const int /* groups */) {
+  // In NCHW, the number of groups doesn't affect Col2Im.
   DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
       N,
       Col2ImNdNCHWHIPImpl,
@@ -2658,6 +2681,24 @@ void Col2ImNd<float, HIPContext, StorageOrder::NCHW>(
       col_data,
       img_data,
       context);
+}
+
+template <>
+void Col2ImNd<float, HIPContext, StorageOrder::NHWC>(
+    const int N,
+    const int img_size,
+    const int col_size,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const float* col_data,
+    float* img_data,
+    HIPContext* context,
+    const int groups) {
+  CAFFE_NOT_IMPLEMENTED;
 }
 
 template <>
@@ -3402,6 +3443,53 @@ CAFFE2_SPECIALIZED_HIP_INV_STD(float)
 
 namespace {
 
+constexpr int kTileDim = 32;
+constexpr int kBlockRows = 8;
+
+// Splits the original matrix into submatrices with size 32 * 32.
+// Each block transposes one submatrix by loading it into shared memory.
+// Reference https://devblogs.nvidia.com/efficient-matrix-transpose-cuda-cc/
+template <typename T>
+__global__ void BatchTranspose2DHIPKernel(
+    const int N,
+    const int H,
+    const int W,
+    const T* X,
+    T* Y) {
+  __shared__ T tile[kTileDim][kTileDim + 1];
+  const int h = (H + kTileDim - 1) / kTileDim;
+  const int w = (W + kTileDim - 1) / kTileDim;
+  const int outer_size = N * h * w;
+  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
+    const int n = i / (h * w);
+    const int k = i % (h * w);
+    const int r = k / w;
+    const int c = k % w;
+    const int offset = n * H * W;
+    int x = c * kTileDim + threadIdx.x;
+    int y = r * kTileDim + threadIdx.y;
+    if (x < W) {
+      for (int j = 0; j < kTileDim && y + j < H; j += kBlockRows) {
+#if __HIP_ARCH__ >= 350
+        tile[threadIdx.y + j][threadIdx.x] =
+            __ldg(X + offset + (y + j) * W + x);
+#else
+        tile[threadIdx.y + j][threadIdx.x] = X[offset + (y + j) * W + x];
+#endif
+      }
+    }
+    __syncthreads();
+    x = r * kTileDim + threadIdx.x;
+    y = c * kTileDim + threadIdx.y;
+    if (x < H) {
+      for (int j = 0; j < kTileDim && y + j < W; j += kBlockRows) {
+        Y[offset + (y + j) * H + x] = tile[threadIdx.x][threadIdx.y + j];
+      }
+    }
+    __syncthreads();
+  }
+}
+
 template <typename T, int D>
 __global__ void TransposeHIPKernel(
     const int size,
@@ -3451,6 +3539,47 @@ void TransposeHIPImpl(
 }
 
 } // namespace
+
+#define CAFFE2_SPECIALIZED_HIP_TRANSPOSE(T)                                  \
+  template <>                                                                \
+  void Transpose<T, HIPContext>(                                             \
+      const int ndim,                                                        \
+      const int* dims,                                                       \
+      const int* axes,                                                       \
+      const T* X,                                                            \
+      T* Y,                                                                  \
+      HIPContext* context) {                                                 \
+    if (utils::IsIdentityPermutation(ndim, axes)) {                          \
+      const int size =                                                       \
+          std::accumulate(dims, dims + ndim, 1, std::multiplies<int>());     \
+      context->template CopySameDevice<T>(size, X, Y);                       \
+      return;                                                                \
+    }                                                                        \
+    if (utils::IsBatchTranspose2D(ndim, axes)) {                             \
+      const int N =                                                          \
+          std::accumulate(dims, dims + ndim - 2, 1, std::multiplies<int>()); \
+      const int H = dims[ndim - 2];                                          \
+      const int W = dims[ndim - 1];                                          \
+      const int h = (H + kTileDim - 1) / kTileDim;                           \
+      const int w = (W + kTileDim - 1) / kTileDim;                           \
+      const int outer_size = N * h * w;                                      \
+      const dim3 dim_block(kTileDim, kBlockRows, 1);                         \
+      hipLaunchKernelGGL(                                                    \
+          BatchTranspose2DHIPKernel<T>,                                      \
+          std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),                    \
+          dim_block,                                                         \
+          0,                                                                 \
+          context->hip_stream(),                                             \
+          N,                                                                 \
+          H,                                                                 \
+          W,                                                                 \
+          X,                                                                 \
+          Y);                                                                \
+      return;                                                                \
+    }                                                                        \
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(                                  \
+        ndim, TransposeHIPImpl, T, dims, axes, X, Y, context);               \
+  }
 
 #define CAFFE2_SPECIALIZED_HIP_TRANSPOSE(T)                              \
   template <>                                                            \
@@ -3524,6 +3653,62 @@ __global__ void AffineChannelHIPKernel(
 CAFFE2_SPECIALIZED_HIP_AFFINE_CHANNEL(float, StorageOrder::NCHW)
 CAFFE2_SPECIALIZED_HIP_AFFINE_CHANNEL(float, StorageOrder::NHWC)
 #undef CAFFE2_SPECIALIZED_HIP_AFFINE_CHANNEL
+
+#define CAFFE2_SPECIALIZED_HIP_NCHW2NHWC(T)             \
+  template <>                                           \
+  void NCHW2NHWC<T, HIPContext>(                        \
+      const int N,                                      \
+      const int C,                                      \
+      const int HxW,                                    \
+      const T* X,                                       \
+      T* Y,                                             \
+      HIPContext* context) {                            \
+    const int h = (C + kTileDim - 1) / kTileDim;        \
+    const int w = (HxW + kTileDim - 1) / kTileDim;      \
+    const int outer_size = N * h * w;                   \
+    const dim3 dim_block(kTileDim, kBlockRows, 1);      \
+    hipLaunchKernelGGL(                                 \
+        BatchTranspose2DHIPKernel<T>,                   \
+        std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS), \
+        dim_block,                                      \
+        0,                                              \
+        context->hip_stream(),                          \
+        N,                                              \
+        C,                                              \
+        HxW,                                            \
+        X,                                              \
+        Y);                                             \
+  }
+CAFFE2_SPECIALIZED_HIP_NCHW2NHWC(float)
+#undef CAFFE2_SPECIALIZED_HIP_NCHW2NHWC
+
+#define CAFFE2_SPECIALIZED_HIP_NHWC2NCHW(T)             \
+  template <>                                           \
+  void NHWC2NCHW<T, HIPContext>(                        \
+      const int N,                                      \
+      const int C,                                      \
+      const int HxW,                                    \
+      const T* X,                                       \
+      T* Y,                                             \
+      HIPContext* context) {                            \
+    const int h = (HxW + kTileDim - 1) / kTileDim;      \
+    const int w = (C + kTileDim - 1) / kTileDim;        \
+    const int outer_size = N * h * w;                   \
+    const dim3 dim_block(kTileDim, kBlockRows, 1);      \
+    hipLaunchKernelGGL(                                 \
+        BatchTranspose2DHIPKernel<T>,                   \
+        std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS), \
+        dim_block,                                      \
+        0,                                              \
+        context->hip_stream(),                          \
+        N,                                              \
+        HxW,                                            \
+        C,                                              \
+        X,                                              \
+        Y);                                             \
+  }
+CAFFE2_SPECIALIZED_HIP_NHWC2NCHW(float)
+#undef CAFFE2_SPECIALIZED_HIP_NHWC2NCHW
 
 } // namespace math
 } // namespace caffe2

@@ -41,23 +41,23 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
       const auto& weights_input = Input(WEIGHTS);
       CAFFE_ENFORCE_EQ(weights_input.ndim(), 1, "WEIGHTS must be a vector");
       CAFFE_ENFORCE_EQ(
-          weights_input.size(),
-          indices.size(),
+          weights_input.numel(),
+          indices.numel(),
           "WEIGHTS should have the same length as INDICES.");
       weights = weights_input.template data<float>();
     }
 
-    CAFFE_ENFORCE_GT(data.dim(1), 8, "DATA must have more than 8 columns");
+    CAFFE_ENFORCE_GT(data.size(1), 8, "DATA must have more than 8 columns");
     // Subtract 8 from the #columns of data for the 4 bytes for scale and 4
     // bytes for bias that we use in the fused representation (per row).
-    const std::vector<int64_t> shape = {lengths.dim(0), data.dim(1) - 8};
+    const std::vector<int64_t> shape = {lengths.size(0), data.size(1) - 8};
     output->Resize(shape);
 
     Fused8BitRowwiseEmbeddingLookup(
-        /*block_size=*/output->dim(1),
-        /*output_size=*/output->dim(0),
-        /*index_size=*/indices.size(),
-        /*data_size=*/data.dim(0),
+        /*block_size=*/output->size(1),
+        /*output_size=*/output->size(0),
+        /*index_size=*/indices.numel(),
+        /*data_size=*/data.size(0),
         /*input=*/data.template data<uint8_t>(),
         /*indices=*/indices.template data<IndexType>(),
         /*lengths=*/lengths.template data<int>(),

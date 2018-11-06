@@ -1,4 +1,4 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
 #include <c10d/Def.hpp>
 #include <c10d/FileStore.hpp>
@@ -33,8 +33,7 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* c10d_init(PyObject* _unused) {
-  auto c10d_module =
-      THPObjectPtr(PyImport_ImportModule("torch.distributed"));
+  auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
     throw python_error();
   }
@@ -147,7 +146,18 @@ PyObject* c10d_init(PyObject* _unused) {
               "allreduce",
               &::c10d::ProcessGroup::allreduce,
               py::call_guard<py::gil_scoped_release>())
-
+          .def(
+              "allreduce",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& xs,
+                 ::c10d::ReduceOp op) {
+                ::c10d::AllreduceOptions opts;
+                opts.reduceOp = op;
+                return pg.allreduce(xs, opts);
+              },
+              py::arg("tensors"),
+              py::arg("op") = ::c10d::ReduceOp::SUM,
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "allreduce",
               [](::c10d::ProcessGroup& pg, at::Tensor& x, ::c10d::ReduceOp op) {
@@ -318,7 +328,8 @@ PyObject* c10d_init(PyObject* _unused) {
         } else if (!interface.empty()) {
           attr.iface = interface;
         } else {
-          // Neither argument is specified; Gloo itself will use the hostname
+          // Neither argument is specified; Gloo itself will use the
+          // hostname
           // Nothing specified, default to something useful
         }
         return ::gloo::transport::tcp::CreateDevice(attr);
@@ -332,8 +343,11 @@ PyObject* c10d_init(PyObject* _unused) {
            int,
            int,
            ::c10d::ProcessGroupGloo::Options>())
-      .def(py::init(
-          [](const std::shared_ptr<::c10d::Store>& store, int rank, int size) {
+      .def(
+          py::init([](const std::shared_ptr<::c10d::Store>& store,
+                      int rank,
+                      int size,
+                      std::chrono::milliseconds timeout) {
             ::c10d::ProcessGroupGloo::Options options;
 
             // By default, use the hostname to resolve the network address to
@@ -349,9 +363,14 @@ PyObject* c10d_init(PyObject* _unused) {
             attr.hostname = hostname.data();
             options.devices.push_back(
                 ::gloo::transport::tcp::CreateDevice(attr));
+            options.timeout = timeout;
             return std::make_shared<::c10d::ProcessGroupGloo>(
                 store, rank, size, options);
-          }));
+          }),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          py::arg("timeout") = std::chrono::milliseconds(10 * 1000));
 
 #ifdef USE_C10D_NCCL
   shared_ptr_class_<::c10d::ProcessGroupNCCL>(
@@ -381,10 +400,12 @@ PyObject* c10d_init(PyObject* _unused) {
   module.def(
       "_dist_broadcast_coalesced",
       &::c10d::distBroadcastCoalesced,
+      py::arg("process_group"),
       py::arg("tensors"),
       py::arg("buffer_size"),
-      py::arg("process_group"),
+      py::arg("fine_grained"),
       py::call_guard<py::gil_scoped_release>());
+
   module.def(
       "_sync_params",
       &::c10d::syncParams,
@@ -394,6 +415,22 @@ PyObject* c10d_init(PyObject* _unused) {
       py::arg("devices"),
       py::arg("broadcast_bucket_size"),
       py::arg("broadcast_buffers"),
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_queue_reduction",
+      &::c10d::queueReduction,
+      py::arg("process_group"),
+      py::arg("grads_batch"),
+      py::arg("devices"),
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_sync_reduction",
+      &::c10d::syncReduction,
+      py::arg("reduction_work"),
+      py::arg("grads_batch"),
+      py::arg("grads_batch_coalesced"),
       py::call_guard<py::gil_scoped_release>());
 #endif
 

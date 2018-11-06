@@ -22,8 +22,8 @@ def parse_default(s):
         return '{}'
     elif re.match(r'{.*}', s):
         return s
-    elif s == 'c10::nullopt':
-        return s
+    elif s == 'None':
+        return 'c10::nullopt'
     try:
         return int(s)
     except Exception:
@@ -131,6 +131,7 @@ def run(paths):
                 output_arguments = [x for x in arguments if x.get('output')]
                 declaration['return'] = return_type if len(output_arguments) == 0 else output_arguments
                 declaration['variants'] = func.get('variants', ['function'])
+                declaration['requires_tensor'] = func.get('requires_tensor', False)
                 declaration['cpu_half'] = func.get('cpu_half', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)

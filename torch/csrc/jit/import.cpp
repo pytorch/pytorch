@@ -1,10 +1,11 @@
 #include "torch/csrc/jit/import.h"
-#include "torch/csrc/jit/serialization.h"
-#include "onnx/onnx_pb.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/operator.h"
+
+#include "caffe2/serialize/inline_container.h"
+#include "onnx/onnx_pb.h"
 
 #include <ATen/ATen.h>
 
@@ -234,8 +235,6 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
     return NoneType::get();
   } else if (kind == "GeneratorType") {
     return GeneratorType::get();
-  } else if (kind == "WorldType") {
-    return WorldType::get();
   } else if (kind == "StringType") {
     return StringType::get();
   } else if (kind.find("TypeVar:") == 0) {
@@ -300,11 +299,11 @@ at::Tensor ModuleDecoder::buildTensorCommon(
       size / at::CPU(type).typeMeta().itemsize(),
       nullptr);
     storage_map_.insert(std::make_pair(record_number, storage));
-    return at::CPU(type).tensor(*storage, storage_offset, dims, strides);
+    return at::CPU(type)._th_tensor(*storage, storage_offset, dims, strides);
   }
 
   auto storage = storage_it->second.get();
-  return at::CPU(type).tensor(*storage, storage_offset, dims, strides);
+  return at::CPU(type)._th_tensor(*storage, storage_offset, dims, strides);
 }
 
 // Given a full name of a parameter or method,
@@ -328,7 +327,7 @@ std::pair<std::shared_ptr<script::Module>, std::string> ModuleDecoder::parseFull
 ModuleDecoder::ModuleDecoder(
     ModuleLookup module_lookup,
     std::istream& in) :
-    stream_reader_(in) {
+    stream_reader_(&in) {
   auto model_proto = onnx::ModelProto();
   auto record = stream_reader_.getLastRecord();
   model_proto.ParsePartialFromArray(std::get<0>(record).get(), std::get<1>(record));

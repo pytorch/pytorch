@@ -12,7 +12,7 @@
 namespace thd {
 
 struct Store : public ::gloo::rendezvous::Store {
-private:
+ private:
   struct StoreDeamon {
     StoreDeamon() = delete;
     StoreDeamon(int listen_socket);
@@ -20,7 +20,7 @@ private:
 
     void join();
 
-  private:
+   private:
     using store_type = std::unordered_map<std::string, std::vector<char>>;
 
     void deamon();
@@ -36,23 +36,27 @@ private:
     std::vector<int> _sockets;
   };
 
-public:
+ public:
   // A special value for listen_socket which doesn't launch the deamon
   static constexpr int CLIENT_ONLY = -1;
 
-  Store(const std::string& addr, port_type port, int listen_socket = CLIENT_ONLY);
+  Store(
+      const std::string& addr,
+      port_type port,
+      int listen_socket = CLIENT_ONLY);
   ~Store();
 
   void set(const std::string& key, const std::vector<char>& data) override;
   std::vector<char> get(const std::string& key) override;
   void wait(const std::vector<std::string>& keys) override;
 
-private:
+ private:
   int _listen_socket;
   int _socket;
   std::string _store_addr;
   port_type _store_port;
-  std::unique_ptr<StoreDeamon> _store_thread; // it is initialised only in a selected process
+  std::unique_ptr<StoreDeamon>
+      _store_thread; // it is initialised only in a selected process
 };
 
 } // namespace thd

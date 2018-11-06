@@ -35,6 +35,9 @@ class ReduceOp final : public Operator<Context> {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
     } else {
+      for (auto& axis: axes_) {
+        axis = X.canonical_axis_index(axis);
+      }
       std::sort(axes_.begin(), axes_.end());
       CAFFE_ENFORCE_GE(axes_.front(), 0, "Axes ids must be non-negative.");
       CAFFE_ENFORCE_LT(
@@ -42,7 +45,7 @@ class ReduceOp final : public Operator<Context> {
           ndim,
           "Axes ids must be smaller than the dimensions of input.");
     }
-    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
     std::vector<int> Y_dims;
     Y_dims.reserve(ndim);
     std::size_t cur_axis = 0;
@@ -95,6 +98,9 @@ class ReduceGradientOp final : public Operator<Context> {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
     } else {
+      for (auto& axis: axes_) {
+        axis = X.canonical_axis_index(axis);
+      }
       std::sort(axes_.begin(), axes_.end());
       CAFFE_ENFORCE_GE(axes_.front(), 0, "Axes ids must be non-negative.");
       CAFFE_ENFORCE_LT(
@@ -102,7 +108,7 @@ class ReduceGradientOp final : public Operator<Context> {
           ndim,
           "Axes ids must be smaller than the dimensions of input.");
     }
-    const std::vector<int> dX_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> dX_dims(X.sizes().cbegin(), X.sizes().cend());
     std::vector<int> dY_dims = dX_dims;
     for (const int axis : axes_) {
       dY_dims[axis] = 1;

@@ -525,6 +525,13 @@ ceil_() -> Tensor
 In-place version of :meth:`~Tensor.ceil`
 """)
 
+add_docstr_all('cholesky',
+               r"""
+cholesky(upper=False) -> Tensor
+
+See :func:`torch.cholesky`
+""")
+
 add_docstr_all('clamp',
                r"""
 clamp(min, max) -> Tensor
@@ -662,11 +669,29 @@ data_ptr() -> int
 Returns the address of the first element of :attr:`self` tensor.
 """)
 
+add_docstr_all('dense_dim',
+               r"""
+dense_dim() -> int
+
+If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
+this returns a the number of dense dimensions. Otherwise, this throws an
+error.
+
+See also :meth:`Tensor.sparse_dim`.
+""")
+
 add_docstr_all('diag',
                r"""
 diag(diagonal=0) -> Tensor
 
 See :func:`torch.diag`
+""")
+
+add_docstr_all('diag_embed',
+               r"""
+diag_embed(offset=0, dim1=-2, dim2=-1) -> Tensor
+
+See :func:`torch.diag_embed`
 """)
 
 add_docstr_all('diagflat',
@@ -877,6 +902,13 @@ flip(dims) -> Tensor
 See :func:`torch.flip`
 """)
 
+add_docstr_all('roll',
+               r"""
+roll(shifts, dims) -> Tensor
+
+See :func:`torch.roll`
+""")
+
 add_docstr_all('floor_',
                r"""
 floor_() -> Tensor
@@ -980,9 +1012,24 @@ gesv(A) -> Tensor, Tensor
 See :func:`torch.gesv`
 """)
 
+add_docstr_all('indices',
+               r"""
+indices() -> Tensor
+
+If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
+this returns a view of the contained indices tensor. Otherwise, this throws an
+error.
+
+See also :meth:`Tensor.values`.
+
+.. note::
+  This method can only be called on a coalesced sparse tensor. See
+  :meth:`Tensor.coalesce` for details.
+""")
+
 add_docstr_all('get_device',
                r"""
-get_device(A) -> Device ordinal (Integer)
+get_device() -> Device ordinal (Integer)
 
 For CUDA tensors, this function returns the device ordinal of the GPU on which the tensor resides.
 For CPU tensors, an error is thrown.
@@ -993,6 +1040,21 @@ Example::
     >>> x.get_device()
     0
     >>> x.cpu().get_device()  # RuntimeError: get_device is not implemented for type torch.FloatTensor
+""")
+
+add_docstr_all('values',
+               r"""
+values() -> Tensor
+
+If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
+this returns a view of the contained values tensor. Otherwise, this throws an
+error.
+
+See also :meth:`Tensor.indices`.
+
+.. note::
+  This method can only be called on a coalesced sparse tensor. See
+  :meth:`Tensor.coalesce` for details.
 """)
 
 add_docstr_all('gt',
@@ -1462,7 +1524,7 @@ narrow_copy(dimension, start, length) -> Tensor
 Same as :meth:`Tensor.narrow` except returning a copy rather
 than shared storage.  This is primarily for sparse tensors, which
 do not have a shared-storage narrow method.  Calling ```narrow_copy``
-with ```dimemsion > self._sparseDims()``` will return a copy with the
+with ```dimemsion > self.sparse_dim()``` will return a copy with the
 relevant dense dimension narrowed, and ```self.shape``` updated accordingly.
 """)
 
@@ -1576,13 +1638,6 @@ Example:
     torch.Size([2, 3, 5])
     >>> x.permute(2, 0, 1).size()
     torch.Size([5, 2, 3])
-""")
-
-add_docstr_all('potrf',
-               r"""
-potrf(upper=True) -> Tensor
-
-See :func:`torch.potrf`
 """)
 
 add_docstr_all('potri',
@@ -1822,6 +1877,15 @@ larger than the current storage size, then the underlying storage is resized
 to fit the new number of elements. If the number of elements is smaller, the
 underlying storage is not changed. Existing elements are preserved but any new
 memory is uninitialized.
+
+.. warning::
+
+    This is a low-level method. The storage is reinterpreted as C-contiguous,
+    ignoring the current strides (unless the target size equals the current
+    size, in which case the tensor is left unchanged). For most purposes, you
+    will instead want to use :meth:`~Tensor.view()`, which checks for
+    contiguity, or :meth:`~Tensor.reshape()`, which copies data if needed. To
+    change the size in-place with custom strides, see :meth:`~Tensor.set_()`.
 
 Args:
     sizes (torch.Size or int...): the desired size
@@ -2083,6 +2147,17 @@ add_docstr_all('sort',
 sort(dim=None, descending=False) -> (Tensor, LongTensor)
 
 See :func:`torch.sort`
+""")
+
+add_docstr_all('sparse_dim',
+               r"""
+sparse_dim() -> int
+
+If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
+this returns a the number of sparse dimensions. Otherwise, this throws an
+error.
+
+See also :meth:`Tensor.dense_dim`.
 """)
 
 add_docstr_all('sqrt',
@@ -2397,6 +2472,30 @@ add_docstr_all('topk',
 topk(k, dim=None, largest=True, sorted=True) -> (Tensor, LongTensor)
 
 See :func:`torch.topk`
+""")
+
+add_docstr_all('to_sparse',
+               r"""
+to_sparse(sparseDims) -> Tensor
+Returns a sparse copy of the tensor.  PyTorch supports sparse tensors in
+:ref:`coordinate format <sparse-docs>`.
+Args:
+    sparseDims (int, optional): the number of sparse dimensions to include in the new sparse tensor
+Example::
+    >>> d = torch.tensor([[0, 0, 0], [9, 0, 10], [0, 0, 0]])
+    >>> d
+    tensor([[ 0,  0,  0],
+            [ 9,  0, 10],
+            [ 0,  0,  0]])
+    >>> d.to_sparse()
+    tensor(indices=tensor([[1, 1],
+                           [0, 2]]),
+           values=tensor([ 9, 10]),
+           size=(3, 3), nnz=2, layout=torch.sparse_coo)
+    >>> d.to_sparse(1)
+    tensor(indices=tensor([[1]]),
+           values=tensor([[ 9,  0, 10]]),
+           size=(3, 3), nnz=1, layout=torch.sparse_coo)
 """)
 
 add_docstr_all('trace',

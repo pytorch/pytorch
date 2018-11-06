@@ -39,7 +39,7 @@ bool isDifferentiable(Node * n) {
     "aten::exp(Tensor self) -> Tensor",
     "aten::t(Tensor self) -> Tensor",
     "aten::neg(Tensor self) -> Tensor",
-    "aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor",
+    "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
     "aten::type_as(Tensor self, Tensor other) -> Tensor",
     "aten::unsqueeze(Tensor self, int dim) -> Tensor",
     "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
@@ -161,20 +161,23 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     } else if (node->matches("aten::relu(Tensor self) -> Tensor")) {
       return {grads.at(0) * (outputs.at(0) > at::Scalar(0)).type_as(outputs.at(0))};
 
-    } else if (node->matches("aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor")) {
-      // we do two type_as and "*" in lieu of boolean "and"
-      // the "! (val > min)" is chosen such that the gradient is 0 on the
-      // boundary and the factor is 1 when the boundary is NaN
-      // the ! is expressed as "1-" for lack of a "not" function and
-      // the the fuser insisting on float
-      // A NaN input will cause the gradient to propagate through,
-      // the more pure approach would be to have NaNs in that case
-      // but that is hard to reliably code and costs extra checks
-      // so we decided against it, see
-      // https://github.com/pytorch/pytorch/pull/11574#discussion_r218104538
-      return {grads.at(0)
-	      * (1-(inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0)))
-	      * (1-(inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))), nullptr, nullptr};
+    } else if (node->matches("aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor")) {
+      // handle the case that min/max is None
+      Value* min = inputs.at(1);
+      Value* max = inputs.at(2);
+      if (!min->isNone() && !max->isNone()) {
+        return {grads.at(0)
+          * (1-(inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0)))
+          * (1-(inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))), nullptr, nullptr};
+      } else if (max->isNone()) {
+        return {grads.at(0)
+          * (1-(inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0))), nullptr, nullptr};
+      } else if (min->isNone()) {
+        return {grads.at(0)
+          * (1-(inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))), nullptr, nullptr};
+      } else {
+        return {grads.at(0), nullptr, nullptr};
+      }
     } else if (node->matches("aten::exp(Tensor self) -> Tensor")) {
       return {grads.at(0) * (outputs.at(0))};
 
@@ -305,8 +308,9 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         squeezed_dims.push_back(i);
       }
       SymbolicVariable returned_grad = grads.at(0);
-      for (auto it = squeezed_dims.begin(); it != squeezed_dims.end(); ++it)
-        returned_grad = returned_grad.unsqueeze(*it);
+      for (const auto& dim : squeezed_dims) {
+        returned_grad = returned_grad.unsqueeze(dim);
+      }
       return {returned_grad};
 
     } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor", /*const_inputs=*/attr::dim)) {
@@ -330,7 +334,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       // of equal sizes. We can use a single split operation to handle that.
       if (std::all_of(tensor_inputs.begin(), tensor_inputs.end(), has_first_sizes)) {
         auto tensor_grads = grads.at(0).chunk(tensor_inputs.size(), dim);
-        tensor_grads.push_back(nullptr); // for attr::dim
+        tensor_grads.emplace_back(nullptr); // for attr::dim
         return tensor_grads;
       } else {
         size_t offset = 0;
@@ -340,7 +344,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
           tensor_grads.push_back(grad.narrow(dim, offset, input.sizes()[dim]));
           offset += input.sizes()[dim];
         }
-        tensor_grads.push_back(nullptr); // for attr::dim
+        tensor_grads.emplace_back(nullptr); // for attr::dim
         return tensor_grads;
       }
     } else if (comparison_ops.find(node)) {

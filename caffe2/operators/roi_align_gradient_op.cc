@@ -202,11 +202,11 @@ bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
   // Must zero-out dX before accumulating gradients
   // (TODO): Kaiming - is this safe?
   math::Set<float, CPUContext>(
-      dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
+      dX->numel(), 0.f, dX->template mutable_data<float>(), &context_);
 
-  if (dY.size() > 0) { // Handle possibly empty gradient if there were no rois
+  if (dY.numel() > 0) { // Handle possibly empty gradient if there were no rois
     ROIAlignBackwardFeature<float>(
-        dY.size(),
+        dY.numel(),
         dY.data<float>(),
         R.dim32(0),
         spatial_scale_,

@@ -18,6 +18,7 @@ namespace jit {
 /// For example:
 /// \rst
 /// .. code-block:: cpp
+///
 ///   auto module = torch::jit::compile(R"JIT(
 ///     def relu_script(a, b):
 ///       return torch.relu(a + b)

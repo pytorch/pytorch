@@ -91,6 +91,15 @@ TensorProto CreateOnnxShapeTensor(
 std::string SsaName(const std::string& n, int version) {
   return c10::str(n, "_", version);
 }
+
+NodeProto AddShapeNode(const std::string& input, const std::string& output) {
+  NodeProto shape_node;
+  shape_node.set_op_type("Shape");
+  shape_node.add_input(input);
+  shape_node.add_output(output);
+  return shape_node;
+}
+
 } // namespace
 
 std::unordered_map<std::string, std::string> SsaRewrite(
@@ -293,6 +302,7 @@ bool OnnxExporter::IsBlackListed(const caffe2::Argument& arg) {
   const static std::unordered_map<std::string, std::unordered_set<int64_t>>
       kBlackListInt = {{"cudnn_exhaustive_search", {0, 1}},
                        {"use_cudnn", {0, 1}},
+                       {"exhaustive_search", {0, 1}},
                        {"is_test", {0, 1}},
                        {"broadcast", {0, 1}}};
 
@@ -616,10 +626,6 @@ ConvertedResult OnnxExporter::CreateConcatNodes(
 
   CAFFE_ENFORCE_EQ(nodes.size(), 1);
   auto& node = nodes.back();
-  if (node.output_size() == 2) {
-    node.mutable_output()->RemoveLast();
-  }
-
   bool explicit_axis = false;
   for (const auto& a : def.arg()) {
     if (a.name() == "axis") {
@@ -631,6 +637,12 @@ ConvertedResult OnnxExporter::CreateConcatNodes(
     node.add_attribute()->CopyFrom(MakeAttribute("axis", 1L));
   }
 
+  if (node.output_size() == 2) {
+    std::string shape_input = node.output(0);
+    std::string shape_output = node.output(1);
+    node.mutable_output()->RemoveLast();
+    nodes.emplace_back(AddShapeNode(shape_input, shape_output));
+  }
   return result;
 }
 
@@ -685,35 +697,53 @@ ConvertedResult OnnxExporter::CreateChannelShuffleNodes(
 ConvertedResult OnnxExporter::CreateUpsampleNodes(
     const caffe2::OperatorDef& def,
     const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
-  float width_scale = 1.0;
-  float height_scale = 1.0;
-  for (const auto& a : def.arg()) {
-    if (a.name() == "width_scale") {
-      width_scale = a.f();
-    } else if (a.name() == "height_scale") {
-      height_scale = a.f();
-    }
-  }
-  CAFFE_ENFORCE_GT(width_scale, 0);
-  CAFFE_ENFORCE_GT(height_scale, 0);
-
-  auto x = def.input(0);
-  const auto& x_shape = shapes.at(x);
-  CAFFE_ENFORCE_GE(x_shape.dims().size(), 2);
-
-  std::vector<float> scales(x_shape.dims().size(), 1.0);
-  scales[scales.size() - 2] = height_scale;
-  scales[scales.size() - 1] = width_scale;
-
   ConvertedResult result;
+  //{H, W} => {1, 1, H, W}
   auto& nodes = result.first;
-  std::vector<std::string> inputs(def.input().begin(), def.input().end());
+  auto resolved_scale = dummy_->NewDummyName();
+  if (def.input_size() == 1) {
+    float width_scale = 1.0;
+    float height_scale = 1.0;
+    for (const auto& a : def.arg()) {
+      if (a.name() == "width_scale") {
+        width_scale = a.f();
+      } else if (a.name() == "height_scale") {
+        height_scale = a.f();
+      }
+    }
+    CAFFE_ENFORCE_GT(width_scale, 0);
+    CAFFE_ENFORCE_GT(height_scale, 0);
+    std::vector<float> tmp_vector = {1, 1, height_scale, width_scale};
+    auto resolved_scale_tensor =
+        MakeTensor("resolved scale tensor", tmp_vector, TensorProto::FLOAT);
+
+    auto node = MakeNode("Constant", {}, {resolved_scale});
+    MakeAttribute("value", resolved_scale_tensor);
+    node.add_attribute()->CopyFrom(
+        MakeAttribute("value", resolved_scale_tensor));
+    nodes.emplace_back(node);
+
+  } else {
+    CAFFE_ENFORCE_EQ(def.input_size(), 2);
+    std::vector<float> tmp_vector = {1, 1};
+    auto scale_pads_tensor =
+        MakeTensor("scale pads", tmp_vector, TensorProto::FLOAT);
+    auto unresolved_scale_pads = dummy_->NewDummyName();
+
+    auto node = MakeNode("Constant", {}, {unresolved_scale_pads});
+    node.add_attribute()->CopyFrom(MakeAttribute("value", scale_pads_tensor));
+    nodes.emplace_back(node);
+
+    node = MakeNode(
+        "Concat", {unresolved_scale_pads, def.input(1)}, {resolved_scale});
+    node.add_attribute()->CopyFrom(MakeAttribute("axis", 0));
+    nodes.emplace_back(node);
+  }
+  std::vector<std::string> inputs = {def.input(0), resolved_scale};
   std::vector<std::string> outputs(def.output().begin(), def.output().end());
   auto node = MakeNode("Upsample", inputs, outputs, def.name());
-  node.add_attribute()->CopyFrom(MakeAttribute("scales", scales));
   node.add_attribute()->CopyFrom(MakeAttribute("mode", "nearest"));
   nodes.emplace_back(node);
-
   return result;
 }
 
@@ -791,7 +821,10 @@ ConvertedResult OnnxExporter::CreateReshapeNodes(
   }
 
   if (node.output_size() == 2) {
+    std::string shape_input = node.output(0);
+    std::string shape_output = node.output(1);
     node.mutable_output()->RemoveLast();
+    nodes.emplace_back(AddShapeNode(shape_input, shape_output));
   }
 
   return result;

@@ -15,7 +15,9 @@ import glob
 import os
 import shutil
 import sys
-import common
+import common_utils as common
+
+from test_pytorch_common import skipIfCI
 
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
@@ -73,7 +75,6 @@ class TestOperators(TestCase):
             import test_onnx_common
             model_def = onnx.ModelProto.FromString(onnx_model_pb)
             onnx.checker.check_model(model_def)
-
             if _onnx_test:
                 test_function = inspect.stack()[1][0].f_code.co_name
                 test_name = test_function[0:4] + "_operator" + test_function[4:]
@@ -450,6 +451,14 @@ class TestOperators(TestCase):
         offset = torch.tensor([0]).long()
         self.assertONNX(emb_bag, (input, offset))
 
+    def test_implicit_expand(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x + 1, x)
+
+    def test_reduce_sum_negative_indices(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x.sum(-1), x)
+
     def test_symbolic_override(self):
         """Lifted from fast-neural-style: custom implementation of instance norm
         to be mapped to ONNX operator"""
@@ -518,6 +527,9 @@ class TestOperators(TestCase):
         BigModule()(*inp)
         self.assertONNX(BigModule(), inp)
 
+    def test_randn(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(lambda x: torch.randn(1, 2, 3, 4) + x, x)
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

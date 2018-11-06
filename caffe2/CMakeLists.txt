@@ -64,6 +64,7 @@ endif()
 # ---[ Caffe2 build
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
+
 if(NOT BUILD_ATEN_ONLY)
   add_subdirectory(proto)
   add_subdirectory(contrib)
@@ -71,7 +72,9 @@ if(NOT BUILD_ATEN_ONLY)
   add_subdirectory(utils)
   add_subdirectory(predictor)
   add_subdirectory(core/nomnigraph)
+  add_subdirectory(core/nomscheduler)
   add_subdirectory(core/dispatch)
+  add_subdirectory(serialize)
   if (USE_NVRTC)
     add_subdirectory(cuda_rtc)
   endif()
@@ -88,6 +91,9 @@ if(NOT BUILD_ATEN_ONLY)
   if (BUILD_CAFFE2_OPS)
     add_subdirectory(operators)
     add_subdirectory(operators/rnn)
+    if (USE_QNNPACK)
+      add_subdirectory(operators/quantized)
+    endif()
   endif()
   add_subdirectory(opt)
   add_subdirectory(perfkernels)
@@ -220,7 +226,7 @@ target_include_directories(caffe2 INTERFACE $<INSTALL_INTERFACE:include>)
 target_include_directories(caffe2 PRIVATE ${Caffe2_CPU_INCLUDE})
 target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
-aten_set_target_props(caffe2)
+torch_set_target_props(caffe2)
 
 if (MSVC)
 target_compile_options(caffe2 INTERFACE "-std=c++11")
@@ -344,7 +350,7 @@ if(USE_CUDA)
   endif()
 
   # Set standard properties on the target
-  aten_set_target_props(caffe2_gpu)
+  torch_set_target_props(caffe2_gpu)
 
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
@@ -381,7 +387,7 @@ if(USE_ROCM)
   target_include_directories(caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
 
   # Set standard properties on the target
-  aten_set_target_props(caffe2_hip)
+  torch_set_target_props(caffe2_hip)
 
   # When a library has object files that contain device code, it needs to use hipcc/hcc to link.
   set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)

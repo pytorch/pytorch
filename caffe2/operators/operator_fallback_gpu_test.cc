@@ -17,7 +17,7 @@ class IncrementByOneOp final : public Operator<CPUContext> {
     out->ResizeLike(in);
     const float* in_data = in.template data<float>();
     float* out_data = out->template mutable_data<float>();
-    for (int i = 0; i < in.size(); ++i) {
+    for (int i = 0; i < in.numel(); ++i) {
       out_data[i] = in_data[i] + 1.f;
     }
     return true;
@@ -46,8 +46,8 @@ TEST(OperatorFallbackTest, IncrementByOneOp) {
   EXPECT_TRUE(op->Run());
   const TensorCPU& output = ws.GetBlob("X")->Get<TensorCPU>();
   EXPECT_EQ(output.ndim(), 2);
-  EXPECT_EQ(output.dim(0), 2);
-  EXPECT_EQ(output.dim(1), 3);
+  EXPECT_EQ(output.size(0), 2);
+  EXPECT_EQ(output.size(1), 3);
   for (int i = 0; i < 6; ++i) {
     EXPECT_EQ(output.data<float>()[i], i + 1);
   }
@@ -71,8 +71,8 @@ TEST(OperatorFallbackTest, GPUIncrementByOneOp) {
   const TensorCUDA& output = ws.GetBlob("X")->Get<TensorCUDA>();
   Tensor output_cpu(output, CPU);
   EXPECT_EQ(output.ndim(), 2);
-  EXPECT_EQ(output.dim(0), 2);
-  EXPECT_EQ(output.dim(1), 3);
+  EXPECT_EQ(output.size(0), 2);
+  EXPECT_EQ(output.size(1), 3);
   for (int i = 0; i < 6; ++i) {
     EXPECT_EQ(output_cpu.data<float>()[i], i + 1);
   }

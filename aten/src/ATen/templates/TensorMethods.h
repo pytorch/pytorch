@@ -56,19 +56,46 @@ inline void Tensor::set_data(Tensor new_data) {
 ${tensor_method_definitions}
 
 inline bool Tensor::is_variable() const noexcept {
-  return type().is_variable();
+  return impl_->is_variable();
 }
 
-inline ScalarType Tensor::dtype() const noexcept {
-  return type().scalarType();
+inline caffe2::TypeMeta Tensor::dtype() const noexcept {
+  return impl_->dtype();
 }
 
 inline Layout Tensor::layout() const noexcept {
-  return type().layout();
+  return impl_->layout();
 }
 
 inline Device Tensor::device() const {
-  return Device(type().device_type(), type().is_cuda() ? get_device() : -1);
+  return impl_->device();
+}
+
+inline int64_t Tensor::get_device() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->get_device();
+}
+
+inline int64_t get_device(Tensor self) {
+  return self.get_device();
+}
+
+inline bool Tensor::is_cuda() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_cuda();
+}
+
+inline bool is_cuda(Tensor self) {
+  return self.is_cuda();
+}
+
+inline bool Tensor::is_sparse() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_sparse();
+}
+
+inline bool is_sparse(Tensor self) {
+  return self.is_sparse();
 }
 
 #define DEFINE_CAST(T, name, _)                  \

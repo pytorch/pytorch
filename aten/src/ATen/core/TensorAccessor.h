@@ -1,8 +1,8 @@
 #pragma once
 
-#include <cstddef>
+#include <c10/macros/Macros.h>
 #include <stdint.h>
-#include <ATen/core/Macros.h>
+#include <cstddef>
 
 namespace at {
 
@@ -14,7 +14,7 @@ struct DefaultPtrTraits {
   typedef T* PtrType;
 };
 
-#ifdef __CUDACC__
+#if defined(__CUDACC__) || defined(__HIPCC__)
 template <typename T>
 struct RestrictPtrTraits {
   typedef T* __restrict__ PtrType;
@@ -31,18 +31,30 @@ class TensorAccessorBase {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
 
-  AT_HOST_DEVICE TensorAccessorBase(PtrType data_, const int64_t * sizes_, const int64_t * strides_)
-  : data_(data_), sizes_(sizes_), strides_(strides_) {}
-  AT_HOST IntList sizes() const {
+  C10_HOST_DEVICE TensorAccessorBase(
+      PtrType data_,
+      const int64_t* sizes_,
+      const int64_t* strides_)
+      : data_(data_), sizes_(sizes_), strides_(strides_) {}
+  C10_HOST IntList sizes() const {
     return IntList(sizes_,N);
   }
-  AT_HOST IntList strides() const {
+  C10_HOST IntList strides() const {
     return IntList(strides_,N);
   }
-  AT_HOST_DEVICE int64_t stride(int64_t i) const { return strides_[i]; }
-  AT_HOST_DEVICE int64_t size(int64_t i) const { return sizes_[i]; }
-  AT_HOST_DEVICE T *data() { return data_; }
-  AT_HOST_DEVICE const T *data() const { return data_; }
+  C10_HOST_DEVICE int64_t stride(int64_t i) const {
+    return strides_[i];
+  }
+  C10_HOST_DEVICE int64_t size(int64_t i) const {
+    return sizes_[i];
+  }
+  C10_HOST_DEVICE T* data() {
+    return data_;
+  }
+  C10_HOST_DEVICE const T* data() const {
+    return data_;
+  }
+
 protected:
   PtrType data_;
   const int64_t* sizes_;
@@ -58,14 +70,17 @@ class TensorAccessor : public TensorAccessorBase<T,N,PtrTraits> {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
 
-  AT_HOST_DEVICE TensorAccessor(PtrType data_, const int64_t * sizes_, const int64_t * strides_)
-  : TensorAccessorBase<T,N>(data_,sizes_,strides_) {}
+  C10_HOST_DEVICE TensorAccessor(
+      PtrType data_,
+      const int64_t* sizes_,
+      const int64_t* strides_)
+      : TensorAccessorBase<T, N>(data_, sizes_, strides_) {}
 
-  AT_HOST_DEVICE TensorAccessor<T,N-1> operator[](int64_t i) {
+  C10_HOST_DEVICE TensorAccessor<T, N - 1> operator[](int64_t i) {
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i,this->sizes_+1,this->strides_+1);
   }
 
-  AT_HOST_DEVICE const TensorAccessor<T,N-1> operator[](int64_t i) const {
+  C10_HOST_DEVICE const TensorAccessor<T, N - 1> operator[](int64_t i) const {
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i,this->sizes_+1,this->strides_+1);
   }
 };
@@ -75,9 +90,12 @@ class TensorAccessor<T,1,PtrTraits> : public TensorAccessorBase<T,1,PtrTraits> {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
 
-  AT_HOST_DEVICE TensorAccessor(PtrType data_, const int64_t * sizes_, const   int64_t * strides_)
-  : TensorAccessorBase<T,1,PtrTraits>(data_,sizes_,strides_) {}
-  AT_HOST_DEVICE T & operator[](int64_t i) {
+  C10_HOST_DEVICE TensorAccessor(
+      PtrType data_,
+      const int64_t* sizes_,
+      const int64_t* strides_)
+      : TensorAccessorBase<T, 1, PtrTraits>(data_, sizes_, strides_) {}
+  C10_HOST_DEVICE T& operator[](int64_t i) {
     return this->data_[this->strides_[0]*i];
   }
 };
@@ -95,14 +113,21 @@ template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPt
 class PackedTensorAccessorBase {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
-  AT_HOST PackedTensorAccessorBase(PtrType data_, const int64_t * sizes_, const   int64_t * strides_)
-  : data_(data_)
-  {
+  C10_HOST PackedTensorAccessorBase(
+      PtrType data_,
+      const int64_t* sizes_,
+      const int64_t* strides_)
+      : data_(data_) {
     std::copy(sizes_, sizes_ + N, std::begin(this->sizes_));
     std::copy(strides_, strides_ + N, std::begin(this->strides_));
   }
-  AT_HOST_DEVICE int64_t stride(int64_t i) const { return strides_[i]; }
-  AT_HOST_DEVICE int64_t size(int64_t i) const { return sizes_[i]; }
+  C10_HOST_DEVICE int64_t stride(int64_t i) const {
+    return strides_[i];
+  }
+  C10_HOST_DEVICE int64_t size(int64_t i) const {
+    return sizes_[i];
+  }
+
 protected:
   PtrType data_;
   int64_t sizes_[N];
@@ -114,16 +139,19 @@ class PackedTensorAccessor : public PackedTensorAccessorBase<T,N,PtrTraits> {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
 
-  AT_HOST PackedTensorAccessor(PtrType data_, const int64_t * sizes_, const   int64_t * strides_)
-  : PackedTensorAccessorBase<T,N,PtrTraits>(data_, sizes_, strides_) {};
+  C10_HOST PackedTensorAccessor(
+      PtrType data_,
+      const int64_t* sizes_,
+      const int64_t* strides_)
+      : PackedTensorAccessorBase<T, N, PtrTraits>(data_, sizes_, strides_){};
 
-  AT_DEVICE TensorAccessor<T,N-1> operator[](int64_t i) {
+  C10_DEVICE TensorAccessor<T, N - 1> operator[](int64_t i) {
     int64_t* new_sizes = this->sizes_+1;
     int64_t* new_strides = this->strides_+1;
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i, new_sizes, new_strides);
   }
 
-  AT_DEVICE const TensorAccessor<T,N-1> operator[](int64_t i) const {
+  C10_DEVICE const TensorAccessor<T, N - 1> operator[](int64_t i) const {
     int64_t* new_sizes = this->sizes_+1;
     int64_t* new_strides = this->strides_+1;
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i, new_sizes, new_strides);
@@ -134,13 +162,16 @@ template<typename T, template <typename U> class PtrTraits>
 class PackedTensorAccessor<T,1,PtrTraits> : public PackedTensorAccessorBase<T,1,PtrTraits> {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
-  AT_HOST PackedTensorAccessor(PtrType data_, const int64_t * sizes_, const   int64_t * strides_)
-  : PackedTensorAccessorBase<T,1,PtrTraits>(data_, sizes_, strides_) {};
+  C10_HOST PackedTensorAccessor(
+      PtrType data_,
+      const int64_t* sizes_,
+      const int64_t* strides_)
+      : PackedTensorAccessorBase<T, 1, PtrTraits>(data_, sizes_, strides_){};
 
-  AT_DEVICE T & operator[](int64_t i) {
+  C10_DEVICE T& operator[](int64_t i) {
     return this->data_[this->strides_[0]*i];
   }
-  AT_DEVICE const T& operator[](int64_t i) const {
+  C10_DEVICE const T& operator[](int64_t i) const {
     return this->data_[this->strides_[0]*i];
   }
 };

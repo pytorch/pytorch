@@ -201,6 +201,14 @@ def unused(g):
     return g.op("prim::Undefined")
 
 
+def _shape_as_tensor(g, input):
+    return g.op('Shape', input)
+
+
+def _reshape_from_tensor(g, input, shape):
+    return g.op('Reshape', input, shape)
+
+
 def add(g, self, other, alpha=None):
     # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
     if alpha and _scalar(_maybe_get_scalar(alpha)) != 1:
@@ -217,6 +225,10 @@ def sub(g, self, other, alpha=None):
     # See Note [Pointwise by scalar]. Note that self or other may be scalars.
     other = _maybe_get_scalar(other)
     return g.op("Sub", self, _if_scalar_type_as(g, other, self))
+
+
+def rsub(g, self, other, alpha=None):
+    return sub(g, other, self, alpha=alpha)
 
 
 def mul(g, self, other):
@@ -336,6 +348,11 @@ def t(g, self):
 # There is no translation for it, but we don't want to raise an error yet
 def expand(g, self, size, implicit):
     return None
+
+
+def expand_as(g, self, other):
+    shape = g.op("Shape", other)
+    return g.op("Expand", self, shape)
 
 
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
@@ -589,6 +606,14 @@ def adaptive_max_pool2d(g, input, output_size):
     return g.op("GlobalMaxPool", input), None
 
 
+@parse_args('v', 'is', 'f')
+def constant_pad_nd(g, input, padding, value):
+    from torch.autograd._functions.utils import prepare_onnx_paddings
+    mode = "constant"
+    paddings = prepare_onnx_paddings(len(input.type().sizes()), padding)
+    return g.op("Pad", input, pads_i=paddings, mode_s=mode, value_f=value)
+
+
 @parse_args('v', 'is')
 def reflection_pad(g, input, padding):
     from torch.autograd._functions.utils import prepare_onnx_paddings
@@ -617,8 +642,10 @@ replication_pad3d = replication_pad
 def upsample_nearest2d(g, input, output_size):
     height_scale = float(output_size[-2]) / input.type().sizes()[-2]
     width_scale = float(output_size[-1]) / input.type().sizes()[-1]
-    return g.op("Upsample", input,
-                scales_f=[1., 1., height_scale, width_scale],
+    scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
+                                                    width_scale]))
+
+    return g.op("Upsample", input, scales,
                 mode_s="nearest")
 
 
@@ -628,8 +655,9 @@ def upsample_bilinear2d(g, input, output_size, align_corners):
         return _unimplemented("upsample_bilinear2d", "align_corners == True")
     height_scale = float(output_size[-2]) / input.type().sizes()[-2]
     width_scale = float(output_size[-1]) / input.type().sizes()[-1]
-    return g.op("Upsample", input,
-                scales_f=[1., 1., height_scale, width_scale],
+    scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
+                                                    width_scale]))
+    return g.op("Upsample", input, scales,
                 mode_s="linear")
 
 
@@ -825,15 +853,16 @@ def pow(g, self, exponent):
     return g.op("Pow", self, _if_scalar_type_as(g, exponent, self))
 
 
-@parse_args('v', 'f', 'f')
 def clamp(g, self, min, max):
-    # check min/max is NaN or not, and dispatch the call
-    # a != a means a == NaN
-    if min != min:
+    # min or max may be prim::None that we need to dispatch to
+    # Clip separately, as ONNX does not have None syntax
+    if min.node().kind() == "prim::None":
         return clamp_max(g, self, max)
-    elif max != max:
+    elif max.node().kind() == "prim::None":
         return clamp_min(g, self, min)
     else:
+        min = _parse_arg(min, 'f')
+        max = _parse_arg(max, 'f')
         return g.op("Clip", self, min_f=min, max_f=max)
 
 
@@ -1073,6 +1102,11 @@ def to(g, self, *args):
         # aten::to(Tensor, Device, ScalarType, bool, bool)
         dtype = _get_const(args[1], 'i', 'dtype')
         return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
+    elif len(args) == 5:
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool) -> Tensor
+        dtype = _get_const(args[0], 'i', 'dtype')
+        # Layout and device are ignored
+        return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
     else:
         raise NotImplementedError("Unknown aten::to signature")
 
@@ -1299,7 +1333,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
 
-@parse_args('v', 'v', 'i', 't', 'i')
+@parse_args('v', 'v', 'i', 't', 'v')
 def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total_length):
     # Ignore total_length as it is not supported in _symbolic_pad_packed_sequence
     # It is only useful/used when training using data_parallel model, so
@@ -1308,3 +1342,9 @@ def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total
     if batch_first:
         data = g.op('Transpose', data, perm_i=[1, 0, 2])
     return data, lengths
+
+
+def randn(g, *shapes):
+    shapes_list = list(shapes)
+    shape = _maybe_get_const(shapes_list[0], "is")
+    return g.op('RandomNormal', shape_i=shape)

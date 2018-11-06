@@ -1,5 +1,6 @@
 import torch
 from torch._six import string_classes
+from datetime import timedelta
 
 from .rendezvous import rendezvous, register_rendezvous_handler
 from . import BroadcastOptions, AllreduceOptions, ReduceOptions, \
@@ -44,11 +45,16 @@ class DistBackend(object):
     GLOO = "gloo"
     NCCL = "nccl"
     MPI = "mpi"
+    TCP = "tcp"
 
     def __new__(cls, name):
         if not isinstance(name, string_classes):
             raise ValueError("Backend name must be a string, but got: {}".format(name))
         value = getattr(DistBackend, name.upper(), DistBackend.UNDEFINED)
+        if value == DistBackend.TCP:
+            raise ValueError("TCP backend has been deprecated. Please use "
+                             "Gloo or MPI backend for collective operations "
+                             "on CPU tensors.")
         if value == DistBackend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
         return value
@@ -83,6 +89,12 @@ _pg_group_ranks = {}
 # Default process group state
 _default_pg = None
 _default_pg_init_method = None
+
+# Default process group wide timeout, if applicable.
+# This currently only applies to the gloo backend. To make an attempt at
+# backwards compatibility with THD, we use an extraordinarily high default
+# timeout, given that THD did not have timeouts.
+_default_pg_timeout = timedelta(minutes=30)
 
 # Process group count for default naming
 _group_count = 0
@@ -280,7 +292,11 @@ def init_process_group(backend,
             store, rank, world_size = next(rendezvous(init_method))
 
         if backend == DistBackend.GLOO:
-            _default_pg = ProcessGroupGloo(store, rank, world_size)
+            _default_pg = ProcessGroupGloo(
+                store,
+                rank,
+                world_size,
+                timeout=_default_pg_timeout)
             _pg_map[_default_pg] = (DistBackend.GLOO, store)
             _pg_names[_default_pg] = group_name
         elif backend == DistBackend.NCCL:
@@ -330,7 +346,11 @@ def _new_process_group_helper(world_size,
         store = PrefixStore(group_name, default_store)
 
         if default_backend == DistBackend.GLOO:
-            pg = ProcessGroupGloo(store, rank, world_size)
+            pg = ProcessGroupGloo(
+                store,
+                rank,
+                world_size,
+                timeout=_default_pg_timeout)
             _pg_map[pg] = (DistBackend.GLOO, store)
             _pg_names[pg] = group_name
         elif default_backend == DistBackend.NCCL:

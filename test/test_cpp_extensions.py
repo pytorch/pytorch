@@ -13,7 +13,7 @@ except ImportError:
           "Run \'python run_test.py -i cpp_extensions\' for the \'test_cpp_extensions.py\' tests.")
     raise
 
-import common
+import common_utils as common
 
 from torch.utils.cpp_extension import CUDA_HOME
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
@@ -353,7 +353,6 @@ class TestCppExtension(common.TestCase):
             name='cpp_api_extension',
             sources='cpp_extensions/cpp_api_extension.cpp',
             extra_include_paths=api_include,
-            extra_cflags=[] if IS_WINDOWS else ['-UTORCH_API_INCLUDE_EXTENSION_H'],
             verbose=True)
 
         net = module.Net(3, 5)

@@ -51,6 +51,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
+  } else if (t.kind() == TypeKind::OptionalType) {
+    auto prim = t.cast<OptionalType>()->getElementType();
+    out << *prim << "?";
   } else if(t.kind() == TypeKind::NoneType) {
     out << "None";
   } else if(t.kind() == TypeKind::StringType) {
@@ -59,8 +62,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << "Generator";
   } else if(t.kind() == TypeKind::VarType) {
     out << t.expect<VarType>()->name();
-  } else if(t.kind() == TypeKind::WorldType) {
-    out << "World";
+  } else if(t.kind() == TypeKind::FutureType) {
+    auto elem = t.cast<FutureType>()->getElementType();
+    out << "Future[" << *elem << "]";
   } else {
     AT_ERROR("unknown type kind");
   }
@@ -97,10 +101,6 @@ NoneTypePtr NoneType::get() {
 }
 GeneratorTypePtr GeneratorType::get() {
   static auto value = GeneratorType::create();
-  return value;
-}
-WorldTypePtr WorldType::get() {
-  static auto value = WorldType::create();
   return value;
 }
 StringTypePtr StringType::get() {
@@ -236,7 +236,26 @@ TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
       ss << "cannot match a tuple to " << actual->str();
       throw TypeMatchError(ss.str());
     }
+  } else if (auto lt_formal = formal->cast<FutureType>()) {
+    if (auto lt_actual = actual->cast<FutureType>()) {
+      return FutureType::create(matchTypeVariables(
+          lt_formal->getElementType(), lt_actual->getElementType(), type_env));
+    } else {
+      std::stringstream ss;
+      ss << "cannot match a future to " << actual->str();
+      throw TypeMatchError(ss.str());
+    }
+  } else if (auto opt_formal = formal->cast<OptionalType>()) {
+    if (auto opt_actual = actual->cast<OptionalType>()) {
+      return OptionalType::create(matchTypeVariables(
+          opt_formal->getElementType(), opt_actual->getElementType(), type_env));
+    } else {
+      std::stringstream ss;
+      ss << "cannot match a optional to " << actual->str();
+      throw TypeMatchError(ss.str());
+    }
   }
+
   AT_ERROR("unhandled free variable container: ", formal->str());
 }
 
@@ -249,14 +268,12 @@ TORCH_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::string
     auto it = type_env.find(vt->name());
     AT_ASSERTM(it != type_env.end(), "schema has unbound type variable '", vt->name(), "' in its return type");
     return it->second;
-  } else if(auto lt = type->cast<ListType>()) {
-    return ListType::create(evalTypeVariables(lt->getElementType(), type_env));
-  } else if(auto tp = type->cast<TupleType>()) {
-    return TupleType::create(fmap(tp->elements(), [&](const TypePtr& typ) {
-      return evalTypeVariables(typ, type_env);
-    }));
+  } else {
+    auto new_contained = fmap(type->containedTypes(), [&](TypePtr t) {
+      return evalTypeVariables(t, type_env);
+    });
+    return type->withContained(std::move(new_contained));
   }
-  return type;
 }
 
 }} // namespace torch::jit

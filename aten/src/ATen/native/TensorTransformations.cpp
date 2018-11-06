@@ -57,6 +57,35 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
   return out_tensor;
 }
 
+Tensor roll_cpu(const Tensor& self, IntList shifts, IntList dims) {
+  // todo: support rolling along no or multiple dimensions as in numpy.roll.
+  AT_CHECK(dims.size() == 1, "only single dimension roll currently supported");
+  AT_CHECK(shifts.size() == dims.size(), "shifts and dimensions must align");
+  // avoid a div zero error below.
+  if( self.numel() == 0 ) {
+    return self.clone();
+  }
+  int64_t dim = dims[0];
+  int64_t size = self.size(dim);
+  int64_t start = (size - shifts[0]) % size;
+  // Behavior of % is different in C++ vs Python for negative numbers. This
+  // corrects the difference.
+  if( start < 0 ) start = start + size;
+
+  auto tensors = self.unbind(dim);
+  std::vector<Tensor> vec = std::vector<Tensor>(size);
+  int64_t index = 0;
+  for (int64_t i = start; i < size; i++) {
+    vec[index++] = tensors[i];
+  }
+
+  for (int64_t i = 0; i < start; i++) {
+    vec[index++] = tensors[i];
+  }
+
+  return at::stack(vec, dim);
+}
+
 Tensor rot90(const Tensor& self, int64_t k, IntList dims) {
   const int64_t total_dims = self.dim(), total_rot_dims = dims.size();
 

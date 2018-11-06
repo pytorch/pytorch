@@ -14,9 +14,14 @@ import torch.cuda.comm as comm
 from torch import multiprocessing as mp
 from torch._six import inf, nan
 
-from test_torch import TestTorch
-from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
-    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_WITH_ROCM
+from test_torch import _TestTorchMixin
+
+from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_WITH_ROCM, load_tests
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 # We cannot import TEST_CUDA and TEST_MULTIGPU from common_cuda here,
 # because if we do that, the TEST_CUDNN line from common_cuda will be executed
@@ -471,7 +476,6 @@ tests = [
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('qr', large_2d_lapack, lambda t: [], 'big', float_types, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('inverse', new_t(20, 20), lambda t: [], None, float_types, False, "skipIfRocm:DoubleTensor,FloatTensor"),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('svd', new_t(10, 10), lambda t: [], 'square', float_types_no_half, False,
@@ -933,7 +937,7 @@ class TestCuda(TestCase):
         self.assertEqual(x.to(torch.int).get_device(), 1)
 
     def test_neg(self):
-        TestTorch._test_neg(self, lambda t: t.cuda())
+        _TestTorchMixin._test_neg(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_arithmetic_large_tensor(self):
@@ -1233,15 +1237,22 @@ class TestCuda(TestCase):
 
     @skipIfRocm
     def test_cat_empty_legacy(self):
-        TestTorch._test_cat_empty_legacy(self, use_cuda=True)
+        _TestTorchMixin._test_cat_empty_legacy(self, use_cuda=True)
 
     @skipIfRocm
     def test_cat_empty(self):
-        TestTorch._test_cat_empty(self, use_cuda=True)
+        _TestTorchMixin._test_cat_empty(self, use_cuda=True)
 
     def test_bernoulli(self):
-        TestTorch._test_bernoulli(self, torch.double, 'cuda')
-        TestTorch._test_bernoulli(self, torch.half, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.float32, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.float32, torch.float16, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.float16, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.float16, torch.float16, 'cuda')
+        # test that it works with integral tensors
+        _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float16, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
 
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1).cuda()
@@ -1494,52 +1505,65 @@ class TestCuda(TestCase):
         self.assertEqual(gpu_tensor1[0], 1)
         self.assertEqual(gpu_tensor0[0], 2)
 
+    @skipIfRocm
+    def test_sum_noncontig(self):
+        x = torch.randn(1, 75, 57, 20, device='cuda').permute(0, 3, 1, 2)
+        y = x.cpu()
+        self.assertEqual(x.sum().cpu(), y.sum())
+        self.assertEqual(x.sum(dim=(-1, -2)).cpu(), y.sum(dim=(-1, -2)))
+        self.assertEqual(x.sum(dim=(1, 3)).cpu(), y.sum(dim=(1, 3)))
+
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
-        return TestTorch._select_broadcastable_dims(dims_full)
+        return _TestTorchMixin._select_broadcastable_dims(dims_full)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_inverse(self):
+        _TestTorchMixin._test_inverse(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_pinverse(self):
-        TestTorch._test_pinverse(self, lambda t: t.cuda())
+        _TestTorchMixin._test_pinverse(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_matrix_rank(self):
-        TestTorch._test_matrix_rank(self, lambda x: x.cuda())
+        _TestTorchMixin._test_matrix_rank(self, lambda x: x.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_matrix_power(self):
-        TestTorch._test_matrix_power(self, conv_fn=lambda t: t.cuda())
+        _TestTorchMixin._test_matrix_power(self, conv_fn=lambda t: t.cuda())
 
     def test_chain_matmul(self):
-        TestTorch._test_chain_matmul(self, cast=lambda t: t.cuda())
+        _TestTorchMixin._test_chain_matmul(self, cast=lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_det_logdet_slogdet(self):
-        TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
+        _TestTorchMixin._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_gesv_batched(self):
-        TestTorch._test_gesv_batched(self, lambda t: t.cuda())
+        _TestTorchMixin._test_gesv_batched(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_gesv_batched_dims(self):
-        TestTorch._test_gesv_batched_dims(self, lambda t: t.cuda())
+        _TestTorchMixin._test_gesv_batched_dims(self, lambda t: t.cuda())
 
     def test_view(self):
-        TestTorch._test_view(self, lambda t: t.cuda())
+        _TestTorchMixin._test_view(self, lambda t: t.cuda())
 
     def test_flip(self):
-        TestTorch._test_flip(self, use_cuda=True)
+        _TestTorchMixin._test_flip(self, use_cuda=True)
 
     def test_rot90(self):
-        TestTorch._test_rot90(self, use_cuda=True)
+        _TestTorchMixin._test_rot90(self, use_cuda=True)
 
     def test_signal_window_functions(self):
-        TestTorch._test_signal_window_functions(self, device=torch.device('cuda'))
+        _TestTorchMixin._test_signal_window_functions(self, device=torch.device('cuda'))
 
     @skipIfRocm
     def test_fft_ifft_rfft_irfft(self):
-        TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+        _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
         @contextmanager
         def plan_cache_max_size(n):
@@ -1549,16 +1573,16 @@ class TestCuda(TestCase):
             torch.backends.cuda.cufft_plan_cache.max_size = original
 
         with plan_cache_max_size(max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
-            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+            _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
         with plan_cache_max_size(0):
-            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+            _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
         torch.backends.cuda.cufft_plan_cache.clear()
 
         # check that stll works after clearing cache
         with plan_cache_max_size(10):
-            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+            _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
         with self.assertRaisesRegex(RuntimeError, r"must be non-negative"):
             torch.backends.cuda.cufft_plan_cache.max_size = -1
@@ -1567,11 +1591,11 @@ class TestCuda(TestCase):
             torch.backends.cuda.cufft_plan_cache.size = -1
 
     def test_stft(self):
-        TestTorch._test_stft(self, device=torch.device('cuda'))
+        _TestTorchMixin._test_stft(self, device=torch.device('cuda'))
 
     @skipIfRocm
     def test_multinomial(self):
-        TestTorch._test_multinomial(self, torch.cuda.FloatTensor)
+        _TestTorchMixin._test_multinomial(self, torch.cuda.FloatTensor)
 
         # Test two corner cases from older PyTorch (Issue #4858)
         freqs = torch.cuda.FloatTensor([
@@ -1638,24 +1662,24 @@ class TestCuda(TestCase):
 
     @skipIfRocm
     def test_broadcast(self):
-        TestTorch._test_broadcast(self, lambda t: t.cuda())
+        _TestTorchMixin._test_broadcast(self, lambda t: t.cuda())
 
     def test_contiguous(self):
-        TestTorch._test_contiguous(self, lambda t: t.cuda())
+        _TestTorchMixin._test_contiguous(self, lambda t: t.cuda())
 
     def test_broadcast_fused_matmul(self):
-        TestTorch._test_broadcast_fused_matmul(self, lambda t: t.cuda())
+        _TestTorchMixin._test_broadcast_fused_matmul(self, lambda t: t.cuda())
 
     def test_broadcast_batched_matmul(self):
-        TestTorch._test_broadcast_batched_matmul(self, lambda t: t.cuda())
+        _TestTorchMixin._test_broadcast_batched_matmul(self, lambda t: t.cuda())
 
     @skipIfRocm
     def test_index(self):
-        TestTorch._test_index(self, lambda t: t.cuda())
+        _TestTorchMixin._test_index(self, lambda t: t.cuda())
 
     @skipIfRocm
     def test_advancedindex(self):
-        TestTorch._test_advancedindex(self, lambda t: t.cuda())
+        _TestTorchMixin._test_advancedindex(self, lambda t: t.cuda())
 
     @skipIfRocm
     def test_advancedindex_mixed_cpu_cuda(self):
@@ -1708,33 +1732,33 @@ class TestCuda(TestCase):
 
     @skipIfRocm
     def test_advancedindex_big(self):
-        TestTorch._test_advancedindex_big(self, lambda t: t.cuda())
+        _TestTorchMixin._test_advancedindex_big(self, lambda t: t.cuda())
 
     @skipIfRocm
     def test_btrifact(self):
-        TestTorch._test_btrifact(self, lambda t: t.cuda())
+        _TestTorchMixin._test_btrifact(self, lambda t: t.cuda())
 
     @skipIfRocm
     def test_btrisolve(self):
-        TestTorch._test_btrisolve(self, lambda t: t.cuda())
+        _TestTorchMixin._test_btrisolve(self, lambda t: t.cuda())
 
     @skipIfRocm
     def test_dim_reduction(self):
-        TestTorch._test_dim_reduction(self, lambda t: t.cuda())
+        _TestTorchMixin._test_dim_reduction(self, lambda t: t.cuda())
 
     @skipIfRocm
     def test_tensor_gather(self):
-        TestTorch._test_gather(self, lambda t: t.cuda(), False)
+        _TestTorchMixin._test_gather(self, lambda t: t.cuda(), False)
 
     def test_tensor_scatter(self):
-        TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False)
+        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False)
 
     @skipIfRocm
     def test_tensor_scatterAdd(self):
-        TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False)
+        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False)
 
     def test_tensor_scatterFill(self):
-        TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
+        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
 
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
@@ -1750,16 +1774,16 @@ class TestCuda(TestCase):
         self.assertEqual(v, expected)
 
     def test_max_with_inf(self):
-        TestTorch._test_max_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
+        _TestTorchMixin._test_max_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
 
     def test_min_with_inf(self):
-        TestTorch._test_min_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
+        _TestTorchMixin._test_min_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
 
     def test_int_pow(self):
-        TestTorch._test_int_pow(self, lambda x: x.cuda())
+        _TestTorchMixin._test_int_pow(self, lambda x: x.cuda())
 
     def test_remainder_overflow(self):
-        TestTorch._test_remainder_overflow(self, dtype=torch.int64, device='cuda')
+        _TestTorchMixin._test_remainder_overflow(self, dtype=torch.int64, device='cuda')
 
     def test_var(self):
         cpu_tensor = torch.randn(2, 3, 3)
@@ -1860,11 +1884,11 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_symeig(self):
-        TestTorch._test_symeig(self, lambda t: t.cuda())
+        _TestTorchMixin._test_symeig(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_svd_no_singularvectors(self):
-        TestTorch._test_svd_no_singularvectors(self, lambda t: t.cuda())
+        _TestTorchMixin._test_svd_no_singularvectors(self, lambda t: t.cuda())
 
     def test_arange(self):
         for t in ['IntTensor', 'LongTensor', 'FloatTensor', 'DoubleTensor']:
@@ -1885,14 +1909,14 @@ class TestCuda(TestCase):
         self.assertEqual(a, b.cuda())
 
     def test_diagonal(self):
-        TestTorch._test_diagonal(self, dtype=torch.float32, device='cuda')
+        _TestTorchMixin._test_diagonal(self, dtype=torch.float32, device='cuda')
 
     def test_diagflat(self):
-        TestTorch._test_diagflat(self, dtype=torch.float32, device='cuda')
+        _TestTorchMixin._test_diagflat(self, dtype=torch.float32, device='cuda')
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_trtrs(self):
-        TestTorch._test_trtrs(self, lambda t: t.cuda())
+        _TestTorchMixin._test_trtrs(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @skipIfRocm
@@ -1950,11 +1974,11 @@ class TestCuda(TestCase):
         self.assertEqual(res2.numel(), 0)
 
     def test_random_neg_values(self):
-        TestTorch._test_random_neg_values(self, use_cuda=True)
+        _TestTorchMixin._test_random_neg_values(self, use_cuda=True)
 
     @skipIfRocm
     def test_bincount_cuda(self):
-        TestTorch._test_bincount(self, device='cuda')
+        _TestTorchMixin._test_bincount(self, device='cuda')
         # ensure CUDA code coverage
         input_size = (5000,)
         w = torch.randn(input_size, device='cuda')
@@ -2103,17 +2127,5 @@ if __name__ == '__main__':
     if TEST_CUDA:
         load_ignore_file()
         generate_tests()
-
-    # skip TestTorch tests
-    # hide in __name__ == '__main__' because we don't want this to be run when
-    # someone imports test_cuda
-    def load_tests(loader, tests, pattern):
-        test_suite = unittest.TestSuite()
-        for test_group in tests:
-            for test in test_group:
-                if test.__class__.__name__ == 'TestTorch':
-                    continue
-                test_suite.addTest(test)
-        return test_suite
 
     run_tests()
