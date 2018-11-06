@@ -73,7 +73,6 @@ public:
 
   ~InlineDeviceGuard() {
     if (original_device_ == DeviceType::CPU) return;
-    // if (original_device_ == current_device_) return;
     T().uncheckedSetDevice(original_device_);
   }
 
@@ -82,7 +81,6 @@ public:
     auto index = device.index();
     if (index == -1) return;
     AT_ASSERT(index >= 0);
-    // if (current_device_ == device) return;
     if (original_device_ == DeviceType::CPU) {
       original_device_ = T().exchangeDevice(device);
     } else {
