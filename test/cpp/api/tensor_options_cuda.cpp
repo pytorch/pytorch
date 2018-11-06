@@ -125,13 +125,3 @@ TEST(OptionsGuardTest, DeviceGuardOptionsGuardInteraction_MultiCUDA) {
     }
   }
 }
-
-TEST(DeviceGuardTest, IsMovable_CUDA) {
-  DeviceGuard first(CUDADevice(1));
-  ASSERT_EQ(first.original_device(), CUDADevice(0));
-  ASSERT_EQ(first.current_device(), CUDADevice(1));
-  DeviceGuard second(std::move(first));
-  ASSERT_EQ(second.original_device(), CUDADevice(0));
-  ASSERT_EQ(second.current_device(), CUDADevice(1));
-  ASSERT_EQ(first.original_device(), CPUDevice());
-}

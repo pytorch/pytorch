@@ -77,6 +77,8 @@ TEST(InlineDeviceGuard, ConstructorError) {
                    g(Device(DeviceType::HIP, 1)));
 }
 
+/*
+
 TEST(InlineDeviceGuard, MoveConstructor) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
@@ -99,7 +101,6 @@ TEST(InlineDeviceGuard, MoveConstructorFromTemporary) {
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i);
 }
 
-/*
 TEST(InlineDeviceGuard, MoveAssignment) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);

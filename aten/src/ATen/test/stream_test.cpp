@@ -185,21 +185,6 @@ TEST(TestStream, CUDAGuardTest) {
   ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(1), streams1[0]);
 }
 
-// CUDAGuardIsMovable
-TEST(TestStream, CUDAGuardMovableTest) {
-  if (at::cuda::getNumGPUs() < 2) {
-    return;
-  }
-  const auto stream = at::cuda::getStreamFromPool();
-  const auto device_count = at::cuda::getNumGPUs();
-  at::cuda::CUDAGuard first(stream);
-  first.set_device(1);
-  at::cuda::CUDAGuard second(std::move(first));
-  ASSERT_EQ_CUDA(second.original_streams().size(), device_count);
-  ASSERT_EQ_CUDA(second.original_device(), at::Device(at::kCUDA, 0));
-  ASSERT_EQ_CUDA(second.current_device(), at::Device(at::kCUDA, 1));
-}
-
 // Streampool Round Robin
 TEST(TestStream, StreamPoolTest) {
   std::vector<at::cuda::CUDAStream> streams{};

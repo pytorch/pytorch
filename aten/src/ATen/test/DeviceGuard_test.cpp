@@ -42,6 +42,8 @@ TEST(DeviceGuard, ConstructorCPUDevice) {
   DeviceGuard g(cpu_dev());
 }
 
+/*
+
 TEST(DeviceGuard, MoveConstructor) {
   TestGuardImpl impl;
   DeviceIndex init_i = 0;
@@ -65,8 +67,6 @@ TEST(DeviceGuard, MoveConstructorFromTemporary) {
   ASSERT_EQ(g2.current_device(), dev(i));
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i);
 }
-
-/*
 
 TEST(DeviceGuard, MoveAssignmentSameDeviceType) {
   TestGuardImpl impl;
