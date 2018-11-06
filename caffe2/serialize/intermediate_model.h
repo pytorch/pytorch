@@ -201,9 +201,9 @@ class CAFFE2_API IntermediateParameter final {
 class CAFFE2_API IntermediateMethod final {
  public:
   // constructors
-  IntermediateMethod() noexcept {};
+  IntermediateMethod() {};
 
-  explicit IntermediateMethod(torch::MethodDef* method_def) noexcept;
+  explicit IntermediateMethod(torch::MethodDef* method_def);
 
   //IntermediateMethod(const IntermediateMethod& method) noexcept = delete;
   //IntermediateMethod& operator =(const IntermediateMethod& method) noexcept = delete;
@@ -234,7 +234,7 @@ class CAFFE2_API IntermediateMethod final {
 
  private:
   std::string name_;
-  std::unique_ptr<caffe2::NetDef> graph_;
+  std::shared_ptr<caffe2::NetDef> graph_;
   std::string torchScript_;
 };
 
