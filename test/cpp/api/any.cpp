@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/nn/modules/any.h>
-#include <torch/torch.h>
+#include <torch/nn/modules/linear.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>
@@ -232,8 +232,9 @@ TEST_F(AnyModuleTest, ConvertsVariableToTensorCorrectly) {
   // mismatch).
   AnyModule any(M{});
   ASSERT_TRUE(
-      any.forward(torch::autograd::Variable(torch::ones(5))).sum().item<float>() ==
-      5);
+      any.forward(torch::autograd::Variable(torch::ones(5)))
+          .sum()
+          .item<float>() == 5);
   // at::Tensors that are not variables work too.
   ASSERT_EQ(any.forward(at::ones(5)).sum().item<float>(), 5);
 }

@@ -76,7 +76,7 @@ bool BatchBoxCoxOp<CPUContext>::DoRunWithType() {
   auto& lambda1 = Input(LAMBDA1);
   auto& lambda2 = Input(LAMBDA2);
   CAFFE_ENFORCE_GE(data.ndim(), 1);
-  auto N = data.dim(0);
+  auto N = data.size(0);
   auto D = data.size_from_dim(1);
 
   auto* output = Output(0);

@@ -82,7 +82,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     CAFFE_ENFORCE_EQ(sparse_indices.ndim(), 1);
     auto& sparse_values = Input(VALUES);
     CAFFE_ENFORCE_GE(sparse_values.ndim(), 1);
-    CAFFE_ENFORCE_EQ(sparse_indices.numel(), sparse_values.dim(0));
+    CAFFE_ENFORCE_EQ(sparse_indices.numel(), sparse_values.size(0));
     auto& default_value = Input(DEFAULT);
     CAFFE_ENFORCE_EQ(default_value.ndim() + 1, sparse_values.ndim());
     CAFFE_ENFORCE_EQ(default_value.numel(), sparse_values.size_from_dim(1));
@@ -224,10 +224,10 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
       rows = lengths.dim32(0);
       CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
       CAFFE_ENFORCE_GE(gradient_output.ndim(), 2);
-      CAFFE_ENFORCE_EQ(gradient_output.dim(0), rows);
-      CAFFE_ENFORCE_EQ(gradient_output.dim(1), cols);
-      block_nbytes /= gradient_output.dim(1);
-      block_size /= gradient_output.dim(1);
+      CAFFE_ENFORCE_EQ(gradient_output.size(0), rows);
+      CAFFE_ENFORCE_EQ(gradient_output.size(1), cols);
+      block_nbytes /= gradient_output.size(1);
+      block_size /= gradient_output.size(1);
       iter_offset += 1;
     }
     if (rows == -1) {
@@ -236,7 +236,7 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
       rows = 1;
       lengths_vec = &default_length;
       CAFFE_ENFORCE_GE(gradient_output.ndim(), 1);
-      CAFFE_ENFORCE_EQ(gradient_output.dim(0), cols);
+      CAFFE_ENFORCE_EQ(gradient_output.size(0), cols);
     }
     shape.push_back(default_length);
     // insert feature_dim

@@ -96,8 +96,8 @@ private:
 # if this list is not empty and ${foo,} will insert one after.
 */
 struct CodeTemplate {
-  /* implicit */ CodeTemplate(const std::string & t)
-  : template_text(t) {}
+  /* implicit */ CodeTemplate(std::string t)
+  : template_text(std::move(t)) {}
 
   std::string format(const TemplateEnv & env) {
     std::stringstream out;
