@@ -12,7 +12,7 @@ namespace datasets {
 /// A chunk could be an entire file, such as an audio data file or an image,
 /// or part of a file in the case of a large text file split based on seek
 /// positions. ChunkDataSet extends the DataSet functionality to read an
-/// antire chunk at once.
+/// entire chunk at once.
 template <typename Self, typename Batch = std::vector<Example<>>>
 class ChunkDataSet : public BatchDataset<Self, Batch> {
  public:
