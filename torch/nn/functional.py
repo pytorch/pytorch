@@ -994,8 +994,8 @@ softplus(input, beta=1, threshold=20) -> Tensor
 @torch._jit_internal.weak_script
 def _get_softmax_dim(name, ndim, stacklevel):
     # type: (str, int, int) -> int
-    # warnings.warn("Implicit dimension choice for {} has been deprecated. "
-    #               "Change the call to include dim=X as an argument.".format(name), stacklevel=stacklevel)
+    warnings.warn("Implicit dimension choice for {} has been deprecated. "
+                  "Change the call to include dim=X as an argument.".format(name))
     if ndim == 0 or ndim == 1 or ndim == 3:
         ret = 0
     else:
