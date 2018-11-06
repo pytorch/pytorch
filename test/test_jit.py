@@ -3750,7 +3750,7 @@ a")
     def test_mutable_list_function_inline(self):
         @torch.jit.script
         def bar(y):
-            # type: (List[int]) -> List[int]
+            # type: (List[int])
             y.append(4)
 
         @torch.jit.script
@@ -4321,6 +4321,12 @@ a")
         self.checkScript(void_return, [a], optimize=True)
         self.checkScript(one_return, [a], optimize=True)
         self.checkScript(multiple_returns, [a], optimize=True)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 1 return value"):
+            @torch.jit.script
+            def no_return_bad_annotation(a):
+                # type: (Tensor) -> Tensor
+                a + 1
 
     def test_error(self):
         @torch.jit.script

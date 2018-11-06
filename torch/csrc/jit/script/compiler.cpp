@@ -874,6 +874,12 @@ struct to_ir {
         }
         returns.emplace_back("", type);
       }
+    } else if (schema.returns().size() > 0) {
+      // schema has returns but there's no return nodes in graph
+      throw ErrorReport() << "Expected " << schema.returns().size()
+                          << " return value"
+                          << (schema.returns().size() > 1 ? "s" : "")
+                          << " but found no return statement";
     }
 
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
