@@ -214,11 +214,17 @@
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
-- name: _th_cumprod(Tensor self, int64_t dim)
+- name: cumprod(Tensor self, int64_t dim)
   self: cumprod_backward(grad, self, dim)
 
-- name: _th_cumsum(Tensor self, int64_t dim)
+- name: cumprod(Tensor self, int64_t dim, *, ScalarType dtype)
+  self: cumprod_backward(grad, self, dim, dtype)
+
+- name: cumsum(Tensor self, int64_t dim)
   self: cumsum_backward(grad, dim)
+
+- name: cumsum(Tensor self, int64_t dim, *, ScalarType dtype)
+  self: cumsum_backward(grad, dim, self.type().scalarType())
 
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad)
   self, weight, bias: conv_tbc_backward(grad, self, weight, bias, pad)
@@ -489,8 +495,8 @@
   self: grad.clone().masked_fill_(self >= other, 0)
   other: grad.clone().masked_fill_(self < other, 0)
 
-- name: _th_mm(Tensor self, Tensor mat2)
-  self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), 1)
+- name: mm(Tensor self, Tensor mat2)
+  self: mm_mat1_backward(grad, mat2, self, 1)
   mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
 
 - name: mode(Tensor self, int64_t dim, bool keepdim)
@@ -899,7 +905,11 @@
   self: soft_margin_loss_backward(grad, self, target, reduction)
 
 - name: relu(Tensor self)
-  self: threshold_backward(grad, self, 0, 0)
+  self: threshold_backward(grad, self, 0)
+
+# NB: `output` instead of `self` saves memory. It avoids saving a copy of self.
+- name: relu_(Tensor self)
+  self: threshold_backward(grad, output, 0)
 
 - name: elu_forward(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale)
   self: elu_backward(grad, alpha, scale, input_scale, output)
@@ -953,11 +963,11 @@
 - name: softshrink_forward(Tensor self, Scalar lambd)
   self: softshrink_backward(grad, self, lambd)
 
-- name: threshold_forward(Tensor self, Scalar threshold, Scalar value)
-  self: threshold_backward(grad, self, threshold, value)
+- name: threshold(Tensor self, Scalar threshold, Scalar value)
+  self: threshold_backward(grad, self, threshold)
 
-- name: threshold_forward_(Tensor self, Scalar threshold, Scalar value)
-  self: threshold_backward(grad, output, threshold, value)
+- name: threshold_(Tensor self, Scalar threshold, Scalar value)
+  self: threshold_backward(grad, output, threshold)
 
 - name: reflection_pad1d_forward(Tensor self, IntList padding)
   self: reflection_pad1d_backward(grad, self, padding)
@@ -1207,8 +1217,8 @@
   grad_output: softshrink_backward(grad, self, lambd)
   self: zeros_like(grad)
 
-- name: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold, Scalar value)
-  grad_output: threshold_backward(grad, self, threshold, value)
+- name: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold)
+  grad_output: threshold_backward(grad, self, threshold)
   self: zeros_like(grad)
 
 - name: upsample_linear1d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)

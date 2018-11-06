@@ -31,9 +31,9 @@ class BatchMatMulOp final : public Operator<Context> {
     const auto& B = Input(1);
     auto* Y = Output(0);
 
-    auto ndims_A = A.ndim();
+    auto ndims_A = A.dim();
     auto dims_A = A.sizes().vec();
-    auto ndims_B = B.ndim();
+    auto ndims_B = B.dim();
     auto dims_B = B.sizes().vec();
 
     auto noBroadcastErrorMsg = [](size_t dim1, size_t dim2) {

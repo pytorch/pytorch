@@ -25,7 +25,7 @@ class GatherOp : public Operator<Context> {
     auto& indices = Input(INDICES);
     auto* output = Output(0);
 
-    CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
+    CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
     auto shape = indices.sizes().vec();
     shape.insert(shape.end(), data.sizes().begin() + 1, data.sizes().end());
     output->Resize(shape);

@@ -868,11 +868,13 @@ class _TestTorchMixin(object):
             self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoLapack
     def test_norm(self):
         self._test_norm(self, device='cpu')
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    @skipIfNoLapack
     @skipIfRocm
     def test_norm_cuda(self):
         self._test_norm(self, device='cuda')
@@ -4563,6 +4565,7 @@ class _TestTorchMixin(object):
             u, s_actual, v = torch.svd(a, compute_uv=False)
             self.assertEqual(s_expect, s_actual, "Singular values don't match")
 
+    @skipIfNoLapack
     def test_svd_no_singularvectors(self):
         self._test_svd_no_singularvectors(self, lambda t: t)
 
@@ -6864,13 +6867,14 @@ class _TestTorchMixin(object):
             # dot
             self.assertEqual(torch.tensor(0., device=device), fn(torch.dot, (0,), (0,)))
 
-            # btrifact
-            A_LU, pivots = fn(torch.btrifact, (0, 5, 5))
-            self.assertEqual([(0, 5, 5), (0, 5)], [A_LU.shape, pivots.shape])
-            A_LU, pivots = fn(torch.btrifact, (0, 0, 0))
-            self.assertEqual([(0, 0, 0), (0, 0)], [A_LU.shape, pivots.shape])
-            A_LU, pivots = fn(torch.btrifact, (2, 0, 0))
-            self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
+            if torch._C.has_lapack:
+                # btrifact
+                A_LU, pivots = fn(torch.btrifact, (0, 5, 5))
+                self.assertEqual([(0, 5, 5), (0, 5)], [A_LU.shape, pivots.shape])
+                A_LU, pivots = fn(torch.btrifact, (0, 0, 0))
+                self.assertEqual([(0, 0, 0), (0, 0)], [A_LU.shape, pivots.shape])
+                A_LU, pivots = fn(torch.btrifact, (2, 0, 0))
+                self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
     @skipIfRocm
     def test_blas_alpha_beta_empty(self):

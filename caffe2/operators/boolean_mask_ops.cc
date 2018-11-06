@@ -21,8 +21,8 @@ class BooleanMaskLengthsOp final : public Operator<Context> {
     auto& lengths = Input(0);
     auto& mask = Input(1);
     auto* lengthsOut = Output(0);
-    CAFFE_ENFORCE(lengths.ndim() == 1);
-    CAFFE_ENFORCE(mask.ndim() == 1);
+    CAFFE_ENFORCE(lengths.dim() == 1);
+    CAFFE_ENFORCE(mask.dim() == 1);
     const auto* lengthsPtr = lengths.template data<T>();
     const auto* maskPtr = mask.template data<bool>();
     auto totalLength =
@@ -50,8 +50,8 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   auto& data = Input(0);
   auto& mask = Input(1);
   auto* dataOut = Output(0);
-  CAFFE_ENFORCE(data.ndim() >= 1);
-  CAFFE_ENFORCE_EQ(mask.ndim(), 1);
+  CAFFE_ENFORCE(data.dim() >= 1);
+  CAFFE_ENFORCE_EQ(mask.dim(), 1);
   CAFFE_ENFORCE(data.sizes()[0] == mask.sizes()[0]);
 
   const auto* maskPtr = mask.template data<bool>();

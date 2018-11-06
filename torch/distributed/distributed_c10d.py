@@ -45,11 +45,16 @@ class DistBackend(object):
     GLOO = "gloo"
     NCCL = "nccl"
     MPI = "mpi"
+    TCP = "tcp"
 
     def __new__(cls, name):
         if not isinstance(name, string_classes):
             raise ValueError("Backend name must be a string, but got: {}".format(name))
         value = getattr(DistBackend, name.upper(), DistBackend.UNDEFINED)
+        if value == DistBackend.TCP:
+            raise ValueError("TCP backend has been deprecated. Please use "
+                             "Gloo or MPI backend for collective operations "
+                             "on CPU tensors.")
         if value == DistBackend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
         return value

@@ -232,7 +232,9 @@ if (NOT NO_API AND NOT USE_ROCM)
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/datasets/mnist.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/base.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/random.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/sequential.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/stream.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/cursor.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp

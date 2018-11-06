@@ -38,7 +38,7 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
 
     const auto input_rows = input.size(0);
     const auto input_columns = input.size(1);
-    CAFFE_ENFORCE_EQ(input.ndim(), 2, "Expect input to be a matrix");
+    CAFFE_ENFORCE_EQ(input.dim(), 2, "Expect input to be a matrix");
 
     // The "fused" representation stores the scale and bias with the row-wise
     // quantized data in one tensor. Since we quantize with 8 bits (1 byte) and
@@ -111,7 +111,7 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
 
     const auto input_rows = input.size(0);
     const auto input_columns = input.size(1);
-    CAFFE_ENFORCE_EQ(input.ndim(), 2, "Expect input to be a matrix");
+    CAFFE_ENFORCE_EQ(input.dim(), 2, "Expect input to be a matrix");
 
     // The last 8 bytes per row are the scale and the bias. The rest of
     // input_columns is the number of values in the original row.
