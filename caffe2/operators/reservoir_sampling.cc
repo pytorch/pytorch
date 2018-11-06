@@ -35,7 +35,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
     if (output_initialized) {
       CAFFE_ENFORCE_EQ(output->ndim(), input.ndim());
       for (size_t i = 1; i < input.ndim(); ++i) {
-        CAFFE_ENFORCE_EQ(output->dim(i), input.dim(i));
+        CAFFE_ENFORCE_EQ(output->size(i), input.size(i));
       }
     }
 
@@ -99,7 +99,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
 
     const auto num_new_entries = countNewEntries(unique_object_ids);
     auto num_to_copy = std::min<int32_t>(num_new_entries, numToCollect_);
-    auto output_batch_size = output_initialized ? output->dim(0) : 0;
+    auto output_batch_size = output_initialized ? output->size(0) : 0;
     auto output_num =
         std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
     // output_num is >= output_batch_size
@@ -197,7 +197,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
   int32_t countNewEntries(const std::set<int64_t>& unique_object_ids) {
     const auto& input = Input(DATA);
     if (InputSize() <= OBJECT_ID) {
-      return input.dim(0);
+      return input.size(0);
     }
     const auto& object_to_pos_map =
         OperatorBase::Input<MapType64To32>(OBJECT_TO_POS_MAP_IN);

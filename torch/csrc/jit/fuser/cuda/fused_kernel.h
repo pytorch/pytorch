@@ -20,24 +20,23 @@ namespace torch { namespace jit { namespace fuser { namespace cuda {
 // Note: CUDA functions are per device.
 struct TORCH_API FusedKernelCUDA : public ::torch::jit::fuser::FusedKernel {
   FusedKernelCUDA(
-    const int16_t _device
-  , const std::string& _name
-  , const std::string& _code
-  , const std::vector<TensorDesc> _input_desc
-  , const std::vector<TensorDesc> _output_desc
-  , const std::vector<PartitionDesc> _chunk_desc
-  , const std::vector<PartitionDesc> _concat_desc
-  , const bool _has_random);
+      int16_t device,
+      std::string name,
+      std::string code,
+      std::vector<TensorDesc> input_desc,
+      std::vector<TensorDesc> output_desc,
+      std::vector<PartitionDesc> chunk_desc,
+      std::vector<PartitionDesc> concat_desc,
+      bool has_random);
 
-  virtual ~FusedKernelCUDA() override {
+  ~FusedKernelCUDA() override {
     cuModuleUnload(module_);
   }
 
-  virtual void launch_raw(
-    const uint32_t numel
-  , std::vector<void*>& arguments) const override;
+  void launch_raw(const uint32_t numel, std::vector<void*>& arguments)
+      const override;
 
-  virtual at::Backend backend() const override {
+  at::Backend backend() const override {
     return at::Backend::CUDA;
   }
 

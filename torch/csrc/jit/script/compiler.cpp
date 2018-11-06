@@ -1,6 +1,5 @@
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/passes/annotate_effects.h"
 #include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/interpreter.h"
@@ -29,8 +28,8 @@ using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 struct NoneValue : SugaredValue {
-  NoneValue() {}
-  virtual std::string kind() const override {
+  NoneValue() = default;
+  std::string kind() const override {
     return "None";
   }
 };
@@ -97,7 +96,7 @@ static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
 // expressions like int(x)
 struct CastValue : public SugaredValue {
   CastValue(TypePtr type)
-  : type(type) {}
+  : type(std::move(type)) {}
   std::string kind() const override {
     std::stringstream ss;
     ss << "<" << type->str() << " cast primitive>";
@@ -153,7 +152,7 @@ private:
 //      delete unnecessary ones later with replaceAllusesWith().
 struct Environment {
   Environment(Method & method, Resolver resolver, Block* b, std::shared_ptr<Environment> next = nullptr)
-      : method(method), resolver(std::move(resolver)), b(b), next(next) {}
+      : method(method), resolver(std::move(resolver)), b(b), next(std::move(next)) {}
 
   Method & method;
   Resolver resolver;
@@ -545,30 +544,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
     const SourceRange& loc,
     Graph& graph,
     c10::optional<NamedValue> self,
-    at::ArrayRef<NamedValue> raw_args,
+    at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     std::ostream& failure_messages,
     bool convert_tensors_to_nums) {
-  // Match against a potentially mutable schema.
-  //
-  // We need to treat mutable schemas differently because the IR explicitly
-  // expresses effects by including a world token in mutable ops. Users do not
-  // know about the world token, so we need to generate a dummy one and add
-  // it to the inputs for schema matching.
-  //
-  // Example:
-  //   append(int[] list, int el)
-  // becomes
-  //   append(World w, int[] list, int el)
-  //
-  // NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
-  // necessary to enforce linearization on effectful ops.
-  std::vector<NamedValue> modifiedArgs(raw_args.begin(), raw_args.end());
-  if (schema.has_world_token()) {
-    // Add a dummy world token to be matched against
-    const auto worldToken = graph.insertDummyWorld();
-    modifiedArgs.insert(modifiedArgs.begin(), worldToken);
-  }
   auto err = [&]() -> std::ostream& {
     failure_messages << "\nfor operator " << schema << ":\n";
     return failure_messages;
@@ -586,7 +565,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (arg.name() == "self" && self) {
       v = self;
       self = c10::nullopt;
-    } else if (!arg.kwarg_only() && used_args < modifiedArgs.size()) {
+    } else if (!arg.kwarg_only() && used_args < args.size()) {
       // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
       if (arg.type()->kind() == TypeKind::ListType && // the formal must be a list
           !arg.N() && // it must not be a broadcasting list like int[3], otherwise
@@ -594,7 +573,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
           (schema_i + 1 == schema.arguments().size() ||
            schema.arguments()[schema_i + 1]
                .kwarg_only())) { // must be the last position argument
-        auto actual_type = modifiedArgs[used_args].value(graph)->type();
+        auto actual_type = args[used_args].value(graph)->type();
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(
                 actual_type,
@@ -604,19 +583,19 @@ c10::optional<MatchedSchema> tryMatchSchema(
               elem_type,
               graph,
               loc,
-              at::ArrayRef<NamedValue>(modifiedArgs).slice(used_args),
+              at::ArrayRef<NamedValue>(args).slice(used_args),
               err,
               convert_tensors_to_nums,
               type_env);
           if (!list)
             return c10::nullopt;
-          used_args = modifiedArgs.size();
+          used_args = args.size();
           positional_inputs.push_back(list);
           continue;
         }
       }
 
-      v = modifiedArgs[used_args];
+      v = args[used_args];
       used_args++;
     } else if (auto idx = findInputWithName(arg.name(), kwargs)) {
       const NamedValue& nv = kwargs[*idx];
@@ -641,24 +620,22 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (!positional)
       return c10::nullopt;
     positional_inputs.push_back(positional);
-
-    if (schema.is_vararg() && schema_i == schema.arguments().size() - 1) {
-      // Freeze iteration to the last argument in the schema and keep going for
-      // all of the provided arguments
-      if (used_args < modifiedArgs.size()) {
-        schema_i--;
-      }
-    }
   }
   // check for unused self argument
   if(self != c10::nullopt) {
     err() << "provided self argument not used in schema\n";
   }
 
+  if (schema.is_vararg()) {
+    for(;used_args < args.size(); ++used_args) {
+      positional_inputs.push_back(args[used_args].value(graph));
+    }
+  }
+
   // check for unused positional arguments
-  if (used_args < modifiedArgs.size()) {
+  if (used_args < args.size()) {
     err() << "expected at most " << used_args << " arguments "
-          << "but found " << modifiedArgs.size() << " positional arguments.\n"
+          << "but found " << args.size() << " positional arguments.\n"
           << loc << "\n";
     return c10::nullopt;
   }
@@ -895,13 +872,17 @@ struct to_ir {
           }
           return_type_idx++;
         }
-        returns.push_back({"", type});
+        returns.emplace_back("", type);
       }
+    } else if (schema.returns().size() > 0) {
+      // schema has returns but there's no return nodes in graph
+      throw ErrorReport() << "Expected " << schema.returns().size()
+                          << " return value"
+                          << (schema.returns().size() > 1 ? "s" : "")
+                          << " but found no return statement";
     }
 
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
-    // annotate effects to prevent reordering
-    AnnotateEffects(graph);
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(graph);
     ConstantPooling(graph);
@@ -946,6 +927,9 @@ private:
         case TK_ASSIGN:
           emitAssignment(Assign(stmt));
           break;
+        case TK_AUG_ASSIGN:
+          emitAugAssignment(AugAssign(stmt));
+          break;
         case TK_GLOBAL:
           for (auto ident : Global(stmt).names()) {
             const auto& name = Ident(ident).name();
@@ -969,6 +953,12 @@ private:
           throw ErrorReport(stmt) << "return statements can appear only at the end "
                                   << "of the function body";
           break;
+        case TK_PASS:
+          // Emit nothing for pass
+          break;
+        default:
+          throw ErrorReport(stmt)
+              << "Unrecognized statement kind " << kindToString(stmt.kind());
       }
     }
   }
@@ -1336,7 +1326,7 @@ private:
     Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
 
     n->addInput(cond_value);
-    auto* true_block = n->addBlock();
+    /* true_block =*/n->addBlock();
     auto* false_block = n->addBlock();
 
     //if assert test is false throw exception
@@ -1383,20 +1373,55 @@ private:
     return num_starred;
   }
 
-  void emitAssignment(const Assign& stmt) {
-    bool starred_unpack = calcNumStarredUnpack(stmt.lhs(), stmt.range());
-    if (stmt.reduction() != '=') {
-      if (stmt.lhs().size() != 1) {
-        throw ErrorReport(stmt)
-            << "reductions are only allowed when there is a single variable "
-            << "on the left-hand side.";
+  // Emit nodes for augmented assignments like `+=`
+  void emitAugAssignment(const AugAssign& stmt) {
+    auto lhs = Var(stmt.lhs());
+    auto lhsValue = environment_stack->getSugaredVar(lhs.name())
+                        ->asValue(lhs.range(), method);
+    if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
+      // for tensors, emit the corresponding in-place op
+      Symbol op;
+      switch (stmt.aug_op()) {
+        case '+':
+          op = aten::add_;
+          break;
+        case '-':
+          op = aten::sub_;
+          break;
+        case '/':
+          op = aten::div_;
+          break;
+        case '*':
+          op = aten::mul_;
+          break;
+        default:
+          throw ErrorReport(stmt) << "Unknown augmented assignment to Tensor: "
+                                  << kindToString(stmt.aug_op());
       }
-      Ident lhs = Var(stmt.lhs()[0]).name();
-      Expr expr = BinOp::create(stmt.range(), stmt.reduction(),
+
+      auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
+      auto self = NamedValue(lhs.range(), lhs.name().name(), lhsValue);
+      auto output = emitBuiltinCall(
+          stmt.range(),
+          *method.graph(),
+          op,
+          self,
+          {rhs},
+          {},
+          /*required=*/true);
+      environment_stack->setVar(lhs.range(), lhs.name().name(), output);
+    } else {
+      // for primitive types, desugar into a simple assignment
+      //   e.g. foo += 1 becomes foo.2 = foo + 1
+      Ident lhs = Var(stmt.lhs()).name();
+      Expr expr = BinOp::create(stmt.range(), stmt.aug_op(),
                                 Var::create(lhs.range(), lhs), stmt.rhs());
       environment_stack->setVar(lhs.range(), lhs.name(), emitExpr(expr));
-      return;
     }
+  }
+
+  void emitAssignment(const Assign& stmt) {
+    bool starred_unpack = calcNumStarredUnpack(stmt.lhs(), stmt.range());
 
     size_t n_binders = stmt.lhs().size();
     if(starred_unpack)
@@ -1485,6 +1510,10 @@ private:
         return aten::__and__;
       case TK_OR:
         return aten::__or__;
+      case TK_IS:
+        return aten::__is__;
+      case TK_ISNOT:
+        return aten::__isnot__;
       case TK_NOT:
         return aten::__not__;
       default:
@@ -1503,12 +1532,11 @@ private:
         auto starred = Starred(tree);
         auto entries = emitSugaredExpr(starred.expr(), 1)->asTuple(starred.range(), method);
         for(auto entry : entries) {
-          values.push_back(NamedValue(
-              tree->range(), entry->asValue(starred.range(), method)));
+          values.emplace_back(
+              tree->range(), entry->asValue(starred.range(), method));
         }
       } else {
-        values.push_back(NamedValue(
-            tree->range(), emitExpr(Expr(tree))));
+        values.emplace_back(tree->range(), emitExpr(Expr(tree)));
       }
     }
     return values;
@@ -1665,6 +1693,8 @@ private:
     switch (tree->kind()) {
       case '@':
       case TK_POW:
+      case TK_IS:
+      case TK_ISNOT:
       case TK_NOT:
       case TK_NE:
       case TK_EQ:

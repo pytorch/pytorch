@@ -48,7 +48,7 @@ class ViterbiPathOp : public Operator<CPUContext> {
       int32_t block_bytesize,
       TensorCPU* outRow) {
     CAFFE_ENFORCE(
-        0 <= rowIndex && rowIndex < data.dim(0),
+        0 <= rowIndex && rowIndex < data.size(0),
         "rowIndex is out of DATA bounds");
     auto out = static_cast<char*>(outRow->raw_mutable_data(data.dtype()));
     auto src_base = static_cast<const char*>(data.raw_data());
@@ -85,13 +85,13 @@ class ViterbiPathOp : public Operator<CPUContext> {
         "Predictions and transitions hould 2D matrices");
 
     CAFFE_ENFORCE(
-        predictions.dim(1) == transitions.dim(0),
+        predictions.size(1) == transitions.size(0),
         "Predictions and transitions dimensions not matching");
 
     auto seqLen = predictions.dim32(0);
 
     viterbiPath->Resize(seqLen);
-    auto block_size = predictions.numel() / predictions.dim(0);
+    auto block_size = predictions.numel() / predictions.size(0);
     auto block_bytesize =
         predictions.size_from_dim(1) * predictions.dtype().itemsize();
     Tensor backpointers(CPU);
@@ -106,8 +106,8 @@ class ViterbiPathOp : public Operator<CPUContext> {
       AddColToMat(transitions, trellis, &dpMat);
       RowwiseMaxAndArg(
           dpMat.template data<float>(),
-          dpMat.dim(0),
-          dpMat.dim(1),
+          dpMat.size(0),
+          dpMat.size(1),
           dpMax.template mutable_data<float>(),
           backpointers.template mutable_data<int32_t>() + (i * block_size));
 
@@ -159,7 +159,7 @@ class SwapBestPathOp : public Operator<CPUContext> {
         "predictions should be a 2D matrix and  bestPath should be 1D vector");
 
     CAFFE_ENFORCE(
-        data.dim(0) == newBestIdicies.dim(0),
+        data.size(0) == newBestIdicies.size(0),
         "predictions and bestPath dimensions not matching");
 
     updatedData->ResizeLike(data);
@@ -174,12 +174,12 @@ class SwapBestPathOp : public Operator<CPUContext> {
 
     ColwiseMaxAndArg(
         data.template data<float>(),
-        data.dim(0),
-        data.dim(1),
+        data.size(0),
+        data.size(1),
         bestScores.template mutable_data<float>(),
         oldBestIndices.template mutable_data<int32_t>());
 
-    auto block_size = data.numel() / data.dim(0);
+    auto block_size = data.numel() / data.size(0);
 
     const int32_t* oldBestIdx = oldBestIndices.template data<int32_t>();
     const int32_t* newIdx = newBestIdicies.template data<int32_t>();
