@@ -403,6 +403,7 @@ PyObject* c10d_init(PyObject* _unused) {
       py::arg("process_group"),
       py::arg("tensors"),
       py::arg("buffer_size"),
+      py::arg("fine_grained"),
       py::call_guard<py::gil_scoped_release>());
 
   module.def(

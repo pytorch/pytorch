@@ -1303,8 +1303,10 @@ _builtin_table = None
 
 _modules_containing_builtins = (torch, torch.nn.functional, torch._C._nn)
 
-# These functions don't have aten ops but have been converted to weak script, so
-# don't add them as builtins
+# These functions have been converted to weak script, so don't add them as
+# builtin aten ops. Instead, they will be compiled from the code in
+# torch.nn.functional when used.
+
 # TODO: delete this list, _should_skip(), and remove torch.nn.functional from
 # builtins list once everything in it has been converted to weak script
 _builtin_blacklist = {
@@ -1326,6 +1328,12 @@ _builtin_blacklist = {
     'rrelu',
     'tanh',
     'sigmoid',
+
+    'dropout',
+    'alpha_dropout',
+    'dropout2d',
+    'dropout3d',
+    'feature_alpha_dropout',
 }
 
 

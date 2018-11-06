@@ -1,9 +1,9 @@
 #pragma once
 
-#include "caffe2/core/dispatch/LeftRight.h"
 #include "caffe2/core/dispatch/OpSchema.h"
+#include <c10/util/LeftRight.h>
 #include <c10/util/Metaprogramming.h>
-#include "caffe2/utils/flat_hash_map/flat_hash_map.h"
+#include <c10/util/flat_hash_map.h>
 
 #include <array>
 #include <atomic>

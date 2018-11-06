@@ -375,7 +375,15 @@ class JitTestCase(TestCase):
 
     def assertExportImportModule(self, m, inputs):
         m_import = self.getExportImportCopy(m)
-        self.assertEqual(m.forward(*inputs), m_import.forward(*inputs))
+        self.assertEqual(self.runAndSaveRNG(m.forward, inputs),
+                         self.runAndSaveRNG(m_import.forward, inputs))
+
+    def runAndSaveRNG(self, func, inputs, kwargs=None):
+        kwargs = kwargs if kwargs else {}
+        initial_rng_state = torch.get_rng_state()
+        results = func(*inputs, **kwargs)
+        torch.set_rng_state(initial_rng_state)
+        return results
 
 
 class TestJit(JitTestCase):
@@ -3750,7 +3758,7 @@ a")
     def test_mutable_list_function_inline(self):
         @torch.jit.script
         def bar(y):
-            # type: (List[int]) -> List[int]
+            # type: (List[int])
             y.append(4)
 
         @torch.jit.script
@@ -4321,6 +4329,12 @@ a")
         self.checkScript(void_return, [a], optimize=True)
         self.checkScript(one_return, [a], optimize=True)
         self.checkScript(multiple_returns, [a], optimize=True)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 1 return value"):
+            @torch.jit.script
+            def no_return_bad_annotation(a):
+                # type: (Tensor) -> Tensor
+                a + 1
 
     def test_error(self):
         @torch.jit.script
@@ -8172,6 +8186,19 @@ a")
             return a, b
         self.checkScript(foo, (torch.rand(3), torch.rand(3)), check_expected=True)
 
+    def test_pass(self):
+        def foo(x):
+            # type: (bool) -> int
+            for _i in range(3):
+                pass
+            if x:
+                pass
+            else:
+                pass
+            return 3
+
+        self.checkScript(foo, (True,))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -8776,11 +8803,6 @@ EXCLUDE_SCRIPT = {
     'test_norm_nuc',
     # skipped nn functional tests
     # ops involves sampling which could not test
-    'test_nn_dropout',
-    'test_nn_alpha_dropout',
-    'test_nn_dropout2d',
-    'test_nn_dropout3d',
-    'test_nn_feature_alpha_dropout',
 
     'test_nn_adaptive_max_pool1d',
     'test_nn_adaptive_max_pool2d',
@@ -8964,8 +8986,8 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
     recording_inputs, recording_tensors = clone_inputs(True)
 
     # test no gradients case
-    outputs = reference_func(*nograd_inputs, **kwargs)
-    outputs_test = func(*nograd_inputs, **kwargs)
+    outputs = self.runAndSaveRNG(reference_func, nograd_inputs, kwargs)
+    outputs_test = self.runAndSaveRNG(func, nograd_inputs, kwargs)
     self.assertEqual(outputs, outputs_test)
 
     if check_types:
@@ -8976,11 +8998,11 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         return
 
     # test single grad case
-    outputs = reference_func(*recording_inputs, **kwargs)
+    outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
     grads = torch.autograd.grad(allSum(outputs), recording_tensors,
                                 allow_unused=allow_unused)
 
-    outputs_test = func(*recording_inputs, **kwargs)
+    outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
     grads_test = torch.autograd.grad(allSum(outputs_test), recording_tensors,
                                      allow_unused=allow_unused)
     self.assertEqual(outputs, outputs_test)
@@ -8990,7 +9012,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
     if self._testMethodName in nn_functional_single_grad:
         return
 
-    outputs = reference_func(*recording_inputs, **kwargs)
+    outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
     l1 = allSum(outputs)
     grads = torch.autograd.grad(l1, recording_tensors, create_graph=True,
                                 allow_unused=allow_unused)
@@ -8999,7 +9021,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
 
     recording_inputs, recording_tensors = clone_inputs(True)
 
-    outputs_test = func(*recording_inputs, **kwargs)
+    outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
     l1_test = allSum(outputs_test)
     grads_test = torch.autograd.grad(
         l1_test, recording_tensors, create_graph=True, allow_unused=allow_unused)
