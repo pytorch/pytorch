@@ -530,7 +530,7 @@ jobs:
   pytorch_linux_xenial_cuda9_cudnn7_py2_caffe2_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py2-caffe2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:256"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:262"
       PYTHON_VERSION: "2.7"
       CUDA_VERSION: "9"
     resource_class: gpu.medium
