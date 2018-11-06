@@ -93,10 +93,15 @@ class ScriptModuleSerializer {
   }
 
   void convertMethod(const script::Method& smethod, at::serialize::IntermediateMethod* imethod) {
-    // TODO encode the method
+    // TODO encode the real torch script instead of ModelProto
+    ::ONNX_NAMESPAC::ModelProto model_proto;
+    ModuleEncoder encoder(smethod, model_proto.mutable_graph());
+    string serialized_proto;
+    model_proto.SerializeToString(&serialized_proto);
+    imethod->setTorchScript(serialized_proto);
   }
 
-  at::serialize::PyTorchStreamReader reader_;
+  at::serialize::PyTorchStreamWriter writer_;
 
 };
 
@@ -134,7 +139,6 @@ class ScriptModuleDeserializer {
     }
 
     for (const auto& isub: imodule.submodules()) {
-      // TODO
       moduleStack_.push(isub.name());
       std::shared_ptr<script::Module> ssub = moduleLook_(moduleStack_);
       convertModule(isub, ssub.get());

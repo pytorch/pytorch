@@ -366,6 +366,48 @@ ModuleDecoder::ModuleDecoder(
   }
 }
 
+ModuleDecoder::ModuleDecoder(
+    ModuleLookup module_lookup,
+    std::istream& in) :
+    stream_reader_(&in) {
+  auto model_proto = onnx::ModelProto();
+  auto record = stream_reader_.getLastRecord();
+  model_proto.ParsePartialFromArray(std::get<0>(record).get(), std::get<1>(record));
+  auto graph_proto = model_proto.graph();
+
+  std::unordered_map<std::string, at::Tensor*> param_map;
+
+  for (auto &tensor_proto : graph_proto.initializer()) {
+    std::shared_ptr<script::Module> parent_module;
+    std::string name;
+    std::tie(parent_module, name) = parseFullName(module_lookup, tensor_proto.name());
+
+    auto param = buildParameter(tensor_proto);
+    parent_module->register_parameter(name, param, /* is_buffer = */ tensor_proto.int64_data(0));
+    param_map[tensor_proto.name()] = parent_module->parameter_slot(name);
+  }
+
+  for (auto &node_proto : graph_proto.node()) {
+    std::shared_ptr<script::Module> parent_module;
+    std::string name;
+    std::tie(parent_module, name) = parseFullName(module_lookup, node_proto.name());
+
+    std::vector<at::Tensor*> member_inputs;
+    for (auto &param_name : node_proto.input()) {
+      member_inputs.push_back(param_map[param_name]);
+    }
+
+    auto graph = buildGraph(node_proto.attribute(0).g());
+    // has_domain field has a string iff the method was optimized
+    parent_module->set_optimized(node_proto.has_domain());
+    parent_module->create_method(name, graph, member_inputs);
+    // We store the schema in the docstring so we can parse the schema and
+    // assign it to the method.
+    auto schema = parseSchema(node_proto.doc_string());
+    parent_module->get_method(name).setSchema(std::move(schema));
+  }
+}
+
 }  // namespace
 
 void import_ir_module(

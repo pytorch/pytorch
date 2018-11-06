@@ -487,6 +487,13 @@ ModuleEncoder::ModuleEncoder(
   EncodeModule(model_proto_.mutable_graph(), module);
 }
 
+ModuleEncoder::ModuleEncoder(const script::Method& method,
+    onnx::GraphProto* graph_proto) {
+  // we already keep the tree structure in the top level module,
+  // so pass "" as prefix
+  EncodeMethod(node_proto, *method.value, "");
+}
+
 void ModuleEncoder::EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto, const Value *n) {
   auto v = graph_proto->add_value_info();
   EncodeTypeInfo(graph_proto, v, n->type(), n->uniqueName());
