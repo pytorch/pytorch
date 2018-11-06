@@ -1817,10 +1817,6 @@ class TestNN(NNTestCase):
                 self.assertEqual(wrapped_m(input), pre_remove_out)
 
                 m = torch.nn.utils.spectral_norm(m)
-                m = torch.nn.utils.remove_spectral_norm(m)
-                self.assertEqual(wrapped_m(input), pre_remove_out)
-
-                m = torch.nn.utils.spectral_norm(m)
                 for i in range(3):
                     pre_remove_out = wrapped_m(input)
                 m = torch.nn.utils.remove_spectral_norm(m)
@@ -1904,13 +1900,17 @@ class TestNN(NNTestCase):
             out3_eval = snm(inp)
 
             snm.load_state_dict(version_none_state_dict)
-            snm.eval()
-            self.assertEqual(out0_eval, snm(inp))
-            snm.train()
-            self.assertEqual(out1_train, snm(inp))
-            self.assertEqual(out2_train, snm(inp))
-            snm.eval()
-            self.assertEqual(out3_eval, snm(inp))
+            if activate_times > 0:
+                # since in loading version None state dict, we assume that the
+                # values in the state dict have gone through at lease one
+                # forward, we only test for equivalence when activate_times > 0.
+                snm.eval()
+                self.assertEqual(out0_eval, snm(inp))
+                snm.train()
+                self.assertEqual(out1_train, snm(inp))
+                self.assertEqual(out2_train, snm(inp))
+                snm.eval()
+                self.assertEqual(out3_eval, snm(inp))
 
             # Test normal loading
             snm.load_state_dict(version_latest_state_dict)

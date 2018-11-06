@@ -7,8 +7,9 @@ from torch.nn.parameter import Parameter
 
 
 class SpectralNorm(object):
-    # Invariant before and after each function call:
+    # Invariant before and after each forward call:
     #   u = normalize(W @ v)
+    # NB: At initialization, this invariant is not enforced
 
     _version = 1
     # At version 1:
@@ -119,10 +120,9 @@ class SpectralNorm(object):
             weight_mat = fn.reshape_weight_to_matrix(weight)
 
             h, w = weight_mat.size()
+            # randomly initialize `u` and `v`
             u = normalize(weight.new_empty(h).normal_(0, 1), dim=0, eps=fn.eps)
-            # compute `v` to satisfy the invariant (see top of this class)
-            # make `u @ W @ v` equal to 1 so at beginning this gives same result
-            v = fn._solve_v_and_rescale(weight_mat, u, target_sigma=1)
+            v = normalize(weight.new_empty(w).normal_(0, 1), dim=0, eps=fn.eps)
 
         delattr(module, fn.name)
         module.register_parameter(fn.name + "_orig", weight)
@@ -149,7 +149,8 @@ class SpectralNormLoadStateDictPreHook(object):
     def __init__(self, fn):
         self.fn = fn
 
-    # For state_dict with version None, we have
+    # For state_dict with version None, (assuming that it has gone through at
+    # least one training forward), we have
     #
     #    u = normalize(W_orig @ v)
     #    W = W_orig / sigma, where sigma = u @ W_orig @ v
