@@ -8,7 +8,8 @@ from torch._six import raise_from, with_metaclass, get_function_from_type
 from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
     COMPILATION_PENDING
-from ..nn.modules.utils import _single, _pair, _triple, _quadruple
+from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
+    _list_with_default
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
@@ -1301,7 +1302,7 @@ class _ConstSequential(_ConstModuleList):
 
 _builtin_table = None
 
-_modules_containing_builtins = (torch, torch.nn.functional)
+_modules_containing_builtins = (torch, torch.nn.functional, torch._C._nn)
 
 # These functions don't have aten ops but have been converted to weak script, so
 # don't add them as builtins
@@ -1313,6 +1314,7 @@ _builtin_blacklist = {
     'pairwise_distance',
     'prelu',
     'hardshrink',
+    'adaptive_avg_pool2d',
 }
 
 
@@ -1340,6 +1342,7 @@ def _get_builtin_table():
     _builtin_table[id(_pair)] = "aten::_pair"
     _builtin_table[id(_triple)] = "aten::_triple"
     _builtin_table[id(_quadruple)] = "aten::_quadruple"
+    _builtin_table[id(_list_with_default)] = "aten::list_with_default"
 
     return _builtin_table
 

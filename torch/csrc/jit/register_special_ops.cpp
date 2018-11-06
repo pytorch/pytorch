@@ -28,6 +28,40 @@ RegisterOperators reg({
           return 0;
         }),
     Operator(
+        "aten::size(Tensor self) -> int[]",
+        [](Stack& stack) {
+          autograd::profiler::RecordFunction record("sizes");
+          auto result = (std::move(pop(stack))).toTensor().sizes();
+          pack(stack, std::move(result));
+          return 0;
+        }),
+    Operator(
+        "aten::list_with_default(t[] list, t[] defaults) -> t[]",
+        [](Stack& stack) {
+          autograd::profiler::RecordFunction record("sizes");
+          auto list = peek(stack, 0, 2).toIntListRef();
+          auto defaults = peek(stack, 1, 2).toIntListRef();
+          drop(stack, 2);
+
+          JIT_ASSERT(defaults.size() > list.size());
+
+          auto it = list.begin();
+          auto defaults_it = defaults.begin();
+          std::vector<IValue> with_defaults;
+
+          while (it++ != list.end()) {
+            with_defaults.push_back(*it);
+            ++defaults_it;
+          }
+
+          while (defaults_it++ != defaults.end()) {
+            with_defaults.push_back(*defaults_it);
+          }
+
+          pack(stack, with_defaults);
+          return 0;
+        }),
+    Operator(
         "aten::format(str self, ...) -> str",
         [](const Node* node) {
           size_t num_inputs = node->inputs().size();
