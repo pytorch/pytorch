@@ -4178,12 +4178,12 @@ a")
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
 
     def test_script_None(self):
-        def func(x):
+        def none_stmt(x):
             output = None
             output = x
             return output
 
-        self.checkScript(func, [torch.arange(0, 2)], optimize=True)
+        self.checkScript(none_stmt, [torch.arange(0, 2)], optimize=True)
 
     def test_script_clamp_none(self):
         def test_script_clamp_max_none(x):

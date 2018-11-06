@@ -609,7 +609,7 @@ inline optional<T> IValue::toOptional() {
 }
 
 inline bool IValue::isSameIdentity(IValue& rhs) {
-  // We choose to not use memcmp for payload check due to potenntial random padding characters on union type
+  // We choose to not use memcmp for payload check due to potential random padding characters on union type
 
   // Semantics:
   // 1. None is None, False is False, and True is True are all true
