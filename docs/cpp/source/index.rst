@@ -159,12 +159,17 @@ Contents
 .. toctree::
    :maxdepth: 2
 
-   frontend
    installing
-   faq
+   frontend
    contributing
    api/library_root
 
+.. toctree::
+  :glob:
+  :maxdepth: 1
+  :caption: Notes
+
+  notes/*
 
 Indices and tables
 ==================
