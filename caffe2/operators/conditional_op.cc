@@ -11,10 +11,10 @@ bool ConditionalOp<CPUContext>::RunOnDevice() {
   auto& dataF = Input(2);
 
   // verify the inputs shape
-  CAFFE_ENFORCE_EQ(condition.ndim(), 1);
-  CAFFE_ENFORCE(dataT.ndim() >= 1);
+  CAFFE_ENFORCE_EQ(condition.dim(), 1);
+  CAFFE_ENFORCE(dataT.dim() >= 1);
   CAFFE_ENFORCE(dataT.sizes()[0] == condition.sizes()[0]);
-  CAFFE_ENFORCE_EQ(dataT.ndim(), dataF.ndim());
+  CAFFE_ENFORCE_EQ(dataT.dim(), dataF.dim());
   for (size_t i = 0; i < dataT.sizes().size(); i++) {
     CAFFE_ENFORCE(dataT.sizes().at(i) == dataF.sizes().at(i));
   }

@@ -37,11 +37,11 @@ class GatherRangesToDenseOp final : public Operator<Context> {
   bool DoRunWithType() {
     auto& data = Input(DATA);
     auto& ranges = Input(RANGES);
-    CAFFE_ENFORCE_EQ(data.ndim(), 1, "Data has to be 1-D");
-    CAFFE_ENFORCE_EQ(ranges.ndim(), 3, "Ranges has to be 3-D");
+    CAFFE_ENFORCE_EQ(data.dim(), 1, "Data has to be 1-D");
+    CAFFE_ENFORCE_EQ(ranges.dim(), 3, "Ranges has to be 3-D");
     if (InputSize() == 3) {
       auto& key = Input(KEY);
-      CAFFE_ENFORCE_EQ(key.ndim(), 1, "Key has to be 1-D");
+      CAFFE_ENFORCE_EQ(key.dim(), 1, "Key has to be 1-D");
       CAFFE_ENFORCE(
           key.dtype().template Match<int64_t>(), "Key has to be type int64_t");
     }
