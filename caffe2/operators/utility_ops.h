@@ -512,7 +512,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
     CAFFE_ENFORCE_GT(X0.ndim(), 0, "X0 has to be at least the vector");
     CAFFE_ENFORCE_EQ(weight0.numel(), 1);
     int64_t M = X0.numel();
-    int64_t N = X0.dim(0);
+    int64_t N = X0.size(0);
     int64_t K = indices.numel();
     int64_t block_size = M / N;
     T* data = output->template mutable_data<T>();
@@ -664,7 +664,7 @@ class ScatterAssignOp : public Operator<Context> {
 
     CAFFE_ENFORCE_GT(input.ndim(), 0, "X0 has to be at least the vector");
     int64_t M = input.numel();
-    int64_t N = input.dim(0);
+    int64_t N = input.size(0);
     int64_t K = indices.numel();
     int64_t block_size = M / N;
     CAFFE_ENFORCE_EQ(slices.numel(), block_size * K);
@@ -781,10 +781,10 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
       CAFFE_ENFORCE_GE(Input(1).ndim(), 1);
       CAFFE_ENFORCE_LE(
           num_segments,
-          Input(1).dim(0),
+          Input(1).size(0),
           "The number of segments inferred should *NOT* be larger "
           "than the size of Input(1)'s first dimension");
-      num_segments = Input(1).dim(0);
+      num_segments = Input(1).size(0);
     }
     CAFFE_ENFORCE(0 <= num_segments, "Indices must be in 0..K-1 range");
     output->Resize(num_segments);
@@ -832,10 +832,10 @@ class SegmentIdsToRangesOp : public Operator<Context> {
       CAFFE_ENFORCE_GE(Input(1).ndim(), 1);
       CAFFE_ENFORCE_LE(
           num_segments,
-          Input(1).dim(0),
+          Input(1).size(0),
           "The number of segments inferred should *NOT* be larger "
           "than the size of Input(1)'s first dimension");
-      num_segments = Input(1).dim(0);
+      num_segments = Input(1).size(0);
     }
     CAFFE_ENFORCE(0 <= num_segments, "Indices must be in 0..K-1 range");
     output->Resize(num_segments, 2);
@@ -1012,12 +1012,12 @@ class GatherRangesOp : public Operator<Context> {
     auto* outputData = Output(0);
     auto* outputLengths = Output(1);
 
-    auto batchSize = ranges.dim(0);
+    auto batchSize = ranges.size(0);
     CAFFE_ENFORCE(data.ndim() == 1, "Data has to be 1-D");
     CAFFE_ENFORCE(ranges.ndim() == 3, "Ranges must be 3-D");
-    CAFFE_ENFORCE(ranges.dim(1) > 0, "There has to be at least one range");
+    CAFFE_ENFORCE(ranges.size(1) > 0, "There has to be at least one range");
     CAFFE_ENFORCE_EQ(
-        ranges.dim(2), 2, "Ranges last dimention should be of size 2");
+        ranges.size(2), 2, "Ranges last dimention should be of size 2");
 
     auto* rawData = static_cast<const char*>(data.raw_data());
     auto* rangesData = ranges.template data<Index>();
@@ -1116,7 +1116,7 @@ class LengthsGatherOp : public Operator<Context> {
       running_offset += lengths_data[i];
     }
     CAFFE_ENFORCE_EQ(
-        items.dim(0),
+        items.size(0),
         running_offset,
         "LENGTHS must match the first dimension of ITEMS");
 

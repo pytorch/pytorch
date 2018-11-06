@@ -366,6 +366,10 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
   return grad_input;
 }
 
+Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim, ScalarType dtype) {
+  return cumprod_backward(grad.to(input.scalar_type()), input, dim);
+}
+
 Tensor gesv_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
   return std::get<0>(at::gesv(grad, A.transpose(-2, -1)));
 }
@@ -387,6 +391,10 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   ret -= ret_sum.expand(ret.sizes());
   ret += x;
   return ret;
+}
+
+Tensor cumsum_backward(const Tensor &x, int64_t dim, ScalarType input_dtype) {
+  return cumsum_backward(x.to(input_dtype), dim);
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim, bool keepdim) {
@@ -466,6 +474,20 @@ Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Sc
 
 Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, IntList sizes, IntList strides, const Scalar & alpha) {
   // if input was column-major, return grad as column-order for efficiency
+  if (strides[0] == 1 && strides[1] == sizes[0]) {
+    return maybe_multiply(mat2.mm(grad.t()).t(), alpha);
+  } else {
+    return maybe_multiply(grad.mm(mat2.t()), alpha);
+  }
+}
+
+Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, const Tensor & mat1, const Scalar & alpha) {
+  // if input was column-major, return grad as column-order for efficiency
+  if (mat1.is_sparse()) {
+    throw std::runtime_error("calculating the gradient of a sparse Tensor argument to mm is not supported.");
+  }
+  at::IntList sizes = mat1.sizes();
+  at::IntList strides = mat1.strides();
   if (strides[0] == 1 && strides[1] == sizes[0]) {
     return maybe_multiply(mat2.mm(grad.t()).t(), alpha);
   } else {
@@ -626,7 +648,7 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntList
   return mask_selected.view(sizes);
 }
 
-Tensor potrf_backward(Tensor grad, bool upper, Tensor L) {
+Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   // cf. Iain Murray (2016); arXiv 1602.07527
   if (upper) {
     L = L.t();

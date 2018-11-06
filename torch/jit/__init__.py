@@ -8,6 +8,7 @@ from torch._six import raise_from, with_metaclass, get_function_from_type
 from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
     COMPILATION_PENDING
+from ..nn.modules.utils import _single, _pair, _triple, _quadruple
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
@@ -1300,10 +1301,12 @@ class _ConstSequential(_ConstModuleList):
 
 _builtin_table = None
 
-_modules_containing_builtins = (torch, torch.nn.functional)
+_modules_containing_builtins = (torch, torch.nn.functional, torch._C._nn)
 
-# These functions don't have aten ops but have been converted to weak script, so
-# don't add them as builtins
+# These functions have been converted to weak script, so don't add them as
+# builtin aten ops. Instead, they will be compiled from the code in
+# torch.nn.functional when used.
+
 # TODO: delete this list, _should_skip(), and remove torch.nn.functional from
 # builtins list once everything in it has been converted to weak script
 _builtin_blacklist = {
@@ -1312,6 +1315,25 @@ _builtin_blacklist = {
     'pairwise_distance',
     'prelu',
     'hardshrink',
+    'threshold',
+
+    # ops with inplace option
+    'relu',
+    'hardtanh',
+    'relu6',
+    'elu',
+    'selu',
+    'celu',
+    'leaky_relu',
+    'rrelu',
+    'tanh',
+    'sigmoid',
+
+    'dropout',
+    'alpha_dropout',
+    'dropout2d',
+    'dropout3d',
+    'feature_alpha_dropout',
 }
 
 
@@ -1333,7 +1355,12 @@ def _get_builtin_table():
                 _builtin_table[id(v)] = "aten::" + name
     for mod in _modules_containing_builtins:
         register_all(mod)
+
     _builtin_table[id(warnings.warn)] = "aten::warn"
+    _builtin_table[id(_single)] = "aten::_single"
+    _builtin_table[id(_pair)] = "aten::_pair"
+    _builtin_table[id(_triple)] = "aten::_triple"
+    _builtin_table[id(_quadruple)] = "aten::_quadruple"
 
     return _builtin_table
 

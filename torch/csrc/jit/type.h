@@ -31,7 +31,6 @@ _(GeneratorType) \
 _(BoolType) \
 _(OptionalType) \
 _(VarType) \
-_(WorldType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -126,7 +125,7 @@ public:
   // list of types this type contains, e.g. for a List then element type of a list
   // for a tuple, the types of the tuple elements
   virtual at::ArrayRef<TypePtr> containedTypes() const {
-    return at::ArrayRef<TypePtr>();
+    return {};
   }
   // create a new version of this type, replacing its contained types with
   // contained_types
@@ -417,31 +416,6 @@ private:
 
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
-};
-
-// This type is a token used to represent effectful computation in the IR.
-// See the AnnotateEffects pass for how it is used.
-struct WorldType;
-using WorldTypePtr = std::shared_ptr<WorldType>;
-struct TORCH_API WorldType : public Type {
-  static WorldTypePtr create() {
-    return WorldTypePtr(new WorldType());
-  }
-  bool operator==(const Type& rhs) const override {
-    return rhs.kind() == kind();
-  }
-  std::string str() const override {
-    return "world";
-  }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    return *this == *rhs;
-  }
-  static const TypeKind Kind = TypeKind::WorldType;
-  // global singleton
-  static WorldTypePtr get();
-
- private:
-  WorldType() : Type(TypeKind::WorldType) {}
 };
 
 // common base for all types that have a single sub element
@@ -841,7 +815,7 @@ struct VarType : public Type {
   }
 private:
   VarType(std::string name_)
-  : Type(TypeKind::VarType), name_(name_) {}
+  : Type(TypeKind::VarType), name_(std::move(name_)) {}
   std::string name_;
 };
 
@@ -872,7 +846,6 @@ inline TypePtr CompleteTensorType::fromNumberType(TypePtr typ) {
 inline TypePtr CompleteTensorType::fromBoolType() {
   return CompleteTensorType::create(at::kLong, -1, {});
 }
-
 
 // Attempt to find the correct supertype of t1 and t2. If none is found then
 // nullopt will be returned. If t1 == t2, or t1 is a type refinement of t2,

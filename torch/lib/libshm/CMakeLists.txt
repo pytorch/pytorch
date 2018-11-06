@@ -2,7 +2,8 @@ project(libshm C CXX)
 CMAKE_MINIMUM_REQUIRED(VERSION 2.6 FATAL_ERROR)
 CMAKE_POLICY(VERSION 2.6)
 
-include(${CMAKE_CURRENT_LIST_DIR}/../../../cmake/public/threads.cmake)
+set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../../)
+include(${TORCH_ROOT}/cmake/public/threads.cmake)
 
 IF(NOT LIBSHM_INSTALL_LIB_SUBDIR)
   SET(LIBSHM_INSTALL_LIB_SUBDIR "lib" CACHE PATH "libshm install library directory")
@@ -24,6 +25,7 @@ ENDIF ()
 ADD_LIBRARY(shm SHARED core.cpp)
 
 target_include_directories(shm PRIVATE
+  ${TORCH_ROOT}
   ${CMAKE_SOURCE_DIR}/aten/src/TH # provides "THAllocator.h" to THCGeneral.h
   ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
   ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h

@@ -230,6 +230,8 @@ class BuildExtension(build_ext):
                 original_compiler = self.compiler.compiler_so
                 if _is_cuda_file(src):
                     nvcc = _join_cuda_home('bin', 'nvcc')
+                    if not isinstance(nvcc, list):
+                        nvcc = [nvcc]
                     self.compiler.set_executable('compiler_so', nvcc)
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
