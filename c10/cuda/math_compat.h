@@ -3,8 +3,10 @@
 /* This file defines math functions compatible across different gpu
  * platforms (currently CUDA and HIP).
  */
+#if defined(__CUDACC__) || defined(__HIPCC__)
 
 #include <c10/macros/Macros.h>
+#include <cmath>
 
 #ifdef __HIPCC__
 #define __MATH_FUNCTIONS_DECL__ inline C10_DEVICE
@@ -41,6 +43,15 @@ __MATH_FUNCTIONS_DECL__ double pow(double x, double y) {
   return ::pow(x, y);
 }
 
+__MATH_FUNCTIONS_DECL__ void sincos(float x, float* sptr, float* cptr) {
+  return sincosf(x, sptr, cptr);
+}
+__MATH_FUNCTIONS_DECL__ void sincos(double x, double* sptr, double* cptr) {
+  return ::sincos(x, sptr, cptr);
+}
+
 } // namespace compat
 } // namespace cuda
 } // namespace c10
+
+#endif

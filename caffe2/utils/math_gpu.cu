@@ -50,18 +50,16 @@ DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Mul, *)
 DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Div, /)
 #undef DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR
 
-#ifndef __HIPCC__
 template <typename T>
 __global__ void SinCosCUDAKernel(const int N, const T* X, T* S, T* C) {
   CUDA_1D_KERNEL_LOOP(i, N) {
 #if __CUDA_ARCH__ >= 350
-    sincos(__ldg(X + i), S + i, C + i);
+    c10::cuda::compat::sincos(__ldg(X + i), S + i, C + i);
 #else
-    sincos(X[i], S + i, C + i);
+    c10::cuda::compat::sincos(X[i], S + i, C + i);
 #endif
   }
 }
-#endif //__HIPCC__
 
 template <typename TIn, typename TOut, class BinaryOperator>
 __global__ void SimpleBinaryOpCUDAKernel(
@@ -383,7 +381,6 @@ DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Inv, utils::Inv<double>)
 
 #undef DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION
 
-#ifndef __HIPCC__
 #define CAFFE2_SPECIALIZED_CUDA_SINCOS(T)                            \
   template <>                                                        \
   CAFFE2_CUDA_EXPORT void SinCos<T, CUDAContext>(                    \
@@ -397,32 +394,6 @@ DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Inv, utils::Inv<double>)
 CAFFE2_SPECIALIZED_CUDA_SINCOS(float)
 CAFFE2_SPECIALIZED_CUDA_SINCOS(double)
 #undef CAFFE2_SPECIALIZED_CUDA_SINCOS
-#else
-#define DELEGATE_SINCOS_HIP_FUNCTION(T, fn)                         \
-  __global__ void _Kernel_##T##_##SinCos(                           \
-      const int N, const T* x, T* ys, T* yc) {                      \
-    HIP_1D_KERNEL_LOOP(i, N) {                                      \
-      fn(__ldg(x + i), ys + i, yc + i);                             \
-    }                                                               \
-  }                                                                 \
-  template <>                                                       \
-  void SinCos<T, HIPContext>(                                       \
-      const int N, const T* x, T* ys, T* yc, HIPContext* context) { \
-    hipLaunchKernelGGL(                                             \
-        (_Kernel_##T##_##SinCos),                                   \
-        CAFFE_GET_BLOCKS(N),                                        \
-        CAFFE_HIP_NUM_THREADS,                                      \
-        0,                                                          \
-        context->hip_stream(),                                      \
-        N,                                                          \
-        x,                                                          \
-        ys,                                                         \
-        yc);                                                        \
-  }
-
-DELEGATE_SINCOS_HIP_FUNCTION(float, sincosf)
-DELEGATE_SINCOS_HIP_FUNCTION(double, sincos)
-#endif
 
 #define DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op) \
   template <>                                                     \
