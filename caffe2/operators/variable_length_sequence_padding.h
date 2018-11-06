@@ -36,9 +36,9 @@ class VariableLengthSequencePaddingOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
-    const auto N = Input(INPUT).dim(0);
-    const auto B = Input(INPUT).dim(1);
-    const auto M = Input(INPUT).dim(2);
+    const auto N = Input(INPUT).size(0);
+    const auto B = Input(INPUT).size(1);
+    const auto M = Input(INPUT).size(2);
 
     auto X = Output(OUTPUT)->template mutable_data<T>();
 

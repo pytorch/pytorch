@@ -35,7 +35,7 @@ class WhereOp final : public Operator<Context> {
     auto* output = Output(0);
     if (enable_broadcast_) {
       CAFFE_ENFORCE_EQ(select.ndim(), 1);
-      CAFFE_ENFORCE_EQ(select.dim(0), right.dim(0));
+      CAFFE_ENFORCE_EQ(select.size(0), right.size(0));
       CAFFE_ENFORCE_EQ(left.sizes(), right.sizes());
     } else {
       CAFFE_ENFORCE_EQ(select.sizes(), left.sizes());

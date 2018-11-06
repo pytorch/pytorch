@@ -192,7 +192,7 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
     auto& features = Input(1 + k);
     CAFFE_ENFORCE(features.ndim() >= 1, "FEATURE should at least 1-D");
     CAFFE_ENFORCE(
-        features.dim(0) == sumLen, "FEATURE and LENGTH should be consistent");
+        features.size(0) == sumLen, "FEATURE and LENGTH should be consistent");
     const auto block_size = features.size_from_dim(1);
 
     auto* out_features = Output(1 + k);

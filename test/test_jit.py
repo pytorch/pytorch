@@ -375,7 +375,15 @@ class JitTestCase(TestCase):
 
     def assertExportImportModule(self, m, inputs):
         m_import = self.getExportImportCopy(m)
-        self.assertEqual(m.forward(*inputs), m_import.forward(*inputs))
+        self.assertEqual(self.runAndSaveRNG(m.forward, inputs),
+                         self.runAndSaveRNG(m_import.forward, inputs))
+
+    def runAndSaveRNG(self, func, inputs, kwargs=None):
+        kwargs = kwargs if kwargs else {}
+        initial_rng_state = torch.get_rng_state()
+        results = func(*inputs, **kwargs)
+        torch.set_rng_state(initial_rng_state)
+        return results
 
 
 class TestJit(JitTestCase):
@@ -780,6 +788,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    @unittest.expectedFailure
     def test_comparison_gt_lt_cuda(self):
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
@@ -790,6 +799,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    @unittest.expectedFailure
     def test_comparison_ge_le_cuda(self):
         def f(x, y):
             mask = (x >= 0).type_as(x)
@@ -807,6 +817,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    @unittest.expectedFailure
     def test_comparison_eq_ne(self):
         def f(x, y):
             mask = (x == 0).type_as(x)
@@ -892,6 +903,23 @@ class TestJit(JitTestCase):
                     fusion_output.sum(), local_fusion_inputs, allow_unused=True, retain_graph=True)
                 grads_half = [t.half() for t in grads]
                 self.assertEqual(grads_half, fusion_grads)
+
+    def test_canonicalize_tensor_iterator(self):
+        x = torch.randn(4, 4)
+
+        def f(x):
+            x = x + 2
+            x = x - 4
+            x = x * 6
+            x = x / 8
+            return x
+
+        traced = torch.jit.trace(f, (x,))
+        f(x)
+        graph = traced.graph_for(x)
+        # There should be 4 int constants for the right sides of operators, plus two
+        # for alpha arguments for add and sub
+        self.assertTrue(str(traced.graph_for(x)).count(': int = prim::Constant'), 6)
 
     # TODO: adapt this test to check that GraphExecutor treats them differently
     @unittest.skip("Need to be adjusted to Graph Executor")
@@ -2473,7 +2501,7 @@ class TestBatched(TestCase):
                    b_i, b_f, b_o, b_c, w_hs, b_s, iter_num):
             iter_count = torch.zeros_like(iter_num)
             while bool(iter_count < iter_num):
-                iter_count += 1
+                iter_count = iter_count + 1
                 # LSTM Cell
                 i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
                 f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
@@ -2539,7 +2567,7 @@ class TestBatched(TestCase):
             iter_count = torch.zeros_like(iter_num)
             max_len = idx.size(2)
             while bool(iter_count < iter_num):
-                iter_count += 1
+                iter_count = iter_count + 1
                 # LSTM Cell
                 i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
                 f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
@@ -2681,7 +2709,15 @@ class TestScript(JitTestCase):
             ge = torch.jit.script(script, optimize)
             ge(*inputs)
 
-    def checkScript(self, script, inputs, optimize=True, outputs=None, name='func', capture_output=False, frames_up=1):
+    def checkScript(self,
+                    script,
+                    inputs,
+                    optimize=True,
+                    outputs=None,
+                    name='func',
+                    capture_output=False,
+                    frames_up=1,
+                    check_expected=False):
         if isinstance(script, str):
             cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
             ge = getattr(cu, name)
@@ -2693,7 +2729,15 @@ class TestScript(JitTestCase):
                 outputs = script(*inputs)
             # Check the string frontend first
             source = textwrap.dedent(inspect.getsource(script))
-            self.checkScript(source, inputs, optimize, outputs, script.__name__, capture_output, frames_up=2)
+            self.checkScript(
+                source,
+                inputs,
+                optimize,
+                outputs,
+                script.__name__,
+                capture_output,
+                frames_up=2,
+                check_expected=check_expected)
             # Continue checking the Python frontend
             ge = torch.jit.script(script, optimize, _frames_up=1)
 
@@ -2705,6 +2749,9 @@ class TestScript(JitTestCase):
         else:
             outputs_ge = ge(*inputs)
         self.assertEqual(outputs, outputs_ge)
+
+        if check_expected:
+            self.assertExpectedGraph(ge.graph)
 
         return ge
 
@@ -2899,7 +2946,9 @@ a")
 
             c = s(a, b)
             c.sum().backward()
-            self.assertAllFused(backward_graph(s))
+            graph = backward_graph(s)
+            self.assertEqual(set([node.kind() for node in graph.nodes()]),
+                             set(['prim::Constant', 'aten::ge', 'aten::le', 'aten::type_as', 'prim::FusionGroup']))
 
     def test_mul(self):
         def func(a, b):
@@ -3709,7 +3758,7 @@ a")
     def test_mutable_list_function_inline(self):
         @torch.jit.script
         def bar(y):
-            # type: (List[int]) -> List[int]
+            # type: (List[int])
             y.append(4)
 
         @torch.jit.script
@@ -4175,6 +4224,9 @@ a")
     def test_format(self):
         def func(x):
             print("{}, I'm a {}".format("Hello", "test"))
+            print("format blank".format())
+            print("stuff before {}".format("hi"))
+            print("{} stuff after".format("hi"))
             return x + 1
 
         x = torch.arange(4., requires_grad=True)
@@ -4277,6 +4329,12 @@ a")
         self.checkScript(void_return, [a], optimize=True)
         self.checkScript(one_return, [a], optimize=True)
         self.checkScript(multiple_returns, [a], optimize=True)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 1 return value"):
+            @torch.jit.script
+            def no_return_bad_annotation(a):
+                # type: (Tensor) -> Tensor
+                a + 1
 
     def test_error(self):
         @torch.jit.script
@@ -4433,6 +4491,41 @@ a")
     @skipIfRocm
     def test_tensor_number_math_cuda(self):
         self._test_tensor_number_math(device='cuda')
+
+    def test_not(self):
+        # test not operator in python
+        # TODO: add more tests when bool conversions ready
+        def test_not_op(a):
+            return not bool(a > 1)
+
+        self.checkScript(test_not_op, (torch.tensor(2), ), optimize=True)
+
+    def test_is_isnot(self):
+        # test is and is not operator in python
+        template = dedent('''
+        def func():
+            # type: () -> bool
+            return {lhs} {op} {rhs}
+        ''')
+
+        def test(op, args):
+            code = template.format(lhs=args[0], rhs=args[1], op=op)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            self.assertEqual(
+                cu.func(),
+                scope['func'](),
+                "Failed with op: {}, lhs: {}, rhs: {}"
+                .format(op, args[0], args[1])
+            )
+
+        ops = ['is', 'is not']
+        type_literals = [True, False, None, [1, 1]]
+
+        # do literals product to try any types combinations
+        for op, lhs, rhs in product(ops, type_literals, type_literals):
+            test(op, [lhs, rhs])
 
     def test_python_call(self):
         def pyfunc(a):
@@ -5316,6 +5409,17 @@ a")
                 # type: (int, Tuple[int, int[2]]) -> List[int]
                 return x
 
+    def test_ntuple_builtins(self):
+        from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
+
+        def test_ints():
+            return _single(1), _pair(2), _triple(3), _quadruple(4)
+
+        def test_floats():
+            return _single(1), _pair(2.1), _triple(3.1), _quadruple(4.1)
+
+        self.checkScript(test_ints, ())
+        self.checkScript(test_floats, ())
 
     def test_type_annotations(self):
         def fn(x, y):
@@ -6288,6 +6392,7 @@ a")
             return c
 
         graph = torch.jit.script(func).graph
+        self.run_pass('remove_inplace_ops', graph)
         self.run_pass('erase_number_types', graph)
         self.assertExpectedGraph(graph)
 
@@ -6468,8 +6573,9 @@ a")
             ''')
 
     def test_multi_reduction(self):
-        with self.assertRaisesRegex(RuntimeError, 'reductions are only allowed when there is a single variable on'
-                                                  ' the left-hand side'):
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'augmented assignment can only have one LHS expression'):
             cu = torch.jit.CompilationUnit('''
             def multi_reduction(x):
                 a, b += x
@@ -8071,6 +8177,28 @@ a")
             return e
         self.checkScript(foo, (torch.rand(3), torch.rand(3)))
 
+    def test_augmented_assign(self):
+        def foo(a, b):
+            a += b
+            a -= b
+            a /= b
+            a *= b
+            return a, b
+        self.checkScript(foo, (torch.rand(3), torch.rand(3)), check_expected=True)
+
+    def test_pass(self):
+        def foo(x):
+            # type: (bool) -> int
+            for _i in range(3):
+                pass
+            if x:
+                pass
+            else:
+                pass
+            return 3
+
+        self.checkScript(foo, (True,))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -8675,11 +8803,6 @@ EXCLUDE_SCRIPT = {
     'test_norm_nuc',
     # skipped nn functional tests
     # ops involves sampling which could not test
-    'test_nn_dropout',
-    'test_nn_alpha_dropout',
-    'test_nn_dropout2d',
-    'test_nn_dropout3d',
-    'test_nn_feature_alpha_dropout',
 
     'test_nn_adaptive_max_pool1d',
     'test_nn_adaptive_max_pool2d',
@@ -8862,19 +8985,19 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
     recording_inputs, recording_tensors = clone_inputs(True)
 
     # test no gradients case
-    outputs = reference_func(*nograd_inputs, **kwargs)
-    outputs_test = func(*nograd_inputs, **kwargs)
+    outputs = self.runAndSaveRNG(reference_func, nograd_inputs, kwargs)
+    outputs_test = self.runAndSaveRNG(func, nograd_inputs, kwargs)
     self.assertEqual(outputs, outputs_test)
 
     if check_types:
         check_output_types(self, func, outputs_test, nograd_inputs, kwargs)
 
     # test single grad case
-    outputs = reference_func(*recording_inputs, **kwargs)
+    outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
     grads = torch.autograd.grad(allSum(outputs), recording_tensors,
                                 allow_unused=allow_unused)
 
-    outputs_test = func(*recording_inputs, **kwargs)
+    outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
     grads_test = torch.autograd.grad(allSum(outputs_test), recording_tensors,
                                      allow_unused=allow_unused)
     self.assertEqual(outputs, outputs_test)
@@ -8884,7 +9007,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
     if self._testMethodName in nn_functional_single_grad:
         return
 
-    outputs = reference_func(*recording_inputs, **kwargs)
+    outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
     l1 = allSum(outputs)
     grads = torch.autograd.grad(l1, recording_tensors, create_graph=True,
                                 allow_unused=allow_unused)
@@ -8893,7 +9016,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
 
     recording_inputs, recording_tensors = clone_inputs(True)
 
-    outputs_test = func(*recording_inputs, **kwargs)
+    outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
     l1_test = allSum(outputs_test)
     grads_test = torch.autograd.grad(
         l1_test, recording_tensors, create_graph=True, allow_unused=allow_unused)
@@ -9054,7 +9177,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         def fn(x, k):
             y = x * 1.1
             if bool(k):
-                k += y
+                k = k + y
             z = y * k
             return z, k
 
@@ -9468,7 +9591,6 @@ def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
             call_args_str = ', '.join(actuals)
             call = "self.submodule({})".format(call_args_str)
             script = script_method_template.format(method_args, call)
-            print(script)
 
             # Create module to use the script method
             class TheModule(torch.jit.ScriptModule):

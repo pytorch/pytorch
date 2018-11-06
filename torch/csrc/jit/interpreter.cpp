@@ -314,17 +314,17 @@ public:
   ContainerTensor()
   : TensorImpl(at::UndefinedTensorId(), caffe2::TypeMeta(), nullptr, /* is_variable */ false) {}
 
-  virtual ~ContainerTensor() = default;
-  virtual at::IntList sizes() const override {
+  ~ContainerTensor() override = default;
+  at::IntList sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
-  virtual at::IntList strides() const override {
+  at::IntList strides() const override {
     throw std::runtime_error("strides() on ContainerTensor");
   }
-  virtual int64_t dim() const override {
+  int64_t dim() const override {
     throw std::runtime_error("dim() on ContainerTensor");
   }
-  virtual const at::Storage& storage() const override {
+  const at::Storage& storage() const override {
     throw std::runtime_error("storage() on ContainerTensor");
   }
 };
@@ -348,6 +348,7 @@ struct UseList {
 };
 
 // one instruction plus meta-data
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Instruction {
   Operation callback;
   UseList inputs;

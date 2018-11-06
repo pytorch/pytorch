@@ -2025,13 +2025,13 @@ class TestAutograd(TestCase):
                               True, f_args_variable, f_args_tensor)
 
     @skipIfNoLapack
-    def test_potrf(self):
-        root = Variable(torch.tril(torch.rand(S, S)), requires_grad=True)
+    def test_cholesky(self):
+        root = torch.tril(torch.rand(S, S)).requires_grad_()
 
         def run_test(upper):
             def func(root):
                 x = torch.mm(root, root.t())
-                return torch.potrf(x, upper)
+                return torch.cholesky(x, upper)
 
             gradcheck(func, [root])
             gradgradcheck(func, [root])
@@ -2668,6 +2668,13 @@ class TestAutograd(TestCase):
         self.assertFalse(p_a == p_b)
         # check one of them is using the computed buffer
         self.assertTrue(p_a == p_g or p_b == p_g)
+
+    def test_gradcheck_single_input(self):
+        def f(inp):
+            return inp.mul(5)
+
+        gradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
+        gradgradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
 
 
 def index_variable(shape, max_indices):

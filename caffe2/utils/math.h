@@ -548,6 +548,7 @@ CAFFE2_API void Im2Col(
     Context* context,
     const int groups = 1);
 
+// groups must be 1 for GPU
 template <typename T, class Context, StorageOrder kOrder>
 CAFFE2_API void Im2ColNd(
     const int N,
@@ -561,7 +562,8 @@ CAFFE2_API void Im2ColNd(
     const int* pad,
     const T* img_data,
     T* col_data,
-    Context* context);
+    Context* context,
+    const int groups = 1);
 
 // groups must be 1 for GPU
 // For NHWC order with groups > 1, the result will be layout in
@@ -588,6 +590,11 @@ CAFFE2_API void Col2Im(
     Context* context,
     const int groups = 1);
 
+// groups must be 1 for GPU
+// For NHWC order with groups > 1, the result will be layout in
+// NHW G RS C/G order to make data within the same group to be contiguous.
+// For NCHW order, groups doesn't make any difference because we're doing Im2Col
+// for each N and C is the slowest moving dimension among CHW.
 template <typename T, class Context, StorageOrder kOrder>
 CAFFE2_API void Col2ImNd(
     const int N,
@@ -601,7 +608,8 @@ CAFFE2_API void Col2ImNd(
     const int* pad,
     const T* col_data,
     T* img_data,
-    Context* context);
+    Context* context,
+    const int groups = 1);
 
 // Applies a per-channel bias value to each channel of the input
 // image. image_size is H * W
