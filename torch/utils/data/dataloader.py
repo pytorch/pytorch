@@ -175,7 +175,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, pin_fn):
         else:
             idx, batch = r
             try:
-                batch = pin_memory_batch(batch, self.pin_fn)
+                batch = pin_memory_batch(batch, pin_fn)
             except Exception:
                 out_queue.put((idx, ExceptionWrapper(sys.exc_info())))
             else:
