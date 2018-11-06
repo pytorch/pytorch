@@ -3,6 +3,7 @@ from __future__ import division
 
 import warnings
 import math
+import types
 from operator import mul
 from functools import reduce
 
@@ -14,9 +15,8 @@ from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
+from . import _VF
 from .._jit_internal import weak_script
-
-_VF = torch._C._VariableFunctions
 
 
 class _Reduction:
@@ -608,7 +608,9 @@ def adaptive_avg_pool3d(input, output_size):
 
 
 # Activation functions
+@torch._jit_internal.weak_script
 def dropout(input, p=0.5, training=True, inplace=False):
+    # type: (Tensor, float, bool, bool) -> Tensor
     r"""
     During training, randomly zeroes some of the elements of the input
     tensor with probability :attr:`p` using samples from a Bernoulli
@@ -621,26 +623,32 @@ def dropout(input, p=0.5, training=True, inplace=False):
         training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if p < 0 or p > 1:
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.dropout_ if inplace else _VF.dropout
-    return f(input, p, training)
+    return (_VF.dropout_(input, p, training)
+            if inplace
+            else _VF.dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def alpha_dropout(input, p=0.5, training=False, inplace=False):
+    # type: (Tensor, float, bool, bool) -> Tensor
     r"""Applies alpha dropout to the input.
 
     See :class:`~torch.nn.AlphaDropout` for details.
     """
-    if p < 0 or p > 1:
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.alpha_dropout_ if inplace else _VF.alpha_dropout
-    return f(input, p, training)
+    return (_VF.alpha_dropout_(input, p, training)
+            if inplace
+            else _VF.alpha_dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def dropout2d(input, p=0.5, training=True, inplace=False):
+    # type: (Tensor, float, bool, bool) -> Tensor
     r"""
     Randomly zero out entire channels (a channel is a 2D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
@@ -655,14 +663,17 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
         training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if p < 0 or p > 1:
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.feature_dropout_ if inplace else _VF.feature_dropout
-    return f(input, p, training)
+    return (_VF.feature_dropout_(input, p, training)
+            if inplace
+            else _VF.feature_dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def dropout3d(input, p=0.5, training=True, inplace=False):
+    # type: (Tensor, float, bool, bool) -> Tensor
     r"""
     Randomly zero out entire channels (a channel is a 3D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
@@ -679,19 +690,23 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
     """
     # This is 100% the same code as dropout2d. We duplicate this code so that
     # stack traces are not confusing.
-    if p < 0 or p > 1:
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.feature_dropout_ if inplace else _VF.feature_dropout
-    return f(input, p, training)
+    return (_VF.feature_dropout_(input, p, training)
+            if inplace
+            else _VF.feature_dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
-    if p < 0 or p > 1:
+    # type: (Tensor, float, bool, bool) -> Tensor
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.feature_alpha_dropout_ if inplace else _VF.feature_alpha_dropout
-    return f(input, p, training)
+    return (_VF.feature_alpha_dropout_(input, p, training)
+            if inplace
+            else _VF.feature_alpha_dropout(input, p, training))
 
 
 def threshold(input, threshold, value, inplace=False):
