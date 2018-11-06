@@ -16,8 +16,8 @@
 #include <torch/csrc/utils/hash.h>
 
 #ifdef USE_CUDA
+#include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CUDAStream.h>
-#include <c10d/CUDAUtils.hpp>
 #endif
 
 #include <c10d/ProcessGroup.hpp>
@@ -100,8 +100,7 @@ struct AlgorithmEntry {
   // For CUDA tensors, the following happens:
   //
   // - Input tensor A is copied to persistent tensor B on the stream
-  //   associated with the device that stores A (the stream is a
-  //   per-device thread local stored by THC).
+  //   associated with the device that stores A
   // - This stream is recorded in an event (see events below) so that
   //   the copy can be synchronized.
   // - The private stream (see streams below) that is used to execute
@@ -121,7 +120,7 @@ struct AlgorithmEntry {
   // correctly sequenced.
   //
   std::vector<at::cuda::CUDAStream> streams;
-  std::vector<CUDAEvent> events;
+  std::vector<at::cuda::CUDAEvent> events;
 #endif
 
   // Used to synchronize between calling thread and worker threads.
@@ -256,7 +255,7 @@ class ProcessGroupGloo : public ProcessGroup {
     //
     bool cuda_;
     std::vector<int> devices_;
-    std::vector<CUDAEvent> events_;
+    std::vector<at::cuda::CUDAEvent> events_;
 #endif
 
     friend class ProcessGroupGloo;

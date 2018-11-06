@@ -85,7 +85,7 @@ bool ChannelShuffleOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(0);
   auto* Y = Output(0);
   Y->ResizeLike(X);
-  const int ndim = X.ndim();
+  const int ndim = X.dim();
   const int N = X.dim32(0);
   const int C = X.dim32(ndim - 1);
   const int G = group_;
@@ -120,7 +120,7 @@ bool ChannelShuffleGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const auto& dY = Input(0);
   auto* dX = Output(0);
   dX->ResizeLike(dY);
-  const int ndim = dY.ndim();
+  const int ndim = dY.dim();
   const int N = dY.dim32(0);
   const int C = dY.dim32(ndim - 1);
   const int G = group_;

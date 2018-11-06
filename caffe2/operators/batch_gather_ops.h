@@ -24,7 +24,7 @@ class BatchGatherOp final : public Operator<Context> {
     auto& indices = Input(INDICES);
     auto* output = Output(0);
 
-    CAFFE_ENFORCE_GE(data.ndim(), 2, "DATA should be at least 2-D");
+    CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
 
     vector<int64_t> shape;
     shape.push_back(data.size(0));
@@ -110,7 +110,7 @@ class BatchGatherGradientOp final : public Operator<Context> {
     auto& grad = Input(GRAD);
     auto* output = Output(0);
 
-    CAFFE_ENFORCE_GE(data.ndim(), 2, "DATA should be at least 2-D");
+    CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
     CAFFE_ENFORCE_EQ(
         data.size(0), grad.size(0), "batch sizes should be the same");
 
