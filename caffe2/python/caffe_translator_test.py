@@ -25,8 +25,8 @@ from caffe2.python import utils, workspace, test_util
 import unittest
 
 def setUpModule():
-    # Do nothing is caffe is not found.
-    if not CAFFE_FOUND:
+    # Do nothing if caffe and test data is not found
+    if not (CAFFE_FOUND and os.path.exists('data/testdata/caffe_translator')):
         return
     # We will do all the computation stuff in the global space.
     caffenet = caffe_pb2.NetParameter()
