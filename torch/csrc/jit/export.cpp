@@ -46,10 +46,6 @@ std::string getNodeStackTraceString(const Node* n) {
   return ss.str();
 }
 
-std::string getTypeName(TypeKind& kind) {
-
-}
-
 void validateBlock(Block *b, onnx_torch::OperatorExportTypes operator_export_type) {
   for (auto node : b->nodes()) {
     for (Block *sub_block : node->blocks()) {
