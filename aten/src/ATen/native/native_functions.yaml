@@ -438,6 +438,16 @@
   dispatch:
     CPU: _copy__cpu
 
+- func: _copy_same_type_(Tensor self, Tensor src) -> Tensor
+  cpu_half: True
+  dispatch:
+    CPU: _copy_same_type__cpu
+
+- func: _copy_same_type_transpose_(Tensor self, Tensor src) -> Tensor
+  cpu_half: True
+  dispatch:
+    CPU: _copy_same_type_transpose__cpu
+
 - func: cos(Tensor self) -> Tensor
   variants: function, method
 

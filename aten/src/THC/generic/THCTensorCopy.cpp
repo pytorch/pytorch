@@ -33,8 +33,10 @@ void THCTensor_(copy##TYPEC)(THCState *state, THCTensor *self, struct TH##TYPEC#
     THCTensor_(copyCPU)(state, self, (THTensor*) src);  /* cast just removes warnings */                     \
   } else {                                                              \
     THTensor *srcf = THTensor_(newWithSize)(src->sizes(), {});          \
+    at::Tensor src_wrap = THTensor_wrap(src);                           \
+    at::Tensor srcf_wrap = THTensor_wrap(srcf);                         \
                                                                         \
-    THTensor_(copy##TYPEC)(srcf, src);                                  \
+    at::_copy_(srcf_wrap, src_wrap);                                    \
     THCTensor_(copyCPU)(state, self, srcf);                             \
                                                                         \
     c10::raw::intrusive_ptr::decref(srcf);                                              \
@@ -94,9 +96,11 @@ void THTensor_(copyCuda)(THCState *state, THTensor *self, struct THCTensor *src)
       THTensor *srcf = THTensor_(newWithSize)(src->sizes(), {});          \
                                                                           \
       THTensor_(copyCuda)(state, srcf, src);                              \
-      TH_CONCAT_4(TH,TYPEC,Tensor_copy,Real)(self, srcf);                 \
+      at::Tensor srcf_wrap = THTensor_wrap(srcf);                         \
+      at::Tensor self_wrap = THTensor_wrap(self);                         \
+      at::_copy_(self_wrap, srcf_wrap);                                    \
                                                                           \
-      c10::raw::intrusive_ptr::decref(srcf);                                              \
+      c10::raw::intrusive_ptr::decref(srcf);                              \
     }                                                                     \
   }
 
