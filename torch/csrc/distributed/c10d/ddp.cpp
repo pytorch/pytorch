@@ -42,6 +42,8 @@ std::vector<std::vector<at::Tensor>> bucketTensors(
   std::vector<std::vector<at::Tensor>> bucketedTensors;
   auto tensorGroups =
       torch::utils::take_tensors(tensors, bucketSize, fineGrained);
+
+  bucketedTensors.reserve(tensorGroups.size());
   for (auto& tensorGroup : tensorGroups) {
     bucketedTensors.push_back(std::move(tensorGroup.tensors));
   }
