@@ -2,7 +2,7 @@
 
 #include <torch/nn/cursor.h>
 #include <torch/nn/module.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>

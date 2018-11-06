@@ -1,7 +1,7 @@
 #include <torch/nn/modules/conv.h>
 
 #include <torch/expanding_array.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <cmath>

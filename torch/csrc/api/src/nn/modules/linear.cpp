@@ -1,6 +1,6 @@
 #include <torch/nn/modules/linear.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <cmath>

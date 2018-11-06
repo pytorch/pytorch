@@ -3,7 +3,7 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/nn/cursor.h>
 #include <torch/serialize/archive.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <string>
 #include <utility>
