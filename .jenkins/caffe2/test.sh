@@ -128,9 +128,6 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/softmax_ops_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/unique_ops_test.py")
 
-  # Need to go through roi ops to replace max(...) with fmaxf(...)
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/roi_align_rotated_op_test.py")
-
   # Our cuda top_k op has some asm code, the hipified version doesn't
   # compile yet, so we don't have top_k operator for now
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/top_k_test.py")

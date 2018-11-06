@@ -22,9 +22,9 @@ void batch_matmul_op_cpu_impl(
     BaseContext* context) {
   using Engine = caffe2::DefaultEngine;
 
-  auto ndims_A = A.ndim();
+  auto ndims_A = A.dim();
   auto dims_A = A.sizes().vec();
-  auto ndims_B = B.ndim();
+  auto ndims_B = B.dim();
   auto dims_B = B.sizes().vec();
 
   auto noBroadcastErrorMsg = [](size_t dim1, size_t dim2) {

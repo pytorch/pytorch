@@ -4400,5 +4400,5 @@ class TestJit(TestCase):
                              message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
 
-if __name__ == '__main__':
+if __name__ == '__main__' and torch._C.has_lapack:
     run_tests()
