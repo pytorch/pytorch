@@ -250,7 +250,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
 
         # TODO temporary hack during unification on CI, this should be in the
         # Dockerfiles, which should themselves be unified
-        
+
         # Install protoc
         echo "which protoc is $(which protoc) with version $(protoc --version)"
         if [[ -z "$(protoc --version 2>/dev/null)" ]]; then
@@ -267,7 +267,10 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
           rm -rf $pb_dir
         fi
 
-        # Build
+        # Install Cython
+        pip -q install --user --upgrade Cython
+
+        # Test
         ./.jenkins/caffe2/test.sh
 
         # Remove benign core dumps.
