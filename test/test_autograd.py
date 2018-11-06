@@ -2320,21 +2320,25 @@ class TestAutograd(TestCase):
         self._test_where_functional(lambda t: t.cuda())
 
     def test_reduce_dtype(self):
-        def test_reduction(op):
+        def test_reduction(op, has_no_dim):
             x = torch.randn(3, 3, dtype=torch.float, requires_grad=True)
-            grad1, = torch.autograd.grad([op(x)], [x])
-            grad2, = torch.autograd.grad([op(x, dtype=torch.double)], [x])
-            self.assertEqual(grad1, grad2)
-            self.assertEqual(grad2.dtype, torch.float)
 
-            gi = torch.randn(3, dtype=torch.float)
+            if has_no_dim:
+                grad1, = torch.autograd.grad([op(x)], [x])
+                grad2, = torch.autograd.grad([op(x, dtype=torch.double)], [x])
+                self.assertEqual(grad1, grad2)
+                self.assertEqual(grad2.dtype, torch.float)
+
+            gi = torch.randn(op(x, dim=0).shape, dtype=torch.float)
             grad1, = torch.autograd.grad([op(x, dim=0)], [x], gi)
             grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
             self.assertEqual(grad1, grad2)
             self.assertEqual(grad2.dtype, torch.float)
 
-        test_reduction(torch.sum)
-        test_reduction(torch.prod)
+        test_reduction(torch.sum, True)
+        test_reduction(torch.prod, True)
+        test_reduction(torch.cumsum, False)
+        test_reduction(torch.cumprod, False)
 
     def test_inplace_view_backprop_base(self):
         # modify view and back-prop through base

@@ -366,6 +366,10 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
   return grad_input;
 }
 
+Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim, ScalarType dtype) {
+  return cumprod_backward(grad.to(input.scalar_type()), input, dim);
+}
+
 Tensor gesv_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
   return std::get<0>(at::gesv(grad, A.transpose(-2, -1)));
 }
@@ -387,6 +391,10 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   ret -= ret_sum.expand(ret.sizes());
   ret += x;
   return ret;
+}
+
+Tensor cumsum_backward(const Tensor &x, int64_t dim, ScalarType input_dtype) {
+  return cumsum_backward(x.to(input_dtype), dim);
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim, bool keepdim) {
