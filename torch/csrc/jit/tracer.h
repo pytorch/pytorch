@@ -80,7 +80,12 @@ inline Value* getNestedValueTrace(const std::shared_ptr<TracingState>& state, co
         DynamicType::get(),
         fmap(v.toTensorListRef(), [&](const IValue &v) {
           return getNestedValueTrace(state, v);
-	)))->output();
+	})))->output();
+  } else if (v.isTuple()) {
+    return state->graph->insertNode(state->graph->createTuple(
+	fmap(v.toTuple()->elements(), [&](const IValue &v) {
+          return getNestedValueTrace(state, v);
+	})))->output();
   }
   return getValueTrace(v.toTensor());
 }
