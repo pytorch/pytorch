@@ -43,7 +43,7 @@ Tensor& _copy__cpu(Tensor& self, const Tensor& src) {
 
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's tricker
-void _copy_same_type_transpose(Tensor& self, const Tensor& src) {
+Tensor& _copy_same_type_transpose__cpu(Tensor& self, const Tensor& src) {
   const int64_t BLOCK_SZ = 60;
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
@@ -86,11 +86,12 @@ void _copy_same_type_transpose(Tensor& self, const Tensor& src) {
       }
     }
   });
+  return self;
 }
 
-void _copy_same_type(Tensor& self, const Tensor& src) {
+Tensor& _copy_same_type__cpu(Tensor& self, const Tensor& src) {
   if (self.is_same(src)) {
-    return;
+    return self;
   }
 
   bool serial_path = false;
@@ -110,7 +111,7 @@ void _copy_same_type(Tensor& self, const Tensor& src) {
         parallel_for(0, self.numel(), /* grain_size= */ 800, sample);
       });
     } else if (copy_transpose_valid(self, src)) {
-      _copy_same_type_transpose(self, src);
+      _copy_same_type_transpose__cpu(self, src);
     } else {
 #ifdef _OPENMP
       if (in_parallel_region()) {
@@ -139,6 +140,7 @@ void _copy_same_type(Tensor& self, const Tensor& src) {
           });
     });
   }
+  return self;
 }
 
 } // namespace native
