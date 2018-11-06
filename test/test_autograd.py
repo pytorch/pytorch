@@ -2188,6 +2188,7 @@ class TestAutograd(TestCase):
         a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
+    @skipIfNoLapack
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
         # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
@@ -2320,21 +2321,25 @@ class TestAutograd(TestCase):
         self._test_where_functional(lambda t: t.cuda())
 
     def test_reduce_dtype(self):
-        def test_reduction(op):
+        def test_reduction(op, has_no_dim):
             x = torch.randn(3, 3, dtype=torch.float, requires_grad=True)
-            grad1, = torch.autograd.grad([op(x)], [x])
-            grad2, = torch.autograd.grad([op(x, dtype=torch.double)], [x])
-            self.assertEqual(grad1, grad2)
-            self.assertEqual(grad2.dtype, torch.float)
 
-            gi = torch.randn(3, dtype=torch.float)
+            if has_no_dim:
+                grad1, = torch.autograd.grad([op(x)], [x])
+                grad2, = torch.autograd.grad([op(x, dtype=torch.double)], [x])
+                self.assertEqual(grad1, grad2)
+                self.assertEqual(grad2.dtype, torch.float)
+
+            gi = torch.randn(op(x, dim=0).shape, dtype=torch.float)
             grad1, = torch.autograd.grad([op(x, dim=0)], [x], gi)
             grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
             self.assertEqual(grad1, grad2)
             self.assertEqual(grad2.dtype, torch.float)
 
-        test_reduction(torch.sum)
-        test_reduction(torch.prod)
+        test_reduction(torch.sum, True)
+        test_reduction(torch.prod, True)
+        test_reduction(torch.cumsum, False)
+        test_reduction(torch.cumprod, False)
 
     def test_inplace_view_backprop_base(self):
         # modify view and back-prop through base
@@ -2615,6 +2620,7 @@ class TestAutograd(TestCase):
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
 
+    @skipIfNoLapack
     def test_symeig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.symeig(A, eigenvectors=False)
@@ -2622,6 +2628,7 @@ class TestAutograd(TestCase):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
     @skipIfRocm
+    @skipIfNoLapack
     def test_svd_no_singularvectors(self):
         A = torch.randn(2, 2, dtype=torch.float32, requires_grad=True)
         u, s, v = torch.svd(A, compute_uv=False)
