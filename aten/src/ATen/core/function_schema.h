@@ -23,7 +23,8 @@ struct Argument {
         type_(type ? type : DynamicType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
-        kwarg_only_(kwarg_only) {}
+        kwarg_only_(kwarg_only),
+        alias_info_(std::move(alias_info)) {}
   const std::string& name() const {
     return name_;
   }
@@ -39,20 +40,13 @@ struct Argument {
   bool kwarg_only() const {
     return kwarg_only_;
   }
-  const AliasInfo& alias_info() const {
-    if(!alias_info_) {
-      alias_info_ = createBlankAliasInfo(type_);
-    }
-    return *alias_info_;
+  const c10::optional<AliasInfo>& alias_info() const {
+    return alias_info_;
   }
+
 private:
-  static AliasInfo createBlankAliasInfo(TypePtr typ) {
-    auto contained = fmap(typ->containedTypes(), createBlankAliasInfo);
-    return AliasInfo({}, std::move(contained));
-  }
   std::string name_;
   TypePtr type_;
-  mutable c10::optional<AliasInfo> alias_info_;
   // for list types, an optional statically known length for the list
   // e.g. for int[3]: type = ListType::ofInts(), N = 3
   // If present, this will allow scalars to be broadcast to this length to
@@ -62,6 +56,7 @@ private:
   c10::optional<IValue> default_value_;
   // is this only specifyable as a keyword argument?
   bool kwarg_only_;
+  c10::optional<AliasInfo> alias_info_;
 };
 
 struct FunctionSchema {
@@ -70,14 +65,13 @@ struct FunctionSchema {
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
       bool is_vararg = false,
-      bool is_varret = false,
-      std::vector<Symbol> writes = {})
+      bool is_varret = false)
       : name_(std::move(name)),
         arguments_(std::move(arguments)),
         returns_(std::move(returns)),
         is_vararg_(is_vararg),
-        is_varret_(is_varret),
-        writes_(std::move(writes)) {}
+        is_varret_(is_varret) {}
+
   FunctionSchema(
       Symbol name,
       std::vector<Argument> arguments,
@@ -103,8 +97,6 @@ private:
   const bool is_vararg_;
   const bool is_varret_;
 
-  // set of alias sets in Arguments that are written to by this op
-  const std::vector<Symbol> writes_;
 public:
   const std::string& name() const {
     return name_;
@@ -115,9 +107,6 @@ public:
   const std::vector<Argument>& returns() const {
     return returns_;
   }
-  const std::vector<Symbol>& writes() const {
-    return writes_;
-  }
   bool is_vararg() const {
     return is_vararg_;
   }
@@ -125,7 +114,10 @@ public:
     return is_varret_;
   }
   bool is_mutable() const {
-    return writes().size() > 0;
+    return std::any_of(
+        arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
+          return arg.alias_info() && arg.alias_info()->isWrite();
+        });
   }
   c10::optional<int> argumentIndexWithName(const std::string& name) const {
     for(size_t i = 0; i < arguments().size(); ++i) {
@@ -134,8 +126,6 @@ public:
     }
     return c10::nullopt;
   }
-
- private:
 };
 
 // for debugging, make sure we can describe the call site
