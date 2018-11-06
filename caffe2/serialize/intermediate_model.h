@@ -248,6 +248,12 @@ class CAFFE2_API IntermediateModule final {
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
       DeserializeMode mode);
 
+  IntermediateModule(const IntermediateModule&) = delete;
+  IntermediateModule& operator =(const IntermediateModule&) = delete;
+
+  IntermediateModule(IntermediateModule&&) = default;
+  IntermediateModule& operator =(IntermediateModule&&) = default;
+
   // extract data from ModuleDef, invoked in deserialize
   // assume record id to data mapping is complete
   void update(torch::ModuleDef* module_def,
@@ -303,6 +309,12 @@ class CAFFE2_API IntermediateModel final {
  public:
   // constructor
   IntermediateModel() = default;
+
+  IntermediateModel(const IntermediateModel&) = delete;
+  IntermediateModel& operator =(const IntermediateModel&) = delete;
+
+  IntermediateModel(IntermediateModel&&) = default;
+  IntermediateModel& operator =(IntermediateModel&&) = default;
 
   // extract data from ModelDef, invoked in deserialize
   // assume record id to data mapping is complete
