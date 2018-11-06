@@ -26,34 +26,28 @@ namespace detail {
  * you might find a use for this interface even without devirtualization;
  * but a better solution in such cases is to move your code into a compilation
  * unit that links against, e.g., CUDA).
- *
- * This code assumes that there are no non-bracketed calls to the underlying
- * setDevice() within the body of the guard.
  */
 template <typename T>
 class InlineDeviceGuard {
 public:
   /// Default constructor, reads the current device so that
   /// we may reset the device to the current device on destruction.
-  explicit InlineDeviceGuard() {
-    initialize();
-  }
+  explicit InlineDeviceGuard()
+    : original_device_(T().getDevice())
+    , current_device_(original_device_)
+    {}
 
   /// Set the current device to the passed Device.
-  explicit InlineDeviceGuard(Device device) {
-    set_device(device); // In Optimizer We Trust
-    if (!initialized()) initialize();
-  }
+  explicit InlineDeviceGuard(Device device)
+    : original_device_(maybeExchangeDevice(device))
+    , current_device_(maybeDeviceElse(device, original_device_))
+    {}
 
   /// Set the current device to the passed Device
-  explicit InlineDeviceGuard(optional<Device> device_opt) {
-    if (device_opt.has_value()) {
-      set_device(device_opt.value());
-      if (!initialized()) initialize();
-    } else {
-      initialize();
-    }
-  }
+  explicit InlineDeviceGuard(optional<Device> device_opt)
+    : original_device_(maybeExchangeDevice(device_opt))
+    , current_device_(maybeDeviceElse(device, original_device_))
+    {}
 
   /// Set the current device index to the passed DeviceIndex.  (The
   /// device type is inferred from the template parameter T).
@@ -66,10 +60,10 @@ public:
   InlineDeviceGuard<T>& operator=(const InlineDeviceGuard<T>&) = delete;
 
   // See Note [Move construction for RAII guards is tricky]
-  InlineDeviceGuard(InlineDeviceGuard<T>&& other) noexcept = delete;
+  InlineDeviceGuard(InlineDeviceGuard<T>&& other) = delete;
 
   // See Note [Move assignment for RAII guards is tricky]
-  InlineDeviceGuard& operator=(InlineDeviceGuard<T>&& other) noexcept = delete;
+  InlineDeviceGuard& operator=(InlineDeviceGuard<T>&& other) = delete;
 
   ~InlineDeviceGuard() {
     if (original_device_ == DeviceType::CPU) return;
@@ -81,11 +75,7 @@ public:
     auto index = device.index();
     if (index == -1) return;
     AT_ASSERT(index >= 0);
-    if (original_device_ == DeviceType::CPU) {
-      original_device_ = T().exchangeDevice(device);
-    } else {
-      T().setDevice(device);
-    }
+    T().setDevice(device);
     current_device_ = device;
   }
 
@@ -96,8 +86,6 @@ public:
 
   /// Returns the device that was set at the time the guard was constructed.
   Device original_device() {
-    AT_ASSERTM(original_device_ != DeviceType::CPU,
-               "This device guard was moved-out from and is no longer valid");
     return original_device_;
   }
 
@@ -105,34 +93,29 @@ public:
   /// guard.  Note that this may not actually be the current device, if there
   /// was an intervening DeviceGuard.
   Device current_device() {
-    AT_ASSERTM(current_device_ != DeviceType::CPU,
-               "This device guard was moved-out from and is no longer valid");
     return current_device_;
   }
 
-  /// Returns whether or not the device guard is initialized.  A device guard
-  /// becomes uninitialized when it is is moved out from.
-  bool initialized() {
-    return original_device_ != DeviceType::CPU;
-  }
-
 private:
-  void initialize() {
-    original_device_ = T().getDevice();
-    current_device_ = original_device_;
+  Device original_device_;
+  Device current_device_;
+
+  // These helpers let us write the initializers more compactly.
+  Device maybeExchangeDevice(optional<Device> d_opt) {
+    if (d_opt.has_value() && d_opt->index() != -1) {
+      return T().exchangeDevice(d_opt.value());
+    } else {
+      return T().getDevice();
+    }
+  }
+  Device maybeDeviceElse(optional<Device> d_opt, Device d_def) {
+    if (d_opt.has_value() && d_opt->index() != -1) {
+      return d_opt.value();
+    } else {
+      return d_def;
+    }
   }
 
-  // In principle, these could have been done alternately as optional<Device>,
-  // but that runs afoul the lgenfe bug
-  // (https://github.com/pytorch/pytorch/issues/12117) so I've instead
-  // plundered CPU for the default value.
-  //
-  // The CPU state can only occur when you have moved out from a
-  // device guard and so it is now "inert."  Note that a default
-  // constructed device guard is not inert; it will reset to the
-  // current device at construction time when it dies.
-  Device original_device_ = DeviceType::CPU;
-  Device current_device_ = DeviceType::CPU;
 };
 
 }} // namespace c10::detail
