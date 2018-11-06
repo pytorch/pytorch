@@ -204,11 +204,12 @@ class CAFFE2_API IntermediateMethod final {
   IntermediateMethod() = default;
 
   explicit IntermediateMethod(torch::MethodDef* method_def);
-  IntermediateMethod(IntermediateMethod&& method) noexcept;
-  IntermediateMethod(const IntermediateMethod& method) = delete;
 
-  IntermediateMethod& operator =(IntermediateMethod&& method) noexcept;
+  IntermediateMethod(const IntermediateMethod& method) = delete;
   IntermediateMethod& operator =(const IntermediateMethod& method) = delete;
+
+  IntermediateMethod(IntermediateMethod&& method) noexcept = default;
+  IntermediateMethod& operator =(IntermediateMethod&& method) = default;
 
   // dump data to MethodDef, called in serialize
   void dump(torch::MethodDef* method_def);

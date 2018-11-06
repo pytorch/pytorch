@@ -158,18 +158,18 @@ IntermediateMethod::IntermediateMethod(torch::MethodDef* method_def) {
   }
 }
 
-IntermediateMethod::IntermediateMethod(IntermediateMethod&& method) noexcept {
-  name_ = method.name_;
-  graph_ = std::move(method.graph_);
-  torchScript_ = method.torchScript_;
-}
-
-IntermediateMethod& IntermediateMethod::operator =(IntermediateMethod&& method) noexcept{
-  name_ = method.name_;
-  graph_ = std::move(method.graph_);
-  torchScript_ = method.torchScript_;
-  return *this;
-}
+//IntermediateMethod::IntermediateMethod(IntermediateMethod&& method) noexcept {
+//  name_ = method.name_;
+//  graph_ = std::move(method.graph_);
+//  torchScript_ = method.torchScript_;
+//}
+//
+//IntermediateMethod& IntermediateMethod::operator =(IntermediateMethod&& method) noexcept{
+//  name_ = method.name_;
+//  graph_ = std::move(method.graph_);
+//  torchScript_ = method.torchScript_;
+//  return *this;
+//}
 
 void IntermediateMethod::dump(torch::MethodDef* method_def) {
   AT_ASSERTM(name_.size() > 0, "IntermediateMethod's name is invalid. name: ", name_);
