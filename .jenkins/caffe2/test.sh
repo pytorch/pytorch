@@ -20,8 +20,10 @@ fi
 
 # Moved from .circleci/config.yaml so that we can install protoc first
 # TODO but why is future here?
-pip -q install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
-pip -q install --user future
+pip install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+pip install --user future
+#pip -q install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+#pip -q install --user future
 
 # Find where Caffe2 is installed. This will be the absolute path to the
 # site-packages of the active Python installation
