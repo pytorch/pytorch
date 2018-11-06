@@ -120,7 +120,9 @@ class AveragePoolDnnLowPOp final
 
     switch (BaseType::kernel_.size()) {
       case 2:
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
         for (int n = 0; n < X.dim32(0); ++n) {
           for (int c = 0; c < channels; ++c) {
             const T *Xdata_temp =
@@ -159,7 +161,9 @@ class AveragePoolDnnLowPOp final
         } // for each image
         break;
       case 3:
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
         for (int n = 0; n < X.dim32(0); ++n) {
           for (int c = 0; c < channels; ++c) {
             const T *Xdata_temp =
@@ -255,7 +259,9 @@ class AveragePoolDnnLowPOp final
 
     switch (BaseType::kernel_.size()) {
       case 2:
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
         for (int n = 0; n < X.dim32(0); ++n) {
           const T* Xdata_temp = Xdata + n * height * width * channels;
           T* Ydata_temp =
@@ -292,7 +298,9 @@ class AveragePoolDnnLowPOp final
         } // for each image
         break;
       case 3:
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
         for (int n = 0; n < X.dim32(0); ++n) {
           const T* Xdata_temp = Xdata + n * height * width * depth * channels;
           T* Ydata_temp = Ydata +
@@ -427,7 +435,9 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
         }
         break;
       case 2:
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
         for (int n = 0; n < X.dim32(0); ++n) {
           for (int c = 0; c < channels; ++c) {
             // Do offset.
@@ -460,7 +470,9 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
         }
         break;
       case 3:
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
         for (int n = 0; n < X.dim32(0); ++n) {
           for (int c = 0; c < channels; ++c) {
             // Do offset.
@@ -551,7 +563,9 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
 
     switch (BaseType::kernel_.size()) {
       case 1:
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
         for (int n = 0; n < X.dim32(0); ++n) {
           const T* Xdata_temp = Xdata + n * height * channels;
           T* Ydata_temp = Ydata + n * pooled_height * channels;
@@ -573,7 +587,9 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
         }
         break;
       case 2:
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
         for (int n = 0; n < X.dim32(0); ++n) {
           const T* Xdata_temp = Xdata + n * height * width * channels;
           T* Ydata_temp = Ydata + n * pooled_height * pooled_width * channels;
@@ -603,7 +619,9 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
         }
         break;
       case 3:
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
         for (int n = 0; n < X.dim32(0); ++n) {
           const T* Xdata_temp = Xdata + n * height * width * depth * channels;
           T* Ydata_temp = Ydata +

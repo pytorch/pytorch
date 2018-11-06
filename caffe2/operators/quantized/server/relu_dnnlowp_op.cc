@@ -112,7 +112,9 @@ bool ReluDNNLowPOp<T>::RunOnDevice() {
     if (GetCpuId().avx2()) {
       ReluAVX2<T>(N, in_qparams.zero_point, X_data, Y_data);
     } else {
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
       for (int i = 0; i < N; ++i) {
         Y_data[i] = std::max(X_data[i], static_cast<T>(in_qparams.zero_point));
       }

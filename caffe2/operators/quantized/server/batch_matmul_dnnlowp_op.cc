@@ -16,7 +16,9 @@
 
 #include "batch_matmul_dnnlowp_op.h"
 
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
 // #define DNNLOWP_MEASURE_TIME_BREAKDOWN
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
@@ -432,16 +434,19 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
     if (!dequantize_output_) {
       auto row_offset_len_per_thread =
           PackAWithRowOffset<uint8_t>::rowOffsetBufferSize();
-      row_offsets_.resize(row_offset_len_per_thread * omp_get_max_threads());
+      row_offsets_.resize(
+          row_offset_len_per_thread * dnnlowp_get_max_threads());
       auto A_pack_buf_len_per_thread =
           PackAWithRowOffset<uint8_t>::packedBufferSize();
-      A_pack_buf_.resize(A_pack_buf_len_per_thread * omp_get_max_threads());
+      A_pack_buf_.resize(A_pack_buf_len_per_thread * dnnlowp_get_max_threads());
       Y_int32_.resize(Y->numel());
 
+#ifdef _OPENMP
 #pragma omp parallel for collapse(2)
+#endif
       for (int p = 0; p < num_outer_batches; ++p) {
         for (int i = 0; i < num_sub_batches; ++i) {
-          int tid = omp_get_thread_num();
+          int tid = dnnlowp_get_thread_num();
 
           PackAWithRowOffset<uint8_t> packA(
               trans_a_ ? matrix_op_t::Transpose : matrix_op_t::NoTranspose,
@@ -490,15 +495,18 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
         // Both input and output are float
         int row_offset_len_per_thread =
             PackAWithQuantRowOffset<uint8_t>::rowOffsetBufferSize();
-        row_offsets_.resize(row_offset_len_per_thread * omp_get_max_threads());
+        row_offsets_.resize(
+            row_offset_len_per_thread * dnnlowp_get_max_threads());
         int A_pack_len_per_thread =
             PackAWithQuantRowOffset<uint8_t>::packedBufferSize();
-        A_pack_buf_.resize(A_pack_len_per_thread * omp_get_max_threads());
+        A_pack_buf_.resize(A_pack_len_per_thread * dnnlowp_get_max_threads());
 
+#ifdef _OPENMP
 #pragma omp parallel for collapse(2)
+#endif
         for (int p = 0; p < num_outer_batches; ++p) {
           for (int i = 0; i < num_sub_batches; ++i) {
-            int tid = omp_get_thread_num();
+            int tid = dnnlowp_get_thread_num();
 
             PackAWithQuantRowOffset<uint8_t> packA(
                 trans_a_ ? matrix_op_t::Transpose : matrix_op_t::NoTranspose,
@@ -540,15 +548,19 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
         // Input quantized and output float
         auto row_offset_len_per_thread =
             PackAWithRowOffset<uint8_t>::rowOffsetBufferSize();
-        row_offsets_.resize(row_offset_len_per_thread * omp_get_max_threads());
+        row_offsets_.resize(
+            row_offset_len_per_thread * dnnlowp_get_max_threads());
         auto A_pack_buf_len_per_thread =
             PackAWithRowOffset<uint8_t>::packedBufferSize();
-        A_pack_buf_.resize(A_pack_buf_len_per_thread * omp_get_max_threads());
+        A_pack_buf_.resize(
+            A_pack_buf_len_per_thread * dnnlowp_get_max_threads());
 
+#ifdef _OPENMP
 #pragma omp parallel for collapse(2)
+#endif
         for (int p = 0; p < num_outer_batches; ++p) {
           for (int i = 0; i < num_sub_batches; ++i) {
-            int tid = omp_get_thread_num();
+            int tid = dnnlowp_get_thread_num();
 
             PackAWithRowOffset<uint8_t> packA(
                 trans_a_ ? matrix_op_t::Transpose : matrix_op_t::NoTranspose,
@@ -609,7 +621,9 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
 
     T* Y_quantized = GetQuantizedOutputData_();
     Y_int32_.resize(Y->numel());
+#ifdef _OPENMP
 #pragma omp parallel for collapse(2)
+#endif
     for (int p = 0; p < num_outer_batches; ++p) {
       for (int i = 0; i < num_sub_batches; ++i) {
         // Y_q = (scale_A * scale_B) / scale_Y * Y_int32

@@ -5,7 +5,9 @@
 #include <cmath>
 #include <cstring>
 
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
@@ -88,7 +90,9 @@ void ComputeQuantizedFusedParamsAVX2(
   const int k = K / kVLen * kVLen;
   const int r = K % kVLen;
   for (int n = N - 1; n >= 0; --n) {
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
     for (int g = 0; g < G; ++g) {
       const __m256i mu_v = _mm256_set1_epi32(mu[n * G + g] + X_zero_point);
       const __m256i rsig_v = _mm256_set1_epi32(rsig[n * G + g]);
@@ -211,7 +215,9 @@ void AffineBatchChannelAndRequantizeNCHWAVX2<uint8_t>(
   const int outer_size = N * C;
   const int n = HxW / kVLen * kVLen;
   const int r = HxW % kVLen;
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int i = 0; i < outer_size; ++i) {
     const uint8_t* X_ptr = X + i * HxW;
     uint8_t* Y_ptr = Y + i * HxW;
@@ -256,7 +262,9 @@ void AffineBatchChannelAndRequantizeNHWCAVX2<uint8_t>(
   INIT_REQUANTIZE_AVX2;
   constexpr int kVLen = 8;
   const int outer_size = N * HxW;
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int i = 0; i < outer_size; ++i) {
     const int c = i / HxW * C;
     const int n = C / kVLen * kVLen;
@@ -382,7 +390,9 @@ void GroupNormDNNLowPOp<T>::QuantizeGammaImpl() {
   gamma_quantized_.resize(C);
   gamma_quantized_data_ = gamma_quantized_.data();
   gamma_dequantized_data_ = gamma.template data<float>();
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int i = 0; i < C; ++i) {
     gamma_quantized_[i] = dnnlowp::Quantize<int32_t>(
         gamma_dequantized_data_[i],
@@ -423,7 +433,9 @@ void GroupNormDNNLowPOp<T>::QuantizeBeta() {
       beta_quantized_.resize(C);
       beta_quantized_data_ = beta_quantized_.data();
       beta_dequantized_data_ = beta.template data<float>();
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
       for (int i = 0; i < C; ++i) {
         beta_quantized_[i] = dnnlowp::Quantize<int32_t>(
             beta_dequantized_data_[i],
@@ -452,7 +464,9 @@ void GroupNormDNNLowPOp<T>::QuantizedGroupMomentsNCHW(
   var_qparams.scale = X_qparams.scale * X_qparams.scale;
   var_qparams.zero_point = 0;
   rsig_dequantized_.resize(outer_size);
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int i = 0; i < outer_size; ++i) {
     int64_t sum = 0;
     int64_t sumsq = 0;
@@ -490,7 +504,9 @@ void GroupNormDNNLowPOp<T>::QuantizedGroupMomentsNHWC(
   var_qparams.scale = X_qparams.scale * X_qparams.scale;
   var_qparams.zero_point = 0;
   rsig_dequantized_.resize(outer_size);
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int i = 0; i < outer_size; ++i) {
     const int n = i / G;
     const int g = i % G;
@@ -715,7 +731,9 @@ void GroupNormDNNLowPOp<T>::ComputeQuantizedInvStd(
       qfactory_->GetWeightPrecision(),
       qfactory_->GetPreserveWeightSparsity());
   rsig_qparams_.zero_point = 0;
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int i = 0; i < N; ++i) {
     rsig_quantized[i] = dnnlowp::Quantize<int32_t>(
         rsig[i], rsig_qparams_.zero_point, rsig_qparams_.scale, 32);
@@ -761,7 +779,9 @@ void GroupNormDNNLowPOp<T>::ComputeQuantizedFusedParams(
   } else {
     ConstEigenArrayMap<int32_t> beta_arr(bias, K, G);
     // Reverse order for-loop to avoid overriding bias data.
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
     for (int i = N - 1; i >= 0; --i) {
       EigenArrayMap<int32_t> scale_arr(scale + i * C, K, G);
       scale_arr = gamma_arr.rowwise() *
@@ -788,7 +808,9 @@ void GroupNormDNNLowPOp<T>::ComputeDequantizedFusedParams(
   const int C = G * K;
   ConstEigenArrayMap<float> gamma_arr(gamma, K, G);
   ConstEigenArrayMap<float> beta_arr(beta, K, G);
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int i = 0; i < N; ++i) {
     EigenArrayMap<float> scale_arr(scale + i * C, K, G);
     scale_arr = gamma_arr.rowwise() *
@@ -848,7 +870,9 @@ void GroupNormDNNLowPOp<T>::AffineBatchChannelQuantizedNHWC(
         N, C, HxW, out_requantization_params, X, scale, bias, Y);
   } else {
     Y_int32_.resize(size);
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
     for (int i = 0; i < N; ++i) {
       EigenArrayMap<int32_t>(Y_int32_.data() + i * stride, C, HxW) =
           (ConstEigenArrayMap<T>(X + i * stride, C, HxW)
@@ -888,7 +912,9 @@ void GroupNormDNNLowPOp<T>::AffineBatchChannelDequantizedNHWC(
     const float* bias,
     float* Y) {
   const int stride = HxW * C;
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int i = 0; i < N; ++i) {
     EigenArrayMap<float>(Y + i * stride, C, HxW) =
         (ConstEigenArrayMap<float>(X + i * stride, C, HxW).colwise() *

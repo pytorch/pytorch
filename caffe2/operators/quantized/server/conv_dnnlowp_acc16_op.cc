@@ -1,17 +1,20 @@
 #include "conv_dnnlowp_acc16_op.h"
+#include "dnnlowp_op.h"
 
 // #define DNNLOWP_ACC16_IN_SLOW_PATH
 // #define DNNLOWP_MEASURE_TIME_BREAKDOWN
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
 #include <chrono>
 #endif
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
 #include "dnnlowp_partition.h"
 #include "im2col_dnnlowp.h"
 
-DECLARE_int32(dnnlowp_nbits_in_non_outlier);
-DECLARE_int32(dnnlowp_copy_to_32bit_frequency);
+C10_DECLARE_int32(dnnlowp_nbits_in_non_outlier);
+C10_DECLARE_int32(dnnlowp_copy_to_32bit_frequency);
 C10_DECLARE_bool(caffe2_dnnlowp_shared_int32_buffer);
 
 namespace caffe2 {
@@ -135,16 +138,23 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
       }
 
       if (!reason.empty()) {
-        LOG_FIRST_N(WARNING, 32) << "Conv with weight "
-                                 << OperatorBase::debug_def().input(FILTER)
-                                 << " falls back to slow path because "
-                                 << reason;
+        static int log_occurences = 0;
+        if (log_occurences < 32) {
+          ++log_occurences;
+          LOG(WARNING) << "Conv with weight "
+                       << OperatorBase::debug_def().input(FILTER)
+                       << " falls back to slow path because " << reason;
+        }
       }
     }
     if (nbits_in_non_outlier_ < 8 &&
         ConvPoolOpBase<CPUContext>::order_ != StorageOrder::NHWC) {
-      LOG_FIRST_N(WARNING, 32) << "Outlier-aware quantization only supports "
-                                  "NHWC layout";
+        static int log_occurences = 0;
+        if (log_occurences < 32) {
+          ++log_occurences;
+          LOG(WARNING) << "Outlier-aware quantization only supports "
+                          "NHWC layout";
+        }
     }
     first_invocation_ = false;
   }
@@ -215,7 +225,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
   buffer_shape.push_back(kernel_dim);
   buffer_shape.insert(
       buffer_shape.end(), output_dims.begin(), output_dims.end());
-  buffer_shape.insert(buffer_shape.begin(), omp_get_max_threads());
+  buffer_shape.insert(buffer_shape.begin(), dnnlowp_get_max_threads());
 
   if (BaseType::kernel_.size() != 2) {
     SetDeviceTensor(img_shape, &(BaseType::img_shape_device_));
@@ -236,7 +246,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
   InType* col_buffer_data = col_buffer_.template mutable_data<InType>();
 
   auto f = [&](vector<int32_t>* Y_int32) {
-    Y_int32->resize(M * output_image_size * omp_get_max_threads());
+    Y_int32->resize(M * output_image_size * dnnlowp_get_max_threads());
     vector<int> buffer_shape_per_thread(
         buffer_shape.begin() + 1, buffer_shape.end());
 
@@ -251,11 +261,14 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
     } else {
       Y_data = Y->template mutable_data<uint8_t>();
     }
-    BaseType::column_offsets_.resize(output_image_size * omp_get_max_threads());
+    BaseType::column_offsets_.resize(
+        output_image_size * dnnlowp_get_max_threads());
 
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
     for (int image_id = 0; image_id < N; ++image_id) {
-      int tid = omp_get_thread_num();
+      int tid = dnnlowp_get_thread_num();
       for (int group_id = 0; group_id < group_; ++group_id) {
         if (BaseType::kernel_.size() == 2) {
           math::Im2ColNCHW<InType>(
@@ -315,9 +328,13 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
         int8_t* W_quantized_group =
             W_quantized_.data() + (M / group_) * group_id * kernel_dim;
 
-        LOG_FIRST_N(WARNING, 32)
-            << "Consider using DNNLOWP instead of DNNLOWP_ACC16 engine since "
-               "we're falling back to a slow path because of NCHW layout";
+        static int log_occurences = 0;
+        if (log_occurences < 32) {
+          ++log_occurences;
+          LOG(WARNING)
+              << "Consider using DNNLOWP instead of DNNLOWP_ACC16 engine since "
+                 "we're falling back to a slow path because of NCHW layout";
+        }
 
         for (int i = 0; i < M / group_; ++i) {
           for (int j = 0; j < output_image_size; ++j) {
@@ -484,7 +501,9 @@ void ConvDNNLowPAcc16Op<ReluFused>::ConvOutlier_(
         sizeof((*Y_int32)[0]) * M * N);
     }
 
+#ifdef _OPENMP
 #pragma omp parallel
+#endif
     {
       int group_begin, group_end, i_begin, i_end;
       BaseType::PartitionGroupedNHWCConv_(
@@ -494,8 +513,8 @@ void ConvDNNLowPAcc16Op<ReluFused>::ConvOutlier_(
           &i_end,
           group_,
           N * output_image_size,
-          omp_get_num_threads(),
-          omp_get_thread_num());
+          dnnlowp_get_num_threads(),
+          dnnlowp_get_thread_num());
 
       for (int group_id = group_begin; group_id < group_end; ++group_id) {
         assert(Wq_outlier_[group_id].NumOfRows() == kernel_dim);
@@ -589,13 +608,15 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
       } else {
         col_buffer_quantized.resize(
             group_ * kernel_dim * output_image_size * N);
+#ifdef _OPENMP
 #pragma omp parallel
+#endif
         {
           size_t begin, end;
           std::tie(begin, end) = Get1DPartition(
               col_buffer_quantized.size(),
-              omp_get_num_threads(),
-              omp_get_thread_num());
+              dnnlowp_get_num_threads(),
+              dnnlowp_get_thread_num());
           Quantize<uint8_t>(
               (const float*)col_buffer_data + begin,
               col_buffer_quantized.data() + begin,
@@ -626,13 +647,13 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
           x_pack_buf_size_per_thread =
               PackAWithRowOffset<uint8_t, int16_t>::packedBufferSize();
           row_offsets_.resize(
-              omp_get_max_threads() * row_offset_size_per_thread);
+              dnnlowp_get_max_threads() * row_offset_size_per_thread);
         } else {
           x_pack_buf_size_per_thread =
               PackAMatrix<uint8_t, int16_t>::packedBufferSize();
         }
         X_pack_buf_.resize(
-            omp_get_max_threads() * x_pack_buf_size_per_thread);
+            dnnlowp_get_max_threads() * x_pack_buf_size_per_thread);
       }
 
       if (nbits_in_non_outlier_ > 0) {
@@ -641,9 +662,11 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
           // fast path
           uint8_t* Y_uint8_data =
               OutputTensorCPU_(0)->template mutable_data<uint8_t>();
+#ifdef _OPENMP
 #pragma omp parallel
+#endif
           {
-            int tid = omp_get_thread_num();
+            int tid = dnnlowp_get_thread_num();
             int group_begin, group_end;
             int i_begin, i_end;
 
@@ -654,8 +677,8 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
                 &i_end,
                 group_,
                 N * output_image_size,
-                omp_get_num_threads(),
-                omp_get_thread_num());
+                dnnlowp_get_num_threads(),
+                dnnlowp_get_thread_num());
 
             for (int group_id = group_begin; group_id < group_end; ++group_id) {
               if (fuse_output_pipeline) {
