@@ -152,7 +152,7 @@ IntermediateMethod::IntermediateMethod(torch::MethodDef* method_def) noexcept {
   if (method_def->has_torch_script()) {
     torchScript_ = method_def->torch_script();
   } else if (method_def->has_graph()) {
-    graph_.reset(method_def->release_graph());
+    //graph_.reset(method_def->release_graph());
   } else {
     //AT_ERROR("No method body is found!");
   }
@@ -166,7 +166,7 @@ IntermediateMethod::IntermediateMethod(torch::MethodDef* method_def) noexcept {
 //
 IntermediateMethod& IntermediateMethod::operator =(IntermediateMethod&& method) noexcept{
   name_ = std::move(method.name_);
-  graph_ = std::move(method.graph_);
+  //graph_ = std::move(method.graph_);
   torchScript_ = std::move(method.torchScript_);
   return *this;
 }
@@ -174,11 +174,11 @@ IntermediateMethod& IntermediateMethod::operator =(IntermediateMethod&& method) 
 void IntermediateMethod::dump(torch::MethodDef* method_def) {
   AT_ASSERTM(name_.size() > 0, "IntermediateMethod's name is invalid. name: ", name_);
   method_def->set_name(name_);
-  if (graph_) {
-    method_def->set_allocated_graph(graph_.release());
-  } else {
+  //if (graph_) {
+  //  method_def->set_allocated_graph(graph_.release());
+  //} else {
     method_def->set_torch_script(torchScript_);
-  }
+  //}
 }
 
 IntermediateModule::IntermediateModule(torch::ModuleDef* module_def,
