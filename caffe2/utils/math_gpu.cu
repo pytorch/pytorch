@@ -820,10 +820,9 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
     at::Half* C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#ifdef __HIPCC__
-  CAFFE_THROW("Unsupported math type");
-#endif
-#ifndef ROCBLAS_FP16
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+    CAFFE_THROW("HIP currently does not support FP16 yet.");
+#else
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
   const int lda = (trans_A == CblasNoTrans) ? K : M;
@@ -879,7 +878,7 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
     // fail
     CAFFE_THROW("Unsupported math type");
   }
-#endif // ROCBLAS_FP16
+#endif
 }
 
 template <>
@@ -1046,10 +1045,9 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     at::Half** C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#ifdef __HIPCC__
-  CAFFE_THROW("Unsupported math type");
-#endif
-#ifndef ROCBLAS_FP16
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+    CAFFE_THROW("HIP currently does not support FP16 yet.");
+#else
 #if __CUDACC_VER_MAJOR__ < 9
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
@@ -1162,7 +1160,7 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     CAFFE_THROW("Unsupported math type");
   }
 #endif
-#endif // ROCBLAS_FP16
+#endif
 }
 
 template <>
@@ -1183,10 +1181,9 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
     const int C_stride,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#ifdef __HIPCC__
-  CAFFE_THROW("Unsupported math type");
-#endif
-#ifndef ROCBLAS_FP16
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+    CAFFE_THROW("HIP currently does not support FP16 yet.");
+#else
 #if __CUDACC_VER_MAJOR__ < 8
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
@@ -1276,7 +1273,6 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
 #endif
 }
 
-#ifndef __HIPCC__
 #if CUDA_VERSION >= 9000
 
 // No change, but required. Defer to default CUDA engine
@@ -1434,7 +1430,6 @@ GemmStridedBatched<at::Half, CUDAContext, TensorCoreEngine>(
 }
 
 #endif // CUDA_VERSION >= 9000
-#endif // __HIPCC__
 
 template <>
 CAFFE2_CUDA_EXPORT void GemmEx<float, CUDAContext>(
@@ -1561,10 +1556,9 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
     at::Half* y,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#ifdef __HIPCC__
-  CAFFE_THROW("Unsupported math type");
-#endif
-#ifndef ROCBLAS_FP16
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+    CAFFE_THROW("HIP currently does not support FP16 yet.");
+#else
   const cublasOperation_t cu_trans_A =
       (trans_A == CblasNoTrans) ? CUBLAS_OP_T : CUBLAS_OP_N;
 
@@ -1619,7 +1613,7 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
     // fail
     CAFFE_THROW("Unsupported math type");
   }
-#endif // ROCBLAS_FP16
+#endif
 }
 
 namespace {
@@ -1662,7 +1656,6 @@ CAFFE2_SPECIALIZED_CUDA_SET(uint8_t);
 CAFFE2_SPECIALIZED_CUDA_SET(uint16_t);
 #undef CAFFE2_SPECIALIZED_CUDA_SET
 
-#ifndef __HIPCC__
 template <>
 CAFFE2_CUDA_EXPORT void Set<at::Half, CUDAContext>(
     const size_t N,
@@ -1677,7 +1670,6 @@ CAFFE2_CUDA_EXPORT void Set<at::Half, CUDAContext>(
            context->cuda_stream()>>>(N, alpha, Y);
   }
 }
-#endif
 
 namespace {
 template <typename T>
@@ -1812,8 +1804,9 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
     const at::Half* b,
     at::Half* y,
     CUDAContext* context) {
-  CAFFE_THROW("Unsupported math type");
-#ifndef ROCBLAS_FP16
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+    CAFFE_THROW("HIP currently does not support FP16 yet.");
+#else
   // execute with 32-bit math
   CUBLAS_ENFORCE(cublasSetPointerMode(
       context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
@@ -1829,7 +1822,7 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
       y,
       CUDA_R_16F,
       CUDA_R_32F));
-#endif // ROCBLAS_FP16
+#endif
 }
 
 // A previous version of caffe2 used Thrust but it turns out that thrust
@@ -2441,8 +2434,9 @@ CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
     const at::Half* X,
     at::Half* Y,
     CUDAContext* context) {
-  CAFFE_THROW("Unsupported math type");
-#ifndef ROCBLAS_FP16
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+    CAFFE_THROW("HIP currently does not support FP16 yet.");
+#else
   CUBLAS_ENFORCE(
       cublasSetPointerMode(context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
   CUBLAS_ENFORCE(cublasAxpyEx(
@@ -2479,8 +2473,9 @@ CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
     const at::Half* X,
     at::Half* Y,
     CUDAContext* context) {
-  CAFFE_THROW("Unsupported math type");
-#ifndef ROCBLAS_FP16
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+    CAFFE_THROW("HIP currently does not support FP16 yet.");
+#else
   CUBLAS_ENFORCE(cublasSetPointerMode(
       context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
   CUBLAS_ENFORCE(cublasAxpyEx(
@@ -3761,16 +3756,16 @@ CAFFE2_CUDA_EXPORT void BroadcastCUDAImpl(
     X_strides_array.data[i] = X_dims[i - d] == 1 ? 0 : cur_stride;
     cur_stride *= X_dims[i - d];
   }
-#ifndef __HIPCC__
   for (int i = 0; i < D; ++i) {
     if (Y_dims[i] == 0) {
       return;
     }
+#ifndef __HIPCC__
     Y_dims_array.data[i] = FixedDivisor<int>(Y_dims[i]);
-  }
 #else
-  std::copy_n(Y_dims, D, Y_dims_array.data);
+    Y_dims_array.data[i] = Y_dims[i];
 #endif
+  }
   const int Y_size =
       std::accumulate(Y_dims, Y_dims + D, 1, std::multiplies<int>());
   BroadcastCUDAKernel<T, D>
