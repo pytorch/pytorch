@@ -383,35 +383,6 @@ class Caffe2Backend(Backend):
         return outputs
 
     @classmethod
-    def _create_upsample(cls, init_model, pred_model, n, opset_version):
-        c2_op = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
-        if opset_version >= 7:
-            if len(n.attrs['scales']) != 4:
-                raise ValueError("The scales argument should have size 4")
-            elif not (np.isclose(n.attrs['scales'][0], 1) and np.isclose(n.attrs['scales'][1], 1)):
-                raise ValueError("The first two elements in the scales argument must be 1")
-            c2_op.arg.extend([caffe2.python.utils.MakeArgument('height_scale', n.attrs['scales'][2])])
-            c2_op.arg.extend([caffe2.python.utils.MakeArgument('width_scale', n.attrs['scales'][3])])
-
-        return c2_op
-
-    @classmethod
-    def _create_gaussian_fill(cls, init_model, pred_model, n, opset_version):
-        c2_op = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n,
-                                                   opset_version)
-        if "seed" in n.attrs:
-            raise ValueError("Caffe2 does not support random seed")
-
-        if "dtype" in n.attrs and n.attrs['dtype'] != onnx.TensorProtoDataType.FLOAT:
-            raise ValueError("Caffe2 does not support no-float dtype")
-
-        if "scale" in n.attrs:
-            c2_op.arg.extend([caffe2.python.utils.MakeArgument('std',
-                                                           n.attrs['scale'])])
-
-        return c2_op
-
-    @classmethod
     def _create_rnn_variant(cls, init_model, pred_model, n, opset_version):
         assert init_model is not None, "cannot convert RNNs without access to the full model"
         assert pred_model is not None, "cannot convert RNNs without access to the full model"

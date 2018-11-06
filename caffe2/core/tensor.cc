@@ -124,6 +124,37 @@ Tensor empty(at::IntList dims, at::TensorOptions options) {
   return tensor;
 }
 
+void ReinitializeTensor(
+    Tensor* tensor,
+    at::IntList dims,
+    at::TensorOptions options) {
+  CAFFE_ENFORCE(options.device_opt() != c10::nullopt);
+  if (*tensor) {
+    if (tensor->GetDevice() == options.device()) {
+      if (tensor->sizes() != dims) {
+        // Resize when the dims doesn't match
+        tensor->Resize(dims);
+      }
+      if (tensor->dtype() == options.dtype()) {
+        tensor->raw_mutable_data();
+      } else {
+        C10_LOG_EVERY_MS(WARNING, 1000)
+            << "Changing the data type of Tensor is discouraged."
+            << " Attempt to change data type from: " << tensor->dtype()
+            << " to: " << options.dtype();
+        // create a new Tensor when the data_type doesn't match
+        *tensor = caffe2::empty(dims, options);
+      }
+      return;
+    }
+    // create a new Tensor when device doesn't match
+  }
+
+  VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<Tensor>()
+          << " dims: " << dims;
+  *tensor = caffe2::empty(dims, options);
+}
+
 namespace {
 
 struct TensorStatGetter : BlobStatGetter {

@@ -58,7 +58,7 @@ struct Method {
 
   void run(Stack & stack) {
     for(at::Tensor* tp : member_inputs) {
-      stack.push_back(*tp);
+      stack.emplace_back(*tp);
     }
     get_executor().run(stack);
   }
@@ -72,7 +72,10 @@ struct Method {
     return stack.front();
   }
 
-  std::shared_ptr<Graph> graph_for(const Stack& inputs) {
+  std::shared_ptr<Graph> graph_for(Stack inputs) {
+    for(at::Tensor* tp : member_inputs) {
+      inputs.emplace_back(*tp);
+    }
     return get_executor().graphFor(inputs);
   }
   std::shared_ptr<Graph> graph() const {

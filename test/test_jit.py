@@ -375,7 +375,15 @@ class JitTestCase(TestCase):
 
     def assertExportImportModule(self, m, inputs):
         m_import = self.getExportImportCopy(m)
-        self.assertEqual(m.forward(*inputs), m_import.forward(*inputs))
+        self.assertEqual(self.runAndSaveRNG(m.forward, inputs),
+                         self.runAndSaveRNG(m_import.forward, inputs))
+
+    def runAndSaveRNG(self, func, inputs, kwargs=None):
+        kwargs = kwargs if kwargs else {}
+        initial_rng_state = torch.get_rng_state()
+        results = func(*inputs, **kwargs)
+        torch.set_rng_state(initial_rng_state)
+        return results
 
 
 class TestJit(JitTestCase):
@@ -3750,7 +3758,7 @@ a")
     def test_mutable_list_function_inline(self):
         @torch.jit.script
         def bar(y):
-            # type: (List[int]) -> List[int]
+            # type: (List[int])
             y.append(4)
 
         @torch.jit.script
@@ -4321,6 +4329,12 @@ a")
         self.checkScript(void_return, [a], optimize=True)
         self.checkScript(one_return, [a], optimize=True)
         self.checkScript(multiple_returns, [a], optimize=True)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 1 return value"):
+            @torch.jit.script
+            def no_return_bad_annotation(a):
+                # type: (Tensor) -> Tensor
+                a + 1
 
     def test_error(self):
         @torch.jit.script
@@ -5894,8 +5908,11 @@ a")
 
             @torch.jit.script_method
             def forward(self, x):
-                for _ in range(100):
-                    x = x + x
+                # test if we support end to end onnx export on loop and
+                # nested loops with and without loop index
+                for _ in range(5):
+                    for i in range(3):
+                        x = x + i
                 return x
 
         mte = ModuleToExport()
@@ -8172,6 +8189,19 @@ a")
             return a, b
         self.checkScript(foo, (torch.rand(3), torch.rand(3)), check_expected=True)
 
+    def test_pass(self):
+        def foo(x):
+            # type: (bool) -> int
+            for _i in range(3):
+                pass
+            if x:
+                pass
+            else:
+                pass
+            return 3
+
+        self.checkScript(foo, (True,))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -8776,11 +8806,6 @@ EXCLUDE_SCRIPT = {
     'test_norm_nuc',
     # skipped nn functional tests
     # ops involves sampling which could not test
-    'test_nn_dropout',
-    'test_nn_alpha_dropout',
-    'test_nn_dropout2d',
-    'test_nn_dropout3d',
-    'test_nn_feature_alpha_dropout',
 
     'test_nn_adaptive_max_pool1d',
     'test_nn_adaptive_max_pool2d',
@@ -8942,7 +8967,8 @@ def check_output_types(self, func, ref_outputs, args, kwargs):
             self.assertTrue(ref_type.isSubtypeOf(t))
 
 
-def check_against_reference(self, func, reference_func, args, kwargs=None, allow_unused=True, check_types=True):
+def check_against_reference(self, func, reference_func, args, kwargs=None,
+                            allow_unused=True, check_types=True, no_grad=False):
     kwargs = kwargs if kwargs else {}
 
     def allSum(vs):
@@ -8963,19 +8989,23 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
     recording_inputs, recording_tensors = clone_inputs(True)
 
     # test no gradients case
-    outputs = reference_func(*nograd_inputs, **kwargs)
-    outputs_test = func(*nograd_inputs, **kwargs)
+    outputs = self.runAndSaveRNG(reference_func, nograd_inputs, kwargs)
+    outputs_test = self.runAndSaveRNG(func, nograd_inputs, kwargs)
     self.assertEqual(outputs, outputs_test)
 
     if check_types:
         check_output_types(self, func, outputs_test, nograd_inputs, kwargs)
 
+    if no_grad:
+        # skip grad tests
+        return
+
     # test single grad case
-    outputs = reference_func(*recording_inputs, **kwargs)
+    outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
     grads = torch.autograd.grad(allSum(outputs), recording_tensors,
                                 allow_unused=allow_unused)
 
-    outputs_test = func(*recording_inputs, **kwargs)
+    outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
     grads_test = torch.autograd.grad(allSum(outputs_test), recording_tensors,
                                      allow_unused=allow_unused)
     self.assertEqual(outputs, outputs_test)
@@ -8985,7 +9015,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
     if self._testMethodName in nn_functional_single_grad:
         return
 
-    outputs = reference_func(*recording_inputs, **kwargs)
+    outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
     l1 = allSum(outputs)
     grads = torch.autograd.grad(l1, recording_tensors, create_graph=True,
                                 allow_unused=allow_unused)
@@ -8994,7 +9024,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
 
     recording_inputs, recording_tensors = clone_inputs(True)
 
-    outputs_test = func(*recording_inputs, **kwargs)
+    outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
     l1_test = allSum(outputs_test)
     grads_test = torch.autograd.grad(
         l1_test, recording_tensors, create_graph=True, allow_unused=allow_unused)
@@ -9323,9 +9353,12 @@ nn_module_tests = [
 #   method name,
 #   input size/constructing fn,
 #   args (tuple represents shape of a tensor arg),
-#   test variant name (will be used at test name suffix),    // optional
-#   indices for possible dim arg,                            // optional
+#   test variant name(will be used at test name suffix,
+#       'inplace' skips grad tests),                         // optional
+#   fn to determine if test should be skipped,               // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
+#   kwargs for function,                                     // optional
+#   is inplace? if so skip grad tests,                       // optional
 # )
 nn_functional_tests = [
     # TODO: default arguments for None type not supported, add
@@ -9360,21 +9393,33 @@ nn_functional_tests = [
     ('dropout2d', (S, S, S), (0.5,)),
     ('dropout3d', (S, S, S), (0.5,)),
     ('feature_alpha_dropout', (S, S, S), (0.5,)),
-    ('threshold', (S, S, S), (0.1, 2),),
+    ('threshold', (S, S, S), (0.1, 2.),),
+    ('threshold', (S, S, S), (0.1, 2., True), 'inplace'),
     ('relu', (S, S, S), (),),
+    ('relu', (S, S, S), (), 'inplace'),
     ('glu', (S - 1, S - 1, S - 1), (),),
     ('hardtanh', (S, S, S), (-0.5, 0.5),),
+    ('hardtanh', (S, S, S), (-0.5, 0.5, True), 'inplace'),
+    ('relu6', (S, S, S), (),),
+    ('relu6', (S, S, S), (True), 'inplace'),
     ('elu', (S, S, S), (0.9,),),
+    ('elu', (S, S, S), (0.9, True), 'inplace'),
     ('selu', (S, S, S), (),),
+    ('selu', (S, S, S), (True), 'inplace'),
     ('celu', (S, S, S), (0.9,),),
+    ('celu', (S, S, S), (0.9, True), 'inplace'),
     ('leaky_relu', (S, S, S), (0.02,),),
-    ('rrelu', (S, S), (0.1, 0.3, False, None),),
+    ('leaky_relu', (S, S, S), (0.02,), 'inplace'),
+    ('rrelu', (S, S), (0.1, 0.3, False),),
+    ('rrelu', (S, S), (0.1, 0.3, False, True), 'inplace'),
     ('hardshrink', (S, S, S), (0.4,),),
     ('tanhshrink', (S, S, S), (),),
     ('softsign', (S, S, S), (),),
     ('softplus', (S, S, S), (),),
     ('softmin', (S, S, S), (0,),),
     ('softmax', (S, S, S), (0,),),
+    ('tanh', (S, S, S), (),),
+    ('sigmoid', (S, S, S), (),),
     ('log_softmax', (S, S, S), (0,),),
     ('linear', (S, S), ((M, S), None),),
     ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M), None),),
@@ -9525,8 +9570,14 @@ def add_autograd_test(
         post_add_test(test_name, skipTestIf, do_test)
 
 
-def add_nn_functional_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x: x, kwargs=None):
+def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=(),
+                           output_process_fn=lambda x: x, kwargs=None):
     test_name = 'test_nn_' + name
+
+    if variant_name != '':
+        test_name = test_name + '_' + variant_name
+
+    no_grad = variant_name == 'inplace'
 
     def do_test(self, name=name, args=args, test_name=test_name):
         torch.manual_seed(2)
@@ -9539,7 +9590,8 @@ def add_nn_functional_test(name, self_size, args, skipTestIf=(), output_process_
         self_tensor = deepcopy(self_variable.data)
         args_tensor = deepcopy(unpack_variables(args_variable))
 
-        output_variable = getattr(F, name)(self_variable, *args_variable, **kwargs_variable)
+        if not no_grad:
+            output_variable = getattr(F, name)(self_variable, *args_variable, **kwargs_variable)
 
         def fn(*inputs, **kwargs):
             output = getattr(F, name)(*inputs, **kwargs)
@@ -9551,7 +9603,7 @@ def add_nn_functional_test(name, self_size, args, skipTestIf=(), output_process_
         if test_name not in EXCLUDE_SCRIPT:
             check_against_reference(self,
                                     create_script_fn(self, name, 'nn_functional', output_process_fn),
-                                    fn, f_args_variable, kwargs_variable)
+                                    fn, f_args_variable, kwargs_variable, no_grad=no_grad)
 
     post_add_test(test_name, skipTestIf, do_test)
 

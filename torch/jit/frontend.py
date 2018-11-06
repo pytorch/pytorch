@@ -330,6 +330,11 @@ class StmtBuilder(Builder):
         args = [build_expr(ctx, val) for val in stmt.values]
         return ExprStmt([Apply(Var(Ident(r, "print")), args, [])])
 
+    @staticmethod
+    def build_Pass(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("pass"))
+        return Pass(r)
+
 
 class ExprBuilder(Builder):
     binop_map = {
