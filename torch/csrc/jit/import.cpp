@@ -247,11 +247,9 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
     return GeneratorType::get();
   } else if (kind == "StringType") {
     return StringType::get();
-  } else if (kind.find("Optional") == 0) {
+  } else if (kind.find("OptionalType") == 0) {
     onnx::TypeProto elem_proto(type_proto);
-    size_t first = kind.find('[') + 1;
-    size_t last = kind.find(']');
-    auto denotation = getTypeName(kind.substr(first, last - first));
+    auto denotation = getTypeName(kind.substr(strlen("OptionalType:")));
     elem_proto.set_denotation(denotation);
     return OptionalType::create(buildType(elem_proto));
   } else if (kind.find("TypeVar:") == 0) {

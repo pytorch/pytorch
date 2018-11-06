@@ -46,6 +46,10 @@ std::string getNodeStackTraceString(const Node* n) {
   return ss.str();
 }
 
+std::string getTypeName(TypeKind& kind) {
+
+}
+
 void validateBlock(Block *b, onnx_torch::OperatorExportTypes operator_export_type) {
   for (auto node : b->nodes()) {
     for (Block *sub_block : node->blocks()) {
@@ -574,7 +578,9 @@ void ModuleEncoder::EncodeTypeInfo(
   } else if (kind == TypeKind::VarType) {
     type_proto->set_denotation("TypeVar:" + type->expect<VarType>()->name());
   } else if (kind == TypeKind::OptionalType) {
-    type_proto->set_denotation(type->python_str());
+    type_proto->set_denotation(
+        "OptionalType:" +
+        type->expect<OptionalType>()->getElementType()->str());
   } else {
     throw std::runtime_error("unexpected type kind");
   }

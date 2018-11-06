@@ -265,7 +265,7 @@ TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
         return OptionalType::create(actual);
       }
       std::stringstream ss;
-      ss << "cannot match a optional[" << opt_formal->getElementType()->str()
+      ss << "cannot match an optional[" << opt_formal->getElementType()->str()
          << "]to " << actual->str();
       throw TypeMatchError(ss.str());
     }
