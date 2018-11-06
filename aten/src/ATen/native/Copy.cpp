@@ -104,7 +104,7 @@ void _copy_same_type(Tensor& self, const Tensor& src) {
           int64_t len = end - begin;
           scalar_t* self_seg = self_ptr + begin;
           scalar_t* src_seg = src_ptr + begin;
-          at::vec256::convert<scalar_t, scalar_t>(self_seg, src_seg, len);
+          at::vec256::convert<scalar_t, scalar_t>(src_seg, self_seg, len);
         };
 
         parallel_for(0, self.numel(), /* grain_size= */ 800, sample);
