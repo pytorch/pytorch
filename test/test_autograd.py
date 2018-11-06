@@ -2188,6 +2188,7 @@ class TestAutograd(TestCase):
         a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
+    @skipIfNoLapack
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
         # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
@@ -2619,6 +2620,7 @@ class TestAutograd(TestCase):
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
 
+    @skipIfNoLapack
     def test_symeig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.symeig(A, eigenvectors=False)
@@ -2626,6 +2628,7 @@ class TestAutograd(TestCase):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
     @skipIfRocm
+    @skipIfNoLapack
     def test_svd_no_singularvectors(self):
         A = torch.randn(2, 2, dtype=torch.float32, requires_grad=True)
         u, s, v = torch.svd(A, compute_uv=False)

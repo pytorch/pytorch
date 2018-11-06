@@ -355,7 +355,12 @@ def build_libs(libs):
     my_env["PYTORCH_PYTHON_LIBRARY"] = cmake_python_library
     my_env["PYTORCH_PYTHON_INCLUDE_DIR"] = cmake_python_include_dir
     my_env["PYTORCH_BUILD_VERSION"] = version
-    my_env["CMAKE_PREFIX_PATH"] = full_site_packages
+
+    cmake_prefix_path = full_site_packages
+    if "CMAKE_PREFIX_PATH" in my_env:
+        cmake_prefix_path = my_env["CMAKE_PREFIX_PATH"] + ";" + cmake_prefix_path
+    my_env["CMAKE_PREFIX_PATH"] = cmake_prefix_path
+
     my_env["NUM_JOBS"] = str(NUM_JOBS)
     my_env["ONNX_NAMESPACE"] = ONNX_NAMESPACE
     if not IS_WINDOWS:
