@@ -99,7 +99,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
         export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
-        script -c "${COMMAND}" /dev/null | ts
+        script -q -c "${COMMAND}" /dev/null | ts
 
         # Push intermediate Docker image for next phase to use
         if [ -z "${BUILD_ONLY}" ]; then
@@ -123,16 +123,16 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
         if [ -n "${CUDA_VERSION}" ]; then
-          id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         else
-          id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         fi
         if [ -n "${MULTI_GPU}" ]; then
           export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         else
           export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         fi
-        script -c "${COMMAND}" /dev/null | ts
+        script -q -c "${COMMAND}" /dev/null | ts
 
 caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   resource_class: large
@@ -200,7 +200,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
         export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
-        script -c "${COMMAND}" /dev/null | ts
+        script -q -c "${COMMAND}" /dev/null | ts
 
         # Push intermediate Docker image for next phase to use
         if [ -z "${BUILD_ONLY}" ]; then
@@ -274,14 +274,14 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
         if [ -n "${CUDA_VERSION}" ]; then
-          id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         else
-          id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         fi
         docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
 
         export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
-        script -c "${COMMAND}" /dev/null | ts
+        script -q -c "${COMMAND}" /dev/null | ts
 
 caffe2_macos_build_defaults: &caffe2_macos_build_defaults
   macos:
@@ -583,7 +583,7 @@ jobs:
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
-          id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           docker cp $id:/var/lib/jenkins/workspace/env /home/circleci/project/env
           # This IAM user allows write access to S3 bucket for perf test numbers
@@ -592,7 +592,7 @@ jobs:
           docker cp /home/circleci/project/env $id:/var/lib/jenkins/workspace/env
 
           export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/short-perf-test-gpu.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
-          script -c "${COMMAND}" /dev/null | ts
+          script -q -c "${COMMAND}" /dev/null | ts
 
   pytorch_doc_push:
     environment:
@@ -616,7 +616,7 @@ jobs:
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
-          id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           cat >/home/circleci/project/doc_push_script.sh <<EOL
           # =================== The following code will be executed inside Docker container ===================
@@ -669,7 +669,7 @@ jobs:
           docker cp /home/circleci/project/doc_push_script.sh $id:/var/lib/jenkins/workspace/doc_push_script.sh
 
           export COMMAND='((echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
-          script -c "${COMMAND}" /dev/null | ts
+          script -q -c "${COMMAND}" /dev/null | ts
 
   pytorch_macos_10_13_py3_build:
     macos:
