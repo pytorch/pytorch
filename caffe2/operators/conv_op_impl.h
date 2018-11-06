@@ -25,7 +25,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int G = group_;
-  CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+  CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE_EQ(
       C,
@@ -69,7 +69,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const T* bias_data = nullptr;
   if (InputSize() == 3) {
     const auto& bias = Input(BIAS);
-    CAFFE_ENFORCE_EQ(bias.ndim(), 1);
+    CAFFE_ENFORCE_EQ(bias.dim(), 1);
     CAFFE_ENFORCE_EQ(bias.dim32(0), M);
     bias_data = bias.template data<T>();
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
@@ -191,17 +191,17 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const Tensor& X = Input(INPUT);
   const auto& filter = Input(FILTER);
   Tensor* Y = Output(0);
-  const int N = X.dim32(0), C = X.dim32(X.ndim() - 1);
+  const int N = X.dim32(0), C = X.dim32(X.dim() - 1);
   const int G = group_;
-  CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+  CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE_EQ(
       C,
-      filter.dim32(filter.ndim() - 1) * G,
+      filter.dim32(filter.dim() - 1) * G,
       "Convolution op: input channels does not match: # of input channels ",
       C,
       " is not equal to kernel channels * group: ",
-      filter.dim32(filter.ndim() - 1),
+      filter.dim32(filter.dim() - 1),
       "*",
       G);
   CAFFE_ENFORCE_EQ(
@@ -238,7 +238,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const T* bias_data = nullptr;
   if (InputSize() == 3) {
     const auto& bias = Input(BIAS);
-    CAFFE_ENFORCE_EQ(bias.ndim(), 1);
+    CAFFE_ENFORCE_EQ(bias.dim(), 1);
     CAFFE_ENFORCE_EQ(bias.dim32(0), M);
     bias_data = bias.template data<T>();
   }
@@ -492,7 +492,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int output_image_size = this->GetDimsSize(dY);
 
   ConvPoolOpBase<Context>::ComputePads(input_dims);
-  CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+  CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE_EQ(C, filter.dim32(1) * group_);
 
@@ -690,7 +690,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
   auto* dfilter = Output(FILTER_GRAD);
-  const int N = X.dim32(0), C = X.dim32(X.ndim() - 1);
+  const int N = X.dim32(0), C = X.dim32(X.dim() - 1);
 
   const vector<int> input_dims = this->GetDims(X);
   const int input_image_size = this->GetDimsSize(X);
@@ -700,9 +700,9 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const int output_image_size = this->GetDimsSize(dY);
 
   ConvPoolOpBase<Context>::ComputePads(input_dims);
-  CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+  CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
-  CAFFE_ENFORCE_EQ(C, filter.dim32(filter.ndim() - 1) * group_);
+  CAFFE_ENFORCE_EQ(C, filter.dim32(filter.dim() - 1) * group_);
 
   int kernel_dims_size = 1;
   for (int i = 0; i < kernel_.size(); ++i) {

@@ -15,7 +15,7 @@ void batch_gather_op_cpu_impl(
     const Tensor& indices,
     Tensor* output,
     BaseContext* context) {
-  CAFFE_ENFORCE_GE(data.ndim(), 2, "DATA should be at least 2-D");
+  CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
 
   vector<int64_t> shape;
   shape.push_back(data.size(0));

@@ -4016,7 +4016,10 @@ class TestNN(NNTestCase):
 
         self.assertEqual(x_leaf.grad, grad_x, dtype2prec[dtype])
         for p1, p2 in zip(lstm.parameters(), lstm2.parameters()):
-            self.assertEqual(p1.grad, p2.grad, dtype2prec[dtype])
+            prec = dtype2prec[dtype]
+            if dtype == torch.float16:
+                prec = 2e-2
+            self.assertEqual(p1.grad, p2.grad, prec)
 
     def test_variable_sequence(self):
         self._test_variable_sequence()
@@ -4288,7 +4291,7 @@ class TestNN(NNTestCase):
 
             # input and hiddens are not at the same device
             with self.assertRaisesRegex(RuntimeError,
-                                        r"Expected object of backend CPU but got backend CUDA for argument"):
+                                        r"Input and hidden tensors are not at the same device"):
                 if mode is 'LSTM':
                     model(input, (hidden.to('cuda:0'), hidden.to('cuda:0')))
                 else:
@@ -5968,14 +5971,17 @@ class TestNN(NNTestCase):
     @staticmethod
     def _test_conv_noncontig_weights(self, device):
         for dim in (1, 2, 3):
-            for grouped in (True, False):
+            for grouped in (False, True):
                 nc = 3
                 groups = 3 if grouped else 1
                 w = torch.randn([3] * dim, device=device)
                 w = w.expand([nc, int(nc / groups)] + list(w.shape))
-                x = torch.randn([1, nc] + ([5] * dim), device=device)
-                getattr(F, 'conv{}d'.format(dim))(x, w, groups=groups)
-                getattr(F, 'conv_transpose{}d'.format(dim))(x, w, groups=groups)
+                w = w.detach().requires_grad_()
+                x = torch.randn([1, nc] + ([5] * dim), device=device, requires_grad=True)
+                y = getattr(F, 'conv{}d'.format(dim))(x, w, groups=groups)
+                y.sum().backward()
+                y = getattr(F, 'conv_transpose{}d'.format(dim))(x, w, groups=groups)
+                y.sum().backward()
 
     def test_conv_noncontig_weights(self):
         self._test_conv_noncontig_weights(self, torch.device('cpu'))
