@@ -49,6 +49,7 @@ BlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
   VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<Tensor>()
           << " dims: " << dims;
   // << " options: " << options; (operator<< for Options is in at:: now)
+  // TODO: Blob store Tensor directly?
   return blob->Reset<Tensor>(new Tensor(caffe2::empty(dims, options)));
 }
 
