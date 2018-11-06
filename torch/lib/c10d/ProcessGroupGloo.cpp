@@ -815,22 +815,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     throw std::invalid_argument("ProcessGroupGloo::broadcast: " + msg);
   };
 
-  if (opts.rootRank < 0 || opts.rootRank >= size_) {
-    invalidArgument("invalid root rank: " + std::to_string(opts.rootRank));
-  }
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  assertRootTensor(invalidArgument, opts.rootTensor, inputs.size());
+  assertDense(invalidArgument, inputs);
+  assertTypeAndSizesMatch(invalidArgument, inputs);
 
-  if (opts.rootTensor < 0 || opts.rootTensor >= inputs.size()) {
-    invalidArgument("invalid root tensor: " + std::to_string(opts.rootTensor));
-  }
-
-  const auto& layout = inputs[0].layout();
   const auto& device = inputs[0].device();
-  const auto& type = inputs[0].type();
-  const auto& sizes = inputs[0].sizes();
-  if (layout != at::kStrided) {
-    invalidArgument("only supports dense tensors");
-  }
-
   switch (device.type()) {
     case at::kCPU:
 #ifdef USE_CUDA
@@ -839,12 +829,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
       break;
     default:
       invalidArgument("unsupported device type");
-  }
-
-  // Expect all input tensors to have the same type and sizes
-  for (size_t i = 1; i < inputs.size(); i++) {
-    assertTypeMatch(invalidArgument, type, inputs, i);
-    assertSizesMatch(invalidArgument, sizes, inputs, i);
   }
 
   std::shared_ptr<AsyncBroadcastWork> work;
@@ -975,18 +959,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     throw std::invalid_argument("ProcessGroupGloo::allreduce: " + msg);
   };
 
-  if (inputs.size() == 0) {
-    invalidArgument("requires non-empty tensor list");
-  }
+  assertNonEmpty(invalidArgument, inputs);
+  assertDense(invalidArgument, inputs);
+  assertTypeAndSizesMatch(invalidArgument, inputs);
 
-  const auto& layout = inputs[0].layout();
   const auto& device = inputs[0].device();
-  const auto& type = inputs[0].type();
-  const auto& sizes = inputs[0].sizes();
-  if (layout != at::kStrided) {
-    invalidArgument("only supports dense tensors");
-  }
-
   switch (device.type()) {
     case at::kCPU:
 #ifdef USE_CUDA
@@ -995,12 +972,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
       break;
     default:
       invalidArgument("unsupported device type");
-  }
-
-  // Expect all input tensors to have the same type and sizes
-  for (size_t i = 1; i < inputs.size(); i++) {
-    assertTypeMatch(invalidArgument, type, inputs, i);
-    assertSizesMatch(invalidArgument, sizes, inputs, i);
   }
 
   std::shared_ptr<AsyncAllreduceWork> work;
@@ -1080,23 +1051,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
     throw std::invalid_argument("ProcessGroupGloo::reduce: " + msg);
   };
 
-  if (opts.rootRank < 0 || opts.rootRank >= size_) {
-    invalidArgument("invalid root rank: " + std::to_string(opts.rootRank));
-  }
-
-  if (opts.rootTensor < 0 || opts.rootTensor >= inputs.size()) {
-    invalidArgument("invalid root tensor: " + std::to_string(opts.rootTensor));
-  }
-
-  if (inputs.size() != 1) {
-    invalidArgument("requires a single input/output tensor");
-  }
-
-  const auto& layout = inputs[0].layout();
-  const auto& device = inputs[0].device();
-  if (layout != at::kStrided || device.type() != at::kCPU) {
-    invalidArgument("only supports dense CPU tensors");
-  }
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  assertRootTensor(invalidArgument, opts.rootTensor, inputs.size());
+  assertSingleElement(invalidArgument, inputs);
+  assertDense(invalidArgument, inputs);
+  assertCPU(invalidArgument, inputs);
 
   auto work = std::make_shared<AsyncReduceWork>(
       contexts_[0],
@@ -1169,34 +1128,25 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   }
 
   for (size_t i = 0; i < outputs.size(); i++) {
-    if (outputs[i].size() != inputs.size() * getSize()) {
+    const auto expected = inputs.size() * getSize();
+    const auto actual = outputs[i].size();
+    if (actual != expected) {
       invalidArgument(
           "invalid output tensor list at index " + std::to_string(i) +
-          " (expected length " + std::to_string(getSize()) + ", got " +
-          std::to_string(outputs[i].size()) + ")");
+          " (expected length " + std::to_string(expected) + ", got " +
+          std::to_string(actual) + ")");
     }
   }
 
-  const auto& layout = inputs[0].layout();
-  const auto& device = inputs[0].device();
+  assertDense(invalidArgument, inputs);
+  assertCPU(invalidArgument, inputs);
+
+  // Expect all input/output tensors to have the same type and sizes
   const auto& type = inputs[0].type();
   const auto& sizes = inputs[0].sizes();
-  if (layout != at::kStrided || device.type() != at::kCPU) {
-    invalidArgument("only supports dense CPU tensors");
-  }
-
-  // Expect all input tensors to have the same type and sizes
-  for (size_t i = 1; i < inputs.size(); i++) {
-    assertTypeMatch(invalidArgument, type, inputs, i);
-    assertSizesMatch(invalidArgument, sizes, inputs, i);
-  }
-
-  // Expect all output tensors to have the same type and sizes
+  assertTypeAndSizesMatch(invalidArgument, inputs, type, sizes);
   for (size_t i = 0; i < outputs.size(); i++) {
-    for (size_t j = 1; j < outputs[i].size(); j++) {
-      assertTypeMatch(invalidArgument, type, outputs[i], j);
-      assertSizesMatch(invalidArgument, sizes, outputs[i], j);
-    }
+    assertTypeAndSizesMatch(invalidArgument, outputs[i], type, sizes);
   }
 
   auto work = std::make_shared<AsyncAllgatherWork>(
@@ -1264,33 +1214,21 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
     throw std::invalid_argument("ProcessGroupGloo::gather: " + msg);
   };
 
-  if (opts.rootRank < 0 || opts.rootRank >= size_) {
-    invalidArgument("invalid root rank: " + std::to_string(opts.rootRank));
-  }
-
-  if (inputs.size() != 1) {
-    invalidArgument("requires a single input tensor");
-  }
-
-  const auto& layout = inputs[0].layout();
-  const auto& device = inputs[0].device();
-  const auto& type = inputs[0].type();
-  const auto& sizes = inputs[0].sizes();
-  if (layout != at::kStrided || device.type() != at::kCPU) {
-    invalidArgument("only supports dense CPU tensors");
-  }
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  assertSingleElementInput(invalidArgument, inputs);
+  assertDense(invalidArgument, inputs);
+  assertCPU(invalidArgument, inputs);
 
   if (getRank() == opts.rootRank) {
     if (outputs.size() != 1 || outputs[0].size() != getSize()) {
       invalidArgument(
-          "requires single output tensor list, "
-          "itself containing <size> output tensors");
+          "requires a single-element output list "
+          "containing a list with <size> tensors");
     }
-    const auto& output = outputs[0];
-    for (size_t i = 0; i < output.size(); i++) {
-      assertTypeMatch(invalidArgument, type, output, i);
-      assertSizesMatch(invalidArgument, sizes, output, i);
-    }
+
+    const auto& type = inputs[0].type();
+    const auto& sizes = inputs[0].sizes();
+    assertTypeAndSizesMatch(invalidArgument, outputs[0], type, sizes);
   } else {
     if (outputs.size() != 0) {
       invalidArgument("requires empty output on non-root");
@@ -1352,33 +1290,20 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
     throw std::invalid_argument("ProcessGroupGloo::scatter: " + msg);
   };
 
-  if (opts.rootRank < 0 || opts.rootRank >= size_) {
-    invalidArgument("invalid root rank: " + std::to_string(opts.rootRank));
-  }
-
-  if (outputs.size() != 1) {
-    invalidArgument("requires a single output tensor");
-  }
-
-  const auto& layout = outputs[0].layout();
-  const auto& device = outputs[0].device();
-  const auto& type = outputs[0].type();
-  const auto& sizes = outputs[0].sizes();
-  if (layout != at::kStrided || device.type() != at::kCPU) {
-    invalidArgument("only supports dense CPU tensors");
-  }
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  assertSingleElementOutput(invalidArgument, outputs);
+  assertDense(invalidArgument, outputs);
+  assertCPU(invalidArgument, outputs);
 
   if (getRank() == opts.rootRank) {
     if (inputs.size() != 1 || inputs[0].size() != getSize()) {
       invalidArgument(
-          "requires single input tensor list, "
-          "itself containing <size> input tensors");
+          "requires a single-element input list "
+          "containing a list with <size> tensors");
     }
-    const auto& input = inputs[0];
-    for (size_t i = 0; i < input.size(); i++) {
-      assertTypeMatch(invalidArgument, type, input, i);
-      assertSizesMatch(invalidArgument, sizes, input, i);
-    }
+    const auto& type = outputs[0].type();
+    const auto& sizes = outputs[0].sizes();
+    assertTypeAndSizesMatch(invalidArgument, inputs[0], type, sizes);
   } else {
     if (inputs.size() != 0) {
       invalidArgument("requires empty input on non-root");
