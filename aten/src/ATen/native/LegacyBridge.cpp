@@ -105,6 +105,8 @@ Tensor& addmm_out(Tensor& result, const Tensor& self, const Tensor& mat1, const 
   if (mat1_sparse) {
     Tensor b_self;
     std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+    //b_self.expand_as(mat1);
+    //b_self.expand_as(mat2);
     return s_native_addmm_out(result, b_self, mat1, mat2, beta, alpha);
   } else {
     return _th_addmm_out(result, self, mat1, mat2, beta, alpha);
@@ -117,6 +119,8 @@ Tensor addmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar 
   if (mat1_sparse) {
     Tensor b_self;
     std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+    //b_self.expand_as(mat1);
+    //b_self.expand_as(mat2);
     return s_native_addmm(b_self, mat1, mat2, beta, alpha);
   } else {
     return _th_addmm(self, mat1, mat2, beta, alpha);
