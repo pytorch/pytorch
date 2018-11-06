@@ -106,7 +106,7 @@ class CAFFE2_API TensorSerializer : public BlobSerializerBase {
 class CAFFE2_API TensorDeserializer : public BlobDeserializerBase {
  public:
   void Deserialize(const BlobProto& proto, Blob* blob) override;
-  void Deserialize(const TensorProto& proto, Tensor* tensor);
+  Tensor Deserialize(const TensorProto& proto);
 };
 
 ////////////////////////////////////////////////////////////////////////////////

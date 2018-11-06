@@ -55,14 +55,10 @@ bool TensorProtosDBInput<Context>::Prefetch() {
       if (protos.protos(i).has_device_detail()) {
         protos.mutable_protos(i)->clear_device_detail();
       }
-      deserializer.Deserialize(
-          protos.protos(i), BlobGetMutableTensor(&prefetched_blobs_[i], CPU));
+      prefetched_blobs_[i].template Reset<Tensor>(new Tensor(deserializer.Deserialize(
+                                                        protos.protos(i))));
     }
   } else {
-    vector<Tensor> temp_tensors;
-    for (int i = 0; i < OutputSize(); ++i) {
-      temp_tensors.emplace_back(CPU);
-    }
     for (int item_id = 0; item_id < batch_size_; ++item_id) {
       reader.Read(&key_, &value_);
       TensorProtos protos;
@@ -79,11 +75,10 @@ bool TensorProtosDBInput<Context>::Prefetch() {
       }
       for (int i = 0; i < protos.protos_size(); ++i) {
         TensorCPU* dst = BlobGetMutableTensor(&prefetched_blobs_[i], CPU);
-        TensorCPU& src = temp_tensors[i];
         if (protos.protos(i).has_device_detail()) {
           protos.mutable_protos(i)->clear_device_detail();
         }
-        deserializer.Deserialize(protos.protos(i), &src);
+        auto src = deserializer.Deserialize(protos.protos(i));
         DCHECK_EQ(src.numel() * batch_size_, dst->numel());
         this->context_.CopyItemsSameDevice(
             src.dtype(),
