@@ -16,36 +16,59 @@ namespace at {
 /// changes it back to the device (for that device type) that was originally
 /// active upon destruction.
 ///
-/// If a DeviceGuard is constructed without specifying a device type (this can
-/// occur if you, e.g., pass a nullopt to the constructor), it behaves as if it
-/// were a no-op "CPU" guard; e.g., current_device() reports that the current
-/// device is kCPU.  This is different from passing Device(kCUDA, -1), which
-/// says to use the current CUDA device; in this case, we will correctly query
-/// what the current CUDA device is, won't change it, but WILL reset it
-/// at the end of DeviceGuard.
+/// A DeviceGuard is constructed without specifying a device type (this can
+/// occur if you, e.g., pass a nullopt to the constructor), behaves differently
+/// from Device(kCUDA, -1), which says to use the current CUDA device. In the
+/// former case, DeviceGuard truly does nothing; in the latter case, we will
+/// query what the current CUDA device is, and reset it at the end of
+/// DeviceGuard (in case someone inside the guard had set the device to
+/// something else.
 class DeviceGuard {
 public:
+
+  // Note [Explicit initialization of optional fields]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // Explicit initialization of original_device_ and last_device_ is
+  // required to workaround an nvcc bug; see https://github.com/pytorch/pytorch/issues/12117
+  //
+  // Furthermore, if you ever store DeviceGuard as a field in another
+  // struct, you must initialize DeviceGuard itself.  (It will be hard
+  // to not do this, since the default constructor for DeviceGuard is
+  // very useless.)
+
   /// Set the current device to the passed Device.
-  explicit DeviceGuard(Device device) {
+  explicit DeviceGuard(Device device)
+    // See Note [Explicit initialization of optional fields]
+    : original_device_()
+    , current_device_() {
     init_device(device);
   }
 
   /// Set the current device to the passed Device, if not nullopt;
   /// otherwise do nothing.
-  explicit DeviceGuard(optional<Device> device_opt) {
+  explicit DeviceGuard(optional<Device> device_opt)
+    // See Note [Explicit initialization of optional fields]
+    : original_device_()
+    , current_device_() {
     if (device_opt.has_value()) {
       init_device(device_opt.value());
     }
   }
 
   /// Sets the current device to the device on which the given tensor is located.
-  explicit DeviceGuard(const Tensor& tensor) {
+  explicit DeviceGuard(const Tensor& tensor)
+    // See Note [Explicit initialization of optional fields]
+    : original_device_()
+    , current_device_() {
     init_device_from(tensor);
   }
 
   /// Sets the current device to the device on which the first tensor in the list is
   /// located. If the list is empty, does nothing.
-  explicit DeviceGuard(const TensorList& tensors) {
+  explicit DeviceGuard(const TensorList& tensors)
+    // See Note [Explicit initialization of optional fields]
+    : original_device_()
+    , current_device_() {
     if (!tensors.empty()) {
       init_device_from(tensors.front());
     }
@@ -53,7 +76,10 @@ public:
 
   /// A constructor for testing; permits explicitly passing in the
   /// DeviceGuardImpl.
-  explicit DeviceGuard(Device device, const detail::DeviceGuardImplInterface* impl) {
+  explicit DeviceGuard(Device device, const detail::DeviceGuardImplInterface* impl)
+    // See Note [Explicit initialization of optional fields]
+    : original_device_()
+    , current_device_() {
     init_device(device, impl);
   }
 
@@ -151,34 +177,35 @@ public:
     // any unmanaged setDevice calls inside the body of the guard.
     // if (original_device_ == current_device_) return;
     if (!impl_) return;
-    impl_->uncheckedSetDevice(original_device_);
+    if (original_device_.has_value()) {
+      impl_->uncheckedSetDevice(original_device_.value());
+    }
   }
 
   /// Returns the device that was set prior to construction of the guard.
-  Device original_device() const noexcept {
+  /// nullopt if the guard is uninitialized.
+  optional<Device> original_device() const noexcept {
     return original_device_;
   }
 
   /// Returns the device that was set after construction of the guard.
-  Device current_device() const noexcept {
+  /// nullopt if the guard is uninitialized.
+  optional<Device> current_device() const noexcept {
     return current_device_;
   }
 
  private:
   void init_device(Device device, const detail::DeviceGuardImplInterface* impl = nullptr) {
-    if (device.type() == at::kCPU) {
-      return;
-    }
     impl_ = impl ? impl : detail::getDeviceGuardImpl(device.type());
     if (impl) {
       AT_ASSERT(impl->type() == device.type());
     }
     if (device.index() == -1) {
-      original_device_ = impl_->getDevice();
+      original_device_ = make_optional(impl_->getDevice());
       current_device_ = original_device_;
     } else {
-      original_device_ = impl_->exchangeDevice(device);
-      current_device_ = device;
+      original_device_ = make_optional(impl_->exchangeDevice(device));
+      current_device_ = make_optional(device);
     }
   }
 
@@ -189,20 +216,22 @@ public:
   }
 
   /// The original device that was active at construction of this object,
-  /// for the device type that this DeviceGuard is changing.  Defaults to
-  /// kCPU if no device type is specified for DeviceGuard.
-  Device original_device_ = at::kCPU;
+  /// for the device type that this DeviceGuard is changing.  Is nullopt for an
+  /// uninitialized DeviceGuard, e.g., one which we didn't actually specify any
+  /// device to change to.
+
+  optional<Device> original_device_;
 
   /// The last device that was set via `set_device`, or the previous
-  /// device, if no device was set.  Defaults to kCPU if no device type is
-  /// specified for DeviceGuard.
-  Device current_device_ = at::kCPU;
+  /// device, if no device was set.  Is nullopt for an "inert" DeviceGuard;
+  /// e.g., one which we didn't actually specify any device to change to.
+  optional<Device> current_device_;
 
   /// Cached pointer to the interface which actually implements the operations
   /// needed for the DeviceGuard.  This is nullptr if the guard is for CPU.
   const detail::DeviceGuardImplInterface* impl_ = nullptr;
 
   // Member invariants:
-  //    !impl_ <==> original_device_ == at::kCPU <==> current_device_ == at::kCPU
+  //    !impl_ <==> original_device_ == nullopt <==> current_device_ == nullopt
 };
 } // namespace at
