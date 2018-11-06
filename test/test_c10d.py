@@ -37,6 +37,7 @@ TestSkip = namedtuple('TestSkip', 'exit_code, message')
 TEST_SKIPS = {
     "multi-gpu": TestSkip(75, "Need at least 2 CUDA devices"),
     "nccl": TestSkip(76, "c10d not compiled with NCCL support"),
+    "known_issues": TestSkip(77, "Test skipped due to known issues")
 }
 
 
@@ -58,6 +59,15 @@ def skip_if_not_nccl(func):
         if hasattr(c10d, "ProcessGroupNCCL"):
             return func(*args, **kwargs)
         sys.exit(TEST_SKIPS['nccl'].exit_code)
+
+    return wrapper
+
+
+def skip_for_known_issues(func):
+    """Skips a test due to known issues (for c10d)."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        sys.exit(TEST_SKIPS['known_issues'].exit_code)
 
     return wrapper
 
@@ -627,37 +637,37 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootRank = self.world_size
             pg.scatter([t1], [], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single output tensor"):
+        with self.assertRaisesRegex(ValueError, "requires a single-element output tensor list"):
             opts = c10d.ScatterOptions()
             opts.rootRank = 0
             pg.scatter([], [], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single output tensor"):
+        with self.assertRaisesRegex(ValueError, "requires a single-element output tensor list"):
             opts = c10d.ScatterOptions()
             opts.rootRank = 0
             pg.scatter([t1, t1], [], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires single input tensor list"):
+        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
             pg.scatter([t1], [], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires single input tensor list"):
+        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
             pg.scatter([t1], [[t1] * self.world_size, [t1] * self.world_size], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires single input tensor list"):
+        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
             pg.scatter([t1], [[t1] * (self.world_size - 1)], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires single input tensor list"):
+        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
             pg.scatter([t1], [[t1] * (self.world_size + 1)], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires single input tensor list"):
+        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
             pg.scatter([t1], [[t1] * (self.world_size + 1)], opts)
@@ -718,32 +728,32 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootRank = self.world_size
             pg.gather([], [t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single input tensor"):
+        with self.assertRaisesRegex(ValueError, "requires a single-element input tensor list"):
             opts = c10d.GatherOptions()
             opts.rootRank = 0
             pg.gather([], [], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single input tensor"):
+        with self.assertRaisesRegex(ValueError, "requires a single-element input tensor list"):
             opts = c10d.GatherOptions()
             opts.rootRank = 0
             pg.gather([], [t1, t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires single output tensor list"):
+        with self.assertRaisesRegex(ValueError, "requires a single-element output list"):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
             pg.gather([], [t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires single output tensor list"):
+        with self.assertRaisesRegex(ValueError, "requires a single-element output list"):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
             pg.gather([[t1] * self.world_size, [t1] * self.world_size], [t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires single output tensor list"):
+        with self.assertRaisesRegex(ValueError, "requires a single-element output list"):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
             pg.gather([[t1] * (self.world_size - 1)], [t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires single output tensor list"):
+        with self.assertRaisesRegex(ValueError, "requires a single-element output list"):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
             pg.gather([[t1] * (self.world_size + 1)], [t1], opts)
@@ -870,7 +880,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootTensor = 1
             pg.reduce([t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single input/output tensor"):
+        with self.assertRaisesRegex(ValueError, "requires a single-element tensor list"):
             opts = c10d.ReduceOptions()
             opts.rootRank = self.rank
             opts.rootTensor = 0
@@ -1176,6 +1186,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @skip_if_not_multigpu
     @skip_if_not_nccl
+    @skip_for_known_issues
     def test_dist_broadcast_coalesced_nccl(self):
         store = c10d.FileStore(self.file.name)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)

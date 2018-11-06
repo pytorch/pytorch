@@ -1318,6 +1318,20 @@ _builtin_blacklist = {
     'hardshrink',
     'adaptive_avg_pool2d',
     'adaptive_avg_pool3d',
+    'threshold',
+
+    # ops with inplace option
+    'relu',
+    'hardtanh',
+    'relu6',
+    'elu',
+    'selu',
+    'celu',
+    'leaky_relu',
+    'rrelu',
+    'tanh',
+    'sigmoid',
+
     'dropout',
     'alpha_dropout',
     'dropout2d',
@@ -1328,6 +1342,11 @@ _builtin_blacklist = {
 
 def _should_skip(mod, name):
     return mod is torch.nn.functional and name in _builtin_blacklist
+
+
+def _unwrap_optional(x):
+    assert x is not None, "Unwrapping null optional"
+    return x
 
 
 # lazily built to ensure the correct initialization order
@@ -1350,7 +1369,11 @@ def _get_builtin_table():
     _builtin_table[id(_pair)] = "aten::_pair"
     _builtin_table[id(_triple)] = "aten::_triple"
     _builtin_table[id(_quadruple)] = "aten::_quadruple"
+<<<<<<< HEAD
     _builtin_table[id(_list_with_default)] = "aten::list_with_default"
+=======
+    _builtin_table[id(_unwrap_optional)] = "aten::_unwrap_optional"
+>>>>>>> 137150be88cf468e0f41fc1cb8af845bf83d7f95
 
     return _builtin_table
 

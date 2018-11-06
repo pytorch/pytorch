@@ -1,3 +1,17 @@
+"""
+To run this file by hand from the root of the PyTorch
+repository, run:
+
+python -m tools.jit.gen_jit_dispatch \
+       build/aten/src/ATen/Declarations.yaml \
+       $OUTPUT_DIR \
+       tools/jit/templates
+
+Where $OUTPUT_DIR is where you would like the files to be
+generated.  In the full build system, OUTPUT_DIR is
+torch/csrc/jit/generated/
+"""
+
 import os
 import argparse
 import re
