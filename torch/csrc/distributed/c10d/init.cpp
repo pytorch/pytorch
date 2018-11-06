@@ -398,6 +398,14 @@ PyObject* c10d_init(PyObject* _unused) {
 
 #ifdef USE_CUDA
   module.def(
+      "_dist_bucket_tensors",
+      &::c10d::bucketTensors,
+      py::arg("tensors"),
+      py::arg("bucket_size"),
+      py::arg("fine_grained"),
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
       "_dist_broadcast_coalesced",
       &::c10d::distBroadcastCoalesced,
       py::arg("process_group"),
