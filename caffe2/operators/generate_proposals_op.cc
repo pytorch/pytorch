@@ -11,7 +11,7 @@ namespace {
 size_t ComputeStartIndex(
     const TensorCPU& tensor,
     const std::vector<int>& index) {
-  DCHECK_EQ(index.size(), tensor.ndim());
+  DCHECK_EQ(index.size(), tensor.dim());
 
   size_t ret = 0;
   for (int i = 0; i < index.size(); i++) {
@@ -32,7 +32,7 @@ utils::ConstTensorView<T> GetSubTensorView(
     return utils::ConstTensorView<T>(nullptr, {});
   }
 
-  std::vector<int> start_dims(tensor.ndim(), 0);
+  std::vector<int> start_dims(tensor.dim(), 0);
   start_dims.at(0) = dim0_start_index;
   auto st_idx = ComputeStartIndex(tensor, start_dims);
   auto ptr = tensor.data<T>() + st_idx;
@@ -224,7 +224,7 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   auto* out_rois = Output(0);
   auto* out_rois_probs = Output(1);
 
-  CAFFE_ENFORCE_EQ(scores.ndim(), 4, scores.ndim());
+  CAFFE_ENFORCE_EQ(scores.dim(), 4, scores.dim());
   CAFFE_ENFORCE(scores.template IsType<float>(), scores.dtype().name());
   const auto num_images = scores.size(0);
   const auto A = scores.size(1);

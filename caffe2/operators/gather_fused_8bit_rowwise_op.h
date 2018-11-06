@@ -23,8 +23,8 @@ class GatherFused8BitRowwiseOp : public Operator<Context> {
     const auto& indices = Input(INDICES);
     auto* output = Output(0);
 
-    CAFFE_ENFORCE_EQ(data.ndim(), 2, "DATA must be a matrix");
-    CAFFE_ENFORCE_EQ(indices.ndim(), 1, "INDICES must be a vector");
+    CAFFE_ENFORCE_EQ(data.dim(), 2, "DATA must be a matrix");
+    CAFFE_ENFORCE_EQ(indices.dim(), 1, "INDICES must be a vector");
     CAFFE_ENFORCE_GT(data.size(1), 8, "DATA must have more than 8 columns");
     // Subtract 8 from the #columns of data for the 4 bytes for scale and 4
     // bytes for bias that we use in the fused representation (per row).
