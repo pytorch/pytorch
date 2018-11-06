@@ -391,6 +391,7 @@ method_tests = [
     ('repeat', (2, 2), (1, 3, 1, 2), 'unsqueeze'),
     ('cumsum', (S, S, S), (0,), 'dim0', [0]),
     ('cumsum', (S, S, S), (1,), 'dim1', [0]),
+    ('cumsum', (S, S, S), (1,), 'dim1_cast', [0], (), lambda x: x, {'dtype': torch.float64}),
     ('cumsum', (), (0,), 'dim0_scalar', [0]),
     ('cumprod', (S, S, S), (0,)),
     ('cumprod', (S, S, S), (1,), 'dim1', [0]),
