@@ -7256,6 +7256,13 @@ a")
 
         self.checkScript(test, (3,))
 
+        with self.assertRaisesRegex(AssertionError, "Unwrapping null optional"):
+            test(None)
+
+        test_script = torch.jit.script(test)
+        with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
+            test_script(None)
+
         with self.assertRaisesRegex(RuntimeError, "cannot match a optional to int"):
             @torch.jit.script
             def test_test():

@@ -1321,6 +1321,7 @@ def _should_skip(mod, name):
 
 
 def _unwrap_optional(x):
+    assert x is not None, "Unwrapping null optional"
     return x
 
 
