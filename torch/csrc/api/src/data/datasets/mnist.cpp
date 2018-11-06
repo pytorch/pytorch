@@ -104,12 +104,12 @@ Example<> MNIST::get(size_t index) {
   return {images_[index], targets_[index]};
 }
 
-size_t MNIST::size() const {
+optional<size_t> MNIST::size() const {
   return images_.size(0);
 }
 
 bool MNIST::is_train() const noexcept {
-  return size() == kTrainSize;
+  return images_.size(0) == kTrainSize;
 }
 
 } // namespace datasets
