@@ -2521,6 +2521,7 @@ void Col2Im<float, HIPContext, StorageOrder::NCHW>(
     float* img_data,
     HIPContext* context,
     const int /* groups */) {
+  // In NCHW, the number of groups doesn't affect Im2Col.
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2611,7 +2612,9 @@ void Im2ColNd<float, HIPContext, StorageOrder::NCHW>(
     const int* pad,
     const float* img_data,
     float* col_data,
-    HIPContext* context) {
+    HIPContext* context,
+    const int /* groups */) {
+  // In NCHW, the number of groups doesn't affect Im2Col.
   DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
       N,
       Im2ColNdNCHWHIPImpl,
@@ -2630,6 +2633,24 @@ void Im2ColNd<float, HIPContext, StorageOrder::NCHW>(
 }
 
 template <>
+void Im2ColNd<float, HIPContext, StorageOrder::NHWC>(
+    const int N,
+    const int img_size,
+    const int col_size,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const float* img_data,
+    float* col_data,
+    HIPContext* context,
+    const int groups) {
+  CAFFE_NOT_IMPLEMENTED;
+}
+
+template <>
 void Col2ImNd<float, HIPContext, StorageOrder::NCHW>(
     const int N,
     const int img_size,
@@ -2642,7 +2663,9 @@ void Col2ImNd<float, HIPContext, StorageOrder::NCHW>(
     const int* pad,
     const float* col_data,
     float* img_data,
-    HIPContext* context) {
+    HIPContext* context,
+    const int /* groups */) {
+  // In NCHW, the number of groups doesn't affect Col2Im.
   DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
       N,
       Col2ImNdNCHWHIPImpl,
@@ -2658,6 +2681,24 @@ void Col2ImNd<float, HIPContext, StorageOrder::NCHW>(
       col_data,
       img_data,
       context);
+}
+
+template <>
+void Col2ImNd<float, HIPContext, StorageOrder::NHWC>(
+    const int N,
+    const int img_size,
+    const int col_size,
+    const int* img_shape,
+    const int* col_shape,
+    const int* kernel_shape,
+    const int* stride,
+    const int* dilation,
+    const int* pad,
+    const float* col_data,
+    float* img_data,
+    HIPContext* context,
+    const int groups) {
+  CAFFE_NOT_IMPLEMENTED;
 }
 
 template <>

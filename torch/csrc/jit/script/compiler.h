@@ -89,17 +89,17 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
 struct TORCH_API SimpleValue : public SugaredValue {
   SimpleValue(Value * value)
   : value(value) {}
-  virtual std::string kind() const override {
+  std::string kind() const override {
     return "value";
   }
-  virtual Value * asValue(SourceRange range, Method & m) override {
+  Value * asValue(SourceRange range, Method & m) override {
     return value;
   }
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(
       SourceRange loc,
       Method& m,
       c10::optional<size_t> size_hint = {}) override;
-  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override;
+  std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override;
   Value* getValue() const {
     return value;
   }
@@ -129,8 +129,8 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
 };
 
 struct TORCH_API BuiltinModule : public SugaredValue {
-  BuiltinModule(const std::string& name)
-    : name(name) {}
+  BuiltinModule(std::string name)
+    : name(std::move(name)) {}
   std::string name;
 
   std::string kind() const override {
@@ -143,7 +143,7 @@ struct TORCH_API BuiltinModule : public SugaredValue {
 };
 
 struct TORCH_API ForkValue : public SugaredValue {
-  ForkValue() {}
+  ForkValue() = default;
 
   std::string kind() const override {
     return "fork";
@@ -194,7 +194,7 @@ struct MethodValue : public SugaredValue {
   std::string kind() const override {
     return "method";
   }
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+  std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     return std::make_shared<SimpleValue>(packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
   }
 private:

@@ -491,11 +491,11 @@ std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some, bool comput
   return at::_th_svd(self, some, compute_uv);
 }
 
-Tensor & potrf_out(Tensor & result, const Tensor & self, bool upper) {
+Tensor & cholesky_out(Tensor & result, const Tensor & self, bool upper) {
   return at::_th_potrf_out(result, self, upper);
 }
 
-Tensor potrf(const Tensor & self, bool upper) {
+Tensor cholesky(const Tensor & self, bool upper) {
   return at::_th_potrf(self, upper);
 }
 
@@ -825,6 +825,86 @@ Tensor & _dirichlet_grad_out(Tensor & output, const Tensor & x, const Tensor & a
 
 Tensor _dirichlet_grad(const Tensor & x, const Tensor & alpha, const Tensor & total) {
   return at::_th_dirichlet_grad(x, alpha, total);
+}
+
+Tensor __and__(const Tensor & self, Scalar other) {
+  return at::_th_and(self, other);
+}
+
+Tensor __and__(const Tensor & self, const Tensor & other) {
+  return at::_th_and(self, other);
+}
+
+Tensor __or__(const Tensor & self, Scalar other) {
+  return at::_th_or(self, other);
+}
+
+Tensor __or__(const Tensor & self, const Tensor & other) {
+  return at::_th_or(self, other);
+}
+
+Tensor __xor__(const Tensor & self, Scalar other) {
+  return at::_th_xor(self, other);
+}
+
+Tensor __xor__(const Tensor & self, const Tensor & other) {
+  return at::_th_xor(self, other);
+}
+
+Tensor __lshift__(const Tensor & self, Scalar other) {
+  return at::_th_lshift(self, other);
+}
+
+Tensor __lshift__(const Tensor & self, const Tensor & other) {
+  return at::_th_lshift(self, other);
+}
+
+Tensor __rshift__(const Tensor & self, Scalar other) {
+  return at::_th_rshift(self, other);
+}
+
+Tensor __rshift__(const Tensor & self, const Tensor & other) {
+  return at::_th_rshift(self, other);
+}
+
+Tensor & __iand__(Tensor & self, Scalar other) {
+  return self._th_iand_(other);
+}
+
+Tensor & __iand__(Tensor & self, const Tensor & other) {
+  return self._th_iand_(other);
+}
+
+Tensor & __ior__(Tensor & self, Scalar other) {
+  return self._th_ior_(other);
+}
+
+Tensor & __ior__(Tensor & self, const Tensor & other) {
+  return self._th_ior_(other);
+}
+
+Tensor & __ixor__(Tensor & self, Scalar other) {
+  return self._th_ixor_(other);
+}
+
+Tensor & __ixor__(Tensor & self, const Tensor & other) {
+  return self._th_ixor_(other);
+}
+
+Tensor & __ilshift__(Tensor & self, Scalar other) {
+  return self._th_ilshift_(other);
+}
+
+Tensor & __ilshift__(Tensor & self, const Tensor & other) {
+  return self._th_ilshift_(other);
+}
+
+Tensor & __irshift__(Tensor & self, Scalar other) {
+  return self._th_irshift_(other);
+}
+
+Tensor & __irshift__(Tensor & self, const Tensor & other) {
+  return self._th_irshift_(other);
 }
 
 }} // namespace at::native
