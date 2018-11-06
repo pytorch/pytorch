@@ -146,7 +146,7 @@ void IntermediateParameter::dump(torch::ParameterDef* param_def) {
   tensor_.dump(tensor_def);
 }
 
-IntermediateMethod::IntermediateMethod(torch::MethodDef* method_def) {
+IntermediateMethod::IntermediateMethod(torch::MethodDef* method_def) noexcept {
   AT_ASSERTM(method_def->has_name(), "name is required for MethodDef!");
   name_ = method_def->name();
   if (method_def->has_torch_script()) {
@@ -158,18 +158,18 @@ IntermediateMethod::IntermediateMethod(torch::MethodDef* method_def) {
   }
 }
 
-//IntermediateMethod::IntermediateMethod(IntermediateMethod&& method) noexcept {
-//  name_ = method.name_;
-//  graph_ = std::move(method.graph_);
-//  torchScript_ = method.torchScript_;
-//}
-//
-//IntermediateMethod& IntermediateMethod::operator =(IntermediateMethod&& method) noexcept{
-//  name_ = method.name_;
-//  graph_ = std::move(method.graph_);
-//  torchScript_ = method.torchScript_;
-//  return *this;
-//}
+IntermediateMethod::IntermediateMethod(IntermediateMethod&& method) noexcept {
+  name_ = std::move(method.name_);
+  graph_ = std::move(method.graph_);
+  torchScript_ = std::move(method.torchScript_);
+}
+
+IntermediateMethod& IntermediateMethod::operator =(IntermediateMethod&& method) noexcept{
+  name_ = std::move(method.name_);
+  graph_ = std::move(method.graph_);
+  torchScript_ = std::move(method.torchScript_);
+  return *this;
+}
 
 void IntermediateMethod::dump(torch::MethodDef* method_def) {
   AT_ASSERTM(name_.size() > 0, "IntermediateMethod's name is invalid. name: ", name_);
