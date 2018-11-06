@@ -135,7 +135,7 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
   // Stream guards, now the current stream is the worker stream
   std::vector<at::cuda::CUDAGuard> cudaGuards;
   for (size_t devIdx = 0; devIdx < devices.size(); ++devIdx) {
-    cudaGuards.push_back(at::cuda::CUDAGuard(workerStreams[devIdx]));
+    cudaGuards.emplace_back(workerStreams[devIdx]);
   }
 
   std::vector<at::Tensor> gradsBatchCoalesced;

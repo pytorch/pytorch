@@ -97,7 +97,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
   std::vector<at::cuda::CUDAGuard> createStreamGuard() {
     std::vector<at::cuda::CUDAGuard> guards;
     for (auto& stream : streams_) {
-      guards.push_back(at::cuda::CUDAGuard(stream));
+      guards.emplace_back(stream);
     }
     return guards;
   }
