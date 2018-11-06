@@ -731,19 +731,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void resize_dim(int64_t ndim) {
-    auto old_dim = sizes_.size();
     sizes_.resize(ndim, 0);
-    if (old_dim != sizes_.size()) {
-      auto new_strides = c10::guts::make_unique<int64_t[]>(ndim);
-      for (size_t i = 0; i < std::min(old_dim, static_cast<size_t>(ndim)); i++) {
-        new_strides[i] = strides_[i];
-      }
-      for (size_t i = old_dim; i < static_cast<size_t>(ndim); i++) {
-        // If ndim < old_dim, this loop never executes
-        new_strides[i] = 0;
-      }
-      strides_ = std::move(new_strides);
-    }
+    strides_.resize(ndim, 0);
     refresh_numel();
     refresh_contiguous();
   }
@@ -798,7 +787,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   void set_sizes_contiguous(at::IntList new_size) {
     AT_ASSERT(!is_variable());
     auto old_dim = sizes_.size();
-    sizes_ = new_size.vec();
+    sizes_ = new_size;
 
     update_to_contiguous_strides(old_dim);
     refresh_numel();
@@ -823,12 +812,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         ") must match dimensionality of strides (",
         new_stride.size(),
         ")");
-    auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
-    sizes_ = new_size.vec();
-    if (old_dim != new_dim) {
-      strides_.reset(new int64_t[new_dim]);
-    }
+    strides_.resize(new_dim, 0);
+    sizes_.resize(new_dim, 0);
+    sizes_ = new_size;
 
     if (new_dim > 0) {
       for (size_t dim = new_dim - 1; ; dim--) {
@@ -1369,9 +1356,7 @@ private:
   }
 
   inline void update_to_contiguous_strides(size_t old_dim) {
-    if (old_dim != sizes_.size()) {
-      strides_ = c10::guts::make_unique<int64_t[]>(sizes_.size());
-    }
+    strides_.resize(sizes_.size(), 0);
     if (dim() > 0) {
       int last_idx = dim() - 1;
       strides_[last_idx] = 1;
@@ -1421,8 +1406,8 @@ public:
   at::Storage storage_; // TODO: Fix visibility on me
 
 protected:
-  std::vector<int64_t> sizes_;
-  std::unique_ptr<int64_t[]> strides_; // this saves two words
+  at::SmallVector<int64_t,5> sizes_;
+  at::SmallVector<int64_t,5> strides_;
 
   int64_t storage_offset_ = 0;
   // If sizes and strides are empty, the numel is 1!!  However, most of the
@@ -1480,17 +1465,16 @@ protected:
 //    strong refcount           TODO: pack these into one word
 //    weak refcount
 //    storage pointer
-//    sizes vector (start)
-//    sizes vector (end)
+//    sizes SmallVector
 //    sizes vector (reserved)   TODO: get rid of me
-//    strides pointer
+//    strides SmallVector
 //    storage offset
 //    numel
 //    data type pointer
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 12,
+              sizeof(TensorImpl) == sizeof(int64_t) * 24,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 
