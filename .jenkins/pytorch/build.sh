@@ -73,10 +73,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   exit 0
 fi
 
-# Validate valgrind version
-valgrind --version
-
-
 # TODO: Don't install this here
 if ! which conda; then
   pip install -q mkl mkl-devel
