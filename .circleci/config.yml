@@ -268,7 +268,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         fi
 
         # Install Cython
-        pip -q install --user --upgrade Cython
+        pip -q install --user Cython --install-option="--no-cython-compile"
 
         # Test
         ./.jenkins/caffe2/test.sh
