@@ -1,49 +1,52 @@
 #include "dnnlowp.h"
-#include "l2_minimization.h"
-#include "kl_minimization.h"
 #include "caffe2/core/logging.h"
+#include "dnnlowp_op.h"
+#include "kl_minimization.h"
+#include "l2_minimization.h"
 
 #include <cassert>
 #include <cctype>
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
-DEFINE_int32(
+C10_DEFINE_int32(
   dnnlowp_activation_quantization_precision, 8,
   "Precision used for activation tensors");
-DEFINE_int32(
+C10_DEFINE_int32(
   dnnlowp_weight_quantization_precision, 8,
   "Precision used for weight tensors");
-DEFINE_int32(
+C10_DEFINE_int32(
   dnnlowp_requantization_multiplier_precision, 32,
   "Precision of integer multipliers used for rescaling quantized numbers");
-DEFINE_int32(
+C10_DEFINE_int32(
   dnnlowp_eltwise_quantization_precision, 16,
   "Precision used for intermediate numbers during elementwise operations");
-DEFINE_bool(
+C10_DEFINE_bool(
   dnnlowp_force_scale_power_of_two, false,
   "When true, force quantization scales to a power of two");
-DEFINE_bool(
+C10_DEFINE_bool(
   dnnlowp_preserve_activation_sparsity, false,
   "When true, 0 is mapped to 0 after quantization: "
   "i.e., symmetric quantization");
-DEFINE_bool(
+C10_DEFINE_bool(
   dnnlowp_preserve_weight_sparsity, false,
   "When true, 0 is mapped to 0 after quantization: "
   "i.e., symmetric quantization");
-DEFINE_string(
+C10_DEFINE_string(
   dnnlowp_activation_quantization_kind, "min_max",
   "Quantization method for activation tensors. "
   "Allowed values: min_max, l2, l2_approx, kl, l1, p99");
-DEFINE_string(
+C10_DEFINE_string(
   dnnlowp_weight_quantization_kind, "min_max",
   "Quantization method for weight tensors. "
   "Allowed values: min_max, l2, l2_approx, kl, l1, p99");
-DEFINE_int32(
+C10_DEFINE_int32(
   dnnlowp_nbits_in_non_outlier, 8,
   "When outlier-aware quantization is used, if a quantized number can be "
   "represented by this number of bits, it is considered not an outlier so "
   "handled with 16-bit accumulation");
-DEFINE_int32(
+C10_DEFINE_int32(
   dnnlowp_copy_to_32bit_frequency, 32,
   "When outlier-aware quantization is used, this option specifies how often "
   "we spill 16-bit accumulated numbers to 32-bit during the first pass");
@@ -449,7 +452,7 @@ QuantizationFactory *QuantizationFactory::GetDefaultInstance() {
     LOG(INFO) << "nbits_in_non_outlier " << FLAGS_dnnlowp_nbits_in_non_outlier;
     LOG(INFO) <<
       "copy_to_32bit_frequency " << FLAGS_dnnlowp_copy_to_32bit_frequency;
-    LOG(INFO) << "omp_get_max_threads() " << omp_get_max_threads();
+    LOG(INFO) << "omp_get_max_threads() " << caffe2::dnnlowp_get_max_threads();
 
     log_printed = true;
   }

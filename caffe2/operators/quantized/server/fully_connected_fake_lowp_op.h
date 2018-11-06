@@ -191,7 +191,11 @@ class FullyConnectedFakeLowpFPOp final : public Operator<Context> {
     CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
     CAFFE_ENFORCE(N == b.size(), dimErrorString());
 
-    LOG_EVERY_N(INFO, nlines_log) << "FAKE_FP16 fc running";
+    static int log_occurences = 0;
+    if (log_occurences % nlines_log == 0) {
+      ++log_occurences;
+      LOG(INFO) << "FAKE_FP16 fc running";
+    }
 
     Y_shape_cache_ = X.sizes().vec();
     // This is an invariant of canonical_axis, so we can DCHECK.
@@ -393,7 +397,11 @@ class FullyConnectedGradientFakeLowpFPOp : public Operator<Context> {
       dYh.template mutable_data<T_DY>()
     );
 
-    LOG_EVERY_N(INFO, nlines_log) << "FAKE_FP16 fc grad running";
+    static int log_occurences = 0;
+    if (log_occurences % nlines_log == 0) {
+      ++log_occurences;
+      LOG(INFO) << "FAKE_FP16 fc grad running";
+    }
 
     // Compute dW
     math::Gemm<T_DY, Context, Engine>(

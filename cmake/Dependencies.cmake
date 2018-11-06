@@ -295,6 +295,43 @@ if(BUILD_TEST)
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 endif()
 
+# ---[ FBGEMM
+if(USE_FBGEMM)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+  if(NOT DEFINED FBGEMM_SOURCE_DIR)
+    set(FBGEMM_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fbgemm" CACHE STRING "FBGEMM source directory")
+  endif()
+  if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
+    message(WARNING
+      "A compiler with AVX512 support is required for FBGEMM. "
+      "Not compiling with FBGEMM. "
+      "Turn this warning off by USE_FBGEMM=OFF.")
+    set(USE_FBGEMM OFF)
+  endif()
+  if(MSVC)
+    set(USE_FBGEMM OFF)
+  endif()
+  if(USE_FBGEMM AND NOT TARGET fbgemm)
+    set(FBGEMM_BUILD_TESTS OFF CACHE BOOL "")
+    set(FBGEMM_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
+    add_subdirectory("${FBGEMM_SOURCE_DIR}")
+    set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
+    set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
+    set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
+  endif()
+
+  if(USE_FBGEMM)
+    list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
+  endif()
+endif()
+
+if(USE_FBGEMM)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}")
+endif()
+
+
 # ---[ LMDB
 if(USE_LMDB)
   find_package(LMDB)

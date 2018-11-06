@@ -36,10 +36,10 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
   virtual ~ConvPoolDNNLowPOpBase() {
     if (measure_quantization_error_) {
       dnnlowp::ReportQuantizationError(this, quantization_error_stats_);
-      LOG(CRITICAL) << this->debug_def().output(0) << " with type "
-                    << this->debug_def().type() << " has output qparams : "
-                    << "scale " << out_qparams_.scale << " offset "
-                    << out_qparams_.zero_point << "; ";
+      LOG(WARNING) << this->debug_def().output(0) << " with type "
+                   << this->debug_def().type() << " has output qparams : "
+                   << "scale " << out_qparams_.scale << " offset "
+                   << out_qparams_.zero_point << "; ";
     }
   }
 
