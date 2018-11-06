@@ -35,15 +35,6 @@ struct BroadcastParameter final {
     return 0;
   }
 };
-struct UseScratchParameter final {
-  using type = int;
-  static constexpr const char* name() {
-    return "use_scratch";
-  }
-  static constexpr int default_value() {
-    return 0;
-  }
-};
 } // namespace
 
 namespace caffe2 {
@@ -53,6 +44,5 @@ REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
     C10BatchMatMul_DontUseThisOpYet,
     ParameterHelper<TransAParameter>,
     ParameterHelper<TransBParameter>,
-    ParameterHelper<BroadcastParameter>,
-    ParameterHelper<UseScratchParameter>)
+    ParameterHelper<BroadcastParameter>)
 }

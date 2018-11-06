@@ -23,6 +23,7 @@
 #include "c10/util/Exception.h"
 #include "c10/util/IdWrapper.h"
 #include "c10/util/Type.h"
+#include "c10/macros/Macros.h"
 
 /*
  * TypeIdentifier is a small type containing an id.

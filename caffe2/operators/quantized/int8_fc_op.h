@@ -40,8 +40,8 @@ class Int8FCOp final : public Operator<CPUContext> {
     Y->zero_point = Y_offset;
     // (NxHxW)xC == MxK x (NxK) -> MxN
     const auto K = X.t.size_from_dim(1);
-    const auto N = W.t.dim(0);
-    CHECK_EQ(K, W.t.dim(1));
+    const auto N = W.t.size(0);
+    CHECK_EQ(K, W.t.size(1));
     CHECK_EQ(N, B.t.numel());
     const auto M = X.t.numel() / K;
     Y->t.Resize(M, N);

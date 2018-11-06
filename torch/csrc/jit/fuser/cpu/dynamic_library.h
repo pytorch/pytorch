@@ -20,6 +20,7 @@ struct DynamicLibrary {
   TH_DISALLOW_COPY_AND_ASSIGN(DynamicLibrary);
 
   DynamicLibrary(const char* name) {
+    // NOLINTNEXTLINE(hicpp-signed-bitwise)
     handle = checkDL(dlopen(name, RTLD_LOCAL | RTLD_NOW));
   }
 

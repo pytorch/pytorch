@@ -1,0 +1,9 @@
+graph(%a.1 : Dynamic
+      %b : Dynamic) {
+  %2 : int = prim::Constant[value=1]()
+  %a.2 : Dynamic = aten::add_(%a.1, %b, %2)
+  %a.3 : Dynamic = aten::sub_(%a.2, %b, %2)
+  %a.4 : Dynamic = aten::div_(%a.3, %b)
+  %a : Dynamic = aten::mul_(%a.4, %b)
+  return (%a, %b);
+}

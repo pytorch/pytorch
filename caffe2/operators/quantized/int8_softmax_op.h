@@ -174,8 +174,8 @@ class Int8SoftmaxOp final : public Operator<CPUContext> {
         -1.0 * CalculateInputRadius(kScaledDiffIntegerBits, input_left_shift);
     Int8Softmax(
         X.t.data<uint8_t>(),
-        X.t.dim(0),
-        X.t.numel() / X.t.dim(0),
+        X.t.size(0),
+        X.t.numel() / X.t.size(0),
         input_multiplier,
         input_left_shift,
         diff_min,

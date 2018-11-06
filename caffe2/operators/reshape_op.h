@@ -57,7 +57,7 @@ class ReshapeOp : public Operator<Context> {
     // Copy over the dimensions for those that are specified zero.
     for (int i = 0; i < actual_new_shape.size() && i < input.ndim(); ++i) {
       if (actual_new_shape[i] == 0) {
-        actual_new_shape[i] = input.dim(i);
+        actual_new_shape[i] = input.size(i);
       }
     }
 
@@ -115,7 +115,7 @@ class ReshapeOp : public Operator<Context> {
     old_shape->Resize(input.ndim());
     T* old_shape_data = old_shape->template mutable_data<T>();
     for (int i = 0; i < input.ndim(); ++i) {
-      math::Set<T, Context>(1, input.dim(i), old_shape_data + i, &context_);
+      math::Set<T, Context>(1, input.size(i), old_shape_data + i, &context_);
     }
 
     output->Resize(actual_new_shape);

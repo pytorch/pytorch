@@ -455,8 +455,6 @@ void initPythonIRBindings(PyObject * module_) {
           return "BoolType";
         case TypeKind::VarType:
           return "VarType";
-        case TypeKind::WorldType:
-          return "WorldType";
         case TypeKind::FutureType:
           return "FutureType";
         }
