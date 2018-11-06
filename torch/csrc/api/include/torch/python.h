@@ -1,5 +1,9 @@
 #pragma once
 
+#include <torch/detail/static.h>
+#include <torch/tensor.h>
+
+#include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/tensor.h>
 

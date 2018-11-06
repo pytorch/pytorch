@@ -22,8 +22,8 @@ bool BatchBucketizeOp<CPUContext>::RunOnDevice() {
   const auto* indices_data = indices.template data<int32_t>();
   const auto* boundaries_data = boundaries.template data<float>();
   const auto* feature_data = feature.template data<float>();
-  auto batch_size = feature.dim(0);
-  auto feature_dim = feature.dim(1);
+  auto batch_size = feature.size(0);
+  auto feature_dim = feature.size(1);
   auto output_dim = indices.numel();
 
   int64_t length_sum = 0;

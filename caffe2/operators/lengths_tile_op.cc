@@ -10,7 +10,7 @@ bool LengthsTileOp<CPUContext>::RunOnDevice() {
 
   CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTHS must be 1-D");
   CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
-  CAFFE_ENFORCE_EQ(lengths.numel(), data.dim(0));
+  CAFFE_ENFORCE_EQ(lengths.numel(), data.size(0));
 
   // Context::CopyFrom and math::Sum need the same context to avoid race
   // conditions

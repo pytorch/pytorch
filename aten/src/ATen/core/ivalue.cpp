@@ -15,7 +15,6 @@
   _(TensorList)              \
   _(Blob)                    \
   _(GenericList)             \
-  _(World)                   \
   _(Future)                  \
 
 namespace c10 {

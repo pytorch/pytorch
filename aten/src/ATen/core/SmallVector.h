@@ -21,7 +21,7 @@
 #pragma once
 
 #include <ATen/core/AlignOf.h>
-#include <ATen/core/Macros.h>
+#include <c10/macros/Macros.h>
 
 #include <algorithm>
 #include <cassert>

@@ -126,6 +126,22 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   return self.as_strided(sizes, strides, storage_offset);
 }
 
+Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_) {
+  int64_t nDims = self.dim() + 1;
+  int64_t dim1 = maybe_wrap_dim(dim1_, nDims);
+  int64_t dim2 = maybe_wrap_dim(dim2_, nDims);
+  AT_CHECK(dim1 != dim2, "diagonal dimensions cannot be identical ", dim1_, ", ", dim2_);
+  int64_t new_dim_len = std::abs(offset) + self.size(-1);
+  auto sizes = self.sizes().vec();
+  sizes.pop_back();
+  sizes.insert(sizes.begin() + std::min(dim1, dim2), new_dim_len);
+  sizes.insert(sizes.begin() + std::max(dim1, dim2), new_dim_len);
+  auto result = at::zeros(sizes, self.options());
+  auto diag = result.diagonal(offset, dim1, dim2);
+  diag.copy_(self);
+  return result;
+}
+
 Tensor expand(const Tensor& self, IntList size, bool implicit) {
   // [expand implicit]
   // The implicit flag is set to true for any expand calls inserted by broadcast

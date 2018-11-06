@@ -34,7 +34,7 @@ RNNImplBase<Derived>::RNNImplBase(
     int64_t number_of_gates)
     : options(options_),
       number_of_gates_(number_of_gates),
-      cudnn_mode_(cudnn_mode) {
+      cudnn_mode_(std::move(cudnn_mode)) {
   reset();
 }
 

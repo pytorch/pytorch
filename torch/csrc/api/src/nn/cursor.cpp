@@ -15,8 +15,8 @@ namespace detail {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CursorBase::Item ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename T>
-CursorBase<T>::Item::Item(const std::string& key_, T& value_)
-    : key(key_), value(value_) {}
+CursorBase<T>::Item::Item(std::string key_, T& value_)
+    : key(std::move(key_)), value(value_) {}
 
 template <typename T>
 T& CursorBase<T>::Item::operator*() {
