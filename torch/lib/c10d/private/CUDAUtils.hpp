@@ -6,11 +6,6 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-#include <ATen/ATen.h>
-#include <THC/THCStream.h>
-
-#include <c10d/CUDAUtils.hpp>
-
 // TODO: Use AT_CHECK or similar here
 #define C10D_CUDA_CHECK(condition)        \
   do {                                    \
