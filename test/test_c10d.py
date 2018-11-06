@@ -1175,7 +1175,44 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self._test_ddp_with_process_group(process_group, list(map(lambda i: torch.device('cuda:' + str(i)), gpus)))
 
     @skip_if_not_multigpu
-    def test_dist_broadcast_coalesced(self):
+    @skip_if_not_nccl
+    def test_dist_broadcast_coalesced_nccl(self):
+        store = c10d.FileStore(self.file.name)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        device = torch.device('cuda')
+
+        for fine_grained in [False, True]:
+            target = torch.arange(60, dtype=torch.float16, device=device).chunk(5)
+            target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
+            target += torch.arange(60, dtype=torch.float16, device=device).chunk(5)
+            target += torch.arange(60, dtype=torch.float64, device=device).chunk(5)
+            target += torch.arange(60, dtype=torch.float16, device=device).chunk(5)
+            target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
+
+            if self.is_master:
+                # All processes should have these tensors in the end.
+                tensors = target
+            else:
+                # Non-master processes start with empty tensors and should be
+                # filled with the tensors from the master.
+                tensors = torch.zeros(60, dtype=torch.float16, device=device).chunk(5)
+                tensors += torch.zeros(60, dtype=torch.float32, device=device).chunk(5)
+                tensors += torch.zeros(60, dtype=torch.float16, device=device).chunk(5)
+                tensors += torch.zeros(60, dtype=torch.float64, device=device).chunk(5)
+                tensors += torch.zeros(60, dtype=torch.float16, device=device).chunk(5)
+                tensors += torch.zeros(60, dtype=torch.float32, device=device).chunk(5)
+
+            c10d._dist_broadcast_coalesced(
+                process_group,
+                tensors,
+                buffer_size=256,
+                fine_grained=fine_grained)
+
+            self.assertEqual(tensors, target)
+
+    @skip_if_not_multigpu
+    def test_dist_broadcast_coalesced_gloo(self):
         store = c10d.FileStore(self.file.name)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
@@ -1183,22 +1220,33 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         device = torch.device('cuda')
 
-        target = torch.arange(10, dtype=torch.float64, device=device).chunk(5)
+        for fine_grained in [False, True]:
+            target = torch.arange(60, dtype=torch.float16, device=device).chunk(5)
+            target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
+            target += torch.arange(60, dtype=torch.float16, device=device).chunk(5)
+            target += torch.arange(60, dtype=torch.float64, device=device).chunk(5)
+            target += torch.arange(60, dtype=torch.float16, device=device).chunk(5)
+            target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
 
-        if self.is_master:
-            # All processes should have these tensors in the end.
-            tensors = target
-        else:
-            # Non-master processes start with empty tensors and should be
-            # filled with the tensors from the master.
-            tensors = torch.zeros(10, device=device).chunk(5)
+            if self.is_master:
+                # All processes should have these tensors in the end.
+                tensors = target
+            else:
+                # Non-master processes start with empty tensors and should be
+                # filled with the tensors from the master.
+                tensors = torch.zeros(60, dtype=torch.float16, device=device).chunk(5)
+                tensors += torch.zeros(60, dtype=torch.float32, device=device).chunk(5)
+                tensors += torch.zeros(60, dtype=torch.float16, device=device).chunk(5)
+                tensors += torch.zeros(60, dtype=torch.float64, device=device).chunk(5)
+                tensors += torch.zeros(60, dtype=torch.float16, device=device).chunk(5)
+                tensors += torch.zeros(60, dtype=torch.float32, device=device).chunk(5)
 
-        c10d._dist_broadcast_coalesced(
-            process_group,
-            tensors,
-            buffer_size=10)
+            c10d._dist_broadcast_coalesced(
+                process_group,
+                tensors,
+                buffer_size=128,
+                fine_grained=fine_grained)
 
-        if not self.is_master:
             self.assertEqual(tensors, target)
 
     @skip_if_not_multigpu

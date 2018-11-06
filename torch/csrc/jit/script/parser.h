@@ -410,6 +410,11 @@ struct Parser {
         L.expect(TK_NEWLINE);
         return Assert::create(range, cond, maybe_first);
       }
+      case TK_PASS: {
+        auto range = L.next().range;
+        L.expect(TK_NEWLINE);
+        return Pass::create(range);
+      }
       default: {
         List<Expr> exprs = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
         if (L.cur().kind != TK_NEWLINE) {
