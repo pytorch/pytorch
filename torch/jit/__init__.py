@@ -1317,6 +1317,7 @@ _builtin_blacklist = {
     'prelu',
     'hardshrink',
     'adaptive_avg_pool2d',
+    'adaptive_avg_pool3d',
     'dropout',
     'alpha_dropout',
     'dropout2d',
