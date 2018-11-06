@@ -133,9 +133,9 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
   }
 
   // Stream guards, now the current stream is the worker stream
-  std::vector<at::cuda::CUDAGuard> cudaGuards;
+  at::cuda::CUDAGuard cudaGuard;
   for (size_t devIdx = 0; devIdx < devices.size(); ++devIdx) {
-    cudaGuards.emplace_back(workerStreams[devIdx]);
+    cudaGuard.set_stream(workerStreams[devIdx]);
   }
 
   std::vector<at::Tensor> gradsBatchCoalesced;
@@ -165,7 +165,7 @@ void syncReduction(
   // and intra-node reduce to be operated on this worker stream to
   // improve performance
   at::cuda::CUDAStream workerStream = at::cuda::getStreamFromPool();
-  at::cuda::CUDAGuard cudaGuard = at::cuda::CUDAGuard(workerStream);
+  at::cuda::CUDAGuard cudaGuard(workerStream);
 
   // Let the worker stream wait on the reduction stream
   reductionWork->wait();

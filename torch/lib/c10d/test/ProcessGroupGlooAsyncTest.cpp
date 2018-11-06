@@ -94,16 +94,8 @@ class AsyncInputIsOutputTest : public AsyncTest {
     }
   }
 
-  std::vector<at::cuda::CUDAGuard> createStreamGuard() {
-    std::vector<at::cuda::CUDAGuard> guards;
-    for (auto& stream : streams_) {
-      guards.emplace_back(stream);
-    }
-    return guards;
-  }
-
   void wait(std::shared_ptr<ProcessGroup::Work>& work) {
-    auto guards = createStreamGuard();
+    at::cuda::CUDAGuard guard(streams_);
     if (!work->wait()) {
       throw work->exception();
     }
@@ -113,7 +105,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     std::vector<at::Tensor> outputs(numTensors_);
 
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAGuard guard(streams_);
 
     // Copy inputs to outputs
     for (auto i = 0; i < numTensors_; i++) {
@@ -138,7 +130,7 @@ class AsyncAllreduceTest : public AsyncInputIsOutputTest {
 
   std::shared_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAGuard guard(streams_);
 
     // Launch sleep on every stream
     at::cuda::CUDAGuard deviceGuard;
@@ -164,7 +156,7 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
 
   std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAGuard guard(streams_);
 
     // Launch sleep on every stream
     at::cuda::CUDAGuard deviceGuard;

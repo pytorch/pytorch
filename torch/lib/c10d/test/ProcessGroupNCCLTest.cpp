@@ -73,16 +73,8 @@ class NCCLTest : public NCCLTestBase {
     }
   }
 
-  std::vector<at::cuda::CUDAGuard> createStreamGuard() {
-    std::vector<at::cuda::CUDAGuard> guards;
-    for (auto& stream : streams_) {
-      guards.push_back(at::cuda::CUDAGuard(stream));
-    }
-    return guards;
-  }
-
   void wait(std::shared_ptr<ProcessGroup::Work>& work) {
-    auto guards = createStreamGuard();
+    at::cuda::CUDAGuard guard(streams_);
     work->wait();
   }
 
@@ -90,7 +82,7 @@ class NCCLTest : public NCCLTestBase {
     std::vector<at::Tensor> outputs(numDevices_);
 
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAGuard guard(streams_);
 
     // Copy inputs to outputs
     for (auto i = 0; i < numDevices_; i++) {
@@ -108,7 +100,7 @@ class NCCLTest : public NCCLTestBase {
     }
 
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAGuard guard(streams_);
 
     // Copy inputs to outputs
     for (auto i = 0; i < numDevices_; ++i) {
@@ -140,7 +132,7 @@ class AllreduceNCCLTest : public NCCLTest {
 
   std::shared_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAGuard guard(streams_);
 
     // Launch sleep on every device
     at::cuda::CUDAGuard deviceGuard;
@@ -166,7 +158,7 @@ class BroadcastNCCLTest : public NCCLTest {
 
   std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAGuard guard(streams_);
 
     // Launch sleep on every device
     at::cuda::CUDAGuard deviceGuard;
@@ -195,7 +187,7 @@ class ReduceNCCLTest : public NCCLTest {
 
   std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAGuard guard(streams_);
 
     // Launch sleep on every device
     at::cuda::CUDAGuard deviceGuard;
@@ -224,7 +216,7 @@ class AllgatherNCCLTest : public NCCLTest {
 
   std::shared_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAGuard guard(streams_);
 
     // Launch sleep on every device
     at::cuda::CUDAGuard deviceGuard;

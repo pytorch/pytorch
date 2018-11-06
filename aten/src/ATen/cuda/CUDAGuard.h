@@ -45,6 +45,15 @@ struct CUDAGuard {
     set_device(device);
   }
 
+  /// Calls `set_stream` on each of the streams in the list.
+  /// This may be useful if you need to set different streams
+  /// for different devices.
+  explicit CUDAGuard(ArrayRef<CUDAStream> streams) {
+    for (const auto& s : streams) {
+      set_stream(s);
+    }
+  }
+
   CUDAGuard(const CUDAGuard&) = delete;
   CUDAGuard& operator=(const CUDAGuard&) = delete;
 
