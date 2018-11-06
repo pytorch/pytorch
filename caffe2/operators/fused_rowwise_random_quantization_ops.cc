@@ -18,7 +18,7 @@ bool FloatToFusedRandRowwiseQuantizedOp<Context>::RunOnDevice() {
   auto* output = Output(DATA_FUSED_QUANTIZED);
 
   CAFFE_ENFORCE_EQ(
-      input.ndim(),
+      input.dim(),
       2,
       "Expect input to be a matrix. Reshape the input tensor to a matrix for usage.");
 
@@ -79,7 +79,7 @@ bool FusedRandRowwiseQuantizedToFloatOp<Context>::RunOnDevice() {
 
   const auto& input = Input(DATA_FUSED_QUANTIZED);
   auto* output = Output(DATA_FLOAT);
-  CAFFE_ENFORCE_EQ(input.ndim(), 2, "Expect input to be a matrix.");
+  CAFFE_ENFORCE_EQ(input.dim(), 2, "Expect input to be a matrix.");
   CAFFE_ENFORCE_GE(
       input.numel(),
       4,

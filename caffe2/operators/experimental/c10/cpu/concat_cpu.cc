@@ -20,7 +20,7 @@ void concat_op_cpu_impl(
     BaseContext* context) {
   split->Resize(vector<int64_t>(1, inputs.size()));
   int* axis_data = split->template mutable_data<int>();
-  int adj_size = inputs[0]->ndim() + (add_axis ? 1 : 0);
+  int adj_size = inputs[0]->dim() + (add_axis ? 1 : 0);
   int canonical_axis = caffe2::canonical_axis_index_(axis, adj_size);
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
   for (int i = 1; i < inputs.size(); ++i) {
@@ -36,7 +36,7 @@ void concat_op_cpu_impl(
 
   int before = 1, after = 1;
   vector<int64_t> output_dims(inputs[0]->sizes().vec());
-  for (int i = 0; i < inputs[0]->ndim(); ++i) {
+  for (int i = 0; i < inputs[0]->dim(); ++i) {
     if (i == canonical_axis && !add_axis) {
       continue;
     }
