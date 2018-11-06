@@ -203,10 +203,10 @@ static void reorder_according_to_dag(Block * block, const detail::DynamicDAG<Nod
     if (!vertex.has_value()) continue;
 
     auto& nodes = vertex.value()->data;
-    for (auto it = nodes.begin(); it != nodes.end(); ++it) {
+    for (Node* node : nodes) {
       // Move all nodes according to the topological order in dep_graph. A lot
       // of the moves are unnecessary but this is a quick & easy solution.
-      (*it)->moveBefore(block->return_node());
+      node->moveBefore(block->return_node());
     }
   }
 }

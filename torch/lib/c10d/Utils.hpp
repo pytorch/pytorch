@@ -33,6 +33,32 @@ inline std::string toString(at::IntList l) {
   return ss.str();
 }
 
+inline void assertSameType(
+    const at::Type& type,
+    const std::vector<at::Tensor>& tensors) {
+  for (size_t i = 0; i < tensors.size(); i++) {
+    if (tensors[i].type() != type) {
+      const std::string expected = type.toString();
+      const std::string actual = tensors[i].type().toString();
+      throw std::invalid_argument(
+          "mixed types (" + expected + " and " + actual + ")");
+    }
+  }
+}
+
+inline void assertSameSizes(
+    const at::IntList& sizes,
+    const std::vector<at::Tensor>& tensors) {
+  for (size_t i = 0; i < tensors.size(); i++) {
+    if (!tensors[i].sizes().equals(sizes)) {
+      const auto expected = toString(sizes);
+      const auto actual = toString(tensors[i].sizes());
+      throw std::invalid_argument(
+          "mixed sizes (" + expected + " and " + actual + ")");
+    }
+  }
+}
+
 inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   // Ensure we have at least one tensor
   if (tensors.size() == 0) {
@@ -58,6 +84,51 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
           ")");
     }
   }
+}
+
+inline void assertTypeMatch(
+    std::function<void(const std::string&)> fn,
+    const at::Type& type,
+    const std::vector<at::Tensor>& tensors,
+    size_t index) {
+  if (tensors[index].type() != type) {
+    fn("invalid tensor type at index " + std::to_string(index) + " (expected " +
+       type.toString() + ", got " + tensors[index].type().toString() + ")");
+  }
+}
+
+inline void assertSizesMatch(
+    std::function<void(const std::string&)> fn,
+    const at::IntList& sizes,
+    const std::vector<at::Tensor>& tensors,
+    size_t index) {
+  if (tensors[index].sizes() != sizes) {
+    fn("invalid tensor size at index " + std::to_string(index) + " (expected " +
+       toString(sizes) + ", got " + toString(tensors[index].sizes()) + ")");
+  }
+}
+
+// Copied from torch/csrc/utils/functional.h.
+template <typename F, typename T>
+inline auto fmap(T& inputs, const F& fn)
+    -> std::vector<decltype(fn(*inputs.begin()))> {
+  std::vector<decltype(fn(*inputs.begin()))> r;
+  r.reserve(inputs.size());
+  for (auto& input : inputs) {
+    r.push_back(fn(input));
+  }
+  return r;
+}
+
+// Copied from torch/csrc/utils/tensor_flatten.h.
+inline at::Tensor flattenDenseTensors(at::TensorList tensors) {
+  static const auto flatten = [](const at::Tensor& t) {
+    return t.contiguous().view({-1});
+  };
+  if (tensors.size() == 1) {
+    return flatten(tensors[0]);
+  }
+  return at::cat(fmap(tensors, flatten));
 }
 
 inline at::Tensor newLikeFlat(
@@ -113,11 +184,16 @@ inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
 }
 
 template <typename T>
+inline T* getDataPointer(const at::Tensor& tensor) {
+  // NB: This does NOT respect storage_offset from the tensor
+  return static_cast<T*>(tensor.storage().data());
+}
+
+template <typename T>
 std::vector<T*> getDataPointers(const std::vector<at::Tensor>& tensors) {
   std::vector<T*> ptrs(tensors.size());
   for (size_t i = 0; i < tensors.size(); i++) {
-    // NB: This does NOT respect storage_offset from the tensor
-    ptrs[i] = static_cast<T*>(tensors[i].storage().data());
+    ptrs[i] = getDataPointer<T>(tensors[i]);
   }
   return ptrs;
 }

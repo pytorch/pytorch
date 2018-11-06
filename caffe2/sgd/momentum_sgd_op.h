@@ -140,7 +140,7 @@ class SparseMomentumSGDUpdateOp final : public Operator<Context> {
 
   template <typename SIndex>
   bool DoRunWithType() {
-    auto block_size = Input(PARAM).numel() / Input(PARAM).dim(0);
+    auto block_size = Input(PARAM).numel() / Input(PARAM).size(0);
     auto n = Input(GRAD).numel() / block_size;
 
     const auto* gradIn = Input(GRAD).template data<T>();

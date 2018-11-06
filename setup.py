@@ -1187,6 +1187,7 @@ if __name__ == '__main__':
                 'lib/include/c10/util/*.h',
                 'lib/include/c10/detail/*.h',
                 'lib/include/caffe2/core/*.h',
+                'lib/include/caffe2/proto/*.h',
                 'lib/include/torch/*.h',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/api/include/torch/*.h',

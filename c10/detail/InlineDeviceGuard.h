@@ -65,14 +65,8 @@ public:
   InlineDeviceGuard(const InlineDeviceGuard<T>&) = delete;
   InlineDeviceGuard<T>& operator=(const InlineDeviceGuard<T>&) = delete;
 
-  /// Move-constructs this `InlineDeviceGuard` from another `InlineDeviceGuard`. The
-  /// moved-from `InlineDeviceGuard` is modified such that its destruction has no
-  /// effect (does not reset the device).
-  InlineDeviceGuard(InlineDeviceGuard<T>&& other) noexcept {
-    // Default construction leaves this uninitialized
-    std::swap(original_device_, other.original_device_);
-    std::swap(current_device_, other.current_device_);
-  }
+  // See Note [Move construction for RAII guards is tricky]
+  InlineDeviceGuard(InlineDeviceGuard<T>&& other) noexcept = delete;
 
   // See Note [Move assignment for RAII guards is tricky]
   InlineDeviceGuard& operator=(InlineDeviceGuard<T>&& other) noexcept = delete;

@@ -1238,23 +1238,6 @@ THC_API void THNN_(TemporalUpSamplingNearest_updateOutput)(
                   THCTensor *output,
                   int outputWidth);
 
-THC_API void THNN_(Threshold_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  accreal threshold,
-                  accreal val,
-                  bool inplace);
-
-THC_API void THNN_(Threshold_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  accreal threshold,
-                  accreal val,
-                  bool inplace);
-
 THC_API void THNN_(VolumetricAveragePooling_updateOutput)(
                   THCState *state,
                   THCTensor *input,

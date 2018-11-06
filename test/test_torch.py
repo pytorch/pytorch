@@ -2647,6 +2647,20 @@ class _TestTorchMixin(object):
         self.assertTrue(np.allclose(expected, result.numpy()))
 
     @staticmethod
+    def _test_diag_embed(self, dtype, device):
+        x = torch.arange(3 * 4, dtype=dtype, device=device).view(3, 4)
+        result = torch.diag_embed(x)
+        expected = torch.stack([torch.diag(r) for r in x], 0)
+        self.assertEqual(result, expected)
+
+        result = torch.diag_embed(x, offset=1, dim1=0, dim2=2)
+        expected = torch.stack([torch.diag(r, 1) for r in x], 1)
+        self.assertEqual(result, expected)
+
+    def test_diag_embed(self):
+        self._test_diag_embed(self, dtype=torch.float32, device='cpu')
+
+    @staticmethod
     def _test_diagflat(self, dtype, device):
         # Basic sanity test
         x = torch.randn((100,), dtype=dtype, device=device)
@@ -6693,6 +6707,10 @@ class _TestTorchMixin(object):
             self.assertEqual(x, x.flip(0))
             self.assertEqual(x, x.flip(2))
 
+            # roll
+            self.assertEqual(x, x.roll(0, 1).roll(0, -1))
+            self.assertEqual(x, x.roll(1, x.size(1)))
+
             # unbind
             self.assertEqual((), x.unbind(0))
             self.assertEqual((torch.empty((0, 1, 0), device=device), torch.empty((0, 1, 0), device=device)),
@@ -7264,6 +7282,37 @@ class _TestTorchMixin(object):
     def test_flip(self):
         self._test_flip(self, use_cuda=False)
 
+    def test_roll(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            numbers = torch.arange(1, 9, device=device)
+
+            single_roll = numbers.roll(1, 0)
+            expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device)
+            self.assertEqual(single_roll, expected, "{} did not equal expected result".format(single_roll))
+
+            data = numbers.view(2, 2, 2)
+            rolled = data.roll(1, 0)
+            expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], device=device).view(2, 2, 2)
+            self.assertEqual(expected, rolled, "{} did not equal expected result: {}".format(rolled, expected))
+
+            data = data.view(2, 4)
+            # roll a loop until back where started
+            loop_rolled = data.roll(2, 0).roll(4, 1)
+            self.assertEqual(data, loop_rolled, "{} did not equal the original: {}".format(loop_rolled, data))
+            # multiple inverse loops
+            self.assertEqual(data, data.roll(-20, 0).roll(-40, 1))
+            self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device), numbers.roll(1, 0))
+
+            # test non-contiguous
+            # strided equivalent to numbers.as_strided(size=(4, 2), stride=(1, 4))
+            strided = numbers.view(2, 4).transpose(0, 1)
+            self.assertFalse(strided.is_contiguous(), "this test needs a non-contiguous tensor")
+            expected = torch.tensor([4, 8, 1, 5, 2, 6, 3, 7]).view(4, 2)
+            rolled = strided.roll(1, 0)
+            self.assertEqual(expected, rolled,
+                             "non contiguous tensor rolled to {} instead of {} ".format(rolled, expected))
+
     def test_reversed(self):
         val = torch.arange(0, 10)
         self.assertEqual(reversed(val), torch.arange(9, -1, -1))
@@ -7489,7 +7538,7 @@ class _TestTorchMixin(object):
         self.assertEqual(result, expected)
 
     @staticmethod
-    def _test_bernoulli(self, p_dtype, device):
+    def _test_bernoulli(self, t_dtype, p_dtype, device):
         for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
             x = torch.tensor(trivial_p, dtype=p_dtype, device=device)
             self.assertEqual(x.bernoulli().tolist(), trivial_p)
@@ -7511,8 +7560,7 @@ class _TestTorchMixin(object):
         torch.bernoulli(torch.rand_like(p), out=p)
         self.assertTrue(isBinary(p))
 
-        # test that it works with integral tensors
-        t = torch.empty(10, 10, dtype=torch.uint8, device=device)
+        t = torch.empty(10, 10, dtype=t_dtype, device=device)
 
         t.fill_(2)
         t.bernoulli_(0.5)
@@ -7532,7 +7580,9 @@ class _TestTorchMixin(object):
         self.assertTrue(isBinary(t))
 
     def test_bernoulli(self):
-        self._test_bernoulli(self, torch.double, 'cpu')
+        self._test_bernoulli(self, torch.float32, torch.float64, 'cpu')
+        # test that it works with integral tensors
+        self._test_bernoulli(self, torch.uint8, torch.float64, 'cpu')
 
     def test_normal(self):
         q = torch.Tensor(100, 100)

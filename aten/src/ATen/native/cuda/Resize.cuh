@@ -35,10 +35,10 @@ inline TensorImpl* resize_impl_cuda_(
   }
 
   // NB: We don't need to hold the device guard when calling from TH
-  c10::optional<cuda::CUDAGuard> guard(
-    device_guard ?
-      make_optional(cuda::CUDAGuard(self->storage().device().index())) :
-      nullopt);
+  c10::optional<cuda::CUDAGuard> guard;
+  if (device_guard) {
+    guard.emplace(self->storage().device().index());
+  }
 
   int64_t storage_size = 1;
   if (stride) {

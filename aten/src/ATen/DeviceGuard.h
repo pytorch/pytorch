@@ -61,9 +61,10 @@ public:
   DeviceGuard(const DeviceGuard&) = delete;
   DeviceGuard& operator=(const DeviceGuard&) = delete;
 
-  /// Move-constructs this `DeviceGuard` from another `DeviceGuard`.
-  /// This can be used to terminate the lifetime of a `DeviceGuard`
-  /// early; for example, in:
+  /// Note [Move construction for RAII guards is tricky]
+  /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  /// In principle, move construction is useful for terminating
+  /// the lifetime of a `DeviceGuard` early; for example:
   ///
   ///     // current device is d0
   ///     DeviceGuard g1(d1);
@@ -73,19 +74,26 @@ public:
   ///     }
   ///     // current device is d0!!
   ///
-  /// It is undefined behavior if you move a device guard across
-  /// an intervening DeviceGuard.
+  /// However, it's difficult to implement the move constructor
+  /// in a way that works in all situations.  For example, consider
+  /// the following example:
   ///
   ///     DeviceGuard g1(d1);
-  ///     DeviceGuard g2(d2);
-  ///     DeviceGuard g3(std::move(g1)); // UB!
+  ///     {
+  ///       DeviceGuard g2(d2);
+  ///       {
+  ///         DeviceGuard g3(std::move(g1)); // !!!
+  ///       }
+  ///     }
   ///
-  DeviceGuard(DeviceGuard&& other) noexcept {
-    // Default construction leaves this uninitialized
-    std::swap(impl_, other.impl_);
-    std::swap(original_device_, other.original_device_);
-    std::swap(current_device_, other.current_device_);
-  }
+  /// What should the current device be while g3 in scope... and what
+  /// should it be after it goes out of scope?  What about g2?
+  /// There don't seem to be satisfactory answers for these questions.
+  ///
+  /// It's in principle possible to raise an error when this occurs
+  /// by doing some extra thread-local bookkeeping.  But why bother?
+  /// Just don't provide the constructor.
+  DeviceGuard(DeviceGuard&& other) = delete;
 
   // Note [Move assignment for RAII guards is tricky]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

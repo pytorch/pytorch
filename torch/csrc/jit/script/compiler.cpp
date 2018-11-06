@@ -28,8 +28,8 @@ using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 struct NoneValue : SugaredValue {
-  NoneValue() {}
-  virtual std::string kind() const override {
+  NoneValue() = default;
+  std::string kind() const override {
     return "None";
   }
 };
@@ -96,7 +96,7 @@ static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
 // expressions like int(x)
 struct CastValue : public SugaredValue {
   CastValue(TypePtr type)
-  : type(type) {}
+  : type(std::move(type)) {}
   std::string kind() const override {
     std::stringstream ss;
     ss << "<" << type->str() << " cast primitive>";
@@ -152,7 +152,7 @@ private:
 //      delete unnecessary ones later with replaceAllusesWith().
 struct Environment {
   Environment(Method & method, Resolver resolver, Block* b, std::shared_ptr<Environment> next = nullptr)
-      : method(method), resolver(std::move(resolver)), b(b), next(next) {}
+      : method(method), resolver(std::move(resolver)), b(b), next(std::move(next)) {}
 
   Method & method;
   Resolver resolver;
@@ -620,18 +620,16 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (!positional)
       return c10::nullopt;
     positional_inputs.push_back(positional);
-
-    if (schema.is_vararg() && schema_i == schema.arguments().size() - 1) {
-      // Freeze iteration to the last argument in the schema and keep going for
-      // all of the provided arguments
-      if (used_args < args.size()) {
-        schema_i--;
-      }
-    }
   }
   // check for unused self argument
   if(self != c10::nullopt) {
     err() << "provided self argument not used in schema\n";
+  }
+
+  if (schema.is_vararg()) {
+    for(;used_args < args.size(); ++used_args) {
+      positional_inputs.push_back(args[used_args].value(graph));
+    }
   }
 
   // check for unused positional arguments
@@ -874,8 +872,14 @@ struct to_ir {
           }
           return_type_idx++;
         }
-        returns.push_back({"", type});
+        returns.emplace_back("", type);
       }
+    } else if (schema.returns().size() > 0) {
+      // schema has returns but there's no return nodes in graph
+      throw ErrorReport() << "Expected " << schema.returns().size()
+                          << " return value"
+                          << (schema.returns().size() > 1 ? "s" : "")
+                          << " but found no return statement";
     }
 
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
@@ -923,6 +927,9 @@ private:
         case TK_ASSIGN:
           emitAssignment(Assign(stmt));
           break;
+        case TK_AUG_ASSIGN:
+          emitAugAssignment(AugAssign(stmt));
+          break;
         case TK_GLOBAL:
           for (auto ident : Global(stmt).names()) {
             const auto& name = Ident(ident).name();
@@ -946,6 +953,12 @@ private:
           throw ErrorReport(stmt) << "return statements can appear only at the end "
                                   << "of the function body";
           break;
+        case TK_PASS:
+          // Emit nothing for pass
+          break;
+        default:
+          throw ErrorReport(stmt)
+              << "Unrecognized statement kind " << kindToString(stmt.kind());
       }
     }
   }
@@ -1360,20 +1373,55 @@ private:
     return num_starred;
   }
 
-  void emitAssignment(const Assign& stmt) {
-    bool starred_unpack = calcNumStarredUnpack(stmt.lhs(), stmt.range());
-    if (stmt.reduction() != '=') {
-      if (stmt.lhs().size() != 1) {
-        throw ErrorReport(stmt)
-            << "reductions are only allowed when there is a single variable "
-            << "on the left-hand side.";
+  // Emit nodes for augmented assignments like `+=`
+  void emitAugAssignment(const AugAssign& stmt) {
+    auto lhs = Var(stmt.lhs());
+    auto lhsValue = environment_stack->getSugaredVar(lhs.name())
+                        ->asValue(lhs.range(), method);
+    if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
+      // for tensors, emit the corresponding in-place op
+      Symbol op;
+      switch (stmt.aug_op()) {
+        case '+':
+          op = aten::add_;
+          break;
+        case '-':
+          op = aten::sub_;
+          break;
+        case '/':
+          op = aten::div_;
+          break;
+        case '*':
+          op = aten::mul_;
+          break;
+        default:
+          throw ErrorReport(stmt) << "Unknown augmented assignment to Tensor: "
+                                  << kindToString(stmt.aug_op());
       }
-      Ident lhs = Var(stmt.lhs()[0]).name();
-      Expr expr = BinOp::create(stmt.range(), stmt.reduction(),
+
+      auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
+      auto self = NamedValue(lhs.range(), lhs.name().name(), lhsValue);
+      auto output = emitBuiltinCall(
+          stmt.range(),
+          *method.graph(),
+          op,
+          self,
+          {rhs},
+          {},
+          /*required=*/true);
+      environment_stack->setVar(lhs.range(), lhs.name().name(), output);
+    } else {
+      // for primitive types, desugar into a simple assignment
+      //   e.g. foo += 1 becomes foo.2 = foo + 1
+      Ident lhs = Var(stmt.lhs()).name();
+      Expr expr = BinOp::create(stmt.range(), stmt.aug_op(),
                                 Var::create(lhs.range(), lhs), stmt.rhs());
       environment_stack->setVar(lhs.range(), lhs.name(), emitExpr(expr));
-      return;
     }
+  }
+
+  void emitAssignment(const Assign& stmt) {
+    bool starred_unpack = calcNumStarredUnpack(stmt.lhs(), stmt.range());
 
     size_t n_binders = stmt.lhs().size();
     if(starred_unpack)
@@ -1484,12 +1532,11 @@ private:
         auto starred = Starred(tree);
         auto entries = emitSugaredExpr(starred.expr(), 1)->asTuple(starred.range(), method);
         for(auto entry : entries) {
-          values.push_back(NamedValue(
-              tree->range(), entry->asValue(starred.range(), method)));
+          values.emplace_back(
+              tree->range(), entry->asValue(starred.range(), method));
         }
       } else {
-        values.push_back(NamedValue(
-            tree->range(), emitExpr(Expr(tree))));
+        values.emplace_back(tree->range(), emitExpr(Expr(tree)));
       }
     }
     return values;

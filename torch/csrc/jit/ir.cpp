@@ -727,7 +727,8 @@ Node::Node(Graph * graph_, NodeKind kind_) :
   graph_(graph_),
   owning_block_(nullptr),
   scope_(graph_->current_scope_),
-  schema_(nullptr) {
+  schema_(nullptr),
+  topo_position_(0) {
   graph_->all_nodes.emplace(this);
 }
 
@@ -1176,10 +1177,9 @@ Node * Graph::createNoneGenerator() {
   return n;
 }
 
-Node * Graph::createFusionGroup(int device) {
+Node * Graph::createFusionGroup() {
   auto n = create(prim::FusionGroup, 0);
   n->g_(attr::Subgraph,std::make_shared<Graph>(current_scope()));
-  n->i_(attr::device, device);
   return n;
 }
 

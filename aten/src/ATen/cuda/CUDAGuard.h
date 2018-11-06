@@ -19,8 +19,19 @@ namespace at { namespace cuda {
 /// which it is bound, setting the CUDA stream *also* sets the current CUDA
 /// device to that of the stream.
 struct CUDAGuard {
-  /// Default constructor, does nothing and causes no change in the current
-  /// stream or device until `set_stream` or `set_device` is called.
+  /// Default constructor.  Although no change in device occurs, the resulting
+  /// CUDAGuard will still record the current device at the time of
+  /// construction, and restore it when the guard goes out of scope.
+  ///
+  /// If you want to avoid performing the device set/get entirely (if the
+  /// CUDAGuard is never actually used), you can implement this using
+  /// the following idiom:
+  ///
+  ///     optional<CUDAGuard> g;
+  ///     if (want_guard) {
+  ///       g.emplace(device_index);
+  ///     }
+  ///
   CUDAGuard() = default;
 
   /// Sets the CUDA stream and its associated device as the current one (calls
@@ -37,10 +48,8 @@ struct CUDAGuard {
   CUDAGuard(const CUDAGuard&) = delete;
   CUDAGuard& operator=(const CUDAGuard&) = delete;
 
-  /// Move-constructs this `CUDAGuard` from another `CUDAGuard`. The
-  /// moved-from `CUDAGuard` is modified such that its destruction has no
-  /// effect (does not reset the stream or device).
-  CUDAGuard(CUDAGuard&& other) noexcept = default;
+  // See Note [Move construction for RAII guards is tricky]
+  CUDAGuard(CUDAGuard&& other) = delete;
 
   // See Note [Move assignment for RAII guards is tricky]
   CUDAGuard& operator=(CUDAGuard&& other) = delete;

@@ -46,6 +46,7 @@ namespace script {
   _(TK_INFERRED, "inferred", "")                 \
   _(TK_ACCESS, "access", "")                     \
   _(TK_ASSIGN, "assign", "")                     \
+  _(TK_AUG_ASSIGN, "aug_assign", "")             \
   _(TK_ATTRIBUTE, "attribute", "")               \
   _(TK_IF, "if", "if")                           \
   _(TK_ELSE, "else", "else")                     \
@@ -88,7 +89,9 @@ namespace script {
   _(TK_SLICE_EXPR, "slice expr", "")             \
   _(TK_TYPE_COMMENT, "type comment", "# type:")  \
   _(TK_RAISE, "raise", "raise")                  \
-  _(TK_ASSERT, "assert", "assert")
+  _(TK_ASSERT, "assert", "assert")               \
+  _(TK_DOTS, "dots", "...")                      \
+  _(TK_PASS, "pass", "pass")
 
 
 static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!";
@@ -350,7 +353,7 @@ SharedParserData& sharedParserData();
 struct Token {
   int kind;
   SourceRange range;
-  Token(int kind, const SourceRange& range) : kind(kind), range(range) {}
+  Token(int kind, SourceRange range) : kind(kind), range(std::move(range)) {}
   std::string text() {
     return range.text();
   }

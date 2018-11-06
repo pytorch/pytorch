@@ -25,19 +25,13 @@ struct SchemaParser {
     bool is_vararg = false;
     size_t idx = 0;
     parseList('(', ',', ')', [&] {
+      if(is_vararg)
+        throw ErrorReport(L.cur()) << "... must be the last element of the argument list";
       if (L.nextIf('*')) {
-        auto tok = L.cur();
-        if (tok.kind == TK_IDENT) {
-          is_vararg = true;
-          arguments.push_back(parseArgument(
-              idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only, writes));
-        } else {
-          kwarg_only = true;
-        }
+        kwarg_only = true;
+      } else if(L.nextIf(TK_DOTS)) {
+        is_vararg = true;
       } else {
-        if (is_vararg) {
-          AT_ERROR("Found argument after varargs declaration");
-        }
         arguments.push_back(parseArgument(
             idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only, writes));
       }

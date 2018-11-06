@@ -42,7 +42,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
     if (output_initialized) {
       CAFFE_ENFORCE_EQ(output->ndim(), input.ndim());
       for (size_t i = 1; i < input.ndim(); ++i) {
-        CAFFE_ENFORCE_EQ(output->dim(i), input.dim(i));
+        CAFFE_ENFORCE_EQ(output->size(i), input.size(i));
       }
     }
 
@@ -77,7 +77,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
     }
 
     auto num_to_copy = std::min<int32_t>(num_entries, numToCollect_);
-    auto output_batch_size = output_initialized ? output->dim(0) : 0;
+    auto output_batch_size = output_initialized ? output->size(0) : 0;
     auto output_num =
         std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
 
@@ -95,7 +95,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
     if (!output_initialized) {
       *next_data = 0;
     }
-    CAFFE_ENFORCE_LT(*next_data, output->dim(0));
+    CAFFE_ENFORCE_LT(*next_data, output->size(0));
 
     auto block_size = input.size_from_dim(1);
     auto block_bytesize = block_size * input.itemsize();

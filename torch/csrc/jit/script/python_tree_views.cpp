@@ -122,10 +122,15 @@ void initTreeViewBindings(PyObject *module) {
 
 
   py::class_<Assign, Stmt>(m, "Assign")
-    .def(py::init([](std::vector<Expr> lhs, std::string kind_str, const Expr& rhs) {
+    .def(py::init([](std::vector<Expr> lhs, const Expr& rhs) {
       auto r = lhs.at(0).range();
-      auto kind = AssignKind(Compound::create(stringToKind(kind_str), r, {}));
-      return Assign::create(r, List<Expr>::create(r, std::move(lhs)), kind, rhs);
+      return Assign::create(r, List<Expr>::create(r, std::move(lhs)), rhs);
+    }));
+  py::class_<AugAssign, Stmt>(m, "AugAssign")
+    .def(py::init([](const Expr& lhs, std::string kind_str, const Expr& rhs) {
+      auto r = lhs.range();
+      auto kind = AugAssignKind(Compound::create(stringToKind(kind_str), r, {}));
+      return AugAssign::create(r, lhs, kind, rhs);
     }));
   py::class_<Return, Stmt>(m, "Return")
     .def(py::init([](const SourceRange& range, std::vector<Expr> values) {
@@ -138,6 +143,10 @@ void initTreeViewBindings(PyObject *module) {
   py::class_<Assert, Stmt>(m, "Assert")
     .def(py::init([](const SourceRange& range, const Expr& test, Expr *msg) {
       return Assert::create(range, test, wrap_maybe(range, msg));
+    }));
+  py::class_<Pass, Stmt>(m, "Pass")
+    .def(py::init([](const SourceRange& range) {
+      return Pass::create(range);
     }));
   py::class_<If, Stmt>(m, "If")
     .def(py::init([](const SourceRange& range, const Expr& cond, std::vector<Stmt> true_branch, std::vector<Stmt> false_branch) {

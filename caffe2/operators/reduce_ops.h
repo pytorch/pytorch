@@ -35,6 +35,9 @@ class ReduceOp final : public Operator<Context> {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
     } else {
+      for (auto& axis: axes_) {
+        axis = X.canonical_axis_index(axis);
+      }
       std::sort(axes_.begin(), axes_.end());
       CAFFE_ENFORCE_GE(axes_.front(), 0, "Axes ids must be non-negative.");
       CAFFE_ENFORCE_LT(
@@ -95,6 +98,9 @@ class ReduceGradientOp final : public Operator<Context> {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
     } else {
+      for (auto& axis: axes_) {
+        axis = X.canonical_axis_index(axis);
+      }
       std::sort(axes_.begin(), axes_.end());
       CAFFE_ENFORCE_GE(axes_.front(), 0, "Axes ids must be non-negative.");
       CAFFE_ENFORCE_LT(
