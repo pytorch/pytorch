@@ -123,7 +123,7 @@ bool SplitOp<Context>::RunOnDevice() {
   auto& input = Input(0);
   int canonical_axis = input.canonical_axis_index(axis_);
   CAFFE_ENFORCE_LT(
-      canonical_axis, input.ndim(), "Axis not in input ndim range.");
+      canonical_axis, input.dim(), "Axis not in input ndim range.");
   const int input_channels = input.dim32(canonical_axis);
   const int* axis_data;
   vector<int> equal_split;
@@ -166,7 +166,7 @@ bool SplitOp<Context>::RunOnDevice() {
   for (int i = 0; i < canonical_axis; ++i) {
     before *= input.dim32(i);
   }
-  for (int i = canonical_axis + 1; i < input.ndim(); ++i) {
+  for (int i = canonical_axis + 1; i < input.dim(); ++i) {
     after *= input.dim32(i);
   }
   if (add_axis_) {
@@ -207,7 +207,7 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
       "len(Lengths) should be divisible by OutputSize().");
   int canonical_axis = input.canonical_axis_index(axis_);
   CAFFE_ENFORCE_LT(
-      canonical_axis, input.ndim(), "Axis not in input ndim range.");
+      canonical_axis, input.dim(), "Axis not in input ndim range.");
   const int input_channels = input.dim32(canonical_axis);
   const auto* axis_data = length.template data<int>();
   CAFFE_ENFORCE_EQ(
@@ -248,7 +248,7 @@ bool ConcatOp<Context>::RunOnDevice() {
   split->Resize(vector<int64_t>(1, InputSize()));
   int* axis_data = split->template mutable_data<int>();
   auto& input_zero = Input(0);
-  int adj_size = input_zero.ndim() + (add_axis_ ? 1 : 0);
+  int adj_size = input_zero.dim() + (add_axis_ ? 1 : 0);
   int canonical_axis = canonical_axis_index_(axis_, adj_size);
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
   for (int i = 1; i < InputSize(); ++i) {
@@ -264,7 +264,7 @@ bool ConcatOp<Context>::RunOnDevice() {
 
   int before = 1, after = 1;
   vector<int64_t> output_dims(input_zero.sizes().vec());
-  for (int i = 0; i < input_zero.ndim(); ++i) {
+  for (int i = 0; i < input_zero.dim(); ++i) {
     if (i == canonical_axis && !add_axis_) {
       continue;
     }

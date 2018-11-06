@@ -15,19 +15,19 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   const int box_dim = rotated_ ? 5 : 4;
 
   // tscores: (num_boxes, num_classes), 0 for background
-  if (tscores.ndim() == 4) {
+  if (tscores.dim() == 4) {
     CAFFE_ENFORCE_EQ(tscores.size(2), 1, tscores.size(2));
     CAFFE_ENFORCE_EQ(tscores.size(3), 1, tscores.size(3));
   } else {
-    CAFFE_ENFORCE_EQ(tscores.ndim(), 2, tscores.ndim());
+    CAFFE_ENFORCE_EQ(tscores.dim(), 2, tscores.dim());
   }
   CAFFE_ENFORCE(tscores.template IsType<float>(), tscores.dtype().name());
   // tboxes: (num_boxes, num_classes * box_dim)
-  if (tboxes.ndim() == 4) {
+  if (tboxes.dim() == 4) {
     CAFFE_ENFORCE_EQ(tboxes.size(2), 1, tboxes.size(2));
     CAFFE_ENFORCE_EQ(tboxes.size(3), 1, tboxes.size(3));
   } else {
-    CAFFE_ENFORCE_EQ(tboxes.ndim(), 2, tboxes.ndim());
+    CAFFE_ENFORCE_EQ(tboxes.dim(), 2, tboxes.dim());
   }
   CAFFE_ENFORCE(tboxes.template IsType<float>(), tboxes.dtype().name());
 
@@ -44,7 +44,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
     // tscores and tboxes have items from multiple images in a batch. Get the
     // corresponding batch splits from input.
     const auto& tbatch_splits = Input(2);
-    CAFFE_ENFORCE_EQ(tbatch_splits.ndim(), 1);
+    CAFFE_ENFORCE_EQ(tbatch_splits.dim(), 1);
     batch_size = tbatch_splits.size(0);
     batch_splits_data = tbatch_splits.data<float>();
   }
