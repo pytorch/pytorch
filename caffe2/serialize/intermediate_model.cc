@@ -70,7 +70,7 @@ void IntermediateTensor::update(caffe2::TensorProto* tensor_proto,
             AT_ASSERT(data_->recordId.value() == record_id);
             AT_ASSERT(data_->size == record_size);
           } else {
-            AT_ASSERTM(mode == DeserializeMode::HEADER_ONLY, "unkonw deserialize mode.");
+            AT_ASSERTM(mode == DeserializeMode::HEADER_ONLY, "unknown deserialize mode.");
             if (it == id_data->end()) {
               data_ = std::make_shared<SharedData>(record_id, record_size);
               (*id_data)[record_id] = data_;

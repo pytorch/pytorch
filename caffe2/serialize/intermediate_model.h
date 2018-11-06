@@ -25,7 +25,7 @@ namespace torch {
 namespace at {
 namespace serialize {
 
-enum DeserializeMode {
+enum class DeserializeMode {
   // In LOADER_TENSOR_DATA mode, we load the file from the beginning, and eagarly load the content of tensors
   LOADER_TENSOR_DATA = 1,
   // In HEADER_ONLY mode, we only load the last record of the file, which is the model metadata
