@@ -146,15 +146,15 @@ void IntermediateParameter::dump(torch::ParameterDef* param_def) {
   tensor_.dump(tensor_def);
 }
 
-IntermediateMethod::IntermediateMethod(torch::MethodDef* method_def) {
-  AT_ASSERTM(method_def->has_name(), "name is required for MethodDef!");
+IntermediateMethod::IntermediateMethod(torch::MethodDef* method_def) noexcept {
+//  AT_ASSERTM(method_def->has_name(), "name is required for MethodDef!");
   name_ = method_def->name();
   if (method_def->has_torch_script()) {
     torchScript_ = method_def->torch_script();
   } else if (method_def->has_graph()) {
     graph_.reset(method_def->release_graph());
   } else {
-    AT_ERROR("No method body is found!");
+//    AT_ERROR("No method body is found!");
   }
 }
 
