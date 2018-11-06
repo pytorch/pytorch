@@ -37,6 +37,9 @@ __MATH_FUNCTIONS_DECL__ double max(double x, double y) {
 __MATH_FUNCTIONS_DECL__ float pow(float x, float y) {
   return powf(x, y);
 }
+__MATH_FUNCTIONS_DECL__ double pow(double x, double y) {
+  return ::pow(x, y);
+}
 
 } // namespace compat
 } // namespace cuda

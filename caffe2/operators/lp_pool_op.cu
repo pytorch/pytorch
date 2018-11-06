@@ -54,7 +54,7 @@ __global__ void LpPoolForwardNCHW(
             pow(abs(bottom_data[bottom_offset + h * width + w]), p);
       }
     }
-    top_data[index] = pow(top_data[index], 1.0 / p);
+    top_data[index] = pow(top_data[index], static_cast<T>(1.0) / p);
   }
 }
 
@@ -95,7 +95,7 @@ __global__ void LpPoolForwardNHWC(
             abs(bottom_data[bottom_offset + (h * width + w) * channels]), p);
       }
     }
-    top_data[index] = pow(output, 1.0 / p);
+    top_data[index] = pow(output, static_cast<T>(1.0) / p);
   }
 }
 
