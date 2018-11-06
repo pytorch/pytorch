@@ -960,6 +960,22 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.zeros(3, 4)
         self.run_model_test(ZerosFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_implicit_expand(self):
+        class ImplicitExpandExportMod(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        x = torch.randn(3, 4)
+        self.run_model_test(ImplicitExpandExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_reduce_sum(self):
+        class ReduceSumNegativeIndices(torch.nn.Module):
+            def forward(self, x):
+                return x.sum(-1)
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(ReduceSumNegativeIndices(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
 
 # a bit of metaprogramming to set up all the rnn tests
 

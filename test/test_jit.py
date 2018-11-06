@@ -5908,8 +5908,11 @@ a")
 
             @torch.jit.script_method
             def forward(self, x):
-                for _ in range(100):
-                    x = x + x
+                # test if we support end to end onnx export on loop and
+                # nested loops with and without loop index
+                for _ in range(5):
+                    for i in range(3):
+                        x = x + i
                 return x
 
         mte = ModuleToExport()
