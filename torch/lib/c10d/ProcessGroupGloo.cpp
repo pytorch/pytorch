@@ -21,15 +21,12 @@
 #include <gloo/cuda_allreduce_halving_doubling.h>
 #include <gloo/cuda_allreduce_ring_chunked.h>
 #include <gloo/cuda_broadcast_one_to_all.h>
+
+#include <c10d/private/CUDAUtils.hpp>
 #endif
 
 #include <gloo/rendezvous/context.h>
 #include <gloo/transport/tcp/device.h>
-
-#ifdef USE_CUDA
-#include <THC.h>
-#include <c10d/private/CUDAUtils.hpp>
-#endif
 
 #define GENERATE_ALL_TYPES(type, func, args...)        \
   switch (type) {                                      \
@@ -144,24 +141,16 @@ std::vector<cudaStream_t> getStreamVector(AlgorithmEntry& entry) {
 
 // synchronizeStreams ensures that the private streams associated with
 // an algorithm entry wait for the public streams to complete.
-void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
-  at::cuda::CUDAGuard deviceGuard;
+void synchronizeStreams(AlgorithmEntry* entry) {
   const auto& key = entry->key;
   for (size_t i = 0; i < key.devices.size(); i++) {
     const auto& device = key.devices[i];
-    auto publicStream = THCState_getCurrentStreamOnDevice(thcState, device);
-    auto privateStream = entry->streams[i].stream();
-    auto event = entry->events[i].getEvent();
-
-    // Synchronize private stream with public stream.
-    //
-    // We must use the device guard to cover the case where the public
-    // stream is stream 0 and cudaEventRecord relies on the current
-    // device to find the right one.
-    //
-    deviceGuard.set_index(key.devices[i]);
-    C10D_CUDA_CHECK(cudaEventRecord(event, publicStream));
-    C10D_CUDA_CHECK(cudaStreamWaitEvent(privateStream, event, 0));
+    auto publicStream = at::cuda::getCurrentCUDAStream(device);
+    auto privateStream = entry->streams[i];
+    auto& event = entry->events[i];
+    // Synchronizes private stream with public stream
+    event.record(publicStream);
+    event.block(privateStream);
   }
 }
 #endif
@@ -279,11 +268,9 @@ bool ProcessGroupGloo::WorkGloo::isSuccess() const {
 void ProcessGroupGloo::WorkGloo::synchronize() {
 #ifdef USE_CUDA
   if (cuda_) {
-    auto thcState = ::at::globalContext().lazyInitCUDA();
     for (size_t i = 0; i < devices_.size(); i++) {
-      auto stream = THCState_getCurrentStreamOnDevice(thcState, devices_[i]);
-      auto event = events_[i].getEvent();
-      C10D_CUDA_CHECK(cudaStreamWaitEvent(stream, event, 0));
+      auto stream = at::cuda::getCurrentCUDAStream(devices_[i]);
+      events_[i].block(stream);
     }
   }
 #endif
@@ -316,15 +303,11 @@ void ProcessGroupGloo::WorkGloo::finish(const AlgorithmEntry& entry) {
       // Populate devices and events so that we can later synchronize
       // with the operation associated with this work finishing.
       if (cuda_) {
-        at::cuda::CUDAGuard deviceGuard;
         devices_ = entry.key.devices;
         events_.resize(devices_.size());
         for (size_t i = 0; i < devices_.size(); i++) {
-          deviceGuard.set_index(devices_[i]);
-          events_[i] = CUDAEvent::create();
-          const auto& event = events_[i].getEvent();
-          const auto& stream = entry.streams[i].stream();
-          C10D_CUDA_CHECK(cudaEventRecord(event, stream));
+          const auto& stream = entry.streams[i];
+          events_[i].record(stream);
         }
       }
 #endif
@@ -664,11 +647,10 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
   // If these are CUDA tensors, create streams and events
   if (key.type->is_cuda()) {
     entry->streams.reserve(key.devices.size());
-    entry->events.reserve(key.devices.size());
+    entry->events.resize(key.devices.size());
     for (size_t i = 0; i < key.devices.size(); i++) {
-      deviceGuard.set_index(key.devices[i]);
-      entry->streams.push_back(at::cuda::getStreamFromPool());
-      entry->events.push_back(CUDAEvent::create());
+      entry->streams.push_back(
+          at::cuda::getStreamFromPool(true, key.devices[i]));
     }
   }
 #endif

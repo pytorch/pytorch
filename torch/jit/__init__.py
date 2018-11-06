@@ -1301,7 +1301,7 @@ class _ConstSequential(_ConstModuleList):
 
 _builtin_table = None
 
-_modules_containing_builtins = (torch, torch.nn.functional)
+_modules_containing_builtins = (torch, torch.nn.functional, torch._C._nn)
 
 # These functions have been converted to weak script, so don't add them as
 # builtin aten ops. Instead, they will be compiled from the code in
@@ -1315,6 +1315,20 @@ _builtin_blacklist = {
     'pairwise_distance',
     'prelu',
     'hardshrink',
+    'threshold',
+
+    # ops with inplace option
+    'relu',
+    'hardtanh',
+    'relu6',
+    'elu',
+    'selu',
+    'celu',
+    'leaky_relu',
+    'rrelu',
+    'tanh',
+    'sigmoid',
+
     'dropout',
     'alpha_dropout',
     'dropout2d',

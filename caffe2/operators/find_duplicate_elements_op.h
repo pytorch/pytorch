@@ -25,7 +25,7 @@ class FindDuplicateElementsOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& data = Input(0);
-    CAFFE_ENFORCE(data.ndim() == 1, "data should be 1-D.");
+    CAFFE_ENFORCE(data.dim() == 1, "data should be 1-D.");
 
     const auto* data_ptr = data.template data<T>();
     std::unordered_map<T, int64_t> dict;

@@ -12,10 +12,10 @@ bool BatchBucketizeOp<CPUContext>::RunOnDevice() {
   auto& boundaries = Input(BOUNDARIES);
   auto& lengths = Input(LENGTHS);
   auto* output = Output(O);
-  CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
-  CAFFE_ENFORCE_EQ(indices.ndim(), 1);
-  CAFFE_ENFORCE_EQ(boundaries.ndim(), 1);
-  CAFFE_ENFORCE_EQ(feature.ndim(), 2);
+  CAFFE_ENFORCE_EQ(lengths.dim(), 1);
+  CAFFE_ENFORCE_EQ(indices.dim(), 1);
+  CAFFE_ENFORCE_EQ(boundaries.dim(), 1);
+  CAFFE_ENFORCE_EQ(feature.dim(), 2);
   CAFFE_ENFORCE_EQ(lengths.numel(), indices.numel());
 
   const auto* lengths_data = lengths.template data<int32_t>();
