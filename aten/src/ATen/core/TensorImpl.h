@@ -177,6 +177,30 @@ namespace detail {
         AT_ERROR("Unsupported layout: ", options.layout());
     }
   }
+
+  inline DeviceType computeDeviceType(TensorTypeId tid) {
+    if (tid == CPUTensorId()) {
+      return DeviceType::CPU;
+    } else if (tid == CUDATensorId()) {
+      return DeviceType::CUDA;
+    } else if (tid == MKLDNNTensorId()) {
+      return DeviceType::MKLDNN;
+    } else if (tid == OpenGLTensorId()) {
+      return DeviceType::IDEEP;
+    } else if (tid == OpenCLTensorId()) {
+      return DeviceType::OPENCL;
+    } else if (tid == IDEEPTensorId()) {
+      return DeviceType::IDEEP;
+    } else if (tid == HIPTensorId()) {
+      return DeviceType::HIP;
+    } else if (tid == SparseCPUTensorId()) {
+      return DeviceType::CPU;
+    } else if (tid == SparseCUDATensorId()) {
+      return DeviceType::CUDA;
+    } else {
+      AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
+    }
+  }
 } // namespace detail
 
 /**
@@ -413,6 +437,32 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       return storage().device().index();
     }
     return get_device_slow();
+  }
+
+  Device device() const {
+    // Special case the common case for performance reasons
+    // TODO: This is a little convoluted so it would be good to investigate
+    // caching device on TensorImpl (#12934) to speed up device() calls in all cases.
+    const auto tid = type_id();
+    if (tid == CPUTensorId() || tid == CUDATensorId()) {
+      // NB: storage(), not storage_, b/c of Variable.
+      const auto& mystorage = storage();
+      if (mystorage) {
+        return mystorage.device();
+      }
+    }
+    const auto device_type = detail::computeDeviceType(tid);
+    bool is_cuda = device_type == DeviceType::CUDA;
+    return Device(device_type, is_cuda ? get_device() : -1);
+  }
+
+  Layout layout() const {
+    // NB: This method is not virtual and avoid dispatches for perf.
+    if (is_sparse()) {
+      return kSparse;
+    } else {
+      return kStrided;
+    }
   }
 
   /**
