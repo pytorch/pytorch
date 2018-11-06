@@ -4,13 +4,15 @@
  * platforms (currently CUDA and HIP).
  */
 
+#include <c10/macros/Macros.h>
+
 #ifdef __HIPCC__
-#define __MATH_FUNCTIONS_DECL__ __device__ inline
+#define __MATH_FUNCTIONS_DECL__ inline C10_DEVICE
 #else /* __HIPCC__ */
 #ifdef __CUDACC_RTC__
-#define __MATH_FUNCTIONS_DECL__ __host__ __device__
+#define __MATH_FUNCTIONS_DECL__ C10_HOST_DEVICE
 #else /* __CUDACC_RTC__ */
-#define __MATH_FUNCTIONS_DECL__ static inline __host__ __device__
+#define __MATH_FUNCTIONS_DECL__ static inline C10_HOST_DEVICE
 #endif /* __CUDACC_RTC__ */
 #endif /* __HIPCC__ */
 
