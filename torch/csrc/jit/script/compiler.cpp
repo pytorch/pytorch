@@ -779,6 +779,8 @@ inline bool isSupportedListElementType(TypePtr type) {
       type->isSubtypeOf(NumberType::get());
 }
 
+static FunctionSchema extractSchemaFromDef(const Def &def, bool is_method);
+
 struct to_ir {
   to_ir(
       Def def,
@@ -2335,12 +2337,6 @@ void defineMethodsInModule(Module & m, const std::string& source, Resolver resol
     resolvers.push_back(resolver);
   }
   defineMethodsInModule(m, definitions, resolvers, self);
-}
-
-std::shared_ptr<Graph> compileFunction(Def def, Resolver resolver) {
-  Module m;
-  defineMethodsInModule(m, {def}, {resolver}, nullptr);
-  return m.get_method(def.name().name()).graph();
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
