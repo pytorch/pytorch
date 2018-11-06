@@ -33,7 +33,7 @@ void get_operator_from_registry_and_execute() {
   torch::jit::Stack stack;
   torch::jit::push(stack, torch::ones(5), 2.0, 3);
   op->getOperation()(stack);
-  std::vector<at::Tensor> output;
+  std::vector<torch::Tensor> output;
   torch::jit::pop(stack, output);
 
   const auto manual = custom_op(torch::ones(5), 2.0, 3);
@@ -99,19 +99,19 @@ void test_move_to_device(const std::string& path_to_exported_script_module) {
       torch::jit::load(path_to_exported_script_module);
   AT_ASSERT(module != nullptr);
 
-  helpers::check_all_parameters(*module, [](const at::Tensor& tensor) {
+  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
     return tensor.device().is_cpu();
   });
 
-  module->to(at::kCUDA);
+  module->to(torch::kCUDA);
 
-  helpers::check_all_parameters(*module, [](const at::Tensor& tensor) {
+  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
     return tensor.device().is_cuda();
   });
 
-  module->to(at::kCPU);
+  module->to(torch::kCPU);
 
-  helpers::check_all_parameters(*module, [](const at::Tensor& tensor) {
+  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
     return tensor.device().is_cpu();
   });
 }
@@ -121,16 +121,16 @@ void test_move_to_dtype(const std::string& path_to_exported_script_module) {
       torch::jit::load(path_to_exported_script_module);
   AT_ASSERT(module != nullptr);
 
-  module->to(at::kInt);
+  module->to(torch::kInt);
 
-  helpers::check_all_parameters(*module, [](const at::Tensor& tensor) {
-    return tensor.dtype() == at::kInt;
+  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
+    return tensor.dtype() == torch::kInt;
   });
 
-  module->to(at::kDouble);
+  module->to(torch::kDouble);
 
-  helpers::check_all_parameters(*module, [](const at::Tensor& tensor) {
-    return tensor.dtype() == at::kDouble;
+  helpers::check_all_parameters(*module, [](const torch::Tensor& tensor) {
+    return tensor.dtype() == torch::kDouble;
   });
 }
 
@@ -147,7 +147,7 @@ int main(int argc, const char* argv[]) {
   test_argument_checking_for_serialized_modules(path_to_exported_script_module);
   test_move_to_dtype(path_to_exported_script_module);
 
-  if (at::globalContext().getNumGPUs() > 0) {
+  if (torch::globalContext().getNumGPUs() > 0) {
     test_move_to_device(path_to_exported_script_module);
   }
 

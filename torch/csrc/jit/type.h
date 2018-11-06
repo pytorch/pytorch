@@ -423,7 +423,6 @@ private:
 template<TypeKind K, typename T>
 struct SingleElementType : public Type {
   static const TypeKind Kind = K;
-  static constexpr bool is_singleton = true;
   TypePtr getElementType() const {
     return elem;
   }
@@ -488,9 +487,6 @@ struct FutureType;
 using FutureTypePtr = std::shared_ptr<FutureType>;
 
 struct TORCH_API FutureType : public Type {
-  // It's not exactly a singleton, but there should be exactly once instance of
-  // Future[T] for every T
-  static constexpr bool is_singleton = true;
   friend struct Type;
   template<typename ... T>
   static FutureTypePtr create(TypePtr elem) {

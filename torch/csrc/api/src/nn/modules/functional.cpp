@@ -1,6 +1,6 @@
 #include <torch/nn/modules/functional.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <functional>
 #include <utility>
