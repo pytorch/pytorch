@@ -9351,6 +9351,7 @@ nn_module_tests = [
     ('Softsign', (), ((S,),)),
     ('Tanh', (), ((S,),)),
     ('Tanhshrink', (), ((S,),)),
+    ('Threshold', (2., 2.), ((S,),)),
 ]
 
 # NB: JIT script tests for all nn functional interfaces, script mode does

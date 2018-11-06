@@ -7,6 +7,7 @@ from .. import functional as F
 from ..._jit_internal import weak_module, weak_script_method
 
 
+@torch._jit_internal.weak_module
 class Threshold(Module):
     __constants__ = ['threshold', 'value', 'inplace']
 
@@ -45,6 +46,7 @@ class Threshold(Module):
         self.inplace = inplace
         # TODO: check in THNN (if inplace == True, then assert value <= threshold)
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
