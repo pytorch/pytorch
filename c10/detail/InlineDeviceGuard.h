@@ -46,7 +46,7 @@ public:
   /// Set the current device to the passed Device
   explicit InlineDeviceGuard(optional<Device> device_opt)
     : original_device_(maybeExchangeDevice(device_opt))
-    , current_device_(maybeDeviceElse(device, original_device_))
+    , current_device_(maybeDeviceElse(device_opt, original_device_))
     {}
 
   /// Set the current device index to the passed DeviceIndex.  (The
