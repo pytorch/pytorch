@@ -709,14 +709,18 @@ def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
             else _VF.feature_alpha_dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def threshold(input, threshold, value, inplace=False):
+    # type: (Tensor, float, float, bool) -> Tensor
     r"""Thresholds each element of the input Tensor.
 
     See :class:`~torch.nn.Threshold` for more details.
     """
     if inplace:
-        return _VF.threshold_(input, threshold, value)
-    return _VF.threshold(input, threshold, value)
+        result = _VF.threshold_(input, threshold, value)
+    else:
+        result = _VF.threshold(input, threshold, value)
+    return result
 
 
 threshold_ = _add_docstr(_VF.threshold_, r"""
@@ -726,15 +730,19 @@ In-place version of :func:`~threshold`.
 """)
 
 
+@torch._jit_internal.weak_script
 def relu(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""relu(input, inplace=False) -> Tensor
 
     Applies the rectified linear unit function element-wise. See
     :class:`~torch.nn.ReLU` for more details.
     """
     if inplace:
-        return torch.relu_(input)
-    return torch.relu(input)
+        result = torch.relu_(input)
+    else:
+        result = torch.relu(input)
+    return result
 
 
 relu_ = _add_docstr(torch.relu_, r"""
@@ -767,7 +775,9 @@ def glu(input, dim=-1):
     return torch._C._nn.glu(input, dim)
 
 
+@torch._jit_internal.weak_script
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
+    # type: (Tensor, float, float, bool) -> Tensor
     r"""
     hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
 
@@ -775,8 +785,10 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
     details.
     """
     if inplace:
-        return torch._C._nn.hardtanh_(input, min_val, max_val)
-    return torch._C._nn.hardtanh(input, min_val, max_val)
+        result = torch._C._nn.hardtanh_(input, min_val, max_val)
+    else:
+        result = torch._C._nn.hardtanh(input, min_val, max_val)
+    return result
 
 
 hardtanh_ = _add_docstr(torch._C._nn.hardtanh_, r"""
@@ -786,25 +798,31 @@ In-place version of :func:`~hardtanh`.
 """)
 
 
+@torch._jit_internal.weak_script
 def relu6(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""relu6(input, inplace=False) -> Tensor
 
     Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`.
 
     See :class:`~torch.nn.ReLU6` for more details.
     """
-    return hardtanh(input, 0, 6, inplace)
+    return hardtanh(input, 0., 6., inplace)
 
 
+@torch._jit_internal.weak_script
 def elu(input, alpha=1., inplace=False):
+    # type: (Tensor, float, bool) -> Tensor
     r"""Applies element-wise,
     :math:`\text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))`.
 
     See :class:`~torch.nn.ELU` for more details.
     """
     if inplace:
-        return torch._C._nn.elu_(input, alpha)
-    return torch._C._nn.elu(input, alpha)
+        result = torch._C._nn.elu_(input, alpha)
+    else:
+        result = torch._C._nn.elu(input, alpha)
+    return result
 
 
 elu_ = _add_docstr(torch._C._nn.elu_, r"""
@@ -814,7 +832,9 @@ In-place version of :func:`~elu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def selu(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""selu(input, inplace=False) -> Tensor
 
     Applies element-wise,
@@ -825,8 +845,11 @@ def selu(input, inplace=False):
     See :class:`~torch.nn.SELU` for more details.
     """
     if inplace:
-        return torch.selu_(input)
-    return torch.selu(input)
+        result = torch.selu_(input)
+    else:
+        result = torch.selu(input)
+    return result
+
 
 selu_ = _add_docstr(torch.selu_, r"""
 selu_(input) -> Tensor
@@ -835,7 +858,9 @@ In-place version of :func:`~selu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def celu(input, alpha=1., inplace=False):
+    # type: (Tensor, float, bool) -> Tensor
     r"""celu(input, alpha=1., inplace=False) -> Tensor
 
     Applies element-wise,
@@ -844,8 +869,10 @@ def celu(input, alpha=1., inplace=False):
     See :class:`~torch.nn.CELU` for more details.
     """
     if inplace:
-        return torch.celu_(input, alpha)
-    return torch.celu(input, alpha)
+        result = torch.celu_(input, alpha)
+    else:
+        result = torch.celu(input, alpha)
+    return result
 
 celu_ = _add_docstr(torch.celu_, r"""
 celu_(input, alpha=1.) -> Tensor
@@ -854,7 +881,9 @@ In-place version of :func:`~celu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def leaky_relu(input, negative_slope=0.01, inplace=False):
+    # type: (Tensor, float, bool) -> Tensor
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
@@ -864,8 +893,10 @@ def leaky_relu(input, negative_slope=0.01, inplace=False):
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
     if inplace:
-        return torch._C._nn.leaky_relu_(input, negative_slope)
-    return torch._C._nn.leaky_relu(input, negative_slope)
+        result = torch._C._nn.leaky_relu_(input, negative_slope)
+    else:
+        result = torch._C._nn.leaky_relu(input, negative_slope)
+    return result
 
 
 leaky_relu_ = _add_docstr(torch._C._nn.leaky_relu_, r"""
@@ -877,6 +908,7 @@ In-place version of :func:`~leaky_relu`.
 
 @torch._jit_internal.weak_script
 def prelu(input, weight):
+    # type: (Tensor, Tensor) -> Tensor
     r"""prelu(input, weight) -> Tensor
 
     Applies element-wise the function
@@ -888,7 +920,9 @@ def prelu(input, weight):
     return torch.prelu(input, weight)
 
 
+@torch._jit_internal.weak_script
 def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
+    # type: (Tensor, float, float, bool, bool) -> Tensor
     r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Tensor
 
     Randomized leaky ReLU.
@@ -896,8 +930,10 @@ def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
     See :class:`~torch.nn.RReLU` for more details.
     """
     if inplace:
-        return torch.rrelu_(input, lower, upper, training)
-    return torch.rrelu(input, lower, upper, training)
+        result = torch.rrelu_(input, lower, upper, training)
+    else:
+        result = torch.rrelu(input, lower, upper, training)
+    return result
 
 
 rrelu_ = _add_docstr(torch.rrelu_, r"""
@@ -1122,6 +1158,7 @@ See :class:`~torch.nn.Softshrink` for more details.
 """)
 
 
+@torch._jit_internal.weak_script
 def tanh(input):
     r"""tanh(input) -> Tensor
 
@@ -1134,6 +1171,7 @@ def tanh(input):
     return input.tanh()
 
 
+@torch._jit_internal.weak_script
 def sigmoid(input):
     r"""sigmoid(input) -> Tensor
 

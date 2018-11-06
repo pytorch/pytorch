@@ -519,8 +519,8 @@ bool CudnnConvOp::DoRunWithType() {
   auto* Y = Output(0);
 
   // Figure out the output shape
-  CAFFE_ENFORCE(X.ndim() >= 3 && X.ndim() <= 5);
-  CAFFE_ENFORCE(filter.ndim() >= 3 && filter.ndim() <= 5);
+  CAFFE_ENFORCE(X.dim() >= 3 && X.dim() <= 5);
+  CAFFE_ENFORCE(filter.dim() >= 3 && filter.dim() <= 5);
   const int M = filter.dim32(0);
   ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, M);
   int N = 0, C = 0, H = 0, W = 0, D = 0, H_out = 0, W_out = 0, D_out = 0;
@@ -530,16 +530,16 @@ bool CudnnConvOp::DoRunWithType() {
     case StorageOrder::NHWC:
       N = X.dim32(0);
       H = X.dim32(1);
-      W = X.ndim() > 3 ? X.dim32(2) : 1;
-      D = X.ndim() > 4 ? X.dim32(3) : 1;
-      C = X.dim32(X.ndim() - 1);
+      W = X.dim() > 3 ? X.dim32(2) : 1;
+      D = X.dim() > 4 ? X.dim32(3) : 1;
+      C = X.dim32(X.dim() - 1);
       H_out = Y->dim32(1);
-      W_out = Y->ndim() > 3 ? Y->dim32(2) : 1;
-      D_out = Y->ndim() > 4 ? Y->dim32(3) : 1;
+      W_out = Y->dim() > 3 ? Y->dim32(2) : 1;
+      D_out = Y->dim() > 4 ? Y->dim32(3) : 1;
       for (int i = 0; i < kernel_.size(); ++i) {
         CAFFE_ENFORCE_EQ(filter.dim32(i + 1), kernel_[i]);
       }
-      CAFFE_ENFORCE_EQ(filter.dim32(filter.ndim() - 1), C / group_);
+      CAFFE_ENFORCE_EQ(filter.dim32(filter.dim() - 1), C / group_);
       group_offset_X = C / group_;
       group_offset_Y = M / group_;
       break;
@@ -547,11 +547,11 @@ bool CudnnConvOp::DoRunWithType() {
       N = X.dim32(0);
       C = X.dim32(1);
       H = X.dim32(2);
-      W = X.ndim() > 3 ? X.dim32(3) : 1;
-      D = X.ndim() > 4 ? X.dim32(4) : 1;
+      W = X.dim() > 3 ? X.dim32(3) : 1;
+      D = X.dim() > 4 ? X.dim32(4) : 1;
       H_out = Y->dim32(2);
-      W_out = Y->ndim() > 3 ? Y->dim32(3) : 1;
-      D_out = Y->ndim() > 4 ? Y->dim32(4) : 1;
+      W_out = Y->dim() > 3 ? Y->dim32(3) : 1;
+      D_out = Y->dim() > 4 ? Y->dim32(4) : 1;
       CAFFE_ENFORCE_EQ(filter.dim32(1), C / group_);
       for (int i = 0; i < kernel_.size(); ++i) {
         CAFFE_ENFORCE_EQ(filter.dim32(i + 2), kernel_[i]);
@@ -581,8 +581,7 @@ bool CudnnConvOp::DoRunWithType() {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
       cudnn_input_dims_ = X.sizes().vec();
-      SetTensorNdDescriptorWithGroup<T_X>(
-          X.ndim(), bottom_desc_, N, C, H, W, D);
+      SetTensorNdDescriptorWithGroup<T_X>(X.dim(), bottom_desc_, N, C, H, W, D);
     }
     if (filter_changed) {
       cudnn_filter_dims_ = filter.sizes().vec();
@@ -626,13 +625,13 @@ bool CudnnConvOp::DoRunWithType() {
               1,
               1));
         } else {
-          std::vector<int> bias_dims(X.ndim(), 1);
+          std::vector<int> bias_dims(X.dim(), 1);
           bias_dims[1] = M;
           std::vector<int> strides = {M, 1, 1, 1, 1, 1};
           CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
               bias_desc_,
               cudnnTypeWrapper<T_B>::type,
-              X.ndim() > 3 ? X.ndim() : 4,
+              X.dim() > 3 ? X.dim() : 4,
               bias_dims.data(),
               strides.data()));
         }
@@ -640,7 +639,7 @@ bool CudnnConvOp::DoRunWithType() {
     }
     // Set the output
     SetTensorNdDescriptorWithGroup<T_Y>(
-        X.ndim(), top_desc_, N, M, H_out, W_out, D_out);
+        X.dim(), top_desc_, N, M, H_out, W_out, D_out);
     // Set the output with descriptor useful for bias addition in one run.
     if (kernel_.size() == 1 || kernel_.size() == 2) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
@@ -661,7 +660,7 @@ bool CudnnConvOp::DoRunWithType() {
       CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
           top_desc_for_bias_,
           cudnnTypeWrapper<T_B>::type,
-          X.ndim() > 3 ? X.ndim() : 4,
+          X.dim() > 3 ? X.dim() : 4,
           dims.data(),
           strides.data()));
     }
@@ -832,7 +831,7 @@ bool CudnnConvOp::DoRunWithType() {
   if (InputSize() == 3) {
     auto& bias = Input(BIAS);
 
-    CAFFE_ENFORCE_EQ(bias.ndim(), 1);
+    CAFFE_ENFORCE_EQ(bias.dim(), 1);
     CAFFE_ENFORCE_EQ(bias.dim32(0), M);
 
     CUDNN_ENFORCE(cudnnAddTensor(
@@ -883,8 +882,8 @@ bool CudnnConvGradientOp::DoRunWithType() {
   auto& dY = Input(OUTPUT_GRAD);
   auto* dfilter = Output(FILTER_GRAD);
 
-  CAFFE_ENFORCE(X.ndim() >= 3 && X.ndim() <= 5);
-  CAFFE_ENFORCE(filter.ndim() >= 3 && filter.ndim() <= 5);
+  CAFFE_ENFORCE(X.dim() >= 3 && X.dim() <= 5);
+  CAFFE_ENFORCE(filter.dim() >= 3 && filter.dim() <= 5);
 
   const int M = filter.dim32(0);
   int N = 0, C = 0, H = 0, W = 0, D = 0, H_out = 0, W_out = 0, D_out = 0;
@@ -894,16 +893,16 @@ bool CudnnConvGradientOp::DoRunWithType() {
     case StorageOrder::NHWC:
       N = X.dim32(0);
       H = X.dim32(1);
-      W = X.ndim() > 3 ? X.dim32(2) : 1;
-      D = X.ndim() > 4 ? X.dim32(3) : 1;
-      C = X.dim32(X.ndim() - 1);
+      W = X.dim() > 3 ? X.dim32(2) : 1;
+      D = X.dim() > 4 ? X.dim32(3) : 1;
+      C = X.dim32(X.dim() - 1);
       H_out = dY.dim32(1);
-      W_out = dY.ndim() > 3 ? dY.dim32(2) : 1;
-      D_out = dY.ndim() > 4 ? dY.dim32(3) : 1;
+      W_out = dY.dim() > 3 ? dY.dim32(2) : 1;
+      D_out = dY.dim() > 4 ? dY.dim32(3) : 1;
       for (int i = 0; i < kernel_.size(); ++i) {
         CAFFE_ENFORCE_EQ(filter.dim32(i + 1), kernel_[i]);
       }
-      CAFFE_ENFORCE_EQ(filter.dim32(filter.ndim() - 1), C / group_);
+      CAFFE_ENFORCE_EQ(filter.dim32(filter.dim() - 1), C / group_);
       group_offset_X = C / group_;
       group_offset_Y = M / group_;
       break;
@@ -911,11 +910,11 @@ bool CudnnConvGradientOp::DoRunWithType() {
       N = X.dim32(0);
       C = X.dim32(1);
       H = X.dim32(2);
-      W = X.ndim() > 3 ? X.dim32(3) : 1;
-      D = X.ndim() > 4 ? X.dim32(4) : 1;
+      W = X.dim() > 3 ? X.dim32(3) : 1;
+      D = X.dim() > 4 ? X.dim32(4) : 1;
       H_out = dY.dim32(2);
-      W_out = dY.ndim() > 3 ? dY.dim32(3) : 1;
-      D_out = dY.ndim() > 4 ? dY.dim32(4) : 1;
+      W_out = dY.dim() > 3 ? dY.dim32(3) : 1;
+      D_out = dY.dim() > 4 ? dY.dim32(4) : 1;
       CAFFE_ENFORCE_EQ(filter.dim32(1), C / group_);
       for (int i = 0; i < kernel_.size(); ++i) {
         CAFFE_ENFORCE_EQ(filter.dim32(i + 2), kernel_[i]);
@@ -955,8 +954,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
       cudnn_input_dims_ = X.sizes().vec();
-      SetTensorNdDescriptorWithGroup<T_X>(
-          X.ndim(), bottom_desc_, N, C, H, W, D);
+      SetTensorNdDescriptorWithGroup<T_X>(X.dim(), bottom_desc_, N, C, H, W, D);
     }
     if (filter_changed) {
       cudnn_filter_dims_ = filter.sizes().vec();
@@ -1001,13 +999,13 @@ bool CudnnConvGradientOp::DoRunWithType() {
               1,
               1));
         } else {
-          std::vector<int> bias_dims(X.ndim(), 1);
+          std::vector<int> bias_dims(X.dim(), 1);
           bias_dims[1] = M;
           std::vector<int> strides = {M, 1, 1, 1, 1, 1};
           CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
               bias_desc_,
               cudnnTypeWrapper<T_B>::type,
-              X.ndim() > 3 ? X.ndim() : 4,
+              X.dim() > 3 ? X.dim() : 4,
               bias_dims.data(),
               strides.data()));
         }
@@ -1015,7 +1013,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
     }
     // Set the output
     SetTensorNdDescriptorWithGroup<T_DX>(
-        X.ndim(), top_desc_, N, M, H_out, W_out, D_out);
+        X.dim(), top_desc_, N, M, H_out, W_out, D_out);
     // Set the output with descriptor useful for bias addition in one run.
     if (kernel_.size() == 1 || kernel_.size() == 2) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
@@ -1036,7 +1034,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
       CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
           top_desc_for_bias_,
           cudnnTypeWrapper<T_B>::type,
-          X.ndim() > 3 ? X.ndim() : 4,
+          X.dim() > 3 ? X.dim() : 4,
           dims.data(),
           strides.data()));
     }
