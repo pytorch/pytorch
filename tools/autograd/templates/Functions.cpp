@@ -481,6 +481,20 @@ Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, IntList sizes,
   }
 }
 
+Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, const Tensor & mat1, const Scalar & alpha) {
+  // if input was column-major, return grad as column-order for efficiency
+  if (mat1.is_sparse()) {
+    throw std::runtime_error("calculating the gradient of a sparse Tensor argument to mm is not supported.");
+  }
+  at::IntList sizes = mat1.sizes();
+  at::IntList strides = mat1.strides();
+  if (strides[0] == 1 && strides[1] == sizes[0]) {
+    return maybe_multiply(mat2.mm(grad.t()).t(), alpha);
+  } else {
+    return maybe_multiply(grad.mm(mat2.t()), alpha);
+  }
+}
+
 Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntList sizes, IntList strides, const Scalar & alpha) {
   // if input was column-major, return grad as column-order for efficiency
   if (strides[0] == 1 && strides[1] == sizes[0]) {
