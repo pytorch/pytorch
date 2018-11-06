@@ -441,6 +441,11 @@ class CAFFE2_API Tensor final {
 };
 
 void ReinitializeTensor(Tensor* t, at::IntList dims, at::TensorOptions options);
+void ReinitializeAndCopyFrom(
+    Tensor* t,
+    at::TensorOptions options,
+    const Tensor& src,
+    BaseContext* context = nullptr);
 
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
 
