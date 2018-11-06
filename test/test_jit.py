@@ -7264,6 +7264,27 @@ a")
         # output is None in script and () in python
         self.assertEqual(test_indexing_end_out_of_bounds(), None)
 
+    def test_unwrap_optional_builtin(self):
+        def test(x):
+            # type: (Optional[int]) -> int
+            x = torch.jit._unwrap_optional(x)
+            x = x + x
+            return x
+
+        self.checkScript(test, (3,))
+
+        with self.assertRaisesRegex(AssertionError, "Unwrapping null optional"):
+            test(None)
+
+        test_script = torch.jit.script(test)
+        with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
+            test_script(None)
+
+        with self.assertRaisesRegex(RuntimeError, "cannot match a optional to int"):
+            @torch.jit.script
+            def test_test():
+                return torch.jit._unwrap_optional(1)
+
     def test_indexing_error(self):
         with self.assertRaisesRegex(RuntimeError, "Indexing only supported on lists, tensors, and tuples"):
             @torch.jit.script
