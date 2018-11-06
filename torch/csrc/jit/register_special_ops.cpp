@@ -36,7 +36,7 @@ RegisterOperators reg({
           return 0;
         }),
     Operator(
-        "aten::list_with_default(t[] list, t[] defaults) -> t[]",
+        "aten::list_with_default(int?[] list, int[] defaults) -> int[]",
         [](Stack& stack) {
           autograd::profiler::RecordFunction record("sizes");
           auto list = peek(stack, 0, 2).toIntListRef();
@@ -47,18 +47,14 @@ RegisterOperators reg({
 
           auto it = list.begin();
           auto defaults_it = defaults.begin();
-          std::vector<IValue> with_defaults;
+          std::vector<int64_t> list_with_defaults;
 
           while (it++ != list.end()) {
-            with_defaults.push_back(*it);
+            list_with_defaults.push_back(*it);
             ++defaults_it;
           }
 
-          while (defaults_it++ != defaults.end()) {
-            with_defaults.push_back(*defaults_it);
-          }
-
-          pack(stack, with_defaults);
+          stack.push_back(list_with_defaults);
           return 0;
         }),
     Operator(
