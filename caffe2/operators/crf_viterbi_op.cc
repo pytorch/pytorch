@@ -81,7 +81,7 @@ class ViterbiPathOp : public Operator<CPUContext> {
     auto* viterbiPath = Output(0);
 
     CAFFE_ENFORCE(
-        predictions.ndim() == 2 && transitions.ndim() == 2,
+        predictions.dim() == 2 && transitions.dim() == 2,
         "Predictions and transitions hould 2D matrices");
 
     CAFFE_ENFORCE(
@@ -155,7 +155,7 @@ class SwapBestPathOp : public Operator<CPUContext> {
     auto* updatedData = Output(0);
 
     CAFFE_ENFORCE(
-        data.ndim() == 2 && newBestIdicies.ndim() == 1,
+        data.dim() == 2 && newBestIdicies.dim() == 1,
         "predictions should be a 2D matrix and  bestPath should be 1D vector");
 
     CAFFE_ENFORCE(

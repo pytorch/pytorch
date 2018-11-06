@@ -22,7 +22,7 @@ void fc_op_cpu_impl(
     BaseContext* context) {
   constexpr bool TransposeWeight = true;
 
-  CAFFE_ENFORCE(b.ndim() == 1, b.ndim());
+  CAFFE_ENFORCE(b.dim() == 1, b.dim());
   // batch size
   const auto canonical_axis = X.canonical_axis_index(axis);
   const auto M = X.size_to_dim(canonical_axis);
