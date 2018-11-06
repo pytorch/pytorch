@@ -2077,12 +2077,11 @@ CAFFE2_CUDA_EXPORT void Select<at::Half, CUDAContext>(
 
 namespace {
 
-#ifndef __HIPCC__
 template <typename TAlpha, typename TData>
 __global__ void
 ScaleCUDAKernel(const int n, const TAlpha alpha, const TData* x, TData* y) {
   CUDA_1D_KERNEL_LOOP(i, n) {
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
     y[i] = __ldg(x + i) * static_cast<TData>(alpha);
 #else
     y[i] = x[i] * static_cast<TData>(alpha);
@@ -2094,80 +2093,13 @@ template <typename TAlpha, typename TData>
 __global__ void
 ScaleCUDAKernel(const int n, const TAlpha* alpha, const TData* x, TData* y) {
   CUDA_1D_KERNEL_LOOP(i, n) {
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
     y[i] = __ldg(x + i) * static_cast<TData>(__ldg(alpha));
 #else
     y[i] = x[i] * static_cast<TData>(*alpha);
 #endif
   }
 }
-#else
-template <typename TAlpha, typename TData>
-__global__ void
-ScaleKernel(const int n, const TAlpha alpha, const TData* x, TData* y) {
-  HIP_1D_KERNEL_LOOP(i, n) {
-    y[i] = x[i] * static_cast<TData>(alpha);
-  }
-}
-
-template <typename TAlpha, typename TData>
-__global__ void
-ScaleKernel(const int n, const TAlpha* alpha, const TData* x, TData* y) {
-  HIP_1D_KERNEL_LOOP(i, n) {
-    y[i] = x[i] * static_cast<TData>(*alpha);
-  }
-}
-
-template <>
-__global__ void ScaleKernel<at::Half, at::Half>(
-    const int n,
-    const at::Half alpha,
-    const at::Half* x,
-    at::Half* y) {
-  HIP_1D_KERNEL_LOOP(i, n) {
-    y[i] = convert::To<float, at::Half>(
-        convert::To<at::Half, float>(x[i]) * convert::To<at::Half, float>(alpha));
-  }
-}
-
-template <>
-__global__ void ScaleKernel<at::Half, at::Half>(
-    const int n,
-    const at::Half* alpha,
-    const at::Half* x,
-    at::Half* y) {
-  HIP_1D_KERNEL_LOOP(i, n) {
-    y[i] = convert::To<float, at::Half>(
-        convert::To<at::Half, float>(x[i]) *
-        convert::To<at::Half, float>(*alpha));
-  }
-}
-
-// fp16 specialization
-template <>
-__global__ void ScaleKernel<float, at::Half>(
-    const int n,
-    const float alpha,
-    const at::Half* x,
-    at::Half* y) {
-  HIP_1D_KERNEL_LOOP(i, n) {
-    y[i] =
-        convert::To<float, at::Half>(convert::To<at::Half, float>(x[i]) * alpha);
-  }
-}
-
-template <>
-__global__ void ScaleKernel<float, at::Half>(
-    const int n,
-    const float* alpha,
-    const at::Half* x,
-    at::Half* y) {
-  HIP_1D_KERNEL_LOOP(i, n) {
-    y[i] = convert::To<float, at::Half>(
-        convert::To<at::Half, float>(x[i]) * (*alpha));
-  }
-}
-#endif //__HIPCC__
 
 template <typename T>
 __global__ void PowKernel(const int n, const T* x, const T exponent, T* y) {
@@ -2192,7 +2124,6 @@ CAFFE2_CUDA_EXPORT void Powx<float, CUDAContext>(
       context->cuda_stream()>>>(N, a, b, y);
 }
 
-#ifndef __HIPCC__
 #define DELEGATE_CUBLAS_SCALE_FUNCTION(TAlpha, TData, CuBLASFunc)            \
   template <>                                                                \
   CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>(                 \
@@ -2290,8 +2221,8 @@ DELEGATE_CUBLAS_SCALE_FUNCTION(double, double, cublasDscal)
   }
 CAFFE2_SPECIALIZED_CUDA_SCALE(std::int32_t, std::int32_t)
 CAFFE2_SPECIALIZED_CUDA_SCALE(std::int64_t, std::int64_t)
-#undef CAFFE2_SPECIALIZED_CUDA_SCALE
 
+#ifndef __HIPCC__
 template <>
 CAFFE2_CUDA_EXPORT void Scale<at::Half, at::Half, CUDAContext>(
     const int N,
@@ -2417,52 +2348,65 @@ CAFFE2_CUDA_EXPORT void Scale<float, at::Half, CUDAContext>(
       1,
       CUDA_R_32F));
 }
-#else
-#define CAFFE2_SPECIALIZED_HIP_SCALE(TAlpha, TData) \
-  template <>                                       \
-  void Scale<TAlpha, TData, HIPContext>(            \
-      const int n,                                  \
-      const TAlpha alpha,                           \
-      const TData* x,                               \
-      TData* y,                                     \
-      HIPContext* context) {                        \
-    hipLaunchKernelGGL(                             \
-        (ScaleKernel<TAlpha, TData>),               \
-        dim3(CAFFE_GET_BLOCKS(n)),                  \
-        dim3(CAFFE_HIP_NUM_THREADS),                \
-        0,                                          \
-        context->hip_stream(),                      \
-        n,                                          \
-        alpha,                                      \
-        x,                                          \
-        y);                                         \
-  }                                                 \
-  template <>                                       \
-  void Scale<TAlpha, TData, HIPContext>(            \
-      const int n,                                  \
-      const TAlpha* alpha,                          \
-      const TData* x,                               \
-      TData* y,                                     \
-      HIPContext* context) {                        \
-    hipLaunchKernelGGL(                             \
-        (ScaleKernel<TAlpha, TData>),               \
-        dim3(CAFFE_GET_BLOCKS(n)),                  \
-        dim3(CAFFE_HIP_NUM_THREADS),                \
-        0,                                          \
-        context->hip_stream(),                      \
-        n,                                          \
-        alpha,                                      \
-        x,                                          \
-        y);                                         \
+
+#else  // __HIPCC__
+
+namespace {
+template <>
+__global__ void ScaleCUDAKernel<at::Half, at::Half>(
+    const int n,
+    const at::Half alpha,
+    const at::Half* x,
+    at::Half* y) {
+  CUDA_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * convert::To<at::Half, float>(alpha));
   }
-CAFFE2_SPECIALIZED_HIP_SCALE(float, float)
+}
+
+template <>
+__global__ void ScaleCUDAKernel<at::Half, at::Half>(
+    const int n,
+    const at::Half* alpha,
+    const at::Half* x,
+    at::Half* y) {
+  CUDA_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) *
+        convert::To<at::Half, float>(*alpha));
+  }
+}
+
+template <>
+__global__ void ScaleCUDAKernel<float, at::Half>(
+    const int n,
+    const float alpha,
+    const at::Half* x,
+    at::Half* y) {
+  CUDA_1D_KERNEL_LOOP(i, n) {
+    y[i] =
+        convert::To<float, at::Half>(convert::To<at::Half, float>(x[i]) * alpha);
+  }
+}
+
+template <>
+__global__ void ScaleCUDAKernel<float, at::Half>(
+    const int n,
+    const float* alpha,
+    const at::Half* x,
+    at::Half* y) {
+  CUDA_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * (*alpha));
+  }
+}
+} // namespace
+
 CAFFE2_SPECIALIZED_HIP_SCALE(at::Half, at::Half)
 CAFFE2_SPECIALIZED_HIP_SCALE(float, at::Half)
-CAFFE2_SPECIALIZED_HIP_SCALE(double, double)
-CAFFE2_SPECIALIZED_HIP_SCALE(std::int32_t, std::int32_t)
-CAFFE2_SPECIALIZED_HIP_SCALE(std::int64_t, std::int64_t)
-#undef CAFFE2_SPECIALIZED_HIP_SCALE
 #endif // __HIPCC__
+
+#undef CAFFE2_SPECIALIZED_CUDA_SCALE
 
 template <>
 CAFFE2_CUDA_EXPORT void Axpy<float, CUDAContext>(
