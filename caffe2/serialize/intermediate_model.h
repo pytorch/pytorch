@@ -234,7 +234,8 @@ class CAFFE2_API IntermediateMethod final {
 
  private:
   std::string name_;
-  std::shared_ptr<caffe2::NetDef> graph_;
+  //std::unique_ptr<caffe2::NetDef> graph_;
+  std::unique_ptr<std::string> graph_;
   std::string torchScript_;
 };
 
