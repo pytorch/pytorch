@@ -953,6 +953,9 @@ private:
           throw ErrorReport(stmt) << "return statements can appear only at the end "
                                   << "of the function body";
           break;
+        case TK_PASS:
+          // Emit nothing for pass
+          break;
         default:
           throw ErrorReport(stmt)
               << "Unrecognized statement kind " << kindToString(stmt.kind());
