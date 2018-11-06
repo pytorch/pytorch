@@ -174,10 +174,10 @@ class DistributedDataParallel(Module):
 
         # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
         param_buckets = []
-        # Split the parameters into buckets and by types as well using the fine_grained approach
+        # Split the parameters into buckets and by types as well
         param_buckets = [dist._dist_bucket_tensors(list(m.parameters()),
                                                    int(bucket_bytes_cap),
-                                                   fine_grained=True)
+                                                   fine_grained=False)
                          for m in self._module_copies]
 
         self.bucket_sizes = []
