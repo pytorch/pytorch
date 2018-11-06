@@ -203,7 +203,7 @@ class CAFFE2_API IntermediateMethod final {
   // constructors
   IntermediateMethod() = default;
 
-  explicit IntermediateMethod(torch::MethodDef* method_def) noexcept;
+  explicit IntermediateMethod(torch::MethodDef* method_def);
 
   IntermediateMethod(const IntermediateMethod& method) noexcept = delete;
   IntermediateMethod& operator =(const IntermediateMethod& method) noexcept = delete;
