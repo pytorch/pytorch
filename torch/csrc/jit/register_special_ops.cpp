@@ -36,7 +36,7 @@ RegisterOperators reg({
           return 0;
         }),
     Operator(
-        "aten::list_with_default(int?[] list, int[] defaults) -> int[]",
+        "aten::list_with_default(int[] list, int[] defaults) -> int[]",
         [](Stack& stack) {
           autograd::profiler::RecordFunction record("sizes");
           auto list = peek(stack, 0, 2).toIntListRef();
@@ -45,16 +45,10 @@ RegisterOperators reg({
 
           JIT_ASSERT(defaults.size() > list.size());
 
-          auto it = list.begin();
-          auto defaults_it = defaults.begin();
-          std::vector<int64_t> list_with_defaults;
+          // TODO: allow list of optionals to be filled in with defaults
+          // i.e. list_with_default([1, 2, None], [1, 2, 3]) -> [1, 2, 3]
 
-          while (it++ != list.end()) {
-            list_with_defaults.push_back(*it);
-            ++defaults_it;
-          }
-
-          stack.push_back(list_with_defaults);
+          stack.push_back(list);
           return 0;
         }),
     Operator(

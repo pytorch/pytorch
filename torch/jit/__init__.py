@@ -1369,11 +1369,8 @@ def _get_builtin_table():
     _builtin_table[id(_pair)] = "aten::_pair"
     _builtin_table[id(_triple)] = "aten::_triple"
     _builtin_table[id(_quadruple)] = "aten::_quadruple"
-<<<<<<< HEAD
     _builtin_table[id(_list_with_default)] = "aten::list_with_default"
-=======
     _builtin_table[id(_unwrap_optional)] = "aten::_unwrap_optional"
->>>>>>> 137150be88cf468e0f41fc1cb8af845bf83d7f95
 
     return _builtin_table
 
