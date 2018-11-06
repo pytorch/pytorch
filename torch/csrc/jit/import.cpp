@@ -190,6 +190,16 @@ void ModuleDecoder::buildBlock(const onnx::GraphProto& graph_proto, Block* block
   }
 }
 
+std::string getTypeName(std::string&& base_type) {
+  static std::unordered_map<std::string, std::string> type_map = {
+    {"str", "StringType" },
+    {"float", "FloatType" },
+    {"int", "IntType" },
+    {"bool", "BoolType" },
+  };
+  return type_map.find(base_type)->second;
+}
+
 TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
   auto tensortype_proto = type_proto.tensor_type();
   auto shape_proto = tensortype_proto.shape();
@@ -237,6 +247,13 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
     return GeneratorType::get();
   } else if (kind == "StringType") {
     return StringType::get();
+  } else if (kind.find("Optional") == 0) {
+    onnx::TypeProto elem_proto(type_proto);
+    size_t first = kind.find('[') + 1;
+    size_t last = kind.find(']');
+    auto denotation = getTypeName(kind.substr(first, last - first));
+    elem_proto.set_denotation(denotation);
+    return OptionalType::create(buildType(elem_proto));
   } else if (kind.find("TypeVar:") == 0) {
     return VarType::create(kind.substr(strlen("TypeVar:")));
   } else {

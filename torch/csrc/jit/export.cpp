@@ -573,6 +573,8 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("StringType");
   } else if (kind == TypeKind::VarType) {
     type_proto->set_denotation("TypeVar:" + type->expect<VarType>()->name());
+  } else if (kind == TypeKind::OptionalType) {
+    type_proto->set_denotation(type->python_str());
   } else {
     throw std::runtime_error("unexpected type kind");
   }

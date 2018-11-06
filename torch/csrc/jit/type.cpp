@@ -164,6 +164,12 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
     return static_cast<TypePtr>(DynamicType::get());;
   }
 
+  if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
+    return t2;
+  } else if (t2->isSubtypeOf(NoneType::get()) && !t1->isSubtypeOf(NoneType::get())) {
+    return t1;
+  }
+
   //types which contain other types
   if (t1->cast<ListType>() && t2->cast<ListType>()) {
     auto unified_type = unifyTypes(t1->cast<ListType>()->getElementType(), t2->cast<ListType>()->getElementType());
@@ -248,10 +254,19 @@ TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
   } else if (auto opt_formal = formal->cast<OptionalType>()) {
     if (auto opt_actual = actual->cast<OptionalType>()) {
       return OptionalType::create(matchTypeVariables(
-          opt_formal->getElementType(), opt_actual->getElementType(), type_env));
+          opt_formal->getElementType(),
+          opt_actual->getElementType(),
+          type_env));
     } else {
+      if (actual->isSubtypeOf(NoneType::get())) {
+        return OptionalType::create(opt_formal->getElementType());
+      }
+      if (opt_formal->getElementType()->kind() == TypeKind::VarType) {
+        return OptionalType::create(actual);
+      }
       std::stringstream ss;
-      ss << "cannot match a optional to " << actual->str();
+      ss << "cannot match a optional[" << opt_formal->getElementType()->str()
+         << "]to " << actual->str();
       throw TypeMatchError(ss.str());
     }
   }
