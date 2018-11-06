@@ -58,7 +58,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/TemporalReplicationPadding.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalRowConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalUpSamplingLinear.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalUpSamplingNearest.cu
-${CMAKE_CURRENT_SOURCE_DIR}/Threshold.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAdaptiveAveragePooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAdaptiveMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAveragePooling.cu

@@ -139,7 +139,7 @@ static detail::DynamicDAG<Node*> make_dependency_graph(Block * block) {
 
 static void find_differentiable_groups(
     detail::DynamicDAG<Node*>& dep_graph,
-    size_t distance_threshold=64,
+    size_t distance_threshold=256,
     size_t producer_edge_threshold=16) {
   // A Vertex contains a Node* or a differentiable group of Node*.
   // Perform graph contraction on dep_graph: contract two vertices(x, y) if
@@ -203,10 +203,10 @@ static void reorder_according_to_dag(Block * block, const detail::DynamicDAG<Nod
     if (!vertex.has_value()) continue;
 
     auto& nodes = vertex.value()->data;
-    for (auto it = nodes.begin(); it != nodes.end(); ++it) {
+    for (Node* node : nodes) {
       // Move all nodes according to the topological order in dep_graph. A lot
       // of the moves are unnecessary but this is a quick & easy solution.
-      (*it)->moveBefore(block->return_node());
+      node->moveBefore(block->return_node());
     }
   }
 }

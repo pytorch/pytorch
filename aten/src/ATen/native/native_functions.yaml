@@ -586,6 +586,9 @@
 - func: det(Tensor self) -> Tensor
   variants: function, method
 
+- func: diag_embed(Tensor self, int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) -> Tensor
+  variants: function, method
+
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
   variants: function, method
 
@@ -1679,6 +1682,18 @@
 - func: tensordot(Tensor self, Tensor other, IntList dims_self, IntList dims_other) -> Tensor
   variants: function
 
+# TODO: namespace threshold in 'nn'
+- func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
+  variants: function
+
+- func: threshold_(Tensor self, Scalar threshold, Scalar value) -> Tensor
+  variants: function
+
+- func: threshold_out(Tensor result, Tensor self, Scalar threshold, Scalar value) -> Tensor
+
+- func: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor
+  variants: function
+
 - func: transpose(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: function, method
   device_guard: false
@@ -1692,6 +1707,12 @@
   dispatch:
     CPU: flip_cpu
     CUDA: flip_cuda
+
+- func: roll(Tensor self, IntList[1] shifts, IntList[1] dims) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: roll_cpu
+    CUDA: roll_cuda
 
 # default IntList value {0,1} should not add space after comma, since native_parse.py uses ', ' to split args
 - func: rot90(Tensor self, int64_t k=1, IntList dims={0,1}) -> Tensor
@@ -2452,6 +2473,86 @@
   variants: method
   device_guard: false
 
+- func: __and__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __and__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __iand__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __iand__(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __or__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __or__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __ior__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __ior__(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __xor__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __xor__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __ixor__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __ixor__(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __lshift__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __lshift__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __ilshift__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __ilshift__(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __rshift__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __rshift__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+  device_guard: false
+
+- func: __irshift__(Tensor self, Scalar other) -> Tensor
+  variants: method
+  device_guard: false
+
+- func: __irshift__(Tensor self, Tensor other) -> Tensor
+  variants: method
+  device_guard: false
+
 - func: lgamma_(Tensor self) -> Tensor
   variants: method
   device_guard: false
@@ -2785,10 +2886,10 @@
   variants: method, function
   device_guard: false
 
-- func: potrf_out(Tensor result, Tensor self, bool upper=true) -> Tensor
+- func: cholesky_out(Tensor result, Tensor self, bool upper=false) -> Tensor
   device_guard: false
 
-- func: potrf(Tensor self, bool upper=true) -> Tensor
+- func: cholesky(Tensor self, bool upper=false) -> Tensor
   variants: method, function
   device_guard: false
 

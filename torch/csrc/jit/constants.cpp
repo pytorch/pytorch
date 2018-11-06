@@ -50,8 +50,6 @@ Value* insertConstant(
     n->destroy();
     n = g.create(prim::None);
     n->output()->setType(NoneType::get());
-  } else if(val.isWorld()) {
-    n->output()->setType(WorldType::get());
   } else {
     throw constant_not_supported_error("Unsupported value kind: " + val.tagKind());
   }

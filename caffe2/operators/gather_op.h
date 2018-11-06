@@ -41,14 +41,14 @@ class GatherOp : public Operator<Context> {
     for (int i = 0; i < N; ++i) {
       auto idx = idxs[i];
       if (idx < 0) {
-        idx = idx + data.dim(0);
+        idx = idx + data.size(0);
       }
       CAFFE_ENFORCE(
-          0 <= idx && idx < data.dim(0),
+          0 <= idx && idx < data.size(0),
           "INDICES element is out of DATA bounds, id=",
           idx,
           " data_dim=",
-          data.dim(0));
+          data.size(0));
       auto src = src_base + idx * block_bytesize;
       context_.template CopyItems<Context, Context>(
           data.dtype(), block_size, src, out + block_bytesize * i);

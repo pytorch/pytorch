@@ -19,7 +19,7 @@
 
 #include "ATen/core/Backtrace.h"
 #include "ATen/core/Half.h"
-#include "ATen/core/Macros.h"
+#include "c10/macros/Macros.h"
 #include "c10/util/C++17.h"
 #include "c10/util/Exception.h"
 #include "c10/util/IdWrapper.h"
