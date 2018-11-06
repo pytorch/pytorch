@@ -520,6 +520,15 @@ RegisterOperators reg({
             };
           }
         }),
+    Operator("aten::_unwrap_optional(t? optional) -> t",
+      [](const Node* node) -> Operation {
+        return [=](Stack& stack) {
+          auto val = pop(stack);
+          JIT_ASSERTM(!val.isNone(), "Unwrapping null optional");
+          push(stack, val);
+          return 0;
+        };
+      }),
     Operator(
         prim::fork,
         [](const Node* node) {
