@@ -399,6 +399,7 @@ method_tests = [
     ('cumprod', prod_zeros(S, [0, 1]), (1,), 'zeros_dim2', [0]),
     ('cumprod', prod_zeros(S, [0, 2]), (1,), 'zeros_dim1', [0]),
     ('cumprod', prod_zeros(S, [1, 2]), (1,), 'zeros_dim0', [0]),
+    ('cumprod', prod_zeros(S, [1, 2]), (1,), 'zeros_dim0_cast', [0], (), lambda x: x, {'dtype': torch.float64}),
     ('unfold', (), (0, 1, 1), 'scalar', [0]),
     ('unfold', (S, S, S, S), (1, 3, 1), '', [0]),
     ('unfold', (S, S, S), (2, 3, 2), 'lastdim', [0]),
