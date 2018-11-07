@@ -687,6 +687,7 @@ if(NOT BUILD_ATEN_MOBILE)
     list(APPEND HIP_HIPCC_FLAGS -Wno-unused-command-line-argument)
     list(APPEND HIP_HIPCC_FLAGS -Wno-duplicate-decl-specifier)
     list(APPEND HIP_HIPCC_FLAGS -DCAFFE2_USE_MIOPEN)
+    list(APPEND HIP_HIPCC_FLAGS -DROCBLAS_FP16=0)
 
     set(Caffe2_HIP_INCLUDES
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
