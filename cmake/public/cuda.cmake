@@ -103,8 +103,21 @@ endif()
 # Optionally, find TensorRT
 if(CAFFE2_USE_TENSORRT)
 
-  find_package(TensorRT)
 
+
+
+
+
+
+
+
+
+
+
+
+  #
+#  find_package(TensorRT)
+#
 ##  find_path(TENSORRT_INCLUDE_DIR NvInfer.h
 ##    HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
 ##    PATH_SUFFIXES include)
@@ -147,6 +160,14 @@ if(CAFFE2_USE_TENSORRT)
 ##  find_package_handle_standard_args(
 ##    TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARY)
 
+  find_path(TENSORRT_INCLUDE_DIR NvInfer.h
+    HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
+    PATH_SUFFIXES include)
+  find_library(TENSORRT_LIBRARIES nvinfer
+    HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
+    PATH_SUFFIXES lib lib64 lib/x64)
+  find_package_handle_standard_args(
+    TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARIES)
   if(NOT TENSORRT_FOUND)
     message(WARNING
       "Caffe2: Cannot find TensorRT library. Turning the option off")
@@ -270,14 +291,20 @@ set_property(
 
 # TensorRT
 if(CAFFE2_USE_TENSORRT)
-  add_library(caffe2::tensorrt INTERFACE IMPORTED)
-#  set_property(
-#      TARGET caffe2::tensorrt PROPERTY IMPORTED_LOCATION
-#      ${TENSORRT_LIBRARIES})
+#  add_library(caffe2::tensorrt INTERFACE IMPORTED)
+##  set_property(
+##      TARGET caffe2::tensorrt PROPERTY IMPORTED_LOCATION
+##      ${TENSORRT_LIBRARIES})
+#target_link_libraries(caffe2::tensorrt INTERFACE ${TENSORRT_LIBRARIES})
+#set_property(
+#      TARGET caffe2::tensorrt PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+#      ${TENSORRT_INCLUDE_DIR})
 
-target_link_libraries(caffe2::tensorrt INTERFACE ${TENSORRT_LIBRARIES})
-
-set_property(
+  add_library(caffe2::tensorrt UNKNOWN IMPORTED)
+  set_property(
+      TARGET caffe2::tensorrt PROPERTY IMPORTED_LOCATION
+      ${TENSORRT_LIBRARIES})
+  set_property(
       TARGET caffe2::tensorrt PROPERTY INTERFACE_INCLUDE_DIRECTORIES
       ${TENSORRT_INCLUDE_DIR})
 endif()
