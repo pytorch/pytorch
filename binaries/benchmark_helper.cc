@@ -218,7 +218,6 @@ void fillInputBlob(
         (tensor->mutable_data<string>())[i] = tensor_proto->string_data(i);
       }
     } else if (tensor_proto->data_type() == caffe2::TensorProto::FLOAT) {
-      // TODO: Blob->Reset
       blob->Reset(new caffe2::Tensor(serializer.Deserialize(*tensor_proto)));
     }
     // todo: for other types
