@@ -449,7 +449,7 @@ class TestAutograd(TestCase):
             def forward(self, x, y):
                 assert self.needs_input_grad[0]
                 assert not self.needs_input_grad[1]
-                return x, y
+                return x.clone(), y.clone()
 
             def backward(self, grad_x, grad_y):
                 return grad_x, None
@@ -1720,16 +1720,16 @@ class TestAutograd(TestCase):
         class Identity(Function):
 
             def forward(self, a, b):
-                return a, a + b
+                return a
 
-            def backward(self, grad_a, grad_b):
-                return grad_a + grad_b, grad_b
+            def backward(self, grad_a):
+                return grad_a, None
 
         hook_called = [False]
         x = torch.randn(5, 5, requires_grad=True)
         y = torch.randn(5, 5, requires_grad=True)
 
-        q, p = Identity()(x, y)
+        q = Identity()(x, y)
 
         # Make sure hooks only receive grad from usage of q, not x.
         def hook(grad):
@@ -1737,8 +1737,8 @@ class TestAutograd(TestCase):
             self.assertEqual(grad.data, torch.ones(5, 5))
 
         q.register_hook(hook)
-        (q + p + x).sum().backward()
-        self.assertEqual(x.grad.data, torch.ones(5, 5) * 3)
+        (q + x + y).sum().backward()
+        self.assertEqual(x.grad.data, torch.ones(5, 5) * 2)
         self.assertEqual(y.grad.data, torch.ones(5, 5))
         self.assertTrue(hook_called[0])
 
@@ -1907,7 +1907,7 @@ class TestAutograd(TestCase):
             def forward(self, input):
                 out = torch.randn(input.size())
                 self.mark_non_differentiable(out)
-                return input, out
+                return input.clone(), out
 
             def backward(self, grad_output, ignored):
                 return grad_output
@@ -2697,7 +2697,7 @@ class TestAutograd(TestCase):
                 return gout1, gout2
 
         # Invalid Function that return an input and has two outputs
-        class BadFunction1(Function):
+        class BadFunction2(Function):
             @staticmethod
             def forward(ctx, inp1, inp2):
                 return inp1, inp2.clone()
@@ -2711,7 +2711,7 @@ class TestAutograd(TestCase):
 
         # This should work fine
         outs = BadFunction1.apply(inp1, inp2)
-        outs.sum().backward()
+        (outs[0] + outs[1]).sum().backward()
 
         inp1_view = inp1.view_as(inp1)
         with self.assertRaisesRegex(RuntimeError, "Functions which modify views in-place"
