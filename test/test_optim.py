@@ -526,8 +526,8 @@ class TestLRScheduler(TestCase):
         power = 0.9
         self.opt.param_groups[0]['lr'] = 0.1
         self.opt.param_groups[1]['lr'] = 0.01
-        targets = [[0.1 * (1.0 - (x % epoch) / epochs) ** power for x in range(epochs)],
-                   [0.01 * (1.0 - (x % epoch) / epochs) ** power for x in range(epochs)]]
+        targets = [[0.1 * (1.0 - (x % epochs) / epochs) ** power for x in range(epochs)],
+                   [0.01 * (1.0 - (x % epochs) / epochs) ** power for x in range(epochs)]]
         scheduler = PolyLR(self.opt, max_epoch=5, power=power)
         self._test(scheduler, targets, epochs)
 
