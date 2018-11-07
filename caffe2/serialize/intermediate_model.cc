@@ -4,9 +4,10 @@
 #include "caffe2/serialize/intermediate_model.h"
 
 namespace at {
-namespace serialize{
+namespace serialize {
 
-void IntermediateTensor::update(caffe2::TensorProto* tensor_proto,
+void IntermediateTensor::update(
+    caffe2::TensorProto* tensor_proto,
     std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
     DeserializeMode mode) {
   AT_ASSERTM(tensor_proto->has_data_type(), "no data_type in TensorProto!");
@@ -35,7 +36,8 @@ void IntermediateTensor::update(caffe2::TensorProto* tensor_proto,
       AT_ERROR("DeviceOption contains extra info, not supported!");
     }
   }
-  AT_ASSERTM(tensor_proto->has_storage_type(), "no storage_type in TensorProto!");
+  AT_ASSERTM(
+      tensor_proto->has_storage_type(), "no storage_type in TensorProto!");
   int64_t storage_type = tensor_proto->storage_type();
   switch (storage_type) {
     case caffe2::TensorProto_StorageType_TYPED:
@@ -44,71 +46,83 @@ void IntermediateTensor::update(caffe2::TensorProto* tensor_proto,
     case caffe2::TensorProto_StorageType_RAW:
       // TODO
       AT_ERROR("Storing data in raw field is not supported yet!");
-    case caffe2::TensorProto_StorageType_EXTERNAL:
-      {
-        AT_ASSERTM(tensor_proto->has_external_data(), "storage type is EXTERNAL, "
-            "but no external_data in TensorProto!");
-        auto& external_data = tensor_proto->external_data();
-        offset_ = external_data.offset();
-        for (int i = 0; i < external_data.strides_size(); ++i) {
-          strides_.push_back(external_data.strides(i));
-        }
-        int64_t source_type = external_data.source_type();
-        if (source_type == caffe2::ExternalDataProto_SourceType_INLINE_CONTAINER) {
-          AT_ASSERTM(external_data.has_record_id(), "no record_id in ExternalDataProto and source_type is INLINE_CONTAINER!");
-          // only load the data of the tensor in LOADER_TENSOR_DATA mode
-          uint64_t record_id = caffe2::stoull(external_data.record_id());
-          uint64_t record_size = external_data.record_size();
-          auto it = id_data->find(record_id);
-          if (mode == DeserializeMode::LOADER_TENSOR_DATA) {
-            // tensor data is only loaded in LOADER_TENSOR_DATA mode
-            if (it == id_data->end()) {
-              AT_ERROR("Tensor's data is missing in id_data, tensor name is ",
-                  name_, ", and record_id is ", caffe2::to_string(record_id));
-            }
-            data_ = it->second;
-            AT_ASSERT(data_->recordId.value() == record_id);
-            AT_ASSERT(data_->size == record_size);
-          } else {
-            AT_ASSERTM(mode == DeserializeMode::HEADER_ONLY, "unknown deserialize mode.");
-            if (it == id_data->end()) {
-              data_ = std::make_shared<SharedData>(record_id, record_size);
-              (*id_data)[record_id] = data_;
-            } else {
-              data_ = it->second;
-            }
+    case caffe2::TensorProto_StorageType_EXTERNAL: {
+      AT_ASSERTM(
+          tensor_proto->has_external_data(),
+          "storage type is EXTERNAL, "
+          "but no external_data in TensorProto!");
+      auto& external_data = tensor_proto->external_data();
+      offset_ = external_data.offset();
+      for (int i = 0; i < external_data.strides_size(); ++i) {
+        strides_.push_back(external_data.strides(i));
+      }
+      int64_t source_type = external_data.source_type();
+      if (source_type ==
+          caffe2::ExternalDataProto_SourceType_INLINE_CONTAINER) {
+        AT_ASSERTM(
+            external_data.has_record_id(),
+            "no record_id in ExternalDataProto and source_type is INLINE_CONTAINER!");
+        // only load the data of the tensor in LOADER_TENSOR_DATA mode
+        uint64_t record_id = caffe2::stoull(external_data.record_id());
+        uint64_t record_size = external_data.record_size();
+        auto it = id_data->find(record_id);
+        if (mode == DeserializeMode::LOADER_TENSOR_DATA) {
+          // tensor data is only loaded in LOADER_TENSOR_DATA mode
+          if (it == id_data->end()) {
+            AT_ERROR(
+                "Tensor's data is missing in id_data, tensor name is ",
+                name_,
+                ", and record_id is ",
+                caffe2::to_string(record_id));
           }
-        } else if (source_type == caffe2::ExternalDataProto_SourceType_SIMPLE_FILE) {
-          // TODO
-          AT_ERROR("Storing data in separate file is not supported yet!");
+          data_ = it->second;
+          AT_ASSERT(data_->recordId.value() == record_id);
+          AT_ASSERT(data_->size == record_size);
         } else {
-          // TODO
-          AT_ERROR("Unknown source_type: ", caffe2::to_string(source_type));
+          AT_ASSERTM(
+              mode == DeserializeMode::HEADER_ONLY,
+              "unknown deserialize mode.");
+          if (it == id_data->end()) {
+            data_ = std::make_shared<SharedData>(record_id, record_size);
+            (*id_data)[record_id] = data_;
+          } else {
+            data_ = it->second;
+          }
         }
-        break;
+      } else if (
+          source_type == caffe2::ExternalDataProto_SourceType_SIMPLE_FILE) {
+        // TODO
+        AT_ERROR("Storing data in separate file is not supported yet!");
+      } else {
+        // TODO
+        AT_ERROR("Unknown source_type: ", caffe2::to_string(source_type));
       }
-    case caffe2::TensorProto_StorageType_NO_CONTENT:
-      {
-        noContent_ = true;
-        break;
-      }
+      break;
+    }
+    case caffe2::TensorProto_StorageType_NO_CONTENT: {
+      noContent_ = true;
+      break;
+    }
     default:
       AT_ERROR("Uknown storage_type: ", caffe2::to_string(storage_type));
   }
-
 }
 
 void IntermediateTensor::dump(caffe2::TensorProto* tensor_proto) {
   for (auto dim : dims_) {
     tensor_proto->add_dims(dim);
   }
-  tensor_proto->set_data_type(static_cast<caffe2::TensorProto_DataType>(dataType_));
+  tensor_proto->set_data_type(
+      static_cast<caffe2::TensorProto_DataType>(dataType_));
   // NB: maybe later we support RAW
-  tensor_proto->set_storage_type(caffe2::TensorProto_StorageType::TensorProto_StorageType_EXTERNAL);
+  tensor_proto->set_storage_type(
+      caffe2::TensorProto_StorageType::TensorProto_StorageType_EXTERNAL);
   caffe2::ExternalDataProto* data_proto = tensor_proto->mutable_external_data();
   // NB: maybe later we support SIMPLE_FILE
-  data_proto->set_source_type(caffe2::ExternalDataProto_SourceType_INLINE_CONTAINER);
-  AT_ASSERTM(data_->recordId.has_value(), "recordId is required for SharedData!");
+  data_proto->set_source_type(
+      caffe2::ExternalDataProto_SourceType_INLINE_CONTAINER);
+  AT_ASSERTM(
+      data_->recordId.has_value(), "recordId is required for SharedData!");
   data_proto->set_record_id(caffe2::to_string(data_->recordId.value()));
   data_proto->set_record_size(data_->size);
   data_proto->set_offset(offset_);
@@ -122,10 +136,13 @@ void IntermediateTensor::dump(caffe2::TensorProto* tensor_proto) {
   }
 }
 
-IntermediateParameter::IntermediateParameter(torch::ParameterDef* param_def,
+IntermediateParameter::IntermediateParameter(
+    torch::ParameterDef* param_def,
     std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
     DeserializeMode mode) {
-  AT_ASSERTM(param_def->has_name(), "ParameterDef has no name! ",
+  AT_ASSERTM(
+      param_def->has_name(),
+      "ParameterDef has no name! ",
       param_def->DebugString());
   name_ = param_def->name();
   isBuffer_ = param_def->is_buffer();
@@ -159,7 +176,8 @@ IntermediateMethod::IntermediateMethod(torch::MethodDef* method_def) {
 }
 
 void IntermediateMethod::dump(torch::MethodDef* method_def) {
-  AT_ASSERTM(name_.size() > 0, "IntermediateMethod's name is invalid. name: ", name_);
+  AT_ASSERTM(
+      name_.size() > 0, "IntermediateMethod's name is invalid. name: ", name_);
   method_def->set_name(name_);
   if (graph_) {
     method_def->set_allocated_graph(graph_.release());
@@ -168,13 +186,15 @@ void IntermediateMethod::dump(torch::MethodDef* method_def) {
   }
 }
 
-IntermediateModule::IntermediateModule(torch::ModuleDef* module_def,
+IntermediateModule::IntermediateModule(
+    torch::ModuleDef* module_def,
     std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
     DeserializeMode mode) {
   update(module_def, id_data, mode);
 }
 
-void IntermediateModule::update(torch::ModuleDef* module_def,
+void IntermediateModule::update(
+    torch::ModuleDef* module_def,
     std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
     DeserializeMode mode) {
   AT_ASSERTM(module_def->has_name(), "name is required for ModuleDef!");
@@ -200,34 +220,43 @@ void IntermediateModule::dump(torch::ModuleDef* module_def) {
 
   for (int i = 0; i < parameters_.size(); ++i) {
     module_def->add_parameters();
-    torch::ParameterDef* param_def = module_def->mutable_parameters(module_def->parameters_size() - 1);
+    torch::ParameterDef* param_def =
+        module_def->mutable_parameters(module_def->parameters_size() - 1);
     parameters_.at(i).dump(param_def);
   }
 
   for (int i = 0; i < submodules_.size(); ++i) {
     module_def->add_submodules();
-    torch::ModuleDef* sub_def = module_def->mutable_submodules(module_def->submodules_size() - 1);
+    torch::ModuleDef* sub_def =
+        module_def->mutable_submodules(module_def->submodules_size() - 1);
     submodules_.at(i).dump(sub_def);
   }
 
   for (int i = 0; i < methods_.size(); ++i) {
     module_def->add_methods();
-    torch::MethodDef* method_def = module_def->mutable_methods(module_def->methods_size() - 1);
+    torch::MethodDef* method_def =
+        module_def->mutable_methods(module_def->methods_size() - 1);
     methods_.at(i).dump(method_def);
   }
 }
 
-void IntermediateModel::update(torch::ModelDef* model_def,
+void IntermediateModel::update(
+    torch::ModelDef* model_def,
     std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
     DeserializeMode mode) {
   AT_ASSERTM(model_def->has_name(), "name is required for ModelDef.");
   name_ = model_def->name();
-  AT_ASSERTM(model_def->has_producer_name(), "producer_name is required for ModelDef.");
+  AT_ASSERTM(
+      model_def->has_producer_name(),
+      "producer_name is required for ModelDef.");
   producerName_ = model_def->producer_name();
   producerVersion_ = model_def->producer_version();
-  AT_ASSERTM(model_def->has_proto_version(), "proto_version is required for ModelDef.");
+  AT_ASSERTM(
+      model_def->has_proto_version(),
+      "proto_version is required for ModelDef.");
   protoVersion_ = model_def->proto_version();
-  AT_ASSERTM(model_def->has_main_module(), "main_module is required for ModelDef.");
+  AT_ASSERTM(
+      model_def->has_main_module(), "main_module is required for ModelDef.");
   mainModule_.update(model_def->mutable_main_module(), id_data, mode);
 }
 
@@ -239,7 +268,8 @@ void IntermediateModel::dump(torch::ModelDef* model_def) {
   mainModule_.dump(model_def->mutable_main_module());
 }
 
-void serializeIntermediateModel(IntermediateModel* imodel,
+void serializeIntermediateModel(
+    IntermediateModel* imodel,
     torch::jit::PyTorchFileWriter* writer) {
   std::unordered_map<void*, uint64_t> data_id;
   std::stack<IntermediateModule*> imodules;
@@ -273,14 +303,18 @@ void serializeIntermediateModel(IntermediateModel* imodel,
   writer->writeRecord(buffer.c_str(), buffer.size());
 }
 
-void serializeIntermediateModel(IntermediateModel* imodel, const std::string& filename) {
+void serializeIntermediateModel(
+    IntermediateModel* imodel,
+    const std::string& filename) {
   torch::jit::PyTorchFileWriter writer(filename);
   serializeIntermediateModel(imodel, &writer);
   writer.writeEndOfFile();
 }
 
-void deserializeIntermediateModel(IntermediateModel* imodel,
-    torch::jit::PyTorchFileReader* reader, DeserializeMode mode) {
+void deserializeIntermediateModel(
+    IntermediateModel* imodel,
+    torch::jit::PyTorchFileReader* reader,
+    DeserializeMode mode) {
   std::unordered_map<uint64_t, std::shared_ptr<SharedData>> id_data;
   if (mode == DeserializeMode::HEADER_ONLY) {
     // only load model meta data, no tensor data
@@ -288,7 +322,10 @@ void deserializeIntermediateModel(IntermediateModel* imodel,
     size_t data_size;
     std::tie(data_ptr, data_size) = reader->getLastRecord();
     torch::ModelDef model_def = torch::ModelDef();
-    AT_ASSERTM(model_def.ParseFromArray(data_ptr.get(), data_size), "parse metadata (i.e., ModelDef) failed.");;
+    AT_ASSERTM(
+        model_def.ParseFromArray(data_ptr.get(), data_size),
+        "parse metadata (i.e., ModelDef) failed.");
+    ;
     imodel->update(&model_def, &id_data, mode);
     return;
   }
@@ -301,19 +338,24 @@ void deserializeIntermediateModel(IntermediateModel* imodel,
     if (!reader->hasNextRecord()) {
       // the last record is model data (ModelDef)
       torch::ModelDef model_def = torch::ModelDef();
-      AT_ASSERTM(model_def.ParseFromArray(data_ptr.get(), data_size), "parse metadata (i.e., ModelDef) failed.");
+      AT_ASSERTM(
+          model_def.ParseFromArray(data_ptr.get(), data_size),
+          "parse metadata (i.e., ModelDef) failed.");
       imodel->update(&model_def, &id_data, mode);
       break;
     }
     // first to the second last records are all tensor data
     auto it = id_data.find(data_key);
     AT_ASSERTM(it == id_data.end(), "record id should not be duplicated!");
-    id_data[data_key] = std::make_shared<SharedData>(
-        data_key, data_size, std::move(data_ptr));
+    id_data[data_key] =
+        std::make_shared<SharedData>(data_key, data_size, std::move(data_ptr));
   }
 }
 
-void deserializeIntermediateModel(IntermediateModel* imodel, const std::string& filename, DeserializeMode mode) {
+void deserializeIntermediateModel(
+    IntermediateModel* imodel,
+    const std::string& filename,
+    DeserializeMode mode) {
   torch::jit::PyTorchFileReader reader(filename);
   deserializeIntermediateModel(imodel, &reader, mode);
 }

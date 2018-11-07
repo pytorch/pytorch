@@ -1,8 +1,8 @@
 #pragma once
 
-#include <unordered_map>
 #include <stack>
 #include <string>
+#include <unordered_map>
 
 #include <ATen/core/Allocator.h>
 #include <c10/util/Optional.h>
@@ -11,24 +11,26 @@
 #include "caffe2/serialize/inline_container.h"
 
 namespace caffe2 {
-  class TensorProto;
-  class NetDef;
-}
+class TensorProto;
+class NetDef;
+} // namespace caffe2
 
 namespace torch {
-  class ParameterDef;
-  class MethodDef;
-  class ModuleDef;
-  class ModelDef;
-}
+class ParameterDef;
+class MethodDef;
+class ModuleDef;
+class ModelDef;
+} // namespace torch
 
 namespace at {
 namespace serialize {
 
 enum class DeserializeMode {
-  // In LOADER_TENSOR_DATA mode, we load the file from the beginning, and eagarly load the content of tensors
+  // In LOADER_TENSOR_DATA mode, we load the file from the beginning, and
+  // eagarly load the content of tensors
   LOADER_TENSOR_DATA = 1,
-  // In HEADER_ONLY mode, we only load the last record of the file, which is the model metadata
+  // In HEADER_ONLY mode, we only load the last record of the file, which is the
+  // model metadata
   // And the data of the tensor will be loaded later
   HEADER_ONLY = 2,
 };
@@ -44,9 +46,9 @@ enum class DeserializeMode {
 struct SharedData {
   // constructor
   explicit SharedData(uint64_t record_id, uint64_t size)
-    : recordId(record_id), size(size), dataPtr() {}
+      : recordId(record_id), size(size), dataPtr() {}
   explicit SharedData(uint64_t record_id, uint64_t size, at::DataPtr&& data_ptr)
-    : recordId(record_id), size(size), dataPtr(std::move(data_ptr)) {}
+      : recordId(record_id), size(size), dataPtr(std::move(data_ptr)) {}
 
   c10::optional<uint64_t> recordId;
   uint64_t size = 0; // the size of the record
@@ -68,17 +70,21 @@ class CAFFE2_API IntermediateTensor final {
   // constructor
   IntermediateTensor() = default;
 
-  explicit IntermediateTensor(int64_t dataType, const std::vector<int64_t>& dims,
-      int64_t offset): dataType_(dataType), dims_(dims), offset_(offset) {}
+  explicit IntermediateTensor(
+      int64_t dataType,
+      const std::vector<int64_t>& dims,
+      int64_t offset)
+      : dataType_(dataType), dims_(dims), offset_(offset) {}
 
   IntermediateTensor(IntermediateTensor&&) = default;
-  IntermediateTensor& operator =(IntermediateTensor&&) = default;
+  IntermediateTensor& operator=(IntermediateTensor&&) = default;
 
   C10_DISABLE_COPY_AND_ASSIGN(IntermediateTensor);
 
   // extract data from TensorProto, called in deserialize
   // assume record id to data mapping is complete
-  void update(caffe2::TensorProto* tensor_proto,
+  void update(
+      caffe2::TensorProto* tensor_proto,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
       DeserializeMode mode);
 
@@ -120,7 +126,6 @@ class CAFFE2_API IntermediateTensor final {
     return noContent_;
   }
 
-
   void setData(std::shared_ptr<SharedData> data) {
     AT_ASSERTM(!noContent_, "noContent_ is true, but set content!");
     data_ = data;
@@ -153,15 +158,19 @@ class CAFFE2_API IntermediateParameter final {
   // constructors
   IntermediateParameter() = default;
 
-  explicit IntermediateParameter(const std::string& name, bool is_buffer, bool require_gradient) :
-    name_(name), isBuffer_(is_buffer), requireGradient_(require_gradient) {}
+  explicit IntermediateParameter(
+      const std::string& name,
+      bool is_buffer,
+      bool require_gradient)
+      : name_(name), isBuffer_(is_buffer), requireGradient_(require_gradient) {}
 
-  explicit IntermediateParameter(torch::ParameterDef* param_def,
+  explicit IntermediateParameter(
+      torch::ParameterDef* param_def,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
       DeserializeMode mode);
 
   IntermediateParameter(IntermediateParameter&&) = default;
-  IntermediateParameter& operator =(IntermediateParameter&&) = default;
+  IntermediateParameter& operator=(IntermediateParameter&&) = default;
 
   C10_DISABLE_COPY_AND_ASSIGN(IntermediateParameter);
 
@@ -211,12 +220,12 @@ class CAFFE2_API IntermediateParameter final {
 class CAFFE2_API IntermediateMethod final {
  public:
   // constructors
-  IntermediateMethod() {};
+  IntermediateMethod(){};
 
   explicit IntermediateMethod(torch::MethodDef* method_def);
 
   IntermediateMethod(IntermediateMethod&& method) = default;
-  IntermediateMethod& operator =(IntermediateMethod&& method) = default;
+  IntermediateMethod& operator=(IntermediateMethod&& method) = default;
 
   C10_DISABLE_COPY_AND_ASSIGN(IntermediateMethod);
 
@@ -252,18 +261,20 @@ class CAFFE2_API IntermediateModule final {
   // constructors
   IntermediateModule() = default;
 
-  explicit IntermediateModule(torch::ModuleDef* module_def,
+  explicit IntermediateModule(
+      torch::ModuleDef* module_def,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
       DeserializeMode mode);
 
   IntermediateModule(IntermediateModule&&) = default;
-  IntermediateModule& operator =(IntermediateModule&&) = default;
+  IntermediateModule& operator=(IntermediateModule&&) = default;
 
   C10_DISABLE_COPY_AND_ASSIGN(IntermediateModule);
 
   // extract data from ModuleDef, invoked in deserialize
   // assume record id to data mapping is complete
-  void update(torch::ModuleDef* module_def,
+  void update(
+      torch::ModuleDef* module_def,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
       DeserializeMode mode);
 
@@ -318,13 +329,14 @@ class CAFFE2_API IntermediateModel final {
   IntermediateModel() = default;
 
   IntermediateModel(IntermediateModel&&) = default;
-  IntermediateModel& operator =(IntermediateModel&&) = default;
+  IntermediateModel& operator=(IntermediateModel&&) = default;
 
   C10_DISABLE_COPY_AND_ASSIGN(IntermediateModel);
 
   // extract data from ModelDef, invoked in deserialize
   // assume record id to data mapping is complete
-  void update(torch::ModelDef* model_def,
+  void update(
+      torch::ModelDef* model_def,
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
       DeserializeMode mode);
 
@@ -379,27 +391,33 @@ class CAFFE2_API IntermediateModel final {
   std::string producerVersion_;
   int64_t protoVersion_;
   IntermediateModule mainModule_;
-
 };
 
 // serialize an IntermediateModel through a PyTorchFileWriter
 // we always put the model data at the end, so when serializing
 // model, the we assume the record_id in imodel is already updated
-CAFFE2_API void serializeIntermediateModel(IntermediateModel* imodel,
+CAFFE2_API void serializeIntermediateModel(
+    IntermediateModel* imodel,
     torch::jit::PyTorchFileWriter* writer);
 
 // serialize an IntermediateModel to a given file
-CAFFE2_API void serializeIntermediateModel(IntermediateModel* imodel, const std::string& filename);
+CAFFE2_API void serializeIntermediateModel(
+    IntermediateModel* imodel,
+    const std::string& filename);
 
 // deserialize an IntermediateModel through a reader,
 // serialize tensors' data first, and maintain the mappint from
 // record id to tensor data
-CAFFE2_API void deserializeIntermediateModel(IntermediateModel* imodel,
-    torch::jit::PyTorchFileReader* reader, DeserializeMode mode=DeserializeMode::LOADER_TENSOR_DATA);
+CAFFE2_API void deserializeIntermediateModel(
+    IntermediateModel* imodel,
+    torch::jit::PyTorchFileReader* reader,
+    DeserializeMode mode = DeserializeMode::LOADER_TENSOR_DATA);
 
 // deserialize an IntermediateModel from a given file
-CAFFE2_API void deserializeIntermediateModel(IntermediateModel* imodel, const std::string& filename,
-    DeserializeMode mode=DeserializeMode::LOADER_TENSOR_DATA);
+CAFFE2_API void deserializeIntermediateModel(
+    IntermediateModel* imodel,
+    const std::string& filename,
+    DeserializeMode mode = DeserializeMode::LOADER_TENSOR_DATA);
 
-}  // namespace serialize
-}  // namespace at
+} // namespace serialize
+} // namespace at

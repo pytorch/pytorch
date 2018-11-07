@@ -31,7 +31,8 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   main_module->setName(module_name);
 
   // prepare method for main module
-  std::vector<serialize::IntermediateMethod>* methods = main_module->mutableMethods();
+  std::vector<serialize::IntermediateMethod>* methods =
+      main_module->mutableMethods();
   methods->resize(1);
   serialize::IntermediateMethod& method = methods->at(0);
   std::string method_name("Test-Method-Name");
@@ -40,14 +41,16 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   method.setTorchScript(torch_script);
 
   // prepare submodule for main module
-  std::vector<serialize::IntermediateModule>* subs = main_module->mutableSubmodules();
+  std::vector<serialize::IntermediateModule>* subs =
+      main_module->mutableSubmodules();
   subs->resize(1);
   serialize::IntermediateModule& sub_module = subs->at(0);
   std::string sub_name("Test-Submodule-Name");
   sub_module.setName(sub_name);
 
   // prepare parameters for main module
-  std::vector<serialize::IntermediateParameter>* params = main_module->mutableParameters();
+  std::vector<serialize::IntermediateParameter>* params =
+      main_module->mutableParameters();
   std::string param1_name("Test-Parameter-Name");
   bool is_buffer = true;
   bool require_gradient = true;
@@ -60,7 +63,8 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
     raw_size *= dim;
   }
   std::vector<int64_t> strides1 = {12, 4, 1};
-  *tensor1 = serialize::IntermediateTensor(caffe2::TensorProto_DataType_FLOAT, dims1, 0);
+  *tensor1 = serialize::IntermediateTensor(
+      caffe2::TensorProto_DataType_FLOAT, dims1, 0);
   std::vector<char> data_vector;
   data_vector.resize(raw_size);
   for (size_t i = 0; i < data_vector.size(); ++i) {
@@ -68,7 +72,7 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   }
   at::DataPtr data_ptr(data_vector.data(), at::kCPU);
   std::shared_ptr<serialize::SharedData> data =
-    std::make_shared<serialize::SharedData>(0, raw_size, std::move(data_ptr));
+      std::make_shared<serialize::SharedData>(0, raw_size, std::move(data_ptr));
   tensor1->setData(data);
   tensor1->setStrides(strides1);
   // prepare second parameter, share the data with first parameter
@@ -78,10 +82,10 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   int64_t offset2 = 12;
   params->emplace_back(param2_name, is_buffer, require_gradient);
   serialize::IntermediateTensor* tensor2 = params->at(1).mutableTensor();
-  *tensor2 = serialize::IntermediateTensor(caffe2::TensorProto_DataType_FLOAT, dims2, offset2);
+  *tensor2 = serialize::IntermediateTensor(
+      caffe2::TensorProto_DataType_FLOAT, dims2, offset2);
   tensor2->setData(data);
   tensor2->setStrides(strides1);
-
 
   // serialize the prepared model
   std::string tmp_name = std::tmpnam(nullptr);
@@ -124,8 +128,10 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   ASSERT_EQ(loaded_tensor1.noContent(), false);
   ASSERT_EQ(loaded_tensor1.dataType(), caffe2::TensorProto_DataType_FLOAT);
   ASSERT_EQ(loaded_tensor1.data()->size, raw_size);
-  ASSERT_EQ(std::memcmp(loaded_tensor1.data()->dataPtr.get(),
-        data_vector.data(), raw_size), 0);
+  ASSERT_EQ(
+      std::memcmp(
+          loaded_tensor1.data()->dataPtr.get(), data_vector.data(), raw_size),
+      0);
   ASSERT_EQ(loaded_tensor1.data()->recordId.value(), 64);
   const auto& loaded_param2 = loaded_main_module.parameters().at(1);
   ASSERT_EQ(loaded_param2.name(), param2_name);
@@ -140,12 +146,15 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   ASSERT_EQ(loaded_tensor2.dataType(), caffe2::TensorProto_DataType_FLOAT);
   ASSERT_EQ(loaded_tensor2.data()->size, raw_size);
   ASSERT_EQ(loaded_tensor2.data()->recordId.value(), 64);
-  ASSERT_EQ(loaded_tensor2.data()->dataPtr.get(), loaded_tensor1.data()->dataPtr.get());
+  ASSERT_EQ(
+      loaded_tensor2.data()->dataPtr.get(),
+      loaded_tensor1.data()->dataPtr.get());
   // TODO test shared data between tensors
 
   // load the serialized model in HEADER_ONLY mode
   serialize::IntermediateModel lazy_model;
-  serialize::deserializeIntermediateModel(&lazy_model, tmp_name, serialize::DeserializeMode::HEADER_ONLY);
+  serialize::deserializeIntermediateModel(
+      &lazy_model, tmp_name, serialize::DeserializeMode::HEADER_ONLY);
   ASSERT_EQ(lazy_model.name(), model_name);
   ASSERT_EQ(lazy_model.mainModule().name(), module_name);
   const auto& lazy_params = lazy_model.mainModule().parameters();
@@ -154,21 +163,24 @@ TEST(IntermediateModel, SerializeAndDeserialize) {
   ASSERT_EQ(lazy_param1.name(), loaded_param1.name());
   const auto& lazy_tensor1 = lazy_param1.tensor();
   ASSERT_EQ(lazy_tensor1.offset(), 0);
-  ASSERT_EQ(lazy_tensor1.data()->recordId.value(), loaded_tensor1.data()->recordId.value());
+  ASSERT_EQ(
+      lazy_tensor1.data()->recordId.value(),
+      loaded_tensor1.data()->recordId.value());
   ASSERT_EQ(lazy_tensor1.data()->dataPtr.get(), nullptr);
   ASSERT_EQ(lazy_tensor1.data()->size, loaded_tensor1.data()->size);
   const auto& lazy_param2 = lazy_params.at(1);
   ASSERT_EQ(lazy_param2.name(), loaded_param2.name());
   const auto& lazy_tensor2 = lazy_param2.tensor();
   ASSERT_EQ(lazy_tensor2.offset(), offset2);
-  ASSERT_EQ(lazy_tensor2.data()->recordId.value(), loaded_tensor2.data()->recordId.value());
+  ASSERT_EQ(
+      lazy_tensor2.data()->recordId.value(),
+      loaded_tensor2.data()->recordId.value());
   ASSERT_EQ(lazy_tensor2.data()->dataPtr.get(), nullptr);
   ASSERT_EQ(lazy_tensor2.data()->size, loaded_tensor2.data()->size);
   ASSERT_EQ(lazy_tensor2.data()->recordId, lazy_tensor1.data()->recordId);
 
   std::remove(tmp_name.c_str());
-
 }
 
-}  // namespace
-}  // namespace at
+} // namespace
+} // namespace at
