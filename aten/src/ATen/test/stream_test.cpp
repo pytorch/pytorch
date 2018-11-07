@@ -141,9 +141,7 @@ TEST(TestStream, CUDAGuardTest) {
 
   // Test that all original streams are recorded.
   {
-    at::cuda::CUDAGuard guard;
-    ASSERT_TRUE(guard.original_streams().empty());
-    guard.set_stream(streams0[0]);
+    at::cuda::CUDAMultiStreamGuard guard;
     ASSERT_EQ_CUDA(guard.original_streams().size(), at::cuda::getNumGPUs());
     ASSERT_EQ_CUDA(guard.original_streams()[0], streams0[0]);
     ASSERT_EQ_CUDA(guard.original_streams()[1], streams1[0]);
@@ -151,7 +149,7 @@ TEST(TestStream, CUDAGuardTest) {
 
   // Setting a stream changes the current device and the stream on that device
   {
-    at::cuda::CUDAGuard guard(streams1[1]);
+    at::cuda::CUDAStreamGuard guard(streams1[1]);
     ASSERT_EQ_CUDA(guard.current_device(), at::Device(at::kCUDA, 1));
     ASSERT_EQ_CUDA(at::cuda::current_device(), 1);
     ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(1), streams1[1]);
@@ -171,18 +169,6 @@ TEST(TestStream, CUDAGuardTest) {
 
   ASSERT_EQ_CUDA(at::cuda::current_device(), 0);
   ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(0), streams0[0]);
-
-  // Setting the stream first, and then the device, first changes the devices
-  // back, and then resets the stream on the initial device.
-
-  {
-    at::cuda::CUDAGuard guard(streams0[1]);
-    guard.set_device(1);
-  }
-
-  ASSERT_EQ_CUDA(at::cuda::current_device(), 0);
-  ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(0), streams0[0]);
-  ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(1), streams1[0]);
 }
 
 // Streampool Round Robin

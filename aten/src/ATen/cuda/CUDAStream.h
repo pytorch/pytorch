@@ -92,6 +92,7 @@ struct AT_CUDA_API CUDAStream {
 
   // Getters
   int64_t device_index() const { return stream_.device_index(); }
+  Device device() const { return Device(DeviceType::CUDA, device_index()); }
   cudaStream_t stream() const { return detail::CUDAStream_stream(internals()); }
   CUDAStreamInternals* internals() const;
 

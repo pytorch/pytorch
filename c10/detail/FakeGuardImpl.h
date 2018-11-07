@@ -10,6 +10,9 @@ namespace detail {
  */
 template <DeviceType T>
 struct FakeGuardImpl final : public DeviceGuardImplInterface {
+  static constexpr DeviceType static_type = T;
+  // Runtime device type is not used
+  FakeGuardImpl(DeviceType) {}
   DeviceType type() const override {
     return T;
   }
@@ -46,5 +49,8 @@ private:
 
 template <DeviceType T>
 thread_local DeviceIndex FakeGuardImpl<T>::current_device_ = 0;
+
+template <DeviceType T>
+constexpr DeviceType FakeGuardImpl<T>::static_type;
 
 }} // namespace c10::detail
