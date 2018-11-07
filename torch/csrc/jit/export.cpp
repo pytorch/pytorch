@@ -492,6 +492,25 @@ void ModuleEncoder::EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto, c
   EncodeTypeInfo(graph_proto, v, n->type(), n->uniqueName());
 }
 
+std::string getBaseTypeDenotation(TypeKind& kind) {
+  if (kind == TypeKind::NumberType) {
+    return "NumberType";
+  } else if (kind == TypeKind::FloatType) {
+    return "FloatType";
+  } else if (kind == TypeKind::IntType) {
+    return "IntType";
+  } else if (kind == TypeKind::BoolType) {
+    return "BoolType";
+  } else if (kind == TypeKind::NoneType) {
+    return "NoneType";
+  } else if (kind == TypeKind::GeneratorType) {
+    return "GeneratorType";
+  } else if (kind == TypeKind::StringType) {
+    return "StringType";
+  }
+  throw std::runtime_error("unexpected type kind");
+}
+
 void ModuleEncoder::EncodeTypeInfo(
     onnx::GraphProto *graph_proto,
     onnx::ValueInfoProto* v,
@@ -557,28 +576,14 @@ void ModuleEncoder::EncodeTypeInfo(
     shape_proto->mutable_dim(0)->set_dim_param(name);
     onnx::ValueInfoProto* subtype_proto = graph_proto->add_value_info();
     EncodeTypeInfo(graph_proto, subtype_proto, node_type->getElementType(), name);
-  } else if (kind == TypeKind::NumberType) {
-    type_proto->set_denotation("NumberType");
-  } else if (kind == TypeKind::FloatType) {
-    type_proto->set_denotation("FloatType");
-  } else if (kind == TypeKind::IntType) {
-    type_proto->set_denotation("IntType");
-  } else if (kind == TypeKind::BoolType) {
-    type_proto->set_denotation("BoolType");
-  } else if (kind == TypeKind::NoneType) {
-    type_proto->set_denotation("NoneType");
-  } else if (kind == TypeKind::GeneratorType) {
-    type_proto->set_denotation("GeneratorType");
-  } else if (kind == TypeKind::StringType) {
-    type_proto->set_denotation("StringType");
   } else if (kind == TypeKind::VarType) {
     type_proto->set_denotation("TypeVar:" + type->expect<VarType>()->name());
   } else if (kind == TypeKind::OptionalType) {
+    auto elem_kind = type->expect<OptionalType>()->getElementType()->kind();
     type_proto->set_denotation(
-        "OptionalType:" +
-        type->expect<OptionalType>()->getElementType()->str());
+        "OptionalType:" + getBaseTypeDenotation(elem_kind));
   } else {
-    throw std::runtime_error("unexpected type kind");
+    type_proto->set_denotation(getBaseTypeDenotation(kind));
   }
 }
 
