@@ -50,6 +50,9 @@ class CAFFE2_API Tensor final {
       )) {
   }
 
+  explicit Tensor(TensorImplPtr impl)
+      : impl_(std::move(impl)) {}
+
   /**
    * @brief Creates a tensor of the given dimension.
    *
