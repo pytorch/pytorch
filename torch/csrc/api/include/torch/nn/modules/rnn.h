@@ -97,7 +97,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   std::vector<Tensor> b_hh;
 
  protected:
-  /// The function signature of `at::rnn_relu`, `at::rnn_tanh` and `at::gru`.
+  /// The function signature of `rnn_relu`, `rnn_tanh` and `gru`.
   using RNNFunctionSignature = std::tuple<Tensor, Tensor>(
       /*input=*/const Tensor&,
       /*state=*/const Tensor&,
