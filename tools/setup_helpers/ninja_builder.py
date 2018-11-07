@@ -18,7 +18,7 @@ class NinjaBuilder(object):
             os.mkdir(BUILD_DIR)
         self.ninja_program = os.path.join(ninja.BIN_DIR, 'ninja')
         self.name = name
-        self.filename = os.path.join(BUILD_DIR, 'build.{}.ninja'.format(name))
+        self.filename = os.path.realpath(os.path.join(BUILD_DIR, 'build.{}.ninja'.format(name)))
         self.writer = ninja.Writer(open(self.filename, 'w'))
         self.writer.rule('do_cmd', '$cmd')
         self.writer.rule('compile', '$cmd')
