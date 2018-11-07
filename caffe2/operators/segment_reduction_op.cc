@@ -43,6 +43,133 @@ OpSchema::Cost CostInferenceForSparseLengths(
   return c;
 }
 
+class SparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
+    : public Operator<CPUContext> {
+ public:
+  using Tembedding = float;
+  using T = float;
+  using TLengths = int;
+  using Context = CPUContext;
+  using ReducerGradient =
+      WeightedSumReducerDef::template ReducerGradient<float, CPUContext>;
+
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  USE_SIMPLE_CTOR_DTOR(
+      SparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp);
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+        this, Input(INDICES));
+  }
+
+  template <typename IndexType>
+  bool DoRunWithType() {
+    // If more complicated fixed size logic becomes necessary, it can be moved
+    // to the reducer class
+    int64_t in_block_size = Input(SEGMENT_GRADS).size_from_dim(1);
+    return DispatchHelper<typename ReducerGradient::FixedDispatch, IndexType>::
+        call(this, in_block_size);
+  }
+
+  template <typename IndexType, int FixedSize>
+  bool DoRunWithValue() {
+    auto& dataInput = Input(DATA_INPUT);
+    auto& segmentGradsInput = Input(SEGMENT_GRADS);
+    auto& lengthsInput = Input(LENGTHS);
+    auto* dataGradsOutput = Output(0);
+
+    CAFFE_ENFORCE(lengthsInput.ndim() == 1, "LENGTHS must be a vector");
+    int64_t numSegments = lengthsInput.size(0);
+    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(numSegments == segmentGradsInput.size(0));
+    const TLengths* lengths = lengthsInput.template data<TLengths>();
+
+    typename ReducerGradient::Meta ctx(segmentGradsInput, 1);
+    for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
+      int aux_num = ReducerGradient::originalInputs()[i];
+      auto& aux_in = Input(i);
+      auto* aux_grad = aux_num < OutputSize() ? Output(aux_num) : nullptr;
+      ctx.observeOriginalInput(aux_num, aux_in, aux_grad, 1);
+    }
+
+    // Either first dim the data or how much we pull in indexies from it
+    int64_t dataToReduceSize;
+    const IndexType* indices = nullptr;
+    auto& indicesInput = Input(INDICES);
+    indices = indicesInput.template data<IndexType>();
+    dataToReduceSize = indicesInput.size(0);
+
+    const T* segmentGrads = segmentGradsInput.template data<T>();
+
+    vector<int64_t> shape;
+    shape.push_back(dataToReduceSize);
+    ctx.appendGradShape(&shape);
+    dataGradsOutput->Resize(shape);
+
+    int64_t dataGradsBlockSize = dataGradsOutput->size_from_dim(1);
+    int64_t segmentBlockSize = segmentGradsInput.size_from_dim(1);
+    T* dataGrads = dataGradsOutput->template mutable_data<T>();
+
+    const Tembedding* data = dataInput.template data<Tembedding>();
+    int64_t dataIndex = 0;
+    for (int64_t rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+      for (int64_t start = dataIndex; dataIndex < start + lengths[rangeIndex];
+           ++dataIndex) {
+        IndexType data_pos;
+        // No range checking, should've been verified in forward pass
+        data_pos = indices[dataIndex];
+
+        int i = 0;
+        float acc = 0.0f;
+#ifdef __AVX__
+        constexpr int VLEN = 8;
+        __m256 acc_v = _mm256_setzero_ps();
+        __m256 scalar_v = _mm256_set1_ps(ctx.scalars[dataIndex]);
+        for (; i < ctx.block_size / VLEN * VLEN; i += VLEN) {
+          __m256 a_v =
+              _mm256_loadu_ps(segmentGrads + segmentBlockSize * rangeIndex + i);
+          __m256 b_v =
+              _mm256_loadu_ps(data + dataGradsBlockSize * data_pos + i);
+          __m256 c_v = _mm256_mul_ps(a_v, b_v);
+          acc_v = _mm256_add_ps(acc_v, c_v);
+
+          _mm256_storeu_ps(
+              dataGrads + dataGradsBlockSize * dataIndex + i,
+              _mm256_mul_ps(a_v, scalar_v));
+        }
+        alignas(64) float temp[8];
+        _mm256_store_ps(temp, acc_v);
+        for (int j = 0; j < 8; ++j) {
+          acc += temp[j];
+        }
+#endif
+        for (; i < ctx.block_size; ++i) {
+          float a = segmentGrads[segmentBlockSize * rangeIndex + i];
+          acc += a * data[dataGradsBlockSize * data_pos + i];
+          dataGrads[dataGradsBlockSize * dataIndex + i] =
+              a * ctx.scalars[dataIndex];
+        }
+        ctx.scalars_grad[dataIndex] = acc;
+      }
+    }
+    return true;
+  }
+
+  // Input layout:
+  //   orig_arg1, orig_arg2, ..., orig_argN, SEGMENT_GRADS, LENGTHS,
+  //      DATA_INPUT, [INDICES]
+  // orig_argXs represent original op's inputs and will be passed to the reducer
+  // directly
+  static constexpr int kNumInputs =
+      ReducerGradient::originalInputs().size() + 3 + 1 + 1;
+  enum _InputTags {
+    SEGMENT_GRADS = ReducerGradient::originalInputs().size(),
+    LENGTHS,
+    DATA_INPUT,
+    INDICES,
+  };
+};
+
 // registering 5 input gradient with main output
 // gradient of SparseLengthsWeightedSum
 OPERATOR_SCHEMA(SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient)
@@ -50,14 +177,7 @@ OPERATOR_SCHEMA(SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient)
     .NumOutputs(2);
 REGISTER_CPU_OPERATOR(
     SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient,
-    AbstractLengthsWithMainInputGradientOp<
-        float,
-        float,
-        int,
-        CPUContext,
-        WeightedSumReducerDef::template ReducerGradient<float, CPUContext>,
-        true /*SparseFused*/,
-        true /*GradientNeedIndices*/>);
+    SparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp);
 
 // registering 4 input version
 OPERATOR_SCHEMA(SparseLengthsIndicesInGradientWeightedSumGradient)
