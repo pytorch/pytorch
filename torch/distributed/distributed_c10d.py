@@ -61,8 +61,8 @@ class Backend(object):
             raise ValueError("Invalid backend: '{}'".format(name))
         return value
 
-# The following three values are here to maintain backward compatibility with
-# pre-c10d distributed package.
+# `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
+# compatibility with pre-c10d distributed package.
 # TODO: remove them when users are ready to take a hard dependency on PyTorch 1.
 _backend = Backend.UNDEFINED
 dist_backend = Backend
