@@ -19,7 +19,7 @@
 #include "caffe2/utils/fixed_divisor.h"
 // TODO: Move this to fixed_divisor.h
 #ifdef __HIPCC__
-#define FIXED_DIVISOR int32_t
+#define FIXED_DIVISOR int
 #define FIXED_DIVISOR_DIV(d, n) (n / d)
 #define FIXED_DIVISOR_MOD(d, n) (n % d)
 #define FIXED_DIVISOR_DIV_MOD(d, n, q, r) \
@@ -28,7 +28,7 @@
     *r = n % d;                           \
   } while (0)
 #else // __HIPCC__
-#define FIXED_DIVISOR FixedDivisor<int32_t>
+#define FIXED_DIVISOR FixedDivisor<int>
 #define FIXED_DIVISOR_DIV(d, n) (d.Div(n))
 #define FIXED_DIVISOR_MOD(d, n) (d.Mod(n))
 #define FIXED_DIVISOR_DIV_MOD(d, n, q, r) (d.DivMod(n, q, r))
