@@ -48,7 +48,7 @@ RegisterOperators reg({
           // TODO: allow list of optionals to be filled in with defaults
           // i.e. list_with_default([1, 2, None], [1, 2, 3]) -> [1, 2, 3]
 
-          stack.push_back(list);
+          push(stack, list);
           return 0;
         }),
     Operator(
