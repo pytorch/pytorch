@@ -104,3 +104,14 @@ def weak_script_method(fn):
         "original_method": fn
     }
     return fn
+
+
+def _unwrap_optional(x):
+    assert x is not None, "Unwrapping null optional"
+    return x
+
+
+# Python equivalents for the empty list construction builtins. We need
+# these otherwise the tests won't execute in regular Python mode.
+def _construct_empty_int_list():
+    return []

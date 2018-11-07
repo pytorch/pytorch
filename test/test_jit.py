@@ -7267,7 +7267,7 @@ a")
     def test_unwrap_optional_builtin(self):
         def test(x):
             # type: (Optional[int]) -> int
-            x = torch.jit._unwrap_optional(x)
+            x = torch._jit_internal._unwrap_optional(x)
             x = x + x
             return x
 
@@ -7284,6 +7284,10 @@ a")
             @torch.jit.script
             def test_test():
                 return torch.jit._unwrap_optional(1)
+
+        @torch.jit.script
+        def test_test():
+            return torch._jit_internal._unwrap_optional(1)
 
     def test_indexing_error(self):
         with self.assertRaisesRegex(RuntimeError, "Indexing only supported on lists, tensors, and tuples"):
