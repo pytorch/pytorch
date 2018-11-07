@@ -53,11 +53,11 @@ class Backend(object):
             raise ValueError("Backend name must be a string, but got: {}".format(name))
         value = getattr(Backend, name.upper(), Backend.UNDEFINED)
 
-        if value == DistBackend.TCP:
+        if value == Backend.TCP:
             raise ValueError("TCP backend has been deprecated. Please use "
                              "Gloo or MPI backend for collective operations "
                              "on CPU tensors.")
-       elif value == Backend.UNDEFINED:
+        elif value == Backend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
         return value
 
@@ -321,7 +321,7 @@ def init_process_group(backend,
                 rank,
                 world_size,
                 timeout=_default_pg_timeout)
-            _pg_map[_default_pg] = (DistBackend.GLOO, store)
+            _pg_map[_default_pg] = (Backend.GLOO, store)
             _pg_names[_default_pg] = group_name
         elif backend == Backend.NCCL:
             if not is_nccl_available():
@@ -375,7 +375,7 @@ def _new_process_group_helper(world_size,
                 rank,
                 world_size,
                 timeout=_default_pg_timeout)
-            _pg_map[pg] = (DistBackend.GLOO, store)
+            _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
         elif default_backend == Backend.NCCL:
             if not is_nccl_available():
