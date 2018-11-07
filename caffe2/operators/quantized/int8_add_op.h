@@ -193,8 +193,8 @@ class Int8AddOp final : public Operator<CPUContext> {
 
     Int8Add(
         X0.t.template data<uint8_t>(),
-        X0.t.numel() / X0.t.size(X0.t.ndim() - 1),
-        X0.t.size(X0.t.ndim() - 1),
+        X0.t.numel() / X0.t.size(X0.t.dim() - 1),
+        X0.t.size(X0.t.dim() - 1),
         X0_offset,
         X0_multiplier,
         X0_shift,
