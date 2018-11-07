@@ -29,8 +29,8 @@ class RemoveDataBlocksOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& data = Input(DATA);
     const auto& indices = Input(INDICES);
-    CAFFE_ENFORCE(data.ndim() > 0, "DATA should be at leat 1-D.");
-    CAFFE_ENFORCE(indices.ndim() == 1, "INDICES should be 1-D.");
+    CAFFE_ENFORCE(data.dim() > 0, "DATA should be at leat 1-D.");
+    CAFFE_ENFORCE(indices.dim() == 1, "INDICES should be 1-D.");
 
     const auto outer_size = data.sizes()[0];
     const auto block_size = data.size_from_dim(1);
