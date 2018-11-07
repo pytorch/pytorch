@@ -7,7 +7,7 @@
 #include <vector>
 
 #include <ATen/core/intrusive_ptr.h>
-#include <ATen/core/typeid.h>
+#include <c10/util/typeid.h>
 #include <c10/macros/Macros.h>
 
 namespace caffe2 {
