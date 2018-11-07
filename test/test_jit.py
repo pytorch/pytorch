@@ -9372,13 +9372,21 @@ S = 5
 #     args (tuple represents shape of a tensor arg),
 # )
 nn_module_tests = [
-    ('Sigmoid', (), ((S,),)),
-    ('PairwiseDistance', (), ((S, S), (S, S))),
-    ('Tanh', (), ((S,),)),
+    ('AlphaDropout', (), ((S,),)),
+    ('Dropout', (), ((S,),)),
+    ('Dropout2d', (), ((S, S),)),
+    ('Dropout3d', (), ((S, S, S),)),
+    ('FeatureAlphaDropout', (), ((S, S),)),
     ('Hardshrink', (), ((S,),)),
     ('PReLU', (), ((S,),)),
+    ('PairwiseDistance', (), ((S, S), (S, S))),
+    ('RReLU', (), ((S,),)),
+    ('Sigmoid', (), ((S,),)),
+    ('Softshrink', (), ((S,),)),
     ('Softsign', (), ((S,),)),
+    ('Tanh', (), ((S,),)),
     ('Tanhshrink', (), ((S,),)),
+    ('Threshold', (2., 2.), ((S,),)),
 ]
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
