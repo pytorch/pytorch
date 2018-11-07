@@ -164,6 +164,7 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
     return static_cast<TypePtr>(DynamicType::get());;
   }
 
+  // if t1 is None and t2 is a concrete type, return Optional[t2] and vice versa
   if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
     return OptionalType::create(t2);
   } else if (t2->isSubtypeOf(NoneType::get()) && !t1->isSubtypeOf(NoneType::get())) {

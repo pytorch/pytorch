@@ -7284,6 +7284,11 @@ a")
         def test_test():
             return torch.jit._unwrap_optional(1)
 
+        with self.assertRaisesRegex(RuntimeError, "unbound type"):
+            @torch.jit.script
+            def test_no_type():
+                return torch.jit._unwrap_optional(None)
+
     def test_indexing_error(self):
         with self.assertRaisesRegex(RuntimeError, "Indexing only supported on lists, tensors, and tuples"):
             @torch.jit.script
@@ -9379,7 +9384,6 @@ nn_module_tests = [
 #   fn to determine if test should be skipped,               // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
 #   kwargs for function,                                     // optional
-#   is inplace? if so skip grad tests,                       // optional
 # )
 nn_functional_tests = [
     # TODO: default arguments for None type not supported, add
@@ -9439,7 +9443,7 @@ nn_functional_tests = [
     ('softplus', (S, S, S), (),),
     ('softmin', (S, S, S), (0,),),
     ('softmax', (S, S, S), (0,),),
-    ('softmax', (S, S, S), (0, 3, torch.double), 'all_args'),
+    ('softmax', (S, S, S), (0, 3, torch.double), 'with_all_args'),
     ('tanh', (S, S, S), (),),
     ('sigmoid', (S, S, S), (),),
     ('log_softmax', (S, S, S), (0,),),
