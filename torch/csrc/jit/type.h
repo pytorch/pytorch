@@ -324,7 +324,7 @@ struct TORCH_API TensorType : public Type {
 protected:
   TensorType(const at::Tensor& tensor, TypeKind kind=TypeKind::TensorType)
     : TensorType(tensor.type().scalarType(),
-                 tensor.type().is_cuda() ? tensor.get_device() : -1,
+                 tensor.is_cuda() ? tensor.get_device() : -1,
                  tensor.dim(),
                  tensor.is_variable() && tensor.requires_grad(),
                  kind) {}
