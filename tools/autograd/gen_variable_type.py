@@ -32,7 +32,7 @@ from .gen_autograd_functions import uses_single_grad
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_'
+    'resize_', 'resize_as_', 'detach', 'detach_',
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -81,7 +81,7 @@ DONT_REQUIRE_DERIVATIVE = {
 }
 
 # Some Variables are not allowed to have their size or storage changed, if they
-# already share the same storage with another Variable (e.g. via `.data` or `detach()`)
+# share the same storage with another Variable (e.g. via `.data` or `detach()`)
 CHECK_ALLOW_SIZE_OR_STORAGE_CHANGE = {
     'set_',
 }
@@ -579,7 +579,7 @@ def emit_body(declaration):
 
     def emit_check_allow_size_or_storage_change():
         return CONDITIONAL.substitute(
-            cond='!as_variable_ref(self).allow_shape_or_storage_change()',
+            cond='!as_variable_ref(self).allow_size_or_storage_change()',
             statements=['AT_ERROR("set_ is not allowed on Tensor created from .data or .detach()");'])
 
     env = {}
@@ -588,7 +588,7 @@ def emit_body(declaration):
     body = []
     if base_name not in DONT_PROFILE:
         body.append(RECORD_FUNCTION.substitute(combined))
-    if base_name in CHECK_ALLOW_SIZE_OR_STORAGE_CHANGE:
+    if declaration['name'] in CHECK_ALLOW_SIZE_OR_STORAGE_CHANGE:
         body.append(emit_check_allow_size_or_storage_change())
     if strategy != 'use_type':
         body.extend(unpack_args(env, declaration))
