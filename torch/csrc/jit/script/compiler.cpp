@@ -472,7 +472,11 @@ Value* tryMatchArgument(
   if (value->type()->isSubtypeOf(NoneType::get())){
     if (concrete_type->isSubtypeOf(GeneratorType::get())) {
       value = graph.insertNode(graph.createNoneGenerator())->output();
-    } else if (concrete_type->isSubtypeOf(DynamicType::get())) {
+    }
+    auto concrete_opt_type = concrete_type->cast<OptionalType>();
+    if ((concrete_opt_type && concrete_opt_type->getElementType()->isSubtypeOf(DynamicType::get())) ||
+        concrete_type->isSubtypeOf(DynamicType::get())) {
+      // create undefined tensor when None pass to a optional[tensor] formal arg
       value = graph.insertNode(graph.createUndefined())->output();
     }
   }
