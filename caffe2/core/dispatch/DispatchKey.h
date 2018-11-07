@@ -6,21 +6,28 @@
 
 #include <vector>
 #include <functional>
-#include "caffe2/utils/Array.h"
+#include <sstream>
+#include <c10/util/Array.h>
 
 namespace c10 {
 
 namespace details {
+
 struct TensorParameterDispatchKey final {
   // note: This dispatch key structure is not final yet and will change. Don't rely on it.
   DeviceTypeId deviceTypeId;
   LayoutId layoutId;
-  // TODO Move this CaffeTypeId to c10 namespace
-  caffe2::CaffeTypeId dataType;
+  // TODO Move this TypeIdentifier to c10 namespace
+  caffe2::TypeIdentifier dataType;
 };
 inline constexpr bool operator==(const TensorParameterDispatchKey& lhs, const TensorParameterDispatchKey& rhs) {
   return lhs.deviceTypeId == rhs.deviceTypeId && lhs.layoutId == rhs.layoutId && lhs.dataType == rhs.dataType;
 }
+
+inline std::ostream& operator<<(std::ostream& stream, const TensorParameterDispatchKey& key) {
+  return stream << "TensorKey(" << key.deviceTypeId << ", " << key.layoutId.value() << ", " << key.dataType << ")";
+}
+
 }  // namespace details
 }  // namespace c10
 
@@ -29,7 +36,7 @@ namespace std {
   struct hash<c10::details::TensorParameterDispatchKey> {
     // TODO constexpr hashing
     size_t operator()(const c10::details::TensorParameterDispatchKey& obj) const {
-      return std::hash<c10::DeviceTypeId>()(obj.deviceTypeId) ^ std::hash<c10::LayoutId>()(obj.layoutId) ^ std::hash<caffe2::CaffeTypeId>()(obj.dataType);
+      return std::hash<c10::DeviceTypeId>()(obj.deviceTypeId) ^ std::hash<c10::LayoutId>()(obj.layoutId) ^ std::hash<caffe2::TypeIdentifier>()(obj.dataType);
     }
   };
 }  // namespace std
@@ -57,6 +64,19 @@ template<size_t num_dispatch_args>
 inline constexpr bool operator==(const DispatchKey<num_dispatch_args> &lhs, const DispatchKey<num_dispatch_args>& rhs) {
   // TODO: Use AVX instructions to perform this equality test more quickly
   return lhs.argTypes == rhs.argTypes;
+}
+
+template<size_t num_dispatch_args>
+inline std::ostream& operator<<(std::ostream& stream, const DispatchKey<num_dispatch_args>& key) {
+  stream << "DispatchKey(";
+  if (num_dispatch_args > 0) {
+      stream << "DispatchKey(" << key.argTypes[0];
+      for (size_t i = 1; i < num_dispatch_args; ++i) {
+          stream << ", " << key.argTypes[i];
+      }
+      stream << ")";
+  }
+  return stream << ")";
 }
 
 }  // namespace c10

@@ -24,11 +24,11 @@ static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
              "stride should be greater than zero, but got dT: %d dH: %d dW: %d",
              dT, dH, dW);
 
-  if (THCTensor_(nDimension)(state, input) == 4)
+  if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4)
   {
     inputSlices = THCTensor_(size)(state, input, 0);
   }
-  else if (THCTensor_(nDimension)(state, input) == 5)
+  else if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5)
   {
     inputSlices = THCTensor_(size)(state, input, 1);
   }
@@ -51,11 +51,11 @@ static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
   }
 
   if (gradOutput != NULL) {
-    if (oT != gradOutput->size[dimt] || oW != gradOutput->size[dimw] || oH != gradOutput->size[dimh])
+    if (oT != gradOutput->size(dimt) || oW != gradOutput->size(dimw) || oH != gradOutput->size(dimh))
     {
       THError(
         "Inconsistent gradOutput size. oT= %d, oH= %d, oW= %d, gradOutput: %dx%dx%d",
-        oT, oH, oW, gradOutput->size[dimt], gradOutput->size[dimh], gradOutput->size[dimw]);
+        oT, oH, oW, gradOutput->size(dimt), gradOutput->size(dimh), gradOutput->size(dimw));
     }
 
     THCUNN_check_dim_size(state, gradOutput, input->dim(), dimn, inputSlices);
@@ -83,8 +83,8 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
         dT, dW, dH, padT, padW, padH);
   THCUNN_assertSameGPU(state, 3, input, indices, output);
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
-  if (THCTensor_(nDimension)(state, input) == 4)
+  int fiveDimensionalInput = THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5;
+  if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4)
   {
     /* sizes */
     batchSize   = 1;
@@ -137,12 +137,12 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
     THCIndexTensor_(free)(state, old_indices);
   }
 
-  real* outputData = THCTensor_(data)(state, output);
+  scalar_t* outputData = THCTensor_(data)(state, output);
 
-  THCDeviceTensor<real, 4> cudaInput;
+  THCDeviceTensor<scalar_t, 4> cudaInput;
   THCDeviceTensor<THCIndex_t, 4> cudaIndices;
 
-  cudaInput  = toDeviceTensor<real, 4>(state, input);
+  cudaInput  = toDeviceTensor<scalar_t, 4>(state, input);
   cudaIndices = toDeviceTensor<THCIndex_t, 4>(state, indices);
 
   int totalZ = inputTime * inputSlices * batchSize;
@@ -192,7 +192,7 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
         dT, dW, dH, padT, padW, padH);
   THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int fiveDimensionalInput = THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5;
   if (!fiveDimensionalInput) /* 4D */
   {
     batchSize = 1;
@@ -231,12 +231,12 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
     THCTensor_(retain)(state, gradInput);
   }
 
-  real* gradOutputData = THCTensor_(data)(state, gradOutput);
+  scalar_t* gradOutputData = THCTensor_(data)(state, gradOutput);
 
-  THCDeviceTensor<real, 4> cudaGradInput;
+  THCDeviceTensor<scalar_t, 4> cudaGradInput;
   THCDeviceTensor<THCIndex_t, 4> cudaIndices;
 
-  cudaGradInput  = toDeviceTensor<real, 4>(state, gradInput);
+  cudaGradInput  = toDeviceTensor<scalar_t, 4>(state, gradInput);
   cudaIndices = toDeviceTensor<THCIndex_t, 4>(state, indices);
 
   int totalZ = inputTime * inputSlices * batchSize;

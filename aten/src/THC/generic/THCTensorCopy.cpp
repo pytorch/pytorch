@@ -14,13 +14,13 @@ void THCTensor_(copyCPU)(THCState *state, THCTensor *self, struct THTensor *src)
 
     cudaStream_t stream = THCState_getCurrentStream(state);
     THCudaCheck(cudaMemcpyAsync(THCTensor_(data)(state,selfc),
-                                THTensor_(data)(src),
-                                THTensor_(nElement)(src) * sizeof(real),
+                                src->data<scalar_t>(),
+                                THTensor_(nElement)(src) * sizeof(scalar_t),
                                 cudaMemcpyHostToDevice,
                                 stream));
     THCudaCheck(cudaStreamSynchronize(stream));
 
-    THTensor_(free)(src);
+    c10::raw::intrusive_ptr::decref(src);
     THCTensor_(freeCopyTo)(state, selfc, self);
   }
 }
@@ -32,14 +32,12 @@ void THCTensor_(copy##TYPEC)(THCState *state, THCTensor *self, struct TH##TYPEC#
   if(THCTypeIdx_(Real) == THCTypeIdx_(TYPEC)) {               \
     THCTensor_(copyCPU)(state, self, (THTensor*) src);  /* cast just removes warnings */                     \
   } else {                                                              \
-    THLongStorage *size = TH##TYPEC##Tensor_newSizeOf(src);             \
-    THTensor *srcf = THTensor_(newWithSize)(size, NULL);                \
+    THTensor *srcf = THTensor_(newWithSize)(src->sizes(), {});          \
                                                                         \
     THTensor_(copy##TYPEC)(srcf, src);                                  \
     THCTensor_(copyCPU)(state, self, srcf);                             \
                                                                         \
-    THLongStorage_free(size);                                           \
-    THTensor_(free)(srcf);                                              \
+    c10::raw::intrusive_ptr::decref(srcf);                                              \
   }                                                                     \
 }
 
@@ -60,15 +58,26 @@ void THTensor_(copyCuda)(THCState *state, THTensor *self, struct THCTensor *src)
 
   {
     THTensor *selfc = THTensor_(newContiguous)(self);
+    int tensorDevice = THCTensor_(getDevice)(state, src);
+    int currentDevice;
+    THCudaCheck(cudaGetDevice(&currentDevice));
+
+    if (currentDevice != tensorDevice) {
+      THCudaCheck(cudaSetDevice(tensorDevice));
+    }
     src = THCTensor_(newContiguous)(state, src);
 
     cudaStream_t stream = THCState_getCurrentStream(state);
-    THCudaCheck(cudaMemcpyAsync(THTensor_(data)(selfc),
+    THCudaCheck(cudaMemcpyAsync(selfc->data<scalar_t>(),
                                 THCTensor_(data)(state, src),
-                                THCTensor_(nElement)(state, src) * sizeof(real),
+                                THCTensor_(nElement)(state, src) * sizeof(scalar_t),
                                 cudaMemcpyDeviceToHost,
                                 stream));
     THCudaCheck(cudaStreamSynchronize(stream));
+
+    if (currentDevice != tensorDevice) {
+      THCudaCheck(cudaSetDevice(currentDevice));
+    }
 
     THCTensor_(free)(state, src);
     THTensor_(freeCopyTo)(selfc, self);
@@ -82,14 +91,12 @@ void THTensor_(copyCuda)(THCState *state, THTensor *self, struct THCTensor *src)
     if(THCTypeIdx_(Real) == THCTypeIdx_(TYPEC)) {   \
       THTensor_(copyCuda)(state, (THTensor*) self, src);  /* cast just removes compiler warning */                   \
     } else {                                                              \
-      THLongStorage *size = THCTensor_(newSizeOf)(state, src);            \
-      THTensor *srcf = THTensor_(newWithSize)(size, NULL);                \
+      THTensor *srcf = THTensor_(newWithSize)(src->sizes(), {});          \
                                                                           \
       THTensor_(copyCuda)(state, srcf, src);                              \
       TH_CONCAT_4(TH,TYPEC,Tensor_copy,Real)(self, srcf);                 \
                                                                           \
-      THLongStorage_free(size);                                           \
-      THTensor_(free)(srcf);                                              \
+      c10::raw::intrusive_ptr::decref(srcf);                                              \
     }                                                                     \
   }
 
@@ -126,12 +133,12 @@ void THCTensor_(copyAsyncCPU)(THCState *state, THCTensor *self, struct THTensor 
 
   THCStream *stream  = THCState_getStream(state);
   THCudaCheck(cudaMemcpyAsync(THCTensor_(data)(state, self),
-                              THTensor_(data)(src),
-                              THTensor_(nElement)(src) * sizeof(real),
+                              src->data<scalar_t>(),
+                              THTensor_(nElement)(src) * sizeof(scalar_t),
                               cudaMemcpyHostToDevice,
-                              stream->stream));
+                              THCStream_stream(stream)));
 
-  THCudaCheck(THCCachingHostAllocator_recordEvent(THStorage_(data)(src->storage), stream));
+  THCudaCheck(THCCachingHostAllocator_recordEvent(THStorage_(data)(THTensor_getStoragePtr(src)), stream));
 
   if (currentDevice != tensorDevice) {
     THCudaCheck(cudaSetDevice(currentDevice));
@@ -156,13 +163,13 @@ void THTensor_(copyAsyncCuda)(THCState *state, THTensor *self, struct THCTensor 
   }
 
   THCStream *stream = THCState_getStream(state);
-  THCudaCheck(cudaMemcpyAsync(THTensor_(data)(self),
+  THCudaCheck(cudaMemcpyAsync(self->data<scalar_t>(),
                               THCTensor_(data)(state, src),
-                              THCTensor_(nElement)(state, src) * sizeof(real),
+                              THCTensor_(nElement)(state, src) * sizeof(scalar_t),
                               cudaMemcpyDeviceToHost,
-                              stream->stream));
+                              THCStream_stream(stream)));
 
-  THCudaCheck(THCCachingHostAllocator_recordEvent(THCStorage_(data)(state, src->storage), stream));
+  THCudaCheck(THCCachingHostAllocator_recordEvent(THCStorage_(data)(state, THTensor_getStoragePtr(src)), stream));
 
   if (currentDevice != tensorDevice) {
     THCudaCheck(cudaSetDevice(currentDevice));

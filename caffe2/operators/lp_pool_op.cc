@@ -17,8 +17,8 @@ bool PoolOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNCHW() {
   const auto inv_p = 1.0 / p;
 
   const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
-  math::Set<float, CPUContext>(Y->size(), 0, Ydata, &context_);
+  float* Ydata = Y->template mutable_data<float>();
+  math::Set<float, CPUContext>(Y->numel(), 0, Ydata, &context_);
   // The main loop
   int channels = X.dim32(1);
   int height = X.dim32(2);
@@ -67,8 +67,8 @@ bool PoolOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
   const auto inv_p = 1.0 / p;
 
   const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
-  math::Set<float, CPUContext>(Y->size(), 0, Ydata, &context_);
+  float* Ydata = Y->template mutable_data<float>();
+  math::Set<float, CPUContext>(Y->numel(), 0, Ydata, &context_);
   // The main loop
   int pooled_height = Y->dim32(1);
   int pooled_width = Y->dim32(2);
@@ -97,8 +97,8 @@ bool PoolOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
       }
     }
     // Do offset.
-    Xdata += X.size() / X.dim32(0);
-    Ydata += Y->size() / Y->dim32(0);
+    Xdata += X.numel() / X.dim32(0);
+    Ydata += Y->numel() / Y->dim32(0);
   }
   return true;
 }
@@ -115,11 +115,11 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNCHW() {
   // TODO(Yangqing): Add shape checks.
   dX->ResizeLike(X);
   math::Set<float, CPUContext>(
-      X.size(), 0, dX->mutable_data<float>(), &context_);
+      X.numel(), 0, dX->template mutable_data<float>(), &context_);
   const float* dYdata = dY.data<float>();
   const float* Xdata = X.data<float>();
   const float* Ydata = Y.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
 
   int channels = X.dim32(1);
   CAFFE_ENFORCE_EQ(channels, dY.dim32(1));
@@ -166,14 +166,14 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(0);
   const auto& Y = Input(1);
   auto& dY = Input(2);
-  CAFFE_ENFORCE_EQ(dY.ndim(), 4);
+  CAFFE_ENFORCE_EQ(dY.dim(), 4);
   auto* dX = Output(0);
   // TODO(Yangqing): Add shape checks.
   dX->ResizeLike(X);
   math::Set<float, CPUContext>(
-      X.size(), 0, dX->mutable_data<float>(), &context_);
+      X.numel(), 0, dX->template mutable_data<float>(), &context_);
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   const float* Xdata = X.data<float>();
   const float* Ydata = Y.data<float>();
   // The main loop
@@ -213,10 +213,10 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
       }
     }
     // offset
-    dXdata += X.size() / X.dim32(0);
-    dYdata += dY.size() / dY.dim32(0);
-    Xdata += X.size() / X.dim32(0);
-    Ydata += Y.size() / Y.dim32(0);
+    dXdata += X.numel() / X.dim32(0);
+    dYdata += dY.numel() / dY.dim32(0);
+    Xdata += X.numel() / X.dim32(0);
+    Ydata += Y.numel() / Y.dim32(0);
   }
   return true;
 }
@@ -258,7 +258,7 @@ op = core.CreateOperator(
     p=2.0
 )
 
-workspace.FeedBlob("X", np.random.randn(1, 1, 6, 6).astype(np.float32)) # NCHW
+workspace.FeedBlob("X", np.random.randn(1, 1, 6, 6).astype(np.float32)) // NCHW
 print("X:\n", workspace.FetchBlob("X"), "\n")
 workspace.RunOperatorOnce(op)
 print("Y:\n", workspace.FetchBlob("Y"))

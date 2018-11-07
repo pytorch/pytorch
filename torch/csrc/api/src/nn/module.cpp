@@ -4,7 +4,7 @@
 
 #include <torch/csrc/autograd/generated/VariableType.h>
 
-#include <ATen/Error.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <map>
@@ -15,7 +15,12 @@
 namespace torch {
 namespace nn {
 
-Module::Module(std::string name) : name_(std::move(name)) {}
+Module::Module()
+    : parameters_("Parameter"), buffers_("Buffer"), children_("Submodule") {}
+
+Module::Module(std::string name) : Module() {
+  name_ = std::move(name);
+}
 
 const std::string& Module::name() const noexcept {
   // If the name optional is empty at this point, we grab the name of the
@@ -29,17 +34,16 @@ const std::string& Module::name() const noexcept {
   // to by this typeid represents the class that is being constructed or
   // destroyed even if it is not the most-derived class.
   if (!name_.has_value()) {
-    name_ = at::demangle(typeid(*this).name());
+    name_ = c10::demangle(typeid(*this).name());
   }
   return *name_;
 }
 
-std::shared_ptr<Module> Module::clone() const {
+std::shared_ptr<Module> Module::clone(optional<Device> device) const {
   AT_ERROR(
       "clone() has not been implemented for ",
       name(),
-      ". Use the copy constructor if you don't require polymorphic cloning. "
-      "Otherwise, subclass torch::nn::Cloneable<",
+      ". Subclass torch::nn::Cloneable<",
       name(),
       "> instead of torch::nn::Module to inherit the ability to clone.");
 }
@@ -90,47 +94,16 @@ void Module::eval() {
   is_training_ = false;
 }
 
-void Module::cuda() {
-  to(at::kCUDA);
+void Module::to(torch::Device device, torch::Dtype dtype, bool non_blocking) {
+  to_impl(device, dtype, non_blocking);
 }
 
-void Module::cpu() {
-  to(at::kCPU);
+void Module::to(torch::Dtype dtype, bool non_blocking) {
+  to_impl(dtype, non_blocking);
 }
 
-void Module::to(at::Type& type) {
-  for (auto& child : children_) {
-    child.value->to(type);
-  }
-  for (auto& parameter : parameters_) {
-    at::detail::set_data(*parameter, parameter->data().toType(type));
-    AT_ASSERT(parameter->data().type() == type);
-    AT_ASSERT(&parameter->type() == autograd::VariableType::getType(type));
-  }
-}
-
-void Module::to(at::ScalarType scalar_type) {
-  for (auto& child : children_) {
-    child.value->to(scalar_type);
-  }
-  for (auto& parameter : parameters_) {
-    auto& new_type = parameter->data().type().toScalarType(scalar_type);
-    at::detail::set_data(*parameter, parameter->data().toType(new_type));
-    AT_ASSERT(parameter->data().type().scalarType() == scalar_type);
-    AT_ASSERT(parameter->type().scalarType() == scalar_type);
-  }
-}
-
-void Module::to(at::Backend backend) {
-  for (auto& child : children_) {
-    child.value->to(backend);
-  }
-  for (auto& parameter : parameters_) {
-    auto& new_type = parameter->data().type().toBackend(backend);
-    at::detail::set_data(*parameter, parameter->data().toType(new_type));
-    AT_ASSERT(parameter->data().type().backend() == backend);
-    AT_ASSERT(parameter->type().backend() == backend);
-  }
+void Module::to(torch::Device device, bool non_blocking) {
+  to_impl(device, non_blocking);
 }
 
 bool Module::is_training() const noexcept {
@@ -142,22 +115,71 @@ void Module::zero_grad() {
     child.value->zero_grad();
   }
   for (auto& parameter : parameters_) {
-    parameter->grad().zero_();
+    auto& grad = parameter->grad();
+    if (grad.defined()) {
+      grad = grad.detach();
+      grad.zero_();
+    }
   }
 }
 
-autograd::Variable& Module::register_parameter(
+void Module::save(serialize::OutputArchive& archive) const {
+  for (const auto& parameter : parameters_) {
+    archive.write(parameter.key, parameter.value);
+  }
+  for (const auto& buffer : buffers_) {
+    archive.write(buffer.key, buffer.value, /*is_buffer=*/true);
+  }
+  for (const auto& child : children_) {
+    serialize::OutputArchive child_archive;
+    child.value->save(child_archive);
+    archive.write(child.key, child_archive);
+  }
+}
+
+void Module::load(serialize::InputArchive& archive) {
+  for (auto& parameter : parameters_) {
+    archive.read(parameter.key, parameter.value);
+  }
+  for (auto& buffer : buffers_) {
+    archive.read(buffer.key, buffer.value, /*is_buffer=*/true);
+  }
+  for (const auto& child : children_) {
+    // Modules that have no state at all (parameters or buffers) are currently
+    // not stored in Protobuf at all, so we can just skip them.
+    if (!child.value->parameters_.is_empty() ||
+        !child.value->buffers_.is_empty()) {
+      serialize::InputArchive child_archive;
+      archive.read(child.key, child_archive);
+      child.value->load(child_archive);
+    }
+  }
+}
+
+Tensor& Module::register_parameter(
     std::string name,
-    Variable tensor,
+    Tensor tensor,
     bool requires_grad) {
+  AT_CHECK(!name.empty(), "Parameter name must not be empty");
+  AT_CHECK(
+      name.find('.') == std::string::npos,
+      "Parameter name must not contain a dot (got '",
+      name,
+      "')");
   tensor.set_requires_grad(requires_grad);
   return parameters_.insert(std::move(name), std::move(tensor));
 }
 
-autograd::Variable& Module::register_buffer(std::string name, Variable tensor) {
-  return parameters_.insert(std::move(name), std::move(tensor));
+Tensor& Module::register_buffer(std::string name, Tensor tensor) {
+  AT_CHECK(!name.empty(), "Buffer name must not be empty");
+  AT_CHECK(
+      name.find('.') == std::string::npos,
+      "Buffer name must not contain a dot (got '",
+      name,
+      "')");
+  return buffers_.insert(std::move(name), std::move(tensor));
 }
 
-void Module::clone_(Module& other) {}
+void Module::clone_(Module& other, optional<Device> device) {}
 } // namespace nn
 } // namespace torch

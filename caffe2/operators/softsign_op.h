@@ -18,10 +18,10 @@ template <class Context>
 struct SoftsignGradientFunctor {
   template <typename T>
   bool Forward(
-      const std::vector<int>& dY_dims,
       const std::vector<int>& X_dims,
-      const T* dY,
+      const std::vector<int>& dY_dims,
       const T* X,
+      const T* dY,
       T* dX,
       Context* context) const;
 };

@@ -7,17 +7,17 @@ bool PerplexityOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
 
-  DCHECK_EQ(X.ndim(), 1);
+  DCHECK_EQ(X.dim(), 1);
   int N = X.dim32(0);
 
-  Y->Resize(vector<TIndex>());
+  Y->Resize(vector<int64_t>());
   const auto* Xdata = X.data<float>();
 
   float perplexity = 1.0;
   for (int i = 0; i < N; ++i) {
     perplexity *= pow(Xdata[i], -1.0/N);
   }
-  *(Y->mutable_data<float>()) = perplexity;
+  *(Y->template mutable_data<float>()) = perplexity;
   return true;
 }
 

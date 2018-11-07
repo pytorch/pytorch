@@ -118,3 +118,23 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]] || \
 else
   BUILD_TEST_LIBTORCH=0
 fi
+
+# Use conda cmake in some CI build. Conda cmake will be newer than our supported
+# min version 3.5, so we only do it in two builds that we know should use conda.
+if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *cuda8-cudnn6-py2* ]] || \
+     [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py3* ]]; then
+    if ! which conda; then
+      echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
+      exit 1
+    else
+      conda install -q -y cmake
+    fi
+  else
+    if ! cmake --version | grep 'cmake version 3\.5'; then
+      echo "Expected ${BUILD_ENVIRONMENT} to have cmake version 3.5.* (min support version), but 'cmake --version' returns:"
+      cmake --version
+      exit 1
+    fi
+  fi
+fi

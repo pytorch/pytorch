@@ -15,14 +15,15 @@
 
 #include <torch/csrc/utils/hash.h>
 
-#include "CUDAUtils.hpp"
-#include "ProcessGroup.hpp"
-#include "Store.hpp"
-#include "Types.hpp"
-#include "Utils.hpp"
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/CUDAStream.h>
+#endif
 
-// Forward declaration
-struct THCState;
+#include <c10d/ProcessGroup.hpp>
+#include <c10d/Store.hpp>
+#include <c10d/Types.hpp>
+#include <c10d/Utils.hpp>
 
 namespace c10d {
 
@@ -95,11 +96,11 @@ struct AlgorithmEntry {
   std::vector<at::Tensor> dst;
   std::function<void()> run;
 
+#ifdef USE_CUDA
   // For CUDA tensors, the following happens:
   //
   // - Input tensor A is copied to persistent tensor B on the stream
-  //   associated with the device that stores A (the stream is a
-  //   per-device thread local stored by THC).
+  //   associated with the device that stores A
   // - This stream is recorded in an event (see events below) so that
   //   the copy can be synchronized.
   // - The private stream (see streams below) that is used to execute
@@ -118,8 +119,9 @@ struct AlgorithmEntry {
   // true, the caller can launch new CUDA kernels and they will be
   // correctly sequenced.
   //
-  std::vector<CUDAStream> streams;
-  std::vector<CUDAEvent> events;
+  std::vector<at::cuda::CUDAStream> streams;
+  std::vector<at::cuda::CUDAEvent> events;
+#endif
 
   // Used to synchronize between calling thread and worker threads.
   std::mutex m;
@@ -165,12 +167,57 @@ namespace c10d {
 //
 class ProcessGroupGloo : public ProcessGroup {
  public:
+  // AsyncWork is the Gloo specific superclass for asynchronous work items.
+  // We can split asynchronous work into 3 phases:
+  // 1) Sanity checks and prepare input (e.g. memcpy)
+  // 2) Run operation on background thread
+  // 3) Synchronize with completion on foreground thread
+  //
+  // There is state to be shared between these 3 phases and all of this state
+  // is captured in the AsyncWork class and its derivatives.
+  //
+  // Note: while we are porting operations to use new style collectives, there
+  // is a split between operations using the existing caching approach and
+  // operations using the new AsyncWork base class. Over time we will port
+  // all operations and perform needed cleanup.
+  //
+  class AsyncWork : public ProcessGroup::Work {
+   public:
+    bool isCompleted() override;
+    bool isSuccess() const override;
+    void synchronize() override;
+    bool wait() override;
+    const std::exception& exception() const override;
+
+    static void execute(std::shared_ptr<AsyncWork> work) {
+      std::exception_ptr eptr;
+      try {
+        work->run();
+      } catch (...) {
+        eptr = std::current_exception();
+      }
+      work->finish(eptr);
+    }
+
+    virtual void run() = 0;
+
+   protected:
+    std::mutex m_;
+    std::condition_variable cv_;
+    bool completed_ = false;
+    std::exception_ptr eptr_;
+
+    void finish(std::exception_ptr ptr);
+
+    friend class ProcessGroupGloo;
+  };
+
   class WorkGloo : public ProcessGroup::Work {
    public:
     explicit WorkGloo();
     virtual ~WorkGloo();
 
-    bool isCompleted() const override;
+    bool isCompleted() override;
     bool isSuccess() const override;
     void synchronize() override;
     bool wait() override;
@@ -189,6 +236,7 @@ class ProcessGroupGloo : public ProcessGroup {
     // is probably cheaper (this is highly speculative).
     std::unique_ptr<::gloo::Exception> ex_;
 
+#ifdef USE_CUDA
     // List of devices and events so that we can synchronize the
     // streams of the caller with the kernels that were launched
     // asynchronously to finish this operation.
@@ -207,9 +255,64 @@ class ProcessGroupGloo : public ProcessGroup {
     //
     bool cuda_;
     std::vector<int> devices_;
-    std::vector<CUDAEvent> events_;
+    std::vector<at::cuda::CUDAEvent> events_;
+#endif
 
     friend class ProcessGroupGloo;
+  };
+
+  // For send and recv operations there is no need to pass them to the
+  // thread pool as they are entirely completed by the device thread.
+  // This work object is used to synchronize completion of the send or
+  // recv operation. It keeps a reference to the tensor it is
+  // operating on to prevent it from being deallocated while the
+  // operation is still in flight.
+  class SendWork : public ProcessGroup::Work {
+   public:
+    explicit SendWork(
+        at::Tensor& tensor,
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
+
+    virtual ~SendWork() = default;
+
+    bool isCompleted() override;
+
+    bool isSuccess() const override;
+
+    void synchronize() override;
+
+    bool wait() override;
+
+    const std::exception& exception() const override;
+
+   protected:
+    at::Tensor tensor_;
+    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
+  };
+
+  class RecvWork : public ProcessGroup::Work {
+   public:
+    explicit RecvWork(
+        at::Tensor& tensor,
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+        int* srcRank);
+
+    virtual ~RecvWork() = default;
+
+    bool isCompleted() override;
+
+    bool isSuccess() const override;
+
+    void synchronize() override;
+
+    bool wait() override;
+
+    const std::exception& exception() const override;
+
+   protected:
+    at::Tensor tensor_;
+    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
+    int* srcRank_;
   };
 
   struct Options {
@@ -243,16 +346,64 @@ class ProcessGroupGloo : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
+  // Unsupported Ops
+  std::shared_ptr<ProcessGroup::Work> reduce(
+      std::vector<at::Tensor>& tensors,
+      const ReduceOptions& opts = ReduceOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> allgather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors) override;
+
+  std::shared_ptr<ProcessGroup::Work> gather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const GatherOptions& opts = GatherOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> scatter(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ScatterOptions& opts = ScatterOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> send(
+      std::vector<at::Tensor>& tensors,
+      int dstRank,
+      int tag) override;
+
+  std::shared_ptr<ProcessGroup::Work> recv(
+      std::vector<at::Tensor>& tensors,
+      int srcRank,
+      int tag) override;
+
+  std::shared_ptr<ProcessGroup::Work> recvAnysource(
+      std::vector<at::Tensor>& tensors,
+      int* srcRank,
+      int tag) override;
+
+  std::shared_ptr<ProcessGroup::Work> barrier() override;
+
+  std::unordered_map<int, int> getGroupRank() override;
+
  protected:
   using KeyType = AlgorithmKey;
   using EntryType = std::unique_ptr<AlgorithmEntry>;
   using HashType = torch::hash<AlgorithmKey>;
-  using WorkType = std::tuple<AlgorithmEntry*, std::shared_ptr<WorkGloo>>;
+  using WorkType = std::
+      tuple<AlgorithmEntry*, std::shared_ptr<WorkGloo>, std::function<void()>>;
 
   std::unique_ptr<::gloo::rendezvous::Store> store_;
   std::vector<std::shared_ptr<::gloo::Context>> contexts_;
   std::vector<std::thread> threads_;
   bool stop_;
+
+  // Incremented for every collective we kick off.
+  // The value is used as tag for collective operations. Collectives are kicked
+  // off in identical order across processes. Therefore the tag can be used
+  // to match up operations during concurrent execution.
+  uint32_t collectiveCounter_;
+
+  // Returns next collective tag to use (uses collectiveCounter_).
+  uint32_t nextTag();
 
   void runLoop(void);
 
@@ -284,13 +435,13 @@ class ProcessGroupGloo : public ProcessGroup {
 
   std::shared_ptr<Work> enqueue(AlgorithmEntry* entry);
 
+  // Queue std::function to run on the background thread pool.
+  void enqueue(std::function<void()> fn);
+
   std::deque<WorkType> queue_;
   std::mutex queueMutex_;
   std::condition_variable queueProduceCV_;
   std::condition_variable queueConsumeCV_;
-
-  // Store copy of pointer to THCState retrieved from ::at::globalContext().
-  THCState* thcState_;
 };
 
 } // namespace c10d

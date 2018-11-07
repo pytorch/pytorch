@@ -1,22 +1,28 @@
-"""Requires the hipify-python.py script (https://github.com/ROCm-Developer-Tools/pyHIPIFY)."""
-import shutil
-import subprocess
+from __future__ import absolute_import, division, print_function
+
 import os
+import subprocess
 import sys
-from shutil import copytree, ignore_patterns
 from functools import reduce
+
+from pyHIPIFY import hipify_python
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
-include_dirs = [
-    "aten",
-    "torch"
+
+includes = [
+    "aten/*",
+    "torch/*",
+]
+
+ignores = [
+    "aten/src/ATen/core/*",
 ]
 
 # List of operators currently disabled
-yaml_file = os.path.join(amd_build_dir, "disabled_features.yaml")
+json_file = os.path.join(amd_build_dir, "disabled_features.json")
 
-# Apply patch files.
+# Apply patch files in place.
 patch_folder = os.path.join(amd_build_dir, "patches")
 for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
     subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=proj_dir)
@@ -41,7 +47,7 @@ for root, _, files in os.walk(os.path.join(proj_dir, "aten/src/ATen")):
 
 # Make various replacements inside AMD_BUILD/torch directory
 ignore_files = ["csrc/autograd/profiler.h", "csrc/autograd/profiler.cpp",
-                "csrc/cuda/cuda_check.h", "csrc/jit/fusion_compiler.cpp"]
+                "csrc/cuda/cuda_check.h"]
 for root, _directories, files in os.walk(os.path.join(proj_dir, "torch")):
     for filename in files:
         if filename.endswith(".cpp") or filename.endswith(".h"):
@@ -60,8 +66,11 @@ for root, _directories, files in os.walk(os.path.join(proj_dir, "torch")):
                 f.flush()
                 os.fsync(f)
 
-# Execute the Hipify Script.
-args = ["--project-directory", proj_dir,
-        "--output-directory", proj_dir,
-        "--include-dirs"] + include_dirs + ["--yaml-settings", yaml_file, "--add-static-casts", "True"]
-os.execv("/opt/rocm/bin/hipify-python.py", ['python'] + args)
+hipify_python.hipify(
+    project_directory=proj_dir,
+    output_directory=proj_dir,
+    includes=includes,
+    ignores=ignores,
+    json_settings=json_file,
+    add_static_casts_option=True,
+    show_progress=False)

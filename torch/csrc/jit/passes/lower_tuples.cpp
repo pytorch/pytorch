@@ -1,23 +1,63 @@
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/utils/functional.h"
+#include "torch/csrc/jit/assertions.h"
 
 namespace torch { namespace jit {
 
+namespace {
+
 // operators where we expect to find tuples as inputs/outputs
-// this is to assert we are only  doing modifications when we know
+// this is to assert we are only doing modifications when we know
 // we can flatten tuples
 std::unordered_set<Symbol> white_list = {
   prim::If,
   prim::Loop,
   prim::TupleUnpack,
   prim::TupleConstruct,
+  prim::TupleIndex,
+  prim::TupleSlice,
   prim::Param,
   prim::Return,
- };
+};
 
+void removeTupleNodes(Node *n, bool must_remove_tuples) {
+  if (n->kind() != prim::TupleUnpack && n->kind() != prim::TupleIndex
+      && n->kind() != prim::TupleSlice) {
+    return;
+  }
+  auto construct = n->input()->node();
+  if (construct->kind() != prim::TupleConstruct) {
+    if (must_remove_tuples) {
+      AT_ERROR(n->kind().toQualString(), " not matched to tuple construct");
+    }
+    return;
+  }
+  if (n->kind() == prim::TupleUnpack) {
+    for(size_t i = 0; i < n->outputs().size(); ++i) {
+      n->outputs()[i]->replaceAllUsesWith(construct->inputs().at(i));
+    }
+  } else if (n->kind() == prim::TupleIndex) {
+    auto idx = n->i(attr::index);
+    n->output()->replaceAllUsesWith(construct->inputs().at(idx));
+  } else if (n->kind() == prim::TupleSlice) {
+    std::vector<Value*> values;
+    int64_t beg = n->i(attr::beg);
+    int64_t end = n->i(attr::end);
+    for (int64_t i = beg; i < end; i += 1) {
+      values.push_back(construct->inputs().at(i));
+    }
+    auto graph = n->owningGraph();
+    auto tuple_out = graph->createTuple(values);
+    WithInsertPoint insert(n);
+    graph->insertNode(tuple_out);
+    n->output()->replaceAllUsesWith(tuple_out->output());
+  }
+}
 
-static void LowerTuples(Block* block);
+} //anonymous namespace
+
+static void LowerAllTuples(Block* block);
 
 static void VisitNode(Node* n, Node* insert_point) {
   auto & graph = *n->owningGraph();
@@ -27,22 +67,20 @@ static void VisitNode(Node* n, Node* insert_point) {
     return;
   }
 
-  // make any TupleUnpack dead by undoing TupleUnpack(TupleConstruct())
-  if(n->kind() == prim::TupleUnpack) {
-    auto construct = n->input()->node();
-    // note: removing these asserts changes this pass from a complete lowering
-    // pass to one that removes tuples when possible. When tuples are first-class
-    // in the interpreter, we should still run this pass to remove extraneous uses
-    JIT_ASSERTM(construct->kind() == prim::TupleConstruct, "tuple unpack not matched to tuple construct");
-    for(size_t i = 0; i < n->outputs().size(); ++i) {
-      n->outputs()[i]->replaceAllUsesWith(construct->inputs()[i]);
-    }
-    return;
+  // note: changing the second argument to false changes this pass from a complete lowering
+  // pass to one that removes tuples when possible. When tuples are first-class
+  // in the interpreter, we should still run this pass to remove extraneous uses
+
+  if(n->kind() == prim::TupleUnpack || n->kind() == prim::TupleIndex ||
+      n->kind() == prim::TupleSlice) {
+     removeTupleNodes(n, /*must_remove_tuples*/true);
+     return;
   }
+
   // flatten the input list  op(a, tup, b) --> op(a, t0, t1, b)
   for(size_t i = 0; i < n->inputs().size();) {
     auto input = n->inputs()[i];
-    if(TupleType* tt = input->type()->cast<TupleType>()) {
+    if(TupleTypePtr tt = input->type()->cast<TupleType>()) {
       JIT_ASSERTM(white_list.count(n->kind()) > 0, "tuple appears in op that does not forward tuples");
       JIT_ASSERTM(input->node()->kind() == prim::TupleConstruct, "tuple use not matched to tuple construct");
       for(size_t j = 0; j < tt->elements().size(); ++j) {
@@ -57,7 +95,7 @@ static void VisitNode(Node* n, Node* insert_point) {
     }
   }
   for(auto b : n->blocks()) {
-    LowerTuples(b);
+    LowerAllTuples(b);
   }
 
   // flatten the outputs list
@@ -67,7 +105,7 @@ static void VisitNode(Node* n, Node* insert_point) {
     // and:
     //    tup = (t0, t1)
     // is placed at the current insertion point
-    if(TupleType* tt = output->type()->cast<TupleType>()) {
+    if(TupleTypePtr tt = output->type()->cast<TupleType>()) {
       JIT_ASSERTM(white_list.count(n->kind()) > 0, "tuple appears in op that does not forward tuples");
       for(size_t j = 0; j < tt->elements().size(); j++) {
         n->insertOutput(i + 1 + j)->setType(tt->elements()[j]);
@@ -84,7 +122,7 @@ static void VisitNode(Node* n, Node* insert_point) {
   }
 }
 
-static void LowerTuples(Block* block) {
+static void LowerAllTuples(Block* block) {
   // tuples in parameter lists of a block behave exactly the same as
   // _outputs_ of normal instructions, since the param_node represents the
   // parameters as outputs, we can handle it by simply visiting the node
@@ -100,29 +138,41 @@ static void LowerTuples(Block* block) {
   VisitNode(block->return_node(), nullptr);
 }
 
+
+static void EnsureNoTuples(ArrayRef<Value*> values) {
+  for (Value * v : values) {
+    JIT_ASSERTM(v->type()->kind() != TypeKind::TupleType,
+                "Couldn't lower all tuples.");
+  }
+}
+
 static void EnsureNoTuples(Block* block) {
   for (Node* n : block->nodes()) {
     for (Block* b : n->blocks()) {
       EnsureNoTuples(b);
     }
-    for (Value * o : n->outputs()) {
-      JIT_ASSERTM(o->type()->kind() != TypeKind::TupleType,
-                  "Couldn't lower all tuples. This is an error because "
-                  "they're not implemented in the interpreter just yet.");
+    EnsureNoTuples(n->outputs());
+  }
+}
+
+void LowerAllTuples(std::shared_ptr<Graph>& graph) {
+  LowerAllTuples(graph->block());
+  EliminateDeadCode(graph);
+  EnsureNoTuples(graph->block());
+}
+
+static void LowerSimpleTuples(Block* block) {
+  for(auto n : block->nodes()) {
+    removeTupleNodes(n, /*must_remove_tuples*/false);
+    for(auto b : n->blocks()) {
+      LowerSimpleTuples(b);
     }
   }
 }
 
-void LowerTuples(std::shared_ptr<Graph>& graph) {
-  for(auto input : graph->inputs()) {
-    JIT_ASSERTM(input->type()->kind() != TypeKind::TupleType, "tuples cannot be inputs to the graph");
-  }
-  for(auto output : graph->outputs()) {
-    JIT_ASSERTM(output->type()->kind() != TypeKind::TupleType, "tuples cannot be outputs to the graph");
-  }
-  LowerTuples(graph->block());
+void LowerSimpleTuples(std::shared_ptr<Graph>& graph) {
+  LowerSimpleTuples(graph->block());
   EliminateDeadCode(graph);
-  EnsureNoTuples(graph->block());
 }
 
 }}

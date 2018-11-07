@@ -1,7 +1,8 @@
 #pragma once
 
-#include <nccl.h>
 #include <memory>
+
+#include <nccl.h>
 
 #define C10D_NCCL_CHECK(cmd)                                              \
   do {                                                                    \
@@ -23,7 +24,7 @@ class NCCLComm {
 
   NCCLComm() : NCCLComm(nullptr) {}
 
-  ~NCCLComm() {
+  ~NCCLComm() noexcept(false) {
     if (ncclComm_) {
       C10D_NCCL_CHECK(ncclCommDestroy(ncclComm_));
     }

@@ -34,12 +34,12 @@ class WhereOp final : public Operator<Context> {
     auto& right = Input(2);
     auto* output = Output(0);
     if (enable_broadcast_) {
-      CAFFE_ENFORCE_EQ(select.ndim(), 1);
-      CAFFE_ENFORCE_EQ(select.dim(0), right.dim(0));
-      CAFFE_ENFORCE_EQ(left.dims(), right.dims());
+      CAFFE_ENFORCE_EQ(select.dim(), 1);
+      CAFFE_ENFORCE_EQ(select.size(0), right.size(0));
+      CAFFE_ENFORCE_EQ(left.sizes(), right.sizes());
     } else {
-      CAFFE_ENFORCE_EQ(select.dims(), left.dims());
-      CAFFE_ENFORCE_EQ(select.dims(), right.dims());
+      CAFFE_ENFORCE_EQ(select.sizes(), left.sizes());
+      CAFFE_ENFORCE_EQ(select.sizes(), right.sizes());
     }
     output->ResizeLike(left);
 
@@ -50,24 +50,24 @@ class WhereOp final : public Operator<Context> {
 
     if (enable_broadcast_) {
       size_t block_size = left.size_from_dim(1);
-      for (int i = 0; i < select.size(); i++) {
+      for (int i = 0; i < select.numel(); i++) {
         size_t offset = i * block_size;
         if (select_data[i]) {
-          context_.template CopyItems<Context, Context>(
-              output->meta(),
+          context_.CopyItemsSameDevice(
+              output->dtype(),
               block_size,
               left_data + offset,
               output_data + offset);
         } else {
-          context_.template CopyItems<Context, Context>(
-              output->meta(),
+          context_.CopyItemsSameDevice(
+              output->dtype(),
               block_size,
               right_data + offset,
               output_data + offset);
         }
       }
     } else {
-      for (int i = 0; i < select.size(); ++i) {
+      for (int i = 0; i < select.numel(); ++i) {
         output_data[i] = select_data[i] ? left_data[i] : right_data[i];
       }
     }
@@ -114,20 +114,20 @@ class IsMemberOfOp final : public Operator<Context> {
   IsMemberOfOp(const OperatorDef& op, Workspace* ws)
       : Operator<Context>(op, ws) {
     auto dtype =
-        static_cast<TensorProto_DataType>(OperatorBase::GetSingleArgument<int>(
+        static_cast<TensorProto_DataType>(this->template GetSingleArgument<int>(
             "dtype", TensorProto_DataType_UNDEFINED));
     switch (dtype) {
       case TensorProto_DataType_INT32:
-        values_.set(OperatorBase::GetRepeatedArgument<int32_t>(VALUE_TAG));
+        values_.set(this->template GetRepeatedArgument<int32_t>(VALUE_TAG));
         break;
       case TensorProto_DataType_INT64:
-        values_.set(OperatorBase::GetRepeatedArgument<int64_t>(VALUE_TAG));
+        values_.set(this->template GetRepeatedArgument<int64_t>(VALUE_TAG));
         break;
       case TensorProto_DataType_BOOL:
-        values_.set(OperatorBase::GetRepeatedArgument<bool>(VALUE_TAG));
+        values_.set(this->template GetRepeatedArgument<bool>(VALUE_TAG));
         break;
       case TensorProto_DataType_STRING:
-        values_.set(OperatorBase::GetRepeatedArgument<std::string>(VALUE_TAG));
+        values_.set(this->template GetRepeatedArgument<std::string>(VALUE_TAG));
         break;
       case TensorProto_DataType_UNDEFINED:
         // If dtype is not provided, values_ will be filled the first time that
@@ -151,13 +151,13 @@ class IsMemberOfOp final : public Operator<Context> {
     output->ResizeLike(input);
 
     if (!values_.has_values()) {
-      values_.set(OperatorBase::GetRepeatedArgument<T>(VALUE_TAG));
+      values_.set(this->template GetRepeatedArgument<T>(VALUE_TAG));
     }
     const auto& values = values_.get<T>();
 
     const T* input_data = input.template data<T>();
     bool* output_data = output->template mutable_data<bool>();
-    for (int i = 0; i < input.size(); ++i) {
+    for (int i = 0; i < input.numel(); ++i) {
       output_data[i] = values.find(input_data[i]) != values.end();
     }
     return true;

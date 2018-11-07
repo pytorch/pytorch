@@ -17,19 +17,21 @@ namespace script {
 // - Maybe<T> is really a Tree with kind TK_OPTION that has 0 or 1 subtree of type T
 // - Builtin types are: Ident (TK_IDENT), String (TK_STRING)
 //
-// Type  = TensorType()                                                 TK_TENSOR_TYPE
-// Param = Param(Type type, Ident name)                                 TK_PARAM
+// Param = Param(Expr type, Ident name)                                 TK_PARAM
 //
-// Def   = Def(Ident name, List<Param> params, List<Stmt> body)         TK_DEF
+// Decl  = Decl(List<Param> params, Maybe<Expr> return_type)            TK_DECL
+// Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
 //       | For(List<Expr> targets, List<Expr> iters, List<Stmt> body)   TK_FOR
 //       | While(Expr cond, List<Stmt> body)                            TK_WHILE
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
 //       -- NB: the only type of Expr's allowed on lhs are Starred and Var
-//       | Assign(List<Expr> lhs, AssignType maybe_reduce, Expr rhs)    TK_ASSIGN
+//       | Assign(List<Expr> lhs, Expr rhs)                             TK_ASSIGN
+//       | AugAssign(Expr lhs, AugAssignKind aug_op, Expr rhs)          TK_AUG_ASSIGN
 //       | Return(List<Expr> values)                                    TK_RETURN
 //       | ExprStmt(List<Expr> expr)                                    TK_EXPR_STMT
+//       | Raise(Expr expr)                                             TK_RAISE
 //
 // Expr  = TernaryIf(Expr cond, Expr true_expr, Expr false_expr)        TK_IF_EXPR
 //       | BinOp(Expr lhs, Expr rhs)
@@ -41,40 +43,39 @@ namespace script {
 //       |     Le                                                       TK_LE
 //       |     Ge                                                       TK_GE
 //       |     Ne                                                       TK_NE
+//       |     Is                                                       TK_IS
+//       |     IsNot                                                    TK_ISNOT
 //       |     Add                                                      '+'
 //       |     Sub                                                      '-'
 //       |     Mul                                                      '*'
 //       |     Div                                                      '/'
+//       |     Mod                                                      '%'
 //       |     MatMult                                                  '@'
 //       |     Pow                                                      TK_POW
 //       | UnaryOp(Expr expr)
 //       |     Not                                                      TK_NOT
 //       |     USub                                                     '-'
 //       | Const(String value)                                          TK_CONST
-//       | Cast(ScalarType type, Expr expr)                             TK_CAST
 //       -- NB: x.name(y) is desugared into name(x, y)
 //       | Apply(Ident name, List<Expr> args, List<Attribute> kwargs)   TK_APPLY
-//       | Select(Expr base, Ident attr_name)                           '.'
-//       | Slice(Expr value, Maybe<Expr> first, Maybe<Expr> second)     TK_SLICE
-//       | Gather(Expr value, Expr indices)                             TK_GATHER
+//       | Select(Expr value, Ident selector)                           '.'
+//       | Subscript(Expr value, List<Expr> subscript_exprs)            TK_SUBSCRIPT
+//       | SliceExpr(Maybe<Expr> start, Maybe<Expr> end)                TK_SLICE_EXPR
 //       | Var(Ident name)                                              TK_VAR
 //       | ListLiteral(List<Expr> inputs)                               TK_LIST_LITERAL
+//       | TupleLiteral(List<Expr> inputs)                              TK_TUPLE_LITERAL
 //       | Starred(Expr expr)                                           TK_STARRED
 //
 // -- NB: only allowed expressions are Const or List(Const)
 //        (List as a value, not type constructor)
 // Attribute = Attribute(Ident name, Expr value)                        TK_ATTRIBUTE
 //
-// AssignKind = Regular()                                               '='
+// AugAssignKind =
 //            | Add()                                                   TK_PLUS_EQ
 //            | Sub()                                                   TK_MINUS_EQ
 //            | Mul()                                                   TK_TIMES_EQ
 //            | Div()                                                   TK_DIV_EQ
 //
-// ScalarType = IntType()                                               TK_INT
-//            | FloatType()                                             TK_FLOAT
-//            | LongType()                                              TK_LONG
-//            | DoubleType()                                            TK_DOUBLE
 
 // Each subclass of TreeView should provide:
 // 1. Constructor that takes a TreeRef, and checks that it's of the right type.
@@ -87,7 +88,7 @@ namespace script {
 //    than both in the parser and in this code.
 // XXX: these structs should have no fields to prevent slicing when passing by value
 struct TreeView {
-  explicit TreeView(const TreeRef& tree_) : tree_(tree_) {}
+  explicit TreeView(TreeRef tree) : tree_(std::move(tree)) {}
   TreeRef tree() const {
     return tree_;
   }
@@ -202,17 +203,6 @@ struct Ident : public TreeView {
 // Base types (production LHS)
 ////////////////////////////////////////////////////////////////////////////////
 
-struct Type : public TreeView {
-  explicit Type(const TreeRef& tree) : TreeView(tree) {
-    switch (tree->kind()) {
-      case TK_TENSOR_TYPE:
-        return;
-      default:
-        throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Type";
-    }
-  }
-};
-
 struct Stmt : public TreeView {
   explicit Stmt(const TreeRef& tree) : TreeView(tree) {
     switch (tree->kind()) {
@@ -221,8 +211,12 @@ struct Stmt : public TreeView {
       case TK_WHILE:
       case TK_GLOBAL:
       case TK_ASSIGN:
+      case TK_AUG_ASSIGN:
       case TK_RETURN:
       case TK_EXPR_STMT:
+      case TK_RAISE:
+      case TK_ASSERT:
+      case TK_PASS:
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Stmt";
@@ -238,6 +232,8 @@ struct Expr : public TreeView {
       case TK_OR:
       case '<':
       case '>':
+      case TK_IS:
+      case TK_ISNOT:
       case TK_EQ:
       case TK_LE:
       case TK_GE:
@@ -248,17 +244,21 @@ struct Expr : public TreeView {
       case '*':
       case TK_STARRED:
       case '/':
+      case '%':
       case TK_NOT:
       case TK_CONST:
+      case TK_STRINGLITERAL:
       case TK_TRUE:
       case TK_FALSE:
+      case TK_NONE:
       case TK_CAST:
       case TK_APPLY:
       case '.':
-      case TK_SLICE:
-      case TK_GATHER:
+      case TK_SUBSCRIPT:
+      case TK_SLICE_EXPR:
       case TK_VAR:
       case TK_LIST_LITERAL:
+      case TK_TUPLE_LITERAL:
       case '@':
       case TK_POW:
         return;
@@ -292,14 +292,14 @@ struct Param : public TreeView {
   explicit Param(const TreeRef& tree) : TreeView(tree) {
     tree_->match(TK_PARAM);
   }
-  static Param create(const SourceRange& range, const Ident& ident, const Type& type) {
+  static Param create(const SourceRange& range, const Ident& ident, const Expr& type) {
     return Param(Compound::create(TK_PARAM, range, {ident, type}));
   }
   Ident ident() const {
     return Ident(subtree(0));
   }
-  Type type() const {
-    return Type(subtree(1));
+  Expr type() const {
+    return Expr(subtree(1));
   }
   template<typename T>
   T typeExpect() const {
@@ -307,47 +307,38 @@ struct Param : public TreeView {
   }
 };
 
-
-////////////////////////////////////////////////////////////////////////////////
-// Type
-////////////////////////////////////////////////////////////////////////////////
-
-struct TensorType : public Type {
-  explicit TensorType(const TreeRef& tree) : Type(tree) {
-    tree_->match(TK_TENSOR_TYPE);
-  }
-  static TensorType create(const SourceRange& range) {
-    return TensorType(Compound::create(TK_TENSOR_TYPE, range, {}));
-  }
-};
-
-struct ScalarType : public TreeView {
-  explicit ScalarType(const TreeRef& tree) : TreeView(tree) {
-    switch (tree->kind()) {
-      case TK_INT:
-      case TK_LONG:
-      case TK_FLOAT:
-      case TK_DOUBLE:
-        return;
-      default:
-        throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid ScalarType";
-    }
-  }
-};
-
 ////////////////////////////////////////////////////////////////////////////////
 // Top level definitions
 ////////////////////////////////////////////////////////////////////////////////
+
+struct Decl : public TreeView {
+  explicit Decl(const TreeRef& tree) : TreeView(tree) {
+    tree->match(TK_DECL);
+  }
+  List<Param> params() const {
+    return List<Param>(subtree(0));
+  }
+  Maybe<Expr> return_type() const {
+    return Maybe<Expr>(subtree(1));
+  }
+  static Decl create(const SourceRange& range, const List<Param>& params, Maybe<Expr> return_type) {
+    return Decl(Compound::create(TK_DECL, range, {params, return_type}));
+  }
+};
 
 struct Def : public TreeView {
   explicit Def(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_DEF);
   }
+  Def withName(std::string new_name) const {
+    auto new_ident = Ident::create(name().range(), new_name);
+    return create(range(), new_ident, decl(), statements());
+  }
   Ident name() const {
     return Ident(subtree(0));
   }
-  List<Param> params() const {
-    return List<Param>(subtree(1));
+  Decl decl() const {
+    return Decl(subtree(1));
   }
   List<Stmt> statements() const {
     return List<Stmt>(subtree(2));
@@ -355,10 +346,10 @@ struct Def : public TreeView {
   static Def create(
       const SourceRange& range,
       const Ident& name,
-      const List<Param>& params,
+      const Decl& decl,
       const List<Stmt>& stmts) {
     return Def(Compound::create(
-        TK_DEF, range, {name, params, stmts}));
+        TK_DEF, range, {name, decl, stmts}));
   }
 };
 
@@ -438,20 +429,44 @@ struct Global : public Stmt {
   }
 };
 
-struct AssignKind : public TreeView {
-  explicit AssignKind(const TreeRef& tree) : TreeView(tree) {
+struct AugAssignKind : public TreeView {
+  explicit AugAssignKind(const TreeRef& tree) : TreeView(tree) {
     switch (tree->kind()) {
-      case '=':
       case '+':
       case '-':
       case '*':
       case '/':
         return;
       default:
-        throw ErrorReport(tree) << "is not a valid AssignKind";
+        throw ErrorReport(tree) << "is not a valid AugAssignKind";
     }
   }
 };
+
+// Augmented assignment, like "foo += bar"
+struct AugAssign : public Stmt {
+  explicit AugAssign(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_AUG_ASSIGN);
+  }
+  static AugAssign create(
+      const SourceRange& range,
+      const Expr& lhs,
+      const AugAssignKind& aug_op,
+      const Expr& rhs) {
+    return AugAssign(
+        Compound::create(TK_AUG_ASSIGN, range, {lhs, aug_op, rhs}));
+  }
+  Expr lhs() const {
+    return Expr(subtree(0));
+  }
+  int aug_op() const {
+    return subtree(1)->kind();
+  }
+  Expr rhs() const {
+    return Expr(subtree(2));
+  }
+};
+
 
 struct Assign : public Stmt {
   explicit Assign(const TreeRef& tree) : Stmt(tree) {
@@ -460,18 +475,14 @@ struct Assign : public Stmt {
   static Assign create(
       const SourceRange& range,
       const List<Expr>& lhs,
-      const AssignKind& reduction,
       const Expr& rhs) {
-    return Assign(Compound::create(TK_ASSIGN, range, {lhs, reduction, rhs}));
+    return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs}));
   }
   List<Expr> lhs() const {
     return List<Expr>(subtree(0));
   }
-  int reduction() const {
-    return subtree(1)->kind();
-  }
   Expr rhs() const {
-    return Expr(subtree(2));
+    return Expr(subtree(1));
   }
 };
 
@@ -486,6 +497,47 @@ struct Return : public Stmt {
     return Return(Compound::create(TK_RETURN, range, {values}));
   }
 };
+
+struct Raise : public Stmt {
+  explicit Raise(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_RAISE);
+  }
+  Maybe<Expr> expr() const {
+    return Maybe<Expr>(subtree(0));
+  }
+  static Raise create(const SourceRange& range, const Maybe<Expr>& expr) {
+    return Raise(Compound::create(TK_RAISE, range, {expr}));
+  }
+};
+
+struct Assert : public Stmt {
+  explicit Assert(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_ASSERT);
+  }
+  Expr test() const {
+    return Expr(subtree(0));
+  }
+  Maybe<Expr> msg() const {
+    return Maybe<Expr>(subtree(1));
+  }
+  static Assert create(
+      const SourceRange& range,
+      const Expr& test,
+      const Maybe<Expr>& msg) {
+    return Assert(Compound::create(TK_ASSERT, range, {test, msg}));
+  }
+};
+
+struct Pass : public Stmt {
+  explicit Pass(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_PASS);
+  }
+  static Pass create(
+      const SourceRange& range) {
+    return Pass(Compound::create(TK_PASS, range, {}));
+  }
+};
+
 
 struct ExprStmt : public Stmt {
   explicit ExprStmt(const TreeRef& tree) : Stmt(tree) {
@@ -511,6 +563,8 @@ struct BinOp : public Expr {
       case TK_OR:
       case '<':
       case '>':
+      case TK_IS:
+      case TK_ISNOT:
       case TK_EQ:
       case TK_LE:
       case TK_GE:
@@ -521,6 +575,7 @@ struct BinOp : public Expr {
       case '-':
       case '@':
       case TK_POW:
+      case '%':
         if (tree->trees().size() != 2)
           throw ErrorReport(tree) << "BinOp expected 2 subtrees, found " << tree->trees().size();
         return;
@@ -580,18 +635,15 @@ struct Const : public Expr {
   }
 };
 
-struct Cast : public Expr {
-  explicit Cast(const TreeRef& tree) : Expr(tree) {
-    tree_->match(TK_CAST);
+struct StringLiteral : public Expr {
+  explicit StringLiteral(const TreeRef& tree) : Expr(tree) {
+    tree_->matchNumSubtrees(TK_STRINGLITERAL, 1);
   }
-  ScalarType type() const {
-    return ScalarType(subtree(0));
+  const std::string& text() const {
+    return subtree(0)->stringValue();
   }
-  Expr input() const {
-    return Expr(subtree(1));
-  }
-  static Cast create(const SourceRange& range, const Type& type, const Expr& input) {
-    return Cast(Compound::create(TK_CAST, range, {type, input}));
+  static StringLiteral create(const SourceRange& range, const std::string& value) {
+    return StringLiteral(Compound::create(TK_STRINGLITERAL, range, {String::create(value)}));
   }
 };
 
@@ -632,18 +684,15 @@ struct Select : public Expr {
   }
 };
 
-struct Slice : public Expr {
-  explicit Slice(const TreeRef& tree) : Expr(tree) {
-    tree_->match(TK_SLICE);
-  }
-  Expr value() const {
-    return Expr(subtree(0));
+struct SliceExpr : public Expr {
+  explicit SliceExpr(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_SLICE_EXPR);
   }
   Maybe<Expr> start() const {
-    return Maybe<Expr>(subtree(1));
+    return Maybe<Expr>(subtree(0));
   }
   Maybe<Expr> end() const {
-    return Maybe<Expr>(subtree(2));
+    return Maybe<Expr>(subtree(1));
   }
   Expr startOr(int alternative) const {
     const auto startOption = start();
@@ -653,12 +702,11 @@ struct Slice : public Expr {
     const auto endOption = end();
     return endOption.present() ? endOption.get() : createInt(alternative);
   }
-  static Slice create(
+  static SliceExpr create(
       const SourceRange& range,
-      const Expr& value,
       const Maybe<Expr>& start,
       const Maybe<Expr>& end) {
-    return Slice(Compound::create(TK_SLICE, range, {value, start, end}));
+    return SliceExpr(Compound::create(TK_SLICE_EXPR, range, {start, end}));
   }
 private:
   Expr createInt(int value) const {
@@ -666,18 +714,21 @@ private:
   }
 };
 
-struct Gather : public Expr {
-  explicit Gather(const TreeRef& tree) : Expr(tree) {
-    tree_->match(TK_GATHER);
+struct Subscript : public Expr {
+  explicit Subscript(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_SUBSCRIPT);
   }
   Expr value() const {
     return Expr(subtree(0));
   }
-  Expr indices() const {
-    return Expr(subtree(1));
+  List<Expr> subscript_exprs() const {
+    return List<Expr>(subtree(1));
   }
-  static Gather create(const SourceRange& range, const Expr& value, const Expr& indices) {
-    return Gather(Compound::create(TK_GATHER, range, {value, indices}));
+  static Subscript create(
+      const SourceRange& range,
+      const Expr& value,
+      const List<Expr>& subscript_exprs) {
+    return Subscript(Compound::create(TK_SUBSCRIPT, range, {value, subscript_exprs}));
   }
 };
 
@@ -727,6 +778,17 @@ struct ListLiteral : public Expr {
   }
 };
 
+struct TupleLiteral : public Expr {
+  explicit TupleLiteral(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_TUPLE_LITERAL);
+  }
+  List<Expr> inputs() const {
+    return subtree(0);
+  }
+  static TupleLiteral create(const SourceRange& range, const List<Expr>& inputs) {
+    return TupleLiteral(Compound::create(TK_TUPLE_LITERAL, range, {inputs}));
+  }
+};
 
 struct Starred : public Expr {
   explicit Starred(const TreeRef& tree) : Expr(tree) {

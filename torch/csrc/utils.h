@@ -11,6 +11,7 @@
 
 #ifdef USE_CUDA
 #include <THC/THC.h>
+#include <ATen/cuda/CUDAStream.h>
 #endif
 
 #define THPUtils_(NAME) TH_CONCAT_4(THP,Real,Utils_,NAME)
@@ -74,13 +75,8 @@
 #define THPFloatUtils_unpackAccreal(object)   (double)THPUtils_unpackReal_FLOAT(object)
 #define THPFloatUtils_newAccreal(value)       THPUtils_newReal_FLOAT(value)
 #define THPHalfUtils_checkReal(object)        THPUtils_checkReal_FLOAT(object)
-#ifndef THP_HOST_HALF
-#define THPHalfUtils_unpackReal(object)       (half)THC_float2half(THPUtils_unpackReal_FLOAT(object))
-#define THPHalfUtils_newReal(value)           PyFloat_FromDouble(THC_half2float(value))
-#else
-#define THPHalfUtils_unpackReal(object)       TH_float2half(THPUtils_unpackReal_FLOAT(object))
-#define THPHalfUtils_newReal(value)           PyFloat_FromDouble(TH_half2float(value))
-#endif
+#define THPHalfUtils_unpackReal(object)       (at::Half)THPUtils_unpackReal_FLOAT(object)
+#define THPHalfUtils_newReal(value)           PyFloat_FromDouble(value)
 #define THPHalfUtils_checkAccreal(object)     THPUtils_checkReal_FLOAT(object)
 #define THPHalfUtils_unpackAccreal(object)    (double)THPUtils_unpackReal_FLOAT(object)
 #define THPHalfUtils_newAccreal(value)        THPUtils_newReal_FLOAT(value)
@@ -116,7 +112,7 @@
 #define THPByteUtils_unpackAccreal(object)    (int64_t)THPUtils_unpackReal_INT(object)
 #define THPByteUtils_newAccreal(value)        THPUtils_newReal_INT(value)
 
-#define THPUtils_assert(cond, ...) THPUtils_assertRet(NULL, cond, __VA_ARGS__)
+#define THPUtils_assert(cond, ...) THPUtils_assertRet(nullptr, cond, __VA_ARGS__)
 #define THPUtils_assertRet(value, cond, ...)                                   \
 if (THP_EXPECT(!(cond), 0)) { THPUtils_setError(__VA_ARGS__); return value; }
 THP_API void THPUtils_setError(const char *format, ...);
@@ -176,8 +172,9 @@ void setBackCompatKeepdimWarn(bool warn);
 bool getBackCompatKeepdimWarn();
 bool maybeThrowBackCompatKeepdimWarn(char *func);
 
+// NB: This is in torch/csrc/cuda/utils.cpp, for whatever reason
 #ifdef USE_CUDA
-std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj);
+std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj);
 #endif
 
 #endif /* _THP_CORE */

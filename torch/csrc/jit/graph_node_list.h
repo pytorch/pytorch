@@ -1,4 +1,6 @@
-#include "torch/csrc/assertions.h"
+#pragma once
+
+#include "torch/csrc/jit/assertions.h"
 
 namespace torch { namespace jit {
 
@@ -45,8 +47,10 @@ struct generic_graph_node_list_iterator {
     : cur(nullptr), d(kNextDirection) {}
   generic_graph_node_list_iterator(T * cur, int d)
     : cur(cur), d(d) {}
-  generic_graph_node_list_iterator(const generic_graph_node_list_iterator & rhs)
-    : cur(rhs.cur), d(rhs.d) {}
+  generic_graph_node_list_iterator(const generic_graph_node_list_iterator & rhs) = default;
+  generic_graph_node_list_iterator(generic_graph_node_list_iterator && rhs) = default;
+  generic_graph_node_list_iterator& operator=(const generic_graph_node_list_iterator & rhs) = default;
+  generic_graph_node_list_iterator& operator=(generic_graph_node_list_iterator && rhs) = default;
   T * operator*() const { return cur; }
   T * operator->() const { return cur; }
   generic_graph_node_list_iterator & operator++() {
@@ -124,6 +128,10 @@ struct generic_graph_node_list {
   const generic_graph_node_list reverse() const {
     return generic_graph_node_list(head, d == kNextDirection ? kPrevDirection : kNextDirection);
   }
+  T* front() { return head->next_in_graph[d]; }
+  const T* front() const { return head->next_in_graph[d]; }
+  T* back() { return head->next_in_graph[!d]; }
+  const T* back() const { return head->next_in_graph[!d]; }
   generic_graph_node_list(T * head, int d)
     : head(head), d(d) {}
 private:

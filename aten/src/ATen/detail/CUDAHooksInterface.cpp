@@ -1,6 +1,6 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
-#include <ATen/Error.h>
+#include <c10/util/Exception.h>
 
 #include <cstddef>
 #include <memory>
@@ -54,6 +54,6 @@ const CUDAHooksInterface& getCUDAHooks() {
 }
 } // namespace detail
 
-AT_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
+C10_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
 
 } // namespace at

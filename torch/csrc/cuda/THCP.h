@@ -4,11 +4,8 @@
 #include "torch/csrc/python_headers.h"
 #include <TH/TH.h>
 #include <THC/THC.h>
-#include <THC/THCHalf.h>
+#include <TH/THHalf.h>
 #include <THC/THCTensor.hpp>
-
-#include <THS/THS.h>
-#include <THCS/THCS.h>
 
 #include "torch/csrc/THP.h"
 #include "serialization.h"

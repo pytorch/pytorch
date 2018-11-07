@@ -1,9 +1,5 @@
 #include "caffe2/operators/collect_and_distribute_fpn_rpn_proposals_op.h"
 
-#ifdef CAFFE2_USE_MKL
-#include "caffe2/mkl/operators/operator_fallback_mkl.h"
-#endif // CAFFE2_USE_MKL
-
 namespace caffe2 {
 
 namespace utils {
@@ -133,14 +129,14 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
   int proposal_num = 0;
   for (int i = 0; i < num_rpn_lvls; i++) {
     const auto& roi_in = Input(i);
-    proposal_num += roi_in.dim(0);
+    proposal_num += roi_in.size(0);
   }
   ERArrXXf rois(proposal_num, 5);
   EArrXf scores(proposal_num);
   int len = 0;
   for (int i = 0; i < num_rpn_lvls; i++) {
     const auto& roi_in = Input(i);
-    const int n = roi_in.dim(0);
+    const int n = roi_in.size(0);
 
     Eigen::Map<const ERArrXXf> roi(roi_in.data<float>(), n, 5);
     rois.block(len, 0, n, 5) = roi;
@@ -180,8 +176,8 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
   //   outputs[0].data[...] = rois
   auto* rois_out = Output(0);
   rois_out->Resize(rois.rows(), rois.cols());
-  Eigen::Map<ERArrXXf> rois_out_mat(rois_out->mutable_data<float>(),
-                                    rois.rows(), rois.cols());
+  Eigen::Map<ERArrXXf> rois_out_mat(
+      rois_out->template mutable_data<float>(), rois.rows(), rois.cols());
   rois_out_mat = rois;
 
   // Create new roi blobs for each FPN level
@@ -207,9 +203,10 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
     // Output blob_roi_level
     auto* roi_out = Output(i + 1);
     roi_out->Resize(blob_roi_level.rows(), blob_roi_level.cols());
-    Eigen::Map<ERArrXXf> roi_out_mat(roi_out->mutable_data<float>(),
-                                     blob_roi_level.rows(),
-                                     blob_roi_level.cols());
+    Eigen::Map<ERArrXXf> roi_out_mat(
+        roi_out->template mutable_data<float>(),
+        blob_roi_level.rows(),
+        blob_roi_level.cols());
     roi_out_mat = blob_roi_level;
 
     // Append indices from idx_lvl to rois_idx_restore
@@ -219,8 +216,9 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
   utils::ArgSort(rois_idx_restore);
   auto* rois_idx_restore_out = Output(OutputSize() - 1);
   rois_idx_restore_out->Resize(rois_idx_restore.size());
-  Eigen::Map<EArrXi> rois_idx_restore_out_mat(rois_idx_restore_out->mutable_data<int>(),
-                                              rois_idx_restore.size());
+  Eigen::Map<EArrXi> rois_idx_restore_out_mat(
+      rois_idx_restore_out->template mutable_data<int>(),
+      rois_idx_restore.size());
   rois_idx_restore_out_mat = rois_idx_restore;
 
   return true;
@@ -229,12 +227,6 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
 namespace {
 
 REGISTER_CPU_OPERATOR(CollectAndDistributeFpnRpnProposals, CollectAndDistributeFpnRpnProposalsOp<CPUContext>);
-
-#ifdef CAFFE2_HAS_MKL_DNN
-REGISTER_MKL_OPERATOR(
-    CollectAndDistributeFpnRpnProposals,
-    mkl::MKLFallbackOp<CollectAndDistributeFpnRpnProposalsOp<CPUContext>>);
-#endif // CAFFE2_HAS_MKL_DNN
 
 OPERATOR_SCHEMA(CollectAndDistributeFpnRpnProposals)
     .NumInputs(2, INT_MAX)

@@ -15,38 +15,41 @@ struct GraphExecutorState;
 // They is only valid only right after you call getDebugState() and should never
 // be used again once another GraphExecutor function is called.
 struct ExecutionPlanState {
-  Code* f;
-  Graph* graph;
-
-  // Those two fields are optional
-  Gradient* grad;
-  std::shared_ptr<GraphExecutorState> grad_executor; // shared_ptr to break the cycle...
+  Code* code = nullptr;
+  const Graph* graph = nullptr;
 };
 
 struct GraphExecutorState {
-  Graph* graph;
+  const Graph* graph = nullptr;
+  ExecutionPlanState fallback; // XXX: members of this field are optional
   std::unordered_map<ArgumentSpec, ExecutionPlanState> execution_plans;
-
-  // Those two fields are optional
-  Code* autograd_fallback;
-  Graph* autograd_fallback_graph;
 };
 
 struct GraphExecutorImpl;
-struct GraphExecutor {
-  GraphExecutor() {}
+struct TORCH_API GraphExecutor {
+  GraphExecutor() = default;
   GraphExecutor(std::shared_ptr<Graph> graph, bool optimize = true);
-  // note: if not specified, symbolically_differentiable is computed from the graph.
-  GraphExecutor(std::shared_ptr<Graph> graph, bool optimize, bool symbolically_differentiable);
-  variable_tensor_list run(variable_tensor_list && inputs);
-  operator bool() const {
+  void run(Stack & inputs);
+  explicit operator bool() const {
     return pImpl != nullptr;
   }
   std::shared_ptr<Graph> graph() const;
-  std::shared_ptr<Graph> graphFor(const variable_tensor_list& inputs) const;
+  std::shared_ptr<Graph> graphFor(const Stack& inputs) const;
   GraphExecutorState getDebugState();
+  void debugDisableAutodiffSubgraphInlining();
 private:
   std::shared_ptr<GraphExecutorImpl> pImpl;
 };
+
+// These passes need to run before it is valid to pass to the interpreter
+// regardless of whether sizes have been specialized or not.
+TORCH_API void runRequiredPasses(const std::shared_ptr<Graph>& g);
+
+namespace detail {
+
+GraphExecutor* getGradExecutor(Operation& op);
+
+} // namespace detail
+
 
 }}

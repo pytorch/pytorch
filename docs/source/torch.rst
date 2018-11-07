@@ -57,6 +57,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: gather
 .. autofunction:: index_select
 .. autofunction:: masked_select
+.. autofunction:: narrow
 .. autofunction:: nonzero
 .. autofunction:: reshape
 .. autofunction:: split
@@ -168,7 +169,9 @@ Pointwise Ops
 .. autofunction:: cos
 .. autofunction:: cosh
 .. autofunction:: div
+.. autofunction:: digamma
 .. autofunction:: erf
+.. autofunction:: erfc
 .. autofunction:: erfinv
 .. autofunction:: exp
 .. autofunction:: expm1
@@ -181,6 +184,7 @@ Pointwise Ops
 .. autofunction:: log1p
 .. autofunction:: log2
 .. autofunction:: mul
+.. autofunction:: mvlgamma
 .. autofunction:: neg
 .. autofunction:: pow
 .. autofunction:: reciprocal
@@ -218,10 +222,14 @@ Reduction Ops
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: allclose
+.. autofunction:: argsort
 .. autofunction:: eq
 .. autofunction:: equal
 .. autofunction:: ge
 .. autofunction:: gt
+.. autofunction:: isfinite
+.. autofunction:: isinf
 .. autofunction:: isnan
 .. autofunction:: kthvalue
 .. autofunction:: le
@@ -248,13 +256,20 @@ Spectral Ops
 
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: bincount
+.. autofunction:: broadcast_tensors
 .. autofunction:: cross
 .. autofunction:: diag
+.. autofunction:: diag_embed
 .. autofunction:: diagflat
 .. autofunction:: diagonal
 .. autofunction:: einsum
+.. autofunction:: flatten
+.. autofunction:: flip
 .. autofunction:: histc
+.. autofunction:: meshgrid
 .. autofunction:: renorm
+.. autofunction:: tensordot
 .. autofunction:: trace
 .. autofunction:: tril
 .. autofunction:: triu
@@ -273,6 +288,8 @@ BLAS and LAPACK Operations
 .. autofunction:: btrifact_with_info
 .. autofunction:: btrisolve
 .. autofunction:: btriunpack
+.. autofunction:: chain_matmul
+.. autofunction:: cholesky
 .. autofunction:: dot
 .. autofunction:: eig
 .. autofunction:: gels
@@ -284,10 +301,13 @@ BLAS and LAPACK Operations
 .. autofunction:: logdet
 .. autofunction:: slogdet
 .. autofunction:: matmul
+.. autofunction:: matrix_power
+.. autofunction:: matrix_rank
 .. autofunction:: mm
 .. autofunction:: mv
 .. autofunction:: orgqr
 .. autofunction:: ormqr
+.. autofunction:: pinverse
 .. autofunction:: potrf
 .. autofunction:: potri
 .. autofunction:: potrs
@@ -296,3 +316,7 @@ BLAS and LAPACK Operations
 .. autofunction:: svd
 .. autofunction:: symeig
 .. autofunction:: trtrs
+
+Utilities
+----------------------------------
+.. autofunction:: compiled_with_cxx11_abi

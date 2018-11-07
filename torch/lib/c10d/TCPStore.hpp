@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Store.hpp"
-#include "Utils.hpp"
-
 #include <memory>
 #include <thread>
 #include <unordered_map>
+
+#include <c10d/Store.hpp>
+#include <c10d/Utils.hpp>
 
 namespace c10d {
 
@@ -60,9 +60,11 @@ class TCPStore : public Store {
 
   bool check(const std::vector<std::string>& keys) override;
 
+  void wait(const std::vector<std::string>& keys) override;
+
   void wait(
       const std::vector<std::string>& keys,
-      const std::chrono::milliseconds& timeout = kDefaultTimeout) override;
+      const std::chrono::milliseconds& timeout) override;
 
  protected:
   bool isServer_;

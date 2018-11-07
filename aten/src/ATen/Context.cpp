@@ -2,6 +2,8 @@
 
 #include "Context.h"
 
+#include <ATen/core/TensorOptions.h>
+
 #include <thread>
 #include <mutex>
 #include <sstream>
@@ -9,10 +11,11 @@
 #include <stdexcept>
 
 #include "ATen/CPUGenerator.h"
+#include "ATen/RegisterCPU.h"
+#include "ATen/Tensor.h"
+#include <ATen/cpu/FlushDenormal.h>
 
-#ifdef USE_SSE3
-#include <pmmintrin.h>
-#endif
+#include "TH/TH.h"  // for USE_LAPACK
 
 namespace at {
 
@@ -32,11 +35,13 @@ Context::Context()
   THSetDefaultErrorHandler(errorHandler,nullptr);
   THSetDefaultArgErrorHandler(argErrorHandler,nullptr);
 
-  generator_registry[static_cast<int>(Backend::CPU)]
+  generator_registry[static_cast<int>(DeviceType::CPU)]
     .reset(new CPUGenerator(this));
-  Type::registerCPU(this);
+  register_cpu_types(this);
 }
 
+// TODO: This could be bad juju if someone calls globalContext() in the
+// destructor of an object with static lifetime.
 Context & globalContext() {
   static Context globalContext_;
   return globalContext_;
@@ -77,19 +82,49 @@ bool Context::hasMKL() const {
 #endif
 }
 
-bool Context::setFlushDenormal(bool on) {
-#ifdef USE_SSE3
-  // Setting flush-to-zero (FTZ) flag
-  _MM_SET_FLUSH_ZERO_MODE(on ? _MM_FLUSH_ZERO_ON
-                             : _MM_FLUSH_ZERO_OFF);
-
-  // Setting denormals-are-zero (DAZ) flag
-  _MM_SET_DENORMALS_ZERO_MODE(on ? _MM_DENORMALS_ZERO_ON
-                                 : _MM_DENORMALS_ZERO_OFF);
+bool Context::hasLAPACK() const {
+#ifdef USE_LAPACK
   return true;
 #else
   return false;
 #endif
 }
+
+bool Context::setFlushDenormal(bool on) {
+  return at::cpu::set_flush_denormal(on);
+}
+
+TypeExtendedInterface& getType(TensorOptions options) {
+  return globalContext().getType(
+            options.backend(), typeMetaToScalarType(options.dtype()), options.is_variable());
+}
+
+TypeExtendedInterface& getType(const TensorImpl* impl) {
+  Backend backend = tensorTypeIdToBackend(impl->type_id());
+  return globalContext().getType(
+            backend, typeMetaToScalarType(impl->dtype()), impl->is_variable());
+}
+
+TypeExtendedInterface& getType(const Tensor& t) {
+  return getType(t.unsafeGetTensorImpl());
+}
+
+Allocator* getCPUAllocator() {
+  return getTHDefaultAllocator();
+}
+
+struct LegacyTypeInit : public LegacyTypeInitInterface {
+  LegacyTypeInit(LegacyTypeInitArgs) {}
+  void initCPU() const override {
+    globalContext();
+  }
+  void initCUDA() const override {
+    globalContext().lazyInitCUDA();
+  }
+  void initComplex() const override {
+    globalContext().lazyInitComplex();
+  }
+};
+REGISTER_LEGACY_TYPE_INIT(LegacyTypeInit);
 
 }

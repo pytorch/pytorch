@@ -41,7 +41,7 @@ void RowsWhereRoILevelEquals(Eigen::Ref<const ERArrXXf> rois,
 //    distribute those proposals to their appropriate FPN levels for Faster RCNN.
 //    An anchor at one FPN level may predict an RoI that will map to another
 //    level, hence the need to redistribute the proposals.
-// Reference: detectron/lib/ops/collect_and_distribute_fpn_rpn_proposals.py
+// Reference: facebookresearch/Detectron/detectron/ops/collect_and_distribute_fpn_rpn_proposals.py
 template <class Context>
 class CollectAndDistributeFpnRpnProposalsOp final : public Operator<Context> {
  public:
@@ -49,19 +49,19 @@ class CollectAndDistributeFpnRpnProposalsOp final : public Operator<Context> {
   CollectAndDistributeFpnRpnProposalsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         roi_canonical_scale_(
-            OperatorBase::GetSingleArgument<int>("roi_canonical_scale", 224)),
+            this->template GetSingleArgument<int>("roi_canonical_scale", 224)),
         roi_canonical_level_(
-            OperatorBase::GetSingleArgument<int>("roi_canonical_level", 4)),
+            this->template GetSingleArgument<int>("roi_canonical_level", 4)),
         roi_max_level_(
-            OperatorBase::GetSingleArgument<int>("roi_max_level", 5)),
+            this->template GetSingleArgument<int>("roi_max_level", 5)),
         roi_min_level_(
-            OperatorBase::GetSingleArgument<int>("roi_min_level", 2)),
+            this->template GetSingleArgument<int>("roi_min_level", 2)),
         rpn_max_level_(
-            OperatorBase::GetSingleArgument<int>("rpn_max_level", 6)),
+            this->template GetSingleArgument<int>("rpn_max_level", 6)),
         rpn_min_level_(
-            OperatorBase::GetSingleArgument<int>("rpn_min_level", 2)),
+            this->template GetSingleArgument<int>("rpn_min_level", 2)),
         rpn_post_nms_topN_(
-            OperatorBase::GetSingleArgument<int>("rpn_post_nms_topN", 2000)) {
+            this->template GetSingleArgument<int>("rpn_post_nms_topN", 2000)) {
     CAFFE_ENFORCE_GE(
         roi_max_level_,
         roi_min_level_,

@@ -8,6 +8,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/reducer_functors.h"
 #include "caffe2/perfkernels/embedding_lookup.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -37,39 +38,38 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
     auto& lengthsInput = Input(LENGTHS);
     auto* output = Output(0);
     auto* scale_bias = Input(SCALE_BIAS).template data<float>();
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    const TIndex outputSize = lengthsInput.dim(0);
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
+    const int64_t outputSize = lengthsInput.size(0);
 
     auto& indicesInput = Input(INDICES);
+    CAFFE_ENFORCE_EQ(2, Input(SCALE_BIAS).dim(), "scale_bias has to be matrix");
     CAFFE_ENFORCE_EQ(
-        2, Input(SCALE_BIAS).ndim(), "scale_bias has to be matrix");
-    CAFFE_ENFORCE_EQ(
-        dataInput.dim(0),
-        Input(SCALE_BIAS).dim(0),
+        dataInput.size(0),
+        Input(SCALE_BIAS).size(0),
         "scale_bias must have the same first dim as data");
     CAFFE_ENFORCE_EQ(
         2,
-        Input(SCALE_BIAS).dim(1),
+        Input(SCALE_BIAS).size(1),
         "the second dim of scale_bias has to be equal to 2");
-    CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
+    CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
     const IndexType* indices = indicesInput.template data<IndexType>();
-    TIndex dataToReduceSize = indicesInput.dim(0);
+    int64_t dataToReduceSize = indicesInput.size(0);
 
     const int* lengths = lengthsInput.template data<int>();
-    vector<TIndex> shape = dataInput.dims();
+    vector<int64_t> shape = dataInput.sizes().vec();
     shape[0] = outputSize;
     output->Resize(shape);
     const float* w = nullptr;
     if (USE_WEIGHTS) {
       w = Input(WEIGHTS).template data<float>();
     }
-    TIndex in_block_size = dataInput.size_from_dim(1);
+    int64_t in_block_size = dataInput.size_from_dim(1);
     OutDataT* out = output->template mutable_data<OutDataT>();
     const uint8_t* input_data = dataInput.template data<uint8_t>();
 
     // delegate work to perfkernel that branches based on architecture
-    const TIndex indices_size = indicesInput.size();
-    const TIndex N = dataInput.dim(0);
+    const int64_t indices_size = indicesInput.numel();
+    const int64_t N = dataInput.size(0);
     EmbeddingLookup(
         in_block_size,
         outputSize,
@@ -106,11 +106,11 @@ class FloatToRowwiseQuantized8BitsOp : public Operator<Context> {
     auto* scale_bias = Output(SCALE_BIAS);
     auto* input_data = input.template data<float>();
     output->ResizeLike(input);
-    vector<TIndex> scale_bias_dims = {input.dim(0), 2};
+    vector<int64_t> scale_bias_dims = {input.size(0), 2};
     scale_bias->Resize(scale_bias_dims);
     auto* output_data = output->template mutable_data<uint8_t>();
     float* scale_bias_data = scale_bias->template mutable_data<float>();
-    size_t n_blocks = input.dim(0);
+    size_t n_blocks = input.size(0);
     size_t block_size = input.size_from_dim(1);
     for (size_t i = 0; i < n_blocks; ++i) {
       ConstEigenVectorArrayMap<float> input_row(
@@ -149,14 +149,14 @@ class Rowwise8BitQuantizedToFloatOp : public Operator<Context> {
     auto& input = Input(DATA_UINT8);
     auto& scale_bias = Input(SCALE_BIAS);
     auto* output = Output(DATA_FLOAT);
-    CAFFE_ENFORCE_EQ(2, scale_bias.ndim(), "scale_bias has to be matrix");
+    CAFFE_ENFORCE_EQ(2, scale_bias.dim(), "scale_bias has to be matrix");
     CAFFE_ENFORCE_EQ(
-        input.dim(0),
-        scale_bias.dim(0),
+        input.size(0),
+        scale_bias.size(0),
         "scale_bias must have the same first dim as data");
     CAFFE_ENFORCE_EQ(
         2,
-        scale_bias.dim(1),
+        scale_bias.size(1),
         "the second dim of scale_bias has to be equal to 2");
     output->ResizeLike(input);
     auto* input_data = input.template data<uint8_t>();
@@ -164,7 +164,7 @@ class Rowwise8BitQuantizedToFloatOp : public Operator<Context> {
 
     auto* output_data = output->template mutable_data<float>();
     size_t block_size = input.size_from_dim(1);
-    size_t n_blocks = input.dim(0);
+    size_t n_blocks = input.size(0);
 
     for (size_t i = 0; i < n_blocks; ++i) {
       ConstEigenVectorArrayMap<uint8_t> input_row(

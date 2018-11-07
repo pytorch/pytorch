@@ -9,10 +9,10 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/static_tracepoint.h"
 #include "caffe2/core/timer.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_simple_net_benchmark_run_whole_net,
     true,
     "If false, whole net passes won't be performed");
@@ -162,6 +162,11 @@ vector<float> SimpleNet::TEST_Benchmark(
             memory_bytes_read_per_op_type[op_type] += cost.bytes_read;
             memory_bytes_written_per_op_type[op_type] += cost.bytes_written;
             param_bytes_per_op_type[op_type] += cost.params_bytes;
+          } else {
+            flops_per_op.emplace_back(0);
+            memory_bytes_read_per_op.emplace_back(0);
+            memory_bytes_written_per_op.emplace_back(0);
+            param_bytes_per_op.emplace_back(0);
           }
         }
         timer.Start();
@@ -189,7 +194,9 @@ vector<float> SimpleNet::TEST_Benchmark(
       std::stringstream flops_str;
       if (idx < flops_per_op.size() && flops_per_op[idx]) {
         flops_str << " (" << to_string(1.0e-9 * flops_per_op[idx]) << " GFLOP, "
-                  << to_string(1.0e-6 * flops_per_op[idx] / time_per_op[idx])
+                  << to_string(
+                         1.0e-6 * flops_per_op[idx] / time_per_op[idx] *
+                         main_runs)
                   << " GFLOPS)";
       }
       std::stringstream memory_bytes_read_str;

@@ -6,9 +6,9 @@
 
 namespace torch { namespace autograd {
 
-#define ANOMALY_TRACE_KEY "traceback_"
-
 struct PyAnomalyMetadata : public AnomalyMetadata {
+  static constexpr char* ANOMALY_TRACE_KEY = "traceback_";
+
   PyAnomalyMetadata() {
     AutoGIL gil;
     dict_ = PyDict_New();

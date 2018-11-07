@@ -25,17 +25,26 @@ class IDEEPConcatOp final : public IDEEPOperator {
   virtual ~IDEEPConcatOp() {}
 
   bool RunOnDevice() override {
-    const auto& input_zero = Input(INPUT0);
     auto* output = Output(OUTPUT);
-    TensorCPU* axis_info = OperatorBase::Output<TensorCPU>(AXIS_INFO);
+    TensorCPU* axis_info = OperatorBase::Output<TensorCPU>(AXIS_INFO, CPU);
 
     vector<itensor> inputs;
     for (int i = 0; i < InputSize(); ++i) {
-      inputs.emplace_back(Input(i));
+      if (OperatorBase::InputBlob(i).template IsType<itensor>()) {
+        inputs.emplace_back(Input(i));
+      } else {
+        CAFFE_ENFORCE(
+            BlobIsTensorType(OperatorBase::InputBlob(i), CPU),
+            "Expect cpu tensor if not itensor");
+        auto& tensor_cpu = OperatorBase::Input<Tensor>(i, CPU);
+        CAFFE_ENFORCE(
+            tensor_cpu.sizes().size() == 0 || tensor_cpu.numel() == 0,
+            "Expect zero dim tensor");
+      }
     }
 
     auto axis_vdata = ideep::concat::compute(inputs, axis_, add_axis_, *output);
-    axis_info->Resize(vector<TIndex>(1, InputSize()));
+    axis_info->Resize(vector<int64_t>(1, InputSize()));
     int* axis_data = axis_info->template mutable_data<int>();
     for (int i = 0; i < axis_vdata.size(); i++) {
       axis_data[i] = axis_vdata[i];
@@ -88,8 +97,8 @@ class IDEEPSplitOp final : public IDEEPOperator {
           0,
           "If you set split with an input blob, do not pass in "
           "split in the argument.");
-      auto& axis_info = OperatorBase::Input<TensorCPU>(AXIS_INFO);
-      CAFFE_ENFORCE_EQ(axis_info.size(), OutputSize());
+      auto& axis_info = OperatorBase::Input<Tensor>(AXIS_INFO, CPU);
+      CAFFE_ENFORCE_EQ(axis_info.numel(), OutputSize());
       auto* axis_data = axis_info.template data<int>();
       axis_vdata.assign(axis_data, axis_data + OutputSize());
     } else if (axis_offset_.size() == 0) {

@@ -12,7 +12,7 @@ class AssertOp final : public Operator<Context> {
   AssertOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         error_msg_(
-            OperatorBase::GetSingleArgument<std::string>("error_msg", "")) {}
+            this->template GetSingleArgument<std::string>("error_msg", "")) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
@@ -22,7 +22,7 @@ class AssertOp final : public Operator<Context> {
     cmp_tensor_.CopyFrom(Input(0));
     auto* cmp_data = cmp_tensor_.template data<T>();
 
-    for (TIndex i = 0; i < cmp_tensor_.size(); ++i) {
+    for (int64_t i = 0; i < cmp_tensor_.numel(); ++i) {
       CAFFE_ENFORCE((bool)cmp_data[i], [&]() {
         std::stringstream ss;
         ss << "Assert failed for element " << i
@@ -41,7 +41,7 @@ class AssertOp final : public Operator<Context> {
   }
 
  private:
-  TensorCPU cmp_tensor_;
+  Tensor cmp_tensor_{CPU};
   std::string error_msg_;
 };
 

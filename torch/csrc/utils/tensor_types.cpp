@@ -16,11 +16,11 @@ namespace torch { namespace utils {
 
 static const char* backend_to_string(const at::Type& type) {
   switch (type.backend()) {
-    case at::kCPU: return "torch";
-    case at::kCUDA: return "torch.cuda";
-    case at::kSparseCPU: return "torch.sparse";
-    case at::kSparseCUDA: return "torch.cuda.sparse";
-    default: throw std::runtime_error("Unimplemented backend");
+    case at::Backend::CPU: return "torch";
+    case at::Backend::CUDA: return "torch.cuda";
+    case at::Backend::SparseCPU: return "torch.sparse";
+    case at::Backend::SparseCUDA: return "torch.cuda.sparse";
+    default: AT_ERROR("Unimplemented backend ", type.backend());
   }
 }
 
@@ -40,7 +40,7 @@ at::Type& type_from_string(const std::string& str) {
   const std::unordered_map<std::string, Type*>* map = nullptr;
 
   if (str == "torch.Tensor") {
-    return torch::tensor::get_default_tensor_type();
+    return torch::tensors::get_default_tensor_type();
   }
 
   if (std::mismatch(cuda_prefix.begin(), cuda_prefix.end(), str.begin()).first == cuda_prefix.end()) {

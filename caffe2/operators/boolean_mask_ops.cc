@@ -21,17 +21,17 @@ class BooleanMaskLengthsOp final : public Operator<Context> {
     auto& lengths = Input(0);
     auto& mask = Input(1);
     auto* lengthsOut = Output(0);
-    CAFFE_ENFORCE(lengths.ndim() == 1);
-    CAFFE_ENFORCE(mask.ndim() == 1);
+    CAFFE_ENFORCE(lengths.dim() == 1);
+    CAFFE_ENFORCE(mask.dim() == 1);
     const auto* lengthsPtr = lengths.template data<T>();
     const auto* maskPtr = mask.template data<bool>();
     auto totalLength =
-        std::accumulate(lengthsPtr, lengthsPtr + lengths.size(), 0);
-    CAFFE_ENFORCE(mask.size() == totalLength);
+        std::accumulate(lengthsPtr, lengthsPtr + lengths.numel(), 0);
+    CAFFE_ENFORCE(mask.numel() == totalLength);
     lengthsOut->ResizeLike(lengths);
     auto* lengthsOutPtr = lengthsOut->template mutable_data<T>();
     int p = 0;
-    for (int i = 0; i < lengths.size(); ++i) {
+    for (int i = 0; i < lengths.numel(); ++i) {
       T lengthOut = 0;
       for (int j = 0; j < lengthsPtr[i]; ++j) {
         if (maskPtr[p++]) {
@@ -50,23 +50,23 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   auto& data = Input(0);
   auto& mask = Input(1);
   auto* dataOut = Output(0);
-  CAFFE_ENFORCE(data.ndim() >= 1);
-  CAFFE_ENFORCE_EQ(mask.ndim(), 1);
-  CAFFE_ENFORCE(data.dims()[0] == mask.dims()[0]);
+  CAFFE_ENFORCE(data.dim() >= 1);
+  CAFFE_ENFORCE_EQ(mask.dim(), 1);
+  CAFFE_ENFORCE(data.sizes()[0] == mask.sizes()[0]);
 
   const auto* maskPtr = mask.template data<bool>();
   int numOutputs = 0;
-  int outerSize = mask.size();
+  int outerSize = mask.numel();
   for (int i = 0; i < outerSize; ++i) {
     if (maskPtr[i]) {
       ++numOutputs;
     }
   }
-  std::vector<TIndex> outShape;
+  std::vector<int64_t> outShape;
   outShape.push_back(numOutputs);
-  outShape.insert(outShape.end(), data.dims().begin() + 1, data.dims().end());
+  outShape.insert(outShape.end(), data.sizes().begin() + 1, data.sizes().end());
   dataOut->Resize(outShape);
-  auto* outPtr = (char*)dataOut->raw_mutable_data(data.meta());
+  auto* outPtr = (char*)dataOut->raw_mutable_data(data.dtype());
 
   int64_t* out_vec = nullptr;
   if (OutputSize() == 2) {
@@ -79,20 +79,20 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
     return true;
   }
   const auto innerSize = data.size_from_dim(1);
-  const auto innerSizeBytes = innerSize * data.meta().itemsize();
+  const auto innerSizeBytes = innerSize * data.dtype().itemsize();
 
-  TIndex lastStart = -1;
+  int64_t lastStart = -1;
   const auto* inPtr = (char*)data.raw_data();
-  TIndex outStart = 0;
+  int64_t outStart = 0;
 
-  for (TIndex i = 0;; ++i) {
+  for (int64_t i = 0;; ++i) {
     // mask was true and either a) became false, or b) sequence finished
     if (lastStart != -1 && ((i >= outerSize) || !maskPtr[i])) {
       const auto* src = inPtr + lastStart * innerSizeBytes;
       auto* dst = outPtr + outStart * innerSizeBytes;
       int numItems = i - lastStart;
-      context_.template CopyItems<CPUContext, CPUContext>(
-          data.meta(), numItems * innerSize, src, dst);
+      context_.CopyItemsSameDevice(
+          data.dtype(), numItems * innerSize, src, dst);
       outStart += numItems;
       lastStart = -1;
     }
@@ -356,9 +356,9 @@ bool SequenceMaskOp<CPUContext>::RunOnDevice() {
 template <>
 template <class T>
 bool SequenceMaskOp<CPUContext>::DoRunWithType() {
-  const Tensor<CPUContext>* input = &Input(0);
-  const Tensor<CPUContext>* sequence_lengths = nullptr;
-  const Tensor<CPUContext>* window_centers = nullptr;
+  const Tensor* input = &Input(0);
+  const Tensor* sequence_lengths = nullptr;
+  const Tensor* window_centers = nullptr;
 
   if (mode_ == "sequence") {
     sequence_lengths = &Input(1);
@@ -393,7 +393,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
   // product of dims from 1 to batch
   const int batch_dim =
       (canonical_batch >= 0
-           ? input->size_to_dim(canonical_batch) * input->dim(canonical_batch)
+           ? input->size_to_dim(canonical_batch) * input->size(canonical_batch)
            : -1);
 
   T fill_val = convert::To<float, T>(grad_ ? 0.0f : fill_val_);
@@ -411,9 +411,9 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
           repeated_dims,
           input->data<T>(),
           SequenceFunctor(
-              sequence_lengths->data<int>(), sequence_lengths->size()),
+              sequence_lengths->data<int>(), sequence_lengths->numel()),
           fill_val,
-          output->mutable_data<T>());
+          output->template mutable_data<T>());
     } else {
       MaskWithFunctor(
           left,
@@ -421,9 +421,9 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
           batch_dim,
           input->data<T>(),
           SequenceFunctor(
-              sequence_lengths->data<int>(), sequence_lengths->size()),
+              sequence_lengths->data<int>(), sequence_lengths->numel()),
           fill_val,
-          output->mutable_data<T>());
+          output->template mutable_data<T>());
     }
   } else if (mode_ == "window") {
     MaskWithFunctor(
@@ -433,7 +433,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         WindowFunctor(window_centers->data<int>(), radius_),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "upper") {
     MaskWithFunctor(
         left,
@@ -442,7 +442,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         UpperFunctor(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "lower") {
     MaskWithFunctor(
         left,
@@ -451,7 +451,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         LowerFunctor(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "upperdiag") {
     MaskWithFunctor(
         left,
@@ -460,7 +460,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         UpperDiagFunctor(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "lowerdiag") {
     MaskWithFunctor(
         left,
@@ -469,7 +469,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         LowerDiagFunctor(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else {
     CAFFE_ENFORCE(false, "Unsupported mode for SequenceMaskOp!");
     return false;

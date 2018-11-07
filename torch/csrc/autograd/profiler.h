@@ -15,9 +15,14 @@
 #include <forward_list>
 #include <tuple>
 #include "ATen/ATen.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/cuda/cuda_check.h"
 #ifdef USE_CUDA
+#include "ATen/cuda/CUDAContext.h"
 #include <cuda_runtime.h>
+#endif
+#ifndef _WIN32
+#include <ctime>
 #endif
 
 namespace torch { namespace autograd {
@@ -30,36 +35,48 @@ constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
 
-inline uint64_t getTime() {
+inline int64_t getTime() {
+#ifdef _WIN32
   using namespace std::chrono;
   using clock = std::conditional<high_resolution_clock::is_steady, high_resolution_clock, steady_clock>::type;
   return duration_cast<nanoseconds>(clock::now().time_since_epoch()).count();
+#else
+  // clock_gettime is *much* faster than std::chrono implementation on Linux
+  struct timespec t{};
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return static_cast<int64_t>(t.tv_sec) * 1000000000 + static_cast<int64_t>(t.tv_nsec);
+#endif
 }
 
-enum class EventKind {
+enum class EventKind : uint16_t {
   Mark,
   PushRange,
   PopRange
 };
 
-struct Event {
-  Event(EventKind kind, std::string name, uint32_t thread_id, bool record_cuda)
-  : kind_(kind)
-  , name_(std::move(name))
-  , thread_id_(thread_id) {
+struct Event final {
+  Event(EventKind kind, std::string name, uint16_t thread_id, bool record_cuda)
+  : owned_name_(new std::string(std::move(name)))
+  , name_ptr_(owned_name_->c_str())
+  , kind_(kind)
+  , thread_id_(thread_id) { record(record_cuda); }
+  Event(EventKind kind, const char* name, uint16_t thread_id, bool record_cuda)
+  : name_ptr_(name)
+  , kind_(kind)
+  , thread_id_(thread_id) { record(record_cuda); }
+
+  void record(bool record_cuda) {
 #ifdef USE_CUDA
-    if(record_cuda) {
+    if (record_cuda) {
       TORCH_CUDA_CHECK(cudaGetDevice(&device_));
       TORCH_CUDA_CHECK(cudaEventCreate(&event));
-      auto stream = at::globalContext().getCurrentCUDAStream();
+      auto stream = at::cuda::getCurrentCUDAStream();
       cpu_ns_ = getTime();
       TORCH_CUDA_CHECK(cudaEventRecord(event, stream));
-    } else {
-      cpu_ns_ = getTime();
+      return;
     }
-#else
-    cpu_ns_ = getTime();
 #endif
+    cpu_ns_ = getTime();
   }
   std::string kind() const {
     switch(kind_) {
@@ -69,10 +86,10 @@ struct Event {
     }
     throw std::runtime_error("unknown EventKind");
   }
-  const std::string & name() const {
-    return name_;
+  const char* name() const {
+    return name_ptr_;
   }
-  uint32_t thread_id() const {
+  uint16_t thread_id() const {
     return thread_id_;
   }
   double cpu_elapsed_us(const Event & e) {
@@ -106,14 +123,18 @@ struct Event {
     return device_;
   }
 private:
+  int64_t cpu_ns_ = 0; // signed to allow for negative intervals, initialized for safety.
+  // std::string is a very large object (usually around 32B),
+  // and this field is used only for user-created ranges, so
+  // it's better to save on size of Events.
+  std::unique_ptr<std::string> owned_name_;
+  const char * name_ptr_;
   EventKind kind_;
-  std::string name_;
-  uint32_t thread_id_;
-  int64_t cpu_ns_; // signed to allow for negative intervals
+  uint16_t thread_id_;
+  int device_ = -1;
 #ifdef USE_CUDA
   cudaEvent_t event = nullptr;
 #endif
-  int device_ = -1;
 };
 
 // a linked-list of fixed sized vectors, to avoid
@@ -130,7 +151,14 @@ struct RangeEventList {
 
   void allocBlock() {
     blocks.emplace_front();
-    blocks.front().reserve(num_block_elements);
+    auto & new_block = blocks.front();
+    new_block.reserve(num_block_elements);
+    // Materialize all pages in the new block to release jitter when recording events.
+    const char * const end_ptr = reinterpret_cast<char*>(new_block.data() + num_block_elements);
+    for (volatile const char * ptr = reinterpret_cast<char*>(new_block.data());
+         ptr < end_ptr; ptr += 4 * 1024) {
+      (*ptr);
+    }
   }
 
   template<typename... Args>
@@ -162,90 +190,30 @@ enum class ProfilerState {
     NVTX,  // only emit NVTX markers
 };
 
-extern ProfilerState state;
-extern uint32_t next_thread_id;
-extern std::mutex all_event_lists_mutex;
-extern std::list<std::shared_ptr<RangeEventList>> all_event_lists;
+TORCH_API RangeEventList& getEventList();
+TORCH_API void mark(std::string name, bool include_cuda = true);
+TORCH_API void pushRange(std::string name);
+TORCH_API void popRange();
 
-extern thread_local std::shared_ptr<RangeEventList> event_list;
-extern thread_local int32_t thread_id;
+struct TORCH_API RecordFunction {
+  explicit RecordFunction(Function* fn);
 
-inline RangeEventList& getEventList() {
-  if (!event_list) {
-    std::lock_guard<std::mutex> guard(all_event_lists_mutex);
-    event_list = std::make_shared<RangeEventList>();
-    thread_id = next_thread_id++;
-    all_event_lists.emplace_front(event_list);
-  }
-  return *event_list;
-}
+  explicit RecordFunction(std::string name);
 
-inline void mark(std::string name, bool include_cuda = true) {
-  if (state == ProfilerState::NVTX) {
-#ifdef USE_CUDA
-    nvtxMarkA(name.c_str());
-#else
-    throw std::logic_error("mark called with NVTX tracing, but compiled without CUDA");
-#endif
-  } else {
-    getEventList().record(EventKind::Mark, std::move(name), thread_id, include_cuda && state == ProfilerState::CUDA);
-  }
-}
+  explicit RecordFunction(const char* name);
 
-inline void pushRange(std::string name) {
-  if (state == ProfilerState::NVTX) {
-#ifdef USE_CUDA
-    nvtxRangePushA(name.c_str());
-#else
-    throw std::logic_error("pushRange called with NVTX tracing, but compiled without CUDA");
-#endif
-  } else {
-    getEventList().record(EventKind::PushRange, std::move(name), thread_id, state == ProfilerState::CUDA);
-  }
-}
-
-inline void popRange() {
-  if (state == ProfilerState::NVTX) {
-#ifdef USE_CUDA
-    nvtxRangePop();
-#else
-    throw std::logic_error("popRange called with NVTX tracing, but compiled without CUDA");
-#endif
-  } else {
-    getEventList().record(EventKind::PopRange, std::string(), thread_id, state == ProfilerState::CUDA);
-  }
-}
-
-struct RecordFunction {
-  explicit RecordFunction(Function *fn) {
-    if (state == ProfilerState::Disabled) return;
-    pushFunctionRange(fn);
-  }
-
-  explicit RecordFunction(std::string name) {
-    if (state == ProfilerState::Disabled) return;
-    pushRange(std::move(name));
-  }
-
-  explicit RecordFunction(const char *name) {
-    if (state == ProfilerState::Disabled) return;
-    pushRange(name);
-  }
+  explicit RecordFunction(const char* name, int64_t current_sequence_nr);
 
   ~RecordFunction() {
-    if (state == ProfilerState::Disabled) return;
     popRange();
   }
-
-  // Needed only because we don't have Function defined yet.
-  void pushFunctionRange(Function *fn);
 };
 
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
 // there no autograd functions are being executed when these function are used.
-void enableProfiler(ProfilerState state);
-thread_event_lists disableProfiler();
+TORCH_API void enableProfiler(ProfilerState new_state);
+TORCH_API thread_event_lists disableProfiler();
 
 } // namespace profiler
 }} // namespace torch::autograd

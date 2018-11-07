@@ -1,0 +1,92 @@
+syntax = "proto2";
+
+import "caffe2/proto/caffe2.proto";
+
+package torch;
+
+message ParameterDef {
+  // whether we compute the gradient for the parameter
+  optional bool require_gradient = 1;
+  // whether this parameter is registered as buffer or not
+  optional bool is_buffer = 2;
+
+  // tensor type parameter
+  optional caffe2.TensorProto tensor = 3;
+  // objects other than tensors will be added here
+}
+
+message MethodDef {
+  // method name
+  // by default, we follow the naming convention below:
+  //   1) forward --> main method
+  //   2) init --> init method
+  optional string name = 1; // method name
+
+  // one of graph and torch_script must exist,
+  // if both exist, we reconstruct the graph from torch_script
+  optional caffe2.NetDef graph = 2;
+  optional string torch_script = 3;
+
+  // inputs and outputs are inferred from graph or script
+}
+
+message ModuleDef {
+  repeated ModuleDef submodules = 1;
+
+  // We suppose to store the modules in one of the following format:
+  //   - methods (static graph or torch script)
+  //   - pickle
+  //   - cpp_arena
+  repeated MethodDef methods = 2;
+  // because the old pickle modules may not be supported by torch_script,
+  // have to stored as pickle_arena at this moment.
+  optional bytes pickle_arena = 3;
+  // should be exposed by the Class Archive, so user can save
+  // module specific data which cannot be store in the graph or torch_script
+  optional bytes cpp_arena = 4;
+
+  // the parameters of this module
+  repeated ParameterDef parameters = 5;
+
+  // the names of inputs and outputs of the module are inferred
+  // from the main method.
+}
+
+enum ProtoVersion {
+  PROTO_VERSION_NEWEST = 0x0000000000000001;
+}
+
+message ModelDef {
+  // for the proto version, to keep both backward and forward
+  // compatibility, please bump the proto_version when we add any
+  // change in the proto. runtime decides whether accept the
+  // model based on the ir_version.
+  optional int64 proto_version = 1;
+
+  // main module of the model
+  optional ModuleDef main_module = 2;
+
+  // to distinguish whether exported from c2 or torch
+  optional string producer_name = 3;
+
+  // put build version here
+  optional string producer_version = 4;
+
+  optional string name = 5;
+
+  // metadata
+  //   - exporter - string (either "CAFFE2" or "PYTORCH"),
+  //     to help the runtime understand who exports the model
+  //   - debug_info - string
+  // for MetaNetDef:
+  //   - project - string
+  //   - model_class - string
+  //   - internal_version - string
+  //   - predictor_type - string
+  //   - predictor_id - string
+  //   - execute_plan - string
+  //   - applicationSpecificInfo
+  //   - publish_time - string
+  repeated caffe2.Argument annotations = 6;
+
+}

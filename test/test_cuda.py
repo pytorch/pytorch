@@ -6,14 +6,22 @@ import unittest
 import sys
 from itertools import repeat
 import os
+from contextlib import contextmanager
 
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
+from torch._six import inf, nan
 
-from test_torch import TestTorch
-from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, PY3, IS_WINDOWS
+from test_torch import _TestTorchMixin
+
+from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_WITH_ROCM, load_tests
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 # We cannot import TEST_CUDA and TEST_MULTIGPU from common_cuda here,
 # because if we do that, the TEST_CUDNN line from common_cuda will be executed
@@ -27,9 +35,11 @@ if not TEST_CUDA:
     TestCase = object  # noqa: F811
 
 TEST_MAGMA = TEST_CUDA
+TEST_LARGE_TENSOR = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
     TEST_MAGMA = torch.cuda.has_magma
+    TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 9e9
 
 floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
                 torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
@@ -87,11 +97,7 @@ float_types_no_half = [
 
 
 def number(floating, integer, t):
-    name = type(t).__name__
-    if 'Double' in name or 'Float' in name or 'Half' in name:
-        return floating
-    else:
-        return integer
+    return floating if is_floating(t) else integer
 
 
 def cast_tensor(tensor, t):
@@ -102,7 +108,14 @@ M = 50
 
 
 def make_tensor(t, *sizes):
-    return t(*sizes).copy_(torch.randn(*sizes))
+    if 'Half' in t.__name__:
+        return t(*sizes).copy_(torch.randn(*sizes))
+    else:
+        tensor = t(*sizes)
+        if tensor.is_floating_point():
+            return tensor.normal_()
+        else:
+            return tensor.random_(0, 10)
 
 
 def make_sparse_tensor(t, n, *sizes):
@@ -153,6 +166,10 @@ def constant_tensor_add(a, b):
         return (a + b.float()).half()
     else:
         return a + b
+
+
+def small_0d(t):
+    return make_tensor(t, (1,)).squeeze()
 
 
 def small_2d(t):
@@ -242,45 +259,64 @@ def new_t(*sizes):
 # - disable inplace test, if set to True, no inplace test will be done (default=False)
 # - decorator, e.g., unittest.skipIf (default is no decorator)
 tests = [
-    ('add', small_3d, lambda t: [number(3.14, 3, t)]),
+    ('add', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
+        "skipIfRocm:ByteTensor,CharTensor,HalfTensor,ShortTensor"),
     ('add', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('add', small_3d, lambda t: [number(0.2, 2, t), small_3d_positive(t)], 'scalar_tensor'),
-    ('sub', small_3d, lambda t: [number(3.14, 3, t)],),
+    ('sub', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
+        "skipIfRocm:ByteTensor,CharTensor,HalfTensor,ShortTensor"),
     ('sub', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
-    ('mul', small_3d, lambda t: [number(3.14, 3, t)],),
+    ('mul', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
+        "skipIfRocm:ByteTensor,CharTensor,HalfTensor,ShortTensor"),
     ('mul', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
-    ('div', small_3d, lambda t: [number(3.14, 3, t)],),
+    ('mul', small_0d, lambda t: [small_0d(torch.IntTensor)], 'scalar', types, True),
+    ('div', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
+        "skipIfRocm:ByteTensor,CharTensor,FloatTensor,HalfTensor,ShortTensor"),
     ('div', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('pow', small_3d, lambda t: [number(3.14, 3, t)], None, float_types),
-    ('pow', small_3d, lambda t: [number(1., 1, t)], 'pow1', types),
-    ('pow', small_3d, lambda t: [number(2., 2, t)], 'pow2', types),
-    ('pow', small_3d, lambda t: [number(3., 3, t)], 'pow3', types),
+    ('pow', small_3d, lambda t: [number(1., 1, t)], 'pow1'),
+    ('pow', small_3d, lambda t: [number(2., 2, t)], 'pow2'),
+    ('pow', small_3d, lambda t: [number(3., 3, t)], 'pow3'),
     ('pow', small_3d, lambda t: [number(-1., -1, t)], 'pow-1', float_types),
     # HalfTensor gives bad result at pow-2 with data sampled from torch.randn
-    ('pow', small_3d, lambda t: [number(-2., -2, t)], 'pow-2', float_types_no_half),
-    ('pow', small_3d, lambda t: [tensor_abs_(small_3d(t))], 'tensor', float_types),
-    ('addbmm', small_2d, lambda t: [small_3d(t), small_3d(t)], None, float_types),
-    ('addbmm', small_2d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
-    ('addbmm', small_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars'),
-    ('baddbmm', small_3d, lambda t: [small_3d(t), small_3d(t)],),
-    ('baddbmm', small_3d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
-    ('baddbmm', small_3d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars'),
-    ('addcdiv', small_2d_lapack, lambda t: [tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)],),
-    ('addcdiv', small_2d_lapack, lambda t: [number(2.8, 1, t),
-                                            tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)], 'scalar'),
-    ('addcmul', small_3d, lambda t: [small_3d(t), small_3d(t)],),
-    ('addcmul', small_3d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
-    ('addmm', medium_2d, lambda t: [medium_2d(t), medium_2d(t)],),
-    ('addmm', medium_2d, lambda t: [number(0.4, 2, t), medium_2d(t), medium_2d(t)], 'scalar'),
-    ('addmm', medium_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_2d(t)], 'two_scalars'),
-    ('addmv', medium_1d, lambda t: [medium_2d(t), medium_1d(t)],),
-    ('addmv', medium_1d, lambda t: [number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'scalar'),
-    ('addmv', medium_1d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'two_scalars'),
-    ('addr', medium_2d, lambda t: [medium_1d(t), medium_1d(t)],),
-    ('addr', medium_2d, lambda t: [number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'scalar'),
-    ('addr', medium_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'two_scalars'),
+    ('pow', small_3d, lambda t: [number(-2., -2, t)], 'pow-2', float_types_no_half,
+        False, "skipIfRocm:HalfTensor,FloatTensor"),
+    ('pow', small_3d, lambda t: [tensor_abs_(small_3d(t))], 'tensor', float_types, False, "skipIfRocm:HalfTensor"),
+    ('addbmm', small_2d, lambda t: [small_3d(t), small_3d(t)], None, float_types, False, "skipIfRocm:HalfTensor"),
+    ('addbmm', small_2d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar',
+        types, False, "skipIfRocm:HalfTensor"),
+    ('addbmm', small_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars',
+        types, False, "skipIfRocm:HalfTensor"),
+    ('baddbmm', small_3d, lambda t: [small_3d(t), small_3d(t)], '', types, False, "skipIfRocm:HalfTensor"),
+    ('baddbmm', small_3d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar',
+        types, False, "skipIfRocm:HalfTensor"),
+    ('baddbmm', small_3d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars',
+        types, False, "skipIfRocm:HalfTensor"),
+    ('bmm', small_3d, lambda t: [small_3d(t)], '', float_types_no_half, False, "skipIfRocm:HalfTensor"),
+    ('addcdiv', small_2d_lapack, lambda t: [tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)], '',
+        types, False, "skipIfRocm:HalfTensor"),
+    ('addcdiv', small_2d_lapack, lambda t: [number(2.8, 1, t), tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)],
+        'scalar', types, False, "skipIfRocm:HalfTensor"),
+    ('addcmul', small_3d, lambda t: [small_3d(t), small_3d(t)], '', types, False, "skipIfRocm:HalfTensor"),
+    ('addcmul', small_3d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar',
+        types, False, "skipIfRocm:HalfTensor"),
+    ('addmm', medium_2d, lambda t: [medium_2d(t), medium_2d(t)], '', types, False, "skipIfRocm:HalfTensor"),
+    ('addmm', medium_2d, lambda t: [number(0.4, 2, t), medium_2d(t), medium_2d(t)], 'scalar',
+        types, False, "skipIfRocm:HalfTensor"),
+    ('addmm', medium_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_2d(t)], 'two_scalars',
+        types, False, "skipIfRocm:HalfTensor"),
+    ('addmv', medium_1d, lambda t: [medium_2d(t), medium_1d(t)], '', types, False, "skipIfRocm:HalfTensor"),
+    ('addmv', medium_1d, lambda t: [number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'scalar',
+        types, False, "skipIfRocm:HalfTensor"),
+    ('addmv', medium_1d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'two_scalars',
+        types, False, "skipIfRocm:HalfTensor"),
+    ('addr', medium_2d, lambda t: [medium_1d(t), medium_1d(t)], '', types, False, "skipIfRocm:HalfTensor"),
+    ('addr', medium_2d, lambda t: [number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'scalar',
+        types, False, "skipIfRocm:HalfTensor"),
+    ('addr', medium_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'two_scalars',
+        types, False, "skipIfRocm:HalfTensor"),
     ('atan2', medium_2d, lambda t: [medium_2d(t)], None, float_types + [torch.HalfTensor]),
-    ('fmod', small_3d, lambda t: [3], 'value'),
+    ('fmod', small_3d, lambda t: [3], 'value', types, False, "skipIfRocm:HalfTensor"),
     ('fmod', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('chunk', medium_2d, lambda t: [4],),
     ('chunk', medium_2d, lambda t: [4, 1], 'dim'),
@@ -290,15 +326,15 @@ tests = [
     ('clone', medium_2d, lambda t: [],),
     ('contiguous', medium_2d, lambda t: [],),
     ('cross', new_t(M, 3, M), lambda t: [new_t(M, 3, M)(t)],),
-    ('cumprod', small_3d, lambda t: [1],),
-    ('cumprod', small_3d, lambda t: [-1], 'neg_dim'),
-    ('cumsum', small_3d, lambda t: [1],),
-    ('cumsum', small_3d, lambda t: [-1], 'neg_dim'),
+    ('cumprod', small_3d, lambda t: [1], '', types, False, "skipIfRocm:HalfTensor"),
+    ('cumprod', small_3d, lambda t: [-1], 'neg_dim', types, False, "skipIfRocm:HalfTensor"),
+    ('cumsum', small_3d, lambda t: [1], '', types, False, "skipIfRocm:HalfTensor"),
+    ('cumsum', small_3d, lambda t: [-1], 'neg_dim', types, False, "skipIfRocm:HalfTensor"),
     ('dim', small_3d, lambda t: [],),
-    ('dist', small_2d, lambda t: [small_2d(t)],),
-    ('dist', small_2d, lambda t: [small_2d(t), 3], '3_norm'),
-    ('dist', small_2d, lambda t: [small_2d(t), 2.5], '2_5_norm'),
-    ('dot', medium_1d, lambda t: [medium_1d(t)],),
+    ('dist', small_2d, lambda t: [small_2d(t)], '', types, False, "skipIfRocm:HalfTensor"),
+    ('dist', small_2d, lambda t: [small_2d(t), 3], '3_norm', types, False, "skipIfRocm:HalfTensor"),
+    ('dist', small_2d, lambda t: [small_2d(t), 2.5], '2_5_norm', types, False, "skipIfRocm:HalfTensor"),
+    ('dot', medium_1d, lambda t: [medium_1d(t)], '', types, False, "skipIfRocm:HalfTensor"),
     ('element_size', medium_1d, lambda t: [],),
     ('eq', small_3d_ones, lambda t: [small_3d(t)],),
     ('eq', small_3d_ones, lambda t: [small_3d_ones(t)], 'equal'),
@@ -308,7 +344,7 @@ tests = [
     ('equal', small_3d_ones, lambda t: [small_3d(t)],),
     ('expand', new_t(M, 1, M), lambda t: [M, 4, M],),
     ('expand_as', new_t(M, 1, M), lambda t: [new_t(M, 4, M)(t)],),
-    ('fill', medium_2d, lambda t: [number(3.14, 3, t)],),
+    ('fill', medium_2d, lambda t: [number(3.14, 3, t)], '', types, False, "skipIfRocm:HalfTensor"),
     ('ge', medium_2d, lambda t: [medium_2d(t)],),
     ('le', medium_2d, lambda t: [medium_2d(t)],),
     ('gt', medium_2d, lambda t: [medium_2d(t)],),
@@ -322,29 +358,31 @@ tests = [
     ('kthvalue', small_3d_unique, lambda t: [3],),
     ('kthvalue', small_3d_unique, lambda t: [3, 1], 'dim'),
     ('kthvalue', small_3d_unique, lambda t: [3, -1], 'neg_dim'),
-    ('lerp', small_3d, lambda t: [small_3d(t), 0.3],),
-    ('max', small_3d_unique, lambda t: [],),
+    ('lerp', small_3d, lambda t: [small_3d(t), 0.3]),
+    ('max', small_3d_unique, lambda t: []),
     ('max', small_3d_unique, lambda t: [1], 'dim'),
     ('max', small_3d_unique, lambda t: [-1], 'neg_dim'),
     ('max', medium_2d, lambda t: [medium_2d(t)], 'elementwise'),
-    ('min', small_3d_unique, lambda t: [],),
-    ('min', small_3d_unique, lambda t: [1], 'dim'),
-    ('min', small_3d_unique, lambda t: [-1], 'neg_dim'),
+    ('min', small_3d_unique, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
+    ('min', small_3d_unique, lambda t: [1], 'dim', types, False, skipIfRocm),
+    ('min', small_3d_unique, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
     ('min', medium_2d, lambda t: [medium_2d(t)], 'elementwise'),
-    ('mean', small_3d, lambda t: [],),
+    ('mean', small_3d, lambda t: []),
     ('mean', small_3d, lambda t: [-1], 'neg_dim'),
     ('mean', small_3d, lambda t: [1], 'dim'),
-    ('mode', small_3d, lambda t: [],),
+    ('mode', small_3d, lambda t: []),
     ('mode', small_3d, lambda t: [1], 'dim'),
     ('mode', small_3d, lambda t: [-1], 'neg_dim'),
-    ('remainder', small_3d, lambda t: [3], 'value'),
+    ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.1, 10), lambda t: [1], '2d_p=1', float_types_no_half),
+    ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.6, 10), lambda t: [2], '2d_p=2', float_types_no_half),
+    ('remainder', small_3d, lambda t: [3], 'value', types, False, "skipIfRocm:HalfTensor"),
     ('remainder', small_3d, lambda t: [-3], 'negative_value', signed_types),
     ('remainder', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('remainder', small_3d, lambda t: [constant_tensor_sub(0, small_3d_positive(t))], 'negative_tensor', signed_types),
-    ('std', small_3d, lambda t: [],),
+    ('std', small_3d, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
     ('std', small_3d, lambda t: [1], 'dim'),
     ('std', small_3d, lambda t: [-1], 'neg_dim'),
-    ('var', small_3d, lambda t: [],),
+    ('var', small_3d, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
     ('var', small_3d, lambda t: [1], 'dim'),
     ('var', small_3d, lambda t: [-1], 'neg_dim'),
     ('ndimension', small_3d, lambda t: [],),
@@ -352,34 +390,37 @@ tests = [
     ('numel', small_3d, lambda t: [],),
     ('narrow', small_3d, lambda t: [1, 3, 2],),
     ('narrow', small_3d, lambda t: [-1, 3, 2], 'neg_dim'),
-    ('nonzero', small_3d, lambda t: [],),
-    ('norm', small_3d, lambda t: [],),
-    ('norm', small_3d, lambda t: [3], '3_norm'),
-    ('norm', small_3d, lambda t: [3, 0], '3_norm_dim'),
-    ('norm', small_3d, lambda t: [3, -2], '3_norm_neg_dim'),
+    ('nonzero', small_3d, lambda t: [], '', types, False, skipIfRocm),
+    ('norm', small_3d, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
+    ('norm', small_3d, lambda t: [3], '3_norm', types, False, "skipIfRocm:HalfTensor"),
+    ('norm', small_3d, lambda t: [3, 0], '3_norm_dim', types, False, "skipIfRocm:HalfTensor,DoubleTensor,FloatTensor"),
+    ('norm', small_3d, lambda t: [3, -2], '3_norm_neg_dim', types,
+        False, "skipIfRocm:HalfTensor,DoubleTensor,FloatTensor"),
     ('ones', small_3d, lambda t: [1, 2, 3, 4, 5],),
     ('permute', new_t(1, 2, 3, 4), lambda t: [2, 1, 3, 0],),
-    ('put_', new_t(2, 5, 3), lambda t: [long_type(t)([[0], [-2]]), t([[3], [4]])],),
+    ('put_', new_t(2, 5, 3), lambda t: [long_type(t)([[0], [-2]]), t([[3], [4]])], '', types, False, skipIfRocm),
     ('put_', new_t(2, 3), lambda t: [long_type(t)([]), t([])], 'empty'),
     ('put_', new_t(2, 2), lambda t: [long_type(t)([[1], [-3]]), t([[1], [2]]), True], 'accumulate'),
-    ('prod', small_2d_oneish, lambda t: [],),
-    ('prod', small_3d, lambda t: [1], 'dim'),
-    ('prod', small_3d, lambda t: [-1], 'neg_dim'),
-    ('sum', small_2d, lambda t: [],),
-    ('sum', small_3d, lambda t: [1], 'dim'),
-    ('sum', small_3d, lambda t: [-1], 'neg_dim'),
-    ('renorm', small_3d, lambda t: [2, 1, 1], '2_norm'),
-    ('renorm', small_3d, lambda t: [2, -1, 1], '2_norm_neg_dim'),
-    ('renorm', small_3d, lambda t: [1.5, 1, 1], '1_5_norm'),
+    ('prod', small_2d_oneish, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
+    ('prod', small_3d, lambda t: [1], 'dim', types, False, skipIfRocm),
+    ('prod', small_3d, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
+    ('sum', small_2d, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
+    ('sum', small_3d, lambda t: [1], 'dim', types, False, skipIfRocm),
+    ('sum', small_3d, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
+    ('renorm', small_3d, lambda t: [2, 1, 1], '2_norm', types, False, "skipIfRocm:HalfTensor,DoubleTensor,FloatTensor"),
+    ('renorm', small_3d, lambda t: [2, -1, 1], '2_norm_neg_dim', types,
+        False, "skipIfRocm:HalfTensor,DoubleTensor,FloatTensor"),
+    ('renorm', small_3d, lambda t: [1.5, 1, 1], '1_5_norm', types,
+        False, "skipIfRocm:HalfTensor,DoubleTensor,FloatTensor"),
     ('repeat', small_2d, lambda t: [2, 2, 2],),
     ('size', new_t(1, 2, 3, 4), lambda t: [],),
     ('size', new_t(1, 2, 3, 4), lambda t: [1], 'dim'),
     ('size', new_t(1, 2, 3, 4), lambda t: [-2], 'neg_dim'),
-    ('sort', small_3d_unique, lambda t: [],),
-    ('sort', small_3d_unique, lambda t: [1], 'dim'),
-    ('sort', small_3d_unique, lambda t: [-1], 'neg_dim'),
-    ('sort', small_3d_unique, lambda t: [1, True], 'dim_descending'),
-    ('sort', small_3d_unique, lambda t: [-1, True], 'neg_dim_descending'),
+    ('sort', small_3d_unique, lambda t: [], '', types, False, skipIfRocm),
+    ('sort', small_3d_unique, lambda t: [1], 'dim', types, False, skipIfRocm),
+    ('sort', small_3d_unique, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
+    ('sort', small_3d_unique, lambda t: [1, True], 'dim_descending', types, False, skipIfRocm),
+    ('sort', small_3d_unique, lambda t: [-1, True], 'neg_dim_descending', types, False, skipIfRocm),
     ('split', small_3d, lambda t: [2],),
     ('split', small_3d, lambda t: [2, 1], 'dim'),
     ('split', small_3d, lambda t: [2, -3], 'neg_dim'),
@@ -387,14 +428,14 @@ tests = [
     ('squeeze', new_t(1, 2, 1, 4), lambda t: [2], 'dim'),
     ('squeeze', new_t(1, 2, 1, 4), lambda t: [-2], 'neg_dim'),
     ('t', new_t(1, 2), lambda t: [],),
-    ('take', new_t(3, 4), lambda t: [long_type(t)([[0], [-2]])],),
+    ('take', new_t(3, 4), lambda t: [long_type(t)([[0], [-2]])], '', types, False, skipIfRocm),
     ('transpose', new_t(1, 2, 3, 4), lambda t: [1, 2],),
     ('transpose', new_t(1, 2, 3, 4), lambda t: [-1, -2], 'neg_dim'),
     ('to_list', small_3d, lambda t: [],),
-    ('topk', small_3d_unique, lambda t: [2, 1, False, True], 'dim_sort'),
-    ('topk', small_3d_unique, lambda t: [2, -1, False, True], 'neg_dim_sort'),
-    ('topk', small_3d_unique, lambda t: [2, 1, True, True], 'dim_desc_sort'),
-    ('trace', medium_2d, lambda t: [],),
+    ('topk', small_3d_unique, lambda t: [2, 1, False, True], 'dim_sort', types, False, skipIfRocm),
+    ('topk', small_3d_unique, lambda t: [2, -1, False, True], 'neg_dim_sort', types, False, skipIfRocm),
+    ('topk', small_3d_unique, lambda t: [2, 1, True, True], 'dim_desc_sort', types, False, skipIfRocm),
+    ('trace', medium_2d, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
     ('tril', medium_2d, lambda t: [],),
     ('tril', medium_2d_expanded, lambda t: [], 'zero_stride', types, True),
     ('tril', medium_2d, lambda t: [2], 'positive'),
@@ -406,7 +447,7 @@ tests = [
     ('unsqueeze', new_t(2, 3, 4), lambda t: [2],),
     ('unsqueeze', new_t(2, 3, 4), lambda t: [-2], 'neg_dim'),
     ('view', small_3d, lambda t: [100, 10], 'contiguous'),
-    ('view_as', small_3d, lambda t: [t(100, 10)],),
+    ('view_as', small_3d, lambda t: [make_tensor(t, 100, 10)],),
     ('zero', small_3d, lambda t: [],),
     ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
     ('eye', small_2d, lambda t: [3, 4],),
@@ -414,6 +455,11 @@ tests = [
     ('flip', small_3d, lambda t: [0, 1, 2], 'd012', types, True),
     ('flip', small_3d, lambda t: [0, 2], 'd02', types, True),
     ('flip', small_3d, lambda t: [2, 0], 'd20', types, True),
+    ('flip', small_3d, lambda t: [-1], 'neg_d', types, True),
+    ('rot90', small_2d, lambda t: [1, [0, 1]], 'k1_d01', types, True),
+    ('rot90', small_3d, lambda t: [1, [1, 2]], 'k1_d12', types, True),
+    ('rot90', small_3d, lambda t: [1, [1, -1]], 'k1_neg_d', types, True),
+    ('rot90', small_3d, lambda t: [], 'default', types, True),
     ('rsqrt', lambda t: constant_tensor_add(1, small_3d(t)), lambda t: [], None, float_types),
     ('sinh', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
     ('tan', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
@@ -430,8 +476,24 @@ tests = [
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('qr', large_2d_lapack, lambda t: [], 'big', float_types, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('inverse', new_t(20, 20), lambda t: [], None, float_types, False),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', new_t(10, 10), lambda t: [], 'square', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', lambda t: new_t(10, 10)(t).t(), lambda t: [True], 'square_col_maj',
+        float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', new_t(20, 5), lambda t: [True], 'tall_some', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', new_t(20, 5), lambda t: [False], 'tall_all', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', lambda t: new_t(5, 20)(t).t(), lambda t: [True],
+        'tall_some_col_maj', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', lambda t: new_t(5, 20)(t).t(), lambda t: [False],
+        'tall_all_col_maj', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('eig', new_t(10, 10), lambda t: [True], 'with_eigvec', float_types_no_half, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
 ]
 
@@ -454,6 +516,7 @@ custom_half_precision = {
     'add': 1e-2,
     'acos': 1e-3,
     'addbmm': 1e-1,
+    'addcdiv': 1e-2,
     'addcmul': 1e-2,
     'addmm': 1e-1,
     'addmv': 1e-2,
@@ -471,9 +534,11 @@ custom_half_precision = {
     'div': 1e-3,
     'dot': 1e-2,
     'erf': 1e-3,
+    'erfc': 1e-3,
     'erfinv': 1e-3,
     'exp': 1e-2,
     'expm1': 1e-2,
+    'fill': 1e-3,
     'lerp': 1e-2,
     'lgamma': 1e-2,
     'log': 1e-2,
@@ -526,6 +591,7 @@ simple_pointwise_float = [
     'cos',
     'cosh',
     'erf',
+    'erfc',
     'erfinv',
     'exp',
     'expm1',
@@ -567,7 +633,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         gpu_tensor = to_gpu(cpu_tensor)
         cpu_args = arg_constructor(t)
         gpu_args = [to_gpu(arg) for arg in cpu_args]
-        if t.__name__ == 'HalfTensor':
+        if is_half(t):
             cpu_tensor = cpu_tensor.float()
             cpu_args = [arg.float() if isinstance(arg, torch.Tensor) and is_half(arg) else arg for arg in cpu_args]
         cpu_result = getattr(cpu_tensor, fn)(*cpu_args)
@@ -726,6 +792,7 @@ class TestCuda(TestCase):
             pass
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
     def test_memory_stats_multigpu(self):
         # advance a generator with a end flag
         def advance(gen, end):
@@ -739,7 +806,7 @@ class TestCuda(TestCase):
         # interlace
         torch.cuda.empty_cache()
         gen0 = self._test_memory_stats_generator(self, device=0, N=35)
-        gen1 = self._test_memory_stats_generator(self, device=1, N=35)
+        gen1 = self._test_memory_stats_generator(self, device=torch.device('cuda:1'), N=35)
         end0 = end1 = False
         while not (end0 and end1):
             end0 = advance(gen0, end0)
@@ -748,7 +815,7 @@ class TestCuda(TestCase):
         # semi-random order
         torch.cuda.empty_cache()
         gen0 = self._test_memory_stats_generator(self, device=0, N=35)
-        gen1 = self._test_memory_stats_generator(self, device=1, N=35)
+        gen1 = self._test_memory_stats_generator(self, device=torch.device('cuda:1'), N=35)
         end0 = end1 = False
 
         while not (end0 and end1):
@@ -756,13 +823,14 @@ class TestCuda(TestCase):
             if not end0:
                 gen1_max_times = torch.LongTensor(1).random_(0, 3)[0]
             else:
-                gen1_max_times = float('inf')
+                gen1_max_times = inf
             t = 0
             while t < gen1_max_times and not end1:
                 end1 = advance(gen1, end1)
                 t += 1
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
     def test_autogpu(self):
         x = torch.randn(5, 5).cuda()
         y = torch.randn(5, 5).cuda()
@@ -780,6 +848,7 @@ class TestCuda(TestCase):
         self.assertEqual(z.get_device(), 0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
     def test_new(self):
         x = torch.randn(3, 3).cuda()
         self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
@@ -790,6 +859,7 @@ class TestCuda(TestCase):
             self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
     def test_copy_device(self):
         x = torch.randn(5, 5).cuda()
         with torch.cuda.device(1):
@@ -842,7 +912,24 @@ class TestCuda(TestCase):
         self.assertIsInstance(y.cuda().float().cpu(), torch.FloatStorage)
         self.assertIsInstance(y.cuda().float().cpu().int(), torch.IntStorage)
 
+    def test_mul_intertype_scalar(self):
+        def test_mul(dtype):
+            x = torch.tensor(1.5, dtype=dtype, device='cuda')
+            y = torch.tensor(3, dtype=torch.int32, device='cuda')
+
+            self.assertEqual(x * y, 4.5)
+            self.assertEqual(y * x, 4.5)
+            with self.assertRaisesRegex(RuntimeError, 'expected type'):
+                y *= x
+            x *= y
+            self.assertEqual(x, 4.5)
+
+        test_mul(torch.float16)
+        test_mul(torch.float32)
+        test_mul(torch.float64)
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
     def test_type_conversions_same_gpu(self):
         x = torch.randn(5, 5).cuda(1)
         self.assertEqual(x.int().get_device(), 1)
@@ -850,7 +937,29 @@ class TestCuda(TestCase):
         self.assertEqual(x.to(torch.int).get_device(), 1)
 
     def test_neg(self):
-        TestTorch._test_neg(self, lambda t: t.cuda())
+        _TestTorchMixin._test_neg(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_arithmetic_large_tensor(self):
+        x = torch.empty(2**30, device='cuda')
+
+        x.fill_(1)
+        self.assertEqual(x.sum(), 2**30)
+
+        x += 1
+        self.assertEqual(x.sum(), 2**31)
+
+        x.fill_(1)
+        x -= 0.5
+        self.assertEqual(x.sum(), 2**29)
+
+        x.fill_(1)
+        x *= 2
+        self.assertEqual(x.sum(), 2**31)
+
+        x.fill_(1)
+        x /= 2
+        self.assertEqual(x.sum(), 2**29)
 
     def _test_broadcast(self, input):
         if not TEST_MULTIGPU:
@@ -859,10 +968,14 @@ class TestCuda(TestCase):
         for i, t in enumerate(result):
             self.assertEqual(t.get_device(), i)
             self.assertEqual(t, input)
+            if input.is_cuda and input.get_device() == i:
+                self.assertEqual(t.data_ptr(), input.data_ptr())
 
+    @skipIfRocm
     def test_broadcast_cpu(self):
         self._test_broadcast(torch.randn(5, 5))
 
+    @skipIfRocm
     def test_broadcast_gpu(self):
         self._test_broadcast(torch.randn(5, 5).cuda())
 
@@ -873,7 +986,7 @@ class TestCuda(TestCase):
                  (lambda x: x.max(0)[0], 'max_dim')]
         for f, name in tests:
             a = torch.arange(25.0).view(5, 5)
-            a[2, 2] = float('nan')
+            a[2, 2] = nan
             actual = f(a.cuda()).cpu()
             expected = f(a).cpu()
             self.assertEqual(torch.isnan(actual), torch.isnan(expected), 'nans for {}'.format(name))
@@ -896,6 +1009,7 @@ class TestCuda(TestCase):
             self.assertIsInstance(bct, type(bt))
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
     def test_broadcast_coalesced(self):
         numel = 5
         num_bytes = numel * 8
@@ -916,6 +1030,7 @@ class TestCuda(TestCase):
         self._test_broadcast_coalesced(self, tensors, num_bytes * 5 // 2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
     def test_broadcast_coalesced_dense_only(self):
         numel = 5
         num_bytes = numel * 8
@@ -930,6 +1045,7 @@ class TestCuda(TestCase):
         self._test_broadcast_coalesced(self, tensors, num_bytes * 5 // 2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
     def test_reduce_add(self):
         x = torch.randn(5, 5)
         y = torch.randn(5, 5)
@@ -956,6 +1072,7 @@ class TestCuda(TestCase):
             self.assertEqual(rc.type(), r.type())
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
     def test_reduce_add_coalesced(self):
         numel = 5
         num_bytes = numel * 8
@@ -976,6 +1093,7 @@ class TestCuda(TestCase):
         self._test_reduce_add_coalesced(self, tensors, num_bytes * 5 // 2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
     def test_reduce_add_coalesced_dense_only(self):
         numel = 5
         num_bytes = numel * 8
@@ -1047,12 +1165,15 @@ class TestCuda(TestCase):
         index[dim] = slice(x.size(dim), x.size(dim) + y.size(dim))
         self.assertEqual(result[tuple(index)], y)
 
+    @skipIfRocm
     def test_gather(self):
         self._test_gather(0)
 
+    @skipIfRocm
     def test_gather_dim(self):
         self._test_gather(1)
 
+    @skipIfRocm
     def test_from_sequence(self):
         seq = [list(range(i * 4, i * 4 + 4)) for i in range(5)]
         reference = torch.arange(0, 20).resize_(5, 4)
@@ -1077,12 +1198,16 @@ class TestCuda(TestCase):
             torch.cuda.manual_seed(2)
             self.assertEqual(torch.cuda.initial_seed(), 2)
             x.uniform_()
+            a = torch.bernoulli(torch.full_like(x, 0.5))
             torch.cuda.manual_seed(2)
             y = x.clone().uniform_()
+            b = torch.bernoulli(torch.full_like(x, 0.5))
             self.assertEqual(x, y)
+            self.assertEqual(a, b)
             self.assertEqual(torch.cuda.initial_seed(), 2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
     def test_cat_autogpu(self):
         x = torch.randn(4, 4).cuda(1)
         y = torch.randn(4, 4).cuda(1)
@@ -1110,15 +1235,24 @@ class TestCuda(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
+    @skipIfRocm
     def test_cat_empty_legacy(self):
-        TestTorch._test_cat_empty_legacy(self, use_cuda=True)
+        _TestTorchMixin._test_cat_empty_legacy(self, use_cuda=True)
 
+    @skipIfRocm
     def test_cat_empty(self):
-        TestTorch._test_cat_empty(self, use_cuda=True)
+        _TestTorchMixin._test_cat_empty(self, use_cuda=True)
 
     def test_bernoulli(self):
-        x = torch.tensor([0, 1], dtype=torch.float32, device='cuda')
-        self.assertEqual(x.bernoulli().tolist(), [0, 1])
+        _TestTorchMixin._test_bernoulli(self, torch.float32, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.float32, torch.float16, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.float16, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.float16, torch.float16, 'cuda')
+        # test that it works with integral tensors
+        _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float16, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
 
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1).cuda()
@@ -1167,6 +1301,7 @@ class TestCuda(TestCase):
             self.assertEqual(copy.get_device(), original.get_device())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @skipIfRocm
     def test_multigpu_serialization(self):
         x = [torch.randn(4, 4).cuda(0), torch.randn(4, 4).cuda(1)]
         with tempfile.NamedTemporaryFile() as f:
@@ -1179,6 +1314,7 @@ class TestCuda(TestCase):
             self.assertEqual(copy.get_device(), original.get_device())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @skipIfRocm
     def test_multigpu_serialization_remap(self):
         x = [torch.randn(4, 4).cuda(0), torch.randn(4, 4).cuda(1)]
 
@@ -1197,6 +1333,7 @@ class TestCuda(TestCase):
             self.assertEqual(copy.get_device(), 0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @skipIfRocm
     def test_multigpu_serialization_remap_dict(self):
         x = [torch.randn(4, 4).cuda(0), torch.randn(4, 4).cuda(1)]
         with tempfile.NamedTemporaryFile() as f:
@@ -1209,6 +1346,7 @@ class TestCuda(TestCase):
             self.assertEqual(copy.get_device(), 0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @skipIfRocm
     def test_cuda_set_device(self):
         x = torch.randn(5, 5)
         with torch.cuda.device(1):
@@ -1230,6 +1368,7 @@ class TestCuda(TestCase):
     def test_cuda_synchronize(self):
         torch.cuda.synchronize()
 
+    @skipIfRocm
     def test_streams(self):
         default_stream = torch.cuda.current_stream()
         user_stream = torch.cuda.Stream()
@@ -1248,6 +1387,7 @@ class TestCuda(TestCase):
         self.assertTrue(default_stream.query())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @skipIfRocm
     def test_streams_multi_gpu(self):
         default_stream = torch.cuda.current_stream()
         self.assertEqual(default_stream.device, 0)
@@ -1258,6 +1398,7 @@ class TestCuda(TestCase):
             self.assertNotEqual(torch.cuda.current_stream(), default_stream)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
     def test_tensor_device(self):
         self.assertEqual(torch.cuda.FloatTensor(1).get_device(), 0)
         self.assertEqual(torch.cuda.FloatTensor(1, device=1).get_device(), 1)
@@ -1266,6 +1407,7 @@ class TestCuda(TestCase):
             self.assertEqual(torch.cuda.FloatTensor(1, device=0).get_device(), 0)
             self.assertEqual(torch.cuda.FloatTensor(1, device=None).get_device(), 1)
 
+    @skipIfRocm
     def test_events(self):
         stream = torch.cuda.current_stream()
         event = torch.cuda.Event(enable_timing=True)
@@ -1279,6 +1421,7 @@ class TestCuda(TestCase):
         self.assertTrue(event.query())
         self.assertGreater(start_event.elapsed_time(event), 0)
 
+    @skipIfRocm
     def test_record_stream(self):
         cycles_per_ms = get_cycles_per_ms()
 
@@ -1316,6 +1459,7 @@ class TestCuda(TestCase):
         x = torch.arange(0, 10).view((2, 5))
         self.assertEqual(x.t(), x.t().pin_memory())
 
+    @skipIfRocm
     def test_caching_pinned_memory(self):
         cycles_per_ms = get_cycles_per_ms()
 
@@ -1336,6 +1480,7 @@ class TestCuda(TestCase):
         self.assertEqual(list(gpu_tensor), [1])
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
     def test_caching_pinned_memory_multi_gpu(self):
         # checks that the events preventing pinned memory from being re-used
         # too early are recorded on the correct GPU
@@ -1360,41 +1505,99 @@ class TestCuda(TestCase):
         self.assertEqual(gpu_tensor1[0], 1)
         self.assertEqual(gpu_tensor0[0], 2)
 
+    @skipIfRocm
+    def test_sum_noncontig(self):
+        x = torch.randn(1, 75, 57, 20, device='cuda').permute(0, 3, 1, 2)
+        y = x.cpu()
+        self.assertEqual(x.sum().cpu(), y.sum())
+        self.assertEqual(x.sum(dim=(-1, -2)).cpu(), y.sum(dim=(-1, -2)))
+        self.assertEqual(x.sum(dim=(1, 3)).cpu(), y.sum(dim=(1, 3)))
+
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
-        return TestTorch._select_broadcastable_dims(dims_full)
+        return _TestTorchMixin._select_broadcastable_dims(dims_full)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_inverse(self):
+        _TestTorchMixin._test_inverse(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_pinverse(self):
+        _TestTorchMixin._test_pinverse(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_matrix_rank(self):
+        _TestTorchMixin._test_matrix_rank(self, lambda x: x.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_matrix_power(self):
+        _TestTorchMixin._test_matrix_power(self, conv_fn=lambda t: t.cuda())
+
+    def test_chain_matmul(self):
+        _TestTorchMixin._test_chain_matmul(self, cast=lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_det_logdet_slogdet(self):
-        TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
+        _TestTorchMixin._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_gesv_batched(self):
-        TestTorch._test_gesv_batched(self, lambda t: t.cuda())
+        _TestTorchMixin._test_gesv_batched(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_gesv_batched_dims(self):
-        TestTorch._test_gesv_batched_dims(self, lambda t: t.cuda())
+        _TestTorchMixin._test_gesv_batched_dims(self, lambda t: t.cuda())
 
     def test_view(self):
-        TestTorch._test_view(self, lambda t: t.cuda())
+        _TestTorchMixin._test_view(self, lambda t: t.cuda())
 
     def test_flip(self):
-        TestTorch._test_flip(self, use_cuda=True)
+        _TestTorchMixin._test_flip(self, use_cuda=True)
+
+    def test_rot90(self):
+        _TestTorchMixin._test_rot90(self, use_cuda=True)
 
     def test_signal_window_functions(self):
-        TestTorch._test_signal_window_functions(self, device=torch.device('cuda'))
+        _TestTorchMixin._test_signal_window_functions(self, device=torch.device('cuda'))
 
+    @skipIfRocm
     def test_fft_ifft_rfft_irfft(self):
-        TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+        _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        @contextmanager
+        def plan_cache_max_size(n):
+            original = torch.backends.cuda.cufft_plan_cache.max_size
+            torch.backends.cuda.cufft_plan_cache.max_size = n
+            yield
+            torch.backends.cuda.cufft_plan_cache.max_size = original
+
+        with plan_cache_max_size(max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
+            _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        with plan_cache_max_size(0):
+            _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        torch.backends.cuda.cufft_plan_cache.clear()
+
+        # check that stll works after clearing cache
+        with plan_cache_max_size(10):
+            _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        with self.assertRaisesRegex(RuntimeError, r"must be non-negative"):
+            torch.backends.cuda.cufft_plan_cache.max_size = -1
+
+        with self.assertRaisesRegex(RuntimeError, r"read-only property"):
+            torch.backends.cuda.cufft_plan_cache.size = -1
 
     def test_stft(self):
-        TestTorch._test_stft(self, device=torch.device('cuda'))
+        _TestTorchMixin._test_stft(self, device=torch.device('cuda'))
 
+    @skipIfRocm
     def test_multinomial(self):
-        TestTorch._test_multinomial(self, torch.cuda.FloatTensor)
+        _TestTorchMixin._test_multinomial(self, torch.cuda.FloatTensor)
 
-        # Test a corner case from older PyTorch (Issue #4858)
+        # Test two corner cases from older PyTorch (Issue #4858)
         freqs = torch.cuda.FloatTensor([
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             0.03178183361887932, 0.027680952101945877, 0.033176131546497345,
@@ -1415,16 +1618,19 @@ class TestCuda(TestCase):
         sample = torch.multinomial(freqs, 1000, True)
         self.assertNotEqual(freqs[sample].min(), 0)
 
+        p = torch.zeros(3421, 2, device="cuda", dtype=torch.float)
+        p[:, 1] = 1
+        torch.cuda.manual_seed(5214)
+        r = torch.multinomial(p, 1)
+        self.assertNotEqual(r.min().item(), 0)
+
     @staticmethod
     def mute():
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
 
     def _spawn_method(self, method, arg):
-        try:
-            mp.set_start_method('spawn')
-        except RuntimeError:
-            pass
-        with mp.Pool(1, initializer=self.mute) as pool:
+        ctx = mp.get_context("spawn")
+        with ctx.Pool(1, initializer=self.mute) as pool:
             errors = pool.map(method, [arg])
             for e in errors:
                 if 'device-side assert triggered' not in str(e):
@@ -1434,41 +1640,48 @@ class TestCuda(TestCase):
     def _test_multinomial_invalid_probs_cuda(probs):
         try:
             with torch.random.fork_rng(devices=[0]):
-                torch.multinomial(probs.to('cuda'), 1)
+                torch.multinomial(probs.to('cuda'), 2)
                 torch.cuda.synchronize()
             return False  # Should not be reached
         except RuntimeError as e:
             return e
 
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
     @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     @unittest.skipIf(not PY3,
                      "spawn start method is not supported in Python 2, \
                      but we need it for creating another process with CUDA")
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
-        self._spawn_method(test_method, torch.Tensor([0, -1]))
-        self._spawn_method(test_method, torch.Tensor([0, float('inf')]))
-        self._spawn_method(test_method, torch.Tensor([0, float('-inf')]))
-        self._spawn_method(test_method, torch.Tensor([0, float('nan')]))
+        self._spawn_method(test_method, torch.Tensor([1, -1, 1]))
+        self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
+        self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
+        self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
+        self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
+    @skipIfRocm
     def test_broadcast(self):
-        TestTorch._test_broadcast(self, lambda t: t.cuda())
+        _TestTorchMixin._test_broadcast(self, lambda t: t.cuda())
 
     def test_contiguous(self):
-        TestTorch._test_contiguous(self, lambda t: t.cuda())
+        _TestTorchMixin._test_contiguous(self, lambda t: t.cuda())
 
     def test_broadcast_fused_matmul(self):
-        TestTorch._test_broadcast_fused_matmul(self, lambda t: t.cuda())
+        _TestTorchMixin._test_broadcast_fused_matmul(self, lambda t: t.cuda())
 
     def test_broadcast_batched_matmul(self):
-        TestTorch._test_broadcast_batched_matmul(self, lambda t: t.cuda())
+        _TestTorchMixin._test_broadcast_batched_matmul(self, lambda t: t.cuda())
 
+    @skipIfRocm
     def test_index(self):
-        TestTorch._test_index(self, lambda t: t.cuda())
+        _TestTorchMixin._test_index(self, lambda t: t.cuda())
 
+    @skipIfRocm
     def test_advancedindex(self):
-        TestTorch._test_advancedindex(self, lambda t: t.cuda())
+        _TestTorchMixin._test_advancedindex(self, lambda t: t.cuda())
 
+    @skipIfRocm
     def test_advancedindex_mixed_cpu_cuda(self):
         def test(x, ia, ib):
             # test getitem
@@ -1517,29 +1730,35 @@ class TestCuda(TestCase):
                 ib = ib.to(other_device)
                 test(x, ia, ib)
 
+    @skipIfRocm
     def test_advancedindex_big(self):
-        TestTorch._test_advancedindex_big(self, lambda t: t.cuda())
+        _TestTorchMixin._test_advancedindex_big(self, lambda t: t.cuda())
 
+    @skipIfRocm
     def test_btrifact(self):
-        TestTorch._test_btrifact(self, lambda t: t.cuda())
+        _TestTorchMixin._test_btrifact(self, lambda t: t.cuda())
 
+    @skipIfRocm
     def test_btrisolve(self):
-        TestTorch._test_btrisolve(self, lambda t: t.cuda())
+        _TestTorchMixin._test_btrisolve(self, lambda t: t.cuda())
 
+    @skipIfRocm
     def test_dim_reduction(self):
-        TestTorch._test_dim_reduction(self, lambda t: t.cuda())
+        _TestTorchMixin._test_dim_reduction(self, lambda t: t.cuda())
 
+    @skipIfRocm
     def test_tensor_gather(self):
-        TestTorch._test_gather(self, lambda t: t.cuda(), False)
+        _TestTorchMixin._test_gather(self, lambda t: t.cuda(), False)
 
     def test_tensor_scatter(self):
-        TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False)
+        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False)
 
+    @skipIfRocm
     def test_tensor_scatterAdd(self):
-        TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False)
+        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False)
 
     def test_tensor_scatterFill(self):
-        TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
+        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
 
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
@@ -1554,11 +1773,17 @@ class TestCuda(TestCase):
         _, v = y.min(dim=0)
         self.assertEqual(v, expected)
 
+    def test_max_with_inf(self):
+        _TestTorchMixin._test_max_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
+
+    def test_min_with_inf(self):
+        _TestTorchMixin._test_min_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
+
     def test_int_pow(self):
-        TestTorch._test_int_pow(self, lambda x: x.cuda())
+        _TestTorchMixin._test_int_pow(self, lambda x: x.cuda())
 
     def test_remainder_overflow(self):
-        TestTorch._test_remainder_overflow(self, dtype=torch.int64, device='cuda')
+        _TestTorchMixin._test_remainder_overflow(self, dtype=torch.int64, device='cuda')
 
     def test_var(self):
         cpu_tensor = torch.randn(2, 3, 3)
@@ -1609,6 +1834,7 @@ class TestCuda(TestCase):
         tensor = tensor.unsqueeze(1)
         self.assertEqual(tensor.var(0), 0.03125)
 
+    @skipIfRocm
     def test_digamma(self):
         def test(use_double=False):
             cpu_tensor = torch.randn(10, 10, 10)
@@ -1630,7 +1856,6 @@ class TestCuda(TestCase):
         cpu_tensor = torch.tensor([-0.999999994, -1.999999994, -2.0000000111,
                                   -100.99999994, -1931.99999994, 0.000000111,
                                   -0.000000111, 0, -1, -2, -931])
-        nan = float('nan')
         expected_errors = torch.tensor([0, 0, 0, 0, 0, 0, 0, nan, nan, nan, nan])
         gpu_tensor = cpu_tensor.cuda()
         cpu_out = cpu_tensor.digamma()
@@ -1638,6 +1863,7 @@ class TestCuda(TestCase):
         norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
         self.assertEqual(norm_errors, expected_errors)
 
+    @skipIfRocm
     def test_polygamma(self):
         def test(use_double=False):
             cpu_tensor = torch.randn(10, 10, 10)
@@ -1658,17 +1884,11 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_symeig(self):
-        # Small case
-        tensor = torch.randn(3, 3).cuda()
-        tensor = torch.mm(tensor, tensor.t())
-        eigval, eigvec = torch.symeig(tensor, eigenvectors=True)
-        self.assertEqual(tensor, torch.mm(torch.mm(eigvec, eigval.diag()), eigvec.t()))
+        _TestTorchMixin._test_symeig(self, lambda t: t.cuda())
 
-        # Large case
-        tensor = torch.randn(257, 257).cuda()
-        tensor = torch.mm(tensor, tensor.t())
-        eigval, eigvec = torch.symeig(tensor, eigenvectors=True)
-        self.assertEqual(tensor, torch.mm(torch.mm(eigvec, eigval.diag()), eigvec.t()))
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_svd_no_singularvectors(self):
+        _TestTorchMixin._test_svd_no_singularvectors(self, lambda t: t.cuda())
 
     def test_arange(self):
         for t in ['IntTensor', 'LongTensor', 'FloatTensor', 'DoubleTensor']:
@@ -1678,17 +1898,28 @@ class TestCuda(TestCase):
             torch.arange(0, 10, out=b)
             self.assertEqual(a, b.cuda())
 
+    def test_linspace(self):
+        a = torch.linspace(0, 10, 10, device='cuda')
+        b = torch.linspace(0, 10, 10)
+        self.assertEqual(a, b.cuda())
+
+    def test_logspace(self):
+        a = torch.logspace(1, 10, 10, device='cuda')
+        b = torch.logspace(1, 10, 10)
+        self.assertEqual(a, b.cuda())
+
     def test_diagonal(self):
-        TestTorch._test_diagonal(self, dtype=torch.float32, device='cuda')
+        _TestTorchMixin._test_diagonal(self, dtype=torch.float32, device='cuda')
 
     def test_diagflat(self):
-        TestTorch._test_diagflat(self, dtype=torch.float32, device='cuda')
+        _TestTorchMixin._test_diagflat(self, dtype=torch.float32, device='cuda')
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_trtrs(self):
-        TestTorch._test_trtrs(self, lambda t: t.cuda())
+        _TestTorchMixin._test_trtrs(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @skipIfRocm
     def test_get_set_rng_state_all(self):
         states = torch.cuda.get_rng_state_all()
         before0 = torch.cuda.FloatTensor(100, device=0).normal_()
@@ -1699,12 +1930,14 @@ class TestCuda(TestCase):
         self.assertEqual(before0, after0, 0)
         self.assertEqual(before1, after1, 0)
 
+    @skipIfRocm
     def test_nvtx(self):
         # Just making sure we can see the symbols
         torch.cuda.nvtx.range_push("foo")
         torch.cuda.nvtx.mark("bar")
         torch.cuda.nvtx.range_pop()
 
+    @skipIfRocm
     def test_randperm_cuda(self):
         cuda = torch.device('cuda:0')
 
@@ -1741,22 +1974,11 @@ class TestCuda(TestCase):
         self.assertEqual(res2.numel(), 0)
 
     def test_random_neg_values(self):
-        TestTorch._test_random_neg_values(self, use_cuda=True)
+        _TestTorchMixin._test_random_neg_values(self, use_cuda=True)
 
-    def test_overlapped_indices(self):
-        a = torch.arange(0, 128).view(32, 4).cuda()
-        b = torch.arange(0, 128).view(32, 4).cuda()
-        b = b.set_(b.storage(), storage_offset=0, size=(65, 64), stride=(1, 1))
-        b += 5
-        b = b.set_(b.storage(),
-                   storage_offset=0,
-                   size=a.size(),
-                   stride=a.stride())
-        a += 5
-        self.assertEqual(a, b)
-
+    @skipIfRocm
     def test_bincount_cuda(self):
-        TestTorch._test_bincount(self, device='cuda')
+        _TestTorchMixin._test_bincount(self, device='cuda')
         # ensure CUDA code coverage
         input_size = (5000,)
         w = torch.randn(input_size, device='cuda')
@@ -1776,6 +1998,7 @@ class TestCuda(TestCase):
         self.assertEqual(t.cpu().bincount(), t.bincount())
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
 
+    @skipIfRocm
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
         a /= 100000000
@@ -1806,6 +2029,13 @@ class TestCuda(TestCase):
 
             with self.assertRaisesRegex(AssertionError, r"leaked \d+ bytes CUDA memory on device 1"):
                 leak_gpu1()
+
+    def test_cuda_memory_leak_detection_propagates_errors(self):
+        with self.assertRaisesRegex(RuntimeError, r"The size of tensor a \(3\) must match"):
+            with self.assertLeaksNoCudaTensors():
+                x = torch.randn(3, 1, device='cuda')
+                y = torch.randn(2, 1, device='cuda')
+                z = x + y
 
 
 def load_ignore_file():
@@ -1839,9 +2069,28 @@ def generate_tests():
 
             if t not in type_subset:
                 continue
+            if TEST_WITH_ROCM and decorator is not None:
+                if (isinstance(decorator, str)):
+                    tensor_type_name = str(t.__name__)
+                    decorator_list = decorator.split(":")
+                    skip_type_list = decorator_list[1].split(",")
+                    if (("ByteTensor" in skip_type_list) and tensor_type_name == "ByteTensor") \
+                            or (("CharTensor" in skip_type_list) and tensor_type_name == "CharTensor") \
+                            or (("DoubleTensor" in skip_type_list) and tensor_type_name == "DoubleTensor") \
+                            or (("FloatTensor" in skip_type_list) and tensor_type_name == "FloatTensor") \
+                            or (("HalfTensor" in skip_type_list) and tensor_type_name == "HalfTensor") \
+                            or (("IntTensor" in skip_type_list) and tensor_type_name == "IntTensor") \
+                            or (("LongTensor" in skip_type_list) and tensor_type_name == "LongTensor") \
+                            or (("ShortTensor" in skip_type_list) and tensor_type_name == "ShortTensor"):
+                        decorator = skipIfRocm
+                    else:
+                        decorator = None
+            elif ((not TEST_WITH_ROCM) and (decorator is not None)):
+                if (isinstance(decorator, str)):
+                    decorator = None
 
             precision = custom_precision.get(name, TestCuda.precision)
-            if t == torch.HalfTensor:
+            if is_half(t):
                 precision = custom_half_precision.get(name, precision)
 
             for inplace in (True, False):
@@ -1878,17 +2127,5 @@ if __name__ == '__main__':
     if TEST_CUDA:
         load_ignore_file()
         generate_tests()
-
-    # skip TestTorch tests
-    # hide in __name__ == '__main__' because we don't want this to be run when
-    # someone imports test_cuda
-    def load_tests(loader, tests, pattern):
-        test_suite = unittest.TestSuite()
-        for test_group in tests:
-            for test in test_group:
-                if test.__class__.__name__ == 'TestTorch':
-                    continue
-                test_suite.addTest(test)
-        return test_suite
 
     run_tests()

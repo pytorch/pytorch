@@ -35,12 +35,12 @@ class WhileOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     CAFFE_ENFORCE(
-        this->template InputIsType<Tensor<Context>>(0),
+        this->InputIsTensorType(0, Context::GetDeviceType()),
         "Invalid condition in While operator: tensor expected");
 
     const auto& condition = Input(0);
     CAFFE_ENFORCE_EQ(
-        condition.size(),
+        condition.numel(),
         1,
         "Invalid condition tensor in While operator: single value expected");
 

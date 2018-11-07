@@ -28,13 +28,13 @@ std::tuple<at::Tensor, at::Tensor> RoiPooling2d_forward_cpu(
   auto inputWidth = input.size(3);
 
   // Output Tensor is (num_rois, C, pooledHeight, pooledWidth)
-  auto output = input.type().tensor({proposals, inputChannels, pooledHeight, pooledWidth});
+  auto output = at::empty({proposals, inputChannels, pooledHeight, pooledWidth}, input.options());
 
   // TODO: need some mechanism for determining train vs. test
 
   // During training, we need to store the argmaxes for the pooling operation, so
   // the argmaxes Tensor should be the same size as the output Tensor
-  auto argmaxes = input.type().toScalarType(kInt).tensor({proposals, inputChannels, pooledHeight, pooledWidth});
+  auto argmaxes = at::empty({proposals, inputChannels, pooledHeight, pooledWidth}, input.options().dtype(kInt));
 
   AT_CHECK(input.is_contiguous(), "input must be contiguous");
   AT_CHECK(rois.is_contiguous(), "rois must be contiguous");
@@ -134,7 +134,7 @@ Tensor RoiPooling2d_backward_cpu(
   double spatialScale,
   const Tensor& gradOutput,
   const Tensor& argmaxes) {
-  throw std::runtime_error("not implemented");
+  AT_ERROR("not implemented");
 }
 
 }

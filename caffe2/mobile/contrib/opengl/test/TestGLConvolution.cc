@@ -12,7 +12,7 @@
 
 #include <vector>
 
-void AddNoiseInput(const std::vector<caffe2::TIndex>& shape,
+void AddNoiseInput(const std::vector<int64_t>& shape,
                    const std::string& name,
                    caffe2::Workspace* ws) {
   caffe2::CPUContext context;
@@ -60,13 +60,13 @@ double BenchOp(const std::string& typ,
   def1.add_arg()->CopyFrom(caffe2::MakeArgument("pad_r", 0));
   def1.add_arg()->CopyFrom(caffe2::MakeArgument("convolution_transform_strategy", std::string("PRECOMPUTE")));
 
-  AddNoiseInput(std::vector<caffe2::TIndex>{1, inputC, inH, inW}, "X", ws);
+  AddNoiseInput(std::vector<int64_t>{1, inputC, inH, inW}, "X", ws);
   if (transposed) {
-    AddNoiseInput(std::vector<caffe2::TIndex>{inputC, outputC, kH, kW}, "W", ws);
+    AddNoiseInput(std::vector<int64_t>{inputC, outputC, kH, kW}, "W", ws);
   } else {
-    AddNoiseInput(std::vector<caffe2::TIndex>{outputC, inputC, kH, kW}, "W", ws);
+    AddNoiseInput(std::vector<int64_t>{outputC, inputC, kH, kW}, "W", ws);
   }
-  AddNoiseInput(std::vector<caffe2::TIndex>{outputC}, "B", ws);
+  AddNoiseInput(std::vector<int64_t>{outputC}, "B", ws);
 
   std::unique_ptr<caffe2::OperatorBase> op1(CreateOperator(def1, ws));
 
@@ -131,19 +131,19 @@ static double BenchGLConvolution(int input_channels,
   }
 
   AddNoiseInput(
-      std::vector<caffe2::TIndex>{1, input_channels, input_height, input_width}, "X_cpu", ws);
+      std::vector<int64_t>{1, input_channels, input_height, input_width}, "X_cpu", ws);
   if (transposed) {
     AddNoiseInput(
-        std::vector<caffe2::TIndex>{input_channels, output_channels, kernel_height, kernel_width},
+        std::vector<int64_t>{input_channels, output_channels, kernel_height, kernel_width},
         "W",
         ws);
   } else {
     AddNoiseInput(
-        std::vector<caffe2::TIndex>{output_channels, input_channels, kernel_height, kernel_width},
+        std::vector<int64_t>{output_channels, input_channels, kernel_height, kernel_width},
         "W",
         ws);
   }
-  AddNoiseInput(std::vector<caffe2::TIndex>{output_channels}, "b", ws);
+  AddNoiseInput(std::vector<int64_t>{output_channels}, "b", ws);
 
   caffe2::NetDef netdef;
   {

@@ -4,6 +4,6 @@
 
 namespace torch { namespace jit {
 
-void UnrollLoops(std::shared_ptr<Graph>& graph);
+TORCH_API void UnrollLoops(std::shared_ptr<Graph>& graph);
 
 }} // namespace torch::jit

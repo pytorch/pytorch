@@ -3,8 +3,8 @@
 from __future__ import print_function
 
 import argparse
+from datetime import datetime
 import os
-import shlex
 import shutil
 import signal
 import subprocess
@@ -12,45 +12,78 @@ import sys
 import tempfile
 
 import torch
+import torch._six
 from torch.utils import cpp_extension
+from common_utils import TEST_WITH_ROCM
+import torch.distributed as dist
 
 TESTS = [
     'autograd',
     'cpp_extensions',
     'c10d',
     'cuda',
+    'cuda_primary_ctx',
     'dataloader',
     'distributed',
     'distributions',
+    'expecttest',
     'indexing',
     'jit',
-    'legacy_nn',
     'multiprocessing',
+    'multiprocessing_spawn',
     'nccl',
     'nn',
+    'numba_integration',
     'optim',
     'sparse',
+    'thd_distributed',
     'torch',
+    'type_info',
     'utils',
 ]
 
 WINDOWS_BLACKLIST = [
     'distributed',
+    'thd_distributed',
+]
+
+ROCM_BLACKLIST = [
+    'c10d',
+    'cpp_extensions',
+    'distributed',
+    'distributions',
+    'multiprocessing',
+    'nccl',
+    'thd_distributed',
+    'utils',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {
+    'gloo': {
+        'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+    },
+}
+
+
+if dist.is_available():
+    if dist.is_mpi_available():
+        DISTRIBUTED_TESTS_CONFIG['mpi'] = {
+            'WORLD_SIZE': '3'
+        }
+    if dist.is_nccl_available():
+        DISTRIBUTED_TESTS_CONFIG['nccl'] = {
+            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+        }
+
+
+THD_DISTRIBUTED_TESTS_CONFIG = {
     'tcp': {
         'WORLD_SIZE': '3'
     },
     'gloo': {
         'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
     },
-    'nccl': {
-        'WORLD_SIZE': '2'
-    },
-    'mpi': {
-        'WORLD_SIZE': '3'
-    },
+    # THD NCCL and MPI tests are known to be flaky in CI
 }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
@@ -62,26 +95,48 @@ def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-def shell(command, cwd):
+def shell(command, cwd=None):
     sys.stdout.flush()
     sys.stderr.flush()
-    return subprocess.call(
-        shlex.split(command), universal_newlines=True, cwd=cwd)
+    # The folloing cool snippet is copied from Py3 core library subprocess.call
+    # only the with
+    #   1. `except KeyboardInterrupt` block added for SIGINT handling.
+    #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do
+    #      `p.wait()` in a `final` block for the code to be portable.
+    #
+    # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
+    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
+    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
+    try:
+        return p.wait()
+    except KeyboardInterrupt:
+        # Give `p` a chance to handle KeyboardInterrupt. Without this,
+        # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
+        exit_status = p.wait(timeout=5)
+        if exit_status is not None:
+            return exit_status
+        else:
+            p.kill()
+            raise
+    except:  # noqa E722, copied from python core library
+        p.kill()
+        raise
+    finally:
+        # Always call p.wait() to ensure exit
+        p.wait()
 
 
-def get_shell_output(command):
-    return subprocess.check_output(shlex.split(command)).decode().strip()
-
-
-def run_test(python, test_module, test_directory, options):
-    verbose = '--verbose' if options.verbose else ''
+def run_test(executable, test_module, test_directory, options):
+    unittest_args = options.additional_unittest_args
+    if options.verbose:
+        unittest_args.append('--verbose')
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    return shell('{} {}.py {}'.format(python, test_module, verbose),
-                 test_directory)
+    command = executable + [test_module + '.py'] + unittest_args
+    return shell(command, test_directory)
 
 
-def test_cpp_extensions(python, test_module, test_directory, options):
+def test_cpp_extensions(executable, test_module, test_directory, options):
     try:
         cpp_extension.verify_ninja_availability()
     except RuntimeError:
@@ -89,7 +144,7 @@ def test_cpp_extensions(python, test_module, test_directory, options):
             'Ninja is not available. Skipping C++ extensions test. '
             "Install ninja with 'pip install ninja' or 'conda install ninja'.")
         return 0
-    return_code = shell('{} setup.py install --root ./install'.format(python),
+    return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
                         os.path.join(test_directory, 'cpp_extensions'))
     if return_code != 0:
         return return_code
@@ -106,17 +161,20 @@ def test_cpp_extensions(python, test_module, test_directory, options):
 
         assert install_directory, 'install_directory must not be empty'
         os.environ['PYTHONPATH'] = os.pathsep.join([install_directory, python_path])
-        return run_test(python, test_module, test_directory, options)
+        return run_test(executable, test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
 
 
-def test_distributed(python, test_module, test_directory, options):
+def test_distributed(executable, test_module, test_directory, options):
     mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
     if options.verbose and not mpi_available:
         print_to_stderr(
             'MPI not available -- MPI backend tests will be skipped')
-    for backend, env_vars in DISTRIBUTED_TESTS_CONFIG.items():
+    config = DISTRIBUTED_TESTS_CONFIG
+    if test_module == "test_thd_distributed":
+        config = THD_DISTRIBUTED_TESTS_CONFIG
+    for backend, env_vars in config.items():
         if backend == 'mpi' and not mpi_available:
             continue
         for with_init_file in {True, False}:
@@ -131,7 +189,10 @@ def test_distributed(python, test_module, test_directory, options):
             os.environ['INIT_METHOD'] = 'env://'
             os.environ.update(env_vars)
             if with_init_file:
-                init_method = 'file://{}/shared_init_file'.format(tmp_dir)
+                if test_module == "test_distributed":
+                    init_method = 'file://{}/'.format(tmp_dir)
+                else:
+                    init_method = 'file://{}/shared_init_file'.format(tmp_dir)
                 os.environ['INIT_METHOD'] = init_method
             try:
                 os.mkdir(os.path.join(tmp_dir, 'barrier'))
@@ -143,12 +204,12 @@ def test_distributed(python, test_module, test_directory, options):
                         'mpiexec -n 1 --noprefix bash -c ""', shell=True,
                         stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
 
-                    mpiexec = 'mpiexec -n 3 {} {}'.format(noprefix_opt, python)
+                    mpiexec = ['mpiexec', '-n', '3', noprefix_opt] + executable
 
                     return_code = run_test(mpiexec, test_module,
                                            test_directory, options)
                 else:
-                    return_code = run_test(python, test_module, test_directory,
+                    return_code = run_test(executable, test_module, test_directory,
                                            options)
                 if return_code != 0:
                     return return_code
@@ -160,6 +221,7 @@ def test_distributed(python, test_module, test_directory, options):
 CUSTOM_HANDLERS = {
     'cpp_extensions': test_cpp_extensions,
     'distributed': test_distributed,
+    'thd_distributed': test_distributed,
 }
 
 
@@ -185,7 +247,10 @@ def parse_args():
         action='store_true',
         help='print verbose information and test-by-test results')
     parser.add_argument(
-        '-p', '--python', help='the python interpreter to execute tests with')
+        '-pt', '--pytest', action='store_true',
+        help='If true, use `pytest` to execute the tests. E.g., this runs '
+             'TestTorch with pytest in verbose and coverage mode: '
+             'python run_test.py -vci torch -pt')
     parser.add_argument(
         '-c', '--coverage', action='store_true', help='enable coverage')
     parser.add_argument(
@@ -222,16 +287,22 @@ def parse_args():
         '--ignore-win-blacklist',
         action='store_true',
         help='always run blacklisted windows tests')
+    parser.add_argument(
+        'additional_unittest_args',
+        nargs='*',
+        help='additional arguments passed through to unittest, e.g., '
+             'python run_test.py -i sparse -- TestSparse.test_factory_size_check')
     return parser.parse_args()
 
 
-def get_python_command(options):
+def get_executable_command(options):
     if options.coverage:
-        return 'coverage run --parallel-mode --source torch'
-    elif options.python:
-        return options.python
+        executable = ['coverage', 'run', '--parallel-mode', '--source torch']
     else:
-        return os.environ.get('PYCMD', 'python')
+        executable = [sys.executable]
+    if options.pytest:
+        executable += ['-m', 'pytest']
+    return executable
 
 
 def find_test_index(test, selected_tests, find_last_index=False):
@@ -248,8 +319,8 @@ def find_test_index(test, selected_tests, find_last_index=False):
                      'torch.TestTorch.test_tan', 'torch.TestTorch.test_add'**, 'utils']
     ```
 
-    If :attr:`test`='torch' and :attr:`find_last_index`=False result should be **2**.
-    If :attr:`test`='torch' and :attr:`find_last_index`=True result should be **4**.
+    If :attr:`test`='torch' and :attr:`find_last_index`=False, result should be **2**.
+    If :attr:`test`='torch' and :attr:`find_last_index`=True, result should be **4**.
 
     Arguments:
         test (str): Name of test to lookup
@@ -303,12 +374,16 @@ def get_selected_tests(options):
 
         selected_tests = exclude_tests(WINDOWS_BLACKLIST, selected_tests, 'on Windows')
 
+    elif TEST_WITH_ROCM:
+        selected_tests = exclude_tests(ROCM_BLACKLIST, selected_tests, 'on ROCm')
+
     return selected_tests
 
 
 def main():
     options = parse_args()
-    python = get_python_command(options)
+    executable = get_executable_command(options)  # this is a list
+    print_to_stderr('Test executor: {}'.format(executable))
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)
 
@@ -316,15 +391,16 @@ def main():
         print_to_stderr('Selected tests: {}'.format(', '.join(selected_tests)))
 
     if options.coverage:
-        shell('coverage erase')
+        shell(['coverage', 'erase'])
 
     for test in selected_tests:
         test_name = 'test_{}'.format(test)
         test_module = parse_test_module(test)
 
-        print_to_stderr('Running {} ...'.format(test_name))
+        # Printing the date here can help diagnose which tests are slow
+        print_to_stderr('Running {} ... [{}]'.format(test_name, datetime.now()))
         handler = CUSTOM_HANDLERS.get(test_module, run_test)
-        return_code = handler(python, test_name, test_directory, options)
+        return_code = handler(executable, test_name, test_directory, options)
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool), 'Return code should be an integer'
         if return_code != 0:
@@ -337,8 +413,8 @@ def main():
             raise RuntimeError(message)
 
     if options.coverage:
-        shell('coverage combine')
-        shell('coverage html')
+        shell(['coverage', 'combine'])
+        shell(['coverage', 'html'])
 
 
 if __name__ == '__main__':

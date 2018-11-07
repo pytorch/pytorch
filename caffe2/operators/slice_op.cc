@@ -3,12 +3,13 @@
 
 namespace caffe2 {
 
-REGISTER_CPU_OPERATOR(Slice, SliceOp<int, CPUContext>);
-REGISTER_CPU_OPERATOR(SliceGradient, SliceGradientOp<int, CPUContext>);
+REGISTER_CPU_OPERATOR(Slice, SliceOp<CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(SliceGradient, SliceGradientOp<CPUContext>);
 
 OPERATOR_SCHEMA(Slice)
     .NumInputs(1, 3)
     .NumOutputs(1)
+    .DisallowInputFillers() // the filler cannot be enabled without output dims
     .SetDoc(R"DOC(
 Produces a slice of the input tensor.
 
@@ -63,8 +64,14 @@ Y:
 
 )DOC")
     .Input(0, "X", "(*Tensor*): tensor to extract slices from")
-    .Input(1, "starts", "(*Tensor`<int>`*): 1D tensor of start-indices for each dimension of data")
-    .Input(2, "ends", "(*Tensor`<int>`*): 1D tensor of end-indices for each dimension of data")
+    .Input(
+        1,
+        "starts",
+        "(*Tensor`<int>`*): 1D tensor of start-indices for each dimension of data")
+    .Input(
+        2,
+        "ends",
+        "(*Tensor`<int>`*): 1D tensor of end-indices for each dimension of data")
     .Arg("starts", "(*Tuple(int)*): list of starting indices")
     .Arg("ends", "(*Tuple(int)*): list of ending indices")
     .TensorInferenceFunction([](const OperatorDef& def,
@@ -103,9 +110,9 @@ Y:
           CreateTensorShape(dst_sizes, data.data_type())};
     })
     .Output(0, "Y", "(*Tensor*): sliced output tensor")
-    .InheritOnnxSchema("Slice");
+    .InheritOnnxSchema();
 
-OPERATOR_SCHEMA(SliceGradient);
+GRADIENT_OPERATOR_SCHEMA(SliceGradient);
 
 namespace {
 struct GetSliceGradient : public GradientMakerBase {

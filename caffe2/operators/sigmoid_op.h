@@ -17,10 +17,10 @@ template <class Context>
 struct SigmoidGradientFunctor {
   template <typename T>
   bool Forward(
-      const std::vector<int>& dY_dims,
       const std::vector<int>& Y_dims,
-      const T* dY,
+      const std::vector<int>& dY_dims,
       const T* Y,
+      const T* dY,
       T* dX,
       Context* context) const;
 };

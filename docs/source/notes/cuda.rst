@@ -74,9 +74,10 @@ You can force synchronous computation by setting environment variable
 operation is actually executed, so the stack trace does not show where it was
 requested.)
 
-As an exception, several functions such as :meth:`~torch.Tensor.copy_` admit
-an explicit :attr:`async` argument, which lets the caller bypass synchronization
-when it is unnecessary.  Another exception is CUDA streams, explained below.
+As an exception, several functions such as :meth:`~torch.Tensor.to` and 
+:meth:`~torch.Tensor.copy_` admit an explicit :attr:`non_blocking` argument, 
+which lets the caller bypass synchronization when it is unnecessary.  
+Another exception is CUDA streams, explained below.
 
 CUDA streams
 ^^^^^^^^^^^^

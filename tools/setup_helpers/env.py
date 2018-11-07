@@ -22,4 +22,8 @@ def check_negative_env_flag(name, default=''):
 
 
 def gather_paths(env_vars):
-    return list(chain(*(os.getenv(v, '').split(':') for v in env_vars)))
+    return list(chain(*(os.getenv(v, '').split(os.pathsep) for v in env_vars)))
+
+
+def lib_paths_from_base(base_path):
+    return [os.path.join(base_path, s) for s in ['lib/x64', 'lib', 'lib64']]

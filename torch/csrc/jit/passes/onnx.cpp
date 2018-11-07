@@ -1,31 +1,18 @@
 #include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/jit/passes/onnx.h"
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/symbolic.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/utils/functional.h"
 #include <unordered_map>
 #include <sstream>
 
 namespace torch { namespace jit {
 
-namespace {
-
-bool hasHandleOutput(Node *node) {
-  auto last_output = node->outputs().back();
-  return last_output->isHandle();
-}
-
-bool hasUsedHandle(Node *node) {
-  if (!hasHandleOutput(node)) return false;
-  return node->outputs().back()->uses().size() > 0;
-}
-
-
-} // anonymous namespace
-
-// Transform PythonOps and Cpp Ops into Node's that match ONNX semantics.
+// Transform PythonOps into Nodes that match ONNX semantics.
 std::shared_ptr<Graph> ToONNX(std::shared_ptr<Graph>& graph, ::torch::onnx::OperatorExportTypes operator_export_type) {
-  auto new_graph = std::make_shared<Graph>(graph->scope_root());
+  auto new_graph = std::make_shared<Graph>(graph->current_scope());
   std::unordered_map<Value*, Value*> env;
   BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
   return new_graph;
@@ -49,7 +36,6 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
   // Initialize context and environment
   for (auto input : old_block->inputs()) {
     auto n = ctx.block->addInput()->copyMetadata(input);
-    n->setStage(input->stage());
     env[input] = n;
   }
   // Put the new outputs in our environment map, and copy the type from the
@@ -58,8 +44,7 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
   auto setOutputs = [&](const std::string& op_name, Node * node, const value_list & outputs) {
     auto old_outputs = node->outputs();
     // Count all outputs, excluding Handles
-    bool has_handle = hasHandleOutput(node);
-    auto num_old_outputs = old_outputs.size() - (has_handle ? 1 : 0);
+    auto num_old_outputs = old_outputs.size();
     if (outputs.size() != num_old_outputs) {
       std::ostringstream ss;
       ss << "symbolic for " << op_name << " produced an incorrect number of outputs (expected ";
@@ -73,9 +58,10 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
         outputs[i]->setType(old->type());
-        // Copy over source location information to all nodes created by
-        // the symbolic
+        // Copy over source location and scope information to all nodes
+        // created by the symbolic
         outputs[i]->node()->setSourceLocation(node->getSourceLocation());
+        outputs[i]->node()->setScope(node->scope());
         env[old] = outputs[i];
       } else {
         // Null output means that the ONNX op doesn't have outputs corresponding
@@ -90,10 +76,6 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
           throw std::runtime_error(ss.str());
         }
       }
-    }
-    if (has_handle) {
-      JIT_ASSERT(old_outputs.back()->uses().empty());
-      env[old_outputs.back()] = nullptr;
     }
   };
 
@@ -174,10 +156,10 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
     auto scalar_it = op->scalar_args.begin();
     for (auto arg_type : op->cconv) {
       py::object obj;
-      if (arg_type == 's') {
+      if (arg_type == 'c') {
         JIT_ASSERTM(scalar_it != op->scalar_args.end(), "expected too many scalar args");
         obj = py::reinterpret_borrow<py::object>(py::handle((scalar_it++)->get()));
-      } else if (arg_type == 't') {
+      } else if (arg_type == 'd') {
         JIT_ASSERTM(node_it != inputs.end(), "expected too many inputs");
         obj = py::cast(envFn(*node_it++));
       } else {
@@ -198,18 +180,7 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
 
   // Finally, visit all nodes in the graph
   for (auto node : old_block->nodes()) {
-    if (hasUsedHandle(node)) {
-      // Nothing we can do here. The handle is used, so we'll need to capture the
-      // original state and can't do anything with this op (we don't know what the
-      // backward is).
-      cloneNode(node);
-      continue;
-    }
-    // Needed so that symbolic calls create nodes with correct stages.
-    auto stage_guard = ctx.block->owningGraph()->setStageTemporary(node->stage());
-    IR_IFM(node, CppOp)
-      cloneNode(node);
-    IR_ELSEIFM(PythonOp)
+    IR_IFM(node, PythonOp)
       callPySymbolicMethod(value);
     IR_ELSE()
       callPySymbolicFunction(node);
@@ -220,8 +191,7 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
     env.at(output)->setType(output->type());
   }
 
-  // Copy stage from original graph
-  ctx.block->owningGraph()->setStage(old_block->owningGraph()->stage());
+  EliminateDeadCode(ctx.block);
 }
 
 }}

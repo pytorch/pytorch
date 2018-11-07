@@ -69,12 +69,14 @@ void CUDARecurrentNetworkExecutor::_ExecRange(int from, int to) {
         continue;
       }
 
-      if (gpu_id == -1 && rnn_op.op->device_option().device_type() == 1) {
-        gpu_id = rnn_op.op->device_option().cuda_gpu_id();
+      if (gpu_id == -1 &&
+          rnn_op.op->device_option().device_type() ==
+              DeviceTypeProto::PROTO_CUDA) {
+        gpu_id = rnn_op.op->device_option().device_id();
       } else {
         CAFFE_ENFORCE(
             rnn_op.op->device_option().device_type() == 0 ||
-                rnn_op.op->device_option().cuda_gpu_id() == gpu_id,
+                rnn_op.op->device_option().device_id() == gpu_id,
             "RNN Executor only supports ops on one GPU");
       }
 
@@ -134,11 +136,19 @@ void CUDARecurrentNetworkExecutor::_ExecRange(int from, int to) {
 }
 
 bool CUDARecurrentNetworkExecutor::Run(int T) {
+  CAFFE_ENFORCE_GE(T, 0, "Negative number of steps");
+  if (T == 0) {
+    return true;
+  }
   _ExecRange(0, T);
   return true;
 }
 
 bool CUDARecurrentNetworkExecutor::RunBackwards(int T) {
+  CAFFE_ENFORCE_GE(T, 0, "Negative number of steps");
+  if (T == 0) {
+    return true;
+  }
   _ExecRange(T - 1, -1);
   return true;
 }

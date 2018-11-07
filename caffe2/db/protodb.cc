@@ -20,7 +20,10 @@ class ProtoDBCursor : public Cursor {
   void SeekToFirst() override { iter_ = 0; }
   void Next() override { ++iter_; }
   string key() override { return proto_->protos(iter_).name(); }
-  string value() override { return proto_->protos(iter_).SerializeAsString(); }
+  string value() override {
+    return
+      SerializeAsString_EnforceCheck(proto_->protos(iter_), "ProtoDBCursor");
+  }
   bool Valid() override { return iter_ < proto_->protos_size(); }
 
  private:
@@ -60,7 +63,7 @@ class ProtoDBTransaction : public Transaction {
   TensorProtos* proto_;
   std::unordered_set<string> existing_names_;
 
-  DISABLE_COPY_AND_ASSIGN(ProtoDBTransaction);
+  C10_DISABLE_COPY_AND_ASSIGN(ProtoDBTransaction);
 };
 
 class ProtoDB : public DB {

@@ -7,6 +7,7 @@ from caffe2.python import workspace, core, scope, gru_cell
 from caffe2.python.model_helper import ModelHelper
 from caffe2.python.rnn.rnn_cell_test_util import sigmoid, tanh, _prepare_rnn
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 from caffe2.proto import caffe2_pb2
 
 from functools import partial
@@ -15,6 +16,7 @@ from hypothesis import settings as ht_settings
 import hypothesis.strategies as st
 import numpy as np
 import unittest
+import os
 
 
 def gru_unit(*args, **kwargs):
@@ -61,19 +63,21 @@ def gru_unit(*args, **kwargs):
     else:
         valid = np.ones(shape=(N, D))
     assert valid.shape == (N, D)
-    hidden_t = update_gate_t * hidden_t_prev + (1 - update_gate_t) * output_gate_t
-    hidden_t = hidden_t * valid + hidden_t_prev * (1 - valid) * (1 - drop_states)
+    hidden_t = update_gate_t * hidden_t_prev + \
+        (1 - update_gate_t) * output_gate_t
+    hidden_t = hidden_t * valid + hidden_t_prev * \
+        (1 - valid) * (1 - drop_states)
     hidden_t = hidden_t.reshape(1, N, D)
 
     return (hidden_t, )
 
 
 def gru_reference(input, hidden_input,
-                   reset_gate_w, reset_gate_b,
-                   update_gate_w, update_gate_b,
-                   output_gate_w, output_gate_b,
-                   seq_lengths, drop_states=False,
-                   linear_before_reset=False):
+                  reset_gate_w, reset_gate_b,
+                  update_gate_w, update_gate_b,
+                  output_gate_w, output_gate_b,
+                  seq_lengths, drop_states=False,
+                  linear_before_reset=False):
     D = hidden_input.shape[hidden_input.ndim - 1]
     T = input.shape[0]
     N = input.shape[1]
@@ -99,7 +103,8 @@ def gru_reference(input, hidden_input,
         update_gate = update_gate + input_update
 
         if linear_before_reset:
-            with_linear = np.dot(hidden_t_prev, output_gate_w.T) + output_gate_b
+            with_linear = np.dot(
+                hidden_t_prev, output_gate_w.T) + output_gate_b
             output_gate = sigmoid(reset_gate) * with_linear
         else:
             with_reset = hidden_t_prev * sigmoid(reset_gate)
@@ -242,10 +247,10 @@ def _prepare_gru_unit_op(gc, n, d, outputs_with_grads,
     return hidden_t, model.net
 
 
-class GRUCellTest(hu.HypothesisTestCase):
+class GRUCellTest(serial.SerializedTestCase):
 
     # Test just for GRUUnitOp
-    @given(
+    @serial.given(
         seed=st.integers(0, 2**32 - 1),
         input_tensor=gru_unit_op_input(),
         fwd_only=st.booleans(),
@@ -287,7 +292,7 @@ class GRUCellTest(hu.HypothesisTestCase):
             op,
             inputs,
             ref,
-            input_device_options={op.input[-1]: hu.cpu_do},
+            input_device_options={"test_name_scope/timestep": hu.cpu_do},
             outputs_to_check=[0],
         )
 
@@ -303,7 +308,8 @@ class GRUCellTest(hu.HypothesisTestCase):
                     outputs_with_grads=outputs_with_grads,
                     threshold=0.0001,
                     stepsize=0.005,
-                    input_device_options={op.input[-1]: hu.cpu_do},
+                    input_device_options={
+                        "test_name_scope/timestep": hu.cpu_do},
                 )
 
     @given(
@@ -319,11 +325,11 @@ class GRUCellTest(hu.HypothesisTestCase):
         np.random.seed(seed)
         for outputs_with_grads in [[0], [1], [0, 1]]:
             self.gru_base(gru_cell.GRU, gru_reference,
-                           outputs_with_grads=outputs_with_grads,
-                           **kwargs)
+                          outputs_with_grads=outputs_with_grads,
+                          **kwargs)
 
     def gru_base(self, create_rnn, ref, outputs_with_grads,
-                  input_tensor, fwd_only, drop_states, linear_before_reset, gc, dc):
+                 input_tensor, fwd_only, drop_states, linear_before_reset, gc, dc):
 
         print("GRU test parameters: ", locals())
         t, n, d = input_tensor.shape
@@ -356,7 +362,7 @@ class GRUCellTest(hu.HypothesisTestCase):
             op,
             inputs,
             ref,
-            input_device_options={"timestep": hu.cpu_do},
+            input_device_options={"test_name_scope/timestep": hu.cpu_do},
             outputs_to_check=list(range(2)),
         )
 
@@ -372,7 +378,8 @@ class GRUCellTest(hu.HypothesisTestCase):
                     outputs_with_grads=outputs_with_grads,
                     threshold=0.001,
                     stepsize=0.005,
-                    input_device_options={"timestep": hu.cpu_do},
+                    input_device_options={
+                        "test_name_scope/timestep": hu.cpu_do},
                 )
 
 

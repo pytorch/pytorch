@@ -4,14 +4,16 @@
 
 namespace caffe2 {
 
-class FileStoreHandler : public StoreHandler {
+class CAFFE2_API FileStoreHandler : public StoreHandler {
  public:
   explicit FileStoreHandler(const std::string& path, const std::string& prefix);
   virtual ~FileStoreHandler();
 
   virtual void set(const std::string& name, const std::string& data) override;
 
-  virtual std::string get(const std::string& name) override;
+  virtual std::string get(
+      const std::string& name,
+      const std::chrono::milliseconds& timeout = kDefaultTimeout) override;
 
   virtual int64_t add(const std::string& name, int64_t value) override;
 

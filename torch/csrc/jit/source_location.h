@@ -14,15 +14,20 @@ namespace torch { namespace jit {
 struct SourceLocation {
   virtual ~SourceLocation() = default;
   virtual void highlight(std::ostream & out) const = 0;
-  void wrapAndRethrowException(const std::exception & e, const std::string & additional = "") {
+
+  std::string wrapException(const std::exception & e, const std::string & additional = "") {
     std::stringstream msg;
     msg << "\n" << e.what() << ":\n";
-    if(additional.size() != 0) {
+    if(!additional.empty()) {
       msg << additional << ":\n";
     }
     highlight(msg);
-    throw std::runtime_error(msg.str());
+    return msg.str();
   }
+  void wrapAndRethrowException(const std::exception & e, const std::string & additional = "") {
+    throw std::runtime_error(wrapException(e, additional));
+  }
+
 };
 
 inline std::ostream& operator<<(std::ostream& out, const SourceLocation& sl) {
@@ -35,7 +40,7 @@ inline std::ostream& operator<<(std::ostream& out, const SourceLocation& sl) {
 struct StringSourceLocation : public SourceLocation {
   StringSourceLocation(std::string context)
   : context(std::move(context)) {}
-  virtual void highlight(std::ostream & out) const override {
+  void highlight(std::ostream & out) const override {
     out << context;
   }
 private:

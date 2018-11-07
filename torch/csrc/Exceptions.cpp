@@ -12,7 +12,7 @@ PyObject *THPException_FatalError;
 #define ASSERT_TRUE(cond) if (!(cond)) return false
 bool THPException_init(PyObject *module)
 {
-  ASSERT_TRUE(THPException_FatalError = PyErr_NewException("torch.FatalError", NULL, NULL));
+  ASSERT_TRUE(THPException_FatalError = PyErr_NewException("torch.FatalError", nullptr, nullptr));
   ASSERT_TRUE(PyModule_AddObject(module, "FatalError", THPException_FatalError) == 0);
   return true;
 }
@@ -109,6 +109,10 @@ static std::string formatMessage(const char *format, va_list fmt_args) {
   static const size_t ERROR_BUF_SIZE = 1024;
   char error_buf[ERROR_BUF_SIZE];
   vsnprintf(error_buf, ERROR_BUF_SIZE, format, fmt_args);
+  
+  // Ensure that the string is null terminated
+  error_buf[sizeof(error_buf) / sizeof(*error_buf) - 1] = 0;
+
   return std::string(error_buf);
 }
 

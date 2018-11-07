@@ -10,14 +10,14 @@ namespace caffe2 {
 
 template <typename Context>
 void spaceToBatch(
-    const Tensor<Context>& input,
+    const Tensor& input,
     int pad_t,
     int pad_l,
     int block_size,
-    Tensor<Context>* output,
+    Tensor* output,
     Context* /*context*/) {
-  CAFFE_ENFORCE(input.ndim() == 4);
-  CAFFE_ENFORCE(output->ndim() == 4);
+  CAFFE_ENFORCE(input.dim() == 4);
+  CAFFE_ENFORCE(output->dim() == 4);
 
   const int output_batch = output->dim32(0);
   const int output_depth = output->dim32(1);
@@ -60,14 +60,14 @@ void spaceToBatch(
 
 template <typename Context>
 void batchToSpace(
-    const Tensor<Context>& input,
+    const Tensor& input,
     int pad_t,
     int pad_l,
     int block_size,
-    Tensor<Context>* output,
+    Tensor* output,
     Context* /*context*/) {
-  CAFFE_ENFORCE(input.ndim() == 4);
-  CAFFE_ENFORCE(output->ndim() == 4);
+  CAFFE_ENFORCE(input.dim() == 4);
+  CAFFE_ENFORCE(output->dim() == 4);
 
   const int output_batch = output->dim32(0);
   const int output_depth = output->dim32(1);
@@ -113,14 +113,14 @@ class SpaceBatchOpBase : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SpaceBatchOpBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        pad_(OperatorBase::GetSingleArgument<int>("pad", 0)),
-        pad_t_(OperatorBase::GetSingleArgument<int>("pad_t", pad_)),
-        pad_l_(OperatorBase::GetSingleArgument<int>("pad", pad_)),
-        pad_b_(OperatorBase::GetSingleArgument<int>("pad", pad_)),
-        pad_r_(OperatorBase::GetSingleArgument<int>("pad", pad_)),
-        block_size_(OperatorBase::GetSingleArgument<int>("block_size", 2)),
+        pad_(this->template GetSingleArgument<int>("pad", 0)),
+        pad_t_(this->template GetSingleArgument<int>("pad_t", pad_)),
+        pad_l_(this->template GetSingleArgument<int>("pad", pad_)),
+        pad_b_(this->template GetSingleArgument<int>("pad", pad_)),
+        pad_r_(this->template GetSingleArgument<int>("pad", pad_)),
+        block_size_(this->template GetSingleArgument<int>("block_size", 2)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(order_ == StorageOrder::NCHW);
   }
 

@@ -9,10 +9,10 @@ void THNN_(LeakyReLU_updateOutput)(
           accreal negval_,
           bool inplace)
 {
-  real negval = TH_CONVERT_ACCREAL_TO_REAL(negval_);
+  scalar_t negval = TH_CONVERT_ACCREAL_TO_REAL(negval_);
   if (inplace)
   {
-    TH_TENSOR_APPLY(real, input,
+    TH_TENSOR_APPLY(scalar_t, input,
       if (*input_data <= 0)
         *input_data *= negval;
     );
@@ -21,8 +21,9 @@ void THNN_(LeakyReLU_updateOutput)(
   else
   {
     THTensor_(resizeAs)(output, input);
-    TH_TENSOR_APPLY2(real, output, real, input,
-      *output_data = *input_data > 0 ? *input_data : *input_data * negval;
+    TH_TENSOR_APPLY2(scalar_t, output, scalar_t, input,
+      const scalar_t r = (*input_data > 0) ? 1 : negval;
+      *output_data = *input_data * r;
     );
   }
 }
@@ -35,11 +36,11 @@ void THNN_(LeakyReLU_updateGradInput)(
           accreal negval_,
           bool inplace)
 {
-  real negval = TH_CONVERT_ACCREAL_TO_REAL(negval_);
+  scalar_t negval = TH_CONVERT_ACCREAL_TO_REAL(negval_);
   THNN_CHECK_NELEMENT(input, gradOutput);
   if (inplace)
   {
-    TH_TENSOR_APPLY2(real, gradOutput, real, input,
+    TH_TENSOR_APPLY2(scalar_t, gradOutput, scalar_t, input,
       if (*input_data <= 0)
         *gradOutput_data *= negval;
     );
@@ -48,7 +49,7 @@ void THNN_(LeakyReLU_updateGradInput)(
   else
   {
     THTensor_(resizeAs)(gradInput, input);
-    TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
+    TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, gradOutput, scalar_t, input,
       *gradInput_data = *input_data > 0 ? *gradOutput_data : *gradOutput_data * negval;
     );
   }

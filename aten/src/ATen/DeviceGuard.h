@@ -1,52 +1,74 @@
 #pragma once
 
-#include <ATen/Device.h>
-#include <ATen/Error.h>
-#include <ATen/ScalarType.h>
 #include <ATen/Tensor.h>
+#include <c10/Device.h>
+#include <ATen/core/ScalarType.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <c10/util/Exception.h>
+#include "c10/util/Optional.h"
 
 #include <cstddef>
 
 namespace at {
-/// RAII guard that sets a certain default GPU index in its constructor, and
+/// RAII guard that sets a certain default device in its constructor, and
 /// changes it back to the device that was originally active upon destruction.
 ///
-/// The index is always reset to the one that was active at the time of
-/// construction of the guard. Even if you `set_index` after construction, the
-/// destructor will still reset the index to the one that was active at
+/// The device is always reset to the one that was active at the time of
+/// construction of the guard. Even if you `set_device` after construction, the
+/// destructor will still reset the device to the one that was active at
 /// construction time.
 struct DeviceGuard {
   /// Default constructor, does nothing.
   DeviceGuard() = default;
 
-  /// Uses the given device's `index()` if it is a CUDA device, else does
-  /// nothing.
+  /// Set the current device to the passed Device.
   explicit DeviceGuard(Device device) {
-    if (device.is_cuda()) {
-      set_index(device.index());
+    set_device(device);
+  }
+
+  explicit DeviceGuard(c10::optional<Device> device_opt) {
+    if (device_opt.has_value()) {
+      set_device(device_opt.value());
     }
   }
 
-  /// Calls `set_device` with the given index.
-  explicit DeviceGuard(int32_t index) {
-    set_index(index);
-  }
-
-  /// Sets the device to the index on which the given tensor is located.
+  /// Sets the current device to the device on which the given tensor is located.
   explicit DeviceGuard(const Tensor& tensor) {
-    set_index_from(tensor);
+    set_device_from(tensor);
   }
 
-  /// Sets the device to the index on which the first tensor in the list is
+  /// Sets the current device to the device on which the first tensor in the list is
   /// located. If the list is empty, does nothing.
   explicit DeviceGuard(const TensorList& tensors) {
     if (!tensors.empty()) {
-      set_index_from(tensors.front());
+      set_device_from(tensors.front());
     }
   }
 
-  /// Resets the device to the index that was active at construction of the
+  /// Copy is disallowed.
+  DeviceGuard(const DeviceGuard&) = delete;
+  DeviceGuard& operator=(const DeviceGuard&) = delete;
+
+  /// Move-constructs this `DeviceGuard` from another `DeviceGuard`. The
+  /// moved-from `DeviceGuard` is modified such that its destruction has no
+  /// effect (does not reset the device).
+  DeviceGuard(DeviceGuard&& other) noexcept {
+    *this = std::move(other);
+  }
+
+  /// Move-assigns this `DeviceGuard` from another `DeviceGuard`. The
+  /// moved-from `DeviceGuard` is modified such that its destruction has no
+  /// effect (does not reset the device).
+  DeviceGuard& operator=(DeviceGuard&& other) noexcept {
+    this->original_index_ = other.original_index_;
+    this->last_index_ = other.last_index_;
+    // Set other's original index to the unspecified/default state, so that it
+    // doesn't also reset the device in its constructor.
+    other.original_index_ = -1;
+    return *this;
+  }
+
+  /// Resets the device to the device that was active at construction of the
   /// guard.
   ~DeviceGuard() {
     // It should only not have a value if an index was never actually set.
@@ -57,7 +79,12 @@ struct DeviceGuard {
   }
 
   /// Sets the device to the given one.
-  void set_index(int32_t index) {
+  void set_device(at::Device device) {
+    if (device.type() == at::kCPU) {
+      return;
+    }
+    AT_ASSERT(device.type() == at::kCUDA);
+    auto index = device.index();
     if (index == -1) {
       return;
     }
@@ -75,28 +102,35 @@ struct DeviceGuard {
     last_index_ = index;
   }
 
-  /// Calls `set_index` with the `Tensor`'s current device, if it is a CUDA
-  /// tensor. Does nothing if the `tensor` is not defined.
-  void set_index_from(const Tensor& tensor) {
-    if (tensor.defined() && tensor.is_cuda()) {
-      set_index(tensor.get_device());
+  /// Calls `set_device` with the `Tensor`'s current device, if it is not a
+  /// CPU tensor. Does nothing if the `tensor` is not defined.
+  void set_device_from(const Tensor& tensor) {
+    if (tensor.defined()) {
+      set_device(tensor.device());
     }
   }
 
   /// Returns the device that was set upon construction of the guard.
-  int32_t original_index() const noexcept {
-    return original_index_;
+  at::Device original_device() const noexcept {
+    return original_index_ == -1 ? at::kCPU : at::Device(at::kCUDA, original_index_);
   }
 
-  // /// Returns the last device that was set via `set_device`, if any.
-  int32_t last_index() const noexcept {
-    return last_index_;
+  /// Returns the last device that was set via `set_device`, if any.
+  at::Device last_device() const noexcept {
+    return last_index_ == -1 ? at::kCPU : at::Device(at::kCUDA, last_index_);
   }
 
  private:
+  // This representation only works under the assumption that the DeviceType
+  // is only CUDA.  I think a reasonable invariant to assert for DeviceGuard
+  // is that once you've "picked" a device type, you can't mix set_device
+  // with other device types.
+
   /// The original device that was active at construction of this object.
-  int32_t original_index_ = -1;
-  /// The last index that was set via `set_device`.
-  int32_t last_index_ = -1;
+  /// If not -1, it is a CUDA device.
+  int16_t original_index_ = -1;
+  /// The last device that was set via `set_device`.  If not -1, it is a CUDA
+  /// device.
+  int16_t last_index_ = -1;
 };
 } // namespace at

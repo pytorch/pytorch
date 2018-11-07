@@ -243,11 +243,13 @@ def _save(obj, f, pickle_module, pickle_protocol):
             return ('module', obj, source_file, source)
         elif torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            root, offset = obj._root_storage()
-            root_key = str(root._cdata)
+            # Offset is always 0, but we keep it for backwards compatibility
+            # with the old serialization format (which supported storage views)
+            offset = 0
+            obj_key = str(obj._cdata)
             location = location_tag(obj)
-            serialized_storages[root_key] = root
-            is_view = obj._cdata != root._cdata
+            serialized_storages[obj_key] = obj
+            is_view = obj._cdata != obj._cdata
             if is_view:
                 view_metadata = (str(obj._cdata), offset, obj.size())
             else:
@@ -255,9 +257,9 @@ def _save(obj, f, pickle_module, pickle_protocol):
 
             return ('storage',
                     storage_type,
-                    root_key,
+                    obj_key,
                     location,
-                    root.size(),
+                    obj.size(),
                     view_metadata)
 
         return None
@@ -325,6 +327,11 @@ def load(f, map_location=None, pickle_module=pickle):
             locations
         pickle_module: module used for unpickling metadata and objects (has to
             match the pickle_module used to serialize file)
+
+    .. note::
+        When you call :meth:`torch.load()` on a file which contains GPU tensors, those tensors
+        will be loaded to GPU by default. You can call `torch.load(.., map_location='cpu')`
+        and then :meth:`load_state_dict` to avoid GPU RAM surge when loading a model checkpoint.
 
     Example:
         >>> torch.load('tensors.pt')

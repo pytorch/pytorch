@@ -1,4 +1,5 @@
 #include "caffe2/operators/minmax_ops.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
@@ -72,10 +73,16 @@ Max:
 </details>
 
 )DOC")
-    .Input(0, "X, Y, ...", "*(type: Tensor`<Ord>`)* List of input tensors with the same shape.")
-    .Output(0, "M", "*(type: Tensor`<Ord>`)* Output tensor with same dimensions as input(s)."
-    "Contains the maximum valued element at each location.")
-    .InheritOnnxSchema("Max");
+    .Input(
+        0,
+        "X, Y, ...",
+        "*(type: Tensor`<Ord>`)* List of input tensors with the same shape.")
+    .Output(
+        0,
+        "M",
+        "*(type: Tensor`<Ord>`)* Output tensor with same dimensions as input(s)."
+        "Contains the maximum valued element at each location.")
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(Min)
     .NumInputs(1, INT_MAX)
@@ -137,15 +144,21 @@ Min:
 </details>
 
 )DOC")
-    .Input(0, "X, Y, ...", "*(type: Tensor`<Ord>`)* List of input tensors with the same shape.")
-    .Output(0, "M", "*(type: Tensor`<Ord>`)* Output tensor with same dimensions as input(s)."
-"Contains the minimum valued element at each location.")
-    .InheritOnnxSchema("Min");
+    .Input(
+        0,
+        "X, Y, ...",
+        "*(type: Tensor`<Ord>`)* List of input tensors with the same shape.")
+    .Output(
+        0,
+        "M",
+        "*(type: Tensor`<Ord>`)* Output tensor with same dimensions as input(s)."
+        "Contains the minimum valued element at each location.")
+    .InheritOnnxSchema();
 
 template <typename T, class Context>
 bool MaxOp<T, Context>::Compute() {
   auto& input0 = Input(0);
-  const int N = input0.size();
+  const int N = input0.numel();
   T* output_data = Output(0)->template mutable_data<T>();
 
   for (int i = 1; i < InputSize(); i++) {
@@ -160,7 +173,7 @@ bool MaxOp<T, Context>::Compute() {
 template <typename T, class Context>
 bool MinOp<T, Context>::Compute() {
   auto& input0 = Input(0);
-  const int N = input0.size();
+  const int N = input0.numel();
   T* output_data = Output(0)->template mutable_data<T>();
 
   for (int i = 1; i < InputSize(); i++) {

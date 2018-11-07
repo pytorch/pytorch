@@ -1,0 +1,4 @@
+sphinx>=1.7.5
+sphinx_rtd_theme
+breathe
+exhale>=0.2.1

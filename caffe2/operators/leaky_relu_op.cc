@@ -1,5 +1,6 @@
 #include "caffe2/operators/leaky_relu_op.h"
 
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -9,8 +10,8 @@ bool LeakyReluOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   auto* Y = Output(0);
   Y->ResizeLike(X);
-  ConstEigenVectorMap<float> Xvec(X.template data<float>(), X.size());
-  EigenVectorMap<float> Yvec(Y->template mutable_data<float>(), Y->size());
+  ConstEigenVectorMap<float> Xvec(X.template data<float>(), X.numel());
+  EigenVectorMap<float> Yvec(Y->template mutable_data<float>(), Y->numel());
   Yvec = Xvec.cwiseMax(0.f) + Xvec.cwiseMin(0.f) * alpha_;
   return true;
 }
@@ -21,10 +22,10 @@ bool LeakyReluGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& dY = Input(1);
   auto* dX = Output(0);
   dX->ResizeLike(Y);
-  CAFFE_ENFORCE_EQ(Y.size(), dY.size());
-  ConstEigenVectorMap<float> Yvec(Y.template data<float>(), Y.size());
-  ConstEigenVectorMap<float> dYvec(dY.template data<float>(), dY.size());
-  EigenVectorMap<float> dXvec(dX->template mutable_data<float>(), dX->size());
+  CAFFE_ENFORCE_EQ(Y.numel(), dY.numel());
+  ConstEigenVectorMap<float> Yvec(Y.template data<float>(), Y.numel());
+  ConstEigenVectorMap<float> dYvec(dY.template data<float>(), dY.numel());
+  EigenVectorMap<float> dXvec(dX->template mutable_data<float>(), dX->numel());
   Eigen::VectorXf gtZero = (Yvec.array() >= 0.0f).cast<float>();
   dXvec = dYvec.array() * gtZero.array() -
       dYvec.array() * (gtZero.array() - 1.0f) * alpha_;
@@ -103,13 +104,13 @@ Y:
 )DOC")
     .Input(0, "X", "Input tensor of data to be operated on.")
     .Output(0, "Y", "Output tensor, calculated as described above.");
-    
+
 OPERATOR_SCHEMA(LeakyReluGradient)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{1, 0}})
     .Arg("alpha", "Coefficient of leakage")
-    .InheritOnnxSchema("LeakyRelu");
+    .InheritOnnxSchema();
 
 class GetLeakyReluGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

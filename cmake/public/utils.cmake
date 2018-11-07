@@ -1,8 +1,12 @@
 ##############################################################################
 # Macro to update cached options.
 macro (caffe2_update_option variable value)
-  get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
-  set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
+  if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+    get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
+    set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
+  else()
+    set(${variable} ${value})
+  endif()
 endmacro()
 
 
@@ -89,7 +93,10 @@ endmacro()
 # target name is given by the first argument and the rest are the source files
 # to build the target.
 function(caffe2_binary_target target_name_or_src)
-  if (${ARGN})
+  # https://cmake.org/cmake/help/latest/command/function.html
+  # Checking that ARGC is greater than # is the only way to ensure
+  # that ARGV# was passed to the function as an extra argument.
+  if (ARGC GREATER 1)
     set(__target ${target_name_or_src})
     prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${ARGN}")
   else()
@@ -105,6 +112,27 @@ function(caffe2_binary_target target_name_or_src)
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
 
+function(caffe2_hip_binary_target target_name_or_src)
+  if (ARGC GREATER 1)
+    set(__target ${target_name_or_src})
+    prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${ARGN}")
+  else()
+    get_filename_component(__target ${target_name_or_src} NAME_WE)
+    prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${target_name_or_src}")
+  endif()
+
+  # These two lines are the only differences between
+  # caffe2_hip_binary_target and caffe2_binary_target
+  set_source_files_properties(${__srcs} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  hip_add_executable(${__target} ${__srcs})
+
+  target_link_libraries(${__target} ${Caffe2_MAIN_LIBS})
+  # If we have Caffe2_MODULES defined, we will also link with the modules.
+  if (DEFINED Caffe2_MODULES)
+    target_link_libraries(${__target} ${Caffe2_MODULES})
+  endif()
+  install(TARGETS ${__target} DESTINATION bin)
+endfunction()
 
 ##############################################################################
 # Multiplex between loading executables for CUDA versus HIP (AMD Software Stack).
@@ -166,16 +194,17 @@ endmacro()
 
 
 ##############################################################################
-# Add ATen compile options.
+# Add standard compile options.
 # Usage:
-#   aten_compile_options(lib_name)
-function(aten_compile_options libname)
+#   torch_compile_options(lib_name)
+function(torch_compile_options libname)
   target_compile_options(${libname}
     PRIVATE
     -Wall
     -Wextra
     -fexceptions
     -Wno-missing-field-initializers
+    -Wno-strict-overflow
     -Wno-type-limits
     -Wno-unused-parameter
     -Wno-unknown-warning-option
@@ -187,10 +216,10 @@ endfunction()
 
 
 ##############################################################################
-# Set ATen target properties.
+# Set standard target properties.
 # Usage:
-#   aten_set_target_props(lib_name)
-function(aten_set_target_props libname)
+#   torch_set_target_props(lib_name)
+function(torch_set_target_props libname)
   if(MSVC AND AT_MKL_MT)
     set_target_properties(${libname} PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
     set_target_properties(${libname} PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")

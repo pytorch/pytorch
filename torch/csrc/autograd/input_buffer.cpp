@@ -1,6 +1,5 @@
 #include "torch/csrc/autograd/input_buffer.h"
 
-#include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 
 #include <ATen/DeviceGuard.h>
@@ -13,7 +12,7 @@ namespace torch { namespace autograd {
 
 
 void InputBuffer::add(size_t pos, Variable var) {
-  TORCH_ASSERT(pos < buffer.size());
+  AT_ASSERT(pos < buffer.size());
   if (!var.defined()) {
     return;
   }
@@ -23,7 +22,7 @@ void InputBuffer::add(size_t pos, Variable var) {
   } else {
     at::DeviceGuard device_guard(var);
     // ATen doesn't route sparse additions correctly...
-    if (old_var.type().is_sparse()) {
+    if (old_var.is_sparse()) {
       buffer[pos] = var + old_var;
     } else {
       buffer[pos] = old_var + var;
@@ -33,7 +32,7 @@ void InputBuffer::add(size_t pos, Variable var) {
 
 auto InputBuffer::device() const -> int {
   for (auto& var : buffer) {
-    if (var.defined() && var.type().is_cuda()) {
+    if (var.defined() && var.is_cuda()) {
       return var.get_device();
     }
   }

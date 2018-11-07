@@ -7,7 +7,7 @@ from torch.distributions.transforms import ComposeTransform, ExpTransform, Stick
 
 class LogisticNormal(TransformedDistribution):
     r"""
-    Creates a logistic-normal distribution parameterized by `loc` and `scale`
+    Creates a logistic-normal distribution parameterized by :attr:`loc` and :attr:`scale`
     that define the base `Normal` distribution transformed with the
     `StickBreakingTransform` such that::
 
@@ -32,11 +32,16 @@ class LogisticNormal(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, loc, scale, validate_args=None):
-        super(LogisticNormal, self).__init__(
-            Normal(loc, scale), StickBreakingTransform(),
-            validate_args=validate_args)
+        base_dist = Normal(loc, scale)
+        super(LogisticNormal, self).__init__(base_dist,
+                                             StickBreakingTransform(),
+                                             validate_args=validate_args)
         # Adjust event shape since StickBreakingTransform adds 1 dimension
         self._event_shape = torch.Size([s + 1 for s in self._event_shape])
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(LogisticNormal, _instance)
+        return super(LogisticNormal, self).expand(batch_shape, _instance=new)
 
     @property
     def loc(self):

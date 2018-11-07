@@ -13,17 +13,17 @@ bool ElementwiseLinearOp<float, CPUContext>::RunOnDevice(){
   const int N = X.size_to_dim(canonical_axis);
   const int D = X.size_from_dim(canonical_axis);
 
-  CAFFE_ENFORCE_EQ(a.ndim(), 1, a.ndim());
-  CAFFE_ENFORCE_EQ(a.dim(0), D, a.ndim());
-  CAFFE_ENFORCE_EQ(b.ndim(), 1, b.ndim());
-  CAFFE_ENFORCE_EQ(b.dim(0), D, b.ndim());
+  CAFFE_ENFORCE_EQ(a.dim(), 1, a.dim());
+  CAFFE_ENFORCE_EQ(a.size(0), D, a.dim());
+  CAFFE_ENFORCE_EQ(b.dim(), 1, b.dim());
+  CAFFE_ENFORCE_EQ(b.size(0), D, b.dim());
 
   Y->ResizeLike(X);
 
   const float* X_data = X.data<float>();
   const float* a_data = a.data<float>();
   const float* b_data = b.data<float>();
-  float* Y_data = Y->mutable_data<float>();
+  float* Y_data = Y->template mutable_data<float>();
 
   int p = 0;
   for (int n = 0; n < N; ++n) {
@@ -45,10 +45,10 @@ bool ElementwiseLinearGradientOp<float, CPUContext>::RunOnDevice(){
   const int N = X.size_to_dim(canonical_axis);
   const int D = X.size_from_dim(canonical_axis);
 
-  CAFFE_ENFORCE_EQ(a.ndim(), 1, a.ndim());
-  CAFFE_ENFORCE_EQ(a.dim(0), D, a.ndim());
+  CAFFE_ENFORCE_EQ(a.dim(), 1, a.dim());
+  CAFFE_ENFORCE_EQ(a.size(0), D, a.dim());
 
-  auto *g_X = Output(0);
+  auto* g_X = Output(0);
   auto *g_a = Output(1);
   auto *g_b = Output(2);
   g_X->ResizeLike(X);
@@ -58,12 +58,12 @@ bool ElementwiseLinearGradientOp<float, CPUContext>::RunOnDevice(){
   const float* g_o_data = g_o.data<float>();
   const float* X_data = X.data<float>();
   const float* a_data = a.data<float>();
-  float* g_X_data = g_X->mutable_data<float>();
-  float* g_a_data = g_a->mutable_data<float>();
-  float* g_b_data = g_b->mutable_data<float>();
+  float* g_X_data = g_X->template mutable_data<float>();
+  float* g_a_data = g_a->template mutable_data<float>();
+  float* g_b_data = g_b->template mutable_data<float>();
 
-  math::Set<float, CPUContext>(g_a->size(), 0.f, g_a_data, &context_);
-  math::Set<float, CPUContext>(g_b->size(), 0.f, g_b_data, &context_);
+  math::Set<float, CPUContext>(g_a->numel(), 0.f, g_a_data, &context_);
+  math::Set<float, CPUContext>(g_b->numel(), 0.f, g_b_data, &context_);
 
   int p = 0;
   for (int n = 0; n < N; ++n) {
@@ -112,28 +112,28 @@ op = core.CreateOperator(
     ["Y"]
 )
 
-# Create X
+// Create X
 X = np.array([[1,2,3,4,5],[6,8,9,16,10]])
 print("X:\n",X)
 
-# Create w
+// Create w
 w = np.array([1,1/2.,1/3.,1/4.,1/5.])
 print("w:\n",w)
 
-# Create b
+// Create b
 b = np.array([1.,1.,1.,1.,1.])
 print("b:\n",b)
 
 
-# Feed X & w & b into workspace
+// Feed X & w & b into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("w", w.astype(np.float32))
 workspace.FeedBlob("b", b.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Y:\n", workspace.FetchBlob("Y"))
 
 ```

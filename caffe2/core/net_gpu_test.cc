@@ -5,7 +5,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
 
-CAFFE2_DECLARE_bool(caffe2_disable_chaining);
+C10_DECLARE_bool(caffe2_disable_chaining);
 
 namespace caffe2 {
 
@@ -34,11 +34,11 @@ class NetTestDummyOp final : public OperatorBase {
 
   // Simulate CUDA operator behavior
   bool HasAsyncPart() const override {
-    return debug_def().device_option().device_type() == CUDA;
+    return debug_def().device_option().device_type() == PROTO_CUDA;
   }
 
   bool SupportsAsyncScheduling() const override {
-    return debug_def().device_option().device_type() == CUDA;
+    return debug_def().device_option().device_type() == PROTO_CUDA;
   }
 
  protected:
@@ -124,7 +124,7 @@ TEST(NetTest, DISABLED_ChainingForDifferentDevices) {
           type: "NetTestDummy"
           device_option {
             device_type: 1
-            cuda_gpu_id: 1
+            device_id: 1
           }
         }
 )DOC";

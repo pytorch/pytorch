@@ -15,7 +15,7 @@
 
 namespace torch { namespace autograd {
 
-auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
+auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   check_input_variables("CopyBackwards", grads, 1);
   auto& grad = grads[0];
   variable_list grad_inputs(2);
@@ -24,7 +24,9 @@ auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
   }
   if (should_compute_output(1)) {
     at::DeviceGuard device_guard(src_device);
-    if (grad.is_cuda() && grad.get_device() != src_device) {
+    // TODO: What if !grad.is_cuda(), but src_device is CUDA?
+    // This code is kind of weirdly asymmetric.
+    if (grad.is_cuda() && grad.device() != src_device) {
       grad_inputs[1] = src_type->copy(grad);
     } else {
       grad_inputs[1] = grad.toType(*src_type);
@@ -43,7 +45,7 @@ CopySlices::CopySlices(
       fn(std::move(fn_)) {
   // Take the next_edges of fn as our own, except for index 0 which goes
   // to base instead of the view.
-  add_input_metadata(base_var.type(), base_var.sizes());
+  add_input_metadata(base_var);
   const auto num_outputs = fn->num_outputs();
   next_edges_.reserve(num_outputs);
   add_next_edge(base_var.gradient_edge());
@@ -52,7 +54,7 @@ CopySlices::CopySlices(
   }
 }
 
-auto CopySlices::apply(const variable_list& inputs) -> variable_list {
+auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   check_input_variables("CopySlices", inputs, 1);
   auto& grad = inputs[0];
 
@@ -60,7 +62,7 @@ auto CopySlices::apply(const variable_list& inputs) -> variable_list {
     throw std::runtime_error(ERR_BACKWARD_TWICE);
   }
 
-  auto result = grad.type().tensor(base.sizes(), base.strides());
+  auto result = at::empty_strided(base.sizes(), base.strides(), grad.options());
   result.copy_(grad);
 
   auto offset = view.storage_offset() - base.storage_offset();
@@ -74,10 +76,10 @@ auto CopySlices::apply(const variable_list& inputs) -> variable_list {
   variable_list grad_inputs(num_outputs());
   for (size_t i = 0; i < res.size(); i++) {
     if (should_compute_output(i)) {
-      TORCH_ASSERT(res[i].defined());
+      AT_ASSERT(res[i].defined());
       if (i == 0) {
         grad_slice.copy_(res[i]);
-        grad_inputs[i] = std::move(result);
+        grad_inputs[i] = std::move(result); // NOLINT(bugprone-use-after-move)
       } else {
         grad_inputs[i] = std::move(res[i]);
       }

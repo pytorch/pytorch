@@ -47,7 +47,7 @@ static struct PyGetSetDef THPDtype_properties[] = {
 
 static PyMethodDef THPDtype_methods[] = {
   {"__reduce__", (PyCFunction)THPDtype_reduce, METH_NOARGS, nullptr},
-  {NULL}  /* Sentinel */
+  {nullptr}  /* Sentinel */
 };
 
 PyObject *THPDtype_repr(THPDtype *self)

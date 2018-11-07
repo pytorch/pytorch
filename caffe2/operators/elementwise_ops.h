@@ -12,6 +12,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/operators/elementwise_ops_utils.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -54,7 +55,7 @@ class UnaryElementwiseWithArgsOp final : public Operator<Context> {
     auto* Y = Output(0);
     Y->ResizeLike(X);
     return functor_(
-        X.size(),
+        X.numel(),
         X.template data<T>(),
         Y->template mutable_data<typename OutputTypeMap::template type<T>>(),
         &context_);
@@ -107,7 +108,7 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         OP_SINGLE_ARG(bool, "broadcast", legacy_broadcast_, false),
         OP_SINGLE_ARG(int, "axis", axis_, -1),
-        OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
+        OP_SINGLE_ARG(string, "axis_str", axis_str_, string("")),
         OP_SINGLE_ARG(string, "order", order_, "NCHW"),
         functor_(*this) {
     if (legacy_broadcast_) {
@@ -159,8 +160,8 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
           "In-place is allowed only with the first tensor when "
           "legacy-broadcasting");
       C->ResizeLike(A);
-      if (B.size() == 1) {
-        A_dims = {static_cast<int>(A.size())};
+      if (B.numel() == 1) {
+        A_dims = {static_cast<int>(A.numel())};
         B_dims = {1};
       } else {
         size_t pre, n, post;
@@ -171,8 +172,10 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
         B_dims = {static_cast<int>(n), 1};
       }
     } else {
-      std::copy(A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
-      std::copy(B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+      std::copy(
+          A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
+      std::copy(
+          B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
       const std::vector<int> C_dims =
           elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
               A_dims, B_dims);
@@ -259,8 +262,8 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
     vector<int> A_dims;
     vector<int> B_dims;
     if (legacy_broadcast_) {
-      if (B.size() == 1) {
-        A_dims = {static_cast<int>(A.size())};
+      if (B.numel() == 1) {
+        A_dims = {static_cast<int>(A.numel())};
         B_dims = {1};
       } else {
         size_t pre, n, post;
@@ -271,8 +274,10 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
         B_dims = {static_cast<int>(n), 1};
       }
     } else {
-      std::copy(A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
-      std::copy(B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+      std::copy(
+          A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
+      std::copy(
+          B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
     }
     const typename OutputTypeMap::template type<T>* C_data = nullptr;
     if (InputSize() == 4) {
@@ -401,49 +406,49 @@ struct SignFunctor {
 };
 
 // Forward-only Binary Functors.
-#define CAFFE2_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(FunctorName) \
-  template <class Context>                                     \
-  struct FunctorName##Functor {                                \
-    template <typename TIn, typename TOut>                     \
-    bool Forward(                                              \
-        const std::vector<int>& A_dims,                        \
-        const std::vector<int>& B_dims,                        \
-        const TIn* A,                                          \
-        const TIn* B,                                          \
-        TOut* C,                                               \
-        Context* context) const {                              \
-      math::FunctorName(                                       \
-          A_dims.size(),                                       \
-          A_dims.data(),                                       \
-          B_dims.size(),                                       \
-          B_dims.data(),                                       \
-          A,                                                   \
-          B,                                                   \
-          C,                                                   \
-          context);                                            \
-      return true;                                             \
-    }                                                          \
+#define C10_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(FunctorName) \
+  template <class Context>                                  \
+  struct FunctorName##Functor {                             \
+    template <typename TIn, typename TOut>                  \
+    bool Forward(                                           \
+        const std::vector<int>& A_dims,                     \
+        const std::vector<int>& B_dims,                     \
+        const TIn* A,                                       \
+        const TIn* B,                                       \
+        TOut* C,                                            \
+        Context* context) const {                           \
+      math::FunctorName(                                    \
+          A_dims.size(),                                    \
+          A_dims.data(),                                    \
+          B_dims.size(),                                    \
+          B_dims.data(),                                    \
+          A,                                                \
+          B,                                                \
+          C,                                                \
+          context);                                         \
+      return true;                                          \
+    }                                                       \
   };
 
 // Compare functors.
-CAFFE2_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(EQ);
-CAFFE2_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(NE);
-CAFFE2_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(LT);
-CAFFE2_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(LE);
-CAFFE2_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(GT);
-CAFFE2_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(GE);
+C10_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(EQ);
+C10_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(NE);
+C10_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(LT);
+C10_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(LE);
+C10_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(GT);
+C10_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(GE);
 
 // Logical functors.
-CAFFE2_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(And);
-CAFFE2_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(Or);
-CAFFE2_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(Xor);
+C10_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(And);
+C10_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(Or);
+C10_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(Xor);
 
 // Bitwise functors.
-CAFFE2_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(BitwiseAnd);
-CAFFE2_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(BitwiseOr);
-CAFFE2_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(BitwiseXor);
+C10_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(BitwiseAnd);
+C10_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(BitwiseOr);
+C10_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR(BitwiseXor);
 
-#undef CAFFE2_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR
+#undef C10_DECLARE_FOWARD_ONLY_BINARY_FUNCTOR
 
 namespace SRLHelper {
 
@@ -511,8 +516,8 @@ class SumReduceLikeOp final : public Operator<Context> {
   int axis_;
   string axis_str_;
   string order_;
-  Tensor<Context> ones_;
-  Tensor<Context> sum_buffer_;
+  Tensor ones_{Context::GetDeviceType()};
+  Tensor sum_buffer_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

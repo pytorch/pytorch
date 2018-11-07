@@ -10,17 +10,6 @@ namespace caffe2 {
 namespace {
 
 template <typename T>
-__global__ void TanhCUDAKernel(const int N, const T* X, T* Y) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-#if __CUDA_ARCH__ >= 350
-    Y[i] = tanh(__ldg(X + i));
-#else
-    Y[i] = tanh(X[i]);
-#endif
-  }
-}
-
-template <typename T>
 __global__ void
 TanhGradientCUDAKernel(const int N, const T* dY, const T* Y, T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
@@ -36,27 +25,15 @@ TanhGradientCUDAKernel(const int N, const T* dY, const T* Y, T* dX) {
 
 template <>
 template <typename T>
-bool TanhFunctor<CUDAContext>::
-operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
-  TanhCUDAKernel<T>
-      <<<CAFFE_GET_BLOCKS(N),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context->cuda_stream()>>>(N, X, Y);
-  return true;
-}
-
-template <>
-template <typename T>
 bool TanhGradientFunctor<CUDAContext>::Forward(
-    const std::vector<int>& dY_dims,
-    const std::vector<int>& /* Y_dims */,
-    const T* dY,
+    const std::vector<int>& Y_dims,
+    const std::vector<int>& /* dY_dims */,
     const T* Y,
+    const T* dY,
     T* dX,
     CUDAContext* context) const {
   const int size = std::accumulate(
-      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
   TanhGradientCUDAKernel<T>
       <<<CAFFE_GET_BLOCKS(size),
          CAFFE_CUDA_NUM_THREADS,

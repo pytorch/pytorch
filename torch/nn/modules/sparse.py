@@ -3,6 +3,7 @@ from torch.nn.parameter import Parameter
 
 from .module import Module
 from .. import functional as F
+from .. import init
 
 
 class Embedding(Module):
@@ -17,16 +18,17 @@ class Embedding(Module):
         embedding_dim (int): the size of each embedding vector
         padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
                                          (initialized to zeros) whenever it encounters the index.
-        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
-                                    this before extracting.
-        norm_type (float, optional): The p of the p-norm to compute for the max_norm option. Default ``2``.
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+        max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
+                                    is renormalized to have norm :attr:`max_norm`.
+        norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
+        scale_grad_by_freq (boolean, optional): If given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
-        sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
+        sparse (bool, optional): If ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
                                  See Notes for more details regarding sparse gradients.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
+                         initialized from :math:`\mathcal{N}(0, 1)`
 
     Shape:
 
@@ -100,9 +102,10 @@ class Embedding(Module):
         self.sparse = sparse
 
     def reset_parameters(self):
-        self.weight.data.normal_(0, 1)
+        init.normal_(self.weight)
         if self.padding_idx is not None:
-            self.weight.data[self.padding_idx].fill_(0)
+            with torch.no_grad():
+                self.weight[self.padding_idx].fill_(0)
 
     def forward(self, input):
         return F.embedding(
@@ -174,9 +177,9 @@ class EmbeddingBag(Module):
     Args:
         num_embeddings (int): size of the dictionary of embeddings
         embedding_dim (int): the size of each embedding vector
-        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
-                                    this before extracting.
-        norm_type (float, optional): The p of the p-norm to compute for the max_norm option. Default ``2``.
+        max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
+                                    is renormalized to have norm :attr:`max_norm`.
+        norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
                                                 Note: this option is not supported when ``mode="max"``.
@@ -188,6 +191,7 @@ class EmbeddingBag(Module):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape ``(num_embeddings x embedding_dim)``
+                         initialized from :math:`\mathcal{N}(0, 1)`.
 
     Inputs: :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
 
@@ -236,7 +240,7 @@ class EmbeddingBag(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.weight.data.normal_(0, 1)
+        init.normal_(self.weight)
 
     def forward(self, input, offsets=None):
         return F.embedding_bag(input, self.weight, offsets,

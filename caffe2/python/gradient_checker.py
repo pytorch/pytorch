@@ -11,6 +11,11 @@ from caffe2.python import core, workspace, net_drawer
 from caffe2.proto import caffe2_pb2
 
 
+def getGradientForOp(op):
+    return core.GradientRegistry.GetGradientForOp(
+        op, [s + '_grad' for s in op.output])
+
+
 def _get_grad_blob(grad_map, input_to_check):
     grad_blob = grad_map[input_to_check]
 
@@ -76,7 +81,7 @@ class NetGradientChecker(object):
                 png = net_drawer.GetPydotGraph(net).create_png()
                 with open("caffe2_net_forward_" + str(i) + net.Name() + ".png",
                           'wb') \
-                     as f:
+                        as f:
                     f.write(png)
 
         results = [
@@ -91,7 +96,7 @@ class NetGradientChecker(object):
             for i, net in enumerate(backward_nets):
                 png = net_drawer.GetPydotGraph(net).create_png()
                 with open("caffe2_net_" + str(i) + net.Name() + ".png", 'wb') \
-                     as f:
+                        as f:
                     f.write(png)
 
         first_net_results, first_net_grads, _ = results[0]
@@ -146,6 +151,7 @@ class NetGradientChecker(object):
 
         return _assert_close(analytic_grad, grad_estimate, threshold, err_msg)
 
+
 class GradientChecker:
     """A gradient checker in Python.
 
@@ -159,19 +165,27 @@ class GradientChecker:
         stepsize,
         threshold,
         device_option=None,
-        workspace_name="gradient_check"
+        workspace_name="gradient_check",
+        input_device_options=None,
     ):
         self._stepsize = stepsize
         self._threshold = threshold
         self._device_option = device_option or caffe2_pb2.DeviceOption()
         self._workspace_name = workspace_name
+        if input_device_options is None:
+            self._input_device_options = {}
+        else:
+            self._input_device_options = input_device_options
 
     def GetLossAndGrad(
-        self, op, grad_ops, x, input_name, grad_name, outputs_with_grads
+        self, op, grad_ops, inputs, input_names, input_to_check, grad_name,
+        outputs_with_grads
     ):
-        # First, feed in the current input. Note that we are not changing
-        # anything else, so we don't need to feed in others.
-        workspace.FeedBlob(input_name, x, self._device_option)
+        for i in range(len(inputs)):
+            workspace.FeedBlob(input_names[i], inputs[i],
+                               self._input_device_options.get(
+                input_names[i], self._device_option))
+        x = inputs[input_to_check]
         # Run.
         workspace.RunOperatorOnce(op)
         loss = 0.
@@ -248,10 +262,9 @@ class GradientChecker:
         if grad_ops is None:
             # TODO(jiayq): use the gradient registration instead of the old
             # hack.
-            grad_ops, g_input = core.GradientRegistry.GetGradientForOp(
-                op, [s + '_grad' for s in op.output])
+            grad_ops, g_input = getGradientForOp(op)
 
-        dims_to_check = inputs[input_to_check].size
+        
         _input_device_options = input_device_options or \
             core.InferOpBlobDevicesAsDict(op)[0]
         # First, feed in the input.
@@ -262,10 +275,9 @@ class GradientChecker:
                     op.input[i], self._device_option))
 
         # Get the loss and gradient for the original.
-        input_name = op.input[input_to_check]
         grad_name = g_input[input_to_check]
         loss, grad = self.GetLossAndGrad(
-            op, grad_ops, inputs[input_to_check], input_name, grad_name,
+            op, grad_ops, inputs, op.input, input_to_check, grad_name,
             outputs_with_grads
         )
         grad_estimate = np.zeros_like(inputs[input_to_check])
@@ -273,19 +285,20 @@ class GradientChecker:
             raise Exception(
                 "Mismatched gradient shapes: estimated ({}), grad ({})".format(
                     grad_estimate.shape, grad.shape))
-
+            
+        dims_to_check = inputs[input_to_check].size
         for current_dim in range(dims_to_check):
             # Positive gradient
             inputs[input_to_check].flat[current_dim] += self._stepsize
             pos_loss, _ = self.GetLossAndGrad(
-                op, grad_ops, inputs[input_to_check], input_name,
-                grad_name, outputs_with_grads
+                op, grad_ops, inputs, op.input, input_to_check, grad_name,
+                outputs_with_grads
             )
             # Negative gradient
             inputs[input_to_check].flat[current_dim] -= self._stepsize * 2
             neg_loss, _ = self.GetLossAndGrad(
-                op, grad_ops, inputs[input_to_check], input_name,
-                grad_name, outputs_with_grads
+                op, grad_ops, inputs, op.input, input_to_check, grad_name,
+                outputs_with_grads
             )
             # Recover the value
             inputs[input_to_check].flat[current_dim] += self._stepsize

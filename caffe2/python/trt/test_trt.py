@@ -13,7 +13,7 @@ from caffe2.python.models.download import downloadFromURLToFile, getURLFromName,
 import caffe2.python.onnx.backend as c2
 from caffe2.python.onnx.workspace import Workspace
 from caffe2.python.trt.transform import convert_onnx_model_to_trt_op, transform_caffe2_net
-from caffe2.python.onnx.tests.test_utils import TestCase
+from caffe2.python.onnx.tests.test_utils import TestCase, DownloadingTestCase
 import numpy as np
 import os.path
 import json
@@ -170,33 +170,12 @@ class TensorRTOpTest(TestCase):
     def test_vgg19(self):
         self._test_onnx_importer('vgg19', -1)
 
-class TensorRTTransformTest(TestCase):
+
+class TensorRTTransformTest(DownloadingTestCase):
     def _model_dir(self, model):
         caffe2_home = os.path.expanduser(os.getenv('CAFFE2_HOME', '~/.caffe2'))
         models_dir = os.getenv('CAFFE2_MODELS', os.path.join(caffe2_home, 'models'))
         return os.path.join(models_dir, model)
-
-    def _download(self, model):
-        model_dir = self._model_dir(model)
-        assert not os.path.exists(model_dir)
-        os.makedirs(model_dir)
-        for f in ['predict_net.pb', 'init_net.pb', 'value_info.json']:
-            url = getURLFromName(model, f)
-            dest = os.path.join(model_dir, f)
-            try:
-                try:
-                    downloadFromURLToFile(url, dest,
-                                          show_progress=False)
-                except TypeError:
-                    # show_progress not supported prior to
-                    # Caffe2 78c014e752a374d905ecfb465d44fa16e02a28f1
-                    # (Sep 17, 2017)
-                    downloadFromURLToFile(url, dest)
-            except Exception as e:
-                print("Abort: {reason}".format(reason=e))
-                print("Cleaning up...")
-                deleteDirectory(model_dir)
-                exit(1)
 
     def _get_c2_model(self, model_name):
         model_dir = self._model_dir(model_name)
@@ -287,8 +266,11 @@ class TensorRTTransformTest(TestCase):
         start = time.time()
         pred_net_cut = transform_caffe2_net(pred_net,
                                             {input_name: input_blob_dims},
-                                            build_serializable_op=True)
+                                            build_serializable_op=False)
         del init_net, pred_net
+        pred_net_cut.device_option.CopyFrom(device_option)
+        for op in pred_net_cut.op:
+            op.device_option.CopyFrom(device_option)
         #_print_net(pred_net_cut)
 
         Y_trt = None

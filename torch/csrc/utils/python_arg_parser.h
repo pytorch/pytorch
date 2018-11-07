@@ -55,6 +55,7 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/autograd/variable.h"
 
 #include <ATen/ATen.h>
 
@@ -90,8 +91,8 @@ struct PythonArgParser {
 
 private:
   [[noreturn]]
-  void print_error(PyObject* args, PyObject* kwargs, PyObject* dst[]);
-  PythonArgs raw_parse(PyObject* args, PyObject* kwargs, PyObject* dst[]);
+  void print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
+  PythonArgs raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
 
   std::vector<FunctionSignature> signatures_;
   std::string function_name;
@@ -120,15 +121,16 @@ struct PythonArgs {
   inline std::vector<int64_t> intlist(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
-  inline std::unique_ptr<at::Storage> storage(int i);
+  inline at::Storage storage(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
-  inline at::optional<at::ScalarType> scalartypeOptional(int i);
+  inline c10::optional<at::ScalarType> scalartypeOptional(int i);
+  inline c10::optional<at::Scalar> scalarOptional(int i);
   inline const THPLayout& layout(int i);
   inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
-  inline at::optional<at::Device> deviceOptional(int i);
+  inline c10::optional<at::Device> deviceOptional(int i);
   inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
@@ -166,6 +168,7 @@ struct FunctionParameter {
   bool optional;
   bool allow_none;
   bool keyword_only;
+  bool allow_numbers_as_tensors = false;
   int size;
   std::string name;
   // having this as a raw PyObject * will presumably leak it, but these are only held by static objects
@@ -192,17 +195,28 @@ inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, Parse
 }
 
 inline at::Tensor PythonArgs::tensor(int i) {
-  if (!args[i]) return at::Tensor();
-  if (!THPVariable_Check(args[i])) {
-    // NB: Are you here because you passed None to a Variable method,
-    // and you expected an undefined tensor to be returned?   Don't add
-    // a test for Py_None here; instead, you need to mark the argument
-    // as *allowing none*; you can do this by writing 'Tensor?' instead
-    // of 'Tensor' in the ATen metadata.
-    throw TypeError("expected Tensor as argument %d, but got %s", i,
-        Py_TYPE(args[i])->tp_name);
+  PyObject* obj = args[i];
+  if (!obj) return at::Tensor();
+  if (!THPVariable_Check(obj)) {
+    at::Scalar scalar;
+    if (THPUtils_checkLong(obj)) {
+      scalar = at::Scalar(THPUtils_unpackLong(obj));
+    } else if (THPUtils_checkDouble(obj)) {
+      scalar = at::Scalar(THPUtils_unpackDouble(obj));
+    } else {
+      // NB: Are you here because you passed None to a Variable method,
+      // and you expected an undefined tensor to be returned?   Don't add
+      // a test for Py_None here; instead, you need to mark the argument
+      // as *allowing none*; you can do this by writing 'Tensor?' instead
+      // of 'Tensor' in the ATen metadata.
+      throw TypeError("expected Tensor as argument %d, but got %s", i,
+          Py_TYPE(obj)->tp_name);
+    }
+    auto tensor = scalar_to_tensor(scalar);
+    tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+    return autograd::make_variable(tensor);
   }
-  return reinterpret_cast<THPVariable*>(args[i])->cdata;
+  return reinterpret_cast<THPVariable*>(obj)->cdata;
 }
 
 inline at::Scalar PythonArgs::scalar(int i) {
@@ -214,12 +228,21 @@ inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
   if (THPVariable_Check(args[i])) {
-    return at::Scalar(((THPVariable*)args[i])->cdata);
+    return at::_local_scalar(((THPVariable*)args[i])->cdata);
   }
   if (THPUtils_checkLong(args[i])) {
     return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
   }
+
+  if (PyComplex_Check(args[i])) {
+    return at::Scalar(THPUtils_unpackComplexDouble(args[i]));
+  }
   return at::Scalar(THPUtils_unpackDouble(args[i]));
+}
+
+inline c10::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
+  if (!args[i]) return c10::nullopt;
+  return scalar(i);
 }
 
 inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
@@ -232,7 +255,7 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
       throw TypeError("expected Tensor as element %d in argument %d, but got %s",
-                 idx, i, Py_TYPE(args[i])->tp_name);
+                 idx, i, Py_TYPE(obj)->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
@@ -253,7 +276,7 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
       throw TypeError("expected Tensor as element %d in argument %d, but got %s",
-                 idx, i, Py_TYPE(args[i])->tp_name);
+                 idx, i, Py_TYPE(obj)->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
@@ -279,11 +302,11 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
     try {
       // Elements of torch.Size are tensors during tracing, and we need to record extra
       // information before they are turned into an IntList
-      if (traceable && THPVariable_Check(obj)) {
+      if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
         auto & var = THPVariable_Unpack(obj);
         jit::tracer::ArgumentStash::stashIntListElem(
             signature.params[i].name, size, idx, var);
-        res[idx] = var.toCLong();
+        res[idx] = var.item<int64_t>();
         continue;
       } else {
         res[idx] = THPUtils_unpackIndex(obj);
@@ -306,13 +329,14 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
   if (!args[i]) {
     auto scalartype = signature.params[i].default_scalartype;
     return (scalartype == at::ScalarType::Undefined) ?
-            torch::tensor::get_default_tensor_type().scalarType() : scalartype;
+            torch::tensors::get_default_tensor_type().scalarType() : scalartype;
   }
   return reinterpret_cast<THPDtype*>(args[i])->scalar_type;
 }
 
-inline at::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
-  if (!args[i]) return at::nullopt;
+inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
   return scalartype(i);
 }
 
@@ -333,8 +357,8 @@ static std::string cpu_prefix = "cpu:";
 
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
-    const auto& default_tensor_type = torch::tensor::get_default_tensor_type();
-    return at::Device(default_tensor_type.backend());
+    const auto& default_tensor_type = torch::tensors::get_default_tensor_type();
+    return at::Device(default_tensor_type.device_type());
   }
   if (THPDevice_Check(args[i])) {
     const auto device = reinterpret_cast<THPDevice*>(args[i]);
@@ -343,21 +367,21 @@ inline at::Device PythonArgs::device(int i) {
   if (THPUtils_checkLong(args[i])) {
     const auto device_index = THPUtils_unpackLong(args[i]);
     AT_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(at::kCUDA, device_index);
+    return at::Device(at::DeviceType::CUDA, device_index);
   }
   const std::string device_str = THPUtils_unpackString(args[i]);
   if (device_str == cpu_str) {
-    return at::Device(at::kCPU);
+    return at::Device(at::DeviceType::CPU);
   } else if (device_str == cuda_str) {
-    return at::Device(at::kCUDA);
+    return at::Device(at::DeviceType::CUDA);
   } else if (device_str.compare(0, cpu_prefix.length(), cpu_prefix) == 0) {
     const auto device_index = std::stoi(device_str.substr(cpu_prefix.length()));
     AT_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(at::kCPU, device_index);
+    return at::Device(at::DeviceType::CPU, device_index);
   } else if (device_str.compare(0, cuda_prefix.length(), cuda_prefix) == 0) {
     const auto device_index = std::stoi(device_str.substr(cuda_prefix.length()));
     AT_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(at::kCUDA, device_index);
+    return at::Device(at::DeviceType::CUDA, device_index);
   }
   throw torch::TypeError("only \"cuda\" and \"cpu\" are valid device types, got %s", device_str.c_str());
 }
@@ -367,8 +391,9 @@ inline at::Device PythonArgs::deviceWithDefault(int i, const at::Device& default
   return device(i);
 }
 
-inline at::optional<at::Device> PythonArgs::deviceOptional(int i) {
-  if (!args[i]) return at::nullopt;
+inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
   return device(i);
 }
 
@@ -379,6 +404,11 @@ inline std::string PythonArgs::string(int i) {
 
 inline int64_t PythonArgs::toInt64(int i) {
   if (!args[i]) return signature.params[i].default_int;
+  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
+    auto & var = THPVariable_Unpack(args[i]);
+    jit::tracer::ArgumentStash::stashValue(
+        signature.params[i].name, idx, var, jit::IntType::get());
+  }
   return THPUtils_unpackLong(args[i]);
 }
 
@@ -416,8 +446,8 @@ inline at::Generator* PythonArgs::generator(int i) {
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
-inline std::unique_ptr<at::Storage> PythonArgs::storage(int i) {
-  if (!args[i]) return nullptr;
+inline at::Storage PythonArgs::storage(int i) {
+  if (!args[i]) return at::Storage();
   return createStorage(args[i]);
 }
 

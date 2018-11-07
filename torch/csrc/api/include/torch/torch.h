@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/functions.h>
-#include <torch/nn/module.h>
-#include <torch/nn/modules/modules.h>
-#include <torch/tensor.h>
+#include <torch/all.h>
 
-#include "torch/optimizers.h"
-#include "torch/serialization.h"
+#ifdef TORCH_API_INCLUDE_EXTENSION_H
+#include <torch/extension.h>
+#warning \
+    "Including torch/torch.h for C++ extensions is deprecated. Please include torch/extension.h"
+#endif // defined(TORCH_API_INCLUDE_EXTENSION_H)

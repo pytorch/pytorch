@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/Error.h>
+#include <c10/util/Exception.h>
 
 #include <cstdint>
 #include <functional>
@@ -71,7 +71,10 @@ class OrderedDict {
   }
 
   // Move works by default, because you can move-construct vectors of const
-  // values..
+  // values.
+  // NB: I tried to make this noexcept (conditional on the move constructors of
+  // index_ and items_ being noexcept) but the obvious spelling didn't compile
+  // on Windows.
   OrderedDict(OrderedDict&& other) = default;
   OrderedDict& operator=(OrderedDict&& other) = default;
 
