@@ -38,6 +38,11 @@ enum class TypeKind {
 #undef DEFINE_TYPE
 };
 
+#define DEFINE_IS_SUBCLASS(_kind) \
+  bool isSubclass(const TypeKind kind) const override { \
+    return kind == TypeKind::_kind; \
+  }
+
 struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
@@ -67,6 +72,10 @@ public:
     return *this == *rhs;
   }
 
+  // If this class can be cast to the kind passed in
+  // This removes the need for RTTI
+  virtual bool isSubclass(const TypeKind kind) const = 0;
+
   // How this type will appear in FunctionSchema declarations
   virtual std::string str() const = 0;
 
@@ -90,7 +99,10 @@ public:
   // inherit more detailed information from subclasses.
   template<typename T>
   std::shared_ptr<T> cast() {
-    auto r = std::dynamic_pointer_cast<T>(shared_from_this());
+    std::shared_ptr<T> r = nullptr;
+    if (isSubclass(T::Kind)) {
+      r = std::static_pointer_cast<T>(shared_from_this());
+    }
     if (!r || T::Kind == kind()) {
       return r;
     } else {
@@ -99,7 +111,10 @@ public:
   }
   template<typename T>
   std::shared_ptr<const T> cast() const {
-    auto r = std::dynamic_pointer_cast<const T>(shared_from_this());
+    std::shared_ptr<const T> r = nullptr;
+    if (isSubclass(T::Kind)) {
+      r = std::static_pointer_cast<const T>(shared_from_this());
+    }
     if (!r || T::Kind == kind()) {
       return r;
     } else {
@@ -155,6 +170,7 @@ struct OptionalType: public Type {
   static OptionalTypePtr create(TypePtr element) {
     return OptionalTypePtr(new OptionalType(std::move(element))); // NOLINT(modernize-make-shared)
   }
+  DEFINE_IS_SUBCLASS(OptionalType);
   bool operator==(const Type& rhs) const override {
     if(auto rhs_ = rhs.cast<OptionalType>()) {
       return *getElementType() == *rhs_->getElementType();
@@ -207,6 +223,7 @@ struct TORCH_API DynamicType : public Type {
   static DynamicTypePtr create() {
     return DynamicTypePtr(new DynamicType()); // NOLINT(modernize-make-shared)
   }
+  DEFINE_IS_SUBCLASS(DynamicType);
 
   bool requires_grad() const override { return true; }
 
@@ -232,6 +249,8 @@ struct TORCH_API UndefinedTensorType : public Type {
   static UndefinedTensorTypePtr create() {
     return UndefinedTensorTypePtr(new UndefinedTensorType()); // NOLINT(modernize-make-shared)
   }
+
+  DEFINE_IS_SUBCLASS(UndefinedTensorType);
 
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -291,6 +310,10 @@ struct TORCH_API TensorType : public Type {
     if (rhs->kind() == TypeKind::DynamicType)
       return true;
     return rhs->kind() == TypeKind::TensorType && *this == *rhs;
+  }
+  bool isSubclass(const TypeKind kind) const override {
+    return kind == TypeKind::DynamicType ||
+        kind == TypeKind::TensorType;
   }
   std::string str() const override {
     // str is used for user-facing error messages, where we
@@ -375,6 +398,11 @@ struct TORCH_API CompleteTensorType : public TensorType {
     if (rhs->kind() == TypeKind::TensorType)
       return *expect<TensorType>() ==  *rhs;
     return *this == *rhs;
+  }
+  bool isSubclass(const TypeKind kind) const override {
+    return kind == TypeKind::DynamicType ||
+           kind == TypeKind::TensorType ||
+           kind == TypeKind::CompleteTensorType;
   }
   std::string str() const override {
     // str is used for user-facing error messages, where we
@@ -461,6 +489,7 @@ struct TORCH_API ListType : public SingleElementType<TypeKind::ListType, ListTyp
   static ListTypePtr create( T&& ... all ) {
     return ListTypePtr(new ListType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
+  DEFINE_IS_SUBCLASS(ListType);
   std::string str() const override {
     std::stringstream ss;
     ss << getElementType()->str() << "[]";
@@ -492,6 +521,9 @@ struct TORCH_API FutureType : public Type {
   static FutureTypePtr create(TypePtr elem) {
     return FutureTypePtr(new FutureType(std::move(elem))); // NOLINT(modernize-make-shared)
   }
+
+  DEFINE_IS_SUBCLASS(FutureType);
+
   bool operator==(const Type& rhs) const override {
     if (auto rhs_ = rhs.cast<FutureType>()) {
       return *getElementType() == *rhs_->getElementType();
@@ -535,6 +567,7 @@ struct TORCH_API TupleType : public Type {
   static TupleTypePtr create(std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType( std::move(types) )); // NOLINT(modernize-make-shared)
   }
+  DEFINE_IS_SUBCLASS(TupleType);
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
   }
@@ -621,6 +654,7 @@ struct TORCH_API NumberType : public Type {
   static NumberTypePtr create() {
     return NumberTypePtr(new NumberType()); // NOLINT(modernize-make-shared)
   }
+  DEFINE_IS_SUBCLASS(NumberType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -642,6 +676,7 @@ struct TORCH_API FloatType : public Type {
   static FloatTypePtr create() {
     return FloatTypePtr(new FloatType()); // NOLINT(modernize-make-shared)
   }
+  DEFINE_IS_SUBCLASS(FloatType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -669,6 +704,7 @@ struct TORCH_API IntType : public Type {
   static IntTypePtr create() {
     return IntTypePtr(new IntType()); // NOLINT(modernize-make-shared)
   }
+  DEFINE_IS_SUBCLASS(IntType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -696,6 +732,7 @@ struct TORCH_API BoolType : public Type {
   static BoolTypePtr create( ) {
     return BoolTypePtr(new BoolType());
   }
+  DEFINE_IS_SUBCLASS(BoolType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -720,6 +757,7 @@ struct TORCH_API StringType : public Type {
   static StringTypePtr create() {
     return StringTypePtr(new StringType()); // NOLINT(modernize-make-shared)
   }
+  DEFINE_IS_SUBCLASS(StringType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -747,6 +785,7 @@ struct NoneType : public Type {
   static NoneTypePtr create() {
     return NoneTypePtr(new NoneType()); // NOLINT(modernize-make-shared)
   }
+  DEFINE_IS_SUBCLASS(NoneType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -774,6 +813,7 @@ struct GeneratorType : public Type {
   static GeneratorTypePtr create() {
     return GeneratorTypePtr(new GeneratorType()); // NOLINT(modernize-make-shared)
   }
+  DEFINE_IS_SUBCLASS(GeneratorType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -796,6 +836,7 @@ struct VarType : public Type {
   static VarTypePtr create(std::string name_) {
     return VarTypePtr(new VarType(std::move(name_)));
   }
+  DEFINE_IS_SUBCLASS(VarType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
