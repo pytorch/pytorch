@@ -80,7 +80,7 @@ RegisterOperators reg({
             }
 
             drop(stack, num_inputs);
-            stack.push_back(ss.str());
+            push(stack, ss.str());
             return 0;
           };
         })
