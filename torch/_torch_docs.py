@@ -4689,7 +4689,7 @@ Example::
 
 add_docstr(torch.roll,
            r"""
-roll(input, shifts, dims) -> Tensor
+roll(input, shifts, dims=None) -> Tensor
 
 Roll the tensor along the given dimension. Elements that are shifted beyond the
 last position are re-introduced at the first position. If a dimension is not

@@ -74,9 +74,9 @@ Tensor roll_cpu(const Tensor& self, IntList shifts, IntList dims) {
   int64_t start = (size - shifts[0]) % size;
   // Behavior of % is different in C++ vs Python for negative numbers. This
   // corrects the difference.
-  if (start < 0)
+  if (start < 0) {
     start = start + size;
-
+  }
   auto tensors = self.unbind(dim);
   std::vector<Tensor> vec = std::vector<Tensor>(size);
   int64_t index = 0;
