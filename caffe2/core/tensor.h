@@ -440,8 +440,9 @@ class CAFFE2_API Tensor final {
   }
 };
 
-void ReinitializeTensor(Tensor* t, at::IntList dims, at::TensorOptions options);
-void ReinitializeAndCopyFrom(
+CAFFE2_API void ReinitializeTensor(Tensor* t, at::IntList dims, at::TensorOptions options);
+
+CAFFE2_API void ReinitializeAndCopyFrom(
     Tensor* t,
     at::TensorOptions options,
     const Tensor& src,
