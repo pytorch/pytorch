@@ -1056,7 +1056,8 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
     """
     if dim is None:
         dim = _get_softmax_dim('softmax', input.dim(), _stacklevel)
-    dim = torch.jit._unwrap_optional(dim)
+    else:
+        dim = torch.jit._unwrap_optional(dim)
     if dtype is None:
         ret = input.softmax(dim)
     else:
