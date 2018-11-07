@@ -1,5 +1,5 @@
-#include <ATen/cuda/Exceptions.h>
 #include "CUDATest.hpp"
+#include <ATen/cuda/Exceptions.h>
 
 namespace c10d {
 namespace test {
