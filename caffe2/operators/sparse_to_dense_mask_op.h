@@ -252,6 +252,7 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
 
     char* output_data =
         static_cast<char*>(output->raw_mutable_data(gradient_output.dtype()));
+    memset(output_data, 0, output->nbytes());
     math::Set<char, Context>(
         default_length * gradient_output.itemsize(), 0, output_data, &context_);
 
