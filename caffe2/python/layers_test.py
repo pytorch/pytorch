@@ -2018,3 +2018,40 @@ class TestLayers(LayersTestCase):
         workspace.RunNetOnce(pred_net)
         output = workspace.FetchBlob(ws_output())
         npt.assert_almost_equal(get_blob_weighted_sum(), output, decimal=5)
+
+    def testSplit(self):
+        input_record = self.new_record(schema.Scalar((np.float32, (6,))))
+        X = np.random.rand(6, 6).astype(np.float32)
+        schema.FeedRecord(input_record, [X])
+        self.model.output_schema = schema.Struct()
+        num_splits = 3
+
+        # split along axis 0
+        split_blobs_0 = self.model.Split(input_record, num_splits, axis=0)
+        expected_output_schema = schema.Tuple(*[
+            schema.Scalar((np.float32, 6))
+            for i in range(num_splits)
+        ])
+        self.assertEqual(expected_output_schema, split_blobs_0)
+
+        pred_net = self.get_predict_net()
+        workspace.RunNetOnce(pred_net)
+
+        for i, split_expected in enumerate(np.array_split(X, num_splits, axis=0)):
+            result = workspace.FetchBlob(split_blobs_0[i].field_blobs()[0])
+            npt.assert_allclose(split_expected, result, atol=1e-4, rtol=1e-4)
+
+        # split along axis 1
+        split_blobs_1 = self.model.Split(input_record, num_splits, axis=1)
+        expected_output_schema = schema.Tuple(*[
+            schema.Scalar((np.float32, 2))
+            for i in range(num_splits)
+        ])
+        self.assertEqual(expected_output_schema, split_blobs_1)
+
+        pred_net = self.get_predict_net()
+        workspace.RunNetOnce(pred_net)
+
+        for i, split_expected in enumerate(np.array_split(X, num_splits, axis=1)):
+            result = workspace.FetchBlob(split_blobs_1[i].field_blobs()[0])
+            npt.assert_allclose(split_expected, result, atol=1e-4, rtol=1e-4)

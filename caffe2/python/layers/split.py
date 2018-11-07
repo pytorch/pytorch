@@ -16,25 +16,28 @@ class Split(ModelLayer):
     def __init__(self, model, input_record, num_splits, axis=1,
                  name='split', **kwargs):
         super(Split, self).__init__(model, name, input_record, **kwargs)
-        self.axis = axis
-        # Assume that first dimension is batch, so actual axis in shape is
-        # axis - 1
-        axis -= 1
-        assert axis >= 0
-
         assert isinstance(input_record, schema.Scalar),\
             "Incorrect input type. Excpected Scalar, but received: {0}".\
             format(input_record)
 
         input_shape = input_record.field_type().shape
-        assert len(input_shape) >= axis
-        assert input_shape[axis] % num_splits == 0
+        assert axis >= 0, "axis should be non-negative."
+        self.axis = axis
 
-        output_shape = list(input_shape)
-        output_shape[axis] = int(output_shape[axis] / num_splits)
+        if axis >= 1:
+            # Assume that first dimension is batch, so actual axis in shape is
+            # axis - 1
+            axis -= 1
+            assert axis >= 0
+            assert len(input_shape) >= axis
+            assert input_shape[axis] % num_splits == 0
+
+            output_shape = list(input_shape)
+            output_shape[axis] = int(output_shape[axis] / num_splits)
+        else:
+            output_shape = input_shape
 
         data_type = input_record.field_type().base
-
         output_scalars = [
             schema.Scalar(
                 (data_type, output_shape),
@@ -42,6 +45,7 @@ class Split(ModelLayer):
             )
             for i in range(num_splits)
         ]
+
         self.output_schema = schema.Tuple(*output_scalars)
 
     def add_ops(self, net):
