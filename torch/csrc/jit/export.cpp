@@ -492,7 +492,7 @@ void ModuleEncoder::EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto, c
   EncodeTypeInfo(graph_proto, v, n->type(), n->uniqueName());
 }
 
-std::string getBaseTypeDenotation(TypeKind& kind) {
+c10::optional<std::string> getBaseTypeDenotation(TypeKind& kind) {
   if (kind == TypeKind::NumberType) {
     return "NumberType";
   } else if (kind == TypeKind::FloatType) {
@@ -508,7 +508,7 @@ std::string getBaseTypeDenotation(TypeKind& kind) {
   } else if (kind == TypeKind::StringType) {
     return "StringType";
   }
-  throw std::runtime_error("unexpected type kind");
+  return c10::nullopt;
 }
 
 void ModuleEncoder::EncodeTypeInfo(
@@ -580,10 +580,17 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("TypeVar:" + type->expect<VarType>()->name());
   } else if (kind == TypeKind::OptionalType) {
     auto elem_kind = type->expect<OptionalType>()->getElementType()->kind();
-    type_proto->set_denotation(
-        "OptionalType:" + getBaseTypeDenotation(elem_kind));
+    auto elem_denotation = getBaseTypeDenotation(elem_kind);
+    if (!elem_denotation) {
+      throw std::runtime_error("unexpected type kind on optional element");
+    }
+    type_proto->set_denotation("OptionalType:" + *elem_denotation);
   } else {
-    type_proto->set_denotation(getBaseTypeDenotation(kind));
+    auto denotation = getBaseTypeDenotation(kind);
+    if (!denotation) {
+      throw std::runtime_error("unexpected type kind");
+    }
+    type_proto->set_denotation(*denotation);
   }
 }
 
