@@ -17,7 +17,7 @@ TEST(NoGradTest, SetsGradModeCorrectly) {
   torch::Tensor s = y.sum();
 
   s.backward();
-  ASSERT_FALSE(model->parameters()["weight"].grad().defined());
+  ASSERT_FALSE(model->weight.grad().defined());
 }
 
 struct AutogradTest : torch::test::SeedingFixture {

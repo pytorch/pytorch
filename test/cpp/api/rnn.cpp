@@ -111,8 +111,8 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   // Make sure the outputs match pytorch outputs
   LSTM model(2, 2);
   for (auto& v : model->parameters()) {
-    float size = v->numel();
-    auto p = static_cast<float*>(v->storage().data());
+    float size = v.numel();
+    auto p = static_cast<float*>(v.storage().data());
     for (size_t i = 0; i < size; i++) {
       p[i] = i / size;
     }
