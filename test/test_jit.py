@@ -7734,6 +7734,20 @@ a")
         ge_graph = jit_trace.__getattr__('forward').graph_for(x, y, c)
         self.assertExpectedGraph(ge_graph, 'jit')
 
+    def test_pyop_exception_message(self):
+        class Foo(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.conv = nn.Conv2d(1, 10, kernel_size=5)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.conv(x)
+        foo = Foo()
+        # testing that the correct error message propagates
+        with self.assertRaisesRegex(RuntimeError, "Expected 4-dimensional input for 4-dimensional weight"):
+            foo(torch.ones([123]))  # wrong size
+
     def test_exceptions(self):
         cu = torch.jit.CompilationUnit('''
             def foo(cond):
