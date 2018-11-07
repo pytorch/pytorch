@@ -334,7 +334,7 @@ void testFromQualString() {
     try {
       Symbol::fromQualString(input);
       ASSERT_TRUE(0);
-    } catch (std::runtime_error c) {
+    } catch (const std::exception& c) {
     }
   }
 }
