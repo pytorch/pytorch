@@ -1,10 +1,12 @@
 #include "fully_connected_dnnlowp_op.h"
+
+#include <chrono>
+
 #include "c10/util/Flags.h"
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/utils/cpuid.h"
+#include "fbgemm_pack_matrix_cache.h"
 #include "mmio.h"
-
-#include <chrono>
 
 C10_DEFINE_bool(
     dnnlowp_enforce_default_caffe2_operators, false,
@@ -446,14 +448,14 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
 
       if (fast_path) {
         // fast path using fbgemm
-        Wq_packed_.reset(new fbgemm2::PackBMatrix<int8_t, int32_t>(
+        Wq_packed_ = GetOrCreateFbgemmPackBMatrix<int32_t>(
             fbgemm2::matrix_op_t::Transpose,
-            K, N,
-            reinterpret_cast<const int8_t *>(W_quantized_.data()),
+            K,
+            N,
+            W.raw_data(),
+            reinterpret_cast<const int8_t*>(W_quantized_.data()),
             K, // ld
-            nullptr, // pmat
-            1, // groups
-            in_qparams_[1].zero_point));
+            in_qparams_[1].zero_point);
       } else {
         string reason;
         if (!is_same<T, uint8_t>::value) {
