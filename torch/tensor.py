@@ -227,7 +227,7 @@ class Tensor(torch._C._TensorBase):
         This is a no-op if the underlying storage is already in shared memory
         and for CUDA tensors. Tensors in shared memory cannot be resized.
         """
-        if not self.allow_shape_or_storage_change:
+        if not self.allow_size_or_storage_change:
             raise RuntimeError("share_memory_ is not allowed on Tensor created from .data or .detach()")
         self.storage().share_memory_()
         return self

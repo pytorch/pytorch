@@ -201,10 +201,10 @@ static PyObject * THPVariable_get_data(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto var = make_variable(self->cdata.data(), false);
-  /// NOTE: we need to set `allow_shape_or_storage_change_` to false, because changing
+  /// NOTE: we need to set `allow_size_or_storage_change_` to false, because changing
   /// shape or storage of `tensor.data` will not update `tensor` in the near future
   /// when VariableImpl and TensorImpl are merged.
-  var.set_allow_shape_or_storage_change(false);
+  var.set_allow_size_or_storage_change(false);
   return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
@@ -378,11 +378,11 @@ PyObject *THPVariable_is_sparse(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPVariable_allow_shape_or_storage_change(THPVariable *self)
+PyObject *THPVariable_allow_size_or_storage_change(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  return torch::autograd::utils::wrap(self_.allow_shape_or_storage_change());
+  return torch::autograd::utils::wrap(self_.allow_size_or_storage_change());
   END_HANDLE_TH_ERRORS
 }
 
@@ -425,7 +425,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
   {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
-  {"allow_shape_or_storage_change", (getter)THPVariable_allow_shape_or_storage_change, nullptr, nullptr, nullptr},
+  {"allow_size_or_storage_change", (getter)THPVariable_allow_size_or_storage_change, nullptr, nullptr, nullptr},
   {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},

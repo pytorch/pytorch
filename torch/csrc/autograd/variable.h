@@ -186,7 +186,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// Returns a copy of this `Variable` that is detached from its autograd graph
   /// and has a blank version. This method is OK to call if the `Variable` is a
   /// view.
-  /// NOTE: This will set `allow_shape_or_storage_change_` to false, because changing
+  /// NOTE: This will set `allow_size_or_storage_change_` to false, because changing
   /// shape or storage of a detached Variable will not update the original Variable
   /// in the near future when VariableImpl and TensorImpl are merged.
   Variable detach() const;
@@ -267,8 +267,8 @@ struct TORCH_API Variable : public at::Tensor {
   PyObject* pyobj() const noexcept;
   void set_pyobj(PyObject* pyobj) noexcept;
 
-  void set_allow_shape_or_storage_change(bool value);
-  bool allow_shape_or_storage_change() const noexcept;
+  void set_allow_size_or_storage_change(bool value);
+  bool allow_size_or_storage_change() const noexcept;
 
  private:
   /// Private implementation struct of the `Variable`. This struct declaration
@@ -369,7 +369,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 
   bool is_view_;
 
-  bool allow_shape_or_storage_change_ = true;
+  bool allow_size_or_storage_change_ = true;
 
   // The "output number" of this variable; e.g., if this variable
   // was the second output of a function, then output_nr == 1.
@@ -594,7 +594,7 @@ inline std::shared_ptr<Function> Variable::grad_accumulator() const {
 
 inline Variable Variable::detach() const {
   auto var = make_variable_view(*this, get()->data_, /*is_differentiable=*/false);
-  var.set_allow_shape_or_storage_change(false);
+  var.set_allow_size_or_storage_change(false);
   return var;
 }
 
@@ -692,12 +692,12 @@ inline PyObject* Variable::pyobj() const noexcept {
   return get()->pyobj_;
 }
 
-inline void Variable::set_allow_shape_or_storage_change(bool value) {
-  get()->allow_shape_or_storage_change_ = value;
+inline void Variable::set_allow_size_or_storage_change(bool value) {
+  get()->allow_size_or_storage_change_ = value;
 }
 
-inline bool Variable::allow_shape_or_storage_change() const noexcept {
-  return get()->allow_shape_or_storage_change_;
+inline bool Variable::allow_size_or_storage_change() const noexcept {
+  return get()->allow_size_or_storage_change_;
 }
 
 // Private Methods

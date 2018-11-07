@@ -291,7 +291,7 @@ Tensor & VariableType::resize_(Tensor & self, IntList size) const {
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
-  if (!as_variable_ref(self).allow_shape_or_storage_change()) {
+  if (!as_variable_ref(self).allow_size_or_storage_change()) {
     AT_ERROR("resize_ is not allowed on Tensor created from .data or .detach()");
   }
   if (torch::jit::tracer::isTracing()) {
@@ -309,7 +309,7 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
-  if (!as_variable_ref(self).allow_shape_or_storage_change()) {
+  if (!as_variable_ref(self).allow_size_or_storage_change()) {
     AT_ERROR("resize_as_ is not allowed on Tensor created from .data or .detach()");
   }
   if (torch::jit::tracer::isTracing()) {
@@ -362,7 +362,7 @@ Tensor & VariableType::detach_(Tensor & self) const {
 
 Tensor & VariableType::set_(Tensor & self, Storage source) const {
   profiler::RecordFunction profiler("set_", Function::peek_at_next_sequence_nr());
-  if (!as_variable_ref(self).allow_shape_or_storage_change()) {
+  if (!as_variable_ref(self).allow_size_or_storage_change()) {
     AT_ERROR("set_ is not allowed on Tensor created from .data or .detach()");
   }
   TypeDefault::set_(self, source);
@@ -370,7 +370,7 @@ Tensor & VariableType::set_(Tensor & self, Storage source) const {
 }
 Tensor & VariableType::set_(Tensor & self, Storage source, int64_t storage_offset, IntList size, IntList stride) const {
   profiler::RecordFunction profiler("set_", Function::peek_at_next_sequence_nr());
-  if (!as_variable_ref(self).allow_shape_or_storage_change()) {
+  if (!as_variable_ref(self).allow_size_or_storage_change()) {
     AT_ERROR("set_ is not allowed on Tensor created from .data or .detach()");
   }
   TypeDefault::set_(self, source, storage_offset, size, stride);
@@ -378,7 +378,7 @@ Tensor & VariableType::set_(Tensor & self, Storage source, int64_t storage_offse
 }
 Tensor & VariableType::set_(Tensor & self, const Tensor & source) const {
   profiler::RecordFunction profiler("set_", Function::peek_at_next_sequence_nr());
-  if (!as_variable_ref(self).allow_shape_or_storage_change()) {
+  if (!as_variable_ref(self).allow_size_or_storage_change()) {
     AT_ERROR("set_ is not allowed on Tensor created from .data or .detach()");
   }
   torch::jit::Node* node = nullptr;
@@ -403,7 +403,7 @@ Tensor & VariableType::set_(Tensor & self, const Tensor & source) const {
 }
 Tensor & VariableType::set_(Tensor & self) const {
   profiler::RecordFunction profiler("set_", Function::peek_at_next_sequence_nr());
-  if (!as_variable_ref(self).allow_shape_or_storage_change()) {
+  if (!as_variable_ref(self).allow_size_or_storage_change()) {
     AT_ERROR("set_ is not allowed on Tensor created from .data or .detach()");
   }
   torch::jit::Node* node = nullptr;
