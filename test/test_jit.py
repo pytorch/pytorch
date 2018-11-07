@@ -8253,6 +8253,7 @@ a")
         self.assertEqual(unify_to_optional(True), None)
         self.assertEqual(unify_to_optional(False), 2)
 
+
 class MnistNet(nn.Module):
     def __init__(self):
         super(MnistNet, self).__init__()
