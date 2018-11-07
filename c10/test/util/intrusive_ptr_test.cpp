@@ -1,4 +1,4 @@
-#include "ATen/core/intrusive_ptr.h"
+#include <C10/util/intrusive_ptr.h>
 
 #include <gtest/gtest.h>
 #include <map>
