@@ -24,8 +24,9 @@
 #define FIXED_DIVISOR_MOD(d, n) (n % d)
 #define FIXED_DIVISOR_DIV_MOD(d, n, q, r) \
   do {                                    \
-    *q = n / d;                           \
-    *r = n % d;                           \
+    const auto n_copy = n;                \
+    *q = n_copy / d;                      \
+    *r = n_copy % d;                      \
   } while (0)
 #else // __HIPCC__
 #define FIXED_DIVISOR FixedDivisor<int32_t>
