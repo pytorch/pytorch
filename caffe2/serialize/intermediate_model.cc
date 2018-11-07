@@ -42,7 +42,7 @@ void IntermediateTensor::update(
   switch (storage_type) {
     case caffe2::TensorProto_StorageType_TYPED:
       // TODO
-      AT_ERROR("Storing data in typed field is not suppored yet!");
+      AT_ERROR("Storing data in typed field is not supported yet!");
     case caffe2::TensorProto_StorageType_RAW:
       // TODO
       AT_ERROR("Storing data in raw field is not supported yet!");

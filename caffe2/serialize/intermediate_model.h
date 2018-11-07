@@ -220,12 +220,12 @@ class CAFFE2_API IntermediateParameter final {
 class CAFFE2_API IntermediateMethod final {
  public:
   // constructors
-  IntermediateMethod(){};
+  IntermediateMethod() = default;
 
   explicit IntermediateMethod(torch::MethodDef* method_def);
 
-  IntermediateMethod(IntermediateMethod&& method) = default;
-  IntermediateMethod& operator=(IntermediateMethod&& method) = default;
+  IntermediateMethod(IntermediateMethod&&) = default;
+  IntermediateMethod& operator=(IntermediateMethod&&) = default;
 
   C10_DISABLE_COPY_AND_ASSIGN(IntermediateMethod);
 
