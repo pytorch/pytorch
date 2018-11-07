@@ -265,10 +265,11 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
           pushd "$pb_dir" && ./configure && make && make check && sudo make install && sudo ldconfig
           popd
           rm -rf $pb_dir
+          echo "after install which protoc is $(which protoc) with version $(protoc --version)"
         fi
 
         # Install Cython
-        pip -q install --user Cython
+        pip -q install Cython
 
         # Test
         ./.jenkins/caffe2/test.sh
