@@ -44,7 +44,7 @@ TEST(UtilityOpGPUTest, testReshapeWithScalar) {
   EXPECT_TRUE(op->Run());
   Blob* XNew = ws.GetBlob("XNew");
   const Tensor& XNewTensor = XNew->Get<Tensor>();
-  EXPECT_EQ(1, XNewTensor.ndim());
+  EXPECT_EQ(1, XNewTensor.dim());
   EXPECT_EQ(1, XNewTensor.numel());
 }
 
