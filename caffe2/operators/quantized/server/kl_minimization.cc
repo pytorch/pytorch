@@ -27,7 +27,9 @@ TensorQuantizationParams KLDivergenceMinimization::ChooseQuantizationParams(
   // Look at mapping [start_bin, start_bin + nbins_selected) to
   // [0, 1 << precision) for every (start_bin, nbins_selected) combination and
   // pick the one with smallest KL divergence
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int nbins_selected = 1; nbins_selected <= nbins; ++nbins_selected) {
     //if (nbins_selected % dst_nbins != 0) continue;
     double kl_min = numeric_limits<double>::max();

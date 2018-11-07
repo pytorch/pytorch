@@ -157,7 +157,7 @@ class FullyConnectedFakeLowpFPOp final : public Operator<Context> {
     const auto& W = Input(1);
     const auto& b = Input(2);
     auto* Y = Output(0);
-    CAFFE_ENFORCE(b.ndim() == 1, b.ndim());
+    CAFFE_ENFORCE(b.dim() == 1, b.dim());
     // batch size
     const auto canonical_axis = X.canonical_axis_index(axis_);
     const auto M = X.size_to_dim(canonical_axis);
@@ -191,7 +191,11 @@ class FullyConnectedFakeLowpFPOp final : public Operator<Context> {
     CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
     CAFFE_ENFORCE(N == b.size(), dimErrorString());
 
-    LOG_EVERY_N(INFO, nlines_log) << "FAKE_FP16 fc running";
+    static int log_occurences = 0;
+    if (log_occurences % nlines_log == 0) {
+      ++log_occurences;
+      LOG(INFO) << "FAKE_FP16 fc running";
+    }
 
     Y_shape_cache_ = X.sizes().vec();
     // This is an invariant of canonical_axis, so we can DCHECK.
@@ -393,7 +397,11 @@ class FullyConnectedGradientFakeLowpFPOp : public Operator<Context> {
       dYh.template mutable_data<T_DY>()
     );
 
-    LOG_EVERY_N(INFO, nlines_log) << "FAKE_FP16 fc grad running";
+    static int log_occurences = 0;
+    if (log_occurences % nlines_log == 0) {
+      ++log_occurences;
+      LOG(INFO) << "FAKE_FP16 fc grad running";
+    }
 
     // Compute dW
     math::Gemm<T_DY, Context, Engine>(

@@ -35,7 +35,9 @@ bool BatchPermutationDNNLowPOp<T>::RunOnDevice() {
   int N = X.dim32(0);
   int K = X.numel() / N;
 
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int i = 0; i < N; ++i) {
     int origIdx = i * K;
     int permuteIdx = indices_data[i] * K;

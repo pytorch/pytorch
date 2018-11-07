@@ -4,17 +4,19 @@
 #include "caffe2/operators/quantized/server/tanh.h"
 
 #include <map>
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
-DECLARE_int32(dnnlowp_activation_quantization_precision);
-DECLARE_int32(dnnlowp_weight_quantization_precision);
-DECLARE_int32(dnnlowp_requantization_multiplier_precision);
-DECLARE_int32(dnnlowp_eltwise_quantization_precision);
-DECLARE_bool(dnnlowp_force_scale_power_of_two);
-DECLARE_bool(dnnlowp_preserve_activation_sparsity);
-DECLARE_bool(dnnlowp_preserve_weight_sparsity);
-DECLARE_string(dnnlowp_activation_quantization_kind);
-DECLARE_string(dnnlowp_weight_quantization_kind);
+C10_DECLARE_int32(dnnlowp_activation_quantization_precision);
+C10_DECLARE_int32(dnnlowp_weight_quantization_precision);
+C10_DECLARE_int32(dnnlowp_requantization_multiplier_precision);
+C10_DECLARE_int32(dnnlowp_eltwise_quantization_precision);
+C10_DECLARE_bool(dnnlowp_force_scale_power_of_two);
+C10_DECLARE_bool(dnnlowp_preserve_activation_sparsity);
+C10_DECLARE_bool(dnnlowp_preserve_weight_sparsity);
+C10_DECLARE_string(dnnlowp_activation_quantization_kind);
+C10_DECLARE_string(dnnlowp_weight_quantization_kind);
 
 namespace dnnlowp {
 

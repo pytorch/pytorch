@@ -1,6 +1,8 @@
 #include "concat_dnnlowp_op.h"
 
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
 #include "dnnlowp_partition.h"
 
@@ -111,10 +113,12 @@ bool ConcatDNNLowPOp<T>::RunOnDevice() {
     auto axis_dim = add_axis_ ? 1 : input.dim32(axis_);
 
     vector<T> input_temp(input.numel());
+#ifdef _OPENMP
 #pragma omp parallel
+#endif
     {
-      int nthreads = omp_get_num_threads();
-      int tid = omp_get_thread_num();
+      int nthreads = dnnlowp_get_num_threads();
+      int tid = dnnlowp_get_thread_num();
       int before_begin, before_end;
       int after_begin, after_end;
 

@@ -33,7 +33,7 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   const auto& dnorm = Input(1);
   auto* dX = Output(0);
-  CAFFE_ENFORCE_EQ(dnorm.ndim(), 1);
+  CAFFE_ENFORCE_EQ(dnorm.dim(), 1);
   CAFFE_ENFORCE_EQ(dnorm.dim32(0), 1);
   dX->ResizeLike(X);
   const float size = average_ ? (float)X.numel() : 1.0f;

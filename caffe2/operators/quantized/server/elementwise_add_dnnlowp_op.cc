@@ -48,7 +48,9 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
                 real_multiplier, intermediate_qparams_);
 
         const T* input_data = InputTensorCPU_(i).template data<T>();
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
         for (int j = 0; j < InputTensorCPU_(i).numel(); ++j) {
           quantized_in[j] = Requantize<int32_t>(
               input_data[j] - in_qparams_[i].zero_point,
@@ -57,7 +59,9 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
       } else {
         assert(A.template IsType<float>());
         const float* input_data = InputTensorCPU_(i).template data<float>();
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
         for (int j = 0; j < InputTensorCPU_(i).numel(); ++j) {
           quantized_in[j] = Quantize<uint32_t>(
               input_data[j],
@@ -78,13 +82,17 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
           A.sizes(),
           B.sizes(),
           "Dimension mismatch - did you forget to set broadcast=1?");
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
       for (int i = 0; i < C->numel(); ++i) {
         int32_t raw = A_quantized[i] + B_quantized[i] - intermediate_zero_point;
         C_quantized[i] = Requantize<T>(raw, requantization_params_);
       }
     } else if (B.numel() == 1) {
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
       for (int i = 0; i < C->numel(); ++i) {
         int32_t raw = A_quantized[i] + B_quantized[0] - intermediate_zero_point;
         C_quantized[i] = Requantize<T>(raw, requantization_params_);
@@ -93,7 +101,9 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
       size_t pre, n, post;
       std::tie(pre, n, post) =
           elementwise_ops_utils::ComputeLegacyBroadcastSizes(A, B, axis_);
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
       for (int i = 0; i < pre; ++i) {
         for (int j = 0; j < n; ++j) {
           for (int k = 0; k < post; ++k) {

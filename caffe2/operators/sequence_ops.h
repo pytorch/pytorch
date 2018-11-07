@@ -40,7 +40,7 @@ class GatherPaddingOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& in = Input(0);
-    CAFFE_ENFORCE_GE(in.ndim(), 1);
+    CAFFE_ENFORCE_GE(in.dim(), 1);
     const int32_t outer_size = in.sizes()[0];
     const auto block_size = in.size_from_dim(1);
     const auto pad_width = startPaddingWidth_ + endPaddingWidth_;
@@ -168,7 +168,7 @@ class AddPaddingOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& in = Input(0);
-    CAFFE_ENFORCE_GE(in.ndim(), 1);
+    CAFFE_ENFORCE_GE(in.dim(), 1);
     const int32_t outer_size = in.sizes()[0];
     const auto block_size = in.size_from_dim(1);
 

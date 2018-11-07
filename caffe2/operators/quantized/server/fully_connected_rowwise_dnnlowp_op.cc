@@ -325,7 +325,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::GetQuantizationParameters_() {
   }
 
   if (Wq_packed_) {
-    W_quantized_.clear();
+    vector<T_signed>().swap(W_quantized_);
   }
   if (!is_weight_constant_ || b_quantized_.empty()) {
       // Quantize bias

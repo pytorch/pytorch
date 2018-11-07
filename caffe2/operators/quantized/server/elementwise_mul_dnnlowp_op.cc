@@ -1,4 +1,4 @@
-#include "caffe2/caffe2/operators/elementwise_mul_op.h"
+#include "caffe2/operators/elementwise_mul_op.h"
 #include "caffe2/operators/quantized/server/elementwise_dnnlowp_op.h"
 #include "caffe2/operators/quantized/server/op_wrapper.h"
 #include "caffe2/operators/quantized/server/sigmoid.h"
@@ -50,14 +50,18 @@ class MulDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, MulFp32Op> {
           A.sizes(),
           B.sizes(),
           "Dimension mismatch - did you forget to set broadcast=1?");
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
       for (int i = 0; i < C->size(); ++i) {
         int32_t raw = (A_quantized[i] - in_qparams_[0].zero_point) *
             (B_quantized[i] - in_qparams_[1].zero_point);
         C_quantized[i] = Requantize<T>(raw, requantization_params_);
       }
     } else if (B.size() == 1) {
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
       for (int i = 0; i < C->size(); ++i) {
         int32_t raw = (A_quantized[i] - in_qparams_[0].zero_point) *
             (B_quantized[0] - in_qparams_[1].zero_point);
@@ -67,7 +71,9 @@ class MulDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, MulFp32Op> {
       size_t pre, n, post;
       std::tie(pre, n, post) =
           elementwise_ops_utils::ComputeLegacyBroadcastSizes(A, B, axis_);
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
       for (int i = 0; i < pre; ++i) {
         for (int j = 0; j < n; ++j) {
           for (int k = 0; k < post; ++k) {

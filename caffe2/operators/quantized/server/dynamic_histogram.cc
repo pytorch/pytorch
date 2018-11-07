@@ -1,10 +1,13 @@
 #include "dynamic_histogram.h"
+#include "dnnlowp_op.h"
 
 #include <cassert>
 #include <limits>
 #include <cmath>
 
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
 namespace dnnlowp {
 
@@ -28,18 +31,20 @@ void Histogram::Add(const float* f, int len) {
   if (bin_width > 0.0) {
     assert(per_thread_histogram_.size() % nbins == 0);
 
-    // Check if omp_get_max_threads has been reduced, and if so reduce
+    // Check if dnnlowp_get_max_threads has been reduced, and if so reduce
     // per-thread histogram and clear them.
     int old_nthreads = per_thread_histogram_.size() / nbins + 1;
-    if (omp_get_max_threads() < old_nthreads) {
+    if (caffe2::dnnlowp_get_max_threads() < old_nthreads) {
       Finalize();
     }
 
-    per_thread_histogram_.resize((omp_get_max_threads() - 1) * nbins);
+    per_thread_histogram_.resize((caffe2::dnnlowp_get_max_threads() - 1) * nbins);
 
+#ifdef _OPENMP
 #pragma omp parallel
+#endif
     {
-      int tid = omp_get_thread_num();
+      int tid = caffe2::dnnlowp_get_thread_num();
 
       uint64_t* my_histogram = nullptr;
       if (tid == 0) {
@@ -48,7 +53,9 @@ void Histogram::Add(const float* f, int len) {
         my_histogram = per_thread_histogram_.data() + (tid - 1) * nbins;
       }
 
+#ifdef _OPENMP
 #pragma omp for
+#endif
       for (auto i = 0; i < len; ++i) {
         int bin =
             std::min(static_cast<int>((f[i] - min_) / bin_width), nbins - 1);
@@ -125,7 +132,9 @@ void DynamicHistogram::Add(float f) {
 
 void DynamicHistogram::Add(const float* f, int len) {
   float minimum = min_, maximum = max_;
+#ifdef _OPENMP
 #pragma omp parallel for reduction(min : minimum) reduction(max : maximum)
+#endif
   for (int i = 0; i < len; ++i) {
     minimum = std::min(f[i], minimum);
     maximum = std::max(f[i], maximum);
