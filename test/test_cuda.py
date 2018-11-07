@@ -379,12 +379,12 @@ tests = [
     ('remainder', small_3d, lambda t: [-3], 'negative_value', signed_types),
     ('remainder', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('remainder', small_3d, lambda t: [constant_tensor_sub(0, small_3d_positive(t))], 'negative_tensor', signed_types),
-    ('std', small_3d, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
-    ('std', small_3d, lambda t: [1], 'dim'),
-    ('std', small_3d, lambda t: [-1], 'neg_dim'),
-    ('var', small_3d, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
-    ('var', small_3d, lambda t: [1], 'dim'),
-    ('var', small_3d, lambda t: [-1], 'neg_dim'),
+    ('std', small_3d, lambda t: [], '', types, False, skipIfRocm),
+    ('std', small_3d, lambda t: [1], 'dim', types, False, skipIfRocm),
+    ('std', small_3d, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
+    ('var', small_3d, lambda t: [], '', types, False, skipIfRocm),
+    ('var', small_3d, lambda t: [1], 'dim', types, False, skipIfRocm),
+    ('var', small_3d, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
     ('ndimension', small_3d, lambda t: [],),
     ('nelement', small_3d, lambda t: [],),
     ('numel', small_3d, lambda t: [],),
@@ -1785,6 +1785,7 @@ class TestCuda(TestCase):
     def test_remainder_overflow(self):
         _TestTorchMixin._test_remainder_overflow(self, dtype=torch.int64, device='cuda')
 
+    @skipIfRocm
     def test_var(self):
         cpu_tensor = torch.randn(2, 3, 3)
         gpu_tensor = cpu_tensor.cuda()
@@ -1799,6 +1800,7 @@ class TestCuda(TestCase):
         gpu_tensor = cpu_tensor.cuda()
         self.assertEqual(gpu_tensor.var(), cpu_tensor.var())
 
+    @skipIfRocm
     def test_var_unbiased(self):
         tensor = torch.randn(100).cuda()
         self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
