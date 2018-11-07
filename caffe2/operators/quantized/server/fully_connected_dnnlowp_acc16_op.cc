@@ -105,7 +105,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
         K));
 
     if (is_weight_constant_) {
-      W_quantized_.clear();
+      vector<T_signed>().swap(W_quantized_);
     }
   }
 
