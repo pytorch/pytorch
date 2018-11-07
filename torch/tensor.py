@@ -178,7 +178,7 @@ class Tensor(torch._C._TensorBase):
       Returned Tensor uses the same data tensor as the original one.
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
-      In-place shape or storage changes (such as `resize_` / `resize_as_` / `set_` / `share_memory_`)
+      In-place size or storage changes (such as `resize_` / `resize_as_` / `set_` / `share_memory_`)
       on the returned tensor are disallowed, to ensure consistency with the original tensor.
     """)
 

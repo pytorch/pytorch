@@ -187,7 +187,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// and has a blank version. This method is OK to call if the `Variable` is a
   /// view.
   /// NOTE: This will set `allow_size_or_storage_change_` to false, because changing
-  /// shape or storage of a detached Variable will not update the original Variable
+  /// size or storage of a detached Variable will not update the original Variable
   /// in the near future when VariableImpl and TensorImpl are merged.
   Variable detach() const;
 
