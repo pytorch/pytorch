@@ -43,11 +43,11 @@ Tensor& _copy__cpu(Tensor& self, const Tensor& src) {
 
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's tricker
-Tensor& _copy_same_type_transpose__cpu(Tensor& self, const Tensor& src) {
+void _copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   const int64_t BLOCK_SZ = 60;
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
-  AT_DISPATCH_ALL_TYPES(self.type(), "_copy_same_type_transpose", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy_same_type_transpose_", [&]() {
     scalar_t* sp = src.data<scalar_t>();
     scalar_t* rp = self.data<scalar_t>();
     scalar_t* bp = buf.data<scalar_t>();
@@ -86,18 +86,17 @@ Tensor& _copy_same_type_transpose__cpu(Tensor& self, const Tensor& src) {
       }
     }
   });
-  return self;
 }
 
-Tensor& _copy_same_type__cpu(Tensor& self, const Tensor& src) {
+void _copy_same_type_(Tensor& self, const Tensor& src) {
   if (self.is_same(src)) {
-    return self;
+    return;
   }
 
   bool serial_path = false;
   if (self.numel() == src.numel()) {
     if (self.is_contiguous() && src.is_contiguous()) {
-      AT_DISPATCH_ALL_TYPES(self.type(), "_copy_same_type", [&]() {
+      AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy_same_type_", [&]() {
         scalar_t* self_ptr = self.data<scalar_t>();
         scalar_t* src_ptr = src.data<scalar_t>();
 
@@ -111,11 +110,11 @@ Tensor& _copy_same_type__cpu(Tensor& self, const Tensor& src) {
         parallel_for(0, self.numel(), /* grain_size= */ 800, sample);
       });
     } else if (copy_transpose_valid(self, src)) {
-      _copy_same_type_transpose__cpu(self, src);
+      _copy_same_type_transpose_(self, src);
     } else {
 #ifdef _OPENMP
       if (in_parallel_region()) {
-        AT_DISPATCH_ALL_TYPES(self.type(), "_copy_same_type", [&]() {
+        AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy_same_type_", [&]() {
           at::CPU_tensor_parallel_apply2<scalar_t, scalar_t>(
               self, src, [](scalar_t& self_val, const scalar_t& src_val) {
                 self_val = src_val;
@@ -133,14 +132,13 @@ Tensor& _copy_same_type__cpu(Tensor& self, const Tensor& src) {
   }
 
   if (serial_path) {
-    AT_DISPATCH_ALL_TYPES(self.type(), "_copy_same_type", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy_same_type_", [&]() {
       at::CPU_tensor_apply2<scalar_t, scalar_t>(
           self, src, [](scalar_t& self_val, const scalar_t& src_val) {
             self_val = src_val;
           });
     });
   }
-  return self;
 }
 
 } // namespace native
