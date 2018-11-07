@@ -147,7 +147,7 @@ std::vector<at::Tensor> scatter(
   } else {
     chunks = tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
   }
-  at::cuda::CUDAGuard cuda_guard;
+  at::cuda::MaybeCUDAStreamGuard cuda_guard;
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
     const auto device_index = static_cast<int16_t>(devices[chunk]);
     if (streams && (*streams)[chunk]) {

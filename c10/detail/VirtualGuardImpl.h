@@ -29,6 +29,9 @@ public:
   void uncheckedSetDevice(Device d) const noexcept override {
     impl_->uncheckedSetDevice(d);
   }
+  Stream exchangeStream(Stream s) const noexcept override {
+    return impl_->exchangeStream(s);
+  }
 private:
   const DeviceGuardImplInterface* impl_ = nullptr;
 };

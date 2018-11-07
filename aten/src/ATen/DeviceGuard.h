@@ -1,6 +1,8 @@
 #pragma once
 
 #include <c10/DeviceGuard.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/ScalarType.h> // TensorList whyyyyy
 
 namespace at {
 

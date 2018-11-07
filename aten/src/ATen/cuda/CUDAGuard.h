@@ -6,6 +6,7 @@
 #include <ATen/cuda/detail/CUDAGuardImpl.h>
 #include <c10/DeviceType.h>
 #include <c10/detail/InlineDeviceGuard.h>
+#include <c10/detail/InlineStreamGuard.h>
 
 #include <cstddef>
 #include <vector>
@@ -60,54 +61,24 @@ struct CUDAGuard {
 };
 
 using MaybeCUDAGuard = c10::detail::InlineMaybeDeviceGuard<detail::CUDAGuardImpl>;
-
-struct CUDAStreamGuard {
-  /// Sets the CUDA stream and its associated device as the current one (calls
-  /// `set_stream`).
-  explicit CUDAStreamGuard(const CUDAStream& stream)
-    : guard_(stream.device_index())
-    , original_stream_(getCurrentCUDAStream(stream.device_index())) {
-    setCurrentCUDAStream(stream);
-  }
-
-  /// Resets the CUDA stream on each device to the one that was active upon
-  /// construction.
-  ~CUDAStreamGuard() {
-    uncheckedSetCurrentCUDAStream(original_stream_);
-  }
-
-  /// Returns the CUDA stream that was active in the first call to
-  /// `set_stream`. If there was no such call, the returned container is
-  /// empty.
-  CUDAStream original_stream() const noexcept {
-    return original_stream_;
-  }
-
-  Device original_device() const noexcept {
-    return guard_.original_device();
-  }
-
-  Device current_device() const noexcept {
-    return guard_.current_device();
-  }
-
-private:
-  CUDAGuard guard_;
-  CUDAStream original_stream_;
-};
+using CUDAStreamGuard = c10::detail::InlineStreamGuard<detail::CUDAGuardImpl>;
+using MaybeCUDAStreamGuard = c10::detail::InlineMaybeStreamGuard<detail::CUDAGuardImpl>;
 
 struct CUDAMultiStreamGuard {
   /// Calls `set_stream` on each of the streams in the list.
   /// This may be useful if you need to set different streams
   /// for different devices.
-  explicit CUDAMultiStreamGuard(ArrayRef<CUDAStream> streams) {
+  explicit CUDAMultiStreamGuard(ArrayRef<CUDAStream> streams) : CUDAMultiStreamGuard() {
+    for (const auto& s : streams) {
+      setCurrentCUDAStream(s);
+    }
+  }
+
+  explicit CUDAMultiStreamGuard() {
     const size_t device_count = getNumGPUs();
     original_streams_.reserve(device_count);
     for (size_t device = 0; device < device_count; ++device) {
       original_streams_.push_back(getCurrentCUDAStream(device));
-    }
-    for (const auto& s : streams) {
-      setCurrentCUDAStream(s);
     }
   }
 

@@ -412,7 +412,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     AutoGradMode grad_mode(false);
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
-      at::DeviceGuard guard(output);
+      at::MaybeDeviceGuard guard(device_of(output));
       if (output.defined() && output.ne(output).any().item<uint8_t>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";

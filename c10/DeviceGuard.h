@@ -78,6 +78,9 @@ private:
 /// still reset the device to original_device.
 class MaybeDeviceGuard {
 public:
+  /// Create an uninitialized guard.  Set the guard later using set_device.
+  explicit MaybeDeviceGuard() : guard_() {}
+
   /// Initialize the guard, setting the current device to the passed Device.
   explicit MaybeDeviceGuard(Device device) : guard_(device) {}
 

@@ -30,7 +30,9 @@ namespace detail {
 template <typename T>
 class InlineDeviceGuard {
 public:
-  // Design note: in principle, we could add a default constructor to
+  // Note [Omitted default constructor from RAII]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // In principle, we could add a default constructor to
   // DeviceGuard which reads the current device and promises to
   // restore to that device on exit.  However, most cases where you
   // would have written this, you probably meant to actually just
@@ -102,8 +104,10 @@ public:
     return current_device_;
   }
 
-private:
+protected:
   T impl_;
+
+private:
   Device original_device_;
   Device current_device_;
 };
@@ -111,6 +115,8 @@ private:
 /**
  * A MaybeDeviceGuard is an RAII class that sets a device to some value on
  * initialization, and resets the device to its original value on destruction.
+ * Morally, a MaybeDeviceGuard is equivalent to optional<DeviceGuard>, but
+ * some methods are implemented more efficiently.
  *
  * Unlike DeviceGuard, a MaybeDeviceGuard may be uninitialized.  This occurs
  * when you use the nullary constructor, or pass a nullopt to the constructor.

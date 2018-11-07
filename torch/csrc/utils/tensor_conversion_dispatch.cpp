@@ -23,14 +23,10 @@ at::Tensor dispatch_type_conversion(
 
   // TODO: Make this less CUDA specific
   at::Device device = self.device();
+  at::MaybeDeviceGuard device_guard;
   if (device_index) {
-    if (*device_index == -1) {
-      device = at::kCPU;
-    } else {
-      device = at::Device(at::kCUDA, *device_index);
-    }
+    device_guard.set_device(at::Device(at::kCUDA, *device_index));
   }
-  at::DeviceGuard device_guard(device);
 
   if (self.device().type() == type.device_type()) {
     switch (self.device().type()) {

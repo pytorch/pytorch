@@ -89,6 +89,7 @@ struct AT_CUDA_API CUDAStream {
 
   // Implicit conversion to cudaStream_t
   operator cudaStream_t() const { return stream(); }
+  operator Stream() const { return unwrap(); }
 
   // Getters
   int64_t device_index() const { return stream_.device_index(); }

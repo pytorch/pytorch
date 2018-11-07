@@ -24,7 +24,7 @@ namespace torch { namespace autograd {
 struct VariableInfo {
   explicit VariableInfo(const Variable& var);
 
-  Variable zeros() const;
+  Variable zeros(at::MaybeDeviceGuard& device_guard) const;
 
   at::Type* type;
   at::Device device = at::kCPU;

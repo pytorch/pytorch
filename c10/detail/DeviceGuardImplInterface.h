@@ -73,7 +73,7 @@ struct C10_API DeviceGuardImplInterface {
    * Return the previous stream for that device. You are NOT required
    * to set the current device to match the device of this stream.
    */
-  // virtual Stream exchangeStream(Stream) const noexcept = 0;
+  virtual Stream exchangeStream(Stream) const noexcept = 0;
 
   /**
    * Intended use of this class is to leak the DeviceGuardImpl at program end.

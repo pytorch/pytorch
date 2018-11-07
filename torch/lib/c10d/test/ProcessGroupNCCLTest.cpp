@@ -49,7 +49,7 @@ class NCCLTest : public NCCLTestBase {
     // Each device has a single tensor to perf the NCCL op
     inputs_.resize(numDevices_);
     outputs_.resize(numDevices_);
-    at::cuda::CUDAGuard deviceGuard;
+    at::cuda::MaybeCUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; ++i) {
       deviceGuard.set_index(i);
       inputs_[i] = at::empty({3, 3}, at::kCUDA);
@@ -74,7 +74,7 @@ class NCCLTest : public NCCLTestBase {
   }
 
   void wait(std::shared_ptr<ProcessGroup::Work>& work) {
-    at::cuda::CUDAGuard guard(streams_);
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
     work->wait();
   }
 
@@ -82,7 +82,7 @@ class NCCLTest : public NCCLTestBase {
     std::vector<at::Tensor> outputs(numDevices_);
 
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAGuard guard(streams_);
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Copy inputs to outputs
     for (auto i = 0; i < numDevices_; i++) {
@@ -100,7 +100,7 @@ class NCCLTest : public NCCLTestBase {
     }
 
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAGuard guard(streams_);
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Copy inputs to outputs
     for (auto i = 0; i < numDevices_; ++i) {
@@ -132,10 +132,10 @@ class AllreduceNCCLTest : public NCCLTest {
 
   std::shared_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAGuard guard(streams_);
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every device
-    at::cuda::CUDAGuard deviceGuard;
+    at::cuda::MaybeCUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 2000 * 1000 * 1000);
@@ -158,10 +158,10 @@ class BroadcastNCCLTest : public NCCLTest {
 
   std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAGuard guard(streams_);
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every device
-    at::cuda::CUDAGuard deviceGuard;
+    at::cuda::MaybeCUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 2000 * 1000 * 1000);
@@ -187,10 +187,10 @@ class ReduceNCCLTest : public NCCLTest {
 
   std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAGuard guard(streams_);
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every device
-    at::cuda::CUDAGuard deviceGuard;
+    at::cuda::MaybeCUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 2000 * 1000 * 1000);
@@ -216,10 +216,10 @@ class AllgatherNCCLTest : public NCCLTest {
 
   std::shared_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
-    at::cuda::CUDAGuard guard(streams_);
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every device
-    at::cuda::CUDAGuard deviceGuard;
+    at::cuda::MaybeCUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 2000 * 1000 * 1000);
