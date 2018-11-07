@@ -9319,6 +9319,28 @@ class TestCustomOperators(JitTestCase):
         output_ref = torch.cat([a, b])
         self.assertEqual(output, output_ref)
 
+    def test_calling_scripted_custom_op(self):
+        @torch.jit.script
+        def func(x):
+            return torch.ops.aten.relu(x)
+        input = torch.ones(5, 5)
+        self.assertEqual(func(input), input.relu())
+
+    def test_calling_traced_custom_op(self):
+        input = torch.ones(5, 5)
+        func = torch.jit.trace(torch.ops.aten.relu, [input])
+        self.assertEqual(func(input), input.relu())
+
+    def test_script_graph_for_custom_ops_matches_traced_graph(self):
+        input = torch.ones(5, 5)
+        trace = torch.jit.trace(torch.ops.aten.relu, [input])
+        self.assertExpectedInline(canonical(trace.graph), '''\
+graph(%0 : Double(5, 5)) {
+  %1 : Double(5, 5) = aten::relu(%0)
+  return (%1);
+}
+''')
+
     def test_script_graph_contains_custom_op(self):
         @torch.jit.script
         def func(x):
@@ -9329,6 +9351,7 @@ graph(%x : Dynamic) {
   return (%1);
 }
 ''')
+
 
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
 # and we have to disable the failing tests here instead.
