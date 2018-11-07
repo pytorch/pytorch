@@ -463,7 +463,6 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
     LongTensor indices = at::zeros({mask._nnz()}, mask_indices.options());
     for (int64_t d = 0; d < mask.sparse_dim(); d++) {
       indices.mul_(mask.size(d));
-      // This used to use a buffer but I deoptimized it
       indices.add_(mask_indices.select(0, d));
     }
 

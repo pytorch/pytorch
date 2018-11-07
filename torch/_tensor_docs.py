@@ -1196,7 +1196,7 @@ add_docstr_all('sparse_mask',
 sparse_mask(input, mask) -> Tensor
 
 Returns a new SparseTensor with values from Tensor :attr:`input` filtered
-by indices of SparseTensor :attr:`mask`. :attr:`input` and :attr:`mask`
+by indices of :attr:`mask` and values are ignored. :attr:`input` and :attr:`mask`
 must have the same shape.
 
 Args:
