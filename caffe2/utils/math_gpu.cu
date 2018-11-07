@@ -23,16 +23,16 @@
 #define FIXED_DIVISOR_DIV(d, n) (n / d)
 #define FIXED_DIVISOR_MOD(d, n) (n % d)
 #define FIXED_DIVISOR_DIV_MOD(d, n, q, r) \
-    do {                                  \
-        *q = n / d;                       \
-        *r = n % d;                       \
-    } while (0)
-#else  // __HIPCC__
+  do {                                    \
+    *q = n / d;                           \
+    *r = n % d;                           \
+  } while (0)
+#else // __HIPCC__
 #define FIXED_DIVISOR FixedDivisor<int32_t>
 #define FIXED_DIVISOR_DIV(d, n) (d.Div(n))
 #define FIXED_DIVISOR_MOD(d, n) (d.Mod(n))
 #define FIXED_DIVISOR_DIV_MOD(d, n, q, r) (d.DivMod(n, q, r))
-#endif  // __HIPCC__
+#endif // __HIPCC__
 
 #include "caffe2/utils/math_utils.h"
 
@@ -743,7 +743,7 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
     CUDAContext* context,
     TensorProto::DataType math_type) {
 #if defined(__HIPCC__) && !ROCBLAS_FP16
-    CAFFE_THROW("HIP currently does not support FP16 yet.");
+  CAFFE_THROW("HIP currently does not support FP16 yet.");
 #else
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
@@ -840,7 +840,7 @@ CAFFE2_CUDA_EXPORT void GemmBatched<float, CUDAContext>(
     float** C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if __CUDACC_VER_MAJOR__ < 8  || defined(__HIPCC__)
+#if __CUDACC_VER_MAJOR__ < 8 || defined(__HIPCC__)
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     Gemm<float, CUDAContext>(
@@ -968,7 +968,7 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     CUDAContext* context,
     TensorProto::DataType math_type) {
 #if defined(__HIPCC__) && !ROCBLAS_FP16
-    CAFFE_THROW("HIP currently does not support FP16 yet.");
+  CAFFE_THROW("HIP currently does not support FP16 yet.");
 #else
 #if __CUDACC_VER_MAJOR__ < 9
   // loop over matrices in the batch
@@ -1104,7 +1104,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
     CUDAContext* context,
     TensorProto::DataType math_type) {
 #if defined(__HIPCC__) && !ROCBLAS_FP16
-    CAFFE_THROW("HIP currently does not support FP16 yet.");
+  CAFFE_THROW("HIP currently does not support FP16 yet.");
 #else
 #if __CUDACC_VER_MAJOR__ < 8
   // loop over matrices in the batch
@@ -1479,7 +1479,7 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
     CUDAContext* context,
     TensorProto::DataType math_type) {
 #if defined(__HIPCC__) && !ROCBLAS_FP16
-    CAFFE_THROW("HIP currently does not support FP16 yet.");
+  CAFFE_THROW("HIP currently does not support FP16 yet.");
 #else
   const cublasOperation_t cu_trans_A =
       (trans_A == CblasNoTrans) ? CUBLAS_OP_T : CUBLAS_OP_N;
@@ -1727,7 +1727,7 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
     at::Half* y,
     CUDAContext* context) {
 #if defined(__HIPCC__) && !ROCBLAS_FP16
-    CAFFE_THROW("HIP currently does not support FP16 yet.");
+  CAFFE_THROW("HIP currently does not support FP16 yet.");
 #else
   // execute with 32-bit math
   CUBLAS_ENFORCE(cublasSetPointerMode(
@@ -2264,7 +2264,7 @@ CAFFE2_CUDA_EXPORT void Scale<float, at::Half, CUDAContext>(
       CUDA_R_32F));
 }
 
-#else  // __HIPCC__
+#else // __HIPCC__
 
 namespace {
 template <>
@@ -2275,7 +2275,8 @@ __global__ void ScaleCUDAKernel<at::Half, at::Half>(
     at::Half* y) {
   CUDA_1D_KERNEL_LOOP(i, n) {
     y[i] = convert::To<float, at::Half>(
-        convert::To<at::Half, float>(x[i]) * convert::To<at::Half, float>(alpha));
+        convert::To<at::Half, float>(x[i]) *
+        convert::To<at::Half, float>(alpha));
   }
 }
 
@@ -2299,8 +2300,8 @@ __global__ void ScaleCUDAKernel<float, at::Half>(
     const at::Half* x,
     at::Half* y) {
   CUDA_1D_KERNEL_LOOP(i, n) {
-    y[i] =
-        convert::To<float, at::Half>(convert::To<at::Half, float>(x[i]) * alpha);
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * alpha);
   }
 }
 
@@ -2357,7 +2358,7 @@ CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
     at::Half* Y,
     CUDAContext* context) {
 #if defined(__HIPCC__) && !ROCBLAS_FP16
-    CAFFE_THROW("HIP currently does not support FP16 yet.");
+  CAFFE_THROW("HIP currently does not support FP16 yet.");
 #else
   CUBLAS_ENFORCE(
       cublasSetPointerMode(context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
@@ -2396,7 +2397,7 @@ CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
     at::Half* Y,
     CUDAContext* context) {
 #if defined(__HIPCC__) && !ROCBLAS_FP16
-    CAFFE_THROW("HIP currently does not support FP16 yet.");
+  CAFFE_THROW("HIP currently does not support FP16 yet.");
 #else
   CUBLAS_ENFORCE(cublasSetPointerMode(
       context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
@@ -3632,9 +3633,9 @@ __global__ void BroadcastCUDAKernel(
     int Y_index_val = Y_index;
 #pragma unroll
     for (int i = D - 1; i >= 0; --i) {
-        int d;
-        FIXED_DIVISOR_DIV_MOD(Y_dims.data[i], Y_index_val, &Y_index_val, &d);
-        X_index += d * X_strides.data[i];
+      int d;
+      FIXED_DIVISOR_DIV_MOD(Y_dims.data[i], Y_index_val, &Y_index_val, &d);
+      X_index += d * X_strides.data[i];
     }
 #if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
     Y[Y_index] = __ldg(X + X_index) * alpha;
