@@ -1,5 +1,5 @@
 #include <climits>
-#include <ATen/core/intrusive_ptr.h>
+#include <c10/util/intrusive_ptr.h>
 
 #include "THStorageFunctions.hpp"
 
