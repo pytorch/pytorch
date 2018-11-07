@@ -957,11 +957,7 @@ endif()
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if (USE_TENSORRT)
     set(CMAKE_CUDA_COMPILER ${CUDA_NVCC_EXECUTABLE})
-
-
-
-#    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt)
-
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt)
     include_directories("${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt")
     caffe2_interface_library(nvonnxparser_static onnx_trt_library)
     list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_trt_library)
