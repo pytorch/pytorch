@@ -7284,9 +7284,10 @@ a")
         def test_test():
             return torch.jit._unwrap_optional(1)
 
-        with self.assertRaisesRegex(RuntimeError, "unbound type"):
+        with self.assertRaisesRegex(RuntimeError, "is actually of type None"):
             @torch.jit.script
             def test_no_type():
+                # type: () -> int
                 return torch.jit._unwrap_optional(None)
 
     def test_indexing_error(self):
