@@ -8887,6 +8887,12 @@ EXCLUDE_SCRIPT = {
     'test_nn_gumbel_softmax',
 }
 
+DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
+    'test_nn_avg_pool2d',
+    'test_nn_log_softmax',
+    'test_nn_threshold',
+}
+
 
 # make a new function where all non-tensor arguments in 'args' have been partially
 # applied, and all tensor arguments remain.
@@ -9645,8 +9651,10 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
         f_args_tensor = (self_tensor,) + args_tensor
 
         if test_name not in EXCLUDE_SCRIPT:
+            disable_ad_subgraph_inlining = test_name in DISABLE_AUTODIFF_SUBGRAPH_INLINING
             check_against_reference(self,
-                                    create_script_fn(self, name, 'nn_functional', output_process_fn),
+                                    create_script_fn(self, name, 'nn_functional', output_process_fn,
+                                                     disable_autodiff_subgraph_inlining=disable_ad_subgraph_inlining),
                                     fn, f_args_variable, kwargs_variable, no_grad=no_grad)
 
     post_add_test(test_name, skipTestIf, do_test)
