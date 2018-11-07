@@ -154,12 +154,12 @@ TEST(SerializeTest, Optim) {
   torch::load(model2, model_tempfile.name);
   torch::load(model3, model_tempfile.name);
 
-  auto param1 = model1->parameters();
-  auto param2 = model2->parameters();
-  auto param3 = model3->parameters();
+  auto param1 = model1->named_parameters();
+  auto param2 = model2->named_parameters();
+  auto param3 = model3->named_parameters();
   for (const auto& p : param1) {
-    ASSERT_TRUE(param1[p.key].allclose(param2[p.key]));
-    ASSERT_TRUE(param2[p.key].allclose(param3[p.key]));
+    ASSERT_TRUE(p->allclose(param2[p.key()]));
+    ASSERT_TRUE(param2[p.key()].allclose(param3[p.key()]));
   }
 
   // Make some optimizers with momentum (and thus state)
@@ -199,11 +199,11 @@ TEST(SerializeTest, Optim) {
   torch::load(optim3_2, optim_tempfile.name);
   step(optim3_2, model3);
 
-  param1 = model1->parameters();
-  param2 = model2->parameters();
-  param3 = model3->parameters();
+  param1 = model1->named_parameters();
+  param2 = model2->named_parameters();
+  param3 = model3->named_parameters();
   for (const auto& p : param1) {
-    const auto& name = p.key;
+    const auto& name = p.key();
     // Model 1 and 3 should be the same
     ASSERT_TRUE(
         param1[name].norm().item<float>() == param3[name].norm().item<float>());

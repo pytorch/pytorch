@@ -13,7 +13,7 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/script/parser.h"
 
-#include <torch/csrc/api/include/torch/detail/ordered_dict.h>
+#include <torch/csrc/api/include/torch/ordered_dict.h>
 
 #include <ATen/ATen.h>
 
@@ -472,7 +472,7 @@ void initJitScriptBindings(PyObject* module) {
         py::tuple result(modules.size());
         for(size_t i = 0; i < modules.size(); ++i) {
           auto & item = modules[i];
-          result[i] = std::make_pair(item.key, item.value);
+          result[i] = std::make_pair(item.key(), item.value());
         }
         return result;
       })
@@ -483,7 +483,7 @@ void initJitScriptBindings(PyObject* module) {
           auto & p = parameters[i];
           py::tuple r(3);
           result[i] = std::make_tuple(
-            p.key,
+            p.key(),
             autograd::as_variable_ref(*p->slot()),
             p->is_buffer);
 
@@ -509,7 +509,7 @@ void initJitScriptBindings(PyObject* module) {
         return bool(self.find_method(name));
       })
       .def("_method_names", [](Module& self) {
-        using Item = torch::detail::OrderedDict<std::string, std::unique_ptr<Method>>::Item;
+        using Item = torch::OrderedDict<std::string, std::unique_ptr<Method>>::Item;
         return fmap(self.get_methods(), [](const Item & item) {
           return (*item)->name();
         });
