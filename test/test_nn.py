@@ -1717,11 +1717,16 @@ class TestNN(NNTestCase):
         m = torch.nn.utils.weight_norm(m, dim=None)
         self.assertEqual(m(input), expected_output)
 
+        with self.assertRaisesRegex(RuntimeError, 'register two weight_norm hooks'):
+            m = torch.nn.utils.weight_norm(m)
+            m = torch.nn.utils.weight_norm(m)
+
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
+    @skipIfRocm
     def test_spectral_norm(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
@@ -1734,8 +1739,9 @@ class TestNN(NNTestCase):
         # weight_u should be just a reused buffer
         self.assertTrue(hasattr(m, 'weight_u'))
         self.assertTrue('weight_u' in m._buffers)
-        self.assertTrue('weight' in m._buffers)
+        self.assertTrue('weight_v' in m._buffers)
         # weight should be a plain attribute, not counted as a buffer or a param
+        self.assertFalse('weight' in m._buffers)
         self.assertFalse('weight' in m._parameters)
         # it should also be sharing storage as `weight_orig`
         self.assertEqual(m.weight_orig.storage(), m.weight.storage())
@@ -1749,58 +1755,173 @@ class TestNN(NNTestCase):
         self.assertTrue(hasattr(m, 'weight'))
         self.assertTrue('weight' in m._parameters)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_spectral_norm_dp(self):
-        for requires_grad in (True, False):
-            m = nn.Linear(5, 7).to(torch.device('cuda'))
-            m.weight.requires_grad_(requires_grad)
+        with self.assertRaisesRegex(RuntimeError, 'register two spectral_norm hooks'):
             m = torch.nn.utils.spectral_norm(m)
-            dpm = torch.nn.DataParallel(m, [0, 1])
-            self.assertTrue(hasattr(m, 'weight_u'))
-            u0 = m.weight_u.clone()
+            m = torch.nn.utils.spectral_norm(m)
 
-            # assert that u is updated
-            input = torch.randn(2, 5, device=torch.device('cuda'))
-            dpm(input)
-            self.assertNotEqual(u0, m.weight_u)
+        # test correctness in training/eval modes and cpu/multi-gpu settings
+        for apply_dp in (True, False):
+            if apply_dp:
+                if not TEST_MULTIGPU:
+                    continue
+                device = torch.device('cuda:0')
 
-            # test that eval works
-            dpm.eval()
-            eval_out0 = dpm(input)
-            self.assertEqual(eval_out0, dpm(input))
+                def maybe_wrap(m):
+                    return torch.nn.DataParallel(m, [0, 1])
+            else:
+                device = torch.device('cpu')
 
-    def test_spectral_norm_eval_remove(self):
-        inp = torch.randn(3, 5)
-        m = nn.Linear(5, 7)
-        m = torch.nn.utils.spectral_norm(m)
-        x0 = m(inp)
-        m.eval()
-        # test that eval mode and removing / adding+removing doesn't change weight and output
-        x1 = m(inp)
-        x2 = m(inp)
-        self.assertEqual(x0, x1)
-        self.assertEqual(x0, x2)
-        # test that we can backward several times without running into problems
-        x1 = m(inp)
-        x1.sum().backward()
-        x1 = m(inp)
-        x1.sum().backward()
-        # test removing
-        m = torch.nn.utils.remove_spectral_norm(m)
-        x3 = m(inp)
-        self.assertEqual(x0, x3)
-        m = torch.nn.utils.spectral_norm(m)
-        m = torch.nn.utils.remove_spectral_norm(m)
-        x4 = m(inp)
-        self.assertEqual(x0, x4)
-        # check that removing after train doesn't change output
-        m.train()
-        m = torch.nn.utils.spectral_norm(m)
-        for i in range(5):
-            x0 = m(inp)
-        m = torch.nn.utils.remove_spectral_norm(m)
-        x1 = m(inp)
-        self.assertEqual(x0, x1)
+                def maybe_wrap(m):
+                    return m
+
+            for requires_grad in (True, False):
+                m = nn.Linear(3, 4).to(device)
+                m.weight.requires_grad_(requires_grad)
+                m = torch.nn.utils.spectral_norm(m)
+                wrapped_m = maybe_wrap(m)
+                self.assertTrue(hasattr(m, 'weight_u'))
+                u0 = m.weight_u.clone()
+                v0 = m.weight_v.clone()
+
+                # TEST TRAINING BEHAVIOR
+
+                # assert that u and v are updated
+                input = torch.randn(2, 3, device=device)
+                out = wrapped_m(input)
+                self.assertNotEqual(u0, m.weight_u)
+                self.assertNotEqual(v0, m.weight_v)
+
+                # assert that backprop reaches weight_orig
+                # can't use gradcheck because the function changes as we
+                # activate through it in training mode
+                if requires_grad:
+                    torch.autograd.grad(out.sum(), m.weight_orig)
+
+                # test backward works with multiple forwards
+                # it uses training mode so we need to reset `u` and `v` vectors
+                # to same value at beginning for finite difference test to pass
+                saved_u = m.weight_u.clone()
+                saved_v = m.weight_v.clone()
+
+                def fn(input):
+                    m.weight_u.data.copy_(saved_u)
+                    m.weight_v.data.copy_(saved_v)
+                    out0 = wrapped_m(input)
+                    out1 = wrapped_m(input)
+                    return out0 + out1
+
+                torch.autograd.gradcheck(fn, (input.clone().requires_grad_(),))
+
+                # test removing
+                pre_remove_out = wrapped_m(input)
+                m = torch.nn.utils.remove_spectral_norm(m)
+                self.assertEqual(wrapped_m(input), pre_remove_out)
+
+                m = torch.nn.utils.spectral_norm(m)
+                for i in range(3):
+                    pre_remove_out = wrapped_m(input)
+                m = torch.nn.utils.remove_spectral_norm(m)
+                self.assertEqual(wrapped_m(input), pre_remove_out)
+
+                # TEST EVAL BEHAVIOR
+
+                m = torch.nn.utils.spectral_norm(m)
+                wrapped_m(input)
+                last_train_out = wrapped_m(input)
+                last_train_u = m.weight_u.clone()
+                last_train_v = m.weight_v.clone()
+                wrapped_m.zero_grad()
+                wrapped_m.eval()
+
+                eval_out0 = wrapped_m(input)
+                # assert eval gives same result as last training iteration
+                self.assertEqual(eval_out0, last_train_out)
+                # assert doing more iteartion in eval don't change things
+                self.assertEqual(eval_out0, wrapped_m(input))
+                self.assertEqual(last_train_u, m.weight_u)
+                self.assertEqual(last_train_v, m.weight_v)
+
+                # test backward works with multiple forwards in mixed training
+                # and eval modes
+                # it uses training mode so we need to reset `u` and `v` vectors
+                # to same value at beginning for finite difference test to pass
+                saved_u = m.weight_u.clone()
+                saved_v = m.weight_v.clone()
+
+                def fn(input):
+                    m.weight_u.data.copy_(saved_u)
+                    m.weight_v.data.copy_(saved_v)
+                    wrapped_m.train()
+                    out0 = wrapped_m(input)
+                    wrapped_m.eval()
+                    out1 = wrapped_m(input)
+                    wrapped_m.train()
+                    out2 = wrapped_m(input)
+                    wrapped_m.eval()
+                    out3 = wrapped_m(input)
+                    return out0 + out1 + out2 + out3
+
+                torch.autograd.gradcheck(fn, (input.clone().requires_grad_(),))
+
+                # assert that backprop reaches weight_orig in eval
+                if requires_grad:
+                    def fn(weight):
+                        return wrapped_m(input)
+
+                    torch.autograd.gradcheck(fn, (m.weight_orig,))
+
+    def test_spectral_norm_load_state_dict(self):
+        inp = torch.randn(2, 3)
+        for activate_times in (0, 3):
+            # Test backward compatibility
+            # At version None -> 1: weight becomes not a buffer and v vector becomes a buffer
+            m = nn.Linear(3, 5)
+            snm = torch.nn.utils.spectral_norm(m)
+            snm.train()
+            for _ in range(activate_times):
+                snm(inp)
+
+            # craft a version None state_dict
+            version_none_state_dict = deepcopy(snm.state_dict())
+            self.assertEqual({'weight_orig', 'bias', 'weight_u', 'weight_v'}, set(version_none_state_dict.keys()))
+            self.assertIn('spectral_norm', version_none_state_dict._metadata[''])
+            del version_none_state_dict._metadata['']['spectral_norm']       # remove metadata info
+            del version_none_state_dict['weight_v']                          # remove v vector
+            version_none_state_dict['weight'] = snm.weight.detach().clone()  # set W as a buffer
+
+            # normal state_dict
+            version_latest_state_dict = deepcopy(snm.state_dict())
+
+            snm.eval()
+            out0_eval = snm(inp)
+            snm.train()
+            out1_train = snm(inp)
+            out2_train = snm(inp)
+            snm.eval()
+            out3_eval = snm(inp)
+
+            snm.load_state_dict(version_none_state_dict)
+            if activate_times > 0:
+                # since in loading version None state dict, we assume that the
+                # values in the state dict have gone through at lease one
+                # forward, we only test for equivalence when activate_times > 0.
+                snm.eval()
+                self.assertEqual(out0_eval, snm(inp))
+                snm.train()
+                self.assertEqual(out1_train, snm(inp))
+                self.assertEqual(out2_train, snm(inp))
+                snm.eval()
+                self.assertEqual(out3_eval, snm(inp))
+
+            # Test normal loading
+            snm.load_state_dict(version_latest_state_dict)
+            snm.eval()
+            self.assertEqual(out0_eval, snm(inp))
+            snm.train()
+            self.assertEqual(out1_train, snm(inp))
+            self.assertEqual(out2_train, snm(inp))
+            snm.eval()
+            self.assertEqual(out3_eval, snm(inp))
 
     def test_spectral_norm_dim(self):
         inp = torch.randn(2, 3, 10, 12)
