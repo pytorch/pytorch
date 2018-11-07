@@ -1,52 +1,52 @@
 # Loss functions
 
-- name: binary_cross_entropy(Tensor self, Tensor target, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean)
+- name: binary_cross_entropy(Tensor self, Tensor target, Tensor weight={}, int64_t reduction=Reduction::Mean)
   cname: BCECriterion
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
 
-- name: l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: AbsCriterion
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
 
-- name: mse_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: mse_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: MSECriterion
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
 
-- name: multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean)
+- name: multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor weight={}, int64_t reduction=Reduction::Mean)
   cname: MultiMarginCriterion
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
 
-- name: multilabel_margin_loss(Tensor self, LongTensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: multilabel_margin_loss(Tensor self, LongTensor target, int64_t reduction=Reduction::Mean)
   cname: MultiLabelMarginCriterion
   buffers: [is_target]
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
     is_target: target_->dim() == 0
 
-- name: nll_loss(Tensor self, LongTensor target, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean, int64_t ignore_index=-100)
+- name: nll_loss(Tensor self, LongTensor target, Tensor weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
   cname: ClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
     total_weight: 'true'
 
-- name: nll_loss2d(Tensor self, LongTensor target, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean, int64_t ignore_index=-100)
+- name: nll_loss2d(Tensor self, LongTensor target, Tensor weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
     total_weight: 'true'
 
-- name: smooth_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: smooth_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: SmoothL1Criterion
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
 
-- name: soft_margin_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: soft_margin_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: SoftMarginCriterion
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
@@ -101,12 +101,6 @@
 
 - name: softshrink(Tensor self, Scalar lambd=0.5)
   cname: SoftShrink
-  scalar_check:
-    output: self_->dim() == 0
-
-- name: threshold(Tensor self, Scalar threshold, Scalar value)
-  cname: Threshold
-  has_inplace: True
   scalar_check:
     output: self_->dim() == 0
 

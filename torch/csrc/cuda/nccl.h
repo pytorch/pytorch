@@ -68,15 +68,15 @@ void reduce(
     std::vector<at::Tensor>& outputs,
     int32_t root = 0,
     int32_t op = ncclSum,
-    const c10::optional<stream_list>& streams = c10::nullopt,
-    const c10::optional<std::vector<ncclComm_t>>& user_comms = c10::nullopt);
+    const stream_list& streams = {},
+    const comm_list& user_comms = {});
 
 void reduce(
     std::vector<at::Tensor>& inputs,
     int32_t root = 0,
     int32_t op = ncclSum,
-    const c10::optional<stream_list>& streams = c10::nullopt,
-    const c10::optional<std::vector<ncclComm_t>>& user_comms = c10::nullopt);
+    const stream_list& streams = {},
+    const comm_list& user_comms = {});
 
 } // namespace nccl
 } // namespace cuda

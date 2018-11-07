@@ -35,7 +35,7 @@
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/dynamic_dag.h"
-#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
@@ -165,7 +165,7 @@ void testFusion() {
     auto a = at::rand({3, 4}, at::kCUDA);
     auto b = at::rand({4, 3}, at::kCUDA).transpose(0, 1);
     auto o = at::zeros({3, 4}, at::kCUDA);
-    auto outputs = debugLaunchGraph(graph, 0, {a, b});
+    auto outputs = debugLaunchGraph(graph, {a, b});
     ASSERT_EQ(outputs.size(), 1);
     auto o2 = a * b;
     float max_diff = (o2 - outputs[0]).abs().max().item<double>();
@@ -218,7 +218,7 @@ void testFusion() {
     auto t5 = out1.tanh();
     auto out0 = t16 * t5;
 
-    auto outputs = debugLaunchGraph(graph, 0, inputs);
+    auto outputs = debugLaunchGraph(graph, inputs);
     ASSERT_EQ(outputs.size(), graph.outputs().size());
     ASSERT_TRUE(out0.is_same_size(outputs.front()));
     float max_diff = (outputs.front() - out0).abs().max().item<double>();
@@ -253,7 +253,7 @@ void testFusion() {
 
     auto o_r = a * b;
     auto o2_r = at::cat({a, o_r}, dim);
-    auto outputs = debugLaunchGraph(graph, 0, {a, b});
+    auto outputs = debugLaunchGraph(graph, {a, b});
     ASSERT_EQ(outputs.size(), 2);
 
     float max_diff = (o_r - outputs[0]).abs().max().item<double>();
@@ -667,8 +667,8 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
   graph->registerOutput(d.value());
   graph->registerOutput(e.value());
 
-  auto a_var = autograd::make_variable(at::CPU(at::kFloat).tensor(2, 2), true);
-  auto b_var = autograd::make_variable(at::CPU(at::kFloat).tensor(2, 2), false);
+  auto a_var = autograd::make_variable(at::empty_strided(2, 2, at::CPU(at::kFloat).options()), true);
+  auto b_var = autograd::make_variable(at::empty_strided(2, 2, at::CPU(at::kFloat).options()), false);
   setInputTypes(*graph, ArgumentSpec(true, {a_var, b_var}, 2));
   PropagateInputShapes(*graph);
   PropagateRequiresGrad(graph);

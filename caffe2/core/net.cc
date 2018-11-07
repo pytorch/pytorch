@@ -110,12 +110,13 @@ const std::unordered_map<std::string, std::string>& defaultOverrides() {
       {"prof_dag", "async_scheduling"},
       {"async_dag", "async_scheduling"},
       {"async_polling", "async_scheduling"},
-      {"async_simple", "simple"},
+      {"async_simple", "simple"}, // "async_simple" impl has been removed.
+      {"rnn", "simple"}, // "rnn" impl has been removed.
   };
   return overrides;
 }
 
-void checkExecutorOverride(std::string& net_type) {
+void ApplyPotentialExecutorOverride(std::string* net_type) {
   auto executors = caffe2::split(',', FLAGS_caffe2_override_executor);
   CAFFE_ENFORCE(
       executors.size() % 2 == 0, "Invalid override executors flag value");
@@ -126,10 +127,10 @@ void checkExecutorOverride(std::string& net_type) {
   for (size_t idx = 0; idx < executors.size(); idx += 2) {
     overrides[executors[idx]] = executors[idx + 1];
   }
-  if (overrides.count(net_type)) {
-    VLOG(1) << "Overrode net type '" << net_type << "' with '"
-            << overrides[net_type] << "'";
-    net_type = overrides[net_type];
+  if (overrides.count(*net_type)) {
+    VLOG(1) << "Overrode net type '" << *net_type << "' with '"
+            << overrides[*net_type] << "'";
+    *net_type = overrides[*net_type];
   }
 }
 
@@ -161,7 +162,7 @@ unique_ptr<NetBase> CreateNet(
     // sequentially.
     net_type = kSimpleNet;
   }
-  checkExecutorOverride(net_type);
+  ApplyPotentialExecutorOverride(&net_type);
   unique_ptr<NetBase> net = NetRegistry()->Create(net_type, net_def, ws);
 
   VLOG(1) << "Adding a global observer to a net";

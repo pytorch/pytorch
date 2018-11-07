@@ -371,7 +371,7 @@ class GraphEncoder: public EncoderBase {
   }
 
  private:
-  virtual void EncodeTensor(
+  void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
       const c10::optional<std::string> external_ref = {}) override;
@@ -450,15 +450,15 @@ class ModuleEncoder: public EncoderBase {
                     script::Method &method,
                     const std::string prefix);
 
-  virtual void EncodeTensor(
+  void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
       const c10::optional<std::string> external_ref = {}) override;
 
-  virtual void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
+  void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
                                            const Value* n) override;
 
-  virtual void EncodeValueInfo(onnx::GraphProto *graph_proto,
+  void EncodeValueInfo(onnx::GraphProto *graph_proto,
                                onnx::ValueInfoProto* v,
                                const Value* n) override;
 
@@ -573,8 +573,6 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("StringType");
   } else if (kind == TypeKind::VarType) {
     type_proto->set_denotation("TypeVar:" + type->expect<VarType>()->name());
-  } else if (kind == TypeKind::WorldType) {
-    type_proto->set_denotation("WorldType");
   } else {
     throw std::runtime_error("unexpected type kind");
   }
@@ -692,7 +690,7 @@ void ModuleEncoder::EncodeTensor(
       // NB: This new tensor is created to support cuda tensors.
       // Storages can be mutated when converting tensors from cuda to cpu,
       // and we need a cpu tensor to copy data from.
-      t = at::getType(tensor).tensor(
+      t = at::getType(tensor)._th_tensor(
           tensor.storage(),
           /* storageOffset = */ 0,
           /* size = */ { static_cast<int64_t>(tensor.storage().size()) },

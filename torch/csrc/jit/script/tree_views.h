@@ -27,9 +27,11 @@ namespace script {
 //       | While(Expr cond, List<Stmt> body)                            TK_WHILE
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
 //       -- NB: the only type of Expr's allowed on lhs are Starred and Var
-//       | Assign(List<Expr> lhs, AssignType maybe_reduce, Expr rhs)    TK_ASSIGN
+//       | Assign(List<Expr> lhs, Expr rhs)                             TK_ASSIGN
+//       | AugAssign(Expr lhs, AugAssignKind aug_op, Expr rhs)          TK_AUG_ASSIGN
 //       | Return(List<Expr> values)                                    TK_RETURN
 //       | ExprStmt(List<Expr> expr)                                    TK_EXPR_STMT
+//       | Raise(Expr expr)                                             TK_RAISE
 //
 // Expr  = TernaryIf(Expr cond, Expr true_expr, Expr false_expr)        TK_IF_EXPR
 //       | BinOp(Expr lhs, Expr rhs)
@@ -41,10 +43,13 @@ namespace script {
 //       |     Le                                                       TK_LE
 //       |     Ge                                                       TK_GE
 //       |     Ne                                                       TK_NE
+//       |     Is                                                       TK_IS
+//       |     IsNot                                                    TK_ISNOT
 //       |     Add                                                      '+'
 //       |     Sub                                                      '-'
 //       |     Mul                                                      '*'
 //       |     Div                                                      '/'
+//       |     Mod                                                      '%'
 //       |     MatMult                                                  '@'
 //       |     Pow                                                      TK_POW
 //       | UnaryOp(Expr expr)
@@ -65,7 +70,7 @@ namespace script {
 //        (List as a value, not type constructor)
 // Attribute = Attribute(Ident name, Expr value)                        TK_ATTRIBUTE
 //
-// AssignKind = Regular()                                               '='
+// AugAssignKind =
 //            | Add()                                                   TK_PLUS_EQ
 //            | Sub()                                                   TK_MINUS_EQ
 //            | Mul()                                                   TK_TIMES_EQ
@@ -83,7 +88,7 @@ namespace script {
 //    than both in the parser and in this code.
 // XXX: these structs should have no fields to prevent slicing when passing by value
 struct TreeView {
-  explicit TreeView(const TreeRef& tree_) : tree_(tree_) {}
+  explicit TreeView(TreeRef tree) : tree_(std::move(tree)) {}
   TreeRef tree() const {
     return tree_;
   }
@@ -206,8 +211,12 @@ struct Stmt : public TreeView {
       case TK_WHILE:
       case TK_GLOBAL:
       case TK_ASSIGN:
+      case TK_AUG_ASSIGN:
       case TK_RETURN:
       case TK_EXPR_STMT:
+      case TK_RAISE:
+      case TK_ASSERT:
+      case TK_PASS:
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Stmt";
@@ -223,6 +232,8 @@ struct Expr : public TreeView {
       case TK_OR:
       case '<':
       case '>':
+      case TK_IS:
+      case TK_ISNOT:
       case TK_EQ:
       case TK_LE:
       case TK_GE:
@@ -414,21 +425,44 @@ struct Global : public Stmt {
   }
 };
 
-struct AssignKind : public TreeView {
-  explicit AssignKind(const TreeRef& tree) : TreeView(tree) {
+struct AugAssignKind : public TreeView {
+  explicit AugAssignKind(const TreeRef& tree) : TreeView(tree) {
     switch (tree->kind()) {
-      case '=':
       case '+':
       case '-':
       case '*':
       case '/':
-      case '%':
         return;
       default:
-        throw ErrorReport(tree) << "is not a valid AssignKind";
+        throw ErrorReport(tree) << "is not a valid AugAssignKind";
     }
   }
 };
+
+// Augmented assignment, like "foo += bar"
+struct AugAssign : public Stmt {
+  explicit AugAssign(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_AUG_ASSIGN);
+  }
+  static AugAssign create(
+      const SourceRange& range,
+      const Expr& lhs,
+      const AugAssignKind& aug_op,
+      const Expr& rhs) {
+    return AugAssign(
+        Compound::create(TK_AUG_ASSIGN, range, {lhs, aug_op, rhs}));
+  }
+  Expr lhs() const {
+    return Expr(subtree(0));
+  }
+  int aug_op() const {
+    return subtree(1)->kind();
+  }
+  Expr rhs() const {
+    return Expr(subtree(2));
+  }
+};
+
 
 struct Assign : public Stmt {
   explicit Assign(const TreeRef& tree) : Stmt(tree) {
@@ -437,18 +471,14 @@ struct Assign : public Stmt {
   static Assign create(
       const SourceRange& range,
       const List<Expr>& lhs,
-      const AssignKind& reduction,
       const Expr& rhs) {
-    return Assign(Compound::create(TK_ASSIGN, range, {lhs, reduction, rhs}));
+    return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs}));
   }
   List<Expr> lhs() const {
     return List<Expr>(subtree(0));
   }
-  int reduction() const {
-    return subtree(1)->kind();
-  }
   Expr rhs() const {
-    return Expr(subtree(2));
+    return Expr(subtree(1));
   }
 };
 
@@ -463,6 +493,47 @@ struct Return : public Stmt {
     return Return(Compound::create(TK_RETURN, range, {values}));
   }
 };
+
+struct Raise : public Stmt {
+  explicit Raise(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_RAISE);
+  }
+  Maybe<Expr> expr() const {
+    return Maybe<Expr>(subtree(0));
+  }
+  static Raise create(const SourceRange& range, const Maybe<Expr>& expr) {
+    return Raise(Compound::create(TK_RAISE, range, {expr}));
+  }
+};
+
+struct Assert : public Stmt {
+  explicit Assert(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_ASSERT);
+  }
+  Expr test() const {
+    return Expr(subtree(0));
+  }
+  Maybe<Expr> msg() const {
+    return Maybe<Expr>(subtree(1));
+  }
+  static Assert create(
+      const SourceRange& range,
+      const Expr& test,
+      const Maybe<Expr>& msg) {
+    return Assert(Compound::create(TK_ASSERT, range, {test, msg}));
+  }
+};
+
+struct Pass : public Stmt {
+  explicit Pass(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_PASS);
+  }
+  static Pass create(
+      const SourceRange& range) {
+    return Pass(Compound::create(TK_PASS, range, {}));
+  }
+};
+
 
 struct ExprStmt : public Stmt {
   explicit ExprStmt(const TreeRef& tree) : Stmt(tree) {
@@ -488,6 +559,8 @@ struct BinOp : public Expr {
       case TK_OR:
       case '<':
       case '>':
+      case TK_IS:
+      case TK_ISNOT:
       case TK_EQ:
       case TK_LE:
       case TK_GE:

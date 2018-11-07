@@ -88,4 +88,39 @@ namespace at {using namespace c10;}
 #define C10_UNLIKELY(expr)  (expr)
 #endif
 
+#include <sstream>
+#include <string>
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+// Designates functions callable from the host (CPU) and the device (GPU)
+#define C10_HOST_DEVICE __host__ __device__
+#define C10_DEVICE __device__
+#define C10_HOST __host__
+#else
+#define C10_HOST_DEVICE
+#define C10_HOST
+#define C10_DEVICE
+#endif
+
+#ifdef __HIP_PLATFORM_HCC__
+#define C10_HIP_HOST_DEVICE __host__ __device__
+#else
+#define C10_HIP_HOST_DEVICE
+#endif
+
+#if defined(__ANDROID__)
+#define C10_ANDROID 1
+#define C10_MOBILE 1
+#elif (                   \
+    defined(__APPLE__) && \
+    (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
+#define C10_IOS 1
+#define C10_MOBILE 1
+#elif (defined(__APPLE__) && TARGET_OS_MAC)
+#define C10_IOS 1
+#define C10_MOBILE 0
+#else
+#define C10_MOBILE 0
+#endif // ANDROID / IOS / MACOS
+
 #endif // C10_MACROS_MACROS_H_

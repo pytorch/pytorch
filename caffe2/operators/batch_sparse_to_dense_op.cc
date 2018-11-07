@@ -10,27 +10,27 @@ bool BatchSparseToDenseOp<T, Context>::RunOnDevice() {
   auto& indices = Input(INDICES);
   auto& values = Input(VALUES);
   auto* output = Output(0);
-  CAFFE_ENFORCE_EQ(indices.size(), values.size());
-  CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
-  CAFFE_ENFORCE_EQ(indices.ndim(), 1);
+  CAFFE_ENFORCE_EQ(indices.numel(), values.numel());
+  CAFFE_ENFORCE_EQ(lengths.dim(), 1);
+  CAFFE_ENFORCE_EQ(indices.dim(), 1);
 
   const int64_t* lengths_data = lengths.template data<int64_t>();
   const int64_t* indices_data = indices.template data<int64_t>();
   const T* values_data = values.template data<T>();
-  int64_t batch_size = lengths.size();
+  int64_t batch_size = lengths.numel();
   int64_t lengths_sum = 0;
   math::Sum<int64_t, Context>(batch_size, lengths_data, &lengths_sum, &context_);
-  CAFFE_ENFORCE_EQ(lengths_sum, indices.size());
+  CAFFE_ENFORCE_EQ(lengths_sum, indices.numel());
 
   vector<int64_t> output_shape = {batch_size};
   if (InputSize() == 4) {
     auto& shaper = Input(3);
-    CAFFE_ENFORCE_EQ(shaper.ndim(), 2);
+    CAFFE_ENFORCE_EQ(shaper.dim(), 2);
     if (dense_last_dim_ == -1) {
-      dense_last_dim_ = shaper.dim(1);
+      dense_last_dim_ = shaper.size(1);
     } else {
       CAFFE_ENFORCE(
-          dense_last_dim_ == shaper.dim(1),
+          dense_last_dim_ == shaper.size(1),
           "The last dim argument is not aligned with the shape input last dim");
     }
   } else {
@@ -40,7 +40,7 @@ bool BatchSparseToDenseOp<T, Context>::RunOnDevice() {
   output->Resize(output_shape);
   T* output_data = output->template mutable_data<T>();
   math::Set(
-      output->size(), static_cast<T>(default_value_), output_data, &context_);
+      output->numel(), static_cast<T>(default_value_), output_data, &context_);
 
   int64_t k = 0;
   for (int64_t i = 0; i < batch_size; ++i) {
@@ -66,20 +66,20 @@ bool BatchDenseToSparseOp<T, Context>::RunOnDevice() {
   auto& indices = Input(INDICES);
   auto& dense = Input(DENSE);
   auto* output = Output(0);
-  CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
-  CAFFE_ENFORCE_EQ(indices.ndim(), 1);
-  CAFFE_ENFORCE_EQ(dense.ndim(), 2);
+  CAFFE_ENFORCE_EQ(lengths.dim(), 1);
+  CAFFE_ENFORCE_EQ(indices.dim(), 1);
+  CAFFE_ENFORCE_EQ(dense.dim(), 2);
   const int64_t* lengths_data = lengths.template data<int64_t>();
   const int64_t* indices_data = indices.template data<int64_t>();
   const T* dense_data = dense.template data<T>();
 
-  int64_t batch_size = lengths.size();
+  int64_t batch_size = lengths.numel();
   int64_t lengths_sum = 0;
   math::Sum<int64_t, Context>(batch_size, lengths_data, &lengths_sum, &context_);
-  CAFFE_ENFORCE_EQ(lengths_sum, indices.size());
+  CAFFE_ENFORCE_EQ(lengths_sum, indices.numel());
 
-  CAFFE_ENFORCE_EQ(batch_size, dense.dim(0));
-  dense_last_dim_ = dense.dim(1);
+  CAFFE_ENFORCE_EQ(batch_size, dense.size(0));
+  dense_last_dim_ = dense.size(1);
   vector<int64_t> output_shape = indices.sizes().vec();
   output->Resize(output_shape);
   T* output_data = output->template mutable_data<T>();
@@ -88,13 +88,13 @@ bool BatchDenseToSparseOp<T, Context>::RunOnDevice() {
   for (int64_t i = 0; i < batch_size; ++i) {
     for (int64_t j = 0; j < lengths_data[i]; ++j) {
       CAFFE_ENFORCE(
-          indices_data[k] < dense.dim(1),
+          indices_data[k] < dense.size(1),
           "An indice (",
           indices_data[k],
           ") is larger then last dim of dense (",
-          dense.dim(1),
+          dense.size(1),
           ").");
-      output_data[k] = dense_data[i * dense.dim(1) + indices_data[k]];
+      output_data[k] = dense_data[i * dense.size(1) + indices_data[k]];
       k += 1;
     }
   }

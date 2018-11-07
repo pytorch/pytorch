@@ -1,6 +1,5 @@
 #include <iostream>
 
-#include <c10d/CUDAUtils.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupNCCL.hpp>
 #include <c10d/private/CUDAUtils.hpp>
@@ -50,7 +49,7 @@ class NCCLTest : public NCCLTestBase {
     // Each device has a single tensor to perf the NCCL op
     inputs_.resize(numDevices_);
     outputs_.resize(numDevices_);
-    at::DeviceGuard deviceGuard;
+    at::cuda::CUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; ++i) {
       deviceGuard.set_index(i);
       inputs_[i] = at::empty({3, 3}, at::kCUDA);
@@ -144,7 +143,7 @@ class AllreduceNCCLTest : public NCCLTest {
     auto guards = createStreamGuard();
 
     // Launch sleep on every device
-    at::DeviceGuard deviceGuard;
+    at::cuda::CUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 2000 * 1000 * 1000);
@@ -170,7 +169,7 @@ class BroadcastNCCLTest : public NCCLTest {
     auto guards = createStreamGuard();
 
     // Launch sleep on every device
-    at::DeviceGuard deviceGuard;
+    at::cuda::CUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 2000 * 1000 * 1000);
@@ -199,7 +198,7 @@ class ReduceNCCLTest : public NCCLTest {
     auto guards = createStreamGuard();
 
     // Launch sleep on every device
-    at::DeviceGuard deviceGuard;
+    at::cuda::CUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 2000 * 1000 * 1000);
@@ -228,7 +227,7 @@ class AllgatherNCCLTest : public NCCLTest {
     auto guards = createStreamGuard();
 
     // Launch sleep on every device
-    at::DeviceGuard deviceGuard;
+    at::cuda::CUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 2000 * 1000 * 1000);

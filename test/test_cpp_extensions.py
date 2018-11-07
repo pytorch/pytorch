@@ -353,7 +353,6 @@ class TestCppExtension(common.TestCase):
             name='cpp_api_extension',
             sources='cpp_extensions/cpp_api_extension.cpp',
             extra_include_paths=api_include,
-            extra_cflags=[] if IS_WINDOWS else ['-UTORCH_API_INCLUDE_EXTENSION_H'],
             verbose=True)
 
         net = module.Net(3, 5)

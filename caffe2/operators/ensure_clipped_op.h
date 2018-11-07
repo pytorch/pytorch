@@ -28,7 +28,7 @@ class EnsureClippedOp final : public Operator<Context> {
       // spares gradient, selective checking clipping
       CAFFE_ENFORCE_EQ(
           Input(PARAM).size_from_dim(1),
-          Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+          Input(GRAD).size_from_dim(Input(INDICES).dim()));
       return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
           this, Input(INDICES));
     } else {

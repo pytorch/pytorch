@@ -1,9 +1,9 @@
 #pragma once
 
-#include "ATen/DeviceGuard.h"
 #include "ATen/cuda/ATenCUDAGeneral.h"
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/CUDAStream.h"
+#include "ATen/cuda/CUDAGuard.h"
 #include "ATen/cuda/Exceptions.h"
 #include "c10/util/Exception.h"
 
@@ -35,7 +35,7 @@ struct AT_CUDA_API CUDAEvent {
   ~CUDAEvent() {
     try {
       if (is_created_) {
-        at::DeviceGuard device_guard{static_cast<int16_t>(device_)};
+        at::cuda::CUDAGuard device_guard(static_cast<int16_t>(device_index_));
         cudaEventDestroy(event_);
       }
     } catch (...) { /* No throw */ }
@@ -58,9 +58,10 @@ struct AT_CUDA_API CUDAEvent {
   }
 
   bool isCreated() const { return is_created_; }
-  int64_t device() const { return device_; }
+  int64_t device() const { return device_index_; }
   cudaEvent_t event() const { return event_; }
 
+  // Note: cudaEventQuery can be safely called from any device
   bool happened() const {
     return (was_recorded_ && cudaEventQuery(event_) == cudaSuccess);
   }
@@ -71,45 +72,44 @@ struct AT_CUDA_API CUDAEvent {
     if (!was_recorded_) record(stream);
   }
 
+  // Note: cudaEventRecord must be called on the same device as the stream.
   void record(const CUDAStream& stream) {
+    at::cuda::CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
+
     if (is_created_) {
-      AT_ASSERT(device_ == stream.device());
+      AT_ASSERT(device_index_ == stream.device_index());
     } else {
-      create(stream.device());
+      AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
+      is_created_ = true;
+      device_index_ = stream.device_index();
     }
 
     AT_CUDA_CHECK(cudaEventRecord(event_, stream));
     was_recorded_ = true;
   }
 
-  void block (const CUDAStream& stream) {
+  // Note: cudaStreamWaitEvent must be called on the same device as the stream.
+  // The event has no actual GPU resources associated with it.
+  void block(const CUDAStream& stream) {
     if (is_created_) {
+      at::cuda::CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
       AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
     }
   }
-
 
 private:
   unsigned int flags_ = DEFAULT_FLAGS;
   bool is_created_ = false;
   bool was_recorded_ = false;
-  int64_t device_ = -1;
+  int64_t device_index_ = -1;
   cudaEvent_t event_;
 
   void moveHelper(CUDAEvent&& other) {
     std::swap(flags_, other.flags_);
     std::swap(is_created_, other.is_created_);
     std::swap(was_recorded_, other.was_recorded_);
-    std::swap(device_, other.device_);
+    std::swap(device_index_, other.device_index_);
     std::swap(event_, other.event_);
-  }
-
-  void create(const int64_t device) {
-    at::DeviceGuard device_guard{static_cast<int16_t>(device)};
-    AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
-
-    is_created_ = true;
-    device_ = device;
   }
 };
 

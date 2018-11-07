@@ -216,7 +216,7 @@ class ConvPoolOpBase : public Operator<Context> {
   // MKL operator. One can still call this function with dummy
   // Tensor objects in order to obtain the sizes.
   void SetOutputSize(const Tensor& input, Tensor* output, int output_channel) {
-    CAFFE_ENFORCE(input.size() > 0);
+    CAFFE_ENFORCE(input.numel() > 0);
     vector<int> output_dims;
     int N = input.dim32(0);
     bool channel_first;
@@ -334,7 +334,7 @@ class ConvPoolOpBase : public Operator<Context> {
   void SetDeviceTensor(const std::vector<int>& data, Tensor* tensor) {
     bool reset_tensor_device_ = false;
 
-    if (tensor->size() != data.size()) {
+    if (tensor->numel() != data.size()) {
       tensor->Resize(data.size());
       reset_tensor_device_ = true;
     } else {
@@ -355,7 +355,7 @@ class ConvPoolOpBase : public Operator<Context> {
 
   template <typename T>
   void SetBiasMultiplier(const int size, Tensor* bias_multiplier_) {
-    if (bias_multiplier_->size() != size) {
+    if (bias_multiplier_->numel() != size) {
       // If the helper bias multiplier is not image size, reshape and fill it
       // with one.
       bias_multiplier_->Resize(std::vector<int64_t>{size});

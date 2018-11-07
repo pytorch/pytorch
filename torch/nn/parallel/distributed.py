@@ -141,7 +141,7 @@ class DistributedDataParallel(Module):
         MB = 1024 * 1024
 
         # used for intra-node param sync and inter-node sync as well
-        self.broadcast_bucket_size = 25 * MB
+        self.broadcast_bucket_size = 250 * MB
 
         # Sync params and buffers
         module_states = list(self.module.state_dict().values())
@@ -175,6 +175,8 @@ class DistributedDataParallel(Module):
         # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
         param_buckets = []
         # Split the parameters into buckets and by types as well
+        # TODO: use take_tensor finegrained to provide better overlapping for
+        # mixed precision training
         param_buckets = [list(_take_tensors(m.parameters(), bucket_bytes_cap)) for m in self._module_copies]
 
         self.bucket_sizes = []
@@ -186,11 +188,11 @@ class DistributedDataParallel(Module):
             self.bucket_sizes.append(0)
             # Now, we transpose again, so we iterate over bucket_elems, but getting tuples
             # of params from each device.
-            for idx, param_tuple in enumerate(zip(*param_buckets_tuple)):
+            for param_tuple in zip(*param_buckets_tuple):
                 if not param_tuple[0].requires_grad:
                     continue
                 for p in param_tuple:
-                    self.bucket_map[p] = (bucket_idx, idx)
+                    self.bucket_map[p] = (bucket_idx, self.bucket_sizes[bucket_idx])
                 self.bucket_sizes[bucket_idx] += 1
 
         self.buckets = [[[None for _ in range(self.bucket_sizes[i])]
@@ -261,7 +263,7 @@ class DistributedDataParallel(Module):
             module.train(mode)
 
     def _dist_broadcast_coalesced(self, tensors, buffer_size):
-        dist._dist_broadcast_coalesced(self.process_group, tensors, buffer_size)
+        dist._dist_broadcast_coalesced(self.process_group, tensors, buffer_size, False)
 
     def _sync_params(self):
         if len(self.device_ids) > 1:

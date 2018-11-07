@@ -8,6 +8,8 @@
 #include <string>
 #include <type_traits>
 
+// Forward declarations confuse Doxygen
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 // Forward declarations.
 namespace torch {
 namespace detail {
@@ -18,6 +20,7 @@ namespace nn {
 class Module;
 } // namespace nn
 } // namespace torch
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 namespace torch {
 namespace detail {
@@ -48,7 +51,7 @@ class CursorBase {
 
   /// A `(key, value)` pair exposed by cursor iterators.
   struct Item {
-    Item(const std::string& key_, T& value_);
+    Item(std::string key_, T& value_);
 
     T& operator*();
     const T& operator*() const;

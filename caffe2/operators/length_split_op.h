@@ -41,7 +41,7 @@ class LengthsSplitOp final : public Operator<Context> {
 
       const auto& input1 = Input(1);
       context_.template CopyItems<Context, CPUContext>(
-          input1.meta(), 1, input1.raw_data(), &n_split_);
+          input1.dtype(), 1, input1.raw_data(), &n_split_);
     }
 
     CAFFE_ENFORCE(

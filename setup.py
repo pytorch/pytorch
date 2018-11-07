@@ -33,9 +33,6 @@
 #   NO_MIOPEN
 #     disables the MIOpen build
 #
-#   NO_MKLDNN
-#     disables the MKLDNN build
-#
 #   NO_NNPACK
 #     disables NNPACK build
 #
@@ -66,6 +63,9 @@
 #
 #   USE_LMDB
 #     enables use of LMDB for storage
+#
+#   USE_MKLDNN
+#     enables use of MKLDNN
 #
 #   BUILD_BINARY
 #     enables the additional binaries/ build
@@ -327,10 +327,7 @@ class create_version_file(PytorchCommand):
 ################################################################################
 
 # All libraries that torch could depend on
-dep_libs = [
-    'nccl', 'caffe2',
-    'libshm', 'libshm_windows'
-]
+dep_libs = ['caffe2']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -358,7 +355,12 @@ def build_libs(libs):
     my_env["PYTORCH_PYTHON_LIBRARY"] = cmake_python_library
     my_env["PYTORCH_PYTHON_INCLUDE_DIR"] = cmake_python_include_dir
     my_env["PYTORCH_BUILD_VERSION"] = version
-    my_env["CMAKE_PREFIX_PATH"] = full_site_packages
+
+    cmake_prefix_path = full_site_packages
+    if "CMAKE_PREFIX_PATH" in my_env:
+        cmake_prefix_path = my_env["CMAKE_PREFIX_PATH"] + ";" + cmake_prefix_path
+    my_env["CMAKE_PREFIX_PATH"] = cmake_prefix_path
+
     my_env["NUM_JOBS"] = str(NUM_JOBS)
     my_env["ONNX_NAMESPACE"] = ONNX_NAMESPACE
     if not IS_WINDOWS:
@@ -457,8 +459,6 @@ class build_deps(PytorchCommand):
         check_pydep('typing', 'typing')
 
         libs = []
-        if USE_NCCL and not USE_SYSTEM_NCCL:
-            libs += ['nccl']
         libs += ['caffe2']
         build_libs(libs)
 
@@ -835,6 +835,7 @@ if USE_ROCM:
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.2')
 C10D_LIB = os.path.join(lib_path, 'libc10d.a')
+GLOO_LIB = os.path.join(lib_path, 'libgloo.a')
 GLOO_CUDA_LIB = os.path.join(lib_path, 'libgloo_cuda.a')
 
 # static library only
@@ -948,6 +949,7 @@ if USE_DISTRIBUTED:
         extra_compile_args.append('-DUSE_C10D')
         main_sources.append('torch/csrc/distributed/c10d/init.cpp')
         main_link_args.append(C10D_LIB)
+        main_link_args.append(GLOO_LIB)
         if USE_CUDA:
             main_sources.append('torch/csrc/distributed/c10d/ddp.cpp')
             main_link_args.append(GLOO_CUDA_LIB)
@@ -1031,10 +1033,9 @@ if USE_ROCM:
 
 if USE_NCCL:
     if USE_SYSTEM_NCCL:
-        main_link_args += [NCCL_SYSTEM_LIB]
         include_dirs.append(NCCL_INCLUDE_DIR)
     else:
-        main_link_args += [NCCL_LIB]
+        include_dirs.append("build/nccl/include")
     extra_compile_args += ['-DUSE_NCCL']
     main_sources += [
         "torch/csrc/cuda/nccl.cpp",
@@ -1190,6 +1191,7 @@ if __name__ == '__main__':
                 'lib/include/c10/macros/*.h',
                 'lib/include/c10/util/*.h',
                 'lib/include/caffe2/core/*.h',
+                'lib/include/caffe2/proto/*.h',
                 'lib/include/torch/*.h',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/api/include/torch/*.h',

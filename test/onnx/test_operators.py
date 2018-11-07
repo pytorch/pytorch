@@ -433,7 +433,6 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
-    @skipIfCI
     def test_upsample(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
@@ -451,6 +450,14 @@ class TestOperators(TestCase):
         input = torch.tensor([1, 2, 3, 4]).long()
         offset = torch.tensor([0]).long()
         self.assertONNX(emb_bag, (input, offset))
+
+    def test_implicit_expand(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x + 1, x)
+
+    def test_reduce_sum_negative_indices(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x.sum(-1), x)
 
     def test_symbolic_override(self):
         """Lifted from fast-neural-style: custom implementation of instance norm

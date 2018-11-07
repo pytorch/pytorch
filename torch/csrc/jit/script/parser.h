@@ -127,7 +127,7 @@ struct Parser {
     }
     return prefix;
   }
-  TreeRef parseOptionalReduction() {
+  TreeRef parseAssignmentOp() {
     auto r = L.cur().range;
     switch (L.cur().kind) {
       case TK_PLUS_EQ:
@@ -356,12 +356,23 @@ struct Parser {
   // 'first' has already been parsed since expressions can exist
   // alone on a line:
   // first[,other,lhs] = rhs
-  Assign parseAssign(List<Expr> list) {
-    auto red = parseOptionalReduction();
+  TreeRef parseAssign(List<Expr> lhs) {
+    auto op = parseAssignmentOp();
     auto rhs = parseExpOrExpTuple(TK_NEWLINE);
     L.expect(TK_NEWLINE);
-    return Assign::create(list.range(), list, AssignKind(red), Expr(rhs));
+    if (op->kind() == '=') {
+      return Assign::create(lhs.range(), lhs, Expr(rhs));
+    } else {
+      // this is an augmented assignment
+      if (lhs.size() != 1) {
+        throw ErrorReport(lhs.range())
+            << " augmented assignment can only have one LHS expression";
+      }
+      return AugAssign::create(
+          lhs.range(), lhs[0], AugAssignKind(op), Expr(rhs));
+    }
   }
+
   TreeRef parseStmt() {
     switch (L.cur().kind) {
       case TK_IF:
@@ -381,6 +392,28 @@ struct Parser {
         // XXX: TK_NEWLINE makes it accept an empty list
         auto values = parseList(TK_NOTHING, ',', TK_NEWLINE, &Parser::parseExp);
         return Return::create(range, values);
+      }
+      case TK_RAISE: {
+        auto range = L.next().range;
+        auto expr = parseExp();
+        L.expect(TK_NEWLINE);
+        return Raise::create(range, expr);
+      }
+      case TK_ASSERT: {
+        auto range = L.next().range;
+        auto cond = parseExp();
+        Maybe<Expr> maybe_first = Maybe<Expr>::create(range);
+        if (L.nextIf(','))  {
+          auto msg = parseExp();
+          maybe_first = Maybe<Expr>::create(range, Expr(msg));
+        }
+        L.expect(TK_NEWLINE);
+        return Assert::create(range, cond, maybe_first);
+      }
+      case TK_PASS: {
+        auto range = L.next().range;
+        L.expect(TK_NEWLINE);
+        return Pass::create(range);
       }
       default: {
         List<Expr> exprs = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);

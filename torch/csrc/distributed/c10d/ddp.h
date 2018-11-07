@@ -15,7 +15,8 @@ namespace c10d {
 void distBroadcastCoalesced(
     ProcessGroup& processGroup,
     std::vector<at::Tensor>& tensors,
-    int64_t bufferSize);
+    int64_t bufferSize,
+    bool fineGrained = false);
 
 void syncParams(
     ProcessGroup& processGroup,

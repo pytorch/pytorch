@@ -12,7 +12,7 @@ bool BatchOneHotOp<CPUContext>::DoRunWithType() {
   auto& lens = Input(LENS);
   auto& vals = Input(VALS);
   CAFFE_ENFORCE_GE(input.ndim(), 1);
-  auto N = input.dim(0);
+  auto N = input.size(0);
   auto D = input.size_from_dim(1);
   CAFFE_ENFORCE_EQ(lens.numel(), D);
 
@@ -111,7 +111,7 @@ bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
   auto& lens = Input(LENS);
   auto& boundaries = Input(BOUNDARIES);
   CAFFE_ENFORCE_GE(input.ndim(), 1);
-  auto N = input.dim(0);
+  auto N = input.size(0);
   auto D = input.size_from_dim(1);
   CAFFE_ENFORCE_EQ(lens.numel(), D);
 

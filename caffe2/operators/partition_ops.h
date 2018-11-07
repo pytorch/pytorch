@@ -46,16 +46,16 @@ class GatherByKeyOp : public Operator<CPUContext> {
 
     CAFFE_ENFORCE_GE(outShape.size(), 1);
     auto totalSize = in0Shape[0];
-    auto meta = Input(1).meta();
+    auto meta = Input(1).dtype();
     for (int i = 2; i < InputSize(); ++i) {
       const auto& input = Input(i);
-      CAFFE_ENFORCE(meta == input.meta());
+      CAFFE_ENFORCE(meta == input.dtype());
       CAFFE_ENFORCE_GE(input.ndim(), 1);
       CAFFE_ENFORCE(std::equal(
           outShape.begin() + keysShape.size(),
           outShape.end(),
           input.sizes().begin() + 1));
-      totalSize += input.dim(0);
+      totalSize += input.size(0);
     }
     CAFFE_ENFORCE_EQ(keysTensor.numel(), totalSize);
 
@@ -145,8 +145,8 @@ class PartitionOpBase : public Operator<CPUContext> {
             i);
         for (int j = 0; j < main_input.ndim(); ++j) {
           CAFFE_ENFORCE_GE(
-              input.dim(j),
-              main_input.dim(j),
+              input.size(j),
+              main_input.size(j),
               "Prefix of extra input's shape must match main input's shape, ",
               "input: ",
               i,
@@ -156,7 +156,7 @@ class PartitionOpBase : public Operator<CPUContext> {
       }
       raw_datas_[i] = input.raw_data();
       block_sizes_[i] = input.size_from_dim(main_input.ndim());
-      metas_[i] = input.meta();
+      metas_[i] = input.dtype();
       // shape = partition_size + suffix of input dims
       vector<int64_t> shape(
           input.sizes().begin() + main_input.ndim() - 1, input.sizes().end());
@@ -165,7 +165,7 @@ class PartitionOpBase : public Operator<CPUContext> {
         auto output = Output(out_idx);
         shape[0] = counts_[j];
         output->Resize(shape);
-        out_datas_[out_idx] = output->raw_mutable_data(input.meta());
+        out_datas_[out_idx] = output->raw_mutable_data(input.dtype());
       }
     }
 
@@ -255,10 +255,10 @@ class LengthsPartitionOp : public PartitionOpBase {
         auto& output = *Output(i);
         output.ResizeLike(input);
         context_.CopyItemsSameDevice(
-            input.meta(),
+            input.dtype(),
             input.numel(),
             input.raw_data(),
-            output.raw_mutable_data(input.meta()));
+            output.raw_mutable_data(input.dtype()));
       }
       return true;
     }
