@@ -367,34 +367,19 @@ ModuleDecoder::ModuleDecoder(
 }
 
 ModuleDecoder::ModuleDecoder(
-    ModuleLookup module_lookup,
-    std::istream& in) :
-    stream_reader_(&in) {
-  auto model_proto = onnx::ModelProto();
-  auto record = stream_reader_.getLastRecord();
-  model_proto.ParsePartialFromArray(std::get<0>(record).get(), std::get<1>(record));
+    script::Module* parent_module,
+    const onnx::ModelProto& model_proto,
+    const std::unordered_map<std::string, at::Tensor*>& param_map) {
   auto graph_proto = model_proto.graph();
 
   std::unordered_map<std::string, at::Tensor*> param_map;
 
-  for (auto &tensor_proto : graph_proto.initializer()) {
-    std::shared_ptr<script::Module> parent_module;
-    std::string name;
-    std::tie(parent_module, name) = parseFullName(module_lookup, tensor_proto.name());
-
-    auto param = buildParameter(tensor_proto);
-    parent_module->register_parameter(name, param, /* is_buffer = */ tensor_proto.int64_data(0));
-    param_map[tensor_proto.name()] = parent_module->parameter_slot(name);
-  }
-
   for (auto &node_proto : graph_proto.node()) {
-    std::shared_ptr<script::Module> parent_module;
-    std::string name;
-    std::tie(parent_module, name) = parseFullName(module_lookup, node_proto.name());
-
     std::vector<at::Tensor*> member_inputs;
-    for (auto &param_name : node_proto.input()) {
-      member_inputs.push_back(param_map[param_name]);
+    for (const auto &param_name : node_proto.input()) {
+      auto it = member_inputs.find(param_name);
+      JIT_ASSERT(it != member_inputs.end();
+      member_inputs.push_back(it->second);
     }
 
     auto graph = buildGraph(node_proto.attribute(0).g());

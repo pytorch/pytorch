@@ -1,21 +1,30 @@
 #pragma once
 
+#include <fstream>
+
+#include "caffe2/serialize/inline_container.h"
+#include "caffe2/serialize/intermediate_model.h"
+
+#include "torch/csrc/jit/import.h"
+#include "torch/csrc/jit/export.h"
 
 namespace torch {
 namespace jit {
 
-class ScriptModuleSerializer {
+class ScriptModuleSerializer final {
  public:
-  ScriptModuleSerializer(const std::string& filename) {
-    // TODO
+  ScriptModuleSerializer(const std::string& filename) :
+    ofs_(filename, std::ofstream::out | std::ofstream::trunc | std::ofstream::binary),
+    writer_(&ofs_) {
+    // TODO appropriate support for mmap, right now we still use stream writer
   }
 
-  ScriptModuleSerializer(std::istream* is) {
-    // TODO
-  }
+  ScriptModuleSerializer(std::istream* is) ofs_(), writer_(is) {}
 
   void serialize(const script::Module& smodule) {
-    // TODO
+    at::serialize::IntermediateModel imodel;
+    convertToModel(smodule, &imodel);
+    at::serialize::serializeIntermediateModel(imodel, &writer_);
   }
 
  private:
@@ -98,22 +107,23 @@ class ScriptModuleSerializer {
     ModuleEncoder encoder(smethod, model_proto.mutable_graph());
     string serialized_proto;
     model_proto.SerializeToString(&serialized_proto);
+    // NB: it should be fine to use torch_script for now
     imethod->setTorchScript(serialized_proto);
   }
 
   at::serialize::PyTorchStreamWriter writer_;
+  std::ofstream ofs_;
 
 };
 
 class ScriptModuleDeserializer {
  public:
-  ScriptModuleDeserializer(const std::string& filename) {
-    // TODO
+  ScriptModuleDeserializer(const std::string& filename) :
+    ifs(filename, std::ifstream::in | std::ifstream::binary), reader_(&ifs) {
+    // TODO appropriate support for mmap, right now still use stream reader
   }
 
-  ScriptModuleSerializer(std::istream* is) {
-    // TODO
-  }
+  ScriptModuleSerializer(std::istream* is) : ifs(), reader_(is) {}
 
   void deserialize(ModuleLookup module_lookup) {
     IntermediateModel imodel;
@@ -127,15 +137,22 @@ class ScriptModuleDeserializer {
   void convertModule(const at::serialize::IntermediateModule& imodule,
       script::Module* smodule,
       std::unordered_map<uint64_t, std::shared_ptr<at::Storage>>* id_storage) {
+    std::unordered_map<std::string, at::Tensor*> param_map;
     for (const auto& iparam: imodule.parameters()) {
       at::Tensor tensor = createTensor(iparam, reader, id_storage);
       autograd::Variable variable = autograd::make_variable(tensor,
           iparam.requireGradient());
       smodule->register_parameter(iparam.name(), variable, iparam.isBuffer());
+      AT_ASSERT(param_map.find(iparam.name()) == param_map.end());
+      param_map[iparam.name()] = &tensor;
     }
 
     for (const auto& imethod: imodule.methods()) {
-      // TODO
+      // TODO read unhacked torch script, right now it's serialized onnx proto
+      ::ONNX_NAMESPACE::ModelProto method_proto;
+      AT_ASSERTM(method_proto.ParseFromString(imethod.torchScript(),
+            "cannot parse method proto (i.e., hacked onnx proto)");
+      ModuleDecoder decoder(smodule, method_proto, param_map);
     }
 
     for (const auto& isub: imodule.submodules()) {
@@ -175,9 +192,10 @@ class ScriptModuleDeserializer {
       tensor.dims(), tensor.stridems());
   }
 
-  std::stack<std::string> moduleStack_;
+  std::ifstream ifs_;
   PyTorchStreamReader reader_;
   ModuleLookup moduleLook_;
+  std::stack<std::string> moduleStack_;
 
 };
 
