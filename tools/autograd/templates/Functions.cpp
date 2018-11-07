@@ -1081,17 +1081,19 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //   Step (3): only apply the procedure outlined above when input tensor has
 //             overlapping memory.
 //   Add step (0):
-//     (a): [optimize for "expand" cases so we may avoid index_add in step (2)]
+//     (a): [optimize for "permute" (and "transpose") cases so we may avoid
+//           creating "storage" tensor]
+//          (i):   Remove dimensions with size 1.
+//          (ii):  Sort the strides of input and output geometries. We need to do
+//                 this anyways to detech overlapping memory.
+//                 See NOTE [ Detecting Memory Overlap Within A Strided Tensor ].
+//          (iii): Check if they can be matched via some permutation. If so,
+//                 return `grad` permuted in reverse permutation.
+//          NB:
+//     (b): [optimize for "expand" cases so we may avoid index_add in step (2)]
 //          For all output dimension `d` with output stride 0, sum the gradients
 //          along dimension `d` (don't keepdim), and remove dimension `d` from
 //          output size and stride.
-//     (b): [optimize for "permute" (and "transpose") cases so we may avoid
-//           creating "storage" tensor]
-//          (i):  Sort the strides of input and output geometries. We need to do
-//                this anyways to detech overlapping memory.
-//                See NOTE [ Detecting Memory Overlap Within A Strided Tensor ].
-//          (ii): Check if they can be matched via some permutation. If so,
-//                return `grad` permuted in reverse order.
 //     (c): [optimize for expanded input case so we may avoid step (3)]
 //          For each expanded input dimension `d`, each memory location is
 //          effectively seen `inp_size[d]`-times more in input geometry. So
@@ -1100,22 +1102,23 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //
 // FULL ALGORITHM:
 //   0. Optimizations for certain cases
-//     a. [expand case]:
+//     a. [permute case]:
+//        i:   Remove dimensions with size 1.
+//        ii:  Sort the strides of input and output geometries. We need to do
+//             this anyways to detect overlapping memory.
+//             See NOTE [ Detecting Memory Overlap Within A Strided Tensor ].
+//        iii: Check if they can be matched via some permutation. If so, return
+//             `grad` permuted in reverse permutation.
+//     b. [expand case]:
 //        For all output dimension `d` with output stride 0, sum the gradients
 //        along dimension `d` (don't keepdim), and remove dimension `d` from
 //        output size and stride.
-//     b. [permute case]:
-//        i.:  Sort the strides of input and output geometries. We need to do
-//             this anyways to detech overlapping memory.
-//             See NOTE [ Detecting Memory Overlap Within A Strided Tensor ].
-//        ii.: Check if they can be matched via some permutation. If so, return
-//             `grad` permuted in reverse order.
 //     c. [expanded input]
 //        For each expanded input dimension `d`, each memory location is
 //        effectively seen `inp_size[d]`-times more in input geometry. So we
 //        first divide `grad` by `\prod_{expanded input dim d} inp_size[d]`, and
 //        ignore those dimensions.
-//   1. Create some underlying flattened tensor as if it is the base tensor
+//   1. Create some underlying flattened tensor, the storage tensor,
 //      representing the contiguous memory storage for both input and output.
 //   2. Use the output geometry to scatter (or index_add) the gradients into
 //      this storage tensor `storage`.
@@ -1126,7 +1129,7 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //   4. Return the as_strided view of the storage tensor using input geometry.
 //
 // See NOTE [ Detecting Memory Overlap Within A Strided Tensor ] on how to
-// roughly detech overlapping memory.
+// roughly detect overlapping memory.
 
 
 // NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
@@ -1148,9 +1151,9 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //
 //           stride[k] > \sum_{ i > k } (size[i] - 1) * stride[i]
 //
-//      That is equivalent to, after reording the dimensions so strides are
-//      in decreasing order, checking that stride of each dimension is larger
-//      than the maximum memory offset in a slice at that dimension.
+//      I.e,, after reordering the dimensions so that the strides are in
+//      decreasing order, checking that stride of each dimension is larger than
+//      than maximum memory offset in a slice at that dimension.
 //
 // Obviously this check passes for contiguous tensors ( the dimensions will be
 // already sorted with LHS = stride[0] = \prod size[i] being exactly 1 larger
@@ -1200,7 +1203,7 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //                    <= \sum_{i > 0}   (size[B[i]] - 1) * stride[B[i]] + (size[d] - 1) * stride[d]
 //                    <= \sum{j > B[0]} (size[j]    - 1) * stride[j],
 //
-//                where the first <   comes from sorting and
+//                where the first < comes from sorting and
 //                      the second <= comes from the fact that dimension d
 //                                               exists after step (1) and
 //                                               thus must have size greater
@@ -1354,7 +1357,7 @@ static inline int64_t _min_storage_size(IntList sizes, IntList strides, int64_t 
 //     permute, and transpose execute the "fast" path, which just returns a view
 //     of grad (after reducing on input/output expanded dims) without allocating
 //     an underlying storage-like tensor. It also asserts that some other ops
-//     (currently just unfold) take the slower path.
+//     (currently just unfold in certain cases) take the slower path.
 Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, int64_t storage_offset) {
   // This method implements the algorithm in NOTE [ as_strided Backward and layout-aware/agnostic autograd ],
   // which we refer to as Alg_bwd.
@@ -1368,7 +1371,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   //   skip size 1 dimensions,                          (Alg_overlap_out step 1)
   //   reduce grad on expanded dims (stride=0, size>1)  (Alg_bwd step 0.a)
   auto out_dim = grad.dim();
-  auto& ty = grad.type();
+  auto options = grad.options();
   std::vector<int64_t> out_sizes_, out_strides_, out_expanded_dims;
   out_sizes_.reserve(out_dim);
   out_strides_.reserve(out_dim);
@@ -1376,17 +1379,17 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
     auto size_i = sizes[i];
     auto stride_i = strides[i];
     if (size_i == 0) {
-      return at::zeros(input_geometry.sizes(), grad.options());
-    } else if (stride_i == 0) {
-      out_expanded_dims.emplace_back(i);
+      return at::zeros(input_geometry.sizes(), options);
+    // } else if (stride_i == 0) {
+    //   out_expanded_dims.emplace_back(i);
     } else if (size_i != 1) {
       out_sizes_.insert(out_sizes_.begin(), size_i);
       out_strides_.insert(out_strides_.begin(), stride_i);
     }
   }
-  if (!out_expanded_dims.empty()) {
-    grad = grad.sum(out_expanded_dims, false);
-  }
+  // if (!out_expanded_dims.empty()) {
+  //   grad = grad.sum(out_expanded_dims, false);
+  // }
   grad = grad.squeeze();
 
   // For input geometry,
@@ -1404,14 +1407,14 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
     auto size_i = inp_sizes[i];
     auto stride_i = inp_strides[i];
     if (size_i == 0) {
-      return at::zeros(input_geometry.sizes(), grad.options());
-    } else if (stride_i == 0) {
-      // Calculate multiplicity given by expanded dims.  (Alg_bwd step 0.b)
-      inp_multiplicity *= size_i;
-      // Moreover, we maintain a size where expanded dims are changed to size 1
-      // dims so we can easily .view(...).expand(...) on the returned grad, if
-      // neede, for Alg_bwd step 0.c.
-      inp_sizes_w_expanded_dims.insert(inp_sizes_w_expanded_dims.begin(), 1);
+      return at::zeros(input_geometry.sizes(), options);
+    // } else if (stride_i == 0) {
+    //   // Calculate multiplicity given by expanded dims.  (Alg_bwd step 0.b)
+    //   inp_multiplicity *= size_i;
+    //   // Moreover, we maintain a size where expanded dims are changed to size 1
+    //   // dims so we can easily .view(...).expand(...) on the returned grad, if
+    //   // needed, for Alg_bwd step 0.c.
+    //   inp_sizes_w_expanded_dims.insert(inp_sizes_w_expanded_dims.begin(), 1);
     } else  {
       if (size_i != 1) {
         inp_sizes_.insert(inp_sizes_.begin(), size_i);
@@ -1420,10 +1423,10 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
       inp_sizes_w_expanded_dims.insert(inp_sizes_w_expanded_dims.begin(), size_i);
     }
   }
-  // Divide grad by multiplicity given by expanded dims.  (Alg_bwd step 0.b)
-  if (inp_multiplicity > 1) {
-    grad = grad.div(inp_multiplicity);
-  }
+  // // Divide grad by multiplicity given by expanded dims.  (Alg_bwd step 0.b)
+  // if (inp_multiplicity > 1) {
+  //   grad = grad.div(inp_multiplicity);
+  // }
 
   // Check output strides & sizes.  (Alg_overlap_out steps 2 ~ 4)
   bool out_maybe_overlap = false, inp_maybe_overlap = false;
@@ -1448,8 +1451,9 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
       max_index_in_slice += stride_i * (out_sizes_[i] - 1);
     }
   }
+
   // Check input strides & sizes.                (Alg_overlap_inp steps 2 ~ 4)
-  // Detech and optimize if it is permute case.  (Alg_bwd step 0.c)
+  // Detect and optimize if it is permute case.  (Alg_bwd step 0.c)
   if (inp_sizes_.size() > 0) {
     std::vector<std::size_t> inp_argsort(inp_sizes_.size());
     std::iota(inp_argsort.begin(), inp_argsort.end(), 0);
@@ -1477,16 +1481,24 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
       if (permute_back != at::nullopt) {
         auto out_i = out_argsort[ii];
         if ((stride_i == out_strides_[out_i]) && (size_i == out_sizes_[out_i])) {
+          // Because out_argsort is a permutation of {0, 1, ..., max_dim - 1},
+          // and we have checked that input and output have same #dims at this
+          // point, this assignment guarantees that permute_back will also be a
+          // permutation.
           permute_back->at(inp_i) = static_cast<int64_t>(out_i);
         } else {
           permute_back = at::nullopt;
         }
       }
-      if (stride_i <= max_index_in_slice) {
-        out_maybe_overlap = true;
-        break;
+      if (!out_maybe_overlap) {
+        if (stride_i <= max_index_in_slice) {
+          out_maybe_overlap = true;
+          // NB: don't break out of the loop here! We may need to still
+          //     calculate permute_back.
+        } else {
+          max_index_in_slice += stride_i * (size_i - 1);
+        }
       }
-      max_index_in_slice += stride_i * (size_i - 1);
     }
     if (permute_back) {
       // Return grad permuted back.  (Alg_bwd step 0.c)
@@ -1511,12 +1523,12 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
     _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
     _min_storage_size(out_sizes_, out_strides_, out_effective_offset)
   );
-  auto storage = at::zeros({base_size}, grad.options());
+  auto storage = at::zeros({base_size}, options);
 
   // Prepare indices tensor if we will do index_add_ later.
   c10::optional<at::Tensor> flatten_full_indices;
   if (inp_maybe_overlap || out_maybe_overlap) {
-    flatten_full_indices = at::arange(0, base_size, grad.options().dtype(at::kLong));
+    flatten_full_indices = at::arange(0, base_size, options.dtype(at::kLong));
   }
 
   // Use output geometry to scatter gradients into storage.  (Alg_bwd step 2)
@@ -1534,7 +1546,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   if (inp_maybe_overlap) {
     auto count = at::zeros_like(storage);
     auto inp_indices = flatten_full_indices->as_strided(inp_sizes_, inp_strides_, inp_effective_offset).reshape(-1);
-    count.index_add_(0, inp_indices, at::ones({1}, grad.options()).expand_as(inp_indices));
+    count.index_add_(0, inp_indices, at::ones({1}, options).expand_as(inp_indices));
     storage.div_(count);  // this will give nan outside visible range
   }
   // Return as_strided view of the storage tensor with input geometry.
