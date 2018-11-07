@@ -18,7 +18,7 @@ class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
  public:
   USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(CPUContext);
   Int8ConvTransposeOp(const OperatorDef& def, Workspace* ws)
-      : ConvTransposeUnpoolBase(def, ws), gemm_context_(ws->GetThreadPool()) {
+      : ConvTransposeUnpoolBase(def, ws) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NHWC,
         "Int8ConvTransposeOp only supports NHWC order");
@@ -63,7 +63,7 @@ class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
       initQNNPACK();
 
       pthreadpool_t threadpool =
-          reinterpret_cast<pthreadpool_t>(gemm_context_.threadPool());
+          reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
 
       if (this->qnnpackObject_ == nullptr) {
         const qnnp_status createStatus = qnnp_create_deconvolution2d_nhwc_q8(
@@ -147,7 +147,6 @@ class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
   }
 
  private:
-  C2GEMMContext gemm_context_;
   // QNNPACK convolution object
   qnnp_operator_t qnnpackObject_{nullptr};
   // batch size in the previous call to RunOnDeviceWithOrderNHWC
