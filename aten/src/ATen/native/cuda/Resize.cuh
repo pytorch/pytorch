@@ -35,7 +35,7 @@ inline TensorImpl* resize_impl_cuda_(
   }
 
   // NB: We don't need to hold the device guard when calling from TH
-  cuda::MaybeCUDAGuard guard;
+  cuda::OptionalCUDAGuard guard;
   if (device_guard) {
     guard.set_index(self->storage().device().index());
   }

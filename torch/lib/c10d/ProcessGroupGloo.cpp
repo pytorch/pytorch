@@ -192,7 +192,7 @@ void initializeStreamsEvents(
     std::vector<at::Tensor>& inputs,
     std::vector<at::cuda::CUDAStream>& streams,
     std::vector<at::cuda::CUDAEvent>& events) {
-  at::cuda::MaybeCUDAGuard guard;
+  at::cuda::OptionalCUDAGuard guard;
   streams.reserve(inputs.size());
   events.resize(inputs.size());
   for (size_t i = 0; i < inputs.size(); i++) {
@@ -523,7 +523,7 @@ void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
 
   // Create algorithm against first context
   auto& context = contexts_[0];
-  at::MaybeDeviceGuard guard(at::device_of(entry.src[0]));
+  at::OptionalDeviceGuard guard(at::device_of(entry.src[0]));
 
   if (backend == at::Backend::CPU) {
     if (getSize() < 16) {
@@ -576,7 +576,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 
   // Create algorithm against first context
   auto& context = contexts_[0];
-  at::MaybeDeviceGuard guard(device_of(entry.src[0]));
+  at::OptionalDeviceGuard guard(device_of(entry.src[0]));
 
   if (backend == at::Backend::CPU) {
     entry.algorithm =
@@ -619,7 +619,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 //
 EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
 #ifdef USE_CUDA
-  at::cuda::MaybeCUDAGuard deviceGuard;
+  at::cuda::OptionalCUDAGuard deviceGuard;
 #endif
   auto entry = std::unique_ptr<AlgorithmEntry>(new AlgorithmEntry);
   entry->key = key;
@@ -762,7 +762,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
     // Create pinned host side tensors.
     tmp = pinnedLike(inputs[rootTensor]);
-    at::cuda::MaybeCUDAStreamGuard guard;
+    at::cuda::OptionalCUDAStreamGuard guard;
     if (context->rank == rootRank) {
       guard.set_stream(streams[rootTensor]);
       tmp.copy_(inputs[rootTensor], /* non_blocking */ true);
@@ -770,7 +770,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
   }
 
   void run() override {
-    at::cuda::MaybeCUDAStreamGuard guard;
+    at::cuda::OptionalCUDAStreamGuard guard;
 
     // Synchronize with copy operation if applicable.
     if (context->rank == rootRank) {
@@ -790,7 +790,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
   }
 
   void synchronize() override {
-    at::cuda::MaybeCUDAGuard guard;
+    at::cuda::OptionalCUDAGuard guard;
 
     // Synchronize with the copy back to CUDA tensors.
     for (size_t i = 0; i < inputs.size(); i++) {
@@ -922,7 +922,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmp.reserve(inputs.size());
-    at::cuda::MaybeCUDAStreamGuard guard;
+    at::cuda::OptionalCUDAStreamGuard guard;
     for (size_t i = 0; i < inputs.size(); i++) {
       guard.set_stream(streams[i]);
       tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
@@ -931,7 +931,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::MaybeCUDAGuard device_guard;
+    at::cuda::OptionalCUDAGuard device_guard;
     for (size_t i = 0; i < inputs.size(); i++) {
       device_guard.set_index(inputs[i].get_device());
       AT_CUDA_CHECK(cudaStreamSynchronize(streams[i]));
@@ -941,7 +941,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
     allreduce(tmp);
 
     // Kick off copy back to the CUDA tensors.
-    at::cuda::MaybeCUDAStreamGuard stream_guard;
+    at::cuda::OptionalCUDAStreamGuard stream_guard;
     for (size_t i = 0; i < inputs.size(); i++) {
       stream_guard.set_stream(streams[i]);
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
@@ -951,7 +951,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::MaybeCUDAGuard guard;
+    at::cuda::OptionalCUDAGuard guard;
     for (size_t i = 0; i < inputs.size(); i++) {
       guard.set_index(static_cast<at::DeviceIndex>(inputs[i].get_device()));
       events[i].block(at::cuda::getCurrentCUDAStream());

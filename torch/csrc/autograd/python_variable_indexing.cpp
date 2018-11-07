@@ -210,14 +210,14 @@ static std::vector<Tensor> typeConvertIndices(const Variable& self, const variab
 static Variable dispatch_index(const Variable& self, const variable_list& indices) {
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
-  MaybeDeviceGuard device_guard(device_of(self));
+  OptionalDeviceGuard device_guard(device_of(self));
   return self.index(converted_indices);
 }
 
 static Variable dispatch_index_put_(Variable& self, const variable_list& indices, const Variable& value) {
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
-  MaybeDeviceGuard device_guard(device_of(self));
+  OptionalDeviceGuard device_guard(device_of(self));
   return self.index_put_(converted_indices, value);
 }
 

@@ -34,7 +34,7 @@ using at::Device;
 using at::Scalar;
 using at::ScalarType;
 using at::Backend;
-using at::MaybeDeviceGuard;
+using at::OptionalDeviceGuard;
 using at::DeviceGuard;
 using at::TensorOptions;
 
@@ -143,7 +143,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
 
 inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, Tensor result) {
   AutoNoGIL no_gil;
-  MaybeDeviceGuard device_guard(device_of(result));
+  OptionalDeviceGuard device_guard(device_of(result));
   return at::range_out(result, start, end, step);
 }
 

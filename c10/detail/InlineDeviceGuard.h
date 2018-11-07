@@ -25,7 +25,7 @@ namespace detail {
  *
  * InlineDeviceGuard is always initialized, and always resets device on exit.
  * For a device guard which permits uninitialized state, see
- * InlineMaybeDeviceGuard.
+ * InlineOptionalDeviceGuard.
  */
 template <typename T>
 class InlineDeviceGuard {
@@ -36,7 +36,7 @@ public:
   // DeviceGuard which reads the current device and promises to
   // restore to that device on exit.  However, most cases where you
   // would have written this, you probably meant to actually just
-  // use MaybeDeviceGuard (since you don't actually need the
+  // use OptionalDeviceGuard (since you don't actually need the
   // restore to happen if you don't ever actually set the device).
   // We remove the constructor here to encourage you to think about
   // what you actually want to happen.
@@ -113,14 +113,14 @@ private:
 };
 
 /**
- * A MaybeDeviceGuard is an RAII class that sets a device to some value on
+ * A OptionalDeviceGuard is an RAII class that sets a device to some value on
  * initialization, and resets the device to its original value on destruction.
- * Morally, a MaybeDeviceGuard is equivalent to optional<DeviceGuard>, but
+ * Morally, a OptionalDeviceGuard is equivalent to optional<DeviceGuard>, but
  * some methods are implemented more efficiently.
  *
- * Unlike DeviceGuard, a MaybeDeviceGuard may be uninitialized.  This occurs
+ * Unlike DeviceGuard, a OptionalDeviceGuard may be uninitialized.  This occurs
  * when you use the nullary constructor, or pass a nullopt to the constructor.
- * Uninitialized MaybeDeviceGuards do *nothing*; they do not know what the
+ * Uninitialized OptionalDeviceGuards do *nothing*; they do not know what the
  * original device was, and they do not reset on destruction.
  *
  * An initialized InlineDeviceGuard doesn't restore device to its value at
@@ -134,12 +134,12 @@ private:
  *
  * On destruction, g will reset device to 2, rather than 1.
  *
- * An uninitialized MaybeDeviceGuard is distinct from a (initialized)
+ * An uninitialized OptionalDeviceGuard is distinct from a (initialized)
  * DeviceGuard whose original_device_ and current_device_ match, since the
  * DeviceGuard will still reset the device to original_device_.
  */
 template <typename T>
-class InlineMaybeDeviceGuard {
+class InlineOptionalDeviceGuard {
 public:
   // Note [Explicit initialization of optional fields]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -149,33 +149,33 @@ public:
 
   /// Default constructor, reads the current device so that
   /// we may reset the device to the current device on destruction.
-  explicit InlineMaybeDeviceGuard()
+  explicit InlineOptionalDeviceGuard()
     : guard_() // See Note [Explicit initialization of optional fields]
     {}
 
   /// Set the current device to the passed Device
-  explicit InlineMaybeDeviceGuard(optional<Device> device_opt)
+  explicit InlineOptionalDeviceGuard(optional<Device> device_opt)
     : guard_() {
     if (device_opt.has_value()) {
       guard_.emplace(device_opt.value());
     }
   }
 
-  /// All constructors of DeviceGuard are valid for MaybeDeviceGuard
+  /// All constructors of DeviceGuard are valid for OptionalDeviceGuard
   template <typename... Args>
-  explicit InlineMaybeDeviceGuard(Args&&... args)
+  explicit InlineOptionalDeviceGuard(Args&&... args)
     : guard_(in_place, std::forward<Args>(args)...) {}
 
   // Note [Move construction for RAII guards is tricky]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // In principle, move construction is useful for terminating
-  // the lifetime of a `MaybeDeviceGuard` early; for example:
+  // the lifetime of a `OptionalDeviceGuard` early; for example:
   //
   //     // current device is d0
-  //     MaybeDeviceGuard g1(d1);
+  //     OptionalDeviceGuard g1(d1);
   //     // current device is d1
   //     {
-  //       MaybeDeviceGuard g2(std::move(g1));
+  //       OptionalDeviceGuard g2(std::move(g1));
   //     }
   //     // current device is d0!!
   //
@@ -183,11 +183,11 @@ public:
   // in a way that works in all situations.  For example, consider
   // the following example:
   //
-  //     MaybeDeviceGuard g1(d1);
+  //     OptionalDeviceGuard g1(d1);
   //     {
-  //       MaybeDeviceGuard g2(d2);
+  //       OptionalDeviceGuard g2(d2);
   //       {
-  //         MaybeDeviceGuard g3(std::move(g1)); // !!!
+  //         OptionalDeviceGuard g3(std::move(g1)); // !!!
   //       }
   //     }
   //
@@ -198,7 +198,7 @@ public:
   // It's in principle possible to raise an error when this occurs
   // by doing some extra thread-local bookkeeping.  But why bother?
   // Just don't provide the constructor.
-  InlineMaybeDeviceGuard(InlineMaybeDeviceGuard<T>&& other) = delete;
+  InlineOptionalDeviceGuard(InlineOptionalDeviceGuard<T>&& other) = delete;
 
   // Note [Move assignment for RAII guards is tricky]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -247,9 +247,9 @@ public:
   //
   // We could solve this with an extra thread-local variable.  But no one is
   // actually using move-assignment.  So just get rid of it.
-  InlineMaybeDeviceGuard& operator=(InlineMaybeDeviceGuard&& other) = delete;
+  InlineOptionalDeviceGuard& operator=(InlineOptionalDeviceGuard&& other) = delete;
 
-  /// Sets the device to the given one.  Initializes MaybeDeviceGuard if it
+  /// Sets the device to the given one.  Initializes OptionalDeviceGuard if it
   /// is not already initialized.
   void set_device(at::Device device) {
     if (!guard_.has_value()) {

@@ -86,7 +86,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     // and pass this along to the collective (since it uses the THC
     // getters to retrieve the current stream).
     //
-    at::cuda::MaybeCUDAGuard deviceGuard;
+    at::cuda::OptionalCUDAGuard deviceGuard;
     streams_.reserve(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
@@ -133,7 +133,7 @@ class AsyncAllreduceTest : public AsyncInputIsOutputTest {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every stream
-    at::cuda::MaybeCUDAGuard deviceGuard;
+    at::cuda::OptionalCUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 10 * 1000 * 1000);
@@ -159,7 +159,7 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every stream
-    at::cuda::MaybeCUDAGuard deviceGuard;
+    at::cuda::OptionalCUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 10 * 1000 * 1000);

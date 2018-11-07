@@ -23,7 +23,7 @@ at::Tensor dispatch_type_conversion(
 
   // TODO: Make this less CUDA specific
   at::Device device = self.device();
-  at::MaybeDeviceGuard device_guard;
+  at::OptionalDeviceGuard device_guard;
   if (device_index) {
     device_guard.set_device(at::Device(at::kCUDA, *device_index));
   }

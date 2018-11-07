@@ -41,7 +41,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
                              "first on devices list");
   std::vector<Tensor> tensors;
   tensors.reserve(devices.size());
-  at::cuda::MaybeCUDAGuard _device_guard;
+  at::cuda::OptionalCUDAGuard _device_guard;
 #ifdef USE_NCCL
   if (nccl::is_available({tensor})) {
     tensors.push_back(tensor);
@@ -147,7 +147,7 @@ std::vector<at::Tensor> scatter(
   } else {
     chunks = tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
   }
-  at::cuda::MaybeCUDAStreamGuard cuda_guard;
+  at::cuda::OptionalCUDAStreamGuard cuda_guard;
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
     const auto device_index = static_cast<int16_t>(devices[chunk]);
     if (streams && (*streams)[chunk]) {

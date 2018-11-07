@@ -11,10 +11,16 @@ namespace c10 {
 /// construction time.
 ///
 /// This device guard does NOT have an uninitialized state; it is guaranteed
-/// to reset a device on exit.  If you are looking for an RAII guard that
-/// *might* happen, see MaybeDeviceGuard.
+/// to reset a device on exit.  If you are in a situation where you *might*
+/// want to setup a guard (i.e., are looking for the moral equivalent
+/// of optional<DeviceGuard>), see OptionalDeviceGuard.
 class DeviceGuard {
 public:
+  /// Why no default constructor?  In principle, we could implement a default
+  /// constructor here (which would eagerly read the current device), but we
+  /// purposely do not to encourage users to look into using OptionalDeviceGuard.
+  explicit DeviceGuard() = delete;
+
   /// Set the current device to the passed Device.
   explicit DeviceGuard(Device device) : guard_(device) {}
 
@@ -29,6 +35,11 @@ public:
 
   /// Sets the device to the given one.  The specified device must be consistent
   /// with the device type originally specified during guard construction.
+  ///
+  /// TODO: The consistency check here is inconsistent with StreamGuard's
+  /// behavior with set_stream, where a stream on a different device than
+  /// the original one isn't an error; we just reset the stream and then
+  /// switch devices.
   void set_device(at::Device device) {
     guard_.set_device(device);
   }
@@ -57,47 +68,47 @@ private:
 /// RAII guard that sets a certain default device in its constructor, and
 /// changes it back to the device that was originally active upon destruction.
 ///
-/// Unlike DeviceGuard, a MaybeDeviceGuard may be uninitialized.  This occurs
+/// Unlike DeviceGuard, a OptionalDeviceGuard may be uninitialized.  This occurs
 /// when you use the nullary constructor, or pass a nullopt to the constructor.
-/// Uninitialized MaybeDeviceGuards do *nothing*; they do not know what the
+/// Uninitialized OptionalDeviceGuards do *nothing*; they do not know what the
 /// original device was, and they do not reset on destruction.
 ///
-/// An initialized MaybeDeviceGuard doesn't restore device to its value at
+/// An initialized OptionalDeviceGuard doesn't restore device to its value at
 /// construction; it restores device to its value *at initialization*.  So if you
 /// have the program:
 ///
 ///     setDevice(1);
-///     MaybeDeviceGuard g;
+///     OptionalDeviceGuard g;
 ///     setDevice(2);
 ///     g.set_device(3);
 ///
 /// On destruction, g will reset device to 2, rather than 1.
 ///
-/// An uninitialized MaybeDeviceGuard is distinct from a MaybeDeviceGuard whose
-/// original_device and current_device match, since the MaybeDeviceGuard will
+/// An uninitialized OptionalDeviceGuard is distinct from a OptionalDeviceGuard whose
+/// original_device and current_device match, since the OptionalDeviceGuard will
 /// still reset the device to original_device.
-class MaybeDeviceGuard {
+class OptionalDeviceGuard {
 public:
   /// Create an uninitialized guard.  Set the guard later using set_device.
-  explicit MaybeDeviceGuard() : guard_() {}
+  explicit OptionalDeviceGuard() : guard_() {}
 
   /// Initialize the guard, setting the current device to the passed Device.
-  explicit MaybeDeviceGuard(Device device) : guard_(device) {}
+  explicit OptionalDeviceGuard(Device device) : guard_(device) {}
 
   /// Initialize the guard if a Device is passed; otherwise leave the
   /// guard uninitialized.
-  explicit MaybeDeviceGuard(optional<Device> device) : guard_(device) {}
+  explicit OptionalDeviceGuard(optional<Device> device) : guard_(device) {}
 
   /// Copy is disallowed
-  MaybeDeviceGuard(const MaybeDeviceGuard&) = delete;
-  MaybeDeviceGuard& operator=(const MaybeDeviceGuard&) = delete;
+  OptionalDeviceGuard(const OptionalDeviceGuard&) = delete;
+  OptionalDeviceGuard& operator=(const OptionalDeviceGuard&) = delete;
 
   /// Move is disallowed
   /// See Note [Explicit initialization of optional fields]
   /// and // Note [Move construction for RAII guards is tricky]
   /// for rationale.
-  MaybeDeviceGuard(MaybeDeviceGuard&& other) = delete;
-  MaybeDeviceGuard& operator=(MaybeDeviceGuard&& other) = delete;
+  OptionalDeviceGuard(OptionalDeviceGuard&& other) = delete;
+  OptionalDeviceGuard& operator=(OptionalDeviceGuard&& other) = delete;
 
   /// Sets the device to the given one.  The specified device must be consistent
   /// with the device type originally specified during guard construction.
@@ -117,13 +128,13 @@ public:
   }
 
 private:
-  detail::InlineMaybeDeviceGuard<detail::VirtualGuardImpl> guard_;
+  detail::InlineOptionalDeviceGuard<detail::VirtualGuardImpl> guard_;
 };
 
 // Design note: in principle, we could avoid these wrappers using:
 //
 // using DeviceGuard = detail::InlineDeviceGuard<detail::VirtualGuardImpl>;
-// using MaybeDeviceGuard = detail::InlineMaybeDeviceGuard<detail::VirtualGuardImpl>;
+// using OptionalDeviceGuard = detail::InlineOptionalDeviceGuard<detail::VirtualGuardImpl>;
 //
 // But the error messages are worse, and our users can't just look at the
 // header file to find out what's going on.  No, let's write out the API

@@ -222,7 +222,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // Broadcast so that each process can have a unique NCCL ID
   broadcastUniqueNCCLID(&ncclID);
 
-  at::cuda::MaybeCUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::vector<at::cuda::CUDAStream> streamVal;
   streamVal.reserve(devices.size());
@@ -352,7 +352,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  at::cuda::MaybeCUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -399,7 +399,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  at::cuda::MaybeCUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -447,7 +447,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  at::cuda::MaybeCUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -515,7 +515,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  at::cuda::MaybeCUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));

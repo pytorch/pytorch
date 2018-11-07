@@ -89,11 +89,11 @@ TEST(InlineDeviceGuard, SetIndex) {
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i2);
 }
 
-// -- InlineMaybeDeviceGuard --------------------------------------------------
+// -- InlineOptionalDeviceGuard --------------------------------------------------
 
-using MaybeTestGuard = InlineMaybeDeviceGuard<TestGuardImpl>;
+using MaybeTestGuard = InlineOptionalDeviceGuard<TestGuardImpl>;
 
-TEST(InlineMaybeDeviceGuard, Constructor) {
+TEST(InlineOptionalDeviceGuard, Constructor) {
   for (DeviceIndex i : {-1, 0, 1}) {
     DeviceIndex init_i = 0;
     TestGuardImpl::setDeviceIndex(init_i);
@@ -125,7 +125,7 @@ TEST(InlineMaybeDeviceGuard, Constructor) {
   }
 }
 
-TEST(InlineMaybeDeviceGuard, NullaryConstructor) {
+TEST(InlineOptionalDeviceGuard, NullaryConstructor) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
   auto test_body = [&](MaybeTestGuard& g) -> void {
@@ -146,7 +146,7 @@ TEST(InlineMaybeDeviceGuard, NullaryConstructor) {
   }
 }
 
-TEST(InlineMaybeDeviceGuard, SetDevice) {
+TEST(InlineOptionalDeviceGuard, SetDevice) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
   MaybeTestGuard g;
@@ -161,7 +161,7 @@ TEST(InlineMaybeDeviceGuard, SetDevice) {
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i);
 }
 
-TEST(InlineMaybeDeviceGuard, SetIndex) {
+TEST(InlineOptionalDeviceGuard, SetIndex) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
   DeviceIndex i = init_i + 1;
