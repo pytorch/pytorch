@@ -30,6 +30,10 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
 
   // check if distance between two flip dims >= 2, where permute of output tensor is needed,
   // because the advanced indexing puts all non-consecutive indices in the beginning of the tensor
+  auto out_tensor = self.index(TensorList(final_indices));
+  auto out_sizes_idx = std::vector<int64_t>(out_tensor.dim());
+  std::iota(out_sizes_idx.begin(), out_sizes_idx.end(), 0);
+
   bool to_permute = false;
   int64_t first = flip_dims_v[0], second = flip_dims_v[0];
   for (int64_t i = 1; i < flip_dims_size; i++) {
@@ -49,11 +53,10 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
         permute_order.emplace_back(i);
       }
     }
-    auto out_tensor = self.index(TensorList(final_indices));
-    return out_tensor.permute(IntList(permute_order));
+    std::sort(out_sizes_idx.begin(), out_sizes_idx.end(),
+              [&permute_order](int64_t i1, int64_t i2) {return permute_order[i1] < permute_order[i2];});
+    return out_tensor.permute(out_sizes_idx);
   }
-
-  auto out_tensor = self.index(TensorList(final_indices));
   return out_tensor;
 }
 

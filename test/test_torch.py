@@ -7228,6 +7228,7 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_flip(self, use_cuda=False):
+        device = torch.device('cuda') if use_cuda else torch.device('cpu')
         if use_cuda:
             cuda = torch.device("cuda")
             data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=cuda).view(2, 2, 2)
@@ -7282,6 +7283,15 @@ class _TestTorchMixin(object):
         # test empty tensor, should just return an empty tensor of the same shape
         data = torch.tensor([])
         self.assertEqual(data, data.flip(0))
+
+        # test for shape
+        data = torch.randn(2, 3, 4, device=device)
+        size = [2, 3, 4]
+        test_dims = []
+        for i in range(1, 3):
+            test_dims += combinations(range(len(size)), i)
+        for ds in test_dims:
+            self.assertEqual(size, list(data.flip(ds).size()))
 
     def test_flip(self):
         self._test_flip(self, use_cuda=False)
