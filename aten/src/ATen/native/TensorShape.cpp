@@ -49,7 +49,7 @@ Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   return at::_th_cat_out(result, tensors, dim);
 }
 
-static bool sizes_match_except(IntList s1, IntList s2, int64_t dim_except) {
+static bool sizes_match_except(IntList s1, IntList s2, int64_t dim_except /* should already be wrapped */) {
   if (s1.size() != s2.size()) {
     return false;
   }
@@ -64,21 +64,28 @@ static bool sizes_match_except(IntList s1, IntList s2, int64_t dim_except) {
 static Tensor cat_sparse(TensorList tensors, int64_t dim) {
   std::vector<Tensor> indices;
   std::vector<Tensor> values;
+  int64_t wrapped = maybe_wrap_dim(dim, tensors[0].dim());
   int64_t sparse_dim = tensors[0].sparse_dim();
   int64_t dense_dim = tensors[0].dense_dim();
-  AT_CHECK(dim < sparse_dim,
+  // TODO - Make catting along dense dimensions work.
+  // it's possible to do so,
+  // but it involves creating a brand new values object
+  // for each nonzero index in each input tensor
+  // E.g.: catting [[1,2],[0,0]] and [[0,0],[3,4]]
+  // yields [[1,2,0,0],[0,0,3,4]]
+  AT_CHECK(wrapped < sparse_dim,
            "Can't cat or stack tensors of sparse dim ", sparse_dim, "along non-sparse dimension ", dim);
   IntList sizes = tensors[0].sizes();
   for (size_t i = 0; i < tensors.size(); ++i) {
     auto const &t = tensors[i];
     AT_CHECK(t.is_sparse(),
              "Can't cat dense tensor at position ", i, " with sparse tensor(s).");
+    AT_CHECK(sizes_match_except(sizes, t.sizes(), wrapped),
+             "Tensor at position ", i, " of sizes ", t.sizes(), " can't be concatenated with tensor of sizes ", sizes,
+             " along dimension ", dim);
     AT_CHECK(t.sparse_dim() == sparse_dim && t.dense_dim() == dense_dim,
              "Tensor at position ", i, " has dimension: sparse ", t.sparse_dim(), ", dense ", t.dense_dim(),
              ". Can't cat with tensor of dimensions ", sparse_dim, ", ", dense_dim);
-    AT_CHECK(sizes_match_except(sizes, t.sizes(), dim),
-             "Tensor at position ", i, " of sizes ", t.sizes(), " can't be concatenated with tensor of sizes ", sizes,
-             " along dimension ", dim);
     indices.push_back(t._indices());
     values.push_back(t._values());
   }
@@ -101,13 +108,13 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
     // cumulative_offset is zero for the first piece, so
     // don't waste time doing this operation unless i > 0.
     if (i > 0) {
-      idxs[dim].narrow(0, col, this_piece_size) += cumulative_offset;
+      idxs[wrapped].narrow(0, col, this_piece_size) += cumulative_offset;
     }
-    cumulative_offset += t.size(dim);
+    cumulative_offset += t.size(wrapped);
     col += this_piece_size;
   }
   auto sizes_copy = sizes.vec();
-  sizes_copy[dim] = cumulative_offset;
+  sizes_copy[wrapped] = cumulative_offset;
   return native::sparse_coo_tensor(idxs, vals, sizes_copy, tensors[0].options());
 }
 

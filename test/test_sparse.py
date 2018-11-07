@@ -701,6 +701,9 @@ class TestSparse(TestCase):
         # mismatched dimensions
         test_shapes([(2, 10, [2, 3, 4]), (3, 10, [2, 3, 4])], 0,
                     "Can't cat with tensor of dimensions")
+        # wrapped dimension
+        test_shapes(
+            [(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4]), (3, 10, [2, 4, 4])], -2)
 
         # sparse with dense
         sp = self._gen_sparse(3, 10, [2, 3, 4])[0]
