@@ -157,7 +157,7 @@ class FullyConnectedFakeLowpFPOp final : public Operator<Context> {
     const auto& W = Input(1);
     const auto& b = Input(2);
     auto* Y = Output(0);
-    CAFFE_ENFORCE(b.ndim() == 1, b.ndim());
+    CAFFE_ENFORCE(b.dim() == 1, b.dim());
     // batch size
     const auto canonical_axis = X.canonical_axis_index(axis_);
     const auto M = X.size_to_dim(canonical_axis);

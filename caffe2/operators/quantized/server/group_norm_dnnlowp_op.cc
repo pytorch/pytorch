@@ -653,7 +653,7 @@ bool GroupNormDNNLowPOp<T>::RunOnDeviceWithOrderNCHW() {
 template <typename T>
 bool GroupNormDNNLowPOp<T>::RunOnDeviceWithOrderNHWC() {
   const auto& X = InputTensorCPU_(INPUT);
-  const int ndim = X.ndim();
+  const int ndim = X.dim();
   const int N = X.dim32(0);
   const int C = X.dim32(ndim - 1);
   const int HxW = X.size() / (N * C);

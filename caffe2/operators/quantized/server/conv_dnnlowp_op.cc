@@ -97,7 +97,7 @@ bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3FastPath_() {
   return StorageOrder::NHWC == ConvPoolOpBase<CPUContext>::order_ &&
       is_same<T, uint8_t>::value && X.template IsType<T>() &&
       OperatorBase::debug_def().engine() != "DNNLOWP_ACC16" &&
-      group_ == X.dim32(X.ndim() - 1) && group_ % 8 == 0 &&
+      group_ == X.dim32(X.dim() - 1) && group_ % 8 == 0 &&
       BaseType::kernel_.size() == 2 && kernel_h() == 3 && kernel_w() == 3 &&
       stride_h() == stride_w() && (stride_h() == 1 || stride_h() == 2) &&
       pad_t() == 1 && pad_b() == 1 && pad_l() == 1 && pad_r() == 1 &&
@@ -110,7 +110,7 @@ bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3x3FastPath_() {
   bool ret = StorageOrder::NHWC == ConvPoolOpBase<CPUContext>::order_ &&
       is_same<T, uint8_t>::value && X.template IsType<T>() &&
       OperatorBase::debug_def().engine() != "DNNLOWP_ACC16" &&
-      group_ == X.dim32(X.ndim() - 1) && group_ % 8 == 0 &&
+      group_ == X.dim32(X.dim() - 1) && group_ % 8 == 0 &&
       BaseType::kernel_.size() == 3 && BaseType::kernel_[0] == 3 &&
       BaseType::kernel_[1] == 3 && BaseType::kernel_[2] == 3 &&
       BaseType::stride_[0] == BaseType::stride_[1] &&
@@ -119,8 +119,7 @@ bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3x3FastPath_() {
       BaseType::pads_[0] == 1 && BaseType::pads_[1] == 1 &&
       BaseType::pads_[2] == 1 && BaseType::pads_[3] == 1 &&
       BaseType::pads_[4] == 1 && BaseType::pads_[5] == 1 &&
-      !dequantize_output_ && GetCpuId().avx2() &&
-      !quantize_groupwise_;
+      !dequantize_output_ && GetCpuId().avx2() && !quantize_groupwise_;
   return ret;
 }
 
@@ -136,7 +135,7 @@ int ConvDNNLowPOp<T, ReluFused>::KernelDim_() {
     C = X.dim32(1);
     filter_offset = 2;
   } else {
-    C = X.dim32(X.ndim() - 1);
+    C = X.dim32(X.dim() - 1);
     filter_offset = 1;
   }
 
@@ -158,7 +157,7 @@ bool ConvDNNLowPOp<T, ReluFused>::NoIm2ColNHWC_() {
 
   const Tensor& X = InputTensorCPU_(INPUT);
   Tensor* Y = OutputTensorCPU_(0);
-  const int C = X.dim32(X.ndim() - 1);
+  const int C = X.dim32(X.dim() - 1);
   int kernel_dim = KernelDim_();
   if (kernel_dim != (C / group_)) {
     return false;
@@ -538,7 +537,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
   auto& filter = InputTensorCPU_(FILTER);
   Tensor* Y = OutputTensorCPU_(0);
   const int N = X.dim32(0), C = X.dim32(1);
-  CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+  CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE_EQ(
       C,
@@ -946,7 +945,7 @@ const InType* ConvDNNLowPOp<T, ReluFused>::Im2ColNHWC_(
     Tensor* col_buffer) {
   const Tensor& X = InputTensorCPU_(INPUT);
   Tensor* Y = OutputTensorCPU_(0);
-  int ndim = X.ndim();
+  int ndim = X.dim();
   const int N = X.dim32(0), C = X.dim32(ndim - 1);
 
   const int kernel_dim = KernelDim_();
@@ -1059,7 +1058,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
   const Tensor& X = InputTensorCPU_(INPUT);
   auto& filter = InputTensorCPU_(FILTER);
   Tensor* Y = OutputTensorCPU_(0);
-  const int N = X.dim32(0), C = X.dim32(X.ndim() - 1);
+  const int N = X.dim32(0), C = X.dim32(X.dim() - 1);
   const int M = filter.dim32(0);
   const int kernel_dim = KernelDim_();
   const int Y_HxW = this->GetDimsSize(*Y);
@@ -1359,17 +1358,17 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
   const Tensor& X = InputTensorCPU_(INPUT);
   auto& filter = InputTensorCPU_(FILTER);
   Tensor* Y = OutputTensorCPU_(0);
-  const int N = X.dim32(0), C = X.dim32(X.ndim() - 1);
+  const int N = X.dim32(0), C = X.dim32(X.dim() - 1);
   const int G = group_;
-  CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+  CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE_EQ(
       C,
-      filter.dim32(filter.ndim() - 1) * G,
+      filter.dim32(filter.dim() - 1) * G,
       "Convolution op: input channels does not match: # of input channels ",
       C,
       " is not equal to kernel channels * group: ",
-      filter.dim32(filter.ndim() - 1),
+      filter.dim32(filter.dim() - 1),
       "*",
       G);
   CAFFE_ENFORCE_EQ(
