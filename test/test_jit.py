@@ -6571,9 +6571,15 @@ a")
             cu = torch.jit.CompilationUnit('''
             def single_starred_lhs(x):
                 a = (x, x, x)
-                *b = a
+                *b, = a
                 return b
             ''')
+
+    def test_singleton_tuple_unpack(self):
+        def foo(a):
+            b, = (a,)
+            return b + 1
+        self.checkScript(foo, (torch.rand(3),))
 
     def test_multi_reduction(self):
         with self.assertRaisesRegex(
@@ -6592,7 +6598,7 @@ a")
                 return torch.unsqueeze(3, 4, 5, 6, 7, 8)
 
     def test_invalid_lhs_assignment(self):
-        with self.assertRaisesRegex(RuntimeError, 'lhs of assignment must be a variable or starred expression'):
+        with self.assertRaisesRegex(RuntimeError, 'unexpected expression'):
             cu = torch.jit.CompilationUnit('''
             def invalid_lhs_assignment(x):
                 x + 1 = x
@@ -6683,7 +6689,7 @@ a")
             SomeModule()
 
     def test_single_starred_expr_for_loop(self):
-        with self.assertRaisesRegex(RuntimeError, 'Starred unpacking is currently not supported for for loops'):
+        with self.assertRaisesRegex(RuntimeError, 'unexpected expression'):
             cu = torch.jit.CompilationUnit('''
             def test():
                 x = 0
