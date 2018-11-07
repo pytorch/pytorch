@@ -377,10 +377,11 @@ Resolver pythonResolver(ResolutionCallback rcb) {
 
 }
 
-FunctionSchema getSchemaWithDefaults(
-    const FunctionDefaults& default_args,
+FunctionSchema getSchemaWithNameAndDefaults(
+    const SourceRange& range,
     const FunctionSchema schema,
-    const Def& def) {
+    at::optional<std::string> new_name,
+    const FunctionDefaults& default_args) {
   std::vector<Argument> new_args;
   for (auto& arg : schema.arguments()) {
     auto it = default_args.find(arg.name());
@@ -390,7 +391,7 @@ FunctionSchema getSchemaWithDefaults(
         new_args.push_back(
             Argument(arg.name(), arg.type(), arg.N(), value, arg.kwarg_only()));
       } catch (py::cast_error& e) {
-        throw ErrorReport(def.range())
+        throw ErrorReport(range)
             << "Expected a default value of type " << arg.type()->str()
             << " on parameter \"" << arg.name() << "\"";
       }
@@ -400,7 +401,7 @@ FunctionSchema getSchemaWithDefaults(
   }
 
   return FunctionSchema(
-      schema.name(),
+      new_name.value_or(schema.name()),
       new_args,
       schema.returns(),
       schema.is_vararg(),
@@ -451,8 +452,8 @@ void initJitScriptBindings(PyObject* module) {
         auto defs_it = defs.begin();
         while (defs_it != defs.end()) {
           auto& method = m->get_method((*defs_it).name().name());
-          method.setSchema(getSchemaWithDefaults(
-              *defaults_it, method.getSchema(), *defs_it));
+          method.setSchema(getSchemaWithNameAndDefaults(
+              defs_it->range(), method.getSchema(), at::nullopt, *defaults_it));
           ++defs_it;
           ++defaults_it;
         }
@@ -514,12 +515,11 @@ void initJitScriptBindings(PyObject* module) {
         });
       })
       .def("_create_method_from_graph", [](
-        Module& self,
-        const std::string& name,
-        std::shared_ptr<Graph> graph
-      ){
-        std::vector<at::Tensor*> parameters;
-        self.create_method(name, std::move(graph), std::move(parameters));
+         Module& self,
+         const std::string& name,
+         std::shared_ptr<Graph> graph
+       ){
+         self.create_method(name, std::move(graph), {});
       })
       .def("_create_method_from_trace", [](
         Module& self,
@@ -596,15 +596,16 @@ void initJitScriptBindings(PyObject* module) {
       Method& self = py::cast<Method&>(args[0]);
       return self.graph_for(createStackForSchema(self.getSchema(), tuple_slice(std::move(args), 1), std::move(kwargs)));
     })
-    .def("forward_schema", [](Method &self, Def &def, FunctionDefaults defaults, bool is_method) {
-      self.setSchema(getSchemaWithDefaults(
-        defaults, extractSchemaFromDef(def, is_method), def));
-    })
     .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
     .def("pretty_print_schema", &Method::pretty_print_schema);
 
-  m.def("_jit_script_compile", [](const Def &def, ResolutionCallback rcb) {
-    return compileFunction(def, pythonResolver(rcb));
+  m.def("_jit_script_compile", [](std::shared_ptr<Module> mod, const Def &def, ResolutionCallback rcb, FunctionDefaults defaults) {
+    auto def_f = def.withName("forward");
+    defineMethodsInModule(*mod, {def_f}, {pythonResolver(rcb)}, nullptr);
+    auto& method = mod->get_method("forward");
+    method.setSchema(getSchemaWithNameAndDefaults(
+        def.range(), method.getSchema(), def.name().name(), defaults));
+    return mod;
   });
 
   m.def("parse_type_comment", [](const std::string& comment) {
