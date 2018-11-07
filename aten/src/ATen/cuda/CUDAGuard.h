@@ -59,6 +59,8 @@ struct CUDAGuard {
   c10::detail::InlineDeviceGuard<detail::CUDAGuardImpl> device_guard_;
 };
 
+using MaybeCUDAGuard = c10::detail::InlineMaybeDeviceGuard<detail::CUDAGuardImpl>;
+
 struct CUDAStreamGuard {
   /// Sets the CUDA stream and its associated device as the current one (calls
   /// `set_stream`).

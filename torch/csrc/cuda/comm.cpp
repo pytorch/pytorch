@@ -41,7 +41,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
                              "first on devices list");
   std::vector<Tensor> tensors;
   tensors.reserve(devices.size());
-  at::cuda::CUDAGuard _device_guard;
+  at::cuda::MaybeCUDAGuard _device_guard;
 #ifdef USE_NCCL
   if (nccl::is_available({tensor})) {
     tensors.push_back(tensor);

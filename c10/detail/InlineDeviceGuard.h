@@ -30,6 +30,15 @@ namespace detail {
 template <typename T>
 class InlineDeviceGuard {
 public:
+  // Design note: in principle, we could add a default constructor to
+  // DeviceGuard which reads the current device and promises to
+  // restore to that device on exit.  However, most cases where you
+  // would have written this, you probably meant to actually just
+  // use MaybeDeviceGuard (since you don't actually need the
+  // restore to happen if you don't ever actually set the device).
+  // We remove the constructor here to encourage you to think about
+  // what you actually want to happen.
+
   /// Set the current device to the passed Device.
   explicit InlineDeviceGuard(Device device)
     : impl_(device.type())

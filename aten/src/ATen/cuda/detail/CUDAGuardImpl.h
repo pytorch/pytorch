@@ -14,6 +14,7 @@ namespace detail {
 
 struct CUDAGuardImpl final : public c10::detail::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
+  CUDAGuardImpl() {}
   CUDAGuardImpl(DeviceType) {}
   DeviceType type() const override {
     return DeviceType::CUDA;
