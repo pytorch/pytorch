@@ -330,6 +330,10 @@ struct Def : public TreeView {
   explicit Def(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_DEF);
   }
+  Def withName(std::string new_name) const {
+    auto new_ident = Ident::create(name().range(), new_name);
+    return create(range(), new_ident, decl(), statements());
+  }
   Ident name() const {
     return Ident(subtree(0));
   }
