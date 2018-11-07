@@ -165,9 +165,9 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   }
 
   if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
-    return t2;
+    return OptionalType::create(t2);
   } else if (t2->isSubtypeOf(NoneType::get()) && !t1->isSubtypeOf(NoneType::get())) {
-    return t1;
+    return OptionalType::create(t1);
   }
 
   //types which contain other types
