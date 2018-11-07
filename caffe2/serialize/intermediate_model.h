@@ -71,6 +71,11 @@ class CAFFE2_API IntermediateTensor final {
   explicit IntermediateTensor(int64_t dataType, const std::vector<int64_t>& dims,
       int64_t offset): dataType_(dataType), dims_(dims), offset_(offset) {}
 
+  IntermediateTensor(IntermediateTensor&&) = default;
+  IntermediateTensor& operator =(IntermediateTensor&&) = default;
+
+  C10_DISABLE_COPY_AND_ASSIGN(IntermediateTensor);
+
   // extract data from TensorProto, called in deserialize
   // assume record id to data mapping is complete
   void update(caffe2::TensorProto* tensor_proto,
@@ -155,6 +160,11 @@ class CAFFE2_API IntermediateParameter final {
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
       DeserializeMode mode);
 
+  IntermediateParameter(IntermediateParameter&&) = default;
+  IntermediateParameter& operator =(IntermediateParameter&&) = default;
+
+  C10_DISABLE_COPY_AND_ASSIGN(IntermediateParameter);
+
   // dump data to ParameterDef, invoked in serialize
   void dump(torch::ParameterDef* param_def);
 
@@ -205,11 +215,10 @@ class CAFFE2_API IntermediateMethod final {
 
   explicit IntermediateMethod(torch::MethodDef* method_def);
 
-  IntermediateMethod(const IntermediateMethod& method) = delete;
-  IntermediateMethod& operator =(const IntermediateMethod& method) = delete;
-
   IntermediateMethod(IntermediateMethod&& method) = default;
   IntermediateMethod& operator =(IntermediateMethod&& method) = default;
+
+  C10_DISABLE_COPY_AND_ASSIGN(IntermediateMethod);
 
   // dump data to MethodDef, called in serialize
   void dump(torch::MethodDef* method_def);
@@ -234,8 +243,7 @@ class CAFFE2_API IntermediateMethod final {
 
  private:
   std::string name_;
-  //std::unique_ptr<caffe2::NetDef> graph_;
-  std::unique_ptr<std::string> graph_;
+  std::unique_ptr<caffe2::NetDef> graph_;
   std::string torchScript_;
 };
 
@@ -248,11 +256,10 @@ class CAFFE2_API IntermediateModule final {
       std::unordered_map<uint64_t, std::shared_ptr<SharedData>>* id_data,
       DeserializeMode mode);
 
-  IntermediateModule(const IntermediateModule&) = delete;
-  IntermediateModule& operator =(const IntermediateModule&) = delete;
-
   IntermediateModule(IntermediateModule&&) = default;
   IntermediateModule& operator =(IntermediateModule&&) = default;
+
+  C10_DISABLE_COPY_AND_ASSIGN(IntermediateModule);
 
   // extract data from ModuleDef, invoked in deserialize
   // assume record id to data mapping is complete
@@ -310,11 +317,10 @@ class CAFFE2_API IntermediateModel final {
   // constructor
   IntermediateModel() = default;
 
-  IntermediateModel(const IntermediateModel&) = delete;
-  IntermediateModel& operator =(const IntermediateModel&) = delete;
-
   IntermediateModel(IntermediateModel&&) = default;
   IntermediateModel& operator =(IntermediateModel&&) = default;
+
+  C10_DISABLE_COPY_AND_ASSIGN(IntermediateModel);
 
   // extract data from ModelDef, invoked in deserialize
   // assume record id to data mapping is complete
