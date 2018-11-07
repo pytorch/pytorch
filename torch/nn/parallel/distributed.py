@@ -68,7 +68,7 @@ class DistributedDataParallel(Module):
     to construct this module:
 
         >>> torch.distributed.init_process_group(backend='nccl', world_size=4, init_method='...')
-        >>> model = DistributedDataParallel(model, devices_ids=[i], output_device=i)
+        >>> model = DistributedDataParallel(model, device_ids=[i], output_device=i)
 
     In order to spawn up multiple processes per node, you can use either
     ``torch.distributed.launch`` or ``torch.multiprocessing.spawn``
