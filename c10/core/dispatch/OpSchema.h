@@ -1,9 +1,9 @@
 #pragma once
 
-#include "caffe2/core/dispatch/DispatchKey.h"
-#include "caffe2/proto/caffe2_pb.h"
+#include <c10/core/dispatch/DispatchKey.h>
 #include <c10/util/Array.h>
 #include <c10/util/Metaprogramming.h>
+#include <c10/DeviceType.h>
 
 namespace caffe2 {
 class Tensor;
@@ -21,11 +21,11 @@ template <class Arg>
 using is_tensor_arg = std::
     is_same<caffe2::Tensor, guts::remove_cv_t<guts::remove_reference_t<Arg>>>;
 
-inline DeviceTypeId to_device_type_id(caffe2::DeviceType device_type) {
+inline DeviceTypeId to_device_type_id(DeviceType device_type) {
   switch (device_type) {
-    case caffe2::CPU:
+    case DeviceType::CPU:
       return DeviceTypeId::CPU;
-    case caffe2::CUDA:
+    case DeviceType::CUDA:
       return DeviceTypeId::CUDA;
     default:
       return DeviceTypeId::UNDEFINED;
