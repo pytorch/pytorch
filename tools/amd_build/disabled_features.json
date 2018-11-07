@@ -11,7 +11,7 @@
           "cublasDgetrsBatched": "rocblas_status_internal_error",
           "cublasSgetriBatched": "rocblas_status_internal_error",
           "cublasDgetriBatched": "rocblas_status_internal_error"
-        },
+        }
       },
       {
         "path": "aten/src/THC/THCStream.cpp",
@@ -87,15 +87,13 @@
       {
         "path": "aten/src/ATen/Context.h",
         "s_constants": {
-            # FIXME: ROCm currently does not support multi-GPU setup; and getNumGPUs runs into a seg fault
-            # ROCm Pytorch issue: https://github.com/ROCmSoftwarePlatform/pytorch/issues/31
-            "detail::getCUDAHooks().getNumGPUs()": "1",
+            "detail::getCUDAHooks().getNumGPUs()": "1"
         }
       },
       {
         "path": "aten/src/ATen/native/cuda/Unique.cu",
         "s_constants": {
-            "inverse_indices_kernel<<<": "inverse_indices_kernel<scalar_t><<<",
+            "inverse_indices_kernel<<<": "inverse_indices_kernel<scalar_t><<<"
         }
       }
     ],
@@ -124,7 +122,7 @@
       "path": "aten/src/ATen/native/cuda/Distributions.cu",
       "functions": [
         "gamma_cuda_kernel",
-        "gamma_grad_cuda_kernel",
+        "gamma_grad_cuda_kernel"
       ]
     },
     {
