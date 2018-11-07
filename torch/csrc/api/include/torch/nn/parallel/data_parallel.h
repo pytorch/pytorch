@@ -3,7 +3,7 @@
 #include <torch/cuda.h>
 #include <torch/nn/module.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <torch/csrc/autograd/functions/comm.h>
 #include <torch/csrc/cuda/comm.h>

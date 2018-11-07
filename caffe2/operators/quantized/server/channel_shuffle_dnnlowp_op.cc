@@ -1,8 +1,8 @@
 #include "caffe2/operators/quantized/server/channel_shuffle_dnnlowp_op.h"
 
-#include "caffe2/caffe2/utils/eigen_utils.h"
 #include "caffe2/operators/quantized/server/caffe2_dnnlowp_utils.h"
 #include "caffe2/operators/quantized/server/transpose.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
@@ -45,7 +45,9 @@ bool ChannelShuffleDNNLowPOp<T>::RunOnDeviceWithOrderNCHW() {
   const int stride = C * HxW;
   const T* X_data = X.template data<T>();
   T* Y_data = Y->template mutable_data<T>();
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int i = 0; i < N; ++i) {
     ConstEigenMatrixMap<T> X_mat(X_data, K * HxW, G);
     for (int j = 0; j < K; ++j) {
@@ -87,14 +89,18 @@ bool ChannelShuffleDNNLowPOp<T>::RunOnDeviceWithOrderNHWC() {
   T* Y_data = Y->template mutable_data<T>();
 
   if (G == 4 && std::is_same<T, std::uint8_t>::value && GetCpuId().avx2()) {
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
     for (auto i = 0; i < X.numel(); i += C) {
       // Transpose each C = GxK matrix
       fbgemm::transpose_4rows(
           K, (const std::uint8_t*)(X_data + i), (std::uint8_t*)(Y_data + i));
     }
   } else {
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
     for (auto i = 0; i < X.numel(); i += C) {
       // Transpose each C = GxK matrix
       math::Transpose(

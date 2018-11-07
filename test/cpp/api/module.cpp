@@ -3,7 +3,7 @@
 #include <torch/nn/module.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/rnn.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>
@@ -54,8 +54,8 @@ TEST_F(ModuleTest, ZeroGrad) {
 TEST_F(ModuleTest, ZeroGradWithUndefined) {
   struct TestModule : torch::nn::Module {
     TestModule() {
-      x = register_parameter("x", torch::ones(5, at::requires_grad()));
-      y = register_parameter("y", torch::ones(5, at::requires_grad()));
+      x = register_parameter("x", torch::ones(5, torch::requires_grad()));
+      y = register_parameter("y", torch::ones(5, torch::requires_grad()));
     }
     torch::Tensor x, y;
   };
@@ -194,7 +194,7 @@ TEST_F(ModuleTest, Conversion_MultiCUDA) {
       ASSERT_EQ(parameter->device().type(), torch::Device::Type::CUDA);
       ASSERT_EQ(parameter->device().index(), 0);
     }
-    module->to({at::kCUDA, 1});
+    module->to({torch::kCUDA, 1});
     for (auto& parameter : module->parameters()) {
       ASSERT_EQ(parameter->device().type(), torch::Device::Type::CUDA);
       ASSERT_EQ(parameter->device().index(), 1);

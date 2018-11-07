@@ -56,7 +56,9 @@ bool ElementwiseLinearDNNLowPOp<T>::RunOnDevice() {
   // Quantize b
   vector<int32_t> b_quantized(b.numel());
   const float *b_data = b.template data<float>();
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int i = 0; i < b.numel(); ++i) {
     b_quantized[i] = Quantize<int32_t>(
       b_data[i], 0, in_qparams_[0].scale * in_qparams_[1].scale,
@@ -64,7 +66,9 @@ bool ElementwiseLinearDNNLowPOp<T>::RunOnDevice() {
   }
 
   T *Y_quantized = GetQuantizedOutputData_();
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int n = 0; n < N; ++n) {
     for (int d = 0; d < D; ++d) {
       int32_t raw =

@@ -44,7 +44,7 @@ class ReshapeOp : public Operator<Context> {
           "the argument `shape`.");
 
       auto& shape = Input(1);
-      CAFFE_ENFORCE(shape.ndim() == 1, "Shape should be 1-D");
+      CAFFE_ENFORCE(shape.dim() == 1, "Shape should be 1-D");
 
       const T* shape_data = shape.template data<T>();
 
@@ -55,7 +55,7 @@ class ReshapeOp : public Operator<Context> {
     }
 
     // Copy over the dimensions for those that are specified zero.
-    for (int i = 0; i < actual_new_shape.size() && i < input.ndim(); ++i) {
+    for (int i = 0; i < actual_new_shape.size() && i < input.dim(); ++i) {
       if (actual_new_shape[i] == 0) {
         actual_new_shape[i] = input.size(i);
       }
@@ -112,9 +112,9 @@ class ReshapeOp : public Operator<Context> {
 
     // Write the original shape to the second output.
     auto* old_shape = Output(1);
-    old_shape->Resize(input.ndim());
+    old_shape->Resize(input.dim());
     T* old_shape_data = old_shape->template mutable_data<T>();
-    for (int i = 0; i < input.ndim(); ++i) {
+    for (int i = 0; i < input.dim(); ++i) {
       math::Set<T, Context>(1, input.size(i), old_shape_data + i, &context_);
     }
 

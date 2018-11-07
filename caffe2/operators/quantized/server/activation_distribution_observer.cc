@@ -83,7 +83,9 @@ void OutputMinMaxObserver::Stop() {
       continue;
     }
 
+#ifdef _OPENMP
 #pragma omp critical
+#endif
     {
       if (min_max_map_.find(out_name) == min_max_map_.end()) {
         min_max_map_[out_name] = make_pair(
@@ -164,7 +166,9 @@ void OutputMinMaxNetObserver::DumpAndReset_(
 OutputMinMaxNetObserver::~OutputMinMaxNetObserver() {
   DumpAndReset_(out_file_name_, true);
 
+#ifdef _OPENMP
 #pragma omp critical
+#endif
   {
     ofstream f;
     time_t rawtime;

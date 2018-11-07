@@ -3,7 +3,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/modules/dropout.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>

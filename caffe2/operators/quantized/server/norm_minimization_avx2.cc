@@ -1,6 +1,7 @@
 #include "l2_minimization.h"
 
 #include <cmath>
+#include <array>
 
 #include <x86intrin.h>
 

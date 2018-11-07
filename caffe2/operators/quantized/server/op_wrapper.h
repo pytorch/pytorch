@@ -53,7 +53,7 @@ class OpWrapper {
           // NHWC2NCHW for input
           std::vector<T> temp(qtensor.numel());
 
-          int ndim = qtensor.ndim();
+          int ndim = qtensor.dim();
           std::vector<int> dims(qtensor.sizes().begin(), qtensor.sizes().end());
           std::vector<int> axes(ndim);
           axes[0] = 0;
@@ -98,7 +98,7 @@ class OpWrapper {
           TensorCPU* float_tensor =
             BlobGetMutableTensor(local_input_blobs_[i], CPU);
 
-          int ndim = in_tensor.ndim();
+          int ndim = in_tensor.dim();
           std::vector<int> dims(
               in_tensor.sizes().begin(), in_tensor.sizes().end());
           std::vector<int> axes(ndim);

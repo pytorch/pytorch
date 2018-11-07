@@ -1,12 +1,11 @@
 #include "l2_minimization.h"
-#include "caffe2/core/logging.h"
 
 #include <chrono>
 #include <fstream>
 #include <sstream>
 
-#include <glog/logging.h>
 #include <gtest/gtest.h>
+#include "caffe2/core/logging.h"
 
 using namespace std;
 using namespace dnnlowp;

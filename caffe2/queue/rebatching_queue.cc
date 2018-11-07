@@ -40,8 +40,8 @@ void concat(
 
       CAFFE_ENFORCE(inputZero[j].meta() == input.dtype());
       CAFFE_ENFORCE_EQ(inputZero[j].itemsize(), input.itemsize());
-      CAFFE_ENFORCE_EQ(inputZero[j].ndim(), input.ndim());
-      for (int k = 0; k < input.ndim(); ++k) {
+      CAFFE_ENFORCE_EQ(inputZero[j].ndim(), input.dim());
+      for (int k = 0; k < input.dim(); ++k) {
         CAFFE_ENFORCE_EQ(input.sizes()[k], inputZero[j].dims()[k]);
       }
 

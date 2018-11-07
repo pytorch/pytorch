@@ -4,9 +4,8 @@
 #include <iomanip>
 #include <bitset>
 
-#include <glog/logging.h>
 #include <gtest/gtest.h>
-
+#include "caffe2/core/logging.h"
 #include "fully_connected_fake_lowp_op.h"
 
 constexpr size_t sz = 10000;

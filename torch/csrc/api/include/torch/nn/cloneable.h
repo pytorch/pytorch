@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/nn/module.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <ATen/OptionsGuard.h>

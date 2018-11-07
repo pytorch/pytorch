@@ -21,7 +21,9 @@ bool ConvReluOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   Tensor *output = Operator<Context>::Output(0);
   output->ResizeLike(*local_output);
   T *output_data = output->template mutable_data<T>();
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int i = 0; i < output->numel(); ++i) {
     output_data[i] = std::max(static_cast<T>(0), output_local_data[i]);
   }
@@ -48,7 +50,9 @@ bool ConvReluOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   Tensor *output = Operator<Context>::Output(0);
   output->ResizeLike(*local_output);
   T *output_data = output->template mutable_data<T>();
+#ifdef _OPENMP
 #pragma omp parallel for
+#endif
   for (int i = 0; i < output->numel(); ++i) {
     output_data[i] = std::max(static_cast<T>(0), output_local_data[i]);
   }

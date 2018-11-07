@@ -245,6 +245,15 @@ TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
       ss << "cannot match a future to " << actual->str();
       throw TypeMatchError(ss.str());
     }
+  } else if (auto opt_formal = formal->cast<OptionalType>()) {
+    if (auto opt_actual = actual->cast<OptionalType>()) {
+      return OptionalType::create(matchTypeVariables(
+          opt_formal->getElementType(), opt_actual->getElementType(), type_env));
+    } else {
+      std::stringstream ss;
+      ss << "cannot match a optional to " << actual->str();
+      throw TypeMatchError(ss.str());
+    }
   }
 
   AT_ERROR("unhandled free variable container: ", formal->str());
