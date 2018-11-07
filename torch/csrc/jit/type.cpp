@@ -259,17 +259,13 @@ TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
           opt_actual->getElementType(),
           type_env));
     } else {
-      if (opt_formal->getElementType()->kind() == TypeKind::VarType) {
-        return OptionalType::create(
-            matchTypeVariables(opt_formal->getElementType(), actual, type_env));
-      }
+      // Allow matching to `None`
       if (actual->isSubtypeOf(NoneType::get())) {
         return OptionalType::create(opt_formal->getElementType());
       }
-      std::stringstream ss;
-      ss << "cannot match an optional[" << opt_formal->getElementType()->str()
-         << "]to " << actual->str();
-      throw TypeMatchError(ss.str());
+       // If the actual type is a non-optional, allow matching to the formal if
+      // its element type matches the actual
+      return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
     }
   }
 
