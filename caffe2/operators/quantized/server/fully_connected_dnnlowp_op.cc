@@ -514,7 +514,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
   }
   if (Wq_packed_ && !FLAGS_caffe2_dnnlowp_dump_tensors) {
     // From here, W_quantized_ is not used anymore when we have Wq_packed_
-    W_quantized_.clear();
+    vector<T_signed>().swap(W_quantized_);
   }
 
   // Quantize bias
