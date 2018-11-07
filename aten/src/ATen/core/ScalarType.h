@@ -2,7 +2,7 @@
 
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Half.h"
-#include "ATen/core/typeid.h"
+#include <c10/util/typeid.h>
 
 #include <cstdint>
 #include <iostream>
