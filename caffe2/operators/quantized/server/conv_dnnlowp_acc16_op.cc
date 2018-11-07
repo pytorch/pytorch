@@ -170,7 +170,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
           W_quantized_.data() + group_id * (M / group_) * kernel_dim,
           kernel_dim));
     }
-    W_quantized_.clear();
+    vector<int8_t>().swap(W_quantized_);
   }
 
   return true;
