@@ -262,7 +262,8 @@ TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
         return OptionalType::create(opt_formal->getElementType());
       }
       if (opt_formal->getElementType()->kind() == TypeKind::VarType) {
-        return OptionalType::create(actual);
+        return OptionalType::create(
+            matchTypeVariables(opt_formal->getElementType(), actual, type_env));
       }
       std::stringstream ss;
       ss << "cannot match an optional[" << opt_formal->getElementType()->str()

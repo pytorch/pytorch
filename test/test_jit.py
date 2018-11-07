@@ -7280,10 +7280,9 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
             test_script(None)
 
-        with self.assertRaisesRegex(RuntimeError, "cannot match a optional to int"):
-            @torch.jit.script
-            def test_test():
-                return torch.jit._unwrap_optional(1)
+        @torch.jit.script
+        def test_test():
+            return torch.jit._unwrap_optional(1)
 
     def test_indexing_error(self):
         with self.assertRaisesRegex(RuntimeError, "Indexing only supported on lists, tensors, and tuples"):
@@ -9440,6 +9439,7 @@ nn_functional_tests = [
     ('softplus', (S, S, S), (),),
     ('softmin', (S, S, S), (0,),),
     ('softmax', (S, S, S), (0,),),
+    ('softmax', (S, S, S), (0, 3, torch.double), 'all_args'),
     ('tanh', (S, S, S), (),),
     ('sigmoid', (S, S, S), (),),
     ('log_softmax', (S, S, S), (0,),),
