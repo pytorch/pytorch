@@ -139,8 +139,8 @@ public:
   int64_t ndimension() const {
     return dim();
   }
-  int64_t is_contiguous() const {
-    return impl_->is_contiguous();  
+  bool is_contiguous() const {
+    return impl_->is_contiguous();
   }
   Type & type() const {
     return impl_->type();
