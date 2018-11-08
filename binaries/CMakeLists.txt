@@ -39,11 +39,6 @@ if (USE_ZMQ)
   target_link_libraries(zmq_feeder ${ZMQ_LIBRARIES})
 endif()
 
-if(USE_MPI)
-  caffe2_binary_target("run_plan_mpi.cc")
-  target_link_libraries(run_plan_mpi ${MPI_CXX_LIBRARIES})
-endif()
-
 if (USE_OPENCV AND USE_LEVELDB)
   caffe2_binary_target("convert_encoded_to_raw_leveldb.cc")
   target_link_libraries(

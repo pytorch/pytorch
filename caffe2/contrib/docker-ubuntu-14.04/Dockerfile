@@ -55,18 +55,6 @@ RUN cd /tmp && \
   cd / && \
   rm -rf /tmp/rocksdb
 
-# Caffe2 works best with openmpi 1.8.5 or above (which has cuda support).
-# If you do not need openmpi, skip this step.
-RUN cd /tmp && \
-  wget http://www.open-mpi.org/software/ompi/v1.10/downloads/openmpi-1.10.0.tar.gz && \
-  tar xzvf openmpi-1.10.0.tar.gz && \
-  cd /tmp/openmpi-1.10.0 && \
-  ./configure --with-cuda --with-threads && \
-  make && make install && \
-  cd / && \
-  rm -rf /tmp/openmpi-1.10.0 && \
-  rm /tmp/openmpi-1.10.0.tar.gz
-
 # Caffe2 requires zeromq 4.0 or above, manually install.
 # If you do not need zeromq, skip this step.
 RUN apt-get install -q -y autoconf libtool
