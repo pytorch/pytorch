@@ -279,21 +279,21 @@ class _DistTestBase(object):
             with self.assertRaisesRegex(RuntimeError, "Invalid process group specified"):
                 dist.get_backend(group_id)
 
-    def test_DistBackend(self):
+    def test_Backend_enum_class(self):
         # test parsing
         backend = BACKEND.lower()
-        self.assertEqual(dist.DistBackend(BACKEND.upper()), backend)
-        self.assertEqual(dist.DistBackend(BACKEND), backend)
+        self.assertEqual(dist.Backend(BACKEND.upper()), backend)
+        self.assertEqual(dist.Backend(BACKEND), backend)
         with self.assertRaisesRegex(ValueError, "Invalid backend: 'undefined'"):
-            dist.DistBackend("undefined")
+            dist.Backend("undefined")
         with self.assertRaisesRegex(ValueError, "Invalid backend: 'xYz'"):
-            dist.DistBackend("xYz")
+            dist.Backend("xYz")
         with self.assertRaises(ValueError):
-            dist.DistBackend(None)
+            dist.Backend(None)
         with self.assertRaises(ValueError):
-            dist.DistBackend(3)
+            dist.Backend(3)
         with self.assertRaises(ValueError):
-            dist.DistBackend(["gloo"])
+            dist.Backend(["gloo"])
 
     # Test destroy
     def test_destroy_group(self):
@@ -541,7 +541,7 @@ class _DistTestBase(object):
             group,
             group_id,
             rank,
-            dist.reduce_op.SUM,
+            dist.ReduceOp.SUM,
             2,
             10,
             2 + (10 * (len(group) - 1)),
@@ -557,7 +557,7 @@ class _DistTestBase(object):
             group,
             group_id,
             rank,
-            dist.reduce_op.SUM,
+            dist.ReduceOp.SUM,
             2,
             10,
             2 + 10 * (len(group) - 1),
@@ -573,7 +573,7 @@ class _DistTestBase(object):
             group,
             group_id,
             rank,
-            dist.reduce_op.PRODUCT,
+            dist.ReduceOp.PRODUCT,
             2,
             10,
             reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
@@ -583,13 +583,13 @@ class _DistTestBase(object):
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_reduce_min(self):
         group, group_id, rank = self._init_global_test()
-        self._test_reduce_helper(group, group_id, rank, dist.reduce_op.MIN, 1010, 1, 1)
+        self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MIN, 1010, 1, 1)
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_reduce_max(self):
         group, group_id, rank = self._init_global_test()
-        self._test_reduce_helper(group, group_id, rank, dist.reduce_op.MAX, -1, 10, 10)
+        self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10)
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
@@ -600,7 +600,7 @@ class _DistTestBase(object):
             group,
             group_id,
             rank,
-            dist.reduce_op.SUM,
+            dist.ReduceOp.SUM,
             2,
             10,
             2 + (10 * (len(group) - 1)),
@@ -615,7 +615,7 @@ class _DistTestBase(object):
             group,
             group_id,
             rank,
-            dist.reduce_op.PRODUCT,
+            dist.ReduceOp.PRODUCT,
             2,
             10,
             reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
@@ -626,14 +626,14 @@ class _DistTestBase(object):
     @skip_if_small_worldsize
     def test_reduce_group_min(self):
         group, group_id, rank = self._init_group_test()
-        self._test_reduce_helper(group, group_id, rank, dist.reduce_op.MIN, 1010, 1, 1)
+        self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MIN, 1010, 1, 1)
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     @skip_if_small_worldsize
     def test_reduce_group_max(self):
         group, group_id, rank = self._init_group_test()
-        self._test_reduce_helper(group, group_id, rank, dist.reduce_op.MAX, -1, 10, 10)
+        self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10)
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
@@ -643,7 +643,7 @@ class _DistTestBase(object):
             group,
             group_id,
             rank,
-            dist.reduce_op.SUM,
+            dist.ReduceOp.SUM,
             2,
             10,
             2 + (10 * (len(group) - 1)),
@@ -657,7 +657,7 @@ class _DistTestBase(object):
             group,
             group_id,
             rank,
-            dist.reduce_op.PRODUCT,
+            dist.ReduceOp.PRODUCT,
             2,
             10,
             reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
@@ -667,13 +667,13 @@ class _DistTestBase(object):
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_reduce_full_group_min(self):
         group, group_id, rank = self._init_full_group_test()
-        self._test_reduce_helper(group, group_id, rank, dist.reduce_op.MIN, 1010, 1, 1)
+        self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MIN, 1010, 1, 1)
 
     @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_reduce_full_group_max(self):
         group, group_id, rank = self._init_full_group_test()
-        self._test_reduce_helper(group, group_id, rank, dist.reduce_op.MAX, -1, 10, 10)
+        self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10)
 
     # ALL REDUCE
     def _test_all_reduce_helper(
@@ -711,7 +711,7 @@ class _DistTestBase(object):
             group,
             group_id,
             rank,
-            dist.reduce_op.SUM,
+            dist.ReduceOp.SUM,
             2,
             10,
             2 + (10 * (len(group) - 1)),
@@ -730,7 +730,7 @@ class _DistTestBase(object):
             group,
             group_id,
             rank,
-            dist.reduce_op.SUM,
+            dist.ReduceOp.SUM,
             2,
             10,
             2 + (10 * (len(group) - 1)),
@@ -745,7 +745,7 @@ class _DistTestBase(object):
             group,
             group_id,
             rank,
-            dist.reduce_op.PRODUCT,
+            dist.ReduceOp.PRODUCT,
             2,
             10,
             reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
@@ -755,14 +755,14 @@ class _DistTestBase(object):
     def test_all_reduce_min(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_reduce_helper(
-            group, group_id, rank, dist.reduce_op.MIN, 1010, 1, 1
+            group, group_id, rank, dist.ReduceOp.MIN, 1010, 1, 1
         )
 
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_all_reduce_max(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_reduce_helper(
-            group, group_id, rank, dist.reduce_op.MAX, -1, 10, 10
+            group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10
         )
 
     @skip_if_small_worldsize
@@ -773,7 +773,7 @@ class _DistTestBase(object):
             group,
             group_id,
             rank,
-            dist.reduce_op.SUM,
+            dist.ReduceOp.SUM,
             2,
             10,
             2 + (10 * (len(group) - 1)),
@@ -787,7 +787,7 @@ class _DistTestBase(object):
             group,
             group_id,
             rank,
-            dist.reduce_op.PRODUCT,
+            dist.ReduceOp.PRODUCT,
             2,
             10,
             reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
@@ -798,7 +798,7 @@ class _DistTestBase(object):
     def test_all_reduce_group_min(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_reduce_helper(
-            group, group_id, rank, dist.reduce_op.MIN, 1010, 1, 1
+            group, group_id, rank, dist.ReduceOp.MIN, 1010, 1, 1
         )
 
     @skip_if_small_worldsize
@@ -806,7 +806,7 @@ class _DistTestBase(object):
     def test_all_reduce_group_max(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_reduce_helper(
-            group, group_id, rank, dist.reduce_op.MAX, -1, 10, 10
+            group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10
         )
 
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
@@ -816,7 +816,7 @@ class _DistTestBase(object):
             group,
             group_id,
             rank,
-            dist.reduce_op.SUM,
+            dist.ReduceOp.SUM,
             2,
             10,
             2 + (10 * (len(group) - 1)),
@@ -829,7 +829,7 @@ class _DistTestBase(object):
             group,
             group_id,
             rank,
-            dist.reduce_op.PRODUCT,
+            dist.ReduceOp.PRODUCT,
             2,
             10,
             reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
@@ -839,14 +839,14 @@ class _DistTestBase(object):
     def test_all_reduce_full_group_min(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_all_reduce_helper(
-            group, group_id, rank, dist.reduce_op.MIN, 1010, 1, 1
+            group, group_id, rank, dist.ReduceOp.MIN, 1010, 1, 1
         )
 
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_all_reduce_full_group_max(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_all_reduce_helper(
-            group, group_id, rank, dist.reduce_op.MAX, -1, 10, 10
+            group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10
         )
 
     # SCATTER
@@ -1057,7 +1057,7 @@ class _DistTestBase(object):
             group_id,
             rank,
             rank_to_GPU,
-            dist.reduce_op.SUM,
+            dist.ReduceOp.SUM,
             2,
             10,
             (2 + 10 * (len(group) - 1)) * len(rank_to_GPU[0]),
@@ -1102,7 +1102,7 @@ class _DistTestBase(object):
             group_id,
             rank,
             rank_to_GPU,
-            dist.reduce_op.SUM,
+            dist.ReduceOp.SUM,
             2,
             10,
             (2 + 10 * (len(group) - 1)) * len(rank_to_GPU[0]),

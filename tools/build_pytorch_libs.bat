@@ -22,6 +22,7 @@ if not exist torch\lib\tmp_install mkdir torch\lib\tmp_install
 
 : Variable defaults
 set /a USE_CUDA=0
+set /a USE_FBGEMM=0
 set /a USE_ROCM=0
 set /a USE_NNPACK=0
 set /a USE_QNNPACK=0
@@ -40,6 +41,11 @@ if "%1"=="" (
 
 if "%1"=="--use-cuda" (
   set /a USE_CUDA=1
+  goto :process_args_processed
+)
+
+if "%1"=="--use-fbgemm" (
+  set /a USE_FBGEMM=1
   goto :process_args_processed
 )
 
@@ -216,6 +222,7 @@ goto:eof
                   -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
                   -DUSE_CUDA=%USE_CUDA% ^
                   -DUSE_DISTRIBUTED=%USE_DISTRIBUTED% ^
+                  -DUSE_FBGEMM=%USE_FBGEMM% ^
                   -DUSE_NUMPY=%USE_NUMPY% ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
                   -DUSE_LEVELDB=%USE_LEVELDB% ^
