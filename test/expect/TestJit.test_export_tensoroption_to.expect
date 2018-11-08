@@ -14,7 +14,7 @@ ModelProto {
         Node {type: "Constant", inputs: [], outputs: [3], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
         Node {type: "Shape", inputs: [3], outputs: [4], attributes: []},
         Node {type: "Expand", inputs: [2,4], outputs: [5], attributes: []},
-        Node {type: "Cast", inputs: [5], outputs: [6], attributes: [{ name: 'to', type: int, value: 1}]},
+        Node {type: "Cast", inputs: [5], outputs: [6], attributes: [{ name: 'to', type: int, value: 11}]},
         Node {type: "Add", inputs: [6,0], outputs: [7], attributes: []}
       ]
     }
