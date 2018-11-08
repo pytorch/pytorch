@@ -1304,14 +1304,15 @@ _modules_containing_builtins = (torch, torch.nn.functional, torch._C._nn)
 # TODO: delete this list, _should_skip(), and remove torch.nn.functional from
 # builtins list once everything in it has been converted to weak script
 _builtin_blacklist = {
-    'tanhshrink',
-    'softsign',
-    'pairwise_distance',
-    'prelu',
-    'hardshrink',
     'adaptive_avg_pool2d',
     'adaptive_avg_pool3d',
     'ctc_loss',
+    'hardshrink',
+    'pairwise_distance',
+    'prelu',
+    'softsign',
+    'tanhshrink',
+    'threshold',
 
     # ops with inplace option
     'relu',
