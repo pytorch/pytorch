@@ -56,6 +56,7 @@ FunctionSchema createFunctionSchemaFromTraits(const std::string& name) {
   return {name, arguments, returns};
 }
 
+/// Adds the elements of the `tuple` as input nodes to the traced graph.
 template <size_t... Is, typename... Types>
 Node* getTracedNode(
     const FunctionSchema& schema,
@@ -67,8 +68,11 @@ Node* getTracedNode(
 
   // Hack to call addInputs for the parameter pack in a sequenced fashion.
   // https://stackoverflow.com/questions/12030538/calling-a-function-for-each-variadic-template-argument-and-an-array
-  int _[] = {(tracer::addInputs(node, schema.arguments()[Is].name().c_str(), std::get<Is>(tuple)), 0)...};
-  (void)_;
+  int _[] = {
+      (tracer::addInputs(
+           node, schema.arguments()[Is].name().c_str(), std::get<Is>(tuple)),
+       0)...};
+  (void)_; // ignore
 
   graph->appendNode(node);
 
@@ -85,22 +89,28 @@ void callOperatorWithTuple(
     const FunctionSchema& schema,
     Implementation&& implementation,
     Stack& stack,
-    std::tuple<Types...>& tuple,
+    std::tuple<Types...>& arguments,
     Indices<Is...>) {
+  AT_ASSERT(stack.size() == sizeof...(Is));
+
+  // Pop values from the stack into the elements of the tuple.
+  pop(stack, std::get<Is>(arguments)...);
+
   Node* node = nullptr;
   if (jit::tracer::isTracing()) {
-    node = getTracedNode<Is...>(schema, tuple);
+    node = getTracedNode<Is...>(schema, arguments);
   }
 
-  pop(stack, std::get<Is>(tuple)...);
-  auto result =
-      std::forward<Implementation>(implementation)(std::get<Is>(tuple)...);
+  // Call into the actual, original, user-supplied function.
+  auto return_value =
+      std::forward<Implementation>(implementation)(std::get<Is>(arguments)...);
 
   if (jit::tracer::isTracing()) {
-    jit::tracer::addOutput(node, result);
+    jit::tracer::addOutput(node, return_value);
   }
 
-  push(stack, IValue(std::move(result)));
+  // Push the return value back onto the stack.
+  push(stack, IValue(std::move(return_value)));
 }
 
 inline void checkArgumentVector(
@@ -109,20 +119,23 @@ inline void checkArgumentVector(
     const std::vector<Argument>& provided,
     const FunctionSchema& inferredSchema,
     const FunctionSchema& providedSchema) {
+  // clang-format off
   AT_CHECK(
       inferred.size() == provided.size(),
       "Inferred ", inferred.size(), " ", what,
       "(s) for operator implementation, but the provided schema specified ",
-      provided.size(), " ", what, "(s). Inferred schema: ",
-      inferredSchema, " | Provided schema: ", providedSchema);
+      provided.size(), " ", what, "(s). Inferred schema: ", inferredSchema,
+      " | Provided schema: ", providedSchema);
+  // clang-format on
   for (size_t i = 0; i < provided.size(); ++i) {
+    // clang-format off
     AT_CHECK(
         provided[i].type()->isSubtypeOf(inferred[i].type()),
-        "Inferred type for ", what, " #", i, " was ",
-        *inferred[i].type(), ", but the provided schema specified type ",
-        *provided[i].type(), " for the ", what,
-        " in that position. Inferred schema: ",
+        "Inferred type for ", what, " #", i, " was ", *inferred[i].type(),
+        ", but the provided schema specified type ", *provided[i].type(),
+        " for the ", what, " in that position. Inferred schema: ",
         inferredSchema, " | Provided schema: ", providedSchema);
+    // clang-format on
   }
 }
 
@@ -200,6 +213,8 @@ Operator createOperator(
       c10::guts::typelist::map_t<decay_t, typename Traits::parameter_types>;
   using ArgumentTuple =
       typename c10::guts::typelist::to_tuple<ArgumentTypes>::type;
+  static constexpr auto kNumberOfArguments =
+      std::tuple_size<ArgumentTuple>::value;
 
   auto schema = torch::jit::detail::inferAndCheckSchema<Traits>(schemaOrName);
 
@@ -210,7 +225,7 @@ Operator createOperator(
         std::move(implementation), // NOLINT(bugprone-move-forwarding-reference)
         stack,
         tuple,
-        typename MakeIndices<std::tuple_size<ArgumentTuple>::value>::indices{});
+        typename MakeIndices<kNumberOfArguments>::indices{});
     return 0;
   });
 }

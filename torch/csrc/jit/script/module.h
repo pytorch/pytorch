@@ -9,7 +9,7 @@
 #include "torch/csrc/jit/named_value.h"
 #include "torch/csrc/jit/source_range.h"
 
-#include <torch/csrc/api/include/torch/detail/ordered_dict.h>
+#include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -344,7 +344,7 @@ struct Module {
   }
 
   at::Tensor* parameter_slot(const std::string & name) const {
-    return parameters.get(name).slot();
+    return parameters[name].slot();
   }
 
   void set_parameter(const std::string & name, at::Tensor v) {
@@ -358,20 +358,20 @@ struct Module {
   // each module owns its method. The reference returned here
   // is guarenteed to stay valid until this module has been destroyed
   Method& get_method(const std::string& name) const {
-    return *methods.get(name);
+    return *methods[name];
   }
 
   std::shared_ptr<Module> get_module(const std::string& name) const {
-    return modules.get(name).module;
+    return modules[name].module;
   }
 
-  const torch::detail::OrderedDict<std::string, NamedModule>& get_modules() const {
+  const torch::OrderedDict<std::string, NamedModule>& get_modules() const {
     return modules;
   }
-  const torch::detail::OrderedDict<std::string, NamedParameter>& get_parameters() const {
+  const torch::OrderedDict<std::string, NamedParameter>& get_parameters() const {
     return parameters;
   }
-  const torch::detail::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
+  const torch::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
     return methods;
   }
 
@@ -447,9 +447,9 @@ struct Module {
   // it is only legal to _add_ new modules and parameters.
   // removing them will allow member_inputs to point to invalid parameters
   // no such restriction exists for methods
-  torch::detail::OrderedDict<std::string, NamedModule> modules;
-  torch::detail::OrderedDict<std::string, NamedParameter> parameters;
-  torch::detail::OrderedDict<std::string, std::unique_ptr<Method>> methods;
+  torch::OrderedDict<std::string, NamedModule> modules;
+  torch::OrderedDict<std::string, NamedParameter> parameters;
+  torch::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
 

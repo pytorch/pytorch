@@ -710,7 +710,7 @@ Workspace chooseAlgorithm(
   search::getWorkspaceSize(args, *algo, &workspace_size);
   try {
     return Workspace(workspace_size);
-  } catch (std::runtime_error& e) {
+  } catch (const std::exception& e) {
     cudaGetLastError(); // clear OOM error
 
     // switch to default algorithm and record it in the cache to prevent

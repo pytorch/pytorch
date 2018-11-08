@@ -31,7 +31,7 @@ import re
 import shutil
 import sys
 import os
-import yaml
+import json
 
 from enum import Enum
 from pyHIPIFY import constants
@@ -371,7 +371,7 @@ def processKernelLaunches(string, stats):
 
             # Handle Kernel Name
             if status != AT_TEMPLATE:
-                if string[i] == "(" or string[i] == ")" or string[i] == "_" or string[i].isalnum() or string[i] == ":":
+                if string[i].isalnum() or string[i] in  {'(', ')', '_', ':', '#'}:
                     if status != AT_KERNEL_NAME:
                         status = AT_KERNEL_NAME
                         pos["kernel_name"]["end"] = i
@@ -1149,10 +1149,10 @@ def main():
         required=False)
 
     parser.add_argument(
-        '--yaml-settings',
+        '--json-settings',
         type=str,
         default="",
-        help="The yaml file storing information for disabled functions and modules.",
+        help="The json file storing information for disabled functions and modules.",
         required=False)
 
     parser.add_argument(
@@ -1205,7 +1205,7 @@ def main():
         extensions=args.extensions,
         output_directory=args.output_directory,
         includes=args.includes,
-        yaml_settings=args.yaml_settings,
+        json_settings=args.json_settings,
         add_static_casts_option=args.add_static_casts,
         hipify_caffe2=args.hipify_caffe2,
         ignores=args.ignores,
@@ -1220,7 +1220,7 @@ def hipify(
     extensions=(".cu", ".cuh", ".c", ".cpp", ".h", ".in", ".hpp"),
     output_directory="",
     includes=(),
-    yaml_settings="",
+    json_settings="",
     add_static_casts_option=False,
     hipify_caffe2=False,
     ignores=(),
@@ -1245,13 +1245,13 @@ def hipify(
     if not os.path.exists(output_directory):
         shutil.copytree(project_directory, output_directory)
 
-    # Open YAML file with disable information.
-    if yaml_settings != "":
-        with openf(yaml_settings, "r") as f:
-            yaml_data = yaml.load(f)
+    # Open JSON file with disable information.
+    if json_settings != "":
+        with openf(json_settings, "r") as f:
+            json_data = json.load(f)
 
-        # Disable functions in certain files according to YAML description
-        for disable_info in yaml_data["disabled_functions"]:
+        # Disable functions in certain files according to JSON description
+        for disable_info in json_data["disabled_functions"]:
             filepath = os.path.join(output_directory, disable_info["path"])
             if "functions" in disable_info:
                 functions = disable_info["functions"]
@@ -1287,12 +1287,12 @@ def hipify(
                 f.truncate()
 
         # Disable modules
-        disable_modules = yaml_data["disabled_modules"]
+        disable_modules = json_data["disabled_modules"]
         for module in disable_modules:
             disable_module(os.path.join(output_directory, module))
 
         # Disable unsupported HIP functions
-        for disable in yaml_data["disable_unsupported_hip_calls"]:
+        for disable in json_data["disable_unsupported_hip_calls"]:
             filepath = os.path.join(output_directory, disable["path"])
             if "functions" in disable:
                 functions = disable["functions"]
@@ -1310,7 +1310,7 @@ def hipify(
                 s_constants = disable.get("s_constants", [])
 
             if not os.path.exists(filepath):
-                print("\n" + bcolors.WARNING + "YAML Warning: File {0} does not exist.".format(filepath) + bcolors.ENDC)
+                print("\n" + bcolors.WARNING + "JSON Warning: File {0} does not exist.".format(filepath) + bcolors.ENDC)
                 continue
 
             with openf(filepath, "r+") as f:

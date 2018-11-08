@@ -177,7 +177,6 @@ TORCH_API void defineMethodsInModule(
 
 // same as above but parse the definitions from source
 TORCH_API void defineMethodsInModule(Module & m, const std::string& source, Resolver resolver, std::shared_ptr<SugaredValue> self);
-TORCH_API std::shared_ptr<Graph> compileFunction(Def def, Resolver resolver);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.
@@ -223,8 +222,6 @@ TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
   at::ArrayRef<NamedValue> attributes,
   std::ostream& failure_messages,
   bool convert_tensors_to_nums);
-
-TORCH_API FunctionSchema extractSchemaFromDef(const Def &def, bool is_method=false);
 
 TORCH_API Value* emitBuiltinCall(
   const SourceRange& loc,

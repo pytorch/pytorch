@@ -1,6 +1,6 @@
 #include <torch/serialize/output-archive.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <torch/csrc/jit/export.h>
