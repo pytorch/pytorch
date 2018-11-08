@@ -195,7 +195,9 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
   // Look at mapping [start_bin, start_bin + nbins_selected) to
   // [0, 1 << precision) for every (start_bin, nbins_selected) combination and
   // pick the one with smallest L2 quantization error
+#ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
+#endif
   for (int nbins_selected = 1; nbins_selected <= nbins; ++nbins_selected) {
     float norm_min = numeric_limits<float>::max();
     int best_start_bin = 0;

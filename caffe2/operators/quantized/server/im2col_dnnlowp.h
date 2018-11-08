@@ -1,6 +1,8 @@
 #pragma once
 
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
@@ -206,7 +208,9 @@ static void Im2ColNHWC(
   int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
   int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
 
+#ifdef _OPENMP
 #pragma omp parallel for if (!omp_in_parallel())
+#endif
   for (int h = 0; h < height_col; ++h) {
     int h_pad = -pad_t + h * stride_h;
     T* data_col_temp =
@@ -284,7 +288,9 @@ static void Im2Col3DNHWC(
   int height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
   int width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
 
+#ifdef _OPENMP
 #pragma omp parallel for if (!omp_in_parallel())
+#endif
   for (int t = 0; t < frame_col; ++t) {
     int t_pad = -pad_p + t * stride_t;
     for (int h = 0; h < height_col; ++h) {

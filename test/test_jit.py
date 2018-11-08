@@ -6571,9 +6571,15 @@ a")
             cu = torch.jit.CompilationUnit('''
             def single_starred_lhs(x):
                 a = (x, x, x)
-                *b = a
+                *b, = a
                 return b
             ''')
+
+    def test_singleton_tuple_unpack(self):
+        def foo(a):
+            b, = (a,)
+            return b + 1
+        self.checkScript(foo, (torch.rand(3),))
 
     def test_multi_reduction(self):
         with self.assertRaisesRegex(
@@ -6592,7 +6598,7 @@ a")
                 return torch.unsqueeze(3, 4, 5, 6, 7, 8)
 
     def test_invalid_lhs_assignment(self):
-        with self.assertRaisesRegex(RuntimeError, 'lhs of assignment must be a variable or starred expression'):
+        with self.assertRaisesRegex(RuntimeError, 'unexpected expression'):
             cu = torch.jit.CompilationUnit('''
             def invalid_lhs_assignment(x):
                 x + 1 = x
@@ -6683,7 +6689,7 @@ a")
             SomeModule()
 
     def test_single_starred_expr_for_loop(self):
-        with self.assertRaisesRegex(RuntimeError, 'Starred unpacking is currently not supported for for loops'):
+        with self.assertRaisesRegex(RuntimeError, 'unexpected expression'):
             cu = torch.jit.CompilationUnit('''
             def test():
                 x = 0
@@ -7738,6 +7744,20 @@ a")
         jit_trace = torch.jit.trace(AddmmWrapper(), (x, y, c))
         ge_graph = jit_trace.__getattr__('forward').graph_for(x, y, c)
         self.assertExpectedGraph(ge_graph, 'jit')
+
+    def test_pyop_exception_message(self):
+        class Foo(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.conv = nn.Conv2d(1, 10, kernel_size=5)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.conv(x)
+        foo = Foo()
+        # testing that the correct error message propagates
+        with self.assertRaisesRegex(RuntimeError, "Expected 4-dimensional input for 4-dimensional weight"):
+            foo(torch.ones([123]))  # wrong size
 
     def test_exceptions(self):
         cu = torch.jit.CompilationUnit('''
@@ -8903,6 +8923,12 @@ EXCLUDE_SCRIPT = {
     'test_nn_gumbel_softmax',
 }
 
+DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
+    'test_nn_avg_pool2d',
+    'test_nn_log_softmax',
+    'test_nn_threshold',
+}
+
 
 # make a new function where all non-tensor arguments in 'args' have been partially
 # applied, and all tensor arguments remain.
@@ -9329,6 +9355,28 @@ class TestCustomOperators(JitTestCase):
         output_ref = torch.cat([a, b])
         self.assertEqual(output, output_ref)
 
+    def test_calling_scripted_custom_op(self):
+        @torch.jit.script
+        def func(x):
+            return torch.ops.aten.relu(x)
+        input = torch.ones(5, 5)
+        self.assertEqual(func(input), input.relu())
+
+    def test_calling_traced_custom_op(self):
+        input = torch.ones(5, 5)
+        func = torch.jit.trace(torch.ops.aten.relu, [input])
+        self.assertEqual(func(input), input.relu())
+
+    def test_script_graph_for_custom_ops_matches_traced_graph(self):
+        input = torch.ones(5, 5)
+        trace = torch.jit.trace(torch.ops.aten.relu, [input])
+        self.assertExpectedInline(canonical(trace.graph), '''\
+graph(%0 : Double(5, 5)) {
+  %1 : Double(5, 5) = aten::relu(%0)
+  return (%1);
+}
+''')
+
     def test_script_graph_contains_custom_op(self):
         @torch.jit.script
         def func(x):
@@ -9339,6 +9387,7 @@ graph(%x : Dynamic) {
   return (%1);
 }
 ''')
+
 
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
 # and we have to disable the failing tests here instead.
@@ -9388,13 +9437,21 @@ S = 5
 #     args (tuple represents shape of a tensor arg),
 # )
 nn_module_tests = [
-    ('Sigmoid', (), ((S,),)),
-    ('PairwiseDistance', (), ((S, S), (S, S))),
-    ('Tanh', (), ((S,),)),
+    ('AlphaDropout', (), ((S,),)),
+    ('Dropout', (), ((S,),)),
+    ('Dropout2d', (), ((S, S),)),
+    ('Dropout3d', (), ((S, S, S),)),
+    ('FeatureAlphaDropout', (), ((S, S),)),
     ('Hardshrink', (), ((S,),)),
     ('PReLU', (), ((S,),)),
+    ('PairwiseDistance', (), ((S, S), (S, S))),
+    ('RReLU', (), ((S,),)),
+    ('Sigmoid', (), ((S,),)),
+    ('Softshrink', (), ((S,),)),
     ('Softsign', (), ((S,),)),
+    ('Tanh', (), ((S,),)),
     ('Tanhshrink', (), ((S,),)),
+    ('Threshold', (2., 2.), ((S,),)),
 ]
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
@@ -9514,7 +9571,7 @@ nn_functional_tests = [
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)), \
                                                            non_differentiable(torch.randn(3, 2))),),
     ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), \
-     (torch.randint(1, S + 1, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
+     (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
       torch.randint(1, S, (S,), dtype=torch.long))),
 ]
 
@@ -9653,8 +9710,10 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
         f_args_tensor = (self_tensor,) + args_tensor
 
         if test_name not in EXCLUDE_SCRIPT:
+            disable_ad_subgraph_inlining = test_name in DISABLE_AUTODIFF_SUBGRAPH_INLINING
             check_against_reference(self,
-                                    create_script_fn(self, name, 'nn_functional', output_process_fn),
+                                    create_script_fn(self, name, 'nn_functional', output_process_fn,
+                                                     disable_autodiff_subgraph_inlining=disable_ad_subgraph_inlining),
                                     fn, f_args_variable, kwargs_variable, no_grad=no_grad)
 
     post_add_test(test_name, skipTestIf, do_test)

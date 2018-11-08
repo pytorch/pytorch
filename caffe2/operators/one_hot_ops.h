@@ -19,7 +19,7 @@ class OneHotOp final : public Operator<Context> {
   bool RunOnDevice() override {
     auto& indices = Input(0);
     CAFFE_ENFORCE_EQ(
-        indices.ndim(),
+        indices.dim(),
         1,
         "indices input must be 1D tensor of data type int64_t");
 

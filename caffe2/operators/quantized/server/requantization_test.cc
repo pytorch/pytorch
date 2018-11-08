@@ -4,8 +4,8 @@
 #include <random>
 #include <cmath>
 
-#include <glog/logging.h>
 #include <gtest/gtest.h>
+#include "caffe2/core/logging.h"
 
 using namespace std;
 using namespace dnnlowp;

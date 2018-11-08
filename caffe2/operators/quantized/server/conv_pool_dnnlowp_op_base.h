@@ -36,10 +36,10 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
   virtual ~ConvPoolDNNLowPOpBase() {
     if (measure_quantization_error_) {
       dnnlowp::ReportQuantizationError(this, quantization_error_stats_);
-      LOG(CRITICAL) << this->debug_def().output(0) << " with type "
-                    << this->debug_def().type() << " has output qparams : "
-                    << "scale " << out_qparams_.scale << " offset "
-                    << out_qparams_.zero_point << "; ";
+      LOG(WARNING) << this->debug_def().output(0) << " with type "
+                   << this->debug_def().type() << " has output qparams : "
+                   << "scale " << out_qparams_.scale << " offset "
+                   << out_qparams_.zero_point << "; ";
     }
   }
 
@@ -100,7 +100,7 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
     std::vector<float> temp;
     if (fp32_fallback_to_nchw) {
       temp.resize(OutputTensorCPU_(0)->numel());
-      int ndim = float_tensor->ndim();
+      int ndim = float_tensor->dim();
       CAFFE_ENFORCE_GE(ndim, 3);
       const int N = float_tensor->dim32(0), C = float_tensor->dim32(1);
       int image_size = 1;

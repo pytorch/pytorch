@@ -1,16 +1,16 @@
 #pragma once
 
+#include <fbgemm/Fbgemm.h>
 #include "caffe2/operators/fully_connected_op.h"
 #include "caffe2/operators/quantized/server/dnnlowp_op.h"
-#include <fbgemm/Fbgemm.h>
 
 namespace caffe2 {
 
 template <typename T>
 class FullyConnectedDNNLowPOp
-  : public DNNLowPOp<T, FullyConnectedOp<CPUContext>> {
+    : public DNNLowPOp<T, FullyConnectedOp<CPUContext>> {
  public:
-  FullyConnectedDNNLowPOp(const OperatorDef& operator_def, Workspace *ws);
+  FullyConnectedDNNLowPOp(const OperatorDef& operator_def, Workspace* ws);
   bool RunOnDevice() override;
 
   USE_OPERATOR_FUNCTIONS(CPUContext);
@@ -31,7 +31,7 @@ class FullyConnectedDNNLowPOp
   using T_signed = typename std::make_signed<T>::type;
 
   // used in fast path for T == uint8_t
-  std::unique_ptr<fbgemm2::PackBMatrix<std::int8_t>> Wq_packed_;
+  std::shared_ptr<fbgemm2::PackBMatrix<std::int8_t>> Wq_packed_;
   std::vector<std::uint8_t> X_pack_buf_;
 
   std::vector<std::int32_t> Y_int32_;

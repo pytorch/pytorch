@@ -20,7 +20,7 @@ ignores = [
 ]
 
 # List of operators currently disabled
-yaml_file = os.path.join(amd_build_dir, "disabled_features.yaml")
+json_file = os.path.join(amd_build_dir, "disabled_features.json")
 
 # Apply patch files in place.
 patch_folder = os.path.join(amd_build_dir, "patches")
@@ -71,6 +71,6 @@ hipify_python.hipify(
     output_directory=proj_dir,
     includes=includes,
     ignores=ignores,
-    yaml_settings=yaml_file,
+    json_settings=json_file,
     add_static_casts_option=True,
     show_progress=False)

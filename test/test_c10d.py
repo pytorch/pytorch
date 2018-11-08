@@ -1124,7 +1124,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).cuda(gpus[0]),
             device_ids=gpus,
-            process_group=process_group)
+            process_group=process_group,
+            bucket_cap_mb=0.001)
 
         model.cuda(gpus[0])
 
@@ -1336,7 +1337,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             model,
             device_ids=[gpus[0]],
             process_group=process_group,
-            bucket_cap_mb=1,
+            bucket_cap_mb=0.001,
         )
 
         # Input 2**15, so that the gradients will overflow with a

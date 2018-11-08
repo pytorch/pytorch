@@ -618,18 +618,11 @@ def script(fn, optimize=True, _frames_up=0, _rcb=None):
     if _rcb is None:
         _rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn, is_method=False)
-    graph = _jit_script_compile(ast, _rcb)
     mod = ScriptModule()
-    mod._create_method_from_graph('forward', graph)
-    # TODO: refactor everything so we're not 1) creating a ScriptModule
-    # 2) Throwing everything away except for the graph 3) Creating a new
-    # ScriptModule and dumping that graph in 4) Re-populating the schema
-    # because it was lost doing the previous
-    mod.__getattr__('forward').forward_schema(ast, get_default_args(fn), False)
+    _jit_script_compile(mod, ast, _rcb, get_default_args(fn))
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod
-
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 

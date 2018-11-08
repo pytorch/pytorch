@@ -177,7 +177,7 @@ at::Tensor gather(
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
   for (const auto& tensor : tensors) {
     AT_CHECK(
-        tensor.type().is_cuda(), "Gather expects all inputs to have CUDA type");
+        tensor.is_cuda(), "Gather expects all inputs to have CUDA type");
     AT_ASSERT(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
     expected_size[dim] = tensor.size(dim);
     for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {

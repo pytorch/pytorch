@@ -3,8 +3,8 @@
 #include <random>
 #include <sstream>
 
-#include <glog/logging.h>
 #include <gtest/gtest.h>
+#include "caffe2/core/logging.h"
 
 #include "dynamic_histogram.h"
 
