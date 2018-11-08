@@ -21,8 +21,6 @@
 #include <gloo/cuda_allreduce_halving_doubling.h>
 #include <gloo/cuda_allreduce_ring_chunked.h>
 #include <gloo/cuda_broadcast_one_to_all.h>
-
-#include <c10d/private/CUDAUtils.hpp>
 #endif
 
 #include <gloo/rendezvous/context.h>
