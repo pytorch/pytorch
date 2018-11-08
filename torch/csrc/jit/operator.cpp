@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "torch/csrc/jit/alias_info.h"
 #include "torch/csrc/jit/script/lexer.h"
 #include "torch/csrc/jit/script/tree.h"
 #include "torch/csrc/jit/operator.h"
