@@ -286,6 +286,40 @@ void serializeIntermediateModel(IntermediateModel* imodel,
   writer->writeRecord(buffer.c_str(), buffer.size());
 }
 
+void serializeIntermediateModel(IntermediateModel* imodel,
+    torch::jit::PyTorchStreamWriter* writer) {
+  std::unordered_map<void*, uint64_t> data_id;
+  std::stack<IntermediateModule*> imodules;
+  imodules.push(imodel->mutableMainModule());
+  while (!imodules.empty()) {
+    IntermediateModule* m = imodules.top();
+    imodules.pop();
+    for (auto& param : *(m->mutableParameters())) {
+      std::shared_ptr<SharedData> dataptr = param.mutableTensor()->data();
+      void* data = dataptr->dataPtr.get();
+      size_t size = dataptr->size;
+      auto it = data_id.find(data);
+      if (it != data_id.end()) {
+        dataptr->recordId = it->second;
+      } else {
+        uint64_t id = writer->writeRecord(data, size);
+        dataptr->recordId = id;
+        data_id[data] = id;
+      }
+    }
+
+    for (auto& sub : *(m->mutableSubmodules())) {
+      imodules.push(&sub);
+    }
+  }
+
+  torch::ModelDef model_def;
+  imodel->dump(&model_def);
+  std::string buffer;
+  model_def.SerializeToString(&buffer);
+  writer->writeRecord(buffer.c_str(), buffer.size());
+}
+
 void serializeIntermediateModel(IntermediateModel* imodel, const std::string& filename) {
   torch::jit::PyTorchFileWriter writer(filename);
   serializeIntermediateModel(imodel, &writer);
@@ -326,9 +360,90 @@ void deserializeIntermediateModel(IntermediateModel* imodel,
   }
 }
 
+void deserializeIntermediateModel(IntermediateModel* imodel,
+    torch::jit::PyTorchStreamReader* reader, DeserializeMode mode) {
+  std::unordered_map<uint64_t, std::shared_ptr<SharedData>> id_data;
+  if (mode == DeserializeMode::HEADER_ONLY) {
+    // only load model meta data, no tensor data
+    at::DataPtr data_ptr;
+    size_t data_size;
+    std::tie(data_ptr, data_size) = reader->getLastRecord();
+    torch::ModelDef model_def = torch::ModelDef();
+    AT_ASSERTM(model_def.ParseFromArray(data_ptr.get(), data_size), "parse metadata (i.e., ModelDef) failed.");;
+    imodel->update(&model_def, &id_data, mode);
+    return;
+  }
+  AT_ASSERT(mode == DeserializeMode::LOADER_TENSOR_DATA);
+  while (reader->hasNextRecord()) {
+    at::DataPtr data_ptr;
+    size_t data_key;
+    size_t data_size;
+    std::tie(data_ptr, data_key, data_size) = reader->getNextRecord();
+    if (!reader->hasNextRecord()) {
+      // the last record is model data (ModelDef)
+      torch::ModelDef model_def = torch::ModelDef();
+      AT_ASSERTM(model_def.ParseFromArray(data_ptr.get(), data_size), "parse metadata (i.e., ModelDef) failed.");
+      imodel->update(&model_def, &id_data, mode);
+      break;
+    }
+    // first to the second last records are all tensor data
+    auto it = id_data.find(data_key);
+    AT_ASSERTM(it == id_data.end(), "record id should not be duplicated!");
+    id_data[data_key] = std::make_shared<SharedData>(
+        data_key, data_size, std::move(data_ptr));
+  }
+}
+
 void deserializeIntermediateModel(IntermediateModel* imodel, const std::string& filename, DeserializeMode mode) {
   torch::jit::PyTorchFileReader reader(filename);
   deserializeIntermediateModel(imodel, &reader, mode);
+}
+
+at::ScalarType iModelTypeToATenType(int64_t imodel_type) {
+  switch(imodel_type) {
+    // NB: handle BOOL
+    case caffe2::TensorProto_DataType_UINT8:
+      return at::kByte;
+    case caffe2::TensorProto_DataType_INT8:
+      return at::kChar;
+    case caffe2::TensorProto_DataType_INT16:
+      return at::kShort;
+    case caffe2::TensorProto_DataType_INT32:
+      return at::kInt;
+    case caffe2::TensorProto_DataType_INT64:
+      return at::kLong;
+    case caffe2::TensorProto_DataType_FLOAT16:
+      return at::kHalf;
+    case caffe2::TensorProto_DataType_FLOAT:
+      return at::kFloat;
+    case caffe2::TensorProto_DataType_DOUBLE:
+      return at::kDouble;
+    default:
+      AT_ERROR("Unsupported imodel data type");
+  }
+}
+
+int64_t atenTypeToIModelType(at::ScalarType aten_type) {
+  switch(aten_type) {
+    case at::kDouble:
+      return caffe2::TensorProto_DataType_DOUBLE;
+    case at::kFloat:
+      return caffe2::TensorProto_DataType_FLOAT;
+    case at::kHalf:
+      return caffe2::TensorProto_DataType_FLOAT16;
+    case at::kByte:
+      return caffe2::TensorProto_DataType_UINT8;
+    case at::kChar:
+      return caffe2::TensorProto_DataType_INT8;
+    case at::kShort:
+      return caffe2::TensorProto_DataType_INT16;
+    case at::kInt:
+      return caffe2::TensorProto_DataType_INT32;
+    case at::kLong:
+      return caffe2::TensorProto_DataType_INT64;
+    default:
+      AT_ERROR("unexpected aten scalar type");
+  }
 }
 
 } // namespace serialize

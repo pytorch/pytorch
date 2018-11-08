@@ -5,6 +5,7 @@
 #include "torch/csrc/utils/functional.h"
 #include <torch/csrc/jit/assertions.h>
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/serialize.h"
 
 #include "caffe2/serialize/inline_container.h"
 #include "onnx/onnx_pb.h"
@@ -20,7 +21,7 @@
 
 namespace torch { namespace jit {
 
-namespace {
+namespace serialize {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
@@ -890,7 +891,7 @@ void dump(const onnx::ModelProto& model, std::ostream& stream, size_t indent) {
   }
   stream << idt(indent) << "}\n";
 }
-} // namespace
+} // namespace serialize
 
 std::string prettyPrint(const onnx::ModelProto& model) {
   std::stringstream ss;
@@ -932,13 +933,18 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
 }
 
 void ExportModule(const script::Module& module, std::ostream& out) {
-  ModuleEncoder(module, out);
+  // ModuleEncoder(module, out);
+  serialize::ScriptModuleSerializer serializer(&out);
+  serializer.serialize(module);
 }
 
 void ExportModule(const script::Module& module, const std::string &filename) {
-  std::ofstream out(filename, std::ios_base::binary);
+  serialize::ScriptModuleSerializer serializer(filename);
+  serializer.serialize(module);
+  // std::ofstream out(filename, std::ios_base::binary);
 
-  ExportModule(module, out);
+  // ExportModule(module, out);
 }
 
-}}
+} // namespace jit
+} // namespace torch

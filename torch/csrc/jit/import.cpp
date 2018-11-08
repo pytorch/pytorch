@@ -5,6 +5,7 @@
 #include "torch/csrc/jit/operator.h"
 
 #include "caffe2/serialize/inline_container.h"
+#include "torch/csrc/jit/serialize.h"
 #include "onnx/onnx_pb.h"
 
 #include <ATen/ATen.h>
@@ -16,51 +17,10 @@
 
 namespace torch { namespace jit {
 
-namespace {
+namespace serialize {
 
-namespace onnx = ::ONNX_NAMESPACE;
 
 // IR graph construction
-
-class ModuleDecoder {
- public:
-  ModuleDecoder(ModuleLookup module_lookup,
-                std::istream& in);
-
- private:
-  std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto);
-
-  void buildBlock(const onnx::GraphProto& graph_proto, Block* block,
-                  std::unordered_map<std::string, Value*>& value_map);
-
-  void buildBlocks(const std::vector<onnx::GraphProto>& graphs_, Node* node,
-                   std::unordered_map<std::string, Value*>& value_map);
-
-  void buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto);
-
-  void buildIntermediateValue(Value* value, const std::string& name);
-
-  at::ScalarType onnxTypeToATenType(onnx::TensorProto_DataType tensor_proto);
-
-  at::Tensor buildTensor(const onnx::TensorProto& tensor_proto);
-
-  TypePtr buildType(const onnx::TypeProto& type_proto);
-
-  at::Tensor buildParameter(const onnx::TensorProto& tensor_proto);
-
-  at::Tensor buildTensorCommon(const onnx::TensorProto& tensor_proto,
-                               const uint64_t record_number,
-                               const int64_t storage_offset,
-                               const std::vector<int64_t>& strides);
-
-  std::pair<std::shared_ptr<script::Module>, std::string> parseFullName(
-      ModuleLookup module_lookup,
-      const std::string fullname);
-
-  PyTorchStreamReader stream_reader_;
-  std::unordered_map<uint64_t, std::shared_ptr<at::Storage>> storage_map_;
-  std::unordered_map<std::string, const onnx::TypeProto*> value_type_map_;
-};
 
 at::ScalarType ModuleDecoder::onnxTypeToATenType(onnx::TensorProto_DataType onnx_type) {
   switch(onnx_type) {
@@ -250,7 +210,7 @@ void ModuleDecoder::buildValue(Value* value, const onnx::ValueInfoProto& valuein
 
 void ModuleDecoder::buildIntermediateValue(Value* value, const std::string& name) {
   auto it = value_type_map_.find(name);
-  JIT_ASSERT(it != value_type_map_.end());
+  AT_ASSERT(it != value_type_map_.end());
   value->setType(buildType(*it->second));
 }
 
@@ -367,9 +327,9 @@ ModuleDecoder::ModuleDecoder(
 }
 
 ModuleDecoder::ModuleDecoder(
-    script::Module* parent_module,
     const onnx::ModelProto& model_proto,
-    const std::unordered_map<std::string, at::Tensor*>& param_map) {
+    const std::unordered_map<std::string, at::Tensor*>& param_map,
+    script::Module* parent_module) {
   auto graph_proto = model_proto.graph();
 
   std::unordered_map<std::string, at::Tensor*> param_map;
@@ -378,7 +338,7 @@ ModuleDecoder::ModuleDecoder(
     std::vector<at::Tensor*> member_inputs;
     for (const auto &param_name : node_proto.input()) {
       auto it = member_inputs.find(param_name);
-      JIT_ASSERT(it != member_inputs.end();
+      JIT_ASSERT(it != member_inputs.end());
       member_inputs.push_back(it->second);
     }
 
@@ -393,22 +353,26 @@ ModuleDecoder::ModuleDecoder(
   }
 }
 
-}  // namespace
+}  // namespace serialize
 
 void import_ir_module(
     ModuleLookup module_lookup,
     std::istream& in) {
-  ModuleDecoder decoder(module_lookup, in);
-  (void)decoder;
+  //ModuleDecoder decoder(module_lookup, in);
+  //(void)decoder;
+  serialize::ScriptModuleDeserializer deserializer(&in);
+  deserializer.deserialize(module_lookup);
 }
 
 void import_ir_module(
     ModuleLookup module_lookup,
     const std::string& filename) {
-  std::ifstream in(filename, std::ios_base::binary);
+  //std::ifstream in(filename, std::ios_base::binary);
 
-  ModuleDecoder decoder(module_lookup, in);
-  (void)decoder;
+  //ModuleDecoder decoder(module_lookup, in);
+  //(void)decoder;
+  serialize::ScriptModuleDeserializer deserializer(filename);
+  deserializer.deserialize(module_lookup);
 }
 
 std::shared_ptr<script::Module> load(std::istream& in) {
@@ -425,7 +389,7 @@ std::shared_ptr<script::Module> load(std::istream& in) {
     return curr;
   };
 
-  ModuleDecoder decoder(module_lookup, in);
+  serialize::ModuleDecoder decoder(module_lookup, in);
   (void)decoder;
 
   return module;
@@ -439,4 +403,5 @@ std::shared_ptr<script::Module> load(const std::string& filename) {
   return module;
 }
 
-}}
+} // namespace jit
+} // namespace torch

@@ -5,6 +5,7 @@
 #include <string>
 
 #include <ATen/core/Allocator.h>
+#include <ATen/core/ScalarType.h>
 #include <c10/util/Optional.h>
 
 #include "caffe2/core/common.h"
@@ -378,6 +379,10 @@ class CAFFE2_API IntermediateModel final {
 CAFFE2_API void serializeIntermediateModel(IntermediateModel* imodel,
     torch::jit::PyTorchFileWriter* writer);
 
+// TODO: refactor
+CAFFE2_API void serializeIntermediateModel(IntermediateModel* imodel,
+    torch::jit::PyTorchStreamWriter* writer);
+
 // serialize an IntermediateModel to a given file
 CAFFE2_API void serializeIntermediateModel(IntermediateModel* imodel, const std::string& filename);
 
@@ -387,9 +392,18 @@ CAFFE2_API void serializeIntermediateModel(IntermediateModel* imodel, const std:
 CAFFE2_API void deserializeIntermediateModel(IntermediateModel* imodel,
     torch::jit::PyTorchFileReader* reader, DeserializeMode mode=DeserializeMode::LOADER_TENSOR_DATA);
 
+// TODO use template or appropriate refactor
+CAFFE2_API void deserializeIntermediateModel(IntermediateModel* imodel,
+    torch::jit::PyTorchStreamReader* reader, DeserializeMode mode=DeserializeMode::LOADER_TENSOR_DATA);
+
 // deserialize an IntermediateModel from a given file
 CAFFE2_API void deserializeIntermediateModel(IntermediateModel* imodel, const std::string& filename,
     DeserializeMode mode=DeserializeMode::LOADER_TENSOR_DATA);
+
+// TODO: split this to utils.h and .cc
+CAFFE2_API at::ScalarType iModelTypeToATenType(int64_t imodel_type);
+
+CAFFE2_API int64_t atenTypeToIModelType(at::ScalarType aten_type);
 
 }  // namespace serialize
 }  // namespace at
