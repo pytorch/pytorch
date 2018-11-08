@@ -3,6 +3,7 @@
 #include <c10/DeviceGuard.h>
 
 using namespace c10;
+using namespace c10::detail;
 
 // The tests here are mostly covered by InlineDeviceGuard_test, but there
 // is some DeviceGuard specific functionality we must test.
