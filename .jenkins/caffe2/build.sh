@@ -149,6 +149,11 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   export PATH="/usr/local/cuda/bin:$PATH"
 fi
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
+  # This is needed to enable ImageInput operator in resnet50_trainer
+  CMAKE_ARGS+=("-USE_OPENCV=ON")
+  # This is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
+  CMAKE_ARGS+=("-USE_LMDB=ON")
+
   # TODO: This is patching the official FindHip to properly handly
   # cmake generator expression. A PR is opened in the upstream repo here:
   # https://github.com/ROCm-Developer-Tools/HIP/pull/516
@@ -235,7 +240,6 @@ else
 
   report_compile_cache_stats
 fi
-
 
 ###############################################################################
 # Install ONNX

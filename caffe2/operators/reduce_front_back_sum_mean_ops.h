@@ -29,28 +29,28 @@ class SumReduceDimsOp final : public Operator<Context> {
     auto* Y = Output(0);
 
     CAFFE_ENFORCE(
-        num_reduce_dims_ >= 0 && num_reduce_dims_ <= X.dims().size(),
+        num_reduce_dims_ >= 0 && num_reduce_dims_ <= X.sizes().size(),
         "For N-dim input tensor, support num_reduce_dims in range [0, N].");
 
     vector<int64_t> output_shape;
     int start_index = FIRSTDIMS ? num_reduce_dims_ : 0;
     int end_index =
-        FIRSTDIMS ? X.dims().size() : X.dims().size() - num_reduce_dims_;
+        FIRSTDIMS ? X.sizes().size() : X.sizes().size() - num_reduce_dims_;
     for (int i = start_index; i < end_index; ++i) {
-      output_shape.push_back(X.dims()[i]);
+      output_shape.push_back(X.sizes()[i]);
     }
     Y->Resize(output_shape);
 
     const int rows = FIRSTDIMS ? X.size_to_dim(num_reduce_dims_)
-                               : X.size_to_dim(X.ndim() - num_reduce_dims_);
+                               : X.size_to_dim(X.dim() - num_reduce_dims_);
     const int cols = FIRSTDIMS ? X.size_from_dim(num_reduce_dims_)
-                               : X.size_from_dim(X.ndim() - num_reduce_dims_);
+                               : X.size_from_dim(X.dim() - num_reduce_dims_);
 
     const T* in_data = X.template data<T>();
     T* out_data = Y->template mutable_data<T>();
 
     if (cols == 0 || rows == 0) {
-      math::Set(Y->size(), static_cast<T>(0), out_data, &context_);
+      math::Set(Y->numel(), static_cast<T>(0), out_data, &context_);
       return true;
     }
 
@@ -63,7 +63,7 @@ class SumReduceDimsOp final : public Operator<Context> {
           "Given lengths input, the number of reduce dimensions should be one.");
       const int batch_size = FIRSTDIMS ? cols : rows;
       CAFFE_ENFORCE(
-          lengths.size() == batch_size,
+          lengths.numel() == batch_size,
           "The size of lengths vector doesn't match the batch size.");
     }
 
@@ -109,13 +109,13 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
     // the shape of the input to the data tensor. This made the backward
     // computation incompatible with old models. To fix this, we check
     // the dimension and type of Input(1).
-    if (input_1.ndim() == 1 && input_1.template IsType<int64_t>()) {
+    if (input_1.dim() == 1 && input_1.template IsType<int64_t>()) {
       // Input(1) is the shape of the input
       shape_.CopyFrom(input_1);
       // Copy first dims
       vector<int64_t> output_shape(
           shape_.template data<int64_t>(),
-          shape_.template data<int64_t>() + shape_.size());
+          shape_.template data<int64_t>() + shape_.numel());
       dX->Resize(output_shape);
     } else {
       // Input(1) is data tensor X
@@ -123,10 +123,10 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
     }
 
     const int rows = FIRSTDIMS ? dX->size_to_dim(num_reduce_dims_)
-                               : dX->size_to_dim(dX->ndim() - num_reduce_dims_);
+                               : dX->size_to_dim(dX->dim() - num_reduce_dims_);
     const int cols = FIRSTDIMS
         ? dX->size_from_dim(num_reduce_dims_)
-        : dX->size_from_dim(dX->ndim() - num_reduce_dims_);
+        : dX->size_from_dim(dX->dim() - num_reduce_dims_);
 
     const int32_t* lengths_data = nullptr;
     if (InputSize() > 2) {
@@ -137,7 +137,7 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
           "Given lengths input, the number of reduce dimensions should be one.");
       const int batch_size = FIRSTDIMS ? cols : rows;
       CAFFE_ENFORCE(
-          lengths.size() == batch_size,
+          lengths.numel() == batch_size,
           "The size of lengths vector doesn't match the batch size.");
     }
 

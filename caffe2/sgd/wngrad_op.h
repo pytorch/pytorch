@@ -93,22 +93,22 @@ class WngradOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     CAFFE_ENFORCE_EQ(
-        Input(GRAD).size(),
-        Input(PARAM).size(),
+        Input(GRAD).numel(),
+        Input(PARAM).numel(),
         "PARAM size: ",
-        Input(PARAM).size(),
+        Input(PARAM).numel(),
         ", GRAD size: ",
-        Input(GRAD).size(),
+        Input(GRAD).numel(),
         ", SEQ_B size: ",
-        Input(SEQ_B).size(),
+        Input(SEQ_B).numel(),
         ", LR size: ",
-        Input(LR).size());
+        Input(LR).numel());
 
     Output(OUTPUT_PARAM)->ResizeLike(Input(PARAM));
     Output(OUTPUT_SEQ_B)->ResizeLike(Input(SEQ_B));
     if (OutputSize() == 2) {
       wngrad_update<Context>(
-          Input(GRAD).size(),
+          Input(GRAD).numel(),
           Input(PARAM).template data<T>(),
           Input(GRAD).template data<T>(),
           Input(SEQ_B).template data<T>(),
@@ -120,7 +120,7 @@ class WngradOp final : public Operator<Context> {
     } else if (OutputSize() == 3) {
       Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(SEQ_B));
       wngrad_update_output_effective_lr<Context>(
-          Input(GRAD).size(),
+          Input(GRAD).numel(),
           Input(PARAM).template data<T>(),
           Input(GRAD).template data<T>(),
           Input(SEQ_B).template data<T>(),
@@ -134,7 +134,7 @@ class WngradOp final : public Operator<Context> {
       Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(SEQ_B));
       Output(OUTPUT_UPDATE)->ResizeLike(Input(GRAD));
       wngrad_update_output_effective_lr_and_update<Context>(
-          Input(GRAD).size(),
+          Input(GRAD).numel(),
           Input(PARAM).template data<T>(),
           Input(GRAD).template data<T>(),
           Input(SEQ_B).template data<T>(),
@@ -166,11 +166,11 @@ class SparseWngradOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     // Enforce shapes
-    CAFFE_ENFORCE_EQ(Input(SEQ_B).size(), 1);
-    CAFFE_ENFORCE_EQ(Input(LR).size(), 1);
+    CAFFE_ENFORCE_EQ(Input(SEQ_B).numel(), 1);
+    CAFFE_ENFORCE_EQ(Input(LR).numel(), 1);
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),
-        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+        Input(GRAD).size_from_dim(Input(INDICES).dim()));
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, Input(INDICES));
@@ -186,12 +186,12 @@ class SparseWngradOp final : public Operator<Context> {
     auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<T>();
     auto* seqBOut = Output(OUTPUT_SEQ_B)->template mutable_data<T>();
 
-    auto n = Input(INDICES).size();
+    auto n = Input(INDICES).numel();
     if (n == 0) {
       return true;
     }
 
-    auto block_size = Input(GRAD).size() / n;
+    auto block_size = Input(GRAD).numel() / n;
 
     for (auto i = 0; i < n; ++i) {
       auto idx = indices[i];
@@ -204,7 +204,7 @@ class SparseWngradOp final : public Operator<Context> {
 
 #ifndef NDEBUG
         CAFFE_ENFORCE_GE(
-            Input(PARAM).size(),
+            Input(PARAM).numel(),
             block_size + offsetIdx,
             this->debug_def().input(PARAM),
             ", out of bound,  idx:",
@@ -214,7 +214,7 @@ class SparseWngradOp final : public Operator<Context> {
             " and block size:",
             block_size);
         CAFFE_ENFORCE_GE(
-            Input(GRAD).size(),
+            Input(GRAD).numel(),
             block_size + offsetI,
             this->debug_def().input(GRAD),
             ", out of bound idx, idx:",
@@ -230,7 +230,7 @@ class SparseWngradOp final : public Operator<Context> {
       }
     }
     float seqBTmp = 0.0;
-    for (auto i = 0; i < Input(GRAD).size(); ++i) {
+    for (auto i = 0; i < Input(GRAD).numel(); ++i) {
       float gi = gradIn[i];
       seqBTmp += gi * gi;
     }

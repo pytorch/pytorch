@@ -13,7 +13,7 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/script/parser.h"
 
-#include <torch/csrc/api/include/torch/detail/ordered_dict.h>
+#include <torch/csrc/api/include/torch/ordered_dict.h>
 
 #include <ATen/ATen.h>
 
@@ -176,6 +176,17 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
     }
     return result;
   }
+
+  Value* asValue(
+      SourceRange loc,
+      Method& m) override {
+    std::vector<Value*> values;
+    for (auto sugared_item : asTuple(loc, m)) {
+      values.push_back(sugared_item->asValue(loc, m));
+    }
+    auto node = m.graph()->createTuple(values);
+    return m.graph()->insertNode(node)->output();
+  }
 };
 
 // defines how modules/methods behave inside the script subset.
@@ -283,6 +294,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
      return std::make_shared<ConstantPythonTupleValue>(obj);
     }
   }
+
+  auto weak_obj =
+      py::module::import("torch.jit").attr("_try_get_weak_module")(obj);
+  if (!weak_obj.is_none()) {
+    obj = weak_obj;
+  }
   if (py::isinstance<Module>(obj)) {
     auto mod = py::cast<std::shared_ptr<Module>>(obj);
     // In the case that this Python object is not a submodule, inline *ONLY
@@ -297,6 +314,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
+  } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
+    return std::make_shared<ForkValue>();
   }
 
   py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);
@@ -358,22 +377,23 @@ Resolver pythonResolver(ResolutionCallback rcb) {
 
 }
 
-FunctionSchema getSchemaWithDefaults(
-    const FunctionDefaults& default_args,
+FunctionSchema getSchemaWithNameAndDefaults(
+    const SourceRange& range,
     const FunctionSchema schema,
-    const Def& def) {
+    at::optional<std::string> new_name,
+    const FunctionDefaults& default_args) {
   std::vector<Argument> new_args;
-  for (auto& arg : schema.arguments) {
-    auto it = default_args.find(arg.name);
+  for (auto& arg : schema.arguments()) {
+    auto it = default_args.find(arg.name());
     if (it != default_args.end()) {
       try {
-        IValue value = toIValue(it->second, arg.type);
+        IValue value = toIValue(it->second, arg.type());
         new_args.push_back(
-            Argument(arg.name, arg.type, arg.N, value, arg.kwarg_only));
+            Argument(arg.name(), arg.type(), arg.N(), value, arg.kwarg_only()));
       } catch (py::cast_error& e) {
-        throw ErrorReport(def.range())
-            << "Expected a default value of type " << arg.type->str()
-            << " on parameter \"" << arg.name << "\"";
+        throw ErrorReport(range)
+            << "Expected a default value of type " << arg.type()->str()
+            << " on parameter \"" << arg.name() << "\"";
       }
     } else {
       new_args.push_back(arg);
@@ -381,11 +401,11 @@ FunctionSchema getSchemaWithDefaults(
   }
 
   return FunctionSchema(
-      schema.name,
+      new_name.value_or(schema.name()),
       new_args,
-      schema.returns,
-      schema.is_vararg,
-      schema.is_varret);
+      schema.returns(),
+      schema.is_vararg(),
+      schema.is_varret());
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -432,8 +452,8 @@ void initJitScriptBindings(PyObject* module) {
         auto defs_it = defs.begin();
         while (defs_it != defs.end()) {
           auto& method = m->get_method((*defs_it).name().name());
-          method.setSchema(getSchemaWithDefaults(
-              *defaults_it, method.getSchema(), *defs_it));
+          method.setSchema(getSchemaWithNameAndDefaults(
+              defs_it->range(), method.getSchema(), at::nullopt, *defaults_it));
           ++defs_it;
           ++defaults_it;
         }
@@ -452,7 +472,7 @@ void initJitScriptBindings(PyObject* module) {
         py::tuple result(modules.size());
         for(size_t i = 0; i < modules.size(); ++i) {
           auto & item = modules[i];
-          result[i] = std::make_pair(item.key, item.value);
+          result[i] = std::make_pair(item.key(), item.value());
         }
         return result;
       })
@@ -463,7 +483,7 @@ void initJitScriptBindings(PyObject* module) {
           auto & p = parameters[i];
           py::tuple r(3);
           result[i] = std::make_tuple(
-            p.key,
+            p.key(),
             autograd::as_variable_ref(*p->slot()),
             p->is_buffer);
 
@@ -489,18 +509,17 @@ void initJitScriptBindings(PyObject* module) {
         return bool(self.find_method(name));
       })
       .def("_method_names", [](Module& self) {
-        using Item = torch::detail::OrderedDict<std::string, std::unique_ptr<Method>>::Item;
+        using Item = torch::OrderedDict<std::string, std::unique_ptr<Method>>::Item;
         return fmap(self.get_methods(), [](const Item & item) {
           return (*item)->name();
         });
       })
       .def("_create_method_from_graph", [](
-        Module& self,
-        const std::string& name,
-        std::shared_ptr<Graph> graph
-      ){
-        std::vector<at::Tensor*> parameters;
-        self.create_method(name, std::move(graph), std::move(parameters));
+         Module& self,
+         const std::string& name,
+         std::shared_ptr<Graph> graph
+       ){
+         self.create_method(name, std::move(graph), {});
       })
       .def("_create_method_from_trace", [](
         Module& self,
@@ -577,15 +596,16 @@ void initJitScriptBindings(PyObject* module) {
       Method& self = py::cast<Method&>(args[0]);
       return self.graph_for(createStackForSchema(self.getSchema(), tuple_slice(std::move(args), 1), std::move(kwargs)));
     })
-    .def("forward_schema", [](Method &self, Def &def, FunctionDefaults defaults, bool is_method) {
-      self.setSchema(getSchemaWithDefaults(
-        defaults, extractSchemaFromDef(def, is_method), def));
-    })
     .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
     .def("pretty_print_schema", &Method::pretty_print_schema);
 
-  m.def("_jit_script_compile", [](const Def &def, ResolutionCallback rcb) {
-    return compileFunction(def, pythonResolver(rcb));
+  m.def("_jit_script_compile", [](std::shared_ptr<Module> mod, const Def &def, ResolutionCallback rcb, FunctionDefaults defaults) {
+    auto def_f = def.withName("forward");
+    defineMethodsInModule(*mod, {def_f}, {pythonResolver(rcb)}, nullptr);
+    auto& method = mod->get_method("forward");
+    method.setSchema(getSchemaWithNameAndDefaults(
+        def.range(), method.getSchema(), def.name().name(), defaults));
+    return mod;
   });
 
   m.def("parse_type_comment", [](const std::string& comment) {

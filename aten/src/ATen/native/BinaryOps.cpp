@@ -29,6 +29,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   }
   auto iter = TensorIterator::binary_op(result, self, other);
   add_stub(iter->device_type(), *iter, alpha);
+  result = iter->output();
   return result;
 }
 
@@ -54,6 +55,7 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
   }
   auto iter = TensorIterator::binary_op(result, self, other);
   div_stub(iter->device_type(), *iter);
+  result = iter->output();
   return result;
 }
 
@@ -75,6 +77,7 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
   }
   auto iter = TensorIterator::binary_op(result, self, other);
   mul_stub(iter->device_type(), *iter);
+  result = iter->output();
   return result;
 }
 
@@ -106,6 +109,7 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   }
   auto iter = TensorIterator::binary_op(result, self, other);
   sub_stub(iter->device_type(), *iter, alpha);
+  result = iter->output();
   return result;
 }
 
@@ -116,6 +120,10 @@ Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
   return native::sub_out(self, self, other, alpha);
+}
+
+Tensor rsub(const Tensor& self, const Tensor& other, Scalar alpha) {
+  return native::sub(other, self, alpha);
 }
 
 // These are still needed because we don't have C++ conversions from number
@@ -158,6 +166,10 @@ Tensor sub(const Tensor& self, Scalar other, Scalar alpha) {
 
 Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
   return native::sub_(self, scalar_tensor(other), alpha);
+}
+
+Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
+  return native::rsub(self, scalar_tensor(other), alpha);
 }
 
 }

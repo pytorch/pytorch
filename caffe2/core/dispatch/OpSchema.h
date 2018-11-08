@@ -39,7 +39,7 @@ struct tensor_to_dispatch_key final {
       return TensorParameterDispatchKey{
           to_device_type_id(tensor.GetDeviceType()),
           LayoutId(0),
-          tensor.meta().id()};
+          tensor.dtype().id()};
     }
 };
 

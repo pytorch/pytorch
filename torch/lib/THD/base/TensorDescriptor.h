@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../THD.h"
 #include <TH/TH.h>
+#include "../THD.h"
 #ifdef USE_CUDA
 #include <THC/THC.h>
 #endif

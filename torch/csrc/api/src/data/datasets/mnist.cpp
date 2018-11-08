@@ -1,7 +1,7 @@
 #include <torch/data/datasets/mnist.h>
 
 #include <torch/data/example.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <c10/util/Exception.h>
 
@@ -31,8 +31,8 @@ bool check_is_little_endian() {
 }
 
 constexpr uint32_t flip_endianness(uint32_t value) {
-  return ((value & 0xff) << 24) | ((value & 0xff00) << 8) |
-      ((value & 0xff0000) >> 8) | ((value & 0xff000000) >> 24);
+  return ((value & 0xffu) << 24u) | ((value & 0xff00u) << 8u) |
+      ((value & 0xff0000u) >> 8u) | ((value & 0xff000000u) >> 24u);
 }
 
 uint32_t read_int32(std::ifstream& stream) {
@@ -73,7 +73,8 @@ Tensor read_images(const std::string& root, bool train) {
   expect_int32(images, kImageRows);
   expect_int32(images, kImageColumns);
 
-  auto tensor = torch::empty({count, kImageRows, kImageColumns}, torch::kByte);
+  auto tensor =
+      torch::empty({count, 1, kImageRows, kImageColumns}, torch::kByte);
   images.read(reinterpret_cast<char*>(tensor.data_ptr()), tensor.numel());
   return tensor.to(torch::kFloat32).div_(255);
 }
@@ -89,7 +90,7 @@ Tensor read_targets(const std::string& root, bool train) {
   expect_int32(targets, kTargetMagicNumber);
   expect_int32(targets, count);
 
-  auto tensor = torch::empty(count);
+  auto tensor = torch::empty(count, torch::kByte);
   targets.read(reinterpret_cast<char*>(tensor.data_ptr()), count);
   return tensor.to(torch::kInt64);
 }
@@ -103,12 +104,12 @@ Example<> MNIST::get(size_t index) {
   return {images_[index], targets_[index]};
 }
 
-size_t MNIST::size() const {
+optional<size_t> MNIST::size() const {
   return images_.size(0);
 }
 
 bool MNIST::is_train() const noexcept {
-  return size() == kTrainSize;
+  return images_.size(0) == kTrainSize;
 }
 
 } // namespace datasets

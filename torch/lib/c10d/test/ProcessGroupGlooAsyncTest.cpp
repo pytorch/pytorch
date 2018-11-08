@@ -2,10 +2,8 @@
 
 #include <ATen/cuda/CUDAGuard.h>
 
-#include <c10d/CUDAUtils.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
-#include <c10d/private/CUDAUtils.hpp>
 #include <c10d/test/CUDATest.hpp>
 #include <c10d/test/TestUtils.hpp>
 
@@ -74,8 +72,10 @@ class AsyncInputIsOutputTest : public AsyncTest {
     // Allocate inputs on available devices in a round robin fashion.
     inputs_.resize(numTensors_);
     for (auto i = 0; i < numTensors_; i++) {
-      inputs_[i] =
-          at::empty({16, 16}, at::device({at::kCUDA, i % numDevices_}));
+      inputs_[i] = at::empty(
+          {16, 16},
+          at::device(
+              {at::kCUDA, static_cast<c10::DeviceIndex>(i % numDevices_)}));
     }
 
     // Allocate a stream per device.
@@ -85,11 +85,11 @@ class AsyncInputIsOutputTest : public AsyncTest {
     // and pass this along to the collective (since it uses the THC
     // getters to retrieve the current stream).
     //
-    at::DeviceGuard deviceGuard;
-    streams_.resize(numDevices_);
+    at::cuda::CUDAGuard deviceGuard;
+    streams_.reserve(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
-      streams_[i] = at::cuda::createCUDAStream();
+      streams_.push_back(at::cuda::getStreamFromPool());
     }
   }
 
@@ -140,7 +140,7 @@ class AsyncAllreduceTest : public AsyncInputIsOutputTest {
     auto guards = createStreamGuard();
 
     // Launch sleep on every stream
-    at::DeviceGuard deviceGuard;
+    at::cuda::CUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 10 * 1000 * 1000);
@@ -166,7 +166,7 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
     auto guards = createStreamGuard();
 
     // Launch sleep on every stream
-    at::DeviceGuard deviceGuard;
+    at::cuda::CUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 10 * 1000 * 1000);

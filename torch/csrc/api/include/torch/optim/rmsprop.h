@@ -4,7 +4,7 @@
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <functional>
 #include <memory>

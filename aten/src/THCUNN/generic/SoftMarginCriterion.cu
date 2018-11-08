@@ -30,7 +30,7 @@ void THNN_(SoftMarginCriterion_updateOutput)(
   thrust::device_ptr<scalar_t> target_data(THCTensor_(data)(state, target));
   sum = thrust::inner_product(input_data, input_data+size, target_data, (accreal) 0, thrust::plus<accreal>(), softmargin_functor<scalar_t, accreal>());
 
-  if (reduction == Reduction::ElementwiseMean)
+  if (reduction == Reduction::Mean)
     sum /= size;
 
   THCTensor_(free)(state, input);
@@ -61,7 +61,7 @@ void THNN_(SoftMarginCriterion_updateGradInput)(
   }
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);
-  accreal norm = (reduction == Reduction::ElementwiseMean ? 1./size : 1.);
+  accreal norm = (reduction == Reduction::Mean ? 1./size : 1.);
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);

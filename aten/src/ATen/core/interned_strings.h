@@ -6,11 +6,11 @@
 #include <algorithm>
 
 #include <ATen/core/aten_interned_strings.h>
-#include <ATen/core/Macros.h>
+#include <c10/macros/Macros.h>
 
 namespace c10 {
 
-#if !AT_MOBILE || true
+#if !C10_MOBILE || true
 #define FORALL_NS_SYMBOLS(_)       \
   _(namespaces, prim)              \
   _(namespaces, aten)              \
@@ -45,6 +45,8 @@ namespace c10 {
   _(prim, Starred)                 \
   _(prim, TupleConstruct)          \
   _(prim, TupleUnpack)             \
+  _(prim, TupleIndex)              \
+  _(prim, TupleSlice)              \
   _(prim, ListConstruct)           \
   _(prim, ListUnpack)              \
   _(prim, BoolToTensor)            \
@@ -65,12 +67,15 @@ namespace c10 {
   _(prim, ConstantChunk)           \
   _(prim, NoneGenerator)           \
   _(aten, floordiv)                \
-  _(prim, MemoryFence)             \
-  _(prim, LoadWorld)               \
-  _(prim, StoreWorld)              \
-  _(prim, DummyWorld)              \
+  _(prim, fork)                    \
+  _(prim, RaiseException)          \
   _(aten, append)                  \
+  _(aten, format)                  \
   _(aten, __not__)                 \
+  _(aten, __is__)                  \
+  _(aten, __isnot__)               \
+  _(aten, copy_)                   \
+  _(aten, _set_item)               \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \
@@ -122,7 +127,8 @@ namespace c10 {
   _(attr, transB)                  \
   _(attr, name)                    \
   _(attr, a)                       \
-  _(attr, b)
+  _(attr, b)                       \
+  _(attr, beg)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
@@ -277,5 +283,3 @@ struct hash<c10::Symbol> {
   }
 };
 }
-
-

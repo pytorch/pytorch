@@ -2,7 +2,6 @@
 
 #include "ATen/Allocator.h"
 #include "ATen/CPUGeneral.h"
-#include "ATen/CUDAGuard.h"
 #include "ATen/Context.h"
 #include "ATen/Device.h"
 #include "ATen/DeviceGuard.h"

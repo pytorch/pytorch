@@ -3,7 +3,19 @@
 #include <cstddef>
 #include <vector>
 
-TORCH_API std::vector<at::Tensor> custom_op(
-    at::Tensor tensor,
+// clang-format off
+#  if defined(_WIN32)
+#    if defined(custom_ops_EXPORTS)
+#      define CUSTOM_OP_API __declspec(dllexport)
+#    else
+#      define CUSTOM_OP_API __declspec(dllimport)
+#    endif
+#  else
+#    define CUSTOM_OP_API
+#  endif
+// clang-format on
+
+CUSTOM_OP_API std::vector<torch::Tensor> custom_op(
+    torch::Tensor tensor,
     double scalar,
     int64_t repeat);
