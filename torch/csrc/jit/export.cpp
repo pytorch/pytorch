@@ -8,6 +8,8 @@
 
 #include "caffe2/serialize/inline_container.h"
 #include "onnx/onnx_pb.h"
+#include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/proto/torch_pb.h"
 
 #include <ATen/ATen.h>
 #include "c10/util/Optional.h"
@@ -430,6 +432,8 @@ class ModuleEncoder: public EncoderBase {
  public:
   ModuleEncoder(const script::Module &module,
                 std::ostream& out);
+  ModuleEncoder(script::Method& method,
+      onnx::NodeProto* node_proto, std::ostream& out);
 
  private:
   void EncodeModule(onnx::GraphProto *graph_proto, const script::Module &module);
@@ -485,6 +489,14 @@ ModuleEncoder::ModuleEncoder(
       stream_writer_(&out) {
   model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
   EncodeModule(model_proto_.mutable_graph(), module);
+}
+
+ModuleEncoder::ModuleEncoder(script::Method& method,
+    onnx::NodeProto* node_proto, std::ostream& out) :
+  EncoderBase(onnx_torch::OperatorExportTypes::RAW, false), stream_writer_(&out) {
+  // we already keep the tree structure in the top level module,
+  // so pass "" as prefix
+  EncodeMethod(node_proto, method, "");
 }
 
 void ModuleEncoder::EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto, const Value *n) {
@@ -899,6 +911,135 @@ void dump(const onnx::ModelProto& model, std::ostream& stream, size_t indent) {
   }
   stream << idt(indent) << "}\n";
 }
+
+// aten type ==> caffe2::TensorProto type
+caffe2::TensorProto_DataType atenTypeToTensorProtoType(at::ScalarType aten_type) {
+  switch(aten_type) {
+    case at::kDouble:
+      return caffe2::TensorProto_DataType_DOUBLE;
+    case at::kFloat:
+      return caffe2::TensorProto_DataType_FLOAT;
+    case at::kHalf:
+      return caffe2::TensorProto_DataType_FLOAT16;
+    case at::kByte:
+      return caffe2::TensorProto_DataType_UINT8;
+    case at::kChar:
+      return caffe2::TensorProto_DataType_INT8;
+    case at::kShort:
+      return caffe2::TensorProto_DataType_INT16;
+    case at::kInt:
+      return caffe2::TensorProto_DataType_INT32;
+    case at::kLong:
+      return caffe2::TensorProto_DataType_INT64;
+    default:
+      AT_ERROR("unexpected aten scalar type");
+  }
+}
+
+class ScriptModuleSerializer final {
+
+ public:
+  ScriptModuleSerializer(const std::string& filename) :
+    ofs_(filename, std::ofstream::out | std::ofstream::trunc | std::ofstream::binary),
+    writer_(&ofs_) {
+      // TODO appropriate support for mmap, right now we still use stream writer
+    }
+  ScriptModuleSerializer(std::ostream* ofs) : ofs_(), writer_(ofs) {}
+  void serialize(const script::Module& module) {
+    torch::ModelDef model_def;
+    convertToModel(module, &model_def);
+    std::string output;
+    model_def.SerializeToString(&output);
+    writer_.writeRecord(output.c_str(), output.size());
+  }
+
+ private:
+  void convertToModel(const script::Module& module,
+      torch::ModelDef* model_def) {
+    model_def->set_name("script-model");
+    model_def->set_producer_name("pytorch");
+    model_def->set_producer_version("1.0"); // TODO: set the producer version using appropriate function call
+    // TODO set proto version
+    convertModule(module, "main-module", model_def->mutable_main_module());
+  }
+  void convertModule(const script::Module& module, const std::string& name,
+      torch::ModuleDef* module_def) {
+    module_def->set_name(name);
+    for (const auto& elem: module.get_parameters()) {
+      torch::ParameterDef* param_def = module_def->add_parameters();
+      convertParameter(elem.value(), param_def);
+    }
+    for (auto& elem: module.get_methods()) {
+      torch::MethodDef* method_def = module_def->add_methods();
+      convertMethod(*elem.value(), method_def);
+    }
+    for (const auto& elem: module.get_modules()) {
+      torch::ModuleDef* sub_def = module_def->add_submodules();
+      convertModule(*elem->module, elem.key(), sub_def);
+    }
+  }
+  void convertParameter(const script::NamedParameter& param,
+      torch::ParameterDef* param_def) {
+    param_def->set_name(param.name);
+    param_def->set_is_buffer(param.is_buffer);
+    param_def->set_require_gradient(param.slot()->requires_grad());
+    convertTensor(*(param.slot()), param_def->mutable_tensor());
+  }
+  void convertTensor(const at::Tensor& tensor,
+      caffe2::TensorProto* tensor_proto) {
+    for (auto d : tensor.sizes()) {
+      tensor_proto->add_dims(d);
+    }
+    tensor_proto->set_data_type(
+        atenTypeToTensorProtoType(tensor.type().scalarType()));
+    tensor_proto->set_storage_type(caffe2::TensorProto_StorageType_EXTERNAL);
+    caffe2::ExternalDataProto* external_data = tensor_proto->mutable_external_data();
+    for (auto s : tensor.strides()) {
+      external_data->add_strides(s);
+    }
+    external_data->set_offset(tensor.storage_offset());
+    external_data->set_record_size(tensor.storage().size());
+    auto* key = tensor.storage().unsafeGetStorageImpl();
+    auto it = storageMap_.find(key);
+    if (it == storageMap_.end()) {
+      // TODO HIP support
+      uint64_t record_id;
+      if (tensor.storage().device_type() == at::DeviceType::CUDA) {
+        // NB: This new tensor is created to support cuda tensors.
+        // Storages can be mutated when converting tensors from cuda to cpu,
+        // and we need a cpu tensor to copy data from.
+        at::Tensor t = at::getType(tensor)._th_tensor(
+            tensor.storage(),
+            /* storageOffset = */ 0,
+            /* size = */ { static_cast<int64_t>(tensor.storage().size()) },
+            /* stride = */ { 1 }).cpu();
+        record_id = writer_.writeRecord(t.storage().data(),
+            t.storage().size());
+      } else {
+        record_id = writer_.writeRecord(tensor.storage().data(),
+            tensor.storage().size());
+      }
+      external_data->set_record_id(caffe2::to_string(record_id));
+      storageMap_[key] = record_id;
+    } else {
+      external_data->set_record_id(caffe2::to_string(it->second));
+    }
+    // TODO handle device case, set the device_detail and load to CUDA device
+  }
+  void convertMethod(script::Method& method, torch::MethodDef* method_def) {
+    // TODO encode the real torch script instead of ModelProto
+    ::ONNX_NAMESPACE::ModelProto model_proto;
+    ModuleEncoder encoder(method, model_proto.mutable_graph()->add_node(), ofs_);
+    std::string serialized_proto;
+    model_proto.SerializeToString(&serialized_proto);
+    // NB: it should be fine to use torch_script for now
+    method_def->set_torch_script(serialized_proto);
+  }
+  std::unordered_map<void*, uint64_t> storageMap_; // storage_ptr => record_offset
+  std::ofstream ofs_;
+  PyTorchStreamWriter writer_;
+};
+
 } // namespace
 
 std::string prettyPrint(const onnx::ModelProto& model) {
@@ -941,13 +1082,16 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
 }
 
 void ExportModule(const script::Module& module, std::ostream& out) {
-  ModuleEncoder(module, out);
+  //ModuleEncoder(module, out);
+  ScriptModuleSerializer serializer(&out);
+  serializer.serialize(module);
 }
 
 void ExportModule(const script::Module& module, const std::string &filename) {
-  std::ofstream out(filename, std::ios_base::binary);
-
-  ExportModule(module, out);
+  //std::ofstream out(filename, std::ios_base::binary);
+  //ExportModule(module, out);
+  ScriptModuleSerializer serializer(filename);
+  serializer.serialize(module);
 }
 
 }}

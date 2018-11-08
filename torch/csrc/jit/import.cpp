@@ -6,6 +6,8 @@
 
 #include "caffe2/serialize/inline_container.h"
 #include "onnx/onnx_pb.h"
+#include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/proto/torch_pb.h"
 
 #include <ATen/ATen.h>
 
@@ -26,6 +28,10 @@ class ModuleDecoder {
  public:
   ModuleDecoder(ModuleLookup module_lookup,
                 std::istream& in);
+  ModuleDecoder(
+      const onnx::ModelProto& model_proto,
+      const std::unordered_map<std::string, at::Tensor*>& param_map,
+      script::Module* parent_module);
 
  private:
   std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto);
@@ -370,22 +376,161 @@ ModuleDecoder::ModuleDecoder(
   }
 }
 
+ModuleDecoder::ModuleDecoder(
+    const onnx::ModelProto& model_proto,
+    const std::unordered_map<std::string, at::Tensor*>& param_map,
+    script::Module* parent_module) : stream_reader_(nullptr) {
+  const auto& graph_proto = model_proto.graph();
+  for (const auto &node_proto : graph_proto.node()) {
+    std::vector<at::Tensor*> member_inputs;
+    const std::string& name = node_proto.name();
+    for (const auto &param_name : node_proto.input()) {
+      auto it = param_map.find(param_name);
+      JIT_ASSERT(it != param_map.end());
+      member_inputs.push_back(it->second);
+    }
+    auto graph = buildGraph(node_proto.attribute(0).g());
+    // has_domain field has a string iff the method was optimized
+    parent_module->set_optimized(node_proto.has_domain());
+    parent_module->create_method(name, graph, member_inputs);
+    // We store the schema in the docstring so we can parse the schema and
+    // assign it to the method.
+    auto schema = parseSchema(node_proto.doc_string());
+    parent_module->get_method(name).setSchema(std::move(schema));
+  }
+}
+
+at::ScalarType tensorProtoTypeToATenType(caffe2::TensorProto_DataType data_type) {
+  switch(data_type) {
+    // NB: handle BOOL
+    case caffe2::TensorProto_DataType_UINT8:
+      return at::kByte;
+    case caffe2::TensorProto_DataType_INT8:
+      return at::kChar;
+    case caffe2::TensorProto_DataType_INT16:
+      return at::kShort;
+    case caffe2::TensorProto_DataType_INT32:
+      return at::kInt;
+    case caffe2::TensorProto_DataType_INT64:
+      return at::kLong;
+    case caffe2::TensorProto_DataType_FLOAT16:
+      return at::kHalf;
+    case caffe2::TensorProto_DataType_FLOAT:
+      return at::kFloat;
+    case caffe2::TensorProto_DataType_DOUBLE:
+      return at::kDouble;
+    default:
+      AT_ERROR("Unsupported TensorProto data type");
+  }
+}
+
+class ScriptModuleDeserializer final {
+ public:
+  ScriptModuleDeserializer(const std::string& filename) :
+    ifs_(filename, std::ifstream::in | std::ifstream::binary), reader_(&ifs_) {
+      // TODO appropriate support for mmap, right now still use stream reader
+    }
+  ScriptModuleDeserializer(std::istream* is) : ifs_(), reader_(is) {}
+  void deserialize(ModuleLookup module_lookup) {
+    torch::ModelDef model_def;
+    at::DataPtr data_ptr;
+    size_t data_size;
+    std::tie(data_ptr, data_size) = reader_.getLastRecord();
+    AT_ASSERTM(model_def.ParseFromArray(data_ptr.get(), data_size),
+        "parse metadata (i.e., ModelDef) failed.");;
+    moduleLookup_ = module_lookup;
+    std::shared_ptr<script::Module> module = moduleLookup_(moduleStack_);
+    convertModule(model_def.main_module(), module.get());
+  }
+ private:
+  void convertModule(const torch::ModuleDef& module_def,
+      script::Module* module) {
+    std::unordered_map<std::string, at::Tensor*> param_map;
+    for (int i = 0; i < module_def.parameters_size(); ++i) {
+      const torch::ParameterDef& param_def = module_def.parameters(i);
+      at::Tensor tensor = createTensor(param_def);
+      autograd::Variable variable = autograd::make_variable(tensor,
+          param_def.require_gradient());
+      module->register_parameter(param_def.name(), variable, param_def.is_buffer());
+      AT_ASSERT(param_map.find(param_def.name()) == param_map.end());
+      param_map[param_def.name()] = &tensor;
+    }
+    for (int i = 0; i < module_def.methods_size(); ++i ) {
+      const torch::MethodDef& method_def = module_def.methods(i);
+      // TODO read unhacked torch script, right now it's serialized onnx proto
+      ::ONNX_NAMESPACE::ModelProto method_proto;
+      AT_ASSERTM(method_proto.ParseFromString(method_def.torch_script()),
+          "cannot parse method proto (i.e., hacked onnx proto)");
+      ModuleDecoder decoder(method_proto, param_map, module);
+      (void)decoder;
+    }
+    for (int i = 0; i < module_def.submodules_size(); ++i) {
+      const torch::ModuleDef& sub_def = module_def.submodules(i);
+      moduleStack_.push_back(sub_def.name());
+      std::shared_ptr<script::Module> sub = moduleLookup_(moduleStack_);
+      convertModule(sub_def, sub.get());
+      moduleStack_.pop_back();
+    }
+  }
+  at::Tensor createTensor(const torch::ParameterDef& param_def) {
+    const caffe2::TensorProto& tensor_proto = param_def.tensor();
+    std::vector<int64_t> dims;
+    for (int i = 0; i < tensor_proto.dims_size(); ++i) {
+      dims.push_back(tensor_proto.dims(i));
+    }
+    AT_ASSERT(tensor_proto.storage_type() == caffe2::TensorProto_StorageType_EXTERNAL);
+    const caffe2::ExternalDataProto& external_data = tensor_proto.external_data();
+    std::vector<int64_t> strides;
+    for (int i = 0;i < external_data.strides_size(); ++i) {
+      strides.push_back(external_data.strides(i));
+    }
+    auto type = tensorProtoTypeToATenType(tensor_proto.data_type());
+    uint64_t record_id = caffe2::stoull(external_data.record_id());
+    AT_ASSERT(record_id != 0);
+    auto storage_it = storageMap_.find(record_id);
+    if (storage_it == storageMap_.end()) {
+      at::DataPtr storage_ptr;
+      uint64_t record_size;
+      std::tie(storage_ptr, record_size) = reader_.getRecordWithKey(record_id);
+      AT_ASSERT(record_size == external_data.record_size());
+      auto storage = std::make_shared<at::Storage>(
+          at::CPU(type).typeMeta(),
+          std::move(storage_ptr),
+          record_size / at::CPU(type).typeMeta().itemsize(),
+          nullptr); // NB: we didn't set any allocator for the tensor
+      storageMap_.insert(std::make_pair(record_id, storage));
+      return at::CPU(type)._th_tensor(*storage, external_data.offset(),
+          dims, strides);
+    }
+    return at::CPU(type)._th_tensor(*(storage_it->second.get()), external_data.offset(),
+        dims, strides);
+  }
+  std::ifstream ifs_;
+  PyTorchStreamReader reader_;
+  ModuleLookup moduleLookup_;
+  std::vector<std::string> moduleStack_;
+  std::unordered_map<uint64_t, std::shared_ptr<at::Storage>> storageMap_;
+};
+
 }  // namespace
 
 void import_ir_module(
     ModuleLookup module_lookup,
     std::istream& in) {
-  ModuleDecoder decoder(module_lookup, in);
-  (void)decoder;
+  //ModuleDecoder decoder(module_lookup, in);
+  //(void)decoder;
+  ScriptModuleDeserializer deserializer(&in);
+  deserializer.deserialize(module_lookup);
 }
 
 void import_ir_module(
     ModuleLookup module_lookup,
     const std::string& filename) {
-  std::ifstream in(filename, std::ios_base::binary);
-
-  ModuleDecoder decoder(module_lookup, in);
-  (void)decoder;
+  //std::ifstream in(filename, std::ios_base::binary);
+  //ModuleDecoder decoder(module_lookup, in);
+  //(void)decoder;
+  ScriptModuleDeserializer deserializer(filename);
+  deserializer.deserialize(module_lookup);
 }
 
 std::shared_ptr<script::Module> load(std::istream& in) {
