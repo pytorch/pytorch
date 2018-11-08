@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <c10/DeviceGuard.h>
+#include <c10/detail/FakeGuardImpl.h>
 
 using namespace c10;
 using namespace c10::detail;
@@ -25,7 +26,7 @@ TEST(DeviceGuard, ResetDeviceDifferentDeviceType) {
 
 // -- OptionalDeviceGuard -----------------------------------------------
 
-TEST(DeviceGuard, ResetDeviceDifferentDeviceType) {
+TEST(OptionalDeviceGuard, ResetDeviceDifferentDeviceType) {
   FakeGuardImpl<DeviceType::CUDA> cuda_impl;
   FakeGuardImpl<DeviceType::HIP> hip_impl;
   FakeGuardImpl<DeviceType::CUDA>::setDeviceIndex(0);

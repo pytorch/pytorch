@@ -9,11 +9,11 @@ using namespace c10::detail;
 constexpr auto TestDeviceType = DeviceType::CUDA;
 using TestGuardImpl = FakeGuardImpl<TestDeviceType>;
 
-Device dev(DeviceIndex index) {
+static Device dev(DeviceIndex index) {
   return Device(TestDeviceType, index);
 }
 
-Stream stream(DeviceIndex index, StreamId sid) {
+static Stream stream(DeviceIndex index, StreamId sid) {
   return Stream(dev(index), sid);
 }
 

@@ -9,7 +9,7 @@ using namespace c10::detail;
 constexpr auto TestDeviceType = DeviceType::CUDA;
 using TestGuardImpl = FakeGuardImpl<TestDeviceType>;
 
-Device dev(DeviceIndex index) {
+static Device dev(DeviceIndex index) {
   return Device(TestDeviceType, index);
 }
 
