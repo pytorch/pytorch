@@ -1131,7 +1131,7 @@ class TestJit(JitTestCase):
             return MyInplaceFn.apply(x)
 
         x = torch.randn(5, 5)
-        ge = torch._C.GraphExecutor(fn, (x,))
+        ge = torch._C.GraphExecutor(fn, (x,), lambda var: '')
         with self.assertRaisesRegex(RuntimeError, 'inplace MyInplaceFn'):
             ge(x)
 
@@ -1468,7 +1468,7 @@ class TestJit(JitTestCase):
             return a * b / (a - b) + b
         V = Variable
         a, b = V(torch.rand(1)), V(torch.rand(1))
-        ge = torch._C.GraphExecutor(foo, (a, b))
+        ge = torch._C.GraphExecutor(foo, (a, b), lambda var: '')
         a, b = V(torch.rand(1), requires_grad=True), V(
             torch.rand(1), requires_grad=True)
         r, = ge(a, b)
@@ -1720,6 +1720,20 @@ class TestJit(JitTestCase):
 
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
+
+    def test_trace_records_names(self):
+        def foo(bar, baz):
+            baz = bar + 3
+            quick_brown_fox = torch.neg(baz)
+            for i in range(20):
+                yeet = quick_brown_fox - 3.14
+            return yeet
+
+        traced = torch.jit.trace(foo, (torch.rand(3, 3), torch.rand(3, 3)))
+        graph_str = str(traced.graph)
+        assert 'bar' in graph_str
+        assert 'baz' in graph_str
+        assert 'quick_brown_fox' in graph_str
 
     def test_constant_prop_if_constant(self):
         @torch.jit.script

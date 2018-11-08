@@ -1718,7 +1718,7 @@
     CPU: flip_cpu
     CUDA: flip_cuda
 
-- func: roll(Tensor self, IntList[1] shifts, IntList[1] dims) -> Tensor
+- func: roll(Tensor self, IntList[1] shifts, IntList[1] dims={}) -> Tensor
   variants: function, method
   dispatch:
     CPU: roll_cpu

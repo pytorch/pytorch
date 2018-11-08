@@ -871,12 +871,23 @@ class _TestTorchMixin(object):
     def test_norm(self):
         self._test_norm(self, device='cpu')
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    @skipIfNoLapack
-    @skipIfRocm
-    def test_norm_cuda(self):
-        self._test_norm(self, device='cuda')
+    @staticmethod
+    def _test_dist(self, device):
+        def run_test(x, y):
+            for p in [0, 1, 2, 3, 4, inf, -inf]:
+                dist_xy = torch.dist(x, y, p)
+                dist_xy_norm = torch.norm(x - y, p)
+                self.assertEqual(dist_xy, dist_xy_norm)
+
+        run_test(torch.randn(5, device=device), torch.randn(5, device=device))
+
+        x = torch.zeros(3, device=device)
+        y = torch.zeros(3, device=device)
+        y[1] = 1.
+        run_test(x, y)
+
+    def test_dist(self):
+        self._test_dist(self, device='cpu')
 
     def test_dim_reduction_uint8_overflow(self):
         example = [[-1, 2, 1], [5, 3, 6]]
@@ -6712,6 +6723,7 @@ class _TestTorchMixin(object):
             # roll
             self.assertEqual(x, x.roll(0, 1).roll(0, -1))
             self.assertEqual(x, x.roll(1, x.size(1)))
+            self.assertEqual(x, x.roll(1))
 
             # unbind
             self.assertEqual((), x.unbind(0))
@@ -7315,6 +7327,11 @@ class _TestTorchMixin(object):
             rolled = strided.roll(1, 0)
             self.assertEqual(expected, rolled,
                              "non contiguous tensor rolled to {} instead of {} ".format(rolled, expected))
+
+            # test roll with no dimension specified
+            expected = numbers.roll(1, 0).view(2, 4)
+            self.assertEqual(expected, data.roll(1), "roll with no dims should flatten and roll.")
+            self.assertEqual(expected, data.roll(1, dims=None), "roll with no dims should flatten and roll.")
 
     def test_reversed(self):
         val = torch.arange(0, 10)
