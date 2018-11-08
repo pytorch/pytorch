@@ -205,7 +205,8 @@ class TaskGroup(object):
         assert (
             self._workspace_type is None or
             task._workspace_type is None or
-            self._workspace_type == task._workspace_type)
+            self._workspace_type == task._workspace_type
+        ), "{} != {}".format(self._workspace_type, task.workspace_type)
         if task._workspace_type is None:
             task._workspace_type = (
                 self._workspace_type or WorkspaceType.PRIVATE)
