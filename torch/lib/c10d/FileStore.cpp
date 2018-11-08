@@ -242,7 +242,9 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
     // Always refresh since even though the key exists in the cache,
     // it might be outdated
     pos_ = refresh(file, pos_, cache_);
-    break;
+    if (cache_.count(regKey) != 0) {
+      break;
+    }
   }
 
   return cache_[regKey];
