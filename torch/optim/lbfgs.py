@@ -97,7 +97,7 @@ def _strong_Wolfe(obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_chang
     insuf_progress = False
     # find high and low points in bracket
     low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[-1] else (1, 0)
-    while not done and ls_iter < max_iter:
+    while not done and ls_iter < max_ls:
         # compute new trial value
         t = _cubic_interpolate(bracket[0], bracket_f[0], bracket_gtd[0],
                                bracket[1], bracket_f[1], bracket_gtd[1])
@@ -149,7 +149,7 @@ def _strong_Wolfe(obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_chang
             bracket_gtd[low_pos] = gtd_new
 
         # line-search bracket is so small
-        if abs(bracket[1] - bracket[0]) * d_norm < tolerate_change:
+        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:
             break
 
     # return stuff
