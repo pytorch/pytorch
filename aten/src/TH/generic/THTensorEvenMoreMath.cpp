@@ -3,6 +3,7 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
+#include <ATen/native/Copy.h>
 
 void THTensor_(fill)(THTensor *r_, scalar_t value)
 {
@@ -157,7 +158,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
 {
   ptrdiff_t i, numel;
-  THTensor *tSlice, *sSlice;
+  at::Tensor tSlice, sSlice;
   int64_t *index_data;
   scalar_t *tensor_data, *src_data;
 
@@ -215,13 +216,15 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   {
     for (i=0; i<numel; i++)
     {
-      tSlice = THTensor_(new)();
-      sSlice = THTensor_(new)();
-      THTensor_(select)(tSlice, tensor, dim, i);
-      THTensor_(select)(sSlice, src, dim, index_data[i] - TH_INDEX_BASE);
-      THTensor_(copy)(tSlice, sSlice);
-      c10::raw::intrusive_ptr::decref(tSlice);
-      c10::raw::intrusive_ptr::decref(sSlice);
+      tSlice = at::empty({0});
+      sSlice = at::empty({0});
+      THTensor_(select)(tSlice.unsafeGetTensorImpl(), tensor, dim, i);
+      THTensor_(select)(
+          sSlice.unsafeGetTensorImpl(),
+          src,
+          dim,
+          index_data[i] - TH_INDEX_BASE);
+      at::native::_copy_same_type_(tSlice, sSlice);
     }
   }
 
@@ -231,7 +234,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
 void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
   ptrdiff_t i, numel;
-  THTensor *tSlice, *sSlice;
+  at::Tensor tSlice, sSlice;
   int64_t *index_data;
 
   // Error checking for this function has moved to ATen!!
@@ -243,18 +246,19 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
 
   if (tensor->dim() > 1 )
   {
-    tSlice = THTensor_(new)();
-    sSlice = THTensor_(new)();
+    tSlice = at::empty({0});
+    tSlice = at::empty({0});
 
     for (i=0; i<numel; i++)
     {
-      THTensor_(select)(tSlice, tensor, dim, index_data[i] - TH_INDEX_BASE);
-      THTensor_(select)(sSlice, src, dim, i);
-      THTensor_(copy)(tSlice, sSlice);
+      THTensor_(select)(
+          tSlice.unsafeGetTensorImpl(),
+          tensor,
+          dim,
+          index_data[i] - TH_INDEX_BASE);
+      THTensor_(select)(sSlice.unsafeGetTensorImpl(), src, dim, i);
+      at::native::_copy_same_type_(tSlice, sSlice);
     }
-
-    c10::raw::intrusive_ptr::decref(tSlice);
-    c10::raw::intrusive_ptr::decref(sSlice);
   }
   else
   {

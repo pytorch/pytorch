@@ -3,6 +3,7 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
+#include <ATen/native/Copy.h>
 
 // HEY YOU!
 //
@@ -213,8 +214,10 @@ void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
 void THTensor_(pow)(THTensor *r_, THTensor *t, scalar_t value)
 {
   THTensor_(resizeAs)(r_, t);
-  if(value == 1){
-    THTensor_(copy)(r_, t);
+  if(value == 1) {
+    at::Tensor r__wrap = THTensor_wrap(r_);
+    at::Tensor t_wrap = THTensor_wrap(t);
+    at::native::_copy_same_type_(r__wrap, t_wrap);
   }
   else if(value == 2){
     THTensor_(cmul)(r_, t, t);
@@ -736,7 +739,9 @@ void THTensor_(addcmul)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src
   if(r_ != t)
   {
     THTensor_(resizeAs)(r_, t);
-    THTensor_(copy)(r_, t);
+    at::Tensor r__wrap = THTensor_wrap(r_);
+    at::Tensor t_wrap = THTensor_wrap(t);
+    at::native::_copy_same_type_(r__wrap, t_wrap);
   }
   int64_t r_Size = THTensor_(nElement)(r_);
   int64_t src1Size = THTensor_(nElement)(src1);
@@ -772,7 +777,9 @@ void THTensor_(addcdiv)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src
   if(r_ != t)
   {
     THTensor_(resizeAs)(r_, t);
-    THTensor_(copy)(r_, t);
+    at::Tensor r__wrap = THTensor_wrap(r_);
+    at::Tensor t_wrap = THTensor_wrap(t);
+    at::native::_copy_same_type_(r__wrap, t_wrap);
   }
   int64_t r_Size = THTensor_(nElement)(r_);
   int64_t src1Size = THTensor_(nElement)(src1);
@@ -827,7 +834,9 @@ void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
   if(r_ != t)
   {
     THTensor_(resizeAs)(r_, t);
-    THTensor_(copy)(r_, t);
+    at::Tensor r__wrap = THTensor_wrap(r_);
+    at::Tensor t_wrap = THTensor_wrap(t);
+    at::native::_copy_same_type_(r__wrap, t_wrap);
   }
 
   auto r_stride = THTensor_strideLegacyNoScalars(r_, 0);
@@ -946,7 +955,9 @@ void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
   {
     THTensor_(resizeAs)(r_, t);
     if (beta != 0.0) {
-      THTensor_(copy)(r_, t);
+      at::Tensor r__wrap = THTensor_wrap(r_);
+      at::Tensor t_wrap = THTensor_wrap(t);
+      at::native::_copy_same_type_(r__wrap, t_wrap);
     }
   }
 
@@ -1082,7 +1093,9 @@ void THTensor_(addr)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, T
   if(r_ != t)
   {
     THTensor_(resizeAs)(r_, t);
-    THTensor_(copy)(r_, t);
+    at::Tensor r__wrap = THTensor_wrap(r_);
+    at::Tensor t_wrap = THTensor_wrap(t);
+    at::native::_copy_same_type_(r__wrap, t_wrap);
   }
 
   if(beta == 0) {
@@ -1145,7 +1158,9 @@ void THTensor_(addbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t al
   if (t != result) {
     THTensor_(resizeAs)(result, t);
     if (beta != 0.0) {
-      THTensor_(copy)(result, t);
+      at::Tensor result_wrap = THTensor_wrap(result);
+      at::Tensor t_wrap = THTensor_wrap(t);
+      at::native::_copy_same_type_(result_wrap, t_wrap);
     }
   }
 
