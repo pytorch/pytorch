@@ -939,10 +939,8 @@ private:
           }
           break;
         case TK_EXPR_STMT: {
-          auto exprs = ExprStmt(stmt).exprs();
-          for (const auto& expr : exprs) {
-            emitSugaredExpr(expr, 0);
-          }
+          auto expr = ExprStmt(stmt).expr();
+          emitSugaredExpr(expr, 0);
         }
         break;
         case TK_RAISE:
@@ -1262,8 +1260,7 @@ private:
     }
 
     if (targets[0].kind() != TK_VAR) {
-      throw ErrorReport(targets[0]) << "Starred unpacking is currently not"
-          << " supported for for loops.";
+      throw ErrorReport(targets[0]) << "unexpected expression in variable initialization of for loop";
     }
     auto target = Var(targets[0]).name();
 
@@ -1378,6 +1375,9 @@ private:
   // Emit nodes for augmented assignments like `+=`
   void emitAugAssignment(const AugAssign& stmt) {
     auto lhs = Var(stmt.lhs());
+    if (lhs.kind() != TK_VAR) {
+      throw ErrorReport(lhs) << "expected a variable on the left-hand side";
+    }
     auto lhsValue = environment_stack->getSugaredVar(lhs.name())
                         ->asValue(lhs.range(), method);
     if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
@@ -1422,57 +1422,68 @@ private:
     }
   }
 
-  void emitAssignment(const Assign& stmt) {
-    bool starred_unpack = calcNumStarredUnpack(stmt.lhs(), stmt.range());
-
-    size_t n_binders = stmt.lhs().size();
+  void emitTupleAssign(const TupleLiteral& tl, const Expr& rhs) {
+    size_t n_binders = tl.inputs().size();
+    bool starred_unpack = calcNumStarredUnpack(tl.inputs(), tl.range());
     if(starred_unpack)
       n_binders--;
-
-    auto output = emitSugaredExpr(stmt.rhs(), n_binders);
-
-    if(stmt.lhs().size() == 1) {
-      JIT_ASSERT(!starred_unpack);
-      auto v = Var(stmt.lhs()[0]);
-      environment_stack->setSugaredVar(v.range(), v.name().name(), output);
-      return;
-    }
+    auto output = emitSugaredExpr(rhs, n_binders);
 
     auto outputs = output->asTuple(
-        stmt.rhs().range(),
+        rhs.range(),
         method,
         starred_unpack ? c10::nullopt : c10::optional<size_t>{n_binders});
     if(outputs.size() < n_binders) {
-      throw ErrorReport(stmt)
+      throw ErrorReport(tl)
         << "need " << (starred_unpack ? "at least " : "")
         << n_binders << " values to unpack but found only "
         << outputs.size();
     }
     if(outputs.size() > n_binders && !starred_unpack) {
-      throw ErrorReport(stmt)
+      throw ErrorReport(tl)
       << "too many values to unpack: need " << n_binders << " but found "
       << outputs.size();
     }
     int i = 0;
-    for (auto assignee : stmt.lhs()) {
-      if (assignee.kind() == TK_VAR) {
-        environment_stack->setSugaredVar(assignee.range(), Var(assignee).name().name(), outputs.at(i));
-        i++;
-      } else if (assignee.kind() == TK_STARRED) {
-        auto var = Starred(assignee).expr();
-        if (var.kind() != TK_VAR) {
-          throw ErrorReport(var) << "Cannot pack a tuple into a non-variable.";
-        }
-        size_t n_matched = outputs.size() - n_binders;
-        ArrayRef<std::shared_ptr<SugaredValue>> outputs_ref = outputs;
-        auto values = fmap(outputs_ref.slice(i, n_matched), [&](const std::shared_ptr<SugaredValue>& v) {
-          return v->asValue(assignee.range(), method);
-        });
-        auto tup = graph->insertNode(graph->createTuple(values))->output();
-        environment_stack->setVar(
-          var.range(), Var(var).name().name(), tup);
-        i += n_matched;
+    for (auto assignee : tl.inputs()) {
+      switch(assignee.kind()) {
+        case TK_VAR:
+          environment_stack->setSugaredVar(assignee.range(), Var(assignee).name().name(), outputs.at(i));
+          i++;
+          break;
+        case TK_STARRED: {
+          auto var = Starred(assignee).expr();
+          if (var.kind() != TK_VAR) {
+            throw ErrorReport(var) << "Cannot pack a tuple into a non-variable.";
+          }
+          size_t n_matched = outputs.size() - n_binders;
+          ArrayRef<std::shared_ptr<SugaredValue>> outputs_ref = outputs;
+          auto values = fmap(outputs_ref.slice(i, n_matched), [&](const std::shared_ptr<SugaredValue>& v) {
+            return v->asValue(assignee.range(), method);
+          });
+          auto tup = graph->insertNode(graph->createTuple(values))->output();
+          environment_stack->setVar(
+            var.range(), Var(var).name().name(), tup);
+          i += n_matched;
+        } break;
+        default:
+        throw ErrorReport(assignee) << "unexpected expression on the left-hand side";
       }
+    }
+  }
+
+  void emitAssignment(const Assign& stmt) {
+    switch(stmt.lhs().kind()) {
+      case TK_VAR: {
+        auto v = Var(stmt.lhs());
+        environment_stack->setSugaredVar(
+            v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1));
+      } break;
+      case TK_TUPLE_LITERAL:
+        emitTupleAssign(TupleLiteral(stmt.lhs()), stmt.rhs());
+        break;
+      default:
+        throw ErrorReport(stmt.lhs()) << "unexpected expression on left-hand side of assignment.";
     }
   }
 
