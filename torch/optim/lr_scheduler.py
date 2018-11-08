@@ -348,6 +348,9 @@ class ReduceLROnPlateau(object):
         current = metrics
         if epoch is None:
             epoch = self.last_epoch = self.last_epoch + 1
+        elif self.last_epoch == epoch:
+            return
+
         self.last_epoch = epoch
 
         if self.is_better(current, self.best):
