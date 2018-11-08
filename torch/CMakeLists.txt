@@ -253,7 +253,6 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/serialize/tensor.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
   )
 endif()
@@ -344,6 +343,10 @@ endif()
 
 if(USE_CUDA)
   if(MSVC)
+    set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
+    if ($ENV{NVTOOLEXT_HOME})
+      set(NVTOOLEXT_HOME $ENV{NVTOOLEXT_HOME})
+    endif()
     set(TORCH_CUDA_LIBRARIES
       ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
       ${CUDA_LIBRARIES})

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/types.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <cstddef>
 #include <vector>
@@ -18,7 +19,7 @@ namespace samplers {
 /// A `Sampler` is an object that yields an index with which to access a
 /// dataset.
 template <typename BatchRequest = std::vector<size_t>>
-class Sampler {
+class TORCH_API Sampler {
  public:
   using BatchRequestType = BatchRequest;
 

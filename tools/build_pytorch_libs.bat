@@ -230,7 +230,7 @@ goto:eof
                   -DPYTHON_LIBRARY="%PYTORCH_PYTHON_LIBRARY%" ^
                   -DBUILD_TORCH="%BUILD_TORCH%" ^
                   -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
-                  -DNO_API=ON ^
+                  -DNO_API=OFF ^
                   -DBUILD_SHARED_LIBS="%BUILD_SHARED_LIBS%" ^
                   -DBUILD_PYTHON=%BUILD_PYTHON% ^
                   -DBUILD_BINARY=%BUILD_BINARY% ^
