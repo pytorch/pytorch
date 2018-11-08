@@ -182,6 +182,7 @@ off_t refresh(
       pos = file.tell();
     }
   }
+  file.seek(0, SEEK_SET);
   return pos;
 }
 
@@ -192,18 +193,18 @@ FileStore::FileStore(const std::string& path, int numWorkers)
       path_(path),
       pos_(0),
       numWorkers_(numWorkers),
-      cleanupKey_("[INTERNAL_RESERVED]pytorch_c10d_filestore_cleanup_key"),
-      cleanupMode_(false) {
+      cleanupKey_("cleanup/"),
+      regularPrefix_("/") {
   if (numWorkers_ < 1) {
     throw std::runtime_error(
-        "Number of workers for FileStore should be "
-        "greater than zero");
+        "Number of workers for FileStore should be greater than zero");
   }
 }
 
 FileStore::~FileStore() {
-  cleanupMode_ = true;
-  auto numFinishedWorker = add(cleanupKey_, 1);
+  // cleanup key will be different from all rest keys since all rest keys will
+  // have a regular prefix.
+  auto numFinishedWorker = addHelper(cleanupKey_, 1);
   // The last worker cleans up the file
   if (numFinishedWorker == numWorkers_) {
     // Best effort removal without checking the return
@@ -212,21 +213,22 @@ FileStore::~FileStore() {
 }
 
 void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
-  checkKey(key);
+  std::string regKey = regularPrefix_ + key;
   File file(path_, O_RDWR | O_CREAT);
   auto lock = file.lockExclusive();
   file.seek(0, SEEK_END);
-  file.write(key);
+  file.write(regKey);
   file.write(value);
 }
 
 std::vector<uint8_t> FileStore::get(const std::string& key) {
+  std::string regKey = regularPrefix_ + key;
   const auto start = std::chrono::steady_clock::now();
-  while (cache_.count(key) == 0) {
+  while (true) {
     File file(path_, O_RDONLY);
     auto lock = file.lockShared();
     auto size = file.size();
-    if (size == pos_) {
+    if (cache_.count(regKey) == 0 && size == pos_) {
       // No new entries; release the shared lock and sleep for a bit
       lock.unlock();
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -237,15 +239,16 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
     }
-
+    // Always refresh since even though the key exists in the cache,
+    // it might be outdated
     pos_ = refresh(file, pos_, cache_);
+    break;
   }
 
-  return cache_[key];
+  return cache_[regKey];
 }
 
-int64_t FileStore::add(const std::string& key, int64_t i) {
-  checkKey(key);
+int64_t FileStore::addHelper(const std::string& key, int64_t i) {
   File file(path_, O_RDWR | O_CREAT);
   auto lock = file.lockExclusive();
   pos_ = refresh(file, pos_, cache_);
@@ -263,12 +266,12 @@ int64_t FileStore::add(const std::string& key, int64_t i) {
   // exclusive lock, so we can write the new value.
   file.write(key);
   file.write(std::to_string(ti));
-  // Need to update the cache since get will only read the file if the key is
-  // not in the cache, in this case, the key is.
-  auto tiStr = std::to_string(ti);
-  auto newValue = std::vector<uint8_t>(tiStr.begin(), tiStr.end());
-  cache_[key] = std::move(newValue);
   return ti;
+}
+
+int64_t FileStore::add(const std::string& key, int64_t i) {
+  std::string regKey = regularPrefix_ + key;
+  return addHelper(regKey, i);
 }
 
 bool FileStore::check(const std::vector<std::string>& keys) {
@@ -277,7 +280,8 @@ bool FileStore::check(const std::vector<std::string>& keys) {
   pos_ = refresh(file, pos_, cache_);
 
   for (const auto& key : keys) {
-    if (cache_.count(key) == 0) {
+    std::string regKey = regularPrefix_ + key;
+    if (cache_.count(regKey) == 0) {
       return false;
     }
   }
@@ -304,15 +308,6 @@ void FileStore::wait(
 
     /* sleep override */
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-}
-
-void FileStore::checkKey(const std::string& key) {
-  if (!cleanupMode_ && key == cleanupKey_) {
-    throw std::runtime_error(
-        "Using FileStore's internal key: " + key +
-        " is "
-        "not supported, please use a different key");
   }
 }
 

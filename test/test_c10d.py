@@ -302,14 +302,23 @@ class RendezvousFileTest(TestCase):
 
     def test_nominal(self):
         with tempfile.NamedTemporaryFile(delete=False) as file:
-            url = 'file://%s?world_size=%d' % (file.name, 1)
+            url = 'file://%s?world_size=%d' % (file.name, 2)
             gen0 = c10d.rendezvous(url + "&rank=0")
             store0, rank0, size0 = next(gen0)
             self.assertEqual(0, rank0)
-            self.assertEqual(1, size0)
+            self.assertEqual(2, size0)
+            gen1 = c10d.rendezvous(url + "&rank=1")
+            store1, rank1, size1 = next(gen1)
+            self.assertEqual(1, rank1)
+            self.assertEqual(2, size1)
 
+            # Set value on both stores
             store0.set("key0", "value0")
-            self.assertEqual(b"value0", store0.get("key0"))
+            store1.set("key1", "value1")
+
+            # Cross check with get
+            self.assertEqual(b"value0", store1.get("key0"))
+            self.assertEqual(b"value1", store0.get("key1"))
 
 
 class RendezvousTCPTest(TestCase):

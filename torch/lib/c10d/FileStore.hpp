@@ -29,14 +29,14 @@ class FileStore : public Store {
       const std::chrono::milliseconds& timeout) override;
 
  protected:
-  void checkKey(const std::string& key);
+  int64_t addHelper(const std::string& key, int64_t i);
 
   std::string path_;
   off_t pos_;
 
   int numWorkers_;
   const std::string cleanupKey_;
-  bool cleanupMode_;
+  const std::string regularPrefix_;
 
   std::unordered_map<std::string, std::vector<uint8_t>> cache_;
 };
