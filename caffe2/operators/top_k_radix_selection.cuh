@@ -4,7 +4,11 @@
 #include "caffe2/utils/GpuDefs.cuh"
 #include "caffe2/utils/GpuScanUtils.cuh"
 #include "caffe2/utils/math.h"
+#if defined(__HIP_PLATFORM_HCC__)
+#include <hip/hip_runtime.h>
+#else
 #include <cuda_runtime.h>
+#endif  // __HIP_PLATFORM_HCC__
 
 namespace caffe2 {
 
@@ -167,11 +171,15 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
 #pragma unroll
     for (unsigned int j = 0; j < RadixSize; ++j) {
       bool vote = hasVal && (digitInRadix == j);
+#if defined(__HIP_PLATFORM_HCC__)
+      counts[j] += __popcll(__ballot(vote));
+#else
 #if CUDA_VERSION >= 9000
       counts[j] += __popc(__ballot_sync(__activemask(), vote));
 #else
       counts[j] += __popc(__ballot(vote));
 #endif
+#endif  // __HIP_PLATFORM_HCC__
     }
   }
 
@@ -207,7 +215,7 @@ __device__ DataType findPattern(DataType* smem,
                                 int sliceSize,
                                 BitDataType desired,
                                 BitDataType desiredMask) {
-  if (threadIdx.x < 32) {
+  if (threadIdx.x < kWarpSize) {
     smem[threadIdx.x] = (DataType) 0;
   }
   __syncthreads();
@@ -350,7 +358,7 @@ __global__ void gatherTopK(const T* inputPtr,
                            int numInputSlices,
                            T* topKPtr,
                            IndicesType* indicesPtr) {
-  __shared__ int smem[32]; // one per each warp, up to warp limit
+  __shared__ int smem[kWarpSize]; // one per each warp, up to warp limit
 
   int slice = blockIdx.x;
   if (slice >= numInputSlices) {
