@@ -462,7 +462,6 @@ class build_deps(PytorchCommand):
         check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
         check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
         check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
-        check_file(os.path.join(third_party_path, 'catch', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
@@ -635,10 +634,10 @@ class build_ext(build_ext_parent):
 
         generate_code(ninja_global)
 
-        if USE_NINJA:            
+        if USE_NINJA:
             # before we start the normal build make sure all generated code
             # gets built
-            ninja_builder.run()
+            ninja_global.run()
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
