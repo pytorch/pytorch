@@ -142,20 +142,20 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   }
 };
 
+// These SugaredValues have special handling in the compiler because they
+// change the normal evalution order of the expression they participate in.
+// They are exposed here so that the python frontend can inject them
+// when it sees the equivalent thing in python
 struct TORCH_API ForkValue : public SugaredValue {
   ForkValue() = default;
-
   std::string kind() const override {
     return "fork";
   }
-
-  std::shared_ptr<SugaredValue> call(
-      SourceRange loc,
-      Method& m,
-      at::ArrayRef<NamedValue> attributes,
-      at::ArrayRef<NamedValue> inputs,
-      size_t n_binders) override {
-    AT_ERROR("Cannot call a fork value directly");
+};
+struct TORCH_API AnnotateValue : public SugaredValue {
+  AnnotateValue() = default;
+  std::string kind() const override {
+    return "annotate";
   }
 };
 

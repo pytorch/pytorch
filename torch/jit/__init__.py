@@ -1443,5 +1443,10 @@ class _disable_tracing(object):
         self.state = None
 
 
+# for use in python if using annotate
+def annotate(the_type, the_value):
+    # noop in python
+    return the_value
+
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
