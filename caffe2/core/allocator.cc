@@ -13,7 +13,29 @@ C10_DEFINE_bool(
     true,
     "If set, do memory zerofilling when allocating on CPU");
 
+C10_DEFINE_bool(
+    caffe2_cpu_allocator_do_junk_fill,
+    false,
+    "If set, fill memory with deterministic junk when allocating on CPU");
+
 namespace caffe2 {
+
+void memset_junk(void* data, size_t num) {
+  // This garbage pattern is NaN when interpretted as floating point values,
+  // or as very large integer values.
+  static constexpr int32_t kJunkPattern = 0x7fedbeef;
+  static constexpr int64_t kJunkPattern64 =
+      static_cast<int64_t>(kJunkPattern) << 32 | kJunkPattern;
+  int32_t int64_count = num / sizeof(kJunkPattern64);
+  int32_t remaining_bytes = num % sizeof(kJunkPattern64);
+  int64_t* data_i64 = reinterpret_cast<int64_t*>(data);
+  for (int i = 0; i < int64_count; i++) {
+    data_i64[i] = kJunkPattern64;
+  }
+  if (remaining_bytes > 0) {
+    memcpy(data_i64 + int64_count, &kJunkPattern64, remaining_bytes);
+  }
+}
 
 void NoDelete(void*) {}
 

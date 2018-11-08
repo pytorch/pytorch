@@ -48,22 +48,24 @@ struct TemplatePutOp : public Operator<CPUContext> {
     int64_t bound_value =
         std::numeric_limits<int64_t>::max() / magnitude_expand_;
 
+    int64_t int_value;
     if (bound_) {
       if (isNan(input)) {
-        input = 0;
-      } else if (input < -bound_value) {
-        input = -bound_value;
-      } else if (input > bound_value) {
-        input = bound_value;
+        int_value = 0;
+      } else if (input <= -bound_value) {
+        int_value = std::numeric_limits<int64_t>::min();
+      } else if (input >= bound_value) {
+        int_value = std::numeric_limits<int64_t>::max();
+      } else {
+        int_value = input * magnitude_expand_;
       }
     } else {
       CAFFE_ENFORCE(
           std::abs(static_cast<int64_t>(input)) < bound_value,
           "Input value is too large for the given magnitude expansion!");
       CAFFE_ENFORCE(!isNan(input), "Input value cannot be NaN!");
+      int_value = input * magnitude_expand_;
     }
-
-    int64_t int_value = input * magnitude_expand_;
 
     CAFFE_EVENT(stat_, stat_value, int_value);
 
