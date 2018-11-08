@@ -6,7 +6,7 @@
 #include <torch/data/iterator.h>
 #include <torch/data/samplers/random.h>
 #include <torch/data/worker_exception.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>

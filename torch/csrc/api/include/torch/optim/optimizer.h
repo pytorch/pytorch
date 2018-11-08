@@ -15,10 +15,6 @@ class Tensor;
 
 namespace torch {
 using at::Tensor;
-namespace detail {
-template <typename T>
-class CursorBase;
-} // namespace detail
 namespace serialize {
 class OutputArchive;
 class InputArchive;
@@ -35,22 +31,13 @@ namespace detail {
 /// shall have, such as `zero_grad`.
 class OptimizerBase {
  public:
-  using ParameterCursor = torch::detail::CursorBase<Tensor>;
-
   /// Constructs the `Optimizer` from a vector of parameters.
   explicit OptimizerBase(std::vector<Tensor> parameters);
-
-  /// Constructs the `Optimizer` from a ParameterCursor, such as
-  /// `nn::Module::parameters()` returns.
-  explicit OptimizerBase(const ParameterCursor& cursor);
 
   virtual ~OptimizerBase() = default;
 
   /// Adds the given vector of parameters to the optimizer's parameter list.
   void add_parameters(const std::vector<Tensor>& parameters);
-
-  /// Adds the `ParameterCursor`'s parameters to the optimizer's parameter list.
-  void add_parameters(const ParameterCursor& cursor);
 
   /// Zeros out the gradients of all parameters.
   virtual void zero_grad();
