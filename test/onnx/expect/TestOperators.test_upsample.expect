@@ -3,7 +3,6 @@ producer_name: "pytorch"
 producer_version: "0.4"
 graph {
   node {
-    input: "input"
     output: "1"
     op_type: "Constant"
     attribute {
@@ -17,7 +16,7 @@ graph {
     }
   }
   node {
-    input: "0"
+    input: "input"
     input: "1"
     output: "2"
     op_type: "Upsample"
