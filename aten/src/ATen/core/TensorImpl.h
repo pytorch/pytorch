@@ -876,6 +876,19 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   bool is_variable() const { return is_variable_; };
 
+  // NOTE: `shallow_copy_and_detach()` does not copy the autograd_meta_ pointer,
+  // because it's meant to be unique for each TensorImpl.
+  virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
+    auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id(), is_variable());
+    impl->set_sizes_and_strides(sizes(), strides());
+    impl->storage_offset_ = storage_offset();
+    impl->is_wrapped_number_ = is_wrapped_number();
+    impl->reserved_ = reserved_;
+    impl->refresh_numel();
+    impl->refresh_contiguous();
+    return impl;
+  }
+
  private:
   // As an optimization, get_device handles the typical CUDA Tensor case and
   // calls get_device_slow if the tensor stores its device somewhere else
@@ -1433,6 +1446,7 @@ protected:
 
 public:
   at::Storage storage_; // TODO: Fix visibility on me
+  void* autograd_meta_ = nullptr;
 
 protected:
   // We could save a word or two by combining the SmallVector structs,
@@ -1515,10 +1529,11 @@ protected:
 //    storage offset
 //    numel
 //    data type pointer
+//    autograd metadata pointer
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 24,
+              sizeof(TensorImpl) == sizeof(int64_t) * 25,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 
