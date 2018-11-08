@@ -119,6 +119,15 @@ if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
   popd
 fi
 
+# Test standalone c10 build
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
+  mkdir -p c10/build
+  pushd c10/build
+  cmake ..
+  make -j
+  popd
+fi
+
 # Test no-Python build
 if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   echo "Building libtorch"
