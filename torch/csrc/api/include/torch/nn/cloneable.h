@@ -32,7 +32,7 @@ class Cloneable : public virtual Module {
   /// Performs a recursive "deep copy" of the `Module`, such that all parameters
   /// and submodules in the cloned module are different from those in the
   /// original module.
-  #if !AT_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+  #if !AT_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY) || true
   std::shared_ptr<Module> clone(
       optional<Device> device = nullopt) const override {
     OptionsGuard options_guard(TensorOptions().device(device));

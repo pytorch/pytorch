@@ -9,7 +9,7 @@ namespace at {
 /// Returns the current default options.
 CAFFE2_API const DefaultTensorOptions& getDefaultTensorOptions();
 
-#if !C10_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+#if !C10_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY) || true
 
 /// Get a mutable reference to the current thread local default options.
 CAFFE2_API DefaultTensorOptions& mutateDefaultTensorOptions();
