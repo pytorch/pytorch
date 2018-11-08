@@ -1308,6 +1308,7 @@ _builtin_blacklist = {
     'pairwise_distance',
     'prelu',
     'hardshrink',
+    'ctc_loss',
     'threshold',
 
     # ops with inplace option
