@@ -931,12 +931,12 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   endif()
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
   # We will build onnx as static libs and embed it directly into the binary.
-  set(BUILD_SHARED_LIBS OFF)
   if (MSVC AND BUILD_SHARED_LIBS)
     # That also means we want to export all symbols from the shared
     # library we are building
     set(ONNX_BUILD_MAIN_LIB ON)
   endif()
+  set(BUILD_SHARED_LIBS OFF)
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
   set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
   # If linking local protobuf, make sure ONNX has the same protobuf
