@@ -33,6 +33,9 @@
 #   NO_MIOPEN
 #     disables the MIOpen build
 #
+#   NO_MKLDNN
+#     disables use of MKLDNN
+#
 #   NO_NNPACK
 #     disables NNPACK build
 #
@@ -63,9 +66,6 @@
 #
 #   USE_LMDB
 #     enables use of LMDB for storage
-#
-#   USE_MKLDNN
-#     enables use of MKLDNN
 #
 #   BUILD_BINARY
 #     enables the additional binaries/ build
