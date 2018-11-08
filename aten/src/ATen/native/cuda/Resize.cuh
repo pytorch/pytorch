@@ -25,11 +25,11 @@ static inline void maybe_resize_storage_cuda(TensorImpl* self, int64_t new_size)
   }
 }
 
+template <bool device_guard = true>
 inline TensorImpl* resize_impl_cuda_(
     TensorImpl* self,
     IntList size,
-    c10::optional<IntList> stride,
-    bool device_guard=true) {
+    c10::optional<IntList> stride) {
   if (self->sizes() == size && (!stride || self->strides() == stride)) {
     return self;
   }
@@ -55,6 +55,14 @@ inline TensorImpl* resize_impl_cuda_(
   }
   maybe_resize_storage_cuda(self, storage_size);
 
+  return self;
+}
+
+template <bool device_guard = true>
+inline Tensor& resize_cuda_helper_(Tensor& self, IntList size) {
+  auto* self_ = self.unsafeGetTensorImpl();
+  resize_impl_cuda_<device_guard>(self_, size, /*strides=*/c10::nullopt);
+  self_->maybe_zero_dim(size.size() == 0);
   return self;
 }
 

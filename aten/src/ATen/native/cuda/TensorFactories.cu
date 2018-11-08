@@ -2,6 +2,7 @@
 #include "ATen/InitialTensorOptions.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/cuda/CUDAContext.h"
+#include "ATen/native/cuda/Resize.cuh"
 #include "c10/util/Exception.h"
 
 #include <THC/THCGeneral.h>
@@ -46,7 +47,10 @@ Tensor empty_cuda(IntList size, const TensorOptions& options) {
     options.dtype(), 0, cuda::getCUDADeviceAllocator(), true);
 
   auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId(), false);
-  resize_cuda_(tensor, size); // avoid dispatch overhead
+  // For performance reasons,
+  // 1) avoid the dispatching overhead
+  // 2) Don't use another DeviceGuard -- at::empty(...) already uses one.
+  resize_cuda_helper_</*device_guard=*/false>(tensor, size);
   return tensor;
 }
 
