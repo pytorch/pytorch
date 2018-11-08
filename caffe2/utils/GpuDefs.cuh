@@ -1,13 +1,7 @@
 #ifndef CAFFE2_UTILS_GPU_DEFS_H_
 #define CAFFE2_UTILS_GPU_DEFS_H_
 
-#ifdef __CUDA_ARCH__
 #include <cuda_runtime.h>
-#endif
-
-#if defined(__HIP_PLATFORM_HCC__)
-#include <hip/hip_runtime.h>
-#endif
 
 namespace caffe2 {
 
