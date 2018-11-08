@@ -10,7 +10,7 @@ namespace c10d {
 
 class FileStore : public Store {
  public:
-  explicit FileStore(const std::string& path);
+  explicit FileStore(const std::string& path, int numWorkers);
 
   virtual ~FileStore();
 
@@ -29,8 +29,14 @@ class FileStore : public Store {
       const std::chrono::milliseconds& timeout) override;
 
  protected:
+  void checkKey(const std::string& key);
+
   std::string path_;
   off_t pos_;
+
+  int numWorkers_;
+  const std::string cleanupKey_;
+  bool cleanupMode_;
 
   std::unordered_map<std::string, std::vector<uint8_t>> cache_;
 };

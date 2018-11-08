@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <cstdio>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -186,11 +187,32 @@ off_t refresh(
 
 } // namespace
 
-FileStore::FileStore(const std::string& path) : Store(), path_(path), pos_(0) {}
+FileStore::FileStore(const std::string& path, int numWorkers)
+    : Store(),
+      path_(path),
+      pos_(0),
+      numWorkers_(numWorkers),
+      cleanupKey_("[INTERNAL_RESERVED]pytorch_c10d_filestore_cleanup_key"),
+      cleanupMode_(false) {
+  if (numWorkers_ < 1) {
+    throw std::runtime_error(
+        "Number of workers for FileStore should be "
+        "greater than zero");
+  }
+}
 
-FileStore::~FileStore() {}
+FileStore::~FileStore() {
+  cleanupMode_ = true;
+  auto numFinishedWorker = add(cleanupKey_, 1);
+  // The last worker cleans up the file
+  if (numFinishedWorker == numWorkers_) {
+    // Best effort removal without checking the return
+    std::remove(path_.c_str());
+  }
+}
 
 void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
+  checkKey(key);
   File file(path_, O_RDWR | O_CREAT);
   auto lock = file.lockExclusive();
   file.seek(0, SEEK_END);
@@ -223,6 +245,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
 }
 
 int64_t FileStore::add(const std::string& key, int64_t i) {
+  checkKey(key);
   File file(path_, O_RDWR | O_CREAT);
   auto lock = file.lockExclusive();
   pos_ = refresh(file, pos_, cache_);
@@ -234,12 +257,17 @@ int64_t FileStore::add(const std::string& key, int64_t i) {
     auto len = value.size();
     ti += std::stoll(std::string(buf, len));
   }
-
+  // Always seek to the end to write
+  file.seek(0, SEEK_END);
   // File cursor is at the end of the file now, and we have an
   // exclusive lock, so we can write the new value.
   file.write(key);
   file.write(std::to_string(ti));
-
+  // Need to update the cache since get will only read the file if the key is
+  // not in the cache, in this case, the key is.
+  auto tiStr = std::to_string(ti);
+  auto newValue = std::vector<uint8_t>(tiStr.begin(), tiStr.end());
+  cache_[key] = std::move(newValue);
   return ti;
 }
 
@@ -276,6 +304,15 @@ void FileStore::wait(
 
     /* sleep override */
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+}
+
+void FileStore::checkKey(const std::string& key) {
+  if (!cleanupMode_ && key == cleanupKey_) {
+    throw std::runtime_error(
+        "Using FileStore's internal key: " + key +
+        " is "
+        "not supported, please use a different key");
   }
 }
 
