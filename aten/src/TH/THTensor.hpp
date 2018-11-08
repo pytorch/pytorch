@@ -9,6 +9,8 @@
 #include <atomic>
 #include <ATen/ATen.h>
 
+// Returns a Tensor given a TensorImpl. The TensorImpl remains valid after the
+// the Tensor is destroyed.
 inline at::Tensor THTensor_wrap(THTensor* tensor) {
   c10::raw::intrusive_ptr::incref(tensor);
   return at::Tensor(c10::intrusive_ptr<at::TensorImpl>::reclaim(tensor));

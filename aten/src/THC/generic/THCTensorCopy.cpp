@@ -32,14 +32,11 @@ void THCTensor_(copy##TYPEC)(THCState *state, THCTensor *self, struct TH##TYPEC#
   if(THCTypeIdx_(Real) == THCTypeIdx_(TYPEC)) {               \
     THCTensor_(copyCPU)(state, self, (THTensor*) src);  /* cast just removes warnings */                     \
   } else {                                                              \
-    THTensor *srcf = THTensor_(newWithSize)(src->sizes(), {});          \
+    at::Tensor srcf_wrap = at::empty(src->sizes(), caffe2::TypeMeta::Make<scalar_t>()); \
     at::Tensor src_wrap = THTensor_wrap(src);                           \
-    at::Tensor srcf_wrap = THTensor_wrap(srcf);                         \
                                                                         \
     at::_copy_(srcf_wrap, src_wrap);                                    \
-    THCTensor_(copyCPU)(state, self, srcf);                             \
-                                                                        \
-    c10::raw::intrusive_ptr::decref(srcf);                                              \
+    THCTensor_(copyCPU)(state, self, srcf_wrap.unsafeGetTensorImpl());  \
   }                                                                     \
 }
 
@@ -93,14 +90,11 @@ void THTensor_(copyCuda)(THCState *state, THTensor *self, struct THCTensor *src)
     if(THCTypeIdx_(Real) == THCTypeIdx_(TYPEC)) {   \
       THTensor_(copyCuda)(state, (THTensor*) self, src);  /* cast just removes compiler warning */                   \
     } else {                                                              \
-      THTensor *srcf = THTensor_(newWithSize)(src->sizes(), {});          \
-                                                                          \
-      THTensor_(copyCuda)(state, srcf, src);                              \
-      at::Tensor srcf_wrap = THTensor_wrap(srcf);                         \
+      at::Tensor srcf_wrap = at::empty(src->sizes(), caffe2::TypeMeta::Make<scalar_t>()); \
       at::Tensor self_wrap = THTensor_wrap(self);                         \
-      at::_copy_(self_wrap, srcf_wrap);                                    \
                                                                           \
-      c10::raw::intrusive_ptr::decref(srcf);                              \
+      THTensor_(copyCuda)(state, srcf_wrap.unsafeGetTensorImpl(), src);   \
+      at::_copy_(self_wrap, srcf_wrap);                                   \
     }                                                                     \
   }
 
