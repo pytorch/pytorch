@@ -74,18 +74,18 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
   // E.g.: catting [[1,2],[0,0]] and [[0,0],[3,4]]
   // yields [[1,2,0,0],[0,0,3,4]]
   AT_CHECK(wrapped < sparse_dim,
-           "Can't cat or stack tensors of sparse dim ", sparse_dim, "along non-sparse dimension ", dim);
+           "Concatenating or stacking tensors of sparse dim ", sparse_dim, "along non-sparse dimension ", dim, " not supported.");
   IntList sizes = tensors[0].sizes();
   for (size_t i = 0; i < tensors.size(); ++i) {
     auto const &t = tensors[i];
     AT_CHECK(t.is_sparse(),
-             "Can't cat dense tensor at position ", i, " with sparse tensor(s).");
+             "Concatenating dense tensor at position ", i, " with sparse tensor(s) not supported.");
     AT_CHECK(sizes_match_except(sizes, t.sizes(), wrapped),
-             "Tensor at position ", i, " of sizes ", t.sizes(), " can't be concatenated with tensor of sizes ", sizes,
-             " along dimension ", dim);
+             "Concatenating tensor at position ", i, " of sizes ", t.sizes(), " with tensor of sizes ", sizes,
+             " along dimension ", dim, " not supported.");
     AT_CHECK(t.sparse_dim() == sparse_dim && t.dense_dim() == dense_dim,
              "Tensor at position ", i, " has dimension: sparse ", t.sparse_dim(), ", dense ", t.dense_dim(),
-             ". Can't cat with tensor of dimensions ", sparse_dim, ", ", dense_dim);
+             ". Concatenating with tensor of dimensions ", sparse_dim, ", ", dense_dim, " not supported.");
     indices.push_back(t._indices());
     values.push_back(t._values());
   }

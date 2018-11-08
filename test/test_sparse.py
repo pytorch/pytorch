@@ -691,16 +691,18 @@ class TestSparse(TestCase):
 
         test_shapes(
             [(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4]), (3, 10, [2, 4, 4])], 1)
+
+        # mismatched sizes
         test_shapes([(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4])], 0,
-                    "can't be concatenated.*along dimension 0")
+                    "Concatenating tensor.*of sizes \\[2, 1, 4].*of sizes \\[2, 3, 4]")
         # hybrid sparse/dense
         test_shapes(
             [(2, 10, [2, 3, 4]), (2, 10, [2, 1, 4]), (2, 10, [2, 4, 4])], 1)
         test_shapes([(2, 10, [2, 3, 4]), (2, 10, [2, 1, 4])], 2,
-                    "Can't cat.*along non-sparse dimension 2")
+                    "Concatenating.*along non-sparse dimension 2")
         # mismatched dimensions
         test_shapes([(2, 10, [2, 3, 4]), (3, 10, [2, 3, 4])], 0,
-                    "Can't cat with tensor of dimensions")
+                    "has dimension: sparse 3, dense 0.*Concatenating with tensor of dimensions 2, 1")
         # wrapped dimension
         test_shapes(
             [(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4]), (3, 10, [2, 4, 4])], -2)
@@ -709,7 +711,7 @@ class TestSparse(TestCase):
         sp = self._gen_sparse(3, 10, [2, 3, 4])[0]
         dn = sp.to_dense()
         with self.assertRaisesRegex(RuntimeError,
-                                    "Can't cat dense tensor.*with sparse"):
+                                    "Concatenating dense tensor.*with sparse"):
             torch.cat((sp, dn))
 
     @cpu_only
