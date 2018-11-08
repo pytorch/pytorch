@@ -610,7 +610,7 @@ public:
   Tensor transpose(int64_t dim0, int64_t dim1) const;
   Tensor & transpose_(int64_t dim0, int64_t dim1);
   Tensor flip(IntList dims) const;
-  Tensor roll(IntList shifts, IntList dims) const;
+  Tensor roll(IntList shifts, IntList dims={}) const;
   Tensor rot90(int64_t k=1, IntList dims={0,1}) const;
   Tensor trunc() const;
   Tensor & trunc_();
