@@ -1,7 +1,7 @@
 #include <torch/data/datasets/mnist.h>
 
 #include <torch/data/example.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <c10/util/Exception.h>
 

@@ -207,13 +207,13 @@ public:
   // cast the data pointer to a __restrict__ pointer.
   // In order to use this, your CUDA kernel has to take a corresponding PackedTensorAccessor
   // as an argument.
-  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
-    PackedTensorAccessor<T,N,PtrTraits> packed_accessor() const& {
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
     AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
-    return PackedTensorAccessor<T,N,PtrTraits>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
+    return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
   }
-  template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits>
+  template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   PackedTensorAccessor<T,N> packed_accessor() && = delete;
 
   Tensor operator-() const;
@@ -610,7 +610,7 @@ public:
   Tensor transpose(int64_t dim0, int64_t dim1) const;
   Tensor & transpose_(int64_t dim0, int64_t dim1);
   Tensor flip(IntList dims) const;
-  Tensor roll(IntList shifts, IntList dims) const;
+  Tensor roll(IntList shifts, IntList dims={}) const;
   Tensor rot90(int64_t k=1, IntList dims={0,1}) const;
   Tensor trunc() const;
   Tensor & trunc_();
