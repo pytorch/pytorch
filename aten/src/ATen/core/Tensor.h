@@ -139,6 +139,9 @@ public:
   int64_t ndimension() const {
     return dim();
   }
+  int64_t is_contiguous() const {
+    return impl_->is_contiguous();  
+  }
   Type & type() const {
     return impl_->type();
   }
@@ -267,8 +270,6 @@ public:
   Tensor & _th_set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
   Tensor & _th_set_(const Tensor & source);
   Tensor & _th_set_();
-  bool _th_is_contiguous() const;
-  bool _th_is_set_to(const Tensor & tensor) const;
   Tensor & _th_masked_fill_(const Tensor & mask, Scalar value);
   Tensor & _th_masked_fill_(const Tensor & mask, const Tensor & value);
   Tensor & _th_masked_scatter_(const Tensor & mask, const Tensor & source);
@@ -663,7 +664,6 @@ public:
   Tensor & set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
   Tensor & set_(const Tensor & source);
   Tensor & set_();
-  bool is_contiguous() const;
   bool is_set_to(const Tensor & tensor) const;
   Tensor & masked_fill_(const Tensor & mask, Scalar value);
   Tensor & masked_fill_(const Tensor & mask, const Tensor & value);
