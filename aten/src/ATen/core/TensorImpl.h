@@ -790,7 +790,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     auto new_dim = new_size.size();
 
     sizes_.resize(new_dim);
-    for (int64_t dim = 0; dim < new_dim; ++dim) {
+    for (size_t dim = 0; dim < new_dim; ++dim) {
       sizes_[dim] = new_size[dim];
     }
 
@@ -820,7 +820,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     auto new_dim = new_size.size();
 
     sizes_.resize(new_dim);
-    for (int64_t dim = 0; dim < new_dim; ++dim) {
+    for (size_t dim = 0; dim < new_dim; ++dim) {
       sizes_[dim] = new_size[dim];
     }
 
