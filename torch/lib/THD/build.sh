@@ -23,7 +23,6 @@ cmake .. -DCMAKE_CXX_FLAGS=" -I${lib_dir}/tmp_install/include -pthread \
          -DCMAKE_EXE_LINKER_FLAGS="-L${lib_dir}/tmp_install/lib -pthread " \
          -DTH_LIBRARIES="${lib_dir}/libTH$LD_POSTFIX" \
          -DTHC_LIBRARIES="${lib_dir}/libTHC$LD_POSTFIX" \
-         -DTHPP_LIBRARIES="${lib_dir}/libTHPP$LD_POSTFIX" \
          -DTHD_WITH_TESTS="1" \
          -DTorch_FOUND="1"
 make

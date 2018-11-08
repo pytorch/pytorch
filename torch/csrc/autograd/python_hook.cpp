@@ -8,10 +8,9 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/Exceptions.h"
-#include <THPP/THPP.h>
 
-using thpp::Tensor;
 using torch::autograd::variable_list;
+using torch::autograd::Variable;
 
 static PyObject* wrap_variables(const variable_list& c_variables);
 static variable_list unwrap_variables(PyObject* py_variables);
@@ -52,7 +51,7 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   }
 
   variable_list results(values);
-  results[value_idx] = ((THPVariable*)value.get())->cdata;
+  if (value != Py_None) results[value_idx] = ((THPVariable*)value.get())->cdata;
   return results;
 }
 
@@ -158,23 +157,23 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
     throw python_error();
   }
 
-  auto& original = *((THPVariable*)_original)->cdata->data;
-  auto& result = *((THPVariable*)_result)->cdata->data;
+  auto& original = ((THPVariable*)_original)->cdata.data();
+  auto& result = ((THPVariable*)_result)->cdata.data();
 
-  if (original.type() != result.type()) {
+  if (original.type().ID() != result.type().ID()) {
     std::stringstream ss;
     auto name = hook_name(hook);
     ss << "hook '" << name << "' has changed the type of value (";
-    ss << "was " << thpp::toString(original.type()) << " got ";
-    ss << thpp::toString(result.type()) << ")";
+    ss << "was " << original.toString() << " got ";
+    ss << result.toString() << ")";
     throw std::runtime_error(ss.str());
   }
 
-  if (original.isCuda() != result.isCuda()) {
+  if (original.is_cuda() != result.is_cuda()) {
     std::stringstream ss;
     auto name = hook_name(hook);
     ss << "hook '" << name << "' has changed the type of value";
-    if (original.isCuda()) {
+    if (original.is_cuda()) {
       ss << " (was CUDA tensor got CPU tensor)";
     } else {
       ss << " (was CPU tensor got CUDA tensor)";
@@ -182,7 +181,7 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
     throw std::runtime_error(ss.str());
   }
 
-  if (original.sizes() != result.sizes()) {
+  if (original.sizes().vec() != result.sizes().vec()) {
     std::stringstream ss;
     auto name = hook_name(hook);
     ss << "hook '" << name << "' has changed the size of value";

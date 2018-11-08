@@ -1,54 +1,38 @@
 #pragma once
 
+#include <atomic>
+#include <cstdint>
+#include <memory>
+
+// Every Variable has a version counter. Version counters are incremented
+// whenever the data or shape of a tensor changes through Variable operations.
+// These are typicallly in-place operations. Version counters are used to
+// detect modifications to saved variables which would result in incorrect
+// gradient calculations. Version counters may be shared between Variables:
+//
+// 1. A view shares the version counter of the base Variable,
+// 2. Detached variables share the version counter of the source,
+// 3. Unpacked saved variables share the version counter of the source.
+
 namespace torch { namespace autograd {
 
 struct VariableVersion {
-  VariableVersion() {
-    saved_ref = false;
-    version_block = new int[3];
-    version_block[0] = 0; // version
-    version_block[1] = 1; // refcount
-    version_block[2] = 1; // number of variables currently using the counter
-  };
+ public:
+  // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
+  // leaves it in a persistently undefined state. See
+  // https://cplusplus.github.io/LWG/issue2334.
+  VariableVersion(uint32_t version = 0)
+      : version_block_(std::make_shared<std::atomic<uint32_t>>(version)) {}
 
-  int operator++(int) { return version_block[0]++; }
-
-  int operator*() { return *version_block; }
-
-  int var_refcnt() { return version_block[2]; }
-
-  void join_with(VariableVersion &other) {
-    if (this == &other) {
-      return;
-    }
-    cleanup();
-    version_block = other.version_block;
-    version_block[1]++;
-    version_block[2]++;
+  void bump() noexcept {
+    version_block_->fetch_add(1);
   }
 
-  std::unique_ptr<VariableVersion> new_saved_ref() {
-    auto new_ver = new VariableVersion();
-    new_ver->cleanup();
-    new_ver->version_block = version_block;
-    version_block[1]++;
-    new_ver->saved_ref = true;
-    return std::unique_ptr<VariableVersion>(new_ver);
+  uint32_t current_version() const noexcept {
+    return version_block_->load();
   }
 
-  void cleanup() {
-    auto vb = version_block;
-    version_block = nullptr;
-    if (!saved_ref) --vb[2];
-    if (--vb[1]) return;
-    delete[] vb;
-  }
-
-  ~VariableVersion() { cleanup(); }
-
-  int *version_block;
-  bool saved_ref;
+ private:
+  std::shared_ptr<std::atomic<uint32_t>> version_block_;
 };
-
 }} // namespace torch::autograd
-

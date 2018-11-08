@@ -1,33 +1,42 @@
+import warnings
 import torch
 from torch.nn.parameter import Parameter
 
 from .module import Module
 from .. import functional as F
+from ..._jit_internal import weak_module, weak_script_method
 
 
+@torch._jit_internal.weak_module
 class Threshold(Module):
-    """Thresholds each element of the input Tensor
+    __constants__ = ['threshold', 'value', 'inplace']
 
-    Threshold is defined as::
+    r"""Thresholds each element of the input Tensor
 
-         y =  x        if x >= threshold
-              value    if x <  threshold
+    Threshold is defined as:
+
+    .. math::
+        y =
+        \begin{cases}
+        x, &\text{ if } x > \text{threshold} \\
+        \text{value}, &\text{ otherwise }
+        \end{cases}
 
     Args:
         threshold: The value to threshold at
         value: The value to replace with
-        inplace: can optionally do the operation in-place
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
 
         >>> m = nn.Threshold(0.1, 20)
-        >>> input = Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, threshold, value, inplace=False):
@@ -37,45 +46,87 @@ class Threshold(Module):
         self.inplace = inplace
         # TODO: check in THNN (if inplace == True, then assert value <= threshold)
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
-    def __repr__(self):
+    def extra_repr(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
-            + str(self.threshold) \
-            + ', ' + str(self.value) \
-            + inplace_str + ')'
+        return 'threshold={}, value={}{}'.format(
+            self.threshold, self.value, inplace_str
+        )
 
 
 class ReLU(Threshold):
-    """Applies the rectified linear unit function element-wise :math:`{ReLU}(x)= max(0, x)`
+    r"""Applies the rectified linear unit function element-wise
+    :math:`\text{ReLU}(x)= \max(0, x)`
+
+    .. image:: scripts/activation_images/ReLU.png
 
     Args:
-        inplace: can optionally do the operation in-place
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
 
         >>> m = nn.ReLU()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(0, 0, inplace)
 
-    def __repr__(self):
+    def extra_repr(self):
         inplace_str = 'inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
-            + inplace_str + ')'
+        return inplace_str
 
 
+@torch._jit_internal.weak_module
 class RReLU(Module):
+    r"""Applies the randomized leaky rectified liner unit function, element-wise,
+    as described in the paper:
+
+    `Empirical Evaluation of Rectified Activations in Convolutional Network`_.
+
+    The function is defined as:
+
+    .. math::
+        \text{RReLU}(x) =
+        \begin{cases}
+            x & \text{if } x \geq 0 \\
+            ax & \text{ otherwise }
+        \end{cases}
+
+    where :math:`a` is randomly sampled from uniform distribution
+    :math:`\mathcal{U}(\text{lower}, \text{upper})`.
+
+     See: https://arxiv.org/pdf/1505.00853.pdf
+
+    Args:
+        lower: lower bound of the uniform distribution. Default: :math:`\frac{1}{8}`
+        upper: upper bound of the uniform distribution. Default: :math:`\frac{1}{3}`
+        inplace: can optionally do the operation in-place. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.RReLU(0.1, 0.3)
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+
+    .. _`Empirical Evaluation of Rectified Activations in Convolutional Network`:
+        https://arxiv.org/abs/1505.00853
+    """
+    __constants__ = ['lower', 'upper', 'inplace', 'training']
 
     def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
         super(RReLU, self).__init__()
@@ -83,151 +134,182 @@ class RReLU(Module):
         self.upper = upper
         self.inplace = inplace
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
-    def __repr__(self):
+    def extra_repr(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
-            + str(self.lower) \
-            + ', ' + str(self.upper) \
-            + inplace_str + ')'
+        return 'lower={}, upper={}{}'.format(self.lower, self.upper, inplace_str)
 
 
 class Hardtanh(Module):
-    """Applies the HardTanh function element-wise
+    r"""Applies the HardTanh function element-wise
 
-    HardTanh is defined as::
+    HardTanh is defined as:
 
-       f(x) = +1, if x  >  1
-       f(x) = -1, if x  < -1
-       f(x) =  x,  otherwise
+    .. math::
+        \text{HardTanh}(x) = \begin{cases}
+            1 & \text{ if } x > 1 \\
+            -1 & \text{ if } x < -1 \\
+            x & \text{ otherwise } \\
+        \end{cases}
 
-    The range of the linear region :math:`[-1, 1]` can be adjusted
+    The range of the linear region :math:`[-1, 1]` can be adjusted using
+    :attr:`min_val` and :attr:`max_val`.
+
+    .. image:: scripts/activation_images/Hardtanh.png
 
     Args:
-        min_value: minimum value of the linear region range
-        max_value: maximum value of the linear region range
-        inplace: can optionally do the operation in-place
+        min_val: minimum value of the linear region range. Default: -1
+        max_val: maximum value of the linear region range. Default: 1
+        inplace: can optionally do the operation in-place. Default: ``False``
+
+    Keyword arguments :attr:`min_value` and :attr:`max_value`
+    have been deprecated in favor of :attr:`min_val` and :attr:`max_val`.
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
 
-        >>> m = nn.HardTanh(-2, 2)
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> m = nn.Hardtanh(-2, 2)
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
-    def __init__(self, min_value=-1, max_value=1, inplace=False):
+    def __init__(self, min_val=-1, max_val=1, inplace=False, min_value=None, max_value=None):
         super(Hardtanh, self).__init__()
-        self.min_val = min_value
-        self.max_val = max_value
+        if min_value is not None:
+            warnings.warn("keyword argument min_value is deprecated and renamed to min_val")
+            min_val = min_value
+        if max_value is not None:
+            warnings.warn("keyword argument max_value is deprecated and renamed to max_val")
+            max_val = max_value
+
+        self.min_val = min_val
+        self.max_val = max_val
         self.inplace = inplace
         assert self.max_val > self.min_val
 
     def forward(self, input):
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
-    def __repr__(self):
+    def extra_repr(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
-            + 'min_val=' + str(self.min_val) \
-            + ', max_val=' + str(self.max_val) \
-            + inplace_str + ')'
+        return 'min_val={}, max_val={}{}'.format(
+            self.min_val, self.max_val, inplace_str
+        )
 
 
 class ReLU6(Hardtanh):
-    """Applies the element-wise function :math:`{ReLU6}(x) = min(max(0,x), 6)`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{ReLU6}(x) = \min(\max(0,x), 6)
 
     Args:
-        inplace: can optionally do the operation in-place
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/ReLU6.png
 
     Examples::
 
         >>> m = nn.ReLU6()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, inplace=False):
         super(ReLU6, self).__init__(0, 6, inplace)
 
-    def __repr__(self):
+    def extra_repr(self):
         inplace_str = 'inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
-            + inplace_str + ')'
+        return inplace_str
 
 
+@torch._jit_internal.weak_module
 class Sigmoid(Module):
-    """Applies the element-wise function :math:`f(x) = 1 / ( 1 + exp(-x))`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}
+
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/Sigmoid.png
 
     Examples::
 
         >>> m = nn.Sigmoid()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return torch.sigmoid(input)
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' ()'
 
-
+@torch._jit_internal.weak_module
 class Tanh(Module):
-    """Applies element-wise, :math:`f(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Tanh}(x) = \tanh(x) = \frac{e^x - e^{-x}} {e^x + e^{-x}}
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/Tanh.png
 
     Examples::
 
         >>> m = nn.Tanh()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return torch.tanh(input)
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' ()'
-
 
 class ELU(Module):
-    """Applies element-wise, :math:`f(x) = max(0,x) + min(0, alpha * (exp(x) - 1))`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))
 
     Args:
-        alpha: the alpha value for the ELU formulation
-        inplace: can optionally do the operation in-place
+        alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/ELU.png
 
     Examples::
 
         >>> m = nn.ELU()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, alpha=1., inplace=False):
@@ -238,32 +320,79 @@ class ELU(Module):
     def forward(self, input):
         return F.elu(input, self.alpha, self.inplace)
 
-    def __repr__(self):
+    def extra_repr(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
-            + 'alpha=' + str(self.alpha) \
-            + inplace_str + ')'
+        return 'alpha={}{}'.format(self.alpha, inplace_str)
+
+
+class CELU(Module):
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))
+
+    More details can be found in the paper `Continuously Differentiable Exponential Linear Units`_ .
+
+    Args:
+        alpha: the :math:`\alpha` value for the CELU formulation. Default: 1.0
+        inplace: can optionally do the operation in-place. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/CELU.png
+
+    Examples::
+
+        >>> m = nn.CELU()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+
+    .. _`Continuously Differentiable Exponential Linear Units`:
+        https://arxiv.org/abs/1704.07483
+    """
+
+    def __init__(self, alpha=1., inplace=False):
+        super(CELU, self).__init__()
+        self.alpha = alpha
+        self.inplace = inplace
+
+    def forward(self, input):
+        return F.celu(input, self.alpha, self.inplace)
+
+    def extra_repr(self):
+        inplace_str = ', inplace' if self.inplace else ''
+        return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
 class SELU(Module):
-    """Applies element-wise, :math:`f(x) = scale * (\max(0,x) + \min(0, alpha * (\exp(x) - 1)))`,
-    with ``alpha=1.6732632423543772848170429916717`` and ``scale=1.0507009873554804934193349852946``.
+    r"""Applied element-wise, as:
+
+    .. math::
+        \text{SELU}(x) = \text{scale} * (\max(0,x) + \min(0, \alpha * (\exp(x) - 1)))
+
+    with :math:`\alpha = 1.6732632423543772848170429916717` and
+    :math:`\text{scale} = 1.0507009873554804934193349852946`.
+
+    .. image:: scripts/activation_images/SELU.png
 
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
     Args:
-        inplace (bool, optional): can optionally do the operation in-place
+        inplace (bool, optional): can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
     Examples::
 
         >>> m = nn.SELU()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
 
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
@@ -275,28 +404,29 @@ class SELU(Module):
     def forward(self, input):
         return F.selu(input, self.inplace)
 
-    def __repr__(self):
-        inplace_str = ' (inplace)' if self.inplace else ''
-        return self.__class__.__name__ + inplace_str
+    def extra_repr(self):
+        inplace_str = 'inplace' if self.inplace else ''
+        return inplace_str
 
 
 class GLU(Module):
-    """Applies the gated linear unit function :math:`{GLU}(a, b)= a \otimes \sigma(b)`
-    where `a` is the first half of the input vector and `b` is the second half.
+    r"""Applies the gated linear unit function
+    :math:`{GLU}(a, b)= a \otimes \sigma(b)` where :math:`a` is the first half
+    of the input vector and :math:`b` is the second half.
 
     Args:
-        dim (int): the dimension on which to split the input
+        dim (int): the dimension on which to split the input. Default: -1
 
     Shape:
-        - Input: :math:`(*, N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(*, N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(*, N / 2, *)`
 
     Examples::
 
         >>> m = nn.GLU()
-        >>> input = autograd.Variable(torch.randn(4, 2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(4, 2)
+        >>> output = m(input)
     """
 
     def __init__(self, dim=-1):
@@ -306,61 +436,84 @@ class GLU(Module):
     def forward(self, input):
         return F.glu(input, self.dim)
 
-    def __repr__(self):
-        return '{} (dim={})'.format(self.__class__.__name__, self.dim)
+    def extra_repr(self):
+        return 'dim={}'.format(self.dim)
 
 
+@torch._jit_internal.weak_module
 class Hardshrink(Module):
-    """Applies the hard shrinkage function element-wise
-    Hardshrink is defined as::
-        f(x) = x, if x >  lambda
-        f(x) = x, if x < -lambda
-        f(x) = 0, otherwise
+    r"""Applies the hard shrinkage function element-wise:
+
+    .. math::
+        \text{HardShrink}(x) =
+        \begin{cases}
+        x, & \text{ if } x > \lambda \\
+        x, & \text{ if } x < -\lambda \\
+        0, & \text{ otherwise }
+        \end{cases}
 
     Args:
-        lambd: the lambda value for the Hardshrink formulation. Default: 0.5
+        lambd: the :math:`\lambda` value for the Hardshrink formulation. Default: 0.5
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/Hardshrink.png
 
     Examples::
 
         >>> m = nn.Hardshrink()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
+    __constants__ = ['lambd']
 
     def __init__(self, lambd=0.5):
         super(Hardshrink, self).__init__()
         self.lambd = lambd
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.hardshrink(input, self.lambd)
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + str(self.lambd) + ')'
+    def extra_repr(self):
+        return '{}'.format(self.lambd)
 
 
 class LeakyReLU(Module):
-    """Applies element-wise, :math:`f(x) = max(0, x) + {negative\_slope} * min(0, x)`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)
+
+
+    or
+
+    .. math::
+        \text{LeakyRELU}(x) =
+        \begin{cases}
+        x, & \text{ if } x \geq 0 \\
+        \text{negative\_slope} \times x, & \text{ otherwise }
+        \end{cases}
 
     Args:
         negative_slope: Controls the angle of the negative slope. Default: 1e-2
-        inplace: can optionally do the operation in-place
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/LeakyReLU.png
 
     Examples::
 
         >>> m = nn.LeakyReLU(0.1)
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, negative_slope=1e-2, inplace=False):
@@ -371,37 +524,39 @@ class LeakyReLU(Module):
     def forward(self, input):
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
-    def __repr__(self):
+    def extra_repr(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
-            + str(self.negative_slope) \
-            + inplace_str + ')'
+        return 'negative_slope={}{}'.format(self.negative_slope, inplace_str)
 
 
 class LogSigmoid(Module):
-    """Applies element-wise :math:`LogSigmoid(x) = log( 1 / (1 + exp(-x_i)))`
+    r"""Applies the element-wise function:
+
+    .. math:`\text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)`
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/LogSigmoid.png
 
     Examples::
 
         >>> m = nn.LogSigmoid()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def forward(self, input):
         return F.logsigmoid(input)
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' ()'
-
 
 class Softplus(Module):
-    """Applies element-wise :math:`f(x) = 1/beta * log(1 + exp(beta * x_i))`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))
 
     SoftPlus is a smooth approximation to the ReLU function and can be used
     to constrain the output of a machine to always be positive.
@@ -410,19 +565,21 @@ class Softplus(Module):
     for inputs above a certain value.
 
     Args:
-        beta: the beta value for the Softplus formulation. Default: 1
+        beta: the :math:`\beta` value for the Softplus formulation. Default: 1
         threshold: values above this revert to a linear function. Default: 20
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/Softplus.png
 
     Examples::
 
         >>> m = nn.Softplus()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, beta=1, threshold=20):
@@ -433,72 +590,102 @@ class Softplus(Module):
     def forward(self, input):
         return F.softplus(input, self.beta, self.threshold)
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + 'beta=' + str(self.beta) \
-            + ', threshold=' + str(self.threshold) + ')'
+    def extra_repr(self):
+        return 'beta={}, threshold={}'.format(self.beta, self.threshold)
 
 
+@torch._jit_internal.weak_module
 class Softshrink(Module):
-    """Applies the soft shrinkage function elementwise
+    r"""Applies the soft shrinkage function elementwise:
 
-    SoftShrinkage operator is defined as::
-
-        f(x) = x-lambda, if x > lambda >  f(x) = x+lambda, if x < -lambda
-        f(x) = 0, otherwise
+    .. math::
+        \text{SoftShrinkage}(x) =
+        \begin{cases}
+        x - \lambda, & \text{ if } x > \lambda \\
+        x + \lambda, & \text{ if } x < -\lambda \\
+        0, & \text{ otherwise }
+        \end{cases}
 
     Args:
-        lambd: the lambda value for the Softshrink formulation. Default: 0.5
+        lambd: the :math:`\lambda` value for the Softshrink formulation. Default: 0.5
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/Softshrink.png
 
     Examples::
 
         >>> m = nn.Softshrink()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
+    __constants__ = ['lambd']
 
     def __init__(self, lambd=0.5):
         super(Softshrink, self).__init__()
         self.lambd = lambd
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.softshrink(input, self.lambd)
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + str(self.lambd) + ')'
+    def extra_repr(self):
+        return str(self.lambd)
 
 
+@torch._jit_internal.weak_module
 class PReLU(Module):
-    """Applies element-wise the function :math:`PReLU(x) = max(0,x) + a * min(0,x)`
-    Here "a" is a learnable parameter.
-    When called without arguments, nn.PReLU() uses a single parameter "a"
-    across all input channels. If called with nn.PReLU(nChannels), a separate
-    "a" is used for each input channel.
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{PReLU}(x) = \max(0,x) + a * \min(0,x)
+
+    or
+
+    .. math::
+        \text{PReLU}(x) =
+        \begin{cases}
+        x, & \text{ if } x \geq 0 \\
+        ax, & \text{ otherwise }
+        \end{cases}
+
+    Here :math:`a` is a learnable parameter. When called without arguments, `nn.PReLU()` uses a single
+    parameter :math:`a` across all input channels. If called with `nn.PReLU(nChannels)`,
+    a separate :math:`a` is used for each input channel.
 
 
     .. note::
-        weight decay should not be used when learning "a" for good performance.
+        weight decay should not be used when learning :math:`a` for good performance.
+
+    .. note::
+        Channel dim is the 2nd dim of input. When input has dims < 2, then there is
+        no channel dim and the number of channels = 1.
 
     Args:
-        num_parameters: number of "a" to learn. Default: 1
-        init: the initial value of "a". Default: 0.25
+        num_parameters (int): number of :math:`a` to learn.
+            Although it takes an int as input, there is only two values are legitimate:
+            1, or the number of channels at input. Default: 1
+        init (float): the initial value of :math:`a`. Default: 0.25
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    Attributes:
+        weight (Tensor): the learnable weights of shape (attr:`num_parameters`).
+            The attr:`dtype` is default to
+
+    .. image:: scripts/activation_images/PReLU.png
 
     Examples::
 
         >>> m = nn.PReLU()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, num_parameters=1, init=0.25):
@@ -506,70 +693,81 @@ class PReLU(Module):
         super(PReLU, self).__init__()
         self.weight = Parameter(torch.Tensor(num_parameters).fill_(init))
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.prelu(input, self.weight)
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + str(self.num_parameters) + ')'
+    def extra_repr(self):
+        return 'num_parameters={}'.format(self.num_parameters)
 
 
+@torch._jit_internal.weak_module
 class Softsign(Module):
-    """Applies element-wise, the function :math:`f(x) = x / (1 + |x|)`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{SoftSign}(x) = \frac{x}{ 1 + |x|}
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/Softsign.png
 
     Examples::
 
         >>> m = nn.Softsign()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.softsign(input)
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' ()'
 
-
+@torch._jit_internal.weak_module
 class Tanhshrink(Module):
-    """Applies element-wise, :math:`Tanhshrink(x) = x - Tanh(x)`
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Tanhshrink}(x) = x - \text{Tanh}(x)
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional dimensions
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/Tanhshrink.png
 
     Examples::
 
         >>> m = nn.Tanhshrink()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.tanhshrink(input)
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' ()'
-
 
 class Softmin(Module):
-    """Applies the Softmin function to an n-dimensional input Tensor
+    r"""Applies the Softmin function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range `(0, 1)` and sum to 1
 
-    :math:`f(x) = exp(-x_i - {shift}) / sum_j exp(-x_j - {shift})`
-
-    where :math:`{shift} = max_i - x_i`
+    .. math::
+        \text{Softmin}(x_{i}) = \frac{\exp(-x_i)}{\sum_j \exp(-x_j)}
 
     Shape:
-        - Input: :math:`(N, L)`
-        - Output: :math:`(N, L)`
+        - Input: any shape
+        - Output: same as input
+
+    Arguments:
+        dim (int): A dimension along which Softmin will be computed (so every slice
+            along dim will sum to 1).
 
     Returns:
         a Tensor of the same dimension and shape as the input, with
@@ -578,61 +776,70 @@ class Softmin(Module):
     Examples::
 
         >>> m = nn.Softmin()
-        >>> input = autograd.Variable(torch.randn(2, 3))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2, 3)
+        >>> output = m(input)
     """
 
-    def forward(self, input):
-        return F.softmin(input)
+    def __init__(self, dim=None):
+        super(Softmin, self).__init__()
+        self.dim = dim
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+    def forward(self, input):
+        return F.softmin(input, self.dim, _stacklevel=5)
 
 
 class Softmax(Module):
-    """Applies the Softmax function to an n-dimensional input Tensor
+    r"""Applies the Softmax function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range (0,1) and sum to 1
 
-    Softmax is defined as :math:`f_i(x) = exp(x_i - shift) / sum_j exp(x_j - shift)`
-    where `shift = max_i x_i`
+    Softmax is defined as:
+
+    .. math::
+        \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
 
     Shape:
-        - Input: :math:`(N, L)`
-        - Output: :math:`(N, L)`
+        - Input: any shape
+        - Output: same as input
 
     Returns:
         a Tensor of the same dimension and shape as the input with
         values in the range [0, 1]
 
+    Arguments:
+        dim (int): A dimension along which Softmax will be computed (so every slice
+            along dim will sum to 1).
+
     .. note::
         This module doesn't work directly with NLLLoss,
         which expects the Log to be computed between the Softmax and itself.
-        Use Logsoftmax instead (it's faster).
+        Use `LogSoftmax` instead (it's faster and has better numerical properties).
 
     Examples::
 
         >>> m = nn.Softmax()
-        >>> input = autograd.Variable(torch.randn(2, 3))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2, 3)
+        >>> output = m(input)
     """
 
-    def forward(self, input):
-        assert input.dim() == 2, 'Softmax requires a 2D tensor as input'
-        return F.softmax(input)
+    def __init__(self, dim=None):
+        super(Softmax, self).__init__()
+        self.dim = dim
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if not hasattr(self, 'dim'):
+            self.dim = None
+
+    def forward(self, input):
+        return F.softmax(input, self.dim, _stacklevel=5)
 
 
 class Softmax2d(Module):
-    """Applies SoftMax over features to each spatial location
+    r"""Applies SoftMax over features to each spatial location.
 
-    When given an image of Channels x Height x Width, it will
-
-    apply Softmax to each location :math:`(Channels, h_i, w_j)`
+    When given an image of ``Channels x Height x Width``, it will
+    apply `Softmax` to each location :math:`(Channels, h_i, w_j)`
 
     Shape:
         - Input: :math:`(N, C, H, W)`
@@ -646,28 +853,29 @@ class Softmax2d(Module):
 
         >>> m = nn.Softmax2d()
         >>> # you softmax over the 2nd dimension
-        >>> input = autograd.Variable(torch.randn(2, 3, 12, 13))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2, 3, 12, 13)
+        >>> output = m(input)
     """
 
     def forward(self, input):
         assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
-        return F.softmax(input)
-
-    def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return F.softmax(input, 1, _stacklevel=5)
 
 
 class LogSoftmax(Module):
-    """Applies the Log(Softmax(x)) function to an n-dimensional input Tensor.
-    The LogSoftmax formulation can be simplified as
+    r"""Applies the :math:`\log(\text{Softmax}(x))` function to an n-dimensional
+    input Tensor. The LogSoftmax formulation can be simplified as:
 
-    :math:`f_i(x) = log(1 / a * exp(x_i))` where :math:`a = sum_j exp(x_j)`
+    .. math::
+        \text{LogSoftmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
 
     Shape:
-        - Input: :math:`(N, L)`
-        - Output: :math:`(N, L)`
+        - Input: any shape
+        - Output: same as input
+
+    Arguments:
+        dim (int): A dimension along which Softmax will be computed (so every slice
+            along dim will sum to 1).
 
     Returns:
         a Tensor of the same dimension and shape as the input with
@@ -676,13 +884,18 @@ class LogSoftmax(Module):
     Examples::
 
         >>> m = nn.LogSoftmax()
-        >>> input = autograd.Variable(torch.randn(2, 3))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2, 3)
+        >>> output = m(input)
     """
 
-    def forward(self, input):
-        return F.log_softmax(input)
+    def __init__(self, dim=None):
+        super(LogSoftmax, self).__init__()
+        self.dim = dim
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if not hasattr(self, 'dim'):
+            self.dim = None
+
+    def forward(self, input):
+        return F.log_softmax(input, self.dim, _stacklevel=5)

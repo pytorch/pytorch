@@ -1,5 +1,7 @@
+import io
+
 import torch
-from ._utils import _type, _cuda, _range
+from ._utils import _type, _cuda
 
 
 class _StorageBase(object):
@@ -7,14 +9,14 @@ class _StorageBase(object):
     is_sparse = False
 
     def __str__(self):
-        content = ' ' + '\n '.join(str(self[i]) for i in _range(len(self)))
+        content = ' ' + '\n '.join(str(self[i]) for i in range(len(self)))
         return content + '\n[{} of size {}]'.format(torch.typename(self), len(self))
 
     def __repr__(self):
         return str(self)
 
     def __iter__(self):
-        return iter(map(lambda i: self[i], _range(self.size())))
+        return iter(map(lambda i: self[i], range(self.size())))
 
     def __copy__(self):
         return self.clone()
@@ -28,7 +30,12 @@ class _StorageBase(object):
         return new_storage
 
     def __reduce__(self):
-        return type(self), (self.tolist(),)
+        b = io.BytesIO()
+        torch.save(self, b)
+        return (_load_from_bytes, (b.getvalue(),))
+
+    def __sizeof__(self):
+        return super(_StorageBase, self).__sizeof__() + self.element_size() * self.size()
 
     def clone(self):
         """Returns a copy of this storage"""
@@ -111,6 +118,10 @@ class _StorageBase(object):
             return cls._new_using_filename(size)
         else:
             return cls._new_using_fd(size)
+
+
+def _load_from_bytes(b):
+    return torch.load(io.BytesIO(b))
 
 
 _StorageBase.type = _type

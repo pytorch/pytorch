@@ -1,6 +1,6 @@
 #pragma once
 
-#include <THPP/Tensor.hpp>
-using THDTensorDescriptor = thpp::Tensor;
+#include <ATen/ATen.h>
+using THDTensorDescriptor = at::Tensor;
 
 #include "TensorDescriptor.h"

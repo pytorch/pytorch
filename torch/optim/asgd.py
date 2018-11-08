@@ -1,11 +1,13 @@
 import math
+import torch
 from .optimizer import Optimizer
 
 
 class ASGD(Optimizer):
     """Implements Averaged Stochastic Gradient Descent.
 
-    It has been proposed in `Acceleration of stochastic approximation by averaging`_.
+    It has been proposed in `Acceleration of stochastic approximation by
+    averaging`_.
 
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
@@ -21,6 +23,11 @@ class ASGD(Optimizer):
     """
 
     def __init__(self, params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0):
+        if not 0.0 <= lr:
+            raise ValueError("Invalid learning rate: {}".format(lr))
+        if not 0.0 <= weight_decay:
+            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+
         defaults = dict(lr=lr, lambd=lambd, alpha=alpha, t0=t0,
                         weight_decay=weight_decay)
         super(ASGD, self).__init__(params, defaults)
@@ -41,6 +48,8 @@ class ASGD(Optimizer):
                 if p.grad is None:
                     continue
                 grad = p.grad.data
+                if grad.is_sparse:
+                    raise RuntimeError('ASGD does not support sparse gradients')
                 state = self.state[p]
 
                 # State initialization
@@ -48,7 +57,7 @@ class ASGD(Optimizer):
                     state['step'] = 0
                     state['eta'] = group['lr']
                     state['mu'] = 1
-                    state['ax'] = grad.new().resize_as_(grad).zero_()
+                    state['ax'] = torch.zeros_like(p.data)
 
                 state['step'] += 1
 

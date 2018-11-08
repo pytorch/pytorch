@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <stdexcept>
 #include <string>
 #include "object_ptr.h"

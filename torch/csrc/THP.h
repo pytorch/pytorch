@@ -1,10 +1,12 @@
 #ifndef THP_H
 #define THP_H
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <stdbool.h>
 #include <TH/TH.h>
-#include <THS/THS.h>
+#include <TH/THTensor.hpp>
+
+#include "THP_export.h"
 
 // Back-compatibility macros, Thanks to http://cx-oracle.sourceforge.net/
 // define PyInt_* macros for Python 3.x.  NB: We must include Python.h first,
@@ -22,13 +24,15 @@
 #define LIBRARY_STATE_TYPE
 #define LIBRARY_STATE_TYPE_NOARGS
 
-#define THP_API extern "C"
+#define THWStorage THStorage
+#define THWStorage_(NAME) THStorage_(NAME)
+#define THWTensor THTensor
+#define THWTensor_(NAME) THTensor_(NAME)
 
 #include "PtrWrapper.h"
 #include "Exceptions.h"
 #include "Generator.h"
 #include "Storage.h"
-#include "Tensor.h"
 #include "Size.h"
 #include "Module.h"
 #include "Types.h"
@@ -37,7 +41,6 @@
 
 #ifdef _THP_CORE
 #include "serialization.h"
-#include "allocators.h"
 
 #include "autograd/autograd.h"
 #endif

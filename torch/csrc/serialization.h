@@ -7,4 +7,10 @@
 #include "generic/serialization.h"
 #include <TH/THGenerateHalfType.h>
 
+template <class io>
+void doRead(io fildes, void* buf, size_t nbytes);
+
+template <class io>
+void doWrite(io fildes, void* buf, size_t nbytes);
+
 #endif

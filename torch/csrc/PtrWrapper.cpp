@@ -1,7 +1,8 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
+#include "ATen/Utils.h"
 #include <functional>
 
-static PyObject* THPWrapperClass = NULL;
+static PyObject* THPWrapperClass = nullptr;
 
 struct THPWrapper {
   PyObject_HEAD
@@ -13,9 +14,9 @@ PyObject * THPWrapper_New(void *data, void (*destructor)(void*))
 {
   PyObject *args = PyTuple_New(0);
   if (!args) {
-    return NULL;
+    return nullptr;
   }
-  PyObject *result = PyObject_Call(THPWrapperClass, args, NULL);
+  PyObject *result = PyObject_Call(THPWrapperClass, args, nullptr);
   if (result) {
     THPWrapper* wrapper = (THPWrapper*) result;
     wrapper->data = data;
@@ -39,8 +40,8 @@ static PyObject * THPWrapper_pynew(PyTypeObject *type, PyObject *args, PyObject 
 {
   PyObject* self = type->tp_alloc(type, 0);
   THPWrapper* wrapper = (THPWrapper*) self;
-  wrapper->data = NULL;
-  wrapper->destructor = NULL;
+  wrapper->data = nullptr;
+  wrapper->destructor = nullptr;
   return self;
 }
 
@@ -51,7 +52,7 @@ static void THPWrapper_dealloc(THPWrapper* self)
 }
 
 PyTypeObject THPWrapperType = {
-  PyVarObject_HEAD_INIT(NULL, 0)
+  PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._PtrWrapper",                /* tp_name */
   sizeof(THPWrapper),                    /* tp_basicsize */
   0,                                     /* tp_itemsize */
@@ -71,7 +72,7 @@ PyTypeObject THPWrapperType = {
   0,                                     /* tp_setattro */
   0,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT,                    /* tp_flags */
-  NULL,                                  /* tp_doc */
+  nullptr,                                  /* tp_doc */
   0,                                     /* tp_traverse */
   0,                                     /* tp_clear */
   0,                                     /* tp_richcompare */

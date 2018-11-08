@@ -2,7 +2,7 @@
 
 // RAII structs to acquire and release Python's global interpreter lock (GIL)
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 // Acquires the GIL on construction
 struct AutoGIL {
@@ -25,3 +25,10 @@ struct AutoNoGIL {
 
   PyThreadState* save;
 };
+
+// Runs the function without the GIL
+template<typename F>
+inline void with_no_gil(F f) {
+  AutoNoGIL no_gil;
+  f();
+}

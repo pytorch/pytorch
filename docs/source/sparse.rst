@@ -1,5 +1,7 @@
 .. currentmodule:: torch.sparse
 
+.. _sparse-docs:
+
 torch.sparse
 ============
 
@@ -12,16 +14,30 @@ efficiently store and process tensors for which the majority of elements
 are zeros.
 
 A sparse tensor is represented as a pair of dense tensors: a tensor
-of values and a tensor of indices.  A sparse tensor can be constructed
+of values and a 2D tensor of indices.  A sparse tensor can be constructed
 by providing these two tensors, as well as the size of the sparse tensor
-(which cannot be inferred from these tensors!)
+(which cannot be inferred from these tensors!)  Suppose we want to define
+a sparse tensor with the entry 3 at location (0, 2), entry 4 at
+location (1, 0), and entry 5 at location (1, 2).  We would then write:
 
-    >>> i = torch.LongTensor([[0, 1], [2, 0]])
-    >>> v = torch.FloatTensor([3, 4])
+    >>> i = torch.LongTensor([[0, 1, 1],
+                              [2, 0, 2]])
+    >>> v = torch.FloatTensor([3, 4, 5])
     >>> torch.sparse.FloatTensor(i, v, torch.Size([2,3])).to_dense()
      0  0  3
-     4  0  0
-    [torch.FloatTensor of size 2x2]
+     4  0  5
+    [torch.FloatTensor of size 2x3]
+
+Note that the input to LongTensor is NOT a list of index tuples.  If you want
+to write your indices this way, you should transpose before passing them to
+the sparse constructor:
+
+    >>> i = torch.LongTensor([[0, 2], [1, 0], [1, 2]])
+    >>> v = torch.FloatTensor([3,      4,      5    ])
+    >>> torch.sparse.FloatTensor(i.t(), v, torch.Size([2,3])).to_dense()
+     0  0  3
+     4  0  5
+    [torch.FloatTensor of size 2x3]
 
 You can also construct hybrid sparse tensors, where only the first n
 dimensions are sparse, and the rest of the dimensions are dense.
@@ -66,7 +82,7 @@ An empty sparse tensor can be constructed by specifying its size:
     whether or not they are coalesced or not (e.g.,
     :func:`torch.sparse.FloatTensor._values` and
     :func:`torch.sparse.FloatTensor._indices`, as well as
-    :func:`torch.Tensor._sparse_mask`).  These operators are
+    :func:`torch.Tensor.sparse_mask`).  These operators are
     prefixed by an underscore to indicate that they reveal internal
     implementation details and should be used with care, since code
     that works with coalesced sparse tensors may not work with
@@ -94,6 +110,7 @@ An empty sparse tensor can be constructed by specifying its size:
     .. method:: mm
     .. method:: mul
     .. method:: mul_
+    .. method:: narrow_copy
     .. method:: resizeAs_
     .. method:: size
     .. method:: spadd

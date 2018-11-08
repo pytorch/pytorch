@@ -2,13 +2,15 @@ import os
 import sys
 from string import Template, ascii_lowercase
 from ..cwrap import cwrap
-from ..cwrap.plugins import StandaloneExtension, GenericNN, NullableArguments, AutoGPU
+from ..cwrap.plugins import NNExtension, NullableArguments, AutoGPU
 from ..shared import import_module
 
-BASE_PATH = os.path.realpath(os.path.join(__file__, '..', '..', '..'))
-WRAPPER_PATH = os.path.join(BASE_PATH, 'torch', 'csrc', 'nn')
-THNN_UTILS_PATH = os.path.join(BASE_PATH, 'torch', '_thnn', 'utils.py')
+from ..shared._utils_internal import get_file_path
 
+THNN_H_PATH = get_file_path('torch', 'lib', 'THNN.h')
+THCUNN_H_PATH = get_file_path('torch', 'lib', 'THCUNN.h')
+
+THNN_UTILS_PATH = get_file_path('torch', '_thnn', 'utils.py')
 
 thnn_utils = import_module('torch._thnn.utils', THNN_UTILS_PATH)
 
@@ -21,8 +23,8 @@ FUNCTION_TEMPLATE = Template("""\
 """)
 
 COMMON_TRANSFORMS = {
-    'THIndex_t': 'long',
-    'THCIndex_t': 'long',
+    'THIndex_t': 'int64_t',
+    'THCIndex_t': 'int64_t',
     'THInteger_t': 'int',
 }
 COMMON_CPU_TRANSFORMS = {
@@ -74,7 +76,7 @@ for t in ['CudaHalf', 'Cuda', 'CudaDouble']:
 def wrap_function(name, type, arguments):
     cname = 'THNN_' + type + name
     declaration = ''
-    declaration += 'extern "C" void ' + cname + \
+    declaration += 'TH_API void ' + cname + \
         '(' + ', '.join(TYPE_TRANSFORMS[type].get(arg.type, arg.type)
                         for arg in arguments) + ');\n'
     declaration += FUNCTION_TEMPLATE.substitute(name=type + name, cname=cname)
@@ -95,101 +97,39 @@ def wrap_function(name, type, arguments):
     return declaration
 
 
-def generate_wrappers():
-    wrap_nn()
-    wrap_cunn()
-    wrap_generic()
+def generate_wrappers(nn_root=None, install_dir=None, template_path=None):
+    wrap_nn(os.path.join(nn_root, 'THNN', 'generic', 'THNN.h') if nn_root else None, install_dir, template_path)
+    wrap_cunn(os.path.join(nn_root, 'THCUNN', 'generic', 'THCUNN.h') if nn_root else None, install_dir, template_path)
 
 
-def wrap_nn():
+def wrap_nn(thnn_h_path, install_dir, template_path):
     wrapper = '#include <TH/TH.h>\n\n\n'
-    nn_functions = thnn_utils.parse_header(thnn_utils.THNN_H_PATH)
+    nn_functions = thnn_utils.parse_header(thnn_h_path or THNN_H_PATH)
     for fn in nn_functions:
         for t in ['Float', 'Double']:
             wrapper += wrap_function(fn.name, t, fn.arguments)
-    with open('torch/csrc/nn/THNN.cwrap', 'w') as f:
+    install_dir = install_dir or 'torch/csrc/nn'
+    try:
+        os.makedirs(install_dir)
+    except OSError:
+        pass
+    with open(os.path.join(install_dir, 'THNN.cwrap'), 'w') as f:
         f.write(wrapper)
-    cwrap('torch/csrc/nn/THNN.cwrap', plugins=[
-        StandaloneExtension('torch._thnn._THNN'),
-        NullableArguments(),
-    ])
+    cwrap(os.path.join(install_dir, 'THNN.cwrap'),
+          plugins=[NNExtension('torch._C._THNN'), NullableArguments()],
+          template_path=template_path)
 
 
-def wrap_cunn():
+def wrap_cunn(thcunn_h_path, install_dir, template_path):
     wrapper = '#include <TH/TH.h>\n'
     wrapper += '#include <THC/THC.h>\n\n\n'
-    cunn_functions = thnn_utils.parse_header(thnn_utils.THCUNN_H_PATH)
+    cunn_functions = thnn_utils.parse_header(thcunn_h_path or THCUNN_H_PATH)
     for fn in cunn_functions:
         for t in ['CudaHalf', 'Cuda', 'CudaDouble']:
             wrapper += wrap_function(fn.name, t, fn.arguments)
-    with open('torch/csrc/nn/THCUNN.cwrap', 'w') as f:
+    install_dir = install_dir or 'torch/csrc/nn'
+    with open(os.path.join(install_dir, 'THCUNN.cwrap'), 'w') as f:
         f.write(wrapper)
-    cwrap('torch/csrc/nn/THCUNN.cwrap', plugins=[
-        StandaloneExtension('torch._thnn._THCUNN'),
-        NullableArguments(),
-        AutoGPU(has_self=False),
-    ])
-
-
-GENERIC_FUNCTION_TEMPLATE = Template("""\
-[[
-  name: $name
-  return: void
-  options:
-""")
-
-
-def wrap_generic_function(name, backends):
-    declaration = ''
-    declaration += GENERIC_FUNCTION_TEMPLATE.substitute(name=name)
-    for backend in backends:
-        declaration += '    - cname: ' + name + '\n'
-        declaration += '      backend: ' + backend['name'] + '\n'
-        declaration += '      arguments:\n'
-        for arg in backend['arguments']:
-            declaration += '       - arg: ' + arg.type + ' ' + arg.name + '\n'
-            if arg.is_optional:
-                declaration += '         optional: True\n'
-    declaration += ']]\n\n\n'
-    return declaration
-
-
-def wrap_generic():
-    from collections import OrderedDict
-    defs = OrderedDict()
-
-    def should_wrap_function(name):
-        if name.startswith('LookupTable_'):
-            return False
-        return (name.endswith('updateOutput') or
-                name.endswith('updateGradInput') or
-                name.endswith('accGradParameters') or
-                name.endswith('backward'))
-
-    def add_functions(name, functions):
-        for fn in functions:
-            if not should_wrap_function(fn.name):
-                continue
-            if fn.name not in defs:
-                defs[fn.name] = []
-            defs[fn.name] += [{
-                'name': name,
-                'arguments': fn.arguments[1:],
-            }]
-
-    add_functions('nn', thnn_utils.parse_header(thnn_utils.THNN_H_PATH))
-    add_functions('cunn', thnn_utils.parse_header(thnn_utils.THCUNN_H_PATH))
-
-    wrapper = ''
-    for name, backends in defs.items():
-        wrapper += wrap_generic_function(name, backends)
-    with open('torch/csrc/nn/THNN_generic.cwrap', 'w') as f:
-        f.write(wrapper)
-
-    cwrap('torch/csrc/nn/THNN_generic.cwrap', plugins=[
-        GenericNN(header=True),
-    ], default_plugins=False, destination='torch/csrc/nn/THNN_generic.h')
-
-    cwrap('torch/csrc/nn/THNN_generic.cwrap', plugins=[
-        GenericNN(),
-    ], default_plugins=False)
+    cwrap(os.path.join(install_dir, 'THCUNN.cwrap'),
+          plugins=[NNExtension('torch._C._THCUNN'), NullableArguments(), AutoGPU(has_self=False)],
+          template_path=template_path)

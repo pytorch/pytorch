@@ -1,0 +1,76 @@
+[["log_probs", [6, 1, 44463], "float32"], ["attentions", [6, 1, 21], "float32"], ["inputs", [21], "float32"]]
+beam_search
+["scores_t"]
+
+def beam_search(inputs, log_probs, attentions) -> ():
+    beam_size = 6LL
+    length = 20LL
+    beam_output_shape, _ = Concat(length + 1LL, beam_size, axis=0)
+    output_token_beam_list = int(zeros(beam_output_shape))
+    output_prev_index_beam_list = int(zeros(beam_output_shape))
+    output_score_beam_list = zeros(beam_output_shape)
+
+    input_length = inputs.Size().ExpandDims(dims=[0])
+
+    attention_beam_output_shape, _ = Concat(
+        input_length, beam_output_shape, axis=0)
+    output_attention_weights_beam_list = zeros(attention_beam_output_shape)
+
+    attention_step_output_shape, _ = Concat(beam_size, input_length, axis=0)
+    attention_t = zeros(attention_step_output_shape)
+
+    scores_t = zeros(shape=[1, 6])
+    hypo_t = int(zeros(shape=[6]))
+    tokens_t = int(ones(shape=[6])) * 99
+
+    output_token_beam_list = output_token_beam_list.ScatterAssign(0, tokens_t)
+    output_token_beam_list = output_token_beam_list.ExpandDims(dims=[2])
+    output_prev_index_beam_list = output_prev_index_beam_list.ScatterAssign(
+        0, hypo_t)
+    output_prev_index_beam_list = output_prev_index_beam_list.ExpandDims(dims=[2])
+    output_score_beam_list = output_score_beam_list.ScatterAssign(0, scores_t)
+    output_score_beam_list = output_score_beam_list.ExpandDims(dims=[2])
+    output_attention_weights_beam_list = output_attention_weights_beam_list\
+        .ScatterAssign(0, attention_t)
+
+    length_32 = int(length)
+
+    timestep = 0
+    not_finished = True
+    while not_finished:
+        # TODO: once we have a metaprogramming facility we need to insert the
+        # body of the post_eos_penalty here programmatically
+
+        best_scores_per_hypo, best_tokens_per_hypo = log_probs.TopK(k=6)
+
+        # Add the best score in each hypothesis to the cumulative score so far
+        output_scores = best_scores_per_hypo + scores_t.Squeeze(dims=[0])
+
+        # Flatten scores so we can find the best overall out of all hypotheses
+        output_scores_flattened_slice, _ = output_scores.FlattenToVec()\
+            .Slice(0, 6 if timestep == 0 else -1).Reshape(shape=[1, -1])
+
+        # Find top K out of all
+        scores_t, best_indices = output_scores_flattened_slice.TopK(k=6)
+
+        # Integer floor divide on indices finds the association back to original
+        #  hypotheses. Use this to reorder states
+        hypo_t_int64 = best_indices / 6LL
+
+        # Reorder attentions
+        attention_t, _ = attentions.Gather(hypo_t_int64)\
+            .Reshape(shape=[1, 6, -1])
+        tokens_t_int64 = best_tokens_per_hypo.FlattenToVec()\
+            .Gather(best_indices).Cast(to=2)
+
+        timestep += 1
+        not_finished = timestep < length_32
+
+        output_token_beam_list = output_token_beam_list\
+            .ScatterAssign(timestep, tokens_t)
+        output_prev_index_beam_list = output_prev_index_beam_list\
+            .ScatterAssign(timestep, hypo_t)
+        output_score_beam_list = output_score_beam_list\
+            .ScatterAssign(timestep, scores_t)
+        output_attention_weights_beam_list = output_attention_weights_beam_list\
+            .ScatterAssign(timestep, attention_t)

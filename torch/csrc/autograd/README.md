@@ -1,7 +1,7 @@
 ## Autograd
 
 Autograd is a hotspot for PyTorch performance, so most of the heavy lifting is
-implemented in C++.  This implies that we have to do some shuffling between
+implemented in C++. This implies that we have to do some shuffling between
 Python and C++; and in general, we want data to be in a form that is convenient
 to manipulate from C++.
 
@@ -29,4 +29,5 @@ classes:
 
 Outside of `PyFunction`, the C++ objects largely avoid referencing Python
 objects (there are a few exceptions, like `pyobj` in `Variable`, and
-`PyFunction`, whose whole point is to let C++ call into Python).
+`PyFunction`, whose whole point is to let C++ call into Python). And `pyobj`
+in `Function` to ensure uniqueness of the associated python wrapper (if it exists).

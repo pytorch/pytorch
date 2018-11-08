@@ -1,3 +1,4 @@
+import torch
 from .optimizer import Optimizer, required
 
 
@@ -34,10 +35,10 @@ class SGD(Optimizer):
                   v = \rho * v + g \\
                   p = p - lr * v
 
-        where p, g, v and :math:`\rho` denote the parameters, gradient, velocity, and
-        momentum respectively.
+        where p, g, v and :math:`\rho` denote the parameters, gradient,
+        velocity, and momentum respectively.
 
-        This is in constrast to Sutskever et. al. and
+        This is in contrast to Sutskever et. al. and
         other frameworks which employ an update of the form
 
         .. math::
@@ -49,6 +50,13 @@ class SGD(Optimizer):
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
                  weight_decay=0, nesterov=False):
+        if lr is not required and lr < 0.0:
+            raise ValueError("Invalid learning rate: {}".format(lr))
+        if momentum < 0.0:
+            raise ValueError("Invalid momentum value: {}".format(momentum))
+        if weight_decay < 0.0:
+            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov)
         if nesterov and (momentum <= 0 or dampening != 0):
@@ -86,7 +94,8 @@ class SGD(Optimizer):
                 if momentum != 0:
                     param_state = self.state[p]
                     if 'momentum_buffer' not in param_state:
-                        buf = param_state['momentum_buffer'] = d_p.clone()
+                        buf = param_state['momentum_buffer'] = torch.zeros_like(p.data)
+                        buf.mul_(momentum).add_(d_p)
                     else:
                         buf = param_state['momentum_buffer']
                         buf.mul_(momentum).add_(1 - dampening, d_p)

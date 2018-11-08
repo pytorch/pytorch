@@ -3,6 +3,8 @@ from .replicate import replicate
 from .data_parallel import DataParallel, data_parallel
 from .scatter_gather import scatter, gather
 from .distributed import DistributedDataParallel
+from .distributed_cpu import DistributedDataParallelCPU
+import torch.nn.parallel.deprecated
 
 __all__ = ['replicate', 'scatter', 'parallel_apply', 'gather', 'data_parallel',
-           'DataParallel', 'DistributedDataParallel']
+           'DataParallel', 'DistributedDataParallel', 'DistributedDataParallelCPU']

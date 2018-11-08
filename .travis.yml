@@ -1,37 +1,8 @@
 # https://travis-ci.org/pytorch/pytorch
 language: python
-python:
-    - 2.7.8
-    - 2.7
-    - 3.5
-    - 3.6
-    - nightly
-
-cache:
-    - ccache
-    - directories:
-        - $HOME/.ccache
-
-install:
-    - unset CCACHE_DISABLE
-    - export CCACHE_DIR=$HOME/.ccache
-    - export CC="ccache gcc-4.8"
-    - export CXX="ccache g++-4.8"
-    - ccache --show-stats
-    - travis_retry pip install --upgrade pip setuptools wheel
-    - travis_retry pip install -r requirements.txt --only-binary=scipy
-    - python setup.py install
-
-script:
-    - OMP_NUM_THREADS=2 ./test/run_test.sh
-
-addons:
-    apt:
-        sources:
-            - ubuntu-toolchain-r-test
-        packages:
-            - gcc-4.8
-            - g++-4.8
+dist: trusty
+git:
+  submodules: false
 
 # This reportedly works around an issue downloading packages from pypi on
 # travis.  Consider removing this after the underlying issue is fixed.
@@ -41,8 +12,29 @@ sudo: false
 matrix:
     fast_finish: true
     include:
-        env: LINT_CHECK
+      - env: LINT_CHECK
         python: "2.7"
-        addons: true
         install: pip install flake8
         script: flake8
+      - env: LINT_CHECK
+        python: "3.7"
+        dist: xenial    # required for Python 3.7 (travis-ci/travis-ci#9069)
+        sudo: required  # required for Python 3.7 (travis-ci/travis-ci#9069)
+        install: pip install flake8
+        script: flake8
+      - env: MYPY_TYPE_CHECK
+        python: "3.6"
+        install: pip install mypy mypy-extensions
+        script: mypy @mypy-files.txt
+      - env: CPP_DOC_CHECK
+        install: sudo apt-get install -y doxygen
+        script: cd docs/cpp/source && ./check-doxygen.sh
+      - env: CLANG_TIDY
+        python: "3.6"
+        addons:
+          apt:
+            sources:
+              - ubuntu-toolchain-r-test
+              - llvm-toolchain-trusty
+            packages: clang-tidy
+        script: tools/run-clang-tidy-in-ci.sh

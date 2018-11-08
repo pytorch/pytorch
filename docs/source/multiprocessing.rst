@@ -62,7 +62,7 @@ view onto the storage data.
 
 Note that if there will be a lot of tensors shared, this strategy will keep a
 large number of file descriptors open most of the time. If your system has low
-limits for the number of open file descriptors, and you can't rise them, you
+limits for the number of open file descriptors, and you can't raise them, you
 should use the ``file_system`` strategy.
 
 File system - ``file_system``
@@ -83,6 +83,6 @@ the current process group, and will keep track of all shared memory allocations.
 Once all processes connected to it exit, it will wait a moment to ensure there
 will be no new connections, and will iterate over all shared memory files
 allocated by the group. If it finds that any of them still exist, they will be
-deallocated. We've tested this method and it prooved to be robust to various
+deallocated. We've tested this method and it proved to be robust to various
 failures. Still, if your system has high enough limits, and ``file_descriptor``
 is a supported strategy, we do not recommend switching to this one.

@@ -1,16 +1,19 @@
 #include "tuple_parser.h"
 
-#include <string>
 
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "python_strings.h"
 #include "python_numbers.h"
 
+#include <string>
+#include <stdexcept>
+#include <vector>
+
 namespace torch {
 
 TupleParser::TupleParser(PyObject* args, int num_args) : args(args), idx(0) {
-   int size = PyTuple_GET_SIZE(args);
+   int size = (int) PyTuple_GET_SIZE(args);
    if (num_args >= 0 && size != num_args) {
      std::string msg("missing required arguments (expected ");
      msg += std::to_string(num_args) + " got " + std::to_string(size) + ")";
@@ -40,16 +43,6 @@ auto TupleParser::parse(double& x, const std::string& param_name) -> void {
     throw invalid_type("float", param_name);
   }
   x = THPUtils_unpackDouble(obj);
-}
-
-auto TupleParser::parse(std::unique_ptr<thpp::Tensor>& x, const std::string& param_name) -> void {
-  PyObject* obj = next_arg();
-  x = torch::createTensor(obj);
-}
-
-auto TupleParser::parse(std::shared_ptr<thpp::Tensor>& x, const std::string& param_name) -> void {
-  PyObject* obj = next_arg();
-  x.reset(torch::createTensor(obj)->clone_shallow());
 }
 
 auto TupleParser::parse(std::vector<int>& x, const std::string& param_name) -> void {

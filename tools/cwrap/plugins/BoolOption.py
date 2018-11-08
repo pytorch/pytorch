@@ -1,6 +1,12 @@
 from . import CWrapPlugin
 from string import Template
 
+import sys
+if sys.version_info[0] == 3:
+    string_type = str
+else:
+    string_type = basestring
+
 
 class BoolOption(CWrapPlugin):
 
@@ -15,7 +21,8 @@ class BoolOption(CWrapPlugin):
                 for arg in option['arguments']:
                     if self.is_bool_option(arg):
                         arg['is_bool_option'] = True
-                        arg['type'] = 'const char*'
+                        if isinstance(arg['if_true'], string_type):
+                            arg['type'] = 'const char*'
         return declarations
 
     def get_type_check(self, arg, option):

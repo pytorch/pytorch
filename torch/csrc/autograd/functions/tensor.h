@@ -1,75 +1,43 @@
 #pragma once
 
-#include <Python.h>
-#include <THPP/THPP.h>
-#include <memory>
-
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 
+#include <ATen/TensorGeometry.h>
+#include "ATen/Type.h"
+#include "c10/util/Optional.h"
+
+#include <cstdint>
+#include <memory>
+
 namespace torch { namespace autograd {
 
-struct Identity : public Function {
-  Identity(FunctionFlags&& f)
-    : Function(std::move(f)) {};
+struct CopyBackwards : public Function {
+  variable_list apply(variable_list&& grads) override;
 
-  virtual variable_list apply(const variable_list& inputs) override;
+  at::Type *src_type = nullptr; // initialized for safety.
+  at::Device src_device = at::kCPU;
 };
 
-struct Clone : public Function {
-  Clone() {}
+// Performs grad[idx] = fn(grad[idx]), but out-of-place. The slicing operation
+// grad[idx] is defined by the relative sizes, strides, and offset of base and
+// view.
+// When an in-place operation is done on a differentiable view, the base's
+// grad_fn is updated to become a `CopySlice` wrapping the backward of the
+// in-place operation.
+// See NOTE [ Autograd View Variables ].
+struct CopySlices : public Function {
+  CopySlices(
+      const Variable& base_var,
+      at::TensorGeometry view_,
+      std::shared_ptr<Function> fn_);
 
-  virtual variable_list apply(const variable_list& inputs) override;
-};
+  variable_list apply(variable_list&& inputs) override;
+  void release_variables() override;
 
-struct Contiguous : public Function {
-  Contiguous() {}
-
-  virtual variable_list apply(const variable_list& inputs) override;
-};
-
-struct Transpose : public Function {
-  Transpose(long dim1, long dim2)
-    : dim1(dim1)
-    , dim2(dim2) {}
-
-  virtual variable_list apply(const variable_list& inputs) override;
-
-  long dim1;
-  long dim2;
-};
-
-struct View : public Function {
-  View(std::vector<long> size)
-    : size(size) {}
-
-  virtual variable_list apply(const variable_list& inputs) override;
-
-  std::vector<long> size;
-};
-
-struct Expand : public Function {
-  Expand(std::vector<long> size)
-    : size(size) {}
-
-  virtual variable_list apply(const variable_list& inputs) override;
-
-  std::vector<long> size;
-};
-
-struct Narrow : public Function {
-  Narrow(long dim, long start, long size)
-    : dim(dim)
-    , start(start)
-    , size(size) {}
-
-  virtual variable_list apply(const variable_list& inputs) override;
-
-  long dim;
-  long start;
-  long size;
+  at::TensorGeometry base;
+  at::TensorGeometry view;
+  std::shared_ptr<Function> fn;
 };
 
 }}
-
-

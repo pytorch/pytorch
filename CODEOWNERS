@@ -1,0 +1,11 @@
+# This is a comment.
+# Each line is a file pattern followed by one or more owners.
+
+/docs/cpp @goldsborough @ebetica
+/torch/csrc/api/ @ebetica @goldsborough
+/test/cpp/api/ @ebetica @goldsborough
+/torch/lib/c10d/ @apaszke @pietern @teng-li
+/torch/csrc/distributed/ @apaszke @pietern @teng-li
+/torch/distributed/ @apaszke @pietern @teng-li
+/test/test_c10d.py @apaszke @pietern @teng-li
+/torch/utils/cpp_extension.py @goldsborough @fmassa @apaszke @soumith @ezyang

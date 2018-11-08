@@ -2,8 +2,17 @@ import os
 import itertools
 import importlib
 
-THNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THNN.h')
-THCUNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THCUNN.h')
+try:
+    # when compiling a cffi extension, this works. When compiling
+    # torch itself, it doesn't work because the parent module can't
+    # yet be imported. However that's fine because we don't need it in
+    # that case.
+    from .._utils_internal import get_file_path
+
+    THNN_H_PATH = get_file_path('torch', 'lib', 'THNN.h')
+    THCUNN_H_PATH = get_file_path('torch', 'lib', 'THCUNN.h')
+except Exception as e:
+    pass
 
 
 def _unpickle_backend(backend_name):
@@ -92,6 +101,13 @@ def parse_header(path):
             else:
                 fn_name = fn_name[:-1]
             generic_functions.append(Function(fn_name))
+        elif l.startswith('THC_API void THNN_'):
+            fn_name = l.lstrip('THC_API void THNN_')
+            if fn_name[0] == '(' and fn_name[-2] == ')':
+                fn_name = fn_name[1:-2]
+            else:
+                fn_name = fn_name[:-1]
+            generic_functions.append(Function(fn_name))
         elif l:
             t, name = l.split()
             if '*' in name:
@@ -102,11 +118,10 @@ def parse_header(path):
 
 
 def load_backend(t, lib, generic_functions, mixins=tuple()):
-    lib_handle = importlib.import_module(lib)
     backend_name = 'THNN{}Backend'.format(t)
     backend = type(backend_name, mixins + (THNNBackendBase,), {})()
     for function in generic_functions:
         full_fn_name = '{}{}'.format(t, function.name)
-        fn = getattr(lib_handle, full_fn_name)
+        fn = getattr(lib, full_fn_name)
         backend.register_method(function.name, fn)
     return backend

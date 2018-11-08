@@ -1,5 +1,6 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
-SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
+# TODO(jiayq): once we have unified CMake entry, remove this module path.
+SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules ${CMAKE_MODULE_PATH})
 
 ################################################################################
 # Helper functions
@@ -18,51 +19,57 @@ FUNCTION(EXCLUDE_DIR list_name dir_name)
 ENDFUNCTION()
 
 ################################################################################
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+
+INCLUDE(CheckCXXSourceCompiles)
+
+CHECK_CXX_SOURCE_COMPILES("
+#include <thread>
+
+thread_local int foo=1;
+
+int main() {
+  return 0;
+}" HAS_THREAD_LOCAL)
+
+IF(NOT HAS_THREAD_LOCAL)
+    MESSAGE(FATAL_ERROR "thread_local not supported. THD requires a compiler"
+                        " that supports thread_local. Please upgrade your "
+                        "compiler. If you are on macOS, upgrade to "
+                        "XCode 8 or newer.")
+ENDIF(NOT HAS_THREAD_LOCAL)
+
 
 FIND_PACKAGE(MPI)
 
-FIND_PACKAGE(Gloo)
+INCLUDE_DIRECTORIES(${CAFFE2_INCLUDE_DIR})
 
-IF(NOT Torch_FOUND)
-  FIND_PACKAGE(Torch REQUIRED)
-ENDIF()
-
-IF(NOT TH_LIBRARIES)
-  SET(TH_LIBRARIES "TH")
-ENDIF(NOT TH_LIBRARIES)
-MESSAGE(STATUS "TH_LIBRARIES: ${TH_LIBRARIES}")
-
-IF(NOT THPP_LIBRARIES)
-  SET(THPP_LIBRARIES "THPP")
-ENDIF(NOT THPP_LIBRARIES)
-MESSAGE(STATUS "THPP_LIBRARIES: ${THPP_LIBRARIES}")
-
-IF(NO_CUDA)
+IF(NOT USE_CUDA)
   MESSAGE(STATUS "ignoring CUDA")
 ELSE()
-  FIND_PACKAGE(CUDA 5.5)
+  FIND_PACKAGE(CUDA 7.5)
   IF(CUDA_FOUND)
     INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
-    INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
     LINK_DIRECTORIES("${CUDA_TOOLKIT_ROOT_DIR}/lib" "${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
-    IF(NOT THC_LIBRARIES)
-      SET(THC_LIBRARIES "THC")
-    ENDIF(NOT THC_LIBRARIES)
-    MESSAGE(STATUS "THC_LIBRARIES: ${THC_LIBRARIES}")
-    ADD_DEFINITIONS(-DWITH_CUDA=1)
+    ADD_DEFINITIONS(-DUSE_CUDA=1)
   ENDIF()
 ENDIF()
 
 IF(MPI_FOUND)
   ADD_DEFINITIONS(-DWITH_MPI=1)
+  MESSAGE(STATUS "MPI_LIBRARIES: ${MPI_LIBRARIES}")
 ENDIF()
 
-IF(GLOO_FOUND)
+IF(USE_GLOO AND USE_CUDA)
   ADD_DEFINITIONS(-DWITH_GLOO=1)
+  IF(USE_GLOO_IBVERBS)
+    MESSAGE(STATUS "Building the gloo backend with both TCP and infiniband support")
+    ADD_DEFINITIONS(-DUSE_GLOO_IBVERBS=1)
+  ELSE()
+    MESSAGE(STATUS "Building the gloo backend with TCP support only")
+  ENDIF()
 ENDIF()
-
-ADD_DEFINITIONS(-D_THD_CORE=1)
 
 # Can be compiled standalone
 IF(NOT THD_INSTALL_BIN_DIR OR NOT THD_INSTALL_LIB_DIR OR NOT THD_INSTALL_INCLUDE_DIR)
@@ -71,8 +78,6 @@ IF(NOT THD_INSTALL_BIN_DIR OR NOT THD_INSTALL_LIB_DIR OR NOT THD_INSTALL_INCLUDE
   SET(THD_INSTALL_INCLUDE_DIR "include" CACHE PATH "THD install include subdirectory")
 ENDIF()
 
-FILE(GLOB_RECURSE master_worker_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "master_worker/*.h")
-FILE(GLOB_RECURSE master_worker_cpp "master_worker/*.cpp")
 FILE(GLOB_RECURSE process_group_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "process_group/*.h")
 FILE(GLOB_RECURSE process_group_cpp "process_group/*.cpp")
 FILE(GLOB_RECURSE base_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "base/*.h")
@@ -84,53 +89,61 @@ IF(NOT MPI_FOUND)
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_mpi_smoke.cpp")
 ENDIF()
 
-IF(NOT GLOO_FOUND)
+IF(NOT USE_GLOO OR NOT USE_CUDA)
   LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/DataChannelGloo.cpp")
   LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/Store.cpp")
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_gloo_store.cpp")
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_gloo_cache.cpp")
 ENDIF()
 
-EXCLUDE_DIR(master_worker_cpp ".*/dispatch/.*\\.cpp$")
+IF(NOT USE_NCCL)
+  LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/DataChannelNccl.cpp")
+ENDIF()
 
-SET(all_cpp ${base_cpp} ${process_group_cpp} ${master_worker_cpp})
-SET(all_h THD.h ${base_h} ${process_group_h} ${master_worker_h})
+SET(all_cpp ${base_cpp} ${process_group_cpp})
+SET(all_h THD.h ${base_h} ${process_group_h})
 
 EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 
-ADD_LIBRARY(THD SHARED ${all_cpp})
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+ADD_LIBRARY(THD STATIC ${all_cpp})
 
-IF(THD_SO_VERSION)
-  MESSAGE(STATUS "THD_SO_VERSION: ${THD_SO_VERSION}")
-  SET_TARGET_PROPERTIES(THD PROPERTIES
-    VERSION   ${THD_SO_VERSION}
-    SOVERSION ${THD_SO_VERSION})
-ENDIF(THD_SO_VERSION)
+TARGET_COMPILE_DEFINITIONS(THD PRIVATE "_THD_CORE=1")
 
-TARGET_LINK_LIBRARIES(THD LINK_PRIVATE ${TH_LIBRARIES} ${THPP_LIBRARIES})
-IF(CUDA_FOUND)
-  TARGET_LINK_LIBRARIES(THD LINK_PRIVATE ${THC_LIBRARIES})
-ENDIF()
+ADD_DEPENDENCIES(THD caffe2)
+
+target_include_directories(THD PRIVATE
+  ${CMAKE_SOURCE_DIR}/aten/src/TH # provides "THAllocator.h" to THCGeneral.h
+  ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
+  ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
+  ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC # provides "THCGeneral.h" to THC.h
+  )
+
+set_property(TARGET THD PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 IF(MPI_FOUND)
   INCLUDE_DIRECTORIES(${MPI_INCLUDE_PATH})
-  TARGET_LINK_LIBRARIES(THD LINK_PRIVATE ${MPI_LIBRARIES})
 
   IF(MPI_COMPILE_FLAGS)
+    MESSAGE(STATUS "MPI_COMPILE_FLAGS: ${MPI_COMPILE_FLAGS}")
     SET_TARGET_PROPERTIES(THD PROPERTIES COMPILE_FLAGS "${MPI_COMPILE_FLAGS}")
   ENDIF()
 
   IF(MPI_LINK_FLAGS)
+    MESSAGE(STATUS "MPI_LINK_FLAGS: ${MPI_LINK_FLAGS}")
     SET_TARGET_PROPERTIES(THD PROPERTIES LINK_FLAGS "${MPI_LINK_FLAGS}")
   ENDIF()
 ENDIF()
 
-IF(GLOO_FOUND)
-  INCLUDE_DIRECTORIES(${GLOO_INCLUDE_DIR})
-  TARGET_LINK_LIBRARIES(THD LINK_PRIVATE ${GLOO_LIBRARIES})
+# TODO we shouldn't need the USE_CUDA condition here. See https://github.com/pytorch/pytorch/issues/13101
+IF(USE_GLOO AND USE_CUDA)
+  ADD_DEPENDENCIES(THD gloo)
+ENDIF()
+
+IF(USE_NCCL)
+  ADD_DEFINITIONS(-DUSE_DISTRIBUTED_NCCL=1)
+  TARGET_LINK_LIBRARIES(THD PUBLIC __caffe2_nccl)
 ENDIF()
 
 # Test executables
@@ -144,7 +157,7 @@ IF(THD_WITH_TESTS)
     SET(test_executable_name "test_${test_name}")
 
     ADD_EXECUTABLE(${test_executable_name} "test/${test_source_file}")
-    TARGET_LINK_LIBRARIES(${test_executable_name} THD ${TH_LIBRARIES} ${THPP_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+    TARGET_LINK_LIBRARIES(${test_executable_name} THD ${CAFFE2_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
     SET_PROPERTY(TARGET ${test_executable_name} PROPERTY CXX_STANDARD 11)
     ADD_TEST(${test_name} ${test_executable_name})
   ENDFOREACH()

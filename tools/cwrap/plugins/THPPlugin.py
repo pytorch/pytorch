@@ -32,12 +32,13 @@ class THPPlugin(CWrapPlugin):
 
         'THLongStorage*': Template('((THPLongStorage*)$arg)->cdata'),
         'THStorage*': Template('((THPStorage*)$arg)->cdata'),
-        'THGenerator*': Template('((THPGenerator*)$arg)->cdata'),
+        'THGenerator*': Template('THPGenerator_TH_CData($arg)'),
         'THSize*': Template('__size.get()'),
         'THStride*': Template('__stride.get()'),
         'void*': Template('THPUtils_unpackLong($arg)'),
         'long': Template('THPUtils_unpackLong($arg)'),
-        'int': Template('THPUtils_unpackLong($arg)'),
+        'int': Template('((int) THPUtils_unpackLong($arg))'),
+        'int64_t': Template('THPUtils_unpackLong($arg)'),
         'bool': Template('($arg == Py_True ? true : false)'),
         'float': Template('THPFloatUtils_unpackReal($arg)'),
         'double': Template('THPDoubleUtils_unpackReal($arg)'),
@@ -75,6 +76,7 @@ class THPPlugin(CWrapPlugin):
         'THStride*': Template('THPUtils_tryUnpackLongs($arg, __stride)'),
         'void*': Template('THPUtils_checkLong($arg)'),
         'long': Template('THPUtils_checkLong($arg)'),
+        'int64_t': Template('THPUtils_checkLong($arg)'),
         'int': Template('THPUtils_checkLong($arg)'),
         'bool': Template('PyBool_Check($arg)'),
         'float': Template('THPFloatUtils_checkReal($arg)'),
@@ -95,6 +97,8 @@ class THPPlugin(CWrapPlugin):
         'THCudaLongTensor*': Template('return THCPLongTensor_New($result);'),
         # TODO: make it smarter - it should return python long if result doesn't fit into an int
         'long': Template('return PyInt_FromLong($result);'),
+        'int64_t': Template('return PyInt_FromLong($result);'),
+        'int': Template('return PyLong_FromLong($result);'),
         'accreal': Template('return THPUtils_(newAccreal)($result);'),
         'self': Template('Py_INCREF(self);\nreturn (PyObject*)self;'),
         'real': Template('return THPUtils_(newReal)($result);'),
@@ -111,8 +115,8 @@ static PyMethodDef TH${sparse}PTensor_$stateless(methods)[] = {
 PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
 {
     HANDLE_TH_ERRORS
-    int __tuplecount = args ? PyTuple_Size(args) : 0;
-    int __dictcount = kwargs ? PyDict_Size(kwargs) : 0;
+    int __tuplecount = args ? (int) PyTuple_Size(args) : 0;
+    int __dictcount = kwargs ? (int) PyDict_Size(kwargs) : 0;
     int __argcount = __tuplecount + __dictcount;
     $variables
     $init
@@ -183,6 +187,8 @@ ${cpu}
         'THSize*': 'torch.Size',
         'THStride*': 'tuple',
         'long': 'int',
+        'int64_t': 'int',
+        'int': 'int',
         'real': '" RealStr "',
         'double': 'float',
         'accreal': '" RealStr "',
@@ -191,8 +197,8 @@ ${cpu}
     }
 
     OUT_INIT = """
-    __out = kwargs ? PyDict_GetItemString(kwargs, "out") : NULL;
-    if (__out == Py_None) { __out = NULL; __dictcount--; __argcount--; }
+    ___out = kwargs ? PyDict_GetItemString(kwargs, "out") : NULL;
+    if (___out == Py_None) { ___out = NULL; __dictcount--; __argcount--; }
     """
 
     def __init__(self):
@@ -200,12 +206,27 @@ ${cpu}
         self.stateless_declarations = []
         self.docstrings = []
 
+    BACKEND_SUBSTITUTIONS = {
+        'CPU': 'TH',
+        'CUDA': 'THCuda',
+    }
+
+    def substitute_tensor_backend(self, arg, option):
+        if 'Backend' in arg['type']:
+            arg['type'] = arg['type'].replace('Backend',
+                                              self.BACKEND_SUBSTITUTIONS.get(option['backends'][0]))
+            # handle the fact that THCudaTensor isn't THCudaFloatTensor
+            if option['backends'][0] == 'CUDA' and 'Float' in arg['type']:
+                arg['type'] = arg['type'].replace('Float', '')
+
     def get_type_unpack(self, arg, option):
+        self.substitute_tensor_backend(arg, option)
         return self.TYPE_UNPACK.get(arg['type'], None)
 
     def get_type_check(self, arg, option):
         if arg['type'] == 'THSize*' and arg.get('long_args', False):
             return self.SIZE_VARARG_CHECK
+        self.substitute_tensor_backend(arg, option)
         return self.TYPE_CHECK.get(arg['type'], None)
 
     # TODO: argument descriptions shouldn't be part of THP, but rather a general cwrap thing
@@ -267,9 +288,9 @@ ${cpu}
             if not option['output_provided']:
                 return arg['name']
             if option['output_count'] == 1:
-                return '__out'
+                return '___out'
             else:
-                return 'PyTuple_GET_ITEM(__out, {})'.format(arg['output_idx'])
+                return 'PyTuple_GET_ITEM(___out, {})'.format(arg['output_idx'])
 
     def process_docstrings(self):
         for declaration in self.declarations:
@@ -436,10 +457,13 @@ ${cpu}
             if has_arg_type(declaration, 'THStride*'):
                 declaration['variables'] += ['THLongStoragePtr __stride;']
             if has_output_args(declaration):
-                declaration['variables'] += ['PyObject *__out;']
+                declaration['variables'] += ['PyObject *___out;']
                 self.generate_out_options(declaration)
             if has_long_args(declaration):
-                declaration['no_kwargs'] = True
+                for option in declaration['options']:
+                    for arg in option['arguments']:
+                        if arg.get('long_args', False):
+                            arg['no_kwargs'] = True
             for option in declaration['options']:
                 option['cname'] = 'TH{}Tensor_({})'.format(
                     'S' if option.get('sparse', False) else '', option['cname'])
@@ -516,7 +540,7 @@ ${cpu}
             generated = '#if !defined(TH_REAL_IS_HALF) && !IS_DISTRIBUTED\n' + generated + '\n#endif\n\n'
         return generated
 
-    def process_full_file(self, code):
+    def process_full_file(self, code, template_path):
         # We have to find a place before all undefs
         idx = code.find('// PUT DEFINITIONS IN HERE PLEASE')
         return (code[:idx] +
@@ -542,19 +566,21 @@ ${cpu}
         if option.get('has_output'):
             indent = " " * 10
             if option['output_provided']:
-                checks = "__out != NULL &&\n" + indent
+                checks = "___out != NULL &&\n" + indent
                 if option['output_count'] > 1:
-                    checks += "PyTuple_Check(__out) &&\n" + indent
-                    length_check = "PyTuple_GET_SIZE(__out) == {} &&\n".format(
+                    checks += "PyTuple_Check(___out) &&\n" + indent
+                    length_check = "PyTuple_GET_SIZE(___out) == {} &&\n".format(
                         option['output_count'])
                     checks += length_check + indent
                 code = checks + code
             else:
-                code = "__out == NULL &&\n" + indent + code
+                code = "___out == NULL &&\n" + indent + code
 
         if any(arg.get('long_args', False) for arg in option['arguments']):
             code = code.replace('__argcount ==', '__argcount >=')
-            expected = str(int(option.get('output_provided', False)))
+            expected = str(int(option.get('output_provided', False)) +
+                           sum(not arg.get('no_kwargs', False) and not arg.get('ignore_check', False)
+                               for arg in option['arguments']))
             code = '__dictcount == ' + expected + ' &&\n          ' + code
 
         return code

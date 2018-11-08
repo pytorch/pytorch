@@ -9,10 +9,14 @@ class BeforeAfterCall(CWrapPlugin):
 
     def insert_snippet(self, template, option, offset, name):
         prepend_str = option.get(name)
+        if isinstance(prepend_str, dict):
+            backend = option['backends'][0]
+            prepend_str = prepend_str.get(backend, None)
+
         if prepend_str is None:
             return
         if '$' in prepend_str:
-            before_call_template = Template(option[name])
+            before_call_template = Template(prepend_str)
             args = {'arg' + str(i): self.cwrap.get_arg_accessor(arg, option) for i, arg
                     in enumerate(option['arguments'])}
             prepend_str = before_call_template.substitute(args)
