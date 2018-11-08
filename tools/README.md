@@ -59,7 +59,7 @@ Important if you want to run on AMD GPU:
   * [build_pytorch_amd.py](amd_build/build_pytorch_amd.py) - Script
     for HIPifying the PyTorch codebase.
 
-Tools which only situationally useful:
+Tools which are only situationally useful:
 
 * [aten_mirror.sh](aten_mirror.sh) - Mirroring script responsible
   for keeping https://github.com/zdevito/ATen up-to-date.
