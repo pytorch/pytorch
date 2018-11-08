@@ -1008,6 +1008,19 @@ class TestCuda(TestCase):
             self.assertEqual(bt.get_device(), bct.get_device())
             self.assertIsInstance(bct, type(bt))
 
+        # check that tensors on device[0] are returned as-is
+        for out_tensors in (b_tensors, bc_tensors_t):
+            for inp_t, (out_t, _) in zip(tensors, out_tensors):
+                self.assertIs(inp_t, out_t)
+
+        # check that the tensors not on device[0] have different version counters
+        # NOTE [ Version Counter in comm.*_coalesced ]
+        versions = [t._version for _, t in bc_tensors_t]
+        for old_version, (_, t) in zip(versions, bc_tensors_t):
+            self.assertEqual(t._version, old_version)
+            t.zero_()
+            self.assertEqual(t._version, old_version + 1)
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @skipIfRocm
     def test_broadcast_coalesced(self):
@@ -1070,6 +1083,15 @@ class TestCuda(TestCase):
         for r, rc in zip(r_tensors, rc_tensors):
             self.assertEqual(rc.get_device(), r.get_device())
             self.assertEqual(rc.type(), r.type())
+
+        # Since we have both cuda:0 and cuda:1 inputs, the outputs must be new.
+        # We can check that they have different version counters.
+        # NOTE [ Version Counter in comm.*_coalesced ]
+        versions = [t._version for t in rc_tensors]
+        for old_version, t in zip(versions, rc_tensors):
+            self.assertEqual(t._version, old_version)
+            t.zero_()
+            self.assertEqual(t._version, old_version + 1)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @skipIfRocm
