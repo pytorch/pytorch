@@ -614,10 +614,9 @@ inline bool IValue::isSameIdentity(IValue& rhs) {
   // Semantics:
   // 1. None is None, False is False, and True is True are all true
   // 2. If it is a tensor type, we need to take undefined tensor into account
-  // 3. Undefined_tensor is None should be true
+  // 3. Undefined_tensor is None and vice versa should be true
   // 4. If it is a reference type (i.e. is_intrusive_ptr), then is is True when the pointed-to object is the same.
   // 5. False for all other comparisons.
-  std::cout<<"this tag kind: " << this->tagKind() << " rhs tag kind: " << rhs.tagKind() << std::endl;
   if (this->isNone() && rhs.isNone()) {
     return true;
   } else if (this->isBool() && rhs.isBool()) {
@@ -629,6 +628,9 @@ inline bool IValue::isSameIdentity(IValue& rhs) {
   } else if (this->isTensor() && rhs.isNone()) {
     // special case: undefined tensor and None are the same identity
     return !this->is_intrusive_ptr;
+  } else if (this->isNone() && rhs.isTensor()) {
+    // special case: undefined tensor and None are the same identity
+    return !rhs.is_intrusive_ptr;
   } else {
     // for objects holding in IValue, do shallow compare on pointer address to testify the identity
     return this->is_intrusive_ptr && rhs.is_intrusive_ptr

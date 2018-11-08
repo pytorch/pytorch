@@ -4184,8 +4184,8 @@ a")
             return output
 
         def none_args(x):
-            # type: (Optional[Tensor])
-            return x
+            # type: (Optional[Tensor]) -> Optional[Tensor]
+            return None
 
         self.checkScript(none_stmt, [torch.arange(0, 2)], optimize=True)
         self.checkScript(none_args, [None], optimize=True)

@@ -166,6 +166,11 @@ inline bool operator!=(const Type & lhs, const Type & rhs) {
 struct OptionalType;
 using OptionalTypePtr = std::shared_ptr<OptionalType>;
 // This type represents an optional type, for each element type.
+// Optional[T] can accept both T and None(nullopt in C++)
+// Subtype hierarchy for Optional:
+// 1. Optional[T] isSubtypeOf Optional[R] iff T isSubtypeOf R
+// 2. T isSubtypeOf Optional[R] if T isSubtypeOf R
+// 3. NoneType isSubtypeOf any Optional Type
 struct OptionalType: public Type {
   static OptionalTypePtr create(TypePtr element) {
     return OptionalTypePtr(new OptionalType(std::move(element))); // NOLINT(modernize-make-shared)
@@ -234,7 +239,7 @@ struct CAFFE2_API DynamicType : public Type {
     if(auto rhs_ = rhs->cast<OptionalType>()) {
       return this->isSubtypeOf(rhs_->getElementType());
     }
-    return *this == *rhs;
+    return Type::isSubtypeOf(rhs);
   }
   std::string str() const override {
     return "Tensor";
