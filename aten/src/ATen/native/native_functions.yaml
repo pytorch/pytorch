@@ -433,6 +433,11 @@
 
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
 
+- func: _copy_(Tensor self, Tensor src) -> Tensor
+  cpu_half: True
+  dispatch:
+    CPU: _copy__cpu
+
 - func: cos(Tensor self) -> Tensor
   variants: function, method
 
