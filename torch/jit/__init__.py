@@ -1315,6 +1315,11 @@ _builtin_blacklist = {
     'leaky_relu',
     'pairwise_distance',
     'prelu',
+    'hardshrink',
+    'ctc_loss',
+    'threshold',
+
+    # ops with inplace option
     'relu',
     'relu6',
     'rrelu',
