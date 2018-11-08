@@ -296,8 +296,8 @@ struct Environment {
             as_simple_value->type()->kind() == TypeKind::ListType) {
           errMsg << "\n. (Note: empty lists are constructed as Tensor[]; "
                  << "if you want an empty list of a different type, "
-                 << "use `_construct_empty_foo_list`, "
-                 << "where `foo` is `int` or `float`)";
+                 << "use `torch.jit.annotate(List[T], [])`, "
+                 << "where `T` is the type of elements in the list)";
         }
         throw ErrorReport(loc) << errMsg.str();
       }
@@ -1754,7 +1754,9 @@ private:
       return emitForkExpr(loc, forked, inputs, attributes);
     } else if (auto annotate_value = dynamic_cast<AnnotateValue*>(sv.get())) {
       if (apply.inputs().size() != 2) {
-        throw ErrorReport(loc) << "expected exactly two arguments to attribute but found " << apply.inputs().size();
+        throw ErrorReport(loc)
+            << "expected exactly two arguments to attribute but found "
+            << apply.inputs().size();
       }
       if (apply.attributes().size() > 0) {
         throw ErrorReport(loc) << "attribute takes no keyword arguments";
