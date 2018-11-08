@@ -57,14 +57,29 @@ struct Parser {
         List<Expr>(makeList(range, std::move(inputs))),
         List<Attribute>(makeList(range, std::move(attributes))));
   }
+
+  static bool followsTuple(int kind) {
+    switch(kind) {
+      case TK_PLUS_EQ:
+      case TK_MINUS_EQ:
+      case TK_TIMES_EQ:
+      case TK_DIV_EQ:
+      case TK_NEWLINE:
+      case '=':
+      case ')':
+        return true;
+      default:
+        return false;
+    }
+  }
+
   // exp | expr, | expr, expr, ...
-  TreeRef parseExpOrExpTuple(int end) {
+  Expr parseExpOrExpTuple() {
     auto prefix = parseExp();
     if(L.cur().kind == ',') {
       std::vector<Expr> exprs = { prefix };
-      while(L.cur().kind != end) {
-        L.expect(',');
-        if (L.cur().kind == end)
+      while(L.nextIf(',')) {
+        if (followsTuple(L.cur().kind))
           break;
         exprs.push_back(parseExp());
       }
@@ -98,7 +113,7 @@ struct Parser {
           prefix = TupleLiteral::create(L.cur().range, listExpr);
           break;
         }
-        prefix = parseExpOrExpTuple(')');
+        prefix = parseExpOrExpTuple();
         L.expect(')');
       } break;
       case '[': {
@@ -356,20 +371,20 @@ struct Parser {
   // 'first' has already been parsed since expressions can exist
   // alone on a line:
   // first[,other,lhs] = rhs
-  TreeRef parseAssign(List<Expr> lhs) {
+  TreeRef parseAssign(Expr lhs) {
     auto op = parseAssignmentOp();
-    auto rhs = parseExpOrExpTuple(TK_NEWLINE);
+    auto rhs = parseExpOrExpTuple();
     L.expect(TK_NEWLINE);
     if (op->kind() == '=') {
       return Assign::create(lhs.range(), lhs, Expr(rhs));
     } else {
       // this is an augmented assignment
-      if (lhs.size() != 1) {
+      if (lhs.kind() == TK_TUPLE_LITERAL) {
         throw ErrorReport(lhs.range())
             << " augmented assignment can only have one LHS expression";
       }
       return AugAssign::create(
-          lhs.range(), lhs[0], AugAssignKind(op), Expr(rhs));
+          lhs.range(), lhs, AugAssignKind(op), Expr(rhs));
     }
   }
 
@@ -416,12 +431,12 @@ struct Parser {
         return Pass::create(range);
       }
       default: {
-        List<Expr> exprs = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
+        auto lhs = parseExpOrExpTuple();
         if (L.cur().kind != TK_NEWLINE) {
-          return parseAssign(exprs);
+          return parseAssign(lhs);
         } else {
           L.expect(TK_NEWLINE);
-          return ExprStmt::create(exprs[0].range(), exprs);
+          return ExprStmt::create(lhs.range(), lhs);
         }
       }
     }
