@@ -204,8 +204,9 @@ struct THCCachingAllocator
           AT_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
           const auto& stats = get_stats_for_device(device);
 
-          // "total": total global memory on GPU
-          // "allocated": memory allocated by the program using the caching allocator
+          // "total capacity": total global memory on GPU
+          // "already allocated": memory allocated by the program using the
+          //                      caching allocator
           // "cached": memory held by the allocator but not used by the program
           //
           // The "allocated" amount  does not include memory allocated outside
@@ -218,8 +219,8 @@ struct THCCachingAllocator
           AT_ERROR(
             "CUDA out of memory. Tried to allocate ", format_size(alloc_size),
             " (GPU ", device, "; ",
-            format_size(prop.totalGlobalMem), " total; ",
-            format_size(stats.amount_allocated), " allocated; ",
+            format_size(prop.totalGlobalMem), " total capacity; ",
+            format_size(stats.amount_allocated), " already allocated; ",
             format_size(stats.amount_cached - stats.amount_allocated), " cached)");
         } else {
           AT_CUDA_CHECK(err);

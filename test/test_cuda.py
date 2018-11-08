@@ -840,7 +840,6 @@ class TestCuda(TestCase):
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
 
-
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @skipIfRocm
     def test_autogpu(self):
