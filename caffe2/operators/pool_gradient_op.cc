@@ -200,12 +200,12 @@ bool PoolGradientOp<T, Context, PoolType>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  DCHECK_EQ(dY.ndim(), kernel_.size() + 2);
+  DCHECK_EQ(dY.dim(), kernel_.size() + 2);
   auto* dX = Output(0);
   dX->ResizeLike(X);
 
-  int channels = X.dim32(X.ndim() - 1);
-  CAFFE_ENFORCE_EQ(channels, dY.dim32(dY.ndim() - 1));
+  int channels = X.dim32(X.dim() - 1);
+  CAFFE_ENFORCE_EQ(channels, dY.dim32(dY.dim() - 1));
   ConstEigenArrayMap<T> Ymat(
       Y.template data<float>(), channels, Y.numel() / channels);
   ConstEigenArrayMap<float> dYmat(

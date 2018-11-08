@@ -1529,9 +1529,10 @@ Example::
 
 add_docstr(torch.erfc,
            r"""
-erfc(tensor, out=None) -> Tensor
+erfc(input, out=None) -> Tensor
 
-Computes the complementary error function of each element. The complementary error function is defined as follows:
+Computes the complementary error function of each element of :attr:`input`.
+The complementary error function is defined as follows:
 
 .. math::
     \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
@@ -1548,16 +1549,16 @@ Example::
 
 add_docstr(torch.erfinv,
            r"""
-erfinv(tensor, out=None) -> Tensor
+erfinv(input, out=None) -> Tensor
 
-Computes the inverse error function of each element. The inverse error function is defined
-in the range :math:`(-1, 1)` as:
+Computes the inverse error function of each element of :attr:`input`.
+The inverse error function is defined in the range :math:`(-1, 1)` as:
 
 .. math::
     \mathrm{erfinv}(\mathrm{erf}(x)) = x
 
 Args:
-    tensor (Tensor): the input tensor
+    input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
 
 Example::
@@ -1568,20 +1569,16 @@ Example::
 
 add_docstr(torch.exp,
            r"""
-exp(tensor, out=None) -> Tensor
+exp(input, out=None) -> Tensor
 
 Returns a new tensor with the exponential of the elements
-of :attr:`input`.
+of the input tensor :attr:`input`.
 
 .. math::
     y_{i} = e^{x_{i}}
 
 Args:
     input (Tensor): the input tensor
-    out (Tensor, optional): the output tensor
-
-Args:
-    tensor (Tensor): the input tensor
     out (Tensor, optional): the output tensor
 
 Example::
@@ -1592,7 +1589,7 @@ Example::
 
 add_docstr(torch.expm1,
            r"""
-expm1(tensor, out=None) -> Tensor
+expm1(input, out=None) -> Tensor
 
 Returns a new tensor with the exponential of the elements minus 1
 of :attr:`input`.
@@ -1602,10 +1599,6 @@ of :attr:`input`.
 
 Args:
     input (Tensor): the input tensor
-    out (Tensor, optional): the output tensor
-
-Args:
-    tensor (Tensor): the input tensor
     out (Tensor, optional): the output tensor
 
 Example::
@@ -1692,9 +1685,9 @@ Example::
 
 add_docstr(torch.frac,
            r"""
-frac(tensor, out=None) -> Tensor
+frac(input, out=None) -> Tensor
 
-Computes the fractional portion of each element in :attr:`tensor`.
+Computes the fractional portion of each element in :attr:`input`.
 
 .. math::
     \text{out}_{i} = \text{input}_{i} - \left\lfloor \text{input}_{i} \right\rfloor

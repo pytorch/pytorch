@@ -40,4 +40,22 @@ foreach(ns ${NAMESPACES})
   endif()
 endforeach()
 
+# The moving constructor is defined in the header file, which will cause
+# a link error that claims that the vftable is not found. Luckily, we
+# could move the definition into the source file to solve the problem.
+list(LENGTH NAMESPACES ns_count)
+if ("${FILENAME}" MATCHES ".pb.h" AND ns_count EQUAL 1)
+  string(REPLACE ".pb.h" ".pb.cc" SOURCE_FILENAME ${FILENAME})
+  file(READ ${SOURCE_FILENAME} content_cc_origin)
+
+  string(REGEX MATCHALL "([a-zA-Z_]+)\\([a-zA-Z_]+&& from\\) noexcept[^}]*}" content_cc "${content}")
+  string(REGEX REPLACE "};" "}\n" content_cc "${content_cc}")
+  string(REGEX REPLACE "([a-zA-Z_]+)\\([a-zA-Z_]+&& from\\) noexcept" "  \\1::\\1(\\1&& from) noexcept" content_cc "${content_cc}")
+  set(content_cc "${content_cc_origin}\nnamespace ${NAMESPACES} {\n#if LANG_CXX11\n${content_cc}\n#endif\n}")
+
+  string(REGEX REPLACE "([a-zA-Z_]+)\\([a-zA-Z_]+&& from\\) noexcept([^}]*)}" "\\1(\\1&& from) noexcept;" content "${content}")
+
+  file(WRITE ${SOURCE_FILENAME} "${content_cc}")
+endif()
+
 file(WRITE ${FILENAME} "${content}")

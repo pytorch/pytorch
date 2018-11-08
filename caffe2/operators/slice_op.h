@@ -23,16 +23,16 @@ bool SliceImpl(
   auto* starts_data = starts.template data<SIndex>();
   auto* ends_data = ends.template data<SIndex>();
 
-  CAFFE_ENFORCE_EQ(starts.ndim(), 1);
-  CAFFE_ENFORCE_EQ(ends.ndim(), 1);
-  CAFFE_ENFORCE_GE(data.ndim(), starts.numel());
+  CAFFE_ENFORCE_EQ(starts.dim(), 1);
+  CAFFE_ENFORCE_EQ(ends.dim(), 1);
+  CAFFE_ENFORCE_GE(data.dim(), starts.numel());
   CAFFE_ENFORCE_EQ(starts.numel(), ends.numel());
 
-  std::vector<SIndex> starts_idx(data.ndim());
-  std::vector<SIndex> ends_idx(data.ndim());
-  std::vector<SIndex> dst_sizes(data.ndim());
+  std::vector<SIndex> starts_idx(data.dim());
+  std::vector<SIndex> ends_idx(data.dim());
+  std::vector<SIndex> dst_sizes(data.dim());
 
-  for (int i = 0; i < data.ndim(); ++i) {
+  for (int i = 0; i < data.dim(); ++i) {
     if (i >= starts.numel()) {
       starts_idx[i] = 0;
       ends_idx[i] = data.sizes()[i];
@@ -76,7 +76,7 @@ bool SliceImpl(
   }
   // for now only supports slicing in 1 dimension
   int dim = -1;
-  for (int i = 0; i < data.ndim(); ++i) {
+  for (int i = 0; i < data.dim(); ++i) {
     if (starts_idx[i] > 0 || ends_idx[i] < data.sizes()[i]) {
       CAFFE_ENFORCE_EQ(
           dim, -1, "Currently only possible to slice in 1 dimension.");

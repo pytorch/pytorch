@@ -5,7 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/nn/cloneable.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <string>

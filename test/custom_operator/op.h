@@ -15,7 +15,7 @@
 #  endif
 // clang-format on
 
-CUSTOM_OP_API std::vector<at::Tensor> custom_op(
-    at::Tensor tensor,
+CUSTOM_OP_API std::vector<torch::Tensor> custom_op(
+    torch::Tensor tensor,
     double scalar,
     int64_t repeat);
