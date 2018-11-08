@@ -576,6 +576,7 @@ Args:
     output_size: the target output size (single integer)
 """)
 
+
 @torch._jit_internal.weak_script
 def adaptive_avg_pool2d(input, output_size):
     # type: (Tensor, BroadcastingList2[int]) -> Tensor
