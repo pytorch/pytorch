@@ -1,12 +1,12 @@
-graph(%0 : Double(100)
-      %1 : Long(4)
-      %2 : Double(1, 1, 1, 4)) {
+graph(%target : Double(100)
+      %indices.1 : Long(4)
+      %rhs : Double(1, 1, 1, 4)) {
   %3 : int = prim::Constant[value=4]()
   %4 : int[] = prim::ListConstruct(%3)
-  %5 : Double(4) = aten::view(%2, %4)
+  %5 : Double(4) = aten::view(%rhs, %4)
   %6 : bool = prim::Constant[value=0]()
-  %7 : Long(4) = aten::_cast_Long(%1, %6)
-  %8 : Dynamic[] = prim::ListConstruct(%7)
-  %9 : Double(100) = aten::index_put(%0, %8, %5)
+  %indices : Long(4) = aten::_cast_Long(%indices.1, %6)
+  %8 : Dynamic[] = prim::ListConstruct(%indices)
+  %9 : Double(100) = aten::index_put(%target, %8, %5)
   return (%9);
 }
