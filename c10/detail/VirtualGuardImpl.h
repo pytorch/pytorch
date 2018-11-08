@@ -14,6 +14,9 @@ public:
   // This constructor exists purely for testing
   VirtualGuardImpl(const DeviceGuardImplInterface* impl)
     : impl_(impl) {}
+
+  // Copying and moving is OK!
+
   DeviceType type() const override {
     return impl_->type();
   }

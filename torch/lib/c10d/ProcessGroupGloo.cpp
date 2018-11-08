@@ -764,7 +764,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
     tmp = pinnedLike(inputs[rootTensor]);
     at::cuda::OptionalCUDAStreamGuard guard;
     if (context->rank == rootRank) {
-      guard.set_stream(streams[rootTensor]);
+      guard.reset_stream(streams[rootTensor]);
       tmp.copy_(inputs[rootTensor], /* non_blocking */ true);
     }
   }
@@ -774,7 +774,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
     // Synchronize with copy operation if applicable.
     if (context->rank == rootRank) {
-      guard.set_stream(streams[rootTensor]);
+      guard.reset_stream(streams[rootTensor]);
       AT_CUDA_CHECK(cudaStreamSynchronize(streams[rootTensor]));
     }
 
@@ -783,7 +783,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
     // Kick off copy back to the CUDA tensors.
     for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_stream(streams[i]);
+      guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp, /* non_blocking */ true);
       events[i].record(streams[i]);
     }
@@ -924,7 +924,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
     tmp.reserve(inputs.size());
     at::cuda::OptionalCUDAStreamGuard guard;
     for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_stream(streams[i]);
+      guard.reset_stream(streams[i]);
       tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
   }
@@ -943,7 +943,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
     // Kick off copy back to the CUDA tensors.
     at::cuda::OptionalCUDAStreamGuard stream_guard;
     for (size_t i = 0; i < inputs.size(); i++) {
-      stream_guard.set_stream(streams[i]);
+      stream_guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
     }

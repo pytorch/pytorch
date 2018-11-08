@@ -11,10 +11,14 @@ namespace detail {
  * default stream on that device to be this stream.
  *
  * InlineStreamGuard is a helper class for implementing StreamGuards.
+ * See InlineDeviceGuard for guidance on how to use this class.
  */
 template <typename T>
 class InlineStreamGuard : private InlineDeviceGuard<T> {
 public:
+  /// No default constructor, see Note [Omitted default constructor from RAII]
+  explicit InlineStreamGuard() = delete;
+
   /// Set the current device to the device associated with the passed stream,
   /// and set the current stream on that device to the passed stream.
   explicit InlineStreamGuard(Stream stream)
@@ -23,8 +27,8 @@ public:
     , current_stream_(stream)
     {}
 
-  // This constructor exists purely for testing
-  template <typename U=T, typename=std::enable_if<std::is_same<U, VirtualGuardImpl>::value >>
+  /// This constructor exists purely for testing
+  template <typename U=T, typename=typename std::enable_if<std::is_same<U, VirtualGuardImpl>::value>::type>
   explicit InlineStreamGuard(Stream stream, const DeviceGuardImplInterface* impl)
     : InlineDeviceGuard<T>(stream.device(), impl)
     , original_stream_(this->impl_.exchangeStream(stream))
@@ -35,7 +39,7 @@ public:
   InlineStreamGuard(const InlineStreamGuard<T>&) = delete;
   InlineStreamGuard<T>& operator=(const InlineStreamGuard<T>&) = delete;
 
-  /// Move is disallowed, as DeviceGuard does not have an uninitialized state,
+  /// Move is disallowed, as StreamGuard does not have an uninitialized state,
   /// which is required for moves on types with nontrivial destructors.
   InlineStreamGuard(InlineStreamGuard<T>&& other) = delete;
   InlineStreamGuard& operator=(InlineStreamGuard<T>&& other) = delete;
@@ -44,30 +48,34 @@ public:
     this->impl_.exchangeStream(original_stream_);
   }
 
-  /// Set the current device to the device associated with the passed stream,
-  /// and set the current stream on that device to the passed stream.  If
-  /// a device change occurred, *reset* the current stream on the previous
-  /// device to its original value.
+  /// Resets the currently set stream to the original stream and
+  /// the currently set device to the original device.  Then,
+  /// set the current device to the device associated with the passed stream,
+  /// and set the current stream on that device to the passed stream.
   ///
-  /// (If you need to remember streams, consider using CUDAMultiStreamGuard.)
-  void set_stream(Stream stream) {
+  /// NOTE: this implementation may skip some stream/device setting if
+  /// it can prove that it is unnecessary.
+  ///
+  /// WARNING: reset_stream does NOT preserve previously set streams on
+  /// different devices.  If you need to set streams on multiple devices
+  /// on CUDA, use CUDAMultiStreamGuard instead.
+  void reset_stream(Stream stream) {
     if (stream.device() == this->original_device()) {
       this->impl_.exchangeStream(stream);
       current_stream_ = stream;
     } else {
       // Destruct and reconstruct the StreamGuard in-place
       this->impl_.exchangeStream(original_stream_);
-      this->set_device(stream.device());
+      this->reset_device(stream.device());
       original_stream_ = this->impl_.exchangeStream(stream);
       current_stream_ = stream;
     }
   }
 
-  // We could probably provide set_device, but be careful: you need to restore
-  // the stream on the current device before moving to the new device.  (It's
-  // also weird to think about what set_device should do if it's a no-op;
-  // probably shouldn't reset the current stream... it's just weird that
-  // the current stream changes in this case.)
+  // It's not clear if set_device should also reset the current stream
+  // if the device is unchanged; therefore, we don't provide it.
+  // The situation is somewhat clearer with reset_device, but it's still
+  // a pretty weird thing to do, so haven't added this either.
 
   /// Returns the stream that was set at the time the guard was constructed.
   Stream original_stream() const {
@@ -80,10 +88,14 @@ public:
     return current_stream_;
   }
 
+  /// Returns the most recent device that was set using this device guard,
+  /// either from construction, or via set_device/reset_device/set_index.
   Device current_device() const {
     return InlineDeviceGuard<T>::current_device();
   }
 
+  /// Returns the device that was set at the most recent reset_stream(),
+  /// or otherwise the device at construction time.
   Device original_device() const {
     return InlineDeviceGuard<T>::original_device();
   }
@@ -94,62 +106,68 @@ private:
 };
 
 /**
- * A MaybeStreamGuard is an RAII class that sets a device to some value on
+ * An OptionalStreamGuard is an RAII class that sets a device to some value on
  * initialization, and resets the device to its original value on destruction.
+ * See InlineOptionalDeviceGuard for more guidance on how to use this class.
  */
 template <typename T>
-class InlineMaybeStreamGuard {
+class InlineOptionalStreamGuard {
 public:
-  // Note [Explicit initialization of optional fields]
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // Explicit initialization of optional fields
-  // required to workaround an nvcc bug; see https://github.com/pytorch/pytorch/issues/12117
-
-
-  /// Default constructor, reads the current device so that
-  /// we may reset the device to the current device on destruction.
-  explicit InlineMaybeStreamGuard()
+  /// Creates an uninitialized stream guard.
+  explicit InlineOptionalStreamGuard()
     : guard_() // See Note [Explicit initialization of optional fields]
     {}
 
-  /// Set the current device to the passed Device
-  explicit InlineMaybeStreamGuard(optional<Device> device_opt)
+  /// Set the current device to the device associated with the passed stream,
+  /// and set the current stream on that device to the passed stream,
+  /// if the passed stream is not nullopt.
+  explicit InlineOptionalStreamGuard(optional<Stream> stream_opt)
     : guard_() {
-    if (device_opt.has_value()) {
-      guard_.emplace(device_opt.value());
+    if (stream_opt.has_value()) {
+      guard_.emplace(stream_opt.value());
     }
   }
 
-  /// All constructors of StreamGuard are valid for MaybeStreamGuard
+  /// All constructors of StreamGuard are valid for OptionalStreamGuard
   template <typename... Args>
-  explicit InlineMaybeStreamGuard(Args&&... args)
+  explicit InlineOptionalStreamGuard(Args&&... args)
     : guard_(in_place, std::forward<Args>(args)...) {}
 
   // See Note [Move construction for RAII guards is tricky]
-  InlineMaybeStreamGuard(InlineMaybeStreamGuard<T>&& other) = delete;
+  InlineOptionalStreamGuard(InlineOptionalStreamGuard<T>&& other) = delete;
 
   // See Note [Move assignment for RAII guards is tricky]
-  InlineMaybeStreamGuard& operator=(InlineMaybeStreamGuard&& other) = delete;
+  InlineOptionalStreamGuard& operator=(InlineOptionalStreamGuard&& other) = delete;
 
-  void set_stream(Stream stream) {
+  /// Resets the currently set stream to the original stream and
+  /// the currently set device to the original device.  Then,
+  /// set the current device to the device associated with the passed stream,
+  /// and set the current stream on that device to the passed stream.
+  /// Initializes the OptionalStreamGuard if it was not previously initialized.
+  void reset_stream(Stream stream) {
     if (guard_.has_value()) {
-      guard_->set_stream(stream);
+      guard_->reset_stream(stream);
     } else {
       guard_.emplace(stream);
     }
   }
 
-  /// Returns the stream that was set at the time the guard was initialized,
-  /// or nullopt if the guard is uninitialized.
+  /// Returns the stream that was set at the time the guard was most recently
+  /// initialized, or nullopt if the guard is uninitialized.
   optional<Stream> original_stream() const {
     return guard_.has_value() ? make_optional(guard_->original_stream()) : nullopt;
   }
 
   /// Returns the most recent stream that was set using this stream guard,
-  /// either from construction, or via set_stream, if the guard is initialized,
+  /// either from construction, or via reset_stream, if the guard is initialized,
   /// or nullopt if the guard is uninitialized.
   optional<Stream> current_stream() const {
     return guard_.has_value() ? make_optional(guard_->current_stream()) : nullopt;
+  }
+
+  /// Restore the original device and stream, resetting this guard to uninitialized state.
+  void reset() const {
+    guard_.reset();
   }
 
 private:

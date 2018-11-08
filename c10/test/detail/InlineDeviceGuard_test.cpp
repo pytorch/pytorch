@@ -73,6 +73,22 @@ TEST(InlineDeviceGuard, SetDevice) {
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i2);
 }
 
+TEST(InlineDeviceGuard, ResetDevice) {
+  DeviceIndex init_i = 0;
+  TestGuardImpl::setDeviceIndex(init_i);
+  DeviceIndex i = init_i + 1;
+  TestGuard g(i);
+  DeviceIndex i2 = init_i + 2;
+  g.reset_device(dev(i2));
+  ASSERT_EQ(g.original_device(), dev(init_i));
+  ASSERT_EQ(g.current_device(), dev(i2));
+  ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i2);
+  g.reset_device(dev(i2));
+  ASSERT_EQ(g.original_device(), dev(init_i));
+  ASSERT_EQ(g.current_device(), dev(i2));
+  ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i2);
+}
+
 TEST(InlineDeviceGuard, SetIndex) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);

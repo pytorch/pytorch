@@ -157,7 +157,7 @@ std::vector<at::Tensor> scatter(
           chunk, " (was ", (*streams)[chunk]->device_index(), ") ",
           "to match the device supplied at that index ",
           "(expected ", device_index, ")");
-      cuda_guard.set_stream(*(*streams)[chunk]);
+      cuda_guard.reset_stream(*(*streams)[chunk]);
     }
     chunks[chunk] = chunks[chunk].contiguous().to(
         {at::DeviceType::CUDA, device_index}, /*non_blocking=*/true);

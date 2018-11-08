@@ -16,9 +16,8 @@ namespace c10 {
 /// of optional<DeviceGuard>), see OptionalDeviceGuard.
 class DeviceGuard {
 public:
-  /// Why no default constructor?  In principle, we could implement a default
-  /// constructor here (which would eagerly read the current device), but we
-  /// purposely do not to encourage users to look into using OptionalDeviceGuard.
+  /// No default constructor; see Note [Omitted default constructor from RAII]
+  /// for why.
   explicit DeviceGuard() = delete;
 
   /// Set the current device to the passed Device.
@@ -40,8 +39,8 @@ public:
   /// behavior with set_stream, where a stream on a different device than
   /// the original one isn't an error; we just reset the stream and then
   /// switch devices.
-  void set_device(at::Device device) {
-    guard_.set_device(device);
+  void reset_device(at::Device device) {
+    guard_.reset_device(device);
   }
 
   /// Sets the device index to the given one.  The device type is inferred
@@ -112,8 +111,8 @@ public:
 
   /// Sets the device to the given one.  The specified device must be consistent
   /// with the device type originally specified during guard construction.
-  void set_device(at::Device device) {
-    guard_.set_device(device);
+  void reset_device(at::Device device) {
+    guard_.reset_device(device);
   }
 
   /// Returns the device that was set at the time the guard was constructed.

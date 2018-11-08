@@ -62,7 +62,7 @@ struct CUDAGuard {
 
 using OptionalCUDAGuard = c10::detail::InlineOptionalDeviceGuard<detail::CUDAGuardImpl>;
 using CUDAStreamGuard = c10::detail::InlineStreamGuard<detail::CUDAGuardImpl>;
-using OptionalCUDAStreamGuard = c10::detail::InlineMaybeStreamGuard<detail::CUDAGuardImpl>;
+using OptionalCUDAStreamGuard = c10::detail::InlineOptionalStreamGuard<detail::CUDAGuardImpl>;
 
 struct CUDAMultiStreamGuard {
   /// Calls `set_stream` on each of the streams in the list.
