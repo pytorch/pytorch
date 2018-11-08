@@ -39,7 +39,7 @@ class BatchMatMulDNNLowPOp final
   bool is_B_constant_{false};
 
   std::vector<std::int8_t> B_quantized_;
-  std::vector<std::unique_ptr<fbgemm2::PackBMatrix<std::int8_t>>> Bq_packed_;
+  std::vector<std::unique_ptr<fbgemm::PackBMatrix<std::int8_t>>> Bq_packed_;
   std::vector<std::uint8_t> A_pack_buf_;
   std::vector<std::int32_t> row_offsets_, column_offsets_;
 

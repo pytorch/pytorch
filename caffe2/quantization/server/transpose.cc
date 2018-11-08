@@ -2,7 +2,7 @@
 
 #include <x86intrin.h>
 
-namespace fbgemm2 {
+namespace fbgemm {
 
 void transpose_4rows(int N, const std::uint8_t* src, std::uint8_t* dst) {
   constexpr int M = 4;
@@ -60,4 +60,4 @@ void transpose_4rows(int N, const std::uint8_t* src, std::uint8_t* dst) {
   }
 }
 
-} // namespace fbgemm2
+} // namespace fbgemm
