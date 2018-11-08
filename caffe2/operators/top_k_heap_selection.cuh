@@ -4,11 +4,7 @@
 #include "caffe2/utils/GpuBitonicSort.cuh"
 #include "caffe2/utils/GpuDefs.cuh"
 #include "caffe2/utils/math.h"
-#if defined(__HIP_PLATFORM_HCC__)
-#include <hip/hip_runtime.h>
-#else
 #include <cuda_runtime.h>
-#endif  // __HIP_PLATFORM_HCC__
 
 namespace caffe2 {
 
