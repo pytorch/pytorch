@@ -112,7 +112,7 @@ bool test_mnist(
     M&& model,
     F&& forward_op,
     O&& optimizer) {
-  std::string mnist_path = "test/cpp/api/mnist";
+  std::string mnist_path = "mnist";
   if (const char* user_mnist_path = getenv("TORCH_CPP_TEST_MNIST_PATH")) {
     mnist_path = user_mnist_path;
   }
@@ -142,10 +142,11 @@ bool test_mnist(
   torch::NoGradGuard guard;
   torch::data::datasets::MNIST test_dataset(
       mnist_path, torch::data::datasets::MNIST::Mode::kTest);
+  auto images = test_dataset.images().to(device),
+       targets = test_dataset.targets().to(device);
 
-  auto result = forward_op(test_dataset.images()).max_values(/*dim=*/1);
-  torch::Tensor correct =
-      (result == test_dataset.targets()).to(torch::kFloat32);
+  auto result = std::get<1>(forward_op(images).max(/*dim=*/1));
+  torch::Tensor correct = (result == targets).to(torch::kFloat32);
   return correct.sum().item<float>() > (test_dataset.size().value() * 0.8);
 }
 
