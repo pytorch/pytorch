@@ -182,6 +182,17 @@ public:
   // make it happen
   void set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values);
 
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
+    auto impl = c10::make_intrusive<SparseTensorImpl>(type_id(), dtype());
+    impl->size_ = sizes().vec();
+    impl->sparse_dim_ = sparse_dim();
+    impl->dense_dim_ = dense_dim();
+    impl->indices_ = indices();
+    impl->values_ = values();
+    impl->coalesced_ = coalesced();
+    impl->refresh_numel();
+    return impl;
+  }
  private:
   int64_t get_device_slow() const override {
     return values_.get_device();
