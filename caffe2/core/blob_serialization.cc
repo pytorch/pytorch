@@ -216,7 +216,7 @@ void TensorSerializer::Serialize(
   proto.mutable_segment()->set_begin(chunkBegin);
   proto.mutable_segment()->set_end(chunkBegin + chunkSize);
 
-  for (int i = 0; i < input.ndim(); ++i) {
+  for (int i = 0; i < input.dim(); ++i) {
     proto.add_dims(input.size(i));
   }
   const TensorProto::DataType data_type = TypeMetaToDataType(input.dtype());

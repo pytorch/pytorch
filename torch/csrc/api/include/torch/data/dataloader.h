@@ -6,13 +6,12 @@
 #include <torch/data/iterator.h>
 #include <torch/data/samplers/random.h>
 #include <torch/data/worker_exception.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 
 #include <cstddef>
 #include <exception>
@@ -28,7 +27,7 @@ template <typename Dataset, typename Sampler>
 class DataLoader {
  public:
   using Batch = typename Dataset::BatchType;
-  using IndexBatch = std::vector<size_t>;
+  using BatchRequest = typename Sampler::BatchRequestType;
 
   /// Constructs a new `DataLoader` from a `dataset` to sample from, `options`
   /// to configure the `DataLoader` with, and a `sampler` that specifies the
@@ -37,29 +36,20 @@ class DataLoader {
       : options_(std::move(options)),
         sampler_(std::move(sampler)),
         sequencer_(new_sequencer()) {
-    // clang-format off
-    AT_CHECK(
-        options_.batch_size <= dataset.size(),
-        "Batch size (was ", options_.batch_size, ") ",
-        "must not be larger than the dataset size (was ",
-        dataset.size(), ")");
-    // clang-format on
-
-    if (options_.workers > 0) {
-      for (size_t w = 0; w < options_.workers; ++w) {
-        // Here we copy the dataset into the worker thread closure. Each worker
-        // has its own copy of the dataset. This means the dataset must be
-        // trivially copiable, or else we don't expect more than one worker to
-        // be in use.
-        workers_.emplace_back(
-            [this, dataset] { this->worker_thread(std::move(dataset)); });
-      }
-    } else {
+    for (size_t w = 0; w < options_.workers; ++w) {
+      // Here we copy the dataset into the worker thread closure. Each worker
+      // has its own copy of the dataset. This means the dataset must be
+      // trivially copiable, or else we don't expect more than one worker to
+      // be in use.
+      workers_.emplace_back(
+          [this, dataset] { this->worker_thread(std::move(dataset)); });
+    }
+    if (options_.workers == 0) {
       main_thread_dataset_ = torch::make_unique<Dataset>(std::move(dataset));
     }
   }
 
-  ~DataLoader() {
+  virtual ~DataLoader() {
     join();
   }
 
@@ -136,15 +126,15 @@ class DataLoader {
 
   struct QuitWorker {};
 
-  /// A `Job` is either an `IndexBatch` (new indices to fetch data at) or a
+  /// A `Job` is either a `BatchRequest` (new indices to fetch data at) or a
   /// `QuitWorker` object, to indicate the worker should shut down.
   struct Job : Sequenced {
     Job() = default;
     Job(QuitWorker q, size_t sqn) : Sequenced(sqn), quit(q) {}
-    Job(IndexBatch&& i, size_t sqn)
-        : Sequenced(sqn), index_batch(std::move(i)) {}
+    Job(BatchRequest&& i, size_t sqn)
+        : Sequenced(sqn), batch_request(std::move(i)) {}
     optional<QuitWorker> quit;
-    optional<IndexBatch> index_batch;
+    optional<BatchRequest> batch_request;
   };
 
   /// The finished result of a job.
@@ -173,8 +163,8 @@ class DataLoader {
   /// number of jobs scheduled may be less if the `DataLoader` exhausts.
   void prefetch(size_t requested_jobs) {
     while (requested_jobs-- > 0) {
-      if (auto index_batch = get_index_batch()) {
-        push_job(std::move(*index_batch));
+      if (auto batch_request = get_batch_request()) {
+        push_job(std::move(*batch_request));
       } else {
         break;
       }
@@ -202,9 +192,9 @@ class DataLoader {
           prefetch(1);
         }
       }
-    } else if (auto index_batch = get_index_batch()) {
+    } else if (auto batch_request = get_batch_request()) {
       AT_ASSERT(main_thread_dataset_ != nullptr);
-      batch = main_thread_dataset_->get_batch(std::move(*index_batch));
+      batch = main_thread_dataset_->get_batch(std::move(*batch_request));
     }
     return batch;
   }
@@ -217,7 +207,7 @@ class DataLoader {
         break;
       }
       try {
-        auto batch = dataset.get_batch(std::move(*job.index_batch));
+        auto batch = dataset.get_batch(std::move(*job.batch_request));
         shuttle_.push_result({std::move(batch), job.sequence_number});
       } catch (...) {
         shuttle_.push_result({std::current_exception(), job.sequence_number});
@@ -225,13 +215,13 @@ class DataLoader {
     }
   }
 
-  optional<IndexBatch> get_index_batch() {
+  optional<BatchRequest> get_batch_request() {
     auto indices = sampler_.next(options_.batch_size);
     if (!indices ||
         (indices->size() < options_.batch_size && options_.drop_last)) {
       return nullopt;
     }
-    AT_ASSERT(!indices->empty());
+    AT_ASSERT(indices->size() > 0);
     return indices;
   }
 
@@ -257,7 +247,7 @@ class DataLoader {
   /// when empty, therefore `unique_ptr` and not `optional`.
   std::unique_ptr<Dataset> main_thread_dataset_;
 
-  /// The sampler with which new index batches are created.
+  /// The sampler with which new batch requests are created.
   Sampler sampler_;
 
   /// The sequence number for the *next* batch to be retrieved from the
@@ -298,9 +288,13 @@ template <
 std::unique_ptr<DataLoader<Dataset, Sampler>> make_data_loader(
     Dataset dataset,
     DataLoaderOptions options = DataLoaderOptions()) {
-  const auto size = dataset.size();
-  return torch::make_unique<DataLoader<Dataset, Sampler>>(
-      std::move(dataset), std::move(options), Sampler(size));
+  const optional<size_t> size = dataset.size();
+  AT_CHECK(
+      size.has_value(),
+      "Expected the dataset to be sized in "
+      "order to construct the Sampler");
+  return make_data_loader(
+      std::move(dataset), std::move(options), Sampler(*size));
 }
 
 } // namespace data

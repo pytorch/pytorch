@@ -76,7 +76,7 @@ struct Tree : std::enable_shared_from_this<Tree> {
     if (kind() != k) {
       std::stringstream ss;
       ss << filename << ":" << lineno << ": expecting kind '" << kindToString(k)
-         << "' but found '" << kind() << "'\n";
+         << "' but found '" << kindToString(kind()) << "'\n";
       range().highlight(ss);
       throw std::runtime_error(ss.str());
     }
@@ -96,8 +96,8 @@ struct Tree : std::enable_shared_from_this<Tree> {
 };
 
 struct String : public Tree {
-  String(const std::string& value_) : Tree(TK_STRING), value_(value_) {}
-  virtual const std::string& stringValue() const override {
+  String(std::string value) : Tree(TK_STRING), value_(std::move(value)) {}
+  const std::string& stringValue() const override {
     return value_;
   }
   template <typename... Args>
@@ -121,22 +121,22 @@ static SourceRange mergeRanges(SourceRange c, const TreeList& others) {
 }
 
 struct Compound : public Tree {
-  Compound(int kind, const SourceRange& range_) : Tree(kind), range_(range_) {}
+  Compound(int kind, SourceRange range) : Tree(kind), range_(std::move(range)) {}
   Compound(int kind, const SourceRange& range_, TreeList&& trees_)
       : Tree(kind),
         range_(mergeRanges(range_, trees_)),
         trees_(std::move(trees_)) {}
-  virtual const TreeList& trees() const override {
+  const TreeList& trees() const override {
     return trees_;
   }
   static TreeRef
   create(int kind, const SourceRange& range_, TreeList&& trees_) {
     return std::make_shared<Compound>(kind, range_, std::move(trees_));
   }
-  virtual bool isAtom() const override {
+  bool isAtom() const override {
     return false;
   }
-  virtual TreeRef map(std::function<TreeRef(TreeRef)> fn) override {
+  TreeRef map(std::function<TreeRef(TreeRef)> fn) override {
     TreeList trees_;
     for (auto& t : trees()) {
       trees_.push_back(fn(t));

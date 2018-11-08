@@ -27,6 +27,9 @@
 #   NO_CUDNN
 #     disables the cuDNN build
 #
+#   NO_FBGEMM
+#     disables the FBGEMM build
+#
 #   NO_TEST
 #     disables the test build
 #
@@ -153,7 +156,7 @@ def hotpatch_var(var, prefix='USE_'):
 
 # Before we run the setup_helpers, let's look for NO_* and WITH_*
 # variables and hotpatch environment with the USE_* equivalent
-use_env_vars = ['CUDA', 'CUDNN', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
+use_env_vars = ['CUDA', 'CUDNN', 'FBGEMM', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
                 'OPENCV', 'QNNPACK', 'FFMPEG', 'SYSTEM_NCCL', 'GLOO_IBVERBS']
 list(map(hotpatch_var, use_env_vars))
 
@@ -168,6 +171,7 @@ from tools.setup_helpers.build import (BUILD_BINARY, BUILD_TEST,
 from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
 from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
+from tools.setup_helpers.fbgemm import USE_FBGEMM
 from tools.setup_helpers.miopen import (USE_MIOPEN, MIOPEN_LIBRARY,
                                         MIOPEN_LIB_DIR, MIOPEN_INCLUDE_DIR)
 from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_LIB_DIR, \
@@ -355,7 +359,12 @@ def build_libs(libs):
     my_env["PYTORCH_PYTHON_LIBRARY"] = cmake_python_library
     my_env["PYTORCH_PYTHON_INCLUDE_DIR"] = cmake_python_include_dir
     my_env["PYTORCH_BUILD_VERSION"] = version
-    my_env["CMAKE_PREFIX_PATH"] = full_site_packages
+
+    cmake_prefix_path = full_site_packages
+    if "CMAKE_PREFIX_PATH" in my_env:
+        cmake_prefix_path = my_env["CMAKE_PREFIX_PATH"] + ";" + cmake_prefix_path
+    my_env["CMAKE_PREFIX_PATH"] = cmake_prefix_path
+
     my_env["NUM_JOBS"] = str(NUM_JOBS)
     my_env["ONNX_NAMESPACE"] = ONNX_NAMESPACE
     if not IS_WINDOWS:
@@ -374,6 +383,8 @@ def build_libs(libs):
             my_env["NVTOOLEXT_HOME"] = NVTOOLEXT_HOME
     if USE_CUDA_STATIC_LINK:
         build_libs_cmd += ['--cuda-static-link']
+    if USE_FBGEMM:
+        build_libs_cmd += ['--use-fbgemm']
     if USE_ROCM:
         build_libs_cmd += ['--use-rocm']
     if USE_NNPACK:
@@ -446,9 +457,9 @@ class build_deps(PytorchCommand):
         check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
         check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
         check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
-        check_file(os.path.join(third_party_path, 'catch', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
+        check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
 
         check_pydep('yaml', 'pyyaml')
         check_pydep('typing', 'typing')
@@ -830,6 +841,7 @@ if USE_ROCM:
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.2')
 C10D_LIB = os.path.join(lib_path, 'libc10d.a')
+GLOO_LIB = os.path.join(lib_path, 'libgloo.a')
 GLOO_CUDA_LIB = os.path.join(lib_path, 'libgloo_cuda.a')
 
 # static library only
@@ -943,6 +955,7 @@ if USE_DISTRIBUTED:
         extra_compile_args.append('-DUSE_C10D')
         main_sources.append('torch/csrc/distributed/c10d/init.cpp')
         main_link_args.append(C10D_LIB)
+        main_link_args.append(GLOO_LIB)
         if USE_CUDA:
             main_sources.append('torch/csrc/distributed/c10d/ddp.cpp')
             main_link_args.append(GLOO_CUDA_LIB)
@@ -1184,6 +1197,7 @@ if __name__ == '__main__':
                 'lib/include/c10/macros/*.h',
                 'lib/include/c10/util/*.h',
                 'lib/include/caffe2/core/*.h',
+                'lib/include/caffe2/proto/*.h',
                 'lib/include/torch/*.h',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/api/include/torch/*.h',

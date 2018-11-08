@@ -2,7 +2,7 @@
 
 #include <torch/data/datasets/base.h>
 #include <torch/data/example.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <cstddef>
 #include <vector>
@@ -26,7 +26,7 @@ struct TensorDataset : public Dataset<TensorDataset, TensorExample> {
   }
 
   /// Returns the number of tensors in the dataset.
-  size_t size() const override {
+  optional<size_t> size() const override {
     return tensor.size(0);
   }
 

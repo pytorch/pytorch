@@ -1,3 +1,16 @@
+"""
+To run this file by hand from the root of the PyTorch
+repository, run:
+
+python -m tools.autograd.gen_autograd \
+       build/aten/src/ATen/Declarations.yaml \
+       $OUTPUT_DIR
+
+Where $OUTPUT_DIR is where you would like the files to be
+generated.  In the full build system, OUTPUT_DIR is
+torch/csrc/autograd/generated/
+"""
+
 # gen_autograd.py generates C++ autograd functions and Python bindings.
 #
 # It delegates to the following scripts:

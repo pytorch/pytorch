@@ -77,12 +77,13 @@ def _check_module_exists(name):
             return True
         except ImportError:
             return False
-    elif PY34:  # Python [3, 3.4)
+    elif not PY34:  # Python [3, 3.4)
         import importlib
         loader = importlib.find_loader(name)
         return loader is not None
     else:  # Python >= 3.4
         import importlib
+        import importlib.util
         spec = importlib.util.find_spec(name)
         return spec is not None
 
@@ -677,7 +678,11 @@ def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     return A
 
 
-def random_fullrank_matrix_distinct_singular_value(l, *batches):
+def random_fullrank_matrix_distinct_singular_value(l, *batches, **kwargs):
+    silent = kwargs.get("silent", False)
+    if silent and not torch._C.has_lapack:
+        return torch.ones(l, l)
+
     if len(batches) == 0:
         A = torch.randn(l, l)
         u, _, v = A.svd()

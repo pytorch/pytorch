@@ -28,7 +28,7 @@ RegisterOperators reg({
           return 0;
         }),
     Operator(
-        "aten::format(str self, *str args) -> str",
+        "aten::format(str self, ...) -> str",
         [](const Node* node) {
           size_t num_inputs = node->inputs().size();
           std::regex unsupported_options("\\{(.*)\\}");
@@ -40,21 +40,19 @@ RegisterOperators reg({
             }
 
             auto args = last(stack, num_inputs - 1);
-
-            size_t base = 0;
-            std::string format_arg = "{}";
-            size_t next = format.find(format_arg, base);
-            size_t used_args = 0;
             std::stringstream ss;
-
-            while (next != std::string::npos) {
-              if (used_args == args.size()) {
+            for(size_t begin = 0, used_args = 0; true; ++used_args) {
+              size_t loc = format.find("{}", begin);
+              if(loc == std::string::npos) {
+                ss << format.substr(begin);
+                break;
+              }
+              ss << format.substr(begin, loc - begin);
+              if(used_args >= args.size()) {
                 AT_ERROR("Too few arguments for format string: ", format);
               }
-              ss << format.substr(base, next - base);
-              ss << args[used_args++];
-              base = next + format_arg.length();
-              next = format.find(format_arg, base);
+              ss << args[used_args];
+              begin = loc + 2;
             }
 
             drop(stack, num_inputs);
