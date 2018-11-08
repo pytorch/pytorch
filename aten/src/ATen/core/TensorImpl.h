@@ -1465,9 +1465,22 @@ protected:
 //    strong refcount           TODO: pack these into one word
 //    weak refcount
 //    storage pointer
-//    sizes SmallVector
-//    sizes vector (reserved)   TODO: get rid of me
-//    strides SmallVector
+//    sizes SmallVector (begin)
+//    sizes SmallVector (end)
+//    sizes SmallVector (reserved)
+//    sizes SmallVector (pre-allocated 0)
+//    sizes SmallVector (pre-allocated 1)
+//    sizes SmallVector (pre-allocated 2)
+//    sizes SmallVector (pre-allocated 3)
+//    sizes SmallVector (pre-allocated 4)
+//    strides SmallVector (begin)
+//    strides SmallVector (end)
+//    strides SmallVector (reserved)
+//    strides SmallVector (pre-allocated 0)
+//    strides SmallVector (pre-allocated 1)
+//    strides SmallVector (pre-allocated 2)
+//    strides SmallVector (pre-allocated 3)
+//    strides SmallVector (pre-allocated 4)
 //    storage offset
 //    numel
 //    data type pointer
