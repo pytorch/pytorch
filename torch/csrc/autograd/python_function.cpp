@@ -52,7 +52,7 @@ VariableInfo::VariableInfo(const Variable& var)
 
 Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
   // NB: This will NOT work if we ever get mixed device gradients
-  device_guard.set_device(device);
+  device_guard.reset_device(device);
   return at::zeros(size, type->options());
 }
 

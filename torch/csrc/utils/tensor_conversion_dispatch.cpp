@@ -25,7 +25,7 @@ at::Tensor dispatch_type_conversion(
   at::Device device = self.device();
   at::OptionalDeviceGuard device_guard;
   if (device_index) {
-    device_guard.set_device(at::Device(at::kCUDA, *device_index));
+    device_guard.reset_device(at::Device(at::kCUDA, *device_index));
   }
 
   if (self.device().type() == type.device_type()) {

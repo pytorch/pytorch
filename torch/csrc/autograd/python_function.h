@@ -9,14 +9,11 @@
 #include "torch/csrc/utils/object_ptr.h"
 
 #include "c10/util/Optional.h"
+#include "c10/DeviceGuard.h"
 
 #include <vector>
 #include <utility>
 #include <memory>
-
-namespace at {
-class DeviceGuard;
-} // namespace at
 
 namespace torch { namespace jit { struct Graph; }}
 namespace torch { namespace autograd {

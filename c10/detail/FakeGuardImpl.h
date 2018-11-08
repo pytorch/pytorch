@@ -1,3 +1,5 @@
+#pragma once
+
 #include <c10/detail/DeviceGuardImplInterface.h>
 
 namespace c10 {
