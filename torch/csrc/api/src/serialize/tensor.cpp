@@ -1,4 +1,4 @@
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/serialize/archive.h>
 
 namespace torch {

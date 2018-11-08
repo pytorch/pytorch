@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/data/example.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <ATen/core/ArrayRef.h>
 

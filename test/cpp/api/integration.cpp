@@ -7,7 +7,7 @@
 #include <torch/optim/adam.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/sgd.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>

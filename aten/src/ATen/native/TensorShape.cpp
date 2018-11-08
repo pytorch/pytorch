@@ -289,7 +289,7 @@ Tensor repeat(const Tensor& self, IntList repeats) {
 }
 
 Tensor reshape(const Tensor& self, IntList proposed_shape) {
-  if (self.type().is_sparse()) {
+  if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
   auto shape = infer_size(proposed_shape, self.numel());
