@@ -25,20 +25,25 @@ void THCTensor_(copyCPU)(THCState *state, THCTensor *self, struct THTensor *src)
   }
 }
 
-#define IMPLEMENT_TH_CUDA_TENSOR_COPY(TYPEC)                            \
-void THCTensor_(copy##TYPEC)(THCState *state, THCTensor *self, struct TH##TYPEC##Tensor *src)                \
-{                                                                       \
-  THArgCheck(THCTensor_(nElement)(state, self) == TH##TYPEC##Tensor_nElement(src), 2, "sizes do not match"); \
-  if(THCTypeIdx_(Real) == THCTypeIdx_(TYPEC)) {               \
-    THCTensor_(copyCPU)(state, self, (THTensor*) src);  /* cast just removes warnings */                     \
-  } else {                                                              \
-    at::Tensor srcf_wrap = at::empty(src->sizes(), caffe2::TypeMeta::Make<scalar_t>()); \
-    at::Tensor src_wrap = THTensor_wrap(src);                           \
-                                                                        \
-    at::_copy_(srcf_wrap, src_wrap);                                    \
-    THCTensor_(copyCPU)(state, self, srcf_wrap.unsafeGetTensorImpl());  \
-  }                                                                     \
-}
+#define IMPLEMENT_TH_CUDA_TENSOR_COPY(TYPEC)                                  \
+  void THCTensor_(copy##TYPEC)(                                               \
+      THCState * state, THCTensor * self, struct TH##TYPEC##Tensor * src) {   \
+    THArgCheck(                                                               \
+        THCTensor_(nElement)(state, self) == TH##TYPEC##Tensor_nElement(src), \
+        2,                                                                    \
+        "sizes do not match");                                                \
+    if (THCTypeIdx_(Real) == THCTypeIdx_(TYPEC)) {                            \
+      THCTensor_(copyCPU)(                                                    \
+          state, self, (THTensor*)src); /* cast just removes warnings */      \
+    } else {                                                                  \
+      at::Tensor srcf_wrap =                                                  \
+          at::empty(src->sizes(), caffe2::TypeMeta::Make<scalar_t>());        \
+      at::Tensor src_wrap = THTensor_wrap(src);                               \
+                                                                              \
+      at::_copy_(srcf_wrap, src_wrap);                                        \
+      THCTensor_(copyCPU)(state, self, srcf_wrap.unsafeGetTensorImpl());      \
+    }                                                                         \
+  }
 
 IMPLEMENT_TH_CUDA_TENSOR_COPY(Byte)
 IMPLEMENT_TH_CUDA_TENSOR_COPY(Char)
@@ -83,19 +88,26 @@ void THTensor_(copyCuda)(THCState *state, THTensor *self, struct THCTensor *src)
   }
 }
 
-#define IMPLEMENT_TH_CUDA_TENSOR_COPY_TO(TYPEC)                           \
-  void TH_CONCAT_4(TH,TYPEC,Tensor_copyCuda,Real)(THCState *state, TH##TYPEC##Tensor *self, struct THCTensor *src) \
-  {                                                                       \
-    THArgCheck(TH##TYPEC##Tensor_nElement(self) == THCTensor_(nElement)(state, src), 2, "sizes do not match");       \
-    if(THCTypeIdx_(Real) == THCTypeIdx_(TYPEC)) {   \
-      THTensor_(copyCuda)(state, (THTensor*) self, src);  /* cast just removes compiler warning */                   \
-    } else {                                                              \
-      at::Tensor srcf_wrap = at::empty(src->sizes(), caffe2::TypeMeta::Make<scalar_t>()); \
-      at::Tensor self_wrap = THTensor_wrap(self);                         \
-                                                                          \
-      THTensor_(copyCuda)(state, srcf_wrap.unsafeGetTensorImpl(), src);   \
-      at::_copy_(self_wrap, srcf_wrap);                                   \
-    }                                                                     \
+#define IMPLEMENT_TH_CUDA_TENSOR_COPY_TO(TYPEC)                               \
+  void TH_CONCAT_4(TH, TYPEC, Tensor_copyCuda, Real)(                         \
+      THCState * state, TH##TYPEC##Tensor * self, struct THCTensor * src) {   \
+    THArgCheck(                                                               \
+        TH##TYPEC##Tensor_nElement(self) == THCTensor_(nElement)(state, src), \
+        2,                                                                    \
+        "sizes do not match");                                                \
+    if (THCTypeIdx_(Real) == THCTypeIdx_(TYPEC)) {                            \
+      THTensor_(copyCuda)(                                                    \
+          state,                                                              \
+          (THTensor*)self,                                                    \
+          src); /* cast just removes compiler warning */                      \
+    } else {                                                                  \
+      at::Tensor srcf_wrap =                                                  \
+          at::empty(src->sizes(), caffe2::TypeMeta::Make<scalar_t>());        \
+      at::Tensor self_wrap = THTensor_wrap(self);                             \
+                                                                              \
+      THTensor_(copyCuda)(state, srcf_wrap.unsafeGetTensorImpl(), src);       \
+      at::_copy_(self_wrap, srcf_wrap);                                       \
+    }                                                                         \
   }
 
 IMPLEMENT_TH_CUDA_TENSOR_COPY_TO(Byte)
