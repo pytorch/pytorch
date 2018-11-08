@@ -6723,6 +6723,7 @@ class _TestTorchMixin(object):
             # roll
             self.assertEqual(x, x.roll(0, 1).roll(0, -1))
             self.assertEqual(x, x.roll(1, x.size(1)))
+            self.assertEqual(x, x.roll(1))
 
             # unbind
             self.assertEqual((), x.unbind(0))
@@ -7326,6 +7327,11 @@ class _TestTorchMixin(object):
             rolled = strided.roll(1, 0)
             self.assertEqual(expected, rolled,
                              "non contiguous tensor rolled to {} instead of {} ".format(rolled, expected))
+
+            # test roll with no dimension specified
+            expected = numbers.roll(1, 0).view(2, 4)
+            self.assertEqual(expected, data.roll(1), "roll with no dims should flatten and roll.")
+            self.assertEqual(expected, data.roll(1, dims=None), "roll with no dims should flatten and roll.")
 
     def test_reversed(self):
         val = torch.arange(0, 10)

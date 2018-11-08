@@ -71,6 +71,12 @@ inline Value* getValueTrace(const Variable& var) {
     constant->inferTypeFrom(var.data());
     it = value_map.emplace_hint(it, var, constant);
   }
+  if (!it->second->hasUniqueName()) {
+    auto unique_name = getTracingState()->lookup_var_name_fn(var);
+    if (!unique_name.empty()) {
+      it->second->setUniqueName(unique_name);
+    }
+  }
   return it->second;
 }
 
