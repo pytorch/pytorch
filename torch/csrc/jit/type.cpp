@@ -253,7 +253,6 @@ TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
       throw TypeMatchError(ss.str());
     }
   } else if (auto opt_formal = formal->cast<OptionalType>()) {
-    std::cout << actual->str() << "\n";
     if (auto opt_actual = actual->cast<OptionalType>()) {
       return OptionalType::create(matchTypeVariables(
           opt_formal->getElementType(),
