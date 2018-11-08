@@ -576,10 +576,9 @@ Args:
     output_size: the target output size (single integer)
 """)
 
-
 @torch._jit_internal.weak_script
 def adaptive_avg_pool2d(input, output_size):
-    # type: (Tensor, BroadcastingList[int, 2]) -> Tensor
+    # type: (Tensor, BroadcastingList2[int]) -> Tensor
     r"""
     Applies a 2D adaptive average pooling over an input signal composed of
     several input planes.
@@ -596,7 +595,7 @@ def adaptive_avg_pool2d(input, output_size):
 
 @torch._jit_internal.weak_script
 def adaptive_avg_pool3d(input, output_size):
-    # type: (Tensor, BroadcastingList[int, 3]) -> Tensor
+    # type: (Tensor, BroadcastingList3[int]) -> Tensor
     r"""
     Applies a 3D adaptive average pooling over an input signal composed of
     several input planes.

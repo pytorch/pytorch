@@ -5375,7 +5375,7 @@ a")
     def test_type_annotations_repeated_list(self):
         @torch.jit.script
         def float_fn(x, y):
-            # type: (float, BroadcastingList[float, 3]) -> List[float]
+            # type: (float, BroadcastingList3[float]) -> List[float]
             return y
         self.assertEqual(float_fn(2.0, 1.0), float_fn(2.0, [1.0, 1.0, 1.0]))
         self.assertEqual(float_fn(2.0, 1.0), float_fn(2.0, (1.0, 1.0, 1.0)))
@@ -5387,7 +5387,7 @@ a")
 
         @torch.jit.script
         def int_fn(x):
-            # type: (BroadcastingList[int, 3]) -> List[int]
+            # type: (BroadcastingList3[int]) -> List[int]
             return x
         self.assertEqual(int_fn(1), int_fn([1, 1, 1]))
         self.assertEqual(int_fn(1), int_fn((1, 1, 1)))
@@ -5400,7 +5400,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "subscript of Broadcastable list must be positive integer"):
             @torch.jit.script
             def fn(x):
-                # type: (BroadcastingList[int, x]) -> List[int]
+                # type: (BroadcastingListx[int]) -> List[int]
                 return x
 
         with self.assertRaisesRegex(RuntimeError, "Unknown type constructor"):
@@ -7383,8 +7383,8 @@ a")
             ('str', 'str'),
             ('int', 'int'),
             ('bool', 'bool'),
-            ('BroadcastingList[float, 3]', 'List[float]'),
-            ('BroadcastingList[int, 2]', 'List[int]'),
+            ('BroadcastingList3[float]', 'List[float]'),
+            ('BroadcastingList2[int]', 'List[int]'),
             ('List[int]', 'List[int]'),
             ('Optional[int]', 'Optional[int]'),
         ]
