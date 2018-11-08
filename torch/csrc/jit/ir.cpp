@@ -519,6 +519,18 @@ std::shared_ptr<Graph> Graph::copy() {
   return new_g;
 }
 
+std::string Value::uniqueNameBase() const {
+  std::string name = uniqueName();
+  std::string name_base = name;
+  auto last_dot_pos = name.find_last_of('.');
+  if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
+    if (name.find_first_not_of("0123456789", last_dot_pos + 1) == std::string::npos) {
+      name_base = name.substr(0, last_dot_pos);
+    }
+  }
+  return name_base;
+}
+
 Value* Value::setUniqueName(const std::string & name) {
   if (name.size() > 0 && name.find_first_not_of("0123456789") == std::string::npos) {
     throw std::runtime_error("names may not be integers: " + name);
