@@ -3,6 +3,7 @@
 #include <torch/data/samplers/base.h>
 #include <torch/data/samplers/custom_batch_request.h>
 #include <torch/types.h>
+#include <torch/csrc/WindowsTorchApiMacro>
 
 #include <cstddef>
 
@@ -17,9 +18,9 @@ namespace torch {
 namespace data {
 namespace samplers {
 
-/// A wrapper around a batch size value, which implements the `CustomBatchRequest`
-/// interface.
-struct BatchSize : public CustomBatchRequest {
+/// A wrapper around a batch size value, which implements the
+/// `CustomBatchRequest` interface.
+struct TORCH_API BatchSize : public CustomBatchRequest {
   explicit BatchSize(size_t size);
   size_t size() const noexcept override;
   operator size_t() const noexcept;
@@ -31,7 +32,7 @@ struct BatchSize : public CustomBatchRequest {
 /// The major feature of the `StreamSampler` is that it does not return
 /// particular indices, but instead only the number of elements to fetch from
 /// the dataset. The dataset has to decide how to produce those elements.
-class StreamSampler : public Sampler<BatchSize> {
+class TORCH_API StreamSampler : public Sampler<BatchSize> {
  public:
   /// Constructs the `StreamSampler` with the number of individual examples that
   /// should be fetched until the sampler is exhausted.

@@ -2,6 +2,7 @@
 
 #include <torch/data/samplers/base.h>
 #include <torch/types.h>
+#include <torch/csrc/WindowsTorchApiMacro>
 
 #include <cstddef>
 #include <vector>
@@ -18,7 +19,7 @@ namespace data {
 namespace samplers {
 
 /// A `Sampler` that returns random indices.
-class RandomSampler : public Sampler<> {
+class TORCH_API RandomSampler : public Sampler<> {
  public:
   /// Constructs a `RandomSampler` with a size and dtype for the stored indices.
   ///

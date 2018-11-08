@@ -2,6 +2,7 @@
 
 #include <torch/data/samplers/base.h>
 #include <torch/types.h>
+#include <torch/csrc/WindowsTorchApiMacro>
 
 #include <cstddef>
 #include <vector>
@@ -18,7 +19,7 @@ namespace data {
 namespace samplers {
 
 /// A `Sampler` that returns indices sequentially.
-class SequentialSampler : public Sampler<> {
+class TORCH_API SequentialSampler : public Sampler<> {
  public:
   /// Creates a `SequentialSampler` that will return indices in the range
   /// `0...size - 1`.
