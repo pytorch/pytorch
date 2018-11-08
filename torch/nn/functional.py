@@ -1469,7 +1469,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
             `T = input length`, and `N = batch size`.
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
-        targets: :math:`(N, S)` or `(sum(target_lenghts))`.
+        targets: :math:`(N, S)` or `(sum(target_lengths))`.
             Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
         input_lengths: :math:`(N)`.
             Lengths of the inputs (must each be :math:`\leq T`)
