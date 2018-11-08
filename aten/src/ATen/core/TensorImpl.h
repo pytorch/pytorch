@@ -787,7 +787,12 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   void set_sizes_contiguous(at::IntList new_size) {
     AT_ASSERT(!is_variable());
     auto old_dim = sizes_.size();
-    sizes_ = new_size;
+    auto new_dim = new_size.size();
+
+    sizes_.resize(new_dim);
+    for (int64_t dim = 0; dim < new_dim; ++dim) {
+      sizes_[dim] = new_size[dim];
+    }
 
     update_to_contiguous_strides(old_dim);
     refresh_numel();
@@ -813,10 +818,13 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         new_stride.size(),
         ")");
     auto new_dim = new_size.size();
-    strides_.resize(new_dim, 0);
-    sizes_.resize(new_dim, 0);
-    sizes_ = new_size;
 
+    sizes_.resize(new_dim);
+    for (int64_t dim = 0; dim < new_dim; ++dim) {
+      sizes_[dim] = new_size[dim];
+    }
+
+    strides_.resize(new_dim);
     if (new_dim > 0) {
       for (size_t dim = new_dim - 1; ; dim--) {
         if (new_stride[dim] >= 0) {
@@ -1406,6 +1414,10 @@ public:
   at::Storage storage_; // TODO: Fix visibility on me
 
 protected:
+  // We could save a word or two by combining the SmallVector structs,
+  // since their size is redundant, and if we need to overflow the buffer space
+  // we could keep the two pointers together. However, that would require
+  // implementing another struct from scratch, so only do this if we're desperate.
   at::SmallVector<int64_t,5> sizes_;
   at::SmallVector<int64_t,5> strides_;
 
@@ -1449,11 +1461,9 @@ protected:
 // https://fburl.com/q5enpv98
 //
 // For reference, we OOMed at 160 bytes (20 words) per TensorImpl.
-// This is not counting overhead from strides out-of-line allocation, and
-// StorageImpl space.  We're currently comfortably under this number;
-// let's keep it that way.  (One currently approved pending size
-// increase is inlining sizes and strides as small vectors, to reduce
-// dynamic allocations.)
+// This is not counting overhead from strides out-of-line allocation and
+// StorageImpl space and this is from before we inlined sizes and strides
+// directly into TensorImpl as SmallVectors.
 //
 // Our memory usage on 32-bit systems is suboptimal, but we're not checking
 // for it at the moment (to help avoid rage inducing cycles when the
