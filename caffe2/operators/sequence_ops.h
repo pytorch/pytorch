@@ -26,10 +26,15 @@ class GatherPaddingOp final : public Operator<Context> {
   bool RunOnDevice() override {
     if (startPaddingWidth_ == 0 && endPaddingWidth_ == 0) {
       Output(0)->Resize(std::vector<int64_t>(0));
-      Output(0)->template mutable_data<int64_t>();
+      auto output_0_data = Output(0)->template mutable_data<int64_t>();
+      // TODO(zhengxq): as suggested by salex@, change this to a loop.
+      math::Set<int64_t, Context>(
+          Output(0)->numel(), 0, output_0_data, &context_);
       if (OutputSize() == 2) {
         Output(1)->Resize(std::vector<int64_t>(0));
-        Output(1)->template mutable_data<int64_t>();
+        auto output_1_data = Output(1)->template mutable_data<int64_t>();
+        math::Set<int64_t, Context>(
+            Output(1)->numel(), 0, output_1_data, &context_);
       }
       return true;
     }
