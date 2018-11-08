@@ -239,8 +239,8 @@ if IS_WINDOWS:
         distutils.sysconfig.get_config_var("VERSION"))
 else:
     cmake_python_library = "{}/{}".format(
-    distutils.sysconfig.get_config_var("LIBDIR"),
-    distutils.sysconfig.get_config_var("INSTSONAME"))
+        distutils.sysconfig.get_config_var("LIBDIR"),
+        distutils.sysconfig.get_config_var("INSTSONAME"))
 cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 
 
