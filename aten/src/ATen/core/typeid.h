@@ -84,7 +84,14 @@ class CAFFE2_API TypeIdentifier final
   CAFFE2_API static TypeIdentifier Get();
 
  private:
+ #if (defined _MSC_VER)
+  // MSVC has problems with constexpr constructors and ODR in debug mode on older compilers. Introduce a template parameter to 
+  // work around the problem; the two versions are functionally equal.
+  template <typename T>
+  constexpr explicit TypeIdentifier(T id) : IdWrapper(static_cast<uint16_t>(id)) {}
+#else
   constexpr explicit TypeIdentifier(uint16_t id) : IdWrapper(id) {}
+#endif
   friend class TypeMeta;
 };
 
@@ -431,12 +438,18 @@ class CAFFE2_API TypeMeta {
     // variable template. '-Wpragmas' and '-Wunknown-warning-option' has to be
     // disabled for compilers that don't know '-Wundefined-var-template' and
     // would error at our attempt to disable it.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpragmas"
-#pragma GCC diagnostic ignored "-Wunknown-warning-option"
-#pragma GCC diagnostic ignored "-Wundefined-var-template"
+#if (defined __GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wpragmas"
+#  pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#  pragma GCC diagnostic ignored "-Wundefined-var-template"
+#endif
+
     return TypeMeta(_typeMetaDataInstance<T>());
-#pragma GCC diagnostic pop
+    
+#if (defined __GNUC__)
+#  pragma GCC diagnostic pop
+#endif
   }
 
  private:

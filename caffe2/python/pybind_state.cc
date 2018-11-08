@@ -1750,7 +1750,13 @@ void addGlobalMethods(py::module& m) {
 #ifdef USE_NUMPY
     ([]() -> void {
       // import_array1() forces a void return value.
-      import_array1();
+
+      #if (!defined _MSC_VER)
+        // This code is troubling. We are creating and invoking an anonymous lambda that returns a void and doesn't seem to be doing anything.
+        // Furthermore, import_array1 is a macro that takes 1 parameter, so the code isn't valid. I'm tempted to delete this, but it feels like
+        // it is just too strange to be completely useless.
+        import_array1();
+      #endif
     })();
 #endif // USE_NUMPY
     // Single threaded, so safe

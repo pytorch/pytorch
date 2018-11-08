@@ -83,11 +83,15 @@ struct ParsedArgs {
   PyObject* args[N];
 };
 
+template <>
+struct ParsedArgs<0> {
+};
+
 struct PythonArgParser {
   explicit PythonArgParser(std::vector<std::string> fmts, bool traceable=false);
 
-  template<int N>
-  inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
+  template<int N> inline typename std::enable_if<N != 0, PythonArgs>::type parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
+  template<int N> inline typename std::enable_if<N == 0, PythonArgs>::type parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
 
 private:
   [[noreturn]]
@@ -186,12 +190,20 @@ struct FunctionParameter {
 };
 
 template<int N>
-inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst) {
+inline typename std::enable_if<N != 0, PythonArgs>::type PythonArgParser::parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst) {
   if (N < max_args) {
     throw ValueError("PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected %d (got %d)",
         (int)max_args, N);
   }
   return raw_parse(args, kwargs, dst.args);
+}
+
+template <int N>
+inline typename std::enable_if<N == 0, PythonArgs>::type PythonArgParser::parse(PyObject *args, PyObject* kwargs, ParsedArgs<N>& dst) {
+  // PythonArgs isn't written to handle zero args, so this isn't going to work. Return a value guaranteed to fail until we can modify the test that 
+  // is invoking this functionality.
+  // BugBug
+  return *reinterpret_cast<PythonArgs const *>(nullptr);
 }
 
 inline at::Tensor PythonArgs::tensor(int i) {

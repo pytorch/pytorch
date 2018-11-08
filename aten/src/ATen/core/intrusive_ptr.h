@@ -65,6 +65,17 @@ class CAFFE2_API intrusive_ptr_target {
   friend class weak_intrusive_ptr;
 
  protected:
+
+#if (defined _MSC_VER)
+#  pragma warning(push)
+#  pragma warning(disable: 4297) // function assumed not to throw an exception but does
+#else
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wpragmas"
+#  pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#  pragma GCC diagnostic ignored "-Wterminate"
+#  pragma GCC diagnostic ignored "-Wexceptions"
+#endif
   // protected destructor. We never want to destruct intrusive_ptr_target*
   // directly.
   virtual ~intrusive_ptr_target() {
@@ -73,19 +84,18 @@ class CAFFE2_API intrusive_ptr_target {
 // We also have to disable -Wunknown-warning-option and -Wpragmas, because
 // some other compilers don't know about -Wterminate or -Wexceptions and
 // will show a warning about unknown warning options otherwise.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpragmas"
-#pragma GCC diagnostic ignored "-Wunknown-warning-option"
-#pragma GCC diagnostic ignored "-Wterminate"
-#pragma GCC diagnostic ignored "-Wexceptions"
     AT_ASSERTM(
         refcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it");
     AT_ASSERTM(
         weakcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
-#pragma GCC diagnostic pop
   }
+#if (defined _MSC_VER)
+#  pragma warning(pop)
+#else
+#  pragma GCC diagnostic pop
+#endif
 
   constexpr intrusive_ptr_target() noexcept : refcount_(0), weakcount_(0) {}
 

@@ -29,9 +29,18 @@ class CAFFE2_API IdWrapper {
   using concrete_type = ConcreteType;
 
  protected:
+ #if (defined _MSC_VER)
+  // MSVC has problems with constexpr constructors and ODR in debug mode on older compilers. Introduce a template parameter to 
+  // work around the problem; the two versions are functionally equal.
+  template <typename T>
+  constexpr explicit IdWrapper(T id) noexcept(
+    noexcept(underlying_type(std::declval<underlying_type>())))
+      : id_(static_cast<underlying_type>(id)) {}
+#else
   constexpr explicit IdWrapper(underlying_type id) noexcept(
       noexcept(underlying_type(std::declval<underlying_type>())))
       : id_(id) {}
+#endif
 
   constexpr underlying_type underlyingId() const
       noexcept(noexcept(underlying_type(std::declval<underlying_type>()))) {

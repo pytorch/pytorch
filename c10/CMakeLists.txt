@@ -30,6 +30,16 @@ if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
 endif()
 
+# BugBug: Begin
+# BugBug if (MSVC)
+# BugBug   add_compile_options(
+# BugBug        /wd4273 # (1): inconsistent dll linkage. This is related to the
+# BugBug               #      caffe2 FLAGS_* definition using dllimport in header and
+# BugBug               #      dllexport in cc file. The strategy is copied from gflags.
+# BugBug   )
+# BugBug endif()
+# BugBug: End
+
 # ---[ Dependency of c10
 if (${USE_GFLAGS})
    target_link_libraries(c10 PUBLIC gflags)

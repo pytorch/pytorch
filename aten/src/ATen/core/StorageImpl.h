@@ -54,7 +54,6 @@ struct CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
   StorageImpl& operator=(const StorageImpl&) = delete;
   StorageImpl() = delete;
   StorageImpl(StorageImpl&& other) = default;
-  StorageImpl(StorageImpl&) = delete;
   StorageImpl(const StorageImpl&) = delete;
   ~StorageImpl() = default;
 

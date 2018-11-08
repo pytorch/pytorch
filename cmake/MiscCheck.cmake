@@ -233,7 +233,7 @@ endif()
 # a third party library (like Protobuf), mention it in the comment as
 # "THIRD_PARTY_NAME related"
 # From https://docs.microsoft.com/en-us/cpp/error-messages/compiler-warnings/
-if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
+if (MSVC)
   add_compile_options(
       ##########################################
       # Protobuf related. Cannot remove.
@@ -299,7 +299,7 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
 
   # Exception handing for compiler warining C4530, see
   # https://msdn.microsoft.com/en-us/library/2axwkyt4.aspx
-  add_definitions("/EHsc")
+  # BugBug add_compile_options("/EHsc")
 
   set(CMAKE_SHARED_LINKER_FLAGS
       "${CMAKE_SHARED_LINKER_FLAGS} /ignore:4049 /ignore:4217")

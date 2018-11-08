@@ -61,8 +61,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
   THIndex_t *indices_data;
 
 
-  AT_CHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4),
-           "non-empty 3D or 4D (batch mode) tensor expected for input, but got sizes: ", input->sizes());
+  try { AT_CHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4), "non-empty 3D or 4D (batch mode) tensor expected for input, but got sizes: ", input->sizes()); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }
   THNN_CHECK_SHAPE_INDICES(input, indices);
 
   if (input->dim() == 4)

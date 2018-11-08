@@ -217,8 +217,13 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   THArgCheck(b->dim() == 1 || b->dim() == 2, 1, "B should have 1 or 2 "
       "dimensions, but has %d", b->dim());
   THArgCheck(!b->is_empty(), 1, "B should not be empty");
-  AT_CHECK(a->size(0) == b->size(0), "Expected A and b to have same size "
+  try { AT_CHECK(a->size(0) == b->size(0), "Expected A and b to have same size "
       "at dim 0, but A has ", a->size(0), " rows and B has ", b->size(0), " rows");
+  } 
+  catch(::c10::Error const &) 
+  { 
+    /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); 
+  }
 
   if (THTensor_nDimensionLegacyAll(b) == 1) {
     b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
@@ -1000,7 +1005,7 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, co
 
 void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinfo_, int pivot, THTensor *a)
 {
-  AT_CHECK(THTensor_(nDimension)(a) == 3, "expected 3D tensor, got size: ", a->sizes());
+  try { AT_CHECK(THTensor_(nDimension)(a) == 3, "expected 3D tensor, got size: ", a->sizes()); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }
   if (!pivot) {
     THError("btrifact without pivoting is not implemented on the CPU");
   }
@@ -1075,10 +1080,16 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
 
 void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor *pivots)
 {
-  AT_CHECK(!atf->is_empty() && THTensor_(nDimensionLegacyNoScalars)(atf) == 3, "expected non-empty 3D tensor, got size: ",
-           atf->sizes());
-  AT_CHECK(!b->is_empty() && (THTensor_(nDimensionLegacyNoScalars)(b) == 3 ||
-             THTensor_(nDimensionLegacyNoScalars)(b) == 2), "expected non-empty 2D or 3D tensor, got size: ", b->sizes());
+  try {
+    AT_CHECK(!atf->is_empty() && THTensor_(nDimensionLegacyNoScalars)(atf) == 3, "expected non-empty 3D tensor, got size: ",
+             atf->sizes());
+    AT_CHECK(!b->is_empty() && (THTensor_(nDimensionLegacyNoScalars)(b) == 3 ||
+               THTensor_(nDimensionLegacyNoScalars)(b) == 2), "expected non-empty 2D or 3D tensor, got size: ", b->sizes());
+  } 
+  catch(::c10::Error const &) { 
+    /* Can't let a C++ exception percolate from a function declared as extern "C" */ 
+    exit(-1); 
+  }
   THArgCheck(THTensor_(size)(atf, 0) ==
              THTensor_(size)(b, 0), 3, "number of batches must be equal");
   THArgCheck(THTensor_(size)(atf, 1) ==

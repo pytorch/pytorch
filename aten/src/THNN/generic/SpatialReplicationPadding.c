@@ -84,11 +84,16 @@ void THNN_(SpatialReplicationPadding_updateOutput)(THNNState *state,
   oheight = iheight + pad_t + pad_b;
   owidth  = iwidth + pad_l + pad_r;
 
-  THArgCheck(owidth >= 1 || oheight >= 1 , 2,
+  try {
+    THArgCheck(owidth >= 1 || oheight >= 1 , 2,
 	     "input (H: %d, W: %d)is too small."
 	     " Calculated output H: %d W: %d",
 	     iheight, iwidth, oheight, owidth);
-
+  } 
+  catch(::c10::Error const &) { 
+    /* Can't let a C++ exception percolate from a function declared as extern "C" */ 
+    exit(-1); 
+  }
 
   /* get contiguous input */
   input = THTensor_(newContiguous)(input);

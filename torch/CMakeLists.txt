@@ -280,7 +280,8 @@ if(MSVC)
   target_compile_options(torch PRIVATE
     ${MSVC_RUNTIME_LIBRARY_OPTION}
     /Z7
-    /EHa
+    # BugBug /EHa
+    /EHsc # BugBug
     /DNOMINMAX
     /wd4267
     /wd4251
@@ -293,6 +294,7 @@ if(MSVC)
     /wd4101
     /wd4996
     /wd4275
+    /wd4273 # BugBug (testing)
     /bigobj
     )
 else()
@@ -334,8 +336,14 @@ if(OPENMP_FOUND)
   if (VERBOSE)
     message(STATUS "Compiling with OpenMP")
   endif()
-  target_compile_options(torch INTERFACE -fopenmp)
-  target_link_libraries(torch -fopenmp)
+
+  if (MSVC)
+    target_compile_options(torch INTERFACE /openmp)
+    # BugBug target_link_libraries(torch /openmp)
+  else()
+    target_compile_options(torch INTERFACE -fopenmp)
+    target_link_libraries(torch -fopenmp)
+  endif()
 endif()
 
 if (NOT NO_API AND NOT USE_ROCM)

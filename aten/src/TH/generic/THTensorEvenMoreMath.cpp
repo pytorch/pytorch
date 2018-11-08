@@ -96,7 +96,7 @@ void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask
   scalar_t *tensor_data;
 
 #ifdef DEBUG
-  THAssert(numel <= LONG_MAX);
+  try { THAssert(numel <= LONG_MAX); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }
 #endif
   THTensor_(resize1d)(tensor,numel);
   tensor_data = tensor->data<scalar_t>();

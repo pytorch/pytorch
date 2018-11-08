@@ -211,10 +211,9 @@ if not ONNX_NAMESPACE:
 try:
     import ninja
     USE_NINJA = True
-    ninja_global = NinjaBuilder('global')
+    
 except ImportError:
     USE_NINJA = False
-    ninja_global = None
 
 # Constant known variables used throughout this file
 cwd = os.path.dirname(os.path.abspath(__file__))
@@ -628,12 +627,16 @@ class build_ext(build_ext_parent):
         else:
             print('-- Building without distributed package')
 
-        generate_code(ninja_global)
-
         if USE_NINJA:
+            ninja_builder = NinjaBuilder('global')
+
+            generate_code(ninja_builder)
+
             # before we start the normal build make sure all generated code
             # gets built
-            ninja_global.run()
+            ninja_builder.run()
+        else:
+            generate_code(None)
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -778,10 +781,14 @@ if IS_WINDOWS:
     # /DNOMINMAX removes builtin min/max functions
     # /wdXXXX disables warning no. XXXX
     extra_compile_args = ['/MD', '/Z7',
-                          '/EHa', '/DNOMINMAX',
+                          # BugBug : Remove comment above if go with /EHsc '/EHa', 
+                          '/EHsc',
+                          '/DNOMINMAX',
                           '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
                           '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
-                          '/wd4275']
+                          '/wd4275',
+                          '/wd4273',        # inconsistent dll linkage # BugBug(testing)
+                          ]
     if sys.version_info[0] == 2:
         if not check_env_flag('FORCE_PY27_BUILD'):
             print('The support for PyTorch with Python 2.7 on Windows is very experimental.')

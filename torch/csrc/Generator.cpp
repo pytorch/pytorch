@@ -32,12 +32,14 @@ PyObject * THPGenerator_New()
 
 PyObject * THPGenerator_NewWithGenerator(at::Generator& cdata)
 {
+  HANDLE_TH_ERRORS
   auto type = (PyTypeObject*)THPGeneratorClass;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self) throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
   self_->cdata = &cdata;
   return self.release();
+  END_HANDLE_TH_ERRORS
 }
 
 static void THPGenerator_dealloc(THPGenerator* self)

@@ -64,9 +64,15 @@ void THNN_(TemporalReflectionPadding_updateOutput)(THNNState *state,
   nslices = input->size(dimslices);
   iwidth = input->size(dimw);
 
-  AT_CHECK(pad_l < iwidth && pad_r < iwidth,
+  try { 
+    AT_CHECK(pad_l < iwidth && pad_r < iwidth,
            "Argument #4: Padding size should be less than the corresponding input dimension, "
            "but got: padding (", pad_l, ", ", pad_r, ") at dimension ", dimw, " of input ", input->sizes());
+  } 
+  catch(::c10::Error const &) { 
+    /* Can't let a C++ exception percolate from a function declared as extern "C" */ 
+    exit(-1); 
+  }
 
   /* output size */
   owidth  = iwidth + pad_l + pad_r;

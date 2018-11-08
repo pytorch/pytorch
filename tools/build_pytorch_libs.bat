@@ -14,7 +14,8 @@ set LDFLAGS=/LIBPATH:%INSTALL_DIR%/lib
 :: set TORCH_CUDA_ARCH_LIST=6.1
 
 set CWRAP_FILES=%BASE_DIR%/torch/lib/ATen/Declarations.cwrap;%BASE_DIR%/torch/lib/ATen/Local.cwrap;%BASE_DIR%/torch/lib/THNN/generic/THNN.h;%BASE_DIR%/torch/lib/THCUNN/generic/THCUNN.h;%BASE_DIR%/torch/lib/ATen/nn.yaml
-set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
+:: BugBug set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
+set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHsc /DNOMINMAX
 set LINK_FLAGS=/DEBUG:FULL
 : End cmake variables
 
@@ -240,7 +241,7 @@ goto:eof
                   -DATEN_NO_CONTRIB=1 ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
-                  -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
+                  -DCMAKE_CXX_FLAGS="/EHsc %USER_CFLAGS%" ^
                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
                   -DCMAKE_SHARED_LINKER_FLAGS="%USER_LDFLAGS%" ^
                   -DUSE_ROCM=%USE_ROCM%

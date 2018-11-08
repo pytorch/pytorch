@@ -75,7 +75,7 @@ void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride)
 
 void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
-  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
+  try { AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative"); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }
   at::IntList sizes(size, nDimension);
   at::optional<at::IntList> strides;
   if (stride) {
@@ -156,6 +156,6 @@ c10::optional<std::vector<int64_t>> THTensor_compute_stride(
 void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
   // Caffe2 might have tensors whose storages are null, but we
   // don't allow it in PyTorch.
-  AT_ASSERT(storage);
+  try { AT_ASSERT(storage); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }
   tensor->storage_ = at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage));
 }

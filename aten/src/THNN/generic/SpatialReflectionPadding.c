@@ -83,13 +83,19 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
   iheight = input->size(dimh);
   iwidth = input->size(dimw);
 
-  AT_CHECK(pad_l < iwidth && pad_r < iwidth,
-           "Argument #4: Padding size should be less than the corresponding input dimension, "
-           "but got: padding (", pad_l, ", ", pad_r, ") at dimension ", dimw, " of input ", input->sizes());
-
-  AT_CHECK(pad_t < iheight && pad_b < iheight,
-           "Argument #6: Padding size should be less than the corresponding input dimension, "
-           "but got: padding (", pad_t, ", ", pad_b, ") at dimension ", dimh, " of input ", input->sizes());
+  try {
+    AT_CHECK(pad_l < iwidth && pad_r < iwidth,
+             "Argument #4: Padding size should be less than the corresponding input dimension, "
+             "but got: padding (", pad_l, ", ", pad_r, ") at dimension ", dimw, " of input ", input->sizes());
+  
+    AT_CHECK(pad_t < iheight && pad_b < iheight,
+             "Argument #6: Padding size should be less than the corresponding input dimension, "
+             "but got: padding (", pad_t, ", ", pad_b, ") at dimension ", dimh, " of input ", input->sizes());
+  } 
+  catch(::c10::Error const &) { 
+    /* Can't let a C++ exception percolate from a function declared as extern "C" */ 
+    exit(-1); 
+  }
 
   /* output sizes */
   oheight = iheight + pad_t + pad_b;

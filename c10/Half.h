@@ -142,8 +142,9 @@ typename std::enable_if<std::is_integral<From>::value, bool>::type overflows(
     // allow for negative numbers to wrap using two's complement arithmetic.
     // For example, with uint8, this allows for `a - b` to be treated as
     // `a + 255 * b`.
-    return f > limit::max() ||
-        (f < 0 && -static_cast<uint64_t>(f) > limit::max());
+    // BugBug: static_assert(sizeof(decltype(f)) < sizeof(int64_t), "Destination must be larger than source type");
+    static_assert(sizeof(decltype(f)) <= sizeof(int64_t), "Destination must be larger than source type"); // BugBug
+    return f > limit::max() || (f < 0 && -static_cast<int64_t>(f) > limit::max());
   } else {
     return f < limit::lowest() || f > limit::max();
   }

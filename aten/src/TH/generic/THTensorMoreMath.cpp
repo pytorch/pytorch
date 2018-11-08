@@ -2342,8 +2342,14 @@ void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THT
   x = THTensor_(newContiguous)(x);
   alpha = THTensor_(newContiguous)(alpha);
   total = THTensor_(newContiguous)(total);
-  TH_CHECK_SAME_SIZE(alpha, x);
-  TH_CHECK_SAME_SIZE(total, x);
+  try {
+    TH_CHECK_SAME_SIZE(alpha, x);
+    TH_CHECK_SAME_SIZE(total, x);
+  } 
+  catch(::c10::Error const &) { 
+    /* Can't let a C++ exception percolate from a function declared as extern "C" */ 
+    exit(-1); 
+  }
   THTensor_(resizeAs)(self, x);
   THTensor* grad = THTensor_(newContiguous)(self);
 

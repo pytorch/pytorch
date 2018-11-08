@@ -40,7 +40,7 @@
   int TH_TENSOR_DIM_APPLY_i; \
 \
   if( (DIMENSION < 0) || (DIMENSION >= THTensor_nDimensionLegacyNoScalars(TENSOR1)) ) \
-    THError("invalid dimension %d (expected to be 0 <= dim < %d)", DIMENSION, THTensor_nDimensionLegacyNoScalars(TENSOR1)); \
+    try { THError("invalid dimension %d (expected to be 0 <= dim < %d)", DIMENSION, THTensor_nDimensionLegacyNoScalars(TENSOR1)); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }\
   int same_dims = 1;                                                    \
   if( THTensor_nDimensionLegacyNoScalars(TENSOR1) != THTensor_nDimensionLegacyNoScalars(TENSOR2) ) { \
     same_dims = 0;                                                      \
@@ -49,9 +49,9 @@
     same_dims = 0;                                   \
   } \
   if (same_dims == 0) { \
-    AT_ERROR("inconsistent tensor size, expected ", #TENSOR1, " ", TENSOR1->sizes(), ", ", #TENSOR2, " ", TENSOR2->sizes(), " and ", #TENSOR3, " ",TENSOR3->sizes() , " to have the same number of dimensions"); \
+    try { AT_ERROR("inconsistent tensor size, expected ", #TENSOR1, " ", TENSOR1->sizes(), ", ", #TENSOR2, " ", TENSOR2->sizes(), " and ", #TENSOR3, " ",TENSOR3->sizes() , " to have the same number of dimensions"); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }\
   }                                                                     \
-  SIZE_CHECK(TENSOR1, TENSOR2, TENSOR3, DIMENSION)                      \
+  try { SIZE_CHECK(TENSOR1, TENSOR2, TENSOR3, DIMENSION) } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }                      \
 \
   if (TH_TENSOR_DIM_APPLY_hasFinished) { \
     return; \
@@ -146,9 +146,9 @@
   int TH_TENSOR_DIM_APPLY_i; \
 \
   if( (DIMENSION < 0) || (DIMENSION >= THTensor_nDimensionLegacyNoScalars(TENSOR1)) ) \
-    THError("invalid dimension %d (expected to be 0 <= dim < %d)", DIMENSION, THTensor_nDimensionLegacyAll(TENSOR1)); \
+    try { THError("invalid dimension %d (expected to be 0 <= dim < %d)", DIMENSION, THTensor_nDimensionLegacyAll(TENSOR1)); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }\
   if( THTensor_nDimensionLegacyNoScalars(TENSOR1) != THTensor_nDimensionLegacyNoScalars(TENSOR2)) { \
-    AT_ERROR("inconsistent tensor size, expected ", #TENSOR1, " ", TENSOR1->sizes(), " and ", #TENSOR2, " ", TENSOR2->sizes(), " to have the same number of dimensions");        \
+    try { AT_ERROR("inconsistent tensor size, expected ", #TENSOR1, " ", TENSOR1->sizes(), " and ", #TENSOR2, " ", TENSOR2->sizes(), " to have the same number of dimensions"); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }       \
   }                                                                     \
   TH_UNUSED int shape_check_flag = 0;                                             \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < THTensor_nDimensionLegacyNoScalars(TENSOR1); TH_TENSOR_DIM_APPLY_i++) \
@@ -156,7 +156,7 @@
     if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       continue; \
     if(THTensor_sizeLegacyNoScalars(TENSOR1, TH_TENSOR_DIM_APPLY_i) != THTensor_sizeLegacyNoScalars(TENSOR2, TH_TENSOR_DIM_APPLY_i)) { \
-      AT_ERROR("Expected ", #TENSOR1, " ", TENSOR1->sizes(), " and ", #TENSOR2, " ", TENSOR2->sizes(), " to have the same size in dimension ", DIMENSION); \
+      try { AT_ERROR("Expected ", #TENSOR1, " ", TENSOR1->sizes(), " and ", #TENSOR2, " ", TENSOR2->sizes(), " to have the same size in dimension ", DIMENSION); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }\
     }                                                                   \
   } \
 \
@@ -267,7 +267,7 @@
   int TH_TENSOR_DIM_APPLY_i; \
 \
   if( (DIMENSION < 0) || (DIMENSION >= THTensor_nDimensionLegacyAll(TENSOR)) ) \
-    THError("invalid dimension"); \
+    try { THError("invalid dimension"); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); } \
 \
   TENSOR##_data = THTensor_getStoragePtr(TENSOR)->data<TYPE>()+(TENSOR)->storage_offset(); \
   TENSOR##_stride = THTensor_strideLegacyNoScalars((TENSOR), DIMENSION); \

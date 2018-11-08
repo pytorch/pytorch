@@ -6,7 +6,14 @@ PyObject *THPStorageClass = nullptr;
 
 PyObject * THPStorage_(New)(THWStorage *ptr)
 {
-  AT_ASSERT(ptr);
+  try { 
+    AT_ASSERT(ptr); 
+  } 
+  catch(::c10::Error const &) { 
+    /* Can't let a C++ exception percolate from a function declared as extern "C" */ 
+    // BugBug: This can be converted to a Python exception type
+    exit(-1); 
+  }
   PyTypeObject *type = (PyTypeObject *)THPStorageClass;
   PyObject *obj = type->tp_alloc(type, 0);
   if (obj) {

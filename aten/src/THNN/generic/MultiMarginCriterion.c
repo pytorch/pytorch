@@ -20,8 +20,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   int64_t t, d;
   scalar_t sum;
 
-  AT_CHECK(!input->is_empty() && input->dim() <= 2,
-           "non-empty vector or matrix expected, got size: ", input->sizes());
+  try { AT_CHECK(!input->is_empty() && input->dim() <= 2, "non-empty vector or matrix expected, got size: ", input->sizes()); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }
 
   if (input->dim() <= 1)
   {
@@ -32,8 +31,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   {
     nframe = input->size(0);
     dim = input->size(1);
-    AT_CHECK(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
-             "inconsistent target size, got: ", target->sizes());
+    try { AT_CHECK(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe), "inconsistent target size, got: ", target->sizes()); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }
   }
 
   for (t = 0; t < nframe; t++)
@@ -136,8 +134,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   int64_t t, d;
   scalar_t g;
 
-  AT_CHECK(!input->is_empty() && (input->dim() <= 2),
-           "non-empty vector or matrix expected, got size: ", input->sizes());
+  try { AT_CHECK(!input->is_empty() && (input->dim() <= 2), "non-empty vector or matrix expected, got size: ", input->sizes()); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }
 
   if (input->dim() <= 1)
   {
@@ -148,8 +145,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   {
     nframe = input->size(0);
     dim = input->size(1);
-    AT_CHECK(!target->is_empty() && (target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
-             "inconsistent target size, got: ", target->sizes());
+    try { AT_CHECK(!target->is_empty() && (target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe), "inconsistent target size, got: ", target->sizes()); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }
   }
 
   g = (reduction == Reduction::Mean ? 1./((scalar_t)(nframe*dim)) : 1./((scalar_t)dim));

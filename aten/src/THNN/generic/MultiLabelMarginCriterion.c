@@ -17,22 +17,19 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   int64_t t, d, dt, ddt;
   scalar_t sum;
 
-  AT_CHECK(!input->is_empty() && input->dim() <= 2,
-           "non-empty vector or matrix expected, got size: ", input->sizes());
+  try { AT_CHECK(!input->is_empty() && input->dim() <= 2, "non-empty vector or matrix expected, got size: ", input->sizes()); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }
 
   if (input->dim() <= 1)
   {
     nframe = 1;
     dim = THTensor_sizeLegacyNoScalars(input, 0);
-    AT_CHECK(!target->is_empty() && (target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == dim),
-             "inconsistent target size");
+    try { AT_CHECK(!target->is_empty() && (target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == dim), "inconsistent target size"); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }
   }
   else
   {
     nframe = input->size(0);
     dim = input->size(1);
-    AT_CHECK(!target->is_empty() && target->dim() == 2 && (target->size(0) == nframe)
-             && (target->size(1) == dim), "inconsistent target size");
+    try { AT_CHECK(!target->is_empty() && target->dim() == 2 && (target->size(0) == nframe) && (target->size(1) == dim), "inconsistent target size"); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }
   }
 
   THArgCheck(THIndexTensor_(minall)(target) >= -1+TH_INDEX_BASE, 3, "target out of range");
@@ -157,26 +154,35 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   int64_t t, d, dt;
   scalar_t g;
 
-  AT_CHECK(!input->is_empty() && input->dim() <= 2,
-           "vector or matrix expected, got size: ", input->sizes());
+  try { AT_CHECK(!input->is_empty() && input->dim() <= 2, "vector or matrix expected, got size: ", input->sizes()); } catch(::c10::Error const &) { /* Can't let a C++ exception percolate from a function declared as extern "C" */ exit(-1); }
 
   if (input->dim() <= 1)
   {
     nframe = 1;
     dim = THTensor_sizeLegacyNoScalars(input, 0);
-    AT_CHECK((!target->is_empty() && target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == dim),
-             "inconsistent target size");
-    AT_CHECK((!isTarget->is_empty() && isTarget->dim() <= 1) && (THTensor_sizeLegacyNoScalars(isTarget, 0) == dim),
-             "inconsistent isTarget size");
+
+    try {
+      AT_CHECK((!target->is_empty() && target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == dim),"inconsistent target size");
+      AT_CHECK((!isTarget->is_empty() && isTarget->dim() <= 1) && (THTensor_sizeLegacyNoScalars(isTarget, 0) == dim), "inconsistent isTarget size");
+     } 
+     catch(::c10::Error const &) { 
+       /* Can't let a C++ exception percolate from a function declared as extern "C" */ 
+       exit(-1); 
+     }
   }
   else
   {
     nframe = input->size(0);
     dim = input->size(1);
-    AT_CHECK(!target->is_empty() && (target->dim() == 2) && (target->size(0) == nframe)
-             && (target->size(1) == dim), 3, "inconsistent target size");
-    AT_CHECK(!isTarget->is_empty() && (isTarget->dim() == 2) && (isTarget->size(0) == nframe)
-             && (isTarget->size(1) == dim), 3, "inconsistent isTarget size");
+
+    try { 
+      AT_CHECK(!target->is_empty() && (target->dim() == 2) && (target->size(0) == nframe) && (target->size(1) == dim), 3, "inconsistent target size");
+      AT_CHECK(!isTarget->is_empty() && (isTarget->dim() == 2) && (isTarget->size(0) == nframe) && (isTarget->size(1) == dim), 3, "inconsistent isTarget size");
+    } 
+    catch(::c10::Error const &) { 
+      /* Can't let a C++ exception percolate from a function declared as extern "C" */ 
+      exit(-1); 
+    }
   }
 
   THArgCheck(THIndexTensor_(minall)(target) >= -1+TH_INDEX_BASE, 3, "target out of range");

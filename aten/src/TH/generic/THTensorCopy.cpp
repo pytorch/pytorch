@@ -2,11 +2,11 @@
 #define TH_GENERIC_FILE "generic/THTensorCopy.cpp"
 #else
 
-#ifndef _WIN32
-#define PRAGMA(P) _Pragma(#P)
-#else
-#define PRAGMA(P) __pragma(P)
-#endif
+// BugBug #ifndef _WIN32
+// BugBug #define PRAGMA(P) _Pragma(#P)
+// BugBug #else
+// BugBug #define PRAGMA(P) __pragma(P)
+// BugBug #endif
 
 #ifdef _OPENMP
 #define TH_OMP_OVERHEAD_THRESHOLD_COPY 20000
