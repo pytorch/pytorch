@@ -230,6 +230,12 @@ struct CAFFE2_API DynamicType : public Type {
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    if(auto rhs_ = rhs->cast<OptionalType>()) {
+      return this->isSubtypeOf(rhs_->getElementType());
+    }
+    return *this == *rhs;
+  }
   std::string str() const override {
     return "Tensor";
   }
@@ -256,6 +262,9 @@ struct CAFFE2_API UndefinedTensorType : public Type {
     return rhs.kind() == kind();
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
+    if(auto rhs_ = rhs->cast<OptionalType>()) {
+      return this->isSubtypeOf(rhs_->getElementType());
+    }
     return rhs->kind() == TypeKind::DynamicType ||
            rhs->kind() == TypeKind::UndefinedTensorType;
   }
@@ -307,6 +316,9 @@ struct CAFFE2_API TensorType : public Type {
            dim() == rt->dim();
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
+    if(auto rhs_ = rhs->cast<OptionalType>()) {
+      return this->isSubtypeOf(rhs_->getElementType());
+    }
     if (rhs->kind() == TypeKind::DynamicType)
       return true;
     return rhs->kind() == TypeKind::TensorType && *this == *rhs;
@@ -393,6 +405,9 @@ struct CAFFE2_API CompleteTensorType : public TensorType {
            device() == rt->device();
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
+    if(auto rhs_ = rhs->cast<OptionalType>()) {
+      return this->isSubtypeOf(rhs_->getElementType());
+    }
     if (rhs->kind() == TypeKind::DynamicType)
       return true;
     if (rhs->kind() == TypeKind::TensorType)
