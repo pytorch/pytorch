@@ -162,7 +162,7 @@ void syncReduction(
   // and intra-node reduce to be operated on this worker stream to
   // improve performance
   at::cuda::CUDAStream workerStream = at::cuda::getStreamFromPool();
-  at::cuda::CUDAGuard cudaGuard(workerStream);
+  at::cuda::CUDAStreamGuard cudaGuard(workerStream);
 
   // Let the worker stream wait on the reduction stream
   reductionWork->wait();

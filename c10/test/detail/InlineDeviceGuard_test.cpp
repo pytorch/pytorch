@@ -2,7 +2,6 @@
 
 #include "c10/detail/InlineDeviceGuard.h"
 #include "c10/detail/FakeGuardImpl.h"
-#include "c10/DeviceGuard.h"
 
 using namespace c10;
 using namespace c10::detail;

@@ -60,6 +60,9 @@ public:
   /// different devices.  If you need to set streams on multiple devices
   /// on CUDA, use CUDAMultiStreamGuard instead.
   void reset_stream(Stream stream) {
+    // TODO: make a version that takes an impl argument.  Unfortunately,
+    // that will require SFINAE because impl is only valid for the
+    // VirtualGuardImpl specialization.
     if (stream.device() == this->original_device()) {
       this->impl_.exchangeStream(stream);
       current_stream_ = stream;
@@ -166,7 +169,7 @@ public:
   }
 
   /// Restore the original device and stream, resetting this guard to uninitialized state.
-  void reset() const {
+  void reset() {
     guard_.reset();
   }
 

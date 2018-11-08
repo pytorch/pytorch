@@ -97,7 +97,7 @@ Tensor new_with_tensor_copy(const Type& type, Tensor other, int32_t device_index
   // dispatch_type_conversion bleggg
   at::OptionalDeviceGuard device_guard;
   if (type.is_cuda()) {
-    device_guard.set_device(at::Device(at::kCUDA, device_index));
+    device_guard.reset_device(at::Device(at::kCUDA, device_index));
   }
   return type.copy(other);
 }
@@ -293,12 +293,12 @@ Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwa
   } else if (r.idx == 2) {
     auto deviceOptional = r.deviceOptional(2);
     check_legacy_ctor_device(type, deviceOptional);
-    at::DeviceGuard device_guard(deviceOptional);
+    at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
     auto deviceOptional = r.deviceOptional(3);
     check_legacy_ctor_device(type, deviceOptional);
-    at::DeviceGuard device_guard(deviceOptional);
+    at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
@@ -327,7 +327,7 @@ Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObject* kwar
   if (r.idx == 0) {
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(type, deviceOptional);
-    at::DeviceGuard device_guard(deviceOptional);
+    at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, type.options());
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));

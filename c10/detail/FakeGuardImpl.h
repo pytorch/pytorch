@@ -57,6 +57,12 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
     AT_ASSERT(i < kFakeGuardImplMaxDevices);
     current_device_ = i;
   }
+  static StreamId getCurrentStreamIdFor(DeviceIndex i) {
+    return current_streams_.at(i);
+  }
+  static void resetStreams() {
+    current_streams_.fill(0);
+  }
 private:
   thread_local static DeviceIndex current_device_;
   thread_local static std::array<StreamId, kFakeGuardImplMaxDevices> current_streams_;

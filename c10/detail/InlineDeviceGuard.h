@@ -136,19 +136,21 @@ public:
   ///
   /// NOTE: this implementation may skip some device setting if it can prove
   /// that it is unnecessary.
+  ///
+  /// Optional argument is for testing only.
   template <typename U=T>
   typename std::enable_if<std::is_same<U, VirtualGuardImpl>::value >::type
-  reset_device(at::Device device) {
-    // TODO: Consider writing a testing variant of this which takes the new impl explicitly
+  reset_device(at::Device device, const detail::DeviceGuardImplInterface* impl = nullptr) {
     auto index = device.index();
     if (index == -1) return;
     if (device.type() == original_device_.type()) {
+      AT_ASSERT(impl == nullptr || impl->type() == device.type());
       impl_.setDevice(device);
       current_device_ = device;
     } else {
       // Destruct and reconstruct the DeviceGuard in place
       impl_.setDevice(original_device_);
-      impl_ = VirtualGuardImpl(device.type());
+      impl_ = !impl ? VirtualGuardImpl(device.type()) : VirtualGuardImpl(impl);
       original_device_ = impl_.exchangeDevice(device);
       current_device_ = device;
     }
@@ -248,6 +250,15 @@ public:
     }
   }
 
+  /// Set the current device to the passed DeviceIndex, if it is not nullopt.
+  template <typename U=T, typename=typename std::enable_if<!std::is_same<U, VirtualGuardImpl>::value>::type>
+  explicit InlineOptionalDeviceGuard(optional<DeviceIndex> device_index_opt)
+    : guard_() { // See Note [Explicit initialization of optional fields]
+    if (device_index_opt.has_value()) {
+      guard_.emplace(device_index_opt.value());
+    }
+  }
+
   /// All constructors of DeviceGuard are valid for OptionalDeviceGuard
   /// and result in initialized OptionalDeviceGuard.
   template <typename... Args>
@@ -344,7 +355,7 @@ public:
 
   /// Sets the device to the given one.  Initializes OptionalDeviceGuard if it
   /// is not already initialized.
-  template <typename U=T, typename=typename std::enable_if<!std::is_same<U, VirtualGuardImpl>::value >::type>
+  template <typename U=T, typename=typename std::enable_if<!std::is_same<U, VirtualGuardImpl>::value>::type>
   void set_device(at::Device device) {
     if (!guard_.has_value()) {
       guard_.emplace(device);
@@ -358,13 +369,15 @@ public:
   /// type).  Initializes OptionalDeviceGuard if it is not already initialized.
   ///
   /// See notes on why this is called reset_device on InlineDeviceGuard.
+  ///
+  /// Optional argument is for testing only.
 
-  template <typename U=T, typename=std::enable_if<std::is_same<U, VirtualGuardImpl>::value >>
-  void reset_device(at::Device device) {
+  template <typename U=T, typename=typename std::enable_if<std::is_same<U, VirtualGuardImpl>::value>::type>
+  void reset_device(at::Device device, const DeviceGuardImplInterface* impl = nullptr) {
     if (!guard_.has_value()) {
-      guard_.emplace(device);
+      guard_.emplace(device, impl);
     } else {
-      guard_->reset_device(device);
+      guard_->reset_device(device, impl);
     }
   }
 
@@ -379,8 +392,8 @@ public:
     }
   }
 
-  /// Returns the device that was set at the time the guard was initialized,
-  /// or nullopt if the guard is uninitialized.
+  /// Returns the device that was set immediately prior to initialization of the,
+  /// guard, or nullopt if the guard is uninitialized.
   optional<Device> original_device() const {
     return guard_.has_value() ? make_optional(guard_->original_device()) : nullopt;
   }
@@ -393,7 +406,7 @@ public:
   }
 
   /// Restore the original device, resetting this guard to uninitialized state.
-  void reset() const {
+  void reset() {
     guard_.reset();
   }
 
