@@ -2,7 +2,7 @@
 
 #include <torch/data/samplers/base.h>
 #include <torch/types.h>
-#include <torch/csrc/WindowsTorchApiMacro>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <cstddef>
 #include <vector>
