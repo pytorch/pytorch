@@ -7228,14 +7228,8 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_flip(self, use_cuda=False):
-        if use_cuda:
-            cuda = torch.device("cuda")
-            data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=cuda).view(2, 2, 2)
-            # large data testing
-            large_data = torch.arange(0, 100000000, device=cuda).view(10000, 10000)
-            large_data.flip([0, 1])
-        else:
-            data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8]).view(2, 2, 2)
+        device = torch.device('cuda') if use_cuda else torch.device('cpu')
+        data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=device).view(2, 2, 2)
 
         self.assertEqual(torch.tensor([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2), data.flip(0))
         self.assertEqual(torch.tensor([3, 4, 1, 2, 7, 8, 5, 6]).view(2, 2, 2), data.flip(1))
@@ -7259,14 +7253,20 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: data.flip(3))
 
         # test for non-contiguous case
-        if use_cuda:
-            expanded_data = torch.arange(1, 4, device=cuda).view(3, 1).expand(3, 2)
-            tranposed_data = torch.arange(1, 9, device=cuda).view(2, 2, 2).transpose(0, 1)
-        else:
-            expanded_data = torch.arange(1, 4).view(3, 1).expand(3, 2)
-            tranposed_data = torch.arange(1, 9).view(2, 2, 2).transpose(0, 1)
+        expanded_data = torch.arange(1, 4, device=device).view(3, 1).expand(3, 2)
+        tranposed_data = torch.arange(1, 9, device=device).view(2, 2, 2).transpose(0, 1)
         self.assertEqual(torch.tensor([3, 3, 2, 2, 1, 1]).view(3, 2), expanded_data.flip(0))
         self.assertEqual(torch.tensor([8, 7, 4, 3, 6, 5, 2, 1]).view(2, 2, 2), tranposed_data.flip(0, 1, 2))
+
+        # test for shape
+        data = torch.randn(2, 3, 4, device=device)
+        size = [2, 3, 4]
+        test_dims = []
+        for i in range(1, 3):
+            test_dims += combinations(range(len(size)), i)
+
+        for ds in test_dims:
+            self.assertEqual(size, list(data.flip(ds).size()))
 
         # test rectangular case
         data = torch.tensor([1, 2, 3, 4, 5, 6]).view(2, 3)
