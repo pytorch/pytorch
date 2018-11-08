@@ -217,10 +217,8 @@ if not ONNX_NAMESPACE:
 try:
     import ninja
     USE_NINJA = True
-    ninja_global = NinjaBuilder('global')
 except ImportError:
     USE_NINJA = False
-    ninja_global = None
 
 # Constant known variables used throughout this file
 cwd = os.path.dirname(os.path.abspath(__file__))
@@ -233,7 +231,12 @@ rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
 # full absolute path to the dir above
 full_site_packages = distutils.sysconfig.get_python_lib()
 # CMAKE: full path to python library
-cmake_python_library = "{}/{}".format(
+if IS_WINDOWS:
+    cmake_python_library = "{}/libs/python{}.lib".format(
+        distutils.sysconfig.get_config_var("prefix"),
+        distutils.sysconfig.get_config_var("VERSION"))
+else:
+    cmake_python_library = "{}/{}".format(
     distutils.sysconfig.get_config_var("LIBDIR"),
     distutils.sysconfig.get_config_var("INSTSONAME"))
 cmake_python_include_dir = distutils.sysconfig.get_python_inc()
@@ -463,6 +466,7 @@ class build_deps(PytorchCommand):
         check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
         check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
         check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
+        check_file(os.path.join(third_party_path, 'catch', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
@@ -633,12 +637,16 @@ class build_ext(build_ext_parent):
         else:
             print('-- Building without distributed package')
 
-        generate_code(ninja_global)
-
         if USE_NINJA:
+            ninja_builder  = NinjaBuilder('global')
+
+            generate_code(ninja_builder)
+            
             # before we start the normal build make sure all generated code
             # gets built
-            ninja_global.run()
+            ninja_builder.run()
+        else:
+            generate_code(None)
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
