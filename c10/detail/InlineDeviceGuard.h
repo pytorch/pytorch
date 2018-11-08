@@ -113,8 +113,8 @@ public:
   }
 
   /// Resets the currently set device to its original device, and then sets the
-  /// current device to the passed device (for a possibly different device
-  /// type).
+  /// current device to the passed device.  This is effectively equivalent to
+  /// set_device when a guard supports only a single device type.
   template <typename U=T>
   typename std::enable_if<!std::is_same<U, VirtualGuardImpl>::value >::type
   reset_device(at::Device device) {
@@ -371,13 +371,25 @@ public:
   /// See notes on why this is called reset_device on InlineDeviceGuard.
   ///
   /// Optional argument is for testing only.
-
   template <typename U=T, typename=typename std::enable_if<std::is_same<U, VirtualGuardImpl>::value>::type>
   void reset_device(at::Device device, const DeviceGuardImplInterface* impl = nullptr) {
     if (!guard_.has_value()) {
       guard_.emplace(device, impl);
     } else {
       guard_->reset_device(device, impl);
+    }
+  }
+
+  /// Resets the currently set device to its original device, and then sets the
+  /// current device to the passed device.  Initializes the guard if it is
+  /// not already initialized.  This is effectively equivalent to set_device
+  /// when a guard supports only a single device type.
+  template <typename U=T, typename=typename std::enable_if<!std::is_same<U, VirtualGuardImpl>::value>::type>
+  void reset_device(at::Device device) {
+    if (!guard_.has_value()) {
+      guard_.emplace(device);
+    } else {
+      guard_->reset_device(device);
     }
   }
 
