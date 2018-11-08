@@ -1650,7 +1650,11 @@ void addGlobalMethods(py::module& m) {
         }
         OnnxifiTransformer ts(infer_shapes, debug_builder);
         ts.Transform(
-            GetCurrentWorkspace(), &pred_net, external_inputs, tensor_shapes);
+            GetCurrentWorkspace(),
+            &pred_net,
+            external_inputs,
+            tensor_shapes,
+            {});
         std::string pred_net_str2;
         pred_net.SerializeToString(&pred_net_str2);
         return py::bytes(pred_net_str2);
