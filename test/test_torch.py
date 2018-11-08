@@ -884,7 +884,7 @@ class _TestTorchMixin(object):
         x = torch.zeros(3, device=device)
         y = torch.zeros(3, device=device)
         y[1] = 1.
-        run_test(x, y)            
+        run_test(x, y)
 
     def test_dist(self):
         self._test_dist(self, device='cpu')

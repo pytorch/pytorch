@@ -1944,6 +1944,7 @@ class TestCuda(TestCase):
     def test_norm(self):
         _TestTorchMixin._test_norm(self, device='cuda')
 
+    @skipIfRocm
     def test_dist(self):
         _TestTorchMixin._test_dist(self, device='cuda')
 
