@@ -184,14 +184,12 @@ struct CAFFE2_API Type {
   virtual Tensor s__th_masked_select(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor _th_masked_select(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor _th_nonzero(const Tensor & self) const = 0;
-  virtual Tensor _th_view(const Tensor & self, IntList size) const = 0;
   virtual Tensor _th_index_select(const Tensor & self, int64_t dim, const Tensor & index) const = 0;
   virtual Tensor _th_take(const Tensor & self, const Tensor & index) const = 0;
   virtual Tensor & _th_put_(Tensor & self, const Tensor & index, const Tensor & source, bool accumulate) const = 0;
   virtual Tensor & _th_index_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) const = 0;
   virtual Tensor & _th_index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) const = 0;
   virtual Tensor & _th_index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & value) const = 0;
-  virtual Tensor _th_unfold(const Tensor & self, int64_t dimension, int64_t size, int64_t step) const = 0;
   virtual Tensor & _th_scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) const = 0;
   virtual Tensor & _th_scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) const = 0;
   virtual Tensor & _th_scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) const = 0;
