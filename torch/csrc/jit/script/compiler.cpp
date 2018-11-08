@@ -2409,14 +2409,17 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
   if (subscript.value().kind() != TK_VAR)
     return c10::nullopt;
   auto var = Var(subscript.value());
-  if (var.name().name() != "BroadcastingList")
+
+  if (var.name().name().find("BroadcastingList") != 0) {
     return c10::nullopt;
-  if (subscript.subscript_exprs().size() != 2)
+  }
+
+  if (subscript.subscript_exprs().size() != 1)
     throw ErrorReport(subscript.subscript_exprs().range())
-      << "BroadcastingList must be subscripted by type & len";
+      << "BroadcastingList must be subscripted with a type";
 
   auto typ = subscript.subscript_exprs()[0];
-  auto len = subscript.subscript_exprs()[1];
+  auto len = var.name().name().substr(strlen("BroadcastingList"));
 
   if (typ.kind() != TK_VAR)
     throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
@@ -2428,12 +2431,13 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
   auto elem_ptr = ident_to_type_lut().find(value_name);
   JIT_ASSERT(elem_ptr != ident_to_type_lut().end());
   TypePtr list_ptr = ListType::create(elem_ptr->second);
-  if (len.kind () != TK_CONST)
-    throw ErrorReport(expr) << "subscript of Broadcastable list must be positive integer";
 
-  auto constant = Const(len);
-  if (!constant.isIntegral() || constant.asIntegral() <= 0)
-    throw ErrorReport(len) << "subscript of Broadcastable list must be positive integer";
+  Parser const_parser(len);
+  auto constant = const_parser.parseConst();
+  if (!constant.isIntegral() || constant.asIntegral() <= 0) {
+    throw ErrorReport(subscript.subscript_exprs().range())
+        << "subscript of Broadcastable list must be positive integer";
+  }
 
   auto len_v = constant.asIntegral();
   return std::pair<TypePtr, int32_t>(list_ptr, len_v);
