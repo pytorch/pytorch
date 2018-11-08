@@ -7,7 +7,7 @@
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/rnn.h>
 #include <torch/nn/modules/sequential.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <algorithm>
@@ -288,26 +288,24 @@ TEST_F(SequentialTest, IsCloneable) {
 
   torch::NoGradGuard no_grad;
 
-  auto params1 = sequential->parameters();
-  auto params2 = clone->parameters();
+  auto params1 = sequential->named_parameters();
+  auto params2 = clone->named_parameters();
   ASSERT_EQ(params1.size(), params2.size());
   for (auto& param : params1) {
-    ASSERT_FALSE(pointer_equal(param.value, params2[param.key]));
-    ASSERT_EQ(param->device(), params2[param.key].device());
-    ASSERT_TRUE(param->allclose(params2[param.key]));
+    ASSERT_FALSE(pointer_equal(param.value(), params2[param.key()]));
+    ASSERT_EQ(param->device(), params2[param.key()].device());
+    ASSERT_TRUE(param->allclose(params2[param.key()]));
     param->add_(2);
   }
   for (auto& param : params1) {
-    ASSERT_FALSE(param->allclose(params2[param.key]));
+    ASSERT_FALSE(param->allclose(params2[param.key()]));
   }
 }
 
 TEST_F(SequentialTest, RegistersElementsAsSubmodules) {
   Sequential sequential(Linear(10, 3), Conv2d(1, 2, 3), FeatureDropout(0.5));
 
-  auto modules = sequential->modules();
-  ASSERT_EQ(modules.size(), sequential->children().size());
-
+  auto modules = sequential->children();
   ASSERT_TRUE(modules[0]->as<Linear>());
   ASSERT_TRUE(modules[1]->as<Conv2d>());
   ASSERT_TRUE(modules[2]->as<FeatureDropout>());
@@ -319,9 +317,9 @@ TEST_F(SequentialTest, CloneToDevice_CUDA) {
   Sequential clone =
       std::dynamic_pointer_cast<SequentialImpl>(sequential->clone(device));
   for (const auto& p : clone->parameters()) {
-    ASSERT_EQ(p->device(), device);
+    ASSERT_EQ(p.device(), device);
   }
   for (const auto& b : clone->buffers()) {
-    ASSERT_EQ(b->device(), device);
+    ASSERT_EQ(b.device(), device);
   }
 }

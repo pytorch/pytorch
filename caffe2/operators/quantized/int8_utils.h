@@ -131,65 +131,6 @@ inline int CalculateInputRadius(int input_integer_bits, int input_left_shift) {
   return static_cast<int>(std::floor(max_input_rescaled));
 }
 
-// An adaptor to use the Caffe2 WorkersPool implementation for gemmlowp
-// multithreading functions.
-class C2GEMMContext : public gemmlowp::SingleThreadGemmContext {
-  class C2WorkersPool;
-
- public:
-  C2GEMMContext(ThreadPool* pool) : threadPool_(pool), workersPool_(pool) {}
-  int max_num_threads() const {
-    CHECK(threadPool_);
-    return threadPool_->getNumThreads();
-  }
-  C2WorkersPool* workers_pool() {
-    return &workersPool_;
-  }
-
-  ThreadPool* threadPool() {
-    return threadPool_;
-  }
-
- private:
-  class C2WorkersPool {
-   public:
-    C2WorkersPool(ThreadPool* pool) : pool_(pool) {}
-    void Execute(const std::vector<gemmlowp::Task*>& tasks) {
-      class C2Task : public Task {
-       public:
-        C2Task(gemmlowp::Task* task) : task_(task){};
-        virtual void Run() override {
-          CHECK(task_);
-          task_->Run();
-        }
-
-       private:
-        gemmlowp::Task* task_;
-      };
-      std::vector<std::shared_ptr<Task>> c2tasks;
-      c2tasks.reserve(tasks.size());
-      std::vector<gemmlowp::Allocator> allocators(tasks.size());
-
-      for (size_t i = 0; i < tasks.size(); ++i) {
-        auto* task = tasks[i];
-        CHECK(task);
-        task->local_allocator = &allocators[i];
-        c2tasks.push_back(std::shared_ptr<Task>(new C2Task(task)));
-      }
-      CHECK(pool_);
-      pool_->withPool([&](WorkersPool* pool) { pool->Execute(c2tasks); });
-      for (auto* t : tasks) {
-        delete t;
-      }
-    }
-
-   private:
-    ThreadPool* pool_;
-  };
-  ThreadPool* threadPool_;
-  C2WorkersPool workersPool_;
-};
-
 enum class Activation : uint8_t { NONE = 0, RELU = 1 };
 
 inline std::pair<uint8_t, uint8_t>

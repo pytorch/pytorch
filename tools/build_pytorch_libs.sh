@@ -43,6 +43,7 @@ fi
 
 # Options for building only a subset of the libraries
 USE_CUDA=0
+USE_FBGEMM=0
 USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
@@ -57,6 +58,9 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-cuda)
           USE_CUDA=1
+          ;;
+      --use-fbgemm)
+          USE_FBGEMM=1
           ;;
       --use-rocm)
           USE_ROCM=1
@@ -212,6 +216,7 @@ function build_caffe2() {
 		       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
 		       -DUSE_CUDA=$USE_CUDA \
 		       -DUSE_DISTRIBUTED=$USE_DISTRIBUTED \
+		       -DUSE_FBGEMM=$USE_FBGEMM \
 		       -DUSE_NUMPY=$USE_NUMPY \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \

@@ -635,7 +635,7 @@ bool PoolOp<T, Context, PoolType>::RunOnDeviceWithOrderNHWC() {
   int height = X.dim32(1);
   int width = kernel_.size() > 1 ? X.dim32(2) : 1;
   int depth = kernel_.size() > 2 ? X.dim32(3) : 1;
-  int channels = X.dim32(X.ndim() - 1);
+  int channels = X.dim32(X.dim() - 1);
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, channels);
 
   EigenMatrixMap<float> Ymat(

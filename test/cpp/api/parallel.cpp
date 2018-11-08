@@ -5,7 +5,7 @@
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/parallel/data_parallel.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <test/cpp/api/support.h>
 
@@ -79,28 +79,28 @@ TEST_F(ParallelTest, Replicate_MultiCUDA) {
 
   auto replica1_parameters = replicas[0]->parameters();
   for (auto& parameter : replica1_parameters) {
-    ASSERT_EQ(parameter->device(), torch::Device(torch::kCUDA, 0));
+    ASSERT_EQ(parameter.device(), torch::Device(torch::kCUDA, 0));
   }
   replicas[0]->to(torch::kCPU);
   ASSERT_EQ(replica1_parameters.size(), original_parameters.size());
   for (size_t i = 0; i < original_parameters.size(); ++i) {
-    ASSERT_TRUE(replica1_parameters[i]->allclose(*original_parameters[i]));
+    ASSERT_TRUE(replica1_parameters[i].allclose(original_parameters[i]));
     ASSERT_TRUE(
-        replica1_parameters[i]->data<float>() !=
-        original_parameters[i]->data<float>());
+        replica1_parameters[i].data<float>() !=
+        original_parameters[i].data<float>());
   }
 
   auto replica2_parameters = replicas[1]->parameters();
   for (auto& parameter : replica2_parameters) {
-    ASSERT_EQ(parameter->device(), torch::Device(torch::kCUDA, 1));
+    ASSERT_EQ(parameter.device(), torch::Device(torch::kCUDA, 1));
   }
   replicas[1]->to(torch::kCPU);
   ASSERT_EQ(replica2_parameters.size(), original_parameters.size());
   for (size_t i = 0; i < original_parameters.size(); ++i) {
-    ASSERT_TRUE(replica2_parameters[i]->allclose(*original_parameters[i]));
+    ASSERT_TRUE(replica2_parameters[i].allclose(original_parameters[i]));
     ASSERT_TRUE(
-        replica2_parameters[i]->data<float>() !=
-        original_parameters[i]->data<float>());
+        replica2_parameters[i].data<float>() !=
+        original_parameters[i].data<float>());
   }
 }
 

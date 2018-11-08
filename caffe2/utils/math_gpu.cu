@@ -15,7 +15,26 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/conversions.h"
+
 #include "caffe2/utils/fixed_divisor.h"
+// TODO: Move this to fixed_divisor.h
+#ifdef __HIPCC__
+#define FIXED_DIVISOR int32_t
+#define FIXED_DIVISOR_DIV(d, n) (n / d)
+#define FIXED_DIVISOR_MOD(d, n) (n % d)
+#define FIXED_DIVISOR_DIV_MOD(d, n, q, r) \
+  do {                                    \
+    const auto n_copy = n;                \
+    *q = n_copy / d;                      \
+    *r = n_copy % d;                      \
+  } while (0)
+#else // __HIPCC__
+#define FIXED_DIVISOR FixedDivisor<int32_t>
+#define FIXED_DIVISOR_DIV(d, n) (d.Div(n))
+#define FIXED_DIVISOR_MOD(d, n) (d.Mod(n))
+#define FIXED_DIVISOR_DIV_MOD(d, n, q, r) (d.DivMod(n, q, r))
+#endif // __HIPCC__
+
 #include "caffe2/utils/math_utils.h"
 
 #if THRUST_VERSION >= 100800
@@ -54,9 +73,9 @@ template <typename T>
 __global__ void SinCosCUDAKernel(const int N, const T* X, T* S, T* C) {
   CUDA_1D_KERNEL_LOOP(i, N) {
 #if __CUDA_ARCH__ >= 350
-    sincos(__ldg(X + i), S + i, C + i);
+    c10::cuda::compat::sincos(__ldg(X + i), S + i, C + i);
 #else
-    sincos(X[i], S + i, C + i);
+    c10::cuda::compat::sincos(X[i], S + i, C + i);
 #endif
   }
 }
@@ -76,13 +95,13 @@ __global__ void SimpleBinaryOpCUDAKernel(
 template <typename TIn, typename TOut, class BinaryOperator, bool broadcast_1st>
 __global__ void RowwiseBinaryOpCUDAKenel(
     const int size,
-    const FixedDivisor<int> cols,
+    const FIXED_DIVISOR cols,
     const BinaryOperator op,
     const TIn* A,
     const TIn* B,
     TOut* C) {
   CUDA_1D_KERNEL_LOOP(C_index, size) {
-    const int j = cols.Mod(C_index);
+    const int j = FIXED_DIVISOR_MOD(cols, C_index);
     const int A_index = broadcast_1st ? j : C_index;
     const int B_index = broadcast_1st ? C_index : j;
     C[C_index] = op(A[A_index], B[B_index]);
@@ -92,13 +111,13 @@ __global__ void RowwiseBinaryOpCUDAKenel(
 template <typename TIn, typename TOut, class BinaryOperator, bool broadcast_1st>
 __global__ void ColwiseBinaryOpCUDAKenel(
     const int size,
-    const FixedDivisor<int> cols,
+    const FIXED_DIVISOR cols,
     const BinaryOperator op,
     const TIn* A,
     const TIn* B,
     TOut* C) {
   CUDA_1D_KERNEL_LOOP(C_index, size) {
-    const int i = cols.Div(C_index);
+    const int i = FIXED_DIVISOR_DIV(cols, C_index);
     const int A_index = broadcast_1st ? i : C_index;
     const int B_index = broadcast_1st ? C_index : i;
     C[C_index] = op(A[A_index], B[B_index]);
@@ -110,7 +129,7 @@ __global__ void BroadcastBinaryOpCUDAKernel(
     const int size,
     const SimpleArray<int, D> A_strides,
     const SimpleArray<int, D> B_strides,
-    const SimpleArray<FixedDivisor<int>, D> C_dims,
+    const SimpleArray<FIXED_DIVISOR, D> C_dims,
     const BinaryOperator op,
     const TIn* A,
     const TIn* B,
@@ -122,7 +141,7 @@ __global__ void BroadcastBinaryOpCUDAKernel(
 #pragma unroll
     for (int i = D - 1; i >= 0; --i) {
       int d;
-      C_dims.data[i].DivMod(C_index_val, &C_index_val, &d);
+      FIXED_DIVISOR_DIV_MOD(C_dims.data[i], C_index_val, &C_index_val, &d);
       A_index += d * A_strides.data[i];
       B_index += d * B_strides.data[i];
     }
@@ -145,7 +164,7 @@ CAFFE2_CUDA_EXPORT void BinaryOpWith2DBroadcasting(
     return;
   }
   const int size = rows * cols;
-  const FixedDivisor<int> cols_div(cols);
+  const FIXED_DIVISOR cols_div(cols);
   if (rowwise_broadcast) {
     if (broadcast_1st) {
       RowwiseBinaryOpCUDAKenel<TIn, TOut, BinaryOperator, true>
@@ -189,7 +208,7 @@ CAFFE2_CUDA_EXPORT void BroadcastBinaryOpImpl(
     CUDAContext* context) {
   SimpleArray<int, D> A_strides_array;
   SimpleArray<int, D> B_strides_array;
-  SimpleArray<FixedDivisor<int>, D> C_dims_array;
+  SimpleArray<FIXED_DIVISOR, D> C_dims_array;
   int A_stride = 1;
   int B_stride = 1;
   for (int i = D - 1; i >= 0; --i) {
@@ -200,7 +219,7 @@ CAFFE2_CUDA_EXPORT void BroadcastBinaryOpImpl(
     B_strides_array.data[i] = B_dims[i] == 1 ? 0 : B_stride;
     A_stride *= A_dims[i];
     B_stride *= B_dims[i];
-    C_dims_array.data[i] = FixedDivisor<int>(C_dims[i]);
+    C_dims_array.data[i] = FIXED_DIVISOR(C_dims[i]);
   }
   const int size =
       std::accumulate(C_dims, C_dims + D, 1, std::multiplies<int>());
@@ -456,7 +475,7 @@ DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
       return;                                                             \
     }                                                                     \
     const int size = rows * cols;                                         \
-    const FixedDivisor<int> cols_div(cols);                               \
+    const FIXED_DIVISOR cols_div(cols);                                   \
     RowwiseBinaryOpCUDAKenel<TIn, TOut, Op<TIn>, true>                    \
         <<<CAFFE_GET_BLOCKS(size),                                        \
            CAFFE_CUDA_NUM_THREADS,                                        \
@@ -475,7 +494,7 @@ DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
       return;                                                             \
     }                                                                     \
     const int size = rows * cols;                                         \
-    const FixedDivisor<int> cols_div(cols);                               \
+    const FIXED_DIVISOR cols_div(cols);                                   \
     RowwiseBinaryOpCUDAKenel<TIn, TOut, Op<TIn>, false>                   \
         <<<CAFFE_GET_BLOCKS(size),                                        \
            CAFFE_CUDA_NUM_THREADS,                                        \
@@ -494,7 +513,7 @@ DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
       return;                                                             \
     }                                                                     \
     const int size = rows * cols;                                         \
-    const FixedDivisor<int> cols_div(cols);                               \
+    const FIXED_DIVISOR cols_div(cols);                                   \
     ColwiseBinaryOpCUDAKenel<TIn, TOut, Op<TIn>, true>                    \
         <<<CAFFE_GET_BLOCKS(size),                                        \
            CAFFE_CUDA_NUM_THREADS,                                        \
@@ -513,7 +532,7 @@ DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
       return;                                                             \
     }                                                                     \
     const int size = rows * cols;                                         \
-    const FixedDivisor<int> cols_div(cols);                               \
+    const FIXED_DIVISOR cols_div(cols);                                   \
     ColwiseBinaryOpCUDAKenel<TIn, TOut, Op<TIn>, false>                   \
         <<<CAFFE_GET_BLOCKS(size),                                        \
            CAFFE_CUDA_NUM_THREADS,                                        \
@@ -724,6 +743,9 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
     at::Half* C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+  CAFFE_THROW("HIP currently does not support FP16 yet.");
+#else
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
   const int lda = (trans_A == CblasNoTrans) ? K : M;
@@ -779,6 +801,7 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
     // fail
     CAFFE_THROW("Unsupported math type");
   }
+#endif
 }
 
 template <>
@@ -818,7 +841,7 @@ CAFFE2_CUDA_EXPORT void GemmBatched<float, CUDAContext>(
     float** C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if __CUDACC_VER_MAJOR__ < 8
+#if __CUDACC_VER_MAJOR__ < 8 || defined(__HIPCC__)
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     Gemm<float, CUDAContext>(
@@ -887,7 +910,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<float, CUDAContext>(
     const int C_stride,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if __CUDACC_VER_MAJOR__ < 8
+#if __CUDACC_VER_MAJOR__ < 8 && !defined(__HIPCC__)
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     Gemm<float, CUDAContext>(
@@ -945,6 +968,9 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     at::Half** C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+  CAFFE_THROW("HIP currently does not support FP16 yet.");
+#else
 #if __CUDACC_VER_MAJOR__ < 9
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
@@ -1057,6 +1083,7 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     CAFFE_THROW("Unsupported math type");
   }
 #endif
+#endif
 }
 
 template <>
@@ -1077,6 +1104,9 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
     const int C_stride,
     CUDAContext* context,
     TensorProto::DataType math_type) {
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+  CAFFE_THROW("HIP currently does not support FP16 yet.");
+#else
 #if __CUDACC_VER_MAJOR__ < 8
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
@@ -1162,6 +1192,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
   } else {
     CAFFE_THROW("Unsupported math type");
   }
+#endif
 #endif
 }
 
@@ -1448,6 +1479,9 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
     at::Half* y,
     CUDAContext* context,
     TensorProto::DataType math_type) {
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+  CAFFE_THROW("HIP currently does not support FP16 yet.");
+#else
   const cublasOperation_t cu_trans_A =
       (trans_A == CblasNoTrans) ? CUBLAS_OP_T : CUBLAS_OP_N;
 
@@ -1502,6 +1536,7 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
     // fail
     CAFFE_THROW("Unsupported math type");
   }
+#endif
 }
 
 namespace {
@@ -1692,6 +1727,9 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
     const at::Half* b,
     at::Half* y,
     CUDAContext* context) {
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+  CAFFE_THROW("HIP currently does not support FP16 yet.");
+#else
   // execute with 32-bit math
   CUBLAS_ENFORCE(cublasSetPointerMode(
       context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
@@ -1707,6 +1745,7 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
       y,
       CUDA_R_16F,
       CUDA_R_32F));
+#endif
 }
 
 // A previous version of caffe2 used Thrust but it turns out that thrust
@@ -1958,7 +1997,7 @@ template <typename TAlpha, typename TData>
 __global__ void
 ScaleCUDAKernel(const int n, const TAlpha alpha, const TData* x, TData* y) {
   CUDA_1D_KERNEL_LOOP(i, n) {
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
     y[i] = __ldg(x + i) * static_cast<TData>(alpha);
 #else
     y[i] = x[i] * static_cast<TData>(alpha);
@@ -1970,7 +2009,7 @@ template <typename TAlpha, typename TData>
 __global__ void
 ScaleCUDAKernel(const int n, const TAlpha* alpha, const TData* x, TData* y) {
   CUDA_1D_KERNEL_LOOP(i, n) {
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
     y[i] = __ldg(x + i) * static_cast<TData>(__ldg(alpha));
 #else
     y[i] = x[i] * static_cast<TData>(*alpha);
@@ -2098,8 +2137,8 @@ DELEGATE_CUBLAS_SCALE_FUNCTION(double, double, cublasDscal)
   }
 CAFFE2_SPECIALIZED_CUDA_SCALE(std::int32_t, std::int32_t)
 CAFFE2_SPECIALIZED_CUDA_SCALE(std::int64_t, std::int64_t)
-#undef CAFFE2_SPECIALIZED_CUDA_SCALE
 
+#ifndef __HIPCC__
 template <>
 CAFFE2_CUDA_EXPORT void Scale<at::Half, at::Half, CUDAContext>(
     const int N,
@@ -2226,6 +2265,66 @@ CAFFE2_CUDA_EXPORT void Scale<float, at::Half, CUDAContext>(
       CUDA_R_32F));
 }
 
+#else // __HIPCC__
+
+namespace {
+template <>
+__global__ void ScaleCUDAKernel<at::Half, at::Half>(
+    const int n,
+    const at::Half alpha,
+    const at::Half* x,
+    at::Half* y) {
+  CUDA_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) *
+        convert::To<at::Half, float>(alpha));
+  }
+}
+
+template <>
+__global__ void ScaleCUDAKernel<at::Half, at::Half>(
+    const int n,
+    const at::Half* alpha,
+    const at::Half* x,
+    at::Half* y) {
+  CUDA_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) *
+        convert::To<at::Half, float>(*alpha));
+  }
+}
+
+template <>
+__global__ void ScaleCUDAKernel<float, at::Half>(
+    const int n,
+    const float alpha,
+    const at::Half* x,
+    at::Half* y) {
+  CUDA_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * alpha);
+  }
+}
+
+template <>
+__global__ void ScaleCUDAKernel<float, at::Half>(
+    const int n,
+    const float* alpha,
+    const at::Half* x,
+    at::Half* y) {
+  CUDA_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * (*alpha));
+  }
+}
+} // namespace
+
+CAFFE2_SPECIALIZED_HIP_SCALE(at::Half, at::Half)
+CAFFE2_SPECIALIZED_HIP_SCALE(float, at::Half)
+#endif // __HIPCC__
+
+#undef CAFFE2_SPECIALIZED_CUDA_SCALE
+
 template <>
 CAFFE2_CUDA_EXPORT void Axpy<float, CUDAContext>(
     const int N,
@@ -2259,6 +2358,9 @@ CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
     const at::Half* X,
     at::Half* Y,
     CUDAContext* context) {
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+  CAFFE_THROW("HIP currently does not support FP16 yet.");
+#else
   CUBLAS_ENFORCE(
       cublasSetPointerMode(context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
   CUBLAS_ENFORCE(cublasAxpyEx(
@@ -2273,6 +2375,7 @@ CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
       CUDA_R_16F,
       1,
       CUDA_R_32F));
+#endif
 }
 
 template <>
@@ -2294,6 +2397,9 @@ CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
     const at::Half* X,
     at::Half* Y,
     CUDAContext* context) {
+#if defined(__HIPCC__) && !ROCBLAS_FP16
+  CAFFE_THROW("HIP currently does not support FP16 yet.");
+#else
   CUBLAS_ENFORCE(cublasSetPointerMode(
       context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
   CUBLAS_ENFORCE(cublasAxpyEx(
@@ -2308,6 +2414,7 @@ CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
       CUDA_R_16F,
       1,
       CUDA_R_32F));
+#endif
 }
 
 namespace {
@@ -2451,7 +2558,7 @@ __global__ void Im2ColNCHWCUDAKernel(
       for (int j = 0; j < kernel_w; ++j) {
         const int h = h_in + dh;
         const int w = w_in + dw;
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
         *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
                 utils::IsAGeZeroAndALtB(w, input_w)
             ? __ldg(img_data_ptr + dh * input_w + dw)
@@ -2502,7 +2609,7 @@ __global__ void Im2ColNHWCCUDAKernel(
       for (int j = 0; j < kernel_w; ++j) {
         const int h = h_in + dh;
         const int w = w_in + dw;
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
         *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
                 utils::IsAGeZeroAndALtB(w, input_w)
             ? __ldg(img_data + (h * input_w + w) * channels + channel_in)
@@ -2564,7 +2671,7 @@ __global__ void Col2ImNCHWCUDAKernel(
               (((c * patch_h + h_k) * patch_w + w_k) * output_h + h_col) *
                   output_w +
               w_col;
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
           val += __ldg(col_data + col_data_index);
 #else
           val += col_data[col_data_index];
@@ -2616,7 +2723,7 @@ __global__ void Col2ImNHWCCUDAKernel(
           h_k /= dilation_h;
           w_k /= dilation_w;
           const int c_col = (h_k * patch_w + w_k) * channels + c;
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
           val += __ldg(
               col_data + (h_col * output_w + w_col) * channels_col + c_col);
 #else
@@ -2668,7 +2775,7 @@ __global__ void Im2ColNdNCHWCUDAKernel(
         is_padding |= !utils::IsAGeZeroAndALtB(d_img, img_shape.data[d_i + 1]);
         img_index = img_index * img_shape.data[d_i + 1] + d_img;
       }
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
       if (!kCol2Im) {
         Y_data[col_index] = is_padding ? 0 : __ldg(X_data + img_index);
       } else if (!is_padding) {
@@ -3252,7 +3359,7 @@ __global__ void ReduceTensorCUDAKernel(
     const int outer_size,
     const int inner_size,
     SimpleArray<int, D> X_strides,
-    SimpleArray<FixedDivisor<int>, D> Y_dims,
+    SimpleArray<FIXED_DIVISOR, D> Y_dims,
     const Reducer reducer,
     const T init,
     const T alpha,
@@ -3267,7 +3374,7 @@ __global__ void ReduceTensorCUDAKernel(
 #pragma unroll
       for (int d = D - 1; d >= 0; --d) {
         int r;
-        Y_dims.data[d].DivMod(Y_index, &Y_index, &r);
+        FIXED_DIVISOR_DIV_MOD(Y_dims.data[d], Y_index, &Y_index, &r);
         X_index += r * X_strides.data[d];
       }
 #if __CUDA_ARCH__ >= 350
@@ -3297,10 +3404,10 @@ CAFFE2_CUDA_EXPORT void ReduceTensorCUDAImpl(
     T* Y,
     CUDAContext* context) {
   SimpleArray<int, D> X_strides;
-  SimpleArray<FixedDivisor<int>, D> Y_dims;
+  SimpleArray<FIXED_DIVISOR, D> Y_dims;
   utils::ComputeTransposedStrides(D, dims, axes, X_strides.data);
   for (int i = 0; i < D; ++i) {
-    Y_dims.data[i] = FixedDivisor<int>(dims[axes[i]]);
+    Y_dims.data[i] = FIXED_DIVISOR(dims[axes[i]]);
   }
   ReduceTensorCUDAKernel<T, Reducer, D>
       <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
@@ -3518,7 +3625,7 @@ template <typename T, int D>
 __global__ void BroadcastCUDAKernel(
     const int Y_size,
     const SimpleArray<int, D> X_strides,
-    const SimpleArray<FixedDivisor<int>, D> Y_dims,
+    const SimpleArray<FIXED_DIVISOR, D> Y_dims,
     const T alpha,
     const T* X,
     T* Y) {
@@ -3528,10 +3635,10 @@ __global__ void BroadcastCUDAKernel(
 #pragma unroll
     for (int i = D - 1; i >= 0; --i) {
       int d;
-      Y_dims.data[i].DivMod(Y_index_val, &Y_index_val, &d);
+      FIXED_DIVISOR_DIV_MOD(Y_dims.data[i], Y_index_val, &Y_index_val, &d);
       X_index += d * X_strides.data[i];
     }
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
     Y[Y_index] = __ldg(X + X_index) * alpha;
 #else
     Y[Y_index] = X[X_index] * alpha;
@@ -3549,7 +3656,7 @@ CAFFE2_CUDA_EXPORT void BroadcastCUDAImpl(
     T* Y,
     CUDAContext* context) {
   SimpleArray<int, D> X_strides_array;
-  SimpleArray<FixedDivisor<int>, D> Y_dims_array;
+  SimpleArray<FIXED_DIVISOR, D> Y_dims_array;
   const int d = D - X_ndim;
   std::fill(X_strides_array.data, X_strides_array.data + d, 0);
   int cur_stride = 1;
@@ -3562,7 +3669,7 @@ CAFFE2_CUDA_EXPORT void BroadcastCUDAImpl(
     if (Y_dims[i] == 0) {
       return;
     }
-    Y_dims_array.data[i] = FixedDivisor<int>(Y_dims[i]);
+    Y_dims_array.data[i] = FIXED_DIVISOR(Y_dims[i]);
   }
   const int Y_size =
       std::accumulate(Y_dims, Y_dims + D, 1, std::multiplies<int>());
@@ -3623,7 +3730,7 @@ __global__ void RowwiseMomentsCUDAKernel(
     T v_val = 0;
     for (int j = threadIdx.x; j < cols; j += blockDim.x) {
       const int X_index = i * cols + j;
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
       m_val += __ldg(X + X_index);
       v_val += __ldg(X + X_index) * __ldg(X + X_index);
 #else
@@ -3657,7 +3764,7 @@ __global__ void ColwiseMomentsCUDAKernel(
     T v_val = 0;
     for (int j = threadIdx.x; j < rows; j += blockDim.x) {
       const int X_index = j * cols + i;
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
       m_val += __ldg(X + X_index);
       v_val += __ldg(X + X_index) * __ldg(X + X_index);
 #else
@@ -3681,7 +3788,7 @@ __global__ void MomentsCUDAKernel(
     const int outer_size,
     const int inner_size,
     SimpleArray<int, D> X_strides,
-    SimpleArray<FixedDivisor<int>, D> Y_dims,
+    SimpleArray<FIXED_DIVISOR, D> Y_dims,
     const T* X,
     T* mean,
     T* variance) {
@@ -3697,10 +3804,10 @@ __global__ void MomentsCUDAKernel(
 #pragma unroll
       for (int d = D - 1; d >= 0; --d) {
         int r;
-        Y_dims.data[d].DivMod(Y_index, &Y_index, &r);
+        FIXED_DIVISOR_DIV_MOD(Y_dims.data[d], Y_index, &Y_index, &r);
         X_index += r * X_strides.data[d];
       }
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
       m_val += __ldg(X + X_index);
       v_val += __ldg(X + X_index) * __ldg(X + X_index);
 #else
@@ -3730,10 +3837,10 @@ CAFFE2_CUDA_EXPORT void MomentsCUDAImpl(
     T* variance,
     CUDAContext* context) {
   SimpleArray<int, D> X_strides;
-  SimpleArray<FixedDivisor<int>, D> Y_dims;
+  SimpleArray<FIXED_DIVISOR, D> Y_dims;
   utils::ComputeTransposedStrides(D, dims, axes, X_strides.data);
   for (int i = 0; i < D; ++i) {
-    Y_dims.data[i] = FixedDivisor<int>(dims[axes[i]]);
+    Y_dims.data[i] = FIXED_DIVISOR(dims[axes[i]]);
   }
   MomentsCUDAKernel<T, D>
       <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
@@ -3907,7 +4014,7 @@ __global__ void BatchTranspose2DCUDAKernel(
     int y = r * kTileDim + threadIdx.y;
     if (x < W) {
       for (int j = 0; j < kTileDim && y + j < H; j += kBlockRows) {
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
         tile[threadIdx.y + j][threadIdx.x] =
             __ldg(X + offset + (y + j) * W + x);
 #else
@@ -3931,7 +4038,7 @@ template <typename T, int D>
 __global__ void TransposeCUDAKernel(
     const int size,
     const SimpleArray<int, D> X_strides,
-    const SimpleArray<FixedDivisor<int>, D> Y_dims,
+    const SimpleArray<FIXED_DIVISOR, D> Y_dims,
     const T* X,
     T* Y) {
   CUDA_1D_KERNEL_LOOP(Y_index, size) {
@@ -3940,10 +4047,10 @@ __global__ void TransposeCUDAKernel(
 #pragma unroll
     for (int i = D - 1; i >= 0; --i) {
       int d;
-      Y_dims.data[i].DivMod(Y_index_val, &Y_index_val, &d);
+      FIXED_DIVISOR_DIV_MOD(Y_dims.data[i], Y_index_val, &Y_index_val, &d);
       X_index += d * X_strides.data[i];
     }
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
     Y[Y_index] = __ldg(X + X_index);
 #else
     Y[Y_index] = X[X_index];
@@ -3959,11 +4066,11 @@ CAFFE2_CUDA_EXPORT void TransposeCUDAImpl(
     T* Y,
     CUDAContext* context) {
   SimpleArray<int, D> X_strides;
-  SimpleArray<FixedDivisor<int>, D> Y_dims;
+  SimpleArray<FIXED_DIVISOR, D> Y_dims;
   utils::ComputeTransposedStrides(D, dims, axes, X_strides.data);
   int size = 1;
   for (int i = 0; i < D; ++i) {
-    Y_dims.data[i] = FixedDivisor<int>(dims[axes[i]]);
+    Y_dims.data[i] = FIXED_DIVISOR(dims[axes[i]]);
     size *= dims[i];
   }
   TransposeCUDAKernel<T, D>
@@ -4028,7 +4135,7 @@ __global__ void AffineChannelCUDAKernel(
     T* Y) {
   CUDA_1D_KERNEL_LOOP(i, size) {
     const int c = kOrder == StorageOrder::NCHW ? i / HxW % C : i % C;
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
     Y[i] = __ldg(scale + c) * __ldg(X + i) + __ldg(bias + c);
 #else
     Y[i] = scale[c] * X[i] + bias[c];

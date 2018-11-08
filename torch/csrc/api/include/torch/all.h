@@ -6,5 +6,5 @@
 #include <torch/nn.h>
 #include <torch/optim.h>
 #include <torch/serialize.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
