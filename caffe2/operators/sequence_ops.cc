@@ -205,8 +205,8 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
     // copy data and add padding index as zero
     Tensor zero{CPU};
     zero.Resize(block_size);
-    auto zeroPtr =
-        static_cast<const char*>(zero.raw_mutable_data(features.dtype()));
+    auto zeroPtr = static_cast<char*>(zero.raw_mutable_data(features.dtype()));
+    memset(zeroPtr, 0, zero.nbytes());
     int start_dest = 0;
     int start_src = 0;
     for (int i = 0; i < lengths.numel(); ++i) {
