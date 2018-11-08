@@ -100,6 +100,8 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
         A tuple of tensors containing an elementwise sum of each group of
         inputs, placed on the ``destination`` device.
     """
+    # TODO: When `len(inputs) == 1` and all inputs are on `destination`, just
+    #       return `inputs`.
     dense_tensors = [[] for _ in inputs]  # shape (num_gpus, num_tensors)
     output = []
     ref_order = []
@@ -118,7 +120,11 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     for chunks in zip(*itrs):
         flat_tensors = [_flatten_dense_tensors(chunk) for chunk in chunks]
         flat_result = reduce_add(flat_tensors, destination)
-        output.extend(_unflatten_dense_tensors(flat_result, chunks[0]))
+        for t in _unflatten_dense_tensors(flat_result, chunks[0]):
+            # The unflattened tensors do not share storage, and we don't expose
+            # base flat tensor anyways, so give them different version counters.
+            # See NOTE [ Version Counter in comm.*_coalesced ]
+            output.append(t.data)
     return tuple(_reorder_tensors_as(output, ref_order))
 
 

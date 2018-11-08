@@ -42,7 +42,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   if (!grad.defined()) {
     // under following condition, we can avoid clone()
     if (!GradMode::is_enabled()
-        && !new_grad.type().is_sparse()
+        && !new_grad.is_sparse()
         && new_grad.is_contiguous()
         && new_grad.use_count() == 1) {
       // first check it is in first-order grad only mode
@@ -60,7 +60,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     // the users. Thanks to this case we can avoid changing the grad tensor,
     // a thing never promised and documented, but used in some hacks seen
     // on the internet.
-    if (grad_variable.type().is_sparse() && !new_grad.type().is_sparse()) {
+    if (grad_variable.is_sparse() && !new_grad.is_sparse()) {
       grad_variable.data() = new_grad.data() + grad_variable.data();
     } else {
       grad_variable.data() += new_grad.data();

@@ -43,7 +43,7 @@ class DLPackWrapper {
       // treat uninitialized tensor as float tensor
       tensor->template mutable_data<float>();
     }
-    CAFFE_ENFORCE_GT(tensor->ndim(), 0);
+    CAFFE_ENFORCE_GT(tensor->dim(), 0);
 
     auto type_ptr = CaffeToDLType(tensor->dtype());
     CAFFE_ENFORCE(
@@ -55,7 +55,7 @@ class DLPackWrapper {
     DLTensor dlTensor;
     dlTensor.data = const_cast<void*>(tensor->raw_data());
     dlTensor.ctx = tensor_context;
-    dlTensor.ndim = tensor->ndim();
+    dlTensor.ndim = tensor->dim();
     dlTensor.dtype = tensor_type;
     dlTensor.shape = const_cast<int64_t*>(&(tensor->sizes()[0]));
     dlTensor.strides = nullptr;

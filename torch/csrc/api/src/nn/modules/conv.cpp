@@ -1,7 +1,7 @@
 #include <torch/nn/modules/conv.h>
 
 #include <torch/expanding_array.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <cmath>
@@ -64,7 +64,7 @@ void ConvImpl<D, Derived>::reset() {
   const auto stdv = 1.0 / std::sqrt(number_of_features);
   NoGradGuard no_grad;
   for (auto& p : this->parameters()) {
-    p->uniform_(-stdv, stdv);
+    p.uniform_(-stdv, stdv);
   }
 }
 

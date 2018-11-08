@@ -2,7 +2,7 @@
 
 #include <torch/arg.h>
 #include <torch/serialize/archive.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <torch/csrc/utils/variadic.h>
 
