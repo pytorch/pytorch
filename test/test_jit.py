@@ -9023,8 +9023,8 @@ EXCLUDE_SCRIPT = {
     'test_nn_batch_norm',
 
     # aten op has additional cudnn argument
-    'test_nn_group_norm',
     'test_nn_nll_loss',
+    'test_nn_group_norm',
     'test_nn_unfold',
     'test_nn_max_unpool2d',
 
@@ -9044,7 +9044,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_cosine_similarity',
     'test_nn_normalize',
     'test_nn_fold',
-    'test_nn_linear',
     'test_nn_max_unpool1d',
     'test_nn_lp_pool1d',
     'test_nn_lp_pool2d',

@@ -713,7 +713,9 @@ In-place version of :func:`~relu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def glu(input, dim=-1):
+    # type: (Tensor, int) -> Tensor
     r"""
     glu(input, dim=-1) -> Tensor
 
@@ -1095,7 +1097,9 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
     return y
 
 
+@torch._jit_internal.weak_script
 def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
+    # type: (Tensor, Optional[int], int, Optional[int]) -> Tensor
     r"""Applies a softmax followed by a logarithm.
 
     While mathematically equivalent to log(softmax(x)), doing these two
@@ -1113,10 +1117,14 @@ def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
     """
     if dim is None:
         dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
-    if dtype is None:
-        return input.log_softmax(dim)
     else:
-        return input.log_softmax(dim, dtype=dtype)
+        dim = torch.jit._unwrap_optional(dim)
+    if dtype is None:
+        ret = input.log_softmax(dim)
+    else:
+        _dtype = torch.jit._unwrap_optional(dtype)
+        ret = input.log_softmax(dim, dtype=_dtype)
+    return ret
 
 
 softshrink = _add_docstr(torch._C._nn.softshrink, r"""
@@ -1153,7 +1161,9 @@ def sigmoid(input):
     return input.sigmoid()
 
 
+@torch._jit_internal.weak_script
 def linear(input, weight, bias=None):
+    # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
     r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
@@ -1167,12 +1177,15 @@ def linear(input, weight, bias=None):
     """
     if input.dim() == 2 and bias is not None:
         # fused op is marginally faster
-        return torch.addmm(bias, input, weight.t())
-
-    output = input.matmul(weight.t())
-    if bias is not None:
-        output += bias
-    return output
+        _bias = torch.jit._unwrap_optional(bias)
+        ret = torch.addmm(_bias, input, weight.t())
+    else:
+        output = input.matmul(weight.t())
+        if bias is not None:
+            _bias = torch.jit._unwrap_optional(bias)
+            output += _bias
+        ret = output
+    return ret
 
 
 @torch._jit_internal.weak_script
@@ -1396,7 +1409,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     :class:`~torch.nn.BatchNorm3d` for details.
     """
     if training:
-        size = list(input.size())
+        size = input.size()
         if reduce(mul, size[2:], size[0]) == 1:
             raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
     return torch.batch_norm(
@@ -1405,8 +1418,10 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     )
 
 
+@torch._jit_internal.weak_script
 def instance_norm(input, running_mean=None, running_var=None, weight=None,
                   bias=None, use_input_stats=True, momentum=0.1, eps=1e-5):
+    # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor
     r"""Applies Instance Normalization for each channel in each data sample in a
     batch.
 
@@ -1437,7 +1452,8 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
                             torch.backends.cudnn.enabled)
 
 
-def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
+def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1.):
+    # type: (Tensor, int, float, float, float) -> Tensor
     r"""Applies local response normalization over an input signal composed of
     several input planes, where channels occupy the second dimension.
     Applies normalization across channels.
@@ -1507,6 +1523,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
 
 def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
              reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], int, Optional[bool], str) -> Tensor
     r"""The negative log likelihood loss.
 
     See :class:`~torch.nn.NLLLoss` for details.
@@ -1549,7 +1566,9 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         >>> output.backward()
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_string(size_average, reduce)
+        _size_average = torch.jit._unwrap_optional(size_average)
+        _reduce = torch.jit._unwrap_optional(reduce)
+        reduction = _Reduction.legacy_get_string(_size_average, _reduce)
     dim = input.dim()
     if dim < 2:
         raise ValueError('Expected 2 or more dimensions (got {})'.format(dim))
@@ -1578,6 +1597,7 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=None, eps=1e-8,
                      reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, bool, bool, Optional[bool], float, Optional[bool], str) -> Tensor
     r"""Poisson negative log likelihood loss.
 
     See :class:`~torch.nn.PoissonNLLLoss` for details.
