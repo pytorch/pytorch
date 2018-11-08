@@ -73,28 +73,49 @@ private:
   detail::InlineDeviceGuard<detail::VirtualGuardImpl> guard_;
 };
 
-/// RAII guard that sets a certain default device in its constructor, and
-/// changes it back to the device that was originally active upon destruction.
-///
-/// Unlike DeviceGuard, a OptionalDeviceGuard may be uninitialized.  This occurs
-/// when you use the nullary constructor, or pass a nullopt to the constructor.
-/// Uninitialized OptionalDeviceGuards do *nothing*; they do not know what the
-/// original device was, and they do not reset on destruction.
-///
-/// An initialized OptionalDeviceGuard doesn't restore device to its value at
-/// construction; it restores device to its value *at initialization*.  So if you
-/// have the program:
-///
-///     setDevice(1);
-///     OptionalDeviceGuard g;
-///     setDevice(2);
-///     g.set_device(3);
-///
-/// On destruction, g will reset device to 2, rather than 1.
-///
-/// An uninitialized OptionalDeviceGuard is distinct from a OptionalDeviceGuard whose
-/// original_device and current_device match, since the OptionalDeviceGuard will
-/// still reset the device to original_device.
+/**
+ * A OptionalDeviceGuard is an RAII class that sets a device to some value on
+ * initialization, and resets the device to its original value on destruction.
+ * Morally, a OptionalDeviceGuard is equivalent to optional<DeviceGuard>, but
+ * with extra constructors and methods as appropriate.
+ *
+ * Besides its obvious use (optionally applying a DeviceGuard), OptionalDeviceGuard
+ * is often also used for the following idiom:
+ *
+ *    OptionalDeviceGuard g;
+ *    for (const auto& t : tensors) {
+ *      g.set_device(t.device());
+ *      do_something_with(t);
+ *    }
+ *
+ * This usage is marginally more efficient than constructing a DeviceGuard every
+ * iteration of the for loop, as it avoids an unnecessary device reset.
+ *
+ * Unlike DeviceGuard, a OptionalDeviceGuard may be uninitialized.  This occurs
+ * when you use the nullary constructor, or pass a nullopt to the constructor.
+ * Uninitialized OptionalDeviceGuards do *nothing*; they do not know what the
+ * original device was and they do not reset on destruction.  This is why
+ * original_device() and current_device() return optional<Device> rather than
+ * Device (as they do in DeviceGuard), and also is why we didn't just
+ * provide OptionalDeviceGuard by default and hide DeviceGuard from users.
+ *
+ * The semantics of an OptionalDeviceGuard are exactly explained by thinking
+ * of it as an optional<DeviceGuard>.  In particular, an initialized
+ * OptionalDeviceGuard doesn't restore device to its value at construction; it
+ * restores device to its value *at initialization*.  So if you have the
+ * program:
+ *
+ *     setDevice(1);
+ *     OptionalDeviceGuard g;
+ *     setDevice(2);
+ *     g.set_device(3);  // initializes!
+ *
+ * On destruction, g will reset device to 2, rather than 1.
+ *
+ * An uninitialized OptionalDeviceGuard is distinct from a (initialized)
+ * DeviceGuard whose original_device_ and current_device_ match, since the
+ * DeviceGuard will still reset the device to original_device_.
+ */
 class OptionalDeviceGuard {
 public:
   /// Create an uninitialized guard.  Set the guard later using set_device.

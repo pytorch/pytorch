@@ -9,6 +9,12 @@ namespace c10 {
  * to the device corresponding to some stream, and changes the
  * default stream on that device to be this stream.
  *
+ * Use of StreamGuard is HIGHLY discouraged in operator definitions.  In
+ * a single operator, you probably don't know enough about the global
+ * state of the world to profitably decide how to set streams.  Let
+ * the caller handle this appropriately, and just use the current stream
+ * in your operator code.
+ *
  * This StreamGuard does NOT have an uninitialized state; it is guaranteed
  * to reset the stream and device on exit.  If you are in a situation
  * where you *might* want to setup a stream guard, see OptionalStreamGuard.
