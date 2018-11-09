@@ -29,7 +29,7 @@ from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
 import random
-
+from typing import List, Optional
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
 
@@ -2769,6 +2769,26 @@ class TestScript(JitTestCase):
 
         return ge
 
+    def test_type_annotate(self):
+
+        def foo(a):
+            return torch.jit.annotate(torch.Tensor, a)
+
+        self.checkScript(foo, (torch.rand(3),))
+
+        def bar():
+            a = torch.jit.annotate(List[int], [])
+            for i in range(10):
+                a.append(4)
+            return a
+
+        self.checkScript(bar, ())
+
+        with self.assertRaisesRegex(RuntimeError, "expected"):
+            @torch.jit.script
+            def baz(a):
+                return torch.jit.annotate(int, a)
+
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
 
@@ -3482,7 +3502,7 @@ a")
 
         @torch.jit.script
         def foo2(x):
-            return torch.cat(torch.jit._construct_empty_tensor_list(), dim=1)
+            return torch.cat([], dim=1)
 
         @torch.jit.script
         def foo3(x):
@@ -3517,13 +3537,13 @@ a")
             self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
-            x = torch.jit._construct_empty_int_list()
+            x = torch.jit.annotate(List[int], [])
             if True:
                 x = [1, 2, 3]
-            y = torch.jit._construct_empty_float_list()
+            y = torch.jit.annotate(List[float], [])
             if True:
                 y = [1.0, 2.0, 3.0]
-            z = torch.jit._construct_empty_tensor_list()
+            z = []
             if True:
                 z = [torch.randn([1])]
             return
@@ -3538,7 +3558,7 @@ a")
             self.checkScript(reassign_bad_type, (), optimize=False)
 
         def reassign_nested():
-            x = torch.jit._construct_empty_int_list()
+            x = torch.jit.annotate(List[int], [])
             if True:
                 x = [1, 2, 3]
                 if True:
@@ -3588,7 +3608,7 @@ a")
         self.checkScript(func, ())
 
         def func2():
-            a = torch.jit._construct_empty_tensor_list()
+            a = []
             return len(a) == 0
 
         self.checkScript(func2, ())
@@ -3644,7 +3664,7 @@ a")
 
         def test_list_add_empty():
             a = [1, 2, 3]
-            b = torch.jit._construct_empty_int_list()
+            b = torch.jit.annotate(List[int], [])
             c = a + b
             return c == [1, 2, 3]
 
@@ -3701,7 +3721,7 @@ a")
 
         def test_backward_slice():
             a = [0, 1, 2, 3, 4]
-            return a[3:2] == torch.jit._construct_empty_int_list()
+            return a[3:2] == torch.jit.annotate(List[int], [])
         self.checkScript(test_backward_slice, ())
 
         def test_over_slice():
@@ -3742,7 +3762,7 @@ a")
         self.checkScript(test_append_if_else, ())
 
         def test_append_loop():
-            a = torch.jit._construct_empty_int_list()
+            a = torch.jit.annotate(List[int], [])
             for i in range(5):
                 a.append(i)
 
@@ -3750,7 +3770,7 @@ a")
         self.checkScript(test_append_loop, ())
 
         def test_append_loop_if():
-            a = torch.jit._construct_empty_int_list()
+            a = torch.jit.annotate(List[int], [])
             for i in range(5):
                 if i > 3:
                     a.append(i)
@@ -3761,7 +3781,7 @@ a")
         self.checkScript(test_append_loop_if, ())
 
         def test_nested_loop():
-            a = torch.jit._construct_empty_int_list()
+            a = torch.jit.annotate(List[int], [])
             for i in range(2):
                 for j in range(2):
                     a.append(i + j)
