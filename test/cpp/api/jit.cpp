@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/jit.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <string>
 

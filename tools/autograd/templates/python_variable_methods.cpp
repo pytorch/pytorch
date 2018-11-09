@@ -259,7 +259,7 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
 
 static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking, bool copy) {
   AutoNoGIL no_gil;
-  return self.to(device, non_blocking, copy);
+  return self.to(self.options().device(device), non_blocking, copy);
 }
 
 static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) {
@@ -396,6 +396,18 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
   }
   self_.set_requires_grad(requires_grad);
   return THPVariable_Wrap(self_);
+  END_HANDLE_TH_ERRORS
+}
+
+inline bool dispatch_is_contiguous(Tensor & self) {
+  return self.is_contiguous();
+}
+
+static PyObject * THPVariable_is_contiguous(PyObject* self_, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
+  return wrap(dispatch_is_contiguous(self));
   END_HANDLE_TH_ERRORS
 }
 
@@ -638,6 +650,7 @@ PyMethodDef variable_methods[] = {
   {"get_device", (PyCFunction)THPVariable_get_device, METH_NOARGS, NULL},
   {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
   {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
+  {"is_contiguous", (PyCFunction)THPVariable_is_contiguous, METH_NOARGS, NULL},
   {"item", (PyCFunction)THPVariable_item, METH_NOARGS, NULL},
   {"long", (PyCFunction)THPVariable_long, METH_NOARGS, NULL},
   {"map_", (PyCFunction)THPVariable_map_, METH_VARARGS | METH_KEYWORDS, NULL},

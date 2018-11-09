@@ -154,7 +154,7 @@ class Int8MaxPoolOp final : public ConvPoolOpBase<CPUContext> {
     CHECK_EQ(Y_offset, X.zero_point);
     CHECK_EQ(Y_scale, X.scale);
 
-    CHECK_EQ(X.t.ndim(), 4);
+    CHECK_EQ(X.t.dim(), 4);
     const int height = X.t.dim32(1);
     const int width = X.t.dim32(2);
     const int channels = X.t.dim32(3);

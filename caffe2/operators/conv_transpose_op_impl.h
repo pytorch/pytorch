@@ -21,7 +21,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   auto& filter = Input(FILTER);
   Tensor* Y = Output(0);
   const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
-  CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
+  CAFFE_ENFORCE(filter.dim() == 4, "filter must be 4D tensor");
   CAFFE_ENFORCE(
       filter.dim32(0) == M,
       "filter number must be equal to input channel number");
@@ -40,7 +40,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   if (InputSize() == 3) {
     auto& bias = Input(BIAS);
-    CAFFE_ENFORCE(bias.ndim() == 1, "bias must be 1D tensor");
+    CAFFE_ENFORCE(bias.dim() == 1, "bias must be 1D tensor");
     CAFFE_ENFORCE(
         bias.dim32(0) == C,
         "bias dimension must be equal to output channel number");
@@ -143,7 +143,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   auto& filter = Input(FILTER);
   Tensor* Y = Output(0);
   const auto N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), M = X.dim32(3);
-  CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
+  CAFFE_ENFORCE(filter.dim() == 4, "filter must be 4D tensor");
   CAFFE_ENFORCE(
       filter.dim32(0) == M,
       "filter number must be equal to input channel number");
@@ -162,7 +162,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 
   if (InputSize() == 3) {
     auto& bias = Input(BIAS);
-    CAFFE_ENFORCE(bias.ndim() == 1, "bias must be 1D tensor");
+    CAFFE_ENFORCE(bias.dim() == 1, "bias must be 1D tensor");
     CAFFE_ENFORCE(
         bias.dim32(0) == C,
         "bias dimension must be equal to output channel number");
@@ -256,7 +256,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   // LegacyPadding::VALID and LegacyPadding::SAME
   // Thus, we don't need to manually compute padding values
   // We simply use the values from the user
-  CAFFE_ENFORCE(filter.ndim() == 4);
+  CAFFE_ENFORCE(filter.dim() == 4);
   const int C = filter.dim32(1);
   CAFFE_ENFORCE(
       filter.dim32(2) == this->kernel_h(),
@@ -408,7 +408,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   // LegacyPadding::VALID and LegacyPadding::SAME
   // Thus, we don't need to manually compute padding values
   // We simply use the values from the user
-  CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
+  CAFFE_ENFORCE(filter.dim() == 4, "filter must be 4D tensor");
   CAFFE_ENFORCE(
       filter.dim32(1) == this->kernel_h(),
       "filter height must be equal to kernel height");

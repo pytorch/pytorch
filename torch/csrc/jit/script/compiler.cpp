@@ -296,8 +296,8 @@ struct Environment {
             as_simple_value->type()->kind() == TypeKind::ListType) {
           errMsg << "\n. (Note: empty lists are constructed as Tensor[]; "
                  << "if you want an empty list of a different type, "
-                 << "use `_construct_empty_foo_list`, "
-                 << "where `foo` is `int` or `float`)";
+                 << "use `torch.jit.annotate(List[T], [])`, "
+                 << "where `T` is the type of elements in the list)";
         }
         throw ErrorReport(loc) << errMsg.str();
       }
@@ -779,6 +779,9 @@ inline bool isSupportedListElementType(TypePtr type) {
       type->isSubtypeOf(NumberType::get());
 }
 
+static FunctionSchema extractSchemaFromDef(const Def &def, bool is_method);
+TypePtr parseTypeFromExpr(Expr expr);
+
 struct to_ir {
   to_ir(
       Def def,
@@ -874,6 +877,12 @@ struct to_ir {
         }
         returns.emplace_back("", type);
       }
+    } else if (schema.returns().size() > 0) {
+      // schema has returns but there's no return nodes in graph
+      throw ErrorReport() << "Expected " << schema.returns().size()
+                          << " return value"
+                          << (schema.returns().size() > 1 ? "s" : "")
+                          << " but found no return statement";
     }
 
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
@@ -931,10 +940,8 @@ private:
           }
           break;
         case TK_EXPR_STMT: {
-          auto exprs = ExprStmt(stmt).exprs();
-          for (const auto& expr : exprs) {
-            emitSugaredExpr(expr, 0);
-          }
+          auto expr = ExprStmt(stmt).expr();
+          emitSugaredExpr(expr, 0);
         }
         break;
         case TK_RAISE:
@@ -946,6 +953,9 @@ private:
         case TK_RETURN:
           throw ErrorReport(stmt) << "return statements can appear only at the end "
                                   << "of the function body";
+          break;
+        case TK_PASS:
+          // Emit nothing for pass
           break;
         default:
           throw ErrorReport(stmt)
@@ -1251,8 +1261,7 @@ private:
     }
 
     if (targets[0].kind() != TK_VAR) {
-      throw ErrorReport(targets[0]) << "Starred unpacking is currently not"
-          << " supported for for loops.";
+      throw ErrorReport(targets[0]) << "unexpected expression in variable initialization of for loop";
     }
     auto target = Var(targets[0]).name();
 
@@ -1340,13 +1349,13 @@ private:
     size_t num_normal_assign = 0;
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
-      if (assignee.kind() == TK_VAR) {
+      if (assignee.kind() == TK_VAR || assignee.kind() == TK_SUBSCRIPT) {
         num_normal_assign++;
       } else if (assignee.kind() == TK_STARRED) {
         num_starred++;
       } else {
-        throw ErrorReport(assignee)
-            << "lhs of assignment must be a variable or starred expression.";
+        throw ErrorReport(assignee) << "lhs of assignment must be a variable, "
+                                    << "subscript, or starred expression.";
       }
     }
 
@@ -1364,104 +1373,279 @@ private:
     return num_starred;
   }
 
-  // Emit nodes for augmented assignments like `+=`
-  void emitAugAssignment(const AugAssign& stmt) {
-    auto lhs = Var(stmt.lhs());
-    auto lhsValue = environment_stack->getSugaredVar(lhs.name())
-                        ->asValue(lhs.range(), method);
-    if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
-      // for tensors, emit the corresponding in-place op
-      Symbol op;
+  // Get the appropriate builtin op for this augmented assignment
+  // If the RHS is a tensor, return the corresponding ATen in-place op
+  // If it's a list of scalars, then return the corresponding list augment op
+  Symbol getAugOp(const AugAssign& stmt, bool isTensor) {
       switch (stmt.aug_op()) {
         case '+':
-          op = aten::add_;
-          break;
+          return isTensor ? aten::add_ : aten::add;
         case '-':
-          op = aten::sub_;
-          break;
+          return isTensor ? aten::sub_ : aten::sub;
         case '/':
-          op = aten::div_;
-          break;
+          return isTensor ? aten::div_ : aten::div;
         case '*':
-          op = aten::mul_;
-          break;
+          return isTensor ? aten::mul_ : aten::mul;
         default:
-          throw ErrorReport(stmt) << "Unknown augmented assignment to Tensor: "
+          throw ErrorReport(stmt) << "Unknown augmented assignment: "
                                   << kindToString(stmt.aug_op());
       }
+  }
 
-      auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
-      auto self = NamedValue(lhs.range(), lhs.name().name(), lhsValue);
-      auto output = emitBuiltinCall(
+  // Emit nodes for augmented assignments like `+=`
+  void emitAugAssignment(const AugAssign& stmt) {
+    switch (stmt.lhs().kind()) {
+      case TK_VAR: {
+        emitAugAssignmentToVar(stmt);
+      } break;
+      case TK_SUBSCRIPT: {
+        emitAugAssignmentToSubscript(stmt);
+      } break;
+      default:
+        throw ErrorReport(stmt.lhs())
+            << "unexpected expression on "
+            << "left-hand side of augmented assignment.";
+    }
+  }
+
+  void emitAugAssignmentToVar(const AugAssign& stmt) {
+    const auto lhs = Var(stmt.lhs());
+    const auto lhsValue = environment_stack->getSugaredVar(lhs.name())
+                              ->asValue(lhs.range(), method);
+    if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
+      // for tensors, emit the corresponding in-place op
+      const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
+      const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
+      const auto output = emitBuiltinCall(
           stmt.range(),
           *method.graph(),
-          op,
+          getAugOp(stmt, /*isTensor=*/true),
           self,
           {rhs},
           {},
           /*required=*/true);
+
       environment_stack->setVar(lhs.range(), lhs.name().name(), output);
     } else {
       // for primitive types, desugar into a simple assignment
       //   e.g. foo += 1 becomes foo.2 = foo + 1
       Ident lhs = Var(stmt.lhs()).name();
-      Expr expr = BinOp::create(stmt.range(), stmt.aug_op(),
-                                Var::create(lhs.range(), lhs), stmt.rhs());
+      Expr expr = BinOp::create(
+          stmt.range(),
+          stmt.aug_op(),
+          Var::create(lhs.range(), lhs),
+          stmt.rhs());
       environment_stack->setVar(lhs.range(), lhs.name(), emitExpr(expr));
     }
   }
 
-  void emitAssignment(const Assign& stmt) {
-    bool starred_unpack = calcNumStarredUnpack(stmt.lhs(), stmt.range());
+  void emitAugAssignmentToSubscript(const AugAssign& stmt) {
+    // Process the base list value
+    const auto lhs = Subscript(stmt.lhs());
+    const auto sliceable = emitExpr(lhs.value());
 
-    size_t n_binders = stmt.lhs().size();
+    if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
+    // If it's a tensor, just fully evaluate the subscript operation and emit
+    // an in-place assignment
+      const auto lhsValue =
+          emitSubscript(lhs.range(), sliceable, lhs.subscript_exprs());
+
+      const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
+      const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
+      emitBuiltinCall(
+          stmt.range(),
+          *method.graph(),
+          getAugOp(stmt, /*isTensor=*/true),
+          self,
+          {rhs},
+          {},
+          /*required=*/true);
+    } else {
+      // Otherwise, it should be a list.  Lower this expression into:
+      //     list.set_item(get_item(idx).add_(value))
+      // similar to how Python handles things.
+      const auto listType = sliceable->type()->cast<ListType>();
+      JIT_ASSERT(listType != nullptr);
+
+      bool isTensorList =
+          listType->getElementType()->isSubtypeOf(DynamicType::get());
+
+      // Get the idx to augment
+      const auto subscriptExprs = lhs.subscript_exprs();
+      if (subscriptExprs.size() != 1) {
+        throw ErrorReport(subscriptExprs)
+            << "Sliced expression not yet supported for"
+            << " subscripted list augmented assignment. "
+            << "File a bug if you want this.";
+      }
+      const auto idxValue = emitExpr(subscriptExprs[0]);
+
+      const auto listArg = NamedValue(lhs.value().range(), "list", sliceable);
+      const auto idxArg = NamedValue(subscriptExprs.range(), "idx", idxValue);
+      const auto valueArg =
+          NamedValue(stmt.rhs().range(), "value", emitExpr(stmt.rhs()));
+
+      const auto getItem = emitBuiltinCall(
+          stmt.range(),
+          *method.graph(),
+          aten::select,
+          c10::nullopt,
+          {listArg, idxArg},
+          {},
+          /*required=*/true);
+
+      const auto augmentedItem = emitBuiltinCall(
+          stmt.range(),
+          *method.graph(),
+          getAugOp(stmt, isTensorList),
+          {},
+          {getItem, valueArg},
+          {},
+          /*required=*/true);
+
+      emitBuiltinCall(
+          stmt.range(),
+          *method.graph(),
+          aten::_set_item,
+          c10::nullopt,
+          {listArg, idxArg, augmentedItem},
+          {},
+          /*required=*/true);
+    }
+  }
+
+  // Emit mutating assignments like `foo[0] = bar`
+  void emitSubscriptAssign(
+      const SourceRange& stmtRange,
+      const Subscript& lhs,
+      const Expr& rhs) {
+    emitSubscriptAssign(
+        stmtRange, lhs, NamedValue(rhs.range(), emitExpr(rhs)));
+  }
+
+  void emitSubscriptAssign(
+      const SourceRange& stmtRange,
+      const Subscript& lhs,
+      const NamedValue& rhs) {
+    // First check the base value.
+    auto sliceable = emitExpr(lhs.value());
+
+    // If it's a tensor, copy the RHS data into it
+    if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
+      std::vector<NamedValue> args;
+      // Obtain the sliced value
+      auto lhsValue =
+          emitSubscript(lhs.range(), sliceable, lhs.subscript_exprs());
+      args.emplace_back(lhs.range(), "t", lhsValue);
+      args.emplace_back(rhs.loc(), "other", rhs.value(*graph));
+      emitBuiltinCall(
+          stmtRange,
+          *method.graph(),
+          aten::copy_,
+          c10::nullopt,
+          args,
+          {},
+          true);
+
+    // Otherwise, this is a list. Dispatch to aten::_set_item to both select and
+    // assign
+    } else {
+      const auto subscript = lhs.subscript_exprs();
+      if (subscript.size() != 1 || subscript[0].kind() == TK_SLICE_EXPR) {
+        throw ErrorReport(subscript)
+            << "Sliced expression not yet supported for"
+            << " subscripted list assignment. "
+            << "File a bug if you want this.";
+      }
+
+      std::vector<NamedValue> args;
+      args.emplace_back(lhs.value().range(), "list", sliceable);
+      args.emplace_back(
+          lhs.subscript_exprs().range(), "idx", emitExpr(subscript[0]));
+      args.push_back(rhs);
+      emitBuiltinCall(
+          stmtRange,
+          *method.graph(),
+          aten::_set_item,
+          c10::nullopt,
+          args,
+          {},
+          true);
+    }
+  }
+
+  void emitTupleAssign(const TupleLiteral& tl, const Expr& rhs) {
+    size_t n_binders = tl.inputs().size();
+    bool starred_unpack = calcNumStarredUnpack(tl.inputs(), tl.range());
     if(starred_unpack)
       n_binders--;
-
-    auto output = emitSugaredExpr(stmt.rhs(), n_binders);
-
-    if(stmt.lhs().size() == 1) {
-      JIT_ASSERT(!starred_unpack);
-      auto v = Var(stmt.lhs()[0]);
-      environment_stack->setSugaredVar(v.range(), v.name().name(), output);
-      return;
-    }
-
+    auto output = emitSugaredExpr(rhs, n_binders);
     auto outputs = output->asTuple(
-        stmt.rhs().range(),
+        rhs.range(),
         method,
         starred_unpack ? c10::nullopt : c10::optional<size_t>{n_binders});
     if(outputs.size() < n_binders) {
-      throw ErrorReport(stmt)
+      throw ErrorReport(tl)
         << "need " << (starred_unpack ? "at least " : "")
         << n_binders << " values to unpack but found only "
         << outputs.size();
     }
     if(outputs.size() > n_binders && !starred_unpack) {
-      throw ErrorReport(stmt)
+      throw ErrorReport(tl)
       << "too many values to unpack: need " << n_binders << " but found "
       << outputs.size();
     }
     int i = 0;
-    for (auto assignee : stmt.lhs()) {
-      if (assignee.kind() == TK_VAR) {
-        environment_stack->setSugaredVar(assignee.range(), Var(assignee).name().name(), outputs.at(i));
-        i++;
-      } else if (assignee.kind() == TK_STARRED) {
-        auto var = Starred(assignee).expr();
-        if (var.kind() != TK_VAR) {
-          throw ErrorReport(var) << "Cannot pack a tuple into a non-variable.";
-        }
-        size_t n_matched = outputs.size() - n_binders;
-        ArrayRef<std::shared_ptr<SugaredValue>> outputs_ref = outputs;
-        auto values = fmap(outputs_ref.slice(i, n_matched), [&](const std::shared_ptr<SugaredValue>& v) {
-          return v->asValue(assignee.range(), method);
-        });
-        auto tup = graph->insertNode(graph->createTuple(values))->output();
-        environment_stack->setVar(
-          var.range(), Var(var).name().name(), tup);
-        i += n_matched;
+    for (auto assignee : tl.inputs()) {
+      switch (assignee.kind()) {
+        case TK_SUBSCRIPT:
+          emitSubscriptAssign(
+              rhs.range(),
+              Subscript(assignee),
+              NamedValue(
+                  rhs.range(), outputs.at(i)->asValue(rhs.range(), method)));
+          i++;
+          break;
+        case TK_VAR:
+          environment_stack->setSugaredVar(assignee.range(), Var(assignee).name().name(), outputs.at(i));
+          i++;
+          break;
+        case TK_STARRED: {
+          auto var = Starred(assignee).expr();
+          if (var.kind() != TK_VAR) {
+            throw ErrorReport(var) << "Cannot pack a tuple into a non-variable.";
+          }
+          size_t n_matched = outputs.size() - n_binders;
+          ArrayRef<std::shared_ptr<SugaredValue>> outputs_ref = outputs;
+          auto values = fmap(outputs_ref.slice(i, n_matched), [&](const std::shared_ptr<SugaredValue>& v) {
+            return v->asValue(assignee.range(), method);
+          });
+          auto tup = graph->insertNode(graph->createTuple(values))->output();
+          environment_stack->setVar(
+            var.range(), Var(var).name().name(), tup);
+          i += n_matched;
+        } break;
+        default:
+        throw ErrorReport(assignee) << "unexpected expression on the left-hand side";
       }
+    }
+  }
+
+  void emitAssignment(const Assign& stmt) {
+    switch(stmt.lhs().kind()) {
+      case TK_VAR: {
+        auto v = Var(stmt.lhs());
+        environment_stack->setSugaredVar(
+            v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1));
+      } break;
+      case TK_TUPLE_LITERAL:
+        emitTupleAssign(TupleLiteral(stmt.lhs()), stmt.rhs());
+        break;
+      case TK_SUBSCRIPT:
+        emitSubscriptAssign(stmt.range(), Subscript(stmt.lhs()), stmt.rhs());
+        break;
+      default:
+        throw ErrorReport(stmt.lhs()) << "unexpected expression on left-hand side of assignment.";
     }
   }
 
@@ -1549,12 +1733,13 @@ private:
     return getValues(trees.tree()->trees(), maybe_unpack);
   }
 
-  std::shared_ptr<SugaredValue> emitApplyExpr(Apply &apply, size_t n_binders) {
-    auto sv = emitSugaredExpr(apply.callee(), 1);
-    auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
+  std::vector<NamedValue> emitAttributes(const List<Attribute> attributes) {
+    return fmap(attributes, [&](const Attribute& attr) {
       return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
     });
-
+  }
+  std::shared_ptr<SugaredValue> emitApplyExpr(Apply &apply, size_t n_binders) {
+    auto sv = emitSugaredExpr(apply.callee(), 1);
     auto loc = apply.callee().range();
     if (auto fork_value = dynamic_cast<ForkValue*>(sv.get())) {
       auto& trees = apply.inputs().tree()->trees();
@@ -1565,15 +1750,34 @@ private:
       auto forked = emitSugaredExpr(Expr(trees[0]), 1);
       TreeList sliced_trees(trees.begin() + 1, trees.end());
       auto inputs = getNamedValues(sliced_trees, true);
+      auto attributes = emitAttributes(apply.attributes());
       return emitForkExpr(loc, forked, inputs, attributes);
+    } else if (auto annotate_value = dynamic_cast<AnnotateValue*>(sv.get())) {
+      if (apply.inputs().size() != 2) {
+        throw ErrorReport(loc)
+            << "expected exactly two arguments to attribute but found "
+            << apply.inputs().size();
+      }
+      if (apply.attributes().size() > 0) {
+        throw ErrorReport(loc) << "attribute takes no keyword arguments";
+      }
+      TypePtr type = parseTypeFromExpr(apply.inputs()[0]);
+      Value* expr = emitExpr(apply.inputs()[1], type);
+      if (!expr->type()->isSubtypeOf(type)) {
+        throw ErrorReport(apply.inputs())
+            << "expected an expression of type " << type->python_str()
+            << " but found " << expr->type()->python_str();
+      }
+      return std::make_shared<SimpleValue>(expr);
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
+      auto attributes = emitAttributes(apply.attributes());
       return sv->call(loc, method, inputs, attributes, n_binders);
     }
   }
 
-  Value* emitExpr(Expr tree) {
-    return emitSugaredExpr(tree, 1)->asValue(tree.range(), method);
+  Value* emitExpr(Expr tree, TypePtr type_hint = nullptr) {
+    return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
   }
 
   NodeKind reverseComparision(NodeKind kind) {
@@ -1591,7 +1795,12 @@ private:
 
   // any expression that can produce a SugaredValue is handled here
   // expressions that only return a single Value* are handled in emitSimpleExpr
-  std::shared_ptr<SugaredValue> emitSugaredExpr(Expr tree, size_t n_binders) {
+  // type_hint is set if there is a type that this value is expected to be
+  // e.g. a : List[int] = []
+  // or a = torch.jit.annotate(List[int], [])
+  // the caller is responsible for checking that the result matches type_hint
+  // emitSugaredExpr is free to ignore it.
+  std::shared_ptr<SugaredValue> emitSugaredExpr(Expr tree, size_t n_binders, TypePtr type_hint=nullptr) {
     switch(tree.kind()) {
       case TK_VAR:
         return environment_stack->getSugaredVar(Var(tree).name());
@@ -1605,7 +1814,7 @@ private:
         return emitApplyExpr(apply, n_binders);
       } break;
       default:
-        return std::make_shared<SimpleValue>(emitSimpleExpr(tree));
+        return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
     }
   }
 
@@ -1680,7 +1889,8 @@ private:
   }
 
   Value* emitSimpleExpr(
-      const TreeRef& tree) {
+      const TreeRef& tree,
+      TypePtr type_hint = nullptr) {
     switch (tree->kind()) {
       case '@':
       case TK_POW:
@@ -1738,16 +1948,7 @@ private:
         return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_SUBSCRIPT: {
-        const auto subscript = Subscript(tree);
-        auto slice_exprs = subscript.subscript_exprs();
-        if (slice_exprs.size() != 1) {
-          return emitMultidimSlicing(subscript);
-        }
-        if (slice_exprs[0].kind() == TK_SLICE_EXPR) {
-          return emitBasicSlice(subscript);
-        } else {
-          return emitBasicGather(subscript);
-        }
+        return emitSubscript(Subscript(tree));
       } break;
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree));
@@ -1759,9 +1960,16 @@ private:
         auto ll = ListLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
 
-        // If this is an empty list literal `[]`, construct an empty Tensor[]
-        const auto elem_type =
-            values.empty() ? DynamicType::get() : values.at(0)->type();
+        // determine the element type of the list
+        // if we have a type hint of List[T], use T
+        // if the list is non-empty use type_of(list[0])
+        // otherwise assume it is List[Tensor]
+        TypePtr elem_type = DynamicType::get();
+        if (type_hint && type_hint->kind() == TypeKind::ListType) {
+          elem_type = type_hint->expect<ListType>()->getElementType();
+        } else if (!values.empty()) {
+          elem_type = values.at(0)->type();
+        }
         for (auto v : values) {
           if (v->type() != elem_type) {
             throw ErrorReport(tree)
@@ -1858,7 +2066,7 @@ private:
   std::pair<Value*, std::vector<Value*>> emitIntAndSliceIndexing(
       const SourceRange& loc,
       Value* sliceable,
-      const Subscript& subscript) {
+      const List<Expr>& subscript_exprs) {
     std::vector<Value*> tensor_indices;
     size_t dim = 0;
 
@@ -1869,7 +2077,7 @@ private:
       dim++;
     };
 
-    for (const auto & subscript_expr : subscript.subscript_exprs()) {
+    for (const auto & subscript_expr : subscript_exprs) {
       if (subscript_expr.kind() == TK_SLICE_EXPR) {
         sliceable = emitSlice(loc, sliceable, dim, SliceExpr(subscript_expr));
         ++dim;
@@ -1890,6 +2098,18 @@ private:
     return std::make_pair(sliceable, tensor_indices);
   }
 
+  // Desugars multidim slicing into slice/select/index calls.
+  //
+  // XXX: Errors in user code are not elegantly reported.
+  // Let's say someone were to do the following:
+  //   @torch.jit.script
+  //   def fn(x):
+  //       return x[0, 1]
+  //   fn(torch.randn(5))
+  // Because we desugar this into two aten::select ops, the error message
+  // complains about aten::select failing rather than there "not being
+  // enough dimensions to index".
+  //
   // The strategy is to slice and select the tensor for int and slices first
   // in one pass and then apply at::index on the result of the slicing/selecting.
   // Call the tensor after we've applied slice / select the `sliced`.
@@ -1899,9 +2119,16 @@ private:
   Value* emitMultidimSlicing(
       const SourceRange& loc,
       Value* sliceable,
-      const Subscript& subscript) {
+      const List<Expr>& subscript_exprs) {
+    if (!sliceable->type()->isSubtypeOf(DynamicType::get())) {
+      throw ErrorReport(loc)
+        << "Unsupported operation: attempted to use multidimensional "
+        << "indexing on a non-tensor type.";
+    }
+
     std::vector<Value*> tensor_indices;
-    std::tie(sliceable, tensor_indices) = emitIntAndSliceIndexing(loc, sliceable, subscript);
+    std::tie(sliceable, tensor_indices) =
+        emitIntAndSliceIndexing(loc, sliceable, subscript_exprs);
 
     if (tensor_indices.empty()) {
       // XXX: Might need to at::alias this when we support mutability
@@ -1918,36 +2145,15 @@ private:
     return emitIndex(loc, sliceable, tensor_indices);
   }
 
-  // Desugars multidim slicing into slice/select/index calls.
-  //
-  // XXX: Errors in user code are not elegantly reported.
-  // Let's say someone were to do the following:
-  //   @torch.jit.script
-  //   def fn(x):
-  //       return x[0, 1]
-  //   fn(torch.randn(5))
-  // Because we desugar this into two aten::select ops, the error message
-  // complains about aten::select failing rather than there "not being
-  // enough dimensions to index".
-  Value* emitMultidimSlicing(const Subscript& subscript) {
-    const auto& loc = subscript.range();
-    auto* sliceable = emitExpr(subscript.value());
-    if (!sliceable->type()->isSubtypeOf(DynamicType::get())) {
-      throw ErrorReport(loc)
-        << "Unsupported operation: attempted to use multidimensional "
-        << "indexing on a non-tensor type.";
-    }
-    return emitMultidimSlicing(loc, sliceable, subscript);
-  }
-
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
   // end).
-  Value* emitBasicSlice(const Subscript& subscript) {
-    const auto& loc = subscript.range();
-    JIT_ASSERT(subscript.subscript_exprs().size() == 1);
-    JIT_ASSERT(subscript.subscript_exprs()[0].kind() == TK_SLICE_EXPR);
-    auto slice_exp = SliceExpr(subscript.subscript_exprs()[0]);
-    auto * sliceable = emitExpr(subscript.value());
+  Value* emitBasicSlice(
+      const SourceRange& loc,
+      Value* sliceable,
+      const List<Expr>& subscript_exprs) {
+    JIT_ASSERT(subscript_exprs.size() == 1);
+    JIT_ASSERT(subscript_exprs[0].kind() == TK_SLICE_EXPR);
+    auto slice_exp = SliceExpr(subscript_exprs[0]);
     c10::optional<int64_t> maybe_dim;
     if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
@@ -2011,22 +2217,43 @@ private:
         graph->createTupleSlice(tuple_val.value(*graph), beg, end))->output();
   }
 
+  Value* emitSubscript(const Subscript& subscript) {
+    return emitSubscript(
+        subscript.range(),
+        emitExpr(subscript.value()),
+        subscript.subscript_exprs());
+  }
+
+  Value* emitSubscript(
+      const SourceRange& loc,
+      Value* sliceable,
+      const List<Expr>& subscript_exprs) {
+    if (subscript_exprs.size() != 1) {
+      return emitMultidimSlicing(loc, sliceable, subscript_exprs);
+    }
+    if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
+      return emitBasicSlice(loc, sliceable, subscript_exprs);
+    } else {
+      return emitBasicGather(loc, sliceable, subscript_exprs);
+    }
+  }
 
   // Desugars gather syntactic sugar foo[i]
-  Value* emitBasicGather(const Subscript& subscript) {
-    const auto& loc = subscript.range();
-    JIT_ASSERT(subscript.subscript_exprs().size() == 1);
-    auto* gatherable = emitExpr(subscript.value());
+  Value* emitBasicGather(
+      const SourceRange& loc,
+      Value* gatherable,
+      const List<Expr>& subscript_exprs) {
+    JIT_ASSERT(subscript_exprs.size() == 1);
 
     if (gatherable->type()->kind() == TypeKind::ListType) {
       // if it's a list, emit a regular index selection op
-      auto* idx = emitExpr(subscript.subscript_exprs()[0]);
+      auto* idx = emitExpr(subscript_exprs[0]);
       return emitBuiltinCall(
                  loc, *graph, aten::select, c10::nullopt, {gatherable, idx}, {}, true);
     } else if (gatherable->type()->isSubtypeOf(DynamicType::get())) {
-      return emitMultidimSlicing(loc, gatherable, subscript);
+      return emitMultidimSlicing(loc, gatherable, subscript_exprs);
     } else if (auto tuple_type = gatherable->type()->cast<TupleType>()) {
-      auto* idx = emitExpr(subscript.subscript_exprs()[0]);
+      auto* idx = emitExpr(subscript_exprs[0]);
       return emitTupleIndex(loc, gatherable, idx);
     } else {
       throw ErrorReport(loc)
@@ -2150,8 +2377,6 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
   return map;
 }
 
-TypePtr parseTypeFromExpr(Expr expr);
-
 const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscript_to_type_fns() {
   static std::unordered_map<std::string, std::function<TypePtr(Subscript)>> map = {
     {"Tuple", [](Subscript subscript) -> TypePtr {
@@ -2179,30 +2404,44 @@ const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscr
   return map;
 }
 
+bool  isTorch(Expr expr) {
+  return expr.kind() == TK_VAR && Var(expr).name().name() == "torch";
+}
+
+// gets the base type name given namespaces where the types live
+// turns torch.Tensor -> Tensor, X -> X
+c10::optional<std::string> parseBaseTypeName(Expr expr) {
+  switch (expr.kind()) {
+    case TK_VAR: {
+      return Var(expr).name().name();
+    }
+    case '.': {
+      auto select = Select(expr);
+      const std::string& name = select.selector().name();
+      if (isTorch(select.value()) && name == "Tensor")
+        return "Tensor";
+    }
+  }
+  return at::nullopt;
+}
+
 TypePtr parseTypeFromExpr(Expr expr) {
-  if (expr.kind() == TK_VAR) {
-    auto ident = Var(expr).name();
-    auto itr = ident_to_type_lut().find(ident.name());
+  if (expr.kind() == TK_SUBSCRIPT) {
+    auto subscript = Subscript(expr);
+    auto value_name = parseBaseTypeName(subscript.value());
+    if (!value_name) {
+      throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
+    }
+    if (!subscript_to_type_fns().count(*value_name)) {
+      throw ErrorReport(subscript.range()) << "Unknown type constructor " << *value_name;
+    }
+    return subscript_to_type_fns().at(*value_name)(subscript);
+  } else if (auto name = parseBaseTypeName(expr)) {
+    auto itr = ident_to_type_lut().find(*name);
     if (itr != ident_to_type_lut().end()) {
       return itr->second;
     }
-    throw ErrorReport(expr.range()) << "Unknown type name " << ident.name();
-  } else if (expr.kind() == TK_SUBSCRIPT) {
-    auto subscript = Subscript(expr);
-    if (subscript.value().kind() != TK_VAR) {
-      throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
-    }
-    auto value_name = Var(subscript.value()).name().name();
-    if (!subscript_to_type_fns().count(value_name)) {
-      throw ErrorReport(subscript.range()) << "Unknown type constructor " << value_name;
-    }
-    return subscript_to_type_fns().at(value_name)(subscript);
-  } else if (expr.kind() == '.') {
-    auto select = Select(expr);
-    if (select.value().kind() == TK_VAR && Var(select.value()).name().name() == "torch"
-        && select.selector().name() == "Tensor") {
-      return ident_to_type_lut().at("Tensor");
-    }
+    throw ErrorReport(expr) << "Unknown type name " << *name;
   }
   throw ErrorReport(expr.range()) << "Expression of type " << kindToString(expr.kind())
                                   << " cannot be used in a type expression";
@@ -2216,14 +2455,17 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
   if (subscript.value().kind() != TK_VAR)
     return c10::nullopt;
   auto var = Var(subscript.value());
-  if (var.name().name() != "BroadcastingList")
+
+  if (var.name().name().find("BroadcastingList") != 0) {
     return c10::nullopt;
-  if (subscript.subscript_exprs().size() != 2)
+  }
+
+  if (subscript.subscript_exprs().size() != 1)
     throw ErrorReport(subscript.subscript_exprs().range())
-      << "BroadcastingList must be subscripted by type & len";
+      << "BroadcastingList must be subscripted with a type";
 
   auto typ = subscript.subscript_exprs()[0];
-  auto len = subscript.subscript_exprs()[1];
+  auto len = var.name().name().substr(strlen("BroadcastingList"));
 
   if (typ.kind() != TK_VAR)
     throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
@@ -2235,12 +2477,13 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
   auto elem_ptr = ident_to_type_lut().find(value_name);
   JIT_ASSERT(elem_ptr != ident_to_type_lut().end());
   TypePtr list_ptr = ListType::create(elem_ptr->second);
-  if (len.kind () != TK_CONST)
-    throw ErrorReport(expr) << "subscript of Broadcastable list must be positive integer";
 
-  auto constant = Const(len);
-  if (!constant.isIntegral() || constant.asIntegral() <= 0)
-    throw ErrorReport(len) << "subscript of Broadcastable list must be positive integer";
+  Parser const_parser(len);
+  auto constant = const_parser.parseConst();
+  if (!constant.isIntegral() || constant.asIntegral() <= 0) {
+    throw ErrorReport(subscript.subscript_exprs().range())
+        << "subscript of Broadcastable list must be positive integer";
+  }
 
   auto len_v = constant.asIntegral();
   return std::pair<TypePtr, int32_t>(list_ptr, len_v);
@@ -2326,12 +2569,6 @@ void defineMethodsInModule(Module & m, const std::string& source, Resolver resol
     resolvers.push_back(resolver);
   }
   defineMethodsInModule(m, definitions, resolvers, self);
-}
-
-std::shared_ptr<Graph> compileFunction(Def def, Resolver resolver) {
-  Module m;
-  defineMethodsInModule(m, {def}, {resolver}, nullptr);
-  return m.get_method(def.name().name()).graph();
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(

@@ -29,6 +29,8 @@ fi
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # JIT C++ extensions require ninja.
   pip install -q ninja --user
+  # ninja is installed in /var/lib/jenkins/.local/bin
+  export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
   # TODO: move this to Docker
   pip install -q hypothesis --user

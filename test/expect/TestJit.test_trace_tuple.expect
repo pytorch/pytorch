@@ -1,8 +1,8 @@
-graph(%0 : Double(2, 2)
+graph(%x : Double(2, 2)
       %1 : Tuple) {
   %2 : Double(2, 2), %3 : Double(2, 2) = prim::TupleUnpack(%1)
-  %4 : Double(2, 2) = aten::mul(%0, %3)
-  %5 : Double(2, 2) = aten::mul(%0, %2)
+  %4 : Double(2, 2) = aten::mul(%x, %3)
+  %5 : Double(2, 2) = aten::mul(%x, %2)
   %6 : Tuple = prim::TupleConstruct(%4, %5)
-  return (%0, %6);
+  return (%x, %6);
 }

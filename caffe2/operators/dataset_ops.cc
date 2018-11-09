@@ -263,7 +263,7 @@ class CheckDatasetConsistencyOp : public Operator<CPUContext> {
     limits.assign(sizes.size(), std::numeric_limits<TOffset>::max());
     for (int i = 0; i < iterator_.fields().size(); ++i) {
       int lengthIdx = iterator_.fields()[i].lengthFieldId + 1;
-      CAFFE_ENFORCE_GT(Input(i).ndim(), 0);
+      CAFFE_ENFORCE_GT(Input(i).dim(), 0);
       TOffset size = (TOffset)Input(i).sizes()[0];
       if (limits[lengthIdx] == std::numeric_limits<TOffset>::max()) {
         limits[lengthIdx] = size;
@@ -375,14 +375,14 @@ class UnPackRecordsOp : public Operator<CPUContext> {
         const auto& input = inputs[i]->at(j);
 
         // Checks to ensure that dimensions/sizes match
-        CAFFE_ENFORCE_EQ(outputDims[j].size(), input.ndim());
+        CAFFE_ENFORCE_EQ(outputDims[j].size(), input.dim());
         CAFFE_ENFORCE(*metas[j] == input.dtype());
         // We look from first dimension, because we concat on the first.
-        for (int k = 1; k < input.ndim(); ++k) {
+        for (int k = 1; k < input.dim(); ++k) {
           CAFFE_ENFORCE_EQ(input.sizes()[k], outputDims[j][k]);
         }
 
-        outputDims[j][0] += input.dim(0);
+        outputDims[j][0] += input.size(0);
       }
     }
 
@@ -721,10 +721,10 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
         continue;
       }
       auto dst = static_cast<char*>(out->raw_mutable_data(in.dtype()));
-      int block_size = in.numel() / in.dim(0);
+      int block_size = in.numel() / in.size(0);
       auto block_bytesize = in.size_from_dim(1) * in.dtype().itemsize();
       CAFFE_ENFORCE(
-          block_bytesize == in.nbytes() / in.dim(0),
+          block_bytesize == in.nbytes() / in.size(0),
           "block_bytesize should be consistent with data dim");
       auto src_base = static_cast<const char*>(in.raw_data());
       int start = 0;
@@ -763,16 +763,16 @@ class AppendOp final : public Operator<Context> {
     auto& a = Input(0);
     auto& b = Input(1);
     auto* c = Output(0);
-    CAFFE_ENFORCE(b.ndim() >= 1);
-    if (a.numel() == 0 && a.dim(0) == 0) {
+    CAFFE_ENFORCE(b.dim() >= 1);
+    if (a.numel() == 0 && a.size(0) == 0) {
       c->CopyFrom(b);
       return true;
     }
     CAFFE_ENFORCE(&a == c, "First argument must be in-place.");
-    CAFFE_ENFORCE(c->ndim() == b.ndim());
-    CAFFE_ENFORCE(b.ndim() == c->ndim());
+    CAFFE_ENFORCE(c->dim() == b.dim());
+    CAFFE_ENFORCE(b.dim() == c->dim());
     CAFFE_ENFORCE(a.dtype() == b.dtype());
-    for (int i = 1; i < a.ndim(); ++i) {
+    for (int i = 1; i < a.dim(); ++i) {
       CAFFE_ENFORCE(a.sizes()[i] == b.sizes()[i]);
     }
     auto oldSize = c->numel();
@@ -802,16 +802,16 @@ class AtomicAppendOp final : public Operator<Context> {
       auto& a = Input(1 + i);
       auto& b = Input(1 + i + numFields);
       auto* c = Output(i);
-      CAFFE_ENFORCE(b.ndim() >= 1);
+      CAFFE_ENFORCE(b.dim() >= 1);
       if (a.numel() == 0) {
         continue;
       }
       CAFFE_ENFORCE(
           (void*)&a == (void*)c, "Appended-to arguments must be in-place.");
-      CAFFE_ENFORCE(c->ndim() == b.ndim());
-      CAFFE_ENFORCE(b.ndim() == c->ndim());
+      CAFFE_ENFORCE(c->dim() == b.dim());
+      CAFFE_ENFORCE(b.dim() == c->dim());
       CAFFE_ENFORCE(a.dtype() == b.dtype());
-      for (int j = 1; j < a.ndim(); ++j) {
+      for (int j = 1; j < a.dim(); ++j) {
         CAFFE_ENFORCE(a.sizes()[j] == b.sizes()[j]);
       }
     }
@@ -821,7 +821,7 @@ class AtomicAppendOp final : public Operator<Context> {
       auto& a = Input(1 + i);
       auto& b = Input(1 + i + numFields);
       auto* c = Output(i);
-      if (a.numel() == 0 && a.dim(0) == 0) {
+      if (a.numel() == 0 && a.size(0) == 0) {
         c->CopyFrom(b);
         continue;
       }
@@ -887,7 +887,7 @@ class ConcatTensorVectorOp final : public Operator<Context> {
     CAFFE_ENFORCE(outputDims.size() > 0);
     for (int i = 1; i < tensorVector->size(); i++) {
       // the tensor shapes are the same except for the first dimension
-      for (int j = 1; j < tensorVector->at(i).ndim(); j++) {
+      for (int j = 1; j < tensorVector->at(i).dim(); j++) {
         CAFFE_ENFORCE(outputDims[j] == tensorVector->at(i).sizes()[j]);
       }
       CAFFE_ENFORCE(tensorVector->at(0).dtype() == tensorVector->at(i).dtype());
@@ -960,8 +960,11 @@ class CollectTensorOp final : public Operator<Context> {
         CAFFE_ENFORCE(numVisited_ >= numToCollect_);
       } else if (pos >= tensorVector->size()) {
         // append
-        tensorVector->emplace_back(Context::GetDeviceType());
-        tensorVector->back().CopyFrom(tensor); // sync copy
+        tensorVector->emplace_back();
+        ReinitializeAndCopyFrom(
+            &tensorVector->back(),
+            Context::GetDeviceType(),
+            tensor); // sync copy
       } else {
         // replace
         tensorVector->at(pos).CopyFrom(tensor); // sync copy

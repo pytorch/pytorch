@@ -104,7 +104,7 @@ bool PReluOp<float, CPUContext>::RunOnDevice() {
   const auto* Wdata = W.template data<float>();
   auto* Ydata = Y->template mutable_data<float>();
 
-  const auto C = order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(X.ndim() - 1);
+  const auto C = order_ == StorageOrder::NCHW ? X.size(1) : X.size(X.dim() - 1);
   const auto C_shared = (W.numel() == 1);
 
   if (!C_shared) {
@@ -126,7 +126,7 @@ bool PReluOp<float, CPUContext>::RunOnDevice() {
   // non-shared case.
   switch (order_) {
     case StorageOrder::NCHW: {
-      const auto N = X.dim(0);
+      const auto N = X.size(0);
       const auto dim = X.size_from_dim(2);
 
 #if defined(__ARM_NEON__) || defined(__ARM_NEON)
@@ -181,7 +181,7 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
   dX->ResizeLike(Y);
   dW->ResizeLike(W);
 
-  const auto C = order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(X.ndim() - 1);
+  const auto C = order_ == StorageOrder::NCHW ? X.size(1) : X.size(X.dim() - 1);
   const auto C_shared = (W.numel() == 1);
 
   const float* Ydata = Y.data<float>();

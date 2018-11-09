@@ -26,8 +26,9 @@ namespace script {
 //       | For(List<Expr> targets, List<Expr> iters, List<Stmt> body)   TK_FOR
 //       | While(Expr cond, List<Stmt> body)                            TK_WHILE
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
-//       -- NB: the only type of Expr's allowed on lhs are Starred and Var
-//       | Assign(List<Expr> lhs, Expr rhs)                             TK_ASSIGN
+//       -- NB: the only type of Expr's allowed on lhs are Var
+//          Or a tuple containing Var with an optional terminating Starred
+//       | Assign(Expr lhs, Expr rhs)                                  TK_ASSIGN
 //       | AugAssign(Expr lhs, AugAssignKind aug_op, Expr rhs)          TK_AUG_ASSIGN
 //       | Return(List<Expr> values)                                    TK_RETURN
 //       | ExprStmt(List<Expr> expr)                                    TK_EXPR_STMT
@@ -216,6 +217,7 @@ struct Stmt : public TreeView {
       case TK_EXPR_STMT:
       case TK_RAISE:
       case TK_ASSERT:
+      case TK_PASS:
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Stmt";
@@ -328,6 +330,10 @@ struct Decl : public TreeView {
 struct Def : public TreeView {
   explicit Def(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_DEF);
+  }
+  Def withName(std::string new_name) const {
+    auto new_ident = Ident::create(name().range(), new_name);
+    return create(range(), new_ident, decl(), statements());
   }
   Ident name() const {
     return Ident(subtree(0));
@@ -469,12 +475,12 @@ struct Assign : public Stmt {
   }
   static Assign create(
       const SourceRange& range,
-      const List<Expr>& lhs,
+      const Expr& lhs,
       const Expr& rhs) {
     return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs}));
   }
-  List<Expr> lhs() const {
-    return List<Expr>(subtree(0));
+  Expr lhs() const {
+    return Expr(subtree(0));
   }
   Expr rhs() const {
     return Expr(subtree(1));
@@ -523,15 +529,25 @@ struct Assert : public Stmt {
   }
 };
 
+struct Pass : public Stmt {
+  explicit Pass(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_PASS);
+  }
+  static Pass create(
+      const SourceRange& range) {
+    return Pass(Compound::create(TK_PASS, range, {}));
+  }
+};
+
 
 struct ExprStmt : public Stmt {
   explicit ExprStmt(const TreeRef& tree) : Stmt(tree) {
     tree_->match(TK_EXPR_STMT);
   }
-  List<Expr> exprs() {
-    return List<Expr>(subtree(0));
+  Expr expr() {
+    return Expr(subtree(0));
   }
-  static ExprStmt create(const SourceRange& range, const List<Expr>& list) {
+  static ExprStmt create(const SourceRange& range, const Expr list) {
     return ExprStmt(Compound::create(TK_EXPR_STMT, range, {list}));
   }
 };

@@ -311,7 +311,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
       } else {
         res[idx] = THPUtils_unpackIndex(obj);
       }
-    } catch (std::runtime_error &e) {
+    } catch (const std::exception &e) {
       throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
           signature.name.c_str(), signature.params[i].name.c_str(),
           signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);

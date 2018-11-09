@@ -678,7 +678,11 @@ def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     return A
 
 
-def random_fullrank_matrix_distinct_singular_value(l, *batches):
+def random_fullrank_matrix_distinct_singular_value(l, *batches, **kwargs):
+    silent = kwargs.get("silent", False)
+    if silent and not torch._C.has_lapack:
+        return torch.ones(l, l)
+
     if len(batches) == 0:
         A = torch.randn(l, l)
         u, _, v = A.svd()

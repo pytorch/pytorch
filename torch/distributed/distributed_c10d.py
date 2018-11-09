@@ -1,11 +1,12 @@
 import torch
+import warnings
 from torch._six import string_classes
 from datetime import timedelta
 
 from .rendezvous import rendezvous, register_rendezvous_handler
 from . import BroadcastOptions, AllreduceOptions, ReduceOptions, \
     ScatterOptions, GatherOptions
-from . import ReduceOp as reduce_op
+from . import ReduceOp
 from . import PrefixStore
 from . import ProcessGroupGloo
 
@@ -25,19 +26,19 @@ except ImportError:
     _NCCL_AVAILABLE = False
 
 
-class DistBackend(object):
+class Backend(object):
     """
     An enum-like class of available backends: GLOO, NCCL, and MPI.
 
     The values of this class are lowercase strings, e.g., ``"gloo"``. They can
-    be accessed as attributes, e.g., ``DistBackend.NCCL``.
+    be accessed as attributes, e.g., ``Backend.NCCL``.
 
     This class can be directly called to parse the string, e.g.,
-    ``DistBackend(backend_str)`` will check if ``backend_str`` is valid, and
+    ``Backend(backend_str)`` will check if ``backend_str`` is valid, and
     return the parsed lowercase string if so. It also accepts uppercase strings,
-    e.g., ``DistBackend("GLOO")`` returns ``"gloo"``.
+    e.g., ``Backend("GLOO")`` returns ``"gloo"``.
 
-    .. note:: The entry ``DistBackend.UNDEFINED`` is present but only used as
+    .. note:: The entry ``Backend.UNDEFINED`` is present but only used as
               initial value of some fields. Users should neither use it directly
               nor assume its existence.
     """
@@ -45,20 +46,48 @@ class DistBackend(object):
     GLOO = "gloo"
     NCCL = "nccl"
     MPI = "mpi"
+    TCP = "tcp"
 
     def __new__(cls, name):
         if not isinstance(name, string_classes):
             raise ValueError("Backend name must be a string, but got: {}".format(name))
-        value = getattr(DistBackend, name.upper(), DistBackend.UNDEFINED)
-        if value == DistBackend.UNDEFINED:
+        value = getattr(Backend, name.upper(), Backend.UNDEFINED)
+
+        if value == Backend.TCP:
+            raise ValueError("TCP backend has been deprecated. Please use "
+                             "Gloo or MPI backend for collective operations "
+                             "on CPU tensors.")
+        elif value == Backend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
         return value
 
-# The following two values are here to maintain backward compatibility with
-# pre-c10d distributed package.
+# `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
+# compatibility with pre-c10d distributed package.
 # TODO: remove them when users are ready to take a hard dependency on PyTorch 1.
-_backend = DistBackend.UNDEFINED
-dist_backend = DistBackend
+_backend = Backend.UNDEFINED
+dist_backend = Backend
+
+
+class reduce_op(object):
+    r"""
+    Deprecated enum-like class for reduction operations: ``SUM``, ``PRODUCT``,
+    ``MIN``, and ``MAX``.
+
+    :class:`~torch.distributed.ReduceOp` is recommended to use instead.
+    """
+
+    def __init__(self):
+        # __members__ is a dict storing key-value pairs for enum classes
+        for k, v in ReduceOp.__members__.items():
+            setattr(self, k, v)
+        self.__members__ = ReduceOp.__members__
+
+    def __getattribute__(self, key):
+        warnings.warn("torch.distributed.reduce_op is deprecated, please use "
+                      "torch.distributed.ReduceOp instead")
+        return object.__getattribute__(self, key)
+
+reduce_op = reduce_op()
 
 
 class group(object):
@@ -72,8 +101,8 @@ class GroupMember(object):
 
 
 # Cached process groups
-# For NCCL and GLOO pg, it is a map from ProcessGroup to (DistBackend, Store)
-# For MPI pg, it is a map from ProcessGroup to (DistBackend, Bool), where bool
+# For NCCL and GLOO pg, it is a map from ProcessGroup to (Backend, Store)
+# For MPI pg, it is a map from ProcessGroup to (Backend, Bool), where bool
 # represents if the ProcessGroup objects is part of the group
 _pg_map = {}
 # Process group's names, map from ProcessGroup to str
@@ -101,7 +130,7 @@ def _rank_not_in_group(group):
 
     """
     default_backend, _ = _pg_map[get_default_group()]
-    if default_backend != DistBackend.MPI:
+    if default_backend != Backend.MPI:
         return group == GroupMember.NON_GROUP_MEMBER
     else:
         if group == GroupMember.WORLD:
@@ -235,11 +264,11 @@ def init_process_group(backend,
     initialize the distributed package
 
     Arguments:
-        backend (str or DistBackend): The backend to use. Depending on
+        backend (str or Backend): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
             and ``nccl``. This field should be given as a lowercase string
             (e.g., ``"gloo"``), which can also be accessed via
-            :class:`DistBackend` attributes (e.g., ``DistBackend.GLOO``).
+            :class:`Backend` attributes (e.g., ``Backend.GLOO``).
         init_method (str, optional): URL specifying how to initialize the
                                      process group.
         world_size (int, optional): Number of processes participating in
@@ -247,7 +276,7 @@ def init_process_group(backend,
         rank (int, optional): Rank of the current process.
         group_name (str, optional, deprecated): Group name.
 
-    To enable ``backend == DistBackend.MPI``, PyTorch needs to built from source
+    To enable ``backend == Backend.MPI``, PyTorch needs to built from source
     on a system that supports MPI. The same applies to NCCL as well.
 
     """
@@ -267,14 +296,14 @@ def init_process_group(backend,
     assert len(kwargs) == 0, \
         "got unexpected keyword arguments: %s" % ",".join(kwargs.keys())
 
-    backend = DistBackend(backend)
+    backend = Backend(backend)
 
-    if backend == DistBackend.MPI:
+    if backend == Backend.MPI:
         if not is_mpi_available():
             raise RuntimeError("Distributed package doesn't have MPI built in")
 
         _default_pg = ProcessGroupMPI([])
-        _pg_map[_default_pg] = (DistBackend.MPI, True)
+        _pg_map[_default_pg] = (Backend.MPI, True)
         _pg_names[_default_pg] = group_name
     else:
         # backward compatible API
@@ -286,20 +315,20 @@ def init_process_group(backend,
         else:
             store, rank, world_size = next(rendezvous(init_method))
 
-        if backend == DistBackend.GLOO:
+        if backend == Backend.GLOO:
             _default_pg = ProcessGroupGloo(
                 store,
                 rank,
                 world_size,
                 timeout=_default_pg_timeout)
-            _pg_map[_default_pg] = (DistBackend.GLOO, store)
+            _pg_map[_default_pg] = (Backend.GLOO, store)
             _pg_names[_default_pg] = group_name
-        elif backend == DistBackend.NCCL:
+        elif backend == Backend.NCCL:
             if not is_nccl_available():
                 raise RuntimeError("Distributed package doesn't have NCCL "
                                    "built in")
             _default_pg = ProcessGroupNCCL(store, rank, world_size)
-            _pg_map[_default_pg] = (DistBackend.NCCL, store)
+            _pg_map[_default_pg] = (Backend.NCCL, store)
             _pg_names[_default_pg] = group_name
 
     _backend = _pg_map[_default_pg][0]
@@ -330,30 +359,30 @@ def _new_process_group_helper(world_size,
 
     default_backend, default_store = _pg_map[_default_pg]
 
-    if default_backend == DistBackend.MPI:
+    if default_backend == Backend.MPI:
         if not is_mpi_available():
             raise RuntimeError("Distributed package doesn't have MPI built in")
         pg = ProcessGroupMPI(group_ranks)
-        _pg_map[pg] = (DistBackend.MPI, in_group)
+        _pg_map[pg] = (Backend.MPI, in_group)
         _pg_names[pg] = group_name
     else:
         # Create the prefix store
         store = PrefixStore(group_name, default_store)
 
-        if default_backend == DistBackend.GLOO:
+        if default_backend == Backend.GLOO:
             pg = ProcessGroupGloo(
                 store,
                 rank,
                 world_size,
                 timeout=_default_pg_timeout)
-            _pg_map[pg] = (DistBackend.GLOO, store)
+            _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
-        elif default_backend == DistBackend.NCCL:
+        elif default_backend == Backend.NCCL:
             if not is_nccl_available():
                 raise RuntimeError("Distributed package doesn't have NCCL "
                                    "built in")
             pg = ProcessGroupNCCL(store, rank, world_size)
-            _pg_map[pg] = (DistBackend.NCCL, store)
+            _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
             raise RuntimeError("Unsupported distributed backend by group")
@@ -377,7 +406,7 @@ def destroy_process_group(group=group.WORLD):
     global _default_pg_init_method
 
     default_backend, _ = _pg_map[get_default_group()]
-    if (default_backend != DistBackend.MPI and
+    if (default_backend != Backend.MPI and
             group == GroupMember.NON_GROUP_MEMBER):
         return
 
@@ -670,10 +699,10 @@ def broadcast(tensor,
 
 
 def all_reduce_multigpu(tensor_list,
-                        op=reduce_op.SUM,
+                        op=ReduceOp.SUM,
                         group=group.WORLD,
                         async_op=False):
-    """
+    r"""
     Reduces the tensor data across all machines in such a way that all get
     the final result. This function reduces a number of tensors on every node,
     while each tensor resides on different GPUs.
@@ -693,7 +722,7 @@ def all_reduce_multigpu(tensor_list,
             You also need to make sure that ``len(tensor_list)`` is the same for
             all the distributed processes calling this function.
         op (optional): One of the values from
-            ``torch.distributed.c10d.reduce_op``
+            ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
         group (ProcessGroup, optional): The process group to work on
         async_op (bool, optional): Whether this op should be an async op
@@ -721,7 +750,7 @@ def all_reduce_multigpu(tensor_list,
 
 
 def all_reduce(tensor,
-               op=reduce_op.SUM,
+               op=ReduceOp.SUM,
                group=group.WORLD,
                async_op=False):
     """
@@ -734,7 +763,7 @@ def all_reduce(tensor,
         tensor (Tensor): Input and output of the collective. The function
             operates in-place.
         op (optional): One of the values from
-            ``torch.distributed.c10d.reduce_op``
+            ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
         group (ProcessGroup, optional): The process group to work on
         async_op (bool, optional): Whether this op should be an async op
@@ -763,7 +792,7 @@ def all_reduce(tensor,
 
 def reduce_multigpu(tensor_list,
                     dst,
-                    op=reduce_op.SUM,
+                    op=ReduceOp.SUM,
                     group=group.WORLD,
                     async_op=False,
                     dst_tensor=0):
@@ -784,7 +813,7 @@ def reduce_multigpu(tensor_list,
             all the distributed processes calling this function.
         dst (int): Destination rank
         op (optional): One of the values from
-            ``torch.distributed.c10d.reduce_op``
+            ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
         group (ProcessGroup, optional): The process group to work on
         async_op (bool, optional): Whether this op should be an async op
@@ -820,7 +849,7 @@ def reduce_multigpu(tensor_list,
 
 def reduce(tensor,
            dst,
-           op=reduce_op.SUM,
+           op=ReduceOp.SUM,
            group=group.WORLD,
            async_op=False):
     """
@@ -833,7 +862,7 @@ def reduce(tensor,
             operates in-place.
         dst (int): Destination rank
         op (optional): One of the values from
-            ``torch.distributed.c10d.reduce_op``
+            ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
         group (ProcessGroup, optional): The process group to work on
         async_op (bool, optional): Whether this op should be an async op
@@ -1139,7 +1168,7 @@ def new_group(ranks=None):
         group_world_size = global_world_size
         group_rank = global_rank
 
-    if default_backend == DistBackend.MPI:
+    if default_backend == Backend.MPI:
         in_group = global_rank in ranks
         pg = _new_process_group_helper(group_world_size,
                                        group_rank,
@@ -1150,14 +1179,14 @@ def new_group(ranks=None):
         if global_rank not in ranks:
             return GroupMember.NON_GROUP_MEMBER
 
-        if default_backend != DistBackend.MPI:
+        if default_backend != Backend.MPI:
             pg = _new_process_group_helper(group_world_size,
                                            group_rank,
                                            input_ranks)
 
     # Create the global rank to group rank mapping
     _pg_group_ranks[pg] = {}
-    if default_backend == DistBackend.MPI:
+    if default_backend == Backend.MPI:
         _pg_group_ranks[pg] = pg.group_ranks()
     else:
         for rank in range(global_world_size):

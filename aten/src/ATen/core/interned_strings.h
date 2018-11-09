@@ -6,11 +6,11 @@
 #include <algorithm>
 
 #include <ATen/core/aten_interned_strings.h>
-#include <ATen/core/Macros.h>
+#include <c10/macros/Macros.h>
 
 namespace c10 {
 
-#if !AT_MOBILE
+#if !C10_MOBILE
 #define FORALL_NS_SYMBOLS(_)       \
   _(namespaces, prim)              \
   _(namespaces, aten)              \
@@ -67,7 +67,6 @@ namespace c10 {
   _(prim, ConstantChunk)           \
   _(prim, NoneGenerator)           \
   _(aten, floordiv)                \
-  _(prim, MemoryFence)             \
   _(prim, fork)                    \
   _(prim, RaiseException)          \
   _(aten, append)                  \
@@ -75,6 +74,8 @@ namespace c10 {
   _(aten, __not__)                 \
   _(aten, __is__)                  \
   _(aten, __isnot__)               \
+  _(aten, copy_)                   \
+  _(aten, _set_item)               \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \

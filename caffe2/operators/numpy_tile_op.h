@@ -24,10 +24,10 @@ class NumpyTileOp : public Operator<Context> {
 
     // Check that the `repeats` tensor has the correct rank, has a number of
     // elements equal to the number of axes of `input`.
-    CAFFE_ENFORCE_EQ(repeats.ndim(), 1, "repeats input must be a 1-d tensor");
+    CAFFE_ENFORCE_EQ(repeats.dim(), 1, "repeats input must be a 1-d tensor");
     CAFFE_ENFORCE_EQ(
         repeats.numel(),
-        input.ndim(),
+        input.dim(),
         "repeats input have the same"
         " number of elements as `inputs` has dimensions.");
     const int64_t *repeats_data = repeats.template data<int64_t>();

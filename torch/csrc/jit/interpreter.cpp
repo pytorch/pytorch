@@ -289,6 +289,7 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
 struct PreprocessGraph {
   PreprocessGraph(Graph & g)
   : graph(g.copy()) {
+    n_outputs = graph->outputs().size();
     desugarTripCounts(graph->block());
     flattenIO(*graph);
     dropUnused(graph->block());
@@ -300,7 +301,8 @@ struct PreprocessGraph {
   std::shared_ptr<Graph> graph;
   // for each input, should we move rather than copy the inputs
   std::unordered_map<Node*, std::vector<uint8_t>> move_flags;
-
+  // Record number of outputs before flattenIO()
+  size_t n_outputs;
 };
 
 // Sometimes we want to pass things that are not tensors.  Instead of
@@ -645,26 +647,43 @@ struct InterpreterStateImpl {
     bool_data(function->bool_data),
     registers(function->register_size) {
   }
-  void run(Stack & stack) {
+
+ private:
+  bool runImpl(Stack& stack, InterpreterState& parent) {
     // std::cout << *function->graph << "\n";
     // function->dump(std::cout);
-    size_t pc = current_pc;
     auto & instructions = function->instructions;
     size_t last = instructions.size();
-    while(pc < last) {
+
+    while (pc < last) {
         // std::cout << "executing " << pc << ": ";
         // function->dumpInstruction(std::cout, pc);
         // std::cout << "\n";
+        auto & inst = instructions[pc];
         try {
-          auto & inst = instructions[pc];
           loadTensorsFromRegisters(inst.inputs, stack);
           size_t new_pc = pc + 1 + inst.callback(stack);
-          for(int i = inst.outputs.size - 1; i >= 0; i--) {
-            int reg = get(inst.outputs,i);
+          for (int i = inst.outputs.size - 1; i >= 0; --i) {
+            int reg = get(inst.outputs, i);
             registers[reg] = pop(stack);
             // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
           }
           pc = new_pc;
+        } catch (Suspend& e) {
+          // wait() expects a single input
+          JIT_ASSERT(inst.inputs.values.size == 1);
+
+          getOrCreateFuture();
+
+          e.future->addCallback([parent](){
+            c10::global_work_queue.schedule(InterpreterContinuation(parent, Stack()));
+          });
+
+          if (get(inst.inputs.free_flags, 0)) {
+            // make sure the register is not freed once we are waked up
+            registers[get(inst.inputs.values, 0)] = e.future;
+          }
+          return true;
         } catch(std::exception & e) {
           if (!instructions[pc].debug_location) {
             throw;
@@ -677,8 +696,49 @@ struct InterpreterStateImpl {
           }
         }
     }
-    current_pc = pc;
+    if (future) {
+      auto num_outputs = function->preprocess.n_outputs;
+      if (num_outputs == 1) {
+        future->markCompleted(stack.back());
+      } else {
+        future->markCompleted(
+            Tuple::create(jit::last(stack, num_outputs).vec()));
+      }
+    }
+
+    return false;
   }
+
+ public:
+  c10::intrusive_ptr<Future> getOrCreateFuture() {
+    if (!future) {
+      future = c10::make_intrusive<Future>();
+    }
+    return future;
+  }
+
+  c10::intrusive_ptr<Future> runAsync(Stack& stack, InterpreterState& parent) {
+    getOrCreateFuture();
+    runImpl(stack, parent);
+    return future;
+  }
+
+  void run(Stack& stack, InterpreterState& parent) {
+    if (runImpl(stack, parent)) {
+      future->wait();
+
+      auto num_outputs = function->preprocess.n_outputs;
+      if (num_outputs == 1) {
+        push(stack, future->value());
+      } else {
+        auto tuple = future->value().toTuple();
+        for (const auto& value : tuple->elements()) {
+          push(stack, value);
+        }
+      }
+    }
+  }
+
   int get(const ListHandle<int> & list, int i) {
     return int_data[list.start + i];
   };
@@ -697,12 +757,10 @@ struct InterpreterStateImpl {
 
     }
   }
-  // note: it may seem unnecessary to keep the current_pc inside InterpreterState
-  // since InterpreterState::run completes the function. However, in the
-  // future we will end up with interpreters that can suspend (e.g. for asynchrony)
-  // so we keep this design in place eventhough we removed the 'staging'
-  // that it was originally used for.
-  size_t current_pc = 0;
+
+  // pc is critical for the interperter to pick up the progress from suspend
+  size_t pc = 0;
+  c10::intrusive_ptr<Future> future;
   std::shared_ptr<CodeImpl> function; // keep function alive
   // these are just copies of function to prevent indirections in interpreter
   int * int_data;
@@ -743,12 +801,20 @@ InterpreterState::InterpreterState(const Code & code)
   : pImpl(new InterpreterStateImpl(code)) {}
 InterpreterState::~InterpreterState() = default;
 
-void InterpreterState::run(Stack & stack) {
-  return pImpl->run(stack);
+void InterpreterState::run(Stack& stack) {
+  pImpl->run(stack, *this);
+}
+
+c10::intrusive_ptr<Future> InterpreterState::runAsync(Stack& stack) {
+  return pImpl->runAsync(stack, *this);
 }
 
 InterpreterState InterpreterState::clone() const {
   return InterpreterState(new InterpreterStateImpl(*pImpl));
+}
+
+c10::intrusive_ptr<Future> InterpreterState::getFuture() {
+  return pImpl->getOrCreateFuture();
 }
 
 InterpreterState::InterpreterState(InterpreterStateImpl * pImpl) : pImpl(pImpl) {}

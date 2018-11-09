@@ -142,20 +142,20 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   }
 };
 
+// These SugaredValues have special handling in the compiler because they
+// change the normal evalution order of the expression they participate in.
+// They are exposed here so that the python frontend can inject them
+// when it sees the equivalent thing in python
 struct TORCH_API ForkValue : public SugaredValue {
   ForkValue() = default;
-
   std::string kind() const override {
     return "fork";
   }
-
-  std::shared_ptr<SugaredValue> call(
-      SourceRange loc,
-      Method& m,
-      at::ArrayRef<NamedValue> attributes,
-      at::ArrayRef<NamedValue> inputs,
-      size_t n_binders) override {
-    AT_ERROR("Cannot call a fork value directly");
+};
+struct TORCH_API AnnotateValue : public SugaredValue {
+  AnnotateValue() = default;
+  std::string kind() const override {
+    return "annotate";
   }
 };
 
@@ -177,7 +177,6 @@ TORCH_API void defineMethodsInModule(
 
 // same as above but parse the definitions from source
 TORCH_API void defineMethodsInModule(Module & m, const std::string& source, Resolver resolver, std::shared_ptr<SugaredValue> self);
-TORCH_API std::shared_ptr<Graph> compileFunction(Def def, Resolver resolver);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.
@@ -223,8 +222,6 @@ TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
   at::ArrayRef<NamedValue> attributes,
   std::ostream& failure_messages,
   bool convert_tensors_to_nums);
-
-TORCH_API FunctionSchema extractSchemaFromDef(const Def &def, bool is_method=false);
 
 TORCH_API Value* emitBuiltinCall(
   const SourceRange& loc,

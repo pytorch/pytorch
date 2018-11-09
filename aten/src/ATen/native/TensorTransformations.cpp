@@ -1,4 +1,5 @@
 #include "ATen/native/TensorTransformations.h"
+#include "ATen/WrapDimUtilsMulti.h"
 
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Exception.h>
@@ -9,52 +10,101 @@
 namespace at {
 namespace native {
 
+constexpr size_t dim_bitset_size = 64;
+
+template <typename scalar_t>
+void inline flip_cpu_kernel(
+  const int64_t total_dims,
+  const std::vector<int64_t>& stride_contiguous_v,
+  const std::bitset<dim_bitset_size>& flip_dims_b,
+  const Tensor& in_tensor,
+  Tensor& out_tensor
+){
+  int64_t i;
+  const int64_t numel = in_tensor.numel();
+  const scalar_t* in_tensor_d = in_tensor.data<scalar_t>();
+  scalar_t* out_tensor_d = out_tensor.data<scalar_t>();
+  auto sizes_v = in_tensor.sizes().vec();
+  auto strides_v = in_tensor.strides().vec();
+
+  #pragma omp parallel for private(i) if (numel > 1000)
+  for (i = 0; i < numel; i++) {
+    int64_t cur_indices = i;
+    int64_t rem = 0;
+    int64_t dst_offset = 0;
+
+    for (int64_t d = 0; d < total_dims; d++) {
+      int64_t temp = cur_indices;
+      cur_indices = cur_indices / stride_contiguous_v[d];
+      rem = temp - cur_indices * stride_contiguous_v[d];
+      dst_offset += flip_dims_b[d] ? (sizes_v[d] - 1 - cur_indices) * strides_v[d] : cur_indices * strides_v[d];
+      cur_indices = rem;
+    }
+    out_tensor_d[i] = in_tensor_d[dst_offset];
+  }
+}
+
 Tensor flip_cpu(const Tensor& self, IntList dims) {
-  const int64_t total_dims = self.dim(), flip_dims_size = dims.size();
-  flip_check_errors(total_dims, flip_dims_size, dims);
+  auto in_tensor = self;
+  const int64_t total_dims = in_tensor.dim();
+  auto flip_dims_b = dim_list_to_bitset(dims, total_dims);
+  Tensor out_tensor = at::empty_like(in_tensor);
 
-  auto flip_dims_v = dims.vec();
-  wrap_all_dims(flip_dims_v, total_dims);
-  std::sort(flip_dims_v.begin(), flip_dims_v.end());
-  auto final_indices = std::vector<at::Tensor>(total_dims);
-
-  auto indices = std::vector<at::Tensor>(flip_dims_size);
-  for (int64_t i = 0; i < flip_dims_size; i++) {
-    indices[i] = at::arange(self.size(flip_dims_v[i]) - 1, -1, -1, self.type().toScalarType(at::kLong));
-    // creates a meshgrid
-    auto temp = std::vector<int64_t>(flip_dims_size, 1);
-    temp[i] = indices[i].size(0);
-    indices[i] = indices[i].view(IntList(temp));
-    final_indices[flip_dims_v[i]] = indices[i];
-  }
-
-  // check if distance between two flip dims >= 2, where permute of output tensor is needed,
-  // because the advanced indexing puts all non-consecutive indices in the beginning of the tensor
-  bool to_permute = false;
-  int64_t first = flip_dims_v[0], second = flip_dims_v[0];
-  for (int64_t i = 1; i < flip_dims_size; i++) {
-    second = flip_dims_v[i];
-    if (second - first >= 2) {
-      to_permute = true;
-      break;
+  // create contiguous strides for input tensor
+  auto stride_contiguous_v = std::vector<int64_t>(total_dims);
+  for (int64_t i = total_dims - 1; i >= 0; i--) {
+    if (i == total_dims - 1) {
+      stride_contiguous_v[i] = 1;
+    } else {
+      stride_contiguous_v[i] = std::max<int64_t>(in_tensor.size(i + 1), 1) * stride_contiguous_v[i + 1];
     }
-    first = second;
   }
 
-  if (to_permute) {
-    // permute output tensor
-    auto permute_order = std::vector<int64_t>(flip_dims_v);
-    for (int64_t i = 0; i < total_dims; i++) {
-      if (std::find(flip_dims_v.begin(), flip_dims_v.end(), i) == flip_dims_v.end()) {
-        permute_order.emplace_back(i);
-      }
-    }
-    auto out_tensor = self.index(TensorList(final_indices));
-    return out_tensor.permute(IntList(permute_order));
-  }
+  AT_DISPATCH_ALL_TYPES(in_tensor.type(), "flip_cpu", [&] {
+    flip_cpu_kernel<scalar_t>(
+      total_dims,
+      stride_contiguous_v,
+      flip_dims_b,
+      in_tensor,
+      out_tensor
+    );
+  });
 
-  auto out_tensor = self.index(TensorList(final_indices));
   return out_tensor;
+}
+
+Tensor roll_cpu(const Tensor& self, IntList shifts, IntList dims) {
+  if (dims.size() == 0 && shifts.size() == 1) {
+    auto flattened = self.contiguous().view(self.numel());
+    return roll_cpu(flattened, shifts[0], 0).view(self.sizes());
+  }
+  AT_CHECK(shifts.size() == dims.size(), "shifts and dimensions must align");
+  // todo: support rolling along multiple dimensions as in numpy.roll.
+  AT_CHECK(dims.size() == 1, "only single dimension roll currently supported");
+  // avoid a div zero error below.
+  if (self.numel() == 0) {
+    return self.clone();
+  }
+  int64_t dim = dims[0];
+  int64_t size = self.size(dim);
+  int64_t start = (size - shifts[0]) % size;
+  // Behavior of % is different in C++ vs Python for negative numbers. This
+  // corrects the difference.
+  if (start < 0) {
+    start = start + size;
+  }
+  auto tensors = self.unbind(dim);
+  std::vector<Tensor> vec = std::vector<Tensor>(size);
+  int64_t index = 0;
+  for (int64_t i = start; i < size; i++) {
+    vec[index++] = tensors[i];
+  }
+
+  for (int64_t i = 0; i < start; i++) {
+    vec[index++] = tensors[i];
+  }
+
+  return at::stack(vec, dim);
 }
 
 Tensor rot90(const Tensor& self, int64_t k, IntList dims) {
