@@ -174,11 +174,21 @@ inline IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_
             return createGenericList(obj, elem_type);
         }
       }
-      case TypeKind::OptionalType:
+      case TypeKind::OptionalType: {
+        const auto& elem_type = type->expect<OptionalType>()->getElementType();
         // check if it's a none obj since optional accepts NoneType
-        if (obj == Py_None)
+        if (obj == Py_None)  {
+          if(elem_type->isSubtypeOf(DynamicType::get())) {
+            // return undefined tensor for Optional[Tensor]
+            return at::Tensor();
+          }
+          else {
+            // for other optional types, return an IValue() to denote a None
             return {};
+          }
+        }
         return toIValue(obj, type->expect<OptionalType>()->getElementType());
+      }
       case TypeKind::NumberType:
       case TypeKind::GeneratorType:
       case TypeKind::VarType:

@@ -1166,7 +1166,9 @@ def linear(input, weight, bias=None):
     return output
 
 
+@torch._jit_internal.weak_script
 def bilinear(input1, input2, weight, bias=None):
+    # type: (Tensor, Tensor, Tensor, Optional[Tensor]) -> Tensor
     return torch.bilinear(input1, input2, weight, bias)
 
 
