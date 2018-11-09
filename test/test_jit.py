@@ -1493,6 +1493,30 @@ class TestJit(JitTestCase):
         x = torch.randn(5, 5)
         self.assertEqual(foo(x), x + x + x)
 
+    def test_trace_script(self):
+        @torch.jit.script
+        def func1(x):
+            # type: (Tuple[Tensor, Tensor]) -> Tensor
+            return x[0] + x[1]
+
+        @torch.jit.script
+        def func2(x):
+            # type: (List[Tensor]) -> Tensor
+            return x[0] + x[1]
+
+        a = torch.randn(5)
+        b = torch.randn(5)
+
+        expected = func1((a, b))
+        traced = torch.jit.trace(func1, ((a, b),))
+        result = traced((a, b))
+        self.assertEqual(expected, result)
+
+        expected = func2((a, b))
+        traced = torch.jit.trace(func2, ((a, b),))
+        result = traced((a, b))
+        self.assertEqual(expected, result)
+
     def test_einsum(self):
         def outer(x, y):
             return torch.einsum('i,j->ij', (x, y))
