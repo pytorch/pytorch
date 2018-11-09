@@ -247,7 +247,7 @@ struct CUDAMultiStreamGuard {
     }
   }
 
-  explicit CUDAMultiStreamGuard() {
+  CUDAMultiStreamGuard() {
     const size_t device_count = getNumGPUs();
     original_streams_.reserve(device_count);
     for (size_t device = 0; device < device_count; ++device) {
