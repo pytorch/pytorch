@@ -316,6 +316,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
     return std::make_shared<ForkValue>();
+  } else if (obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
+    return std::make_shared<AnnotateValue>();
   }
 
   py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);
