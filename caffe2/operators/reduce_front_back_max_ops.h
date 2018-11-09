@@ -27,9 +27,9 @@ class MaxReduceDimsOp final : public Operator<Context> {
         "For N-dim input tensor, support num_reduce_dims in range [0, N].");
 
     const int rows = FIRSTDIMS ? X.size_to_dim(num_reduce_dims_)
-                               : X.size_to_dim(X.ndim() - num_reduce_dims_);
+                               : X.size_to_dim(X.dim() - num_reduce_dims_);
     const int cols = FIRSTDIMS ? X.size_from_dim(num_reduce_dims_)
-                               : X.size_from_dim(X.ndim() - num_reduce_dims_);
+                               : X.size_from_dim(X.dim() - num_reduce_dims_);
 
     vector<int64_t> output_shape;
     int start_index = FIRSTDIMS ? num_reduce_dims_ : 0;
@@ -94,9 +94,9 @@ class MaxReduceDimsGradientOp final : public Operator<Context> {
 
     dX->ResizeLike(X);
     const int rows = FIRSTDIMS ? X.size_to_dim(num_reduce_dims_)
-                               : X.size_to_dim(X.ndim() - num_reduce_dims_);
+                               : X.size_to_dim(X.dim() - num_reduce_dims_);
     const int cols = FIRSTDIMS ? X.size_from_dim(num_reduce_dims_)
-                               : X.size_from_dim(X.ndim() - num_reduce_dims_);
+                               : X.size_from_dim(X.dim() - num_reduce_dims_);
 
     const float* dYdata = dY.template data<float>();
     const float* Xdata = X.template data<float>();

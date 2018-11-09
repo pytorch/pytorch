@@ -1191,6 +1191,45 @@ index_select(dim, index) -> Tensor
 See :func:`torch.index_select`
 """)
 
+add_docstr_all('sparse_mask',
+               r"""
+sparse_mask(input, mask) -> Tensor
+
+Returns a new SparseTensor with values from Tensor :attr:`input` filtered
+by indices of :attr:`mask` and values are ignored. :attr:`input` and :attr:`mask`
+must have the same shape.
+
+Args:
+    input (Tensor): an input Tensor
+    mask (SparseTensor): a SparseTensor which we filter :attr:`input` based on its indices
+
+Example::
+
+    >>> nnz = 5
+    >>> dims = [5, 5, 2, 2]
+    >>> I = torch.cat([torch.randint(0, dims[0], size=(nnz,)),
+                       torch.randint(0, dims[1], size=(nnz,))], 0).reshape(2, nnz)
+    >>> V = torch.randn(nnz, dims[2], dims[3])
+    >>> size = torch.Size(dims)
+    >>> S = torch.sparse_coo_tensor(I, V, size).coalesce()
+    >>> D = torch.randn(dims)
+    >>> D.sparse_mask(S)
+    tensor(indices=tensor([[0, 0, 0, 2],
+                           [0, 1, 4, 3]]),
+           values=tensor([[[ 1.6550,  0.2397],
+                           [-0.1611, -0.0779]],
+
+                          [[ 0.2326, -1.0558],
+                           [ 1.4711,  1.9678]],
+
+                          [[-0.5138, -0.0411],
+                           [ 1.9417,  0.5158]],
+
+                          [[ 0.0793,  0.0036],
+                           [-0.2569, -0.1055]]]),
+           size=(5, 5, 2, 2), nnz=4, layout=torch.sparse_coo)
+""")
+
 add_docstr_all('inverse',
                r"""
 inverse() -> Tensor

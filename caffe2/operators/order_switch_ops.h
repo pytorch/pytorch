@@ -22,7 +22,7 @@ class NHWC2NCHWOp final : public Operator<Context> {
   bool RunOnDevice() override {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     CAFFE_ENFORCE_GE(ndim, 3);
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
@@ -59,7 +59,7 @@ class NCHW2NHWCOp final : public Operator<Context> {
   bool RunOnDevice() override {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     CAFFE_ENFORCE_GE(ndim, 3);
     const int N = X.dim32(0);
     const int C = X.dim32(1);

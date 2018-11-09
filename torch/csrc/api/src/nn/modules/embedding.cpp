@@ -1,6 +1,6 @@
 #include <torch/nn/modules/embedding.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <cstddef>

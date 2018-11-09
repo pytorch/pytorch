@@ -129,6 +129,7 @@ class ImageInputOp final
   int num_decode_threads_;
   int additional_inputs_offset_;
   int additional_inputs_count_;
+  std::vector<int> additional_output_sizes_;
   std::shared_ptr<TaskThreadPool> thread_pool_;
 
   // Output type for GPU transform path
@@ -194,6 +195,8 @@ ImageInputOp<Context>::ImageInputOp(
           0)),
       num_decode_threads_(
           OperatorBase::template GetSingleArgument<int>("decode_threads", 4)),
+      additional_output_sizes_(OperatorBase::template GetRepeatedArgument<int>(
+                                   "output_sizes", {})),
       thread_pool_(std::make_shared<TaskThreadPool>(num_decode_threads_)),
       // output type only supported with CUDA and use_gpu_transform for now
       output_type_(
@@ -219,9 +222,14 @@ ImageInputOp<Context>::ImageInputOp(
     "std_per_channel",
     {OperatorBase::template GetSingleArgument<float>("std", 1.)});
 
-  vector<int> additional_output_sizes =
-      OperatorBase::template GetRepeatedArgument<int>(
-          "output_sizes", vector<int>(OutputSize() - 2, 1));
+  if (additional_output_sizes_.size() == 0) {
+    additional_output_sizes_ = std::vector<int>(OutputSize() - 2, 1);
+  } else {
+    CAFFE_ENFORCE(
+      additional_output_sizes_.size() == OutputSize() - 2,
+      "If the output sizes are specified, they must be specified for all "
+      "additional outputs");
+  }
   additional_inputs_count_ = OutputSize() - 2;
 
   default_arg_.bounding_params = {
@@ -287,10 +295,6 @@ ImageInputOp<Context>::ImageInputOp(
   CAFFE_ENFORCE(
       !use_caffe_datum_ || OutputSize() == 2,
       "There can only be 2 outputs if the Caffe datum format is used");
-  CAFFE_ENFORCE(
-      additional_output_sizes.size() == OutputSize() - 2,
-      "If the output sizes are specified, they must be specified for all "
-      "additional outputs");
 
   CAFFE_ENFORCE(random_scale_.size() == 2,
       "Must provide [scale_min, scale_max]");
@@ -381,10 +385,11 @@ ImageInputOp<Context>::ImageInputOp(
     prefetched_label_.Resize(vector<int64_t>(1, batch_size_));
   }
 
-  for (int i = 0; i < additional_output_sizes.size(); ++i) {
+  for (int i = 0; i < additional_output_sizes_.size(); ++i) {
     prefetched_additional_outputs_on_device_.emplace_back();
     prefetched_additional_outputs_.emplace_back();
   }
+
 }
 
 // Inception-stype scale jittering
@@ -1140,17 +1145,10 @@ bool ImageInputOp<Context>::Prefetch() {
           LOG(FATAL) << "Unsupported label type.";
         }
 
-        vector<int> additional_output_sizes =
-            OperatorBase::template GetRepeatedArgument<int>(
-                "output_sizes", vector<int>(OutputSize() - 2, 1));
-        CAFFE_ENFORCE_EQ(
-            additional_output_sizes.size(),
-            additional_inputs_count_,
-            "size of additional output sizes and protos mismatch");
         for (int i = 0; i < additional_inputs_count_; ++i) {
           int index = additional_inputs_offset_ + i;
           TensorProto additional_output_proto = protos.protos(index);
-          auto sizes = std::vector<int64_t>({batch_size_, additional_output_sizes[i]});
+          auto sizes = std::vector<int64_t>({batch_size_, additional_output_sizes_[i]});
           if (additional_output_proto.data_type() == TensorProto::FLOAT) {
             prefetched_additional_outputs_[i] =
                 caffe2::empty(sizes, at::dtype<float>().device(CPU));

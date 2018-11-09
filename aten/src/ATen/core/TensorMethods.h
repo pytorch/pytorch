@@ -89,9 +89,6 @@ inline Tensor Tensor::_th_masked_select(const Tensor & mask) const {
 inline Tensor Tensor::_th_nonzero() const {
     return type()._th_nonzero(*this);
 }
-inline Tensor Tensor::_th_view(IntList size) const {
-    return type()._th_view(*this, size);
-}
 inline Tensor Tensor::_th_index_select(int64_t dim, const Tensor & index) const {
     return type()._th_index_select(*this, dim, index);
 }
@@ -109,9 +106,6 @@ inline Tensor & Tensor::_th_index_fill_(int64_t dim, const Tensor & index, Scala
 }
 inline Tensor & Tensor::_th_index_fill_(int64_t dim, const Tensor & index, const Tensor & value) {
     return type()._th_index_fill_(*this, dim, index, value);
-}
-inline Tensor Tensor::_th_unfold(int64_t dimension, int64_t size, int64_t step) const {
-    return type()._th_unfold(*this, dimension, size, step);
 }
 inline Tensor & Tensor::_th_scatter_(int64_t dim, const Tensor & index, const Tensor & src) {
     return type()._th_scatter_(*this, dim, index, src);
@@ -1702,7 +1696,7 @@ inline Tensor Tensor::alias() const {
 }
 
 inline bool Tensor::is_variable() const noexcept {
-  return type().is_variable();
+  return impl_->is_variable();
 }
 
 inline caffe2::TypeMeta Tensor::dtype() const noexcept {
@@ -1710,11 +1704,11 @@ inline caffe2::TypeMeta Tensor::dtype() const noexcept {
 }
 
 inline Layout Tensor::layout() const noexcept {
-  return type().layout();
+  return impl_->layout();
 }
 
 inline Device Tensor::device() const {
-  return Device(type().device_type(), type().is_cuda() ? get_device() : -1);
+  return impl_->device();
 }
 
 inline int64_t Tensor::get_device() const {
