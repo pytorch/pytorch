@@ -1,5 +1,9 @@
 #!/bin/bash
 
+if [[ "${BUILD_ENVIRONMENT}" =~ devtoolset([0-9]) ]]; then
+  source scl_source enable "devtoolset-${BASH_REMATCH[1]}"
+fi
+
 # For distributed, four environmental configs:
 # (1) build with only NCCL
 # (2) build with NCCL and MPI
