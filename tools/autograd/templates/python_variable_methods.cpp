@@ -399,6 +399,18 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
   END_HANDLE_TH_ERRORS
 }
 
+inline bool dispatch_is_contiguous(Tensor & self) {
+  return self.is_contiguous();
+}
+
+static PyObject * THPVariable_is_contiguous(PyObject* self_, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
+  return wrap(dispatch_is_contiguous(self));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_item(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -638,6 +650,7 @@ PyMethodDef variable_methods[] = {
   {"get_device", (PyCFunction)THPVariable_get_device, METH_NOARGS, NULL},
   {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
   {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
+  {"is_contiguous", (PyCFunction)THPVariable_is_contiguous, METH_NOARGS, NULL},
   {"item", (PyCFunction)THPVariable_item, METH_NOARGS, NULL},
   {"long", (PyCFunction)THPVariable_long, METH_NOARGS, NULL},
   {"map_", (PyCFunction)THPVariable_map_, METH_VARARGS | METH_KEYWORDS, NULL},

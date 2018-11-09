@@ -1493,6 +1493,30 @@ class TestJit(JitTestCase):
         x = torch.randn(5, 5)
         self.assertEqual(foo(x), x + x + x)
 
+    def test_trace_script(self):
+        @torch.jit.script
+        def func1(x):
+            # type: (Tuple[Tensor, Tensor]) -> Tensor
+            return x[0] + x[1]
+
+        @torch.jit.script
+        def func2(x):
+            # type: (List[Tensor]) -> Tensor
+            return x[0] + x[1]
+
+        a = torch.randn(5)
+        b = torch.randn(5)
+
+        expected = func1((a, b))
+        traced = torch.jit.trace(func1, ((a, b),))
+        result = traced((a, b))
+        self.assertEqual(expected, result)
+
+        expected = func2((a, b))
+        traced = torch.jit.trace(func2, ((a, b),))
+        result = traced((a, b))
+        self.assertEqual(expected, result)
+
     def test_einsum(self):
         def outer(x, y):
             return torch.einsum('i,j->ij', (x, y))
@@ -9898,6 +9922,61 @@ class TestAsync(JitTestCase):
             def wait_script(x):
                 fut = torch.jit._fork(x)
                 return fut
+
+    def test_async_script_multi_waits(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.neg(x).t() + x
+
+        @torch.jit.script
+        def wait_script(x):
+            fut = torch.jit._fork(foo, x)
+
+            # wait twice on the same future
+            y1 = torch.jit._wait(fut)
+            y2 = torch.jit._wait(fut)
+            return y1, y2
+
+        x = torch.rand(2, 2)
+        y1, y2 = wait_script(x)
+        self.assertEqual(y1, y2)
+
+    def test_async_script_multi_forks(self):
+        @torch.jit.script
+        def foo1(x):
+            return torch.neg(x).t() + x
+
+        @torch.jit.script
+        def foo2(x, y):
+            return torch.neg(x).t() + x + torch.neg(y).t()
+
+        @torch.jit.script
+        def foo3(x, y, z):
+            return torch.neg(z).t() + y.t() + x
+
+        x1 = torch.rand(10, 10)
+        x2 = torch.rand(10, 10)
+        x3 = torch.rand(10, 10)
+
+        @torch.jit.script
+        def wait_script(x1, x2, x3):
+            f1 = torch.jit._fork(foo1, x1)
+            f2 = torch.jit._fork(foo2, x1, x2)
+            f3 = torch.jit._fork(foo3, x1, x2, x3)
+            f4 = torch.jit._fork(foo1, x2)
+            f5 = torch.jit._fork(foo2, x2, x3)
+
+            # ignore some forks
+            y1 = torch.jit._wait(f1)
+            y2 = torch.jit._wait(f2)
+            y3 = torch.jit._wait(f3)
+
+            return y1, y2, y3
+
+        y1, y2, y3 = wait_script(x1, x2, x3)
+        self.assertEqual(y1, foo1(x1))
+        self.assertEqual(y2, foo2(x1, x2))
+        self.assertEqual(y3, foo3(x1, x2, x3))
 
 for test in autograd_method_tests:
     add_autograd_test(*test)
