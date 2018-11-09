@@ -132,6 +132,8 @@ private:
   friend struct Type;
 };
 
+static Context globalContext_;
+
 CAFFE2_API Context& globalContext();
 
 static inline void init() {
