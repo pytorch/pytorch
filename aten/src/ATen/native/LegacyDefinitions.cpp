@@ -5,10 +5,6 @@ namespace at { namespace native {
 
 // Methods
 
-int64_t ndimension(const Tensor& self) {
-  return self._th_ndimension();
-}
-
 void* data_ptr(const Tensor & self) {
   return self.unsafeGetTensorImpl()->slow_data();
 }
@@ -50,7 +46,7 @@ Tensor & masked_scatter_(Tensor& self, const Tensor & mask, const Tensor & sourc
 }
 
 Tensor view(const Tensor& self, IntList size) {
-  return self._th_view(size);
+  return at::_th_view(self, size);
 }
 
 Tensor & put_(Tensor& self, const Tensor & index, const Tensor & source, bool accumulate) {

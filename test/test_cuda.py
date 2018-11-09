@@ -17,7 +17,7 @@ from torch._six import inf, nan
 from test_torch import _TestTorchMixin
 
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
-    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_WITH_ROCM, load_tests
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1937,6 +1937,16 @@ class TestCuda(TestCase):
 
     def test_diagflat(self):
         _TestTorchMixin._test_diagflat(self, dtype=torch.float32, device='cuda')
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @skipIfRocm
+    def test_norm(self):
+        _TestTorchMixin._test_norm(self, device='cuda')
+
+    @skipIfRocm
+    def test_dist(self):
+        _TestTorchMixin._test_dist(self, device='cuda')
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_trtrs(self):

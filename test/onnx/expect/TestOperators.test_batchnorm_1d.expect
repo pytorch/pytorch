@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "0.4"
 graph {
   node {
-    input: "0"
+    input: "input"
     output: "6"
     op_type: "Unsqueeze"
     attribute {
@@ -72,7 +72,7 @@ graph {
     raw_data: "\000\000\000\000\000\000\000\000"
   }
   input {
-    name: "0"
+    name: "input"
     type {
       tensor_type {
         elem_type: FLOAT

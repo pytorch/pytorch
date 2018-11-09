@@ -316,6 +316,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
     return std::make_shared<ForkValue>();
+  } else if (obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
+    return std::make_shared<AnnotateValue>();
   }
 
   py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);
@@ -525,7 +527,8 @@ void initJitScriptBindings(PyObject* module) {
         Module& self,
         const std::string& name,
         py::function func,
-        py::tuple input_tuple) {
+        py::tuple input_tuple,
+        py::function var_lookup_fn) {
           // prereq: Module's buffers and parameters are unique
           // this was ensured in python before calling this function
           std::vector<at::Tensor*> parameters;
@@ -534,7 +537,7 @@ void initJitScriptBindings(PyObject* module) {
           for(at::Tensor* param : parameters) {
             inputs.emplace_back(*param);
           }
-          auto graph = tracer::createGraphByTracing(func, inputs, input_tuple.size());
+          auto graph = tracer::createGraphByTracing(func, inputs, var_lookup_fn, input_tuple.size());
           self.create_method(name, std::move(graph), std::move(parameters));
       })
       .def("graph_for", [](py::args args, py::kwargs kwargs) {

@@ -262,12 +262,10 @@ public:
 
   //example
   //Tensor * add(Tensor & b);
-  int64_t _th_ndimension() const;
   bool _th_is_contiguous() const;
   bool _th_is_set_to(const Tensor & tensor) const;
   Tensor _th_masked_select(const Tensor & mask) const;
   Tensor _th_nonzero() const;
-  Tensor _th_view(IntList size) const;
   Tensor _th_index_select(int64_t dim, const Tensor & index) const;
   Tensor _th_take(const Tensor & index) const;
   Tensor _th_gather(int64_t dim, const Tensor & index) const;
@@ -543,7 +541,7 @@ public:
   Tensor transpose(int64_t dim0, int64_t dim1) const;
   Tensor & transpose_(int64_t dim0, int64_t dim1);
   Tensor flip(IntList dims) const;
-  Tensor roll(IntList shifts, IntList dims) const;
+  Tensor roll(IntList shifts, IntList dims={}) const;
   Tensor rot90(int64_t k=1, IntList dims={0,1}) const;
   Tensor trunc() const;
   Tensor & trunc_();

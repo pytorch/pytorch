@@ -168,13 +168,11 @@ struct CAFFE2_API Type {
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
-  virtual int64_t _th_ndimension(const Tensor & self) const = 0;
   virtual bool _th_is_contiguous(const Tensor & self) const = 0;
   virtual bool _th_is_set_to(const Tensor & self, const Tensor & tensor) const = 0;
   virtual Tensor s__th_masked_select(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor _th_masked_select(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor _th_nonzero(const Tensor & self) const = 0;
-  virtual Tensor _th_view(const Tensor & self, IntList size) const = 0;
   virtual Tensor _th_index_select(const Tensor & self, int64_t dim, const Tensor & index) const = 0;
   virtual Tensor _th_take(const Tensor & self, const Tensor & index) const = 0;
   virtual Tensor _th_gather(const Tensor & self, int64_t dim, const Tensor & index) const = 0;

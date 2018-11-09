@@ -36,6 +36,9 @@
 #   NO_MIOPEN
 #     disables the MIOpen build
 #
+#   NO_MKLDNN
+#     disables use of MKLDNN
+#
 #   NO_NNPACK
 #     disables NNPACK build
 #
@@ -66,9 +69,6 @@
 #
 #   USE_LMDB
 #     enables use of LMDB for storage
-#
-#   USE_MKLDNN
-#     enables use of MKLDNN
 #
 #   BUILD_BINARY
 #     enables the additional binaries/ build
@@ -192,9 +192,15 @@ DEBUG = check_env_flag('DEBUG')
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
+IS_PPC = (platform.machine() == 'ppc64le')
 
 BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
-USE_MKLDNN = check_env_flag('USE_MKLDNN')
+# ppc64le does not support MKLDNN
+if IS_PPC:
+    USE_MKLDNN = check_env_flag('USE_MKLDNN', 'OFF')
+else:
+    USE_MKLDNN = check_env_flag('USE_MKLDNN', 'ON')
+
 USE_CUDA_STATIC_LINK = check_env_flag('USE_CUDA_STATIC_LINK')
 RERUN_CMAKE = True
 
