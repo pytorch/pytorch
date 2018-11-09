@@ -84,7 +84,7 @@ public:
   /// DeviceGuardImplInterface pointer.
   template <typename U=T, typename=typename std::enable_if<std::is_same<U, VirtualGuardImpl>::value>::type>
   explicit InlineDeviceGuard(Device device, const DeviceGuardImplInterface* impl)
-    : impl_(VirtualGuardImpl(impl))
+    : impl_(VirtualGuardImpl(impl ? impl : getDeviceGuardImpl(device.type())))
     , original_device_(device.index() == -1 ? impl_.getDevice() : impl_.exchangeDevice(device))
     , current_device_(device.index() == -1 ? original_device_ : device)
     {}
