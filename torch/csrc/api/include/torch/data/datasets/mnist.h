@@ -31,6 +31,12 @@ class MNIST : public Dataset<MNIST> {
   /// Returns true if this is the training subset of MNIST.
   bool is_train() const noexcept;
 
+  /// Returns all images stacked into a single tensor.
+  const Tensor& images() const;
+
+  /// Returns all targets stacked into a single tensor.
+  const Tensor& targets() const;
+
  private:
   Tensor images_, targets_;
 };
