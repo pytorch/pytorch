@@ -96,7 +96,6 @@
   name: _th_masked_select
   cname: maskedSelect
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -110,7 +109,6 @@
   name: _th_nonzero
   cname: nonzero
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -155,7 +153,6 @@
   name: _th_index_select
   cname: indexSelect
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -182,7 +179,6 @@
   name: _th_take
   cname: take
   variants:
-    - method
     - function
   return: argument 0
   scalar_check: index_->dim() == 0
@@ -327,7 +323,6 @@
   name: _th_gather
   cname: gather
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -343,7 +338,6 @@
   name: _th_equal
   cname: equal
   variants:
-    - method
     - function
   return: bool
   arguments:
@@ -354,7 +348,6 @@
   name: _th_and
   cname: __and__
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -395,7 +388,6 @@
   name: _th_or
   cname: __or__
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -436,7 +428,6 @@
   name: _th_xor
   cname: __xor__
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -477,7 +468,6 @@
   name: _th_lshift
   cname: __lshift__
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -518,7 +508,6 @@
   name: _th_rshift
   cname: __rshift__
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -558,7 +547,6 @@
 [[
   name: _th_lt
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -595,7 +583,6 @@
 [[
   name: _th_gt
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -632,7 +619,6 @@
 [[
   name: _th_le
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -669,7 +655,6 @@
 [[
   name: _th_ge
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -706,7 +691,6 @@
 [[
   name: _th_eq
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -743,7 +727,6 @@
 [[
   name: _th_ne
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -780,7 +763,6 @@
 [[
   name: _th_min
   variants:
-    - method
     - function
   options:
     - cname: minall
@@ -817,7 +799,6 @@
 [[
   name: _th_max
   variants:
-    - method
     - function
   options:
     - cname: maxall
@@ -893,7 +874,6 @@
 [[
   name: _th_median
   variants:
-    - method
     - function
   return: argument 0,1
   options:
@@ -925,7 +905,6 @@
   name: _th_sort
   cname: sort
   variants:
-    - method
     - function
   return: argument 0,1
   arguments:
@@ -944,7 +923,6 @@
   name: _th_topk
   cname: topk
   variants:
-    - method
     - function
   return: argument 0,1
   arguments:
@@ -967,7 +945,6 @@
   types:
     - Byte
   variants:
-    - method
     - function
   backends:
     - CPU
@@ -1004,7 +981,6 @@
   types:
     - Byte
   variants:
-    - method
     - function
   backends:
     - CPU
@@ -1135,7 +1111,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -1165,7 +1140,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -1195,7 +1169,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -1424,7 +1397,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -1538,7 +1510,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -1662,7 +1633,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -1699,7 +1669,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   options:
     - cname: dist
@@ -1719,7 +1688,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   options:
     - cname: cinv
@@ -1749,7 +1717,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   options:
     - cname: neg
@@ -1779,7 +1746,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   cname: atan2
   return: argument 0
@@ -1822,7 +1788,6 @@
 [[
   name: _th_pow
   variants:
-    - method
     - function
   return: argument 0
   options:
@@ -1872,7 +1837,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0
   cname: lerp
@@ -1947,7 +1911,6 @@
   backends:
     - CPU
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -1998,7 +1961,6 @@
   name: _th_sign
   cname: sign
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -2018,7 +1980,6 @@
   name: _th_trace
   cname: trace
   variants:
-    - method
     - function
   return: accreal
   arguments:
@@ -2028,7 +1989,6 @@
   name: _th_fmod
   return: argument 0
   variants:
-    - method
     - function
   options:
     - cname: fmod
@@ -2065,7 +2025,6 @@
   name: _th_remainder
   return: argument 0
   variants:
-    - method
     - function
   options:
     - cname: remainder
@@ -2146,7 +2105,6 @@
   name: _th_tril
   cname: tril
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -2170,7 +2128,6 @@
   name: _th_triu
   cname: triu
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -2194,7 +2151,6 @@
   name: _th_cross
   cname: cross
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -2208,7 +2164,6 @@
 [[
   name: _th_diag
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -2408,7 +2363,6 @@
   name: _th_addbmm
   cname: addbmm
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -2467,7 +2421,6 @@
   name: _th_addcmul
   cname: addcmul
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -2510,7 +2463,6 @@
   name: _th_addcdiv
   cname: addcdiv
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -2567,7 +2519,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0,1
   arguments:
@@ -2588,7 +2539,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0,1
   arguments:
@@ -2621,7 +2571,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0,1
   arguments:
@@ -2649,7 +2598,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0,1
   arguments:
@@ -2673,7 +2621,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0,1,2
   arguments:
@@ -2719,7 +2666,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -2741,7 +2687,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -2764,7 +2709,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -2785,7 +2729,6 @@
   backends:
     - CPU
   variants:
-    - method
     - function
   return: argument 0,1
   arguments:
@@ -2814,7 +2757,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0,1
   arguments:
@@ -2834,7 +2776,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0,1
   arguments:
@@ -2853,7 +2794,6 @@
   backends:
     - CPU
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -2871,7 +2811,6 @@
   backends:
     - CPU
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -2898,7 +2837,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0,1
   arguments:
@@ -2921,7 +2859,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0,1,2
   arguments:
@@ -2945,7 +2882,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -2993,7 +2929,6 @@
     - CPU
     - CUDA
   variants:
-    - method
     - function
   return: argument 0
   arguments:
@@ -3200,7 +3135,6 @@
   return: THTensor*
   cpu_half: True
   variants:
-    - method
     - function
   options:
     - cname: newWithTensor
