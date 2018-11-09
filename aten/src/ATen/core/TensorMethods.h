@@ -53,9 +53,6 @@ inline void Tensor::set_data(Tensor new_data) {
 }
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
-inline int64_t Tensor::_th_ndimension() const {
-    return type()._th_ndimension(*this);
-}
 inline Tensor & Tensor::_th_set_(Storage source) {
     return type()._th_set_(*this, source);
 }

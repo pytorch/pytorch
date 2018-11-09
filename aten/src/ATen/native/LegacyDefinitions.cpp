@@ -5,10 +5,6 @@ namespace at { namespace native {
 
 // Methods
 
-int64_t ndimension(const Tensor& self) {
-  return self._th_ndimension();
-}
-
 void* data_ptr(const Tensor & self) {
   return self.unsafeGetTensorImpl()->slow_data();
 }
