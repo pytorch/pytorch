@@ -19,10 +19,10 @@
 
 #include "ATen/core/Backtrace.h"
 #include "ATen/core/Half.h"
-#include "ATen/core/IdWrapper.h"
 #include "c10/macros/Macros.h"
 #include "c10/util/C++17.h"
 #include "c10/util/Exception.h"
+#include "c10/util/IdWrapper.h"
 #include "caffe2/core/macros.h"
 
 #include "c10/util/Type.h"
@@ -106,7 +106,7 @@ namespace at {
 using DataType = caffe2::TypeIdentifier;
 }
 
-AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
+C10_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
 
 namespace caffe2 {
 
