@@ -24,11 +24,9 @@ namespace onnx = ::ONNX_NAMESPACE;
 
 // IR graph construction
 
-class ModuleDecoder {
+class MethodDecoder {
  public:
-//  ModuleDecoder(ModuleLookup module_lookup,
-//                std::istream& in);
-  ModuleDecoder(
+  MethodDecoder(
       const onnx::ModelProto& model_proto,
       const std::unordered_map<std::string, at::Tensor*>& param_map,
       script::Module* parent_module,
@@ -54,8 +52,6 @@ class ModuleDecoder {
 
   TypePtr buildType(const onnx::TypeProto& type_proto);
 
-  at::Tensor buildParameter(const onnx::TensorProto& tensor_proto);
-
   at::Tensor buildTensorCommon(const onnx::TensorProto& tensor_proto,
                                const uint64_t record_number,
                                const int64_t storage_offset,
@@ -70,7 +66,7 @@ class ModuleDecoder {
   std::unordered_map<std::string, const onnx::TypeProto*> value_type_map_;
 };
 
-at::ScalarType ModuleDecoder::onnxTypeToATenType(onnx::TensorProto_DataType onnx_type) {
+at::ScalarType MethodDecoder::onnxTypeToATenType(onnx::TensorProto_DataType onnx_type) {
   switch(onnx_type) {
     case onnx::TensorProto_DataType_UINT8:
       return at::kByte;
@@ -93,7 +89,7 @@ at::ScalarType ModuleDecoder::onnxTypeToATenType(onnx::TensorProto_DataType onnx
   }
 }
 
-void ModuleDecoder::buildBlocks(
+void MethodDecoder::buildBlocks(
     const std::vector<onnx::GraphProto>& graphs_, Node* node,
     std::unordered_map<std::string, Value*>& value_map) {
   for (auto g_ : graphs_) {
@@ -102,7 +98,7 @@ void ModuleDecoder::buildBlocks(
   }
 }
 
-std::shared_ptr<Graph> ModuleDecoder::buildGraph(const onnx::GraphProto& graph_proto) {
+std::shared_ptr<Graph> MethodDecoder::buildGraph(const onnx::GraphProto& graph_proto) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> value_map;
 
@@ -111,7 +107,7 @@ std::shared_ptr<Graph> ModuleDecoder::buildGraph(const onnx::GraphProto& graph_p
   return graph;
 }
 
-void ModuleDecoder::buildBlock(const onnx::GraphProto& graph_proto, Block* block,
+void MethodDecoder::buildBlock(const onnx::GraphProto& graph_proto, Block* block,
                 std::unordered_map<std::string, Value*>& value_map) {
   for (auto &subtype : graph_proto.value_info()) {
     value_type_map_[subtype.name()] = &subtype.type();
@@ -198,7 +194,7 @@ void ModuleDecoder::buildBlock(const onnx::GraphProto& graph_proto, Block* block
   }
 }
 
-TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
+TypePtr MethodDecoder::buildType(const onnx::TypeProto& type_proto) {
   auto tensortype_proto = type_proto.tensor_type();
   auto shape_proto = tensortype_proto.shape();
   auto kind = type_proto.denotation();
@@ -256,29 +252,17 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
   }
 }
 
-void ModuleDecoder::buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto) {
+void MethodDecoder::buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto) {
   value->setType(buildType(valueinfo_proto.type()));
 }
 
-void ModuleDecoder::buildIntermediateValue(Value* value, const std::string& name) {
+void MethodDecoder::buildIntermediateValue(Value* value, const std::string& name) {
   auto it = value_type_map_.find(name);
   JIT_ASSERT(it != value_type_map_.end());
   value->setType(buildType(*it->second));
 }
 
-at::Tensor ModuleDecoder::buildParameter(const onnx::TensorProto& tensor_proto) {
-  std::vector<int64_t> strides;
-  // We've stored four other values (is_buffer, requires_grad, record no., storage_offset) before strides; ignore them
-  std::move(tensor_proto.int64_data().begin() + 4, tensor_proto.int64_data().end(), std::back_inserter(strides));
-  auto tensor = buildTensorCommon(tensor_proto,
-                                  /* record_number = */ tensor_proto.int64_data(2),
-                                  /* storage_offset = */ tensor_proto.int64_data(3),
-                                  strides);
-  autograd::Variable var = autograd::make_variable(tensor, /* requires_grad = */ tensor_proto.int64_data(1));
-  return var;
-}
-
-at::Tensor ModuleDecoder::buildTensor(const onnx::TensorProto& tensor_proto) {
+at::Tensor MethodDecoder::buildTensor(const onnx::TensorProto& tensor_proto) {
   std::vector<int64_t> strides;
   // We've stored two other values (record no., storage_offset) before strides; ignore it
   std::move(tensor_proto.int64_data().begin() + 2, tensor_proto.int64_data().end(), std::back_inserter(strides));
@@ -288,7 +272,7 @@ at::Tensor ModuleDecoder::buildTensor(const onnx::TensorProto& tensor_proto) {
                            strides);
 }
 
-at::Tensor ModuleDecoder::buildTensorCommon(
+at::Tensor MethodDecoder::buildTensorCommon(
     const onnx::TensorProto& tensor_proto,
     const uint64_t record_number,
     const int64_t storage_offset,
@@ -320,7 +304,7 @@ at::Tensor ModuleDecoder::buildTensorCommon(
 
 // Given a full name of a parameter or method,
 // return the parent submodule and local name
-std::pair<std::shared_ptr<script::Module>, std::string> ModuleDecoder::parseFullName(
+std::pair<std::shared_ptr<script::Module>, std::string> MethodDecoder::parseFullName(
     ModuleLookup module_lookup,
     const std::string fullname) {
   AT_ASSERT(!fullname.empty());
@@ -336,48 +320,7 @@ std::pair<std::shared_ptr<script::Module>, std::string> ModuleDecoder::parseFull
   return std::make_pair(module_lookup(vec), std::move(last));
 }
 
-//ModuleDecoder::ModuleDecoder(
-//    ModuleLookup module_lookup,
-//    std::istream& in) {
-//  auto model_proto = onnx::ModelProto();
-//  //auto record = stream_reader_.getLastRecord();
-//  //model_proto.ParsePartialFromArray(std::get<0>(record).get(), std::get<1>(record));
-//  auto graph_proto = model_proto.graph();
-//
-//  std::unordered_map<std::string, at::Tensor*> param_map;
-//
-//  for (auto &tensor_proto : graph_proto.initializer()) {
-//    std::shared_ptr<script::Module> parent_module;
-//    std::string name;
-//    std::tie(parent_module, name) = parseFullName(module_lookup, tensor_proto.name());
-//
-//    auto param = buildParameter(tensor_proto);
-//    parent_module->register_parameter(name, param, /* is_buffer = */ tensor_proto.int64_data(0));
-//    param_map[tensor_proto.name()] = parent_module->parameter_slot(name);
-//  }
-//
-//  for (auto &node_proto : graph_proto.node()) {
-//    std::shared_ptr<script::Module> parent_module;
-//    std::string name;
-//    std::tie(parent_module, name) = parseFullName(module_lookup, node_proto.name());
-//
-//    std::vector<at::Tensor*> member_inputs;
-//    for (auto &param_name : node_proto.input()) {
-//      member_inputs.push_back(param_map[param_name]);
-//    }
-//
-//    auto graph = buildGraph(node_proto.attribute(0).g());
-//    // has_domain field has a string iff the method was optimized
-//    parent_module->set_optimized(node_proto.has_domain());
-//    parent_module->create_method(name, graph, member_inputs);
-//    // We store the schema in the docstring so we can parse the schema and
-//    // assign it to the method.
-//    auto schema = parseSchema(node_proto.doc_string());
-//    parent_module->get_method(name).setSchema(std::move(schema));
-//  }
-//}
-
-ModuleDecoder::ModuleDecoder(
+MethodDecoder::MethodDecoder(
     const onnx::ModelProto& model_proto,
     const std::unordered_map<std::string, at::Tensor*>& param_map,
     script::Module* parent_module,
@@ -465,7 +408,7 @@ class ScriptModuleDeserializer final {
     for (int i = 0; i < module_def.submodules_size(); ++i) {
       const torch::ModuleDef& sub_def = module_def.submodules(i);
       moduleStack_.push_back(sub_def.name());
-      collectParamsInfo(sub_def, prefix + "." + sub_def.name());
+      collectParamsInfo(sub_def, prefix + sub_def.name() + ".");
       moduleStack_.pop_back();
     }
   }
@@ -478,7 +421,7 @@ class ScriptModuleDeserializer final {
       ::ONNX_NAMESPACE::ModelProto method_proto;
       AT_ASSERTM(method_proto.ParseFromString(method_def.onnx_proto()),
           "cannot parse method proto (i.e., hacked onnx proto)");
-      ModuleDecoder decoder(method_proto, parameterMap_, module,
+      MethodDecoder decoder(method_proto, parameterMap_, module,
           &storageMap_, &reader_);
       (void)decoder;
     }
@@ -541,8 +484,6 @@ class ScriptModuleDeserializer final {
 void import_ir_module(
     ModuleLookup module_lookup,
     std::istream& in) {
-  //ModuleDecoder decoder(module_lookup, in);
-  //(void)decoder;
   ScriptModuleDeserializer deserializer(&in);
   deserializer.deserialize(module_lookup);
 }
@@ -550,9 +491,6 @@ void import_ir_module(
 void import_ir_module(
     ModuleLookup module_lookup,
     const std::string& filename) {
-  //std::ifstream in(filename, std::ios_base::binary);
-  //ModuleDecoder decoder(module_lookup, in);
-  //(void)decoder;
   ScriptModuleDeserializer deserializer(filename);
   deserializer.deserialize(module_lookup);
 }
@@ -571,8 +509,6 @@ std::shared_ptr<script::Module> load(std::istream& in) {
     return curr;
   };
 
-  //ModuleDecoder decoder(module_lookup, in);
-  //(void)decoder;
   ScriptModuleDeserializer deserializer(&in);
   deserializer.deserialize(module_lookup);
 

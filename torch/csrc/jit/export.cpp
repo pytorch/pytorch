@@ -429,30 +429,15 @@ void GraphEncoder::EncodeTensor(
   }
 }
 
-class ModuleEncoder: public EncoderBase {
+class MethodEncoder: public EncoderBase {
  public:
-//  ModuleEncoder(const script::Module &module,
-//                std::ostream& out);
-  ModuleEncoder(script::Method& method,
+  MethodEncoder(script::Method& method,
       onnx::NodeProto* node_proto,
       std::unordered_map<const void*, uint64_t>* storage_map,
       std::unordered_map<at::Tensor*, std::string>* parameter_map,
       PyTorchStreamWriter* writer);
 
  private:
-  void EncodeModule(onnx::GraphProto *graph_proto, const script::Module &module);
-
-  void EncodeParameters(onnx::GraphProto *graph_proto,
-                        const script::Module &module,
-                        const std::string prefix);
-
-  void EncodeParameter(onnx::TensorProto *tensor_proto,
-                       const script::NamedParameter &parameter,
-                       const std::string prefix);
-
-  void EncodeMethods(onnx::GraphProto *graph_proto,
-                     const script::Module &module,
-                     const std::string prefix);
 
   void EncodeMethod(onnx::NodeProto *node_proto,
                     script::Method &method,
@@ -486,15 +471,7 @@ class ModuleEncoder: public EncoderBase {
   size_t type_counter_ = 0;
 };
 
-//ModuleEncoder::ModuleEncoder(
-//    const script::Module &module,
-//    std::ostream& out)
-//    : EncoderBase(onnx_torch::OperatorExportTypes::RAW, false) {
-//  model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
-//  EncodeModule(model_proto_.mutable_graph(), module);
-//}
-
-ModuleEncoder::ModuleEncoder(script::Method& method,
+MethodEncoder::MethodEncoder(script::Method& method,
     onnx::NodeProto* node_proto,
     std::unordered_map<const void*, uint64_t>* storage_map,
     std::unordered_map<at::Tensor*, std::string>* parameter_map,
@@ -508,7 +485,7 @@ ModuleEncoder::ModuleEncoder(script::Method& method,
   EncodeMethod(node_proto, method, "");
 }
 
-void ModuleEncoder::EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto, const Value *n) {
+void MethodEncoder::EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto, const Value *n) {
   auto v = graph_proto->add_value_info();
   EncodeTypeInfo(graph_proto, v, n->type(), n->uniqueName());
 }
@@ -532,7 +509,7 @@ c10::optional<std::string> getBaseTypeDenotation(TypeKind& kind) {
   return c10::nullopt;
 }
 
-void ModuleEncoder::EncodeTypeInfo(
+void MethodEncoder::EncodeTypeInfo(
     onnx::GraphProto *graph_proto,
     onnx::ValueInfoProto* v,
     const TypePtr& type,
@@ -615,71 +592,14 @@ void ModuleEncoder::EncodeTypeInfo(
   }
 }
 
-void ModuleEncoder::EncodeValueInfo(
+void MethodEncoder::EncodeValueInfo(
     onnx::GraphProto *graph_proto,
     onnx::ValueInfoProto* v,
     const Value* n) {
   EncodeTypeInfo(graph_proto, v, n->type(), n->uniqueName());
 }
 
-void ModuleEncoder::EncodeModule(
-    onnx::GraphProto *graph_proto,
-    const script::Module &module) {
-  EncodeParameters(graph_proto, module, "");
-  EncodeMethods(graph_proto, module, "");
-  auto str = model_proto_.SerializeAsString();
-  stream_writer_->writeRecord(str.data(), str.size());
-}
-
-void ModuleEncoder::EncodeParameters(
-    onnx::GraphProto *graph_proto,
-    const script::Module &module,
-    const std::string prefix) {
-  // Encode each parameter as a initializer in the proto
-  for (auto &parameter : module.get_parameters()) {
-    auto tensor_proto = graph_proto->add_initializer();
-    EncodeParameter(tensor_proto, parameter.value(), prefix);
-  }
-
-  for (auto &submodule : module.get_modules()) {
-    EncodeParameters(graph_proto, *submodule->module, prefix + submodule.key() + ".");
-  }
-}
-
-void ModuleEncoder::EncodeParameter(
-    onnx::TensorProto *tensor_proto,
-    const script::NamedParameter &parameter,
-    const std::string prefix) {
-  auto tensor = parameter.slot();
-  // Name will be prefixed by submodule. e.g. submodule_foo.parameter_bar
-  auto name = prefix + parameter.name;
-
-  tensor_proto->set_name(name);
-  (*parameter_map_)[tensor] = name;
-
-  // Parameters have these fields, but tensors do not
-  tensor_proto->add_int64_data(parameter.is_buffer);
-  tensor_proto->add_int64_data(tensor->requires_grad());
-
-  EncodeTensor(tensor_proto, *tensor, name);
-}
-
-void ModuleEncoder::EncodeMethods(
-    onnx::GraphProto *graph_proto,
-    const script::Module &module,
-    const std::string prefix) {
-  // Encode each parameter as a initializer in the proto
-  for (auto &method : module.get_methods()) {
-    auto node_proto = graph_proto->add_node();
-    EncodeMethod(node_proto, *method.value(), prefix);
-  }
-
-  for (auto &submodule : module.get_modules()) {
-    EncodeMethods(graph_proto, *submodule->module, prefix + submodule.key() + ".");
-  }
-}
-
-void ModuleEncoder::EncodeMethod(
+void MethodEncoder::EncodeMethod(
     onnx::NodeProto *node_proto,
     script::Method &method,
     const std::string prefix) {
@@ -715,7 +635,7 @@ void ModuleEncoder::EncodeMethod(
   EncodeBlock(attr_proto->mutable_g(), method.graph()->block(), {});
 }
 
-void ModuleEncoder::EncodeTensor(
+void MethodEncoder::EncodeTensor(
     onnx::TensorProto* tensor_proto,
     const at::Tensor& tensor,
     const c10::optional<std::string> external_ref) {
@@ -988,7 +908,7 @@ class ScriptModuleSerializer final {
       parameterMap_[param.slot()] = prefix + param.name;
     }
     for (const auto& elem: module.get_modules()) {
-      collectParamsInfo(*elem->module, prefix + "." + elem.key());
+      collectParamsInfo(*elem->module, prefix + elem.key() + ".");
     }
   }
   void convertModule(const script::Module& module, const std::string& name,
@@ -1065,7 +985,8 @@ class ScriptModuleSerializer final {
   void convertMethod(script::Method& method, torch::MethodDef* method_def) {
     // TODO encode the real torch script instead of ModelProto
     ::ONNX_NAMESPACE::ModelProto model_proto;
-    ModuleEncoder encoder(method, model_proto.mutable_graph()->add_node(),
+    model_proto.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
+    MethodEncoder encoder(method, model_proto.mutable_graph()->add_node(),
         &storageMap_, &parameterMap_, &writer_);
     std::string serialized_proto;
     model_proto.SerializeToString(&serialized_proto);
@@ -1119,7 +1040,7 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
 }
 
 void ExportModule(const script::Module& module, std::ostream& out) {
-  //ModuleEncoder(module, out);
+  //MethodEncoder(module, out);
   //std::cout << "export from stream!" << std::endl;
   ScriptModuleSerializer serializer(&out);
   serializer.serialize(module);

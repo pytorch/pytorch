@@ -109,7 +109,8 @@ class PyTorchStreamReader final {
     AT_ASSERTM(
         file_size_ % kFieldAlignment == 0,
         "File length is not a multiple of the alignment"
-        " size. Is this a valid PyTorch model file?");
+        " size. Is this a valid PyTorch model file? File size: ",
+        caffe2::to_string(file_size_));
     readAndValidateFileHeader();
   }
 
