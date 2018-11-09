@@ -678,7 +678,7 @@ class TestSparse(TestCase):
     @skipIfRocm
     def test_cat(self):
         # shapes: list of tuples (sparse_dims, nnz, sizes)
-        def test_shapes(shapes, dim, fail_message=None):
+        def test_shapes(shapes, dim=None, fail_message=None):
             inputs = [self._gen_sparse(shape[0], shape[1], shape[2])[0]
                       for shape in shapes]
             if fail_message:
@@ -698,8 +698,10 @@ class TestSparse(TestCase):
         # hybrid sparse/dense
         test_shapes(
             [(2, 10, [2, 3, 4]), (2, 10, [2, 1, 4]), (2, 10, [2, 4, 4])], 1)
-        test_shapes([(2, 10, [2, 3, 4]), (2, 10, [2, 1, 4])], 2,
-                    "Concatenating.*along non-sparse dimension 2")
+        # cat along dense dim
+        test_shapes([(2, 10, [2, 3, 4]), (2, 10, [2, 3, 7])], 2)
+        test_shapes([(1, 10, [2, 3, 4]), (1, 10, [2, 3, 4])], 1)
+        test_shapes([(1, 10, [2, 3, 4]), (1, 10, [2, 3, 4])], 2)
         # mismatched dimensions
         test_shapes([(2, 10, [2, 3, 4]), (3, 10, [2, 3, 4])], 0,
                     "has dimension: sparse 3, dense 0.*Concatenating with tensor of dimensions 2, 1")
