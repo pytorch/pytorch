@@ -201,7 +201,7 @@ void syncReduction(
   AT_ASSERT(bwDevice.type() == at::kCUDA);
   auto bwStream = bwDevice == cudaGuard.current_device() ?
                   cudaGuard.original_stream() :
-                  at::cuda::getCurrentCUDAStream(bwDevice);
+                  at::cuda::getCurrentCUDAStream(bwDevice.index());
 
   // Now let the BW stream wait for the worker stream
   event.block(bwStream);
