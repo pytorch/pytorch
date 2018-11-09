@@ -505,17 +505,17 @@ class ScriptModuleDeserializer final {
     auto type = tensorProtoTypeToATenType(tensor_proto.data_type());
     uint64_t record_id = caffe2::stoull(external_data.record_id());
     AT_ASSERT(record_id != 0);
-    std::cout << "param name: " << param_def.name() << std::endl;
-    std::cout << "\t\tdims: " << dims << std::endl;
-    std::cout << "\t\tstrides: " << strides << std::endl;
-    std::cout << "\t\trecord_id: " << record_id << std::endl;
+    //std::cout << "param name: " << param_def.name() << std::endl;
+    //std::cout << "\t\tdims: " << dims << std::endl;
+    //std::cout << "\t\tstrides: " << strides << std::endl;
+    //std::cout << "\t\trecord_id: " << record_id << std::endl;
     auto storage_it = storageMap_.find(record_id);
     if (storage_it == storageMap_.end()) {
       at::DataPtr storage_ptr;
       uint64_t record_size;
       std::tie(storage_ptr, record_size) = reader_.getRecordWithKey(record_id);
       AT_ASSERT(record_size == external_data.record_size());
-      std::cout << "\t\trecord_size " << record_size << std::endl;
+      //std::cout << "\t\trecord_size " << record_size << std::endl;
       auto storage = std::make_shared<at::Storage>(
           at::CPU(type).typeMeta(),
           std::move(storage_ptr),

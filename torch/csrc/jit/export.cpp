@@ -692,10 +692,10 @@ void ModuleEncoder::EncodeMethod(
   // We store the schema string in the docstring.
   node_proto->set_doc_string(getExportableSchemaStringForMethod(method));
 
-  std::cout << "method name: " << node_proto->name() << std::endl;
+  //std::cout << "method name: " << node_proto->name() << std::endl;
   // Store member_inputs of Method in input
   for (auto &member_input : method.params()) {
-    std::cout << "method tensor: " << member_input << std::endl;
+    //std::cout << "method tensor: " << member_input << std::endl;
     auto it = parameter_map_->find(member_input);
     JIT_ASSERT(it != parameter_map_->end());
     node_proto->add_input(it->second);
@@ -993,7 +993,7 @@ class ScriptModuleSerializer final {
   }
   void convertModule(const script::Module& module, const std::string& name,
       torch::ModuleDef* module_def) {
-    std::cout << "module.name: " << name << std::endl;
+    //std::cout << "module.name: " << name << std::endl;
     module_def->set_name(name);
     for (const auto& elem: module.get_parameters()) {
       torch::ParameterDef* param_def = module_def->add_parameters();
@@ -1010,7 +1010,7 @@ class ScriptModuleSerializer final {
   }
   void convertParameter(const script::NamedParameter& param,
       torch::ParameterDef* param_def) {
-    std::cout << "param.name: " << param.name << "," << param.slot() << std::endl;
+    //std::cout << "param.name: " << param.name << "," << param.slot() << std::endl;
     param_def->set_name(param.name);
     param_def->set_is_buffer(param.is_buffer);
     param_def->set_require_gradient(param.slot()->requires_grad());
@@ -1026,12 +1026,13 @@ class ScriptModuleSerializer final {
         atenTypeToTensorProtoType(tensor.type().scalarType()));
     tensor_proto->set_storage_type(caffe2::TensorProto_StorageType_EXTERNAL);
     caffe2::ExternalDataProto* external_data = tensor_proto->mutable_external_data();
-    std::cout << "strides: " << tensor.strides() << std::endl;
+    //std::cout << "strides: " << tensor.strides() << std::endl;
     for (auto s : tensor.strides()) {
       external_data->add_strides(s);
     }
     external_data->set_offset(tensor.storage_offset());
-    external_data->set_record_size(tensor.storage().size());
+    uint64_t record_size = tensor.type().elementSizeInBytes() * tensor.storage().size();
+    external_data->set_record_size(record_size);
     auto* key = tensor.storage().unsafeGetStorageImpl();
     auto it = storageMap_.find(key);
     if (it == storageMap_.end()) {
@@ -1046,15 +1047,13 @@ class ScriptModuleSerializer final {
             /* storageOffset = */ 0,
             /* size = */ { static_cast<int64_t>(tensor.storage().size()) },
             /* stride = */ { 1 }).cpu();
+        AT_ASSERT(t.type().elementSizeInBytes() * t.storage().size() == record_size);
         record_id = writer_.writeRecord(t.storage().data(),
-            t.storage().size());
+            t.type().elementSizeInBytes() * t.storage().size());
         //std::cout << "===> record_id: " << record_id << std::endl;
       } else {
         record_id = writer_.writeRecord(tensor.storage().data(),
-            tensor.storage().size());
-        std::cout << "storage size: " << tensor.storage().size() << std::endl;
-        std::cout << "record_id: " << record_id << std::endl;
-        //std::cout << "===> record_id: " << record_id << std::endl;
+            record_size);
       }
       external_data->set_record_id(caffe2::to_string(record_id));
       storageMap_[key] = record_id;
