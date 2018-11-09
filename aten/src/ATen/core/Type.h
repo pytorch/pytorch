@@ -172,8 +172,6 @@ struct CAFFE2_API Type {
   virtual Tensor & _th_set_(Tensor & self, Storage source, int64_t storage_offset, IntList size, IntList stride) const = 0;
   virtual Tensor & _th_set_(Tensor & self, const Tensor & source) const = 0;
   virtual Tensor & _th_set_(Tensor & self) const = 0;
-  virtual bool _th_is_contiguous(const Tensor & self) const = 0;
-  virtual bool _th_is_set_to(const Tensor & self, const Tensor & tensor) const = 0;
   virtual Tensor & s__th_masked_fill_(Tensor & self, const Tensor & mask, Scalar value) const = 0;
   virtual Tensor & _th_masked_fill_(Tensor & self, const Tensor & mask, Scalar value) const = 0;
   virtual Tensor & s__th_masked_fill_(Tensor & self, const Tensor & mask, const Tensor & value) const = 0;
@@ -506,7 +504,6 @@ struct CAFFE2_API Type {
   virtual Tensor & set_(Tensor & self, Storage source, int64_t storage_offset, IntList size, IntList stride) const = 0;
   virtual Tensor & set_(Tensor & self, const Tensor & source) const = 0;
   virtual Tensor & set_(Tensor & self) const = 0;
-  virtual bool is_contiguous(const Tensor & self) const = 0;
   virtual bool is_set_to(const Tensor & self, const Tensor & tensor) const = 0;
   virtual Tensor & masked_fill_(Tensor & self, const Tensor & mask, Scalar value) const = 0;
   virtual Tensor & masked_fill_(Tensor & self, const Tensor & mask, const Tensor & value) const = 0;

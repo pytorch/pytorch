@@ -25,12 +25,8 @@ Tensor & set_(Tensor& self) {
   return self._th_set_();
 }
 
-bool is_contiguous(const Tensor& self) {
-  return self._th_is_contiguous();
-}
-
 bool is_set_to(const Tensor& self, const Tensor & tensor) {
-  return self._th_is_set_to(tensor);
+  return at::_th_is_set_to(self, tensor);
 }
 
 Tensor & masked_fill_(Tensor& self, const Tensor & mask, Scalar value) {
