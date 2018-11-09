@@ -10,7 +10,6 @@
 #include <ATen/cuda/CUDAGuard.h>
 
 #include <c10d/Utils.hpp>
-#include <c10d/private/CUDAUtils.hpp>
 
 namespace c10d {
 
@@ -103,7 +102,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() const {
     // Checking the work's corresponding CUDA events' status
     auto ret = cudaEventQuery(cudaEvents_[i]);
     if (ret != cudaSuccess && ret != cudaErrorNotReady) {
-      C10D_CUDA_CHECK(ret);
+      AT_CUDA_CHECK(ret);
     }
     if (ret == cudaErrorNotReady) {
       return false;
@@ -290,8 +289,8 @@ void ProcessGroupNCCL::tensorCheckHelper(
 
   for (size_t i = 0; i < input.size(); ++i) {
     //  Check to make sure it's a GPU dense tensor
-    if (!(input[i].type().is_cuda() && !input[i].type().is_sparse() &&
-          output[i].type().is_cuda() && !output[i].type().is_sparse())) {
+    if (!(input[i].is_cuda() && !input[i].is_sparse() &&
+          output[i].is_cuda() && !output[i].is_sparse())) {
       throw std::runtime_error(
           "Only CUDA dense tensor is supported for NCCL "
           "collective operations");

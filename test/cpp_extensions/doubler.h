@@ -3,15 +3,15 @@
 struct Doubler {
   Doubler(int A, int B) {
     tensor_ =
-        torch::ones({A, B}, torch::dtype(torch::kDouble).requires_grad(true));
+        torch::ones({A, B}, torch::dtype(torch::kFloat64).requires_grad(true));
   }
-  at::Tensor forward() {
+  torch::Tensor forward() {
     return tensor_ * 2;
   }
-  at::Tensor get() const {
+  torch::Tensor get() const {
     return tensor_;
   }
 
  private:
-  at::Tensor tensor_;
+  torch::Tensor tensor_;
 };

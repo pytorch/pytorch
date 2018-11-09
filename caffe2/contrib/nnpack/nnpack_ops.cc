@@ -124,8 +124,8 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
     const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
     const int M = filter.dim32(0);
 
-    CAFFE_ENFORCE(X.ndim() == 4, "Input dim should be 4");
-    CAFFE_ENFORCE(filter.ndim(), 4);
+    CAFFE_ENFORCE(X.dim() == 4, "Input dim should be 4");
+    CAFFE_ENFORCE(filter.dim(), 4);
     CAFFE_ENFORCE(C % this->group_ == 0, "");
     CAFFE_ENFORCE(M % this->group_ == 0, "");
     CAFFE_ENFORCE(filter.dim32(1) == C / this->group_, "");
@@ -251,7 +251,7 @@ class NNPACKMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
   bool RunOnDeviceWithOrderNCHW() override {
     auto& X = Input(0);
     auto* Y = Output(0);
-    CAFFE_ENFORCE(X.ndim() == 4, "");
+    CAFFE_ENFORCE(X.dim() == 4, "");
     const int H = X.dim32(2), W = X.dim32(3);
     ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, X.dim32(1));
     std::vector<int> pads(

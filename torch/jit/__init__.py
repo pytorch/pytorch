@@ -8,7 +8,8 @@ from torch._six import raise_from, with_metaclass, get_function_from_type
 from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
     COMPILATION_PENDING
-from ..nn.modules.utils import _single, _pair, _triple, _quadruple
+from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
+    _list_with_default
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
@@ -23,6 +24,7 @@ import copy
 import numbers
 import collections
 import re
+import inspect
 if sys.version_info[0] > 2:
     import pathlib
 
@@ -182,6 +184,27 @@ def _unique_state_dict(module, keep_vars=False):
     return filtered_dict
 
 
+def _create_interpreter_name_lookup_fn(frames_up=1):
+    def _get_interpreter_name_for_var(var):
+        frame = inspect.currentframe()
+        i = 0
+        while i < frames_up + 1:
+            frame = frame.f_back
+            i += 1
+
+        f_locals = frame.f_locals
+        f_globals = frame.f_globals
+
+        for k, v in f_locals.items():
+            if isinstance(v, torch.Tensor) and var is v:
+                return k
+        for k, v in f_globals.items():
+            if isinstance(v, torch.Tensor) and var is v:
+                return k
+        return ''
+    return _get_interpreter_name_for_var
+
+
 class LegacyTracedModule(Module):
     def __init__(self, inner):
         super(LegacyTracedModule, self).__init__()
@@ -196,6 +219,7 @@ class LegacyTracedModule(Module):
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
         trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
+        torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
         try:
             trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
             out = self.inner(*trace_inputs)
@@ -569,7 +593,8 @@ def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=No
     elif not isinstance(example_inputs, tuple):
         example_inputs = tuple(example_inputs)
     module = TopLevelTracedModule(func, **executor_options)
-    module._create_method_from_trace('forward', func, example_inputs)
+    var_lookup_fn = _create_interpreter_name_lookup_fn(0)
+    module._create_method_from_trace('forward', func, example_inputs, var_lookup_fn)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
@@ -618,18 +643,11 @@ def script(fn, optimize=True, _frames_up=0, _rcb=None):
     if _rcb is None:
         _rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn, is_method=False)
-    graph = _jit_script_compile(ast, _rcb)
     mod = ScriptModule()
-    mod._create_method_from_graph('forward', graph)
-    # TODO: refactor everything so we're not 1) creating a ScriptModule
-    # 2) Throwing everything away except for the graph 3) Creating a new
-    # ScriptModule and dumping that graph in 4) Re-populating the schema
-    # because it was lost doing the previous
-    mod.__getattr__('forward').forward_schema(ast, get_default_args(fn), False)
+    _jit_script_compile(mod, ast, _rcb, get_default_args(fn))
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod
-
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
@@ -1310,11 +1328,14 @@ _modules_containing_builtins = (torch, torch.nn.functional, torch._C._nn)
 # TODO: delete this list, _should_skip(), and remove torch.nn.functional from
 # builtins list once everything in it has been converted to weak script
 _builtin_blacklist = {
-    'tanhshrink',
-    'softsign',
+    'adaptive_avg_pool2d',
+    'adaptive_avg_pool3d',
+    'ctc_loss',
+    'hardshrink',
     'pairwise_distance',
     'prelu',
-    'hardshrink',
+    'softsign',
+    'tanhshrink',
     'threshold',
 
     # ops with inplace option
@@ -1341,6 +1362,11 @@ def _should_skip(mod, name):
     return mod is torch.nn.functional and name in _builtin_blacklist
 
 
+def _unwrap_optional(x):
+    assert x is not None, "Unwrapping null optional"
+    return x
+
+
 # lazily built to ensure the correct initialization order
 def _get_builtin_table():
     global _builtin_table
@@ -1361,6 +1387,8 @@ def _get_builtin_table():
     _builtin_table[id(_pair)] = "aten::_pair"
     _builtin_table[id(_triple)] = "aten::_triple"
     _builtin_table[id(_quadruple)] = "aten::_quadruple"
+    _builtin_table[id(_list_with_default)] = "aten::list_with_default"
+    _builtin_table[id(_unwrap_optional)] = "aten::_unwrap_optional"
 
     return _builtin_table
 
