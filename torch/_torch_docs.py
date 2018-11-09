@@ -1153,6 +1153,68 @@ Get the k-th diagonal of a given matrix::
     tensor([ 0.0255, 0.1374])
 """)
 
+add_docstr(torch.diag_embed,
+           r"""
+diag_embed(input, offset=0, dim1=-2, dim2=-1) -> Tensor
+
+Creates a tensor whose diagonals of certain 2D planes (specified by
+:attr:`dim1` and :attr:`dim2`) are filled by :attr:`input`.
+To facilitate creating batched diagonal matrices, the 2D planes formed by
+the last two dimensions of the returned tensor are chosen by default.
+
+The argument :attr:`offset` controls which diagonal to consider:
+
+- If :attr:`offset` = 0, it is the main diagonal.
+- If :attr:`offset` > 0, it is above the main diagonal.
+- If :attr:`offset` < 0, it is below the main diagonal.
+
+The size of the new matrix will be calculated to make the specified diagonal
+of the size of the last input dimension.
+Note that for :attr:`offset` other than :math:`0`, the order of :attr:`dim1`
+and :attr:`dim2` matters. Exchanging them is equivalent to changing the
+sign of :attr:`offset`.
+
+Applying :meth:`torch.diagonal` to the output of this function with
+the same arguments yields a matrix identical to input. However,
+:meth:`torch.diagonal` has different default dimensions, so those
+need to be explicitly specified.
+
+Args:
+    input (Tensor): the input tensor. Must be at least 1-dimensional.
+    offset (int, optional): which diagonal to consider. Default: 0
+        (main diagonal).
+    dim1 (int, optional): first dimension with respect to which to
+        take diagonal. Default: -2.
+    dim2 (int, optional): second dimension with respect to which to
+        take diagonal. Default: -1.
+
+Example::
+
+    >>> a = torch.randn(2, 3)
+    >>> torch.diag_embed(a)
+    tensor([[[ 1.5410,  0.0000,  0.0000],
+             [ 0.0000, -0.2934,  0.0000],
+             [ 0.0000,  0.0000, -2.1788]],
+
+            [[ 0.5684,  0.0000,  0.0000],
+             [ 0.0000, -1.0845,  0.0000],
+             [ 0.0000,  0.0000, -1.3986]]])
+
+    >>> torch.diag_embed(a, offset=1, dim1=0, dim2=2)
+    tensor([[[ 0.0000,  1.5410,  0.0000,  0.0000],
+             [ 0.0000,  0.5684,  0.0000,  0.0000]],
+
+            [[ 0.0000,  0.0000, -0.2934,  0.0000],
+             [ 0.0000,  0.0000, -1.0845,  0.0000]],
+
+            [[ 0.0000,  0.0000,  0.0000, -2.1788],
+             [ 0.0000,  0.0000,  0.0000, -1.3986]],
+
+            [[ 0.0000,  0.0000,  0.0000,  0.0000],
+             [ 0.0000,  0.0000,  0.0000,  0.0000]]])
+""")
+
+
 add_docstr(torch.diagflat,
            r"""
 diagflat(input, diagonal=0) -> Tensor
@@ -1212,6 +1274,11 @@ The argument :attr:`offset` controls which diagonal to consider:
 - If :attr:`offset` = 0, it is the main diagonal.
 - If :attr:`offset` > 0, it is above the main diagonal.
 - If :attr:`offset` < 0, it is below the main diagonal.
+
+Applying :meth:`torch.diag_embed` to the output of this function with
+the same arguments yields a diagonal matrix with the diagonal entries
+of the input. However, :meth:`torch.diag_embed` has different default
+dimensions, so those need to be explicitly specified.
 
 Args:
     input (Tensor): the input tensor. Must be at least 2-dimensional.
@@ -1462,9 +1529,10 @@ Example::
 
 add_docstr(torch.erfc,
            r"""
-erfc(tensor, out=None) -> Tensor
+erfc(input, out=None) -> Tensor
 
-Computes the complementary error function of each element. The complementary error function is defined as follows:
+Computes the complementary error function of each element of :attr:`input`.
+The complementary error function is defined as follows:
 
 .. math::
     \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
@@ -1481,16 +1549,16 @@ Example::
 
 add_docstr(torch.erfinv,
            r"""
-erfinv(tensor, out=None) -> Tensor
+erfinv(input, out=None) -> Tensor
 
-Computes the inverse error function of each element. The inverse error function is defined
-in the range :math:`(-1, 1)` as:
+Computes the inverse error function of each element of :attr:`input`.
+The inverse error function is defined in the range :math:`(-1, 1)` as:
 
 .. math::
     \mathrm{erfinv}(\mathrm{erf}(x)) = x
 
 Args:
-    tensor (Tensor): the input tensor
+    input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
 
 Example::
@@ -1501,20 +1569,16 @@ Example::
 
 add_docstr(torch.exp,
            r"""
-exp(tensor, out=None) -> Tensor
+exp(input, out=None) -> Tensor
 
 Returns a new tensor with the exponential of the elements
-of :attr:`input`.
+of the input tensor :attr:`input`.
 
 .. math::
     y_{i} = e^{x_{i}}
 
 Args:
     input (Tensor): the input tensor
-    out (Tensor, optional): the output tensor
-
-Args:
-    tensor (Tensor): the input tensor
     out (Tensor, optional): the output tensor
 
 Example::
@@ -1525,7 +1589,7 @@ Example::
 
 add_docstr(torch.expm1,
            r"""
-expm1(tensor, out=None) -> Tensor
+expm1(input, out=None) -> Tensor
 
 Returns a new tensor with the exponential of the elements minus 1
 of :attr:`input`.
@@ -1535,10 +1599,6 @@ of :attr:`input`.
 
 Args:
     input (Tensor): the input tensor
-    out (Tensor, optional): the output tensor
-
-Args:
-    tensor (Tensor): the input tensor
     out (Tensor, optional): the output tensor
 
 Example::
@@ -1625,9 +1685,9 @@ Example::
 
 add_docstr(torch.frac,
            r"""
-frac(tensor, out=None) -> Tensor
+frac(input, out=None) -> Tensor
 
-Computes the fractional portion of each element in :attr:`tensor`.
+Computes the fractional portion of each element in :attr:`input`.
 
 .. math::
     \text{out}_{i} = \text{input}_{i} - \left\lfloor \text{input}_{i} \right\rfloor
@@ -3020,7 +3080,7 @@ narrow(input, dimension, start, length) -> Tensor
 
 Returns a new tensor that is a narrowed version of :attr:`input` tensor. The
 dimension :attr:`dim` is input from :attr:`start` to :attr:`start + length`. The
-returned tensor and :attr:`self` tensor share the same underlying storage.
+returned tensor and :attr:`input` tensor share the same underlying storage.
 
 Args:
     input (Tensor): the tensor to narrow
@@ -4618,6 +4678,41 @@ Example::
 
             [[ 2,  3],
              [ 0,  1]]])
+""")
+
+add_docstr(torch.roll,
+           r"""
+roll(input, shifts, dims=None) -> Tensor
+
+Roll the tensor along the given dimension. Elements that are shifted beyond the
+last position are re-introduced at the first position. If a dimension is not
+specified, the tensor will be flattened before rolling and then restored
+to the original shape.
+
+Args:
+    input (Tensor): the input tensor
+    shifts (int or tuple of ints): The number of places by which the elements
+        of the tensor are shifted
+    dims (int or tuple of ints): Axis along which to roll
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8]).view(4, 2)
+    >>> x
+    tensor([[1, 2],
+            [3, 4],
+            [5, 6],
+            [7, 8]])
+    >>> torch.roll(x, 1, 0)
+    tensor([[7, 8],
+            [1, 2],
+            [3, 4],
+            [5, 6]])
+    >>> torch.roll(x, -1, 0)
+    tensor([[3, 4],
+            [5, 6],
+            [7, 8],
+            [1, 2]])
 """)
 
 add_docstr(torch.rot90,

@@ -522,7 +522,7 @@ Workspace chooseAlgorithm(
   workspace_size = getWorkspaceSize(args, *algo);
   try {
     return Workspace(workspace_size);
-  } catch (std::runtime_error& e) {
+  } catch (const std::exception& e) {
     hipGetLastError(); // clear OOM error
 
     // switch to default algorithm and record it in the cache to prevent

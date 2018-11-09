@@ -357,7 +357,8 @@
     - THTensor* other
 ]]
 [[
-  name: __and__
+  name: _th_and
+  cname: __and__
   variants:
     - method
     - function
@@ -378,7 +379,8 @@
         - THTensor* other
 ]]
 [[
-  name: __iand__
+  name: _th_iand_
+  cname: __iand__
   variants:
     - method
   return: argument 0
@@ -396,7 +398,8 @@
         - THTensor* other
 ]]
 [[
-  name: __or__
+  name: _th_or
+  cname: __or__
   variants:
     - method
     - function
@@ -417,7 +420,8 @@
         - THTensor* other
 ]]
 [[
-  name: __ior__
+  name: _th_ior_
+  cname: __ior__
   variants:
     - method
   return: argument 0
@@ -435,7 +439,8 @@
         - THTensor* other
 ]]
 [[
-  name: __xor__
+  name: _th_xor
+  cname: __xor__
   variants:
     - method
     - function
@@ -456,7 +461,8 @@
         - THTensor* other
 ]]
 [[
-  name: __ixor__
+  name: _th_ixor_
+  cname: __ixor__
   variants:
     - method
   return: argument 0
@@ -474,7 +480,8 @@
         - THTensor* other
 ]]
 [[
-  name: __lshift__
+  name: _th_lshift
+  cname: __lshift__
   variants:
     - method
     - function
@@ -495,7 +502,8 @@
         - THTensor* other
 ]]
 [[
-  name: __ilshift__
+  name: _th_ilshift_
+  cname:: __ilshift__
   variants:
     - method
   return: argument 0
@@ -513,7 +521,8 @@
         - THTensor* other
 ]]
 [[
-  name: __rshift__
+  name: _th_rshift
+  cname: __rshift__
   variants:
     - method
     - function
@@ -534,7 +543,8 @@
         - THTensor* other
 ]]
 [[
-  name: __irshift__
+  name: _th_irshift_
+  cname: __irshift__
   variants:
     - method
   return: argument 0

@@ -28,7 +28,7 @@ namespace native {
 //
 // For the curious:
 //   https://en.cppreference.com/w/cpp/language/implicit_conversion
-//   The relevant paragraph is "Floating–integral conversions".
+//   The relevant paragraph is "Floating-integral conversions".
 
 template <typename T>
 struct inter_copy_type {
@@ -42,6 +42,8 @@ struct inter_copy_type<uint8_t> {
 
 template <typename T>
 using inter_copy_type_t = typename inter_copy_type<T>::type;
+
+void _copy_same_type_(Tensor& self, const Tensor& src);
 
 } // namespace native
 } // namespace at

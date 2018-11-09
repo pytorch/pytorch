@@ -38,7 +38,7 @@ class GroupNormOp final : public Operator<Context> {
     const auto& X = Input(INPUT);
     const auto& gamma = Input(GAMMA);
     const auto& beta = Input(BETA);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
     const int HxW = X.numel() / (N * C);
@@ -211,7 +211,7 @@ class GroupNormGradientOp final : public Operator<Context> {
     const auto& beta = Input(BETA);
     const auto& mu = Input(MU);
     const auto& rsig = Input(INV_SIGMA);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
     const int HxW = X.numel() / (N * C);

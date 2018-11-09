@@ -84,6 +84,7 @@ option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
+option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" ON)
 option(USE_GLOG "Use GLOG" ON)
@@ -421,6 +422,7 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
+      ${PROJECT_SOURCE_DIR}/cmake/public/mkldnn.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake

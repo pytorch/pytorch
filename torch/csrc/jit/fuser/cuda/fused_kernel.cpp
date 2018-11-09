@@ -67,16 +67,23 @@ static void getMajorMinor(const cudaDeviceProp* const prop, int& major, int& min
 
 // Compiles the specified kernel and stores the metadata required to run it
 FusedKernelCUDA::FusedKernelCUDA(
-  const int16_t _device
-, const std::string& _name
-, const std::string& _code
-, const std::vector<TensorDesc> _input_desc
-, const std::vector<TensorDesc> _output_desc
-, const std::vector<PartitionDesc> _chunk_desc
-, const std::vector<PartitionDesc> _concat_desc
-, const bool _has_random)
-: FusedKernel{_name, _code, _input_desc, _output_desc, _chunk_desc, _concat_desc, _has_random}
-, device_{_device} {
+    int16_t device,
+    std::string name,
+    std::string code,
+    std::vector<TensorDesc> input_desc,
+    std::vector<TensorDesc> output_desc,
+    std::vector<PartitionDesc> chunk_desc,
+    std::vector<PartitionDesc> concat_desc,
+    bool has_random)
+    : FusedKernel(
+          std::move(name),
+          std::move(code),
+          std::move(input_desc),
+          std::move(output_desc),
+          std::move(chunk_desc),
+          std::move(concat_desc),
+          has_random),
+      device_(device) {
   // Initializes driver's API context (if necessary)
   CUcontext pctx = 0;
   TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));

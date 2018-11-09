@@ -35,7 +35,7 @@ def warn(string: str):
 
 auto _ntuple_ops = CodeTemplate(
 R"SCRIPT(
-def _${name}(x: BroadcastingList[${Scalar}, ${Length}]) -> List[${Scalar}]:
+def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
   return x
 )SCRIPT");
 
@@ -69,8 +69,8 @@ private:
         *module, source, script::nativeResolver, /*self=*/nullptr);
     modules.push_back(module);
     for (auto& method : module->get_methods()) {
-      builtins_by_name[Symbol::fromQualString("aten::" + method.key)].push_back(
-          method.value.get());
+      builtins_by_name[Symbol::fromQualString("aten::" + method.key())].push_back(
+          method->get());
     }
   }
   void loadBuiltinFunctions() {

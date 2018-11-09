@@ -43,61 +43,61 @@ Tensor& _copy__cpu(Tensor& self, const Tensor& src) {
 
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's tricker
-Tensor& _copy_same_type_transpose__cpu(Tensor& self, const Tensor& src) {
+void _copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   const int64_t BLOCK_SZ = 60;
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
-  AT_DISPATCH_ALL_TYPES(self.type(), "_copy_same_type_transpose", [&]() {
-    scalar_t* sp = src.data<scalar_t>();
-    scalar_t* rp = self.data<scalar_t>();
-    scalar_t* bp = buf.data<scalar_t>();
+  AT_DISPATCH_ALL_TYPES_AND_HALF(
+      self.type(), "_copy_same_type_transpose_", [&]() {
+        scalar_t* sp = src.data<scalar_t>();
+        scalar_t* rp = self.data<scalar_t>();
+        scalar_t* bp = buf.data<scalar_t>();
 
-    int64_t NR = src.size(0);
-    int64_t NC = src.size(1);
-    for (int64_t R = 0; R < NR; R += BLOCK_SZ) {
-      for (int64_t C = 0; C < NC; C += BLOCK_SZ) {
-        scalar_t* spo = sp + R + C * NR;
-        scalar_t* rpo = rp + C + R * NC;
+        int64_t NR = src.size(0);
+        int64_t NC = src.size(1);
+        for (int64_t R = 0; R < NR; R += BLOCK_SZ) {
+          for (int64_t C = 0; C < NC; C += BLOCK_SZ) {
+            scalar_t* spo = sp + R + C * NR;
+            scalar_t* rpo = rp + C + R * NC;
 
-        int nr = std::min(NR - R, BLOCK_SZ);
-        int nc = std::min(NC - C, BLOCK_SZ);
+            int nr = std::min(NR - R, BLOCK_SZ);
+            int nc = std::min(NC - C, BLOCK_SZ);
 
-        // 1. copy columns from src to buf
-        for (int c = 0; c < nc; c++) {
-          memcpy(bp + c * BLOCK_SZ, spo + c * NR, nr * sizeof(scalar_t));
-        }
+            // 1. copy columns from src to buf
+            for (int c = 0; c < nc; c++) {
+              memcpy(bp + c * BLOCK_SZ, spo + c * NR, nr * sizeof(scalar_t));
+            }
 
-        // 2. transpose buf in place
-        int rc_max = std::max(nr, nc);
-        int rc_min = std::min(nr, nc);
-        for (int r = 0; r < rc_max; r++) {
-          int end = std::min(r, rc_min);
-          for (int c = 0; c < end; c++) {
-            scalar_t tmp = bp[r + BLOCK_SZ * c];
-            bp[r + BLOCK_SZ * c] = bp[r * BLOCK_SZ + c];
-            bp[r * BLOCK_SZ + c] = tmp;
+            // 2. transpose buf in place
+            int rc_max = std::max(nr, nc);
+            int rc_min = std::min(nr, nc);
+            for (int r = 0; r < rc_max; r++) {
+              int end = std::min(r, rc_min);
+              for (int c = 0; c < end; c++) {
+                scalar_t tmp = bp[r + BLOCK_SZ * c];
+                bp[r + BLOCK_SZ * c] = bp[r * BLOCK_SZ + c];
+                bp[r * BLOCK_SZ + c] = tmp;
+              }
+            }
+
+            // 3. copy rows from buf to dst
+            for (int r = 0; r < nr; r++) {
+              memcpy(rpo + r * NC, bp + r * BLOCK_SZ, nc * sizeof(scalar_t));
+            }
           }
         }
-
-        // 3. copy rows from buf to dst
-        for (int r = 0; r < nr; r++) {
-          memcpy(rpo + r * NC, bp + r * BLOCK_SZ, nc * sizeof(scalar_t));
-        }
-      }
-    }
-  });
-  return self;
+      });
 }
 
-Tensor& _copy_same_type__cpu(Tensor& self, const Tensor& src) {
+void _copy_same_type_(Tensor& self, const Tensor& src) {
   if (self.is_same(src)) {
-    return self;
+    return;
   }
 
   bool serial_path = false;
   if (self.numel() == src.numel()) {
     if (self.is_contiguous() && src.is_contiguous()) {
-      AT_DISPATCH_ALL_TYPES(self.type(), "_copy_same_type", [&]() {
+      AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy_same_type_", [&]() {
         scalar_t* self_ptr = self.data<scalar_t>();
         scalar_t* src_ptr = src.data<scalar_t>();
 
@@ -111,11 +111,11 @@ Tensor& _copy_same_type__cpu(Tensor& self, const Tensor& src) {
         parallel_for(0, self.numel(), /* grain_size= */ 800, sample);
       });
     } else if (copy_transpose_valid(self, src)) {
-      _copy_same_type_transpose__cpu(self, src);
+      _copy_same_type_transpose_(self, src);
     } else {
 #ifdef _OPENMP
       if (in_parallel_region()) {
-        AT_DISPATCH_ALL_TYPES(self.type(), "_copy_same_type", [&]() {
+        AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy_same_type_", [&]() {
           at::CPU_tensor_parallel_apply2<scalar_t, scalar_t>(
               self, src, [](scalar_t& self_val, const scalar_t& src_val) {
                 self_val = src_val;
@@ -133,14 +133,13 @@ Tensor& _copy_same_type__cpu(Tensor& self, const Tensor& src) {
   }
 
   if (serial_path) {
-    AT_DISPATCH_ALL_TYPES(self.type(), "_copy_same_type", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy_same_type_", [&]() {
       at::CPU_tensor_apply2<scalar_t, scalar_t>(
           self, src, [](scalar_t& self_val, const scalar_t& src_val) {
             self_val = src_val;
           });
     });
   }
-  return self;
 }
 
 } // namespace native

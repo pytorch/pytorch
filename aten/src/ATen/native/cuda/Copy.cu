@@ -32,12 +32,11 @@ struct CopyOp {
 // device-to-device copy, does type conversion
 template <typename dst_T, typename src_T>
 void copy_device_to_device(Tensor& dst, const Tensor& src) {
-  auto numel = dst.numel();
-
-  if (dst.dim() == 0) {
-    // Zero-dim tensor; copy nothing
+  if (dst.is_same(src) || dst.dim() == 0) {
     return;
   }
+
+  auto numel = dst.numel();
 
   // We can memcpy the memory if:
   // -both tensors are contiguous; or,
@@ -124,7 +123,7 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
       } else {
         // Types are different
         // Copy into the new format, contiguous, on the source device
-        src_contig = at::empty_like(dst);
+        src_contig = at::empty_like(dst, src.options().dtype(dst.dtype()));
 
         CopyOp<dst_T, src_T>::apply(dst, src);
       }
@@ -198,7 +197,7 @@ void copy_to_cpu(Tensor& dst, const Tensor& src) {
         cudaMemcpyDeviceToHost,
         stream));
     AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-    _copy_(dst, dst_contig);
+    native::_copy_same_type_(dst, dst_contig);
   });
 }
 
@@ -211,16 +210,16 @@ void _copy__cuda(Tensor& dst, const Tensor& src) {
       if (std::is_same<dst_T, scalar_t>::value) {
         copy_from_cpu(dst, src);
       }
-      Tensor srcf = at::empty_like(src);
+      Tensor srcf = at::empty_like(src, src.options().dtype(dst.dtype()));
       _copy_(srcf, src);
       copy_from_cpu(dst, srcf);
     } else {
       if (std::is_same<dst_T, scalar_t>::value) {
         copy_to_cpu(dst, src);
       }
-      Tensor srcf = at::empty_like(src);
-      copy_device_to_device<dst_T, scalar_t>(srcf, src);
-      copy_to_cpu(dst, srcf);
+      Tensor srcf = at::empty_like(src, dst.options().dtype(src.dtype()));
+      copy_to_cpu(srcf, src);
+      _copy_(dst, srcf);
     }
   });
 }

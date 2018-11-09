@@ -108,6 +108,10 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/public/mkl.cmake")
 
+if (@USE_MKLDNN@)
+  include("${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake")
+endif()
+
 # import targets
 include ("${CMAKE_CURRENT_LIST_DIR}/Caffe2Targets.cmake")
 
@@ -134,4 +138,4 @@ get_filename_component(
 # Note: the current list dir is _INSTALL_PREFIX/share/cmake/Gloo.
 get_filename_component(
     _INSTALL_PREFIX "${CMAKE_CURRENT_LIST_DIR}/../../../" ABSOLUTE)
-set(CAFFE2_INCLUDE_DIRS "${_INSTALL_PREFIX}/include")
+set(CAFFE2_INCLUDE_DIRS "${_INSTALL_PREFIX}/lib/include")
