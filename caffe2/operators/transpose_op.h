@@ -42,7 +42,7 @@ class TransposeOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.rbegin(), axes_.rend(), 0);

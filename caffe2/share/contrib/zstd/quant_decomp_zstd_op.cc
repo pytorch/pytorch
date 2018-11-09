@@ -96,7 +96,7 @@ bool QuantDecompZstdOp::RunOnDevice() {
 
   // op_compressed: compressed data, 1d
   if (op_compressed.template IsType<uint8_t>()) {
-    CAFFE_ENFORCE_EQ(op_compressed.ndim(), 1, op_compressed.ndim());
+    CAFFE_ENFORCE_EQ(op_compressed.dim(), 1, op_compressed.dim());
   } else {
     // string type has 0 dimension
     CAFFE_ENFORCE_EQ(op_compressed.numel(), 1, op_compressed.numel());

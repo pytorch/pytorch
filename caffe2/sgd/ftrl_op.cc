@@ -89,7 +89,7 @@ void SparseFtrlOp<T>::DoRun() {
   CAFFE_ENFORCE_EQ(&Input(VAR), var, "In place operation is required");
   CAFFE_ENFORCE_EQ(&Input(N_Z), n_z, "In place operation is required");
   int64_t M = var->numel();
-  int64_t N = var->dim(0);
+  int64_t N = var->size(0);
   int64_t block_size = M / N;
   int64_t K = indices.numel();
   DCHECK_EQ(M * 2, n_z->numel());

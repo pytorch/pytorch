@@ -2,7 +2,7 @@
 
 #include <torch/nn/cloneable.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <cstdint>
 

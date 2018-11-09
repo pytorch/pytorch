@@ -42,9 +42,9 @@ class SumReduceDimsOp final : public Operator<Context> {
     Y->Resize(output_shape);
 
     const int rows = FIRSTDIMS ? X.size_to_dim(num_reduce_dims_)
-                               : X.size_to_dim(X.ndim() - num_reduce_dims_);
+                               : X.size_to_dim(X.dim() - num_reduce_dims_);
     const int cols = FIRSTDIMS ? X.size_from_dim(num_reduce_dims_)
-                               : X.size_from_dim(X.ndim() - num_reduce_dims_);
+                               : X.size_from_dim(X.dim() - num_reduce_dims_);
 
     const T* in_data = X.template data<T>();
     T* out_data = Y->template mutable_data<T>();
@@ -109,7 +109,7 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
     // the shape of the input to the data tensor. This made the backward
     // computation incompatible with old models. To fix this, we check
     // the dimension and type of Input(1).
-    if (input_1.ndim() == 1 && input_1.template IsType<int64_t>()) {
+    if (input_1.dim() == 1 && input_1.template IsType<int64_t>()) {
       // Input(1) is the shape of the input
       shape_.CopyFrom(input_1);
       // Copy first dims
@@ -123,10 +123,10 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
     }
 
     const int rows = FIRSTDIMS ? dX->size_to_dim(num_reduce_dims_)
-                               : dX->size_to_dim(dX->ndim() - num_reduce_dims_);
+                               : dX->size_to_dim(dX->dim() - num_reduce_dims_);
     const int cols = FIRSTDIMS
         ? dX->size_from_dim(num_reduce_dims_)
-        : dX->size_from_dim(dX->ndim() - num_reduce_dims_);
+        : dX->size_from_dim(dX->dim() - num_reduce_dims_);
 
     const int32_t* lengths_data = nullptr;
     if (InputSize() > 2) {

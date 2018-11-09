@@ -400,7 +400,7 @@ class BaseReducerGradient {
                 : block_shape.assign(dims.begin(), dims.end() - skip_dims);
       block_size = first_dim
           ? out_grad.size_from_dim(skip_dims)
-          : out_grad.size_from_dim(out_grad.ndim() - skip_dims);
+          : out_grad.size_from_dim(out_grad.dim() - skip_dims);
     }
 
     void observeOriginalInput(
@@ -520,7 +520,7 @@ class WeightedSumReducer<T, CPUContext> : public BaseReducer {
     void observeInput(int input, const Tensor& value, int skip_dims) {
       if (input == 1) {
         CAFFE_ENFORCE_EQ(
-            skip_dims, value.ndim(), "SCALARS mustn't have extra dimensions");
+            skip_dims, value.dim(), "SCALARS mustn't have extra dimensions");
         scalars = value.data<T>();
         return;
       }

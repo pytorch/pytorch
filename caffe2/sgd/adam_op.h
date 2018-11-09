@@ -166,7 +166,7 @@ class SparseAdamOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(Input(PARAM).numel(), Input(MOMENT_2).numel());
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),
-        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+        Input(GRAD).size_from_dim(Input(INDICES).dim()));
     CAFFE_ENFORCE_EQ(Input(LR).numel(), 1);
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
@@ -183,7 +183,7 @@ class SparseAdamOp final : public Operator<Context> {
     const auto correction =
         std::sqrt(T(1.) - std::pow(beta2_, t)) / (T(1.) - std::pow(beta1_, t));
 
-    auto block_size = Input(PARAM).numel() / Input(PARAM).dim(0);
+    auto block_size = Input(PARAM).numel() / Input(PARAM).size(0);
     auto n = Input(GRAD).numel() / block_size;
 
     const auto* paramIn = Input(PARAM).template data<T>();
@@ -336,7 +336,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(Input(PARAM).sizes()[0], Input(MOMENT_2).numel());
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),
-        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+        Input(GRAD).size_from_dim(Input(INDICES).dim()));
     CAFFE_ENFORCE_EQ(Input(LR).numel(), 1);
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
@@ -353,7 +353,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
     const auto correction =
         std::sqrt(T(1.) - std::pow(beta2_, t)) / (T(1.) - std::pow(beta1_, t));
 
-    auto block_size = Input(PARAM).numel() / Input(PARAM).dim(0);
+    auto block_size = Input(PARAM).numel() / Input(PARAM).size(0);
     auto n = Input(GRAD).numel() / block_size;
 
     const auto* paramIn = Input(PARAM).template data<T>();

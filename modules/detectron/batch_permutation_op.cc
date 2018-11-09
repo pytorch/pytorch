@@ -80,7 +80,7 @@ bool BatchPermutationOp<float, CPUContext>::RunOnDevice() {
   const auto& indices = Input(1);
   auto* Y = Output(0);
 
-  CAFFE_ENFORCE_EQ(indices.ndim(), 1, "indices must be 1-d");
+  CAFFE_ENFORCE_EQ(indices.dim(), 1, "indices must be 1-d");
   CAFFE_ENFORCE_EQ(
     X.dim32(0), indices.dim32(0),
     "X.dim32(0) must be equal to indices.dim32(0)",

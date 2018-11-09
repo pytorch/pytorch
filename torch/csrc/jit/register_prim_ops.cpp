@@ -54,13 +54,6 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
 
 RegisterOperators reg({
     Operator(
-        prim::MemoryFence,
-        [](const Node* node) {
-          return [](Stack& stack) {
-            return 0;
-          };
-        }),
-    Operator(
         prim::FusionGroup,
         [](const Node* node) {
           const auto key = registerFusion(node);
@@ -275,37 +268,12 @@ RegisterOperators reg({
     // nothing since the stack manipulation is already encoded in inst.inputs
     // and inst.outputs
     Operator(prim::Store, noop),
-
     Operator(
         prim::Drop,
         [](const Node* node) {
           auto N = node->inputs().size();
           return [=](Stack& stack) {
             drop(stack, N);
-            return 0;
-          };
-        }),
-    Operator(
-        prim::LoadWorld,
-        [](const Node* node) {
-          return [](Stack& stack) {
-            push(stack, World{0});
-            return 0;
-          };
-        }),
-    Operator(
-        prim::StoreWorld,
-        [](const Node* node) {
-          return [](Stack& stack) {
-            drop(stack, 1);
-            return 0;
-          };
-        }),
-    Operator(
-        prim::DummyWorld,
-        [](const Node* node) {
-          return [](Stack& stack) {
-            AT_ERROR("Encountered a dummy world during graph execution.");
             return 0;
           };
         }),
@@ -545,6 +513,15 @@ RegisterOperators reg({
             };
           }
         }),
+    Operator("aten::_unwrap_optional(t? optional) -> t",
+      [](const Node* node) -> Operation {
+        return [=](Stack& stack) {
+          auto val = pop(stack);
+          JIT_ASSERTM(!val.isNone(), "Unwrapping null optional");
+          push(stack, val);
+          return 0;
+        };
+      }),
     Operator(
         prim::fork,
         [](const Node* node) {
@@ -623,6 +600,17 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   return idx;
 }
 
+// Equivalent to list.at(idx)
+template <typename TList> // something like Shared<IntList>
+typename TList::element_type::ElemType& getItem(TList& list, int64_t idx) {
+  const int64_t list_size = list->elements().size();
+  const int64_t normalized_idx = normalizeIndex(idx, list_size);
+  if (normalized_idx < 0 || normalized_idx >= list_size) {
+    throw std::out_of_range("list index out of range");
+  }
+  return list->elements()[normalized_idx];
+}
+
 template <typename TList, typename TElement>
 Operation listAppend(const Node* node) {
   return [](Stack& stack) {
@@ -631,6 +619,7 @@ Operation listAppend(const Node* node) {
     pop(stack, a, el);
 
     a->elements().push_back(el);
+    push(stack, a);
 
     return 0;
   };
@@ -642,13 +631,8 @@ Operation listSelect(const Node* node) {
     T list;
     int64_t idx;
     pop(stack, list, idx);
-    const int64_t list_size = list->elements().size();
-    const int64_t normalized_idx = normalizeIndex(idx, list_size);
-    if (normalized_idx < 0 || normalized_idx >= list_size) {
-      throw std::out_of_range("list index out of range");
-    }
 
-    auto element = list->elements()[normalized_idx];
+    auto element = getItem(list, idx);
     push(stack, std::move(element));
     return 0;
   };
@@ -764,6 +748,21 @@ Operation listSlice(const Node* node) {
   };
 }
 
+template <typename TList, typename TElement>
+Operation listSetItem(const Node* node) {
+  return [](Stack& stack) {
+    TList list;
+    int64_t idx;
+    TElement value;
+
+    pop(stack, list, idx, value);
+    getItem(list, idx) = value;
+
+    push(stack, list);
+    return 0;
+  };
+}
+
 RegisterOperators reg2({
 
 #define DEFINE_STRING_OP(op_name, string_op, result)                           \
@@ -797,13 +796,14 @@ Operator(                                                                      \
     ),
 #define CREATE_LIST_OPS(decl_type, c_type) \
     Operator("aten::select(" decl_type "[] a, int b) -> " decl_type, listSelect<Shared<c_type>>), \
+    Operator("aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type " el) -> " decl_type"[](a!)", listSetItem<Shared<c_type>, c_type::ElemType>), \
     Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>), \
     Operator("aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type "[]", listAdd<Shared<c_type>, c_type::ElemType>), \
     Operator( \
         "aten::slice(" decl_type "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type "[]", \
         listSlice<Shared<c_type>, c_type::ElemType>), \
     Operator( \
-        "aten::append(World w, " decl_type "[] self, " decl_type " el) -> World", \
+        "aten::append(" decl_type "[](a!) self, " decl_type " el) -> " decl_type "[](a!)", \
         listAppend<Shared<c_type>, c_type::ElemType>), \
 
 
@@ -817,6 +817,25 @@ Operator(                                                                      \
     Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
     Operator("aten::eq(float[] a, float[] b) -> int", listEq<Shared<DoubleList>>),
     Operator("aten::eq(Tensor[] a, Tensor[] b) -> int", listEq<Shared<TensorList>>),
+
+#define CREATE_COPY_OP(other_type, c_type)                              \
+  Operator(                                                             \
+      "aten::copy_(Tensor(a!) t, " #other_type " other) -> Tensor(a!)", \
+      [](const Node* node) {                                            \
+        return [=](Stack& stack) {                                      \
+          at::Tensor t;                                                 \
+          c_type other;                                                 \
+          pop(stack, t, other);                                         \
+          std::move(t) = other;                                         \
+          push(stack, std::move(t));                                    \
+          return 0;                                                     \
+        };                                                              \
+      }),
+
+    CREATE_COPY_OP(Tensor, at::Tensor)
+    CREATE_COPY_OP(int, int64_t)
+    CREATE_COPY_OP(float, double)
+#undef CREATE_COPY_OP
 
     DEFINE_BINARY_OP(aten::add, a + b)
     DEFINE_BINARY_OP(aten::sub, a - b)
@@ -900,10 +919,30 @@ Operator(                                                                      \
           };
         }),
     Operator(
-        "aten::__not__(int self) -> int",
+        "aten::__not__(bool self) -> bool",
         [](const Node* node) {
           return [=](Stack& stack) {
-            push(stack, !pop(stack).toInt());
+            push(stack, !pop(stack).toBool());
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::__is__(t1 self, t2 obj) -> bool",
+        [](const Node* node) {
+          return [=](Stack& stack) {
+            IValue self, obj;
+            pop(stack, self, obj);
+            push(stack, self.isSameIdentity(obj));
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::__isnot__(t1 self, t2 obj) -> bool",
+        [](const Node* node) {
+          return [=](Stack& stack) {
+            IValue self, obj;
+            pop(stack, self, obj);
+            push(stack, !self.isSameIdentity(obj));
             return 0;
           };
         }),
