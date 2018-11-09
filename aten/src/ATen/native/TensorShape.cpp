@@ -156,9 +156,9 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
       zeros_sizes[0] = t._values().size(0);
       zeros_sizes[values_dim] = cumulative_size;
       cumulative_size += t._values().size(values_dim);
-      auto z1 = native::zeros(sizes, t._values().options());
+      auto z1 = native::zeros(zeros_sizes, t._values().options());
       zeros_sizes[values_dim] = total_size - cumulative_size;
-      auto z2 = native::zeros(sizes, t._values().options());
+      auto z2 = native::zeros(zeros_sizes, t._values().options());
       vals_pieces.push_back(native::cat({z1, t._values(), z2}, values_dim));
       idxs_pieces.push_back(t._indices());
     }
