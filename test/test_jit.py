@@ -9653,6 +9653,9 @@ S = 5
 # )
 nn_module_tests = [
     ('AlphaDropout', (), ((S,),)),
+    ('BatchNorm1d', (10,), ((S, 10),)),
+    ('BatchNorm2d', (10,), ((S, 10, S, S),)),
+    ('BatchNorm3d', (10,), ((S, 10, S, S, S),)),
     ('Dropout', (), ((S,),)),
     ('Dropout2d', (), ((S, S),)),
     ('Dropout3d', (), ((S, S, S),)),

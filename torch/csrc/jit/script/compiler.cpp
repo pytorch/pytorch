@@ -1414,10 +1414,37 @@ private:
       case TK_VAR: {
         emitAugAssignmentToVar(stmt);
       } break;
+      case '.': {
+        emitAugAssignmentToSelectVar(stmt);
+      } break;
       case TK_SUBSCRIPT: {
         emitAugAssignmentToSubscript(stmt);
       } break;
       default:
+        throw ErrorReport(stmt.lhs())
+            << "unexpected expression on "
+            << "left-hand side of augmented assignment.";
+    }
+  }
+
+  void emitAugAssignmentToSelectVar(const AugAssign& stmt) {
+    const auto lhs = Select(stmt.lhs());
+    const auto lhsSugaredVar = environment_stack->getSugaredVar(Var(lhs.value()).name());
+    const auto lhsValue = lhsSugaredVar->attr(lhs.range(), method, lhs.selector().name())->asValue(lhs.range(), method);
+    if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
+      // for tensors, emit the corresponding in-place op
+      const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
+      const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
+      emitBuiltinCall(
+          stmt.range(),
+          *method.graph(),
+          getAugOp(stmt, /*isTensor=*/true),
+          self,
+          {rhs},
+          {},
+          /*required=*/true);
+
+    } else {
         throw ErrorReport(stmt.lhs())
             << "unexpected expression on "
             << "left-hand side of augmented assignment.";
@@ -2401,6 +2428,7 @@ void defineMethodsInModule(std::shared_ptr<Module> m, const std::vector<Def>& de
 const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
   static std::unordered_map<std::string, TypePtr> map = {
     {"Tensor", DynamicType::get()},
+    {"number", NumberType::get()},
     {"int", IntType::get()},
     {"float", FloatType::get()},
     {"bool", BoolType::get()},
