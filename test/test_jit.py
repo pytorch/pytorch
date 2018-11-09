@@ -4221,13 +4221,48 @@ a")
 
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
 
-    def test_script_None(self):
-        def func(x):
+    def test_script_optional_none(self):
+        def none_stmt(x):
             output = None
             output = x
             return output
 
-        self.checkScript(func, [torch.arange(0, 2)], optimize=True)
+        def none_args(x):
+            # type: (Optional[Tensor]) -> Optional[Tensor]
+            return None
+
+        self.checkScript(none_stmt, [torch.arange(0, 2)], optimize=True)
+        self.checkScript(none_args, [None], optimize=True)
+
+        # test undefined tensor None as default param
+        def test_script_optional_tensor_none(x=None):
+            # type: (Optional[Tensor]) -> Tensor
+            res = torch.zeros(1, dtype=torch.int8)
+            if x is None:
+                res = res + 1
+            else:
+                res = torch.jit._unwrap_optional(x)
+            return res
+
+        fn = test_script_optional_tensor_none
+        scripted_fn = torch.jit.script(fn)
+        self.assertEqual(fn(), scripted_fn())
+        self.assertEqual(fn(torch.zeros(1)), scripted_fn(torch.zeros(1)))
+
+        # test typical None as default param
+        def test_script_optional_other_none(x=None):
+            # type: (Optional[float]) -> float
+            res = 2.0
+            if x is None:
+                res = res + 1.0
+            else:
+                res = torch.jit._unwrap_optional(x)
+            return res
+
+        fn = test_script_optional_other_none
+        scripted_fn = torch.jit.script(fn)
+        self.assertEqual(fn(), scripted_fn())
+        self.assertEqual(fn(1.0), scripted_fn(1.0))
 
     def test_script_clamp_none(self):
         def test_script_clamp_max_none(x):
