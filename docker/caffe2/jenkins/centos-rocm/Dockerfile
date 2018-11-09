@@ -49,7 +49,6 @@ ARG JENKINS_GID
 ADD ./add_jenkins_user.sh add_jenkins_user.sh
 RUN if [ -n "${JENKINS}" ]; then bash ./add_jenkins_user.sh; fi
 RUN rm add_jenkins_user.sh
-RUN if [ -n "${JENKINS}" ]; then bash usermod -a -G video ${JENKINS}; fi
 
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
