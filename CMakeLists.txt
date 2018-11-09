@@ -198,6 +198,10 @@ include(ExternalProject)
 # ---[ Dependencies
 include(cmake/Dependencies.cmake)
 
+if(USE_FBGEMM)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FBGEMM")
+endif()
+
 # ---[ Whitelist file if whitelist is specified
 include(cmake/Whitelist.cmake)
 
