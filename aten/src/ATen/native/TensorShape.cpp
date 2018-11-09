@@ -160,11 +160,11 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
       zeros_sizes[values_dim] = total_size - cumulative_size;
       auto z2 = native::zeros(sizes, t._values().options());
       vals_pieces.push_back(native::cat({z1, t._values(), z2}, values_dim));
-      idxs_pieces.push_back(t._indices().t());
+      idxs_pieces.push_back(t._indices());
     }
     auto sizes_copy = sizes.vec();
     sizes_copy[wrapped] = total_size;
-    return native::sparse_coo_tensor(native::cat(idxs_pieces).t(), native::cat(vals_pieces), sizes_copy, tensors[0].options());
+    return native::sparse_coo_tensor(native::cat(idxs_pieces, 1), native::cat(vals_pieces), sizes_copy, tensors[0].options());
   }
 }
 
