@@ -272,10 +272,10 @@ struct THCCachingAllocator
 
     get_stats_for_device(block->device).decreaseAllocated(block->size);
     if (!block->stream_uses.empty()) {
-      AT_CUDA_CHECK(insert_events(block));
+      insert_events(block);
+    } else {
+      free_block(block);
     }
-
-    free_block(block);
   }
 
   /** returns cached blocks to the system allocator */
@@ -313,7 +313,7 @@ struct THCCachingAllocator
   {
     Block search_key(dev_id, 0, 0);
     auto it = blocks.lower_bound(&search_key);
-    for (;it != blocks.end() && *it && (*it)->device == dev_id; ++it) {
+    for (; it != blocks.end() && *it && (*it)->device == dev_id; ++it) {
       size_t blocksize = (*it)->size;
       *total += blocksize;
       if (blocksize > *largest) {
@@ -450,35 +450,26 @@ struct THCCachingAllocator
     return it->second;
   }
 
-  cudaError_t insert_events(Block* block)
+  void insert_events(Block* block)
   {
-    cudaError_t err;
-
     int prev_device;
-    err = cudaGetDevice(&prev_device);
-    if (err != cudaSuccess) return err;
+    AT_CUDA_CHECK(cudaGetDevice(&prev_device));
 
     std::set<THCStreamPtr> streams(std::move(block->stream_uses));
     THAssert(block->stream_uses.empty());
     for (auto it = streams.begin(); it != streams.end(); ++it) {
       auto& stream = *it;
-
-      err = cudaSetDevice(THCStream_device(stream.get()));
-      if (err != cudaSuccess) break;
+      AT_CUDA_CHECK(cudaSetDevice(THCStream_device(stream.get())));
 
       cudaEvent_t event;
-      err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
-      if (err != cudaSuccess) break;
-
-      err = cudaEventRecord(event, THCStream_stream(stream.get()));
-      if (err != cudaSuccess) break;
+      AT_CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
+      AT_CUDA_CHECK(cudaEventRecord(event, THCStream_stream(stream.get())));
 
       block->event_count++;
       cuda_events.emplace_back(event, block);
     }
 
     cudaSetDevice(prev_device);
-    return err;
   }
 
   void process_events()
