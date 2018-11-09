@@ -2,7 +2,7 @@
 
 #include <torch/data/example.h>
 #include <torch/data/transforms/collate.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <utility>
 #include <vector>

@@ -129,12 +129,8 @@ and `python setup.py clean`. Then you can install in `build develop` mode again.
     * [api](torch/csrc/api) - The PyTorch C++ frontend.
     * [distributed](torch/csrc/distributed) - Distributed training
       support for PyTorch.
-* [tools](tools) - Code generation scripts for the PyTorch library
-  * [autograd](tools/autograd) - Code generation for autograd.  This
-    includes definitions of all our derivatives.
-  * [jit](tools/jit) - Code generation for JIT
-  * [amd_build](tools/amd_build) - HIPify scripts, for transpiling CUDA
-    into AMD HIP.
+* [tools](tools) - Code generation scripts for the PyTorch library.
+  See README of this directory for more details.
 * [test](tests) - Python unit tests for PyTorch Python frontend
   * [test_torch.py](test/test_torch.py) - Basic tests for PyTorch
     functionality
@@ -458,13 +454,14 @@ have more checks than older versions. In our CI, we run clang-tidy-6.0.
    uncommitted changes). Changes are picked up based on a `git diff` with the
    given revision:
   ```sh
-  $ python tools/clang_tidy.py -d build -p torch/csrc -r HEAD~1
+  $ python tools/clang_tidy.py -d build -p torch/csrc --diff 'HEAD~1'
   ```
 
 Above, it is assumed you are in the PyTorch root folder. `path/to/build` should
 be the path to where you built PyTorch from source, e.g. `build` in the PyTorch
 root folder if you used `setup.py build`. You can use `-c <clang-tidy-binary>`
-to change the clang-tidy this script uses.
+to change the clang-tidy this script uses. Make sure you have PyYaml installed,
+which is in PyTorch's `requirements.txt`.
 
 ## Caffe2 notes
 

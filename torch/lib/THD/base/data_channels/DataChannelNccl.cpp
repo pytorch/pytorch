@@ -345,8 +345,8 @@ bool DataChannelNccl::_tensorCheckHelper(
 
   for (size_t i = 0; i < input.size(); ++i) {
     //  Check to make sure it's a GPU dense tensor
-    if (!(input[i].type().is_cuda() && !input[i].type().is_sparse() &&
-          output[i].type().is_cuda() && !output[i].type().is_sparse())) {
+    if (!(input[i].is_cuda() && !input[i].is_sparse() &&
+          output[i].is_cuda() && !output[i].is_sparse())) {
       throw std::runtime_error(
           "Only CUDA dense tensor is supported for NCCL "
           "collective operations");

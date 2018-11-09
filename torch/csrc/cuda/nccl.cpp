@@ -133,8 +133,8 @@ void _check_inputs(
     auto input = inputs[i];
     auto output = outputs[i];
 
-    if (!(input.type().is_cuda() && !input.type().is_sparse() &&
-          output.type().is_cuda() && !output.type().is_sparse())) {
+    if (!(input.is_cuda() && !input.is_sparse() &&
+          output.is_cuda() && !output.is_sparse())) {
       throw std::runtime_error(
           "input and output elements have to be cuda dense Tensors");
     }

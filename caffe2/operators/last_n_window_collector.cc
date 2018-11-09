@@ -35,13 +35,13 @@ class LastNWindowCollectorOp : public Operator<Context> {
     auto* output = Output(LAST_N);
     const auto& input = Input(DATA);
 
-    CAFFE_ENFORCE_GE(input.ndim(), 1);
+    CAFFE_ENFORCE_GE(input.dim(), 1);
     bool output_initialized = output->numel() > 0 &&
         (static_cast<std::shared_ptr<std::vector<TensorCPU>>*>(
              output->raw_mutable_data(input.dtype()))[0] != nullptr);
     if (output_initialized) {
-      CAFFE_ENFORCE_EQ(output->ndim(), input.ndim());
-      for (size_t i = 1; i < input.ndim(); ++i) {
+      CAFFE_ENFORCE_EQ(output->dim(), input.dim());
+      for (size_t i = 1; i < input.dim(); ++i) {
         CAFFE_ENFORCE_EQ(output->size(i), input.size(i));
       }
     }
@@ -90,7 +90,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
         static_cast<char*>(output->raw_mutable_data(input.dtype()));
 
     auto* next = Output(NEXT);
-    CAFFE_ENFORCE_EQ(0, next->ndim());
+    CAFFE_ENFORCE_EQ(0, next->dim());
     auto* next_data = next->template mutable_data<int32_t>();
     if (!output_initialized) {
       *next_data = 0;

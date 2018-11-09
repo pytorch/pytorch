@@ -3,7 +3,7 @@
 #include <torch/csrc/utils/tempfile.h>
 #include <torch/nn/init.h>
 #include <torch/nn/modules/linear.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>
@@ -17,7 +17,7 @@ TEST(NoGradTest, SetsGradModeCorrectly) {
   torch::Tensor s = y.sum();
 
   s.backward();
-  ASSERT_FALSE(model->parameters()["weight"].grad().defined());
+  ASSERT_FALSE(model->weight.grad().defined());
 }
 
 struct AutogradTest : torch::test::SeedingFixture {

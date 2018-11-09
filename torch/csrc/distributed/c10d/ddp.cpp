@@ -35,24 +35,39 @@ void copyBroadcastTensorsToReplicas(
 }
 } // namespace
 
+std::vector<std::vector<at::Tensor>> bucketTensors(
+    std::vector<at::Tensor>& tensors,
+    int64_t bucketSize,
+    bool fineGrained) {
+  std::vector<std::vector<at::Tensor>> bucketedTensors;
+  auto tensorGroups =
+      torch::utils::take_tensors(tensors, bucketSize, fineGrained);
+
+  bucketedTensors.reserve(tensorGroups.size());
+  for (auto& tensorGroup : tensorGroups) {
+    bucketedTensors.push_back(std::move(tensorGroup.tensors));
+  }
+  return bucketedTensors;
+}
+
 void distBroadcastCoalesced(
     ProcessGroup& processGroup,
     std::vector<at::Tensor>& tensors,
     int64_t bufferSize,
     bool fineGrained) {
-  auto tensorGroups = torch::utils::take_tensors(
-      tensors, bufferSize, fineGrained);
+  std::vector<std::vector<at::Tensor>> bucketedTensors =
+      bucketTensors(tensors, bufferSize, fineGrained);
   // We store single-element vectors in `flatTensors` because
   // `ProcessGroup::broadcast` takes a reference to a vector, which must be
   // alive until the `wait()` call on the returned `Work` completes.
   std::vector<std::vector<at::Tensor>> flatTensors;
   std::vector<std::shared_ptr<ProcessGroup::Work>> work;
-  flatTensors.reserve(tensorGroups.size());
-  work.reserve(tensorGroups.size());
-  for (const auto& group : tensorGroups) {
-    // Flatten each group of tensors (whose size equals `bufferSize`) into a
+  flatTensors.reserve(bucketedTensors.size());
+  work.reserve(bucketedTensors.size());
+  for (const auto& tensorBucket : bucketedTensors) {
+    // Flatten each bucket of tensors (whose size equals `bufferSize`) into a
     // single tensor.
-    flatTensors.push_back({torch::utils::flatten_dense_tensors(group.tensors)});
+    flatTensors.push_back({torch::utils::flatten_dense_tensors(tensorBucket)});
     BroadcastOptions broadcastOptions;
     broadcastOptions.rootRank = 0;
     broadcastOptions.rootTensor = 0;
@@ -61,13 +76,13 @@ void distBroadcastCoalesced(
     work.push_back(
         processGroup.broadcast(flatTensors.back(), broadcastOptions));
   }
-  // Now loop through each group, wait for the broadcast to complete, and
+  // Now loop through each bucket, wait for the broadcast to complete, and
   // un-flatten the broadcast tensor back into device-local individual tensors.
-  for (size_t group = 0; group < tensorGroups.size(); ++group) {
-    auto& tensors = tensorGroups[group].tensors;
-    work[group]->wait();
+  for (size_t bucket = 0; bucket < bucketedTensors.size(); ++bucket) {
+    auto& tensors = bucketedTensors[bucket];
+    work[bucket]->wait();
     const auto synced =
-        torch::utils::unflatten_dense_tensors(flatTensors[group][0], tensors);
+        torch::utils::unflatten_dense_tensors(flatTensors[bucket][0], tensors);
     AT_ASSERT(synced.size() == tensors.size());
     for (size_t i = 0; i < synced.size(); ++i) {
       // Copy into the per-process tensors.
@@ -127,7 +142,8 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
   for (size_t devIdx = 0; devIdx < devices.size(); ++devIdx) {
     at::cuda::CUDAGuard guard(devices[devIdx]);
     events[devIdx].record();
-    workerStreams.push_back(at::cuda::getStreamFromPool(false, devices[devIdx]));
+    workerStreams.push_back(
+        at::cuda::getStreamFromPool(false, devices[devIdx]));
     // Let the worker stream to wait for the default stream
     events[devIdx].block(workerStreams.back());
   }
