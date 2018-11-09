@@ -139,6 +139,7 @@ class PyTorchStreamReader final {
         key % kFieldAlignment == 0,
         "Provided key is not divisible by the alignment size.");
     auto tag = read64BitIntegerLittleEndian();
+    //std::cout << "tag: " << tag << std::endl;
     AT_ASSERTM(
         tag == RecordTags::STORAGE,
         "Attempted to read a record of non-storage type");
@@ -224,6 +225,7 @@ class PyTorchStreamReader final {
         tag == RecordTags::FOOTER,
         "File footer has wrong record type. Is this file corrupted?");
     last_record_offset_ = read64BitIntegerLittleEndian();
+    //std::cout << "====> last_record_offset: " << last_record_offset_ << std::endl;
     AT_ASSERTM(
         last_record_offset_ < file_size_,
         "Offset of last record is higher than the size"
@@ -281,6 +283,7 @@ class PyTorchStreamWriter final {
   // Utility functions
   void write64BitIntegerLittleEndian(const uint64_t value) {
     // TODO endian swap on platforms that need it?
+    //std::cout << "write integer little endian: " << value << std::endl;
     out_->write(reinterpret_cast<const char*>(&value), 8);
     cursor_ += 8u;
   }
@@ -306,6 +309,7 @@ class PyTorchStreamWriter final {
 
   // File format write functions
   void writeFileHeader() {
+    //std::cout << "write file header" << std::endl;
     write64BitIntegerLittleEndian(kFileMagicNumber);
     write64BitIntegerLittleEndian(kFileFormatVersion);
     padToNextAlignmentBoundary();

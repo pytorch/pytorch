@@ -26,12 +26,14 @@ namespace onnx = ::ONNX_NAMESPACE;
 
 class ModuleDecoder {
  public:
-  ModuleDecoder(ModuleLookup module_lookup,
-                std::istream& in);
+//  ModuleDecoder(ModuleLookup module_lookup,
+//                std::istream& in);
   ModuleDecoder(
       const onnx::ModelProto& model_proto,
       const std::unordered_map<std::string, at::Tensor*>& param_map,
-      script::Module* parent_module);
+      script::Module* parent_module,
+      std::unordered_map<uint64_t, std::shared_ptr<at::Storage>>* storage_map,
+      PyTorchStreamReader* stream_reader_);
 
  private:
   std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto);
@@ -63,8 +65,8 @@ class ModuleDecoder {
       ModuleLookup module_lookup,
       const std::string fullname);
 
-  PyTorchStreamReader stream_reader_;
-  std::unordered_map<uint64_t, std::shared_ptr<at::Storage>> storage_map_;
+  PyTorchStreamReader* stream_reader_;
+  std::unordered_map<uint64_t, std::shared_ptr<at::Storage>>* storage_map_;
   std::unordered_map<std::string, const onnx::TypeProto*> value_type_map_;
 };
 
@@ -298,17 +300,17 @@ at::Tensor ModuleDecoder::buildTensorCommon(
   std::move(tensor_proto.dims().begin(), tensor_proto.dims().end(), std::back_inserter(dims));
 
   // Find or create the storage
-  auto storage_it = storage_map_.find(record_number);
-  if (storage_it == storage_map_.end()) {
+  auto storage_it = storage_map_->find(record_number);
+  if (storage_it == storage_map_->end()) {
     at::DataPtr storage_ptr;
     int64_t size;
-    std::tie(storage_ptr, size) = stream_reader_.getRecordWithKey(record_number);
+    std::tie(storage_ptr, size) = stream_reader_->getRecordWithKey(record_number);
     auto storage = std::make_shared<at::Storage>(
       at::CPU(type).typeMeta(),
       std::move(storage_ptr),
       size / at::CPU(type).typeMeta().itemsize(),
       nullptr);
-    storage_map_.insert(std::make_pair(record_number, storage));
+    storage_map_->insert(std::make_pair(record_number, storage));
     return at::CPU(type)._th_tensor(*storage, storage_offset, dims, strides);
   }
 
@@ -334,52 +336,55 @@ std::pair<std::shared_ptr<script::Module>, std::string> ModuleDecoder::parseFull
   return std::make_pair(module_lookup(vec), std::move(last));
 }
 
-ModuleDecoder::ModuleDecoder(
-    ModuleLookup module_lookup,
-    std::istream& in) :
-    stream_reader_(&in) {
-  auto model_proto = onnx::ModelProto();
-  auto record = stream_reader_.getLastRecord();
-  model_proto.ParsePartialFromArray(std::get<0>(record).get(), std::get<1>(record));
-  auto graph_proto = model_proto.graph();
-
-  std::unordered_map<std::string, at::Tensor*> param_map;
-
-  for (auto &tensor_proto : graph_proto.initializer()) {
-    std::shared_ptr<script::Module> parent_module;
-    std::string name;
-    std::tie(parent_module, name) = parseFullName(module_lookup, tensor_proto.name());
-
-    auto param = buildParameter(tensor_proto);
-    parent_module->register_parameter(name, param, /* is_buffer = */ tensor_proto.int64_data(0));
-    param_map[tensor_proto.name()] = parent_module->parameter_slot(name);
-  }
-
-  for (auto &node_proto : graph_proto.node()) {
-    std::shared_ptr<script::Module> parent_module;
-    std::string name;
-    std::tie(parent_module, name) = parseFullName(module_lookup, node_proto.name());
-
-    std::vector<at::Tensor*> member_inputs;
-    for (auto &param_name : node_proto.input()) {
-      member_inputs.push_back(param_map[param_name]);
-    }
-
-    auto graph = buildGraph(node_proto.attribute(0).g());
-    // has_domain field has a string iff the method was optimized
-    parent_module->set_optimized(node_proto.has_domain());
-    parent_module->create_method(name, graph, member_inputs);
-    // We store the schema in the docstring so we can parse the schema and
-    // assign it to the method.
-    auto schema = parseSchema(node_proto.doc_string());
-    parent_module->get_method(name).setSchema(std::move(schema));
-  }
-}
+//ModuleDecoder::ModuleDecoder(
+//    ModuleLookup module_lookup,
+//    std::istream& in) {
+//  auto model_proto = onnx::ModelProto();
+//  //auto record = stream_reader_.getLastRecord();
+//  //model_proto.ParsePartialFromArray(std::get<0>(record).get(), std::get<1>(record));
+//  auto graph_proto = model_proto.graph();
+//
+//  std::unordered_map<std::string, at::Tensor*> param_map;
+//
+//  for (auto &tensor_proto : graph_proto.initializer()) {
+//    std::shared_ptr<script::Module> parent_module;
+//    std::string name;
+//    std::tie(parent_module, name) = parseFullName(module_lookup, tensor_proto.name());
+//
+//    auto param = buildParameter(tensor_proto);
+//    parent_module->register_parameter(name, param, /* is_buffer = */ tensor_proto.int64_data(0));
+//    param_map[tensor_proto.name()] = parent_module->parameter_slot(name);
+//  }
+//
+//  for (auto &node_proto : graph_proto.node()) {
+//    std::shared_ptr<script::Module> parent_module;
+//    std::string name;
+//    std::tie(parent_module, name) = parseFullName(module_lookup, node_proto.name());
+//
+//    std::vector<at::Tensor*> member_inputs;
+//    for (auto &param_name : node_proto.input()) {
+//      member_inputs.push_back(param_map[param_name]);
+//    }
+//
+//    auto graph = buildGraph(node_proto.attribute(0).g());
+//    // has_domain field has a string iff the method was optimized
+//    parent_module->set_optimized(node_proto.has_domain());
+//    parent_module->create_method(name, graph, member_inputs);
+//    // We store the schema in the docstring so we can parse the schema and
+//    // assign it to the method.
+//    auto schema = parseSchema(node_proto.doc_string());
+//    parent_module->get_method(name).setSchema(std::move(schema));
+//  }
+//}
 
 ModuleDecoder::ModuleDecoder(
     const onnx::ModelProto& model_proto,
     const std::unordered_map<std::string, at::Tensor*>& param_map,
-    script::Module* parent_module) : stream_reader_(nullptr) {
+    script::Module* parent_module,
+    std::unordered_map<uint64_t, std::shared_ptr<at::Storage>>* storage_map,
+    PyTorchStreamReader* stream_reader) {
+  storage_map_ = storage_map;
+  stream_reader_ = stream_reader;
   const auto& graph_proto = model_proto.graph();
   for (const auto &node_proto : graph_proto.node()) {
     std::vector<at::Tensor*> member_inputs;
@@ -427,9 +432,10 @@ at::ScalarType tensorProtoTypeToATenType(caffe2::TensorProto_DataType data_type)
 class ScriptModuleDeserializer final {
  public:
   ScriptModuleDeserializer(const std::string& filename) :
-    ifs_(filename, std::ifstream::in | std::ifstream::binary), reader_(&ifs_) {
+    ifs_(filename, std::ifstream::in), reader_(&ifs_) {
       // TODO appropriate support for mmap, right now still use stream reader
-    }
+      //std::cout << "filename: " << filename << std::endl;
+  }
   ScriptModuleDeserializer(std::istream* is) : ifs_(), reader_(is) {}
   void deserialize(ModuleLookup module_lookup) {
     torch::ModelDef model_def;
@@ -438,30 +444,42 @@ class ScriptModuleDeserializer final {
     std::tie(data_ptr, data_size) = reader_.getLastRecord();
     AT_ASSERTM(model_def.ParseFromArray(data_ptr.get(), data_size),
         "parse metadata (i.e., ModelDef) failed.");;
+    //std::cout << "loaded model_def: " << model_def.DebugString() << std::endl;
     moduleLookup_ = module_lookup;
+    const auto& module_def = model_def.main_module();
+    collectParamsInfo(module_def, module_def.name());
     std::shared_ptr<script::Module> module = moduleLookup_(moduleStack_);
-    convertModule(model_def.main_module(), module.get());
+    convertModule(module_def, module.get());
   }
  private:
-  void convertModule(const torch::ModuleDef& module_def,
-      script::Module* module) {
-    std::unordered_map<std::string, at::Tensor*> param_map;
+  void collectParamsInfo(const torch::ModuleDef& module_def, const std::string& prefix) {
     for (int i = 0; i < module_def.parameters_size(); ++i) {
+      std::shared_ptr<script::Module> module = moduleLookup_(moduleStack_);
       const torch::ParameterDef& param_def = module_def.parameters(i);
       at::Tensor tensor = createTensor(param_def);
       autograd::Variable variable = autograd::make_variable(tensor,
           param_def.require_gradient());
       module->register_parameter(param_def.name(), variable, param_def.is_buffer());
-      AT_ASSERT(param_map.find(param_def.name()) == param_map.end());
-      param_map[param_def.name()] = &tensor;
+      parameterMap_[prefix + param_def.name()] = module->parameter_slot(param_def.name());
     }
+    for (int i = 0; i < module_def.submodules_size(); ++i) {
+      const torch::ModuleDef& sub_def = module_def.submodules(i);
+      moduleStack_.push_back(sub_def.name());
+      collectParamsInfo(sub_def, prefix + "." + sub_def.name());
+      moduleStack_.pop_back();
+    }
+  }
+  void convertModule(const torch::ModuleDef& module_def,
+      script::Module* module) {
+    //std::unordered_map<std::string, at::Tensor*> param_map;
     for (int i = 0; i < module_def.methods_size(); ++i ) {
       const torch::MethodDef& method_def = module_def.methods(i);
       // TODO read unhacked torch script, right now it's serialized onnx proto
       ::ONNX_NAMESPACE::ModelProto method_proto;
-      AT_ASSERTM(method_proto.ParseFromString(method_def.torch_script()),
+      AT_ASSERTM(method_proto.ParseFromString(method_def.onnx_proto()),
           "cannot parse method proto (i.e., hacked onnx proto)");
-      ModuleDecoder decoder(method_proto, param_map, module);
+      ModuleDecoder decoder(method_proto, parameterMap_, module,
+          &storageMap_, &reader_);
       (void)decoder;
     }
     for (int i = 0; i < module_def.submodules_size(); ++i) {
@@ -487,12 +505,17 @@ class ScriptModuleDeserializer final {
     auto type = tensorProtoTypeToATenType(tensor_proto.data_type());
     uint64_t record_id = caffe2::stoull(external_data.record_id());
     AT_ASSERT(record_id != 0);
+    std::cout << "param name: " << param_def.name() << std::endl;
+    std::cout << "\t\tdims: " << dims << std::endl;
+    std::cout << "\t\tstrides: " << strides << std::endl;
+    std::cout << "\t\trecord_id: " << record_id << std::endl;
     auto storage_it = storageMap_.find(record_id);
     if (storage_it == storageMap_.end()) {
       at::DataPtr storage_ptr;
       uint64_t record_size;
       std::tie(storage_ptr, record_size) = reader_.getRecordWithKey(record_id);
       AT_ASSERT(record_size == external_data.record_size());
+      std::cout << "\t\trecord_size " << record_size << std::endl;
       auto storage = std::make_shared<at::Storage>(
           at::CPU(type).typeMeta(),
           std::move(storage_ptr),
@@ -510,6 +533,7 @@ class ScriptModuleDeserializer final {
   ModuleLookup moduleLookup_;
   std::vector<std::string> moduleStack_;
   std::unordered_map<uint64_t, std::shared_ptr<at::Storage>> storageMap_;
+  std::unordered_map<std::string, at::Tensor*> parameterMap_;
 };
 
 }  // namespace
@@ -547,8 +571,10 @@ std::shared_ptr<script::Module> load(std::istream& in) {
     return curr;
   };
 
-  ModuleDecoder decoder(module_lookup, in);
-  (void)decoder;
+  //ModuleDecoder decoder(module_lookup, in);
+  //(void)decoder;
+  ScriptModuleDeserializer deserializer(&in);
+  deserializer.deserialize(module_lookup);
 
   return module;
 }

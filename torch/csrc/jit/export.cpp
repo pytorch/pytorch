@@ -16,6 +16,7 @@
 
 #include <memory>
 #include <vector>
+#include <stack>
 #include <string>
 #include <sstream>
 #include <fstream>
@@ -430,10 +431,13 @@ void GraphEncoder::EncodeTensor(
 
 class ModuleEncoder: public EncoderBase {
  public:
-  ModuleEncoder(const script::Module &module,
-                std::ostream& out);
+//  ModuleEncoder(const script::Module &module,
+//                std::ostream& out);
   ModuleEncoder(script::Method& method,
-      onnx::NodeProto* node_proto, std::ostream& out);
+      onnx::NodeProto* node_proto,
+      std::unordered_map<const void*, uint64_t>* storage_map,
+      std::unordered_map<at::Tensor*, std::string>* parameter_map,
+      PyTorchStreamWriter* writer);
 
  private:
   void EncodeModule(onnx::GraphProto *graph_proto, const script::Module &module);
@@ -471,29 +475,34 @@ class ModuleEncoder: public EncoderBase {
                       const TypePtr& type,
                       const std::string& name);
 
-  PyTorchStreamWriter stream_writer_;
+  PyTorchStreamWriter* stream_writer_;
   // Used to deduplicate tensor storages
-  std::unordered_map<const void*, uint64_t> storage_dedup_map_;
+  std::unordered_map<const void*, uint64_t>* storage_dedup_map_;
 
   // Used to keep track of Parameter names so Methods can refer to them
-  std::unordered_map<at::Tensor*, std::string> parameter_map_;
+  std::unordered_map<at::Tensor*, std::string>* parameter_map_;
 
   // Used to create sequential dummy names for node types
   size_t type_counter_ = 0;
 };
 
-ModuleEncoder::ModuleEncoder(
-    const script::Module &module,
-    std::ostream& out)
-    : EncoderBase(onnx_torch::OperatorExportTypes::RAW, false),
-      stream_writer_(&out) {
-  model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
-  EncodeModule(model_proto_.mutable_graph(), module);
-}
+//ModuleEncoder::ModuleEncoder(
+//    const script::Module &module,
+//    std::ostream& out)
+//    : EncoderBase(onnx_torch::OperatorExportTypes::RAW, false) {
+//  model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
+//  EncodeModule(model_proto_.mutable_graph(), module);
+//}
 
 ModuleEncoder::ModuleEncoder(script::Method& method,
-    onnx::NodeProto* node_proto, std::ostream& out) :
-  EncoderBase(onnx_torch::OperatorExportTypes::RAW, false), stream_writer_(&out) {
+    onnx::NodeProto* node_proto,
+    std::unordered_map<const void*, uint64_t>* storage_map,
+    std::unordered_map<at::Tensor*, std::string>* parameter_map,
+    PyTorchStreamWriter* writer) :
+  EncoderBase(onnx_torch::OperatorExportTypes::RAW, false) {
+  storage_dedup_map_ = storage_map;
+  parameter_map_ = parameter_map;
+  stream_writer_ = writer;
   // we already keep the tree structure in the top level module,
   // so pass "" as prefix
   EncodeMethod(node_proto, method, "");
@@ -619,7 +628,7 @@ void ModuleEncoder::EncodeModule(
   EncodeParameters(graph_proto, module, "");
   EncodeMethods(graph_proto, module, "");
   auto str = model_proto_.SerializeAsString();
-  stream_writer_.writeRecord(str.data(), str.size());
+  stream_writer_->writeRecord(str.data(), str.size());
 }
 
 void ModuleEncoder::EncodeParameters(
@@ -646,7 +655,7 @@ void ModuleEncoder::EncodeParameter(
   auto name = prefix + parameter.name;
 
   tensor_proto->set_name(name);
-  parameter_map_[tensor] = name;
+  (*parameter_map_)[tensor] = name;
 
   // Parameters have these fields, but tensors do not
   tensor_proto->add_int64_data(parameter.is_buffer);
@@ -683,10 +692,12 @@ void ModuleEncoder::EncodeMethod(
   // We store the schema string in the docstring.
   node_proto->set_doc_string(getExportableSchemaStringForMethod(method));
 
+  std::cout << "method name: " << node_proto->name() << std::endl;
   // Store member_inputs of Method in input
   for (auto &member_input : method.params()) {
-    auto it = parameter_map_.find(member_input);
-    JIT_ASSERT(it != parameter_map_.end());
+    std::cout << "method tensor: " << member_input << std::endl;
+    auto it = parameter_map_->find(member_input);
+    JIT_ASSERT(it != parameter_map_->end());
     node_proto->add_input(it->second);
   }
 
@@ -709,8 +720,8 @@ void ModuleEncoder::EncodeTensor(
     const at::Tensor& tensor,
     const c10::optional<std::string> external_ref) {
   auto storage_ptr = tensor.storage().unsafeGetStorageImpl();
-  auto dedup_it = storage_dedup_map_.find(storage_ptr);
-  if (dedup_it != storage_dedup_map_.end()) {
+  auto dedup_it = storage_dedup_map_->find(storage_ptr);
+  if (dedup_it != storage_dedup_map_->end()) {
     tensor_proto->add_int64_data(dedup_it->second);
   } else {
     at::Tensor t = tensor;
@@ -726,10 +737,10 @@ void ModuleEncoder::EncodeTensor(
         .cpu();
     }
 
-    auto record_number = stream_writer_.writeRecord(
+    auto record_number = stream_writer_->writeRecord(
       static_cast<char*>(t.storage().data()), t.type().elementSizeInBytes() * t.storage().size());
     tensor_proto->add_int64_data(record_number);
-    storage_dedup_map_[storage_ptr] = record_number;
+    (*storage_dedup_map_)[storage_ptr] = record_number;
   }
 
   for (auto &d : tensor.sizes()) {
@@ -940,17 +951,24 @@ class ScriptModuleSerializer final {
 
  public:
   ScriptModuleSerializer(const std::string& filename) :
-    ofs_(filename, std::ofstream::out | std::ofstream::trunc | std::ofstream::binary),
+    //ofs_(filename, std::ofstream::out | std::ofstream::trunc | std::ofstream::binary),
+    ofs_(filename, std::ofstream::out),
     writer_(&ofs_) {
+      //std::cout << "filename: " << filename << std::endl;
       // TODO appropriate support for mmap, right now we still use stream writer
-    }
+  }
   ScriptModuleSerializer(std::ostream* ofs) : ofs_(), writer_(ofs) {}
   void serialize(const script::Module& module) {
     torch::ModelDef model_def;
     convertToModel(module, &model_def);
     std::string output;
     model_def.SerializeToString(&output);
-    writer_.writeRecord(output.c_str(), output.size());
+    auto record_id = writer_.writeRecord(output.data(), output.size());
+    //std::cout << "===> last record_id: " << record_id << std::endl;
+    //std::cout << "===> serialized proto size: " << output.size() << std::endl;
+    //std::cout << model_def.DebugString() << std::endl;
+    writer_.writeEndOfFile();
+
   }
 
  private:
@@ -960,10 +978,22 @@ class ScriptModuleSerializer final {
     model_def->set_producer_name("pytorch");
     model_def->set_producer_version("1.0"); // TODO: set the producer version using appropriate function call
     // TODO set proto version
-    convertModule(module, "main-module", model_def->mutable_main_module());
+    std::string main_module_name = "";
+    collectParamsInfo(module, main_module_name);
+    convertModule(module, main_module_name, model_def->mutable_main_module());
+  }
+  void collectParamsInfo(const script::Module& module, const std::string& prefix) {
+    for (const auto& elem: module.get_parameters()) {
+      const script::NamedParameter& param = elem.value();
+      parameterMap_[param.slot()] = prefix + param.name;
+    }
+    for (const auto& elem: module.get_modules()) {
+      collectParamsInfo(*elem->module, prefix + "." + elem.key());
+    }
   }
   void convertModule(const script::Module& module, const std::string& name,
       torch::ModuleDef* module_def) {
+    std::cout << "module.name: " << name << std::endl;
     module_def->set_name(name);
     for (const auto& elem: module.get_parameters()) {
       torch::ParameterDef* param_def = module_def->add_parameters();
@@ -980,9 +1010,11 @@ class ScriptModuleSerializer final {
   }
   void convertParameter(const script::NamedParameter& param,
       torch::ParameterDef* param_def) {
+    std::cout << "param.name: " << param.name << "," << param.slot() << std::endl;
     param_def->set_name(param.name);
     param_def->set_is_buffer(param.is_buffer);
     param_def->set_require_gradient(param.slot()->requires_grad());
+    //parameterMap_[param.slot()] = param.name;
     convertTensor(*(param.slot()), param_def->mutable_tensor());
   }
   void convertTensor(const at::Tensor& tensor,
@@ -994,6 +1026,7 @@ class ScriptModuleSerializer final {
         atenTypeToTensorProtoType(tensor.type().scalarType()));
     tensor_proto->set_storage_type(caffe2::TensorProto_StorageType_EXTERNAL);
     caffe2::ExternalDataProto* external_data = tensor_proto->mutable_external_data();
+    std::cout << "strides: " << tensor.strides() << std::endl;
     for (auto s : tensor.strides()) {
       external_data->add_strides(s);
     }
@@ -1015,9 +1048,13 @@ class ScriptModuleSerializer final {
             /* stride = */ { 1 }).cpu();
         record_id = writer_.writeRecord(t.storage().data(),
             t.storage().size());
+        //std::cout << "===> record_id: " << record_id << std::endl;
       } else {
         record_id = writer_.writeRecord(tensor.storage().data(),
             tensor.storage().size());
+        std::cout << "storage size: " << tensor.storage().size() << std::endl;
+        std::cout << "record_id: " << record_id << std::endl;
+        //std::cout << "===> record_id: " << record_id << std::endl;
       }
       external_data->set_record_id(caffe2::to_string(record_id));
       storageMap_[key] = record_id;
@@ -1029,15 +1066,16 @@ class ScriptModuleSerializer final {
   void convertMethod(script::Method& method, torch::MethodDef* method_def) {
     // TODO encode the real torch script instead of ModelProto
     ::ONNX_NAMESPACE::ModelProto model_proto;
-    ModuleEncoder encoder(method, model_proto.mutable_graph()->add_node(), ofs_);
+    ModuleEncoder encoder(method, model_proto.mutable_graph()->add_node(),
+        &storageMap_, &parameterMap_, &writer_);
     std::string serialized_proto;
     model_proto.SerializeToString(&serialized_proto);
-    // NB: it should be fine to use torch_script for now
-    method_def->set_torch_script(serialized_proto);
+    method_def->set_onnx_proto(serialized_proto);
   }
-  std::unordered_map<void*, uint64_t> storageMap_; // storage_ptr => record_offset
+  std::unordered_map<const void*, uint64_t> storageMap_; // storage_ptr => record_offset
   std::ofstream ofs_;
   PyTorchStreamWriter writer_;
+  std::unordered_map<at::Tensor*, std::string> parameterMap_;
 };
 
 } // namespace
@@ -1083,6 +1121,7 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
 
 void ExportModule(const script::Module& module, std::ostream& out) {
   //ModuleEncoder(module, out);
+  //std::cout << "export from stream!" << std::endl;
   ScriptModuleSerializer serializer(&out);
   serializer.serialize(module);
 }
@@ -1090,6 +1129,7 @@ void ExportModule(const script::Module& module, std::ostream& out) {
 void ExportModule(const script::Module& module, const std::string &filename) {
   //std::ofstream out(filename, std::ios_base::binary);
   //ExportModule(module, out);
+  //std::cout << "export from filename!" << std::endl;
   ScriptModuleSerializer serializer(filename);
   serializer.serialize(module);
 }
