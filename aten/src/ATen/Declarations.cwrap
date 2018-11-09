@@ -1,14 +1,4 @@
 [[
-  name: _th_ndimension
-  cname: nDimension
-  cpu_half: True
-  device_guard: False
-  return: long
-  arguments:
-    - THTensor* self
-]]
-[[
-[[
   name: _th_set_
   cname: set
   cpu_half: True

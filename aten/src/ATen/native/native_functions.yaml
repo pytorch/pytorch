@@ -2364,10 +2364,6 @@
 
 # wrappers for legacy TH methods
 
-- func: ndimension(Tensor self) -> int64_t
-  variants: method
-  device_guard: false
-
 - func: data_ptr(Tensor self) -> void*
   variants: method
   device_guard: false

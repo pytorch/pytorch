@@ -262,7 +262,6 @@ public:
 
   //example
   //Tensor * add(Tensor & b);
-  int64_t _th_ndimension() const;
   Tensor & _th_set_(Storage source);
   Tensor & _th_set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
   Tensor & _th_set_(const Tensor & source);
