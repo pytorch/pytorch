@@ -916,6 +916,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     AT_ASSERTM(
         src.is_contiguous(),
         "Right now only copy of contiguous source Tensor is supported.");
+    CAFFE_ENFORCE_WITH_CALLER(
+        src.storage_initialized(),
+        "Cannot copy from an uninitialized Tensor");
 
     if ((void*)&src == (void*)this) {
       return;
@@ -925,10 +928,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // Uninitialized storages are guaranteed to be uniquely owned,
     // so we don't need to swap in this case.
     if (storage_initialized()) {
-      // If the dtype changed, we need to reallocate;
-      // If the src storage is uninitialized, we need to reallocate
-      // to preserve the unique storage invariant.
-      if (data_type_ != src.dtype() || !src.storage_initialized()) {
+      // If the dtype changed, we need to reallocate storage.
+      if (data_type_ != src.dtype()) {
         // NB: copy preserves device_type
         // This storage will get initialized by the mutable_data call below.
         storage_ = at::Storage(device_type(), src.dtype());
@@ -937,14 +938,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     data_type_ = src.dtype();
     Resize(src.sizes());
 
-    if (src.storage_initialized() && numel() > 0) {
-
-      // Only do an actual data copy if we actually have an initialized storage
-      // to copy from (NB: we have !storage_initialized() at this point if
-      // data_type_ != src.dtype() but src.storage_initialized(), since
-      // we're waiting for the raw_mutable_data call to actually initialize
-      // the storage)
-
+    if (numel() > 0) {
       if (data_type_.copy()) {
         AT_ASSERTM(
             device_type() == ::at::DeviceType::CPU,

@@ -35,7 +35,7 @@ def warn(string: str):
 
 auto _ntuple_ops = CodeTemplate(
 R"SCRIPT(
-def _${name}(x: BroadcastingList[${Scalar}, ${Length}]) -> List[${Scalar}]:
+def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
   return x
 )SCRIPT");
 

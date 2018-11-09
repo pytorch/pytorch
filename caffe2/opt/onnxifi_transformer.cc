@@ -11,10 +11,21 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/onnx/onnx_exporter.h"
 #include "caffe2/opt/backend_cutting.h"
+#include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
 
 namespace {
+
+const std::string kNetPos("net_pos");
+
+// TODO: We probably don't want use protobuf as annotation in the future.
+void AnnotateOpIndex(NetDef* net) {
+  int i = 0;
+  for (auto& op : *(net->mutable_op())) {
+    AddArgument(kNetPos, i++, &op);
+  }
+}
 
 // TODO(yinghai): Remove the awkward conversion between unordered_map and map
 std::unordered_map<std::string, TensorShape> InferShapes(
@@ -305,6 +316,8 @@ CaffeMap<std::string, TensorShape> OnnxifiTransformer::SsaRewriteAndMapNames(
     NetDef* pred_net,
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
   input_mapping_ = onnx::SsaRewrite(nullptr, pred_net);
+  // Annote the ops with net position
+  AnnotateOpIndex(pred_net);
   std::vector<std::string> external_inputs;
   for (const auto kv : input_mapping_) {
     reverse_input_mapping_.emplace(kv.second, kv.first);
@@ -333,7 +346,8 @@ void OnnxifiTransformer::Transform(
     Workspace* ws,
     NetDef* pred_net,
     const std::vector<std::string>& external_inputs,
-    const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
+    const std::unordered_map<std::string, TensorShape>& input_shape_hints,
+    const std::unordered_set<int>& blacklisted_ops) {
   CAFFE_ENFORCE(ws);
   auto shape_hints_ordered =
       SsaRewriteAndMapNames(ws, pred_net, input_shape_hints);
@@ -348,9 +362,17 @@ void OnnxifiTransformer::Transform(
   // TODO: choose backend id
   onnxifi_library* backend = lib_;
   onnxBackendID backend_id = backend_ids_[0];
-  auto supports = [&exporter, &shape_hints, backend, backend_id](
-                      const caffe2::OperatorDef& op) {
+  auto supports = [&exporter,
+                   &shape_hints,
+                   &blacklisted_ops,
+                   backend,
+                   backend_id](const caffe2::OperatorDef& op) {
     try {
+      int pos =
+          ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
+      if (blacklisted_ops.count(pos)) {
+        return false;
+      }
       const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
       // NB: this might not be a hard constraint as we can just export C2
       // domain specific ops to ONNX

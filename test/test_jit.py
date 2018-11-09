@@ -1131,7 +1131,7 @@ class TestJit(JitTestCase):
             return MyInplaceFn.apply(x)
 
         x = torch.randn(5, 5)
-        ge = torch._C.GraphExecutor(fn, (x,))
+        ge = torch._C.GraphExecutor(fn, (x,), lambda var: '')
         with self.assertRaisesRegex(RuntimeError, 'inplace MyInplaceFn'):
             ge(x)
 
@@ -1468,7 +1468,7 @@ class TestJit(JitTestCase):
             return a * b / (a - b) + b
         V = Variable
         a, b = V(torch.rand(1)), V(torch.rand(1))
-        ge = torch._C.GraphExecutor(foo, (a, b))
+        ge = torch._C.GraphExecutor(foo, (a, b), lambda var: '')
         a, b = V(torch.rand(1), requires_grad=True), V(
             torch.rand(1), requires_grad=True)
         r, = ge(a, b)
@@ -1720,6 +1720,20 @@ class TestJit(JitTestCase):
 
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
+
+    def test_trace_records_names(self):
+        def foo(bar, baz):
+            baz = bar + 3
+            quick_brown_fox = torch.neg(baz)
+            for i in range(20):
+                yeet = quick_brown_fox - 3.14
+            return yeet
+
+        traced = torch.jit.trace(foo, (torch.rand(3, 3), torch.rand(3, 3)))
+        graph_str = str(traced.graph)
+        assert 'bar' in graph_str
+        assert 'baz' in graph_str
+        assert 'quick_brown_fox' in graph_str
 
     def test_constant_prop_if_constant(self):
         @torch.jit.script
@@ -5375,7 +5389,7 @@ a")
     def test_type_annotations_repeated_list(self):
         @torch.jit.script
         def float_fn(x, y):
-            # type: (float, BroadcastingList[float, 3]) -> List[float]
+            # type: (float, BroadcastingList3[float]) -> List[float]
             return y
         self.assertEqual(float_fn(2.0, 1.0), float_fn(2.0, [1.0, 1.0, 1.0]))
         self.assertEqual(float_fn(2.0, 1.0), float_fn(2.0, (1.0, 1.0, 1.0)))
@@ -5387,7 +5401,7 @@ a")
 
         @torch.jit.script
         def int_fn(x):
-            # type: (BroadcastingList[int, 3]) -> List[int]
+            # type: (BroadcastingList3[int]) -> List[int]
             return x
         self.assertEqual(int_fn(1), int_fn([1, 1, 1]))
         self.assertEqual(int_fn(1), int_fn((1, 1, 1)))
@@ -5397,10 +5411,10 @@ a")
             print(int_fn(1))
             print(int_fn((1, 1, 1)))
 
-        with self.assertRaisesRegex(RuntimeError, "subscript of Broadcastable list must be positive integer"):
+        with self.assertRaisesRegex(RuntimeError, "expected number"):
             @torch.jit.script
             def fn(x):
-                # type: (BroadcastingList[int, x]) -> List[int]
+                # type: (BroadcastingListx[int]) -> List[int]
                 return x
 
         with self.assertRaisesRegex(RuntimeError, "Unknown type constructor"):
@@ -7389,8 +7403,8 @@ a")
             ('str', 'str'),
             ('int', 'int'),
             ('bool', 'bool'),
-            ('BroadcastingList[float, 3]', 'List[float]'),
-            ('BroadcastingList[int, 2]', 'List[int]'),
+            ('BroadcastingList3[float]', 'List[float]'),
+            ('BroadcastingList2[int]', 'List[int]'),
             ('List[int]', 'List[int]'),
             ('Optional[int]', 'Optional[int]'),
         ]
@@ -7486,7 +7500,7 @@ a")
         code = dedent('''
             from typing import Tuple, List, Optional
             from torch import Tensor
-            from torch.jit.annotations import BroadcastingList
+            from torch.jit.annotations import BroadcastingList2, BroadcastingList3
             import torch
             @torch.jit.script
             def foo(x : {input}, y : Tuple[Tensor, Tensor]) -> Tuple[{output}, {output}]:
@@ -7504,7 +7518,8 @@ a")
         code = dedent('''
             from typing import Tuple, List, Optional
             from torch import Tensor
-            from torch.jit.annotations import BroadcastingList
+            from torch.jit.annotations import BroadcastingList2, \\
+                BroadcastingList3
             import torch
             class FooModule(torch.jit.ScriptModule):
                 @torch.jit.script_method
@@ -7523,9 +7538,6 @@ a")
     @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_mypy_fn(self):
         code = dedent('''
-            from typing import Tuple, List, Optional
-            from torch import Tensor
-            from torch.jit.annotations import BroadcastingList
             import torch
             @torch.jit.script
             def foo(x, y):
@@ -7543,8 +7555,6 @@ a")
     @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_mypy_method(self):
         code = dedent('''
-            from typing import Tuple
-            from torch import Tensor
             import torch
             class FooModule(torch.jit.ScriptModule):
                 @torch.jit.script_method

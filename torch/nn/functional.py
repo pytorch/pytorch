@@ -534,7 +534,9 @@ Args:
 """)
 
 
+@torch._jit_internal.weak_script
 def adaptive_avg_pool2d(input, output_size):
+    # type: (Tensor, BroadcastingList2[int]) -> Tensor
     r"""
     Applies a 2D adaptive average pooling over an input signal composed of
     several input planes.
@@ -545,11 +547,13 @@ def adaptive_avg_pool2d(input, output_size):
         output_size: the target output size (single integer or
             double-integer tuple)
     """
-    output_size = _list_with_default(output_size, input.size())
-    return torch._C._nn.adaptive_avg_pool2d(input, output_size)
+    _output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
 
+@torch._jit_internal.weak_script
 def adaptive_avg_pool3d(input, output_size):
+    # type: (Tensor, BroadcastingList3[int]) -> Tensor
     r"""
     Applies a 3D adaptive average pooling over an input signal composed of
     several input planes.
@@ -560,8 +564,8 @@ def adaptive_avg_pool3d(input, output_size):
         output_size: the target output size (single integer or
             triple-integer tuple)
     """
-    output_size = _list_with_default(output_size, input.size())
-    return torch._C._nn.adaptive_avg_pool3d(input, output_size)
+    _output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_avg_pool3d(input, _output_size)
 
 
 # Activation functions
@@ -1465,7 +1469,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
             `T = input length`, and `N = batch size`.
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
-        targets: :math:`(N, S)` or `(sum(target_lenghts))`.
+        targets: :math:`(N, S)` or `(sum(target_lengths))`.
             Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
         input_lengths: :math:`(N)`.
             Lengths of the inputs (must each be :math:`\leq T`)
