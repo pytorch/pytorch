@@ -65,12 +65,6 @@ inline Tensor & Tensor::_th_set_(const Tensor & source) {
 inline Tensor & Tensor::_th_set_() {
     return type()._th_set_(*this);
 }
-inline bool Tensor::_th_is_contiguous() const {
-    return type()._th_is_contiguous(*this);
-}
-inline bool Tensor::_th_is_set_to(const Tensor & tensor) const {
-    return type()._th_is_set_to(*this, tensor);
-}
 inline Tensor & Tensor::_th_masked_fill_(const Tensor & mask, Scalar value) {
     return type()._th_masked_fill_(*this, mask, value);
 }
@@ -1003,9 +997,6 @@ inline Tensor & Tensor::set_(const Tensor & source) {
 }
 inline Tensor & Tensor::set_() {
     return type().set_(*this);
-}
-inline bool Tensor::is_contiguous() const {
-    return type().is_contiguous(*this);
 }
 inline bool Tensor::is_set_to(const Tensor & tensor) const {
     return type().is_set_to(*this, tensor);

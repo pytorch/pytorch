@@ -47,17 +47,10 @@
       - THTensor* value
 ]]
 [[
-  name: _th_is_contiguous
-  cname: isContiguous
-  cpu_half: True
-  device_guard: False
-  return: bool
-  arguments:
-    - THTensor* self
-]]
-[[
   name: _th_is_set_to
   cname: isSetTo
+  variants:
+    - function
   cpu_half: True
   device_guard: False
   return: bool
