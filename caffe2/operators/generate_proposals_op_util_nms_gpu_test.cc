@@ -20,7 +20,7 @@ TEST(UtilsNMSTest, TestNMSGPU) {
   std::vector<float> boxes = {10, 10, 50,  60,  11,  12,  48, 60,  8,   9,
                               40, 50, 100, 100, 150, 140, 99, 110, 155, 139};
 
-  std::vector<float> scores = {0.5, 0.7, 0.6, 0.9, 0.8};
+  std::vector<float> scores = {0.5f, 0.7f, 0.6f, 0.9f, 0.8f};
 
   std::vector<int> indices(scores.size());
   std::iota(indices.begin(), indices.end(), 0);
