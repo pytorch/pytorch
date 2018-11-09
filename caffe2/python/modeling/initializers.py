@@ -35,6 +35,23 @@ class Initializer(object):
         )
 
 
+class GivenBlobInitializer(Initializer):
+    def __init__(self, given_blob_name):
+        self.given_blob_name = given_blob_name
+        self.operator_name = "Copy"
+
+    def create_param(self, param_name, init_net, shape):
+        param = init_net.Copy(
+            self.given_blob_name,
+            param_name
+        )
+        return ParameterInfo(
+            param_id=None,
+            param=param,
+            shape=shape,
+        )
+
+
 class ExternalInitializer(object):
     '''
     This class is used in cases when the parameter should not be initialized by
