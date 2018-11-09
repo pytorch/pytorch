@@ -89,7 +89,7 @@ void _copy_same_type_transpose_(Tensor& self, const Tensor& src) {
       });
 }
 
-void _copy_same_type_(Tensor& self, const Tensor& src) {
+void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
   if (self.is_same(src)) {
     return;
   }
