@@ -34,6 +34,9 @@ public:
   void uncheckedSetDevice(Device d) const noexcept override {
     impl_->uncheckedSetDevice(d);
   }
+  Stream getStream(Device d) const noexcept override {
+    return impl_->getStream(d);
+  }
   Stream exchangeStream(Stream s) const noexcept override {
     return impl_->exchangeStream(s);
   }

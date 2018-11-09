@@ -23,7 +23,8 @@ public:
   /// and set the current stream on that device to the passed stream.
   explicit InlineStreamGuard(Stream stream)
     : InlineDeviceGuard<T>(stream.device())
-    , original_stream_(this->impl_.exchangeStream(stream))
+    , original_stream_of_original_device_(this->impl_.getStream(original_device()))
+    , original_stream_of_current_device_(this->impl_.exchangeStream(stream))
     , current_stream_(stream)
     {}
 
@@ -31,7 +32,8 @@ public:
   template <typename U=T, typename=typename std::enable_if<std::is_same<U, VirtualGuardImpl>::value>::type>
   explicit InlineStreamGuard(Stream stream, const DeviceGuardImplInterface* impl)
     : InlineDeviceGuard<T>(stream.device(), impl ? impl : getDeviceGuardImpl(stream.device_type()))
-    , original_stream_(this->impl_.exchangeStream(stream))
+    , original_stream_of_original_device_(this->impl_.getStream(original_device()))
+    , original_stream_of_current_device_(this->impl_.exchangeStream(stream))
     , current_stream_(stream)
     {}
 
@@ -45,7 +47,7 @@ public:
   InlineStreamGuard& operator=(InlineStreamGuard<T>&& other) = delete;
 
   ~InlineStreamGuard() {
-    this->impl_.exchangeStream(original_stream_);
+    this->impl_.exchangeStream(original_stream_of_current_device_);
   }
 
   /// Resets the currently set stream to the original stream and
@@ -63,14 +65,14 @@ public:
     // TODO: make a version that takes an impl argument.  Unfortunately,
     // that will require SFINAE because impl is only valid for the
     // VirtualGuardImpl specialization.
-    if (stream.device() == this->original_device()) {
+    if (stream.device() == this->current_device()) {
       this->impl_.exchangeStream(stream);
       current_stream_ = stream;
     } else {
       // Destruct and reconstruct the StreamGuard in-place
-      this->impl_.exchangeStream(original_stream_);
+      this->impl_.exchangeStream(original_stream_of_current_device_);
       this->reset_device(stream.device());
-      original_stream_ = this->impl_.exchangeStream(stream);
+      original_stream_of_current_device_ = this->impl_.exchangeStream(stream);
       current_stream_ = stream;
     }
   }
@@ -80,9 +82,13 @@ public:
   // The situation is somewhat clearer with reset_device, but it's still
   // a pretty weird thing to do, so haven't added this either.
 
-  /// Returns the stream that was set at the time the guard was constructed.
+  /// Returns the stream of the original device prior to this guard.  Subtly,
+  /// the stream returned here is the original stream of the *original*
+  /// device; i.e., it's the stream that your computation *would* have
+  /// been put on, if it hadn't been for this meddling stream guard.
+  /// This is usually what you want.
   Stream original_stream() const {
-    return original_stream_;
+    return original_stream_of_original_device_;
   }
 
   /// Returns the most recent stream that was set using this device guard,
@@ -104,7 +110,8 @@ public:
   }
 
 private:
-  Stream original_stream_;
+  Stream original_stream_of_original_device_; // what the user probably cares about
+  Stream original_stream_of_current_device_; // what we need to restore
   Stream current_stream_;
 };
 

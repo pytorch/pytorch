@@ -46,6 +46,9 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
   void uncheckedSetDevice(Device d) const noexcept override {
     current_device_ = d.index();
   }
+  Stream getStream(Device d) const noexcept override {
+    return Stream(d, current_streams_[d.index()]);
+  }
   Stream exchangeStream(Stream s) const noexcept override {
     auto old_id = current_streams_[s.device_index()];
     current_streams_[s.device_index()] = s.id();

@@ -69,6 +69,11 @@ struct C10_API DeviceGuardImplInterface {
   virtual void uncheckedSetDevice(Device) const noexcept = 0;
 
   /**
+   * Get the current stream for a given device.
+   */
+  virtual Stream getStream(Device) const noexcept = 0;
+
+  /**
    * Set a stream to be the thread local current stream for its device.
    * Return the previous stream for that device. You are NOT required
    * to set the current device to match the device of this stream.
