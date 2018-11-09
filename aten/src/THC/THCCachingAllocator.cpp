@@ -200,18 +200,24 @@ struct THCCachingAllocator
         if (err == cudaErrorMemoryAllocation) {
           cudaGetLastError();  // clear CUDA error
 
-          cudaDeviceProp prop;
-          AT_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+          size_t device_free;
+          size_t device_total;
+          AT_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
           const auto& stats = get_stats_for_device(device);
 
           // "total capacity": total global memory on GPU
           // "already allocated": memory allocated by the program using the
           //                      caching allocator
+          // "free": free memory as reported by the CUDA API
           // "cached": memory held by the allocator but not used by the program
           //
           // The "allocated" amount  does not include memory allocated outside
           // of the caching allocator, such as memory allocated by other programs
           // or memory held by the driver.
+          //
+          // The sum of "allocated" + "free" + "cached" may be less than the
+          // total capacity due to memory held by the driver and usage by other
+          // programs.
           //
           // Note that at this point cuda_malloc_retry has already returned all
           // possible "cached" memory to the driver. The only remaining "cached"
@@ -219,8 +225,9 @@ struct THCCachingAllocator
           AT_ERROR(
             "CUDA out of memory. Tried to allocate ", format_size(alloc_size),
             " (GPU ", device, "; ",
-            format_size(prop.totalGlobalMem), " total capacity; ",
+            format_size(device_total), " total capacity; ",
             format_size(stats.amount_allocated), " already allocated; ",
+            format_size(device_free), " free; ",
             format_size(stats.amount_cached - stats.amount_allocated), " cached)");
         } else {
           AT_CUDA_CHECK(err);
