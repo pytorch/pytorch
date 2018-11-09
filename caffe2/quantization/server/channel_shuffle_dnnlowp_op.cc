@@ -94,7 +94,7 @@ bool ChannelShuffleDNNLowPOp<T>::RunOnDeviceWithOrderNHWC() {
 #endif
     for (auto i = 0; i < X.numel(); i += C) {
       // Transpose each C = GxK matrix
-      fbgemm2::transpose_4rows(
+      fbgemm::transpose_4rows(
           K, (const std::uint8_t*)(X_data + i), (std::uint8_t*)(Y_data + i));
     }
   } else {

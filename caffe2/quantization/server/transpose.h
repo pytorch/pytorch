@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace fbgemm2 {
+namespace fbgemm {
 
 /**
  * Transpose 4xN matrix with unsigned 8-byte integers
@@ -10,4 +10,4 @@ namespace fbgemm2 {
  */
 void transpose_4rows(int N, const std::uint8_t* src, std::uint8_t* dst);
 
-} // namespace fbgemm2
+} // namespace fbgemm
