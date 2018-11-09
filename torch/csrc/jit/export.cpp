@@ -612,10 +612,8 @@ void MethodEncoder::EncodeMethod(
   // We store the schema string in the docstring.
   node_proto->set_doc_string(getExportableSchemaStringForMethod(method));
 
-  //std::cout << "method name: " << node_proto->name() << std::endl;
   // Store member_inputs of Method in input
   for (auto &member_input : method.params()) {
-    //std::cout << "method tensor: " << member_input << std::endl;
     auto it = parameter_map_->find(member_input);
     JIT_ASSERT(it != parameter_map_->end());
     node_proto->add_input(it->second);
@@ -871,10 +869,9 @@ class ScriptModuleSerializer final {
 
  public:
   ScriptModuleSerializer(const std::string& filename) :
-    //ofs_(filename, std::ofstream::out | std::ofstream::trunc | std::ofstream::binary),
-    ofs_(filename, std::ofstream::out),
+    ofs_(filename, std::ofstream::out | std::ofstream::trunc | std::ofstream::binary),
+    //ofs_(filename, std::ofstream::out),
     writer_(&ofs_) {
-      //std::cout << "filename: " << filename << std::endl;
       // TODO appropriate support for mmap, right now we still use stream writer
   }
   ScriptModuleSerializer(std::ostream* ofs) : ofs_(), writer_(ofs) {}
@@ -884,9 +881,6 @@ class ScriptModuleSerializer final {
     std::string output;
     model_def.SerializeToString(&output);
     auto record_id = writer_.writeRecord(output.data(), output.size());
-    //std::cout << "===> last record_id: " << record_id << std::endl;
-    //std::cout << "===> serialized proto size: " << output.size() << std::endl;
-    //std::cout << model_def.DebugString() << std::endl;
     writer_.writeEndOfFile();
 
   }
@@ -913,7 +907,6 @@ class ScriptModuleSerializer final {
   }
   void convertModule(const script::Module& module, const std::string& name,
       torch::ModuleDef* module_def) {
-    //std::cout << "module.name: " << name << std::endl;
     module_def->set_name(name);
     for (const auto& elem: module.get_parameters()) {
       torch::ParameterDef* param_def = module_def->add_parameters();
@@ -930,11 +923,9 @@ class ScriptModuleSerializer final {
   }
   void convertParameter(const script::NamedParameter& param,
       torch::ParameterDef* param_def) {
-    //std::cout << "param.name: " << param.name << "," << param.slot() << std::endl;
     param_def->set_name(param.name);
     param_def->set_is_buffer(param.is_buffer);
     param_def->set_require_gradient(param.slot()->requires_grad());
-    //parameterMap_[param.slot()] = param.name;
     convertTensor(*(param.slot()), param_def->mutable_tensor());
   }
   void convertTensor(const at::Tensor& tensor,
@@ -946,7 +937,6 @@ class ScriptModuleSerializer final {
         atenTypeToTensorProtoType(tensor.type().scalarType()));
     tensor_proto->set_storage_type(caffe2::TensorProto_StorageType_EXTERNAL);
     caffe2::ExternalDataProto* external_data = tensor_proto->mutable_external_data();
-    //std::cout << "strides: " << tensor.strides() << std::endl;
     for (auto s : tensor.strides()) {
       external_data->add_strides(s);
     }
