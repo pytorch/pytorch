@@ -22,7 +22,7 @@ void fc_op_cpu_impl(
     BaseContext* context) {
   constexpr bool TransposeWeight = true;
 
-  CAFFE_ENFORCE(b.ndim() == 1, b.ndim());
+  CAFFE_ENFORCE(b.dim() == 1, b.dim());
   // batch size
   const auto canonical_axis = X.canonical_axis_index(axis);
   const auto M = X.size_to_dim(canonical_axis);
@@ -35,11 +35,11 @@ void fc_op_cpu_impl(
     return c10::str(
         "Dimension mismatch: ",
         "X: ",
-        X.dims(),
+        X.sizes(),
         ", W: ",
-        W.dims(),
+        W.sizes(),
         ", b: ",
-        b.dims(),
+        b.sizes(),
         ", axis: ",
         axis,
         ", M: ",
@@ -51,20 +51,20 @@ void fc_op_cpu_impl(
   };
 
   // Error checking
-  CAFFE_ENFORCE(M == X.size() / K, dimErrorString());
-  CAFFE_ENFORCE(K == W.size() / N, dimErrorString());
+  CAFFE_ENFORCE(M == X.numel() / K, dimErrorString());
+  CAFFE_ENFORCE(K == W.numel() / N, dimErrorString());
   CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
-  CAFFE_ENFORCE(N == b.size(), dimErrorString());
+  CAFFE_ENFORCE(N == b.numel(), dimErrorString());
 
-  cache->Y_shape_cache_ = X.dims().vec();
+  cache->Y_shape_cache_ = X.sizes().vec();
   // This is an invariant of canonical_axis, so we can DCHECK.
   DCHECK_LE(canonical_axis + 1, cache->Y_shape_cache_.size());
   cache->Y_shape_cache_.resize(canonical_axis + 1);
   cache->Y_shape_cache_[canonical_axis] = N;
   Y->Resize(cache->Y_shape_cache_);
-  CAFFE_ENFORCE(M * N == Y->size(), dimErrorString());
+  CAFFE_ENFORCE(M * N == Y->numel(), dimErrorString());
 
-  if (X.size() == 0) {
+  if (X.numel() == 0) {
     // skip the rest of the computation if X is empty
     Y->template mutable_data<DataType>();
     return;
@@ -91,7 +91,7 @@ void fc_op_cpu_impl(
       static_cast<Context*>(context),
       math_type);
   // Add bias term
-  if (cache->bias_multiplier_.size() != M) {
+  if (cache->bias_multiplier_.numel() != M) {
     // If the helper bias multiplier is not M, reshape and fill it with one.
     cache->bias_multiplier_.Resize(M);
     caffe2::math::Set<DataType, Context>(

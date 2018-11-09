@@ -9,8 +9,8 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
       OutputSize(),
       "The number of tensors of the input and the output must be the same.");
   auto& weights = Input(0);
-  int batch_size = weights.dim(0);
-  int weights_dim = weights.dim(1);
+  int batch_size = weights.size(0);
+  int weights_dim = weights.size(1);
   auto* out_idx = Output(0);
 
   if (batch_size > 0 && weights_dim > 0) {
@@ -24,8 +24,8 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
     if (InputSize() == 2) {
       auto& values = Input(1);
       CAFFE_ENFORCE_EQ(
-          weights.dims(),
-          values.dims(),
+          weights.sizes(),
+          values.sizes(),
           "The sampling weights tensor and the sampling values tensor must have the same dimensions.");
       mat_values = values.template data<float>();
       auto* out_value = Output(1);

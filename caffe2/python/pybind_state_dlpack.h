@@ -36,28 +36,28 @@ class DLPackWrapper {
     tensor_context.device_type = *device_type_ptr;
     tensor_context.device_id = device_option.device_id();
 
-    if (tensor->size() <= 0) {
+    if (tensor->numel() <= 0) {
       tensor->Resize(0);
     }
-    if (tensor->meta().id() == TypeIdentifier::uninitialized()) {
+    if (tensor->dtype().id() == TypeIdentifier::uninitialized()) {
       // treat uninitialized tensor as float tensor
       tensor->template mutable_data<float>();
     }
-    CAFFE_ENFORCE_GT(tensor->ndim(), 0);
+    CAFFE_ENFORCE_GT(tensor->dim(), 0);
 
-    auto type_ptr = CaffeToDLType(tensor->meta());
+    auto type_ptr = CaffeToDLType(tensor->dtype());
     CAFFE_ENFORCE(
         type_ptr,
         "Tensor type is not supported in DLPack: ",
-        tensor->meta().name());
+        tensor->dtype().name());
     DLDataType tensor_type = *type_ptr;
 
     DLTensor dlTensor;
     dlTensor.data = const_cast<void*>(tensor->raw_data());
     dlTensor.ctx = tensor_context;
-    dlTensor.ndim = tensor->ndim();
+    dlTensor.ndim = tensor->dim();
     dlTensor.dtype = tensor_type;
-    dlTensor.shape = const_cast<int64_t*>(&(tensor->dims()[0]));
+    dlTensor.shape = const_cast<int64_t*>(&(tensor->sizes()[0]));
     dlTensor.strides = nullptr;
     dlTensor.byte_offset = 0;
 

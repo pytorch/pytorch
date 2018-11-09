@@ -7,30 +7,33 @@
 #include <memory>
 #include <mutex>
 #include <queue>
-#include <string>
 #include <stdexcept>
+#include <string>
 #include <thread>
 
 namespace thd {
 
-inline void assertSameSizeAndType(const at::Tensor& tensor1,
-                              const at::Tensor& tensor2,
-                              std::string prefix = std::string()) {
-  bool equal = tensor1.type().elementSizeInBytes() == tensor2.type().elementSizeInBytes() &&
-               tensor1.numel() == tensor2.numel() &&
-               tensor1.type() == tensor2.type();
+inline void assertSameSizeAndType(
+    const at::Tensor& tensor1,
+    const at::Tensor& tensor2,
+    std::string prefix = std::string()) {
+  bool equal = tensor1.type().elementSizeInBytes() ==
+          tensor2.type().elementSizeInBytes() &&
+      tensor1.numel() == tensor2.numel() && tensor1.type() == tensor2.type();
 
   if (!prefix.empty())
     prefix = prefix + ": ";
 
   if (!equal)
-    throw std::logic_error(prefix + "tensors are not equal in size or data type");
+    throw std::logic_error(
+        prefix + "tensors are not equal in size or data type");
 }
 
 struct QueueWorker {
-private:
+ private:
   struct Task {
-    Task(std::function<void ()>&& handler): _handler(handler), _completed(false) {}
+    Task(std::function<void()>&& handler)
+        : _handler(handler), _completed(false) {}
     Task(const Task&) = delete;
     Task& operator=(const Task&) = delete;
 
@@ -64,27 +67,31 @@ private:
       _validate();
     }
 
-  private:
+   private:
     void _validate() {
       if (_exception)
         std::rethrow_exception(_exception);
     }
 
-    std::function<void ()> _handler;
+    std::function<void()> _handler;
     std::atomic<bool> _completed;
     std::mutex _mutex;
     std::condition_variable _cond;
     std::exception_ptr _exception;
   };
 
-public:
+ public:
   struct Request {
     Request(std::shared_ptr<QueueWorker::Task> item) : _item(item) {}
 
-    void wait() { _item->wait(); }
-    bool isCompleted() { return _item->isCompleted(); }
+    void wait() {
+      _item->wait();
+    }
+    bool isCompleted() {
+      return _item->isCompleted();
+    }
 
-  private:
+   private:
     std::shared_ptr<QueueWorker::Task> _item;
   };
 
@@ -101,12 +108,12 @@ public:
   QueueWorker(const QueueWorker&) = delete;
   QueueWorker& operator=(const QueueWorker&) = delete;
 
-  Request push(std::function<void ()>&& f) {
+  Request push(std::function<void()>&& f) {
     auto item = _push(std::make_shared<Task>(std::move(f)));
     return Request(item);
   }
 
-private:
+ private:
   std::shared_ptr<Task> _pop() {
     std::unique_lock<std::mutex> ulock(_mutex);
     if (_queue.empty())
@@ -127,7 +134,6 @@ private:
     _cond.notify_one();
     return item;
   }
-
 
   void _runner() {
     while (true) {

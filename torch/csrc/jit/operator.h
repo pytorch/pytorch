@@ -20,9 +20,9 @@
 
 namespace torch { namespace jit {
 
-FunctionSchema parseSchema(const std::string& schema);
+TORCH_API FunctionSchema parseSchema(const std::string& schema);
 
-using OperationCreator = std::function<Operation(Node*)>;
+using OperationCreator = std::function<Operation(const Node*)>;
 
 struct TORCH_API Operator {
   Operator(FunctionSchema schema, OperationCreator op_creator)
@@ -50,7 +50,7 @@ struct TORCH_API Operator {
 
   bool matches(const Node* node) const;
 
-  Operation getOperation(Node* node = nullptr) const {
+  Operation getOperation(const Node* node = nullptr) const {
     if (op_) {
       return *op_;
     }
@@ -84,13 +84,13 @@ TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbo
 std::shared_ptr<Operator> findOperatorFor(const Node* node);
 const Operator& getOperatorFor(const Node* node);
 
-inline Operation getOperation(Node* node) {
+inline Operation getOperation(const Node* node) {
   // note: getOperatorFor ensures that getOperatorFor(node).matches(node) == true
   // so the call to selectVariant is always valid.
   return getOperatorFor(node).getOperation(node);
 }
 
-void registerOperator(Operator&& op);
+TORCH_API void registerOperator(Operator&& op);
 
 // XXX: this function is meant to be used with string literals only!
 Operator& sig(const char *signature_literal);

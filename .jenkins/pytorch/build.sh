@@ -7,15 +7,15 @@
 # (4) build with neither
 if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
   # TODO: move this to Docker
-  sudo apt-get update
-  sudo apt-get install -y --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
+  sudo apt-get -qq update
+  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
   # TODO: move this to Docker
-  sudo apt-get update
-  sudo apt-get install -y --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-  sudo apt-get install -y --no-install-recommends openssh-client openssh-server
+  sudo apt-get -qq update
+  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
+  sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
   sudo mkdir -p /var/run/sshd
 fi
 
@@ -40,7 +40,7 @@ echo "CMake version:"
 cmake --version
 
 # TODO: Don't run this...
-pip install -r requirements.txt || true
+pip install -q -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 
@@ -59,13 +59,20 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 
   python tools/amd_build/build_pytorch_amd.py
   python tools/amd_build/build_caffe2_amd.py
-  USE_ROCM=1 python setup.py install --user
+  # OPENCV is needed to enable ImageInput operator in caffe2 resnet5_trainer
+  # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
+  USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
   exit 0
 fi
 
 # TODO: Don't install this here
 if ! which conda; then
-  pip install mkl mkl-devel
+  pip install -q mkl mkl-devel
+  if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc7.2* ]] || [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc4.8* ]]; then
+    export USE_MKLDNN=1
+  else
+    export USE_MKLDNN=0
+  fi
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -104,7 +111,7 @@ git add -f build/bin
 if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
   pushd docs
   # TODO: Don't run this here
-  pip install -r requirements.txt || true
+  pip install -q -r requirements.txt || true
   LC_ALL=C make html
   popd
 fi

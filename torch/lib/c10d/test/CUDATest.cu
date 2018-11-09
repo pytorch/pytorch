@@ -1,6 +1,5 @@
 #include "CUDATest.hpp"
-
-#include <c10d/private/CUDAUtils.hpp>
+#include <ATen/cuda/Exceptions.h>
 
 namespace c10d {
 namespace test {
@@ -22,7 +21,7 @@ void cudaSleep(at::cuda::CUDAStream& stream, uint64_t clocks) {
 
 int cudaNumDevices() {
   int n = 0;
-  C10D_CUDA_CHECK(cudaGetDeviceCount(&n));
+  AT_CUDA_CHECK(cudaGetDeviceCount(&n));
   return n;
 }
 

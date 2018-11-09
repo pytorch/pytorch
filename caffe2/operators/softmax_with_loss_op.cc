@@ -167,19 +167,19 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   const float* weights = (InputSize() > 2 ? Input(2).data<float>() : nullptr);
 
   if (label_prob_mode_) {
-    CAFFE_ENFORCE_GE(T.ndim(), 2);
+    CAFFE_ENFORCE_GE(T.dim(), 2);
     CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
     CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), D);
   } else {
-    if (T.ndim() == canonical_axis) {
-      CAFFE_ENFORCE_EQ(T.size(), N);
+    if (T.dim() == canonical_axis) {
+      CAFFE_ENFORCE_EQ(T.numel(), N);
     } else {
       CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
       CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), 1);
     }
   }
 
-  if (sum_multiplier_.size() != D) {
+  if (sum_multiplier_.numel() != D) {
     sum_multiplier_.Resize(D);
     math::Set<float, CPUContext>(
         D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
@@ -273,12 +273,12 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   dX->ResizeLike(X);
 
   if (label_prob_mode_) {
-    CAFFE_ENFORCE_GE(T.ndim(), 2);
+    CAFFE_ENFORCE_GE(T.dim(), 2);
     CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
     CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), D);
   } else {
-    if (T.ndim() == canonical_axis) {
-      CAFFE_ENFORCE_EQ(T.size(), N);
+    if (T.dim() == canonical_axis) {
+      CAFFE_ENFORCE_EQ(T.numel(), N);
     } else {
       CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
       CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), 1);
@@ -291,7 +291,7 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   // Copy softmax probabilities into dX. All but the neuron
   // corresponding to the correct label has gradient equaling e(x_j)
   // which is the probability under softmax.
-  context_.CopyFromCPU<float>(P.size(), Pdata, dX_data);
+  context_.CopyFromCPU<float>(P.numel(), Pdata, dX_data);
 
   // Compute gradient for the matching labels.
   float total_weight = 0.0f;
@@ -343,7 +343,7 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   // Scale by d_avg_loss / N
   if (total_weight > 0) {
     math::Scale<float, float, CPUContext>(
-        dX->size(),
+        dX->numel(),
         scale_ / total_weight * d_avg_loss.data<float>()[0],
         dX->data<float>(),
         dX_data,

@@ -9,7 +9,7 @@
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/source_range.h"
 #include <torch/csrc/utils/memory.h>
-#include <locale.h>
+#include <clocale>
 
 namespace torch {
 namespace jit {
@@ -46,6 +46,7 @@ namespace script {
   _(TK_INFERRED, "inferred", "")                 \
   _(TK_ACCESS, "access", "")                     \
   _(TK_ASSIGN, "assign", "")                     \
+  _(TK_AUG_ASSIGN, "aug_assign", "")             \
   _(TK_ATTRIBUTE, "attribute", "")               \
   _(TK_IF, "if", "if")                           \
   _(TK_ELSE, "else", "else")                     \
@@ -53,6 +54,8 @@ namespace script {
   _(TK_WHILE, "while", "while")                  \
   _(TK_EXPR_STMT, "expression statement", "")    \
   _(TK_RETURN, "return", "return")               \
+  _(TK_IS, "is", "is")                           \
+  _(TK_ISNOT, "is not", "is not")                \
   _(TK_NE, "ne", "!=")                           \
   _(TK_EQ, "eq", "==")                           \
   _(TK_LE, "le", "<=")                           \
@@ -84,7 +87,12 @@ namespace script {
   _(TK_ARROW, "arrow", "->")                     \
   _(TK_DECL, "decl", "")                         \
   _(TK_SLICE_EXPR, "slice expr", "")             \
-  _(TK_TYPE_COMMENT, "type comment", "# type:")
+  _(TK_TYPE_COMMENT, "type comment", "# type:")  \
+  _(TK_RAISE, "raise", "raise")                  \
+  _(TK_ASSERT, "assert", "assert")               \
+  _(TK_DOTS, "dots", "...")                      \
+  _(TK_PASS, "pass", "pass")
+
 
 static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!";
 
@@ -149,11 +157,13 @@ struct SharedParserData {
   }
 #ifdef _WIN32
   double strtod_c(const char * str, char** end) {
+    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
     static _locale_t loc = _create_locale(LC_ALL, "C");
     return _strtod_l(str, end, loc);
   }
 #else
   double strtod_c(const char * str, char** end) {
+    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
     static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
     return strtod_l(str, end, loc);
   }
@@ -343,7 +353,7 @@ SharedParserData& sharedParserData();
 struct Token {
   int kind;
   SourceRange range;
-  Token(int kind, const SourceRange& range) : kind(kind), range(range) {}
+  Token(int kind, SourceRange range) : kind(kind), range(std::move(range)) {}
   std::string text() {
     return range.text();
   }

@@ -6,8 +6,8 @@ namespace caffe2 {
 template <class Context>
 bool WeightedMultiSamplingOp<Context>::RunOnDevice() {
   const auto& weight = Input(0);
-  CAFFE_ENFORCE_EQ(weight.ndim(), 1, "Input should be 1-D vector");
-  auto dims = weight.dims().vec();
+  CAFFE_ENFORCE_EQ(weight.dim(), 1, "Input should be 1-D vector");
+  auto dims = weight.sizes().vec();
   size_t data_size = weight.dim32(0);
   auto* indices = Output(0);
 
@@ -17,7 +17,7 @@ bool WeightedMultiSamplingOp<Context>::RunOnDevice() {
         !OperatorBase::HasArgument("num_samples"),
         "New shape is specified by the input blob, do not pass in "
         "the argument `num_samples`.");
-    num_samples = Input(1).size();
+    num_samples = Input(1).numel();
     indices->ResizeLike(Input(1));
   } else {
     indices->Resize(num_samples);

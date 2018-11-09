@@ -42,7 +42,7 @@ class TTContractionOp final : public Operator<Context> {
     const auto& B = Input(1);
     auto* C = Output(0);
 
-    CAFFE_ENFORCE(A.ndim() == 2, A.ndim());
+    CAFFE_ENFORCE(A.dim() == 2, A.dim());
 
     int64_t A_size = A.numel();
     int64_t B_size = B.numel();
@@ -111,8 +111,8 @@ class TTContractionGradientOp final : public Operator<Context> {
 
     int64_t dB_size = D_ * K_ * N_;
 
-    dA->Resize(A.dims());
-    dB->Resize(B.dims());
+    dA->Resize(A.sizes());
+    dB->Resize(B.sizes());
 
     int64_t B_stride = K_ * N_;
     int64_t G_stride = M_ * N_;

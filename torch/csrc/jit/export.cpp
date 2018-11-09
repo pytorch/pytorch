@@ -26,9 +26,9 @@ namespace onnx = ::ONNX_NAMESPACE;
 
 std::string getExportableSchemaStringForMethod(const script::Method& method) {
   const auto& schema = method.getSchema();
-  for (const auto& argument : schema.arguments) {
+  for (const auto& argument : schema.arguments()) {
     AT_CHECK(
-        !argument.default_value,
+        !argument.default_value(),
         "Default arguments in script graphs may currently not be exported.");
   }
   std::ostringstream stream;
@@ -371,7 +371,7 @@ class GraphEncoder: public EncoderBase {
   }
 
  private:
-  virtual void EncodeTensor(
+  void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
       const c10::optional<std::string> external_ref = {}) override;
@@ -450,15 +450,15 @@ class ModuleEncoder: public EncoderBase {
                     script::Method &method,
                     const std::string prefix);
 
-  virtual void EncodeTensor(
+  void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
       const c10::optional<std::string> external_ref = {}) override;
 
-  virtual void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
+  void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
                                            const Value* n) override;
 
-  virtual void EncodeValueInfo(onnx::GraphProto *graph_proto,
+  void EncodeValueInfo(onnx::GraphProto *graph_proto,
                                onnx::ValueInfoProto* v,
                                const Value* n) override;
 
@@ -482,7 +482,7 @@ ModuleEncoder::ModuleEncoder(
     const script::Module &module,
     std::ostream& out)
     : EncoderBase(onnx_torch::OperatorExportTypes::RAW, false),
-      stream_writer_(out) {
+      stream_writer_(&out) {
   model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
   EncodeModule(model_proto_.mutable_graph(), module);
 }
@@ -573,8 +573,6 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("StringType");
   } else if (kind == TypeKind::VarType) {
     type_proto->set_denotation("TypeVar:" + type->expect<VarType>()->name());
-  } else if (kind == TypeKind::WorldType) {
-    type_proto->set_denotation("WorldType");
   } else {
     throw std::runtime_error("unexpected type kind");
   }
@@ -603,11 +601,11 @@ void ModuleEncoder::EncodeParameters(
   // Encode each parameter as a initializer in the proto
   for (auto &parameter : module.get_parameters()) {
     auto tensor_proto = graph_proto->add_initializer();
-    EncodeParameter(tensor_proto, parameter.value, prefix);
+    EncodeParameter(tensor_proto, parameter.value(), prefix);
   }
 
   for (auto &submodule : module.get_modules()) {
-    EncodeParameters(graph_proto, *submodule.value.module, prefix + submodule.key + ".");
+    EncodeParameters(graph_proto, *submodule->module, prefix + submodule.key() + ".");
   }
 }
 
@@ -636,11 +634,11 @@ void ModuleEncoder::EncodeMethods(
   // Encode each parameter as a initializer in the proto
   for (auto &method : module.get_methods()) {
     auto node_proto = graph_proto->add_node();
-    EncodeMethod(node_proto, *method.value, prefix);
+    EncodeMethod(node_proto, *method.value(), prefix);
   }
 
   for (auto &submodule : module.get_modules()) {
-    EncodeMethods(graph_proto, *submodule.value.module, prefix + submodule.key + ".");
+    EncodeMethods(graph_proto, *submodule->module, prefix + submodule.key() + ".");
   }
 }
 
@@ -692,7 +690,7 @@ void ModuleEncoder::EncodeTensor(
       // NB: This new tensor is created to support cuda tensors.
       // Storages can be mutated when converting tensors from cuda to cpu,
       // and we need a cpu tensor to copy data from.
-      t = at::getType(tensor).tensor(
+      t = at::getType(tensor)._th_tensor(
           tensor.storage(),
           /* storageOffset = */ 0,
           /* size = */ { static_cast<int64_t>(tensor.storage().size()) },

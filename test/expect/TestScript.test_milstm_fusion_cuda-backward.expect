@@ -26,18 +26,18 @@ graph(%0 : Float(*, *)
       %cellgate : Float(*, *)
       %outgate : Float(*, *)
       %27 : Float(*, *)) {
-  %28 : Float(*, *) = prim::FusionGroup_0[device=0](%ingate, %forgetgate, %cellgate, %outgate, %17, %0, %27, %1)
+  %28 : Float(*, *) = prim::FusionGroup_0(%ingate, %forgetgate, %cellgate, %outgate, %17, %0, %27, %1)
   %29 : Float(*, *) = aten::mul(%28, %Uz)
   %30 : Float(*, *) = aten::mul(%28, %Wx)
-  %31 : Float(*, *) = prim::FusionGroup_1[device=0](%28, %22, %16)
-  %32 : Float(*, *), %33 : Float(*, *) = prim::FusionGroup_2[device=0](%14, %28, %15, %Wx, %Uz)
+  %31 : Float(*, *) = prim::FusionGroup_1(%28, %22, %16)
+  %32 : Float(*, *), %33 : Float(*, *) = prim::FusionGroup_2(%Wx, %14, %28, %Uz, %15)
   %34 : Float(*, *) = aten::t(%13)
   %35 : Float(*, *) = aten::mm(%34, %31)
   %36 : Float(*, *) = aten::t(%35)
   %37 : Float(*, *) = aten::t(%12)
-  %38 : Float(*, *) = aten::mm(%37, %32)
+  %38 : Float(*, *) = aten::mm(%37, %33)
   %39 : Float(*, *) = aten::t(%38)
-  return (%39, %36, %33, %30, %29, %28);
+  return (%39, %36, %32, %30, %29, %28);
 }
 with prim::FusionGroup_0 = graph(%0 : Float(*, *)
       %1 : Float(*, *)
@@ -91,16 +91,17 @@ with prim::FusionGroup_1 = graph(%0 : Float(*, *)
   %6 : Float(*, *) = aten::add(%3, %4, %5)
   return (%6);
 }
-with prim::FusionGroup_2 = graph(%0 : Float(*)
-      %1 : Float(*, *)
-      %2 : Float(*)
+with prim::FusionGroup_2 = graph(%0 : Float(*, *)
+      %1 : Float(*)
+      %2 : Float(*, *)
       %3 : Float(*, *)
-      %4 : Float(*, *)) {
-  %5 : Float(*, *) = aten::mul(%1, %4)
-  %6 : Float(*, *) = aten::mul(%5, %3)
-  %7 : Float(*, *) = aten::mul(%1, %2)
-  %8 : Float(*, *) = aten::mul(%5, %0)
+      %4 : Float(*)) {
+  %5 : Float(*, *) = aten::mul(%2, %4)
+  %6 : Float(*, *) = aten::mul(%2, %3)
+  %7 : Float(*, *) = aten::mul(%6, %1)
+  %8 : int = prim::Constant[value=1]()
   %9 : int = prim::Constant[value=1]()
-  %10 : Float(*, *) = aten::add(%7, %8, %9)
-  return (%10, %6);
+  %10 : Float(*, *) = aten::add(%5, %7, %9)
+  %11 : Float(*, *) = aten::mul(%6, %0)
+  return (%11, %10);
 }

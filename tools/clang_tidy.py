@@ -42,10 +42,12 @@ def run_shell_command(arguments):
     """Executes a shell command."""
     if VERBOSE:
         print(" ".join(arguments))
-    result = subprocess.run(arguments, stdout=subprocess.PIPE)
-    output = result.stdout.decode().strip()
-    if result.returncode != 0:
-        raise RuntimeError("Error executing {}: {}".format(" ".join(arguments), output))
+    try:
+        output = subprocess.check_output(arguments).decode().strip()
+    except subprocess.CalledProcessError:
+        _, error, _ = sys.exc_info()
+        error_output = error.output.decode().strip()
+        raise RuntimeError("Error executing {}: {}".format(" ".join(arguments), error_output))
 
     return output
 
