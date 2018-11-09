@@ -90,6 +90,13 @@ THD_DISTRIBUTED_TESTS_CONFIG = {
 SIGNALS_TO_NAMES_DICT = dict((getattr(signal, n), n) for n in dir(signal)
                              if n.startswith('SIG') and '_' not in n)
 
+CPP_EXTENSIONS_ERROR = """
+Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
+but it could not be found. Install ninja with `pip install ninja`
+or `conda install ninja`. Alternatively, disable C++ extensions test with
+`run_test.py --exclude cpp_extensions`.
+"""
+
 
 def print_to_stderr(message):
     print(message, file=sys.stderr)
@@ -140,10 +147,8 @@ def test_cpp_extensions(executable, test_module, test_directory, options):
     try:
         cpp_extension.verify_ninja_availability()
     except RuntimeError:
-        print(
-            'Ninja is not available. Skipping C++ extensions test. '
-            "Install ninja with 'pip install ninja' or 'conda install ninja'.")
-        return 0
+        print(CPP_EXTENSIONS_ERROR)
+        return 1
     return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
                         os.path.join(test_directory, 'cpp_extensions'))
     if return_code != 0:

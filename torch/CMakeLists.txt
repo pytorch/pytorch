@@ -193,7 +193,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/type.cpp
   ${TORCH_SRC_DIR}/csrc/torch.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
@@ -348,7 +347,6 @@ if(USE_CUDA)
     set(TORCH_CUDA_LIBRARIES
       ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
       ${CUDA_LIBRARIES})
-    set_target_properties(torch PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
     target_include_directories(torch PRIVATE "${NVTOOLEXT_HOME}/include")
   elseif(APPLE)
     set(TORCH_CUDA_LIBRARIES

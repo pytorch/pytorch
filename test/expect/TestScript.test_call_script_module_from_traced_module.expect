@@ -1,7 +1,7 @@
-graph(%0 : Double(3, 4)
+graph(%x : Double(3, 4)
       %1 : Double(4, 5)
       %2 : Double(5, 7)) {
-  %3 : Double(3, 5) = aten::mm(%0, %1), scope: TracedModule
+  %3 : Double(3, 5) = aten::mm(%x, %1), scope: TracedModule
   %4 : Double(*, *) = aten::mm(%3, %2), scope: TracedModule/ScriptMod[mod]
   %5 : Double() = prim::Constant[value={1}](), scope: TracedModule
   %6 : int = prim::Constant[value=1](), scope: TracedModule

@@ -1131,7 +1131,7 @@ class TestJit(JitTestCase):
             return MyInplaceFn.apply(x)
 
         x = torch.randn(5, 5)
-        ge = torch._C.GraphExecutor(fn, (x,))
+        ge = torch._C.GraphExecutor(fn, (x,), lambda var: '')
         with self.assertRaisesRegex(RuntimeError, 'inplace MyInplaceFn'):
             ge(x)
 
@@ -1468,7 +1468,7 @@ class TestJit(JitTestCase):
             return a * b / (a - b) + b
         V = Variable
         a, b = V(torch.rand(1)), V(torch.rand(1))
-        ge = torch._C.GraphExecutor(foo, (a, b))
+        ge = torch._C.GraphExecutor(foo, (a, b), lambda var: '')
         a, b = V(torch.rand(1), requires_grad=True), V(
             torch.rand(1), requires_grad=True)
         r, = ge(a, b)
@@ -1720,6 +1720,20 @@ class TestJit(JitTestCase):
 
         self.run_pass('constant_propagation', constant_prop.graph)
         self.assertExpected(canonical(constant_prop.graph))
+
+    def test_trace_records_names(self):
+        def foo(bar, baz):
+            baz = bar + 3
+            quick_brown_fox = torch.neg(baz)
+            for i in range(20):
+                yeet = quick_brown_fox - 3.14
+            return yeet
+
+        traced = torch.jit.trace(foo, (torch.rand(3, 3), torch.rand(3, 3)))
+        graph_str = str(traced.graph)
+        assert 'bar' in graph_str
+        assert 'baz' in graph_str
+        assert 'quick_brown_fox' in graph_str
 
     def test_constant_prop_if_constant(self):
         @torch.jit.script
@@ -3128,7 +3142,7 @@ a")
             c = 1
             return c.add(1)
         with self.assertRaisesRegex(RuntimeError, 'Cannot call methods on numbers'):
-                    torch.jit.script(func)
+            torch.jit.script(func)
 
     # testing implicit conversion of tensors to scalars to match function arguments
     def test_scalar_to_num_conversions(self):
@@ -5375,7 +5389,7 @@ a")
     def test_type_annotations_repeated_list(self):
         @torch.jit.script
         def float_fn(x, y):
-            # type: (float, BroadcastingList[float, 3]) -> List[float]
+            # type: (float, BroadcastingList3[float]) -> List[float]
             return y
         self.assertEqual(float_fn(2.0, 1.0), float_fn(2.0, [1.0, 1.0, 1.0]))
         self.assertEqual(float_fn(2.0, 1.0), float_fn(2.0, (1.0, 1.0, 1.0)))
@@ -5387,7 +5401,7 @@ a")
 
         @torch.jit.script
         def int_fn(x):
-            # type: (BroadcastingList[int, 3]) -> List[int]
+            # type: (BroadcastingList3[int]) -> List[int]
             return x
         self.assertEqual(int_fn(1), int_fn([1, 1, 1]))
         self.assertEqual(int_fn(1), int_fn((1, 1, 1)))
@@ -5397,10 +5411,10 @@ a")
             print(int_fn(1))
             print(int_fn((1, 1, 1)))
 
-        with self.assertRaisesRegex(RuntimeError, "subscript of Broadcastable list must be positive integer"):
+        with self.assertRaisesRegex(RuntimeError, "expected number"):
             @torch.jit.script
             def fn(x):
-                # type: (BroadcastingList[int, x]) -> List[int]
+                # type: (BroadcastingListx[int]) -> List[int]
                 return x
 
         with self.assertRaisesRegex(RuntimeError, "Unknown type constructor"):
@@ -6571,9 +6585,15 @@ a")
             cu = torch.jit.CompilationUnit('''
             def single_starred_lhs(x):
                 a = (x, x, x)
-                *b = a
+                *b, = a
                 return b
             ''')
+
+    def test_singleton_tuple_unpack(self):
+        def foo(a):
+            b, = (a,)
+            return b + 1
+        self.checkScript(foo, (torch.rand(3),))
 
     def test_multi_reduction(self):
         with self.assertRaisesRegex(
@@ -6592,7 +6612,7 @@ a")
                 return torch.unsqueeze(3, 4, 5, 6, 7, 8)
 
     def test_invalid_lhs_assignment(self):
-        with self.assertRaisesRegex(RuntimeError, 'lhs of assignment must be a variable or starred expression'):
+        with self.assertRaisesRegex(RuntimeError, 'unexpected expression'):
             cu = torch.jit.CompilationUnit('''
             def invalid_lhs_assignment(x):
                 x + 1 = x
@@ -6683,7 +6703,7 @@ a")
             SomeModule()
 
     def test_single_starred_expr_for_loop(self):
-        with self.assertRaisesRegex(RuntimeError, 'Starred unpacking is currently not supported for for loops'):
+        with self.assertRaisesRegex(RuntimeError, 'unexpected expression'):
             cu = torch.jit.CompilationUnit('''
             def test():
                 x = 0
@@ -7383,8 +7403,8 @@ a")
             ('str', 'str'),
             ('int', 'int'),
             ('bool', 'bool'),
-            ('BroadcastingList[float, 3]', 'List[float]'),
-            ('BroadcastingList[int, 2]', 'List[int]'),
+            ('BroadcastingList3[float]', 'List[float]'),
+            ('BroadcastingList2[int]', 'List[int]'),
             ('List[int]', 'List[int]'),
             ('Optional[int]', 'Optional[int]'),
         ]
@@ -7480,7 +7500,7 @@ a")
         code = dedent('''
             from typing import Tuple, List, Optional
             from torch import Tensor
-            from torch.jit.annotations import BroadcastingList
+            from torch.jit.annotations import BroadcastingList2, BroadcastingList3
             import torch
             @torch.jit.script
             def foo(x : {input}, y : Tuple[Tensor, Tensor]) -> Tuple[{output}, {output}]:
@@ -7498,7 +7518,8 @@ a")
         code = dedent('''
             from typing import Tuple, List, Optional
             from torch import Tensor
-            from torch.jit.annotations import BroadcastingList
+            from torch.jit.annotations import BroadcastingList2, \\
+                BroadcastingList3
             import torch
             class FooModule(torch.jit.ScriptModule):
                 @torch.jit.script_method
@@ -7517,9 +7538,6 @@ a")
     @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_mypy_fn(self):
         code = dedent('''
-            from typing import Tuple, List, Optional
-            from torch import Tensor
-            from torch.jit.annotations import BroadcastingList
             import torch
             @torch.jit.script
             def foo(x, y):
@@ -7537,8 +7555,6 @@ a")
     @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_mypy_method(self):
         code = dedent('''
-            from typing import Tuple
-            from torch import Tensor
             import torch
             class FooModule(torch.jit.ScriptModule):
                 @torch.jit.script_method
@@ -8237,6 +8253,48 @@ a")
 
         self.checkScript(foo, (True,))
 
+    def test_lhs_indexing(self):
+        def foo(a, b):
+            a = a.clone()
+            a[0] = b
+            return a
+        self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
+
+    def test_lhs_indexing_list(self):
+        def foo(a, b):
+            ls = [a]
+            ls[0] = b
+            return ls
+        self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
+
+    def test_lhs_indexing_increment(self):
+        def foo(a, b):
+            a[0] += b
+            return a
+        self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
+
+    def test_lhs_indexing_increment_list(self):
+        def foo(a, b):
+            a = a.clone()
+            ls = [a, b]
+            ls[0] += b
+            return ls
+        self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
+
+    def test_lhs_indexing_increment_list_prim(self):
+        def foo():
+            ls = [1, 2, 3]
+            ls[0] += 5
+            return ls
+        self.checkScript(foo, ())
+
+    def test_lhs_indexing_multi(self):
+        def foo(a, b):
+            a = a.clone()
+            foo, a[0], bar = (1, b, 3)
+            return foo, a, bar
+        self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -8846,7 +8904,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_adaptive_max_pool1d',
     'test_nn_adaptive_max_pool2d',
     'test_nn_adaptive_max_pool3d',
-    'test_nn_ctc_loss',
 
 
     # argument has custom behavior

@@ -259,7 +259,7 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
 
 static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking, bool copy) {
   AutoNoGIL no_gil;
-  return self.to(device, non_blocking, copy);
+  return self.to(self.options().device(device), non_blocking, copy);
 }
 
 static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) {
