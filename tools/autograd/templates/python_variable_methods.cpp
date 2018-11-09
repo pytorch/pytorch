@@ -259,6 +259,11 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
 
 static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking, bool copy) {
   AutoNoGIL no_gil;
+  // NOTE: this is where we record aten::to in the graph during tracing. However, the behavior of aten::to
+  // is different with respect to TensorOptions fields that are not present: aten::to inherits fields that
+  // are missing from the self argument while the tracer assumes that they should be populated with the
+  // default values (eg. float for scalar type). By explicitly copying over the tensor options here we fully
+  // specify all tensor options and thus record the proper trace
   return self.to(self.options().device(device), non_blocking, copy);
 }
 
