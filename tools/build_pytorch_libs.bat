@@ -204,6 +204,22 @@ goto:eof
 : libtorch-specific build functionality
 :build_caffe2
   @setlocal
+  : Note [Backslash munging on Windows]
+  : In CMake, Windows native backslashes are not well handled. 
+  : It will cause a warning as the following
+  :   CMake Warning (dev) at cmake (source_group):
+  :    Syntax error in cmake code at cmake
+  :    when parsing string
+  :      Header Files C:\include\cudnn.h
+  :    Invalid escape sequence \i
+  : which is said to become an error in the future.
+  : As an alternative, we should use forward slashes instead.
+  : Here those paths should be espaced before passing to CMake. 
+  set NVTOOLEXT_HOME=%NVTOOLEXT_HOME:\=/%
+  set CUDNN_INCLUDE_DIR=%CUDNN_INCLUDE_DIR:\=/%
+  set CUDNN_LIB_DIR=%CUDNN_LIB_DIR:\=/%
+  set CUDNN_LIBRARY=%CUDNN_LIBRARY:\=/%
+
   IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
   if not exist build mkdir build
   pushd build
