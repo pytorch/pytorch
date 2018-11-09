@@ -75,6 +75,7 @@ def print_stats(FunctionalModule_nums, nn_module):
                     ["{} Unsupported Operators:".format(len(unsupported)), unsupported]]:
         fun(info, l)
 
+
 def convert_tests(testcases, sets=1):
     print("Collect {} test cases from PyTorch.".format(len(testcases)))
     failed = 0
