@@ -70,6 +70,9 @@ def print_stats(FunctionalModule_nums, nn_module):
         for v in l:
             print(v)
 
+    # Fully Supported Ops: All related test cases of these ops have been exported
+    # Semi-Supported Ops: Part of related test cases of these ops have been exported
+    # Unsupported Ops: None of related test cases of these ops have been exported
     for info, l in [["{} Fully Supported Operators:".format(len(supported)), supported],
                     ["{} Semi-Supported Operators:".format(len(not_fully_supported)), not_fully_supported],
                     ["{} Unsupported Operators:".format(len(unsupported)), unsupported]]:
