@@ -335,9 +335,9 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
               B_qparams_[i]);
         }
 
-        Bq_packed_.emplace_back(new fbgemm2::PackBMatrix<int8_t>(
-            trans_b_ ? fbgemm2::matrix_op_t::Transpose
-                     : fbgemm2::matrix_op_t::NoTranspose,
+        Bq_packed_.emplace_back(new fbgemm::PackBMatrix<int8_t>(
+            trans_b_ ? fbgemm::matrix_op_t::Transpose
+                     : fbgemm::matrix_op_t::NoTranspose,
             K,
             N,
             B_quantized_temp.data(),
@@ -416,7 +416,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
   vector<T> A_temp, B_temp;
   if (!Bq_packed_.empty()) {
     // fast path
-    using namespace fbgemm2;
+    using namespace fbgemm;
 
     const T* A_quantized = nullptr;
     if (A.template IsType<T>() || !dequantize_output_) {
