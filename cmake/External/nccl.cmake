@@ -1,8 +1,12 @@
 if (NOT __NCCL_INCLUDED)
   set(__NCCL_INCLUDED TRUE)
 
-  # try the system-wide nccl first
-  find_package(NCCL)
+  # If USE_SYSTEM_NCCL, try the system-wide nccl first
+  if (USE_SYSTEM_NCCL)
+      find_package(NCCL)
+  else()
+      set(NCCL_FOUND FALSE)
+  endif()
   if (NCCL_FOUND)
       add_library(__caffe2_nccl INTERFACE)
       target_link_libraries(__caffe2_nccl INTERFACE ${NCCL_LIBRARIES})
