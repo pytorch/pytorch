@@ -6,6 +6,7 @@
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <ATen/core/blob.h>
 #include <ATen/core/intrusive_ptr.h>
+#include <ATen/core/thread_pool.h>
 
 #include <type_traits>
 
@@ -443,19 +444,59 @@ struct CAFFE2_API IValue final {
 
 // Future
 struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
-  explicit Future(IValue result_) : result(result_), ready(true) {}
+ private:
+  c10::intrusive_ptr<Future> intrusive_from_this() {
+    c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
+                                           // from a raw `this` pointer
+                                           // so we need to bump the refcount
+                                           // to account for this ownership
+    return c10::intrusive_ptr<Future>::reclaim(this);
+  }
 
-  IValue get() const {
-    AT_ASSERT(ready);
-    return result;
+ public:
+  void wait() {
+    if (completed()) {
+      return;
+    }
+    c10::global_work_queue.workOnTasksUntilCompleted(intrusive_from_this());
+    AT_ASSERT(completed());
+  }
+
+  void markCompleted(IValue value) {
+    value_ = std::move(value);
+    completed_ = true;
+    for (auto& callback : callbacks) {
+      callback();
+    }
+    callbacks.clear();
+  }
+
+  // Get the result of the current future.
+  IValue value() {
+    AT_ASSERT(completed());
+    return value_;
+  }
+
+  void addCallback(std::function<void(void)> callback) {
+    if (completed()) {
+      callback();
+    }
+    callbacks.push_back(callback);
+  }
+
+  // Check if the current future has completed
+  bool completed() {
+    return completed_;
   }
 
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const Future& v);
 
-  IValue result;
-  bool ready = false;
+ private:
+  IValue value_; // when finished the value
+  bool completed_ = false; // is this future complete
+  std::vector<std::function<void(void)>> callbacks;
 };
 
 #undef TORCH_FORALL_TAGS
