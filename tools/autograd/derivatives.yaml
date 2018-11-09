@@ -580,8 +580,8 @@
   self: not_implemented("potri")
 
 - name: potrs(Tensor self, Tensor input2, bool upper)
-  self: not_implemented("potri")
-  input2: not_implemented("potri")
+  self: not_implemented("potrs")
+  input2: not_implemented("potrs")
 
 - name: pow(Tensor self, Scalar exponent)
   self: pow_backward(grad, self, exponent)

@@ -491,14 +491,6 @@ Tensor cholesky(const Tensor & self, bool upper) {
   return at::_th_potrf(self, upper);
 }
 
-Tensor & potrs_out(Tensor & result, const Tensor & self, const Tensor & input2, bool upper) {
-  return at::_th_potrs_out(result, self, input2, upper);
-}
-
-Tensor potrs(const Tensor & self, const Tensor & input2, bool upper) {
-  return at::_th_potrs(self, input2, upper);
-}
-
 Tensor & potri_out(Tensor & result, const Tensor & self, bool upper) {
   return at::_th_potri_out(result, self, upper);
 }
