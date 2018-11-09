@@ -914,6 +914,7 @@
 - func: inverse_out(Tensor result, Tensor self) -> Tensor
 
 - func: _inverse_helper(Tensor self) -> Tensor
+  variants: function
   dispatch:
     CPU: _inverse_helper_cpu
     CUDA: _inverse_helper_cuda
@@ -2906,6 +2907,12 @@
 - func: potrs(Tensor self, Tensor input2, bool upper=true) -> Tensor
   variants: method, function
   device_guard: false
+
+- func: _potrs_helper(Tensor self, Tensor A, bool upper) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _potrs_helper_cpu
+    CUDA: _potrs_helper_cuda
 
 - func: potri_out(Tensor result, Tensor self, bool upper=true) -> Tensor
   device_guard: false
