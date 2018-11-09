@@ -526,7 +526,7 @@ if (BUILD_PYTHON)
   if (WIN32)
     target_link_libraries(caffe2_pybind11_state ${PYTHON_LIBRARIES})
     target_link_libraries(caffe2_pybind11_state onnx_proto)
-  endif(WIN32)
+  endif(WIN32) 
 
   # Install caffe2_pybind11_state(_gpu|hip) in site-packages/caffe2/python,
   # so it needs an rpath to find libcaffe2
@@ -542,7 +542,7 @@ if (BUILD_PYTHON)
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "" DEBUG_POSTFIX "")
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     if (APPLE)
-      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
+      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "-undefined dynamic_lookup") 
     endif()
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE ${Caffe2_CPU_INCLUDE})
