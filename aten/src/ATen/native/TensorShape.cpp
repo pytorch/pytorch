@@ -681,7 +681,7 @@ static Tensor unsqueeze_sparse(Tensor const &self, int64_t dim /* should already
   if (dim <= sparse_dim) {
     auto new_indices = native::cat({
       indices.narrow(0, 0, dim),
-      native::zeros({1, indices.size(1)}, kLong),
+      native::zeros({1, indices.size(1)}, indices.options().dtype(kLong)),
       indices.narrow(0, dim, indices.size(0) - dim)
     });
     return native::sparse_coo_tensor(new_indices, self._values(), sizes, self.options());
