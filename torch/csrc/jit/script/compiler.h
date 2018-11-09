@@ -12,11 +12,6 @@ namespace torch {
 namespace jit {
 namespace script {
 
-struct CallsiteDescriptor {
-  size_t n_outputs;
-  bool allow_varargs;
-};
-
 static inline std::vector<Value*> toValues(Graph& g, at::ArrayRef<NamedValue> nvs) {
   return fmap(nvs, [&](const NamedValue& v) {
     return v.value(g);
@@ -188,8 +183,6 @@ TORCH_API void defineMethodsInModule(Module & m, const std::string& source, Reso
 // a SimpleValue, otherwise pack all the values into a Tuple.
 TORCH_API Value* packOutputs(Graph& g, at::ArrayRef<Value*> values);
 TORCH_API std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
-TORCH_API void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what);
-TORCH_API void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values);
 
 // defines how a method obtained from a module behaves in script
 struct MethodValue : public SugaredValue {
