@@ -2,6 +2,8 @@
 
 #include <c10/detail/DeviceGuardImplInterface.h>
 
+#include <array>
+
 namespace c10 {
 namespace detail {
 

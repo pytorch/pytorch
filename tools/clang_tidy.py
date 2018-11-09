@@ -42,12 +42,10 @@ def run_shell_command(arguments):
     """Executes a shell command."""
     if VERBOSE:
         print(" ".join(arguments))
-    try:
-        output = subprocess.check_output(arguments).decode().strip()
-    except subprocess.CalledProcessError:
-        raise RuntimeError("Error executing {}: {}".format(" ".join(arguments), output))
+    p = subprocess.Popen(arguments, stdout=subprocess.PIPE)
+    output, _ = p.communicate()
 
-    return output
+    return output.decode().strip()
 
 
 def split_negative_from_positive_patterns(patterns):
