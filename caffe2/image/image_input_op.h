@@ -83,6 +83,7 @@ class ImageInputOp final
   void DecodeAndTransposeOnly(
       const std::string& value, uint8_t *image_data, int item_id,
       const int channels, std::size_t thread_index);
+  bool ApplyTransformOnGPU(const std::vector<std::int64_t>& dims, const c10::Device& type);
 
   unique_ptr<db::DBReader> owned_reader_;
   const db::DBReader* reader_;
@@ -1266,23 +1267,11 @@ bool ImageInputOp<Context>::CopyPrefetched() {
       // data comes in as NHWC
       const int N = X.dim32(0), C = X.dim32(3), H = X.dim32(1), W = X.dim32(2);
       // data goes out as NCHW
-      auto dims = std::vector<int64_t>{N, C, H, W};
-      // GPU transform kernel allows explicitly setting output type
-      if (output_type_ == TensorProto_DataType_FLOAT) {
-        auto* image_output = OperatorBase::OutputTensor(
-            0, dims, at::dtype<float>().device(type));
-        TransformOnGPU<uint8_t,float,Context>(prefetched_image_on_device_,
-                                              image_output, mean_gpu_,
-                                              std_gpu_, &context_);
-      } else if (output_type_ == TensorProto_DataType_FLOAT16) {
-        auto* image_output = OperatorBase::OutputTensor(
-            0, dims, at::dtype<at::Half>().device(type));
-        TransformOnGPU<uint8_t,at::Half,Context>(prefetched_image_on_device_,
-                                                image_output, mean_gpu_,
-                                                std_gpu_, &context_);
-      }  else {
-        return false;
+      auto dims = std::vector<int64_t>{ N, C, H, W };
+      if (!ApplyTransformOnGPU(dims, type)) {
+          return false;
       }
+
     } else {
       OperatorBase::OutputTensorCopyFrom(
           0, type, prefetched_image_on_device_, &context_);
