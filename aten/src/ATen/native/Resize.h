@@ -9,16 +9,28 @@ namespace at { namespace native {
 // They are not in TH/THTensor.cpp because the at namespace is easier
 // to benchmark than TH; I can't get gbenchmark to call fns from THTensor.cpp
 
+static inline int64_t computeStorageSize(
+    IntList sizes, IntList strides, int64_t storage_offset) {
+  int64_t result = 1;
+  for (size_t dim = 0; dim < sizes.size(); ++dim) {
+    // NB: (a tensor with arbitrary 0 dim)'s storage_size is 0.
+    if (sizes[dim] == 0) {
+      return 0;
+    }
+    result += strides[dim] * (sizes[dim] - 1);
+  }
+  return result + storage_offset;
+}
+
 static inline void maybe_resize_storage_cpu(TensorImpl* self, int64_t new_size) {
-  if (new_size + self->storage_offset() > 0) {
-    if (!THTensor_getStoragePtr(self)) {
-      THTensor_stealAndSetStoragePtr(self, THStorage_new(self->dtype()));
-    }
-    if (new_size + self->storage_offset() > self->storage().numel()) {
-      THStorage_resize(
-          THTensor_getStoragePtr(self),
-          new_size + self->storage_offset());
-    }
+  if (new_size == 0) {
+    return;
+  }
+  if (!THTensor_getStoragePtr(self)) {
+    THTensor_stealAndSetStoragePtr(self, THStorage_new(self->dtype()));
+  }
+  if (new_size > self->storage().numel()) {
+    THStorage_resize(THTensor_getStoragePtr(self), new_size);
   }
 }
 
@@ -30,33 +42,18 @@ inline TensorImpl* resize_impl_cpu_(
     return self;
   }
 
+  int64_t storage_offset = self->storage_offset();
   int64_t storage_size = 1;
   if (stride) {
     self->set_sizes_and_strides(size, *stride);
-    // NB: storage size can be different from numel.
-    for (size_t dim = 0; dim < size.size(); ++dim) {
-      // FIXME: Don't rely on storage_size being negative because this
-      // may not be true for some edge cases.
-      storage_size += (size[dim] - 1) * stride.value()[dim];
-    }
+    storage_size = computeStorageSize(size, *stride, storage_offset);
   } else {
     self->set_sizes_contiguous(size);
-    storage_size = self->numel();
+    storage_size = self->numel() + storage_offset;
   }
   maybe_resize_storage_cpu(self, storage_size);
 
   return self;
-}
-
-static inline int64_t computeStorageSize(IntList sizes, IntList strides) {
-  int64_t storage_size = 1;
-  for (size_t dim = 0; dim < sizes.size(); ++dim) {
-    if (sizes[dim] == 0) {
-      return 0;
-    }
-    storage_size += strides[dim] * (sizes[dim] - 1);
-  }
-  return storage_size;
 }
 
 static inline void checkInBoundsForStorage(
@@ -64,17 +61,17 @@ static inline void checkInBoundsForStorage(
     IntList stride,
     int64_t storage_offset,
     const Storage& new_storage) {
-  int64_t storage_size = computeStorageSize(size, stride);
+  int64_t storage_size = computeStorageSize(size, stride, storage_offset);
   if (storage_size == 0) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
   }
   int64_t new_storage_size = new_storage.numel();
   AT_CHECK(
-      storage_offset + storage_size <= new_storage_size,
+      storage_size <= new_storage_size,
       "setStorage: sizes ", size, ", strides ", stride, ","
       " and storage offset ", storage_offset,
-      " requiring a storage size of ", storage_size + storage_offset,
+      " requiring a storage size of ", storage_size,
       " are out of bounds for storage with numel ", new_storage_size);
 }
 
