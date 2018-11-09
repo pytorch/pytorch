@@ -195,7 +195,7 @@ private:
     size_t num_inputs = method.num_inputs();
     for(size_t i = 0; i < num_inputs; ++i) {
       const Value* v = g.inputs().at(i);
-      std::string name = v->hasUniqueName() ? v->uniqueName() : ("argument_"  + std::to_string(i));
+      std::string name = v->hasUniqueName() ? v->uniqueNameBase() : ("argument_"  + std::to_string(i));
       args.emplace_back(std::move(name), unshapedType(g.inputs()[i]->type()));
     }
     for(size_t i = 0; i < g.outputs().size(); ++i) {

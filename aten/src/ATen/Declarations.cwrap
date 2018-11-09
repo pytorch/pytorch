@@ -1,14 +1,4 @@
 [[
-  name: _th_ndimension
-  cname: nDimension
-  cpu_half: True
-  device_guard: False
-  return: long
-  arguments:
-    - THTensor* self
-]]
-[[
-[[
   name: _th_set_
   cname: set
   cpu_half: True
@@ -141,6 +131,8 @@
 [[
   name: _th_view
   cname: newView
+  variants:
+    - function
   device_guard: False
   return: THTensor*
   arguments:
@@ -247,6 +239,8 @@
 [[
   name: _th_unfold
   cname: unfold
+  variants:
+    - function
   cpu_half: True
   device_guard: False
   return: argument 0

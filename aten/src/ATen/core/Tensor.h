@@ -262,7 +262,6 @@ public:
 
   //example
   //Tensor * add(Tensor & b);
-  int64_t _th_ndimension() const;
   Tensor & _th_set_(Storage source);
   Tensor & _th_set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
   Tensor & _th_set_(const Tensor & source);
@@ -274,14 +273,12 @@ public:
   Tensor & _th_masked_scatter_(const Tensor & mask, const Tensor & source);
   Tensor _th_masked_select(const Tensor & mask) const;
   Tensor _th_nonzero() const;
-  Tensor _th_view(IntList size) const;
   Tensor _th_index_select(int64_t dim, const Tensor & index) const;
   Tensor _th_take(const Tensor & index) const;
   Tensor & _th_put_(const Tensor & index, const Tensor & source, bool accumulate=false);
   Tensor & _th_index_add_(int64_t dim, const Tensor & index, const Tensor & source);
   Tensor & _th_index_fill_(int64_t dim, const Tensor & index, Scalar value);
   Tensor & _th_index_fill_(int64_t dim, const Tensor & index, const Tensor & value);
-  Tensor _th_unfold(int64_t dimension, int64_t size, int64_t step) const;
   Tensor & _th_scatter_(int64_t dim, const Tensor & index, const Tensor & src);
   Tensor & _th_scatter_(int64_t dim, const Tensor & index, Scalar value);
   Tensor & _th_scatter_add_(int64_t dim, const Tensor & index, const Tensor & src);
@@ -610,7 +607,7 @@ public:
   Tensor transpose(int64_t dim0, int64_t dim1) const;
   Tensor & transpose_(int64_t dim0, int64_t dim1);
   Tensor flip(IntList dims) const;
-  Tensor roll(IntList shifts, IntList dims) const;
+  Tensor roll(IntList shifts, IntList dims={}) const;
   Tensor rot90(int64_t k=1, IntList dims={0,1}) const;
   Tensor trunc() const;
   Tensor & trunc_();
