@@ -678,7 +678,7 @@ class TestSparse(TestCase):
     @skipIfRocm
     def test_cat(self):
         # shapes: list of tuples (sparse_dims, nnz, sizes)
-        def test_shapes(shapes, dim=None, fail_message=None):
+        def test_shapes(shapes, dim, fail_message=None):
             inputs = [self._gen_sparse(shape[0], shape[1], shape[2])[0]
                       for shape in shapes]
             if fail_message:
