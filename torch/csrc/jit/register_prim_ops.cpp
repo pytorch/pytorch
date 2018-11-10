@@ -212,7 +212,7 @@ RegisterOperators reg({
         prim::Undefined,
         [](const Node* node) {
           return [](Stack& stack) {
-            stack.push_back(at::Tensor());
+            stack.emplace_back(at::Tensor());
             return 0;
           };
         }),
@@ -220,7 +220,7 @@ RegisterOperators reg({
       prim::None,
       [](const Node* node) {
         return [](Stack& stack) {
-          stack.push_back(IValue());
+          stack.emplace_back(IValue());
           return 0;
         };
       }),
@@ -302,7 +302,7 @@ RegisterOperators reg({
             for (size_t i = 0; i < sizes.size(); ++i) {
               accessor[i] = sizes[i];
             }
-            stack.push_back(sizes_tensor);
+            stack.emplace_back(sizes_tensor);
             return 0;
           };
         }),
@@ -320,7 +320,7 @@ RegisterOperators reg({
               }
             }
             drop(stack, num_inputs);
-            stack.push_back(result);
+            stack.emplace_back(result);
             return 0;
           };
         }),
@@ -332,11 +332,11 @@ RegisterOperators reg({
             at::Tensor a, b;
             pop(stack, a, b);
             if (!a.defined())
-              stack.push_back(b);
+              stack.emplace_back(b);
             else if (!b.defined())
-              stack.push_back(a);
+              stack.emplace_back(a);
             else
-              stack.push_back(a + b);
+              stack.emplace_back(a + b);
             return 0;
           };
         }),
