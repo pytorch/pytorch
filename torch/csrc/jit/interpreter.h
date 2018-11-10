@@ -37,7 +37,7 @@ struct TORCH_API Code {
   explicit operator bool() const {
     return pImpl != nullptr;
   }
-
+  static bool debug=false;
 private:
   std::shared_ptr<CodeImpl> pImpl;
   friend struct InterpreterStateImpl;

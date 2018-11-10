@@ -659,9 +659,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     size_t last = instructions.size();
 
     while (pc < last) {
-        // std::cout << "executing " << pc << ": ";
-        // function->dumpInstruction(std::cout, pc);
-        // std::cout << "\n";
+        if(Code::debug)
+        {
+            std::cout << "executing " << pc << ": ";
+            function->dumpInstruction(std::cout, pc);
+            std::cout << "\n";
+        }
         auto & inst = instructions[pc];
         try {
           loadTensorsFromRegisters(inst.inputs, stack);
@@ -669,7 +672,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           for (int i = inst.outputs.size - 1; i >= 0; --i) {
             int reg = get(inst.outputs, i);
             registers[reg] = pop(stack);
-            // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
+            if(Code::debug)
+            {
+                std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
+            }
           }
           pc = new_pc;
         } catch (Suspend& e) {
@@ -752,7 +758,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   void loadTensorsFromRegisters(const UseList & uses, Stack & stack) {
     for(int i = 0; i < uses.values.size; i++) {
       int reg = get(uses.values,i);
-      // std::cout << "push reg[" << reg << "];\n" << registers[reg] << "\n\n";
+      if(Code::debug)
+      {
+        std::cout << "push reg[" << reg << "];\n" << registers[reg] << "\n\n";
+      }
       if(get(uses.free_flags,i)) {
         stack.push_back(std::move(registers[reg]));
       } else {
