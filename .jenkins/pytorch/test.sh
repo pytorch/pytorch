@@ -3,10 +3,6 @@
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-test"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-if [[ "${BUILD_ENVIRONMENT}" =~ devtoolset([0-9]) ]]; then
-  source scl_source enable "devtoolset-${BASH_REMATCH[1]}"
-fi
-
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.

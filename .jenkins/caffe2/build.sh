@@ -2,10 +2,6 @@
 
 set -ex
 
-if [[ "${BUILD_ENVIRONMENT}" =~ devtoolset([0-9]) ]]; then
-  source scl_source enable "devtoolset-${BASH_REMATCH[1]}"
-fi
-
 pip install --user --no-cache-dir hypothesis==3.59.0
 
 # The INSTALL_PREFIX here must match up with test.sh

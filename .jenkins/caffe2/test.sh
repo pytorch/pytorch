@@ -2,10 +2,6 @@
 
 set -ex
 
-if [[ "${BUILD_ENVIRONMENT}" =~ devtoolset([0-9]) ]]; then
-  source scl_source enable "devtoolset-${BASH_REMATCH[1]}"
-fi
-
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT_DIR=$(cd "$LOCAL_DIR"/../.. && pwd)
 TEST_DIR=$ROOT_DIR/caffe2_tests

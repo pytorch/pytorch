@@ -11,6 +11,7 @@ ARG DEVTOOLSET_VERSION
 ADD ./install_devtoolset.sh install_devtoolset.sh
 RUN bash ./install_devtoolset.sh
 RUN rm install_devtoolset.sh
+ENV BASH_ENV "/etc/profile"
 
 # Install rocm
 ARG ROCM_VERSION
