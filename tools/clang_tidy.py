@@ -49,7 +49,7 @@ def run_shell_command(arguments):
         error_output = error.output.decode().strip()
         raise RuntimeError("Error executing {}: {}".format(" ".join(arguments), error_output))
 
-    return output.decode().strip()
+    return output
 
 
 def split_negative_from_positive_patterns(patterns):
