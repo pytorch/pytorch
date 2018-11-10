@@ -2671,7 +2671,7 @@
       default: U
 ]]
 [[
-  name: _th_potrs
+  name: _th_potrs_single
   cname: potrs
   types:
     - Float

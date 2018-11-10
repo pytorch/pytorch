@@ -64,7 +64,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::TensorToBool,
+        "prim::TensorToBool(Tensor a) -> bool",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
@@ -75,7 +75,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::TensorToNum,
+        "prim::TensorToNum(Tensor a) -> Scalar",
         [](const Node* node) -> Operation {
           if(node->output()->type() == IntType::get()) {
             return [](Stack& stack) {
@@ -96,7 +96,7 @@ RegisterOperators reg({
           }
         }),
     Operator(
-        prim::ImplicitTensorToNum,
+        "prim::ImplicitTensorToNum(Tensor a) -> Scalar",
         [](const Node* node) -> Operation {
           if(node->output()->type() == IntType::get()) {
             return [](Stack& stack) {
@@ -119,7 +119,7 @@ RegisterOperators reg({
           }
         }),
     Operator(
-        prim::NumToTensor,
+        "prim::NumToTensor(Scalar a) -> Tensor",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Scalar s;
@@ -129,7 +129,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::BoolToTensor,
+        "prim::BoolToTensor(bool a) -> Tensor",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             bool b;
@@ -141,7 +141,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::IntToFloat,
+        "prim::IntToFloat(int a) -> float",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             int64_t i;
@@ -151,7 +151,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::FloatToInt,
+        "prim::FloatToInt(float a) -> int",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             double d;
@@ -161,7 +161,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::StringToFloat,
+        "prim::StringToFloat(str a) -> float",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto s = pop(stack).toString();
