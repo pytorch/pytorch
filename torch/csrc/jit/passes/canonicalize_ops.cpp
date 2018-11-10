@@ -1,6 +1,7 @@
 #include "torch/csrc/jit/passes/canonicalize_ops.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/symbolic_variable.h"
+#include "ATen/ExpandUtils.h"
 
 
 namespace torch { namespace jit {
@@ -58,7 +59,25 @@ static void CanonicalizeOps(Block* block) {
       SymbolicVariable mat2(it->inputs()[2]);
 
       auto mm_result = mat1.mm(mat2);
+      auto mat1_complete = mat1.value()->type()->cast<CompleteTensorType>();
+      auto mat2_complete = mat2.value()->type()->cast<CompleteTensorType>();
+      if (mat1_complete && mat2_complete) {
+        mm_result.value()->setType(
+            CompleteTensorType::create(
+                mat1_complete->scalarType(),
+                mat1_complete->device(),
+                {mat1_complete->sizes()[0], mat2_complete->sizes()[1]}));
+      }
       auto result = mat + mm_result;
+      auto mat_complete = mat.value()->type()->cast<CompleteTensorType>();
+      auto mm_result_complete = mm_result.value()->type()->cast<CompleteTensorType>();
+      if (mat_complete && mm_result_complete) {
+          result.value()->setType(
+              CompleteTensorType::create(
+                  mat_complete->scalarType(),
+                  mat_complete->device(),
+                  at::infer_size(mat_complete->sizes(), mm_result_complete->sizes())));
+      }
 
       it->output()->replaceAllUsesWith(result);
       it.destroyCurrent();
