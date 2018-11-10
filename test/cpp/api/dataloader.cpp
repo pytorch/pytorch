@@ -39,6 +39,71 @@ TEST(DataTest, DatasetCallsGetCorrectly) {
   ASSERT_EQ(batch, expected);
 }
 
+struct DummyChunkDataset : datasets::ChunkDataSet<DummyChunkDataset, std::vector<int>> {
+  using Batch = std::vector<int>;
+  DummyChunkDataset(size_t prefetch_count) : datasets::ChunkDataSet<DummyChunkDataset, Batch>(prefetch_count) {};
+
+  Batch read_chunk(size_t chunk_index) override
+  {
+    Batch batchData;
+    auto s = chunkSize[chunk_index];
+    batchData.resize(chunkSize[chunk_index]);
+    std::iota(batchData.begin(), batchData.end(), chunkSize[chunk_index]);
+    return batchData;
+  }
+  size_t size() const override {
+    return chunkSize[0] + chunkSize[1];
+  }
+  size_t get_chunk_count() override{
+    return 2;
+  }
+
+  size_t chunkSize[2] = {1024, 512};
+};
+
+TEST(DataTest, ChunkDataSetGetChunk) {
+  DummyChunkDataset d(1);
+  {
+    std::vector<int> batch = d.read_chunk(0);
+    int expectedStart = 1024;
+    for(auto value : batch)
+    {
+      ASSERT_EQ(value, expectedStart++);
+    }
+  }
+}
+
+TEST(DataTest, ChunkDataSetGetBatch) {
+  const size_t prefetch_counts[] = {1, 2};
+
+  for(auto prefetch_count : prefetch_counts)
+  {
+    DummyChunkDataset d(prefetch_count);
+    d.initialize();
+
+    const size_t batch_size = 512;
+    {
+      std::vector<int> batch = d.get_batch(batch_size);
+      std::vector<int> expected(batch_size);
+      std::iota(expected.begin(), expected.end(), 1024);
+      ASSERT_EQ(batch, expected);
+    }
+
+    {
+      std::vector<int> batch = d.get_batch(batch_size);
+      std::vector<int> expected(batch_size);
+      std::iota(expected.begin(), expected.end(), 1024 + batch_size);
+      ASSERT_EQ(batch, expected);
+    }
+    {
+      std::vector<int> batch = d.get_batch(batch_size);
+      std::vector<int> expected(batch_size);
+      std::iota(expected.begin(), expected.end(), 512);
+      ASSERT_EQ(batch, expected);
+    }
+  }
+}
+
 TEST(DataTest, TransformCallsGetApplyCorrectly) {
   struct T : transforms::Transform<int, std::string> {
     std::string apply(int input) override {
