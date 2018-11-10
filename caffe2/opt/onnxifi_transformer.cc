@@ -27,27 +27,7 @@ void AnnotateOpIndex(NetDef* net) {
   }
 }
 
-uint64_t OnnxifiDataType(caffe2::TensorProto::DataType t) {
-#define CAFFE2_TO_ONNXIFI_TYPE(x, y) \
-  case (caffe2::TensorProto::x):     \
-    return y
-  switch (t) {
-    CAFFE2_TO_ONNXIFI_TYPE(FLOAT, ONNXIFI_DATATYPE_FLOAT32);
-    CAFFE2_TO_ONNXIFI_TYPE(INT8, ONNXIFI_DATATYPE_INT8);
-    CAFFE2_TO_ONNXIFI_TYPE(UINT8, ONNXIFI_DATATYPE_UINT8);
-    CAFFE2_TO_ONNXIFI_TYPE(INT16, ONNXIFI_DATATYPE_INT16);
-    CAFFE2_TO_ONNXIFI_TYPE(UINT16, ONNXIFI_DATATYPE_UINT16);
-    CAFFE2_TO_ONNXIFI_TYPE(INT32, ONNXIFI_DATATYPE_INT32);
-    CAFFE2_TO_ONNXIFI_TYPE(INT64, ONNXIFI_DATATYPE_INT64);
-    CAFFE2_TO_ONNXIFI_TYPE(FLOAT16, ONNXIFI_DATATYPE_FLOAT16);
-    default:
-      LOG(WARNING) << "Unsupported Caffe2 tensor type: " << t
-                   << ", fallback to FLOAT";
-      return ONNXIFI_DATATYPE_FLOAT32;
-  }
-#undef CAFFE2_TO_ONNXIFI_TYPE
-}
-
+// TODO(yinghai): Remove the awkward conversion between unordered_map and map
 std::unordered_map<std::string, TensorShape> InferShapes(
     Workspace* ws,
     NetDef* pred_net,
@@ -75,8 +55,7 @@ std::unordered_map<std::string, TensorShape> InferShapes(
     ws_local.RunNetOnce(*pred_net);
     const std::vector<std::string> ws_blobs = ws_local.Blobs();
     for (const auto& s : ws_blobs) {
-      const Blob* b = ws_local.GetBlob(s);
-      auto shape = GetTensorShapeOfBlob(b);
+      auto shape = GetTensorShapeOfBlob(ws_local.GetBlob(s));
       if (!shape.unknown_shape()) {
         shape_hints.emplace(s, std::move(shape));
       }
@@ -110,7 +89,7 @@ std::vector<::ONNX_NAMESPACE::ValueInfoProto> ConvertToValueInfo(
     } else {
       auto* tensor_type = value_info.mutable_type()->mutable_tensor_type();
       tensor_type->set_elem_type(
-          onnx::Caffe2TypeToOnnxType(it->second.data_type()));
+          ::ONNX_NAMESPACE::TensorProto_DataType::TensorProto_DataType_FLOAT);
       auto* shape = tensor_type->mutable_shape();
       for (int i = 0; i < it->second.dims().size(); ++i) {
         shape->add_dim()->set_dim_value(it->second.dims(i));
@@ -146,7 +125,7 @@ OnnxifiTransformer::OnnxifiTransformer(bool infer_shapes, bool debug)
 
 OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
     const std::string& onnx_model_str,
-    const std::unordered_map<std::string, TensorShape>& output_shape_hints,
+    const std::unordered_map<std::string, std::vector<int>>& output_size_hints,
     const std::unordered_set<std::string>& initialization_list,
     const caffe2::NetDef& net) {
   OperatorDef op;
@@ -177,14 +156,13 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
   // Add output size hints
   for (int i = 0; i < op.output_size(); ++i) {
     const auto& o = op.output(i);
-    const auto it = output_shape_hints.find(o);
-    if (it != output_shape_hints.end()) {
-      const auto& shape = it->second;
-      auto* output_shape_hint_arg = op.add_arg();
-      output_shape_hint_arg->set_name(c10::str("output_shape_hint_", i));
-      output_shape_hint_arg->add_ints(OnnxifiDataType(shape.data_type()));
-      for (const auto& d : shape.dims()) {
-        output_shape_hint_arg->add_ints(d);
+    const auto it = output_size_hints.find(o);
+    if (it != output_size_hints.end()) {
+      const auto& dims = it->second;
+      auto* output_size_hint_arg = op.add_arg();
+      output_size_hint_arg->set_name(c10::str("output_size_hint_", i));
+      for (const auto& d : dims) {
+        output_size_hint_arg->add_ints(d);
       }
 
       VLOG(2) << "Adding output hint: " << o;
@@ -256,16 +234,20 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
     io_names.emplace_back(output);
   }
   auto io_vec = ConvertToValueInfo(io_names, *shape_hints);
-  std::unordered_map<std::string, TensorShape> output_shape_hints;
+  std::unordered_map<std::string, std::vector<int>> output_shape_hints;
   for (const auto& i : io_vec) {
     onnx_model.mutable_graph()->add_output()->CopyFrom(i);
+    auto ret = output_shape_hints.emplace(i.name(), std::vector<int>());
+    auto& vec = ret.first->second;
     const auto it = shape_hints->find(i.name());
     CAFFE_ENFORCE(
         it != shape_hints->end(),
         "Cannot find shape info for output ",
         i.name());
     const auto& shape = it->second;
-    output_shape_hints.emplace(i.name(), shape);
+    for (int k = 0; k < shape.dims().size(); ++k) {
+      vec.push_back(shape.dims(k));
+    }
   }
 
   // Convert inputs and figure out weights
@@ -370,7 +352,7 @@ void OnnxifiTransformer::Transform(
   auto shape_hints_ordered =
       SsaRewriteAndMapNames(ws, pred_net, input_shape_hints);
   Workspace mapped_ws(ws, input_mapping_);
-  std::unordered_map<std::string, TensorShape> shape_hints =
+  auto shape_hints =
       InferShapes(&mapped_ws, pred_net, &shape_hints_ordered, infer_shapes_);
 
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
