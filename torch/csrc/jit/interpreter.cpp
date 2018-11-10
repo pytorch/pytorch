@@ -48,6 +48,8 @@ namespace torch { namespace jit {
 //   indicating whether this is the last use of the value. The interpreter
 //   should generate a move rather than a copy in this case.
 
+bool Code::debug=false;    
+    
 namespace {
 
 // new_cond = (i < max_trip_count) && cond
