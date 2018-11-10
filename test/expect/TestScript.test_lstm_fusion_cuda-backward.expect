@@ -17,7 +17,7 @@ graph(%0 : Float(*, *)
       %cellgate : Float(*, *)
       %outgate : Float(*, *)
       %18 : Float(*, *)) {
-  %19 : Float(*, *), %20 : Float(*, *) = prim::FusionGroup_0(%forgetgate, %ingate, %cellgate, %outgate, %11, %0, %18, %1)
+  %19 : Float(*, *), %20 : Float(*, *) = prim::FusionGroup_0(%forgetgate, %ingate, %cellgate, %outgate, %9, %1, %18, %0)
   %21 : Float(*, *) = aten::t(%13)
   %22 : Float(*, *) = aten::mm(%20, %21)
   %23 : Float(*, *) = aten::t(%10)
@@ -25,10 +25,10 @@ graph(%0 : Float(*, *)
   %25 : Float(*, *) = aten::t(%24)
   %26 : Float(*, *) = aten::t(%12)
   %27 : Float(*, *) = aten::mm(%20, %26)
-  %28 : Float(*, *) = aten::t(%9)
+  %28 : Float(*, *) = aten::t(%11)
   %29 : Float(*, *) = aten::mm(%28, %20)
   %30 : Float(*, *) = aten::t(%29)
-  return (%30, %27, %25, %22, %20, %20, %19);
+  return (%19, %20, %20, %22, %25, %27, %30);
 }
 with prim::FusionGroup_0 = graph(%0 : Float(*, *)
       %1 : Float(*, *)

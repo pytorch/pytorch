@@ -1229,6 +1229,12 @@ Node * Graph::createFusionGroup() {
   return n;
 }
 
+Node * Graph::createDifferentiableSubgraph() {
+  auto n = create(prim::DifferentiableGraph, 0);
+  n->g_(attr::Subgraph, std::make_shared<Graph>(current_scope()));
+  return n;
+}
+
 Node* Graph::createTuple(at::ArrayRef<Value*> values) {
   auto types = fmap(values, [](Value* v) { return v->type(); });
   auto tt = TupleType::create(std::move(types));
