@@ -1,60 +1,44 @@
 #include "caffe2/operators/dropout_op.h"
 
+#include <string>
+#include <vector>
+
+#include "caffe2/utils/eigen_utils.h"
+
 namespace caffe2 {
 
 template <>
-bool DropoutOp<float, CPUContext>::RunOnDevice() {
-  auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->Resize(X.sizes());
-  if (is_test_) {
-    if (Y != &X) {
-      context_.CopyFromCPU<float>(
-          X.numel(), X.data<float>(), Y->template mutable_data<float>());
-    }
-    return true;
-  } else {
-    float scale = 1. / (1. - ratio_);
-    // mask=true means keep, and mask=false means not keep, so we will
-    // generate probability depending on 1-ratio.
-    std::bernoulli_distribution dist(1. - ratio_);
-    const float* Xdata = X.data<float>();
-    float* Ydata = Y->template mutable_data<float>();
-    auto mask = Output(1);
-    mask->Resize(X.sizes());
-    bool* mask_data = mask->template mutable_data<bool>();
-    auto& gen = context_.RandGenerator();
-    for (int i = 0; i < X.numel(); ++i) {
-      mask_data[i] = dist(gen);
-      Ydata[i] = Xdata[i] * scale * mask_data[i];
-    }
-    return true;
+void DropoutOp<float, CPUContext>::DropoutForward(
+    const int N,
+    const float* X,
+    float* Y,
+    bool* mask) {
+  float* uniform_data = Y;
+  if (Y == X) {
+    uniform_.Resize(N);
+    uniform_data = uniform_.mutable_data<float>();
   }
+  EigenVectorArrayMap<bool> mask_arr(mask, N);
+  EigenVectorArrayMap<float> uniform_arr(uniform_data, N);
+  uniform_arr.setRandom();
+  // Change threshold since setRandom() generates uniform distribution in range
+  // [-1, 1].
+  const float threshold = ratio_ * 2.0f - 1.0f;
+  mask_arr = uniform_arr > threshold;
+  const float scale = 1.0f / (1.0f - ratio_);
+  EigenVectorArrayMap<float>(Y, N) =
+      ConstEigenVectorArrayMap<float>(X, N) * mask_arr.cast<float>() * scale;
 }
 
 template <>
-bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
-  auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->Resize(dY.sizes());
-  if (is_test_) {
-    if (dX != &dY) {
-      context_.CopyFromCPU<float>(
-          dY.numel(), dY.data<float>(), dX->template mutable_data<float>());
-    }
-    return true;
-  } else {
-    auto& mask = Input(1);
-    CAFFE_ENFORCE_EQ(dY.numel(), mask.numel());
-    const float* dYdata = dY.data<float>();
-    const bool* mask_data = mask.data<bool>();
-    float* dXdata = dX->template mutable_data<float>();
-    float scale = 1. / (1. - ratio_);
-    for (int i = 0; i < dY.numel(); ++i) {
-      dXdata[i] = dYdata[i] * mask_data[i] * scale;
-    }
-    return true;
-  }
+void DropoutGradientOp<float, CPUContext>::DropoutBackward(
+    const int N,
+    const float* dY,
+    const bool* mask,
+    float* dX) {
+  const float scale = 1.0f / (1.0f - ratio_);
+  EigenVectorArrayMap<float>(dX, N) = ConstEigenVectorArrayMap<float>(dY, N) *
+      ConstEigenVectorArrayMap<bool>(mask, N).cast<float>() * scale;
 }
 
 REGISTER_CPU_OPERATOR(Dropout, DropoutOp<float, CPUContext>);
@@ -146,12 +130,12 @@ mask: [[False False False  True  True]
 </details>
 
 )DOC")
-    .Arg(
-        "ratio",
-        "*(type: float; default: 0.5)* Probability of an element to be zeroed.")
     .ArgIsTest(
         "*(type: int; default: 0)* If zero (train mode), perform dropout. If non-zero"
         "(test mode), Y = X.")
+    .Arg(
+        "ratio",
+        "*(type: float; default: 0.5)* Probability of an element to be zeroed.")
     .Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor.")
     .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
     .Output(
@@ -167,9 +151,12 @@ GRADIENT_OPERATOR_SCHEMA(DropoutGrad)
     .NumOutputs(1)
     .AllowInplace({{0, 0}});
 
+namespace {
+
 class GetDropoutGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
+
+  std::vector<OperatorDef> GetGradientDefs() override {
     ArgumentHelper argshelper(def_);
     auto is_test = argshelper.GetSingleArgument<bool>("is_test", 0);
     if (is_test) {
@@ -179,10 +166,14 @@ class GetDropoutGradient : public GradientMakerBase {
       return SingleGradientDef(
           "DropoutGrad",
           "",
-          vector<string>{GO(0), O(1)},
-          vector<string>{GI(0)});
+          std::vector<std::string>{GO(0), O(1)},
+          std::vector<std::string>{GI(0)});
     }
   }
 };
+
+} // namespace
+
 REGISTER_GRADIENT(Dropout, GetDropoutGradient);
+
 } // namespace caffe2
