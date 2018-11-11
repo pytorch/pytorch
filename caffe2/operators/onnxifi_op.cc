@@ -4,6 +4,75 @@ namespace caffe2 {
 
 namespace {
 
+void SetInputTensorDescriptorTypeAndBuffer(
+    const Tensor& cpu_tensor,
+    onnxTensorDescriptorV1* desc) {
+  if (cpu_tensor.template IsType<float>()) {
+    desc->dataType = ONNXIFI_DATATYPE_FLOAT32;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<float>());
+  } else if (cpu_tensor.template IsType<int32_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_INT32;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int32_t>());
+  } else if (cpu_tensor.template IsType<int8_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_INT8;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int8_t>());
+  } else if (cpu_tensor.template IsType<uint8_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_UINT8;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<uint8_t>());
+  } else if (cpu_tensor.template IsType<int64_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_INT64;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int64_t>());
+  } else if (cpu_tensor.template IsType<int16_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_INT16;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int16_t>());
+  } else if (cpu_tensor.template IsType<uint16_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_UINT16;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<uint16_t>());
+  } else {
+    CAFFE_THROW(
+        "Unsupported tensor type in ONNXIFI: ", cpu_tensor.dtype().name());
+  }
+}
+
+void SetOutputTensorDescriptorTypeAndBuffer(
+    uint64_t onnxifi_type,
+    Tensor* cpu_tensor,
+    onnxTensorDescriptorV1* desc) {
+  desc->dataType = onnxifi_type;
+  switch (onnxifi_type) {
+    case (ONNXIFI_DATATYPE_FLOAT32):
+      desc->buffer =
+          reinterpret_cast<onnxPointer>(cpu_tensor->mutable_data<float>());
+      break;
+    case (ONNXIFI_DATATYPE_INT32):
+      desc->buffer =
+          reinterpret_cast<onnxPointer>(cpu_tensor->mutable_data<int32_t>());
+      break;
+    case (ONNXIFI_DATATYPE_INT8):
+      desc->buffer =
+          reinterpret_cast<onnxPointer>(cpu_tensor->mutable_data<int8_t>());
+      break;
+    case (ONNXIFI_DATATYPE_UINT8):
+      desc->buffer =
+          reinterpret_cast<onnxPointer>(cpu_tensor->mutable_data<uint8_t>());
+      break;
+    case (ONNXIFI_DATATYPE_INT64):
+      desc->buffer =
+          reinterpret_cast<onnxPointer>(cpu_tensor->mutable_data<int64_t>());
+      break;
+    case (ONNXIFI_DATATYPE_INT16):
+      desc->buffer =
+          reinterpret_cast<onnxPointer>(cpu_tensor->mutable_data<int16_t>());
+      break;
+    case (ONNXIFI_DATATYPE_UINT16):
+      desc->buffer =
+          reinterpret_cast<onnxPointer>(cpu_tensor->mutable_data<uint16_t>());
+      break;
+    default:
+      CAFFE_THROW("Unsupported ONXNIFI data type: ", onnxifi_type);
+  }
+}
+
 void BlobToTensorDescriptor(
     const std::string& name,
     Workspace* ws,
@@ -24,16 +93,7 @@ void BlobToTensorDescriptor(
 
   // Data type
   const auto& cpu_tensor = blob->template Get<TensorCPU>();
-  if (cpu_tensor.template IsType<float>()) {
-    desc->dataType = ONNXIFI_DATATYPE_FLOAT32;
-    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<float>());
-  } else if (cpu_tensor.template IsType<int64_t>()) {
-    desc->dataType = ONNXIFI_DATATYPE_INT64;
-    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int64_t>());
-  } else if (cpu_tensor.template IsType<int32_t>()) {
-    desc->dataType = ONNXIFI_DATATYPE_INT32;
-    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int32_t>());
-  }
+  SetInputTensorDescriptorTypeAndBuffer(cpu_tensor, desc);
 
   // Set dims
   const auto shape = cpu_tensor.sizes();
@@ -79,23 +139,20 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
     const auto tensor_dims = input_tensor.sizes();
     auto& tensor_descriptor = input_desc_.at(i);
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
-    tensor_descriptor.dataType = ONNXIFI_DATATYPE_FLOAT32;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     tensor_descriptor.dimensions = tensor_dims.size();
     input_shapes_.emplace_back(tensor_dims.cbegin(), tensor_dims.cend());
     tensor_descriptor.shape = input_shapes_.back().data();
-    tensor_descriptor.buffer =
-        reinterpret_cast<onnxPointer>(input_tensor.data<float>());
+    SetInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
   }
 
   for (unsigned i = 0U; i < OutputSize(); ++i) {
     auto* output_tensor = Output(i);
-    std::vector<int64_t> tensor_dims;
-    SetOutputShape(i, &tensor_dims);
+    std::vector<size_t> tensor_dims;
+    uint64_t type = SetOutputShapeAndType(i, &tensor_dims);
     output_tensor->Resize(tensor_dims);
     auto& tensor_descriptor = output_desc_.at(i);
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
-    tensor_descriptor.dataType = ONNXIFI_DATATYPE_FLOAT32;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     tensor_descriptor.dimensions = tensor_dims.size();
     CAFFE_ENFORCE(
@@ -104,8 +161,8 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
         " has 0 dim");
     output_shapes_.emplace_back(tensor_dims.cbegin(), tensor_dims.cend());
     tensor_descriptor.shape = output_shapes_.back().data();
-    tensor_descriptor.buffer =
-        reinterpret_cast<onnxPointer>(output_tensor->mutable_data<float>());
+    SetOutputTensorDescriptorTypeAndBuffer(
+        type, output_tensor, &tensor_descriptor);
   }
 
   CAFFE_ENFORCE_EQ(
