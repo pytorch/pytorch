@@ -75,21 +75,22 @@ class TestDropout(serial.SerializedTestCase):
             outputs_to_check=None if engine != 'CUDNN' else [0])
 
     @given(
-        N=st.integers(1000, 2000),
+        N=st.integers(10000, 20000),
         ratio=st.floats(0.2, 0.8),
         in_place=st.booleans(),
         engine=st.sampled_from(["", "CUDNN"]),
         **hu.gcs)
     def test_dropout_forward(self, N, ratio, in_place, engine, gc, dc):
+        output = "X" if in_place else "Y"
         op = core.CreateOperator(
-            "Dropout", ["X"], ["Y", "mask"],
+            "Dropout", ["X"], [output, "mask"],
             ratio=ratio,
             engine=engine,
             is_test=False)
         X = np.ones(N).astype(np.float32)
         workspace.FeedBlob("X", X, device_option=gc)
         workspace.RunOperatorOnce(op)
-        Y = workspace.FetchBlob("Y")
+        Y = workspace.FetchBlob(output)
         np.testing.assert_allclose(np.sum(Y) / N, 1.0, rtol=0.1, atol=0)
 
 
