@@ -81,7 +81,6 @@ class TestDropout(serial.SerializedTestCase):
         engine=st.sampled_from(["", "CUDNN"]),
         **hu.gcs)
     def test_dropout_forward(self, N, ratio, in_place, engine, gc, dc):
-        op = core.CreateOperator(
             "Dropout", ["X"], ["Y", "mask"],
             ratio=ratio,
             engine=engine,
