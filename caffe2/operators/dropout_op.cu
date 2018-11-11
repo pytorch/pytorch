@@ -36,7 +36,7 @@ __global__ void DropoutBackwardCUDAKenel(
     float* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
 #if __CUDA_ARCH__ >= 350
-    dX[i] = __ldg(dY + i) * static_cast<T>(__ldg(mask + i)) * scale;
+    dX[i] = __ldg(dY + i) * static_cast<T>(mask[i]) * scale;
 #else
     dX[i] = dY[i] * static_cast<T>(mask[i]) * scale;
 #endif
