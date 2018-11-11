@@ -16,6 +16,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/observer.h"
+#include "caffe2/core/operator.h"
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/workspace.h"
