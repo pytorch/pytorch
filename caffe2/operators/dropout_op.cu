@@ -62,7 +62,7 @@ void DropoutOp<float, CUDAContext>::DropoutForward(
       <<<CAFFE_GET_BLOCKS(N),
          CAFFE_CUDA_NUM_THREADS,
          0,
-         context_.cuda_stream()>>>(N, ratio_, X, uniform, Y, mask);
+         context_.cuda_stream()>>>(N, ratio_, X, uniform_data, Y, mask);
 }
 
 template <>
