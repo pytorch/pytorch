@@ -819,6 +819,8 @@ else:
         '-Wno-missing-braces',
         # gcc7 seems to report spurious warnings with this enabled
         "-Wno-stringop-overflow",
+        # gcc7 also reports spurious warnings with this enabled
+        "-Wno-maybe-uninitialized",
     ]
     if check_env_flag('WERROR'):
         extra_compile_args.append('-Werror')
@@ -1202,6 +1204,7 @@ if __name__ == '__main__':
                 'lib/include/c10/*.h',
                 'lib/include/c10/macros/*.h',
                 'lib/include/c10/util/*.h',
+                'lib/include/c10/detail/*.h',
                 'lib/include/caffe2/core/*.h',
                 'lib/include/caffe2/proto/*.h',
                 'lib/include/torch/*.h',
