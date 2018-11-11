@@ -34,6 +34,8 @@
 #include <stdexcept>
 
 using at::DeviceGuard;
+using at::device_of;
+using at::OptionalDeviceGuard;
 using at::Backend;
 using at::Scalar;
 using at::ScalarType;
@@ -129,7 +131,7 @@ static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
 
 static Tensor dispatch_contiguous(const Tensor & self) {
   AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
+  OptionalDeviceGuard device_guard(device_of(self));
   return self.contiguous();
 }
  static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
@@ -159,7 +161,7 @@ static Tensor dispatch_contiguous(const Tensor & self) {
 
 static Tensor dispatch_copy_(Tensor & self, const Tensor & other, bool non_blocking) {
   AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
+  OptionalDeviceGuard device_guard(device_of(self));
   return self.copy_(other, non_blocking);
 }
 
@@ -179,7 +181,7 @@ static PyObject * THPVariable_copy_(PyObject* self, PyObject* args, PyObject* kw
 
 static double dispatch_to_CDouble(const Tensor & self) {
   AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
+  OptionalDeviceGuard device_guard(device_of(self));
   if (self.numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
   }
@@ -188,7 +190,7 @@ static double dispatch_to_CDouble(const Tensor & self) {
 
 static std::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
   AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
+  OptionalDeviceGuard device_guard(device_of(self));
   if (self.numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
   }
@@ -197,7 +199,7 @@ static std::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
 
 static int64_t dispatch_to_CLong(const Tensor & self) {
   AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
+  OptionalDeviceGuard device_guard(device_of(self));
   if (self.numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
   }
@@ -243,7 +245,7 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
 
 static Tensor dispatch_invert(const Tensor & self) {
   AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
+  OptionalDeviceGuard device_guard(device_of(self));
   return 1 - self;
 }
 
@@ -470,7 +472,7 @@ static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwar
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  DeviceGuard device_guard(self_);
+  OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::legacy_tensor_new(self_.type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -479,7 +481,7 @@ static PyObject * THPVariable_new_empty(PyObject* self, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  DeviceGuard device_guard(self_);
+  OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_empty(self_.type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -488,7 +490,7 @@ static PyObject * THPVariable_new_full(PyObject* self, PyObject* args, PyObject*
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  DeviceGuard device_guard(self_);
+  OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_full(self_.type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -497,7 +499,7 @@ static PyObject * THPVariable_new_ones(PyObject* self, PyObject* args, PyObject*
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  DeviceGuard device_guard(self_);
+  OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_ones(self_.type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -506,7 +508,7 @@ static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObjec
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  DeviceGuard device_guard(self_);
+  OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_tensor(self_.type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -515,7 +517,7 @@ static PyObject * THPVariable_new_zeros(PyObject* self, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  DeviceGuard device_guard(self_);
+  OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_zeros(self_.type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
