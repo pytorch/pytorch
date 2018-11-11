@@ -41,7 +41,7 @@ class DropoutOp final : public Operator<Context> {
   }
 
  protected:
-  void DropoutForward(const int N, const T* X, T* Y, bool* mask) {}
+  void DropoutForward(const int N, const T* X, T* Y, bool* mask);
 
   const bool is_test_;
   const float ratio_;
@@ -75,7 +75,7 @@ class DropoutGradientOp final : public Operator<Context> {
   }
 
  protected:
-  void DropoutBackward(const int N, const T* dY, const bool* mask, T* dX) {}
+  void DropoutBackward(const int N, const T* dY, const bool* mask, T* dX);
 
   const float ratio_;
 };
