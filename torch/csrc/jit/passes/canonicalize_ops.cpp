@@ -59,7 +59,7 @@ static void CanonicalizeOps(Block* block) {
 
       auto mm_result = mat1.mm(mat2);
       auto result = mat + mm_result;
-      ((Value*)result)->setType(it->output()->type());
+      (static_cast<Value*>(result))->setType(it->output()->type());
 
       it->output()->replaceAllUsesWith(result);
       it.destroyCurrent();
