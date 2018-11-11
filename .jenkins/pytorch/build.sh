@@ -43,14 +43,6 @@ cmake --version
 pip install -q -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-
-  # This is necessary in order to cross compile (or else we'll have missing GPU device).
-  export HCC_AMDGPU_TARGET=gfx900
-
-  # This environment variable enabled HCC Optimizations that speed up the linking stage.
-  # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
-  export KMTHINLTO=1
-
   # When hcc runs out of memory, it silently exits without stopping
   # the build process, leaving undefined symbols in the shared lib
   # which will cause undefined symbol errors when later running
