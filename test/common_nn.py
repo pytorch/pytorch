@@ -391,9 +391,7 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, reducti
     if input.dim() == 1:
         n = 1
         dim = input.size(0)
-        output = input.new(1)
-        output[0] = _multimarginloss_reference(input, target[0], p, margin, weight) / dim
-        return output
+        return _multimarginloss_reference(input, target[0], p, margin, weight) / dim
     else:
         n = input.size(0)
         dim = input.size(1)
