@@ -214,11 +214,12 @@ goto:eof
   :    Invalid escape sequence \i
   : which is said to become an error in the future.
   : As an alternative, we should use forward slashes instead.
-  : Here those paths should be espaced before passing to CMake. 
+  : Here those paths should be escaped before passing to CMake. 
   set NVTOOLEXT_HOME=%NVTOOLEXT_HOME:\=/%
   set CUDNN_INCLUDE_DIR=%CUDNN_INCLUDE_DIR:\=/%
   set CUDNN_LIB_DIR=%CUDNN_LIB_DIR:\=/%
   set CUDNN_LIBRARY=%CUDNN_LIBRARY:\=/%
+  set PYTORCH_PYTHON_LIBRARY=%PYTORCH_PYTHON_LIBRARY:\=/%
 
   IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
   if not exist build mkdir build
@@ -226,6 +227,7 @@ goto:eof
   cmake .. %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
                   -DTORCH_BUILD_VERSION="%PYTORCH_BUILD_VERSION%" ^
+                  -DPYTHON_LIBRARY="%PYTORCH_PYTHON_LIBRARY%" ^
                   -DBUILD_TORCH="%BUILD_TORCH%" ^
                   -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
                   -DNO_API=ON ^
