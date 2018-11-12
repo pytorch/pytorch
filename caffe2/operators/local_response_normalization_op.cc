@@ -7,7 +7,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   // Note(Yangqing): this one is copied from my Caffe implementation.
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
@@ -71,7 +71,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   // variants have I written...?
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
@@ -124,7 +124,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& Y = Input(1);
   auto& dY = Input(2);
   auto* dX = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
@@ -227,7 +227,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& Y = Input(1);
   auto& dY = Input(2);
   auto* dX = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);

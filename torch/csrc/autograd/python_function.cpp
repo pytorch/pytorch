@@ -45,15 +45,14 @@ namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
   : type(&var.type())
+  , device(var.device())
   , size(var.sizes().vec())
   , requires_grad(var.requires_grad()) {
-  if (var.type().is_cuda()) {
-    device = var.get_device();
-  }
 }
 
-Variable VariableInfo::zeros(at::DeviceGuard& device_guard) const {
-  device_guard.set_index(device);
+Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
+  // NB: This will NOT work if we ever get mixed device gradients
+  device_guard.reset_device(device);
   return at::zeros(size, type->options());
 }
 
@@ -106,7 +105,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
 // C++'s Function::apply to a Python method "apply".
 auto PyFunction::apply(variable_list&& inputs) -> variable_list {
   AutoGIL gil;
-  at::DeviceGuard _device_guard;
+  at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
   THPObjectPtr _legacy(PyObject_GetAttrString(obj, "_is_legacy"));
@@ -759,7 +758,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 
 static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_grad_output)
 {
-  at::DeviceGuard device_guard;
+  at::OptionalDeviceGuard device_guard;
   int num_grads = PyTuple_GET_SIZE(raw_grads.get());
   // First, check if any of grads is None. If not, there's nothing to do
   bool has_none = false;

@@ -93,9 +93,9 @@ class SparseMatrixReshapeOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& old_col = Input(0);
-    CAFFE_ENFORCE(old_col.ndim() == 1, "Row index tensor must be 1-D.");
+    CAFFE_ENFORCE(old_col.dim() == 1, "Row index tensor must be 1-D.");
     auto& old_row = Input(1);
-    CAFFE_ENFORCE(old_row.ndim() == 1, "Column index tensor must be 1-D.");
+    CAFFE_ENFORCE(old_row.dim() == 1, "Column index tensor must be 1-D.");
 
     const auto nnz = old_col.numel();
     CAFFE_ENFORCE(

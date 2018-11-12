@@ -7,7 +7,7 @@
 
 namespace {
   static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
-    if (reduction == Reduction::ElementwiseMean) {
+    if (reduction == Reduction::Mean) {
       return unreduced.mean();
     } else if (reduction == Reduction::Sum) {
       return unreduced.sum();
@@ -81,7 +81,7 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
           }
         });
   });
-  if (reduction == Reduction::ElementwiseMean) {
+  if (reduction == Reduction::Mean) {
     return grad_input / input.numel();
   }
   return grad_input;
@@ -119,7 +119,7 @@ Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tenso
         grad_input.mul_(weight);
     }
 
-    if (reduction == Reduction::ElementwiseMean) {
+    if (reduction == Reduction::Mean) {
         return grad_input / input.numel();
     }
 

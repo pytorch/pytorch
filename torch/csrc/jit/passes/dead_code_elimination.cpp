@@ -24,7 +24,8 @@ bool hasSideEffects(Node * node, bool_memo_type& memo) {
   if (it != memo.end())
     return it->second;
   bool has_side_effects =
-      node->kind() == prim::Print || node->kind() == prim::StoreWorld ||
+      node->kind() == prim::Print ||
+        node->kind() == prim::RaiseException ||
       std::any_of(node->blocks().begin(), node->blocks().end(), [&](Block* b) {
         return std::any_of(b->nodes().begin(), b->nodes().end(), [&](Node* n) {
           return hasSideEffects(n, memo);

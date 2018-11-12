@@ -176,7 +176,7 @@ bool LambdaRankNdcgOp<float, CPUContext>::RunOnDevice() {
   auto* dy = Output(DPRED);
 
   const auto* session_lengths = sid.template data<int>();
-  CAFFE_ENFORCE(y.ndim() == 1);
+  CAFFE_ENFORCE(y.dim() == 1);
   CAFFE_ENFORCE(y.numel() == r.numel());
   dy->Resize(y.numel());
   loss->Resize(sid.numel());
@@ -198,8 +198,8 @@ bool LambdaRankNdcgGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dy_cache = Input(DY_CACHE);
   auto& dLoss = Input(DLOSS);
   auto* dy = Output(DY);
-  CAFFE_ENFORCE(y.ndim() == 1);
-  CAFFE_ENFORCE(dy_cache.ndim() == 1);
+  CAFFE_ENFORCE(y.dim() == 1);
+  CAFFE_ENFORCE(dy_cache.dim() == 1);
   CAFFE_ENFORCE(dy_cache.numel() > 0);
   CAFFE_ENFORCE(y.numel() == dy_cache.numel());
 

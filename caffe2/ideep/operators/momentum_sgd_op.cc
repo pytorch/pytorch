@@ -55,7 +55,7 @@ class IDEEPMomentumSGDOp final : public IDEEPOperator {
 
     // TODO: Use itensor after 0-dim is supported. Now use CPU tensor.
     const auto& lr = OperatorBase::Input<TensorCPU>(LR, CPU);
-    CAFFE_ENFORCE(lr.size() == 1);
+    CAFFE_ENFORCE(lr.numel() == 1);
 
     momentum_sgd_update(
         Input(GRAD).get_nelems(),
@@ -97,7 +97,7 @@ class IDEEPMomentumSGDUpdateOp final : public IDEEPOperator {
 
     // TODO: Use itensor after 0-dim is supported. Now use CPU tensor.
     const auto& lr = OperatorBase::Input<TensorCPU>(LR, CPU);
-    CAFFE_ENFORCE(lr.size() == 1);
+    CAFFE_ENFORCE(lr.numel() == 1);
 
     momentum_sgd_update(
         Input(GRAD).get_nelems(),

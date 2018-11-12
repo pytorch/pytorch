@@ -1,6 +1,7 @@
 #pragma once
 
 #include "caffe2/core/operator.h"
+#include "caffe2/perfkernels/adagrad.h"
 
 namespace caffe2 {
 
@@ -16,11 +17,7 @@ void adagrad_update(
     float decay,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
-    float gi = g[i];
-    float hi = nh[i] = decay * h[i] + gi * gi;
-    nw[i] = w[i] + lr[0] * gi / (std::sqrt(hi) + epsilon);
-  }
+  return adagrad_update(N, w, g, h, nw, nh, epsilon, decay, lr[0]);
 }
 
 template <typename Context>
@@ -80,23 +77,23 @@ class AdagradOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     CAFFE_ENFORCE_EQ(
-        Input(GRAD).size(),
-        Input(MOMENT_1).size(),
+        Input(GRAD).numel(),
+        Input(MOMENT_1).numel(),
         "PARAM size: ",
-        Input(PARAM).size(),
+        Input(PARAM).numel(),
         ", GRAD size: ",
-        Input(GRAD).size(),
+        Input(GRAD).numel(),
         ", MOMENT_1 size: ",
-        Input(MOMENT_1).size(),
+        Input(MOMENT_1).numel(),
         ", LR size: ",
-        Input(LR).size());
+        Input(LR).numel());
 
-    CAFFE_ENFORCE_EQ(Input(GRAD).size(), Input(PARAM).size());
+    CAFFE_ENFORCE_EQ(Input(GRAD).numel(), Input(PARAM).numel());
     Output(OUTPUT_PARAM)->ResizeLike(Input(PARAM));
     Output(OUTPUT_MOMENT_1)->ResizeLike(Input(MOMENT_1));
     if (OutputSize() == 2) {
       adagrad_update<Context>(
-          Input(GRAD).size(),
+          Input(GRAD).numel(),
           Input(PARAM).template data<T>(),
           Input(GRAD).template data<T>(),
           Input(MOMENT_1).template data<T>(),
@@ -109,7 +106,7 @@ class AdagradOp final : public Operator<Context> {
     } else if (OutputSize() == 3) {
       Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(GRAD));
       adagrad_update_output_effective_lr<Context>(
-          Input(GRAD).size(),
+          Input(GRAD).numel(),
           Input(PARAM).template data<T>(),
           Input(GRAD).template data<T>(),
           Input(MOMENT_1).template data<T>(),
@@ -124,7 +121,7 @@ class AdagradOp final : public Operator<Context> {
       Output(OUTPUT_EFFECTIVE_LR)->ResizeLike(Input(GRAD));
       Output(OUTPUT_UPDATE)->ResizeLike(Input(GRAD));
       adagrad_update_output_effective_lr_and_update<Context>(
-          Input(GRAD).size(),
+          Input(GRAD).numel(),
           Input(PARAM).template data<T>(),
           Input(GRAD).template data<T>(),
           Input(MOMENT_1).template data<T>(),
@@ -162,11 +159,11 @@ class SparseAdagradOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     // Enforce shapes
-    CAFFE_ENFORCE_EQ(Input(PARAM).size(), Input(MOMENT_1).size());
-    CAFFE_ENFORCE_EQ(Input(LR).size(), 1);
+    CAFFE_ENFORCE_EQ(Input(PARAM).numel(), Input(MOMENT_1).numel());
+    CAFFE_ENFORCE_EQ(Input(LR).numel(), 1);
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),
-        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+        Input(GRAD).size_from_dim(Input(INDICES).dim()));
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, Input(INDICES));
@@ -182,12 +179,12 @@ class SparseAdagradOp final : public Operator<Context> {
     auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<T>();
     auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<T>();
 
-    auto n = Input(INDICES).size();
+    auto n = Input(INDICES).numel();
     if (n == 0) {
       return true;
     }
 
-    auto block_size = Input(GRAD).size() / n;
+    auto block_size = Input(GRAD).numel() / n;
     for (auto i = 0; i < n; ++i) {
       auto idx = indices[i];
       if (block_size == 1) {
@@ -200,7 +197,7 @@ class SparseAdagradOp final : public Operator<Context> {
 
 #ifndef NDEBUG
         CAFFE_ENFORCE_GE(
-            Input(PARAM).size(),
+            Input(PARAM).numel(),
             block_size + offsetIdx,
             this->debug_def().input(PARAM),
             ", out of bound,  idx:",
@@ -210,7 +207,7 @@ class SparseAdagradOp final : public Operator<Context> {
             " and block size:",
             block_size);
         CAFFE_ENFORCE_GE(
-            Input(GRAD).size(),
+            Input(GRAD).numel(),
             block_size + offsetI,
             this->debug_def().input(GRAD),
             ", out of bound idx, idx:",
@@ -250,11 +247,11 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     // Enforce shapes
-    CAFFE_ENFORCE_EQ(Input(PARAM).sizes()[0], Input(MOMENT_1).size());
-    CAFFE_ENFORCE_EQ(Input(LR).size(), 1);
+    CAFFE_ENFORCE_EQ(Input(PARAM).sizes()[0], Input(MOMENT_1).numel());
+    CAFFE_ENFORCE_EQ(Input(LR).numel(), 1);
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),
-        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+        Input(GRAD).size_from_dim(Input(INDICES).dim()));
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, Input(INDICES));
@@ -270,12 +267,12 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
     auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<T>();
     auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<T>();
 
-    auto n = Input(INDICES).size();
+    auto n = Input(INDICES).numel();
     if (n == 0) {
       return true;
     }
 
-    auto block_size = Input(GRAD).size() / n;
+    auto block_size = Input(GRAD).numel() / n;
 
     for (auto i = 0; i < n; ++i) {
       auto idx = indices[i];
@@ -289,7 +286,7 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
 
 #ifndef NDEBUG
         CAFFE_ENFORCE_GE(
-            Input(PARAM).size(),
+            Input(PARAM).numel(),
             block_size + offsetIdx,
             this->debug_def().input(PARAM),
             ", out of bound,  idx:",
@@ -299,7 +296,7 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
             " and block size:",
             block_size);
         CAFFE_ENFORCE_GE(
-            Input(GRAD).size(),
+            Input(GRAD).numel(),
             block_size + offsetI,
             this->debug_def().input(GRAD),
             ", out of bound idx, idx:",

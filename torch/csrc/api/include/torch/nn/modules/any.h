@@ -3,7 +3,7 @@
 #include <torch/detail/static.h>
 #include <torch/nn/module.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/memory.h>
@@ -38,6 +38,7 @@ namespace nn {
 ///
 /// \rst
 /// .. code-block:: cpp
+///
 ///   struct GenericTrainer {
 ///     torch::nn::AnyModule module;
 ///
@@ -57,6 +58,7 @@ namespace nn {
 ///
 /// \rst
 /// .. code-block:: cpp
+///
 ///   torch::nn::AnyModule module(torch::nn::Linear(3, 4));
 ///   // Linear takes a tensor as input, but we are passing an integer.
 ///   // This will compile, but throw a `torch::Error` exception at runtime.
@@ -79,6 +81,7 @@ namespace nn {
 ///
 /// \rst
 /// .. code-block:: cpp
+///
 ///   torch::nn::AnyModule module(torch::nn::Linear(3, 4));
 ///   auto output = module.forward(torch::ones({2, 3}));
 ///
@@ -97,6 +100,7 @@ namespace nn {
 ///
 /// \rst
 /// .. code-block:: cpp
+///
 ///   torch::nn::AnyModule module(torch::nn::Linear(3, 4));
 ///   std::shared_ptr<nn::Module> ptr = module.ptr();
 ///   torch::nn::Linear linear(module.get<torch::nn::Linear>());

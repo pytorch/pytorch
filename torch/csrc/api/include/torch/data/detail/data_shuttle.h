@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/data/detail/queue.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>

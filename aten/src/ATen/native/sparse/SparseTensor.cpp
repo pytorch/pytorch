@@ -79,7 +79,7 @@ SparseTensor new_sparse(const TensorOptions& options) {
     type_id = SparseCPUTensorId();
   }
   return detail::make_tensor<SparseTensorImpl>(
-      type_id, scalarTypeToTypeMeta(options.dtype()));
+      type_id, options.dtype());
 }
 
 /** Actual dispatched creation methods ***/
@@ -400,6 +400,37 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   return dst;
 }
 
+
+// --------------------------------------------------------------------
+// sparse_mask(D, S) -> S
+//
+// Filter Tensor D by S.indices() and output a SparseTensor.
+// D and S must share the same shape.
+// --------------------------------------------------------------------
+
+template <typename scalar_t>
+void inline sparse_mask_out_cpu_kernel(
+  Tensor& r_values,
+  const Tensor& t,
+  const int64_t r_nnz,
+  const int64_t sparse_dim,
+  const LongTensor& mask_indices
+) {
+  auto r_values_accessor = r_values.accessor<scalar_t, 1>();
+  auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
+  scalar_t* t_ptr = t.data<scalar_t>();
+  int64_t i;
+
+  #pragma omp parallel for private(i) if (r_nnz > 1000)
+  for (i = 0; i < r_nnz; i++) {
+    int64_t idx = 0;
+    for (int64_t d = 0; d < sparse_dim; d++) {
+      idx += mask_indices_accessor[d][i] * t.stride(d);
+    }
+    r_values_accessor[i] = t_ptr[idx];
+  }
+}
+
 SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const SparseTensor& mask) {
   AT_CHECK(mask.is_coalesced(), "sparse_mask: mask is uncoalesced");
   AT_CHECK(mask.sizes().equals(t.sizes()), "sparse_mask: operands have incompatible sizes; self has size ",
@@ -409,8 +440,7 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   AT_CHECK(!mask.is_cuda(), "sparse_mask: expected 'mask' to be CPU, but got CUDA");
   resize_as_sparse_(r, mask);
   if (mask._nnz() == 0) {
-    r.zero_();
-    return r;
+    return r.zero_();
   }
   int64_t dim = t.dim();
   int64_t sparse_dim = mask.sparse_dim();
@@ -426,35 +456,33 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
     return r;
   }
 
-  // NB: Relies on mask._nnz() == 0 test above
-  auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
-
   if (dim > sparse_dim) {
-    // NB: This used to reuse buffers, but I deoptimized it
-    for (int64_t i = 0; i < r_nnz; i++) {
-      Tensor srcBuffer = t;
-      for (int64_t d = 0; d < sparse_dim; d++) {
-        srcBuffer = srcBuffer.select(0, mask_indices_accessor[d][i]);
-      }
-      Tensor dstBuffer = r_values.select(0, i);
-      dstBuffer.copy_(srcBuffer);
+
+    // Get a flattened sparse indices, similar to NOTE [ Flatten Sparse Indices ].
+    // Keeping this implementation because it is faster than flatten_indices()
+    LongTensor indices = at::zeros({mask._nnz()}, mask_indices.options());
+    for (int64_t d = 0; d < mask.sparse_dim(); d++) {
+      indices.mul_(mask.size(d));
+      indices.add_(mask_indices.select(0, d));
     }
+
+    std::vector<int64_t> view_size(1 + mask.dense_dim());
+    view_size[0] = -1;
+    for (int64_t d = 0; d < mask.dense_dim(); d++) {
+      view_size[d + 1] = mask.size(mask.sparse_dim() + d);
+    }
+
+    Tensor t_view = t.view(view_size);
+    // TODO: Re-audit this; it used to be an indexSelect directly into r_values
+    at::index_select_out(r_values, t_view, 0, indices);
   } else {
-    AT_DISPATCH_ALL_TYPES(
-        r_values.type(), "sparse_mask", [&] {
-          auto r_values_accessor = r_values.accessor<scalar_t, 1>();
-          // NB: The old code did this pointer access in a weird way (going straight
-          // to storage + storageOffset.)  Was there perhaps a method to the
-          // madness?
-          scalar_t* t_ptr = t.data<scalar_t>();
-          for (int64_t i = 0; i < r_nnz; i++) {
-            int64_t idx = 0;
-            for (int64_t d = 0; d < sparse_dim; d++) {
-              idx += mask_indices_accessor[d][i] * t.stride(d);
-            }
-            scalar_t val = t_ptr[idx];
-            r_values_accessor[i] = val;
-          }
+    AT_DISPATCH_ALL_TYPES(r_values.type(), "sparse_mask", [&] {
+      sparse_mask_out_cpu_kernel<scalar_t>(
+        r_values,
+        t,
+        r_nnz,
+        sparse_dim,
+        mask_indices);
     });
   }
   return r;

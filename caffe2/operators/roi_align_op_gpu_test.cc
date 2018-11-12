@@ -190,7 +190,7 @@ void CreateAndRun(
   EXPECT_NE(nullptr, Y_blob);
 
   auto& Y = Y_blob->Get<Tensor>();
-  outResult->CopyFrom(Y, &context);
+  outResult->CopyFrom(Y);
 }
 
 } // namespace

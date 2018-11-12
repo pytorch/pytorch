@@ -15,21 +15,25 @@ C10_DEFINE_OP_SCHEMA(caffe2::ops::GivenTensorFill<int64_t>);
 
 namespace {
 struct ShapeParameter final {
+  using type = std::vector<int64_t>;
   static std::vector<int64_t> parse(const caffe2::ArgumentHelper& helper) {
     return helper.GetRepeatedArgument<int64_t>("shape");
   }
 };
 struct ExtraShapeParameter final {
+  using type = std::vector<int>;
   static std::vector<int> parse(const caffe2::ArgumentHelper& helper) {
     return helper.GetRepeatedArgument<int>("extra_shape");
   }
 };
 struct InputAsShapeParameter final {
+  using type = bool;
   static bool parse(const caffe2::ArgumentHelper& helper) {
     return helper.GetSingleArgument<bool>("input_as_shape", false);
   }
 };
 struct DTypeParameter final {
+  using type = int;
   static int parse(const caffe2::ArgumentHelper& helper) {
     auto dtype = helper.GetSingleArgument<int>(
         "dtype", caffe2::TensorProto_DataType_FLOAT);
@@ -50,6 +54,7 @@ struct DTypeParameter final {
   }
 };
 struct ValueParameter final {
+  using type = caffe2::ops::ConstantFill::Value;
   static caffe2::ops::ConstantFill::Value parse(
       const caffe2::ArgumentHelper& helper) {
     caffe2::ops::ConstantFill::Value result;
@@ -68,17 +73,20 @@ struct ValueParameter final {
   }
 };
 struct MinParameter final {
+  using type = float;
   static float parse(const caffe2::ArgumentHelper& helper) {
     return helper.GetSingleArgument<float>("min", 0);
   }
 };
 struct MaxParameter final {
+  using type = float;
   static float parse(const caffe2::ArgumentHelper& helper) {
     return helper.GetSingleArgument<float>("max", 1);
   }
 };
 template <class T>
 struct ValuesParameter final {
+  using type = Tensor;
   static Tensor parse(const caffe2::ArgumentHelper& helper) {
     if (!std::is_same<T, float>::value || !helper.HasArgument("dtype")) {
       return ExtractValues<T>(helper);

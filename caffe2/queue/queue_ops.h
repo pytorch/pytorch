@@ -150,10 +150,10 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
         if (i == 0) {
           out->CopyFrom(in);
         } else {
-          auto oldSize = out->size();
+          auto oldSize = out->numel();
 
           CAFFE_ENFORCE(
-              in.ndim() > 0,
+              in.dim() > 0,
               "Empty tensor to dequeue at column ",
               col,
               " within ",
@@ -162,9 +162,9 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
 
           out->Extend(in.sizes()[0], kTensorGrowthPct, &context_);
           auto* dst =
-              (char*)out->raw_mutable_data() + oldSize * in.meta().itemsize();
+              (char*)out->raw_mutable_data() + oldSize * in.dtype().itemsize();
           context_.template CopyItems<Context, Context>(
-              in.meta(), in.size(), in.raw_data(), dst);
+              in.meta(), in.numel(), in.raw_data(), dst);
         }
       }
     }

@@ -13,22 +13,26 @@ import hypothesis.extra.numpy as hnp
 
 
 class TestGatherOps(serial.SerializedTestCase):
-    @serial.given(rows_num=st.integers(1, 10000),
+    @serial.given(rows_num=st.integers(0, 10000),
            index_num=st.integers(0, 5000),
            **hu.gcs)
     def test_gather_ops(self, rows_num, index_num, gc, dc):
         data = np.random.random((rows_num, 10, 20)).astype(np.float32)
-        ind = np.random.randint(rows_num, size=(index_num, )).astype('int32')
+
+        if rows_num > 0:
+            ind = np.random.randint(rows_num, size=(index_num, )).astype('int32')
+        else:
+            ind = np.random.randint(10, size=(index_num, )).astype('int32')
         op = core.CreateOperator(
             'Gather',
             ['data', 'ind'],
             ['output'])
 
         def ref_gather(data, ind):
-            if ind.size == 0:
+            if ind.size == 0 or rows_num == 0:
                 return [np.zeros((0, 10, 20)).astype(np.float32)]
 
-            output = [r for r in [data[i] for i in ind]]
+            output = [data[i] for i in ind]
             return [output]
 
         self.assertReferenceChecks(gc, op, [data, ind], ref_gather)
@@ -67,7 +71,7 @@ class TestBatchGatherOps(serial.SerializedTestCase):
         def ref_batch_gather(data, ind):
             output = []
             for b in range(data.shape[0]):
-                output.append([r for r in [data[b][i] for i in ind]])
+                output.append([data[b][i] for i in ind])
             return [output]
 
         self.assertReferenceChecks(gc, op, [data, ind], ref_batch_gather)

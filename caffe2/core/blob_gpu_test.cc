@@ -20,13 +20,13 @@ TYPED_TEST(TensorGPUTest, TensorInitializedEmpty) {
   if (!caffe2::HasCudaGPU()) return;
   Tensor tensor(CUDA);
   EXPECT_EQ(tensor.numel(), 0);
-  EXPECT_EQ(tensor.ndim(), 1);
+  EXPECT_EQ(tensor.dim(), 1);
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
   dims[2] = 5;
   tensor.Resize(dims);
-  EXPECT_EQ(tensor.ndim(), 3);
+  EXPECT_EQ(tensor.dim(), 3);
   EXPECT_EQ(tensor.dim32(0), 2);
   EXPECT_EQ(tensor.dim32(1), 3);
   EXPECT_EQ(tensor.dim32(2), 5);
@@ -41,7 +41,7 @@ TYPED_TEST(TensorGPUTest, TensorInitializedNonEmpty) {
   dims[1] = 3;
   dims[2] = 5;
   Tensor tensor(dims, CUDA);
-  EXPECT_EQ(tensor.ndim(), 3);
+  EXPECT_EQ(tensor.dim(), 3);
   EXPECT_EQ(tensor.dim32(0), 2);
   EXPECT_EQ(tensor.dim32(1), 3);
   EXPECT_EQ(tensor.dim32(2), 5);
@@ -52,7 +52,7 @@ TYPED_TEST(TensorGPUTest, TensorInitializedNonEmpty) {
   dims[2] = 13;
   dims.push_back(17);
   tensor.Resize(dims);
-  EXPECT_EQ(tensor.ndim(), 4);
+  EXPECT_EQ(tensor.dim(), 4);
   EXPECT_EQ(tensor.dim32(0), 7);
   EXPECT_EQ(tensor.dim32(1), 11);
   EXPECT_EQ(tensor.dim32(2), 13);
@@ -88,7 +88,7 @@ TYPED_TEST(TensorGPUTest, TensorShareDataCanUseDifferentShapes) {
   Tensor other_tensor(alternate_dims, CUDA);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
   other_tensor.ShareData(tensor);
-  EXPECT_EQ(other_tensor.ndim(), 1);
+  EXPECT_EQ(other_tensor.dim(), 1);
   EXPECT_EQ(other_tensor.dim32(0), alternate_dims[0]);
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
   EXPECT_TRUE(other_tensor.data<TypeParam>() != nullptr);
@@ -118,7 +118,7 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
   if (!HasCudaGPU()) return;
   ::testing::FLAGS_gtest_death_test_style = "threadsafe";
   Tensor tensor(CUDA);
-  EXPECT_EQ(tensor.ndim(), 1);
+  EXPECT_EQ(tensor.dim(), 1);
   EXPECT_EQ(tensor.numel(), 0);
   EXPECT_THROW(tensor.data<TypeParam>(), EnforceNotMet);
 }
@@ -153,9 +153,9 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
     EXPECT_NO_THROW(DeserializeBlob(serialized, &new_blob));               \
     EXPECT_TRUE(BlobIsTensorType(new_blob, CUDA));                         \
     Tensor new_cpu_tensor(blob.Get<Tensor>(), CPU);                        \
-    EXPECT_EQ(new_cpu_tensor.ndim(), 2);                                   \
-    EXPECT_EQ(new_cpu_tensor.dim(0), 2);                                   \
-    EXPECT_EQ(new_cpu_tensor.dim(1), 3);                                   \
+    EXPECT_EQ(new_cpu_tensor.dim(), 2);                                    \
+    EXPECT_EQ(new_cpu_tensor.size(0), 2);                                  \
+    EXPECT_EQ(new_cpu_tensor.size(1), 3);                                  \
     for (int i = 0; i < 6; ++i) {                                          \
       EXPECT_EQ(                                                           \
           cpu_tensor.data<TypeParam>()[i],                                 \
@@ -182,8 +182,8 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
   }
   for (int gpu_id = 0; gpu_id < NumCudaDevices(); ++gpu_id) {
     DeviceGuard guard(gpu_id);
-    CUDAContext context(gpu_id);
-    blob.Reset(new Tensor(tensor, &context, CUDA));
+    CUDAContext context(gpu_id); // switch to the current gpu
+    blob.Reset(new Tensor(tensor, CUDA));
     string serialized = SerializeBlob(blob, "test");
     BlobProto proto;
     CAFFE_ENFORCE(proto.ParseFromString(serialized));

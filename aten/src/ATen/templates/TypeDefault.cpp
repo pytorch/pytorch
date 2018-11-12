@@ -28,10 +28,7 @@ Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking
 }
 
 Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device> to_device) const {
-  DeviceGuard device_guard;
-  if (to_device.has_value()) {
-    device_guard.set_index(to_device.value().index());
-  }
+  OptionalDeviceGuard device_guard(to_device);
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   Tensor r;
   if (is_sparse()) {
@@ -87,14 +84,14 @@ Tensor TypeDefault::tensorFromBlob(void * data, IntList sizes, const std::functi
 }
 Tensor TypeDefault::tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter) const {
   auto storage = storageFromBlob(data, computeStorageSize(sizes, strides), deleter);
-  return tensor(storage, 0, sizes, strides);
+  return _th_tensor(storage, 0, sizes, strides);
 }
 Tensor TypeDefault::tensorWithAllocator(IntList sizes, Allocator* allocator) const {
   return tensorWithAllocator(sizes, defaultStrides(sizes), std::move(allocator));
 }
 Tensor TypeDefault::tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const {
   auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
-  return tensor(storage, 0, sizes, strides);
+  return _th_tensor(storage, 0, sizes, strides);
 }
 
 Storage TypeDefault::storage(bool resizable) const {

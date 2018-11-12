@@ -43,7 +43,7 @@ Tensor empty_cuda(IntList size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == at::Backend::CUDA);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'
   auto storage_impl = c10::make_intrusive<at::StorageImpl>(
-    scalarTypeToTypeMeta(options.dtype()), 0, cuda::getCUDADeviceAllocator(), true);
+    options.dtype(), 0, cuda::getCUDADeviceAllocator(), true);
 
   auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId(), false);
   resize_cuda_(tensor, size); // avoid dispatch overhead

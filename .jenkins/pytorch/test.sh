@@ -12,28 +12,29 @@ echo "Testing pytorch"
 if [ -n "${IN_CIRCLECI}" ]; then
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
     # TODO: move this to Docker
-    sudo apt-get update
-    sudo apt-get install -y --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
+    sudo apt-get -qq update
+    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]]; then
     # TODO: move this to Docker
-    sudo apt-get update
-    sudo apt-get install -y --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-    sudo apt-get install -y --no-install-recommends openssh-client openssh-server
+    sudo apt-get -qq update
+    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
+    sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
     sudo mkdir -p /var/run/sshd
   fi
 fi
 
-# JIT C++ extensions require ninja.
-git clone https://github.com/ninja-build/ninja --quiet
-pushd ninja
-python ./configure.py --bootstrap
-export PATH="$PWD:$PATH"
-popd
+# --user breaks ppc64le builds and these packages are already in ppc64le docker
+if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
+  # JIT C++ extensions require ninja.
+  pip install -q ninja --user
+  # ninja is installed in /var/lib/jenkins/.local/bin
+  export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
-# TODO: move this to Docker
-pip install hypothesis
+  # TODO: move this to Docker
+  pip install -q hypothesis --user
+fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
@@ -109,6 +110,7 @@ test_aten() {
 
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libc10* build/bin
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
+    ${SUDO} ln -s "$TORCH_LIB_PATH"/libmkldnn* build/bin
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
 
     ls build/bin
@@ -130,7 +132,7 @@ test_torchvision() {
   # this should be a transient requirement...)
   # See https://github.com/pytorch/pytorch/issues/7525
   #time python setup.py install
-  pip install --user .
+  pip install -q --user .
   popd
 }
 
@@ -143,7 +145,7 @@ test_libtorch() {
      else
        "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
      fi
-     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+     python tools/download_mnist.py --quiet -d mnist
      OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
   fi
 }

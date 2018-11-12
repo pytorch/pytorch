@@ -12,14 +12,14 @@ bool CosineEmbeddingCriterionOp<CPUContext>::RunOnDevice() {
   auto& Y = Input(1);
   auto* output = Output(0);
   CAFFE_ENFORCE(
-      S.size() == Y.size(),
+      S.numel() == Y.numel(),
       "The embedding and label should have the same size.");
   output->ResizeLike(S);
 
   const float* Sdata = S.data<float>();
   const int* Ydata = Y.data<int>();
   float* output_data = output->template mutable_data<float>();
-  for (int i = 0; i < S.size(); ++i) {
+  for (int i = 0; i < S.numel(); ++i) {
     output_data[i] =
         Ydata[i] == 1 ? (1.f - Sdata[i]) : std::max(0.f, Sdata[i] - margin_);
   }
@@ -39,7 +39,7 @@ bool CosineEmbeddingCriterionGradientOp<CPUContext>::RunOnDevice() {
   const int* Ydata = Y.data<int>();
   const float* dOutput_data = dOutput.data<float>();
   float* dSdata = dS->template mutable_data<float>();
-  for (int i = 0; i < S.size(); ++i) {
+  for (int i = 0; i < S.numel(); ++i) {
     dSdata[i] = dOutput_data[i] *
         (Ydata[i] == 1 ? -1.f : static_cast<float>(Sdata[i] >= margin_));
   }

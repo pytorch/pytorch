@@ -17,8 +17,7 @@ class Int8FCOp final : public Operator<CPUContext> {
  public:
   Int8FCOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
-        ws_(ws),
-        gemm_context_(ws->GetThreadPool()) {
+        ws_(ws) {
     createSharedBuffer<CPUContext>(ws_);
   }
 
@@ -40,17 +39,17 @@ class Int8FCOp final : public Operator<CPUContext> {
     Y->zero_point = Y_offset;
     // (NxHxW)xC == MxK x (NxK) -> MxN
     const auto K = X.t.size_from_dim(1);
-    const auto N = W.t.dim(0);
-    CHECK_EQ(K, W.t.dim(1));
-    CHECK_EQ(N, B.t.size());
-    const auto M = X.t.size() / K;
+    const auto N = W.t.size(0);
+    CHECK_EQ(K, W.t.size(1));
+    CHECK_EQ(N, B.t.numel());
+    const auto M = X.t.numel() / K;
     Y->t.Resize(M, N);
 
     runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
       initQNNPACK();
 
       pthreadpool_t threadpool =
-          reinterpret_cast<pthreadpool_t>(gemm_context_.threadPool());
+          reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
 
       if (this->qnnpackObject_ == nullptr) {
         const qnnp_status createStatus = qnnp_create_fully_connected_nc_q8(
@@ -75,9 +74,9 @@ class Int8FCOp final : public Operator<CPUContext> {
 
       uint8_t* inputPtr = X.t.template mutable_data<uint8_t>();
       if (K < 8) {
-        buffer->Resize(std::vector<int64_t>{X.t.size() + 8});
+        buffer->Resize(std::vector<int64_t>{X.t.numel() + 8});
         inputPtr = buffer->template mutable_data<uint8_t>() + 8;
-        memcpy(inputPtr, X.t.template data<uint8_t>(), X.t.size());
+        memcpy(inputPtr, X.t.template data<uint8_t>(), X.t.numel());
       }
 
       if (lastBatchSize_ != static_cast<size_t>(M) ||
@@ -115,7 +114,6 @@ class Int8FCOp final : public Operator<CPUContext> {
 
  private:
   Workspace* ws_;
-  C2GEMMContext gemm_context_;
   // QNNPACK convolution object
   qnnp_operator_t qnnpackObject_{nullptr};
   // batch size in the previous call to RunOnDeviceWithOrderNHWC
