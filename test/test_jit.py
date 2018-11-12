@@ -4464,12 +4464,34 @@ a")
                 # Replace this with another unsupported op when/if it gets supported
                 return x << y
 
+    def test_bitwise_ops(self):
+
+        def int_test():
+            return 2 & 3, 2 ^ 3, 2 | 3
+
+        self.checkScript(int_test, ())
+
+        def bool_test(x, y):
+            # type: (bool, bool) -> Tuple[bool, bool, bool]
+            return x & y, x ^ y, x | y
+
+        self.checkScript(bool_test, (True, False))
+        self.checkScript(bool_test, (True, True))
+
+        def tensor_test(x, y):
+            return x & y, x ^ y, x | y
+
+        x = torch.tensor(2)
+        y = torch.tensor(3)
+
+        self.checkScript(tensor_test, (x, y))
+
     def test_number_math(self):
         template = dedent('''
         def func():
             return {scalar1} {op} {scalar2}
         ''')
-        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=']
+        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=', '//']
         scalars = ['7', '2', '3', '-3', '3.14', '0.125', '-0.5', '2.0', '-2.0']
         scalar_pairs = [(scalar1, scalar2) for scalar1 in scalars for scalar2 in scalars]
         for scalar1, scalar2 in scalar_pairs:
