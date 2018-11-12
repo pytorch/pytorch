@@ -7380,10 +7380,15 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
             test_script(None)
 
-        with self.assertRaisesRegex(RuntimeError, "cannot match a optional to int"):
+        @torch.jit.script
+        def test_test():
+            return torch.jit._unwrap_optional(1)
+
+        with self.assertRaisesRegex(RuntimeError, "is actually of type None"):
             @torch.jit.script
-            def test_test():
-                return torch.jit._unwrap_optional(1)
+            def test_no_type():
+                # type: () -> int
+                return torch.jit._unwrap_optional(None)
 
     def test_indexing_error(self):
         with self.assertRaisesRegex(RuntimeError, "Indexing only supported on lists, tensors, and tuples"):
@@ -8332,6 +8337,31 @@ a")
             return 3
 
         self.checkScript(foo, (True,))
+
+    def test_optional_conversion(self):
+        @torch.jit.script
+        def other_fn(x=None):
+            # type: (Optional[int]) -> int
+            return torch.jit._unwrap_optional(x)
+
+        @torch.jit.script
+        def fn(x):
+            # type: (int) -> int
+            return other_fn(x)
+
+        self.assertEqual(fn(2), 2)
+
+        @torch.jit.script
+        def unify_to_optional(x):
+            # type: (bool) -> Optional[int]
+            if x:
+                a = None
+            else:
+                a = 2
+            return a
+
+        self.assertEqual(unify_to_optional(True), None)
+        self.assertEqual(unify_to_optional(False), 2)
 
     def test_lhs_indexing(self):
         def foo(a, b):
@@ -9568,7 +9598,6 @@ nn_module_tests = [
 #   fn to determine if test should be skipped,               // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
 #   kwargs for function,                                     // optional
-#   is inplace? if so skip grad tests,                       // optional
 # )
 nn_functional_tests = [
     # TODO: default arguments for None type not supported, add
@@ -9628,6 +9657,7 @@ nn_functional_tests = [
     ('softplus', (S, S, S), (),),
     ('softmin', (S, S, S), (0,),),
     ('softmax', (S, S, S), (0,),),
+    ('softmax', (S, S, S), (0, 3, torch.double), 'with_all_args'),
     ('tanh', (S, S, S), (),),
     ('sigmoid', (S, S, S), (),),
     ('log_softmax', (S, S, S), (0,),),
