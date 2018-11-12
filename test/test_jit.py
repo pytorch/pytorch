@@ -3679,6 +3679,17 @@ a")
 
         self.checkScript(test_non_equality, (), optimize=True)
 
+        def test_list_equality_as_cond():
+            a = [1, 2, 3]
+            b = [3]
+            if a == b:
+                c = 1
+            else:
+                c = 2
+            return c
+
+        self.checkScript(test_list_equality_as_cond, (), optimize=True)
+
         def test_list_add():
             a = [1, 2, 3]
             b = [2]
@@ -4455,49 +4466,20 @@ a")
 
     def test_number_math(self):
         template = dedent('''
-        # int, int -> int
-        def func1():
-            return 7 {op} 2
-
-        def func2():
-            return 3 {op} 2
-
-        def func3():
-            return -7 {op} 3
-
-        def func4():
-            return 7 {op} -3
-
-        # float, float -> float
-        def func5():
-            return 3.14 {op} 0.125
-
-        def func6():
-            return 3.14 {op} 3.14
-
-        def func7():
-            return -0.5 {op} 2.0
-
-        def func8():
-            return 3.5 {op} -2.0
-
+        def func():
+            return {scalar1} {op} {scalar2}
         ''')
         ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=']
+        scalars = ['7', '2', '3', '-3', '3.14', '0.125', '-0.5', '2.0', '-2.0']
+        scalar_pairs = [(scalar1, scalar2) for scalar1 in scalars for scalar2 in scalars]
+        for scalar1, scalar2 in scalar_pairs:
+            for op in ops:
+                code = template.format(op=op, scalar1=scalar1, scalar2=scalar2)
+                scope = {}
+                exec(code, globals(), scope)
+                cu = torch.jit.CompilationUnit(code)
 
-        for op in ops:
-            code = template.format(op=op)
-            scope = {}
-            exec(code, globals(), scope)
-            cu = torch.jit.CompilationUnit(code)
-
-            self.assertEqual(cu.func1(), scope['func1']())
-            self.assertEqual(cu.func2(), scope['func2']())
-            self.assertEqual(cu.func3(), scope['func3']())
-            self.assertEqual(cu.func4(), scope['func4']())
-            self.assertEqual(cu.func5(), scope['func5']())
-            self.assertEqual(cu.func6(), scope['func6']())
-            self.assertEqual(cu.func7(), scope['func7']())
-            self.assertEqual(cu.func8(), scope['func8']())
+                self.assertEqual(cu.func(), scope['func']())
 
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)

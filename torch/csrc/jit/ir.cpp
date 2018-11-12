@@ -867,9 +867,32 @@ bool Node::isBefore(const Node * n) const {
 }
 
 bool Node::isAfter(const Node * n) const {
-  JIT_ASSERT(this->owningBlock() == n->owningBlock());
+  JIT_ASSERT(this->owningGraph() == n->owningGraph());
 
-  return this->topo_position_ > n->topo_position_;
+  if (this->owningBlock() == n->owningBlock()) {
+    return this->topo_position_ > n->topo_position_;
+  }
+
+  // These nodes don't share a common block. Traverse the blockchains upward
+  // until we find the first common block.
+  auto lhs = this;
+  while (lhs) {
+    JIT_ASSERT(lhs->owningBlock());
+
+    auto rhs = n;
+    while (rhs) {
+      JIT_ASSERT(rhs->owningBlock());
+
+      if (lhs->owningBlock() == rhs->owningBlock()) {
+        return lhs->isAfter(rhs);
+      }
+      rhs = rhs->owningBlock()->owningNode();
+    }
+
+    lhs = lhs->owningBlock()->owningNode();
+  }
+  // should never reach here, since both nodes are ultimately in the same graph
+  JIT_ASSERT(false);
 }
 
 Node* Node::insertBefore(Node * n) {
