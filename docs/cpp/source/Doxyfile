@@ -39,7 +39,6 @@ INPUT                  = ../../../torch/csrc/api/include \
                          ../../../aten/src/ATen/Backend.h \
                          ../../../aten/src/ATen/DeviceGuard.h \
                          ../../../aten/src/ATen/Layout.h \
-                         ../../../aten/src/ATen/OptionsGuard.h \
                          ../../../aten/src/ATen/Scalar.h \
                          ../../../aten/src/ATen/TensorOptions.h \
                          ../../../aten/src/ATen/core/Half.h \
