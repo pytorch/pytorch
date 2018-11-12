@@ -7,7 +7,7 @@
 // we build.
 
 #ifdef _WIN32
-#if defined(C10_CUDA/BUILD_SHARED_LIBS)
+#if defined(C10_CUDA_BUILD_SHARED_LIBS)
 #define C10_CUDA_EXPORT __declspec(dllexport)
 #define C10_CUDA_IMPORT __declspec(dllimport)
 #else
