@@ -410,6 +410,7 @@ def _unpool_output_size(input, kernel_size, stride, padding, output_size):
     return output_size
 
 
+@torch._jit_internal.weak_script
 def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
     r"""Computes a partial inverse of :class:`MaxPool1d`.
@@ -465,14 +466,19 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
 
 
 def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
+    # type: (Tensor, int, int, Optional[List[int]], bool) -> Tensor
     r"""Applies a 1D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
-    out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
-    return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1. / norm_type)
+    if stride is None:
+        _stride = torch.jit.annotate(List[int], [])
+    else:
+        _stride = torch.jit._unwrap_optional(stride)
+    out = avg_pool1d(input.pow(norm_type), kernel_size, _stride, 0, ceil_mode)
+    return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1 / norm_type)
 
 
 def adaptive_max_pool1d(input, output_size, return_indices=False):
@@ -1577,9 +1583,9 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         raise ValueError('Expected input batch_size ({}) to match target batch_size ({}).'
                          .format(input.size(0), target.size(0)))
     if dim == 2:
-        return torch._C._nn.nll_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
+        ret = torch._C._nn.nll_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
     elif dim == 4:
-        return torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
+        ret = torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
     elif dim == 3 or dim > 4:
         n = input.size(0)
         c = input.size(1)
@@ -1590,9 +1596,10 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         input = input.contiguous().view(n, c, 1, -1)
         target = target.contiguous().view(n, 1, -1)
         if reduction is not 'none':
-            return torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
+            ret = torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
         out = torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
-        return out.view(out_size)
+        ret = out.view(out_size)
+    return ret
 
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=None, eps=1e-8,
@@ -1646,7 +1653,9 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     return torch.sum(loss)
 
 
+@torch._jit_internal.weak_script
 def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""The `Kullback-Leibler divergence`_ Loss.
 
     See :class:`~torch.nn.KLDivLoss` for details.
@@ -1671,10 +1680,12 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             specifying either of those two args will override :attr:`reduction`. Default: 'mean'
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        _size_average = torch.jit._unwrap_optional(size_average)
+        _reduce = torch.jit._unwrap_optional(reduce)
+        _reduction = _Reduction.legacy_get_enum(_size_average, _reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch.kl_div(input, target, reduction)
+        _reduction = _Reduction.get_enum(reduction)
+    return torch.kl_div(input, target, _reduction)
 
 
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
@@ -1724,8 +1735,10 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
     return nll_loss(log_softmax(input, 1), target, weight, None, ignore_index, None, reduction)
 
 
+@torch._jit_internal.weak_script
 def binary_cross_entropy(input, target, weight=None, size_average=None,
                          reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
     r"""Function that measures the Binary Cross Entropy
     between the target and the output.
 
@@ -1760,9 +1773,11 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         >>> loss.backward()
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        _size_average = torch.jit._unwrap_optional(size_average)
+        _reduce = torch.jit._unwrap_optional(reduce)
+        _reduction = _Reduction.legacy_get_enum(_size_average, _reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
+        _reduction = _Reduction.get_enum(reduction)
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                       "Please ensure they have the same size.".format(target.size(), input.size()))
@@ -2379,7 +2394,6 @@ def pad(input, pad, mode='constant', value=0):
 
 # distance
 
-@torch._jit_internal.weak_script
 def pairwise_distance(x1, x2, p=2., eps=1e-6, keepdim=False):
     # type: (Tensor, Tensor, float, float, bool) -> Tensor
     r"""
