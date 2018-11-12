@@ -583,6 +583,22 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
     @skipIfRocm
+    def test_sparse_mm_backward(self):
+        size = (3, 3)
+        sparse = torch.sparse_coo_tensor(size, requires_grad=True)
+        dense = torch.randn(size, requires_grad=True)
+
+        z = sparse.mm(dense)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
+            z.sum().backward()
+
+        z = dense.addmm(sparse, dense)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
+            z.sum().backward()
+
+    @skipIfRocm
     def test_sparse_ctor_getter_backward(self):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
         def test(size, sparse_dim, nnz, device):

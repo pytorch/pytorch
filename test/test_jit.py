@@ -234,6 +234,7 @@ class JitTestCase(TestCase):
         buffer = io.BytesIO()
         torch.jit.save(imported, buffer)
         buffer.seek(0)
+
         return torch.jit.load(buffer)
 
     def assertGraphContains(self, graph, kind):

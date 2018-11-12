@@ -183,6 +183,11 @@ class CAFFE2_API Tensor : public NeuralNetData {
   const std::string getName() const {
     return name_;
   }
+
+  void setName(const std::string& name) {
+    name_ = name;
+  }
+
   ~Tensor() {}
 
  private:
