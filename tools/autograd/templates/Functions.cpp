@@ -472,15 +472,6 @@ Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Sc
   }
 }
 
-Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, IntList sizes, IntList strides, const Scalar & alpha) {
-  // if input was column-major, return grad as column-order for efficiency
-  if (strides[0] == 1 && strides[1] == sizes[0]) {
-    return maybe_multiply(mat2.mm(grad.t()).t(), alpha);
-  } else {
-    return maybe_multiply(grad.mm(mat2.t()), alpha);
-  }
-}
-
 Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, const Tensor & mat1, const Scalar & alpha) {
   // if input was column-major, return grad as column-order for efficiency
   if (mat1.is_sparse()) {

@@ -19,7 +19,7 @@ SumDNNLowPOp<T, ReluFused>::SumDNNLowPOp(
 
 template <typename T, bool ReluFused>
 bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
-  if (!BaseType::arguments_parsed_) {
+  if (!this->arguments_parsed_) {
     dnnlowp::ParseDNNLowPOperatorArguments(
         this,
         &dequantize_output_,
@@ -29,12 +29,12 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
     if (ReluFused) {
       // It's actually fused with Relu not followed by but setting this to make
       // sure quantization error is correctly measured in
-      // BaseType::MeasureQuantizationError_
+      // this->MeasureQuantizationError_
       followed_by_ = "Relu";
       dnnlowp::AdjustOutputTensorQuantizationParamsWithFollowedBy(
           this, followed_by_);
     }
-    BaseType::arguments_parsed_ = true;
+    this->arguments_parsed_ = true;
   }
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN

@@ -292,9 +292,12 @@ Tensor& _copy__cuda(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
-Tensor _copy_from_cuda(const Tensor& src, const Tensor& self) {
+Tensor _copy_from_cuda(
+    const Tensor& src,
+    const Tensor& self,
+    bool non_blocking) {
   Tensor self_ = self;
-  _copy__cuda(self_, src);
+  _copy__cuda(self_, src, non_blocking);
   return self;
 }
 

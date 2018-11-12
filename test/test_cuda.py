@@ -829,6 +829,17 @@ class TestCuda(TestCase):
                 end1 = advance(gen1, end1)
                 t += 1
 
+    @skipIfRocm
+    def test_out_of_memory(self):
+        tensor = torch.zeros(1024, device='cuda')
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to allocate 80.00 GiB"):
+            torch.randn(1024 * 1024 * 1024 * 80, dtype=torch.int8, device='cuda')
+
+        # ensure out of memory error doesn't disturb subsequent kernel
+        tensor.fill_(1)
+        self.assertTrue((tensor == 1).all())
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @skipIfRocm
     def test_autogpu(self):
@@ -1570,6 +1581,18 @@ class TestCuda(TestCase):
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_gesv_batched_dims(self):
         _TestTorchMixin._test_gesv_batched_dims(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_potrs(self):
+        _TestTorchMixin._test_potrs(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_potrs_batched(self):
+        _TestTorchMixin._test_potrs_batched(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_potrs_batched_dims(self):
+        _TestTorchMixin._test_potrs_batched_dims(self, lambda t: t.cuda())
 
     def test_view(self):
         _TestTorchMixin._test_view(self, lambda t: t.cuda())

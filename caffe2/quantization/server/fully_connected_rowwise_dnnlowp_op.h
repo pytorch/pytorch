@@ -30,7 +30,7 @@ class FullyConnectedRowWiseDNNLowPOp final
   using T_signed = typename std::make_signed<T>::type;
 
   // used in fast path for T == uint8_t
-  std::unique_ptr<fbgemm2::PackBMatrix<std::int8_t>> Wq_packed_;
+  std::unique_ptr<fbgemm::PackBMatrix<std::int8_t>> Wq_packed_;
   std::vector<std::uint8_t> X_pack_buf_;
 
   // used in slow path for T != uint8_t

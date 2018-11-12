@@ -662,9 +662,9 @@ def random_symmetric_psd_matrix(l):
     return A.mm(A.transpose(0, 1))
 
 
-def random_symmetric_pd_matrix(l, eps=1e-5):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1)) + torch.eye(l) * eps
+def random_symmetric_pd_matrix(l, *batches):
+    A = torch.randn(*(batches + (l, l)))
+    return A.matmul(A.transpose(-2, -1)) + torch.eye(l) * 1e-5
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
