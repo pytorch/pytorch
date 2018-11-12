@@ -73,9 +73,12 @@ def print_stats(FunctionalModule_nums, nn_module):
     # Fully Supported Ops: All related test cases of these ops have been exported
     # Semi-Supported Ops: Part of related test cases of these ops have been exported
     # Unsupported Ops: None of related test cases of these ops have been exported
-    for info, l in [["{} Fully Supported Operators:".format(len(supported)), supported],
-                    ["{} Semi-Supported Operators:".format(len(not_fully_supported)), not_fully_supported],
-                    ["{} Unsupported Operators:".format(len(unsupported)), unsupported]]:
+    for info, l in [["{} Fully Supported Operators:".format(len(supported)),
+                     supported],
+                    ["{} Semi-Supported Operators:".format(len(not_fully_supported)),
+                     not_fully_supported],
+                    ["{} Unsupported Operators:".format(len(unsupported)),
+                     unsupported]]:
         fun(info, l)
 
 
@@ -83,7 +86,7 @@ def convert_tests(testcases, sets=1):
     print("Collect {} test cases from PyTorch.".format(len(testcases)))
     failed = 0
     FunctionalModule_nums = 0
-    nn_module = dict()
+    nn_module = {}
     for t in testcases:
         test_name = get_test_name(t)
         module = gen_module(t)
