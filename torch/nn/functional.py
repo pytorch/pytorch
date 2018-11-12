@@ -1415,7 +1415,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     :class:`~torch.nn.BatchNorm3d` for details.
     """
     if training:
-        size = input.size()
+        size = list(input.size())
         if reduce(mul, size[2:], size[0]) == 1:
             raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
     return torch.batch_norm(
@@ -2411,6 +2411,7 @@ def pad(input, pad, mode='constant', value=0):
 
 # distance
 
+@torch._jit_internal.weak_script
 def pairwise_distance(x1, x2, p=2., eps=1e-6, keepdim=False):
     # type: (Tensor, Tensor, float, float, bool) -> Tensor
     r"""
