@@ -2,7 +2,6 @@
 #include "ATen/InitialTensorOptions.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/cuda/CUDAContext.h"
-#include "ATen/native/cuda/Resize.cuh"
 #include "c10/util/Exception.h"
 
 #include <THC/THCGeneral.h>
@@ -43,14 +42,22 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
 Tensor empty_cuda(IntList size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == at::Backend::CUDA);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'
-  auto storage_impl = c10::make_intrusive<at::StorageImpl>(
-    options.dtype(), 0, cuda::getCUDADeviceAllocator(), true);
+
+  auto* allocator = at::cuda::getCUDADeviceAllocator();
+  int64_t nelements = prod_intlist(size);
+  auto dtype = options.dtype();
+  auto storage_impl = c10::make_intrusive<StorageImpl>(
+    dtype,
+    nelements,
+    allocator->allocate(nelements * dtype.itemsize()),
+    allocator,
+    /*resizeable=*/true);
 
   auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId(), false);
-  // For performance reasons,
-  // 1) avoid the dispatching overhead
-  // 2) Don't use another DeviceGuard -- at::empty(...) already uses one.
-  resize_cuda_helper_(tensor, size, /*device_guard=*/false);
+  // Default TensorImpl has size [0]
+  if (size.size() != 1 || size[0] != 0) {
+    tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
+  }
   return tensor;
 }
 
