@@ -352,7 +352,7 @@ if(USE_CUDA)
     set(TORCH_CUDA_LIBRARIES
       ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
       ${CUDA_LIBRARIES})
-    target_include_directories(torch PRIVATE "${NVTOOLEXT_HOME}/include")
+    target_include_directories(torch PUBLIC "${NVTOOLEXT_HOME}/include")
   elseif(APPLE)
     set(TORCH_CUDA_LIBRARIES
       ${CUDA_TOOLKIT_ROOT_DIR}/lib/libcudart.dylib
