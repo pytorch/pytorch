@@ -80,6 +80,27 @@ inline Value* getValueTrace(const Variable& var) {
   return it->second;
 }
 
+// allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...] arguments
+// One might merge getValueTrace and getNestedValueTrace after checking that
+// casting to IValue instead  of Variable is OK
+inline Value* getNestedValueTrace(const IValue &v) {
+  auto &state = getTracingState();
+  if (v.isTensorList()) {
+    return state->graph->insertNode(state->graph->createList(
+        DynamicType::get(),
+        fmap(v.toTensorListRef(), [](const IValue &val) {
+          return getNestedValueTrace(val);
+	})))->output();
+  } else if (v.isTuple()) {
+    return state->graph->insertNode(state->graph->createTuple(
+	fmap(v.toTuple()->elements(), [](const IValue &val) {
+          return getNestedValueTrace(val);
+	})))->output();
+  }
+  return getValueTrace(v.toTensor());
+}
+
+
 inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const Variable& var, size_t output_no) {
   if (!var.defined()) {
     Node *n = state->graph->createUndefined();

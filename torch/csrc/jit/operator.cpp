@@ -3,7 +3,7 @@
 #include "torch/csrc/jit/script/lexer.h"
 #include "torch/csrc/jit/script/tree.h"
 #include "torch/csrc/jit/operator.h"
-
+#include "torch/csrc/jit/passes/python_print.h"
 #include "torch/csrc/jit/script/error_report.h"
 
 namespace torch { namespace jit {
@@ -419,6 +419,16 @@ OperatorRegistry& getRegistry() {
 } // anonymous namespace
 
 void registerOperator(Operator&& op) {
+  if(op.schema().is_varret()) {
+    Symbol s = Symbol::fromQualString(op.schema().name());
+    if (!printerHasSpecialCaseFor(s)) {
+      std::cout << c10::str(
+          "missing special case in python printer for non-schematized operator ",
+          op.schema().name(),
+          ". File a bug to add a case for this operator.\n");
+    }
+  }
+
   getRegistry().registerOperator(std::move(op));
 }
 
