@@ -580,6 +580,29 @@ RegisterOperators reg({
         };                                                                     \
       }),
 
+#define DEFINE_INT_FLOAT_OP(aten_op, op, result)                               \
+  Operator(                                                                    \
+      #aten_op "(int a, float b) -> " #result, [](const Node* node) {          \
+        return [=](Stack& stack) {                                             \
+          int64_t a;                                                           \
+          double b;                                                            \
+          pop(stack, a, b);                                                    \
+          push(stack, op);                                                     \
+          return 0;                                                            \
+        };                                                                     \
+      }),                                                                      \
+  Operator(                                                                    \
+      #aten_op "(float a, int b) -> " #result, [](const Node* node) {          \
+        return [=](Stack& stack) {                                             \
+          double a;                                                            \
+          int64_t b;                                                           \
+          pop(stack, a, b);                                                    \
+          push(stack, op);                                                     \
+          return 0;                                                            \
+        };                                                                     \
+      }),
+
+
 #define DEFINE_INT_OP(aten_op, op)                            \
   Operator(#aten_op "(int a, int b) -> int", [](const Node* node) { \
     return [=](Stack& stack) {                                \
@@ -591,9 +614,11 @@ RegisterOperators reg({
   }),
 
 #define DEFINE_BINARY_OP(aten_op, op) \
-  DEFINE_GENERIC_OP(aten_op, op, op, int, float)
+  DEFINE_GENERIC_OP(aten_op, op, op, int, float)  \
+  DEFINE_INT_FLOAT_OP(aten_op, op, float)
 #define DEFINE_COMPARISON_OP(aten_op, op) \
-  DEFINE_GENERIC_OP(aten_op, op, op, bool, bool)
+  DEFINE_GENERIC_OP(aten_op, op, op, bool, bool) \
+  DEFINE_INT_FLOAT_OP(aten_op, op, bool)
 #define DEFINE_BOOL_OP(aten_op, op)                              \
   Operator(#aten_op "(bool a, bool b) -> bool", [](const Node* node) { \
     return [=](Stack& stack) {                                   \
@@ -669,7 +694,7 @@ Operation listEq(const Node* node) {
     T a;
     T b;
     pop(stack, a, b);
-    push(stack, a->elements() == b->elements() ? 1 : 0);
+    push(stack, a->elements() == b->elements() ? true : false);
     return 0;
   };
 }
@@ -682,7 +707,7 @@ Operation listEq<Shared<TensorList>>(const Node* node) {
     Shared<TensorList> b;
     pop(stack, a, b);
     if (a->elements().size() != b->elements().size()) {
-      push(stack, 0);
+      push(stack, false);
       return 0;
     }
 
@@ -694,12 +719,12 @@ Operation listEq<Shared<TensorList>>(const Node* node) {
       // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
       const auto cmp_result = a_element.eq(b_element);
       if (!cmp_result.is_nonzero()) {
-        push(stack, 0);
+        push(stack, false);
         return 0;
       }
     }
 
-    push(stack, 1);
+    push(stack, true);
     return 0;
   };
 }
@@ -828,9 +853,9 @@ Operator(                                                                      \
 #undef CREATE_LIST_OPS
 
 
-    Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
-    Operator("aten::eq(float[] a, float[] b) -> int", listEq<Shared<DoubleList>>),
-    Operator("aten::eq(Tensor[] a, Tensor[] b) -> int", listEq<Shared<TensorList>>),
+    Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntList>>),
+    Operator("aten::eq(float[] a, float[] b) -> bool", listEq<Shared<DoubleList>>),
+    Operator("aten::eq(Tensor[] a, Tensor[] b) -> bool", listEq<Shared<TensorList>>),
 
 #define CREATE_COPY_OP(other_type, c_type)                              \
   Operator(                                                             \
@@ -860,6 +885,8 @@ Operator(                                                                      \
     // The modulus calculation is different between C++ and Python (on negative), we preserve
     // the python behavior as it's more common and match python syntax, hence the conversion.
     DEFINE_GENERIC_OP(aten::remainder, (b + (a % b)) % b, fmod((b + fmod(a, b)), b), int, float)
+    DEFINE_INT_FLOAT_OP(aten::remainder, fmod((b + fmod(a, b)), b), float)
+
 
     // TODO: Support python floordiv (//)
     // Right now aten::floordiv is only used by loop unrolling
