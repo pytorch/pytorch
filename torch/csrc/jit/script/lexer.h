@@ -60,7 +60,7 @@ namespace script {
   _(TK_EQ, "eq", "==")                           \
   _(TK_LE, "le", "<=")                           \
   _(TK_GE, "ge", ">=")                           \
-  _(TK_FLOOR_DIV, "TK_FLOOR_DIV", "//")          \
+  _(TK_FLOOR_DIV, "floordiv", "//")              \
   _(TK_IF_EXPR, "if", "")                        \
   _(TK_TRUE, "True", "True")                     \
   _(TK_FALSE, "False", "False")                  \
