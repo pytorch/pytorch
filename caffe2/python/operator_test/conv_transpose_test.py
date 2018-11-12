@@ -8,6 +8,7 @@ import hypothesis.strategies as st
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.hip_test_util as hiputl
 
 
 class TestConvolutionTranspose(hu.HypothesisTestCase):
@@ -37,6 +38,11 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         outputs = {}
         for order in ["NCHW", "NHWC"]:
+            # NHWC not supported in MIOpen, run HIP
+            if hiputl.run_in_hip(gc, dc) and engine == "CUDNN":
+                tmp_engine = "CUDNN" if order == "NCHW" else ""
+            else:
+                tmp_engine = engine
             op = core.CreateOperator(
                 "ConvTranspose",
                 ["X", "w", "b"] if use_bias else ["X", "w"],
@@ -46,7 +52,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                 pad=pad,
                 adj=adj,
                 order=order,
-                engine=engine,
+                engine=tmp_engine,
                 shared_buffer=int(shared_buffer),
                 device_option=gc,
             )
@@ -102,6 +108,11 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         outputs = {}
         for order in ["NCHW", "NHWC"]:
+            # NHWC not supported in MIOpen, run HIP
+            if hiputl.run_in_hip(gc, dc) and engine == "CUDNN":
+                tmp_engine = "CUDNN" if order == "NCHW" else ""
+            else:
+                tmp_engine = engine
             op = core.CreateOperator(
                 "ConvTranspose",
                 ["X", "w", "b"] if use_bias else ["X", "w"],
@@ -111,7 +122,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                 pads=[pad] * 4,
                 adjs=[adj] * 2,
                 order=order,
-                engine=engine,
+                engine=tmp_engine,
                 shared_buffer=int(shared_buffer),
                 device_option=gc,
             )
@@ -236,6 +247,8 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                                              order, engine, use_bias,
                                              compute_dX, gc, dc):
         assume(adj < stride)
+        if hiputl.run_in_hip(gc, dc) and engine == "CUDNN":
+            assume(order == "NCHW")
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
         w = np.random.rand(
