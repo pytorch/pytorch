@@ -565,6 +565,14 @@ jobs:
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
+  pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build:
+    environment:
+      JOB_BASE_NAME: pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7:262"
+      PYTHON_VERSION: "3.6"
+      CUDA_VERSION: "10"
+    <<: *pytorch_linux_build_defaults
+
   pytorch_short_perf_test_gpu:
     environment:
       JOB_BASE_NAME: pytorch-short-perf-test-gpu
@@ -1015,6 +1023,7 @@ workflows:
       - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
           requires:
             - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+      - pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build
 
       - pytorch_macos_10_13_py3_build
       - pytorch_macos_10_13_py3_test:
