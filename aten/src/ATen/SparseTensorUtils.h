@@ -69,6 +69,7 @@ inline Tensor new_values_with_size_of(const Tensor& values, int64_t nnz) {
   return at::empty(size, values.options());
 }
 
+// NOTE [ Flatten Sparse Indices ]
 // This helper function flattens a sparse indices tensor (a LongTensor) into a 1D
 // indices tensor. E.g.,
 //   input = [[2, 4, 0],

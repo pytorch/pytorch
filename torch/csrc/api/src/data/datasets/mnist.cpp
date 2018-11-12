@@ -1,7 +1,7 @@
 #include <torch/data/datasets/mnist.h>
 
 #include <torch/data/example.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <c10/util/Exception.h>
 
@@ -104,12 +104,20 @@ Example<> MNIST::get(size_t index) {
   return {images_[index], targets_[index]};
 }
 
-size_t MNIST::size() const {
+optional<size_t> MNIST::size() const {
   return images_.size(0);
 }
 
 bool MNIST::is_train() const noexcept {
-  return size() == kTrainSize;
+  return images_.size(0) == kTrainSize;
+}
+
+const Tensor& MNIST::images() const {
+  return images_;
+}
+
+const Tensor& MNIST::targets() const {
+  return targets_;
 }
 
 } // namespace datasets

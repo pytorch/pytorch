@@ -371,7 +371,7 @@ class GraphEncoder: public EncoderBase {
   }
 
  private:
-  virtual void EncodeTensor(
+  void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
       const c10::optional<std::string> external_ref = {}) override;
@@ -450,15 +450,15 @@ class ModuleEncoder: public EncoderBase {
                     script::Method &method,
                     const std::string prefix);
 
-  virtual void EncodeTensor(
+  void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
       const c10::optional<std::string> external_ref = {}) override;
 
-  virtual void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
+  void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
                                            const Value* n) override;
 
-  virtual void EncodeValueInfo(onnx::GraphProto *graph_proto,
+  void EncodeValueInfo(onnx::GraphProto *graph_proto,
                                onnx::ValueInfoProto* v,
                                const Value* n) override;
 
@@ -601,11 +601,11 @@ void ModuleEncoder::EncodeParameters(
   // Encode each parameter as a initializer in the proto
   for (auto &parameter : module.get_parameters()) {
     auto tensor_proto = graph_proto->add_initializer();
-    EncodeParameter(tensor_proto, parameter.value, prefix);
+    EncodeParameter(tensor_proto, parameter.value(), prefix);
   }
 
   for (auto &submodule : module.get_modules()) {
-    EncodeParameters(graph_proto, *submodule.value.module, prefix + submodule.key + ".");
+    EncodeParameters(graph_proto, *submodule->module, prefix + submodule.key() + ".");
   }
 }
 
@@ -634,11 +634,11 @@ void ModuleEncoder::EncodeMethods(
   // Encode each parameter as a initializer in the proto
   for (auto &method : module.get_methods()) {
     auto node_proto = graph_proto->add_node();
-    EncodeMethod(node_proto, *method.value, prefix);
+    EncodeMethod(node_proto, *method.value(), prefix);
   }
 
   for (auto &submodule : module.get_modules()) {
-    EncodeMethods(graph_proto, *submodule.value.module, prefix + submodule.key + ".");
+    EncodeMethods(graph_proto, *submodule->module, prefix + submodule.key() + ".");
   }
 }
 

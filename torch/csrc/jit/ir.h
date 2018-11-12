@@ -152,6 +152,7 @@ public:
       return unique_name_;
     return std::to_string(unique());
   }
+  TORCH_API std::string uniqueNameBase() const;
   Node* node() {
     return node_;
   }
@@ -225,7 +226,7 @@ private:
   // the schema.
   // note: mutable because schema_ is effectively a cache
   mutable const FunctionSchema* schema_;
-  topo_position_t topo_position_;
+  topo_position_t topo_position_ = 0;
 protected:
   TORCH_API Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
@@ -831,7 +832,7 @@ public:
 
   TORCH_API Node* createUndefined();
   TORCH_API Node* createNoneGenerator();
-  TORCH_API Node* createFusionGroup(int device);
+  TORCH_API Node* createFusionGroup();
   TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
   TORCH_API Node* createTupleUnpack(Value * v);
   TORCH_API Node* createTupleIndex(Value * tup, int64_t index);
@@ -867,7 +868,11 @@ public:
   // argument matching rules, and checks that the op matches a known schema
   // if this node successfully completes, it guarentees the node is a correctly-formed invocation
   // of opname
-  Value* insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs = {});
+  Value* insert(
+      Symbol opname,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs = {},
+      c10::optional<SourceRange> range = {});
 
   Node * appendNode(Node * n) {
     return block_->appendNode(n);

@@ -40,6 +40,7 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
@@ -165,7 +166,7 @@ void testFusion() {
     auto a = at::rand({3, 4}, at::kCUDA);
     auto b = at::rand({4, 3}, at::kCUDA).transpose(0, 1);
     auto o = at::zeros({3, 4}, at::kCUDA);
-    auto outputs = debugLaunchGraph(graph, 0, {a, b});
+    auto outputs = debugLaunchGraph(graph, {a, b});
     ASSERT_EQ(outputs.size(), 1);
     auto o2 = a * b;
     float max_diff = (o2 - outputs[0]).abs().max().item<double>();
@@ -218,7 +219,7 @@ void testFusion() {
     auto t5 = out1.tanh();
     auto out0 = t16 * t5;
 
-    auto outputs = debugLaunchGraph(graph, 0, inputs);
+    auto outputs = debugLaunchGraph(graph, inputs);
     ASSERT_EQ(outputs.size(), graph.outputs().size());
     ASSERT_TRUE(out0.is_same_size(outputs.front()));
     float max_diff = (outputs.front() - out0).abs().max().item<double>();
@@ -253,7 +254,7 @@ void testFusion() {
 
     auto o_r = a * b;
     auto o2_r = at::cat({a, o_r}, dim);
-    auto outputs = debugLaunchGraph(graph, 0, {a, b});
+    auto outputs = debugLaunchGraph(graph, {a, b});
     ASSERT_EQ(outputs.size(), 2);
 
     float max_diff = (o_r - outputs[0]).abs().max().item<double>();
@@ -333,7 +334,7 @@ void testFromQualString() {
     try {
       Symbol::fromQualString(input);
       ASSERT_TRUE(0);
-    } catch (std::runtime_error c) {
+    } catch (const std::exception& c) {
     }
   }
 }
@@ -583,6 +584,12 @@ void testADFormulas() {
        unary_pointwise,
        [](const VL& v) -> VL { return {v[0].tanh()}; }},
       {"t", unary_pointwise_2d, [](const VL& v) -> VL { return {v[0].t()}; }},
+      {"view",
+        unary_pointwise_2d,
+        [](const VL& v) -> VL { return {v[0].view({3, 2})}; }},
+      {"expand",
+        {{2, 1}},
+        [](const VL& v) -> VL { return {v[0].expand({2, 3})}; }},
       {"mm",
        {{10, 12}, {12, 15}},
        [](const VL& v) -> VL { return {v[0].mm(v[1])}; }},
@@ -607,6 +614,7 @@ void testADFormulas() {
     // Trace and differentiate the op
     auto graph = trace(test, vars_in);
     EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
+    ConstantPropagation(graph);
     auto grad_spec = differentiate(graph);
     LowerGradOf(*grad_spec.df);
     // Get outputs from the interpreter

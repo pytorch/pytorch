@@ -1,7 +1,7 @@
 #include <torch/nn/modules/rnn.h>
 
 #include <torch/nn/modules/dropout.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <c10/util/Exception.h>
@@ -34,7 +34,7 @@ RNNImplBase<Derived>::RNNImplBase(
     int64_t number_of_gates)
     : options(options_),
       number_of_gates_(number_of_gates),
-      cudnn_mode_(cudnn_mode) {
+      cudnn_mode_(std::move(cudnn_mode)) {
   reset();
 }
 
@@ -69,7 +69,7 @@ void RNNImplBase<Derived>::reset() {
     NoGradGuard no_grad;
     const auto stdv = 1.0 / std::sqrt(options.hidden_size_);
     for (auto& p : this->parameters()) {
-      p->uniform_(-stdv, stdv);
+      p.uniform_(-stdv, stdv);
     }
   }
 
@@ -166,11 +166,11 @@ bool RNNImplBase<Derived>::any_parameters_alias() const {
   // don't completely alias would break the assumptions of the uniqueness check
   // in Module.named_parameters().
   std::unordered_set<void*> unique_data_ptrs;
-  const auto params = this->parameters();
-  params.map(
-      std::inserter(unique_data_ptrs, unique_data_ptrs.end()),
-      [](Tensor p) { return p.data_ptr(); });
-
+  auto params = this->parameters();
+  unique_data_ptrs.reserve(params.size());
+  for (const auto& p : params) {
+    unique_data_ptrs.emplace(p.data_ptr());
+  }
   return unique_data_ptrs.size() != params.size();
 }
 

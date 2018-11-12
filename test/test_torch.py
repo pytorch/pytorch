@@ -225,7 +225,6 @@ class _TestTorchMixin(object):
                        'to_dense',
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
-                       'sparse_mask',
                        )
         test_namespace(torch.nn)
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear', 'feature_alpha_dropout')
@@ -868,14 +867,27 @@ class _TestTorchMixin(object):
             self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfNoLapack
     def test_norm(self):
         self._test_norm(self, device='cpu')
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    @skipIfRocm
-    def test_norm_cuda(self):
-        self._test_norm(self, device='cuda')
+    @staticmethod
+    def _test_dist(self, device):
+        def run_test(x, y):
+            for p in [0, 1, 2, 3, 4, inf, -inf]:
+                dist_xy = torch.dist(x, y, p)
+                dist_xy_norm = torch.norm(x - y, p)
+                self.assertEqual(dist_xy, dist_xy_norm)
+
+        run_test(torch.randn(5, device=device), torch.randn(5, device=device))
+
+        x = torch.zeros(3, device=device)
+        y = torch.zeros(3, device=device)
+        y[1] = 1.
+        run_test(x, y)
+
+    def test_dist(self):
+        self._test_dist(self, device='cpu')
 
     def test_dim_reduction_uint8_overflow(self):
         example = [[-1, 2, 1], [5, 3, 6]]
@@ -2644,6 +2656,20 @@ class _TestTorchMixin(object):
         expected = xp.numpy().diagonal(0, -2, -1)
         self.assertEqual(expected.shape, result.shape)
         self.assertTrue(np.allclose(expected, result.numpy()))
+
+    @staticmethod
+    def _test_diag_embed(self, dtype, device):
+        x = torch.arange(3 * 4, dtype=dtype, device=device).view(3, 4)
+        result = torch.diag_embed(x)
+        expected = torch.stack([torch.diag(r) for r in x], 0)
+        self.assertEqual(result, expected)
+
+        result = torch.diag_embed(x, offset=1, dim1=0, dim2=2)
+        expected = torch.stack([torch.diag(r, 1) for r in x], 1)
+        self.assertEqual(result, expected)
+
+    def test_diag_embed(self):
+        self._test_diag_embed(self, dtype=torch.float32, device='cpu')
 
     @staticmethod
     def _test_diagflat(self, dtype, device):
@@ -4537,6 +4563,7 @@ class _TestTorchMixin(object):
             u, s_actual, v = torch.svd(a, compute_uv=False)
             self.assertEqual(s_expect, s_actual, "Singular values don't match")
 
+    @skipIfNoLapack
     def test_svd_no_singularvectors(self):
         self._test_svd_no_singularvectors(self, lambda t: t)
 
@@ -5307,8 +5334,8 @@ class _TestTorchMixin(object):
         B = torch.mm(L, L.t())
         self.assertEqual(A, B, 1e-14, 'cholesky (lower) did not allow rebuilding the original matrix')
 
-    @skipIfNoLapack
-    def test_potrs(self):
+    @staticmethod
+    def _test_potrs(self, cast):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
                           (-0.45, 2.58, -2.70, 0.27, 9.04),
@@ -5320,6 +5347,7 @@ class _TestTorchMixin(object):
 
         # make sure 'a' is symmetric PSD
         a = torch.mm(a, a.t())
+        a, b = cast(a), cast(b)
 
         # upper Triangular Test
         U = torch.cholesky(a, True)
@@ -5330,6 +5358,102 @@ class _TestTorchMixin(object):
         L = torch.cholesky(a, False)
         x = torch.potrs(b, L, False)
         self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
+
+    @skipIfNoLapack
+    def test_potrs(self):
+        self._test_potrs(self, lambda t: t)
+
+    @staticmethod
+    def _test_potrs_batched(self, cast):
+        from common_utils import random_symmetric_pd_matrix
+
+        # TODO: This function should be replaced after batch potrf is ready
+        def get_cholesky(bmat, upper):
+            n = bmat.size(-1)
+            cholesky = torch.stack([m.cholesky(upper) for m in bmat.reshape(-1, n, n)])
+            return cholesky.reshape_as(bmat)
+
+        def potrs_test_helper(A_dims, b_dims, cast, upper):
+            A = cast(random_symmetric_pd_matrix(*A_dims))
+            L = get_cholesky(A, upper)
+            b = cast(torch.randn(*b_dims))
+            return A, L, b
+
+        for upper in [True, False]:
+            # test against potrs: one batch with both choices of upper
+            A, L, b = potrs_test_helper((5, 1), (1, 5, 10), cast, upper)
+            x_exp = torch.potrs(b.squeeze(0), L.squeeze(0), upper=upper)
+            x = torch.potrs(b, L, upper=upper)
+            self.assertEqual(x, x_exp.unsqueeze(0))
+
+            # test against potrs in a loop: four batches with both choices of upper
+            A, L, b = potrs_test_helper((5, 4), (4, 5, 10), cast, upper)
+            x_exp_list = list()
+            for i in range(4):
+                x_exp = torch.potrs(b[i], L[i], upper=upper)
+                x_exp_list.append(x_exp)
+            x_exp = torch.stack(x_exp_list)
+
+            x = torch.potrs(b, L, upper=upper)
+            self.assertEqual(x, x_exp)
+
+            # basic correctness test
+            A, L, b = potrs_test_helper((5, 3), (3, 5, 10), cast, upper)
+            x = torch.potrs(b, L, upper)
+            self.assertLessEqual(b.dist(torch.matmul(A, x)), 1e-12)
+
+            # Test non-contiguous inputs.
+            if not TEST_NUMPY:
+                return
+            import numpy
+            from numpy.linalg import solve
+            A = random_symmetric_pd_matrix(2, 2)
+            b = torch.randn(2, 2, 2)
+            x_exp = torch.Tensor(solve(A.permute(0, 2, 1).numpy(), b.permute(2, 1, 0).numpy()))
+            A = cast(A).permute(0, 2, 1)
+            b = cast(b).permute(2, 1, 0)
+            assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
+            L = get_cholesky(A, upper)
+            x = torch.potrs(b, L, upper=upper)
+            self.assertEqual(x, cast(x_exp))
+
+    @skipIfNoLapack
+    def test_potrs_batched(self):
+        self._test_potrs_batched(self, lambda t: t)
+
+    @staticmethod
+    def _test_potrs_batched_dims(self, cast):
+        if not TEST_NUMPY:
+            return
+
+        from numpy.linalg import solve
+        from common_utils import random_symmetric_pd_matrix
+
+        # TODO: This function should be replaced after batch potrf is ready
+        def get_cholesky(bmat, upper):
+            n = bmat.size(-1)
+            cholesky = torch.stack([m.cholesky(upper) for m in bmat.reshape(-1, n, n)])
+            return cholesky.reshape_as(bmat)
+
+        def run_test(A_dims, b_dims, cast, upper):
+            A = random_symmetric_pd_matrix(*A_dims)
+            b = torch.randn(*b_dims)
+            x_exp = torch.Tensor(solve(A.numpy(), b.numpy()))
+            A, b = cast(A), cast(b)
+            L = get_cholesky(A, upper)
+            x = torch.potrs(b, L, upper=upper)
+            self.assertEqual(x, cast(x_exp))
+
+        for upper in [True, False]:
+            # test against numpy.linalg.solve
+            run_test((4, 2, 1, 3), (2, 1, 3, 4, 6), cast, upper)  # no broadcasting
+            run_test((4, 2, 1, 3), (4, 6), cast, upper)  # broadcasting b
+            run_test((4,), (2, 1, 3, 4, 2), cast, upper)  # broadcasting A
+            run_test((4, 1, 3, 1), (2, 1, 3, 4, 5), cast, upper)  # broadcasting A & b
+
+    @skipIfNoLapack
+    def test_potrs_batched_dims(self):
+        self._test_potrs_batched_dims(self, lambda t: t)
 
     @skipIfNoLapack
     def test_potri(self):
@@ -6680,6 +6804,11 @@ class _TestTorchMixin(object):
             self.assertEqual(x, x.flip(0))
             self.assertEqual(x, x.flip(2))
 
+            # roll
+            self.assertEqual(x, x.roll(0, 1).roll(0, -1))
+            self.assertEqual(x, x.roll(1, x.size(1)))
+            self.assertEqual(x, x.roll(1))
+
             # unbind
             self.assertEqual((), x.unbind(0))
             self.assertEqual((torch.empty((0, 1, 0), device=device), torch.empty((0, 1, 0), device=device)),
@@ -6833,13 +6962,14 @@ class _TestTorchMixin(object):
             # dot
             self.assertEqual(torch.tensor(0., device=device), fn(torch.dot, (0,), (0,)))
 
-            # btrifact
-            A_LU, pivots = fn(torch.btrifact, (0, 5, 5))
-            self.assertEqual([(0, 5, 5), (0, 5)], [A_LU.shape, pivots.shape])
-            A_LU, pivots = fn(torch.btrifact, (0, 0, 0))
-            self.assertEqual([(0, 0, 0), (0, 0)], [A_LU.shape, pivots.shape])
-            A_LU, pivots = fn(torch.btrifact, (2, 0, 0))
-            self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
+            if torch._C.has_lapack:
+                # btrifact
+                A_LU, pivots = fn(torch.btrifact, (0, 5, 5))
+                self.assertEqual([(0, 5, 5), (0, 5)], [A_LU.shape, pivots.shape])
+                A_LU, pivots = fn(torch.btrifact, (0, 0, 0))
+                self.assertEqual([(0, 0, 0), (0, 0)], [A_LU.shape, pivots.shape])
+                A_LU, pivots = fn(torch.btrifact, (2, 0, 0))
+                self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
     @skipIfRocm
     def test_blas_alpha_beta_empty(self):
@@ -7193,14 +7323,8 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_flip(self, use_cuda=False):
-        if use_cuda:
-            cuda = torch.device("cuda")
-            data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=cuda).view(2, 2, 2)
-            # large data testing
-            large_data = torch.arange(0, 100000000, device=cuda).view(10000, 10000)
-            large_data.flip([0, 1])
-        else:
-            data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8]).view(2, 2, 2)
+        device = torch.device('cuda') if use_cuda else torch.device('cpu')
+        data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=device).view(2, 2, 2)
 
         self.assertEqual(torch.tensor([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2), data.flip(0))
         self.assertEqual(torch.tensor([3, 4, 1, 2, 7, 8, 5, 6]).view(2, 2, 2), data.flip(1))
@@ -7224,14 +7348,20 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: data.flip(3))
 
         # test for non-contiguous case
-        if use_cuda:
-            expanded_data = torch.arange(1, 4, device=cuda).view(3, 1).expand(3, 2)
-            tranposed_data = torch.arange(1, 9, device=cuda).view(2, 2, 2).transpose(0, 1)
-        else:
-            expanded_data = torch.arange(1, 4).view(3, 1).expand(3, 2)
-            tranposed_data = torch.arange(1, 9).view(2, 2, 2).transpose(0, 1)
+        expanded_data = torch.arange(1, 4, device=device).view(3, 1).expand(3, 2)
+        tranposed_data = torch.arange(1, 9, device=device).view(2, 2, 2).transpose(0, 1)
         self.assertEqual(torch.tensor([3, 3, 2, 2, 1, 1]).view(3, 2), expanded_data.flip(0))
         self.assertEqual(torch.tensor([8, 7, 4, 3, 6, 5, 2, 1]).view(2, 2, 2), tranposed_data.flip(0, 1, 2))
+
+        # test for shape
+        data = torch.randn(2, 3, 4, device=device)
+        size = [2, 3, 4]
+        test_dims = []
+        for i in range(1, 3):
+            test_dims += combinations(range(len(size)), i)
+
+        for ds in test_dims:
+            self.assertEqual(size, list(data.flip(ds).size()))
 
         # test rectangular case
         data = torch.tensor([1, 2, 3, 4, 5, 6]).view(2, 3)
@@ -7250,6 +7380,42 @@ class _TestTorchMixin(object):
 
     def test_flip(self):
         self._test_flip(self, use_cuda=False)
+
+    def test_roll(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            numbers = torch.arange(1, 9, device=device)
+
+            single_roll = numbers.roll(1, 0)
+            expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device)
+            self.assertEqual(single_roll, expected, "{} did not equal expected result".format(single_roll))
+
+            data = numbers.view(2, 2, 2)
+            rolled = data.roll(1, 0)
+            expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], device=device).view(2, 2, 2)
+            self.assertEqual(expected, rolled, "{} did not equal expected result: {}".format(rolled, expected))
+
+            data = data.view(2, 4)
+            # roll a loop until back where started
+            loop_rolled = data.roll(2, 0).roll(4, 1)
+            self.assertEqual(data, loop_rolled, "{} did not equal the original: {}".format(loop_rolled, data))
+            # multiple inverse loops
+            self.assertEqual(data, data.roll(-20, 0).roll(-40, 1))
+            self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device), numbers.roll(1, 0))
+
+            # test non-contiguous
+            # strided equivalent to numbers.as_strided(size=(4, 2), stride=(1, 4))
+            strided = numbers.view(2, 4).transpose(0, 1)
+            self.assertFalse(strided.is_contiguous(), "this test needs a non-contiguous tensor")
+            expected = torch.tensor([4, 8, 1, 5, 2, 6, 3, 7]).view(4, 2)
+            rolled = strided.roll(1, 0)
+            self.assertEqual(expected, rolled,
+                             "non contiguous tensor rolled to {} instead of {} ".format(rolled, expected))
+
+            # test roll with no dimension specified
+            expected = numbers.roll(1, 0).view(2, 4)
+            self.assertEqual(expected, data.roll(1), "roll with no dims should flatten and roll.")
+            self.assertEqual(expected, data.roll(1, dims=None), "roll with no dims should flatten and roll.")
 
     def test_reversed(self):
         val = torch.arange(0, 10)
@@ -7476,7 +7642,7 @@ class _TestTorchMixin(object):
         self.assertEqual(result, expected)
 
     @staticmethod
-    def _test_bernoulli(self, p_dtype, device):
+    def _test_bernoulli(self, t_dtype, p_dtype, device):
         for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
             x = torch.tensor(trivial_p, dtype=p_dtype, device=device)
             self.assertEqual(x.bernoulli().tolist(), trivial_p)
@@ -7498,8 +7664,7 @@ class _TestTorchMixin(object):
         torch.bernoulli(torch.rand_like(p), out=p)
         self.assertTrue(isBinary(p))
 
-        # test that it works with integral tensors
-        t = torch.empty(10, 10, dtype=torch.uint8, device=device)
+        t = torch.empty(10, 10, dtype=t_dtype, device=device)
 
         t.fill_(2)
         t.bernoulli_(0.5)
@@ -7519,7 +7684,9 @@ class _TestTorchMixin(object):
         self.assertTrue(isBinary(t))
 
     def test_bernoulli(self):
-        self._test_bernoulli(self, torch.double, 'cpu')
+        self._test_bernoulli(self, torch.float32, torch.float64, 'cpu')
+        # test that it works with integral tensors
+        self._test_bernoulli(self, torch.uint8, torch.float64, 'cpu')
 
     def test_normal(self):
         q = torch.Tensor(100, 100)

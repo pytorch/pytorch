@@ -17,24 +17,23 @@ struct FusedKernel {
   TH_DISALLOW_COPY_AND_ASSIGN(FusedKernel);
 
   FusedKernel(
-    const std::string& _name
-  , const std::string& _code
-  , const std::vector<TensorDesc>& _input_desc
-  , const std::vector<TensorDesc>& _output_desc
-  , const std::vector<PartitionDesc>& _chunk_desc
-  , const std::vector<PartitionDesc>& _concat_desc
-  , const bool _has_random)
-  : name_{_name}
-  , code_{_code}
-  , input_desc_{_input_desc}
-  , output_desc_{_output_desc}
-  , chunk_desc_{_chunk_desc}
-  , concat_desc_{_concat_desc}
-  , has_random_{_has_random}
-  { }
+      std::string name,
+      std::string code,
+      std::vector<TensorDesc> input_desc,
+      std::vector<TensorDesc> output_desc,
+      std::vector<PartitionDesc> chunk_desc,
+      std::vector<PartitionDesc> concat_desc,
+      bool has_random)
+      : name_(std::move(name)),
+        code_(std::move(code)),
+        input_desc_(std::move(input_desc)),
+        output_desc_(std::move(output_desc)),
+        chunk_desc_(std::move(chunk_desc)),
+        concat_desc_(std::move(concat_desc)),
+        has_random_(has_random) {}
 
   virtual ~FusedKernel() = default;
-  
+
 
   // arguments is a list of pointers to the arguments for the compiled CUDA/CPU
   // code.
@@ -57,7 +56,7 @@ struct FusedKernel {
   const std::vector<TensorDesc>& outputDesc() const { return output_desc_; }
   const std::vector<PartitionDesc>& chunkDesc() const { return chunk_desc_; }
   const std::vector<PartitionDesc>& concatDesc() const { return concat_desc_; }
-  bool hasRandom() const { return has_random_; } 
+  bool hasRandom() const { return has_random_; }
 
 
 protected:
@@ -65,7 +64,7 @@ protected:
   const std::string code_;
   const std::vector<TensorDesc> input_desc_;
   const std::vector<TensorDesc> output_desc_;
-  
+
   // same size as input_desc, describes whether an
   // input should be broken into subtensors (chunks)
   // to be consumed by the fusion group
@@ -80,7 +79,7 @@ protected:
 };
 
 } // namespace fuser
-} // namespace jit 
+} // namespace jit
 } // namespace torch
 
 #endif // USE_CUDA_FUSER || USE_CPU_FUSER
