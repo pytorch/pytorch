@@ -64,24 +64,24 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::TensorToBool,
+        "prim::TensorToBool(Tensor a) -> bool",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
             pop(stack, a);
-            at::DeviceGuard guard(a);
+            at::OptionalDeviceGuard guard(device_of(a));
             push(stack, a.item<int64_t>() != 0);
             return 0;
           };
         }),
     Operator(
-        prim::TensorToNum,
+        "prim::TensorToNum(Tensor a) -> Scalar",
         [](const Node* node) -> Operation {
           if(node->output()->type() == IntType::get()) {
             return [](Stack& stack) {
               at::Tensor a;
               pop(stack, a);
-              at::DeviceGuard guard(a);
+              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<int64_t>());
               return 0;
             };
@@ -89,21 +89,21 @@ RegisterOperators reg({
             return [](Stack& stack) {
               at::Tensor a;
               pop(stack, a);
-              at::DeviceGuard guard(a);
+              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<double>());
               return 0;
             };
           }
         }),
     Operator(
-        prim::ImplicitTensorToNum,
+        "prim::ImplicitTensorToNum(Tensor a) -> Scalar",
         [](const Node* node) -> Operation {
           if(node->output()->type() == IntType::get()) {
             return [](Stack& stack) {
               at::Tensor a;
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/true);
-              at::DeviceGuard guard(a);
+              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<int64_t>());
               return 0;
             };
@@ -112,14 +112,14 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/false);
-              at::DeviceGuard guard(a);
+              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<double>());
               return 0;
             };
           }
         }),
     Operator(
-        prim::NumToTensor,
+        "prim::NumToTensor(Scalar a) -> Tensor",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Scalar s;
@@ -129,7 +129,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::BoolToTensor,
+        "prim::BoolToTensor(bool a) -> Tensor",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             bool b;
@@ -141,7 +141,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::IntToFloat,
+        "prim::IntToFloat(int a) -> float",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             int64_t i;
@@ -151,7 +151,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::FloatToInt,
+        "prim::FloatToInt(float a) -> int",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             double d;
@@ -161,7 +161,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::StringToFloat,
+        "prim::StringToFloat(str a) -> float",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto s = pop(stack).toString();
@@ -212,7 +212,7 @@ RegisterOperators reg({
         prim::Undefined,
         [](const Node* node) {
           return [](Stack& stack) {
-            stack.push_back(at::Tensor());
+            stack.emplace_back(at::Tensor());
             return 0;
           };
         }),
@@ -220,7 +220,7 @@ RegisterOperators reg({
       prim::None,
       [](const Node* node) {
         return [](Stack& stack) {
-          stack.push_back(IValue());
+          stack.emplace_back(IValue());
           return 0;
         };
       }),
@@ -302,7 +302,7 @@ RegisterOperators reg({
             for (size_t i = 0; i < sizes.size(); ++i) {
               accessor[i] = sizes[i];
             }
-            stack.push_back(sizes_tensor);
+            stack.emplace_back(sizes_tensor);
             return 0;
           };
         }),
@@ -320,7 +320,7 @@ RegisterOperators reg({
               }
             }
             drop(stack, num_inputs);
-            stack.push_back(result);
+            stack.emplace_back(result);
             return 0;
           };
         }),
@@ -332,11 +332,11 @@ RegisterOperators reg({
             at::Tensor a, b;
             pop(stack, a, b);
             if (!a.defined())
-              stack.push_back(b);
+              stack.emplace_back(b);
             else if (!b.defined())
-              stack.push_back(a);
+              stack.emplace_back(a);
             else
-              stack.push_back(a + b);
+              stack.emplace_back(a + b);
             return 0;
           };
         }),

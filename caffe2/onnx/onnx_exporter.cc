@@ -102,6 +102,29 @@ NodeProto AddShapeNode(const std::string& input, const std::string& output) {
 
 } // namespace
 
+::ONNX_NAMESPACE::TensorProto::DataType Caffe2TypeToOnnxType(
+    caffe2::TensorProto::DataType t) {
+#define CAFFE2_TO_ONNX_TYPE(x)   \
+  case (caffe2::TensorProto::x): \
+    return ::ONNX_NAMESPACE::TensorProto::x
+  switch (t) {
+    CAFFE2_TO_ONNX_TYPE(FLOAT);
+    CAFFE2_TO_ONNX_TYPE(BOOL);
+    CAFFE2_TO_ONNX_TYPE(INT8);
+    CAFFE2_TO_ONNX_TYPE(UINT8);
+    CAFFE2_TO_ONNX_TYPE(UINT16);
+    CAFFE2_TO_ONNX_TYPE(INT16);
+    CAFFE2_TO_ONNX_TYPE(INT32);
+    CAFFE2_TO_ONNX_TYPE(INT64);
+    CAFFE2_TO_ONNX_TYPE(FLOAT16);
+    default:
+      LOG(WARNING) << "Unsupported Caffe2 tensor type: " << t
+                   << ", fallback to FLOAT";
+      return ::ONNX_NAMESPACE::TensorProto::FLOAT;
+  }
+#undef CAFFE2_TO_ONNX_TYPE
+}
+
 std::unordered_map<std::string, std::string> SsaRewrite(
     caffe2::NetDef* init_net,
     caffe2::NetDef* pred_net) {

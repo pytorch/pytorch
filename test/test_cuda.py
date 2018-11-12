@@ -1582,6 +1582,18 @@ class TestCuda(TestCase):
     def test_gesv_batched_dims(self):
         _TestTorchMixin._test_gesv_batched_dims(self, lambda t: t.cuda())
 
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_potrs(self):
+        _TestTorchMixin._test_potrs(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_potrs_batched(self):
+        _TestTorchMixin._test_potrs_batched(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_potrs_batched_dims(self):
+        _TestTorchMixin._test_potrs_batched_dims(self, lambda t: t.cuda())
+
     def test_view(self):
         _TestTorchMixin._test_view(self, lambda t: t.cuda())
 
