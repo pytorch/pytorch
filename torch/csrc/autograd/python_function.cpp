@@ -705,6 +705,8 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 {
   HANDLE_TH_ERRORS
   torch::autograd::profiler::RecordFunction record(((PyTypeObject*)cls)->tp_name);
+  torch::autograd::profiler::RecordFunction record(((PyTypeObject*)cls)->tp_name, 
+                                                   Function::peek_at_next_sequence_nr());
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;
