@@ -27,7 +27,6 @@ class CAFFE2_API AsyncSchedulingNet : public AsyncNetBase {
   std::mutex running_mutex_;
   std::condition_variable running_cv_;
   std::atomic<bool> running_;
-  bool use_dfs_scheduling_;
 
   std::atomic<int> processed_tasks_num_;
 

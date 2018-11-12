@@ -16,14 +16,13 @@
 #include "caffe2/utils/thread_pool.h"
 
 C10_DECLARE_int(caffe2_streams_per_gpu);
-C10_DECLARE_bool(caffe2_net_async_finish_chain);
-C10_DECLARE_bool(caffe2_net_async_always_schedule_child);
 C10_DECLARE_int(caffe2_net_async_max_gpus);
 C10_DECLARE_int(caffe2_net_async_max_numa_nodes);
 C10_DECLARE_int(caffe2_net_async_thread_pool_size);
 C10_DECLARE_bool(caffe2_net_async_check_stream_status);
 C10_DECLARE_bool(caffe2_net_async_use_single_pool);
 C10_DECLARE_bool(caffe2_net_async_use_per_net_pools);
+C10_DECLARE_bool(caffe2_net_async_run_root_tasks_inline);
 
 namespace caffe2 {
 
@@ -32,6 +31,21 @@ class AsyncNetExecutorHelper;
 namespace tracing {
 class Tracer;
 }
+
+struct ExecutionOptions {
+  explicit ExecutionOptions(const std::shared_ptr<const NetDef>& net_def);
+
+  int streams_per_gpu_ = 1;
+  bool finish_chain_ = false;
+  bool always_schedule_child_ = false;
+  bool check_stream_status_ = false;
+  bool use_single_pool_ = false;
+  bool use_per_net_pools_ = false;
+  bool is_blocking_ = false;
+  bool report_stats_ = false;
+  bool use_dfs_scheduling_ = false;
+  bool run_root_tasks_inline_ = false;
+};
 
 class CAFFE2_API AsyncNetBase : public NetBase {
  public:
@@ -127,15 +141,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   std::shared_ptr<tracing::Tracer> tracer_;
 
   // execution mode flags
-  void computeExecutionModeFlags();
-  int streams_per_gpu_;
-  bool finish_chain_;
-  bool always_schedule_child_;
-  bool check_stream_status_;
-  bool use_single_pool_;
-  bool use_per_net_pools_;
-  bool is_blocking_;
-  bool report_stats_;
+  ExecutionOptions options_;
 
   ProfDAGCounters counters_;
 
