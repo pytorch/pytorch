@@ -65,7 +65,7 @@ option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
-option(INCLUDE_EXPERIMENTAL_C10_OPS "Include caffe2/operators/experimental/c10 sources" ON)
+option(BUILD_C10_EXPERIMENTAL_OPS "Build c10 experimental operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON

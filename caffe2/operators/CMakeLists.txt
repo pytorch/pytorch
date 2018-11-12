@@ -41,7 +41,7 @@ file(GLOB tmp_cudnn *_cudnn.cc)
 exclude(tmp "${tmp}" ${tmp_cudnn})
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${tmp})
 
-if (INCLUDE_EXPERIMENTAL_C10_OPS)
+if (BUILD_C10_EXPERIMENTAL_OPS)
     file(GLOB_RECURSE tmp experimental/c10/*.cc)
 endif()
 
