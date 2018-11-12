@@ -38,7 +38,7 @@ struct TORCH_API Operator {
   // arguments. This is used for things like prim::While or prim::If that can
   // take a number of different valid input types and lengths.
   Operator(Symbol name, OperationCreator op_creator)
-      : Operator(FunctionSchema(name, {}, {}, true), std::move(op_creator)) {}
+      : Operator(FunctionSchema(name, {}, {}, /*is_vararg*/true, /*is_varret*/true), std::move(op_creator)) {}
 
   Operator(FunctionSchema schema, Operation op)
       : schema_(std::make_shared<FunctionSchema>(std::move(schema))),
