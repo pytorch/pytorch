@@ -27,11 +27,17 @@
 #   NO_CUDNN
 #     disables the cuDNN build
 #
+#   NO_FBGEMM
+#     disables the FBGEMM build
+#
 #   NO_TEST
 #     disables the test build
 #
 #   NO_MIOPEN
 #     disables the MIOpen build
+#
+#   NO_MKLDNN
+#     disables use of MKLDNN
 #
 #   NO_NNPACK
 #     disables NNPACK build
@@ -63,9 +69,6 @@
 #
 #   USE_LMDB
 #     enables use of LMDB for storage
-#
-#   USE_MKLDNN
-#     enables use of MKLDNN
 #
 #   BUILD_BINARY
 #     enables the additional binaries/ build
@@ -153,7 +156,7 @@ def hotpatch_var(var, prefix='USE_'):
 
 # Before we run the setup_helpers, let's look for NO_* and WITH_*
 # variables and hotpatch environment with the USE_* equivalent
-use_env_vars = ['CUDA', 'CUDNN', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
+use_env_vars = ['CUDA', 'CUDNN', 'FBGEMM', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
                 'OPENCV', 'QNNPACK', 'FFMPEG', 'SYSTEM_NCCL', 'GLOO_IBVERBS']
 list(map(hotpatch_var, use_env_vars))
 
@@ -168,6 +171,7 @@ from tools.setup_helpers.build import (BUILD_BINARY, BUILD_TEST,
 from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
 from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
+from tools.setup_helpers.fbgemm import USE_FBGEMM
 from tools.setup_helpers.miopen import (USE_MIOPEN, MIOPEN_LIBRARY,
                                         MIOPEN_LIB_DIR, MIOPEN_INCLUDE_DIR)
 from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_LIB_DIR, \
@@ -188,9 +192,15 @@ DEBUG = check_env_flag('DEBUG')
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
+IS_PPC = (platform.machine() == 'ppc64le')
 
 BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
-USE_MKLDNN = check_env_flag('USE_MKLDNN')
+# ppc64le does not support MKLDNN
+if IS_PPC:
+    USE_MKLDNN = check_env_flag('USE_MKLDNN', 'OFF')
+else:
+    USE_MKLDNN = check_env_flag('USE_MKLDNN', 'ON')
+
 USE_CUDA_STATIC_LINK = check_env_flag('USE_CUDA_STATIC_LINK')
 RERUN_CMAKE = True
 
@@ -379,6 +389,8 @@ def build_libs(libs):
             my_env["NVTOOLEXT_HOME"] = NVTOOLEXT_HOME
     if USE_CUDA_STATIC_LINK:
         build_libs_cmd += ['--cuda-static-link']
+    if USE_FBGEMM:
+        build_libs_cmd += ['--use-fbgemm']
     if USE_ROCM:
         build_libs_cmd += ['--use-rocm']
     if USE_NNPACK:
@@ -445,15 +457,15 @@ class build_deps(PytorchCommand):
         def check_file(f):
             if not os.path.exists(f):
                 print("Could not find {}".format(f))
-                print("Did you run 'git submodule update --init'?")
+                print("Did you run 'git submodule update --init --recursive'?")
                 sys.exit(1)
 
         check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
         check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
         check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
-        check_file(os.path.join(third_party_path, 'catch', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
+        check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
 
         check_pydep('yaml', 'pyyaml')
         check_pydep('typing', 'typing')
@@ -807,6 +819,8 @@ else:
         '-Wno-missing-braces',
         # gcc7 seems to report spurious warnings with this enabled
         "-Wno-stringop-overflow",
+        # gcc7 also reports spurious warnings with this enabled
+        "-Wno-maybe-uninitialized",
     ]
     if check_env_flag('WERROR'):
         extra_compile_args.append('-Werror')
@@ -1192,6 +1206,7 @@ if __name__ == '__main__':
                 'lib/include/c10/*.h',
                 'lib/include/c10/macros/*.h',
                 'lib/include/c10/util/*.h',
+                'lib/include/c10/detail/*.h',
                 'lib/include/caffe2/core/*.h',
                 'lib/include/caffe2/proto/*.h',
                 'lib/include/torch/*.h',

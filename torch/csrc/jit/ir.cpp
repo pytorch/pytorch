@@ -6,7 +6,7 @@
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/passes/pretty_print.h"
+#include "torch/csrc/jit/passes/python_print.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -188,12 +188,12 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
 }
 
 std::ostream& Graph::prettyPrint(std::ostream & out) {
-  PrettyPrint(out, *this);
+  PythonPrint(out, *this);
   return out;
 }
 
 void Graph::dumpPretty() {
-  PrettyPrint(std::cout, *this);
+  PythonPrint(std::cout, *this);
 }
 
 static void checkSameDevice(const Node* node) {
@@ -517,6 +517,18 @@ std::shared_ptr<Graph> Graph::copy() {
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
+}
+
+std::string Value::uniqueNameBase() const {
+  std::string name = uniqueName();
+  std::string name_base = name;
+  auto last_dot_pos = name.find_last_of('.');
+  if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
+    if (name.find_first_not_of("0123456789", last_dot_pos + 1) == std::string::npos) {
+      name_base = name.substr(0, last_dot_pos);
+    }
+  }
+  return name_base;
 }
 
 Value* Value::setUniqueName(const std::string & name) {
@@ -1148,8 +1160,19 @@ inline const SourceRange& fakeRange() {
   return range;
 }
 
-Value* Graph::insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs) {
-  return script::emitBuiltinCall(fakeRange(), *this, opname, c10::nullopt, args, kwargs, /*required=*/true);
+Value* Graph::insert(
+    Symbol opname,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    c10::optional<SourceRange> range) {
+  return script::emitBuiltinCall(
+      range.value_or(fakeRange()),
+      *this,
+      opname,
+      c10::nullopt,
+      args,
+      kwargs,
+      /*required=*/true);
 }
 
 Node* Graph::create(NodeKind kind, size_t num_outputs) {

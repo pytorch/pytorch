@@ -153,7 +153,6 @@ class CAFFE2_API NeuralNetData : public Data {
 
  private:
   NNDataKind kind_;
-  size_t version_ = 0;
 };
 
 class CAFFE2_API Tensor : public NeuralNetData {

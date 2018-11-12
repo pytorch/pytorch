@@ -3,7 +3,7 @@
 #include <torch/detail/static.h>
 #include <torch/nn/module.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/memory.h>

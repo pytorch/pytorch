@@ -50,9 +50,30 @@ enum TracingField {
   TRACE_CATEGORY,
 };
 
+enum class TracingMode {
+  EVERY_K_ITERATIONS,
+  GLOBAL_TIMESLICE,
+};
+
+struct TracingConfig {
+  TracingMode mode{TracingMode::EVERY_K_ITERATIONS};
+  std::string filepath{"/tmp"};
+
+  // for TracingMode::EVERY_K_ITERATIONS
+  int64_t trace_every_nth_batch = 100;
+  int64_t dump_every_nth_batch = 10000;
+
+  // for TracingMode::GLOBAL_TIMESLICE
+  int64_t trace_every_n_ms = 2 * 60 * 1000; // 2min
+  int64_t trace_for_n_ms = 1000; // 1sec
+};
+
 class CAFFE2_API Tracer {
  public:
-  Tracer(const NetBase* net, const std::string& net_name);
+  Tracer(
+      const NetBase* net,
+      const std::string& net_name,
+      TracingConfig = TracingConfig{});
 
   void recordEvent(const TracerEvent& event);
   std::string opTraceName(const OperatorBase* op);
@@ -62,7 +83,11 @@ class CAFFE2_API Tracer {
   void renameThreads();
   void setEnabled(bool enabled);
   bool isEnabled() const;
+  const TracingConfig& config() {
+    return config_;
+  }
   int bumpIter();
+  int bumpDumpingIter();
   // Dump the tracing result to file with given suffix, and then
   // clear current events.
   void dumpTracingResultAndClearEvents(const std::string& file_suffix);
@@ -77,6 +102,8 @@ class CAFFE2_API Tracer {
   bool enabled_ = false;
   Timer timer_;
   int iter_;
+  int dumping_iter_;
+  TracingConfig config_;
 
   friend class TracerGuard;
 };
@@ -115,7 +142,9 @@ CAFFE2_API int extractShardId(const std::string& name);
 // line flag)
 CAFFE2_API bool isTraceableNetName(const std::string& net_name);
 
-CAFFE2_API std::shared_ptr<Tracer> create(const NetBase* net, const std::string& net_name);
+CAFFE2_API std::shared_ptr<Tracer> create(
+    const NetBase* net,
+    const std::string& net_name);
 CAFFE2_API bool startIter(const std::shared_ptr<Tracer>& tracer);
 
 } // namespace tracing

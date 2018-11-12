@@ -26,7 +26,8 @@ class CAFFE2_API OnnxifiTransformer {
       Workspace* ws,
       NetDef* pred_net,
       const std::vector<std::string>& external_inputs,
-      const std::unordered_map<std::string, TensorShape>& shape_hints);
+      const std::unordered_map<std::string, TensorShape>& shape_hints,
+      const std::unordered_set<int>& blacklisted_ops);
 
   const std::unordered_map<std::string, std::string>& input_mapping() const {
     return input_mapping_;
@@ -49,8 +50,7 @@ class CAFFE2_API OnnxifiTransformer {
 
   OperatorDef BuildOnnxifiOp(
       const std::string& onnx_model_str,
-      const std::unordered_map<std::string, std::vector<int>>&
-          output_size_hints,
+      const std::unordered_map<std::string, TensorShape>& output_size_hints,
       const std::unordered_set<std::string>& initialization_list,
       const caffe2::NetDef& net);
 
