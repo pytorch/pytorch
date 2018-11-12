@@ -25,7 +25,7 @@ class SequentialSampler : public Sampler<> {
   explicit SequentialSampler(size_t size);
 
   /// Resets the `SequentialSampler` to zero.
-  void reset() override;
+  void reset(optional<size_t> new_size) override;
 
   /// Returns the next batch of indices.
   optional<std::vector<size_t>> next(size_t batch_size) override;

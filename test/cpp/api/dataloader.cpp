@@ -8,6 +8,7 @@
 #include <test/cpp/api/support.h>
 
 #include <ATen/core/ArrayRef.h>
+#include <c10/util/Optional.h>
 
 #include <algorithm>
 #include <chrono>
@@ -20,6 +21,7 @@
 #include <vector>
 
 using namespace torch::data; // NOLINT
+using namespace c10;
 
 const std::chrono::milliseconds kMillisecond(1);
 
@@ -195,8 +197,21 @@ TEST(DataTest, SequentialSamplerResetsWell) {
   samplers::SequentialSampler sampler(5);
   ASSERT_EQ(sampler.next(5).value(), std::vector<size_t>({0, 1, 2, 3, 4}));
   ASSERT_FALSE(sampler.next(2).has_value());
-  sampler.reset();
+  sampler.reset(nullopt);
   ASSERT_EQ(sampler.next(5).value(), std::vector<size_t>({0, 1, 2, 3, 4}));
+  ASSERT_FALSE(sampler.next(2).has_value());
+}
+
+TEST(DataTest, SequentialSamplerResetsWithNewSizeWell) {
+  samplers::SequentialSampler sampler(5);
+  ASSERT_EQ(sampler.next(5).value(), std::vector<size_t>({0, 1, 2, 3, 4}));
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(7);
+  ASSERT_EQ(
+      sampler.next(7).value(), std::vector<size_t>({0, 1, 2, 3, 4, 5, 6}));
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(3);
+  ASSERT_EQ(sampler.next(3).value(), std::vector<size_t>({0, 1, 2}));
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
@@ -260,8 +275,20 @@ TEST(DataTest, RandomSamplerResetsWell) {
   samplers::RandomSampler sampler(5);
   ASSERT_EQ(sampler.next(5).value().size(), 5);
   ASSERT_FALSE(sampler.next(2).has_value());
-  sampler.reset();
+  sampler.reset(nullopt);
   ASSERT_EQ(sampler.next(5).value().size(), 5);
+  ASSERT_FALSE(sampler.next(2).has_value());
+}
+
+TEST(DataTest, RandomSamplerResetsWithNewSizeWell) {
+  samplers::RandomSampler sampler(5);
+  ASSERT_EQ(sampler.next(5).value().size(), 5);
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(7);
+  ASSERT_EQ(sampler.next(7).value().size(), 7);
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(3);
+  ASSERT_EQ(sampler.next(3).value().size(), 3);
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
@@ -308,8 +335,20 @@ TEST(DataTest, StreamSamplerResetsWell) {
   samplers::StreamSampler sampler(/*epoch_size=*/5);
   ASSERT_EQ(sampler.next(5).value().size(), 5);
   ASSERT_FALSE(sampler.next(2).has_value());
-  sampler.reset();
+  sampler.reset(nullopt);
   ASSERT_EQ(sampler.next(5).value().size(), 5);
+  ASSERT_FALSE(sampler.next(2).has_value());
+}
+
+TEST(DataTest, StreamSamplerResetsWithNewSizeWell) {
+  samplers::StreamSampler sampler(/*epoch_size=*/5);
+  ASSERT_EQ(sampler.next(5).value().size(), 5);
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(7);
+  ASSERT_EQ(sampler.next(7).value().size(), 7);
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(3);
+  ASSERT_EQ(sampler.next(3).value().size(), 3);
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
@@ -568,7 +607,7 @@ struct TestIndexDataset
 
 struct TestIndexSampler : public samplers::Sampler<TestIndex> {
   explicit TestIndexSampler(size_t size) : size_(size) {}
-  void reset() override {}
+  void reset(optional<size_t> new_size) override {}
   torch::optional<TestIndex> next(size_t batch_size) override {
     if (index_ >= size_) {
       return torch::nullopt;
