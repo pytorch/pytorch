@@ -4,7 +4,7 @@
 #include <c10/impl/FakeGuardImpl.h>
 
 using namespace c10;
-using namespace c10::detail;
+using namespace c10::impl;
 
 // The tests here are mostly covered by InlineDeviceGuard_test, but there
 // is some DeviceGuard specific functionality we must test.

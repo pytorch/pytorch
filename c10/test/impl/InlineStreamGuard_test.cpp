@@ -4,7 +4,7 @@
 #include "c10/impl/FakeGuardImpl.h"
 
 using namespace c10;
-using namespace c10::detail;
+using namespace c10::impl;
 
 constexpr auto TestDeviceType = DeviceType::CUDA;
 using TestGuardImpl = FakeGuardImpl<TestDeviceType>;
