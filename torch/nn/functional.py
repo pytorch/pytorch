@@ -1869,7 +1869,9 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
         torch._C._nn.smooth_l1_loss, input, target, reduction)
 
 
+@torch._jit_internal.weak_script
 def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     Function that takes the mean element-wise absolute value difference.
@@ -1877,9 +1879,24 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     See :class:`~torch.nn.L1Loss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_string(size_average, reduce)
-    return _pointwise_loss(lambda a, b: torch.abs(a - b), torch._C._nn.l1_loss,
-                           input, target, reduction)
+        _size_average = torch.jit._unwrap_optional(size_average)
+        _reduce = torch.jit._unwrap_optional(reduce)
+        _reduction = _Reduction.legacy_get_string(_size_average, _reduce)
+    else:
+        _reduction = reduction
+    # return _pointwise_loss(lambda a, b: torch.abs(a - b), torch._C._nn.l1_loss,
+    #                        input, target, reduction)
+
+    if target.requires_grad:
+        d = torch.abs(input - target)
+        if _reduction == 'none':
+            ret = d
+        else:
+            ret = torch.mean(d) if _reduction == 'mean' else torch.sum(d)
+    else:
+        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+        ret = torch._C._nn.l1_loss(expanded_input, expanded_target, _Reduction.get_enum(_reduction))
+    return ret
 
 
 def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
