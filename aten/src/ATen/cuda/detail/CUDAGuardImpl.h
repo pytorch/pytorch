@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/detail/DeviceGuardImplInterface.h>
+#include <c10/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 
 #include <ATen/cuda/Exceptions.h>
