@@ -33,4 +33,17 @@ static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size,
     ", but unique flip dims size=", flip_dims_v.size());
 }
 
+static inline Tensor roll_common(const Tensor& self, IntList shifts, IntList dims) {
+  if (dims.size() == 0 && shifts.size() == 1) {
+    auto flattened = self.contiguous().view(self.numel());
+    return roll(flattened, shifts[0], 0).view(self.sizes());
+  }
+  AT_CHECK(shifts.size() == dims.size(), "shifts and dimensions must align");
+  AT_CHECK(dims.size() > 1, "this code should only be reached for handling multi-dim rolling" );
+  auto tail_shifts = shifts.slice(1);
+  auto tail_dims = dims.slice(1);
+  auto first_dim_rolled = roll(self, shifts[0], dims[0]);
+  return roll(first_dim_rolled, tail_shifts, tail_dims);
+}
+
 }}  // namespace at::native

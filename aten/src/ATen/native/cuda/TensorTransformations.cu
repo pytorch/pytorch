@@ -150,13 +150,9 @@ void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
 
 // Roll a tensor along a dimension
 Tensor roll_cuda(const Tensor& self, IntList shifts, IntList dims) {
-  if (dims.size() == 0 && shifts.size() == 1) {
-    auto flattened = self.contiguous().view(self.numel());
-    return roll_cuda(flattened, shifts[0], 0).view(self.sizes());
+  if ( dims.size() != 1) {
+    return roll_common(self, shifts, dims);
   }
-  AT_CHECK(shifts.size() == dims.size(), "shifts and dimensions must align");
-  // todo: support rolling along multiple dimensions as in numpy.roll.
-  AT_CHECK(dims.size() == 1, "only single dimension roll currently supported");
 
   auto in_tensor = self;
   if(!self.is_contiguous()) {
