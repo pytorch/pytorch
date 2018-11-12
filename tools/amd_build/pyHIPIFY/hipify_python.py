@@ -1358,7 +1358,7 @@ def hipify(
                 get_kernel_template_params(
                     filepath,
                     KernelTemplateParams,
-                    CAFFE2_TEMPLATE_MAP if args.hipify_caffe2 else PYTORCH_TEMPLATE_MAP)
+                    CAFFE2_TEMPLATE_MAP if hipify_caffe2 else PYTORCH_TEMPLATE_MAP)
 
         # Execute the Clang Tool to Automatically add static casts
         for filepath in all_files:
