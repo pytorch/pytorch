@@ -7,6 +7,11 @@
 #include <fstream>
 #include <unordered_set>
 
+#if defined (_MSC_VER)
+#include <locale>
+#include <codecvt>
+#endif
+
 #include <google/protobuf/io/coded_stream.h>
 
 #ifndef CAFFE2_USE_LITE_PROTO
@@ -67,7 +72,13 @@ C10_EXPORT bool IsGPUDeviceType(int device_type) {
 }
 
 C10_EXPORT bool ReadStringFromFile(const char* filename, string* str) {
+#if defined (_MSC_VER)
+  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+  std::wstring wstr = converter.from_bytes(filename);
+  std::ifstream ifs(&wstr[0], std::ios::in);
+#else
   std::ifstream ifs(filename, std::ios::in);
+#endif
   if (!ifs) {
     VLOG(1) << "File cannot be opened: " << filename
             << " error: " << ifs.rdstate();
@@ -82,7 +93,13 @@ C10_EXPORT bool ReadStringFromFile(const char* filename, string* str) {
 }
 
 C10_EXPORT bool WriteStringToFile(const string& str, const char* filename) {
+#if defined (_MSC_VER)
+  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+  std::wstring wstr = converter.from_bytes(filename);
+  std::ofstream ofs(&wstr[0], std::ios::out | std::ios::trunc);
+#else
   std::ofstream ofs(filename, std::ios::out | std::ios::trunc);
+#endif
   if (!ofs.is_open()) {
     VLOG(1) << "File cannot be created: " << filename
             << " error: " << ofs.rdstate();
@@ -198,7 +215,13 @@ C10_EXPORT bool ParseProtoFromLargeString(const string& str, Message* proto) {
 }
 
 C10_EXPORT bool ReadProtoFromTextFile(const char* filename, Message* proto) {
+#if defined (_MSC_VER)
+  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+  std::wstring wstr = converter.from_bytes(filename);
+  int fd = _wopen(&wstr[0], O_RDONLY);
+#else
   int fd = open(filename, O_RDONLY);
+#endif
   CAFFE_ENFORCE_NE(fd, -1, "File not found: ", filename);
   FileInputStream* input = new FileInputStream(fd);
   bool success = google::protobuf::TextFormat::Parse(input, proto);
@@ -210,7 +233,13 @@ C10_EXPORT bool ReadProtoFromTextFile(const char* filename, Message* proto) {
 C10_EXPORT void WriteProtoToTextFile(
     const Message& proto,
     const char* filename) {
+#if defined (_MSC_VER)
+  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+  std::wstring wstr = converter.from_bytes(filename);
+  int fd = _wopen(&wstr[0], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#else
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#endif
   FileOutputStream* output = new FileOutputStream(fd);
   CAFFE_ENFORCE(google::protobuf::TextFormat::Print(proto, output));
   delete output;
@@ -221,7 +250,9 @@ C10_EXPORT bool ReadProtoFromBinaryFile(
     const char* filename,
     MessageLite* proto) {
 #if defined (_MSC_VER)  // for MSC compiler binary flag needs to be specified
-  int fd = open(filename, O_RDONLY | O_BINARY);
+  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+  std::wstring wstr = converter.from_bytes(filename);
+  int fd = _wopen(&wstr[0], O_RDONLY | O_BINARY);
 #else
   int fd = open(filename, O_RDONLY);
 #endif
@@ -241,7 +272,13 @@ C10_EXPORT bool ReadProtoFromBinaryFile(
 C10_EXPORT void WriteProtoToBinaryFile(
     const MessageLite& proto,
     const char* filename) {
+#if defined (_MSC_VER)
+  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+  std::wstring wstr = converter.from_bytes(filename);
+  int fd = _wopen(&wstr[0], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#else
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#endif
   CAFFE_ENFORCE_NE(
       fd, -1, "File cannot be created: ", filename, " error number: ", errno);
   std::unique_ptr<ZeroCopyOutputStream> raw_output(new FileOutputStream(fd));
