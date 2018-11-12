@@ -52,8 +52,8 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
                        THCTensor_(size)(state, input, 1),
                        outputHeight, outputWidth);
   THCTensor_(zero)(state, output);
-  THCDeviceTensor<real, 4> idata = toDeviceTensor<real, 4>(state, input);
-  THCDeviceTensor<real, 4> odata = toDeviceTensor<real, 4>(state, output);
+  THCDeviceTensor<scalar_t, 4> idata = toDeviceTensor<scalar_t, 4>(state, input);
+  THCDeviceTensor<scalar_t, 4> odata = toDeviceTensor<scalar_t, 4>(state, output);
   THAssert(inputHeight > 0 && inputWidth > 0 && outputHeight > 0 && outputWidth > 0);
 
   // Get scaling factors
@@ -66,7 +66,7 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
 
   // Launch kernel
   cudaStream_t stream = THCState_getCurrentStream(state);
-  bicubic_interp2d_kernel<real, accreal> <<<
+  bicubic_interp2d_kernel<scalar_t, accreal> <<<
     THCCeilDiv(num_output_elements, max_threads),
     max_threads,
     0,
@@ -97,15 +97,15 @@ void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   THCTensor_(resize4d)(state, gradInput, nbatch, nchannels, inputHeight, inputWidth);
   THCTensor_(zero)(state, gradInput);
-  THCDeviceTensor<real, 4> in_data = toDeviceTensor<real, 4>(state, gradInput);
-  THCDeviceTensor<real, 4> out_data = toDeviceTensor<real, 4>(state, gradOutput);
+  THCDeviceTensor<scalar_t, 4> in_data = toDeviceTensor<scalar_t, 4>(state, gradInput);
+  THCDeviceTensor<scalar_t, 4> out_data = toDeviceTensor<scalar_t, 4>(state, gradOutput);
   const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
   const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputHeight * outputWidth;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
-  bicubic_interp2d_backward_kernel<real ,accreal> <<<THCCeilDiv(num_kernels, num_threads),
+  bicubic_interp2d_backward_kernel<scalar_t ,accreal> <<<THCCeilDiv(num_kernels, num_threads),
   num_threads, 0, stream>>>(num_kernels, rheight, rwidth, align_corners, in_data, out_data);
   THCudaCheck(cudaGetLastError());
   THCTensor_(free)(state, gradOutput);
