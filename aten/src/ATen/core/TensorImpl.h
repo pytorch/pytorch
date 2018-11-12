@@ -731,6 +731,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void resize_dim(int64_t ndim) {
+    // yf225 TODO: check `allow_size_or_storage_change` here
     sizes_.resize(ndim, 0);
     strides_.resize(ndim, 0);
     refresh_numel();
@@ -746,6 +747,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_size(int64_t dim, int64_t new_size) {
+    // yf225 TODO: check `allow_size_or_storage_change` here
     sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
@@ -758,6 +760,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_stride(int64_t dim, int64_t new_stride) {
+    // yf225 TODO: check `allow_size_or_storage_change` here
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
@@ -771,6 +774,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * (and resizing if necessary.)
    */
   virtual void set_storage_offset(int64_t storage_offset) {
+    // yf225 TODO: check `allow_size_or_storage_change` here
     storage_offset_ = storage_offset;
   }
 
@@ -785,6 +789,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_contiguous(at::IntList new_size) {
+    // yf225 TODO: check `allow_size_or_storage_change` here
     AT_ASSERT(!is_variable());
     auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
@@ -809,6 +814,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_and_strides(at::IntList new_size, at::IntList new_stride) {
+    // yf225 TODO: check `allow_size_or_storage_change` here
     AT_ASSERT(!is_variable());
     AT_CHECK(
         new_size.size() == new_stride.size(),
