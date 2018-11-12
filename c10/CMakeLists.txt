@@ -60,6 +60,10 @@ target_include_directories(
 
 add_subdirectory(test)
 
+if(USE_CUDA)
+  add_subdirectory(cuda)
+endif()
+
 # ---[ Installation
 # Note: for now, we will put all export path into one single Caffe2Targets group
 # to deal with the cmake deployment need. Inside the Caffe2Targets set, the
