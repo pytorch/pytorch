@@ -231,9 +231,14 @@ rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
 # full absolute path to the dir above
 full_site_packages = distutils.sysconfig.get_python_lib()
 # CMAKE: full path to python library
-cmake_python_library = "{}/{}".format(
-    distutils.sysconfig.get_config_var("LIBDIR"),
-    distutils.sysconfig.get_config_var("INSTSONAME"))
+if IS_WINDOWS:
+    cmake_python_library = "{}/libs/python{}.lib".format(
+        distutils.sysconfig.get_config_var("prefix"),
+        distutils.sysconfig.get_config_var("VERSION"))
+else:
+    cmake_python_library = "{}/{}".format(
+        distutils.sysconfig.get_config_var("LIBDIR"),
+        distutils.sysconfig.get_config_var("INSTSONAME"))
 cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 
 
