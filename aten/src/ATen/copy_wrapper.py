@@ -32,25 +32,7 @@ CUDA_INCLUDES = """\
 # on the surrounding code to establish the necessary invariants.)
 
 COPY = CodeTemplate("""\
-_copy_(dst, src);
-""")
-
-COPY_ASYNC_CPU = CodeTemplate("""\
-if (non_blocking) {
-    ${THTensor}_copyAsyncCPU(${state,}\
-dst.unsafeGetTensorImpl(), \
-src.unsafeGetTensorImpl());
-    break;
-}
-""")
-
-COPY_ASYNC_CUDA = CodeTemplate("""\
-if (non_blocking) {
-    ${THTensor}_copyAsyncCuda(${state,}\
-dst.unsafeGetTensorImpl(), \
-src.unsafeGetTensorImpl());
-    break;
-}
+_copy_(dst, src, non_blocking);
 """)
 
 CASE = CodeTemplate("""\
@@ -133,9 +115,6 @@ def create_one_copy(dst_type, all_types):
         }, dst_type)
 
         copies = []
-        if dst_type['ScalarType'] == src_type['ScalarType']:
-            if dst_type['Backend'] == 'CUDA' and src_type['Backend'] == 'CPU':
-                copies.append(COPY_ASYNC_CPU.substitute(body_env))
         copies.append(COPY.substitute())
 
         copy_body.append(CASE.substitute(body_env, copies=copies))
@@ -196,12 +175,6 @@ def create_one_copy_from(src_type, all_types):
         }, dst_type)
 
         copies = []
-        if dst_type['ScalarType'] == src_type['ScalarType']:
-            # NB: Technically, we have already short-circuited the
-            # src_type['Backend'] == 'CUDA' case at the beginning of this
-            # function
-            if dst_type['Backend'] == 'CPU' and src_type['Backend'] == 'CUDA':
-                copies.append(COPY_ASYNC_CUDA.substitute(body_env))
         copies.append(COPY.substitute())
 
         copy_body.append(CASE.substitute(body_env, copies=copies))
