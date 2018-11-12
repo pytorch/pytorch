@@ -153,9 +153,6 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   # This is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   CMAKE_ARGS+=("-USE_LMDB=ON")
 
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
-
   ########## HIPIFY Caffe2 operators
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_pytorch_amd.py"
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
