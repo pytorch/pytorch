@@ -4313,7 +4313,8 @@ class TestNN(NNTestCase):
             # Weights will no longer view onto the same chunk of memory
             weight = all_vars[4]
             weight_data = weight.data.clone()
-            weight.data.set_(weight_data)
+            with torch.no_grad():
+                weight.set_(weight_data)
 
             for i in range(2):
                 with warnings.catch_warnings(record=True) as w:
