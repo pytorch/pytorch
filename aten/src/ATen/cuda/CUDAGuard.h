@@ -169,7 +169,7 @@ struct CUDAStreamGuard {
   Device original_device() const { return guard_.original_device(); }
 
 private:
-  c10::detail::InlineStreamGuard<detail::CUDAGuardImpl> guard_;
+  c10::impl::InlineStreamGuard<at::detail::CUDAGuardImpl> guard_;
 };
 
 /// A variant of OptionalStreamGuard that is specialized for CUDA.  See CUDAGuard
@@ -232,7 +232,7 @@ struct OptionalCUDAStreamGuard {
   void reset() { guard_.reset(); }
 
 private:
-  c10::detail::InlineOptionalStreamGuard<detail::CUDAGuardImpl> guard_;
+  c10::impl::InlineOptionalStreamGuard<at::detail::CUDAGuardImpl> guard_;
 };
 
 // TODO: Implement this generically in c10.  You'll need some way to get
