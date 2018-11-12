@@ -267,9 +267,6 @@ struct TORCH_API Variable : public at::Tensor {
   PyObject* pyobj() const noexcept;
   void set_pyobj(PyObject* pyobj) noexcept;
 
-  void set_allow_size_or_storage_change(bool value);
-  bool allow_size_or_storage_change() const noexcept;
-
  private:
   /// Private implementation struct of the `Variable`. This struct declaration
   /// and the `get()` method which exposes it shall forever remain private and
@@ -368,8 +365,6 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   bool requires_grad_;
 
   bool is_view_;
-
-  bool allow_size_or_storage_change_ = true;
 
   // The "output number" of this variable; e.g., if this variable
   // was the second output of a function, then output_nr == 1.
@@ -594,7 +589,7 @@ inline std::shared_ptr<Function> Variable::grad_accumulator() const {
 
 inline Variable Variable::detach() const {
   auto var = make_variable_view(*this, get()->data_, /*is_differentiable=*/false);
-  var.set_allow_size_or_storage_change(false);
+  var.data().unsafeGetTensorImpl()->set_allow_size_or_storage_change(false);
   return var;
 }
 
@@ -690,14 +685,6 @@ inline void Variable::set_pyobj(PyObject* pyobj) noexcept {
 
 inline PyObject* Variable::pyobj() const noexcept {
   return get()->pyobj_;
-}
-
-inline void Variable::set_allow_size_or_storage_change(bool value) {
-  get()->allow_size_or_storage_change_ = value;
-}
-
-inline bool Variable::allow_size_or_storage_change() const noexcept {
-  return get()->allow_size_or_storage_change_;
 }
 
 // Private Methods
