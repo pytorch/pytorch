@@ -37,16 +37,17 @@ NNGraph::NodeRef NNModule::createUniqueDataNode(const std::string& s) {
   auto iter = 0;
   bool need_name = true;
   do {
+    need_name = false;
     for (const auto& node : dataFlow.getMutableNodes()) {
       if (nn::getName(node) == curr_name) {
         std::stringstream ss;
         ss << iter;
         curr_name = s + "_" + ss.str();
         iter++;
+        need_name = true;
         break;
       }
     }
-    need_name = false;
   } while (need_name);
   return dataFlow.createNode(util::make_unique<nom::repr::Tensor>(curr_name));
 }
