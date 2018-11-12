@@ -257,11 +257,9 @@ TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
   } else if (auto opt_formal = formal->cast<OptionalType>()) {
     if (auto opt_actual = actual->cast<OptionalType>()) {
       return OptionalType::create(matchTypeVariables(
-          opt_formal->getElementType(),
-          opt_actual->getElementType(),
-          type_env));
+          opt_formal->getElementType(), opt_actual->getElementType(), type_env));
     } else {
-       // If the actual type is a non-optional, allow matching to the formal if
+      // If the actual type is a non-optional, allow matching to the formal if
       // its element type matches the actual
       return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
     }
