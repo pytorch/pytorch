@@ -71,9 +71,9 @@ class Conv1d(_ConvNd):
     precisely described as:
 
     .. math::
-        \op{out}(N_i, C_{\text{out}_j}) = \op{bias}(C_{\text{out}_j}) +
-        \sum_{k = 0}^{C_{in} - 1} \op{weight}(C_{\text{out}_j}, k)
-        \star \op{input}(N_i, k)
+        \text{out}(N_i, C_{\text{out}_j}) = \text{bias}(C_{\text{out}_j}) +
+        \sum_{k = 0}^{C_{in} - 1} \text{weight}(C_{\text{out}_j}, k)
+        \star \text{input}(N_i, k)
 
     where :math:`\star` is the valid `cross-correlation`_ operator,
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
@@ -190,8 +190,8 @@ class Conv2d(_ConvNd):
     can be precisely described as:
 
     .. math::
-        \op{out}(N_i, C_{\text{out}_j}) = \op{bias}(C_{\text{out}_j}) +
-        \sum_{k = 0}^{C_{\text{in}} - 1} \op{weight}(C_{\text{out}_j}, k) \star \op{input}(N_i, k)
+        \text{out}(N_i, C_{\text{out}_j}) = \text{bias}(C_{\text{out}_j}) +
+        \sum_{k = 0}^{C_{\text{in}} - 1} \text{weight}(C_{\text{out}_j}, k) \star \text{input}(N_i, k)
 
 
     where :math:`\star` is the valid 2D `cross-correlation`_ operator,
@@ -459,7 +459,7 @@ class _ConvTransposeMixin(object):
         output_size = list(output_size)
         k = input.dim() - 2
         if len(output_size) == k + 2:
-            output_size = output_size[-2:]
+            output_size = output_size[2:]
         if len(output_size) != k:
             raise ValueError(
                 "output_size must have {} or {} elements (got {})"
@@ -832,7 +832,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         >>> # With square kernels and equal stride
         >>> m = nn.ConvTranspose3d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
-        >>> m = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(0, 4, 2))
+        >>> m = nn.ConvTranspose3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(0, 4, 2))
         >>> input = torch.randn(20, 16, 10, 50, 100)
         >>> output = m(input)
 

@@ -28,8 +28,7 @@ bool LengthsTileOp<CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
   CAFFE_ENFORCE_EQ(lengths.size(), data.dim(0));
 
-  lengths_host_.CopyFrom(lengths, &context_);
-  context_.FinishDeviceComputation();
+  lengths_host_.CopyFrom(lengths); // sync copy
   auto lengths_size = lengths_host_.size();
   auto* lengths_data = lengths_host_.data<int32_t>();
 
@@ -38,7 +37,7 @@ bool LengthsTileOp<CUDAContext>::RunOnDevice() {
   math::Sum<int32_t, CPUContext>(
       lengths_size, lengths_data, &total_length, &cpuContext);
 
-  auto shape = data.dims();
+  auto shape = data.dims().vec();
   shape[0] = total_length;
   output->Resize(shape);
 

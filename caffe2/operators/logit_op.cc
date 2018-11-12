@@ -26,13 +26,13 @@ bool LogitGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& dY = Input(1);
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  int channels = X.dim32(X.ndim() - 1);
+  int channels = X.dim32(X.dim() - 1);
   ConstEigenArrayMap<float> Xmat(
-      X.template data<float>(), channels, X.size() / channels);
+      X.template data<float>(), channels, X.numel() / channels);
   ConstEigenArrayMap<float> dYmat(
-      dY.template data<float>(), channels, X.size() / channels);
+      dY.template data<float>(), channels, X.numel() / channels);
   EigenArrayMap<float> dXmat(
-      dX->template mutable_data<float>(), channels, X.size() / channels);
+      dX->template mutable_data<float>(), channels, X.numel() / channels);
   dXmat = (Xmat < eps_ || Xmat > 1.0 - eps_)
               .select(0, dYmat * ((1 - Xmat) * Xmat).inverse());
   return true;

@@ -17,20 +17,20 @@
 #include <nvToolsExt.h>
 #endif
 
-CAFFE2_DEFINE_bool(caffe2_use_nvtx, false, "Use NVTX ranges for profiling");
+C10_DEFINE_bool(caffe2_use_nvtx, false, "Use NVTX ranges for profiling");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_async_dag_use_multiple_streams,
     false,
     "Use multiple streams per thread");
 
-CAFFE2_DECLARE_bool(caffe2_dag_net_collect_stats);
+C10_DECLARE_bool(caffe2_dag_net_collect_stats);
 
-CAFFE2_DECLARE_bool(caffe2_net_async_finish_chain);
+C10_DECLARE_bool(caffe2_net_async_finish_chain);
 
-CAFFE2_DECLARE_int(caffe2_streams_per_gpu);
+C10_DECLARE_int(caffe2_streams_per_gpu);
 
-CAFFE2_DECLARE_bool(caffe2_net_async_check_stream_status);
+C10_DECLARE_bool(caffe2_net_async_check_stream_status);
 
 namespace caffe2 {
 
@@ -112,7 +112,7 @@ AsyncDAGNet::AsyncDAGNet(
 int AsyncDAGNet::stream(const DeviceOption& device_option) {
   int stream_id = 0;
   if (device_option.device_type() == PROTO_CUDA) {
-    int gpu_id = device_option.cuda_gpu_id();
+    int gpu_id = device_option.device_id();
     CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + caffe2::to_string(gpu_id));
     if ((unsigned)gpu_id >= stream_counters_.size()) {
       stream_counters_.resize(gpu_id + 1, 0);

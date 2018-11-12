@@ -1,3 +1,9 @@
+cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+project(c10 CXX)
+
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Main build file for the C10 library.
 #
 # Note that the C10 library should maintain minimal dependencies - especially,
@@ -7,6 +13,8 @@
 # one to link against a specific protobuf version.
 
 # ---[ Configure macro file.
+set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
+set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
 set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
@@ -15,10 +23,13 @@ configure_file(
 # Note: if you want to add ANY dependency to the c10 library, make sure you
 # check with the core PyTorch developers as the dependendency will be
 # transitively passed on to all libraries dependent on PyTorch.
-file(GLOB_RECURSE C10_SRCS *.cpp)
-# exclude test files
+file(GLOB C10_SRCS
+        *.cpp
+        detail/*.cpp
+        macros/*.cpp
+        util/*.cpp
+        )
 file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
-exclude(C10_SRCS "${C10_SRCS}" ${C10_ALL_TEST_FILES})
 file(GLOB_RECURSE C10_HEADERS *.h)
 add_library(c10 ${C10_SRCS} ${C10_HEADERS})
 # If building shared library, set dllimport/dllexport proper.
@@ -26,6 +37,19 @@ target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 # Enable hidden visibility if compiler supports it.
 if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
+endif()
+
+# ---[ Dependency of c10
+if (${USE_GFLAGS})
+   target_link_libraries(c10 PUBLIC gflags)
+endif()
+
+if (${USE_GLOG})
+    target_link_libraries(c10 PUBLIC glog::glog)
+endif()
+
+if (ANDROID)
+    target_link_libraries(c10 PRIVATE log)
 endif()
 
 target_include_directories(

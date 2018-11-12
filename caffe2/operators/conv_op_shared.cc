@@ -3,7 +3,7 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/workspace.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_force_shared_col_buffer,
     false,
     "Always use the shared col buffer");

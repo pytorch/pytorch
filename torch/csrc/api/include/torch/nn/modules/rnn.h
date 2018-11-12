@@ -3,11 +3,10 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/modules/dropout.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <ATen/ATen.h>
-#include <ATen/core/Error.h>
-#include <ATen/core/optional.h>
+#include <c10/util/Exception.h>
 
 #include <cstddef>
 #include <functional>
@@ -62,7 +61,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
 
   explicit RNNImplBase(
       RNNOptionsBase options_,
-      at::optional<CuDNNMode> cudnn_mode = at::nullopt,
+      optional<CuDNNMode> cudnn_mode = nullopt,
       int64_t number_of_gates = 1);
 
   /// Initializes the parameters of the RNN module.
@@ -98,7 +97,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   std::vector<Tensor> b_hh;
 
  protected:
-  /// The function signature of `at::rnn_relu`, `at::rnn_tanh` and `at::gru`.
+  /// The function signature of `rnn_relu`, `rnn_tanh` and `gru`.
   using RNNFunctionSignature = std::tuple<Tensor, Tensor>(
       /*input=*/const Tensor&,
       /*state=*/const Tensor&,
@@ -128,7 +127,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   int64_t number_of_gates_;
 
   /// The cuDNN RNN mode, if this RNN subclass has any.
-  at::optional<CuDNNMode> cudnn_mode_;
+  optional<CuDNNMode> cudnn_mode_;
 
   /// The cached result of the latest `flat_weights()` call.
   std::vector<Tensor> flat_weights_;

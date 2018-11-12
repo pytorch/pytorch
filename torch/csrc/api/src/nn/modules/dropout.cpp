@@ -1,8 +1,8 @@
 #include <torch/nn/modules/dropout.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <cstddef>
 #include <vector>

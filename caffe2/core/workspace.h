@@ -18,7 +18,7 @@
 #include "caffe2/utils/signal_handler.h"
 #include "caffe2/utils/threadpool/ThreadPool.h"
 
-CAFFE2_DECLARE_bool(caffe2_print_blob_sizes_at_exit);
+C10_DECLARE_bool(caffe2_print_blob_sizes_at_exit);
 
 namespace caffe2 {
 

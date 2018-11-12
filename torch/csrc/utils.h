@@ -11,6 +11,7 @@
 
 #ifdef USE_CUDA
 #include <THC/THC.h>
+#include <ATen/cuda/CUDAStream.h>
 #endif
 
 #define THPUtils_(NAME) TH_CONCAT_4(THP,Real,Utils_,NAME)
@@ -171,8 +172,9 @@ void setBackCompatKeepdimWarn(bool warn);
 bool getBackCompatKeepdimWarn();
 bool maybeThrowBackCompatKeepdimWarn(char *func);
 
+// NB: This is in torch/csrc/cuda/utils.cpp, for whatever reason
 #ifdef USE_CUDA
-std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj);
+std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj);
 #endif
 
 #endif /* _THP_CORE */

@@ -13,12 +13,12 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/thread_name.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_disable_chaining,
     false,
     "Disable chaining logic (some latent multi-device issues).");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_dag_net_collect_stats,
     false,
     "Collect time stats in DAG net");
@@ -242,7 +242,7 @@ void DAGNetBase::WorkerFunction() {
                           operator_nodes_[idx].operator_->debug_def());
       }
     } catch (std::exception& e) {
-      std::string exception_str = at::GetExceptionString(e);
+      std::string exception_str = c10::GetExceptionString(e);
       HandleException(idx, exception_str);
     } catch (...) {
       std::string exception_str = "Unknown exception";

@@ -13,10 +13,10 @@ bool ElementwiseLinearOp<float, CPUContext>::RunOnDevice(){
   const int N = X.size_to_dim(canonical_axis);
   const int D = X.size_from_dim(canonical_axis);
 
-  CAFFE_ENFORCE_EQ(a.ndim(), 1, a.ndim());
-  CAFFE_ENFORCE_EQ(a.dim(0), D, a.ndim());
-  CAFFE_ENFORCE_EQ(b.ndim(), 1, b.ndim());
-  CAFFE_ENFORCE_EQ(b.dim(0), D, b.ndim());
+  CAFFE_ENFORCE_EQ(a.dim(), 1, a.dim());
+  CAFFE_ENFORCE_EQ(a.size(0), D, a.dim());
+  CAFFE_ENFORCE_EQ(b.dim(), 1, b.dim());
+  CAFFE_ENFORCE_EQ(b.size(0), D, b.dim());
 
   Y->ResizeLike(X);
 
@@ -45,8 +45,8 @@ bool ElementwiseLinearGradientOp<float, CPUContext>::RunOnDevice(){
   const int N = X.size_to_dim(canonical_axis);
   const int D = X.size_from_dim(canonical_axis);
 
-  CAFFE_ENFORCE_EQ(a.ndim(), 1, a.ndim());
-  CAFFE_ENFORCE_EQ(a.dim(0), D, a.ndim());
+  CAFFE_ENFORCE_EQ(a.dim(), 1, a.dim());
+  CAFFE_ENFORCE_EQ(a.size(0), D, a.dim());
 
   auto* g_X = Output(0);
   auto *g_a = Output(1);
@@ -62,8 +62,8 @@ bool ElementwiseLinearGradientOp<float, CPUContext>::RunOnDevice(){
   float* g_a_data = g_a->template mutable_data<float>();
   float* g_b_data = g_b->template mutable_data<float>();
 
-  math::Set<float, CPUContext>(g_a->size(), 0.f, g_a_data, &context_);
-  math::Set<float, CPUContext>(g_b->size(), 0.f, g_b_data, &context_);
+  math::Set<float, CPUContext>(g_a->numel(), 0.f, g_a_data, &context_);
+  math::Set<float, CPUContext>(g_b->numel(), 0.f, g_b_data, &context_);
 
   int p = 0;
   for (int n = 0; n < N; ++n) {

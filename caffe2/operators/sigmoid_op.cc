@@ -76,7 +76,7 @@ sigmoid: [0.8284105  0.57842743 0.85621804 0.80923885 0.10222916]
 )DOC")
     .Input(0, "X", "*(type: Tensor`<float>`)* Input tensor.")
     .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
-    .InheritOnnxSchema("Sigmoid");
+    .InheritOnnxSchema();
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(SigmoidGradient)
     .NumInputs(2)

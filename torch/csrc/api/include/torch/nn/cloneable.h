@@ -1,13 +1,12 @@
 #pragma once
 
 #include <torch/nn/module.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <ATen/OptionsGuard.h>
 #include <ATen/core/TensorOptions.h>
-#include <ATen/core/Error.h>
-#include <ATen/core/optional.h>
+#include <c10/util/Exception.h>
 
 #include <memory>
 #include <utility>
@@ -34,10 +33,8 @@ class Cloneable : public virtual Module {
   /// and submodules in the cloned module are different from those in the
   /// original module.
   std::shared_ptr<Module> clone(
-      at::optional<Device> device = at::nullopt) const override {
-    auto options = DefaultTensorOptions::get();
-    OptionsGuard options_guard(
-        options.device(device.value_or(options.device())));
+      optional<Device> device = nullopt) const override {
+    OptionsGuard options_guard(TensorOptions().device(device));
 
     NoGradGuard no_grad;
 
@@ -55,10 +52,11 @@ class Cloneable : public virtual Module {
         "and not the constructor?");
     for (const auto& parameter : parameters_) {
       if (device) {
-        copy->parameters_[parameter.key].copy_(
+        copy->parameters_[parameter.key()].copy_(
             *parameter, /*non_blocking=*/true);
       } else {
-        copy->parameters_[parameter.key].set_data(autograd::Variable(*parameter).data().clone());
+        copy->parameters_[parameter.key()].set_data(
+            autograd::Variable(*parameter).data().clone());
       }
     }
     AT_CHECK(
@@ -69,9 +67,10 @@ class Cloneable : public virtual Module {
         "and not the constructor?");
     for (const auto& buffer : buffers_) {
       if (device) {
-        copy->buffers_[buffer.key].copy_(*buffer, /*non_blocking=*/true);
+        copy->buffers_[buffer.key()].copy_(*buffer, /*non_blocking=*/true);
       } else {
-        copy->buffers_[buffer.key].set_data(autograd::Variable(*buffer).data().clone());
+        copy->buffers_[buffer.key()].set_data(
+            autograd::Variable(*buffer).data().clone());
       }
     }
     AT_CHECK(
@@ -81,13 +80,13 @@ class Cloneable : public virtual Module {
         "Are you sure you called register_module() inside reset() "
         "and not the constructor?");
     for (const auto& child : children_) {
-      copy->children_[child.key]->clone_(*child.value, device);
+      copy->children_[child.key()]->clone_(*child.value(), device);
     }
     return copy;
   }
 
  private:
-  void clone_(Module& other, at::optional<Device> device) final override {
+  void clone_(Module& other, optional<Device> device) final {
     // Here we are *pretty* certain that `other's` type is `Derived` (because it
     // was registered under the same name as `this`), but you never know what
     // crazy things `reset()` does, so `dynamic_cast` just to be safe.

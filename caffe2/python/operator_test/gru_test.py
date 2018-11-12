@@ -250,7 +250,6 @@ def _prepare_gru_unit_op(gc, n, d, outputs_with_grads,
 class GRUCellTest(serial.SerializedTestCase):
 
     # Test just for GRUUnitOp
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     @serial.given(
         seed=st.integers(0, 2**32 - 1),
         input_tensor=gru_unit_op_input(),

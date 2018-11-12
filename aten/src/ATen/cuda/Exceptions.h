@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 
 #define AT_CUDNN_CHECK(EXPR)                                                     \
   do {                                                                           \
@@ -17,10 +17,10 @@
     }                                                                            \
   } while (0)
 
-#define AT_CUDA_CHECK(EXPR)                              \
-  do {                                                   \
-    cudaError_t err = EXPR;                              \
-    if (err != cudaSuccess) {                            \
-      AT_ERROR("CUDA error: ", cudaGetErrorString(err)); \
-    }                                                    \
+#define AT_CUDA_CHECK(EXPR)                                \
+  do {                                                     \
+    cudaError_t __err = EXPR;                              \
+    if (__err != cudaSuccess) {                            \
+      AT_ERROR("CUDA error: ", cudaGetErrorString(__err)); \
+    }                                                      \
   } while (0)

@@ -127,21 +127,18 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/piecewise_linear_transform_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/softmax_ops_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/unique_ops_test.py")
-
-  # Need to go through roi ops to replace max(...) with fmaxf(...)
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/roi_align_rotated_op_test.py")
-
-  # Our cuda top_k op has some asm code, the hipified version doesn't
-  # compile yet, so we don't have top_k operator for now
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/top_k_test.py")
 fi
 
 # Python tests
+# NB: Warnings are disabled because they make it harder to see what
+# the actual erroring test is
 echo "Running Python tests.."
+pip install --user pytest-sugar
 "$PYTHON" \
   -m pytest \
   -x \
   -v \
+  --disable-warnings \
   --junit-xml="$TEST_DIR/python/result.xml" \
   --ignore "$CAFFE2_PYPATH/python/test/executor_test.py" \
   --ignore "$CAFFE2_PYPATH/python/operator_test/matmul_op_test.py" \

@@ -12,6 +12,7 @@
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/variable_tensor_functions.h"
+#include "torch/csrc/jit/script/jit_exception.h"
 
 #include <exception>
 #include <iostream>
@@ -32,8 +33,7 @@ namespace torch { namespace jit {
 // to what the instructions will look like.
 // In particular we:
 // * (TODO) desugar Loop trip counts into c = 0, c += 1 instructions in the loop
-// * flatten stages so that each stage starts with a load to registers
-//   and ends with a store to the stack
+// * Turn inputs/outputs into Load/Store instruction
 // *. computes move_flags (see Outputs), and inserts
 // *  Drop nodes are inserted for any node that is unused to create a dummy use
 //    that will cause the interpreter to free the node.
@@ -47,8 +47,6 @@ namespace torch { namespace jit {
 // * move_flags[n] - a list of booleans, one for each input,
 //   indicating whether this is the last use of the value. The interpreter
 //   should generate a move rather than a copy in this case.
-// * stage_input_types: the type annotations on the inputs to each stage
-//   these can be removed once the the backward tracer is no longer used
 
 namespace {
 
@@ -61,14 +59,14 @@ Value* createTripCountConjunctiveCondition(
   // Emit initial comparison -- initial_trip_count < max_trip_count
   Value* initial_comparison_value =
       g->insertNode(g->create(aten::lt, {cur_trip_count, max_trip_count}, 1))
-          ->output()->setType(IntType::get());
+          ->output()->setType(BoolType::get());
 
   // Replace initial condition with logical `and` of trip count and
   // initial condition
   Value* new_cond =
       g->insertNode(
            g->create(aten::__and__, {initial_comparison_value, cond}, 1))
-          ->output()->setType(IntType::get());
+          ->output()->setType(BoolType::get());
   return new_cond;
 }
 
@@ -129,40 +127,20 @@ void desugarTripCounts(Block * b) {
   }
 }
 
-// removes all inputs and outputs to a graph, replacing them with nodes before of after each insertStage
-static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
-  // because JIT classic needs this to fix up gradients, remove when possible
-  std::vector<std::vector<TypePtr>> stage_input_types;
-
-  WithInsertPoint guard(*graph.nodes().begin());
-  size_t input_pos = 0;
-  size_t output_pos = 0;
-  auto it = graph.nodes().begin();
-  for(size_t i = 0; i <= graph.stage(); i++) {
-    stage_input_types.emplace_back();
-    auto load = graph.create(prim::Load, 0)->insertBefore(*it);
-    while(input_pos < graph.inputs().size() && graph.inputs()[input_pos]->stage() == i) {
-      auto nv = load->addOutput();
-      auto old_node = graph.inputs()[input_pos];
-      nv->setType(old_node->type());
-      stage_input_types[i].push_back(old_node->type());
-      old_node->replaceAllUsesWith(nv);
-      input_pos++;
-    }
-    while(it != graph.nodes().end() && it->stage() == i)
-      ++it;
-    auto store = graph.create(prim::Store, 0)->insertBefore(*it);
-    while(output_pos < graph.outputs().size() && graph.outputs()[output_pos]->stage() == i) {
-      store->addInput(graph.outputs()[output_pos]);
-      output_pos++;
-    }
+// removes all inputs and outputs to a graph, replacing them with Load Store nodes
+static void flattenIO(Graph & graph) {
+  auto load = graph.prependNode(graph.create(prim::Load, 0));
+  for(auto old_input : graph.inputs()) {
+    auto nv = load->addOutput();
+    nv->setType(old_input->type());
+    old_input->replaceAllUsesWith(nv);
   }
+  graph.appendNode(graph.create(prim::Store, graph.outputs(), 0));
+
   while (graph.inputs().size() > 0)
     graph.eraseInput(graph.inputs().size() - 1);
   while (graph.outputs().size() > 0)
     graph.eraseOutput(graph.outputs().size() - 1);
-
-  return stage_input_types;
 }
 
 
@@ -311,8 +289,9 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
 struct PreprocessGraph {
   PreprocessGraph(Graph & g)
   : graph(g.copy()) {
+    n_outputs = graph->outputs().size();
     desugarTripCounts(graph->block());
-    stage_input_types = flattenStages(*graph);
+    flattenIO(*graph);
     dropUnused(graph->block());
     // fill in move_flags by scanning blocks;
     move_flags = findLastUses(*graph);
@@ -322,8 +301,8 @@ struct PreprocessGraph {
   std::shared_ptr<Graph> graph;
   // for each input, should we move rather than copy the inputs
   std::unordered_map<Node*, std::vector<uint8_t>> move_flags;
-  std::vector<std::vector<TypePtr>> stage_input_types;
-
+  // Record number of outputs before flattenIO()
+  size_t n_outputs;
 };
 
 // Sometimes we want to pass things that are not tensors.  Instead of
@@ -337,17 +316,17 @@ public:
   ContainerTensor()
   : TensorImpl(at::UndefinedTensorId(), caffe2::TypeMeta(), nullptr, /* is_variable */ false) {}
 
-  virtual ~ContainerTensor() = default;
-  virtual at::IntList sizes() const override {
+  ~ContainerTensor() override = default;
+  at::IntList sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
-  virtual at::IntList strides() const override {
+  at::IntList strides() const override {
     throw std::runtime_error("strides() on ContainerTensor");
   }
-  virtual int64_t dim() const override {
+  int64_t dim() const override {
     throw std::runtime_error("dim() on ContainerTensor");
   }
-  virtual const at::Storage& storage() const override {
+  const at::Storage& storage() const override {
     throw std::runtime_error("storage() on ContainerTensor");
   }
 };
@@ -371,6 +350,7 @@ struct UseList {
 };
 
 // one instruction plus meta-data
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Instruction {
   Operation callback;
   UseList inputs;
@@ -385,33 +365,32 @@ int relativeJump(int from_inst, int to_inst) {
 }
 
 struct CodeImpl {
-  CodeImpl(std::shared_ptr<Graph>& graph_)
+  CodeImpl(const std::shared_ptr<Graph>& graph_)
       : preprocess(*graph_) {
     graph = preprocess.graph;
-    // std::cout << "into code graph:\n" << *graph << "\n";
     insertNodesFromBlock(graph->block());
   }
 
-  // jump when input is 0
-  void createJumpZ(int from_inst, int to_inst) {
+  // jump when input is false
+  void createJumpFalse(int from_inst, int to_inst) {
     auto & inst = instructions[from_inst];
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
-      auto t = pop(stack).toInt();
-      return (t == 0) ? offset : 0;
+      auto t = pop(stack).toBool();
+      return t ? 0 : offset;
     };
     inst.debug_name = prim::JumpZ;
   }
 
-  // jump when input is not 0
-  void createJumpNZ(int from_inst, int to_inst) {
+  // jump when input is true
+  void createJumpTrue(int from_inst, int to_inst) {
     auto & inst = instructions[from_inst];
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
-      auto t = pop(stack).toInt();
-      return (t != 0) ? offset : 0;
+      auto t = pop(stack).toBool();
+      return t ? offset : 0;
     };
     inst.debug_name = prim::JumpNZ;
   }
@@ -460,7 +439,7 @@ struct CodeImpl {
           insertNodesFromBlock(then_block);
           insertAssign(source_location, then_block->outputs(), moveFlags(then_block), node->outputs());
           createJump(jump, instructions.size());
-          createJumpNZ(cond_branch, then_block_start);
+          createJumpTrue(cond_branch, then_block_start);
         } break;
         case prim::Loop: {
           // o0 = while c i0
@@ -495,18 +474,12 @@ struct CodeImpl {
           // after branch: stack: ...
 
           aliasRegistersTo(node->outputs(), body_block->inputs());
-          createJumpZ(cond_branch, instructions.size());
-          createJumpNZ(cond_branch_end, entry);
+          createJumpFalse(cond_branch, instructions.size());
+          createJumpTrue(cond_branch_end, entry);
         } break;
         default: {
           insertInstruction(node);
         } break;
-      }
-      // each stage ends with a store instruction
-      // we record where these instructions occur, and use them to
-      // exit the interpreter
-      if(node->kind() == prim::Store) {
-        stage_end.push_back(instructions.size());
       }
     }
   }
@@ -651,14 +624,13 @@ struct CodeImpl {
   // It is also very useful for debugging interpreter problems to
   // keep this around.
   std::shared_ptr<Graph> graph;
-  at::optional<std::vector<GraphExecutor*>> grad_executors_;
+  c10::optional<std::vector<GraphExecutor*>> grad_executors_;
   PreprocessGraph preprocess;
 
   std::unordered_map<size_t, int> unique_to_reg; // map from unique of nodes to register in register table
 
   friend struct InterpreterState;
   std::vector<Instruction> instructions;
-  std::vector<size_t> stage_end; // each stage runs while(pc < stage_end[stage])
   int register_size = 0;
 
   // all memory ArrayRef<int> are slices of this, to make sure
@@ -667,45 +639,110 @@ struct CodeImpl {
   std::vector<bool> bool_data;
 };
 
-// InterpreterState state that is held across stages and used to compute a Code
-struct InterpreterStateImpl {
+// InterpreterState state that and used to compute a Code
+struct InterpreterStateImpl : c10::intrusive_ptr_target {
   InterpreterStateImpl(const Code & code)
   : function(code.pImpl),
     int_data(function->int_data.data()),
     bool_data(function->bool_data),
     registers(function->register_size) {
   }
-  void runOneStage(Stack & stack) {
-    // std::cout << "running stage: " << current_stage << " of " << function->stage_end.size() << "\n";
-    // std::cout << *function->graph << "\n";
-    // function->dump(std::cout);
-    size_t pc = current_pc;
-    size_t last = function->stage_end[current_stage];
+
+ private:
+  c10::intrusive_ptr<InterpreterStateImpl> intrusive_from_this() {
+    c10::raw::intrusive_ptr::incref(this);
+    return c10::intrusive_ptr<InterpreterStateImpl>::reclaim(this);
+  }
+
+  bool runImpl(Stack& stack) {
     auto & instructions = function->instructions;
-    while(pc < last) {
+    size_t last = instructions.size();
+
+    while (pc < last) {
         // std::cout << "executing " << pc << ": ";
         // function->dumpInstruction(std::cout, pc);
         // std::cout << "\n";
+        auto & inst = instructions[pc];
         try {
-          auto & inst = instructions[pc];
           loadTensorsFromRegisters(inst.inputs, stack);
           size_t new_pc = pc + 1 + inst.callback(stack);
-          for(int i = inst.outputs.size - 1; i >= 0; i--) {
-            int reg = get(inst.outputs,i);
+          for (int i = inst.outputs.size - 1; i >= 0; --i) {
+            int reg = get(inst.outputs, i);
             registers[reg] = pop(stack);
             // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
           }
           pc = new_pc;
+        } catch (Suspend& e) {
+          // wait() expects a single input
+          JIT_ASSERT(inst.inputs.values.size == 1);
+
+          getOrCreateFuture();
+
+          InterpreterState state(intrusive_from_this());
+          e.future->addCallback([state](){
+            c10::global_work_queue.schedule(InterpreterContinuation(state, Stack()));
+          });
+
+          if (get(inst.inputs.free_flags, 0)) {
+            // make sure the register is not freed once we are waked up
+            registers[get(inst.inputs.values, 0)] = e.future;
+          }
+          return true;
         } catch(std::exception & e) {
-          if(!instructions[pc].debug_location)
-            throw; // rethrow original exception
-          // throw a new exception with enhanced debugging information
-          instructions[pc].debug_location->wrapAndRethrowException(e, "operation failed in interpreter");
+          if (!instructions[pc].debug_location) {
+            throw;
+          }
+          auto msg = instructions[pc].debug_location->wrapException(e, "operation failed in interpreter");
+          if (dynamic_cast<JITException *>(&e)) {
+            throw JITException(msg);
+          } else {
+            throw std::runtime_error(msg);
+          }
         }
     }
-    current_pc = pc;
-    current_stage++;
+    if (future) {
+      auto num_outputs = function->preprocess.n_outputs;
+      if (num_outputs == 1) {
+        future->markCompleted(stack.back());
+      } else {
+        future->markCompleted(
+            Tuple::create(jit::last(stack, num_outputs).vec()));
+      }
+    }
+
+    return false;
   }
+
+ public:
+  c10::intrusive_ptr<Future> getOrCreateFuture() {
+    if (!future) {
+      future = c10::make_intrusive<Future>();
+    }
+    return future;
+  }
+
+  c10::intrusive_ptr<Future> runAsync(Stack& stack) {
+    getOrCreateFuture();
+    runImpl(stack);
+    return future;
+  }
+
+  void run(Stack& stack) {
+    if (runImpl(stack)) {
+      future->wait();
+
+      auto num_outputs = function->preprocess.n_outputs;
+      if (num_outputs == 1) {
+        push(stack, future->value());
+      } else {
+        auto tuple = future->value().toTuple();
+        for (const auto& value : tuple->elements()) {
+          push(stack, value);
+        }
+      }
+    }
+  }
+
   int get(const ListHandle<int> & list, int i) {
     return int_data[list.start + i];
   };
@@ -724,8 +761,10 @@ struct InterpreterStateImpl {
 
     }
   }
-  size_t current_stage = 0;
-  size_t current_pc = 0;
+
+  // pc is critical for the interperter to pick up the progress from suspend
+  size_t pc = 0;
+  c10::intrusive_ptr<Future> future;
   std::shared_ptr<CodeImpl> function; // keep function alive
   // these are just copies of function to prevent indirections in interpreter
   int * int_data;
@@ -754,7 +793,7 @@ std::ostream & operator<<(std::ostream & out, const Code & code) {
   return out;
 }
 
-Code::Code(std::shared_ptr<Graph>& graph)
+Code::Code(const std::shared_ptr<Graph>& graph)
     : pImpl(new CodeImpl(graph)) {}
 Code::~Code() = default;
 
@@ -763,17 +802,21 @@ const std::vector<GraphExecutor*>& Code::grad_executors() {
 }
 
 InterpreterState::InterpreterState(const Code & code)
-  : pImpl(new InterpreterStateImpl(code)) {}
+  : pImpl(c10::make_intrusive<InterpreterStateImpl>(code)) {}
 InterpreterState::~InterpreterState() = default;
 
-void InterpreterState::runOneStage(Stack & stack) {
-  return pImpl->runOneStage(stack);
+void InterpreterState::run(Stack& stack) {
+  static_cast<InterpreterStateImpl*>(pImpl.get())->run(stack);
 }
 
-InterpreterState InterpreterState::clone() const {
-  return InterpreterState(new InterpreterStateImpl(*pImpl));
+c10::intrusive_ptr<Future> InterpreterState::runAsync(Stack& stack) {
+  return static_cast<InterpreterStateImpl*>(pImpl.get())->runAsync(stack);
 }
 
-InterpreterState::InterpreterState(InterpreterStateImpl * pImpl) : pImpl(pImpl) {}
+c10::intrusive_ptr<Future> InterpreterState::getFuture() {
+  return static_cast<InterpreterStateImpl*>(pImpl.get())->getOrCreateFuture();
+}
 
+InterpreterState::InterpreterState(c10::intrusive_ptr<c10::intrusive_ptr_target> pImpl_)
+    : pImpl(std::move(pImpl_)) {}
 }}

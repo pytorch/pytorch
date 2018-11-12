@@ -18,6 +18,7 @@
 #include "caffe2/core/hip/context_hip.h"
 #include "caffe2/core/hip/miopen_wrapper.h"
 #include "caffe2/operators/spatial_batch_norm_op.h"
+#include "caffe2/operators/hip/spatial_batch_norm_op_hip_impl.cuh"
 #include "caffe2/utils/math.h"
 
 const double MIOPEN_BN_MIN_EPSILON = 1e-6;
@@ -33,8 +34,6 @@ class MIOpenSpatialBNOp final : public SpatialBNOp<HIPContext> {
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
         beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
         mode_(miopenBNSpatial) {
-    CAFFE_ENFORCE_EQ(
-        order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&data_desc_));
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&bn_param_desc_));
     if (epsilon_ <= MIOPEN_BN_MIN_EPSILON) {
@@ -139,7 +138,7 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
   // See if we need to reshape.
   if (N > 0 && X.dims() != miopen_input_dims_) {
     VLOG(1) << "Setting descriptors.";
-    miopen_input_dims_ = X.dims();
+    miopen_input_dims_ = X.dims().vec();
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
         data_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
 
@@ -247,6 +246,10 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
   return true;
 }
 bool MIOpenSpatialBNOp::RunOnDevice() {
+  // Fall back to HIP for multi batch spatial BNorm and NHWC layout
+  if (num_batches_ > 1 || order_ == StorageOrder::NHWC) {
+    return SpatialBNOp<HIPContext>::RunOnDevice();
+  }
   if (Input(0).IsType<float>()) {
     return DoRunWithType<float, float>();
   } else {
@@ -273,7 +276,7 @@ bool MIOpenSpatialBNGradientOp::DoRunWithType() {
   CAFFE_ENFORCE_EQ(scale.dim32(0), C);
   // See if we need to reshape.
   if (N > 0 && X.dims() != miopen_input_dims_) {
-    miopen_input_dims_ = X.dims();
+    miopen_input_dims_ = X.dims().vec();
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
         data_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
 
@@ -327,6 +330,10 @@ bool MIOpenSpatialBNGradientOp::DoRunWithType() {
   return true;
 }
 bool MIOpenSpatialBNGradientOp::RunOnDevice() {
+  // Fall back to HIP for multi batch spatial BNorm and NHWC layout
+  if (num_batches_ > 1 || order_ == StorageOrder::NHWC) {
+    return SpatialBNGradientOp<HIPContext>::RunOnDevice();
+  }
   if (Input(0).IsType<float>()) {
     return DoRunWithType<float, float>();
   } else {

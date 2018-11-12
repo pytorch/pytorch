@@ -21,7 +21,7 @@ static void AddConstInput(
   auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   math::Set<float, CPUContext>(
-      tensor->size(), value, tensor->template mutable_data<float>(), &context);
+      tensor->numel(), value, tensor->template mutable_data<float>(), &context);
   return;
 }
 
@@ -37,7 +37,7 @@ static void AddLinSpacedInput(
   auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
-      tensor->template mutable_data<float>(), tensor->size());
+      tensor->template mutable_data<float>(), tensor->numel());
   tensor_vec.setLinSpaced(min_val, max_val);
 
   return;
@@ -54,7 +54,7 @@ static void AddInput(
   auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
-      tensor->template mutable_data<float>(), tensor->size());
+      tensor->template mutable_data<float>(), tensor->numel());
   tensor_vec.array() = utils::AsEArrXt(values);
 
   return;
@@ -185,12 +185,12 @@ TEST(GenerateProposalsTest, TestEmpty) {
   Blob* rois_blob = ws.GetBlob("rois");
   EXPECT_NE(nullptr, rois_blob);
   auto& rois = rois_blob->Get<TensorCPU>();
-  EXPECT_EQ(rois.size(), 0);
+  EXPECT_EQ(rois.numel(), 0);
 
   Blob* rois_probs_blob = ws.GetBlob("rois_probs");
   EXPECT_NE(nullptr, rois_probs_blob);
   auto& rois_probs = rois_probs_blob->Get<TensorCPU>();
-  EXPECT_EQ(rois_probs.size(), 0);
+  EXPECT_EQ(rois_probs.numel(), 0);
 }
 
 TEST(GenerateProposalsTest, TestRealDownSampled) {
@@ -300,18 +300,19 @@ TEST(GenerateProposalsTest, TestRealDownSampled) {
   Blob* rois_blob = ws.GetBlob("rois");
   EXPECT_NE(nullptr, rois_blob);
   auto& rois = rois_blob->Get<TensorCPU>();
-  EXPECT_EQ(rois.dims(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
+  EXPECT_EQ(rois.sizes(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
   auto rois_data =
-      Eigen::Map<const ERMatXf>(rois.data<float>(), rois.dim(0), rois.dim(1));
+      Eigen::Map<const ERMatXf>(rois.data<float>(), rois.size(0), rois.size(1));
   EXPECT_NEAR((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff(), 0, 1e-4);
 
   // test rois_probs
   Blob* rois_probs_blob = ws.GetBlob("rois_probs");
   EXPECT_NE(nullptr, rois_probs_blob);
   auto& rois_probs = rois_probs_blob->Get<TensorCPU>();
-  EXPECT_EQ(rois_probs.dims(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
+  EXPECT_EQ(
+      rois_probs.sizes(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
   auto rois_probs_data =
-      ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.dim(0));
+      ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.size(0));
   EXPECT_NEAR(
       (rois_probs_data.matrix() - utils::AsEArrXt(rois_probs_gt).matrix())
           .cwiseAbs()
@@ -470,18 +471,19 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   Blob* rois_blob = ws.GetBlob("rois");
   EXPECT_NE(nullptr, rois_blob);
   auto& rois = rois_blob->Get<TensorCPU>();
-  EXPECT_EQ(rois.dims(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
+  EXPECT_EQ(rois.sizes(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
   auto rois_data =
-      Eigen::Map<const ERMatXf>(rois.data<float>(), rois.dim(0), rois.dim(1));
+      Eigen::Map<const ERMatXf>(rois.data<float>(), rois.size(0), rois.size(1));
   EXPECT_NEAR((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff(), 0, 1e-3);
 
   // test rois_probs
   Blob* rois_probs_blob = ws.GetBlob("rois_probs");
   EXPECT_NE(nullptr, rois_probs_blob);
   auto& rois_probs = rois_probs_blob->Get<TensorCPU>();
-  EXPECT_EQ(rois_probs.dims(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
+  EXPECT_EQ(
+      rois_probs.sizes(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
   auto rois_probs_data =
-      ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.dim(0));
+      ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.size(0));
   EXPECT_NEAR(
       (rois_probs_data.matrix() - utils::AsEArrXt(rois_probs_gt).matrix())
           .cwiseAbs()
@@ -612,10 +614,10 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   Blob* rois_blob = ws.GetBlob("rois");
   EXPECT_NE(nullptr, rois_blob);
   auto& rois = rois_blob->Get<TensorCPU>();
-  EXPECT_GT(rois.dim(0), 0);
+  EXPECT_GT(rois.size(0), 0);
   auto rois_data =
-      Eigen::Map<const ERMatXf>(rois.data<float>(), rois.dim(0), rois.dim(1));
-  for (int i = 0; i < rois.dim(0); ++i) {
+      Eigen::Map<const ERMatXf>(rois.data<float>(), rois.size(0), rois.size(1));
+  for (int i = 0; i < rois.size(0); ++i) {
     EXPECT_LE(std::abs(rois_data(i, 5) - expected_angle), 1e-4);
   }
 }

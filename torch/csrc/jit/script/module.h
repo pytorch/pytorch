@@ -9,10 +9,12 @@
 #include "torch/csrc/jit/named_value.h"
 #include "torch/csrc/jit/source_range.h"
 
-#include <torch/csrc/api/include/torch/detail/ordered_dict.h>
+#include <torch/csrc/api/include/torch/ordered_dict.h>
+#include <torch/csrc/utils/memory.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/core/ArrayRef.h>
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #include <functional>
 #include <memory>
@@ -46,7 +48,7 @@ struct Method {
   , graph_(std::move(graph))
   , optimize(optimize)
   , member_inputs(std::move(initial_members))
-  , method_creator(method_creator) {
+  , method_creator(std::move(method_creator)) {
     JIT_ASSERT(graph_->inputs().size() >= member_inputs.size());
     int i = graph_->inputs().size() - member_inputs.size();
     for(at::Tensor* member : member_inputs) {
@@ -56,7 +58,7 @@ struct Method {
 
   void run(Stack & stack) {
     for(at::Tensor* tp : member_inputs) {
-      stack.push_back(*tp);
+      stack.emplace_back(*tp);
     }
     get_executor().run(stack);
   }
@@ -70,7 +72,10 @@ struct Method {
     return stack.front();
   }
 
-  std::shared_ptr<Graph> graph_for(const Stack& inputs) {
+  std::shared_ptr<Graph> graph_for(Stack inputs) {
+    for(at::Tensor* tp : member_inputs) {
+      inputs.emplace_back(*tp);
+    }
     return get_executor().graphFor(inputs);
   }
   std::shared_ptr<Graph> graph() const {
@@ -114,7 +119,8 @@ struct Method {
     for (at::Tensor* inp : member_inputs) {
       stack.push_back(*inp);
     }
-    setInputTypes(*retval, ArgumentSpec(with_grad, std::move(stack), stack.size()));
+    const auto size = stack.size();
+    setInputTypes(*retval, ArgumentSpec(with_grad, std::move(stack), size));
     PropagateInputShapes(*retval);
     return retval;
   }
@@ -150,11 +156,16 @@ struct Method {
   }
 
   Method& setSchema(FunctionSchema schema_) {
-    schema.reset(new FunctionSchema(std::move(schema_)));
+    schema = make_unique<FunctionSchema>(std::move(schema_));
     return *this;
   }
 
-  const FunctionSchema& getSchema() const;
+  const FunctionSchema& getSchema() const {
+    if(schema == nullptr) {
+      schema = make_unique<FunctionSchema>(defaultSchemaFor(*this));
+    }
+    return *schema;
+  }
 
   std::string pretty_print_schema() const {
     JIT_ASSERT(schema);
@@ -176,6 +187,23 @@ struct Method {
   }
 
 private:
+
+  static FunctionSchema defaultSchemaFor(const Method& method) {
+    std::vector<Argument> args;
+    std::vector<Argument> returns;
+    Graph& g = *method.graph();
+    size_t num_inputs = method.num_inputs();
+    for(size_t i = 0; i < num_inputs; ++i) {
+      const Value* v = g.inputs().at(i);
+      std::string name = v->hasUniqueName() ? v->uniqueNameBase() : ("argument_"  + std::to_string(i));
+      args.emplace_back(std::move(name), unshapedType(g.inputs()[i]->type()));
+    }
+    for(size_t i = 0; i < g.outputs().size(); ++i) {
+      returns.emplace_back("", unshapedType(g.outputs()[i]->type()));
+    }
+    return { method.name(), std::move(args), std::move(returns) };
+  }
+
   std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
   bool optimize;
@@ -191,26 +219,26 @@ private:
     const auto& schema = getSchema();
     // Do we have more inputs than the schema accepts?
     AT_CHECK(
-        inputs.size() <= schema.arguments.size(),
-        "Expected at most ", schema.arguments.size(),
-        " argument(s) for operator '", schema.name, "', but received ",
+        inputs.size() <= schema.arguments().size(),
+        "Expected at most ", schema.arguments().size(),
+        " argument(s) for operator '", schema.name(), "', but received ",
         inputs.size(), " argument(s). Declaration: ", schema);
 
-    for (size_t pos = 0; pos < schema.arguments.size(); ++pos) {
-      const auto& argument = schema.arguments[pos];
+    for (size_t pos = 0; pos < schema.arguments().size(); ++pos) {
+      const auto& argument = schema.arguments()[pos];
       if (pos < inputs.size()) {
         const TypePtr inputType = inferTypeFrom(inputs[pos]);
-        AT_CHECK(inputType->isSubtypeOf(argument.type),
-              "Expected value of type ", *argument.type,
-              " for argument '", argument.name,
+        AT_CHECK(inputType->isSubtypeOf(argument.type()),
+              "Expected value of type ", *argument.type(),
+              " for argument '", argument.name(),
               "' in position ", pos,
               ", but instead got value of type ", *inputType,
               ". Declaration: ", schema);
-      } else if (argument.default_value) {
-        inputs.push_back(*argument.default_value);
+      } else if (argument.default_value()) {
+        inputs.push_back(*argument.default_value());
       } else {
-        AT_ERROR(schema.name, "() is missing value for argument '",
-                argument.name, "'. Declaration: ", schema);
+        AT_ERROR(schema.name(), "() is missing value for argument '",
+                argument.name(), "'. Declaration: ", schema);
       }
     }
   }
@@ -259,7 +287,7 @@ struct NamedParameter {
   NamedParameter(std::string name, at::Tensor tensor, bool is_buffer)
   : name(std::move(name))
   , is_buffer(is_buffer)
-  , parameter(new at::Tensor(std::move(tensor))) {}
+  , parameter(torch::make_unique<at::Tensor>(std::move(tensor))) {}
 
   const std::string name;
   bool is_buffer; // buffers are part of the module state but
@@ -316,7 +344,7 @@ struct Module {
   }
 
   at::Tensor* parameter_slot(const std::string & name) const {
-    return parameters.get(name).slot();
+    return parameters[name].slot();
   }
 
   void set_parameter(const std::string & name, at::Tensor v) {
@@ -330,20 +358,20 @@ struct Module {
   // each module owns its method. The reference returned here
   // is guarenteed to stay valid until this module has been destroyed
   Method& get_method(const std::string& name) const {
-    return *methods.get(name);
+    return *methods[name];
   }
 
   std::shared_ptr<Module> get_module(const std::string& name) const {
-    return modules.get(name).module;
+    return modules[name].module;
   }
 
-  const torch::detail::OrderedDict<std::string, NamedModule>& get_modules() const {
+  const torch::OrderedDict<std::string, NamedModule>& get_modules() const {
     return modules;
   }
-  const torch::detail::OrderedDict<std::string, NamedParameter>& get_parameters() const {
+  const torch::OrderedDict<std::string, NamedParameter>& get_parameters() const {
     return parameters;
   }
-  const torch::detail::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
+  const torch::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
     return methods;
   }
 
@@ -359,6 +387,33 @@ struct Module {
     }
     return nullptr;
   }
+
+  /// Recursively casts all parameters to the given `dtype` and `device`.
+  ///
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  TORCH_API void to(
+      at::Device device,
+      at::ScalarType dtype,
+      bool non_blocking = false);
+
+  /// Recursively casts all parameters to the given dtype.
+  ///
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  TORCH_API void to(at::ScalarType dtype, bool non_blocking = false);
+
+  /// Recursively moves all parameters to the given device.
+  ///
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  TORCH_API void to(at::Device device, bool non_blocking = false);
 
   /// Run a method from this module.
   ///
@@ -383,29 +438,33 @@ struct Module {
   void save(const std::string& filename);
 
  private:
+  void to_impl(
+      c10::optional<at::Device> device,
+      c10::optional<at::ScalarType> dtype,
+      bool non_blocking);
 
   // invariant: to ensure member_inputs of Methods stay valid,
   // it is only legal to _add_ new modules and parameters.
   // removing them will allow member_inputs to point to invalid parameters
   // no such restriction exists for methods
-  torch::detail::OrderedDict<std::string, NamedModule> modules;
-  torch::detail::OrderedDict<std::string, NamedParameter> parameters;
-  torch::detail::OrderedDict<std::string, std::unique_ptr<Method>> methods;
+  torch::OrderedDict<std::string, NamedModule> modules;
+  torch::OrderedDict<std::string, NamedParameter> parameters;
+  torch::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
 
-// returns at::nullopt and fills in failure_messages if the callee does not
+// returns c10::nullopt and fills in failure_messages if the callee does not
 // match the functions schema
-at::optional<std::vector<Value*>> try_emit_call_to(
+c10::optional<std::vector<Value*>> try_emit_call_to(
     Graph& graph,
     SourceRange loc,
     Method& callee,
+    c10::optional<NamedValue> self,
     ArrayRef<NamedValue> args,
     ArrayRef<NamedValue> kwargs,
     std::stringstream& failure_messages,
-    // when callee uses no parameters (e.g. it is a function in a compilation unit,
-    // and not a method), then nullptr can be passed as caller.
+    // when callee uses no parameters (e.g. it is a function in a compilation
+    // unit, and not a method), then nullptr can be passed as caller.
     Method* caller,
     bool conv_tensors_to_nums);
-
 }}}

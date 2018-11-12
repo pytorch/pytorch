@@ -1,9 +1,9 @@
 #include <ATen/core/TensorImpl.h>
 
-#include <ATen/core/optional.h>
 #include <ATen/core/Backend.h>
-#include <ATen/core/WrapDimMinimal.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/WrapDimMinimal.h>
+#include "c10/util/Optional.h"
 
 #include <ATen/core/VariableHooksInterface.h>
 
@@ -19,8 +19,8 @@ const Tensor& TensorImpl::grad() const {
 
 TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, Allocator *allocator, bool is_variable)
     : TensorImpl({}, type_id, data_type, is_variable) {
-  // UndefinedTensors and SparseTensors don't have storages.
-  if (type_id != UndefinedTensorId() && data_type.id() != caffe2::TypeIdentifier::uninitialized()
+  // Variables, UndefinedTensors and SparseTensors don't have storages.
+  if (!is_variable && type_id != UndefinedTensorId() && data_type.id() != caffe2::TypeIdentifier::uninitialized()
       && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
     storage_ = Storage(data_type, 0, allocator, true);
   }
@@ -31,23 +31,20 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable
 
 TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable)
     : storage_(std::move(storage)),
-      storage_offset_(0),
       sizes_{0},
-      strides_{1},
-      is_contiguous_(true),
+      storage_offset_(0),
       numel_(0),
-      type_id_(type_id),
       data_type_(data_type),
-      is_variable_(is_variable) {}
+      type_id_(type_id),
+      is_variable_(is_variable) {
+  strides_.push_back(1);
+}
 
 IntList TensorImpl::sizes() const {
   return sizes_;
 }
 
 IntList TensorImpl::strides() const {
-  AT_ASSERTM(strides_.size() == sizes_.size(),
-             "Caffe2 tensors don't (yet) have meaningful strides and cannot "
-             "be used in PyTorch.");
   return strides_;
 }
 
@@ -55,10 +52,6 @@ bool TensorImpl::compute_contiguous() const {
   bool is_contiguous = true;
   if (is_empty())
     return is_contiguous;
-  if (strides_.empty()) {
-    // Special case for Caffe2 tensors which don't have strides set.
-    return true;
-  }
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
     if (size(d) != 1) {
@@ -89,9 +82,6 @@ int64_t TensorImpl::size(int64_t d) const {
 }
 
 int64_t TensorImpl::stride(int64_t d) const {
-  AT_ASSERTM(strides_.size() == sizes_.size(),
-             "Caffe2 tensors don't (yet) have meaningful strides and cannot "
-             "be used in PyTorch.");
   d = at::maybe_wrap_dim(d, dim(), false);
   return strides_[d];
 }
@@ -106,6 +96,22 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
 
 const Storage& TensorImpl::storage() const {
   return storage_;
+}
+
+static void deletePlacementDeleteContext(void* ptr) {
+  delete static_cast<PlacementDeleteContext*>(ptr);
+}
+
+at::DataPtr PlacementDeleteContext::makeDataPtr(
+    at::DataPtr&& data_ptr,
+    PlacementDtor placement_dtor,
+    size_t size,
+    at::Device device) {
+  auto* ptr = data_ptr.get();
+  return {ptr,
+          new PlacementDeleteContext(std::move(data_ptr), placement_dtor, size),
+          &deletePlacementDeleteContext,
+          device};
 }
 
 } // namespace at

@@ -5,7 +5,7 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/operator.h"
 
-CAFFE2_DECLARE_string(caffe_test_root);
+C10_DECLARE_string(caffe_test_root);
 
 namespace caffe2 {
 
@@ -62,7 +62,7 @@ TEST(BooleanUnmaskTest, Test) {
   EXPECT_NE(nullptr, unmasked_data_blob);
 
   auto& unmasked_data = unmasked_data_blob->Get<TensorCPU>();
-  EXPECT_EQ(unmasked_data.size(), 1);
+  EXPECT_EQ(unmasked_data.numel(), 1);
 
   CHECK_EQ(unmasked_data.data<float>()[0], 1.0f);
 }

@@ -9,11 +9,15 @@ from sys import platform
 import torch
 import torch.cuda
 import torch.multiprocessing as mp
-from torch.autograd import Variable
+import torch.utils.hooks
 from torch.nn import Parameter
-from common import TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN
+from common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
+                          load_tests)
 from multiprocessing.reduction import ForkingPickler
 
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 TEST_REPEATS = 30
 HAS_SHM_FILES = os.path.isdir('/dev/shm')
@@ -53,7 +57,7 @@ def send_tensor(queue, event, tp):
 
 
 def call_backward():
-    x = torch.autograd.Variable(torch.randn(3, 3), requires_grad=True)
+    x = torch.randn(3, 3, requires_grad=True)
     x.sum().backward()
 
 
@@ -104,6 +108,7 @@ def autograd_sharing(queue, ready, master_modified, device, is_parameter):
     var.data[:] = torch.ones(5, 5, device=device)
 
     is_ok &= var.grad is None
+    is_ok &= not var._backward_hooks
     if is_parameter:
         is_ok &= type(var) == Parameter
     else:
@@ -411,6 +416,15 @@ class TestMultiprocessing(TestCase):
         p = ctx.Process(target=autograd_sharing, args=(queue, ready, master_modified, device, is_parameter))
         p.daemon = True
         p.start()
+
+        # This would cause an error if we tried to serialize the hooks,
+        # because it's a closure and pickle doesn't support closures.
+        @torch.utils.hooks.unserializable_hook
+        def hook(*unused):
+            pass
+
+        if var.requires_grad:
+            var.register_hook(hook)
         var._grad = torch.zeros(5, 5, device=device)
         queue.put(var)
 

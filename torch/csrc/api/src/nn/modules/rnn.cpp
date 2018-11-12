@@ -1,11 +1,10 @@
 #include <torch/nn/modules/rnn.h>
 
 #include <torch/nn/modules/dropout.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
-#include <ATen/core/Error.h>
-#include <ATen/core/optional.h>
+#include <c10/util/Exception.h>
 
 #include <array>
 #include <cmath>
@@ -31,11 +30,11 @@ RNNOptionsBase::RNNOptionsBase(int64_t input_size, int64_t hidden_size)
 template <typename Derived>
 RNNImplBase<Derived>::RNNImplBase(
     RNNOptionsBase options_,
-    at::optional<CuDNNMode> cudnn_mode,
+    optional<CuDNNMode> cudnn_mode,
     int64_t number_of_gates)
     : options(options_),
       number_of_gates_(number_of_gates),
-      cudnn_mode_(cudnn_mode) {
+      cudnn_mode_(std::move(cudnn_mode)) {
   reset();
 }
 
@@ -70,7 +69,7 @@ void RNNImplBase<Derived>::reset() {
     NoGradGuard no_grad;
     const auto stdv = 1.0 / std::sqrt(options.hidden_size_);
     for (auto& p : this->parameters()) {
-      p->uniform_(-stdv, stdv);
+      p.uniform_(-stdv, stdv);
     }
   }
 
@@ -103,14 +102,14 @@ void RNNImplBase<Derived>::flatten_parameters() {
   // Cache the flattened weight and bias vector.
   flat_weights_ = flat_weights();
 
-  if (!cudnn_mode_ || !torch::cudnn_is_acceptable(/*sample=*/w_ih.at(0))) {
+  if (!cudnn_mode_ || !torch::cudnn_is_acceptable(w_ih.at(0))) {
     return;
   }
 
   NoGradGuard no_grad;
   torch::_cudnn_rnn_flatten_weight(
       flat_weights_,
-      /*weight_stride=*/options.with_bias_ ? 4 : 2,
+      /*weight_stride0=*/options.with_bias_ ? 4 : 2,
       options.input_size_,
       static_cast<int64_t>(*cudnn_mode_),
       options.hidden_size_,
@@ -167,11 +166,11 @@ bool RNNImplBase<Derived>::any_parameters_alias() const {
   // don't completely alias would break the assumptions of the uniqueness check
   // in Module.named_parameters().
   std::unordered_set<void*> unique_data_ptrs;
-  const auto params = this->parameters();
-  params.map(
-      std::inserter(unique_data_ptrs, unique_data_ptrs.end()),
-      [](Tensor p) { return p.data_ptr(); });
-
+  auto params = this->parameters();
+  unique_data_ptrs.reserve(params.size());
+  for (const auto& p : params) {
+    unique_data_ptrs.emplace(p.data_ptr());
+  }
   return unique_data_ptrs.size() != params.size();
 }
 

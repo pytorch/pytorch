@@ -146,7 +146,8 @@ public:
     // See NOTE [ cuFFT Embedded Strides ].
     //
     // TODO: Figure out why windows fails to compile
-    //         at::optional<std::vector<long long int>> inembed_opt = at::nullopt;
+    //         c10::optional<std::vector<long long int>> inembed_opt =
+    //         c10::nullopt;
     //       Then move the following to a helper function.
 #ifdef __HIP_PLATFORM_HCC__
     std::vector<int> inembed(signal_ndim);
@@ -337,17 +338,16 @@ private:
   int64_t ws_size;
 };
 
-// NB: cuFFT allocates a starting plan array of size 1024. It should grow the
-//     array as more plans are created. However, a bug in cuFFT (at least
-//     present in CUDA 9.1) causes the cufftSetAutoAllocation call on the
-//     1024-th plan to fail with CUFFT_INVALID_PLAN. Therefore, we check that
-//     cache size is leq 1023. The initial plan array size is 1024 for
-//     CUDA 8.0 ~ 9.2 so setting this as a CUDA-version-agnostic constant should
-//     be fine for now.
-// TODO: When CUDA 10 comes out, check if the bug is fixed or if we need another
-//       number for CUDA 10.
-// Update: bug related to cuFFT plan cache max size has been fixed in CUDA 10.
-constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
+#if CUDA_VERSION < 10000
+  // Note that the max plan number for CUDA version < 10 has to be 1023
+  // due to a bug that fails on the 1024th plan
+  constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
+#else
+  // The max plan number chosen for CUDA version > 10 is arbitrary.
+  // This number puts a limit on how big of a plan cache should we maintain.
+  // Without this number, the plan cache can grow unconditionally.
+  constexpr int64_t CUFFT_MAX_PLAN_NUM = 4096;
+#endif
 static_assert(CUFFT_MAX_PLAN_NUM >= 0 && CUFFT_MAX_PLAN_NUM <= std::numeric_limits<size_t>::max(),
               "CUFFT_MAX_PLAN_NUM not in size_t range");
 
@@ -390,17 +390,12 @@ public:
 
     // Miss
     // remove if needed
-    // bug related to cuFFT plan cache max size has been fixed
-    // in CUDA 10. Hence, when compiling with CUDA 10, just
-    // don't do the erase.
-    #if CUDA_VERSION < 10000
     if (_usage_list.size() >= _max_size) {
       auto last = _usage_list.end();
       last--;
       _cache_map.erase(last->first);
       _usage_list.pop_back();
     }
-    #endif
 
     // construct new plan at list front, then insert into _cache_map
     _usage_list.emplace_front(std::piecewise_construct,
@@ -420,8 +415,6 @@ public:
 
   void resize(int64_t new_size) {
     _set_max_size(new_size);
-    // no-op when compiling with CUDA 10.
-    #if CUDA_VERSION < 10000
     auto cur_size = _usage_list.size();
     if (cur_size > _max_size) {
       auto delete_it = _usage_list.end();
@@ -431,26 +424,17 @@ public:
       }
       _usage_list.erase(delete_it, _usage_list.end());
     }
-    #endif
   }
 
   size_t size() const { return _cache_map.size(); }
 
-  size_t max_size() const noexcept {
-    #if CUDA_VERSION < 10000
-      return _max_size;
-    #else
-      return size();
-    #endif
-  }
+  size_t max_size() const noexcept { return _max_size; }
 
 private:
   // Only sets size and does value check. Does not resize the data structures.
   void _set_max_size(int64_t new_size) {
-    #if CUDA_VERSION < 10000
     AT_CHECK(new_size <= CUFFT_MAX_PLAN_NUM,
              "cuFFT plan cache size can not be larger than ", CUFFT_MAX_PLAN_NUM, ", but got ", new_size);
-    #endif
     AT_CHECK(new_size >= 0,
              "cuFFT plan cache size must be non-negative, but got ", new_size);
     _max_size = static_cast<size_t>(new_size);

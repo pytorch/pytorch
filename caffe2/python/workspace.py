@@ -54,7 +54,7 @@ if has_gpu_support:
     GetDeviceProperties = C.get_device_properties
 else:
     NumCudaDevices = lambda: 0 # noqa
-    GetCuDNNVersion = lambda: 0 # noqa
+    GetCUDAVersion = lambda: 0 # noqa
     GetCuDNNVersion = lambda: 0 # noqa
     GetCudaPeerAccessPattern = lambda: np.array([]) # noqa
     GetDeviceProperties = lambda x: None # noqa
@@ -163,8 +163,8 @@ def GetOperatorCost(operator, blobs):
     return C.get_operator_cost(StringifyProto(operator), blobs)
 
 
-def RunOperatorOnce(operator, legacy_proto=True):
-    return C.run_operator_once(StringifyProto(operator), legacy_proto)
+def RunOperatorOnce(operator):
+    return C.run_operator_once(StringifyProto(operator))
 
 
 def RunOperatorsOnce(operators):
@@ -367,6 +367,23 @@ def FetchInt8Blob(name):
         'You are not fetching an Int8Blob {}. Please use FetchBlob'.format(
             StringifyBlobName(name))
     return Int8Tensor(*result)
+
+
+def FetchInt8BlobRealVal(name):
+    """Fetches an Int8 blob from the workspace and return its real value representation.
+
+    Inputs:
+      name: the name of the Int8 blob - a string or a BlobReference
+    Returns:
+      real value representation of int8 numpy array
+    """
+    result = C.fetch_blob(StringifyBlobName(name))
+    assert isinstance(result, tuple), \
+        'You are not fetching an Int8Blob {}. Please use FetchBlob'.format(
+            StringifyBlobName(name))
+    int8_blob = Int8Tensor(*result)
+    return (int8_blob.data.astype(np.int32) - int(int8_blob.zero_point)).astype(
+        np.float32) * int8_blob.scale
 
 
 def _Workspace_fetch_int8_blob(ws, name):

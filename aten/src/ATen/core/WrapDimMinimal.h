@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 
 namespace at {
 
@@ -18,12 +18,6 @@ static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr, bool wr
       min, ", ", max, "], but got ", dim, ")");
   if (dim < 0) dim += dim_post_expr;
   return dim;
-}
-
-// Wrap around axis_index if it is negative, s.t., -1 is the last dim
-// This is the "Caffe2" name
-static inline int canonical_axis_index_(int axis_index, int ndims) {
-  return maybe_wrap_dim(axis_index, ndims, false);
 }
 
 }

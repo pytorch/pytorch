@@ -3,8 +3,8 @@
 #include "ATen/Dispatch.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/core/Error.h"
 #include "ReduceOpsUtils.h"
+#include "c10/util/Exception.h"
 #include "cpu/TensorCompareKernel.h"
 
 namespace {

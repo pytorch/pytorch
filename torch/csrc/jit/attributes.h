@@ -167,6 +167,7 @@ struct Attributes {
   const Kind##Attr::ValueType& method(Symbol name) const { \
     return get<Kind##Attr>(name); \
   }
+
   CREATE_ACCESSOR(Float,f)
   CREATE_ACCESSOR(Floats,fs)
   CREATE_ACCESSOR(String,s)
@@ -228,7 +229,7 @@ struct Attributes {
     return s;
   }
 
-  void printValue(std::ostream & out, Symbol & name) const {
+  void printValue(std::ostream & out, const Symbol & name) const {
     switch(kindOf(name)) {
       case AttributeKind::f:
         out << f(name);

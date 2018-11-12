@@ -147,7 +147,7 @@ class TreeWalker {
     }
 
     inline const TypeMeta& meta() const {
-      return walker_.input(fieldId_).meta();
+      return walker_.input(fieldId_).dtype();
     }
 
     inline void* ptr() const {
@@ -196,7 +196,8 @@ using TensorVectorPtr = std::unique_ptr<std::vector<Tensor>>;
 class SharedTensorVectorPtrSerializer : public BlobSerializerBase {
  public:
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       BlobSerializerBase::SerializationAcceptor acceptor) override;
 };
