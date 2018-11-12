@@ -52,15 +52,15 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
 		      THTensor_(size)(input, 1),
 		      output_height, output_width);
   THTensor_(zero)(output);
-  real* odata = THTensor_(data)(output);
-  real* idata = THTensor_(data)(input);
+  scalar_t *idata = input->data<scalar_t>();
+  scalar_t *odata = output->data<scalar_t>();
 
   // Special case: input/output same size, just copy
   if (input_height == output_height && input_width == output_width) {
     for (int output_y = 0; output_y < output_height; output_y++) {
       for (int output_x = 0; output_x < output_width; output_x++) {
-        const real* in = &idata[output_y * input_width + output_x];
-        real* out = &odata[output_y * output_width + output_x];
+        const scalar_t* in = &idata[output_y * input_width + output_x];
+        scalar_t* out = &odata[output_y * output_width + output_x];
         for (int c = 0; c < channels; ++c) {
           out[0] = in[0];
           in += input_width * input_height;
@@ -68,7 +68,7 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
         }
       }
     }
-    THTensor_(free)(input);
+    c10::raw::intrusive_ptr::decref(input);
     return;
   }
 
@@ -84,37 +84,37 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
 
   for (int output_y = 0; output_y < output_height; output_y++) {
     for (int output_x = 0; output_x < output_width; output_x++) {
-      real* in = idata;
-      real* out = odata;
+      scalar_t* in = idata;
+      scalar_t* out = odata;
 
-      real real_x = width_scale * output_x;
+      const scalar_t real_x = width_scale * output_x;
       int input_x = real_x;
-      real t_x = real_x - input_x;
+      const scalar_t t_x = real_x - input_x;
 
-      real real_y = height_scale * output_y;
+      const scalar_t real_y = height_scale * output_y;
       int input_y = real_y;
-      real t_y = real_y - input_y;
+      const scalar_t t_y = real_y - input_y;
 
       for (int c = 0; c < channels; c++) {
-        real coefficients[4];
+        scalar_t coefficients[4];
 
         // Interpolate 4 times in the x direction
         for (int i = 0; i < 4; i++) {
-          coefficients[i] = cubic_interp1d<real>(
-            upsampling_get_value_bounded<real>(
+          coefficients[i] = cubic_interp1d<scalar_t>(
+            upsampling_get_value_bounded<scalar_t>(
               in, input_width, input_height, input_x - 1, input_y - 1 + i),
-            upsampling_get_value_bounded<real>(
+            upsampling_get_value_bounded<scalar_t>(
               in, input_width, input_height, input_x + 0, input_y - 1 + i),
-            upsampling_get_value_bounded<real>(
+            upsampling_get_value_bounded<scalar_t>(
               in, input_width, input_height, input_x + 1, input_y - 1 + i),
-            upsampling_get_value_bounded<real>(
+            upsampling_get_value_bounded<scalar_t>(
               in, input_width, input_height, input_x + 2, input_y - 1 + i),
             t_x
           );
         }
 
         // Interpolate in the y direction using x interpolations
-        odata[output_y * output_width + output_x] = cubic_interp1d<real>(
+        odata[output_y * output_width + output_x] = cubic_interp1d<scalar_t>(
           coefficients[0],
           coefficients[1],
           coefficients[2],
@@ -129,7 +129,7 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
     }
   }
 
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
@@ -154,16 +154,16 @@ void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
   THTensor_(zero)(gradInput);
 
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  real *idata = THTensor_(data)(gradInput);
-  real *odata = THTensor_(data)(gradOutput);
+  scalar_t *idata = gradInput->data<scalar_t>();
+  scalar_t *odata = gradOutput->data<scalar_t>();
   channels = nbatch * channels;
 
   // Special case: input/output same size, just copy
   if (input_height == output_height && input_width == output_width) {
     for (int output_y = 0; output_y < output_height; output_y++) {
       for (int output_x = 0; output_x < output_width; output_x++) {
-        real* in = &idata[output_y * input_width + output_x];
-        real* out = &odata[output_y * output_width + output_x];
+        scalar_t* in = &idata[output_y * input_width + output_x];
+        scalar_t* out = &odata[output_y * output_width + output_x];
         for (int c = 0; c < channels; ++c) {
           in[0] = out[0];
           in += input_width * input_height;
@@ -171,7 +171,7 @@ void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
         }
       }
     }
-    THTensor_(free)(gradOutput);
+    c10::raw::intrusive_ptr::decref(gradOutput);
     return;
   }
 
@@ -182,30 +182,30 @@ void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
 
   for (int output_y = 0; output_y < output_height; output_y++) {
     for (int output_x = 0; output_x < output_width; output_x++) {
-      real* in = idata;
-      real* out = odata;
+      scalar_t* in = idata;
+      scalar_t* out = odata;
 
-      real real_x = width_scale * output_x;
+      scalar_t real_x = width_scale * output_x;
       int input_x = real_x;
-      real t_x = real_x - input_x;
+      scalar_t t_x = real_x - input_x;
 
-      real real_y = height_scale * output_y;
+      scalar_t real_y = height_scale * output_y;
       int input_y = real_y;
-      real t_y = real_y - input_y;
+      scalar_t t_y = real_y - input_y;
 
-      real x_coeffs[4];
-      real y_coeffs[4];
+      scalar_t x_coeffs[4];
+      scalar_t y_coeffs[4];
 
-      get_cubic_upsampling_coefficients<real>(x_coeffs, t_x);
-      get_cubic_upsampling_coefficients<real>(y_coeffs, t_y);
+      get_cubic_upsampling_coefficients<scalar_t>(x_coeffs, t_x);
+      get_cubic_upsampling_coefficients<scalar_t>(y_coeffs, t_y);
 
 
       for (int c = 0; c < channels; c++) {
-        real out_value = out[output_y * output_width + output_x];
+        scalar_t out_value = out[output_y * output_width + output_x];
 
         for (int i = 0; i < 4; i++) {
           for (int j = 0; j < 4; j++) {
-            upsampling_increment_value_bounded<real>(in,
+            upsampling_increment_value_bounded<scalar_t>(in,
               input_width,
               input_height,
               input_x - 1 + i,
@@ -220,7 +220,7 @@ void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
     }
   }
 
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif
