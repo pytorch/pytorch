@@ -1,11 +1,11 @@
 #pragma once
 
-#include <c10/detail/DeviceGuardImplInterface.h>
+#include <c10/impl/DeviceGuardImplInterface.h>
 
 #include <array>
 
 namespace c10 {
-namespace detail {
+namespace impl {
 
 // FakeGuardImpl is hardcoded to have eight devices.  Not for
 // any good reason, just to simplify code.
@@ -84,4 +84,4 @@ template <DeviceType T>
 thread_local std::array<StreamId, kFakeGuardImplMaxDevices> FakeGuardImpl<T>::current_streams_ = {0,0,0,0,0,0,0,0};
 
 
-}} // namespace c10::detail
+}} // namespace c10::impl

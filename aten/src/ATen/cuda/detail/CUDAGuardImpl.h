@@ -12,7 +12,7 @@ namespace at {
 namespace cuda {
 namespace detail {
 
-struct CUDAGuardImpl final : public c10::detail::DeviceGuardImplInterface {
+struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
   CUDAGuardImpl() {}
   CUDAGuardImpl(DeviceType) {}
