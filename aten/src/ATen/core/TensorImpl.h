@@ -861,8 +861,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   bool is_variable() const { return is_variable_; };
 
-  // NOTE: `shallow_copy_and_detach()` does not copy the autograd_meta_ pointer,
-  // because it's meant to be unique for each TensorImpl.
+  // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
+  // because it requires unique ownership.
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id(), is_variable());
     impl->set_sizes_and_strides(sizes(), strides());

@@ -337,12 +337,6 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
   ~DifferentiableViewMeta() override {
     base_.reset();
   }
-
-  // void copy_to(Variable::DifferentiableViewMeta* autograd_meta) {
-  //   Variable::AutogradMeta::copy_to(autograd_meta);
-  //   autograd_meta->base_ = base_;
-  //   autograd_meta->attr_version = attr_version;
-  // }
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
