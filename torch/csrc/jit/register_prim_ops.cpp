@@ -178,7 +178,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::TensorDevice,
+        "prim::device(Tensor a) -> int[]",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
@@ -189,7 +189,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::TensorDType,
+        "prim::dtype(Tensor a) -> int",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
@@ -199,7 +199,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::TensorShape,
+        "prim::shape(Tensor a) -> int[]",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
@@ -250,7 +250,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::RaiseException,
+        "prim::RaiseException(str msg) -> ()",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             throw JITException(pop(stack).toStringRef());
@@ -364,7 +364,7 @@ RegisterOperators reg({
             const auto & elems = t->elements();
             std::vector<IValue> output_elems;
             for (int64_t i = beg_ind; i < end_ind; ++i) {
-              output_elems.push_back(elems.at(i));
+              output_elems.emplace_back(elems.at(i));
             }
             push(stack, Tuple::create(std::move(output_elems)));
             return 0;
@@ -378,7 +378,7 @@ RegisterOperators reg({
           auto tup = pop(stack).toTuple();
           const auto & elems = tup->elements();
           // index is normalized to be positive at compile time
-          stack.push_back(elems.at(index));
+          stack.emplace_back(elems.at(index));
           return 0;
         };
       }),
@@ -493,7 +493,7 @@ RegisterOperators reg({
               std::vector<at::Tensor> vals;
               vals.reserve(num_inputs);
               for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
-                vals.push_back(std::move(stack[i]).toTensor());
+                vals.emplace_back(std::move(stack[i]).toTensor());
               }
               drop(stack, num_inputs);
               push(stack, std::move(vals));
@@ -505,7 +505,7 @@ RegisterOperators reg({
               std::vector<IValue> vals;
               vals.reserve(num_inputs);
               for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
-                vals.push_back(std::move(stack[i]));
+                vals.emplace_back(std::move(stack[i]));
               }
               drop(stack, num_inputs);
               push(stack, std::move(vals));

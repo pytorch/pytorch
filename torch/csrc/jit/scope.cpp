@@ -2,11 +2,7 @@
 
 
 #include "torch/csrc/jit/operator.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/passes/pretty_print.h"
 
 #include <iostream>
 #include <unordered_map>

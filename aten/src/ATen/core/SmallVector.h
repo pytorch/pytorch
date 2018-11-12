@@ -198,6 +198,16 @@ class SmallVectorTemplateCommon : public SmallVectorBase {
     return const_pointer(begin());
   }
 
+  // SmallVector::at is NOT from LLVM.
+  reference at(size_type idx) {
+    assert(idx < size());
+    return begin()[idx];
+  }
+  const_reference at(size_type idx) const {
+    assert(idx < size());
+    return begin()[idx];
+  }
+
   reference operator[](size_type idx) {
     assert(idx < size());
     return begin()[idx];
