@@ -36,6 +36,10 @@ namespace at {
 namespace native {
 
 Tensor& _copy__cpu(Tensor& self, const Tensor& src) {
+  if (src.is_cuda()) {
+    _copy_from(src, self);
+    return self;
+  }
   AT_DISPATCH_ALL_TYPES_AND_HALF(
       self.type(), "_copy__cpu", [&]() { ::_copy__cpu<scalar_t>(self, src); });
   return self;
