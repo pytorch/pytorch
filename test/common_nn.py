@@ -1149,8 +1149,6 @@ class CriterionTest(TestBase):
             out = test_case._forward_criterion(module, input, target, extra_args=self.extra_args)
             ref_args = (deepcopy(input), deepcopy(target)) + self.extra_args + (module,)
             expected_out = self.reference_fn(*ref_args)
-            if isinstance(expected_out, torch.Tensor):
-                expected_out = expected_out.item()
             test_case.assertEqual(out, expected_out)
 
         if self.check_forward_only:
