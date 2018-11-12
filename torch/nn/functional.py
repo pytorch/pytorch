@@ -478,7 +478,7 @@ def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     else:
         _stride = torch.jit._unwrap_optional(stride)
     out = avg_pool1d(input.pow(norm_type), kernel_size, _stride, 0, ceil_mode)
-    return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1 / norm_type)
+    return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1. / norm_type)
 
 
 def adaptive_max_pool1d(input, output_size, return_indices=False):
@@ -1183,13 +1183,11 @@ def linear(input, weight, bias=None):
     """
     if input.dim() == 2 and bias is not None:
         # fused op is marginally faster
-        _bias = torch.jit._unwrap_optional(bias)
-        ret = torch.addmm(_bias, input, weight.t())
+        ret = torch.addmm(torch.jit._unwrap_optional(bias), input, weight.t())
     else:
         output = input.matmul(weight.t())
         if bias is not None:
-            _bias = torch.jit._unwrap_optional(bias)
-            output += _bias
+            output += torch.jit._unwrap_optional(bias)
         ret = output
     return ret
 
@@ -1681,10 +1679,10 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
     if size_average is not None or reduce is not None:
         _size_average = torch.jit._unwrap_optional(size_average)
         _reduce = torch.jit._unwrap_optional(reduce)
-        _reduction = _Reduction.legacy_get_enum(_size_average, _reduce)
+        _reduction_enum = _Reduction.legacy_get_enum(_size_average, _reduce)
     else:
-        _reduction = _Reduction.get_enum(reduction)
-    return torch.kl_div(input, target, _reduction)
+        _reduction_enum = _Reduction.get_enum(reduction)
+    return torch.kl_div(input, target, _reduction_enum)
 
 
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
@@ -1774,9 +1772,9 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
     if size_average is not None or reduce is not None:
         _size_average = torch.jit._unwrap_optional(size_average)
         _reduce = torch.jit._unwrap_optional(reduce)
-        _reduction = _Reduction.legacy_get_enum(_size_average, _reduce)
+        _reduction_enum = _Reduction.legacy_get_enum(_size_average, _reduce)
     else:
-        _reduction = _Reduction.get_enum(reduction)
+        _reduction_enum = _Reduction.get_enum(reduction)
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                       "Please ensure they have the same size.".format(target.size(), input.size()))
@@ -1788,7 +1786,8 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 
-    return torch._C._nn.binary_cross_entropy(input, target, weight, reduction)
+    return torch._C._nn.binary_cross_entropy(
+        input, target, weight, _reduction_enum)
 
 
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=None,
