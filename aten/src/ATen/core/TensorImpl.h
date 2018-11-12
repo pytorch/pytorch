@@ -1477,7 +1477,7 @@ protected:
 //    storage pointer
 //    sizes SmallVector (begin)
 //    sizes SmallVector (end)
-//    sizes SmallVector (reserved)
+//    sizes SmallVector (capacity)
 //    sizes SmallVector (pre-allocated 0)
 //    sizes SmallVector (pre-allocated 1)
 //    sizes SmallVector (pre-allocated 2)
@@ -1485,7 +1485,7 @@ protected:
 //    sizes SmallVector (pre-allocated 4)
 //    strides SmallVector (begin)
 //    strides SmallVector (end)
-//    strides SmallVector (reserved)
+//    strides SmallVector (capacity)
 //    strides SmallVector (pre-allocated 0)
 //    strides SmallVector (pre-allocated 1)
 //    strides SmallVector (pre-allocated 2)
