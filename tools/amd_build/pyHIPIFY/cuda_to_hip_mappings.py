@@ -241,7 +241,10 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict([
 ])
 
 CUDA_INCLUDE_MAP = collections.OrderedDict([
-    ("cuda.h", ("hip/hip_runtime.h", CONV_INCLUDE_CUDA_MAIN_H, API_DRIVER)),
+    # since pytorch uses "\b{pattern}\b" as the actual re pattern,
+    # patterns listed here have to begin and end with alnum chars
+    ("include <cuda.h", ("include <hip/hip_runtime.h", CONV_INCLUDE_CUDA_MAIN_H, API_DRIVER)),
+    ('include "cuda.h', ('include "hip/hip_runtime.h', CONV_INCLUDE_CUDA_MAIN_H, API_DRIVER)),
     ("cuda_runtime.h", ("hip/hip_runtime.h", CONV_INCLUDE_CUDA_MAIN_H, API_RUNTIME)),
     ("cuda_runtime_api.h", ("hip/hip_runtime_api.h", CONV_INCLUDE, API_RUNTIME)),
     ("channel_descriptor.h", ("hip/channel_descriptor.h", CONV_INCLUDE, API_RUNTIME)),
