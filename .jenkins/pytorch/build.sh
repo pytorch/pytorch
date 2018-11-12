@@ -43,6 +43,9 @@ cmake --version
 pip install -q -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export LANG=C.UTF-8
+  export LC_ALL=C.UTF-8
+
   # When hcc runs out of memory, it silently exits without stopping
   # the build process, leaving undefined symbols in the shared lib
   # which will cause undefined symbol errors when later running

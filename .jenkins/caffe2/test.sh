@@ -49,6 +49,11 @@ fi
 
 mkdir -p $TEST_DIR/{cpp,python}
 
+if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
+  export LANG=C.UTF-8
+  export LC_ALL=C.UTF-8
+fi
+
 cd "${WORKSPACE}"
 
 # C++ tests
