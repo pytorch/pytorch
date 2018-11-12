@@ -890,16 +890,8 @@ Operator(                                                                      \
 
     // in c++ int division rounds to the integer closer to 0, in python floordiv
     // rounds to lower integer
-    DEFINE_INT_OP(aten::floordiv, int64_t(std::floor(float(a) / float(b))))
+    DEFINE_GENERIC_OP(aten::floordiv, int64_t(std::floor(double(a) / double(b))), std::floor(a / b), int, float)
     DEFINE_INT_FLOAT_OP(aten::floordiv, std::floor(a / b), float)
-    Operator("aten::floordiv(float a, float b) -> float", [](const Node* node) {
-          return [=](Stack& stack) {
-            double a, b;
-            pop(stack, a, b);
-            push(stack, std::floor(a / b));
-            return 0;
-          };
-        }),
 
     DEFINE_INT_OP(aten::__and__, a & b)
     DEFINE_INT_OP(aten::__or__, a | b)
