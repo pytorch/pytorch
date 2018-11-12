@@ -1,3 +1,5 @@
+#include <google/protobuf/util/json_util.h>
+
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/functional.h"
@@ -6,6 +8,7 @@
 
 #include "caffe2/serialize/inline_container.h"
 #include "onnx/onnx_pb.h"
+#include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/proto/torch_pb.h"
 
@@ -334,7 +337,7 @@ MethodDecoder::MethodDecoder(
     const std::string& name = node_proto.name();
     for (const auto &param_name : node_proto.input()) {
       auto it = param_map.find(param_name);
-      JIT_ASSERT(it != param_map.end());
+      AT_ASSERTM(it != param_map.end(), "cannot find parameter ", param_name);
       member_inputs.push_back(it->second);
     }
     auto graph = buildGraph(node_proto.attribute(0).g());
@@ -372,6 +375,12 @@ at::ScalarType tensorProtoTypeToATenType(caffe2::TensorProto_DataType data_type)
   }
 }
 
+// this is a deserializer class which loads script modules from pt files. the
+// content of the file is written using PyTorchStreamWriter, for details please
+// check caffe2/serialize/inline_container.h. all the records except the last
+// one are tensor data, and the last record is a serialized ModelProto, defined
+// in caffe2/proto/torch.proto. ModelProto contains all the metadata of the
+// model, and it is serialized as json.
 class ScriptModuleDeserializer final {
  public:
   ScriptModuleDeserializer(const std::string& filename) :
@@ -384,20 +393,24 @@ class ScriptModuleDeserializer final {
     at::DataPtr data_ptr;
     size_t data_size;
     std::tie(data_ptr, data_size) = reader_.getLastRecord();
-    AT_ASSERTM(model_def.ParseFromArray(data_ptr.get(), data_size),
-        "parse metadata (i.e., ModelDef) failed.");;
+    std::string json_string = std::string(static_cast<char*>(data_ptr.get()),
+        static_cast<char*>(data_ptr.get()) + data_size);
+    AT_ASSERT(::google::protobuf::util::JsonStringToMessage(json_string, &model_def) ==
+      ::google::protobuf::util::Status::OK);
     moduleLookup_ = module_lookup;
     const auto& module_def = model_def.main_module();
     collectParamsInfo(module_def, module_def.name());
+    // TODO: this can be simplified when C++/Python interop lands,
+    // and the submodules would be created as the same in either C++ or Python
     std::shared_ptr<script::Module> module = moduleLookup_(moduleStack_);
     convertModule(module_def, module.get());
   }
  private:
   void collectParamsInfo(const torch::ModuleDef& module_def, const std::string& prefix) {
+    std::shared_ptr<script::Module> module = moduleLookup_(moduleStack_);
     for (int i = 0; i < module_def.parameters_size(); ++i) {
-      std::shared_ptr<script::Module> module = moduleLookup_(moduleStack_);
       const torch::ParameterDef& param_def = module_def.parameters(i);
-      at::Tensor tensor = createTensor(param_def);
+      at::Tensor tensor = createTensor(param_def.tensor());
       autograd::Variable variable = autograd::make_variable(tensor,
           param_def.require_gradient());
       module->register_parameter(param_def.name(), variable, param_def.is_buffer());
@@ -412,7 +425,6 @@ class ScriptModuleDeserializer final {
   }
   void convertModule(const torch::ModuleDef& module_def,
       script::Module* module) {
-    //std::unordered_map<std::string, at::Tensor*> param_map;
     for (int i = 0; i < module_def.methods_size(); ++i ) {
       const torch::MethodDef& method_def = module_def.methods(i);
       // TODO read unhacked torch script, right now it's serialized onnx proto
@@ -431,8 +443,7 @@ class ScriptModuleDeserializer final {
       moduleStack_.pop_back();
     }
   }
-  at::Tensor createTensor(const torch::ParameterDef& param_def) {
-    const caffe2::TensorProto& tensor_proto = param_def.tensor();
+  at::Tensor createTensor(const caffe2::TensorProto& tensor_proto) {
     std::vector<int64_t> dims;
     for (int i = 0; i < tensor_proto.dims_size(); ++i) {
       dims.push_back(tensor_proto.dims(i));
@@ -443,7 +454,8 @@ class ScriptModuleDeserializer final {
     for (int i = 0;i < external_data.strides_size(); ++i) {
       strides.push_back(external_data.strides(i));
     }
-    auto type = tensorProtoTypeToATenType(tensor_proto.data_type());
+    auto type = at::typeMetaToScalarType(caffe2::DataTypeToTypeMeta(
+          tensor_proto.data_type()));
     uint64_t record_id = caffe2::stoull(external_data.record_id());
     AT_ASSERT(record_id != 0);
     auto storage_it = storageMap_.find(record_id);

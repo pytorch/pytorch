@@ -88,10 +88,12 @@ constexpr uint64_t kFieldAlignment =
     64L; // 64 byte alignment supports up to AVX512 for mmap
 
 // Reader-specific constants
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0x1L;
+// FileFOrmatVersion 1 was used in PyTorch 1.0 rc, which is a hacked ONNX proto.
+constexpr uint64_t kMinSupportedFileFormatVersion = 0x2L;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0x2L;
 
 // Writer-specific constants
-constexpr uint64_t kFileFormatVersion = 0x1L;
+constexpr uint64_t kFileFormatVersion = 0x2L;
 constexpr char kPadValue = -17; // 0xEF
 
 }  // namespace
@@ -206,12 +208,19 @@ class PyTorchStreamReader final {
     // magic number mismatch in PyTorch file.
     uint64_t file_format_version = read64BitIntegerLittleEndian();
     AT_ASSERTM(
+        file_format_version >= kMinSupportedFileFormatVersion,
+        "Attempted to read a PyTorch file with version ",
+        caffe2::to_string(file_format_version),
+        ", but the minimum supported version for reading is ",
+        caffe2::to_string(kMinSupportedFileFormatVersion),
+        ". Your PyTorch script module file is too old. Please re-export it again.");
+    AT_ASSERTM(
         file_format_version <= kMaxSupportedFileFormatVersion,
-        "Attempted to read a PyTorch file with version "
-        "%llu, but the maximum supported version for reading is "
-        "%llu. Your PyTorch installation may be too old.",
-        file_format_version,
-        kMaxSupportedFileFormatVersion);
+        "Attempted to read a PyTorch file with version ",
+        caffe2::to_string(file_format_version),
+        ", but the maximum supported version for reading is ",
+        caffe2::to_string(kMaxSupportedFileFormatVersion),
+        ". Your PyTorch installation may be too old.");
     seekToNextAlignmentBoundary();
   }
 

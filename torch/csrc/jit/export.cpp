@@ -1,3 +1,5 @@
+#include <google/protobuf/util/json_util.h>
+
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/autograd/symbolic.h"
 #include "torch/csrc/onnx/onnx.h"
@@ -8,6 +10,7 @@
 
 #include "caffe2/serialize/inline_container.h"
 #include "onnx/onnx_pb.h"
+#include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/proto/torch_pb.h"
 
@@ -432,15 +435,15 @@ void GraphEncoder::EncodeTensor(
 class MethodEncoder: public EncoderBase {
  public:
   MethodEncoder(script::Method& method,
-      onnx::NodeProto* node_proto,
+      std::string* torch_script,
       std::unordered_map<const void*, uint64_t>* storage_map,
       std::unordered_map<at::Tensor*, std::string>* parameter_map,
       PyTorchStreamWriter* writer);
 
  private:
 
-  void EncodeMethod(onnx::NodeProto *node_proto,
-                    script::Method &method,
+  void EncodeMethod(std::string* torch_script,
+                    const script::Method &method,
                     const std::string prefix);
 
   void EncodeTensor(
@@ -472,7 +475,7 @@ class MethodEncoder: public EncoderBase {
 };
 
 MethodEncoder::MethodEncoder(script::Method& method,
-    onnx::NodeProto* node_proto,
+    std::string* torch_script,
     std::unordered_map<const void*, uint64_t>* storage_map,
     std::unordered_map<at::Tensor*, std::string>* parameter_map,
     PyTorchStreamWriter* writer) :
@@ -482,7 +485,7 @@ MethodEncoder::MethodEncoder(script::Method& method,
   stream_writer_ = writer;
   // we already keep the tree structure in the top level module,
   // so pass "" as prefix
-  EncodeMethod(node_proto, method, "");
+  EncodeMethod(torch_script, method, "");
 }
 
 void MethodEncoder::EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto, const Value *n) {
@@ -600,9 +603,12 @@ void MethodEncoder::EncodeValueInfo(
 }
 
 void MethodEncoder::EncodeMethod(
-    onnx::NodeProto *node_proto,
-    script::Method &method,
+    std::string* torch_script,
+    const script::Method &method,
     const std::string prefix) {
+  onnx::ModelProto model_proto;
+  model_proto.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
+  auto* node_proto = model_proto.mutable_graph()->add_node();
   node_proto->set_name(prefix + method.name());
   if (method.is_optimized()) {
     // mark that this method was optimized
@@ -631,6 +637,7 @@ void MethodEncoder::EncodeMethod(
     }
   }
   EncodeBlock(attr_proto->mutable_g(), method.graph()->block(), {});
+  AT_ASSERT(model_proto.SerializeToString(torch_script));
 }
 
 void MethodEncoder::EncodeTensor(
@@ -879,7 +886,8 @@ class ScriptModuleSerializer final {
     torch::ModelDef model_def;
     convertToModel(module, &model_def);
     std::string output;
-    model_def.SerializeToString(&output);
+    AT_ASSERT(::google::protobuf::util::MessageToJsonString(model_def, &output) ==
+        ::google::protobuf::util::Status::OK);
     auto record_id = writer_.writeRecord(output.data(), output.size());
     writer_.writeEndOfFile();
 
@@ -891,7 +899,7 @@ class ScriptModuleSerializer final {
     model_def->set_name("script-model");
     model_def->set_producer_name("pytorch");
     model_def->set_producer_version("1.0"); // TODO: set the producer version using appropriate function call
-    // TODO set proto version
+    model_def->set_proto_version(torch::ProtoVersion::PROTO_VERSION_NEWEST);
     std::string main_module_name = "";
     collectParamsInfo(module, main_module_name);
     convertModule(module, main_module_name, model_def->mutable_main_module());
@@ -934,7 +942,8 @@ class ScriptModuleSerializer final {
       tensor_proto->add_dims(d);
     }
     tensor_proto->set_data_type(
-        atenTypeToTensorProtoType(tensor.type().scalarType()));
+        caffe2::TypeMetaToDataType(at::scalarTypeToTypeMeta(
+            tensor.type().scalarType())));
     tensor_proto->set_storage_type(caffe2::TensorProto_StorageType_EXTERNAL);
     caffe2::ExternalDataProto* external_data = tensor_proto->mutable_external_data();
     for (auto s : tensor.strides()) {
@@ -973,14 +982,11 @@ class ScriptModuleSerializer final {
     // TODO handle device case, set the device_detail and load to CUDA device
   }
   void convertMethod(script::Method& method, torch::MethodDef* method_def) {
+    std::string torch_script;
     // TODO encode the real torch script instead of ModelProto
-    ::ONNX_NAMESPACE::ModelProto model_proto;
-    model_proto.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
-    MethodEncoder encoder(method, model_proto.mutable_graph()->add_node(),
+    MethodEncoder encoder(method, &torch_script,
         &storageMap_, &parameterMap_, &writer_);
-    std::string serialized_proto;
-    model_proto.SerializeToString(&serialized_proto);
-    method_def->set_onnx_proto(serialized_proto);
+    method_def->set_onnx_proto(torch_script);
   }
   std::unordered_map<const void*, uint64_t> storageMap_; // storage_ptr => record_offset
   std::ofstream ofs_;
@@ -1030,16 +1036,11 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
 }
 
 void ExportModule(const script::Module& module, std::ostream& out) {
-  //MethodEncoder(module, out);
-  //std::cout << "export from stream!" << std::endl;
   ScriptModuleSerializer serializer(&out);
   serializer.serialize(module);
 }
 
 void ExportModule(const script::Module& module, const std::string &filename) {
-  //std::ofstream out(filename, std::ios_base::binary);
-  //ExportModule(module, out);
-  //std::cout << "export from filename!" << std::endl;
   ScriptModuleSerializer serializer(filename);
   serializer.serialize(module);
 }
