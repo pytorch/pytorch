@@ -7928,6 +7928,8 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         desc='padding',
+        test_cuda=(not TEST_WITH_ROCM),
+        decorator=skipIfRocm
     ),
     dict(
         module_name='Conv2d',
