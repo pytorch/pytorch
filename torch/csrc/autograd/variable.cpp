@@ -172,8 +172,8 @@ void Variable::Impl::set_data(Tensor new_data) {
   is_variable_ = true;
 
   auto new_data_copy = at::Tensor(new_data.getIntrusivePtr()->shallow_copy_and_detach());
-  // NOTE: this is the only place we change the ownership of the AutogradMeta struct
-  // (from the old TensorImpl to the new TensorImpl)
+  // NOTE: this is the only place where we change the ownership of the AutogradMeta pointer
+  // (moving it from the old TensorImpl to the new TensorImpl)
   new_data_copy.unsafeGetTensorImpl()->autograd_meta_ = autograd_meta;
   data_.unsafeGetTensorImpl()->autograd_meta_ = nullptr;
   data_ = std::move(new_data_copy);
