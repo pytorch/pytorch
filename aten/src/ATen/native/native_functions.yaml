@@ -925,6 +925,7 @@
 - func: inverse_out(Tensor result, Tensor self) -> Tensor
 
 - func: _inverse_helper(Tensor self) -> Tensor
+  variants: function
   dispatch:
     CPU: _inverse_helper_cpu
     CUDA: _inverse_helper_cuda
@@ -2375,10 +2376,6 @@
 
 # wrappers for legacy TH methods
 
-- func: ndimension(Tensor self) -> int64_t
-  variants: method
-  device_guard: false
-
 - func: data_ptr(Tensor self) -> void*
   variants: method
   device_guard: false
@@ -2396,10 +2393,6 @@
   device_guard: false
 
 - func: set_(Tensor self) -> Tensor
-  variants: method
-  device_guard: false
-
-- func: is_contiguous(Tensor self) -> bool
   variants: method
   device_guard: false
 
@@ -2925,6 +2918,12 @@
 - func: potrs(Tensor self, Tensor input2, bool upper=true) -> Tensor
   variants: method, function
   device_guard: false
+
+- func: _potrs_helper(Tensor self, Tensor A, bool upper) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _potrs_helper_cpu
+    CUDA: _potrs_helper_cuda
 
 - func: potri_out(Tensor result, Tensor self, bool upper=true) -> Tensor
   device_guard: false

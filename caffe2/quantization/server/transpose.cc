@@ -2,11 +2,9 @@
 
 #include <x86intrin.h>
 
-namespace fbgemm
-{
+namespace fbgemm {
 
-void transpose_4rows(int N, const std::uint8_t* src, std::uint8_t* dst)
-{
+void transpose_4rows(int N, const std::uint8_t* src, std::uint8_t* dst) {
   constexpr int M = 4;
   int j;
   // vectorized loop
@@ -15,10 +13,10 @@ void transpose_4rows(int N, const std::uint8_t* src, std::uint8_t* dst)
     // b : b0 b1 ... b31
     // c : c0 c1 ... c31
     // d : d0 d1 ... d31
-    __m256i a = _mm256_lddqu_si256((const __m256i *)(src + j + 0 * N));
-    __m256i b = _mm256_lddqu_si256((const __m256i *)(src + j + 1 * N));
-    __m256i c = _mm256_lddqu_si256((const __m256i *)(src + j + 2 * N));
-    __m256i d = _mm256_lddqu_si256((const __m256i *)(src + j + 3 * N));
+    __m256i a = _mm256_lddqu_si256((const __m256i*)(src + j + 0 * N));
+    __m256i b = _mm256_lddqu_si256((const __m256i*)(src + j + 1 * N));
+    __m256i c = _mm256_lddqu_si256((const __m256i*)(src + j + 2 * N));
+    __m256i d = _mm256_lddqu_si256((const __m256i*)(src + j + 3 * N));
 
     // even-odd interleaving
     // ab_lo : a0 b0 a1 b1 ...  a7  b7 | a16 b16 ... a23 b23
@@ -42,20 +40,20 @@ void transpose_4rows(int N, const std::uint8_t* src, std::uint8_t* dst)
 
     // Storing with 128-bit lanes are permuted so that everything is in order
     _mm256_storeu_si256(
-        (__m256i *)(dst + j * M + 0 * 32),
+        (__m256i*)(dst + j * M + 0 * 32),
         _mm256_permute2f128_si256(y0, y1, 0x20));
     _mm256_storeu_si256(
-        (__m256i *)(dst + j * M + 1 * 32),
+        (__m256i*)(dst + j * M + 1 * 32),
         _mm256_permute2f128_si256(y2, y3, 0x20));
     _mm256_storeu_si256(
-        (__m256i *)(dst + j * M + 2 * 32),
+        (__m256i*)(dst + j * M + 2 * 32),
         _mm256_permute2f128_si256(y0, y1, 0x31));
     _mm256_storeu_si256(
-        (__m256i *)(dst + j * M + 3 * 32),
+        (__m256i*)(dst + j * M + 3 * 32),
         _mm256_permute2f128_si256(y2, y3, 0x31));
   }
   // scalar loop for remainder
-  for ( ; j < N; ++j) {
+  for (; j < N; ++j) {
     for (int i = 0; i < M; ++i) {
       dst[j * M + i] = src[j + i * N];
     }

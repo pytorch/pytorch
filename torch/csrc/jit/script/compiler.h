@@ -129,33 +129,39 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
 };
 
 struct TORCH_API BuiltinModule : public SugaredValue {
-  BuiltinModule(std::string name)
-    : name(std::move(name)) {}
-  std::string name;
+  BuiltinModule(std::string name,
+                c10::optional<int64_t> version = at::nullopt)
+    : name(std::move(name))
+    , version(version) {}
 
   std::string kind() const override {
     return "builtin module";
   }
-
   std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
-    return std::make_shared<BuiltinFunction>(Symbol::aten(field), c10::nullopt);
+    return std::make_shared<BuiltinFunction>(Symbol::fromQualString(name+"::"+field), c10::nullopt);
   }
+
+private:
+  std::string name;
+  // when we add operator versioning, emit this op as it exising at 'version'
+  // if not set, use the latest version
+  c10::optional<int64_t> version;
 };
 
+// These SugaredValues have special handling in the compiler because they
+// change the normal evalution order of the expression they participate in.
+// They are exposed here so that the python frontend can inject them
+// when it sees the equivalent thing in python
 struct TORCH_API ForkValue : public SugaredValue {
   ForkValue() = default;
-
   std::string kind() const override {
     return "fork";
   }
-
-  std::shared_ptr<SugaredValue> call(
-      SourceRange loc,
-      Method& m,
-      at::ArrayRef<NamedValue> attributes,
-      at::ArrayRef<NamedValue> inputs,
-      size_t n_binders) override {
-    AT_ERROR("Cannot call a fork value directly");
+};
+struct TORCH_API AnnotateValue : public SugaredValue {
+  AnnotateValue() = default;
+  std::string kind() const override {
+    return "annotate";
   }
 };
 
@@ -163,7 +169,7 @@ using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& 
 
 inline std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m, const SourceRange& loc){
   if (name == "torch") {
-    return std::make_shared<BuiltinModule>(name);
+    return std::make_shared<BuiltinModule>("aten");
   }
   return nullptr;
 }
