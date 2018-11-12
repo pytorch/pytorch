@@ -76,6 +76,11 @@ fi
 # TODO: Don't install this here
 if ! which conda; then
   pip install -q mkl mkl-devel
+  if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc7.2* ]] || [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc4.8* ]]; then
+    export USE_MKLDNN=1
+  else
+    export USE_MKLDNN=0
+  fi
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -116,6 +121,15 @@ if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
   # TODO: Don't run this here
   pip install -q -r requirements.txt || true
   LC_ALL=C make html
+  popd
+fi
+
+# Test standalone c10 build
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
+  mkdir -p c10/build
+  pushd c10/build
+  cmake ..
+  make -j
   popd
 fi
 

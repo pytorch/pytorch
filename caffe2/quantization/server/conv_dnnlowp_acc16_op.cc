@@ -38,8 +38,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHW() {
   const Tensor& X = InputTensorCPU_(INPUT);
   if (X.template IsType<uint8_t>()) {
     return RunOnDeviceWithOrderNCHWAndType_<uint8_t>();
-  }
-  else {
+  } else {
     assert(X.template IsType<float>());
     return RunOnDeviceWithOrderNCHWAndType_<float>();
   }
@@ -50,8 +49,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWC() {
   const Tensor& X = InputTensorCPU_(INPUT);
   if (X.template IsType<uint8_t>()) {
     return RunOnDeviceWithOrderNHWCAndType_<uint8_t>();
-  }
-  else {
+  } else {
     assert(X.template IsType<float>());
     return RunOnDeviceWithOrderNHWCAndType_<float>();
   }
@@ -78,10 +76,9 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
       int outlier_cnt = 0;
       for (int i = 0; i < (M / group_) * kernel_dim; ++i) {
         int8_t w = W_quantized_[group_id * (M / group_) * kernel_dim + i];
-        bool is_outlier =
-          nbits_in_non_outlier_ == 0 ||
-          w < -(1 << (nbits_in_non_outlier_ - 1)) ||
-          w >= (1 << (nbits_in_non_outlier_ - 1));
+        bool is_outlier = nbits_in_non_outlier_ == 0 ||
+            w < -(1 << (nbits_in_non_outlier_ - 1)) ||
+            w >= (1 << (nbits_in_non_outlier_ - 1));
         if (is_outlier) {
           ++outlier_cnt;
         }
@@ -118,12 +115,10 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
               << OperatorBase::debug_def().input(1) << " is "
               << (float)total_outlier_cnt / W_quantized_.size();
     LOG(INFO) << "nbits_in_non_outlier " << nbits_in_non_outlier_
-              << " copy_to_32bit_frequency "
-              << copy_to_32bit_frequency_;
+              << " copy_to_32bit_frequency " << copy_to_32bit_frequency_;
   }
 
-  bool packW =
-      ConvPoolOpBase<CPUContext>::order_ == StorageOrder::NHWC &&
+  bool packW = ConvPoolOpBase<CPUContext>::order_ == StorageOrder::NHWC &&
       GetCpuId().avx2();
 
   if (first_invocation_) {
@@ -162,9 +157,8 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
   if (packW && Wq_acc16_packed_.empty()) {
     Wq_acc16_packed_.resize(group_);
     for (int group_id = 0; group_id < group_; ++group_id) {
-      Wq_acc16_packed_[group_id].reset(
-        new fbgemm2::PackBMatrix<int8_t, int16_t>(
-          fbgemm2::matrix_op_t::Transpose,
+      Wq_acc16_packed_[group_id].reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
+          fbgemm::matrix_op_t::Transpose,
           kernel_dim,
           M / group_,
           W_quantized_.data() + group_id * (M / group_) * kernel_dim,
@@ -311,7 +305,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
         vector<uint8_t> col_buffer_quantized;
         if (X.template IsType<uint8_t>()) {
           col_buffer_quantized_data =
-              (uint8_t *)col_buffer_data + tid * col_buffer_size;
+              (uint8_t*)col_buffer_data + tid * col_buffer_size;
         } else {
           col_buffer_quantized.resize(kernel_dim * output_image_size);
           Quantize<uint8_t>(
@@ -407,9 +401,10 @@ static void conv_nhwc_acc16_ref_(
     const int8_t* W,
     int32_t* Y
 #ifdef DNNLOWP_ACC16_IN_SLOW_PATH
-    , OperatorBase* op
+    ,
+    OperatorBase* op
 #endif
-    ) {
+) {
 #ifdef DNNLOWP_ACC16_IN_SLOW_PATH
   uint64_t underflow_cnt = 0, overflow_cnt = 0;
 #endif
@@ -437,8 +432,7 @@ static void conv_nhwc_acc16_ref_(
               numeric_limits<int16_t>::min(),
               std::min<int32_t>(
                   numeric_limits<int16_t>::max(), int16_sum + x * w));
-          if (k % copy_to_32bit_frequency_ ==
-              copy_to_32bit_frequency_ - 1) {
+          if (k % copy_to_32bit_frequency_ == copy_to_32bit_frequency_ - 1) {
             int32_sum += int16_sum;
             int16_sum = 0;
           }
@@ -472,9 +466,8 @@ static void conv_nhwc_acc16_ref_(
   } // for each group
 
 #ifdef DNNLOWP_ACC16_IN_SLOW_PATH
-  LOG(INFO) << op->debug_def().input(1)
-            << " underflow_cnt " << underflow_cnt << " ("
-            << (float)underflow_cnt / (N * output_image_size * M) * 100
+  LOG(INFO) << op->debug_def().input(1) << " underflow_cnt " << underflow_cnt
+            << " (" << (float)underflow_cnt / (N * output_image_size * M) * 100
             << ") overflow_cnt " << overflow_cnt << " ("
             << (float)overflow_cnt / (N * output_image_size * M) * 100 << ")";
 #endif
@@ -495,10 +488,7 @@ void ConvDNNLowPAcc16Op<ReluFused>::ConvOutlier_(
     const int output_image_size = this->GetDimsSize(*Y);
 
     if (nbits_in_non_outlier_ == 0) {
-      memset(
-        Y_int32->data(),
-        0,
-        sizeof((*Y_int32)[0]) * M * N);
+      memset(Y_int32->data(), 0, sizeof((*Y_int32)[0]) * M * N);
     }
 
 #ifdef _OPENMP
@@ -519,7 +509,7 @@ void ConvDNNLowPAcc16Op<ReluFused>::ConvOutlier_(
       for (int group_id = group_begin; group_id < group_end; ++group_id) {
         assert(Wq_outlier_[group_id].NumOfRows() == kernel_dim);
         // Dense-matrix times sparse-matrix multiplication for outlier
-        fbgemm2::block_type_t block = { 0, i_end - i_begin, 0, M / group_ };
+        fbgemm::block_type_t block = {0, i_end - i_begin, 0, M / group_};
         Wq_outlier_[group_id].SpMDM(
             block,
             col_buffer + (i_begin * group_ + group_id) * kernel_dim,
@@ -637,7 +627,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
       bool fuse_output_pipeline = !Wq_acc16_packed_.empty() &&
           nbits_in_non_outlier_ > 0 && !dequantize_output_;
 
-      using namespace fbgemm2;
+      using namespace fbgemm;
       int row_offset_size_per_thread = -1;
       int x_pack_buf_size_per_thread = -1;
       if (!Wq_acc16_packed_.empty()) {
@@ -784,9 +774,10 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
               W_quantized_.data(),
               Y_int32->data()
 #ifdef DNNLOWP_ACC16_IN_SLOW_PATH
-              , this
+                  ,
+              this
 #endif
-              );
+          );
         } // slow path
       } // nbits_in_non_outlier_ > 0
 
@@ -847,10 +838,9 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
   LOG(INFO) << "this=" << this << " " << OperatorBase::debug_def().type()
             << " output=" << OperatorBase::debug_def().output(0) << " "
             << N * output_image_size << "x" << M << "x" << kernel_dim
-            << " G=" << group_ << " C/G=" << C / group_
-            << " K/G=" << M / group_
-            << " R=" << kernel_h() << " S=" << kernel_w() << " : "
-            << dt * 1e3 << " ms " << gops << " gops";
+            << " G=" << group_ << " C/G=" << C / group_ << " K/G=" << M / group_
+            << " R=" << kernel_h() << " S=" << kernel_w() << " : " << dt * 1e3
+            << " ms " << gops << " gops";
 #endif
 
   BaseType::MeasureQuantizationError_();
@@ -859,13 +849,21 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
 }
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  Conv, DNNLOWP_ACC16, ConvDNNLowPAcc16Op<false>);
+    Conv,
+    DNNLOWP_ACC16,
+    ConvDNNLowPAcc16Op<false>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  ConvRelu, DNNLOWP_ACC16, ConvDNNLowPAcc16Op<true>);
+    ConvRelu,
+    DNNLOWP_ACC16,
+    ConvDNNLowPAcc16Op<true>);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  Int8Conv, DNNLOWP_ACC16, ConvDNNLowPAcc16Op<false>);
+    Int8Conv,
+    DNNLOWP_ACC16,
+    ConvDNNLowPAcc16Op<false>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  Int8ConvRelu, DNNLOWP_ACC16, ConvDNNLowPAcc16Op<true>);
+    Int8ConvRelu,
+    DNNLOWP_ACC16,
+    ConvDNNLowPAcc16Op<true>);
 
 } // namespace caffe2

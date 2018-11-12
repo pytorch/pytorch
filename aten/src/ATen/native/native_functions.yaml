@@ -433,6 +433,11 @@
 
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
 
+- func: _copy_(Tensor self, Tensor src) -> Tensor
+  cpu_half: True
+  dispatch:
+    CPU: _copy__cpu
+
 - func: cos(Tensor self) -> Tensor
   variants: function, method
 
@@ -909,6 +914,7 @@
 - func: inverse_out(Tensor result, Tensor self) -> Tensor
 
 - func: _inverse_helper(Tensor self) -> Tensor
+  variants: function
   dispatch:
     CPU: _inverse_helper_cpu
     CUDA: _inverse_helper_cuda
@@ -1718,7 +1724,7 @@
     CPU: flip_cpu
     CUDA: flip_cuda
 
-- func: roll(Tensor self, IntList[1] shifts, IntList[1] dims) -> Tensor
+- func: roll(Tensor self, IntList[1] shifts, IntList[1] dims={}) -> Tensor
   variants: function, method
   dispatch:
     CPU: roll_cpu
@@ -2359,10 +2365,6 @@
 
 # wrappers for legacy TH methods
 
-- func: ndimension(Tensor self) -> int64_t
-  variants: method
-  device_guard: false
-
 - func: data_ptr(Tensor self) -> void*
   variants: method
   device_guard: false
@@ -2380,10 +2382,6 @@
   device_guard: false
 
 - func: set_(Tensor self) -> Tensor
-  variants: method
-  device_guard: false
-
-- func: is_contiguous(Tensor self) -> bool
   variants: method
   device_guard: false
 
@@ -2909,6 +2907,12 @@
 - func: potrs(Tensor self, Tensor input2, bool upper=true) -> Tensor
   variants: method, function
   device_guard: false
+
+- func: _potrs_helper(Tensor self, Tensor A, bool upper) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _potrs_helper_cpu
+    CUDA: _potrs_helper_cuda
 
 - func: potri_out(Tensor result, Tensor self, bool upper=true) -> Tensor
   device_guard: false
