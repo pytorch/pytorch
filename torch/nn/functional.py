@@ -1424,10 +1424,9 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     )
 
 
-@torch._jit_internal.weak_script
 def instance_norm(input, running_mean=None, running_var=None, weight=None,
                   bias=None, use_input_stats=True, momentum=0.1, eps=1e-5):
-    # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor
+    # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor  # noqa
     r"""Applies Instance Normalization for each channel in each data sample in a
     batch.
 
