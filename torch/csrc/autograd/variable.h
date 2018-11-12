@@ -262,7 +262,7 @@ struct TORCH_API Variable : public at::Tensor {
   const std::string& name() const noexcept;
 
   PyObject* pyobj() const noexcept;
-  void set_pyobj(PyObject* pyobj);
+  void set_pyobj(PyObject* pyobj) noexcept;
 
   struct AutogradMeta;
   Variable::AutogradMeta* get_autograd_meta() const noexcept;
@@ -712,7 +712,7 @@ inline const std::string& Variable::name() const noexcept {
   return get_autograd_meta()->name;
 }
 
-inline void Variable::set_pyobj(PyObject* pyobj) {
+inline void Variable::set_pyobj(PyObject* pyobj) noexcept {
   get_autograd_meta()->pyobj_ = pyobj;
 }
 
