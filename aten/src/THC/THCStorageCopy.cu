@@ -1,7 +1,7 @@
 #include "THCStorageCopy.h"
 #include "THCGeneral.h"
 
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCTensorCopy.h"
 #include "THCTensor.hpp"
 #include "THCStorage.hpp"

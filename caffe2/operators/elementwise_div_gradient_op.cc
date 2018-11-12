@@ -186,8 +186,8 @@ class BinaryElementwiseWithArgsGradientOp<
       const auto& C = Input(1);
       const auto& dC = Input(2);
       if (legacy_broadcast_) {
-        if (B.size() == 1) {
-          A_dims = {static_cast<int>(C.size())};
+        if (B.numel() == 1) {
+          A_dims = {static_cast<int>(C.numel())};
           B_dims = {1};
         } else {
           size_t pre, n, post;
@@ -200,9 +200,9 @@ class BinaryElementwiseWithArgsGradientOp<
         }
       } else {
         std::copy(
-            C.dims().cbegin(), C.dims().cend(), std::back_inserter(A_dims));
+            C.sizes().cbegin(), C.sizes().cend(), std::back_inserter(A_dims));
         std::copy(
-            B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+            B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
       }
       B_data = B.template data<T>();
       C_data = C.template data<T>();
@@ -215,8 +215,8 @@ class BinaryElementwiseWithArgsGradientOp<
       const auto& B = Input(2);
       const auto& C = Input(3);
       if (legacy_broadcast_) {
-        if (B.size() == 1) {
-          A_dims = {static_cast<int>(A.size())};
+        if (B.numel() == 1) {
+          A_dims = {static_cast<int>(A.numel())};
           B_dims = {1};
         } else {
           size_t pre, n, post;
@@ -229,9 +229,9 @@ class BinaryElementwiseWithArgsGradientOp<
         }
       } else {
         std::copy(
-            A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
+            A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
         std::copy(
-            B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+            B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
       }
       dC_data = dC.template data<T>();
       A_data = A.template data<T>();

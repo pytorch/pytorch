@@ -12,7 +12,7 @@ class CopyCPUToIDEEPOp final : public IDEEPOperator {
   bool RunOnDevice() override {
     const auto& X = OperatorBase::Input<Tensor>(0, CPU);
     auto* Y = OperatorBase::OutputBlob(0);
-    itensor::dims src_dims(X.dims().begin(), X.dims().end());
+    itensor::dims src_dims(X.sizes().begin(), X.sizes().end());
     if (!(Y->template IsType<itensor>() &&
           Y->Get<itensor>().get_data_type() == itensor::data_type::f32) ||
         Y->Get<itensor>().get_dims() != src_dims) {
@@ -25,13 +25,30 @@ class CopyCPUToIDEEPOp final : public IDEEPOperator {
   }
 };
 
+class IDEEPCopyOp final : public IDEEPOperator {
+ public:
+  USE_SIMPLE_IDEEP_CTOR_DTOR(IDEEPCopyOp);
+  USE_IDEEP_DEF_ALIASES();
+
+  bool RunOnDevice() override {
+    const auto& X = OperatorBase::Input<itensor>(0);
+    auto* Y = Output(0);
+    if (X != *Y) {
+      Y->reinit_like(X);
+      ideep::direct_copy::compute(X, *Y);
+    }
+
+    return true;
+  }
+};
+
 class CopyIDEEPToCPUOp final : public IDEEPOperator {
  public:
   USE_SIMPLE_IDEEP_CTOR_DTOR(CopyIDEEPToCPUOp);
   USE_IDEEP_DEF_ALIASES();
   bool RunOnDevice() override {
     const auto& input_blob = OperatorBase::InputBlob(0);
-    if (input_blob.template IsType<Tensor>(CPU)) {
+    if (BlobIsTensorType(input_blob, CPU)) {
       VLOG(2) << "Directing sharing of TensorCPU";
       const auto& X = OperatorBase::Input<Tensor>(0, CPU);
       auto* Y = OperatorBase::Output<Tensor>(0, CPU);
@@ -52,6 +69,7 @@ class CopyIDEEPToCPUOp final : public IDEEPOperator {
 
 REGISTER_IDEEP_OPERATOR(CopyCPUToIDEEP, CopyCPUToIDEEPOp);
 REGISTER_IDEEP_OPERATOR(CopyIDEEPToCPU, CopyIDEEPToCPUOp);
+REGISTER_IDEEP_OPERATOR(Copy, IDEEPCopyOp);
 
 OPERATOR_SCHEMA(CopyCPUToIDEEP)
     .NumInputs(1)

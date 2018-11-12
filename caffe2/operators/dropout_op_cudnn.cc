@@ -55,7 +55,7 @@ class CuDNNDropoutOp final : public Operator<CUDAContext> {
   cudnnTensorDescriptor_t data_desc_;
   cudnnDropoutDescriptor_t dropout_desc_;
 
-  vector<TIndex> cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   float ratio_;
   bool is_test_;
@@ -113,7 +113,7 @@ class CuDNNDropoutGradientOp final : public Operator<CUDAContext> {
   cudnnTensorDescriptor_t data_desc_;
   cudnnDropoutDescriptor_t dropout_desc_;
 
-  vector<TIndex> cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   Blob* scratch_blob_;
 
@@ -135,23 +135,23 @@ bool CuDNNDropoutOp::DoRunWithType() {
   auto* Y = Output(0);
 
   auto size_prod = 1;
-  for (auto dim : X.dims()) {
+  for (auto dim : X.sizes()) {
     size_prod *= dim;
   }
   // now actually run the computation
   if (is_test_) {
     if (Y != &X) {
       context_.CopySameDevice<T>(
-          X.size(), X.template data<T>(), Y->template mutable_data<T>());
+          X.numel(), X.template data<T>(), Y->template mutable_data<T>());
     }
     return true;
   } else {
     auto* mask = Output(1);
     // Reshape tensor descriptors if necessary
-    if (X.dims() != cudnn_input_dims_ && !is_test_) {
+    if (X.sizes() != cudnn_input_dims_ && !is_test_) {
       CAFFE_ENFORCE(scratch_blob_);
-      Tensor* states = scratch_blob_->GetMutableTensor(CUDA);
-      cudnn_input_dims_ = X.dims();
+      Tensor* states = BlobGetMutableTensor(scratch_blob_, CUDA);
+      cudnn_input_dims_ = X.sizes().vec();
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           data_desc_,
           GetCudnnTensorFormat(StorageOrder::NCHW),
@@ -208,8 +208,8 @@ bool CuDNNDropoutOp::RunOnDevice() {
 
   if (X.IsType<float>()) {
     return DoRunWithType<float, float>();
-  } else if (X.IsType<float16>()) {
-    return DoRunWithType<float16, float>();
+  } else if (X.IsType<at::Half>()) {
+    return DoRunWithType<at::Half, float>();
   }
   return false;
 }
@@ -222,7 +222,7 @@ bool CuDNNDropoutGradientOp::DoRunWithType() {
   auto* dX = Output(0);
 
   auto size_prod = 1;
-  for (auto dim : dY.dims()) {
+  for (auto dim : dY.sizes()) {
     size_prod *= dim;
   }
 
@@ -243,8 +243,8 @@ bool CuDNNDropoutGradientOp::DoRunWithType() {
     states_initialized_ = true;
   }
 
-  if (dY.dims() != cudnn_input_dims_) {
-    cudnn_input_dims_ = dY.dims();
+  if (dY.sizes() != cudnn_input_dims_) {
+    cudnn_input_dims_ = dY.sizes().vec();
     CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
         data_desc_,
         GetCudnnTensorFormat(StorageOrder::NCHW),
@@ -257,7 +257,6 @@ bool CuDNNDropoutGradientOp::DoRunWithType() {
     // get the reserve space we need
     CUDNN_ENFORCE(cudnnDropoutGetReserveSpaceSize(
         data_desc_, &reserve_space_size_in_bytes_));
-
   }
 
   // run the computation
@@ -283,8 +282,8 @@ bool CuDNNDropoutGradientOp::RunOnDevice() {
 
   if (dY.IsType<float>()) {
     return DoRunWithType<float, float>();
-  } else if (dY.IsType<float16>()) {
-    return DoRunWithType<float16, float>();
+  } else if (dY.IsType<at::Half>()) {
+    return DoRunWithType<at::Half, float>();
   }
   return false;
 }

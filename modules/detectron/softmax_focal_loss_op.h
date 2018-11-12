@@ -29,12 +29,12 @@ class SoftmaxFocalLossOp final : public Operator<Context> {
  public:
   SoftmaxFocalLossOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)),
-        gamma_(OperatorBase::GetSingleArgument<float>("gamma", 1.)),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0.25)),
-        num_classes_(OperatorBase::GetSingleArgument<int>("num_classes", 81)),
+        scale_(this->template GetSingleArgument<float>("scale", 1.)),
+        gamma_(this->template GetSingleArgument<float>("gamma", 1.)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 0.25)),
+        num_classes_(this->template GetSingleArgument<int>("num_classes", 81)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(scale_ >= 0);
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");
@@ -60,12 +60,12 @@ class SoftmaxFocalLossGradientOp final : public Operator<Context> {
  public:
   SoftmaxFocalLossGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)),
-        gamma_(OperatorBase::GetSingleArgument<float>("gamma", 1.)),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0.25)),
-        num_classes_(OperatorBase::GetSingleArgument<int>("num_classes", 81)),
+        scale_(this->template GetSingleArgument<float>("scale", 1.)),
+        gamma_(this->template GetSingleArgument<float>("gamma", 1.)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 0.25)),
+        num_classes_(this->template GetSingleArgument<int>("num_classes", 81)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(scale_ >= 0);
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");

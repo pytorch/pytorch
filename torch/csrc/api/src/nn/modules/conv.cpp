@@ -1,11 +1,13 @@
 #include <torch/nn/modules/conv.h>
 
 #include <torch/expanding_array.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
+#include <torch/utils.h>
 
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -60,14 +62,13 @@ void ConvImpl<D, Derived>::reset() {
       options.input_channels_,
       std::multiplies<int64_t>{});
   const auto stdv = 1.0 / std::sqrt(number_of_features);
+  NoGradGuard no_grad;
   for (auto& p : this->parameters()) {
-    p->data().uniform_(-stdv, stdv);
+    p.uniform_(-stdv, stdv);
   }
 }
 
 Tensor Conv1dImpl::forward(Tensor input) {
-  AT_ASSERT(input.ndimension() == 3);
-
   if (options.transposed_) {
     return torch::conv_transpose1d(
         input,
@@ -90,8 +91,6 @@ Tensor Conv1dImpl::forward(Tensor input) {
 }
 
 Tensor Conv2dImpl::forward(Tensor input) {
-  AT_ASSERT(input.ndimension() == 4);
-
   if (options.transposed_) {
     return torch::conv_transpose2d(
         input,
@@ -114,8 +113,6 @@ Tensor Conv2dImpl::forward(Tensor input) {
 }
 
 Tensor Conv3dImpl::forward(Tensor input) {
-  AT_ASSERT(input.ndimension() == 5);
-
   if (options.transposed_) {
     return torch::conv_transpose3d(
         input,

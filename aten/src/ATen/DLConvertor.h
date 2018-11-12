@@ -10,8 +10,8 @@
 
 namespace at {
 
-AT_API ScalarType toScalarType(const DLDataType& dtype);
-AT_API DLManagedTensor * toDLPack(const Tensor& src);
-AT_API Tensor fromDLPack(const DLManagedTensor* src);
+CAFFE2_API ScalarType toScalarType(const DLDataType& dtype);
+CAFFE2_API DLManagedTensor* toDLPack(const Tensor& src);
+CAFFE2_API Tensor fromDLPack(const DLManagedTensor* src);
 
 } //namespace at

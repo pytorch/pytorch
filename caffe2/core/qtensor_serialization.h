@@ -17,7 +17,8 @@ class QTensorSerializer : public BlobSerializerBase {
    * Serializes a Blob. Note that this blob has to contain QTensor<Context>.
    */
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override;
 
@@ -34,10 +35,12 @@ class QTensorDeserializer : public BlobDeserializerBase {
 
 template <class Context>
 void QTensorSerializer<Context>::Serialize(
-    const Blob& blob,
+    const void* pointer,
+    TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor) {
-  const auto& qtensor = blob.template Get<QTensor<Context>>();
+  CAFFE_ENFORCE(typeMeta.Match<QTensor<Context>>());
+  const auto& qtensor = *static_cast<const QTensor<Context>*>(pointer);
   BlobProto blob_proto;
   blob_proto.set_name(name);
   blob_proto.set_type(kQTensorBlobQType);
@@ -52,7 +55,7 @@ void QTensorSerializer<Context>::Serialize(
   proto.set_is_signed(qtensor.is_signed());
   detail::CopyToProtoWithCast(
       qtensor.nbytes(), qtensor.data(), proto.mutable_data(), &this->context_);
-  acceptor(name, blob_proto.SerializeAsString());
+  acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
 }
 
 template <class Context>

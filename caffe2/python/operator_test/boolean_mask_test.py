@@ -2,18 +2,18 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import numpy as np
-from hypothesis import assume, given
-import hypothesis.strategies as st
-
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+from hypothesis import assume, given
+import hypothesis.strategies as st
+import numpy as np
 
 
-class TestBooleanMaskOp(hu.HypothesisTestCase):
+class TestBooleanMaskOp(serial.SerializedTestCase):
 
-    @given(x=hu.tensor(min_dim=1,
+    @serial.given(x=hu.tensor(min_dim=1,
                        max_dim=5,
                        elements=st.floats(min_value=0.5, max_value=1.0)),
            **hu.gcs)
@@ -54,7 +54,7 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
             x = x.astype(dtype)
         return x, dc
 
-    @given(x=hu.tensor(min_dim=2,
+    @serial.given(x=hu.tensor(min_dim=2,
                        max_dim=5,
                        elements=st.floats(min_value=0.5, max_value=1.0)),
            dtype=st.sampled_from([np.float32, np.float16]),

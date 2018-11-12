@@ -81,12 +81,18 @@ inline PyObject* wrap(double value) {
   return PyFloat_FromDouble(value);
 }
 
+inline PyObject* wrap(std::complex<double> value) {
+  // I could probably also use FromComplex with a reinterpret cast,
+  // but... eh.
+  return PyComplex_FromDoubles(value.real(), value.imag());
+}
+
 inline PyObject* wrap(void* value) {
   return THPUtils_packInt64(reinterpret_cast<intptr_t>(value));
 }
 
 inline PyObject* wrap(at::Scalar scalar) {
-  return wrap(scalar.toTensor());
+  return wrap(scalar_to_tensor(scalar));
 }
 
 inline PyObject* wrap(THPDtype *dtype) {

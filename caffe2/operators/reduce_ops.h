@@ -19,7 +19,7 @@ class ReduceOp final : public Operator<Context> {
 
   ReduceOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axes_(OperatorBase::GetRepeatedArgument<int>("axes")),
+        axes_(this->template GetRepeatedArgument<int>("axes")),
         OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true) {}
 
   bool RunOnDevice() override {
@@ -30,11 +30,14 @@ class ReduceOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
     } else {
+      for (auto& axis: axes_) {
+        axis = X.canonical_axis_index(axis);
+      }
       std::sort(axes_.begin(), axes_.end());
       CAFFE_ENFORCE_GE(axes_.front(), 0, "Axes ids must be non-negative.");
       CAFFE_ENFORCE_LT(
@@ -42,7 +45,7 @@ class ReduceOp final : public Operator<Context> {
           ndim,
           "Axes ids must be smaller than the dimensions of input.");
     }
-    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
     std::vector<int> Y_dims;
     Y_dims.reserve(ndim);
     std::size_t cur_axis = 0;
@@ -78,7 +81,7 @@ class ReduceGradientOp final : public Operator<Context> {
 
   ReduceGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axes_(OperatorBase::GetRepeatedArgument<int>("axes")) {}
+        axes_(this->template GetRepeatedArgument<int>("axes")) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
@@ -90,11 +93,14 @@ class ReduceGradientOp final : public Operator<Context> {
     const auto& X = Input(1);
     const auto& Y = Input(2);
     auto* dX = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
     } else {
+      for (auto& axis: axes_) {
+        axis = X.canonical_axis_index(axis);
+      }
       std::sort(axes_.begin(), axes_.end());
       CAFFE_ENFORCE_GE(axes_.front(), 0, "Axes ids must be non-negative.");
       CAFFE_ENFORCE_LT(
@@ -102,7 +108,7 @@ class ReduceGradientOp final : public Operator<Context> {
           ndim,
           "Axes ids must be smaller than the dimensions of input.");
     }
-    const std::vector<int> dX_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> dX_dims(X.sizes().cbegin(), X.sizes().cend());
     std::vector<int> dY_dims = dX_dims;
     for (const int axis : axes_) {
       dY_dims[axis] = 1;

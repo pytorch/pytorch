@@ -22,14 +22,14 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 
-CAFFE2_DECLARE_string(caffe2_net_async_tracing_filepath);
-CAFFE2_DECLARE_string(caffe2_net_async_names_to_trace);
-CAFFE2_DECLARE_int(caffe2_net_async_tracing_nth);
+C10_DECLARE_string(caffe2_net_async_tracing_filepath);
+C10_DECLARE_string(caffe2_net_async_names_to_trace);
+C10_DECLARE_int(caffe2_net_async_tracing_nth);
 
 namespace caffe2 {
 namespace tracing {
 
-struct TracerEvent {
+struct CAFFE2_API TracerEvent {
   int op_id_ = -1;
   int task_id_ = -1;
   int stream_id_ = -1;
@@ -50,9 +50,30 @@ enum TracingField {
   TRACE_CATEGORY,
 };
 
-class Tracer {
+enum class TracingMode {
+  EVERY_K_ITERATIONS,
+  GLOBAL_TIMESLICE,
+};
+
+struct TracingConfig {
+  TracingMode mode{TracingMode::EVERY_K_ITERATIONS};
+  std::string filepath{"/tmp"};
+
+  // for TracingMode::EVERY_K_ITERATIONS
+  int64_t trace_every_nth_batch = 100;
+  int64_t dump_every_nth_batch = 10000;
+
+  // for TracingMode::GLOBAL_TIMESLICE
+  int64_t trace_every_n_ms = 2 * 60 * 1000; // 2min
+  int64_t trace_for_n_ms = 1000; // 1sec
+};
+
+class CAFFE2_API Tracer {
  public:
-  Tracer(const NetBase* net, const std::string& net_name);
+  Tracer(
+      const NetBase* net,
+      const std::string& net_name,
+      TracingConfig = TracingConfig{});
 
   void recordEvent(const TracerEvent& event);
   std::string opTraceName(const OperatorBase* op);
@@ -62,7 +83,11 @@ class Tracer {
   void renameThreads();
   void setEnabled(bool enabled);
   bool isEnabled() const;
+  const TracingConfig& config() {
+    return config_;
+  }
   int bumpIter();
+  int bumpDumpingIter();
   // Dump the tracing result to file with given suffix, and then
   // clear current events.
   void dumpTracingResultAndClearEvents(const std::string& file_suffix);
@@ -77,11 +102,13 @@ class Tracer {
   bool enabled_ = false;
   Timer timer_;
   int iter_;
+  int dumping_iter_;
+  TracingConfig config_;
 
   friend class TracerGuard;
 };
 
-class TracerGuard {
+class CAFFE2_API TracerGuard {
  public:
   TracerGuard() {}
 
@@ -109,14 +136,16 @@ class TracerGuard {
 
 // Extract the shard id from name of the form "...shard:123..."
 // Return -1 if there is no shard found
-int extractShardId(const std::string& name);
+CAFFE2_API int extractShardId(const std::string& name);
 
 // Check if the net name is white-listed for tracing (specified via a command
 // line flag)
-bool isTraceableNetName(const std::string& net_name);
+CAFFE2_API bool isTraceableNetName(const std::string& net_name);
 
-std::shared_ptr<Tracer> create(const NetBase* net, const std::string& net_name);
-bool startIter(const std::shared_ptr<Tracer>& tracer);
+CAFFE2_API std::shared_ptr<Tracer> create(
+    const NetBase* net,
+    const std::string& net_name);
+CAFFE2_API bool startIter(const std::shared_ptr<Tracer>& tracer);
 
 } // namespace tracing
 

@@ -20,7 +20,7 @@ void Decode(
   CAFFE_ENFORCE(codebook.IsType<CodebookT>());
 
   auto* cb_ptr = codebook.data<CodebookT>();
-  int cb_size = codebook.size();
+  int cb_size = codebook.numel();
 
   CAFFE_ENFORCE(codes.IsType<CodeT>());
   auto* code_ptr = codes.data<CodeT>();
@@ -33,18 +33,18 @@ void Decode(
       return;
     }
 
-    int sz = output->size();
+    int sz = output->numel();
     for (int i = 0; i < sz; i++) {
       DCHECK_LE(*code_ptr, cb_size);
       *out_ptr++ = cb_ptr[*code_ptr++];
     }
   } else {
     // Backward pass: decode and accumulate gradient w.r.t. codebook values.
-    CAFFE_ENFORCE_EQ(codes.size(), decoded_grad->size());
+    CAFFE_ENFORCE_EQ(codes.numel(), decoded_grad->numel());
     auto* gradient_ptr = decoded_grad->data<CodebookT>();
-    auto* const gradient_end = gradient_ptr + decoded_grad->size();
+    auto* const gradient_end = gradient_ptr + decoded_grad->numel();
 
-    CAFFE_ENFORCE_EQ(cb_size, output->size());
+    CAFFE_ENFORCE_EQ(cb_size, output->numel());
     auto* out_ptr = output->template mutable_data<CodebookT>();
     while (gradient_ptr < gradient_end) {
       DCHECK_LE(*code_ptr, cb_size);
@@ -84,7 +84,7 @@ inline void DecodeGeneral(
                         REGISTER_DECODER(float, uint16_t),
                         REGISTER_DECODER(float, int32_t)};
 
-  gDecoderMapper.at({codebook.meta().id(), codes.meta().id()})(
+  gDecoderMapper.at({codebook.dtype().id(), codes.dtype().id()})(
       codebook, codes, gradient, outDecoded, resizeOnly);
 }
 
@@ -113,7 +113,7 @@ class QuantDecodeOp final : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(InputSize(), OutputSize() + 1);
 
     const auto& codebook = Input(0);
-    CAFFE_ENFORCE(codebook.template IsType<float>(), codebook.meta().name());
+    CAFFE_ENFORCE(codebook.template IsType<float>(), codebook.dtype().name());
 
     for (int i = 0; i < OutputSize(); i++) {
       auto& ci = Input(i + 1);
@@ -149,12 +149,12 @@ class QuantDecodeGradientOp final : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(OutputSize(), 1);
 
     const auto& codebook = Input(0);
-    CAFFE_ENFORCE(codebook.template IsType<float>(), codebook.meta().name());
+    CAFFE_ENFORCE(codebook.template IsType<float>(), codebook.dtype().name());
 
     auto* gradient = Output(0);
     gradient->ResizeLike(codebook);
     auto* gradient_ptr = gradient->template mutable_data<float>();
-    std::fill(gradient_ptr, gradient_ptr + gradient->size(), 0);
+    std::fill(gradient_ptr, gradient_ptr + gradient->numel(), 0);
 
     for (int i = 0; i < num_code_tensors; i++) {
       auto& codes_i = Input(i + 1);

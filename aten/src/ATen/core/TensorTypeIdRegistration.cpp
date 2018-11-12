@@ -1,10 +1,8 @@
 #include <ATen/core/TensorTypeIdRegistration.h>
-#include <ATen/core/C++17.h>
-#include <ATen/core/Error.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
 
 namespace at {
-
-constexpr at::TensorTypeId TensorTypeIdCreator::max_id_;
 
 TensorTypeIds::TensorTypeIds() : creator_(), registry_() {}
 
@@ -16,9 +14,10 @@ TensorTypeIds& TensorTypeIds::singleton() {
 TensorTypeIdCreator::TensorTypeIdCreator() : last_id_(0) {}
 
 at::TensorTypeId TensorTypeIdCreator::create() {
+
   auto id = TensorTypeId(++last_id_);
 
-  if (id == max_id_) {
+  if (last_id_ == 0) { // overflow happened!
     // If this happens in prod, we have to change
     // details::_tensorTypeId_underlyingType to uint16_t.
     AT_ERROR(
@@ -58,5 +57,16 @@ TensorTypeIdRegistrar::TensorTypeIdRegistrar()
 TensorTypeIdRegistrar::~TensorTypeIdRegistrar() {
   TensorTypeIds::singleton().deregister(id_);
 }
+
+AT_DEFINE_TENSOR_TYPE(UndefinedTensorId);
+AT_DEFINE_TENSOR_TYPE(CPUTensorId);
+AT_DEFINE_TENSOR_TYPE(CUDATensorId);
+AT_DEFINE_TENSOR_TYPE(SparseCPUTensorId);
+AT_DEFINE_TENSOR_TYPE(SparseCUDATensorId);
+AT_DEFINE_TENSOR_TYPE(MKLDNNTensorId); // Caffe2 only
+AT_DEFINE_TENSOR_TYPE(OpenGLTensorId); // Caffe2 only
+AT_DEFINE_TENSOR_TYPE(OpenCLTensorId); // Caffe2 only
+AT_DEFINE_TENSOR_TYPE(IDEEPTensorId); // Caffe2 only
+AT_DEFINE_TENSOR_TYPE(HIPTensorId); // Caffe2 only
 
 } // namespace at

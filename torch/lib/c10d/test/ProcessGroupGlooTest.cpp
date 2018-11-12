@@ -11,7 +11,6 @@
 
 #include <gloo/transport/tcp/device.h>
 
-#include <c10d/CUDAUtils.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/test/TestUtils.hpp>
@@ -31,10 +30,10 @@ class SignalTest {
   // Arms test to send signal to PID when the semaphore unlocks. This
   // happens as soon as the first collective completes successfully.
   void arm(int pid, int signal) {
-    arm_ = std::move(std::thread([=] {
+    arm_ = std::thread([=] {
       sem_.wait();
       kill(pid, signal);
-    }));
+    });
   }
 
   std::shared_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
@@ -43,12 +42,14 @@ class SignalTest {
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
     options.timeout = std::chrono::milliseconds(50);
+    ::gloo::transport::tcp::attr attr;
+    options.devices.push_back(::gloo::transport::tcp::CreateDevice(attr));
 
     ::c10d::ProcessGroupGloo pg(store, rank, size, options);
 
     // Initialize tensor list
     std::vector<at::Tensor> tensors = {
-        at::ones(at::CPU(at::kFloat), {16, 16}),
+        at::ones({16, 16}),
     };
 
     // Loop until an exception happens
@@ -61,7 +62,7 @@ class SignalTest {
       sem_.post();
     }
 
-    return std::move(work);
+    return work;
   }
 
  protected:
@@ -92,19 +93,19 @@ class CollectiveTest {
       int num) {
     std::vector<CollectiveTest> tests;
     for (auto i = 0; i < num; i++) {
-      tests.push_back(std::move(CollectiveTest(path)));
+      tests.push_back(CollectiveTest(path));
     }
 
     std::vector<std::thread> threads;
     for (auto i = 0; i < num; i++) {
-      threads.push_back(std::move(
-          std::thread([i, &tests] { tests[i].start(i, tests.size()); })));
+      threads.push_back(
+          std::thread([i, &tests] { tests[i].start(i, tests.size()); }));
     }
     for (auto& thread : threads) {
       thread.join();
     }
 
-    return std::move(tests);
+    return tests;
   }
 
   CollectiveTest(const std::string& path) : path_(path) {}
@@ -125,6 +126,9 @@ class CollectiveTest {
     ::c10d::ProcessGroupGloo::Options options;
     options.timeout = std::chrono::milliseconds(50);
 
+    ::gloo::transport::tcp::attr attr;
+    options.devices.push_back(::gloo::transport::tcp::CreateDevice(attr));
+
     pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
         new ::c10d::ProcessGroupGloo(store, rank, size, options));
   }
@@ -141,9 +145,9 @@ std::vector<std::vector<at::Tensor>> copyTensors(
     const auto& input = inputs[i];
     std::vector<at::Tensor> output(input.size());
     for (size_t j = 0; j < input.size(); j++) {
-      output[j] = input[j].toBackend(at::kCPU);
+      output[j] = input[j].cpu();
     }
-    outputs[i] = std::move(output);
+    outputs[i] = output;
   }
   return outputs;
 }
@@ -155,7 +159,7 @@ void testAllreduce(const std::string& path, const at::Backend b) {
   // Generate inputs
   std::vector<std::vector<at::Tensor>> inputs(size);
   for (auto i = 0; i < size; i++) {
-    auto tensor = at::ones(at::getType(b, at::kFloat), {16, 16}) * i;
+    auto tensor = at::ones({16, 16}, b) * i;
     inputs[i] = std::vector<at::Tensor>({tensor});
   }
 
@@ -192,7 +196,6 @@ void testBroadcast(const std::string& path, const at::Backend b) {
   auto tests = CollectiveTest::initialize(path, size);
 
   std::vector<std::vector<at::Tensor>> inputs(size);
-  const auto& type = at::getType(b, at::kFloat);
 
   // Try every permutation of root rank and root tensoro
   for (auto i = 0; i < size; i++) {
@@ -200,12 +203,13 @@ void testBroadcast(const std::string& path, const at::Backend b) {
       // Initialize inputs
       for (auto k = 0; k < size; k++) {
         inputs[k].resize(stride);
-        at::DeviceGuard deviceGuard;
+        // This won't work if we ever support sparse CUDA
+        at::OptionalDeviceGuard deviceGuard;
         for (auto l = 0; l < stride; l++) {
-          if (type.is_cuda()) {
-            deviceGuard.set_index(l);
+          if (b == at::Backend::CUDA) {
+            deviceGuard.reset_device(at::Device(at::kCUDA, l));
           }
-          inputs[k][l] = at::ones(type, {16, 16}) * (k * stride + l);
+          inputs[k][l] = at::ones({16, 16}, b) * (k * stride + l);
         }
       }
 
@@ -244,6 +248,24 @@ void testBroadcast(const std::string& path, const at::Backend b) {
   }
 }
 
+void testBarrier(const std::string& path) {
+  const auto size = 2;
+  auto tests = CollectiveTest::initialize(path, size);
+
+  // Kick off work
+  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> work(size);
+  for (auto i = 0; i < size; i++) {
+    work[i] = tests[i].getProcessGroup().barrier();
+  }
+
+  // Wait for work to complete
+  for (auto i = 0; i < size; i++) {
+    if (!work[i]->wait()) {
+      throw work[i]->exception();
+    }
+  }
+}
+
 int main(int argc, char** argv) {
   {
     TemporaryFile file;
@@ -261,23 +283,33 @@ int main(int argc, char** argv) {
 
   {
     TemporaryFile file;
-    testAllreduce(file.path, at::kCPU);
+    testAllreduce(file.path, at::Backend::CPU);
   }
+
+#ifdef USE_CUDA
+  {
+    TemporaryFile file;
+    testAllreduce(file.path, at::Backend::CUDA);
+  }
+#endif
 
   {
     TemporaryFile file;
-    testAllreduce(file.path, at::kCUDA);
+    testBroadcast(file.path, at::Backend::CPU);
   }
+
+#ifdef USE_CUDA
+  {
+    TemporaryFile file;
+    testBroadcast(file.path, at::Backend::CUDA);
+  }
+#endif
 
   {
     TemporaryFile file;
-    testBroadcast(file.path, at::kCPU);
+    testBarrier(file.path);
   }
 
-  {
-    TemporaryFile file;
-    testBroadcast(file.path, at::kCUDA);
-  }
-
+  std::cout << "Test successful" << std::endl;
   return 0;
 }

@@ -28,6 +28,12 @@ def get_sparse_lookup_predictor_version(version):
     return version
 
 
+def get_sparse_lookup_trainer_version(version):
+    assert version in {'fp32', 'fp16'},\
+        "Unexpected version of sparse_lookup layer {0}".format(version)
+    return version
+
+
 def _is_id_list(input_record):
     return schema.equal_schemas(input_record, IdList)
 
@@ -72,10 +78,12 @@ class SparseLookup(ModelLayer):
             "{} should have categorical limit > 0, but got {}".format(
                 get_key(input_record)(), input_dim))
 
-        scale = math.sqrt(1.0 / input_dim)
+        self.input_dim = input_dim
         self.shape = [input_dim] + inner_shape
-        self.weight_init = weight_init if weight_init else (
-            'UniformFill', {'min': -scale, 'max': scale})
+
+        default_init_op = self._get_default_init_op()
+
+        self.weight_init = weight_init or default_init_op
 
         if _is_id_list(self.input_record):
             sparse_key = self.input_record.items()
@@ -140,6 +148,25 @@ class SparseLookup(ModelLayer):
                 'RowwiseQuantized8BitsWeight', 'w, scale_bias'
             )
             return [RowwiseQuantized8BitsWeight(self.w, self.scale_bias)]
+
+    def _get_default_init_op(self):
+        scale = math.sqrt(1.0 / self.input_dim)
+
+        cur_scope = get_current_scope()
+        trainer_version = get_sparse_lookup_trainer_version(
+            **cur_scope.get(get_sparse_lookup_trainer_version.__name__,
+                            {'version': 'fp32'}))
+
+        if trainer_version == 'fp32':
+            default_weight_init = ('UniformFill', {'min': -scale, 'max': scale})
+        elif trainer_version == 'fp16':
+            default_weight_init = ("Float16UniformFill", {'min': -scale, 'max': scale})
+        else:
+            raise NotImplementedError(
+                "Train version {} is not currently supported".format(trainer_version)
+            )
+
+        return default_weight_init
 
     def _gather_wrapper(self, net, version, in_indices, out):
         # Gather can work on all kinds of input data types, and output

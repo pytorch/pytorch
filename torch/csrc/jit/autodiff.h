@@ -45,7 +45,7 @@ struct Gradient {
   // Describes how to construct outputs of f from what its graph will return.
   // This is necessary because some trailing outputs are intermediates produced
   // only to be saved for df (and should be ignored).
-  size_t f_real_outputs;
+  size_t f_real_outputs = 0;  // initialized for safety.
 
   // df inputs are split into two sections: vjps (aka grad_outputs) and captures.
   // VJPs are "seeds" for the gradient computation given for each input capture
@@ -85,9 +85,7 @@ struct Gradient {
   //   - Interpret df
   //   - Wrap outputs of df into Variables (that don't require grad)
 };
-// XXX: When calling this function, graph should have complete type information.
-// Use the shape analysis pass to fill in the gaps if it doesn't.
-TORCH_API Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& requires_grad);
+TORCH_API Gradient differentiate(std::shared_ptr<Graph>& graph);
 
 // can we take a derivative of this node symbolically?
 TORCH_API bool isDifferentiable(Node * n);

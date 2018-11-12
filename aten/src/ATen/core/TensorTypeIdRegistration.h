@@ -8,15 +8,16 @@
  * Both must be in the same namespace.
  */
 
-#include "ATen/core/Macros.h"
 #include "ATen/core/TensorTypeId.h"
+#include "c10/macros/Macros.h"
 
 #include <atomic>
+#include <mutex>
 #include <unordered_set>
 
 namespace at {
 
-class TensorTypeIdCreator final {
+class CAFFE2_API TensorTypeIdCreator final {
  public:
   TensorTypeIdCreator();
 
@@ -29,13 +30,10 @@ class TensorTypeIdCreator final {
  private:
   std::atomic<details::_tensorTypeId_underlyingType> last_id_;
 
-  static constexpr at::TensorTypeId max_id_ = TensorTypeId(
-      std::numeric_limits<details::_tensorTypeId_underlyingType>::max());
-
-  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdCreator);
+  C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIdCreator);
 };
 
-class TensorTypeIdRegistry final {
+class CAFFE2_API TensorTypeIdRegistry final {
  public:
   TensorTypeIdRegistry();
 
@@ -46,10 +44,10 @@ class TensorTypeIdRegistry final {
   std::unordered_set<at::TensorTypeId> registeredTypeIds_;
   std::mutex mutex_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistry);
+  C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistry);
 };
 
-class TensorTypeIds final {
+class CAFFE2_API TensorTypeIds final {
  public:
   static TensorTypeIds& singleton();
 
@@ -64,14 +62,14 @@ class TensorTypeIds final {
   TensorTypeIdCreator creator_;
   TensorTypeIdRegistry registry_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIds);
+  C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIds);
 };
 
 inline constexpr at::TensorTypeId TensorTypeIds::undefined() noexcept {
   return TensorTypeIdCreator::undefined();
 }
 
-class TensorTypeIdRegistrar final {
+class CAFFE2_API TensorTypeIdRegistrar final {
  public:
   TensorTypeIdRegistrar();
   ~TensorTypeIdRegistrar();
@@ -81,19 +79,31 @@ class TensorTypeIdRegistrar final {
  private:
   at::TensorTypeId id_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistrar);
+  C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistrar);
 };
 
 inline at::TensorTypeId TensorTypeIdRegistrar::id() const noexcept {
   return id_;
 }
 
-} // namespace at
-
-#define AT_DECLARE_TENSOR_TYPE(TensorName) at::TensorTypeId TensorName();
+#define AT_DECLARE_TENSOR_TYPE(TensorName) \
+  CAFFE2_API at::TensorTypeId TensorName()
 
 #define AT_DEFINE_TENSOR_TYPE(TensorName)           \
   at::TensorTypeId TensorName() {                   \
     static TensorTypeIdRegistrar registration_raii; \
     return registration_raii.id();                  \
   }
+
+AT_DECLARE_TENSOR_TYPE(UndefinedTensorId);
+AT_DECLARE_TENSOR_TYPE(CPUTensorId); // PyTorch/Caffe2 supported
+AT_DECLARE_TENSOR_TYPE(CUDATensorId); // PyTorch/Caffe2 supported
+AT_DECLARE_TENSOR_TYPE(SparseCPUTensorId); // PyTorch only
+AT_DECLARE_TENSOR_TYPE(SparseCUDATensorId); // PyTorch only
+AT_DECLARE_TENSOR_TYPE(MKLDNNTensorId); // Caffe2 only
+AT_DECLARE_TENSOR_TYPE(OpenGLTensorId); // Caffe2 only
+AT_DECLARE_TENSOR_TYPE(OpenCLTensorId); // Caffe2 only
+AT_DECLARE_TENSOR_TYPE(IDEEPTensorId); // Caffe2 only
+AT_DECLARE_TENSOR_TYPE(HIPTensorId); // Caffe2 only
+
+} // namespace at

@@ -65,6 +65,14 @@ def broadcast_all(*values):
     return torch.broadcast_tensors(*values)
 
 
+def _standard_normal(shape, dtype, device):
+    if torch._C._get_tracing_state():
+        # [JIT WORKAROUND] lack of support for .normal_()
+        return torch.normal(torch.zeros(shape, dtype=dtype, device=device),
+                            torch.ones(shape, dtype=dtype, device=device))
+    return torch.empty(shape, dtype=dtype, device=device).normal_()
+
+
 def _sum_rightmost(value, dim):
     r"""
     Sum out ``dim`` many rightmost dimensions of a given tensor.

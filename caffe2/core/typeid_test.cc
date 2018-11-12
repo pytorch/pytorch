@@ -37,7 +37,7 @@ TEST(TypeMetaTest, Names) {
   EXPECT_TRUE(
       string(string_meta.name()) != typeid(string).name());
   EXPECT_TRUE(
-      string(string_meta.name()) == Demangle(typeid(string).name()));
+      string(string_meta.name()) == c10::demangle(typeid(string).name()));
 #endif  // __GXX_RTTI
 }
 
@@ -104,13 +104,13 @@ namespace {
 
 TEST(TypeMetaTest, CtorDtorAndCopy) {
   TypeMeta fundamental_meta = TypeMeta::Make<int>();
-  EXPECT_EQ(fundamental_meta.ctor(), nullptr);
-  EXPECT_EQ(fundamental_meta.dtor(), nullptr);
+  EXPECT_EQ(fundamental_meta.placementNew(), nullptr);
+  EXPECT_EQ(fundamental_meta.placementDelete(), nullptr);
   EXPECT_EQ(fundamental_meta.copy(), nullptr);
 
   TypeMeta meta_a = TypeMeta::Make<ClassAllowAssignment>();
-  EXPECT_TRUE(meta_a.ctor() != nullptr);
-  EXPECT_TRUE(meta_a.dtor() != nullptr);
+  EXPECT_TRUE(meta_a.placementNew() != nullptr);
+  EXPECT_TRUE(meta_a.placementDelete() != nullptr);
   EXPECT_TRUE(meta_a.copy() != nullptr);
   ClassAllowAssignment src;
   src.x = 10;
@@ -121,19 +121,18 @@ TEST(TypeMetaTest, CtorDtorAndCopy) {
 
   TypeMeta meta_b = TypeMeta::Make<ClassNoAssignment>();
 
-  EXPECT_TRUE(meta_b.ctor() != nullptr);
-  EXPECT_TRUE(meta_b.dtor() != nullptr);
+  EXPECT_TRUE(meta_b.placementNew() != nullptr);
+  EXPECT_TRUE(meta_b.placementDelete() != nullptr);
 #ifndef __clang__
   // gtest seems to have some problem with function pointers and
   // clang right now... Disabling it.
   // TODO: figure out the real cause.
-  EXPECT_EQ(meta_b.copy(),
-            &(TypeMeta::_CopyNotAllowed<ClassNoAssignment>));
+  EXPECT_EQ(meta_b.copy(), &(detail::_CopyNotAllowed<ClassNoAssignment>));
 #endif
 }
 
 TEST(TypeMetaTest, Float16IsNotUint16) {
-  EXPECT_NE(TypeMeta::Id<uint16_t>(), TypeMeta::Id<float16>());
+  EXPECT_NE(TypeMeta::Id<uint16_t>(), TypeMeta::Id<at::Half>());
 }
 
 }  // namespace

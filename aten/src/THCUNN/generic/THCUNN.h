@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/THCUNN.h"
 #else
 
-#include "Reduction.h"
+#include <ATen/core/Reduction.h>
 
 THC_API void THNN_(Abs_updateOutput)(
                   THCState *state,
@@ -29,36 +29,6 @@ THC_API void THNN_(AbsCriterion_updateGradInput)(
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
                   int64_t reduction);
-
-THC_API void THNN_(BatchNormalization_updateOutput)(
-                  THCState *state,
-                  THCTensor *input_,
-                  THCTensor *output_,
-                  THCTensor *weight_,        // [OPTIONAL]
-                  THCTensor *bias_,          // [OPTIONAL]
-                  THCTensor *runningMean_,   // [OPTIONAL] if train
-                  THCTensor *runningVar_,    // [OPTIONAL] if train
-                  THCTensor *saveMean_,
-                  THCTensor *saveStd_,
-                  bool train,
-                  double momentum,
-                  double eps);
-
-THC_API void THNN_(BatchNormalization_backward)(
-                  THCState *state,
-                  THCTensor *input_,
-                  THCTensor *gradOutput_,
-                  THCTensor *gradInput_,        // [OPTIONAL]
-                  THCTensor *gradWeight_,       // [OPTIONAL]
-                  THCTensor *gradBias_,         // [OPTIONAL]
-                  THCTensor *weight_,           // [OPTIONAL]
-                  THCTensor *runningMean_,      // [OPTIONAL] if train
-                  THCTensor *runningVar_,       // [OPTIONAL] if train
-                  THCTensor *saveMean_,         // [OPTIONAL] if !train
-                  THCTensor *saveStd_,          // [OPTIONAL] if !train
-                  bool train,
-                  double scale,
-                  double eps);
 
 THC_API void THNN_(BCECriterion_updateOutput)(
                   THCState *state,
@@ -234,44 +204,6 @@ THC_API void THNN_(LeakyReLU_updateGradInput)(
                   accreal negval,
                   bool inplace);
 
-THC_API void THNN_(GRUFused_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *hidden,
-                  THCTensor *bias1, // [OPTIONAL]
-                  THCTensor *bias2, // [OPTIONAL]
-                  THCTensor *hx,
-                  THCTensor *hy,
-                  THCTensor *storage);
-
-THC_API void THNN_(GRUFused_updateGradInput)(
-                  THCState *state,
-                  THCTensor *gradInInput,
-                  THCTensor *gradInHidden,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInputHx,
-                  THCTensor *storage);
-
-THC_API void THNN_(LSTMFused_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *hidden,
-                  THCTensor *bias1, // [OPTIONAL]
-                  THCTensor *bias2, // [OPTIONAL]
-                  THCTensor *cx,
-                  THCTensor *hy,
-                  THCTensor *cy);
-
-THC_API void THNN_(LSTMFused_updateGradInput)(
-                  THCState *state,
-                  THCTensor *storage,
-                  THCTensor *gradInGates,
-                  THCTensor *prevC,
-                  THCTensor *cy,
-                  THCTensor *gradOutput,
-                  THCTensor *gradOutputCell,
-                  THCTensor *gradInputCx);
-
 THC_API void THNN_(LogSigmoid_updateOutput)(
                   THCState *state,
                   THCTensor *input,
@@ -407,29 +339,6 @@ THC_API void THNN_(MultiMarginCriterion_updateGradInput)(
                   int p,
                   THCTensor *weights,           // [OPTIONAL]
                   accreal margin);
-
-THC_API void THNN_(PReLU_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCTensor *weight);
-
-THC_API void THNN_(PReLU_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCTensor *weight);
-
-THC_API void THNN_(PReLU_accGradParameters)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCTensor *weight,
-                  THCTensor *gradWeight,
-                  accreal scale);
-
 THC_API void THNN_(SmoothL1Criterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
@@ -1298,23 +1207,6 @@ THC_API void THNN_(TemporalUpSamplingNearest_updateOutput)(
                   THCTensor *input,
                   THCTensor *output,
                   int outputWidth);
-
-THC_API void THNN_(Threshold_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  accreal threshold,
-                  accreal val,
-                  bool inplace);
-
-THC_API void THNN_(Threshold_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  accreal threshold,
-                  accreal val,
-                  bool inplace);
 
 THC_API void THNN_(VolumetricAveragePooling_updateOutput)(
                   THCState *state,

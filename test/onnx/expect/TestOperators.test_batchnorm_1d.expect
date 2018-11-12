@@ -1,9 +1,9 @@
 ir_version: 3
 producer_name: "pytorch"
-producer_version: "0.3"
+producer_version: "0.4"
 graph {
   node {
-    input: "0"
+    input: "input"
     output: "6"
     op_type: "Unsqueeze"
     attribute {
@@ -22,7 +22,7 @@ graph {
     op_type: "BatchNormalization"
     attribute {
       name: "epsilon"
-      f: 9.99999974737875e-06
+      f: 1e-05
       type: FLOAT
     }
     attribute {
@@ -46,7 +46,7 @@ graph {
     dims: 2
     data_type: FLOAT
     name: "1"
-    raw_data: "\217~,?b\265\251>"
+    raw_data: "\340e\355<\246\305\315>"
   }
   initializer {
     dims: 2
@@ -72,7 +72,7 @@ graph {
     raw_data: "\000\000\000\000\000\000\000\000"
   }
   input {
-    name: "0"
+    name: "input"
     type {
       tensor_type {
         elem_type: FLOAT
@@ -167,5 +167,5 @@ graph {
   }
 }
 opset_import {
-  version: 7
+  version: 9
 }

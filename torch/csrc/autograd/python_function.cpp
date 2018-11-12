@@ -45,16 +45,15 @@ namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
   : type(&var.type())
+  , device(var.device())
   , size(var.sizes().vec())
   , requires_grad(var.requires_grad()) {
-  if (var.type().is_cuda()) {
-    device = var.get_device();
-  }
 }
 
-Variable VariableInfo::zeros(at::DeviceGuard& device_guard) const {
-  device_guard.set_index(device);
-  return at::zeros(size, *type);
+Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
+  // NB: This will NOT work if we ever get mixed device gradients
+  device_guard.reset_device(device);
+  return at::zeros(size, type->options());
 }
 
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
@@ -106,7 +105,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
 // C++'s Function::apply to a Python method "apply".
 auto PyFunction::apply(variable_list&& inputs) -> variable_list {
   AutoGIL gil;
-  at::DeviceGuard _device_guard;
+  at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
   THPObjectPtr _legacy(PyObject_GetAttrString(obj, "_is_legacy"));
@@ -575,9 +574,9 @@ static Node* _trace_pre_record(
   for (int i = 0; i < num_args; i++) {
     PyObject *arg_object = PyTuple_GET_ITEM(input_objects, i);
     if (THPVariable_Check(arg_object)) {
-      arg_types.push_back('t');
+      arg_types.push_back('d');
     } else {
-      arg_types.push_back('s');
+      arg_types.push_back('c');
       Py_INCREF(arg_object);
       scalar_args.emplace_back(arg_object);
     }
@@ -597,23 +596,34 @@ static void _trace_post_record(
     PyObject* op_obj,
     const variable_list& input_vars,
     PyObject *output_objects,
-    bool is_inplace) {
+    bool is_inplace,
+    bool unpack_output) {
   if (!jit::tracer::isTracing()) {
     return;
   }
 
+  node->i_(attr::inplace, is_inplace);
+
   // Isolate C variable ptrs in a vector
   int num_outputs = PyTuple_GET_SIZE(output_objects);
   variable_list output_vars(num_outputs);
+  auto graph = node->owningGraph();
+  node->addOutput();
+  if (!unpack_output) {
+    std::vector<TypePtr> tuple_values(num_outputs, DynamicType::get());
+    TypePtr tuple_type = TupleType::create(std::move(tuple_values));
+    node->output()->setType(tuple_type);
+    auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);
+    node = unpacked;
+  }
   for (int i = 0; i < num_outputs; ++i) {
     auto var = (THPVariable*)PyTuple_GET_ITEM(output_objects, i);
-    output_vars[i] = var->cdata;
+    Value* value = node->outputs()[i];
+    if (var->cdata.defined()) {
+      value->inferTypeFrom(var->cdata);
+      jit::tracer::setValueTrace(autograd::as_variable_ref(var->cdata), value);
+    }
   }
-
-  jit::tracer::postRecordTrace(node, output_vars);
-
-  node->i_(attr::inplace, is_inplace);
-
 }
 
 PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const UnpackedInput& unpacked,
@@ -639,7 +649,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(grad_fn, inputs, raw_output, outputs, is_executable);
-  _trace_post_record(node, op_obj, unpacked.input_vars, outputs, is_inplace);
+  _trace_post_record(node, op_obj, unpacked.input_vars, outputs, is_inplace, unpack_output);
   if (is_executable) {
     _save_variables(grad_fn);
   } else {
@@ -748,7 +758,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 
 static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_grad_output)
 {
-  at::DeviceGuard device_guard;
+  at::OptionalDeviceGuard device_guard;
   int num_grads = PyTuple_GET_SIZE(raw_grads.get());
   // First, check if any of grads is None. If not, there's nothing to do
   bool has_none = false;

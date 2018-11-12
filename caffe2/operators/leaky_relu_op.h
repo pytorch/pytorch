@@ -13,7 +13,7 @@ class LeakyReluOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws), alpha_(0.01) {
     if (HasArgument("alpha")) {
       alpha_ =
-          static_cast<T>(OperatorBase::GetSingleArgument<float>("alpha", 0.01));
+          static_cast<T>(this->template GetSingleArgument<float>("alpha", 0.01));
     }
   }
 
@@ -32,7 +32,7 @@ class LeakyReluGradientOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws), alpha_(0.01) {
     if (HasArgument("alpha")) {
       alpha_ =
-          static_cast<T>(OperatorBase::GetSingleArgument<float>("alpha", 0.01));
+          static_cast<T>(this->template GetSingleArgument<float>("alpha", 0.01));
     }
   }
 

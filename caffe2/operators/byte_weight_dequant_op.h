@@ -12,9 +12,9 @@ class ByteWeightDequantOp : public Operator<Context> {
  public:
   ByteWeightDequantOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        min_(OperatorBase::GetSingleArgument<float>("min", -3)),
-        max_(OperatorBase::GetSingleArgument<float>("max", 3)),
-        shape_(OperatorBase::GetRepeatedArgument<int>("shape")) {}
+        min_(this->template GetSingleArgument<float>("min", -3)),
+        max_(this->template GetSingleArgument<float>("max", 3)),
+        shape_(this->template GetRepeatedArgument<int>("shape")) {}
 
   USE_OPERATOR_FUNCTIONS(Context);
   using Operator<Context>::Operator;
@@ -26,7 +26,7 @@ class ByteWeightDequantOp : public Operator<Context> {
     float bin_interval = (max_ - min_) / 255.0;
     int total = 1;
     for (int i = 0; i < shape_.size(); i++) {
-      total *= Y->dim(i);
+      total *= Y->size(i);
     }
     const uint8_t* Xdata;
     if (WI.template IsType<uint8_t>()) {

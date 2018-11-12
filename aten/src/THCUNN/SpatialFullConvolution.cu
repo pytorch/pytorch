@@ -1,7 +1,7 @@
 #include "THCUNN.h"
 #include "im2col.h"
 
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 
 #include "generic/SpatialFullConvolution.cu"

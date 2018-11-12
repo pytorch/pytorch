@@ -36,25 +36,25 @@ def batch_neg_scalar(data):
 @torch.jit.script
 def batch_add(data1, mask1, dims1, data2, mask2, dims2, alpha_):
     alpha = float(alpha_)
-    data = torch.add(data1, data2, alpha)
+    data = torch.add(data1, data2, alpha=alpha)
     mask = mask1 * mask2
-    dims = dims1 or dims2
+    dims = dims1.__or__(dims2)
     return data, mask, dims
 
 
 @torch.jit.script
 def batch_add_scalar(data, mask, dims, other, alpha_):
     alpha = float(alpha_)
-    data = torch.add(data, other.type_as(data), alpha)
+    data = torch.add(data, other.type_as(data), alpha=alpha)
     return data, mask, dims
 
 
 @torch.jit.script
 def batch_sub(data1, mask1, dims1, data2, mask2, dims2, alpha_):
     alpha = float(alpha_)
-    data = torch.sub(data1, data2, alpha)
+    data = torch.sub(data1, data2, alpha=alpha)
     mask = mask1 * mask2
-    dims = dims1 or dims2
+    dims = dims1.__or__(dims2)
     return data, mask, dims
 
 
@@ -67,7 +67,7 @@ def batch_sub_scalar(data1, data2):
 def batch_mul(data1, mask1, dims1, data2, mask2, dims2):
     data = torch.mul(data1, data2)
     mask = mask1 * mask2
-    dims = dims1 or dims2
+    dims = dims1.__or__(dims2)
     return data, mask, dims
 
 
@@ -140,7 +140,7 @@ def batch_select(data, mask, dims, dim_, index_):
     # if dim == 0:
     #     raise ValueError("Cannot select 0 dim in BatchTensor")
     data = data.select(dim, index)
-    if dims[dim - 1]:
+    if bool(dims[dim - 1]):
         mask = mask.select(dim, index)
     else:
         mask = mask.select(dim, 0)
@@ -171,7 +171,7 @@ def batch_index_select(data, mask, dims, dim_, index_data, index_mask, index_dim
     res_mask = torch.zeros([0])
     for i in range(batch_size):
         d = data[i].index_select(dim - 1, index_data[i]).unsqueeze(0)
-        if dims[dim - 1]:
+        if bool(dims[dim - 1]):
             m = mask[i].index_select(dim - 1, index_data[i]).unsqueeze(0)
         else:
             m = mask[i].unsqueeze(0)
@@ -209,13 +209,13 @@ def batch_where(data, mask, dims, data1, mask1, dims1, data2, mask2, dims2):
         cond_mask = data.expand_as(mask1)
     res_data = torch.where(cond_data, data1, data2)
     res_mask = torch.where(cond_mask, mask1, mask2)
-    res_dims = dims1 or dims2
+    res_dims = dims1.__or__(dims2)
     return res_data, res_mask, res_dims
 
 
 @torch.jit.script
-def batch_where_scalar(cond_, data1, mask1, dims1, data2, mask2, dims2):
-    cond = torch.zeros([1], dtype=torch.uint8) * cond_
+def batch_where_scalar(cond, data1, mask1, dims1, data2, mask2, dims2):
+    cond = torch.zeros([1], dtype=torch.uint8)
     res_data = torch.where(cond, data1, data2)
     res_mask = torch.where(cond, mask1, mask2)
     res_dims = torch.where(cond, dims1, dims2)
@@ -240,7 +240,7 @@ def batch_type_as(data, mask, dims, data1, mask1, dims1):
 
 @torch.jit.script
 def batch_gt(data, mask, dims, data1, mask1, dims1):
-    return torch.gt(data, data1), mask * mask1, dims or dims1
+    return torch.gt(data, data1), mask * mask1, dims.__or__(dims1)
 
 
 @torch.jit.script
@@ -256,12 +256,12 @@ def batch_gt_one_scalar(data, mask, dims, other_):
 
 @torch.jit.script
 def batch_lt(data, mask, dims, data1, mask1, dims1):
-    return torch.lt(data, data1), mask * mask1, dims or dims1
+    return torch.lt(data, data1), mask * mask1, dims.__or__(dims1)
 
 
 @torch.jit.script
 def batch_eq(data, mask, dims, data1, mask1, dims1):
-    return torch.eq(data, data1), mask * mask1, dims or dims1
+    return torch.eq(data, data1), mask * mask1, dims.__or__(dims1)
 
 
 @torch.jit.script
@@ -278,7 +278,7 @@ def batch_dim(data, mask, dims):
 @torch.jit.script
 def batch_squeeze(data, mask, dims, dim_):
     if int(dim_) < 0:
-        dim_ += data.dim()
+        dim_ = dim_ + data.dim()
     dim = int(dim_)
     # if dim == 0:
     #     raise ValueError("cannot do squeeze along batch_dim")
@@ -291,7 +291,7 @@ def batch_squeeze(data, mask, dims, dim_):
 @torch.jit.script
 def batch_unsqueeze(data, mask, dims, dim_):
     if int(dim_) < 0:
-        dim_ += data.dim() + 1
+        dim_ = dim_ + data.dim() + 1
     dim = int(dim_)
     # if dim == 0:
     #     raise ValueError("cannot do unsqueeze along batch_dim")
@@ -304,13 +304,13 @@ def batch_unsqueeze(data, mask, dims, dim_):
 @torch.jit.script
 def batch_argmax(data, mask, dims, dim_, keepdim_):
     dim = int(dim_)
-    keepdim = int(keepdim_)
+    keepdim = bool(keepdim_)
     # if dim == 0:
     #     raise ValueError("cannot do argmax along batch_dim")
     batch_size = data.size(0)
     res_data = torch.zeros([0])
     for i in range(batch_size):
-        if dims[dim - 1]:
+        if bool(dims[dim - 1]):
             if dim - 1 != 0:
                 m = mask[i].transpose(0, dim - 1)
             else:
@@ -338,15 +338,15 @@ def batch_argmax(data, mask, dims, dim_, keepdim_):
 def batch_topk(data, mask, dims, k_, dim_, largest_, sorted_):
     k = int(k_)
     dim = int(dim_)
-    largest = int(largest_)
-    sorted = int(sorted_)
+    largest = bool(largest_)
+    sorted = bool(sorted_)
     # if dim == 0:
     #     raise ValueError("cannot do topk along batch_dim")
     batch_size = data.size(0)
     res_data = torch.zeros([0])
     res_index = torch.zeros([0])
     for i in range(batch_size):
-        if dims[dim - 1]:
+        if bool(dims[dim - 1]):
             if dim - 1 != 0:
                 m = mask[i].transpose(0, dim - 1)
             else:
@@ -364,7 +364,7 @@ def batch_topk(data, mask, dims, k_, dim_, largest_, sorted_):
         else:
             res_data = torch.cat([res_data, d], 0)
             res_index = torch.cat([res_index, idx], 0)
-    if dims[dim - 1]:
+    if bool(dims[dim - 1]):
         mask = mask.narrow(dim, 0, k)
     return res_data, mask, dims, res_index, mask, dims
 
@@ -378,7 +378,7 @@ def batch_softmax(data, mask, dims, dim_):
     max_len = data.size(dim)
     res_data = torch.zeros([0])
     for i in range(batch_size):
-        if dims[dim - 1]:
+        if bool(dims[dim - 1]):
             if dim - 1 != 0:
                 m = mask[i].transpose(0, dim - 1)
             else:
@@ -417,7 +417,7 @@ def batch_view(data, mask, dims, sizes):
     res_dims = data_sizes_.narrow(0, 0, 1)
     for i_ in range(sizes.size(0) - 1):
         i = i_ + 1
-        if(sizes[i] == -1):
+        if bool(sizes[i] == -1):
             cur_size_ = mask.size(i)
             cur_dim = 1
         else:
@@ -434,7 +434,7 @@ def batch_view(data, mask, dims, sizes):
 def batch_cat2(data1, mask1, dims1, data2, mask2, dims2, dim_):
     dim = int(dim_)
     data = torch.cat([data1, data2], dim)
-    if(dims1[dim - 1]):
+    if bool(dims1[dim - 1]):
         mask = torch.cat([mask1, mask2], dim)
     else:
         mask = mask1
@@ -445,7 +445,7 @@ def batch_cat2(data1, mask1, dims1, data2, mask2, dims2, dim_):
 def batch_cat3(data1, mask1, dims1, data2, mask2, dims2, data3, mask3, dims3, dim_):
     dim = int(dim_)
     data = torch.cat([data1, data2, data3], dim)
-    if(dims1[dim - 1]):
+    if bool(dims1[dim - 1]):
         mask = torch.cat([mask1, mask2, mask3], dim)
     else:
         mask = mask1
@@ -460,7 +460,7 @@ def batch_narrow(data, mask, dims, dimension_, start_, length_):
     # if dimension == 0:
     #     raise ValueError("cannot do narrow along batch_dim")
     data = data.narrow(dimension, start, length)
-    if dims[dimension - 1]:
+    if bool(dims[dimension - 1]):
         mask = mask.narrow(dimension, start, length)
     else:
         mask = mask.narrow(dimension, 0, 1)

@@ -1,6 +1,6 @@
 ir_version: 3
 producer_name: "pytorch"
-producer_version: "0.3"
+producer_version: "0.4"
 graph {
   node {
     output: "1"
@@ -8,21 +8,21 @@ graph {
     attribute {
       name: "value"
       t {
-        data_type: DOUBLE
-        raw_data: "\000\000\000\000\000\000\360?"
+        data_type: INT64
+        raw_data: "\001\000\000\000\000\000\000\000"
       }
       type: TENSOR
     }
   }
   node {
     input: "1"
-    input: "0"
+    input: "x"
     output: "2"
     op_type: "Sub"
   }
   name: "torch-jit-export"
   input {
-    name: "0"
+    name: "x"
     type {
       tensor_type {
         elem_type: DOUBLE
@@ -55,5 +55,5 @@ graph {
   }
 }
 opset_import {
-  version: 7
+  version: 9
 }

@@ -5,8 +5,9 @@ set -ex
 install_ubuntu() {
     apt-get update
     apt-get install -y wget
+    apt-get install -y libopenblas-dev
 
-    DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/debian
+    DEB_ROCM_REPO=http://repo.radeon.com/rocm/misc/facebook/apt/.apt_1.9.white_rabbit/debian
     # Add rocm repository
     wget -qO - $DEB_ROCM_REPO/rocm.gpg.key | apt-key add -
     echo "deb [arch=amd64] $DEB_ROCM_REPO xenial main" > /etc/apt/sources.list.d/rocm.list
@@ -20,28 +21,24 @@ install_ubuntu() {
                    miopen-hip \
                    miopengemm \
                    rocblas \
-                   hipblas \
                    rocm-profiler \
-                   cxlactivitylogger
+                   cxlactivitylogger \
+                   rocsparse \
+                   hipsparse \
+                   rocrand \
+                   hip-thrust
 
-    pushd $HOME
-    # install hcrng
-    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o hcrng.deb
-    dpkg -i hcrng.deb
-    rm hcrng.deb
-
-    # hotfix a bug in hip's cmake files, this has been fixed in
-    # https://github.com/ROCm-Developer-Tools/HIP/pull/516 but for
-    # some reason it has not included in the latest rocm release
-    if [[ -f /opt/rocm/hip/cmake/FindHIP.cmake ]]; then
-        sudo sed -i 's/\ -I${dir}/\ $<$<BOOL:${dir}>:-I${dir}>/' /opt/rocm/hip/cmake/FindHIP.cmake
-    fi
-    
     # HIP has a bug that drops DEBUG symbols in generated MakeFiles.
     # https://github.com/ROCm-Developer-Tools/HIP/pull/588
     if [[ -f /opt/rocm/hip/cmake/FindHIP.cmake ]]; then
         sudo sed -i 's/set(_hip_build_configuration "${CMAKE_BUILD_TYPE}")/string(TOUPPER _hip_build_configuration "${CMAKE_BUILD_TYPE}")/' /opt/rocm/hip/cmake/FindHIP.cmake
     fi
+
+    # there is a case-sensitivity issue in the cmake files of some ROCm libraries. Fix this here until the fix is released
+    sed -i 's/find_dependency(hip)/find_dependency(HIP)/g' /opt/rocm/rocsparse/lib/cmake/rocsparse/rocsparse-config.cmake
+    sed -i 's/find_dependency(hip)/find_dependency(HIP)/g' /opt/rocm/rocfft/lib/cmake/rocfft/rocfft-config.cmake
+    sed -i 's/find_dependency(hip)/find_dependency(HIP)/g' /opt/rocm/miopen/lib/cmake/miopen/miopen-config.cmake
+    sed -i 's/find_dependency(hip)/find_dependency(HIP)/g' /opt/rocm/rocblas/lib/cmake/rocblas/rocblas-config.cmake
 }
 
 install_centos() {
@@ -51,30 +48,11 @@ install_centos() {
  
 install_hip_thrust() {
     # Needed for now, will be replaced soon
+    # We are now (redundantly) installing the Thrust package into another location (/opt/rocm/include/thrust) which we will
+    # switch over to
     git clone --recursive https://github.com/ROCmSoftwarePlatform/Thrust.git /data/Thrust
     rm -rf /data/Thrust/thrust/system/cuda/detail/cub-hip
     git clone --recursive https://github.com/ROCmSoftwarePlatform/cub-hip.git /data/Thrust/thrust/system/cuda/detail/cub-hip
-}
-
-# This will be removed after merging an upcoming PR.
-install_hcrng() {
-    mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o /opt/rocm/debians/hcrng.deb 
-    dpkg -i /opt/rocm/debians/hcrng.deb
-}
-
-# This will be removed after merging an upcoming PR.
-install_hcsparse() {
-    mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb 
-    dpkg -i /opt/rocm/debians/hcsparse.deb
-}
-
-# Install an updated version of rocRand that's PyTorch compatible.
-install_rocrand() {
-    mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/rocrand-1.8.0-Linux.deb -o /opt/rocm/debians/rocrand.deb 
-    dpkg -i /opt/rocm/debians/rocrand.deb
 }
 
 # Install Python packages depending on the base OS
@@ -88,6 +66,3 @@ else
 fi
 
 install_hip_thrust
-install_hcrng
-install_rocrand
-install_hcsparse

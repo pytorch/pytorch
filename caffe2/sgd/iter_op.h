@@ -13,7 +13,7 @@ namespace caffe2 {
 
 inline void IncrementIter(TensorCPU* output) {
   CAFFE_ENFORCE_EQ(
-      output->size(),
+      output->numel(),
       1,
       "The output of IterOp exists, but not of the right size.");
   int64_t* iter = output->template mutable_data<int64_t>();
@@ -39,7 +39,7 @@ class IterOp final : public Operator<Context> {
   bool RunOnDevice() override {
     if (InputSize() == 0) {
       LOG(INFO) << "[Input size is zero]";
-      if (!OperatorBase::OutputIsType<Tensor>(0, CPU)) {
+      if (!OperatorBase::OutputIsTensorType(0, CPU)) {
         // This is the first run; set the iter to start with 0.
         LOG(ERROR) << "You are using an old definition of IterOp that will "
                       "be deprecated soon. More specifically, IterOp now "
@@ -88,7 +88,8 @@ class MutexSerializer : public BlobSerializerBase {
    * fatal error.
    */
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       BlobSerializerBase::SerializationAcceptor acceptor) override;
 };

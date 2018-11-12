@@ -1,0 +1,8 @@
+def script(
+    a: Tensor,
+    b: Tensor) -> Tensor:
+  if bool(aten.lt(a, b)):
+    c = a
+  else:
+    c = b
+  return c

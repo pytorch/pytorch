@@ -1,12 +1,15 @@
 #include "ProcessGroupNCCL.hpp"
 
 #include <map>
+#include <tuple>
 #include <unordered_set>
 
 #include <THC.h>
-#include <THC/THCGeneral.hpp>
 
-#include <c10d/private/CUDAUtils.hpp>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGuard.h>
+
+#include <c10d/Utils.hpp>
 
 namespace c10d {
 
@@ -54,7 +57,7 @@ std::string getKeyFromDevices(const std::vector<at::Device>& devices) {
 }
 
 // Get the list of devices from list of tensors
-std::vector<at::Device> getDevices(const std::vector<at::Tensor>& tensors) {
+std::vector<at::Device> getDeviceList(const std::vector<at::Tensor>& tensors) {
   std::vector<at::Device> res;
   res.reserve(tensors.size());
   for (auto& tensor : tensors) {
@@ -63,23 +66,16 @@ std::vector<at::Device> getDevices(const std::vector<at::Tensor>& tensors) {
   return res;
 }
 
-// Helper that lets the input ncclStreams to wait for the THC stream
+// Helper that lets the input ncclStreams to wait for the current stream
 void syncStreams(
-    THCState* thcState,
     const std::vector<at::Device>& devices,
-    std::vector<CUDAEvent>& ncclEvents,
-    std::vector<CUDAStream>& ncclStreams) {
-  at::DeviceGuard gpuGuard;
+    std::vector<at::cuda::CUDAEvent>& ncclEvents,
+    std::vector<at::cuda::CUDAStream>& ncclStreams) {
   for (size_t i = 0; i < devices.size(); ++i) {
-    gpuGuard.set_index(devices[i].index());
-    auto currentThcStream =
-        THCState_getCurrentStreamOnDevice(thcState, devices[i].index());
-    CUDAStream& ncclStream = ncclStreams[i];
-    CUDAEvent& ncclEvent = ncclEvents[i];
-
-    C10D_CUDA_CHECK(cudaEventRecord(ncclEvent.getEvent(), currentThcStream));
-    C10D_CUDA_CHECK(
-        cudaStreamWaitEvent(ncclStream.getStream(), ncclEvent.getEvent(), 0));
+    at::cuda::CUDAStream& ncclStream = ncclStreams[i];
+    at::cuda::CUDAEvent& ncclEvent = ncclEvents[i];
+    ncclEvent.record(at::cuda::getCurrentCUDAStream(devices[i].index()));
+    ncclEvent.block(ncclStream);
   }
 }
 
@@ -87,32 +83,26 @@ void syncStreams(
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
     : devices_(devices) {
-  at::DeviceGuard gpuGuard;
+  // Creates the CUDA event wrappers
+  // Note: The actual events are lazily created when first recorded to with
+  // DEFAULT_FLAGS = cudaEventDisableTiming.
   cudaEvents_.resize(devices.size());
-  // Now create the CUDA events
-  for (size_t i = 0; i < devices.size(); ++i) {
-    gpuGuard.set_index(devices[i].index());
-    cudaEvents_[i] = CUDAEvent::create(cudaEventDisableTiming);
-  }
 }
 
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
 
 // Check if the NCCL kernels are queued on the GPUs
-bool ProcessGroupNCCL::WorkNCCL::isCompleted() const {
+bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
   return true;
 }
 
 // Helper that checks if the NCCL kernels are completed on the GPUs
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() const {
-  at::DeviceGuard gpuGuard;
   for (size_t i = 0; i < devices_.size(); ++i) {
-    gpuGuard.set_index(devices_[i].index());
-    auto& cudaEvent = cudaEvents_[i];
     // Checking the work's corresponding CUDA events' status
-    auto ret = cudaEventQuery(cudaEvent.getEvent());
+    auto ret = cudaEventQuery(cudaEvents_[i]);
     if (ret != cudaSuccess && ret != cudaErrorNotReady) {
-      C10D_CUDA_CHECK(ret);
+      AT_CUDA_CHECK(ret);
     }
     if (ret == cudaErrorNotReady) {
       return false;
@@ -129,15 +119,10 @@ bool ProcessGroupNCCL::WorkNCCL::wait() {
 
 // Waiting on the work's corresponding CUDA events
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
-  auto thcState = ::at::globalContext().lazyInitCUDA();
-  at::DeviceGuard gpuGuard;
   for (size_t i = 0; i < devices_.size(); ++i) {
-    gpuGuard.set_index(devices_[i].index());
-    auto thcStream =
-        THCState_getCurrentStreamOnDevice(thcState, devices_[i].index());
-    auto& cudaEvent = cudaEvents_[i];
-    // Let THC stream wait for the NCCL stream
-    C10D_CUDA_CHECK(cudaStreamWaitEvent(thcStream, cudaEvent.getEvent(), 0));
+    auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
+    // Block the current stream on the NCCL stream
+    cudaEvents_[i].block(currentStream);
   }
 }
 
@@ -161,7 +146,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     int rank,
     int size)
     : ProcessGroup(rank, size), store_(store) {
-  thcState_ = ::at::globalContext().lazyInitCUDA();
   // Generate the Process Group ID for current PG, this needs to be identical
   // for all processes
   std::unique_lock<std::mutex> lock(pgTrackingLock_);
@@ -237,13 +221,10 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // Broadcast so that each process can have a unique NCCL ID
   broadcastUniqueNCCLID(&ncclID);
 
-  at::DeviceGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
-  std::vector<CUDAEvent> eventVal;
-  std::vector<CUDAStream> streamVal;
-
-  eventVal.resize(devices.size());
-  streamVal.resize(devices.size());
+  std::vector<at::cuda::CUDAStream> streamVal;
+  streamVal.reserve(devices.size());
 
   // Create the NCCL communicators for each GPU
   C10D_NCCL_CHECK(ncclGroupStart());
@@ -256,13 +237,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     gpuGuard.set_index(devices[i].index());
     ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
 
-    // Also create the NCCL streams and events
-    streamVal[i] = CUDAStream::create();
-    // Event created using cudaEventDisableTiming flag and not
-    // cudaEventBlockingSync flag will provide the best performance when used
-    // with cudaStreamWaitEvent() and cudaEventQuery(). Since we here don't
-    // measure the performance using cudaEvent, this should be set.
-    eventVal[i] = CUDAEvent::create(cudaEventDisableTiming);
+    // Creates the NCCL streams
+    streamVal.push_back(at::cuda::getStreamFromPool());
   }
 
   C10D_NCCL_CHECK(ncclGroupEnd());
@@ -270,7 +246,15 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // Move the NCCL resource to cache
   devNCCLCommMap_.emplace(devicesKey, std::move(ncclComms));
   ncclStreams_.emplace(devicesKey, std::move(streamVal));
-  ncclEvents_.emplace(devicesKey, std::move(eventVal));
+
+  // Note: these events are created with the (default) cudaEventDisableTiming
+  // flag This flag provides the best performance when used with
+  // cudaStreamWaitEvent() and cudaEventQuery(). Since we here don't measure the
+  // performance using cudaEvent, this should be set.
+  ncclEvents_.emplace(
+      std::piecewise_construct,
+      std::make_tuple(devicesKey),
+      std::make_tuple(devices.size()));
 
   return devNCCLCommMap_[devicesKey];
 }
@@ -280,7 +264,7 @@ void ProcessGroupNCCL::tensorCheckHelper(
     const std::vector<at::Tensor>& input,
     const std::vector<at::Tensor>& output,
     int outputOverInput) {
-  if (input.size() != output.size()) {
+  if (input.size() * outputOverInput != output.size()) {
     throw std::runtime_error(
         "Input tensor sequence should have the same "
         "number of tensors as the output tensor sequence");
@@ -290,7 +274,7 @@ void ProcessGroupNCCL::tensorCheckHelper(
     throw std::runtime_error("The number of input tensors should not be zero");
   }
 
-  if (input.size() > static_cast<size_t>(thcState_->numDevices)) {
+  if (input.size() > static_cast<size_t>(at::cuda::getNumGPUs())) {
     throw std::runtime_error(
         "The number of input tensors is larger than "
         "the number of available GPUs");
@@ -305,8 +289,8 @@ void ProcessGroupNCCL::tensorCheckHelper(
 
   for (size_t i = 0; i < input.size(); ++i) {
     //  Check to make sure it's a GPU dense tensor
-    if (!(input[i].type().is_cuda() && !input[i].type().is_sparse() &&
-          output[i].type().is_cuda() && !output[i].type().is_sparse())) {
+    if (!(input[i].is_cuda() && !input[i].is_sparse() &&
+          output[i].is_cuda() && !output[i].is_sparse())) {
       throw std::runtime_error(
           "Only CUDA dense tensor is supported for NCCL "
           "collective operations");
@@ -325,7 +309,7 @@ void ProcessGroupNCCL::tensorCheckHelper(
           "number of elements");
     }
     // Check the output tensor size equals to input tensor size
-    if (output[i].numel() != inputNumElement * outputOverInput) {
+    if (output[i].numel() != inputNumElement) {
       throw std::runtime_error(
           "The number of elements of output tensor does "
           "not match the number of elements of the input "
@@ -357,17 +341,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
     const AllreduceOptions& opts) {
   tensorCheckHelper(tensors, tensors);
 
-  auto devices = getDevices(tensors);
+  auto devices = getDeviceList(tensors);
   auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices);
 
   // First let NCCL streams wait for THC stream
-  syncStreams(thcState_, devices, ncclEvents_[key], ncclStreams_[key]);
+  syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
 
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  at::DeviceGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -376,7 +360,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
 
   for (size_t i = 0; i < tensors.size(); ++i) {
     gpuGuard.set_index(devices[i].index());
-    CUDAStream& ncclStream = ncclStreams_[key][i];
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
 
     C10D_NCCL_CHECK(ncclAllReduce(
         tensors[i].data_ptr(),
@@ -385,18 +369,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
         getNcclDataType(tensors[i].type().scalarType()),
         ncclOp[opts.reduceOp],
         ncclComms[i]->getNcclComm(),
-        ncclStream.getStream()));
+        ncclStream.stream()));
   }
 
   C10D_NCCL_CHECK(ncclGroupEnd());
 
   // Event should only be recorded after the ncclGroupEnd()
   for (size_t i = 0; i < tensors.size(); ++i) {
-    CUDAStream& ncclStream = ncclStreams_[key][i];
-    CUDAEvent& cudaEvent = work->cudaEvents_[i];
-
-    C10D_CUDA_CHECK(
-        cudaEventRecord(cudaEvent.getEvent(), ncclStream.getStream()));
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+    work->cudaEvents_[i].record(ncclStream);
   }
 
   return work;
@@ -407,17 +388,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
     const BroadcastOptions& opts) {
   tensorCheckHelper(tensors, tensors);
 
-  auto devices = getDevices(tensors);
+  auto devices = getDeviceList(tensors);
   auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices);
 
-  // First let NCCL streams wait for THC stream
-  syncStreams(thcState_, devices, ncclEvents_[key], ncclStreams_[key]);
+  // First let NCCL streams wait for current streams
+  syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
 
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  at::DeviceGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -426,7 +407,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
 
   for (size_t i = 0; i < tensors.size(); ++i) {
     gpuGuard.set_index(devices[i].index());
-    CUDAStream& ncclStream = ncclStreams_[key][i];
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     // root rank of the the GPU
     int root = opts.rootRank * tensors.size() + opts.rootTensor;
 
@@ -436,21 +417,184 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
         getNcclDataType(tensors[i].type().scalarType()),
         root,
         ncclComms[i]->getNcclComm(),
-        ncclStream.getStream()));
+        ncclStream.stream()));
   }
 
   C10D_NCCL_CHECK(ncclGroupEnd());
 
   // Event should only be recorded after the ncclGroupEnd()
   for (size_t i = 0; i < tensors.size(); ++i) {
-    CUDAStream& ncclStream = ncclStreams_[key][i];
-    CUDAEvent& cudaEvent = work->cudaEvents_[i];
-
-    C10D_CUDA_CHECK(
-        cudaEventRecord(cudaEvent.getEvent(), ncclStream.getStream()));
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+    work->cudaEvents_[i].record(ncclStream);
   }
 
   return work;
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
+    std::vector<at::Tensor>& tensors,
+    const ReduceOptions& opts) {
+  tensorCheckHelper(tensors, tensors);
+
+  auto devices = getDeviceList(tensors);
+  auto key = getKeyFromDevices(devices);
+  auto& ncclComms = getNCCLComm(key, devices);
+
+  // First let NCCL streams wait for current streams
+  syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
+
+  // Work itself will create the CUDA events on all GPUs of tensors
+  auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
+
+  at::cuda::OptionalCUDAGuard gpuGuard;
+
+  std::unique_lock<std::mutex> cudaFreeMutexLock(
+      *(THCCachingAllocator_getCudaFreeMutex()));
+
+  C10D_NCCL_CHECK(ncclGroupStart());
+
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    gpuGuard.set_index(devices[i].index());
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+    // root rank of the the GPU
+    int root = opts.rootRank * tensors.size() + opts.rootTensor;
+
+    C10D_NCCL_CHECK(ncclReduce(
+        tensors[i].data_ptr(),
+        tensors[i].data_ptr(),
+        tensors[i].numel(),
+        getNcclDataType(tensors[i].type().scalarType()),
+        ncclOp[opts.reduceOp],
+        root,
+        ncclComms[i]->getNcclComm(),
+        ncclStream.stream()));
+  }
+
+  C10D_NCCL_CHECK(ncclGroupEnd());
+
+  // Event should only be recorded after the ncclGroupEnd()
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+    work->cudaEvents_[i].record(ncclStream);
+  }
+
+  return work;
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
+    std::vector<std::vector<at::Tensor>>& outputTensors,
+    std::vector<at::Tensor>& inputTensors) {
+  if (outputTensors.size() != inputTensors.size()) {
+    throw std::runtime_error("allgather: input and output size mismatch");
+  }
+  std::vector<at::Tensor> flattenOutputTensors;
+  flattenOutputTensors.resize(outputTensors.size());
+
+  for (size_t i = 0; i < outputTensors.size(); ++i) {
+    tensorCheckHelper(
+        std::vector<at::Tensor>{inputTensors[i]},
+        outputTensors[i],
+        size_ * inputTensors.size());
+    // Flatten the output tensors (from all ranks) to a single big tensor
+    flattenOutputTensors[i] = newLikeFlat(outputTensors, i);
+
+    if (static_cast<size_t>(flattenOutputTensors[i].numel()) !=
+        inputTensors[i].numel() * size_ * inputTensors.size()) {
+      throw std::runtime_error("Unexpected size for flatten tensor");
+    }
+  }
+
+  auto devices = getDeviceList(inputTensors);
+  auto key = getKeyFromDevices(devices);
+  auto& ncclComms = getNCCLComm(key, devices);
+
+  // First let NCCL streams wait for current streams
+  syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
+
+  // Work itself will create the CUDA events on all GPUs of tensors
+  auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
+
+  at::cuda::OptionalCUDAGuard gpuGuard;
+
+  std::unique_lock<std::mutex> cudaFreeMutexLock(
+      *(THCCachingAllocator_getCudaFreeMutex()));
+
+  C10D_NCCL_CHECK(ncclGroupStart());
+
+  for (size_t i = 0; i < inputTensors.size(); ++i) {
+    gpuGuard.set_index(devices[i].index());
+
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+
+    C10D_NCCL_CHECK(ncclAllGather(
+        inputTensors[i].data_ptr(),
+        flattenOutputTensors[i].data_ptr(),
+        inputTensors[i].numel(),
+        getNcclDataType(inputTensors[i].type().scalarType()),
+        ncclComms[i]->getNcclComm(),
+        ncclStream.stream()));
+  }
+
+  C10D_NCCL_CHECK(ncclGroupEnd());
+
+  // Copy the flattened output tensors to the outputs
+  for (size_t i = 0; i < outputTensors.size(); ++i) {
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+    at::cuda::CUDAStreamGuard guard(ncclStream);
+    for (size_t j = 0; j < outputTensors[0].size(); ++j) {
+      outputTensors[i][j].copy_(flattenOutputTensors[i][j], true);
+    }
+  }
+
+  // Event should only be recorded after the ncclGroupEnd()
+  for (size_t i = 0; i < inputTensors.size(); ++i) {
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+    work->cudaEvents_[i].record(ncclStream);
+  }
+  return work;
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
+    std::vector<std::vector<at::Tensor>>& /* unused */,
+    std::vector<at::Tensor>& /* unused */,
+    const GatherOptions& /* unused */) {
+  throw std::runtime_error("ProcessGroupNCCL does not support gather");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
+    std::vector<at::Tensor>& /* unused */,
+    std::vector<std::vector<at::Tensor>>& /* unused */,
+    const ScatterOptions& /* unused */) {
+  throw std::runtime_error("ProcessGroupNCCL does not support scatter");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */,
+    int /* unused */) {
+  throw std::runtime_error("ProcessGroupNCCL does not support send");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */,
+    int /* unused */) {
+  throw std::runtime_error("ProcessGroupNCCL does not support recv");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
+    std::vector<at::Tensor>& /* unused */,
+    int* /* unused */,
+    int /* unused */) {
+  throw std::runtime_error("ProcessGroupNCCL does not support recv");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier() {
+  throw std::runtime_error("ProcessGroupNCCL does not support barrier");
+}
+
+std::unordered_map<int, int> ProcessGroupNCCL::getGroupRank() {
+  throw std::runtime_error("ProcessGroupNCCL doest not support getGroupRank");
 }
 
 } // namespace c10d

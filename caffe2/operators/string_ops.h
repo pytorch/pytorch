@@ -44,8 +44,8 @@ class StringJoinOp final : public Operator<Context> {
   StringJoinOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         delimiter_(
-            OperatorBase::GetSingleArgument<std::string>("delimiter", ",")),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 0)) {
+            this->template GetSingleArgument<std::string>("delimiter", ",")),
+        axis_(this->template GetSingleArgument<int>("axis", 0)) {
     CAFFE_ENFORCE(axis_ == 0 || axis_ == 1);
   }
 

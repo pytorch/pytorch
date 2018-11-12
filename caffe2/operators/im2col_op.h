@@ -14,27 +14,27 @@ class Im2ColOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   Im2ColOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        pad_(OperatorBase::GetSingleArgument<int>("pad", 0)),
-        kernel_h_(OperatorBase::GetSingleArgument<int>(
+        pad_(this->template GetSingleArgument<int>("pad", 0)),
+        kernel_h_(this->template GetSingleArgument<int>(
             "kernel_h",
-            OperatorBase::GetSingleArgument<int>("kernel", 0))),
-        kernel_w_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("kernel", 0))),
+        kernel_w_(this->template GetSingleArgument<int>(
             "kernel_w",
-            OperatorBase::GetSingleArgument<int>("kernel", 0))),
-        dilation_h_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("kernel", 0))),
+        dilation_h_(this->template GetSingleArgument<int>(
             "dilation_h",
-            OperatorBase::GetSingleArgument<int>("dilation", 1))),
-        dilation_w_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("dilation", 1))),
+        dilation_w_(this->template GetSingleArgument<int>(
             "dilation_w",
-            OperatorBase::GetSingleArgument<int>("dilation", 1))),
-        stride_h_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("dilation", 1))),
+        stride_h_(this->template GetSingleArgument<int>(
             "stride_h",
-            OperatorBase::GetSingleArgument<int>("stride", 1))),
-        stride_w_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("stride", 1))),
+        stride_w_(this->template GetSingleArgument<int>(
             "stride_w",
-            OperatorBase::GetSingleArgument<int>("stride", 1))),
+            this->template GetSingleArgument<int>("stride", 1))),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(kernel_h_ > 0);
     CAFFE_ENFORCE(kernel_w_ > 0);
     CAFFE_ENFORCE(dilation_h_ > 0);
@@ -47,7 +47,7 @@ class Im2ColOp final : public Operator<Context> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto* Y = Output(0);
-    CAFFE_ENFORCE(4 == X.ndim());
+    CAFFE_ENFORCE(4 == X.dim());
 
     int N = 0, C = 0, H = 0, W = 0;
     switch (order_) {
@@ -77,10 +77,10 @@ class Im2ColOp final : public Operator<Context> {
     switch (order_) {
       case StorageOrder::NCHW: {
         Y->Resize(
-            std::vector<TIndex>{N, C * kernel_h_ * kernel_w_, out_h, out_w});
+            std::vector<int64_t>{N, C * kernel_h_ * kernel_w_, out_h, out_w});
 
-        const size_t dx = X.size() / N;
-        const size_t dy = Y->size() / N;
+        const size_t dx = X.numel() / N;
+        const size_t dy = Y->numel() / N;
         for (int n = 0; n < N; ++n) {
           const auto* xdata = X.template data<T>() + (n * dx);
           auto* ydata = Y->template mutable_data<T>() + (n * dy);
@@ -105,10 +105,10 @@ class Im2ColOp final : public Operator<Context> {
       }; break;
       case StorageOrder::NHWC: {
         Y->Resize(
-            std::vector<TIndex>{N, out_h, out_w, kernel_h_ * kernel_w_ * C});
+            std::vector<int64_t>{N, out_h, out_w, kernel_h_ * kernel_w_ * C});
 
-        const size_t dx = X.size() / N;
-        const size_t dy = Y->size() / N;
+        const size_t dx = X.numel() / N;
+        const size_t dy = Y->numel() / N;
         for (int n = 0; n < N; ++n) {
           const auto* xdata = X.template data<T>() + (n * dx);
           auto* ydata = Y->template mutable_data<T>() + (n * dy);
@@ -155,27 +155,27 @@ class Col2ImOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   Col2ImOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        pad_(OperatorBase::GetSingleArgument<int>("pad", 0)),
-        kernel_h_(OperatorBase::GetSingleArgument<int>(
+        pad_(this->template GetSingleArgument<int>("pad", 0)),
+        kernel_h_(this->template GetSingleArgument<int>(
             "kernel_h",
-            OperatorBase::GetSingleArgument<int>("kernel", 0))),
-        kernel_w_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("kernel", 0))),
+        kernel_w_(this->template GetSingleArgument<int>(
             "kernel_w",
-            OperatorBase::GetSingleArgument<int>("kernel", 0))),
-        dilation_h_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("kernel", 0))),
+        dilation_h_(this->template GetSingleArgument<int>(
             "dilation_h",
-            OperatorBase::GetSingleArgument<int>("dilation", 1))),
-        dilation_w_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("dilation", 1))),
+        dilation_w_(this->template GetSingleArgument<int>(
             "dilation_w",
-            OperatorBase::GetSingleArgument<int>("dilation", 1))),
-        stride_h_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("dilation", 1))),
+        stride_h_(this->template GetSingleArgument<int>(
             "stride_h",
-            OperatorBase::GetSingleArgument<int>("stride", 1))),
-        stride_w_(OperatorBase::GetSingleArgument<int>(
+            this->template GetSingleArgument<int>("stride", 1))),
+        stride_w_(this->template GetSingleArgument<int>(
             "stride_w",
-            OperatorBase::GetSingleArgument<int>("stride", 1))),
+            this->template GetSingleArgument<int>("stride", 1))),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(kernel_h_ > 0);
     CAFFE_ENFORCE(kernel_w_ > 0);
     CAFFE_ENFORCE(dilation_h_ > 0);
@@ -190,7 +190,7 @@ class Col2ImOp final : public Operator<Context> {
     auto& Z = Input(1);
     auto* Y = Output(0);
     Y->ResizeLike(Z);
-    CAFFE_ENFORCE(4 == Y->ndim());
+    CAFFE_ENFORCE(4 == Y->dim());
 
     int N = 0, C = 0, H = 0, W = 0;
     switch (order_) {
@@ -216,10 +216,10 @@ class Col2ImOp final : public Operator<Context> {
     CAFFE_ENFORCE(W >= dkernel_w);
     const int out_h = (H + 2 * pad_ - dkernel_h) / stride_h_ + 1;
     const int out_w = (W + 2 * pad_ - dkernel_w) / stride_w_ + 1;
-    CAFFE_ENFORCE(X.size() == N * kernel_h_ * kernel_w_ * C * out_h * out_w);
+    CAFFE_ENFORCE(X.numel() == N * kernel_h_ * kernel_w_ * C * out_h * out_w);
 
-    const size_t dx = X.size() / N;
-    const size_t dy = Y->size() / N;
+    const size_t dx = X.numel() / N;
+    const size_t dy = Y->numel() / N;
 
     // could template-specialize this, but it's test code...
     switch (order_) {

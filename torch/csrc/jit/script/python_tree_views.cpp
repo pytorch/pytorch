@@ -84,7 +84,7 @@ void initTreeViewBindings(PyObject *module) {
           "name", [](const Ident& self) { return self.name(); });
 
   py::class_<Param, TreeView>(m, "Param")
-    .def(py::init([](const Type& type, const Ident& name) {
+    .def(py::init([](const Expr& type, const Ident& name) {
       return Param::create(name.range(), name, type);
     }));
   py::class_<Attribute, TreeView>(m, "Attribute")
@@ -100,33 +100,52 @@ void initTreeViewBindings(PyObject *module) {
   m.def("NoneLiteral", [](const SourceRange& range) {
     return Expr(Compound::create(TK_NONE, range, {}));
   });
-  py::class_<Type, TreeView>(m, "Type");
-  py::class_<TensorType, Type>(m, "TensorType")
-    .def(py::init(&TensorType::create));
 
   py::class_<Stmt, TreeView>(m, "Stmt");
   py::class_<Expr, TreeView>(m, "Expr");
   py::class_<Def, TreeView>(m, "Def")
     .def(py::init([](const Ident& name,
-                     std::vector<Param> params,
+                     Decl decl,
                      std::vector<Stmt> body) {
       auto r = name.range();
       return Def::create(r,
                          name,
-                         wrap_list(r, std::move(params)),
+                         std::move(decl),
                          wrap_list(r, std::move(body)));
+    }));
+  py::class_<Decl, TreeView>(m, "Decl")
+    .def(py::init([](const SourceRange& r,
+                     std::vector<Param> params,
+                     Expr *return_type) {
+      return Decl::create(r, wrap_list(r, std::move(params)), wrap_maybe(r, return_type));
     }));
 
 
   py::class_<Assign, Stmt>(m, "Assign")
-    .def(py::init([](std::vector<Expr> lhs, std::string kind_str, const Expr& rhs) {
-      auto r = lhs.at(0).range();
-      auto kind = AssignKind(Compound::create(stringToKind(kind_str), r, {}));
-      return Assign::create(r, List<Expr>::create(r, std::move(lhs)), kind, rhs);
+    .def(py::init([](const Expr& lhs, const Expr& rhs) {
+      return Assign::create(lhs.range(), lhs, rhs);
+    }));
+  py::class_<AugAssign, Stmt>(m, "AugAssign")
+    .def(py::init([](const Expr& lhs, std::string kind_str, const Expr& rhs) {
+      auto r = lhs.range();
+      auto kind = AugAssignKind(Compound::create(stringToKind(kind_str), r, {}));
+      return AugAssign::create(r, lhs, kind, rhs);
     }));
   py::class_<Return, Stmt>(m, "Return")
     .def(py::init([](const SourceRange& range, std::vector<Expr> values) {
       return Return::create(range, wrap_list(range, std::move(values)));
+    }));
+  py::class_<Raise, Stmt>(m, "Raise")
+    .def(py::init([](const SourceRange& range, Expr *expr) {
+      return Raise::create(range, wrap_maybe(range, expr));
+    }));
+  py::class_<Assert, Stmt>(m, "Assert")
+    .def(py::init([](const SourceRange& range, const Expr& test, Expr *msg) {
+      return Assert::create(range, test, wrap_maybe(range, msg));
+    }));
+  py::class_<Pass, Stmt>(m, "Pass")
+    .def(py::init([](const SourceRange& range) {
+      return Pass::create(range);
     }));
   py::class_<If, Stmt>(m, "If")
     .def(py::init([](const SourceRange& range, const Expr& cond, std::vector<Stmt> true_branch, std::vector<Stmt> false_branch) {
@@ -149,9 +168,8 @@ void initTreeViewBindings(PyObject *module) {
         wrap_list(range, std::move(body)));
   }));
   py::class_<ExprStmt, Stmt>(m, "ExprStmt")
-    .def(py::init([](std::vector<Expr>& exprs) {
-      auto r = exprs[0].range();
-      return ExprStmt::create(r, wrap_list(r, std::move(exprs)));
+    .def(py::init([](const Expr& expr) {
+      return ExprStmt::create(expr.range(), expr);
     }));
 
   py::class_<Var, Expr>(m, "Var")
@@ -201,16 +219,13 @@ void initTreeViewBindings(PyObject *module) {
     .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
       return TupleLiteral::create(range, wrap_list(range, std::move(args)));
     }));
-  py::class_<Gather, Expr>(m, "Gather")
-    .def(py::init([](const Expr& base, const Expr& index) {
-      return Gather::create(base.range(), base, index);
+  py::class_<Subscript, Expr>(m, "Subscript")
+    .def(py::init([](const Expr& base, std::vector<Expr> subscript_exprs) {
+      return Subscript::create(base.range(), base, wrap_list(base.range(), std::move(subscript_exprs)));
     }));
-  py::class_<Slice, Expr>(m, "Slice")
-    .def(py::init([](const Expr& base, Expr* lower, Expr* upper) {
-      return Slice::create(base.range(),
-                           base,
-                           wrap_maybe(base.range(), lower),
-                           wrap_maybe(base.range(), upper));
+  py::class_<SliceExpr, Expr>(m, "SliceExpr")
+    .def(py::init([](const SourceRange& range, Expr *lower, Expr *upper) {
+      return SliceExpr::create(range, wrap_maybe(range, lower), wrap_maybe(range, upper));
     }));
   py::class_<Starred, Expr>(m, "Starred")
     .def(py::init([](const SourceRange& range, Expr expr){

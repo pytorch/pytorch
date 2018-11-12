@@ -30,8 +30,8 @@ class MaxPool1d(_MaxPoolNd):
     and output :math:`(N, C, L_{out})` can be precisely described as:
 
     .. math::
-        out(N_i, C_j, k)  = \max_{m=0, \ldots, kernel\_size-1}
-                input(N_i, C_j, stride * k + m)
+        out(N_i, C_j, k) = \max_{m=0, \ldots, \text{kernel\_size} - 1}
+                input(N_i, C_j, stride \times k + m)
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
@@ -43,16 +43,16 @@ class MaxPool1d(_MaxPoolNd):
         padding: implicit zero padding to be added on both sides
         dilation: a parameter that controls the stride of elements in the window
         return_indices: if ``True``, will return the max indices along with the outputs.
-                        Useful when Unpooling later
+                        Useful for :class:`torch.nn.MaxUnpool1d` later
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
         - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})` where
+        - Output: :math:`(N, C, L_{out})`, where
 
           .. math::
-              L_{out} = \left\lfloor \frac{L_{in} + 2 * \text{padding} - \text{dilation}
-                    * (\text{kernel\_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
+              L_{out} = \left\lfloor \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
+                    \times (\text{kernel\_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
 
     Examples::
 
@@ -84,9 +84,11 @@ class MaxPool2d(_MaxPoolNd):
     can be precisely described as:
 
     .. math::
-
-        out(N_i, C_j, h, w)  = \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1}
-                               \text{input}(N_i, C_j, \text{stride[0]} * h + m, \text{stride[1]} * w + n)
+        \begin{aligned}
+            out(N_i, C_j, h, w) ={} & \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1} \\
+                                    & \text{input}(N_i, C_j, \text{stride[0]} \times h + m,
+                                                   \text{stride[1]} \times w + n)
+        \end{aligned}
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
@@ -104,20 +106,20 @@ class MaxPool2d(_MaxPoolNd):
         padding: implicit zero padding to be added on both sides
         dilation: a parameter that controls the stride of elements in the window
         return_indices: if ``True``, will return the max indices along with the outputs.
-                        Useful when Unpooling later
+                        Useful for :class:`torch.nn.MaxUnpool2d` later
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, H_{out}, W_{out})`, where
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding[0]} - \text{dilation[0]}
-                    * (\text{kernel\_size[0]} - 1) - 1}{\text{stride[0]}} + 1\right\rfloor
+                    \times (\text{kernel\_size[0]} - 1) - 1}{\text{stride[0]}} + 1\right\rfloor
 
           .. math::
               W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding[1]} - \text{dilation[1]}
-                    * (\text{kernel\_size[1]} - 1) - 1}{\text{stride[1]}} + 1\right\rfloor
+                    \times (\text{kernel\_size[1]} - 1) - 1}{\text{stride[1]}} + 1\right\rfloor
 
     Examples::
 
@@ -147,14 +149,11 @@ class MaxPool3d(_MaxPoolNd):
     can be precisely described as:
 
     .. math::
-        out(N_i, C_j, d, h, w) =
-        \begin{gathered}
-        \max_{k=0, \ldots, kD-1}
-        \max_{m=0, \ldots, kH-1}
-        \max_{n=0, \ldots, kW-1} \\
-        \text{input}(N_i, C_j, \text{stride[0]} *
-        k + d, \text{stride[1]} * h + m, \text{stride[2]} * w + n)
-        \end{gathered}
+        \begin{aligned}
+            \text{out}(N_i, C_j, d, h, w) ={} & \max_{k=0, \ldots, kD-1} \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1} \\
+                                              & \text{input}(N_i, C_j, \text{stride[0]} \times k + d,
+                                                             \text{stride[1]} \times h + m, \text{stride[2]} \times w + n)
+        \end{aligned}
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
@@ -172,23 +171,23 @@ class MaxPool3d(_MaxPoolNd):
         padding: implicit zero padding to be added on all three sides
         dilation: a parameter that controls the stride of elements in the window
         return_indices: if ``True``, will return the max indices along with the outputs.
-                        Useful when Unpooling later
+                        Useful for :class:`torch.nn.MaxUnpool3d` later
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
 
           .. math::
-              D_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[0] - \text{dilation}[0] *
+              D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] - \text{dilation}[0] \times
                 (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
           .. math::
-              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding}[1] - \text{dilation}[1] *
+              H_{out} = \left\lfloor\frac{H_{in} + 2 \times \text{padding}[1] - \text{dilation}[1] \times
                 (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
           .. math::
-              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding}[2] - \text{dilation}[2] *
+              W_{out} = \left\lfloor\frac{W_{in} + 2 \times \text{padding}[2] - \text{dilation}[2] \times
                 (\text{kernel\_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
 
     Examples::
@@ -202,7 +201,7 @@ class MaxPool3d(_MaxPoolNd):
 
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
-    """
+    """  # noqa: E501
 
     def forward(self, input):
         return F.max_pool3d(input, self.kernel_size, self.stride,
@@ -227,29 +226,29 @@ class MaxUnpool1d(_MaxUnpoolNd):
     including the indices of the maximal values and computes a partial inverse
     in which all non-maximal values are set to zero.
 
-    .. note:: `MaxPool1d` can map several input sizes to the same output sizes.
-              Hence, the inversion process can get ambiguous.
+    .. note:: :class:`MaxPool1d` can map several input sizes to the same output
+              sizes. Hence, the inversion process can get ambiguous.
               To accommodate this, you can provide the needed output size
-              as an additional argument `output_size` in the forward call.
+              as an additional argument :attr:`output_size` in the forward call.
               See the Inputs and Example below.
 
     Args:
         kernel_size (int or tuple): Size of the max pooling window.
         stride (int or tuple): Stride of the max pooling window.
-            It is set to ``kernel_size`` by default.
+            It is set to :attr:`kernel_size` by default.
         padding (int or tuple): Padding that was added to the input
 
     Inputs:
         - `input`: the input Tensor to invert
-        - `indices`: the indices given out by `MaxPool1d`
-        - `output_size` (optional) : a `torch.Size` that specifies the targeted output size
+        - `indices`: the indices given out by :class:`~torch.nn.MaxPool1d`
+        - `output_size` (optional): the targeted output size
 
     Shape:
         - Input: :math:`(N, C, H_{in})`
-        - Output: :math:`(N, C, H_{out})` where
+        - Output: :math:`(N, C, H_{out})`, where
 
           .. math::
-              H_{out} = (H_{in} - 1) * \text{stride}[0] - 2 * \text{padding}[0] + \text{kernel\_size}[0]
+              H_{out} = (H_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{kernel\_size}[0]
 
           or as given by :attr:`output_size` in the call operator
 
@@ -292,32 +291,32 @@ class MaxUnpool2d(_MaxUnpoolNd):
     including the indices of the maximal values and computes a partial inverse
     in which all non-maximal values are set to zero.
 
-    .. note:: `MaxPool2d` can map several input sizes to the same output sizes.
-              Hence, the inversion process can get ambiguous.
+    .. note:: :class:`MaxPool2d` can map several input sizes to the same output
+              sizes. Hence, the inversion process can get ambiguous.
               To accommodate this, you can provide the needed output size
-              as an additional argument `output_size` in the forward call.
+              as an additional argument :attr:`output_size` in the forward call.
               See the Inputs and Example below.
 
     Args:
         kernel_size (int or tuple): Size of the max pooling window.
         stride (int or tuple): Stride of the max pooling window.
-            It is set to ``kernel_size`` by default.
+            It is set to :attr:`kernel_size` by default.
         padding (int or tuple): Padding that was added to the input
 
     Inputs:
         - `input`: the input Tensor to invert
-        - `indices`: the indices given out by `MaxPool2d`
-        - `output_size` (optional) : a `torch.Size` that specifies the targeted output size
+        - `indices`: the indices given out by :class:`~torch.nn.MaxPool2d`
+        - `output_size` (optional): the targeted output size
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, H_{out}, W_{out})`, where
 
           .. math::
-            H_{out} = (H_{in} - 1) * \text{stride[0]} - 2 * \text{padding[0]} + \text{kernel\_size[0]}
+            H_{out} = (H_{in} - 1) \times \text{stride[0]} - 2 \times \text{padding[0]} + \text{kernel\_size[0]}
 
           .. math::
-            W_{out} = (W_{in} - 1) * \text{stride[1]} - 2 * \text{padding[1]} + \text{kernel\_size[1]}
+            W_{out} = (W_{in} - 1) \times \text{stride[1]} - 2 \times \text{padding[1]} + \text{kernel\_size[1]}
 
           or as given by :attr:`output_size` in the call operator
 
@@ -364,35 +363,35 @@ class MaxUnpool3d(_MaxUnpoolNd):
     including the indices of the maximal values and computes a partial inverse
     in which all non-maximal values are set to zero.
 
-    .. note:: `MaxPool3d` can map several input sizes to the same output sizes.
-              Hence, the inversion process can get ambiguous.
+    .. note:: :class:`MaxPool3d` can map several input sizes to the same output
+              sizes. Hence, the inversion process can get ambiguous.
               To accommodate this, you can provide the needed output size
-              as an additional argument `output_size` in the forward call.
+              as an additional argument :attr:`output_size` in the forward call.
               See the Inputs section below.
 
     Args:
         kernel_size (int or tuple): Size of the max pooling window.
         stride (int or tuple): Stride of the max pooling window.
-            It is set to ``kernel_size`` by default.
+            It is set to :attr:`kernel_size` by default.
         padding (int or tuple): Padding that was added to the input
 
     Inputs:
         - `input`: the input Tensor to invert
-        - `indices`: the indices given out by `MaxPool3d`
-        - `output_size` (optional) : a `torch.Size` that specifies the targeted output size
+        - `indices`: the indices given out by :class:`~torch.nn.MaxPool3d`
+        - `output_size` (optional): the targeted output size
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
 
           .. math::
-              D_{out} = (D_{in} - 1) * \text{stride[0]} - 2 * \text{padding[0]} + \text{kernel\_size[0]}
+              D_{out} = (D_{in} - 1) \times \text{stride[0]} - 2 \times \text{padding[0]} + \text{kernel\_size[0]}
 
           .. math::
-              H_{out} = (H_{in} - 1) * \text{stride[1]} - 2 * \text{padding[1]} + \text{kernel\_size[1]}
+              H_{out} = (H_{in} - 1) \times \text{stride[1]} - 2 \times \text{padding[1]} + \text{kernel\_size[1]}
 
           .. math::
-              W_{out} = (W_{in} - 1) * \text{stride[2]} - 2 * \text{padding[2]} + \text{kernel\_size[2]}
+              W_{out} = (W_{in} - 1) \times \text{stride[2]} - 2 \times \text{padding[2]} + \text{kernel\_size[2]}
 
           or as given by :attr:`output_size` in the call operator
 
@@ -436,8 +435,8 @@ class AvgPool1d(_AvgPoolNd):
 
     .. math::
 
-        \text{out}(N_i, C_j, l)  = \frac{1}{k} \sum_{m=0}^{k}
-                               \text{input}(N_i, C_j, \text{stride} * l + m)
+        \text{out}(N_i, C_j, l) = \frac{1}{k} \sum_{m=0}^{k}
+                               \text{input}(N_i, C_j, \text{stride} \times l + m)
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points.
@@ -454,11 +453,11 @@ class AvgPool1d(_AvgPoolNd):
 
     Shape:
         - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})` where
+        - Output: :math:`(N, C, L_{out})`, where
 
           .. math::
               L_{out} = \left\lfloor \frac{L_{in} +
-              2 * \text{padding} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
+              2 \times \text{padding} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
 
     Examples::
 
@@ -494,7 +493,7 @@ class AvgPool2d(_AvgPoolNd):
     .. math::
 
         out(N_i, C_j, h, w)  = \frac{1}{kH * kW} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1}
-                               input(N_i, C_j, stride[0] * h + m, stride[1] * w + n)
+                               input(N_i, C_j, stride[0] \times h + m, stride[1] \times w + n)
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points.
@@ -514,14 +513,14 @@ class AvgPool2d(_AvgPoolNd):
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, H_{out}, W_{out})`, where
 
           .. math::
-              H_{out} = \left\lfloor\frac{H_{in}  + 2 * \text{padding}[0] -
+              H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] -
                 \text{kernel\_size}[0]}{\text{stride}[0]} + 1\right\rfloor
 
           .. math::
-              W_{out} = \left\lfloor\frac{W_{in}  + 2 * \text{padding}[1] -
+              W_{out} = \left\lfloor\frac{W_{in}  + 2 \times \text{padding}[1] -
                 \text{kernel\_size}[1]}{\text{stride}[1]} + 1\right\rfloor
 
     Examples::
@@ -557,11 +556,12 @@ class AvgPool3d(_AvgPoolNd):
     can be precisely described as:
 
     .. math::
-
-        \text{out}(N_i, C_j, d, h, w)  = \sum_{k=0}^{kD-1} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1}
-                \frac{\text{input}(N_i, C_j, \text{stride}[0] * d + k, \text{stride}[1] * h + m,
-                        \text{stride}[2] * w + n)}
-                     {kD * kH * kW}
+        \begin{aligned}
+            \text{out}(N_i, C_j, d, h, w) ={} & \sum_{k=0}^{kD-1} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1} \\
+                                              & \frac{\text{input}(N_i, C_j, \text{stride}[0] \times d + k,
+                                                      \text{stride}[1] \times h + m, \text{stride}[2] \times w + n)}
+                                                     {kD \times kH \times kW}
+        \end{aligned}
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on all three sides
     for :attr:`padding` number of points.
@@ -581,18 +581,18 @@ class AvgPool3d(_AvgPoolNd):
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
 
           .. math::
-              D_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[0] -
+              D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] -
                     \text{kernel\_size}[0]}{\text{stride}[0]} + 1\right\rfloor
 
           .. math::
-              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding}[1] -
+              H_{out} = \left\lfloor\frac{H_{in} + 2 \times \text{padding}[1] -
                     \text{kernel\_size}[1]}{\text{stride}[1]} + 1\right\rfloor
 
           .. math::
-              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding}[2] -
+              W_{out} = \left\lfloor\frac{W_{in} + 2 \times \text{padding}[2] -
                     \text{kernel\_size}[2]}{\text{stride}[2]} + 1\right\rfloor
 
     Examples::
@@ -718,11 +718,11 @@ class LPPool1d(_LPPoolNd):
 
     Shape:
         - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})` where
+        - Output: :math:`(N, C, L_{out})`, where
 
           .. math::
               L_{out} = \left\lfloor\frac{L_{in} +
-              2 * \text{padding} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
+              2 \times \text{padding} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
 
     Examples::
         >>> # power-2 pool of window of length 3, with stride 2.
@@ -746,7 +746,7 @@ class LPPool2d(_LPPoolNd):
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
     - At p = :math:`\infty`, one gets Max Pooling
-    - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
+    - At p = 1, one gets Sum Pooling (which is proportional to average pooling)
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
 
@@ -764,14 +764,14 @@ class LPPool2d(_LPPoolNd):
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, H_{out}, W_{out})`, where
 
           .. math::
-              H_{out} = \left\lfloor\frac{H_{in}  + 2 * \text{padding}[0] - \text{dilation}[0] *
+              H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] - \text{dilation}[0] \times
                     (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
           .. math::
-              W_{out} = \left\lfloor\frac{W_{in}  + 2 * \text{padding}[1] - \text{dilation}[1] *
+              W_{out} = \left\lfloor\frac{W_{in}  + 2 \times \text{padding}[1] - \text{dilation}[1] \times
                     (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
     Examples::
@@ -799,6 +799,9 @@ class _AdaptiveMaxPoolNd(Module):
 
     def extra_repr(self):
         return 'output_size={}'.format(self.output_size)
+
+# FIXME (by @ssnl): Improve adaptive pooling docs: specify what the input and
+#   output shapes are, and how the operation computes output.
 
 
 class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):

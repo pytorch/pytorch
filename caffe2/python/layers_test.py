@@ -185,6 +185,28 @@ class TestLayers(LayersTestCase):
         predict_net = self.get_predict_net()
         self.assertNetContainOps(predict_net, [mat_mul_spec])
 
+    def testFCwithAxis2(self):
+        input_dim = 10
+        output_dim = 30
+        max_length = 20
+        input_record = self.new_record(
+            schema.Struct(
+                ('history_sequence', schema.Scalar((np.float32, (max_length,
+                    input_dim)))),
+            )
+        )
+        fc_out = self.model.FC(
+            input_record.history_sequence, output_dim,
+            axis=2)
+        self.model.output_schema = fc_out
+        self.assertEqual(
+            schema.Scalar((np.float32, (max_length, output_dim))),
+            fc_out
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
+
     def testSparseLookupSumPooling(self):
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('sparse', schema.Struct(
@@ -826,15 +848,22 @@ class TestLayers(LayersTestCase):
 
     @given(
         X=hu.arrays(dims=[2, 5, 6]),
+        use_layer_norm_op=st.booleans(),
     )
-    def testLayerNormalization(self, X):
-        input_record = self.new_record(schema.Scalar((np.float32, (5, 6,))))
+    def testLayerNormalization(self, X, use_layer_norm_op):
+        expect = (5, 6,)
+        if not use_layer_norm_op:
+            X = X.reshape(10, 6)
+            expect = (6,)
+        input_record = self.new_record(schema.Scalar((np.float32, expect)))
         schema.FeedRecord(input_record, [X])
-        ln_output = self.model.LayerNormalization(input_record)
-        self.assertEqual(schema.Scalar((np.float32, (5, 6,))), ln_output)
+        ln_output = self.model.LayerNormalization(
+            input_record, use_layer_norm_op=use_layer_norm_op
+        )
+        self.assertEqual(schema.Scalar((np.float32, expect)), ln_output)
         self.model.output_schema = schema.Struct()
 
-        train_init_net, train_net = self.get_training_nets()
+        train_init_net, train_net = self.get_training_nets(add_constants=True)
         workspace.RunNetOnce(train_init_net)
         workspace.RunNetOnce(train_net)
 

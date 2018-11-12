@@ -2,10 +2,14 @@
 
 #include "caffe2/core/net_async_tracing.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_net_async_optimize_polling,
     true,
     "Use event callbacks whenever possible instead of polling");
+C10_DEFINE_bool(
+    caffe2_net_async_run_root_tasks_inline,
+    false,
+    "Run root tasks in current thread instread of scheduling to threadpool");
 
 namespace caffe2 {
 
@@ -35,6 +39,17 @@ void AsyncSchedulingNet::Wait() {
   }
 }
 
+bool AsyncSchedulingNet::isInlineTask(int parent_id, int child_id) const {
+  if (!use_dfs_scheduling_) {
+    return false;
+  }
+  const auto* last_parent_op = lastTaskOp(parent_id);
+  const auto* first_child_op = firstTaskOp(child_id);
+  // check that we do not cross device boundary
+  return IsSameDevice(
+      last_parent_op->device_option(), first_child_op->device_option());
+}
+
 void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
   if (!testAndSetScheduled(task_id)) {
     return;
@@ -47,6 +62,16 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
       }
       if (!run(task_id, stream_id)) {
         success_ = false;
+      }
+    }
+
+    if (report_stats_) {
+      auto last_op_id = lastTaskOpId(task_id);
+      auto* last_op = lastTaskOp(task_id);
+      if (last_op->device_option().device_type() == PROTO_CPU &&
+          last_op->HasAsyncPart()) {
+        last_op->event().SetCallback(
+            [this, last_op_id] { counters_.AddPerOpAsyncEndTime(last_op_id); });
       }
     }
 
@@ -63,7 +88,7 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
             canSchedule(child_id)) {
           // if DFS scheduling is enabled, run children inline,
           // ignore DFS scheduling in callbacks
-          schedule(child_id, use_dfs_scheduling_);
+          schedule(child_id, isInlineTask(task_id, child_id));
         } else {
           bool parent_failed = false;
           bool parent_needs_polling = false;
@@ -102,7 +127,7 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
           if (parent_failed) {
             // one of parents failed, set failure flag and wrap up execution
             success_ = false;
-            schedule(child_id, use_dfs_scheduling_);
+            schedule(child_id, isInlineTask(task_id, child_id));
           } else if (parent_needs_polling) {
             // some parents are blocking us from scheduling a child and don't
             // support callbacks, using polling
@@ -119,7 +144,7 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
             }
           } else {
             // we're ready to schedule a child
-            schedule(child_id, use_dfs_scheduling_);
+            schedule(child_id, isInlineTask(task_id, child_id));
           }
         }
       }
@@ -195,33 +220,39 @@ void AsyncSchedulingNet::pollAndSchedule(int task_id) {
 }
 
 void AsyncSchedulingNet::finishRun() {
-  {
-    std::unique_lock<std::mutex> lock(running_mutex_);
-    running_ = false;
-  }
+  std::unique_lock<std::mutex> lock(running_mutex_);
   // wait for scheduled ops and make sure all events are marked as finished
   finalizeEvents();
+  if (report_stats_) {
+    counters_.ReportRunEnd();
+  }
   // notify observers and waiters
   StopAllObservers();
+  running_ = false;
   running_cv_.notify_all();
 }
 
 bool AsyncSchedulingNet::RunAsync() {
   try {
-    std::unique_lock<std::mutex> lock(running_mutex_);
-    if (running_) {
-      LOG(ERROR) << "Detected concurrent runs";
-      return false;
-    }
-    running_ = true;
-    reset();
+    {
+      std::unique_lock<std::mutex> lock(running_mutex_);
+      if (running_) {
+        LOG(ERROR) << "Detected concurrent runs";
+        return false;
+      }
+      running_ = true;
+      reset();
 
-    StartAllObservers();
-    tracing::startIter(tracer_);
+      StartAllObservers();
+      tracing::startIter(tracer_);
+      if (report_stats_) {
+        counters_.ReportRunStart();
+      }
+    }
 
     for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
       if (parents(task_id).empty()) {
-        schedule(task_id);
+        schedule(task_id, FLAGS_caffe2_net_async_run_root_tasks_inline);
       }
     }
   } catch (const std::exception& e) {

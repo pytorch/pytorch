@@ -23,7 +23,7 @@ do
 done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
-pip install pytest torchvision
+pip install pytest scipy torchvision
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
 fi

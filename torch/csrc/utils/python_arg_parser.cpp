@@ -103,10 +103,11 @@ bool FunctionParameter::check(PyObject* obj) {
       return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkDouble(obj));
     }
     case ParameterType::SCALAR:
+      if (PyComplex_Check(obj)) {
+        return true;
+      }
+      // fallthrough
     case ParameterType::DOUBLE: {
-      // NOTE: we don't currently accept most NumPy types as Scalars. np.float64
-      // is okay because it's a subclass of PyFloat. We may want to change this
-      // in the future.
       if (THPUtils_checkDouble(obj)) {
         return true;
       }
@@ -167,12 +168,13 @@ std::string FunctionParameter::type_name() const {
   }
 }
 
-static inline at::optional<int64_t> parse_as_integer(const std::string& s) {
-  if (s.empty()) return at::nullopt;
+static inline c10::optional<int64_t> parse_as_integer(const std::string& s) {
+  if (s.empty())
+    return c10::nullopt;
   char *str_end;
   long ans = strtol(s.c_str(), &str_end, 0);
   // *str_end == 0 if the entire string was parsed as an integer.
-  return (*str_end == 0) ? at::optional<int64_t>(ans) : at::nullopt;
+  return (*str_end == 0) ? c10::optional<int64_t>(ans) : c10::nullopt;
 }
 
 /*
@@ -222,11 +224,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else if (type_ == ParameterType::DOUBLE) {
     default_double = atof(str.c_str());
   } else if (type_ == ParameterType::SCALAR) {
-    if (str == "None") {
-      // This is a bit awkward, but convenient for clamp which takes Scalars,
-      // but allows None.
-      default_scalar = at::Scalar(NAN);
-    } else {
+    if (str != "None") {
       // we sometimes rely on integer-vs-float values, e.g. with arange.
       const auto as_integer = parse_as_integer(str);
       default_scalar = as_integer.has_value() ? at::Scalar(as_integer.value()) :
@@ -449,6 +447,13 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     PyObject* obj = nullptr;
     bool is_kwd = false;
     if (arg_pos < nargs) {
+      // extra positional args given after single positional IntList arg
+      if (param.keyword_only) {
+        if (raise_exception) {
+          extra_args(*this, nargs);
+        }
+        return false;
+      }
       obj = PyTuple_GET_ITEM(args, arg_pos);
     } else if (kwargs) {
       obj = PyDict_GetItem(kwargs, param.python_name);

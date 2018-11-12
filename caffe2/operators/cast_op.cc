@@ -10,8 +10,8 @@ bool CastOp<CPUContext>::DoRunWithType() {
   output->ResizeLike(input);
   const auto* data = input.template data<SrcType>();
   auto* out = output->template mutable_data<DstType>();
-  auto N = input.size();
-  for (TIndex i = 0; i < N; ++i) {
+  auto N = input.numel();
+  for (int64_t i = 0; i < N; ++i) {
     out[i] = static_cast<DstType>(data[i]);
   }
   return true;
@@ -52,7 +52,7 @@ void CastOp<CPUContext>::SetBody(TensorProto_DataType to) {
       body_ = &CastOp<CPUContext>::DoRunWithDstType<int64_t>;
       break;
     case TensorProto_DataType_FLOAT16:
-      CAFFE_THROW("Casting to and from float16 on CPU is not supported yet");
+      CAFFE_THROW("Casting to and from at::Half on CPU is not supported yet");
       // break;
     case TensorProto_DataType_DOUBLE:
       //body_ = &CastOp::DoRunIncFp16WithDstType<double>;
@@ -122,7 +122,7 @@ message TensorProto {
     UINT16 = 8;  // uint16_t
     INT16 = 9;  // int16_t
     INT64 = 10;  // int64_t
-    FLOAT16 = 12;  // caffe2::__f16, caffe2::float16
+    FLOAT16 = 12;  // at::Half
     DOUBLE = 13;  // double
   }
 ```
@@ -178,7 +178,7 @@ Y: [[9 5 0]
         "Y",
         "*(type: Tensor`<'to' type>`)* Output tensor with the same shape as "
         "input with type specified by the `to` argument.")
-    .InheritOnnxSchema("Cast");
+    .InheritOnnxSchema();
 
 // Some Casts are compatible with gradients, but for now we don't support it
 // GRADIENT_NOT_IMPLEMENTED_YET(Cast);

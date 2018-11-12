@@ -135,17 +135,17 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   }
 
   input = THCTensor_(newContiguous)(state, input);
-  real* input_data = THCTensor_(data)(state, input);
+  scalar_t* input_data = THCTensor_(data)(state, input);
 
   THCTensor_(resize4d)(state, output, batchSize, nInputPlane, nOutputRows, nOutputCols);
   THCUNN_resizeAs_indices(state, indices, output);
 
   THCIndex_t* indices_data = THCIndexTensor_(data)(state, indices);
-  real* output_data = THCTensor_(data)(state, output);
+  scalar_t* output_data = THCTensor_(data)(state, output);
 
   int count = THCTensor_(nElement)(state, output);
 
-  MaxPoolForward<real, accreal> <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
+  MaxPoolForward<scalar_t, accreal> <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
       (count, input_data,
       batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
       kH, kW, dH, dW, padH, padW, dilationH, dilationW, output_data, indices_data);
@@ -227,7 +227,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   uint64_t maxGridZ = THCState_getCurrentDeviceProperties(state)->maxGridSize[2];
   if (maxGridY < grid.y) grid.y = maxGridY;
   if (maxGridZ < grid.z) grid.z = maxGridZ;
-  MaxPoolBackward<real, accreal> <<< grid, BACKWARD_THREADS, 0, THCState_getCurrentStream(state) >>>
+  MaxPoolBackward<scalar_t, accreal> <<< grid, BACKWARD_THREADS, 0, THCState_getCurrentStream(state) >>>
       (count,
       THCTensor_(data)(state, gradOutput),
       THCIndexTensor_(data)(state, indices),

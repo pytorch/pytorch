@@ -52,6 +52,7 @@ REGISTER_CPU_OPERATOR(
     SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient,
     AbstractLengthsWithMainInputGradientOp<
         float,
+        float,
         int,
         CPUContext,
         WeightedSumReducerDef::template ReducerGradient<float, CPUContext>,
@@ -335,18 +336,18 @@ OUTPUT:
 template <typename Def>
 string FormatDoc() {
   string doc = Def::doc;
-  ReplaceAll(doc, "{op}", Def::OpDef::name);
-  ReplaceAll(doc, "{op_doc}", Def::OpDef::doc);
+  c10::ReplaceAll(doc, "{op}", Def::OpDef::name);
+  c10::ReplaceAll(doc, "{op_doc}", Def::OpDef::doc);
   if (strcmp(Def::OpDef::name, "Max") == 0) {
-    ReplaceAll(doc, "{extra}", kLengthsMaxExtra);
+    c10::ReplaceAll(doc, "{extra}", kLengthsMaxExtra);
   } else if (strcmp(Def::OpDef::name, "Mean") == 0) {
-    ReplaceAll(doc, "{extra}", kLengthsMeanExtra);
+    c10::ReplaceAll(doc, "{extra}", kLengthsMeanExtra);
   } else if (strcmp(Def::OpDef::name, "Sum") == 0) {
-    ReplaceAll(doc, "{extra}", kLengthsSumExtra);
+    c10::ReplaceAll(doc, "{extra}", kLengthsSumExtra);
   } else if (strcmp(Def::OpDef::name, "WeightedSum") == 0) {
-    ReplaceAll(doc, "{extra}", kLengthsWeightedSumExtra);
+    c10::ReplaceAll(doc, "{extra}", kLengthsWeightedSumExtra);
   } else {
-    ReplaceAll(doc, "{extra}", " ");
+    c10::ReplaceAll(doc, "{extra}", " ");
   }
   return doc;
 }
@@ -367,6 +368,7 @@ constexpr bool equal(
 
 // Helper macro when the main op is defined elsewhere, and we only need to
 // define the schema, and the gradient op.
+// TODO: enable input fillers
 #define REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(                            \
     segment_name, gradient_name, ...)                                         \
   static_assert(                                                              \
@@ -382,13 +384,15 @@ constexpr bool equal(
   OPERATOR_SCHEMA(segment_name)                                               \
       .NumInputs(__VA_ARGS__::ForwardOp::kNumInputs)                          \
       .NumOutputs(1)                                                          \
+      .DisallowInputFillers()                                                 \
       .SetDoc(FormatDoc<__VA_ARGS__>())                                       \
       .Output(0, "OUTPUT", "Aggregated tensor")                               \
       .FillUsing(__VA_ARGS__::PopulateSchema);                                \
   REGISTER_CPU_OPERATOR_STR(string(#gradient_name), __VA_ARGS__::BackwardOp); \
   OPERATOR_SCHEMA(gradient_name)                                              \
       .NumInputs(__VA_ARGS__::BackwardOp::kNumInputs)                         \
-      .NumOutputs(1);                                                         \
+      .NumOutputs(1)                                                          \
+      .DisallowInputFillers();                                                \
   REGISTER_GRADIENT_STR(string(#segment_name), __VA_ARGS__::GetGradient)
 
 #define REGISTER_SEGMENT_DEF(segment_name, gradient_name, ...)               \
@@ -504,37 +508,6 @@ REGISTER_SEGMENT_DEF(
     LengthsWeightedSum,
     LengthsWeightedSumGradient,
     AbstractLengthsDef<float, int, CPUContext, WeightedSumReducerDef, false>);
-
-// SparseLengths[Sum,WeightedSum,Mean] are now implemented separately,
-// so we only rely to the historical implementation for the backward + schema.
-REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
-    SparseLengthsSum,
-    SparseLengthsSumGradient,
-    AbstractSparseLengthsDef<
-        float,
-        int,
-        CPUContext,
-        SumReducerDef,
-        true /*GradientNeedIndices*/>)
-REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
-    SparseLengthsWeightedSum,
-    SparseLengthsWeightedSumGradient,
-    AbstractSparseLengthsDef<
-        float,
-        int,
-        CPUContext,
-        WeightedSumReducerDef,
-        true /*GradientNeedIndices*/>)
-
-REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
-    SparseLengthsMean,
-    SparseLengthsMeanGradient,
-    AbstractSparseLengthsDef<
-        float,
-        int,
-        CPUContext,
-        MeanReducerDef,
-        true /*GradientNeedIndices*/>)
 
 // Auxiliary output gradients are currently implemented only for Lengths version
 #define REGISTER_GRADIENT_WITH_MAIN_INPUT(gradient_name, ...)        \

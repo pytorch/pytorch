@@ -31,17 +31,21 @@ CUDA_INCLUDES = """\
 # in both cases, we unconditionally cast both tensors (and rely
 # on the surrounding code to establish the necessary invariants.)
 
+COPY_CPU = CodeTemplate("""\
+_copy_(dst, src);
+""")
+
 COPY = CodeTemplate("""\
 ${THTensor}_copy${cuda}${src_scalar_name}(${state,}\
-static_cast<TensorImpl*>(dst.pImpl)->tensor, \
-static_cast<TensorImpl*>(src.pImpl)->tensor);
+dst.unsafeGetTensorImpl(), \
+src.unsafeGetTensorImpl());
 """)
 
 COPY_ASYNC_CPU = CodeTemplate("""\
 if (non_blocking) {
     ${THTensor}_copyAsyncCPU(${state,}\
-static_cast<TensorImpl*>(dst.pImpl)->tensor, \
-static_cast<TensorImpl*>(src.pImpl)->tensor);
+dst.unsafeGetTensorImpl(), \
+src.unsafeGetTensorImpl());
     break;
 }
 """)
@@ -49,8 +53,8 @@ static_cast<TensorImpl*>(src.pImpl)->tensor);
 COPY_ASYNC_CUDA = CodeTemplate("""\
 if (non_blocking) {
     ${THTensor}_copyAsyncCuda(${state,}\
-static_cast<TensorImpl*>(dst.pImpl)->tensor, \
-static_cast<TensorImpl*>(src.pImpl)->tensor);
+dst.unsafeGetTensorImpl(), \
+src.unsafeGetTensorImpl());
     break;
 }
 """)
@@ -70,7 +74,7 @@ Tensor & ${Type}::s_copy_(Tensor & dst, const Tensor & src, bool non_blocking) c
     default:
       ${function_fallthrough}
   }
-  dst.pImpl->maybe_zero_dim(src.pImpl->dim() == 0);
+  dst.unsafeGetTensorImpl()->maybe_zero_dim(src.dim() == 0);
   return dst;
 }
 """)
@@ -91,7 +95,7 @@ Tensor & ${Type}::_s_copy_from(const Tensor & src, Tensor & dst, bool non_blocki
       AT_ERROR("copy does not support ", toString(), " to ", dst.type().toString(), " copy.");
       break;
   }
-  dst.pImpl->maybe_zero_dim(src.pImpl->dim() == 0);
+  dst.unsafeGetTensorImpl()->maybe_zero_dim(src.dim() == 0);
   return dst; // NB! dst
 }
 """)
@@ -138,7 +142,10 @@ def create_one_copy(dst_type, all_types):
         if dst_type['ScalarType'] == src_type['ScalarType']:
             if dst_type['Backend'] == 'CUDA' and src_type['Backend'] == 'CPU':
                 copies.append(COPY_ASYNC_CPU.substitute(body_env))
-        copies.append(COPY.substitute(body_env))
+        if dst_type['Backend'] == 'CPU' and src_type['Backend'] == 'CPU':
+            copies.append(COPY_CPU.substitute())
+        else:
+            copies.append(COPY.substitute(body_env))
 
         copy_body.append(CASE.substitute(body_env, copies=copies))
 
@@ -160,7 +167,7 @@ def create_one_copy(dst_type, all_types):
     checked_cast_dst = ''
     if dst_type['Density'] == 'Dense':
         checked_cast_dst = \
-            'checked_cast_tensor<TensorImpl>(dst.pImpl, "dst", 0, false, Backend::{}, ScalarType::{});' \
+            'checked_tensor_unwrap(dst, "dst", 0, false, Backend::{}, ScalarType::{});' \
             .format(dst_type['Backend'],
                     dst_type['ScalarName'])
 
@@ -204,7 +211,10 @@ def create_one_copy_from(src_type, all_types):
             # function
             if dst_type['Backend'] == 'CPU' and src_type['Backend'] == 'CUDA':
                 copies.append(COPY_ASYNC_CUDA.substitute(body_env))
-        copies.append(COPY.substitute(body_env))
+        if dst_type['Backend'] == 'CPU' and src_type['Backend'] == 'CPU':
+            copies.append(COPY_CPU.substitute())
+        else:
+            copies.append(COPY.substitute(body_env))
 
         copy_body.append(CASE.substitute(body_env, copies=copies))
 
@@ -212,7 +222,7 @@ def create_one_copy_from(src_type, all_types):
     checked_cast_src = ''
     if src_type['Density'] != 'Sparse':
         checked_cast_src = \
-            'checked_cast_tensor<TensorImpl>(src.pImpl, "src", 0, false, Backend::{}, ScalarType::{});' \
+            'checked_tensor_unwrap(src, "src", 0, false, Backend::{}, ScalarType::{});' \
             .format(src_type['Backend'], src_type['ScalarName'])
 
     return FUNCTION_FROM.substitute(src_type, copy_body=copy_body, checked_cast_src=checked_cast_src)
@@ -238,7 +248,7 @@ def create(all_types, backend):
         top_env['copy_includes'].append(
             '#include "ATen/{}.h"'.format(the_type['Type']))
     top_env['copy_includes'].append(
-        '#include "ATen/TensorImpl.h"')
+        '#include "ATen/core/TensorImpl.h"')
 
     # Code generation
     for the_type in all_types:

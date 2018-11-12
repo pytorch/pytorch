@@ -29,10 +29,10 @@ class SigmoidFocalLossOp final : public Operator<Context> {
  public:
   SigmoidFocalLossOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)),
-        num_classes_(OperatorBase::GetSingleArgument<int>("num_classes", 80)),
-        gamma_(OperatorBase::GetSingleArgument<float>("gamma", 1.)),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0.25)) {
+        scale_(this->template GetSingleArgument<float>("scale", 1.)),
+        num_classes_(this->template GetSingleArgument<int>("num_classes", 80)),
+        gamma_(this->template GetSingleArgument<float>("gamma", 1.)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 0.25)) {
     CAFFE_ENFORCE(scale_ >= 0);
   }
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -56,10 +56,10 @@ class SigmoidFocalLossGradientOp final : public Operator<Context> {
  public:
   SigmoidFocalLossGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)),
-        num_classes_(OperatorBase::GetSingleArgument<int>("num_classes", 80)),
-        gamma_(OperatorBase::GetSingleArgument<float>("gamma", 1.)),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0.25)) {
+        scale_(this->template GetSingleArgument<float>("scale", 1.)),
+        num_classes_(this->template GetSingleArgument<int>("num_classes", 80)),
+        gamma_(this->template GetSingleArgument<float>("gamma", 1.)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 0.25)) {
     CAFFE_ENFORCE(scale_ >= 0);
   }
   USE_OPERATOR_CONTEXT_FUNCTIONS;

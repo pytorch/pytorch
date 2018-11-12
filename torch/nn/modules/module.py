@@ -42,7 +42,7 @@ class Module(object):
                return F.relu(self.conv2(x))
 
     Submodules assigned in this way will be registered, and will have their
-    parameters converted too when you call `.cuda()`, etc.
+    parameters converted too when you call :meth:`to`, etc.
     """
 
     dump_patches = False
@@ -66,6 +66,8 @@ class Module(object):
         self._backward_hooks = OrderedDict()
         self._forward_hooks = OrderedDict()
         self._forward_pre_hooks = OrderedDict()
+        self._state_dict_hooks = OrderedDict()
+        self._load_state_dict_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
         self.training = True
 
@@ -498,8 +500,13 @@ class Module(object):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        # Support loading old checkpoints that don't have the following attrs:
         if '_forward_pre_hooks' not in self.__dict__:
             self._forward_pre_hooks = OrderedDict()
+        if '_state_dict_hooks' not in self.__dict__:
+            self._state_dict_hooks = OrderedDict()
+        if '_load_state_dict_pre_hooks' not in self.__dict__:
+            self._load_state_dict_pre_hooks = OrderedDict()
 
     def __getattr__(self, name):
         if '_parameters' in self.__dict__:
@@ -571,6 +578,17 @@ class Module(object):
         else:
             object.__delattr__(self, name)
 
+    def _register_state_dict_hook(self, hook):
+        r"""These hooks will be called with arguments: `self`, `state_dict`,
+        `prefix`, `local_metadata`, after the `state_dict` of `self` is set.
+        Note that only parameters and buffers of `self` or its children are
+        guaranteed to exist in `state_dict`. The hooks may modify `state_dict`
+        inplace or return a new one.
+        """
+        handle = hooks.RemovableHandle(self._state_dict_hooks)
+        self._state_dict_hooks[handle.id] = hook
+        return handle
+
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         r"""Returns a dictionary containing a whole state of the module.
 
@@ -590,7 +608,7 @@ class Module(object):
         if destination is None:
             destination = OrderedDict()
             destination._metadata = OrderedDict()
-        destination._metadata[prefix[:-1]] = dict(version=self._version)
+        destination._metadata[prefix[:-1]] = local_metadata = dict(version=self._version)
         for name, param in self._parameters.items():
             if param is not None:
                 destination[prefix + name] = param if keep_vars else param.data
@@ -600,16 +618,31 @@ class Module(object):
         for name, module in self._modules.items():
             if module is not None:
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
+        for hook in self._state_dict_hooks.values():
+            hook_result = hook(self, destination, prefix, local_metadata)
+            if hook_result is not None:
+                destination = hook_result
         return destination
 
-    def _load_from_state_dict(self, state_dict, prefix, metadata, strict, missing_keys, unexpected_keys, error_msgs):
+    def _register_load_state_dict_pre_hook(self, hook):
+        r"""These hooks will be called with arguments: `state_dict`, `prefix`,
+        `local_metadata`, `strict`, `missing_keys`, `unexpected_keys`,
+        `error_msgs`, before loading `state_dict` into `self`. These arguments
+        are exactly the same as those of `_load_from_state_dict`.
+        """
+        handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
+        self._load_state_dict_pre_hooks[handle.id] = hook
+        return handle
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
         r"""Copies parameters and buffers from :attr:`state_dict` into only
         this module, but not its descendants. This is called on every submodule
         in :meth:`~torch.nn.Module.load_state_dict`. Metadata saved for this
-        module in input :attr:`state_dict` is provided as :attr`metadata`.
-        For state dicts without meta data, :attr`metadata` is empty.
+        module in input :attr:`state_dict` is provided as :attr`local_metadata`.
+        For state dicts without metadata, :attr`local_metadata` is empty.
         Subclasses can achieve class-specific backward compatible loading using
-        the version number at `metadata.get("version", None)`.
+        the version number at `local_metadata.get("version", None)`.
 
         .. note::
             :attr:`state_dict` is not the same object as the input
@@ -621,7 +654,7 @@ class Module(object):
                 persistent buffers.
             prefix (str): the prefix for parameters and buffers used in this
                 module
-            metadata (dict): a dict containing the metadata for this moodule.
+            local_metadata (dict): a dict containing the metadata for this moodule.
                 See
             strict (bool): whether to strictly enforce that the keys in
                 :attr:`state_dict` with :attr:`prefix` match the names of
@@ -634,6 +667,9 @@ class Module(object):
                 list, and will be reported together in
                 :meth:`~torch.nn.Module.load_state_dict`
         """
+        for hook in self._load_state_dict_pre_hooks.values():
+            hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+
         local_name_params = itertools.chain(self._parameters.items(), self._buffers.items())
         local_state = {k: v.data for k, v in local_name_params if v is not None}
 
@@ -648,9 +684,9 @@ class Module(object):
 
                 if input_param.shape != param.shape:
                     # local shape should match the one in checkpoint
-                    error_msgs.append('size mismatch for {}: copying a param of {} from checkpoint, '
-                                      'where the shape is {} in current model.'
-                                      .format(key, param.shape, input_param.shape))
+                    error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
+                                      'the shape in current model is {}.'
+                                      .format(key, input_param.shape, param.shape))
                     continue
 
                 if isinstance(input_param, Parameter):
@@ -722,10 +758,28 @@ class Module(object):
             raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
                                self.__class__.__name__, "\n\t".join(error_msgs)))
 
-    def parameters(self):
+    def _named_members(self, get_members_fn, prefix='', recurse=True):
+        r"""Helper method for yielding various names + members of modules."""
+        memo = set()
+        modules = self.named_modules(prefix=prefix) if recurse else [(prefix, self)]
+        for module_prefix, module in modules:
+            members = get_members_fn(module)
+            for k, v in members:
+                if v is None or v in memo:
+                    continue
+                memo.add(v)
+                name = module_prefix + ('.' if module_prefix else '') + k
+                yield name, v
+
+    def parameters(self, recurse=True):
         r"""Returns an iterator over module parameters.
 
         This is typically passed to an optimizer.
+
+        Args:
+            recurse (bool): if True, then yields parameters of this module
+                and all submodules. Otherwise, yields only parameters that
+                are direct members of this module.
 
         Yields:
             Parameter: module parameter
@@ -738,12 +792,18 @@ class Module(object):
             <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
 
         """
-        for name, param in self.named_parameters():
+        for name, param in self.named_parameters(recurse=recurse):
             yield param
 
-    def named_parameters(self, memo=None, prefix=''):
+    def named_parameters(self, prefix='', recurse=True):
         r"""Returns an iterator over module parameters, yielding both the
-        name of the parameter as well as the parameter itself
+        name of the parameter as well as the parameter itself.
+
+        Args:
+            prefix (str): prefix to prepend to all parameter names.
+            recurse (bool): if True, then yields parameters of this module
+                and all submodules. Otherwise, yields only parameters that
+                are direct members of this module.
 
         Yields:
             (string, Parameter): Tuple containing the name and parameter
@@ -755,27 +815,59 @@ class Module(object):
             >>>        print(param.size())
 
         """
-        if memo is None:
-            memo = set()
-        for name, p in self._parameters.items():
-            if p is not None and p not in memo:
-                memo.add(p)
-                yield prefix + ('.' if prefix else '') + name, p
-        for mname, module in self.named_children():
-            submodule_prefix = prefix + ('.' if prefix else '') + mname
-            for name, p in module.named_parameters(memo, submodule_prefix):
-                yield name, p
+        gen = self._named_members(
+            lambda module: module._parameters.items(),
+            prefix=prefix, recurse=recurse)
+        for elem in gen:
+            yield elem
 
-    def _all_buffers(self, memo=None):
-        if memo is None:
-            memo = set()
-        for name, b in self._buffers.items():
-            if b is not None and b not in memo:
-                memo.add(b)
-                yield b
-        for module in self.children():
-            for b in module._all_buffers(memo):
-                yield b
+    def buffers(self, recurse=True):
+        r"""Returns an iterator over module buffers.
+
+        Args:
+            recurse (bool): if True, then yields buffers of this module
+                and all submodules. Otherwise, yields only buffers that
+                are direct members of this module.
+
+        Yields:
+            torch.Tensor: module buffer
+
+        Example::
+
+            >>> for buf in model.buffers():
+            >>>     print(type(buf.data), buf.size())
+            <class 'torch.FloatTensor'> (20L,)
+            <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+
+        """
+        for name, buf in self.named_buffers(recurse=recurse):
+            yield buf
+
+    def named_buffers(self, prefix='', recurse=True):
+        r"""Returns an iterator over module buffers, yielding both the
+        name of the buffer as well as the buffer itself.
+
+        Args:
+            prefix (str): prefix to prepend to all buffer names.
+            recurse (bool): if True, then yields buffers of this module
+                and all submodules. Otherwise, yields only buffers that
+                are direct members of this module.
+
+        Yields:
+            (string, torch.Tensor): Tuple containing the name and buffer
+
+        Example::
+
+            >>> for name, buf in self.named_buffers():
+            >>>    if name in ['running_var']:
+            >>>        print(buf.size())
+
+        """
+        gen = self._named_members(
+            lambda module: module._buffers.items(),
+            prefix=prefix, recurse=recurse)
+        for elem in gen:
+            yield elem
 
     def children(self):
         r"""Returns an iterator over immediate children modules.

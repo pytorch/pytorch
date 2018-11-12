@@ -17,14 +17,14 @@ class MomentsOp final : public Operator<Context> {
 
   MomentsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axes_(OperatorBase::GetRepeatedArgument<int>("axes")),
+        axes_(this->template GetRepeatedArgument<int>("axes")),
         OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true) {}
 
   bool RunOnDevice() override {
     const auto& X = Input(0);
     auto* mean = Output(0);
     auto* variance = Output(1);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
@@ -36,7 +36,7 @@ class MomentsOp final : public Operator<Context> {
           ndim,
           "Axes ids must be smaller than the dimensions of input.");
     }
-    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
     std::vector<int> Y_dims;
     Y_dims.reserve(ndim);
     std::size_t cur_axis = 0;
@@ -76,7 +76,7 @@ class MomentsGradientOp final : public Operator<Context> {
 
   MomentsGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axes_(OperatorBase::GetRepeatedArgument<int>("axes")) {}
+        axes_(this->template GetRepeatedArgument<int>("axes")) {}
 
   bool RunOnDevice() override {
     const auto& dmean = Input(0);
@@ -84,7 +84,7 @@ class MomentsGradientOp final : public Operator<Context> {
     const auto& X = Input(2);
     const auto& mean = Input(3);
     auto* dX = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
@@ -96,7 +96,7 @@ class MomentsGradientOp final : public Operator<Context> {
           ndim,
           "Axes ids must be smaller than the dimensions of input.");
     }
-    const std::vector<int> dX_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> dX_dims(X.sizes().cbegin(), X.sizes().cend());
     std::vector<int> dY_dims = dX_dims;
     for (const int axis : axes_) {
       dY_dims[axis] = 1;

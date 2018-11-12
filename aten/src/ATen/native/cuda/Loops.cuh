@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -22,9 +24,6 @@
 
 
 namespace at { namespace native {
-
-// NOTE: CUDA requires func_t to be passed by value, while ROCm fails to compile
-// unless it's passed as a const reference.
 
 template<int nt, int vt, typename func_t>
 __launch_bounds__(nt, 4)
@@ -66,6 +65,13 @@ template<typename func_t>
 void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      gpu_nullary_kernel(sub_iter, f);
+    }
+    return;
+  }
+
   char* out_data = (char*)iter.data_ptr(0);
 
   using traits = function_traits<func_t>;
@@ -96,6 +102,13 @@ template<typename func_t>
 void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      gpu_unary_kernel(sub_iter, f);
+    }
+    return;
+  }
+
   char* out_data = (char*)iter.data_ptr(0);
   const char* in1_data = (char*)iter.data_ptr(1);
 
@@ -117,7 +130,7 @@ void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
     auto strides = iter.get_inner_strides();
     int stride0 = strides[0];
     int stride1 = strides[1];
-    launch_kernel<512, 1>(numel, [=]__device__(int idx) {
+    launch_kernel<512, 1>(numel, [out_data, stride0, stride1, in1_data, f]__device__(int idx) {
       arg0_t* out = (arg0_t*)&out_data[stride0 * idx];
       arg1_t* in1 = (arg1_t*)&in1_data[stride1 * idx];
       *out = f(*in1);
@@ -174,7 +187,7 @@ void gpu_binary_kernel(TensorIterator& iter, const func_t& f) {
     int stride0 = strides[0];
     int stride1 = strides[1];
     int stride2 = strides[2];
-    launch_kernel<512, 1>(numel, [=]__device__(int idx) {
+    launch_kernel<512, 1>(numel, [stride0, stride1, out_data, in1_data, f, stride2, in2_data]__device__(int idx) {
       arg0_t* out = (arg0_t*)&out_data[stride0 * idx];
       arg1_t* in1 = (arg1_t*)&in1_data[stride1 * idx];
       arg2_t* in2 = (arg2_t*)&in2_data[stride2 * idx];

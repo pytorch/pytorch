@@ -744,6 +744,12 @@ DataParallel layers (multi-GPU, distributed)
 .. autoclass:: torch.nn.parallel.DistributedDataParallel
     :members:
 
+:hidden:`DistributedDataParallelCPU`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: torch.nn.parallel.DistributedDataParallelCPU
+    :members:
+
 
 Utilities
 ---------
@@ -1173,6 +1179,11 @@ Distance functions
 
 .. autofunction:: cosine_similarity
 
+:hidden:`pdist`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: pdist
+
 
 Loss functions
 --------------
@@ -1181,6 +1192,11 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: binary_cross_entropy
+
+:hidden:`binary_cross_entropy_with_logits`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: binary_cross_entropy_with_logits
 
 :hidden:`poisson_nll_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1246,11 +1262,6 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: nll_loss
-
-:hidden:`binary_cross_entropy_with_logits`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: binary_cross_entropy_with_logits
 
 :hidden:`smooth_l1_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~

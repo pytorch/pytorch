@@ -1,5 +1,5 @@
 import torch
-from collections import Iterable
+from torch._six import container_abcs
 import torch.testing
 import sys
 from itertools import product
@@ -11,7 +11,7 @@ def zero_gradients(x):
         if x.grad is not None:
             x.grad.detach_()
             x.grad.data.zero_()
-    elif isinstance(x, Iterable):
+    elif isinstance(x, container_abcs.Iterable):
         for elem in x:
             zero_gradients(elem)
 
@@ -23,7 +23,7 @@ def make_jacobian(input, num_out):
         if not input.requires_grad:
             return None
         return torch.zeros(input.nelement(), num_out, dtype=input.dtype)
-    elif isinstance(input, Iterable):
+    elif isinstance(input, container_abcs.Iterable) and not isinstance(input, str):
         jacobians = list(filter(
             lambda x: x is not None, (make_jacobian(elem, num_out) for elem in input)))
         if not jacobians:
@@ -37,7 +37,7 @@ def iter_tensors(x, only_requiring_grad=False):
     if isinstance(x, torch.Tensor):
         if x.requires_grad or not only_requiring_grad:
             yield x
-    elif isinstance(x, Iterable):
+    elif isinstance(x, container_abcs.Iterable) and not isinstance(x, str):
         for elem in x:
             for result in iter_tensors(elem, only_requiring_grad):
                 yield result
@@ -130,16 +130,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point type
     and with ``requires_grad=True``.
 
-    The check between numerical and analytical gradients has the same behaviour as
-    `numpy.allclose <https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html>`_,
-    i.e., it checks that
-
-    .. math::
-
-        \lvert a - n \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert n \rvert
-
-    holds for all elements of analytical gradient :math:`a` and numerical
-    gradient :math:`n`.
+    The check between numerical and analytical gradients uses :func:`~torch.allclose`.
 
     .. note::
         The default values are designed for :attr:`input` of double precision.
@@ -156,7 +147,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     Args:
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor or a tuple of Tensors
-        inputs (tuple of Tensor): inputs to the function
+        inputs (tuple of Tensor or Tensor): inputs to the function
         eps (float, optional): perturbation for finite differences
         atol (float, optional): absolute tolerance
         rtol (float, optional): relative tolerance
@@ -187,7 +178,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             'gradcheck expects at least one input tensor to require gradient, '
             'but none of the them have requires_grad=True.')
 
-    output = _differentiable_outputs(func(*inputs))
+    output = _differentiable_outputs(func(*tupled_inputs))
 
     def fail_test(msg):
         if raise_exception:
@@ -202,14 +193,14 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             return _as_tuple(func(*input))[i]
 
         analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(tupled_inputs, o)
-        numerical = get_numerical_jacobian(fn, inputs, eps=eps)
+        numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
 
         if not correct_grad_sizes:
             return fail_test('Analytical gradient has incorrect size')
 
         for j, (a, n) in enumerate(zip(analytical, numerical)):
             if a.numel() != 0 or n.numel() != 0:
-                if not ((a - n).abs() <= (atol + rtol * n.abs())).all():
+                if not torch.allclose(a, n, rtol, atol):
                     return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
                                      'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
 
@@ -219,9 +210,9 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                              'although analytical gradient matches numerical gradient')
 
     # check if the backward multiplies by grad_output
-    output = _differentiable_outputs(func(*inputs))
+    output = _differentiable_outputs(func(*tupled_inputs))
     if any([o.requires_grad for o in output]):
-        diff_input_list = list(iter_tensors(inputs, True))
+        diff_input_list = list(iter_tensors(tupled_inputs, True))
         if not diff_input_list:
             raise RuntimeError("no Tensors requiring grad found in input")
         grads_input = torch.autograd.grad(output, diff_input_list, [torch.zeros_like(o) for o in output],
@@ -249,16 +240,7 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
     This function checks that backpropagating through the gradients computed
     to the given :attr:`grad_outputs` are correct.
 
-    The check between numerical and analytical gradients has the same behaviour as
-    `numpy.allclose <https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html>`_,
-    i.e., it checks that
-
-    .. math::
-
-        \lvert a - n \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert n \rvert
-
-    holds for all elements of analytical gradient :math:`a` and numerical
-    gradient :math:`n`.
+    The check between numerical and analytical gradients uses :func:`~torch.allclose`.
 
     .. note::
         The default values are designed for :attr:`input` and
@@ -276,9 +258,9 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
     Args:
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor or a tuple of Tensors
-        inputs (tuple of Tensor): inputs to the function
-        grad_outputs (tuple of Tensor, optional): The gradients with respect to
-            the function's outputs.
+        inputs (tuple of Tensor or Tensor): inputs to the function
+        grad_outputs (tuple of Tensor or Tensor, optional): The gradients with
+            respect to the function's outputs.
         eps (float, optional): perturbation for finite differences
         atol (float, optional): absolute tolerance
         rtol (float, optional): relative tolerance
@@ -292,6 +274,8 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
     Returns:
         True if all differences satisfy allclose condition
     """
+    tupled_inputs = _as_tuple(inputs)
+
     if grad_outputs is None:
         # If grad_outputs is not specified, create random Tensors of the same
         # shape, type, and device as the outputs
@@ -300,11 +284,12 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
             if gen_non_contig_grad_outputs:
                 y = torch.testing.make_non_contiguous(y)
             return y.requires_grad_()
-        outputs = _as_tuple(func(*inputs))
-        grad_outputs_gen = (randn_like(x) for x in outputs)
-        grad_outputs = list(grad_outputs_gen) if not isinstance(inputs, tuple) else tuple(grad_outputs_gen)
+        outputs = _as_tuple(func(*tupled_inputs))
+        tupled_grad_outputs = tuple(randn_like(x) for x in outputs)
+    else:
+        tupled_grad_outputs = _as_tuple(grad_outputs)
 
-    num_outputs = len(grad_outputs)
+    num_outputs = len(tupled_grad_outputs)
 
     def new_func(*args):
         input_args = args[:-num_outputs]
@@ -314,4 +299,4 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs, create_graph=True)
         return grad_inputs
 
-    return gradcheck(new_func, inputs + grad_outputs, eps, atol, rtol, raise_exception)
+    return gradcheck(new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception)

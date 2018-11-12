@@ -51,7 +51,7 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   }
 
   variable_list results(values);
-  results[value_idx] = ((THPVariable*)value.get())->cdata;
+  if (value != Py_None) results[value_idx] = ((THPVariable*)value.get())->cdata;
   return results;
 }
 
@@ -169,11 +169,11 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
     throw std::runtime_error(ss.str());
   }
 
-  if (original.type().is_cuda() != result.type().is_cuda()) {
+  if (original.is_cuda() != result.is_cuda()) {
     std::stringstream ss;
     auto name = hook_name(hook);
     ss << "hook '" << name << "' has changed the type of value";
-    if (original.type().is_cuda()) {
+    if (original.is_cuda()) {
       ss << " (was CUDA tensor got CPU tensor)";
     } else {
       ss << " (was CPU tensor got CUDA tensor)";

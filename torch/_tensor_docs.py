@@ -35,6 +35,13 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
     If you have a numpy array and want to avoid a copy, use
     :func:`torch.from_numpy`.
 
+.. warning::
+
+    When data is a tensor `x`, :func:`new_tensor()` reads out 'the data' from whatever it is passed,
+    and constructs a leaf variable. Therefore ``tensor.new_tensor(x)`` is equivalent to ``x.clone().detach()``
+    and ``tensor.new_tensor(x, requires_grad=True)`` is equivalent to ``x.clone().detach().requires_grad_(True)``.
+    The equivalents using ``clone()`` and ``detach()`` are recommended.
+
 Args:
     data (array_like): The returned Tensor copies :attr:`data`.
     {dtype}
@@ -281,14 +288,11 @@ Returns True if all elements in the tensor are non-zero, False otherwise.
 
 Example::
 
-    >>> a = torch.randn(1, 3).mul(2).byte()
+    >>> a = torch.randn(1, 3).byte() % 2
     >>> a
-
-     1  1  0
-    [torch.ByteTensor of size 1x3]
-
+    tensor([[1, 0, 0]], dtype=torch.uint8)
     >>> a.all()
-    False
+    tensor(0, dtype=torch.uint8)
 
 .. function:: all(dim, keepdim=False, out=None) -> Tensor
 
@@ -307,22 +311,22 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4, 2).mul(2).byte()
+    >>> a = torch.randn(4, 2).byte() % 2
     >>> a
-
-     1  1
-     1  0
-     0  0
-     1  0
-    [torch.ByteTensor of size 4x2]
-
+    tensor([[0, 0],
+            [0, 0],
+            [0, 1],
+            [1, 1]], dtype=torch.uint8)
     >>> a.all(dim=1)
+    tensor([0, 0, 0, 1], dtype=torch.uint8)
 
-     1
-     0
-     0
-     0
-    [torch.ByteTensor of size 4]
+""")
+
+add_docstr_all('allclose',
+               r"""
+allclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
+
+See :func:`torch.allclose`
 """)
 
 add_docstr_all('any',
@@ -333,14 +337,11 @@ Returns True if any elements in the tensor are non-zero, False otherwise.
 
 Example::
 
-    >>> a = torch.randn(1, 3).mul(2).byte()
+    >>> a = torch.randn(1, 3).byte() % 2
     >>> a
-
-     1  1  0
-    [torch.ByteTensor of size 1x3]
-
+    tensor([[0, 0, 1]], dtype=torch.uint8)
     >>> a.any()
-    True
+    tensor(1, dtype=torch.uint8)
 
 .. function:: any(dim, keepdim=False, out=None) -> Tensor
 
@@ -359,22 +360,15 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4, 2).mul(2).byte()
+    >>> a = torch.randn(4, 2).byte() % 2
     >>> a
-
-     1  1
-     1  0
-     0  0
-     1  0
-    [torch.ByteTensor of size 4x2]
-
+    tensor([[1, 0],
+            [0, 0],
+            [0, 1],
+            [0, 0]], dtype=torch.uint8)
     >>> a.any(dim=1)
+    tensor([1, 0, 1, 0], dtype=torch.uint8)
 
-     1
-     1
-     0
-     1
-    [torch.ByteTensor of size 4]
 """)
 
 add_docstr_all('apply_',
@@ -447,16 +441,42 @@ In-place version of :meth:`~Tensor.baddbmm`
 
 add_docstr_all('bernoulli',
                r"""
-bernoulli() -> Tensor
+bernoulli(*, generator=None) -> Tensor
+
+Returns a result tensor where each :math:`\texttt{result[i]}` is independently
+sampled from :math:`\text{Bernoulli}(\texttt{self[i]})`. :attr:`self` must have
+floating point ``dtype``, and the result will have the same ``dtype``.
 
 See :func:`torch.bernoulli`
 """)
 
 add_docstr_all('bernoulli_',
                r"""
-bernoulli_() -> Tensor
+.. function:: bernoulli_(p=0.5, *, generator=None) -> Tensor
 
-In-place version of :meth:`~Tensor.bernoulli`
+    Fills each location of :attr:`self` with an independent sample from
+    :math:`\text{Bernoulli}(\texttt{p})`. :attr:`self` can have integral
+    ``dtype``.
+
+.. function:: bernoulli_(p_tensor, *, generator=None) -> Tensor
+
+    :attr:`p_tensor` should be a tensor containing probabilities to be used for
+    drawing the binary random number.
+
+    The :math:`\text{i}^{th}` element of :attr:`self` tensor will be set to a
+    value sampled from :math:`\text{Bernoulli}(\texttt{p\_tensor[i]})`.
+
+    :attr:`self` can have integral ``dtype``, but :attr`p_tensor` must have
+    floating point ``dtype``.
+
+See also :meth:`~Tensor.bernoulli` and :func:`torch.bernoulli`
+""")
+
+add_docstr_all('bincount',
+               r"""
+bincount(weights=None, minlength=0) -> Tensor
+
+See :func:`torch.bincount`
 """)
 
 add_docstr_all('bmm',
@@ -473,6 +493,13 @@ btrifact_with_info(pivot=True) -> (Tensor, Tensor, Tensor)
 See :func:`torch.btrifact_with_info`
 """)
 
+add_docstr_all('btrisolve',
+               r"""
+btrisolve(LU_data, LU_pivots) -> Tensor
+
+See :func:`torch.btrisolve`
+""")
+
 add_docstr_all('cauchy_',
                r"""
 cauchy_(median=0, sigma=1, *, generator=None) -> Tensor
@@ -481,7 +508,7 @@ Fills the tensor with numbers drawn from the Cauchy distribution:
 
 .. math::
 
-    f(x) = \dfrac{1}{\pi} \dfrac{\sigma}{(x - median)^2 + \sigma^2}
+    f(x) = \dfrac{1}{\pi} \dfrac{\sigma}{(x - \text{median})^2 + \sigma^2}
 """)
 
 add_docstr_all('ceil',
@@ -496,6 +523,13 @@ add_docstr_all('ceil_',
 ceil_() -> Tensor
 
 In-place version of :meth:`~Tensor.ceil`
+""")
+
+add_docstr_all('cholesky',
+               r"""
+cholesky(upper=False) -> Tensor
+
+See :func:`torch.cholesky`
 """)
 
 add_docstr_all('clamp',
@@ -580,6 +614,16 @@ cosh_() -> Tensor
 In-place version of :meth:`~Tensor.cosh`
 """)
 
+add_docstr_all('cpu',
+               r"""
+cpu() -> Tensor
+
+Returns a copy of this object in CPU memory.
+
+If this object is already in CPU memory and on the correct device,
+then no copy is performed and the original object is returned.
+""")
+
 add_docstr_all('cross',
                r"""
 cross(other, dim=-1) -> Tensor
@@ -625,11 +669,57 @@ data_ptr() -> int
 Returns the address of the first element of :attr:`self` tensor.
 """)
 
+add_docstr_all('dense_dim',
+               r"""
+dense_dim() -> int
+
+If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
+this returns a the number of dense dimensions. Otherwise, this throws an
+error.
+
+See also :meth:`Tensor.sparse_dim`.
+""")
+
 add_docstr_all('diag',
                r"""
 diag(diagonal=0) -> Tensor
 
 See :func:`torch.diag`
+""")
+
+add_docstr_all('diag_embed',
+               r"""
+diag_embed(offset=0, dim1=-2, dim2=-1) -> Tensor
+
+See :func:`torch.diag_embed`
+""")
+
+add_docstr_all('diagflat',
+               r"""
+diagflat(diagonal=0) -> Tensor
+
+See :func:`torch.diagflat`
+""")
+
+add_docstr_all('diagonal',
+               r"""
+diagonal(offset=0, dim1=0, dim2=1) -> Tensor
+
+See :func:`torch.diagonal`
+""")
+
+add_docstr_all('digamma',
+               r"""
+digamma() -> Tensor
+
+See :func:`torch.digamma`
+""")
+
+add_docstr_all('digamma_',
+               r"""
+digamma_() -> Tensor
+
+In-place version of :meth:`~Tensor.digamma`
 """)
 
 add_docstr_all('dim',
@@ -717,11 +807,25 @@ erf() -> Tensor
 See :func:`torch.erf`
 """)
 
+add_docstr_all('erf_',
+               r"""
+erf_() -> Tensor
+
+In-place version of :meth:`~Tensor.erf`
+""")
+
 add_docstr_all('erfc',
                r"""
-erf() -> Tensor
+erfc() -> Tensor
 
 See :func:`torch.erfc`
+""")
+
+add_docstr_all('erfc_',
+               r"""
+erfc_() -> Tensor
+
+In-place version of :meth:`~Tensor.erfc`
 """)
 
 add_docstr_all('erfinv',
@@ -729,6 +833,13 @@ add_docstr_all('erfinv',
 erfinv() -> Tensor
 
 See :func:`torch.erfinv`
+""")
+
+add_docstr_all('erfinv_',
+               r"""
+erfinv_() -> Tensor
+
+In-place version of :meth:`~Tensor.erfinv`
 """)
 
 add_docstr_all('exp',
@@ -782,6 +893,20 @@ add_docstr_all('floor',
 floor() -> Tensor
 
 See :func:`torch.floor`
+""")
+
+add_docstr_all('flip',
+               r"""
+flip(dims) -> Tensor
+
+See :func:`torch.flip`
+""")
+
+add_docstr_all('roll',
+               r"""
+roll(shifts, dims) -> Tensor
+
+See :func:`torch.roll`
 """)
 
 add_docstr_all('floor_',
@@ -887,9 +1012,24 @@ gesv(A) -> Tensor, Tensor
 See :func:`torch.gesv`
 """)
 
+add_docstr_all('indices',
+               r"""
+indices() -> Tensor
+
+If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
+this returns a view of the contained indices tensor. Otherwise, this throws an
+error.
+
+See also :meth:`Tensor.values`.
+
+.. note::
+  This method can only be called on a coalesced sparse tensor. See
+  :meth:`Tensor.coalesce` for details.
+""")
+
 add_docstr_all('get_device',
                r"""
-get_device(A) -> Device ordinal (Integer)
+get_device() -> Device ordinal (Integer)
 
 For CUDA tensors, this function returns the device ordinal of the GPU on which the tensor resides.
 For CPU tensors, an error is thrown.
@@ -900,6 +1040,21 @@ Example::
     >>> x.get_device()
     0
     >>> x.cpu().get_device()  # RuntimeError: get_device is not implemented for type torch.FloatTensor
+""")
+
+add_docstr_all('values',
+               r"""
+values() -> Tensor
+
+If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
+this returns a view of the contained values tensor. Otherwise, this throws an
+error.
+
+See also :meth:`Tensor.indices`.
+
+.. note::
+  This method can only be called on a coalesced sparse tensor. See
+  :meth:`Tensor.coalesce` for details.
 """)
 
 add_docstr_all('gt',
@@ -914,6 +1069,13 @@ add_docstr_all('gt_',
 gt_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.gt`
+""")
+
+add_docstr_all('hardshrink',
+               r"""
+hardshrink(lambd=0.5) -> Tensor
+
+See :func:`torch.nn.functional.hardshrink`
 """)
 
 add_docstr_all('histc',
@@ -935,6 +1097,8 @@ and ``index[i] == j``, then the ``i``\ th row of :attr:`tensor` is added to the
 The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
+
+.. include:: cuda_deterministic.rst
 
 Args:
     dim (int): dimension along which to index
@@ -1025,6 +1189,45 @@ add_docstr_all('index_select',
 index_select(dim, index) -> Tensor
 
 See :func:`torch.index_select`
+""")
+
+add_docstr_all('sparse_mask',
+               r"""
+sparse_mask(input, mask) -> Tensor
+
+Returns a new SparseTensor with values from Tensor :attr:`input` filtered
+by indices of :attr:`mask` and values are ignored. :attr:`input` and :attr:`mask`
+must have the same shape.
+
+Args:
+    input (Tensor): an input Tensor
+    mask (SparseTensor): a SparseTensor which we filter :attr:`input` based on its indices
+
+Example::
+
+    >>> nnz = 5
+    >>> dims = [5, 5, 2, 2]
+    >>> I = torch.cat([torch.randint(0, dims[0], size=(nnz,)),
+                       torch.randint(0, dims[1], size=(nnz,))], 0).reshape(2, nnz)
+    >>> V = torch.randn(nnz, dims[2], dims[3])
+    >>> size = torch.Size(dims)
+    >>> S = torch.sparse_coo_tensor(I, V, size).coalesce()
+    >>> D = torch.randn(dims)
+    >>> D.sparse_mask(S)
+    tensor(indices=tensor([[0, 0, 0, 2],
+                           [0, 1, 4, 3]]),
+           values=tensor([[[ 1.6550,  0.2397],
+                           [-0.1611, -0.0779]],
+
+                          [[ 0.2326, -1.0558],
+                           [ 1.4711,  1.9678]],
+
+                          [[-0.5138, -0.0411],
+                           [ 1.9417,  0.5158]],
+
+                          [[ 0.0793,  0.0036],
+                           [-0.2569, -0.1055]]]),
+           size=(5, 5, 2, 2), nnz=4, layout=torch.sparse_coo)
 """)
 
 add_docstr_all('inverse',
@@ -1155,17 +1358,18 @@ log2_() -> Tensor
 In-place version of :meth:`~Tensor.log2`
 """)
 
-add_docstr_all('log_normal_', u"""
+add_docstr_all('log_normal_', r"""
 log_normal_(mean=1, std=2, *, generator=None)
 
 Fills :attr:`self` tensor with numbers samples from the log-normal distribution
-parameterized by the given mean (\u00B5) and standard deviation (\u03C3).
-Note that :attr:`mean` and :attr:`stdv` are the mean and standard deviation of
-the underlying normal distribution, and not of the returned distribution:
+parameterized by the given mean :math:`\mu` and standard deviation
+:math:`\sigma`. Note that :attr:`mean` and :attr:`std` are the mean and
+standard deviation of the underlying normal distribution, and not of the
+returned distribution:
 
 .. math::
 
-    f(x) = \\dfrac{1}{x \\sigma \\sqrt{2\\pi}}\ e^{-\\dfrac{(\\ln x - \\mu)^2}{2\\sigma^2}}
+    f(x) = \dfrac{1}{x \sigma \sqrt{2\pi}}\ e^{-\frac{(\ln x - \mu)^2}{2\sigma^2}}
 """)
 
 add_docstr_all('logsumexp',
@@ -1241,6 +1445,13 @@ add_docstr_all('masked_select',
 masked_select(mask) -> Tensor
 
 See :func:`torch.masked_select`
+""")
+
+add_docstr_all('matrix_power',
+               r"""
+matrix_power(n) -> Tensor
+
+See :func:`torch.matrix_power`
 """)
 
 add_docstr_all('max',
@@ -1331,14 +1542,7 @@ add_docstr_all('narrow',
                r"""
 narrow(dimension, start, length) -> Tensor
 
-Returns a new tensor that is a narrowed version of :attr:`self` tensor. The
-dimension :attr:`dim` is narrowed from :attr:`start` to :attr:`start + length`. The
-returned tensor and :attr:`self` tensor share the same underlying storage.
-
-Args:
-    dimension (int): the dimension along which to narrow
-    start (int): the starting dimension
-    length (int): the distance to the ending dimension
+See :func:`torch.narrow`
 
 Example::
 
@@ -1350,6 +1554,17 @@ Example::
     tensor([[ 2,  3],
             [ 5,  6],
             [ 8,  9]])
+""")
+
+add_docstr_all('narrow_copy',
+               r"""
+narrow_copy(dimension, start, length) -> Tensor
+
+Same as :meth:`Tensor.narrow` except returning a copy rather
+than shared storage.  This is primarily for sparse tensors, which
+do not have a shared-storage narrow method.  Calling ```narrow_copy``
+with ```dimemsion > self.sparse_dim()``` will return a copy with the
+relevant dense dimension narrowed, and ```self.shape``` updated accordingly.
 """)
 
 add_docstr_all('ndimension',
@@ -1462,13 +1677,6 @@ Example:
     torch.Size([2, 3, 5])
     >>> x.permute(2, 0, 1).size()
     torch.Size([5, 2, 3])
-""")
-
-add_docstr_all('potrf',
-               r"""
-potrf(upper=True) -> Tensor
-
-See :func:`torch.potrf`
 """)
 
 add_docstr_all('potri',
@@ -1671,13 +1879,16 @@ add_docstr_all('reshape',
                r"""
 reshape(*shape) -> Tensor
 
-Returns a tensor with the same data and number of elements as :attr:`self`,
-but with the specified shape.
+Returns a tensor with the same data and number of elements as :attr:`self`
+but with the specified shape. This method returns a view if :attr:`shape` is
+compatible with the current shape. See :meth:`torch.Tensor.view` on when it is
+possible to return a view.
+
+See :func:`torch.reshape`
 
 Args:
     shape (tuple of ints or int...): the desired shape
 
-See :func:`torch.reshape`
 """)
 
 add_docstr_all('reshape_as',
@@ -1686,8 +1897,10 @@ reshape_as(other) -> Tensor
 
 Returns this tensor as the same shape as :attr:`other`.
 ``self.reshape_as(other)`` is equivalent to ``self.reshape(other.sizes())``.
+This method returns a view if ``other.sizes()`` is compatible with the current
+shape. See :meth:`torch.Tensor.view` on when it is possible to return a view.
 
-Please see :meth:`~Tensor.reshape` for more information about ``reshape``.
+Please see :meth:`reshape` for more information about ``reshape``.
 
 Args:
     other (:class:`torch.Tensor`): The result tensor has the same shape
@@ -1703,6 +1916,15 @@ larger than the current storage size, then the underlying storage is resized
 to fit the new number of elements. If the number of elements is smaller, the
 underlying storage is not changed. Existing elements are preserved but any new
 memory is uninitialized.
+
+.. warning::
+
+    This is a low-level method. The storage is reinterpreted as C-contiguous,
+    ignoring the current strides (unless the target size equals the current
+    size, in which case the tensor is left unchanged). For most purposes, you
+    will instead want to use :meth:`~Tensor.view()`, which checks for
+    contiguity, or :meth:`~Tensor.reshape()`, which copies data if needed. To
+    change the size in-place with custom strides, see :meth:`~Tensor.set_()`.
 
 Args:
     sizes (torch.Size or int...): the desired size
@@ -1721,6 +1943,13 @@ resize_as_(tensor) -> Tensor
 
 Resizes the :attr:`self` tensor to be the same size as the specified
 :attr:`tensor`. This is equivalent to ``self.resize_(tensor.size())``.
+""")
+
+add_docstr_all('rot90',
+               r"""
+rot90(k, dims) -> Tensor
+
+See :func:`torch.rot90`
 """)
 
 add_docstr_all('round',
@@ -1824,6 +2053,8 @@ dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row along
 the specified dimension :attr:`dim` must be unique.
+
+.. include:: cuda_deterministic.rst
 
 Args:
     dim (int): the axis along which to index
@@ -1957,6 +2188,17 @@ sort(dim=None, descending=False) -> (Tensor, LongTensor)
 See :func:`torch.sort`
 """)
 
+add_docstr_all('sparse_dim',
+               r"""
+sparse_dim() -> int
+
+If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
+this returns a the number of sparse dimensions. Otherwise, this throws an
+error.
+
+See also :meth:`Tensor.dense_dim`.
+""")
+
 add_docstr_all('sqrt',
                r"""
 sqrt() -> Tensor
@@ -2072,7 +2314,7 @@ See :func:`torch.sum`
 
 add_docstr_all('svd',
                r"""
-svd(some=True) -> (Tensor, Tensor, Tensor)
+svd(some=True, compute_uv=True) -> (Tensor, Tensor, Tensor)
 
 See :func:`torch.svd`
 """)
@@ -2114,24 +2356,28 @@ inferred from the arguments of ``self.to(*args, **kwargs)``.
 
 Here are the ways to call ``to``:
 
-.. function:: to(dtype) -> Tensor
+.. function:: to(dtype, non_blocking=False, copy=False) -> Tensor
 
     Returns a Tensor with the specified :attr:`dtype`
 
-.. function:: to(device=None, dtype=None, non_blocking=False) -> Tensor
+.. function:: to(device=None, dtype=None, non_blocking=False, copy=False) -> Tensor
 
     Returns a Tensor with the specified :attr:`device` and (optional)
     :attr:`dtype`. If :attr:`dtype` is ``None`` it is inferred to be ``self.dtype``.
     When :attr:`non_blocking`, tries to convert asynchronously with respect to
     the host if possible, e.g., converting a CPU Tensor with pinned memory to a
     CUDA Tensor.
+    When :attr:`copy` is set, a new Tensor is created even when the Tensor
+    already matches the desired conversion.
 
-.. function:: to(other, non_blocking=False) -> Tensor
+.. function:: to(other, non_blocking=False, copy=False) -> Tensor
 
     Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as
     the Tensor :attr:`other`. When :attr:`non_blocking`, tries to convert
     asynchronously with respect to the host if possible, e.g., converting a CPU
     Tensor with pinned memory to a CUDA Tensor.
+    When :attr:`copy` is set, a new Tensor is created even when the Tensor
+    already matches the desired conversion.
 
 Example::
 
@@ -2265,6 +2511,30 @@ add_docstr_all('topk',
 topk(k, dim=None, largest=True, sorted=True) -> (Tensor, LongTensor)
 
 See :func:`torch.topk`
+""")
+
+add_docstr_all('to_sparse',
+               r"""
+to_sparse(sparseDims) -> Tensor
+Returns a sparse copy of the tensor.  PyTorch supports sparse tensors in
+:ref:`coordinate format <sparse-docs>`.
+Args:
+    sparseDims (int, optional): the number of sparse dimensions to include in the new sparse tensor
+Example::
+    >>> d = torch.tensor([[0, 0, 0], [9, 0, 10], [0, 0, 0]])
+    >>> d
+    tensor([[ 0,  0,  0],
+            [ 9,  0, 10],
+            [ 0,  0,  0]])
+    >>> d.to_sparse()
+    tensor(indices=tensor([[1, 1],
+                           [0, 2]]),
+           values=tensor([ 9, 10]),
+           size=(3, 3), nnz=2, layout=torch.sparse_coo)
+    >>> d.to_sparse(1)
+    tensor(indices=tensor([[1]]),
+           values=tensor([[ 9,  0, 10]]),
+           size=(3, 3), nnz=1, layout=torch.sparse_coo)
 """)
 
 add_docstr_all('trace',
@@ -2443,10 +2713,10 @@ See :func:`torch.var`
 
 add_docstr_all('view',
                r"""
-view(*args) -> Tensor
+view(*shape) -> Tensor
 
 Returns a new tensor with the same data as the :attr:`self` tensor but of a
-different size.
+different :attr:`shape`.
 
 The returned tensor shares the same data and must have the same number
 of elements, but may have a different size. For a tensor to be viewed, the new
@@ -2457,13 +2727,14 @@ contiguity-like condition that :math:`\forall i = 0, \dots, k-1`,
 
 .. math::
 
-  stride[i] = stride[i+1] \times size[i+1]
+  \text{stride}[i] = \text{stride}[i+1] \times \text{size}[i+1]
 
-Otherwise, :func:`contiguous` needs to be called before the tensor can be
-viewed.
+Otherwise, :meth:`contiguous` needs to be called before the tensor can be
+viewed. See also: :meth:`reshape`, which returns a view if the shapes are
+compatible, and copies (equivalent to calling :meth:`contiguous`) otherwise.
 
 Args:
-    args (torch.Size or int...): the desired size
+    shape (torch.Size or int...): the desired size
 
 Example::
 

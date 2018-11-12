@@ -11,9 +11,9 @@ class _InstanceNorm(_BatchNorm):
     def _check_input_dim(self, input):
         raise NotImplementedError
 
-    def _load_from_state_dict(self, state_dict, prefix, metadata, strict,
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        version = metadata.get('version', None)
+        version = local_metadata.get('version', None)
         # at version 1: removed running_mean and running_var when
         # track_running_stats=False (default)
         if version is None and not self.track_running_stats:
@@ -38,7 +38,7 @@ class _InstanceNorm(_BatchNorm):
                     state_dict.pop(key)
 
         super(_InstanceNorm, self)._load_from_state_dict(
-            state_dict, prefix, metadata, strict,
+            state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
 
     def forward(self, input):
@@ -77,6 +77,15 @@ class InstanceNorm1d(_InstanceNorm):
         :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
+
+    .. note::
+        :class:`InstanceNorm1d` and :class:`LayerNorm` are very similar, but
+        have some subtle differences. :class:`InstanceNorm1d` is applied
+        on each channel of channeled data like multidimensional time series, but
+        :class:`LayerNorm` is usually applied on entire sample and often in NLP
+        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        transform, while :class:`InstanceNorm1d` usually don't apply affine
+        transform.
 
     Args:
         num_features: :math:`C` from an expected input of size
@@ -143,6 +152,15 @@ class InstanceNorm2d(_InstanceNorm):
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
+    .. note::
+        :class:`InstanceNorm2d` and :class:`LayerNorm` are very similar, but
+        have some subtle differences. :class:`InstanceNorm2d` is applied
+        on each channel of channeled data like RGB images, but
+        :class:`LayerNorm` is usually applied on entire sample and often in NLP
+        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        transform, while :class:`InstanceNorm2d` usually don't apply affine
+        transform.
+
     Args:
         num_features: :math:`C` from an expected input of size
             :math:`(N, C, H, W)`
@@ -207,6 +225,15 @@ class InstanceNorm3d(_InstanceNorm):
         :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
+
+    .. note::
+        :class:`InstanceNorm3d` and :class:`LayerNorm` are very similar, but
+        have some subtle differences. :class:`InstanceNorm3d` is applied
+        on each channel of channeled data like 3D models with RGB color, but
+        :class:`LayerNorm` is usually applied on entire sample and often in NLP
+        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        transform, while :class:`InstanceNorm3d` usually don't apply affine
+        transform.
 
     Args:
         num_features: :math:`C` from an expected input of size

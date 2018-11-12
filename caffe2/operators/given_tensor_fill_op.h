@@ -59,7 +59,7 @@ class GivenTensorFillOp final : public FillerOp<Context> {
   template <typename Type>
   void ExtractValues() {
     auto source_values =
-        OperatorBase::template GetRepeatedArgument<Type>("values");
+        this->template GetRepeatedArgument<Type>("values");
     values_.Resize(source_values.size());
     Type* values_data = values_.template mutable_data<Type>();
     for (int i = 0; i < source_values.size(); i++) {
@@ -70,14 +70,14 @@ class GivenTensorFillOp final : public FillerOp<Context> {
 
   template <typename Type>
   bool FillWithType(Tensor* output) {
-    DCHECK_EQ(output->size(), values_.size())
-        << "output size: " << output->size()
-        << " given size: " << values_.size();
+    DCHECK_EQ(output->numel(), values_.numel())
+        << "output size: " << output->numel()
+        << " given size: " << values_.numel();
     auto* data = output->template mutable_data<Type>();
     const Type* values_data = values_.template data<Type>();
-    if (output->size()) {
+    if (output->numel()) {
       context_.CopyItemsFromCPU(
-          TypeMeta::Make<Type>(), output->size(), values_data, data);
+          TypeMeta::Make<Type>(), output->numel(), values_data, data);
     }
     return true;
   }

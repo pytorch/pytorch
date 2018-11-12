@@ -21,7 +21,7 @@
 #pragma once
 
 #include <ATen/core/AlignOf.h>
-#include <ATen/core/Macros.h>
+#include <c10/macros/Macros.h>
 
 #include <algorithm>
 #include <cassert>
@@ -59,7 +59,7 @@ static inline uint64_t NextPowerOf2(uint64_t A) {
 } // namespace detail
 
 /// This is all the non-templated stuff common to all SmallVectors.
-class AT_CORE_API SmallVectorBase {
+class CAFFE2_API SmallVectorBase {
  protected:
   void *BeginX, *EndX, *CapacityX;
 
@@ -196,6 +196,16 @@ class SmallVectorTemplateCommon : public SmallVectorBase {
   /// Return a pointer to the vector's buffer, even if empty().
   const_pointer data() const {
     return const_pointer(begin());
+  }
+
+  // SmallVector::at is NOT from LLVM.
+  reference at(size_type idx) {
+    assert(idx < size());
+    return begin()[idx];
+  }
+  const_reference at(size_type idx) const {
+    assert(idx < size());
+    return begin()[idx];
   }
 
   reference operator[](size_type idx) {
@@ -1013,6 +1023,19 @@ class SmallVector : public SmallVectorImpl<T> {
 template <typename T, unsigned N>
 inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
   return X.capacity_in_bytes();
+}
+
+template <typename T, unsigned N>
+std::ostream& operator<<(std::ostream & out, const SmallVector<T, N>& list) {
+  int i = 0;
+  out << "[";
+  for(auto e : list) {
+    if (i++ > 0)
+      out << ", ";
+    out << e;
+  }
+  out << "]";
+  return out;
 }
 
 } // end namespace at

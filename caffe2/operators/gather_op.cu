@@ -34,7 +34,7 @@ bool GatherOp<CUDAContext>::DoRunWithType() {
   auto* output = Output(0);
 
   CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
-  auto shape = indices.dims();
+  auto shape = indices.dims().vec();
   shape.insert(shape.end(), data.dims().begin() + 1, data.dims().end());
   output->Resize(shape);
 

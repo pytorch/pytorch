@@ -1,9 +1,9 @@
 #pragma once
 
 #include "caffe2/core/dispatch/DispatchKey.h"
-#include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/utils/Array.h"
-#include "caffe2/utils/Metaprogramming.h"
+#include "caffe2/proto/caffe2_pb.h"
+#include <c10/util/Array.h>
+#include <c10/util/Metaprogramming.h>
 
 namespace caffe2 {
 class Tensor;
@@ -39,7 +39,7 @@ struct tensor_to_dispatch_key final {
       return TensorParameterDispatchKey{
           to_device_type_id(tensor.GetDeviceType()),
           LayoutId(0),
-          tensor.meta().id()};
+          tensor.dtype().id()};
     }
 };
 
@@ -242,7 +242,8 @@ public:
  *      - a constexpr guts<const char*, n_args> parameter_names field (where n_args is
  *        the number of arguments in Signature)
  */
-template<class OpSchemaDef> class OpSchema final {
+template <class OpSchemaDef>
+class CAFFE2_API OpSchema final {
   // TODO static_assert OpSchemaDef isn't an instanciation of OpSchema. If yes, the caller probably passed an OpSchema somewhere where an OpSchemaDef was expected and wants a good error message.
 public:
   using metadata = details::OpMetadataSchema<OpSchemaDef>;

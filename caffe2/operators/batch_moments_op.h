@@ -15,7 +15,7 @@ class BatchMomentsOp final : public Operator<Context> {
   BatchMomentsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<std::string>("order", "NCHW"))) {
+            this->template GetSingleArgument<std::string>("order", "NCHW"))) {
     CAFFE_ENFORCE_NE(order_, StorageOrder::UNKNOWN);
   }
 
@@ -23,10 +23,10 @@ class BatchMomentsOp final : public Operator<Context> {
     const auto& X = Input(0);
     auto* mu = Output(0);
     auto* var = Output(1);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
-    const int HxW = X.size() / (N * C);
+    const int HxW = X.numel() / (N * C);
     mu->Resize(C);
     var->Resize(C);
     const T* X_data = X.template data<T>();
@@ -65,7 +65,7 @@ class BatchMomentsGradientOp final : public Operator<Context> {
   BatchMomentsGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<std::string>("order", "NCHW"))) {
+            this->template GetSingleArgument<std::string>("order", "NCHW"))) {
     CAFFE_ENFORCE_NE(order_, StorageOrder::UNKNOWN);
   }
 
@@ -74,10 +74,10 @@ class BatchMomentsGradientOp final : public Operator<Context> {
     const auto& dvar = Input(1);
     const auto& X = Input(2);
     auto* dX = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
-    const int HxW = X.size() / (N * C);
+    const int HxW = X.numel() / (N * C);
     dX->ResizeLike(X);
     const T* dmu_data = dmu.template data<T>();
     const T* dvar_data = dvar.template data<T>();

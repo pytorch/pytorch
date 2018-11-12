@@ -71,9 +71,9 @@ class Conv1d(_ConvNd):
     precisely described as:
 
     .. math::
-        \op{out}(N_i, C_{\text{out}_j}) = \op{bias}(C_{\text{out}_j}) +
-        \sum_{k = 0}^{C_{in} - 1} \op{weight}(C_{\text{out}_j}, k)
-        \star \op{input}(N_i, k)
+        \text{out}(N_i, C_{\text{out}_j}) = \text{bias}(C_{\text{out}_j}) +
+        \sum_{k = 0}^{C_{in} - 1} \text{weight}(C_{\text{out}_j}, k)
+        \star \text{input}(N_i, k)
 
     where :math:`\star` is the valid `cross-correlation`_ operator,
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
@@ -101,24 +101,26 @@ class Conv1d(_ConvNd):
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters,
           of size
-          :math:`\left\lfloor\frac{\text{out\_channels}}{\text{in\_channels}}\right\rfloor`
+          :math:`\left\lfloor\frac{C_\text{out}}{C_\text{in}}\right\rfloor`
 
     .. note::
 
-         Depending of the size of your kernel, several (of the last)
-         columns of the input might be lost, because it is a valid
-         `cross-correlation`_, and not a full `cross-correlation`_.
-         It is up to the user to add proper padding.
+        Depending of the size of your kernel, several (of the last)
+        columns of the input might be lost, because it is a valid
+        `cross-correlation`_, and not a full `cross-correlation`_.
+        It is up to the user to add proper padding.
 
     .. note::
 
-         The configuration when `groups == in_channels` and `out_channels == K * in_channels`
-         where `K` is a positive integer is termed in literature as depthwise convolution.
+        When `groups == in_channels` and `out_channels == K * in_channels`,
+        where `K` is a positive integer, this operation is also termed in
+        literature as depthwise convolution.
 
-         In other words, for an input of size :math:`(N, C_{in}, L_{in})`, if you want a
-         depthwise convolution with a depthwise multiplier `K`,
-         then you use the constructor arguments
-         :math:`(\text{in\_channels}=C_{in}, \text{out\_channels}=C_{in} * K, ..., \text{groups}=C_{in})`
+        In other words, for an input of size :math:`(N, C_{in}, L_{in})`,
+        a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
+        :math:`(C_\text{in}=C_{in}, C_\text{out}=C_{in} \times K, ..., \text{groups}=C_{in})`.
+
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -145,11 +147,11 @@ class Conv1d(_ConvNd):
         weight (Tensor): the learnable weights of the module of shape
             (out_channels, in_channels, kernel_size). The values of these weights are sampled from
             :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{1}{\text{in\_channels} * \text{kernel\_size}}`
+            :math:`k = \frac{1}{C_\text{in} * \text{kernel\_size}}`
         bias (Tensor):   the learnable bias of the module of shape
             (out_channels). If :attr:`bias` is ``True``, then the values of these weights are
             sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{1}{\text{in\_channels} * \text{kernel\_size}}`
+            :math:`k = \frac{1}{C_\text{in} * \text{kernel\_size}}`
 
     Examples::
 
@@ -188,8 +190,8 @@ class Conv2d(_ConvNd):
     can be precisely described as:
 
     .. math::
-        \op{out}(N_i, C_{\text{out}_j}) = \op{bias}(C_{\text{out}_j}) +
-        \sum_{k = 0}^{C_{\text{in}} - 1} \op{weight}(C_{\text{out}_j}, k) \star \op{input}(N_i, k)
+        \text{out}(N_i, C_{\text{out}_j}) = \text{bias}(C_{\text{out}_j}) +
+        \sum_{k = 0}^{C_{\text{in}} - 1} \text{weight}(C_{\text{out}_j}, k) \star \text{input}(N_i, k)
 
 
     where :math:`\star` is the valid 2D `cross-correlation`_ operator,
@@ -218,7 +220,7 @@ class Conv2d(_ConvNd):
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters, of size:
-          :math:`\left\lfloor\frac{\text{out\_channels}}{\text{in\_channels}}\right\rfloor`.
+          :math:`\left\lfloor\frac{C_\text{out}}{C_\text{in}}\right\rfloor`.
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
@@ -235,13 +237,15 @@ class Conv2d(_ConvNd):
 
     .. note::
 
-         The configuration when `groups == in_channels` and `out_channels == K * in_channels`
-         where `K` is a positive integer is termed in literature as depthwise convolution.
+        When `groups == in_channels` and `out_channels == K * in_channels`,
+        where `K` is a positive integer, this operation is also termed in
+        literature as depthwise convolution.
 
-         In other words, for an input of size :math:`(N, C_{in}, H_{in}, W_{in})`, if you want a
-         depthwise convolution with a depthwise multiplier `K`,
-         then you use the constructor arguments
-         :math:`(in\_channels=C_{in}, out\_channels=C_{in} * K, ..., groups=C_{in})`
+        In other words, for an input of size :math:`(N, C_{in}, H_{in}, W_{in})`,
+        a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
+        :math:`(in\_channels=C_{in}, out\_channels=C_{in} \times K, ..., groups=C_{in})`.
+
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -261,6 +265,7 @@ class Conv2d(_ConvNd):
               H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] - \text{dilation}[0]
                         \times (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
+          .. math::
               W_{out} = \left\lfloor\frac{W_{in}  + 2 \times \text{padding}[1] - \text{dilation}[1]
                         \times (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
@@ -269,11 +274,11 @@ class Conv2d(_ConvNd):
                          (out_channels, in_channels, kernel_size[0], kernel_size[1]).
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels). If :attr:`bias` is ``True``,
                          then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
 
     Examples::
 
@@ -357,13 +362,15 @@ class Conv3d(_ConvNd):
 
     .. note::
 
-         The configuration when `groups == in_channels` and `out_channels == K * in_channels`
-         where `K` is a positive integer is termed in literature as depthwise convolution.
+        When `groups == in_channels` and `out_channels == K * in_channels`,
+        where `K` is a positive integer, this operation is also termed in
+        literature as depthwise convolution.
 
-         In other words, for an input of size :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`, if you want a
-         depthwise convolution with a depthwise multiplier `K`,
-         then you use the constructor arguments
-         :math:`(in\_channels=C_{in}, out\_channels=C_{in} * K, ..., groups=C_{in})`
+         In other words, for an input of size :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`,
+         a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
+         :math:`(in\_channels=C_{in}, out\_channels=C_{in} \times K, ..., groups=C_{in})`.
+
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -383,9 +390,11 @@ class Conv3d(_ConvNd):
               D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] - \text{dilation}[0]
                     \times (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
+          .. math::
               H_{out} = \left\lfloor\frac{H_{in} + 2 \times \text{padding}[1] - \text{dilation}[1]
                     \times (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
+          .. math::
               W_{out} = \left\lfloor\frac{W_{in} + 2 \times \text{padding}[2] - \text{dilation}[2]
                     \times (\text{kernel\_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
 
@@ -394,11 +403,11 @@ class Conv3d(_ConvNd):
                          (out_channels, in_channels, kernel_size[0], kernel_size[1], kernel_size[2])
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels). If :attr:`bias` is ``True``,
                          then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
 
     Examples::
 
@@ -450,7 +459,7 @@ class _ConvTransposeMixin(object):
         output_size = list(output_size)
         k = input.dim() - 2
         if len(output_size) == k + 2:
-            output_size = output_size[-2:]
+            output_size = output_size[2:]
         if len(output_size) != k:
             raise ValueError(
                 "output_size must have {} or {} elements (got {})"
@@ -524,6 +533,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
 
+    .. include:: cudnn_deterministic.rst
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -550,11 +561,11 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
                          (in_channels, out_channels, kernel_size[0], kernel_size[1]). The values
                          of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in\_channels} * \text{kernel\_size}}`
+                         :math:`k = \frac{1}{C_\text{in} * \text{kernel\_size}}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels).
                          If :attr:`bias` is ``True``, then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in\_channels} * \text{kernel\_size}}`
+                         :math:`k = \frac{1}{C_\text{in} * \text{kernel\_size}}`
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -634,6 +645,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
 
+    .. include:: cudnn_deterministic.rst
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -651,10 +664,10 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C_{out}, H_{out}, W_{out})` where
 
-          .. math::
+        .. math::
               H_{out} = (H_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0]
                     + \text{kernel\_size}[0] + \text{output\_padding}[0]
-
+        .. math::
               W_{out} = (W_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1]
                     + \text{kernel\_size}[1] + \text{output\_padding}[1]
 
@@ -663,11 +676,11 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
                          (in_channels, out_channels, kernel_size[0], kernel_size[1])
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
                          If :attr:`bias` is ``True``, then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
 
     Examples::
 
@@ -774,6 +787,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
 
+    .. include:: cudnn_deterministic.rst
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -791,13 +806,13 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` where
 
-          .. math::
+        .. math::
               D_{out} = (D_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0]
                     + \text{kernel\_size}[0] + \text{output\_padding}[0]
-
+        .. math::
               H_{out} = (H_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1]
                     + \text{kernel\_size}[1] + \text{output\_padding}[1]
-
+        .. math::
               W_{out} = (W_{in} - 1) \times \text{stride}[2] - 2 \times \text{padding}[2]
                     + \text{kernel\_size}[2] + \text{output\_padding}[2]
 
@@ -806,18 +821,18 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
                          (in_channels, out_channels, kernel_size[0], kernel_size[1], kernel_size[2])
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
                          If :attr:`bias` is ``True``, then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{\text{in\_channels} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
 
     Examples::
 
         >>> # With square kernels and equal stride
         >>> m = nn.ConvTranspose3d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
-        >>> m = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(0, 4, 2))
+        >>> m = nn.ConvTranspose3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(0, 4, 2))
         >>> input = torch.randn(20, 16, 10, 50, 100)
         >>> output = m(input)
 

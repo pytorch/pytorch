@@ -6,19 +6,22 @@
 #include "generic/THTensor.cpp"
 #include "THGenerateHalfType.h"
 
+#include "ATen/native/Resize.h"
+
 #include <numeric>
 
+// NB: This is NOT valid on UndefinedTensorImpl
 void THTensor_free(THTensor *self)
 {
   if (!self) return;
-  self->release();
+  c10::raw::intrusive_ptr::decref(self);
 }
 
 void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_) {
-  if(size_.data() && stride_.data())
+  if (stride_.data()) {
     THArgCheck(size_.size() == stride_.size(), 5, "inconsistent size/stride sizes");
+  }
 
-  AT_CHECK(size_.data(), "size must not be null");
 #ifdef DEBUG
   THAssert(size_.size() <= INT_MAX);
 #endif
@@ -38,22 +41,21 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
     if (!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    auto scalar_type = THTensor_getStoragePtr(self)->scalar_type();
-    THStorage_free(THTensor_getStoragePtr(self));
+    auto data_type = THTensor_getStoragePtr(self)->dtype();
     if(storage)
     {
+      c10::raw::intrusive_ptr::incref(storage);
       THTensor_stealAndSetStoragePtr(self, storage);
-      THStorage_retain(THTensor_getStoragePtr(self));
     }
     else {
-      THTensor_stealAndSetStoragePtr(self, THStorage_new(scalar_type));
+      THTensor_stealAndSetStoragePtr(self, THStorage_new(data_type));
     }
   }
 
   /* storageOffset */
   if(storageOffset < 0)
     THError("Tensor: invalid storage offset");
-  THTensor_setStorageOffset(self, storageOffset);
+    self->set_storage_offset(storageOffset);
 
   /* size and stride */
   THTensor_resizeNd(self, nDimension, size, stride);
@@ -61,9 +63,9 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
 
 void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride)
 {
-  THArgCheck(size.data() != NULL, 2, "invalid size");
-  if(stride.data())
+  if (stride.data()) {
     THArgCheck(stride.size() == size.size(), 3, "invalid stride");
+  }
 
 #ifdef DEBUG
   THAssert(size.size() <= INT_MAX);
@@ -73,67 +75,13 @@ void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride)
 
 void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
-  int d;
-  ptrdiff_t totalSize;
-  bool hascorrectsize = true;
-
-#ifndef USE_TH_SCALAR
-  AT_CHECK(nDimension > 0, "resizeNd nDimension must be greater than 0");
-#else
   AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
-#endif
-
-  for(d = 0; d < nDimension; d++)
-  {
-    if((self->dim() > d) && (size[d] != self->size(d))) {
-      hascorrectsize = false;
-    }
-
-    // NB: this used to test that stride[d] was >= 0
-    if((self->dim() > d) && stride && (stride[d] != self->stride(d))) {
-      hascorrectsize = false;
-    }
+  at::IntList sizes(size, nDimension);
+  at::optional<at::IntList> strides;
+  if (stride) {
+    strides = at::IntList(stride, nDimension);
   }
-
-  if(nDimension != self->dim()) {
-    hascorrectsize = false;
-  }
-
-  if(hascorrectsize) {
-    return;
-  }
-
-  if(nDimension != self->dim())
-  {
-    THTensor_resizeDim(self, nDimension);
-  }
-
-  totalSize = 1;
-  for(d = nDimension-1; d >= 0; d--)
-  {
-    THTensor_setSizeAtDim(self, d, size[d]);
-    if(stride && (stride[d] >= 0) ) {
-      THTensor_setStrideAtDim(self, d, stride[d]);
-    } else {
-      if(d == nDimension-1) {
-        THTensor_setStrideAtDim(self, d, 1);
-      } else {
-        // Keep stride monotonically increasing to match NumPy.
-        THTensor_setStrideAtDim(self, d, std::max<int64_t>(self->size(d+1), 1)*self->stride(d+1));
-      }
-    }
-    totalSize += (self->size(d)-1)*self->stride(d);
-  }
-
-  if(totalSize+self->storage_offset() > 0)
-  {
-    if(!THTensor_getStoragePtr(self)) {
-      THTensor_stealAndSetStoragePtr(self, THStorage_new(self->scalar_type()));
-    }
-    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->size()) {
-      THStorage_resize(THTensor_getStoragePtr(self), totalSize+self->storage_offset());
-    }
-  }
+  at::native::resize_impl_cpu_(self, sizes, strides);
 }
 
 // On a high level,
@@ -142,8 +90,10 @@ void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, cons
 // 2. newshape must be able to be separated into same number of chunks as oldshape was separated into,
 //    where each chunk of newshape has matching ``numel'', i.e., number of subspaces,
 //    as the corresponding chunk of oldshape.
-at::optional<std::vector<int64_t>>
-THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride, at::IntList newshape) {
+c10::optional<std::vector<int64_t>> THTensor_compute_stride(
+    at::IntList oldshape,
+    at::IntList oldstride,
+    at::IntList newshape) {
   if (oldshape.empty()) {
     return std::vector<int64_t>(newshape.size(), 1);
   }
@@ -187,7 +137,7 @@ THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride, at::IntList
         view_d--;
       }
       if (view_numel != tensor_numel) {
-        return at::nullopt;
+        return c10::nullopt;
       }
       if (tensor_d > 0) {
         chunk_base_stride = oldstride[tensor_d - 1];
@@ -197,7 +147,15 @@ THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride, at::IntList
     }
   }
   if (view_d != -1) {
-    return at::nullopt;
+    return c10::nullopt;
   }
   return newstride;
+}
+
+// NB: Steals ownership of storage
+void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
+  // Caffe2 might have tensors whose storages are null, but we
+  // don't allow it in PyTorch.
+  AT_ASSERT(storage);
+  tensor->storage_ = at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage));
 }

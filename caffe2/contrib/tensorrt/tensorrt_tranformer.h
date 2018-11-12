@@ -9,7 +9,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/onnx/onnx_exporter.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "onnx/onnx_pb.h"
 
 namespace caffe2 {

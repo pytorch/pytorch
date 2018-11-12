@@ -1,16 +1,18 @@
 #include "torch/csrc/jit/import.h"
-#include "onnx/onnx.pb.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/operator.h"
+
+#include "caffe2/serialize/inline_container.h"
+#include "onnx/onnx_pb.h"
 
 #include <ATen/ATen.h>
 
 #include <unordered_map>
 #include <vector>
 #include <string>
-
-#include <pb_decode.h>
+#include <fstream>
 
 namespace torch { namespace jit {
 
@@ -20,26 +22,47 @@ namespace onnx = ::ONNX_NAMESPACE;
 
 // IR graph construction
 
-class DecoderBase {
- protected:
-  virtual std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto);
+class ModuleDecoder {
+ public:
+  ModuleDecoder(ModuleLookup module_lookup,
+                std::istream& in);
+
+ private:
+  std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto);
 
   void buildBlock(const onnx::GraphProto& graph_proto, Block* block,
-                   std::unordered_map<std::string, Value*>& value_map);
+                  std::unordered_map<std::string, Value*>& value_map);
 
   void buildBlocks(const std::vector<onnx::GraphProto>& graphs_, Node* node,
                    std::unordered_map<std::string, Value*>& value_map);
 
-  virtual void buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto) {};
+  void buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto);
 
-  virtual void buildIntermediateValue(Value* value, const std::string& name) {};
+  void buildIntermediateValue(Value* value, const std::string& name);
 
   at::ScalarType onnxTypeToATenType(onnx::TensorProto_DataType tensor_proto);
 
-  virtual at::Tensor buildTensor(const onnx::TensorProto& tensor_proto);
+  at::Tensor buildTensor(const onnx::TensorProto& tensor_proto);
+
+  TypePtr buildType(const onnx::TypeProto& type_proto);
+
+  at::Tensor buildParameter(const onnx::TensorProto& tensor_proto);
+
+  at::Tensor buildTensorCommon(const onnx::TensorProto& tensor_proto,
+                               const uint64_t record_number,
+                               const int64_t storage_offset,
+                               const std::vector<int64_t>& strides);
+
+  std::pair<std::shared_ptr<script::Module>, std::string> parseFullName(
+      ModuleLookup module_lookup,
+      const std::string fullname);
+
+  PyTorchStreamReader stream_reader_;
+  std::unordered_map<uint64_t, std::shared_ptr<at::Storage>> storage_map_;
+  std::unordered_map<std::string, const onnx::TypeProto*> value_type_map_;
 };
 
-at::ScalarType DecoderBase::onnxTypeToATenType(onnx::TensorProto_DataType onnx_type) {
+at::ScalarType ModuleDecoder::onnxTypeToATenType(onnx::TensorProto_DataType onnx_type) {
   switch(onnx_type) {
     case onnx::TensorProto_DataType_UINT8:
       return at::kByte;
@@ -62,21 +85,7 @@ at::ScalarType DecoderBase::onnxTypeToATenType(onnx::TensorProto_DataType onnx_t
   }
 }
 
-at::Tensor DecoderBase::buildTensor(const onnx::TensorProto& tensor_proto) {
-  at::Tensor tensor = at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor();
-  std::vector<int64_t> sizes = { tensor_proto.dims().begin(), tensor_proto.dims().end() };
-  tensor.resize_(sizes);
-
-  JIT_ASSERT(
-      tensor.storage()->pImpl()->size() *
-          tensor.storage()->pImpl()->elementSize() ==
-      tensor_proto.raw_data().size());
-
-  std::memcpy(tensor.data_ptr(), tensor_proto.raw_data().data(), tensor_proto.raw_data().size());
-  return tensor;
-}
-
-void DecoderBase::buildBlocks(
+void ModuleDecoder::buildBlocks(
     const std::vector<onnx::GraphProto>& graphs_, Node* node,
     std::unordered_map<std::string, Value*>& value_map) {
   for (auto g_ : graphs_) {
@@ -85,7 +94,7 @@ void DecoderBase::buildBlocks(
   }
 }
 
-std::shared_ptr<Graph> DecoderBase::buildGraph(const onnx::GraphProto& graph_proto) {
+std::shared_ptr<Graph> ModuleDecoder::buildGraph(const onnx::GraphProto& graph_proto) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> value_map;
 
@@ -94,8 +103,11 @@ std::shared_ptr<Graph> DecoderBase::buildGraph(const onnx::GraphProto& graph_pro
   return graph;
 }
 
-void DecoderBase::buildBlock(const onnx::GraphProto& graph_proto, Block* block,
+void ModuleDecoder::buildBlock(const onnx::GraphProto& graph_proto, Block* block,
                 std::unordered_map<std::string, Value*>& value_map) {
+  for (auto &subtype : graph_proto.value_info()) {
+    value_type_map_[subtype.name()] = &subtype.type();
+  }
 
   for (auto & input : graph_proto.input()) {
     auto value = block->addInput();
@@ -178,107 +190,6 @@ void DecoderBase::buildBlock(const onnx::GraphProto& graph_proto, Block* block,
   }
 }
 
-class GraphDecoder : DecoderBase {
- public:
-  std::shared_ptr<Graph> decode(const std::string& serialized_graph,
-                                std::vector<at::Tensor>& initializers);
-
-  void reconstructOutputTypes(Block *b);
-};
-
-// TODO: this should be removed once we'll be able to serialize value types
-void GraphDecoder::reconstructOutputTypes(Block *b) {
-  for (Node * n : b->nodes()) {
-    if (n->kind() == prim::Constant) {
-      switch (n->kindOf(attr::value)) {
-        case AttributeKind::i:
-          n->output()->setType(IntType::get());
-          break;
-        case AttributeKind::f:
-          n->output()->setType(FloatType::get());
-          break;
-        case AttributeKind::is:
-          n->output()->setType(ListType::ofInts());
-          break;
-        case AttributeKind::t:
-          n->output()->setType(DynamicType::get());
-          break;
-        default:
-          throw std::runtime_error("Unsupported case in reconstructOutputTypes. File a bug report");
-      }
-    } else if (n->kind() == prim::ListConstruct && n->inputs().size() > 0) {
-      auto input_types = fmap(n->inputs(), [](Value *v) -> TypePtr {
-        return v->node()->kind() == prim::Constant ? v->type() : nullptr;
-      });
-      // Check that all types are equal
-      if (std::equal(std::next(input_types.begin()), input_types.end(), input_types.begin())) {
-        auto elem_type = input_types[0];
-        if (elem_type == IntType::get()) {
-          n->output()->setType(ListType::ofInts());
-        }
-      }
-    }
-    for (Block * b : n->blocks()) {
-      reconstructOutputTypes(b);
-    }
-  }
-}
-
-std::shared_ptr<Graph> GraphDecoder::decode(
-    const std::string& serialized_graph,
-    std::vector<at::Tensor>& initializers) {
-  auto model_proto = onnx::ModelProto();
-  model_proto.ParseFromString(serialized_graph);
-
-  auto graph_proto = model_proto.graph();
-  auto graph = buildGraph(graph_proto);
-  for (auto &tensor_ : graph_proto.initializer()) {
-    initializers.push_back(buildTensor(tensor_));
-  }
-  reconstructOutputTypes(graph->block());
-  return graph;
-}
-
-class ModuleDecoder : DecoderBase {
- public:
-  std::shared_ptr<script::Module> decode(
-      std::shared_ptr<script::Module> root_module,
-      const std::string& serialized_module,
-      const std::unordered_map<std::string, std::string>& storage_map);
-
- private:
-  virtual std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto) override;
-
-  virtual at::Tensor buildTensor(const onnx::TensorProto& tensor_proto) override;
-
-  TypePtr buildType(const onnx::TypeProto& type_proto);
-
-  virtual void buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto) override;
-
-  virtual void buildIntermediateValue(Value* value, const std::string& name) override;
-
-  at::Tensor buildParameter(const onnx::TensorProto& tensor_proto);
-
-  at::Tensor buildTensorCommon(const onnx::TensorProto& tensor_proto,
-                               const int64_t storage_offset,
-                               const std::vector<int64_t>& strides);
-
-  std::pair<std::shared_ptr<script::Module>, std::string> parseFullName(
-      std::shared_ptr<script::Module> root_module,
-      const std::string fullname);
-
-  const std::unordered_map<std::string, std::string> *storage_export_map_;
-  std::unordered_map<std::string, std::shared_ptr<at::Tensor>> storage_map_;
-  std::unordered_map<std::string, const onnx::TypeProto*> value_type_map_;
-};
-
-std::shared_ptr<Graph> ModuleDecoder::buildGraph(const onnx::GraphProto& graph_proto) {
-  for (auto &subtype : graph_proto.value_info()) {
-    value_type_map_[subtype.name()] = &subtype.type();
-  }
-  return DecoderBase::buildGraph(graph_proto);
-}
-
 TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
   auto tensortype_proto = type_proto.tensor_type();
   auto shape_proto = tensortype_proto.shape();
@@ -286,8 +197,19 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
   if (kind == "DynamicType") {
     return DynamicType::get();
   } else if (kind == "TensorType") {
-    // TODO: Don't use DynamicType here
-    return DynamicType::get();
+    auto dims = shape_proto.dim_size();
+    return TensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), -1, dims);
+  } else if (kind == "CompleteTensorType") {
+    // first half of the dims are sizes and the second half are strides
+    auto total = shape_proto.dim_size();
+    std::vector<int64_t> sizes, strides;
+    for (int i = 0; i < total / 2; i++) {
+      sizes.push_back(shape_proto.dim(i).dim_value());
+    }
+    for (int i = total / 2; i < total; i++) {
+      strides.push_back(shape_proto.dim(i).dim_value());
+    }
+    return CompleteTensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), -1, sizes, strides);
   } else if (kind == "TupleType") {
     std::vector<TypePtr> elems;
     for (auto &subkind : shape_proto.dim()) {
@@ -307,10 +229,18 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
     return FloatType::get();
   } else if (kind == "IntType") {
     return IntType::get();
+  } else if (kind == "BoolType") {
+    return BoolType::get();
   } else if (kind == "NoneType") {
     return NoneType::get();
+  } else if (kind == "GeneratorType") {
+    return GeneratorType::get();
+  } else if (kind == "StringType") {
+    return StringType::get();
+  } else if (kind.find("TypeVar:") == 0) {
+    return VarType::create(kind.substr(strlen("TypeVar:")));
   } else {
-    throw std::runtime_error("unexpected string for type kind");
+    throw std::runtime_error("unexpected string for type kind: " + kind);
   }
 }
 
@@ -326,55 +256,62 @@ void ModuleDecoder::buildIntermediateValue(Value* value, const std::string& name
 
 at::Tensor ModuleDecoder::buildParameter(const onnx::TensorProto& tensor_proto) {
   std::vector<int64_t> strides;
-  // We've stored three other values (is_buffer, requires_grad, storage_offset) before strides; ignore them
-  std::move(tensor_proto.int64_data().begin() + 3, tensor_proto.int64_data().end(), std::back_inserter(strides));
-  auto tensor = buildTensorCommon(tensor_proto, /* storage_offset = */ tensor_proto.int64_data(2), strides);
+  // We've stored four other values (is_buffer, requires_grad, record no., storage_offset) before strides; ignore them
+  std::move(tensor_proto.int64_data().begin() + 4, tensor_proto.int64_data().end(), std::back_inserter(strides));
+  auto tensor = buildTensorCommon(tensor_proto,
+                                  /* record_number = */ tensor_proto.int64_data(2),
+                                  /* storage_offset = */ tensor_proto.int64_data(3),
+                                  strides);
   autograd::Variable var = autograd::make_variable(tensor, /* requires_grad = */ tensor_proto.int64_data(1));
   return var;
 }
 
 at::Tensor ModuleDecoder::buildTensor(const onnx::TensorProto& tensor_proto) {
   std::vector<int64_t> strides;
-  // We've stored one other value (storage_offset) before strides; ignore it
-  std::move(tensor_proto.int64_data().begin() + 1, tensor_proto.int64_data().end(), std::back_inserter(strides));
-  return buildTensorCommon(tensor_proto, /* storage_offset = */ tensor_proto.int64_data(0), strides);
+  // We've stored two other values (record no., storage_offset) before strides; ignore it
+  std::move(tensor_proto.int64_data().begin() + 2, tensor_proto.int64_data().end(), std::back_inserter(strides));
+  return buildTensorCommon(tensor_proto,
+                           /* record_number = */ tensor_proto.int64_data(0),
+                           /* storage_offset = */ tensor_proto.int64_data(1),
+                           strides);
 }
 
 at::Tensor ModuleDecoder::buildTensorCommon(
     const onnx::TensorProto& tensor_proto,
+    const uint64_t record_number,
     const int64_t storage_offset,
     const std::vector<int64_t>& strides) {
   // NB: storage_offset and strides are passed in separately because
   // because they are encoded differently for parameters and tensors
-  auto storage_name = tensor_proto.doc_string();
   auto type = onnxTypeToATenType(tensor_proto.data_type());
   std::vector<int64_t> dims;
   std::move(tensor_proto.dims().begin(), tensor_proto.dims().end(), std::back_inserter(dims));
 
   // Find or create the storage
-  at::Tensor *storage_tensor;
-  auto storage_it = storage_map_.find(storage_name);
+  auto storage_it = storage_map_.find(record_number);
   if (storage_it == storage_map_.end()) {
-    auto storage = std::make_shared<at::Tensor>(at::CPU(type).tensor());
-    auto string_it = storage_export_map_->find(storage_name);
-    JIT_ASSERT(string_it != storage_export_map_->end());
-    storage->resize_({ static_cast<int64_t>(string_it->second.size()) });
-    std::memcpy(storage->storage()->pImpl()->data(), string_it->second.data(), string_it->second.size());
-    storage_map_.insert(std::make_pair(storage_name, storage));
-    storage_tensor = storage.get();
-  } else {
-    storage_tensor = storage_it->second.get();
+    at::DataPtr storage_ptr;
+    int64_t size;
+    std::tie(storage_ptr, size) = stream_reader_.getRecordWithKey(record_number);
+    auto storage = std::make_shared<at::Storage>(
+      at::CPU(type).typeMeta(),
+      std::move(storage_ptr),
+      size / at::CPU(type).typeMeta().itemsize(),
+      nullptr);
+    storage_map_.insert(std::make_pair(record_number, storage));
+    return at::CPU(type)._th_tensor(*storage, storage_offset, dims, strides);
   }
 
-  return at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor(
-      *storage_tensor->storage().get(), storage_offset, dims, strides);
+  auto storage = storage_it->second.get();
+  return at::CPU(type)._th_tensor(*storage, storage_offset, dims, strides);
 }
 
 // Given a full name of a parameter or method,
 // return the parent submodule and local name
 std::pair<std::shared_ptr<script::Module>, std::string> ModuleDecoder::parseFullName(
-    std::shared_ptr<script::Module> root_module,
+    ModuleLookup module_lookup,
     const std::string fullname) {
+  AT_ASSERT(!fullname.empty());
   std::vector<std::string> vec;
   std::stringstream ss(fullname);
   std::string name;
@@ -382,42 +319,36 @@ std::pair<std::shared_ptr<script::Module>, std::string> ModuleDecoder::parseFull
     vec.push_back(name);
   }
 
-  std::shared_ptr<script::Module> curr = root_module;
-  for (size_t i = 0; i < vec.size() - 1; i++) {
-    if (curr->find_module(vec[i]) == nullptr) {
-      curr->register_module(vec[i], std::make_shared<script::Module>());
-    }
-    curr = curr->get_module(vec[i]);
-  }
-  return std::make_pair(curr, vec.back());
+  std::string last = vec.back();
+  vec.pop_back();
+  return std::make_pair(module_lookup(vec), std::move(last));
 }
 
-std::shared_ptr<script::Module> ModuleDecoder::decode(
-    const std::shared_ptr<script::Module> root_module,
-    const std::string &serialized_module,
-    const std::unordered_map<std::string, std::string> &storage_export_map) {
+ModuleDecoder::ModuleDecoder(
+    ModuleLookup module_lookup,
+    std::istream& in) :
+    stream_reader_(&in) {
   auto model_proto = onnx::ModelProto();
-  model_proto.ParseFromString(serialized_module);
+  auto record = stream_reader_.getLastRecord();
+  model_proto.ParsePartialFromArray(std::get<0>(record).get(), std::get<1>(record));
   auto graph_proto = model_proto.graph();
 
   std::unordered_map<std::string, at::Tensor*> param_map;
-  storage_export_map_ = &storage_export_map;
-  storage_map_.clear();
 
   for (auto &tensor_proto : graph_proto.initializer()) {
     std::shared_ptr<script::Module> parent_module;
     std::string name;
-    std::tie(parent_module, name) = parseFullName(root_module, tensor_proto.name());
+    std::tie(parent_module, name) = parseFullName(module_lookup, tensor_proto.name());
 
     auto param = buildParameter(tensor_proto);
-    parent_module->register_parameter(name, param, /* is_buffer = */ tensor_proto.int64_data(1));
+    parent_module->register_parameter(name, param, /* is_buffer = */ tensor_proto.int64_data(0));
     param_map[tensor_proto.name()] = parent_module->parameter_slot(name);
   }
 
   for (auto &node_proto : graph_proto.node()) {
     std::shared_ptr<script::Module> parent_module;
     std::string name;
-    std::tie(parent_module, name) = parseFullName(root_module, node_proto.name());
+    std::tie(parent_module, name) = parseFullName(module_lookup, node_proto.name());
 
     std::vector<at::Tensor*> member_inputs;
     for (auto &param_name : node_proto.input()) {
@@ -425,26 +356,60 @@ std::shared_ptr<script::Module> ModuleDecoder::decode(
     }
 
     auto graph = buildGraph(node_proto.attribute(0).g());
+    // has_domain field has a string iff the method was optimized
+    parent_module->set_optimized(node_proto.has_domain());
     parent_module->create_method(name, graph, member_inputs);
+    // We store the schema in the docstring so we can parse the schema and
+    // assign it to the method.
+    auto schema = parseSchema(node_proto.doc_string());
+    parent_module->get_method(name).setSchema(std::move(schema));
   }
-
-  return root_module;
 }
 
 }  // namespace
 
-std::shared_ptr<Graph> ImportIRGraph(const std::string& serialized_graph,
-                                     std::vector<at::Tensor>& initializers) {
-  GraphDecoder decoder;
-  return decoder.decode(serialized_graph, initializers);
+void import_ir_module(
+    ModuleLookup module_lookup,
+    std::istream& in) {
+  ModuleDecoder decoder(module_lookup, in);
+  (void)decoder;
 }
 
-void ImportIRModule(
-    const std::shared_ptr<script::Module> module,
-    const std::string& serialized_module,
-    const std::unordered_map<std::string, std::string>& storage_map) {
-  ModuleDecoder decoder;
-  decoder.decode(module, serialized_module, storage_map);
+void import_ir_module(
+    ModuleLookup module_lookup,
+    const std::string& filename) {
+  std::ifstream in(filename, std::ios_base::binary);
+
+  ModuleDecoder decoder(module_lookup, in);
+  (void)decoder;
+}
+
+std::shared_ptr<script::Module> load(std::istream& in) {
+  auto module = std::make_shared<script::Module>();
+
+  auto module_lookup = [&](const std::vector<std::string>& qualified_name) {
+    std::shared_ptr<script::Module> curr = module;
+    for (const auto& name : qualified_name) {
+      if (curr->find_module(name) == nullptr) {
+        curr->register_module(name, std::make_shared<script::Module>());
+      }
+      curr = curr->get_module(name);
+    }
+    return curr;
+  };
+
+  ModuleDecoder decoder(module_lookup, in);
+  (void)decoder;
+
+  return module;
+}
+
+std::shared_ptr<script::Module> load(const std::string& filename) {
+  std::ifstream in(filename, std::ios_base::binary);
+
+  auto module = load(in);
+
+  return module;
 }
 
 }}
