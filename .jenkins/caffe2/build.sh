@@ -154,14 +154,6 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   # This is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   CMAKE_ARGS+=("-USE_LMDB=ON")
 
-  # TODO: This is patching the official FindHip to properly handly
-  # cmake generator expression. A PR is opened in the upstream repo here:
-  # https://github.com/ROCm-Developer-Tools/HIP/pull/516
-  # remove this hack once it's merged.
-  if [[ -f /opt/rocm/hip/cmake/FindHIP.cmake ]]; then
-    sudo sed -i 's/\ -I${dir}/\ $<$<BOOL:${dir}>:-I${dir}>/' /opt/rocm/hip/cmake/FindHIP.cmake
-  fi
-
   export LANG=C.UTF-8
   export LC_ALL=C.UTF-8
   export HCC_AMDGPU_TARGET=gfx900
