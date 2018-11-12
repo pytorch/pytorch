@@ -9,6 +9,7 @@ C10_DEFINE_OP_SCHEMA(caffe2::ops::ExpandDims);
 
 namespace {
 struct DimsParameter final {
+  using type = std::vector<int>;
   static std::vector<int> parse(const caffe2::ArgumentHelper& helper) {
     return helper.GetRepeatedArgument<int>("dims");
   }

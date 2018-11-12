@@ -152,6 +152,7 @@ public:
       return unique_name_;
     return std::to_string(unique());
   }
+  TORCH_API std::string uniqueNameBase() const;
   Node* node() {
     return node_;
   }
@@ -225,7 +226,7 @@ private:
   // the schema.
   // note: mutable because schema_ is effectively a cache
   mutable const FunctionSchema* schema_;
-  topo_position_t topo_position_;
+  topo_position_t topo_position_ = 0;
 protected:
   TORCH_API Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
@@ -316,6 +317,10 @@ public:
     return inputs_.at(0);
   }
   Value * output() {
+    JIT_ASSERT(outputs_.size() == 1);
+    return outputs_.at(0);
+  }
+  const Value* output() const {
     JIT_ASSERT(outputs_.size() == 1);
     return outputs_.at(0);
   }
@@ -827,7 +832,7 @@ public:
 
   TORCH_API Node* createUndefined();
   TORCH_API Node* createNoneGenerator();
-  TORCH_API Node* createFusionGroup(int device);
+  TORCH_API Node* createFusionGroup();
   TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
   TORCH_API Node* createTupleUnpack(Value * v);
   TORCH_API Node* createTupleIndex(Value * tup, int64_t index);
@@ -856,8 +861,6 @@ public:
       IValue val,
       c10::optional<SourceRange> loc = c10::nullopt,
       c10::optional<ScopePtr> scope = c10::nullopt);
-
-  TORCH_API Value* insertDummyWorld();
 
 
   // schema-driven insert

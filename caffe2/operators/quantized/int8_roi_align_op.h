@@ -286,7 +286,7 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
     Y->scale = Y_scale;
     Y->zero_point = Y_offset;
 
-    if (R.size() == 0) {
+    if (R.numel() == 0) {
       // Handle empty rois
       Y->t.Resize(0, pooled_height_, pooled_width_, X.t.dim32(3));
       // The following mutable_data calls are needed to allocate the tensors
@@ -294,7 +294,7 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
       return true;
     }
 
-    CAFFE_ENFORCE_EQ(R.ndim(), 2);
+    CAFFE_ENFORCE_EQ(R.dim(), 2);
     // if R has 5 columns, the first column is the index, otherwise 0
     CAFFE_ENFORCE(R.dim32(1) == 4 || R.dim32(1) == 5);
 
@@ -302,7 +302,7 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
 
     // only supports NHWC now
     Y->t.Resize(R.dim32(0), pooled_height_, pooled_width_, X.t.dim32(3));
-    int output_size = Y->t.size();
+    int output_size = Y->t.numel();
 
     ROIAlignForward(
         output_size,

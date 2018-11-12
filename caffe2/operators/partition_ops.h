@@ -46,16 +46,16 @@ class GatherByKeyOp : public Operator<CPUContext> {
 
     CAFFE_ENFORCE_GE(outShape.size(), 1);
     auto totalSize = in0Shape[0];
-    auto meta = Input(1).meta();
+    auto meta = Input(1).dtype();
     for (int i = 2; i < InputSize(); ++i) {
       const auto& input = Input(i);
-      CAFFE_ENFORCE(meta == input.meta());
-      CAFFE_ENFORCE_GE(input.ndim(), 1);
+      CAFFE_ENFORCE(meta == input.dtype());
+      CAFFE_ENFORCE_GE(input.dim(), 1);
       CAFFE_ENFORCE(std::equal(
           outShape.begin() + keysShape.size(),
           outShape.end(),
           input.sizes().begin() + 1));
-      totalSize += input.dim(0);
+      totalSize += input.size(0);
     }
     CAFFE_ENFORCE_EQ(keysTensor.numel(), totalSize);
 
@@ -138,15 +138,15 @@ class PartitionOpBase : public Operator<CPUContext> {
       auto& input = Input(i);
       if (i > mainInputIndex) {
         CAFFE_ENFORCE_GE(
-            input.ndim(),
-            main_input.ndim(),
+            input.dim(),
+            main_input.dim(),
             "Prefix of extra input's shape must match main input's shape, ",
             "input: ",
             i);
-        for (int j = 0; j < main_input.ndim(); ++j) {
+        for (int j = 0; j < main_input.dim(); ++j) {
           CAFFE_ENFORCE_GE(
-              input.dim(j),
-              main_input.dim(j),
+              input.size(j),
+              main_input.size(j),
               "Prefix of extra input's shape must match main input's shape, ",
               "input: ",
               i,
@@ -155,17 +155,17 @@ class PartitionOpBase : public Operator<CPUContext> {
         }
       }
       raw_datas_[i] = input.raw_data();
-      block_sizes_[i] = input.size_from_dim(main_input.ndim());
-      metas_[i] = input.meta();
+      block_sizes_[i] = input.size_from_dim(main_input.dim());
+      metas_[i] = input.dtype();
       // shape = partition_size + suffix of input dims
       vector<int64_t> shape(
-          input.sizes().begin() + main_input.ndim() - 1, input.sizes().end());
+          input.sizes().begin() + main_input.dim() - 1, input.sizes().end());
       for (int j = 0; j < partitions; ++j) {
         int out_idx = i + j * inputSize;
         auto output = Output(out_idx);
         shape[0] = counts_[j];
         output->Resize(shape);
-        out_datas_[out_idx] = output->raw_mutable_data(input.meta());
+        out_datas_[out_idx] = output->raw_mutable_data(input.dtype());
       }
     }
 
@@ -244,7 +244,7 @@ class LengthsPartitionOp : public PartitionOpBase {
     int partitions = OutputSize() / InputSize();
     CAFFE_ENFORCE_GT(partitions, 0, "Invalid number of partitions");
     CAFFE_ENFORCE_EQ(
-        Input(1).ndim(),
+        Input(1).dim(),
         1,
         "Only 1-D tensors supported as a partitioning tensor for sharding");
 
@@ -255,10 +255,10 @@ class LengthsPartitionOp : public PartitionOpBase {
         auto& output = *Output(i);
         output.ResizeLike(input);
         context_.CopyItemsSameDevice(
-            input.meta(),
+            input.dtype(),
             input.numel(),
             input.raw_data(),
-            output.raw_mutable_data(input.meta()));
+            output.raw_mutable_data(input.dtype()));
       }
       return true;
     }

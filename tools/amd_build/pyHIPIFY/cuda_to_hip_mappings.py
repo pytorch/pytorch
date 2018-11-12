@@ -1,6 +1,6 @@
 import collections
 
-from constants import *
+from pyHIPIFY.constants import *
 
 """ Mapping of CUDA functions, include files, constants, and types to ROCm/HIP equivalents
 This closely follows the implementation in hipify-clang
@@ -1714,11 +1714,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cublasDspr2", ("rocblas_dspr2", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasChpr2", ("rocblas_chpr2", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasZhpr2", ("rocblas_zhpr2", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
-    ("cublasSgemm", ("rocblas_sgemm", CONV_MATH_FUNC, API_BLAS)),
-    ("cublasDgemm", ("rocblas_dgemm", CONV_MATH_FUNC, API_BLAS)),
-    ("cublasCgemm", ("rocblas_cgemm", CONV_MATH_FUNC, API_BLAS)),
-    ("cublasZgemm", ("rocblas_zgemm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
-    ("cublasHgemm", ("rocblas_hgemm", CONV_MATH_FUNC, API_BLAS)),
     ("cublasSgemmBatched", ("rocblas_sgemm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasDgemmBatched", ("rocblas_dgemm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasHgemmBatched", ("rocblas_hgemm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
@@ -1732,6 +1727,11 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cublasCgemm3mStridedBatched", ("rocblas_cgemm_3m_strided_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasZgemmStridedBatched", ("rocblas_zgemm_strided_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasHgemmStridedBatched", ("rocblas_hgemm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
+    ("cublasSgemm", ("rocblas_sgemm", CONV_MATH_FUNC, API_BLAS)),
+    ("cublasDgemm", ("rocblas_dgemm", CONV_MATH_FUNC, API_BLAS)),
+    ("cublasCgemm", ("rocblas_cgemm", CONV_MATH_FUNC, API_BLAS)),
+    ("cublasZgemm", ("rocblas_zgemm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
+    ("cublasHgemm", ("rocblas_hgemm", CONV_MATH_FUNC, API_BLAS)),
     ("cublasSsyrk", ("rocblas_ssyrk", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasDsyrk", ("rocblas_dsyrk", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasCsyrk", ("rocblas_csyrk", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
@@ -2221,6 +2221,11 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("recurrent_network_executor_gpu" , ("hip/recurrent_network_executor_hip", API_CAFFE2)),
     ("max_pool_with_index_gpu", ("hip/max_pool_with_index_hip", API_CAFFE2)),
     ("THCCachingAllocator_gpu", ("hip/THCCachingAllocator_hip", API_CAFFE2)),
+    ("top_k_heap_selection", ("hip/top_k_heap_selection_hip", API_CAFFE2)),
+    ("top_k_radix_selection", ("hip/top_k_radix_selection_hip", API_CAFFE2)),
+    ("GpuDefs", ("hip/GpuDefs_hip", API_CAFFE2)),
+    ("GpuScanUtils", ("hip/GpuScanUtils_hip", API_CAFFE2)),
+    ("GpuBitonicSort", ("hip/GpuBitonicSort_hip", API_CAFFE2)),
     ("caffe2/core/common_cudnn.h", ("caffe2/core/hip/common_miopen.h", API_CAFFE2)),
     ("REGISTER_CUDA_OPERATOR" , ("REGISTER_HIP_OPERATOR", API_CAFFE2)),
     ("CUDA_1D_KERNEL_LOOP" , ("HIP_1D_KERNEL_LOOP", API_CAFFE2)),

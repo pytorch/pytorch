@@ -3,61 +3,21 @@ from __future__ import division
 
 import warnings
 import math
+import types
 from operator import mul
 from functools import reduce
 
 import torch
 from torch._C import _infer_size, _add_docstr
+from . import _reduction as _Reduction
 from . import _functions
 from .modules import utils
 from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
+from . import _VF
 from .._jit_internal import weak_script
-
-_VF = torch._C._VariableFunctions
-
-
-class _Reduction:
-    # NB: Keep this class in sync with enums in THNN/Reduction.h
-
-    @staticmethod
-    def get_enum(reduction):
-        if reduction == 'none':
-            return 0
-        if reduction == 'elementwise_mean':
-            return 1
-        if reduction == 'sum':
-            return 2
-        raise ValueError(reduction + " is not a valid value for reduction")
-
-    # In order to support previous versions, accept boolean size_average and reduce
-    # and convert them into the new constants for now
-
-    # We use these functions in torch/legacy as well, in which case we'll silence the warning
-    @staticmethod
-    def legacy_get_string(size_average, reduce, emit_warning=True):
-        warning = "size_average and reduce args will be deprecated, please use reduction='{}' instead."
-
-        if size_average is None:
-            size_average = True
-        if reduce is None:
-            reduce = True
-
-        if size_average and reduce:
-            ret = 'elementwise_mean'
-        elif reduce:
-            ret = 'sum'
-        else:
-            ret = 'none'
-        if emit_warning:
-            warnings.warn(warning.format(ret))
-        return ret
-
-    @staticmethod
-    def legacy_get_enum(size_average, reduce, emit_warning=True):
-        return _Reduction.get_enum(_Reduction.legacy_get_string(size_average, reduce, emit_warning))
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
@@ -574,7 +534,9 @@ Args:
 """)
 
 
+@torch._jit_internal.weak_script
 def adaptive_avg_pool2d(input, output_size):
+    # type: (Tensor, BroadcastingList2[int]) -> Tensor
     r"""
     Applies a 2D adaptive average pooling over an input signal composed of
     several input planes.
@@ -585,11 +547,13 @@ def adaptive_avg_pool2d(input, output_size):
         output_size: the target output size (single integer or
             double-integer tuple)
     """
-    output_size = _list_with_default(output_size, input.size())
-    return torch._C._nn.adaptive_avg_pool2d(input, output_size)
+    _output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
 
+@torch._jit_internal.weak_script
 def adaptive_avg_pool3d(input, output_size):
+    # type: (Tensor, BroadcastingList3[int]) -> Tensor
     r"""
     Applies a 3D adaptive average pooling over an input signal composed of
     several input planes.
@@ -600,12 +564,14 @@ def adaptive_avg_pool3d(input, output_size):
         output_size: the target output size (single integer or
             triple-integer tuple)
     """
-    output_size = _list_with_default(output_size, input.size())
-    return torch._C._nn.adaptive_avg_pool3d(input, output_size)
+    _output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_avg_pool3d(input, _output_size)
 
 
 # Activation functions
+@torch._jit_internal.weak_script
 def dropout(input, p=0.5, training=True, inplace=False):
+    # type: (Tensor, float, bool, bool) -> Tensor
     r"""
     During training, randomly zeroes some of the elements of the input
     tensor with probability :attr:`p` using samples from a Bernoulli
@@ -618,26 +584,32 @@ def dropout(input, p=0.5, training=True, inplace=False):
         training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if p < 0 or p > 1:
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.dropout_ if inplace else _VF.dropout
-    return f(input, p, training)
+    return (_VF.dropout_(input, p, training)
+            if inplace
+            else _VF.dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def alpha_dropout(input, p=0.5, training=False, inplace=False):
+    # type: (Tensor, float, bool, bool) -> Tensor
     r"""Applies alpha dropout to the input.
 
     See :class:`~torch.nn.AlphaDropout` for details.
     """
-    if p < 0 or p > 1:
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.alpha_dropout_ if inplace else _VF.alpha_dropout
-    return f(input, p, training)
+    return (_VF.alpha_dropout_(input, p, training)
+            if inplace
+            else _VF.alpha_dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def dropout2d(input, p=0.5, training=True, inplace=False):
+    # type: (Tensor, float, bool, bool) -> Tensor
     r"""
     Randomly zero out entire channels (a channel is a 2D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
@@ -652,14 +624,17 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
         training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if p < 0 or p > 1:
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.feature_dropout_ if inplace else _VF.feature_dropout
-    return f(input, p, training)
+    return (_VF.feature_dropout_(input, p, training)
+            if inplace
+            else _VF.feature_dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def dropout3d(input, p=0.5, training=True, inplace=False):
+    # type: (Tensor, float, bool, bool) -> Tensor
     r"""
     Randomly zero out entire channels (a channel is a 3D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
@@ -676,47 +651,59 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
     """
     # This is 100% the same code as dropout2d. We duplicate this code so that
     # stack traces are not confusing.
-    if p < 0 or p > 1:
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.feature_dropout_ if inplace else _VF.feature_dropout
-    return f(input, p, training)
+    return (_VF.feature_dropout_(input, p, training)
+            if inplace
+            else _VF.feature_dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
-    if p < 0 or p > 1:
+    # type: (Tensor, float, bool, bool) -> Tensor
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.feature_alpha_dropout_ if inplace else _VF.feature_alpha_dropout
-    return f(input, p, training)
+    return (_VF.feature_alpha_dropout_(input, p, training)
+            if inplace
+            else _VF.feature_alpha_dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def threshold(input, threshold, value, inplace=False):
+    # type: (Tensor, float, float, bool) -> Tensor
     r"""Thresholds each element of the input Tensor.
 
     See :class:`~torch.nn.Threshold` for more details.
     """
     if inplace:
-        return torch._C._nn.threshold_(input, threshold, value)
-    return torch._C._nn.threshold(input, threshold, value)
+        result = _VF.threshold_(input, threshold, value)
+    else:
+        result = _VF.threshold(input, threshold, value)
+    return result
 
 
-threshold_ = _add_docstr(torch._C._nn.threshold_, r"""
+threshold_ = _add_docstr(_VF.threshold_, r"""
 threshold_(input, threshold, value) -> Tensor
 
 In-place version of :func:`~threshold`.
 """)
 
 
+@torch._jit_internal.weak_script
 def relu(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""relu(input, inplace=False) -> Tensor
 
     Applies the rectified linear unit function element-wise. See
     :class:`~torch.nn.ReLU` for more details.
     """
     if inplace:
-        return torch.relu_(input)
-    return torch.relu(input)
+        result = torch.relu_(input)
+    else:
+        result = torch.relu(input)
+    return result
 
 
 relu_ = _add_docstr(torch.relu_, r"""
@@ -749,7 +736,9 @@ def glu(input, dim=-1):
     return torch._C._nn.glu(input, dim)
 
 
+@torch._jit_internal.weak_script
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
+    # type: (Tensor, float, float, bool) -> Tensor
     r"""
     hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
 
@@ -757,8 +746,10 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
     details.
     """
     if inplace:
-        return torch._C._nn.hardtanh_(input, min_val, max_val)
-    return torch._C._nn.hardtanh(input, min_val, max_val)
+        result = torch._C._nn.hardtanh_(input, min_val, max_val)
+    else:
+        result = torch._C._nn.hardtanh(input, min_val, max_val)
+    return result
 
 
 hardtanh_ = _add_docstr(torch._C._nn.hardtanh_, r"""
@@ -768,25 +759,31 @@ In-place version of :func:`~hardtanh`.
 """)
 
 
+@torch._jit_internal.weak_script
 def relu6(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""relu6(input, inplace=False) -> Tensor
 
     Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`.
 
     See :class:`~torch.nn.ReLU6` for more details.
     """
-    return hardtanh(input, 0, 6, inplace)
+    return hardtanh(input, 0., 6., inplace)
 
 
+@torch._jit_internal.weak_script
 def elu(input, alpha=1., inplace=False):
+    # type: (Tensor, float, bool) -> Tensor
     r"""Applies element-wise,
     :math:`\text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))`.
 
     See :class:`~torch.nn.ELU` for more details.
     """
     if inplace:
-        return torch._C._nn.elu_(input, alpha)
-    return torch._C._nn.elu(input, alpha)
+        result = torch._C._nn.elu_(input, alpha)
+    else:
+        result = torch._C._nn.elu(input, alpha)
+    return result
 
 
 elu_ = _add_docstr(torch._C._nn.elu_, r"""
@@ -796,7 +793,9 @@ In-place version of :func:`~elu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def selu(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""selu(input, inplace=False) -> Tensor
 
     Applies element-wise,
@@ -807,8 +806,11 @@ def selu(input, inplace=False):
     See :class:`~torch.nn.SELU` for more details.
     """
     if inplace:
-        return torch.selu_(input)
-    return torch.selu(input)
+        result = torch.selu_(input)
+    else:
+        result = torch.selu(input)
+    return result
+
 
 selu_ = _add_docstr(torch.selu_, r"""
 selu_(input) -> Tensor
@@ -817,7 +819,9 @@ In-place version of :func:`~selu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def celu(input, alpha=1., inplace=False):
+    # type: (Tensor, float, bool) -> Tensor
     r"""celu(input, alpha=1., inplace=False) -> Tensor
 
     Applies element-wise,
@@ -826,8 +830,10 @@ def celu(input, alpha=1., inplace=False):
     See :class:`~torch.nn.CELU` for more details.
     """
     if inplace:
-        return torch.celu_(input, alpha)
-    return torch.celu(input, alpha)
+        result = torch.celu_(input, alpha)
+    else:
+        result = torch.celu(input, alpha)
+    return result
 
 celu_ = _add_docstr(torch.celu_, r"""
 celu_(input, alpha=1.) -> Tensor
@@ -836,7 +842,9 @@ In-place version of :func:`~celu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def leaky_relu(input, negative_slope=0.01, inplace=False):
+    # type: (Tensor, float, bool) -> Tensor
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
@@ -846,8 +854,10 @@ def leaky_relu(input, negative_slope=0.01, inplace=False):
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
     if inplace:
-        return torch._C._nn.leaky_relu_(input, negative_slope)
-    return torch._C._nn.leaky_relu(input, negative_slope)
+        result = torch._C._nn.leaky_relu_(input, negative_slope)
+    else:
+        result = torch._C._nn.leaky_relu(input, negative_slope)
+    return result
 
 
 leaky_relu_ = _add_docstr(torch._C._nn.leaky_relu_, r"""
@@ -859,6 +869,7 @@ In-place version of :func:`~leaky_relu`.
 
 @torch._jit_internal.weak_script
 def prelu(input, weight):
+    # type: (Tensor, Tensor) -> Tensor
     r"""prelu(input, weight) -> Tensor
 
     Applies element-wise the function
@@ -870,7 +881,9 @@ def prelu(input, weight):
     return torch.prelu(input, weight)
 
 
+@torch._jit_internal.weak_script
 def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
+    # type: (Tensor, float, float, bool, bool) -> Tensor
     r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Tensor
 
     Randomized leaky ReLU.
@@ -878,8 +891,10 @@ def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
     See :class:`~torch.nn.RReLU` for more details.
     """
     if inplace:
-        return torch.rrelu_(input, lower, upper, training)
-    return torch.rrelu(input, lower, upper, training)
+        result = torch.rrelu_(input, lower, upper, training)
+    else:
+        result = torch.rrelu(input, lower, upper, training)
+    return result
 
 
 rrelu_ = _add_docstr(torch.rrelu_, r"""
@@ -899,6 +914,7 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 
 @torch._jit_internal.weak_script
 def hardshrink(input, lambd=0.5):
+    # type: (Tensor, float) -> Tensor
     r"""
     hardshrink(input, lambd=0.5) -> Tensor
 
@@ -906,7 +922,6 @@ def hardshrink(input, lambd=0.5):
 
     See :class:`~torch.nn.Hardshrink` for more details.
     """
-    # type: (Tensor, float) -> Tensor
     return torch.hardshrink(input, lambd)
 
 
@@ -1104,6 +1119,7 @@ See :class:`~torch.nn.Softshrink` for more details.
 """)
 
 
+@torch._jit_internal.weak_script
 def tanh(input):
     r"""tanh(input) -> Tensor
 
@@ -1116,6 +1132,7 @@ def tanh(input):
     return input.tanh()
 
 
+@torch._jit_internal.weak_script
 def sigmoid(input):
     r"""sigmoid(input) -> Tensor
 
@@ -1149,7 +1166,9 @@ def linear(input, weight, bias=None):
     return output
 
 
+@torch._jit_internal.weak_script
 def bilinear(input1, input2, weight, bias=None):
+    # type: (Tensor, Tensor, Tensor, Optional[Tensor]) -> Tensor
     return torch.bilinear(input1, input2, weight, bias)
 
 
@@ -1165,17 +1184,17 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
 
     Args:
         input (LongTensor): Tensor containing indices into the embedding matrix
-        weight (Tensor): The embedding matrix
-            Number of rows should correspond to the maximum possible index + 1,
-            number of columns is the embedding size
+        weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
+            and number of columns equal to the embedding size
         padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
                                          (initialized to zeros) whenever it encounters the index.
-        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
-                                    this before extracting. Note: this will modify :attr:`weight` in-place.
-        norm_type (float, optional): The p of the p-norm to compute for the max_norm option. Default ``2``.
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+        max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
+                                    is renormalized to have norm :attr:`max_norm`.
+                                    Note: this will modify :attr:`weight` in-place.
+        norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
+        scale_grad_by_freq (boolean, optional): If given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
-        sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
+        sparse (bool, optional): If ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
                                  :class:`torch.nn.Embedding` for more details regarding sparse gradients.
 
     Shape:
@@ -1240,14 +1259,15 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
 
     Args:
         input (LongTensor): Tensor containing bags of indices into the embedding matrix
-        weight (Tensor): The embedding matrix
-            Number of rows should correspond to the maximum possible index + 1,
-            number of columns is the embedding size
+        weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
+            and number of columns equal to the embedding size
         offsets (LongTensor, optional): Only used when :attr:`input` is 1D. :attr:`offsets` determines
                              the starting index position of each bag (sequence) in :attr:`input`.
-        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
-                                    this before extracting. Note: this will modify :attr:`weight` in-place.
-        norm_type (float, optional): The ``p`` in the ``p``-norm to compute for the max_norm option. Default ``2``.
+        max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
+                                    is renormalized to have norm :attr:`max_norm`.
+                                    Note: this will modify :attr:`weight` in-place.
+        norm_type (float, optional): The ``p`` in the ``p``-norm to compute for the :attr:`max_norm` option.
+                                     Default ``2``.
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
                                                 Note: this option is not supported when ``mode="max"``.
@@ -1435,8 +1455,10 @@ def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
 
 # loss
 
+@torch._jit_internal.weak_script
 def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
-             reduction='elementwise_mean'):
+             reduction='mean'):
+    # type: (Tensor, Tensor, Tensor, Tensor, int, str) -> Tensor
     r"""The Connectionist Temporal Classification loss.
 
     See :class:`~torch.nn.CTCLoss` for details.
@@ -1449,7 +1471,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
             `T = input length`, and `N = batch size`.
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
-        targets: :math:`(N, S)` or `(sum(target_lenghts))`.
+        targets: :math:`(N, S)` or `(sum(target_lengths))`.
             Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
         input_lengths: :math:`(N)`.
             Lengths of the inputs (must each be :math:`\leq T`)
@@ -1458,14 +1480,14 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
         blank (int, optional):
             Blank label. Default :math:`0`.
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
-            'elementwise_mean': the output losses will be divided by the target lengths and
-            then the mean over the batch is taken. Default: 'elementwise_mean'
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the output losses will be divided by the target lengths and
+            then the mean over the batch is taken. Default: 'mean'
 
     Example::
 
         >>> log_probs = torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_()
-        >>> targets = torch.randint(1, 21, (16, 30), dtype=torch.long)
+        >>> targets = torch.randint(1, 20, (16, 30), dtype=torch.long)
         >>> input_lengths = torch.full((16,), 50, dtype=torch.long)
         >>> target_lengths = torch.randint(10,30,(16,), dtype=torch.long)
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
@@ -1475,7 +1497,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
 
 
 def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
-             reduce=None, reduction='elementwise_mean'):
+             reduce=None, reduction='mean'):
     r"""The negative log likelihood loss.
 
     See :class:`~torch.nn.NLLLoss` for details.
@@ -1502,11 +1524,11 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
-            'elementwise_mean': the sum of the output will be divided by the number of
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the sum of the output will be divided by the number of
             elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
+            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 
     Example::
 
@@ -1546,7 +1568,7 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
 
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=None, eps=1e-8,
-                     reduce=None, reduction='elementwise_mean'):
+                     reduce=None, reduction='mean'):
     r"""Poisson negative log likelihood loss.
 
     See :class:`~torch.nn.PoissonNLLLoss` for details.
@@ -1572,11 +1594,11 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
-            'elementwise_mean': the sum of the output will be divided by the number of
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the sum of the output will be divided by the number of
             elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
+            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 
     """
     if size_average is not None or reduce is not None:
@@ -1590,12 +1612,12 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
         loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
     if reduction is 'none':
         return loss
-    if reduction is 'elementwise_mean':
+    if reduction is 'mean':
         return torch.mean(loss)
     return torch.sum(loss)
 
 
-def kl_div(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
+def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
     r"""The `Kullback-Leibler divergence`_ Loss.
 
     See :class:`~torch.nn.KLDivLoss` for details.
@@ -1613,11 +1635,11 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='elementwise
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
-            'elementwise_mean': the sum of the output will be divided by the number of
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the sum of the output will be divided by the number of
             elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
+            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
     """
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_enum(size_average, reduce)
@@ -1627,7 +1649,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='elementwise
 
 
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
-                  reduce=None, reduction='elementwise_mean'):
+                  reduce=None, reduction='mean'):
     r"""This criterion combines `log_softmax` and `nll_loss` in a single
     function.
 
@@ -1655,11 +1677,11 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
-            'elementwise_mean': the sum of the output will be divided by the number of
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the sum of the output will be divided by the number of
             elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
+            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 
     Examples::
 
@@ -1674,7 +1696,7 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=None,
-                         reduce=None, reduction='elementwise_mean'):
+                         reduce=None, reduction='mean'):
     r"""Function that measures the Binary Cross Entropy
     between the target and the output.
 
@@ -1695,11 +1717,11 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
-            'elementwise_mean': the sum of the output will be divided by the number of
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the sum of the output will be divided by the number of
             elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
+            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 
     Examples::
 
@@ -1727,7 +1749,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
 
 
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=None,
-                                     reduce=None, reduction='elementwise_mean', pos_weight=None):
+                                     reduce=None, reduction='mean', pos_weight=None):
     r"""Function that measures Binary Cross Entropy between target and output
     logits.
 
@@ -1748,11 +1770,11 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'elementwise_mean' | 'sum'. 'none': no reduction will be applied,
-            'elementwise_mean': the sum of the output will be divided by the number of
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the sum of the output will be divided by the number of
             elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'elementwise_mean'
+            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
         pos_weight (Tensor, optional): a weight of positive examples.
                 Must be a vector with length equal to the number of classes.
 
@@ -1774,31 +1796,37 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction)
 
 
-def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='elementwise_mean'):
+def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
     if target.requires_grad:
         d = lambd(input, target)
         if reduction == 'none':
             return d
-        return torch.mean(d) if reduction == 'elementwise_mean' else torch.sum(d)
+        return torch.mean(d) if reduction == 'mean' else torch.sum(d)
     else:
-        return lambd_optimized(input, target, _Reduction.get_enum(reduction))
+        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+        return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
-def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
+def _smooth_l1_loss(input, target):
+    t = torch.abs(input - target)
+    return torch.where(t < 1, 0.5 * t ** 2, t - 0.5)
+
+
+def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     r"""Function that uses a squared term if the absolute
     element-wise error falls below 1 and an L1 term otherwise.
 
     See :class:`~torch.nn.SmoothL1Loss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
-    else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch._C._nn.smooth_l1_loss(input, target, reduction)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
+    return _pointwise_loss(
+        _smooth_l1_loss,
+        torch._C._nn.smooth_l1_loss, input, target, reduction)
 
 
-def l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
-    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean') -> Tensor
+def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     Function that takes the mean element-wise absolute value difference.
 
@@ -1810,8 +1838,8 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='elementwis
                            input, target, reduction)
 
 
-def mse_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
-    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean') -> Tensor
+def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     Measures the element-wise mean squared error.
 
@@ -1823,8 +1851,8 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='elementwi
 
 
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=None,
-                        reduce=None, reduction='elementwise_mean'):
-    r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='elementwise_mean') -> Tensor
+                        reduce=None, reduction='mean'):
+    r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
     """  # noqa
@@ -1839,8 +1867,8 @@ def margin_ranking_loss(input1, input2, target, margin=0, size_average=None,
 
 
 def hinge_embedding_loss(input, target, margin=1.0, size_average=None,
-                         reduce=None, reduction='elementwise_mean'):
-    r"""hinge_embedding_loss(input, target, margin=1.0, size_average=None, reduce=None, reduction='elementwise_mean') -> Tensor
+                         reduce=None, reduction='mean'):
+    r"""hinge_embedding_loss(input, target, margin=1.0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
     """  # noqa
@@ -1851,8 +1879,8 @@ def hinge_embedding_loss(input, target, margin=1.0, size_average=None,
     return torch.hinge_embedding_loss(input, target, margin, reduction)
 
 
-def multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
-    r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean') -> Tensor
+def multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelMarginLoss` for details.
     """
@@ -1863,8 +1891,8 @@ def multilabel_margin_loss(input, target, size_average=None, reduce=None, reduct
     return torch._C._nn.multilabel_margin_loss(input, target, reduction)
 
 
-def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean'):
-    r"""soft_margin_loss(input, target, size_average=None, reduce=None, reduction='elementwise_mean') -> Tensor
+def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    r"""soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
     """
@@ -1876,7 +1904,7 @@ def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='e
 
 
 def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
-                                reduce=None, reduction='elementwise_mean'):
+                                reduce=None, reduction='mean'):
     r"""multilabel_soft_margin_loss(input, target, weight=None, size_average=None) -> Tensor
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
@@ -1893,7 +1921,7 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
 
     if reduction == 'none':
         return loss
-    elif reduction == 'elementwise_mean':
+    elif reduction == 'mean':
         return loss.mean()
     elif reduction == 'sum':
         return loss.sum()
@@ -1902,8 +1930,8 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
 
 
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
-                          reduce=None, reduction='elementwise_mean'):
-    r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='elementwise_mean') -> Tensor
+                          reduce=None, reduction='mean'):
+    r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
     """  # noqa
@@ -1915,9 +1943,9 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
 
 
 def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
-                      reduce=None, reduction='elementwise_mean'):
+                      reduce=None, reduction='mean'):
     r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
-                          reduce=None, reduction='elementwise_mean') -> Tensor
+                          reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
@@ -2324,10 +2352,10 @@ def pad(input, pad, mode='constant', value=0):
 
 @torch._jit_internal.weak_script
 def pairwise_distance(x1, x2, p=2., eps=1e-6, keepdim=False):
+    # type: (Tensor, Tensor, float, float, bool) -> Tensor
     r"""
     See :class:`torch.nn.PairwiseDistance` for details
     """
-    # type: (Tensor, Tensor, float, float, bool) -> Tensor
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 
@@ -2386,7 +2414,7 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
 
 
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False, size_average=None,
-                        reduce=None, reduction="elementwise_mean"):
+                        reduce=None, reduction="mean"):
     r"""
     See :class:`~torch.nn.TripletMarginLoss` for details
     """

@@ -117,11 +117,28 @@ AsyncNetBase::AsyncNetBase(
 
 bool AsyncNetBase::handleRunError() {
 #ifdef CAFFE2_USE_EXCEPTION_PTR
-  std::unique_lock<std::mutex> exception_lock(exception_mutex_);
-  if (caught_exception_) {
-    std::rethrow_exception(caught_exception_);
+  // Check net's events for exceptions and rethrow chronologically the first one
+  int first_exc_task_id = -1;
+  int64_t first_exc_ts = 0;
+  for (int task_id = 0; task_id < tasksNum(); ++task_id) {
+    if (event(task_id).HasException()) {
+      if (first_exc_task_id >= 0) {
+        auto exc_ts = event(task_id).ExceptionTimestamp();
+        if (exc_ts < first_exc_ts) {
+          first_exc_task_id = task_id;
+          first_exc_ts = exc_ts;
+        }
+      } else {
+        first_exc_task_id = task_id;
+        first_exc_ts = event(task_id).ExceptionTimestamp();
+      }
+    }
+  }
+  if (first_exc_task_id >= 0) {
+    event(first_exc_task_id).RethrowException();
   }
 #endif // CAFFE2_USE_EXCEPTION_PTR
+
   return success_;
 }
 
@@ -150,7 +167,8 @@ TaskThreadPoolBase* AsyncNetBase::pool(const DeviceOption& device_option) {
   if (use_single_pool_) {
     return poolGetter(cpu_pools_, PROTO_CPU, -1, num_workers_);
   }
-  if (IsCPUDeviceType(device_option.device_type())) {
+  const auto device_type = device_option.device_type();
+  if (IsCPUDeviceType(device_type)) {
     auto numa_node_id = -1;
     if (device_option.has_numa_node_id()) {
       numa_node_id = device_option.numa_node_id();
@@ -161,24 +179,24 @@ TaskThreadPoolBase* AsyncNetBase::pool(const DeviceOption& device_option) {
         FLAGS_caffe2_net_async_max_numa_nodes,
         "Invalid NUMA node id: ",
         numa_node_id);
-    return poolGetter(cpu_pools_, PROTO_CPU, numa_node_id, num_workers_);
-  } else if (device_option.device_type() == PROTO_CUDA) {
+    return poolGetter(cpu_pools_, device_type, numa_node_id, num_workers_);
+  } else if (IsGPUDeviceType(device_type)) {
     auto gpu_id = device_option.device_id();
     CAFFE_ENFORCE(
         gpu_id >= 0 && gpu_id < FLAGS_caffe2_net_async_max_gpus,
         "Invalid GPU id: " + caffe2::to_string(gpu_id));
-    return poolGetter(gpu_pools_, PROTO_CUDA, gpu_id, num_workers_);
+    return poolGetter(gpu_pools_, device_type, gpu_id, num_workers_);
   } else {
     CAFFE_THROW(
         "Unsupported device type " +
-        caffe2::to_string(device_option.device_type()));
+        caffe2::to_string(device_type));
   }
 }
 
 int AsyncNetBase::stream(int task_id) {
   const auto& device_option = event(task_id).GetDeviceOption();
   int stream_id = 0;
-  if (device_option.device_type() == PROTO_CUDA) {
+  if (IsGPUDeviceType(device_option.device_type())) {
     int gpu_id = device_option.device_id();
     CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + caffe2::to_string(gpu_id));
     if ((unsigned)gpu_id >= getStreamCounters().size()) {
@@ -341,26 +359,25 @@ void AsyncNetBase::reset() {
   }
 
   success_ = true;
-#ifdef CAFFE2_USE_EXCEPTION_PTR
-  std::unique_lock<std::mutex> exception_lock(exception_mutex_);
-  caught_exception_ = nullptr;
-#endif // CAFFE2_USE_EXCEPTION_PTR
 }
 
-void AsyncNetBase::storeExceptionPtr() {
-#ifdef CAFFE2_USE_EXCEPTION_PTR
-  std::unique_lock<std::mutex> exception_lock(exception_mutex_);
-  if (!caught_exception_) {
-    caught_exception_ = std::current_exception();
-  }
-#endif // CAFFE2_USE_EXCEPTION_PTR
-}
-
-void AsyncNetBase::setTaskErrorMessage(
+void AsyncNetBase::handleChainError(
     int task_id,
-    const std::string& err_msg) {
+    OperatorBase* op,
+    const char* err_str,
+    bool save_exception) {
+  std::string err_msg = err_str;
+  if (op) {
+    err_msg += ",  op " + (op->has_debug_def() ? op->type() : " unknown");
+  }
+  LOG(ERROR) << err_msg;
+  // mark end of chain with an error
   if (query(task_id) == EventStatus::EVENT_INITIALIZED) {
-    event(task_id).SetFinished(err_msg.c_str());
+    if (save_exception) {
+      event(task_id).SetFinishedWithException(err_msg.c_str());
+    } else {
+      event(task_id).SetFinished(err_msg.c_str());
+    }
   }
 }
 
@@ -393,11 +410,9 @@ bool AsyncNetBase::run(int task_id, int stream_id) {
         }
         counters_.AddPerOpEndTime(op_id);
       }
+
       if (!success) {
-        auto err_msg = "Failed to execute an op: " +
-            (op->has_debug_def() ? op->type() : " unknown");
-        setTaskErrorMessage(task_id, err_msg);
-        LOG(ERROR) << err_msg;
+        handleChainError(task_id, op, "Failed to execute an op");
         return false;
       }
     }
@@ -407,22 +422,14 @@ bool AsyncNetBase::run(int task_id, int stream_id) {
       operators_[chains_[task_id].back()]->event().Finish();
     }
   } catch (const std::exception& e) {
-    storeExceptionPtr();
-    std::string err_msg = e.what();
-    if (op) {
-      err_msg += ",  op " + (op->has_debug_def() ? op->type() : " unknown");
-    }
-    setTaskErrorMessage(task_id, err_msg);
-    LOG(ERROR) << err_msg;
+    handleChainError(task_id, op, e.what(), /* save_exception */ true);
     return false;
   } catch (...) {
-    storeExceptionPtr();
-    std::string err_msg = "Failed to execute task: unknown error";
-    if (op) {
-      err_msg += ",  op " + (op->has_debug_def() ? op->type() : " unknown");
-    }
-    setTaskErrorMessage(task_id, err_msg);
-    LOG(ERROR) << err_msg;
+    handleChainError(
+        task_id,
+        op,
+        "Failed to execute task: unknown error",
+        /* save_exception */ true);
     return false;
   }
 

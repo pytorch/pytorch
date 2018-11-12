@@ -8,6 +8,7 @@
 #include "ATen/WrapDimUtils.h"
 #include "c10/util/Exception.h"
 #include "c10/util/Optional.h"
+#include "ATen/native/Resize.h"
 #include <ATen/SparseTensorUtils.h>
 #include <algorithm>
 #include <vector>
@@ -45,13 +46,86 @@ static void check_cat_no_zero_dim(TensorList tensors) {
 Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat_out(result, tensors, dim);
+  return at::_th_cat_out(result, tensors, dim);
+}
+
+static bool sizes_match_except(IntList s1, IntList s2, int64_t dim_except /* should already be wrapped */) {
+  if (s1.size() != s2.size()) {
+    return false;
+  }
+  for (int64_t i = 0; i < s1.size(); ++i) {
+    if (i != dim_except && s1[i] != s2[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static Tensor cat_sparse(TensorList tensors, int64_t dim) {
+  std::vector<Tensor> indices;
+  std::vector<Tensor> values;
+  int64_t wrapped = maybe_wrap_dim(dim, tensors[0].dim());
+  int64_t sparse_dim = tensors[0].sparse_dim();
+  int64_t dense_dim = tensors[0].dense_dim();
+  // TODO - Make catting along dense dimensions work.
+  // it's possible to do so,
+  // but it involves creating a brand new values object
+  // for each nonzero index in each input tensor
+  // E.g.: catting [[1,2],[0,0]] and [[0,0],[3,4]]
+  // yields [[1,2,0,0],[0,0,3,4]]
+  AT_CHECK(wrapped < sparse_dim,
+           "Concatenating or stacking tensors of sparse dim ", sparse_dim, "along non-sparse dimension ", dim, " not supported.");
+  IntList sizes = tensors[0].sizes();
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    auto const &t = tensors[i];
+    AT_CHECK(t.is_sparse(),
+             "Concatenating dense tensor at position ", i, " with sparse tensor(s) not supported.");
+    AT_CHECK(sizes_match_except(sizes, t.sizes(), wrapped),
+             "Concatenating tensor at position ", i, " of sizes ", t.sizes(), " with tensor of sizes ", sizes,
+             " along dimension ", dim, " not supported.");
+    AT_CHECK(t.sparse_dim() == sparse_dim && t.dense_dim() == dense_dim,
+             "Tensor at position ", i, " has dimension: sparse ", t.sparse_dim(), ", dense ", t.dense_dim(),
+             ". Concatenating with tensor of dimensions ", sparse_dim, ", ", dense_dim, " not supported.");
+    indices.push_back(t._indices());
+    values.push_back(t._values());
+  }
+  Tensor idxs = native::cat(indices, 1);
+  Tensor vals = native::cat(values, 0);
+  
+  // We now need to move the indices of each
+  // input tensor up along `dim` by an appropriate amount.
+  // E.g., if t1 has indices [[2,3,4],[5,6,7]], 
+  // and sizes [10, 7]
+  // then torch.cat((t1,t1,t1),1) should have indices
+  // [[2,3,4,2,3,4,2,3,4],[5,6,7,12,13,14,19,20,21]],
+  // so we need to increase idxs[1][3:6] by 7 
+  // and idxs[1][6:9] by 14.
+  int64_t col = 0;
+  int64_t cumulative_offset = 0;
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    auto const &t = tensors[i];
+    int64_t this_piece_size = t._nnz();
+    // cumulative_offset is zero for the first piece, so
+    // don't waste time doing this operation unless i > 0.
+    if (i > 0) {
+      idxs[wrapped].narrow(0, col, this_piece_size) += cumulative_offset;
+    }
+    cumulative_offset += t.size(wrapped);
+    col += this_piece_size;
+  }
+  auto sizes_copy = sizes.vec();
+  sizes_copy[wrapped] = cumulative_offset;
+  return native::sparse_coo_tensor(idxs, vals, sizes_copy, tensors[0].options());
 }
 
 Tensor cat(TensorList tensors, int64_t dim) {
+  if (tensors.size() > 0 && 
+        tensors[0].is_sparse()) {
+    return cat_sparse(tensors, dim);
+  }
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat(tensors, dim);
+  return at::_th_cat(tensors, dim);
 }
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
@@ -125,6 +199,22 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   return self.as_strided(sizes, strides, storage_offset);
 }
 
+Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_) {
+  int64_t nDims = self.dim() + 1;
+  int64_t dim1 = maybe_wrap_dim(dim1_, nDims);
+  int64_t dim2 = maybe_wrap_dim(dim2_, nDims);
+  AT_CHECK(dim1 != dim2, "diagonal dimensions cannot be identical ", dim1_, ", ", dim2_);
+  int64_t new_dim_len = std::abs(offset) + self.size(-1);
+  auto sizes = self.sizes().vec();
+  sizes.pop_back();
+  sizes.insert(sizes.begin() + std::min(dim1, dim2), new_dim_len);
+  sizes.insert(sizes.begin() + std::max(dim1, dim2), new_dim_len);
+  auto result = at::zeros(sizes, self.options());
+  auto diag = result.diagonal(offset, dim1, dim2);
+  diag.copy_(self);
+  return result;
+}
+
 Tensor expand(const Tensor& self, IntList size, bool implicit) {
   // [expand implicit]
   // The implicit flag is set to true for any expand calls inserted by broadcast
@@ -150,11 +240,18 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
-  return at::empty({0}, self.options()).set_(self.storage(), storage_offset, size, stride);
+  auto tid = self.type_id();
+  AT_CHECK(
+      tid == CPUTensorId() || tid == CUDATensorId(),
+      "as_strided is only implemented for strided CPU and CUDA tensors.");
+  auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), tid, false);
+  setStrided(result, size, stride, storage_offset);
+  return result;
 }
 
 Tensor &as_strided_(Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
-  return self.set_(self.storage(), storage_offset, size, stride);
+  setStrided(self, size, stride, storage_offset);
+  return self;
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride) {
@@ -162,7 +259,7 @@ Tensor as_strided(const Tensor& self, IntList size, IntList stride) {
 }
 
 Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
-  return at::as_strided_(self, size, stride, self.storage_offset());
+  return self.as_strided_(size, stride, self.storage_offset());
 }
 
 Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
@@ -265,7 +362,7 @@ Tensor repeat(const Tensor& self, IntList repeats) {
 }
 
 Tensor reshape(const Tensor& self, IntList proposed_shape) {
-  if (self.type().is_sparse()) {
+  if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
   auto shape = infer_size(proposed_shape, self.numel());

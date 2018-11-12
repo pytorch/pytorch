@@ -89,10 +89,10 @@ class AdamOp final : public Operator<Context> {
   bool RunOnDevice() override {
     // Iter live on the CPU
     CAFFE_ENFORCE(OperatorBase::InputIsTensorType(ITER, CPU));
-    CAFFE_ENFORCE(Input(LR).size() == 1);
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(PARAM).size());
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENT_1).size());
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENT_2).size());
+    CAFFE_ENFORCE(Input(LR).numel() == 1);
+    CAFFE_ENFORCE(Input(GRAD).numel() == Input(PARAM).numel());
+    CAFFE_ENFORCE(Input(GRAD).numel() == Input(MOMENT_1).numel());
+    CAFFE_ENFORCE(Input(GRAD).numel() == Input(MOMENT_2).numel());
     Output(OUTPUT_PARAM)->ResizeLike(Input(PARAM));
     Output(OUTPUT_MOMENT_1)->ResizeLike(Input(MOMENT_1));
     Output(OUTPUT_MOMENT_2)->ResizeLike(Input(MOMENT_2));
@@ -105,7 +105,7 @@ class AdamOp final : public Operator<Context> {
         std::sqrt(T(1.) - std::pow(beta2_, t)) / (T(1.) - std::pow(beta1_, t));
     if (OutputSize() == 3) {
       adam_compute<Context>(
-          Input(GRAD).size(),
+          Input(GRAD).numel(),
           Input(PARAM).template data<T>(),
           Input(GRAD).template data<T>(),
           Input(MOMENT_1).template data<T>(),
@@ -122,7 +122,7 @@ class AdamOp final : public Operator<Context> {
     } else {
       Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
       adam_compute_output_grad<Context>(
-          Input(GRAD).size(),
+          Input(GRAD).numel(),
           Input(PARAM).template data<T>(),
           Input(GRAD).template data<T>(),
           Input(MOMENT_1).template data<T>(),
@@ -162,12 +162,12 @@ class SparseAdamOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     // Enforce shapes
-    CAFFE_ENFORCE_EQ(Input(PARAM).size(), Input(MOMENT_1).size());
-    CAFFE_ENFORCE_EQ(Input(PARAM).size(), Input(MOMENT_2).size());
+    CAFFE_ENFORCE_EQ(Input(PARAM).numel(), Input(MOMENT_1).numel());
+    CAFFE_ENFORCE_EQ(Input(PARAM).numel(), Input(MOMENT_2).numel());
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),
-        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
-    CAFFE_ENFORCE_EQ(Input(LR).size(), 1);
+        Input(GRAD).size_from_dim(Input(INDICES).dim()));
+    CAFFE_ENFORCE_EQ(Input(LR).numel(), 1);
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, Input(INDICES));
@@ -183,8 +183,8 @@ class SparseAdamOp final : public Operator<Context> {
     const auto correction =
         std::sqrt(T(1.) - std::pow(beta2_, t)) / (T(1.) - std::pow(beta1_, t));
 
-    auto block_size = Input(PARAM).size() / Input(PARAM).dim(0);
-    auto n = Input(GRAD).size() / block_size;
+    auto block_size = Input(PARAM).numel() / Input(PARAM).size(0);
+    auto n = Input(GRAD).numel() / block_size;
 
     const auto* paramIn = Input(PARAM).template data<T>();
     const auto* indices = Input(INDICES).template data<SIndex>();
@@ -214,7 +214,7 @@ class SparseAdamOp final : public Operator<Context> {
 
 #ifndef NDEBUG
           CAFFE_ENFORCE_GE(
-              Input(PARAM).size(),
+              Input(PARAM).numel(),
               block_size + offsetIdx,
               this->debug_def().input(PARAM),
               ", out of bound,  idx:",
@@ -224,7 +224,7 @@ class SparseAdamOp final : public Operator<Context> {
               " and block size:",
               block_size);
           CAFFE_ENFORCE_GE(
-              Input(GRAD).size(),
+              Input(GRAD).numel(),
               block_size + offsetI,
               this->debug_def().input(GRAD),
               ", out of bound idx, idx:",
@@ -271,7 +271,7 @@ class SparseAdamOp final : public Operator<Context> {
 
 #ifndef NDEBUG
           CAFFE_ENFORCE_GE(
-              Input(PARAM).size(),
+              Input(PARAM).numel(),
               block_size + offsetIdx,
               this->debug_def().input(PARAM),
               ", out of bound,  idx:",
@@ -281,7 +281,7 @@ class SparseAdamOp final : public Operator<Context> {
               " and block size:",
               block_size);
           CAFFE_ENFORCE_GE(
-              Input(GRAD).size(),
+              Input(GRAD).numel(),
               block_size + offsetI,
               this->debug_def().input(GRAD),
               ", out of bound idx, idx:",
@@ -332,12 +332,12 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     // Enforce shapes
-    CAFFE_ENFORCE_EQ(Input(PARAM).size(), Input(MOMENT_1).size());
-    CAFFE_ENFORCE_EQ(Input(PARAM).sizes()[0], Input(MOMENT_2).size());
+    CAFFE_ENFORCE_EQ(Input(PARAM).numel(), Input(MOMENT_1).numel());
+    CAFFE_ENFORCE_EQ(Input(PARAM).sizes()[0], Input(MOMENT_2).numel());
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),
-        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
-    CAFFE_ENFORCE_EQ(Input(LR).size(), 1);
+        Input(GRAD).size_from_dim(Input(INDICES).dim()));
+    CAFFE_ENFORCE_EQ(Input(LR).numel(), 1);
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, Input(INDICES));
@@ -353,8 +353,8 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
     const auto correction =
         std::sqrt(T(1.) - std::pow(beta2_, t)) / (T(1.) - std::pow(beta1_, t));
 
-    auto block_size = Input(PARAM).size() / Input(PARAM).dim(0);
-    auto n = Input(GRAD).size() / block_size;
+    auto block_size = Input(PARAM).numel() / Input(PARAM).size(0);
+    auto n = Input(GRAD).numel() / block_size;
 
     const auto* paramIn = Input(PARAM).template data<T>();
     const auto* indices = Input(INDICES).template data<SIndex>();
@@ -384,7 +384,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
 
 #ifndef NDEBUG
           CAFFE_ENFORCE_GE(
-              Input(PARAM).size(),
+              Input(PARAM).numel(),
               block_size + offsetIdx,
               this->debug_def().input(PARAM),
               ", out of bound,  idx:",
@@ -394,7 +394,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
               " and block size:",
               block_size);
           CAFFE_ENFORCE_GE(
-              Input(GRAD).size(),
+              Input(GRAD).numel(),
               block_size + offsetI,
               this->debug_def().input(GRAD),
               ", out of bound idx, idx:",
@@ -445,7 +445,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
 
 #ifndef NDEBUG
           CAFFE_ENFORCE_GE(
-              Input(PARAM).size(),
+              Input(PARAM).numel(),
               block_size + offsetIdx,
               this->debug_def().input(PARAM),
               ", out of bound,  idx:",
@@ -455,7 +455,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
               " and block size:",
               block_size);
           CAFFE_ENFORCE_GE(
-              Input(GRAD).size(),
+              Input(GRAD).numel(),
               block_size + offsetI,
               this->debug_def().input(GRAD),
               ", out of bound idx, idx:",

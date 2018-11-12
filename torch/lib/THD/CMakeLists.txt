@@ -54,8 +54,6 @@ ELSE()
 
     ADD_DEFINITIONS(-DUSE_CUDA=1)
   ENDIF()
-
-  FIND_PACKAGE(NCCL)
 ENDIF()
 
 IF(MPI_FOUND)
@@ -71,23 +69,6 @@ IF(USE_GLOO AND USE_CUDA)
   ELSE()
     MESSAGE(STATUS "Building the gloo backend with TCP support only")
   ENDIF()
-ENDIF()
-
-IF(NCCL_FOUND)
-  MESSAGE(STATUS "NCCL_LIBRARIES: ${NCCL_LIBRARIES}")
-  IF(NCCL_MAJOR_VERSION AND NOT (NCCL_MAJOR_VERSION LESS 2))
-    MESSAGE(STATUS "NCCL Version 2 or higher found, will "
-                   "compile with NCCL distributed backend")
-    SET(DISTRIBUTED_NCCL_FOUND TRUE)
-    ADD_DEFINITIONS(-DUSE_DISTRIBUTED_NCCL=1)
-  ELSE()
-    MESSAGE(STATUS "Found NCCL, but the NCCL version is either not 2+ or not "
-                   "determinable, will not compile with NCCL distributed "
-                   "backend")
-  ENDIF()
-ELSE()
-  MESSAGE(STATUS "Not able to find NCCL, will not "
-                 "compile with NCCL distributed backend")
 ENDIF()
 
 # Can be compiled standalone
@@ -115,7 +96,7 @@ IF(NOT USE_GLOO OR NOT USE_CUDA)
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_gloo_cache.cpp")
 ENDIF()
 
-IF(NOT DISTRIBUTED_NCCL_FOUND)
+IF(NOT USE_NCCL)
   LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/DataChannelNccl.cpp")
 ENDIF()
 
@@ -123,11 +104,6 @@ SET(all_cpp ${base_cpp} ${process_group_cpp})
 SET(all_h THD.h ${base_h} ${process_group_h})
 
 EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
-
-# Need to include external NCCL first
-IF(DISTRIBUTED_NCCL_FOUND)
-  INCLUDE_DIRECTORIES(${NCCL_INCLUDE_DIRS})
-ENDIF()
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -163,6 +139,11 @@ ENDIF()
 # TODO we shouldn't need the USE_CUDA condition here. See https://github.com/pytorch/pytorch/issues/13101
 IF(USE_GLOO AND USE_CUDA)
   ADD_DEPENDENCIES(THD gloo)
+ENDIF()
+
+IF(USE_NCCL)
+  ADD_DEFINITIONS(-DUSE_DISTRIBUTED_NCCL=1)
+  TARGET_LINK_LIBRARIES(THD PUBLIC __caffe2_nccl)
 ENDIF()
 
 # Test executables

@@ -108,7 +108,7 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
   if (!detail::getCUDAHooks().compiledWithCuDNN()) {
     return false;
   }
-  if (!input.type().is_cuda() || !cudnn_enabled) {
+  if (!input.is_cuda() || !cudnn_enabled) {
     return false;
   }
   if (deterministic && is_dilated()) {
@@ -125,7 +125,7 @@ auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 
   return ((input.type().scalarType() == at::kFloat) || (input.type().scalarType() == at::kHalf))
          && detail::getCUDAHooks().compiledWithMIOpen()
-         && input.type().is_cuda()
+         && input.is_cuda()
          && input.dim() <= MIOPEN_DIM_MAX
          && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
          && !transposed
@@ -150,7 +150,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 // a depthwise multiplier)
 auto ConvParams::is_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
-  return input.type().is_cuda() &&
+  return input.is_cuda() &&
          !transposed &&
          input.ndimension() == 4 &&
          input.size(1) == groups &&
@@ -450,7 +450,7 @@ at::Tensor _convolution_nogroup(
             input, weight, kernel_size, bias,
             stride, padding);
       }
-    } else if (dim == 5 && (input.type().is_cuda() || dilated)) {
+    } else if (dim == 5 && (input.is_cuda() || dilated)) {
       return at::thnn_conv_dilated3d(
           input, weight, kernel_size, bias,
           stride, padding, dilation);
@@ -498,14 +498,14 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
   // Compute ggO = conv(ggI, w) + conv(i, ggW) + ggb
   Tensor ggO;
   if (ggI.defined()) {
-    if (weight.type().is_cuda()) {
+    if (weight.is_cuda()) {
       weight = weight.contiguous();
     }
     ggO = at::_convolution(ggI, weight, Tensor(), params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups, params.benchmark, params.deterministic, params.cudnn_enabled);
   }
 
   if (ggW.defined()) {
-    if (ggW.type().is_cuda()) {
+    if (ggW.is_cuda()) {
       ggW = ggW.contiguous();
     }
     auto ggW_term = at::_convolution(input, ggW, Tensor(), params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups, params.benchmark, params.deterministic, params.cudnn_enabled);
@@ -553,7 +553,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
     Tensor gWt;
     // Compute conv
     if (groups == 1) {
-      if (gOt.type().is_cuda()) {
+      if (gOt.is_cuda()) {
         gOt = gOt.contiguous();
       }
 
@@ -569,7 +569,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       for (int g = 0; g < groups; ++g) {
         auto ggIt_g = subvariable(ggIt, 0, groups, g);
         auto gOt_g = subvariable(gOt, 0, groups, g);
-        if (gOt_g.type().is_cuda()) {
+        if (gOt_g.is_cuda()) {
           gOt_g = gOt_g.contiguous();
         }
 
@@ -609,7 +609,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
     gi_conv_params.transposed = !params.transposed;
 
     if (params.transposed) {
-      if (gO.type().is_cuda()) {
+      if (gO.is_cuda()) {
         gO = gO.contiguous();
       }
       gI = at::_convolution(gO, ggW, Tensor(), gi_conv_params.stride, gi_conv_params.padding, gi_conv_params.dilation, gi_conv_params.transposed, gi_conv_params.output_padding, gi_conv_params.groups, gi_conv_params.benchmark, gi_conv_params.deterministic, gi_conv_params.cudnn_enabled);
@@ -662,7 +662,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
 
       Tensor gIt;
       if (params.groups == 1) {
-        if (gOt.type().is_cuda()) {
+        if (gOt.is_cuda()) {
           gOt = gOt.contiguous();
         }
 
@@ -672,7 +672,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
         for (int g = 0; g < groups; ++g) {
           auto ggWt_g = subvariable(ggWt, 1, groups, g);
           auto gOt_g = subvariable(gOt, 0, groups, g);
-          if (gOt_g.type().is_cuda()) {
+          if (gOt_g.is_cuda()) {
             gOt_g = gOt_g.contiguous();
           }
 

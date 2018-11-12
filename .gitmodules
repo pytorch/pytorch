@@ -1,6 +1,3 @@
-[submodule "third_party/catch"]
-	path = third_party/catch
-	url = https://github.com/catchorg/Catch2.git
 [submodule "third_party/pybind11"]
 	path = third_party/pybind11
 	url = https://github.com/pybind/pybind11.git
@@ -82,3 +79,6 @@
 [submodule "third_party/neon2sse"]
 	path = third_party/neon2sse
 	url = https://github.com/intel/ARM_NEON_2_x86_SSE.git
+[submodule "third_party/fbgemm"]
+	path = third_party/fbgemm
+	url = https://github.com/pytorch/fbgemm

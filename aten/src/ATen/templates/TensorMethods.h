@@ -35,7 +35,7 @@ inline Tensor Tensor::toBackend(Backend b) const {
 }
 
 inline TensorOptions Tensor::options() const {
-  return TensorOptions().dtype(scalar_type())
+  return TensorOptions().dtype(dtype())
                         .device(device())
                         .layout(layout())
                         .is_variable(is_variable());
@@ -56,7 +56,7 @@ inline void Tensor::set_data(Tensor new_data) {
 ${tensor_method_definitions}
 
 inline bool Tensor::is_variable() const noexcept {
-  return type().is_variable();
+  return impl_->is_variable();
 }
 
 inline caffe2::TypeMeta Tensor::dtype() const noexcept {
@@ -64,11 +64,11 @@ inline caffe2::TypeMeta Tensor::dtype() const noexcept {
 }
 
 inline Layout Tensor::layout() const noexcept {
-  return type().layout();
+  return impl_->layout();
 }
 
 inline Device Tensor::device() const {
-  return Device(type().device_type(), type().is_cuda() ? get_device() : -1);
+  return impl_->device();
 }
 
 inline int64_t Tensor::get_device() const {

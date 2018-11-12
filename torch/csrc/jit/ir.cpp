@@ -242,6 +242,7 @@ void Node::lint() const {
     size_t i = 0;
     for (auto input : inputs_) {
       // WARNING: O(n^2)
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) != input->uses_.end());
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
       i++;
@@ -262,12 +263,6 @@ void Node::lint() const {
   // Node subclass invariants
   IR_IF(this,Constant)
     JIT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIF(LoadWorld)
-    JIT_ASSERT(inputs_.size() == 0);
-    JIT_ASSERT(outputs_.size() == 1);
-  IR_ELSEIF(StoreWorld)
-    JIT_ASSERT(inputs_.size() == 1);
-    JIT_ASSERT(outputs_.size() == 0);
   IR_ELSEIF(Return)
     // Return uses is zero
     JIT_ASSERT(outputs().size() == 0);
@@ -405,7 +400,6 @@ void Graph::lint() const {
       for (auto n : b->nodes()) {
         JIT_ASSERT(n->kind_ != prim::Param);
         JIT_ASSERT(n->kind_ != prim::Return);
-        JIT_ASSERT(n->kind_ != prim::DummyWorld);
         check_node(n);
       }
 
@@ -523,6 +517,18 @@ std::shared_ptr<Graph> Graph::copy() {
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
+}
+
+std::string Value::uniqueNameBase() const {
+  std::string name = uniqueName();
+  std::string name_base = name;
+  auto last_dot_pos = name.find_last_of('.');
+  if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
+    if (name.find_first_not_of("0123456789", last_dot_pos + 1) == std::string::npos) {
+      name_base = name.substr(0, last_dot_pos);
+    }
+  }
+  return name_base;
 }
 
 Value* Value::setUniqueName(const std::string & name) {
@@ -733,7 +739,8 @@ Node::Node(Graph * graph_, NodeKind kind_) :
   graph_(graph_),
   owning_block_(nullptr),
   scope_(graph_->current_scope_),
-  schema_(nullptr) {
+  schema_(nullptr),
+  topo_position_(0) {
   graph_->all_nodes.emplace(this);
 }
 
@@ -1182,10 +1189,9 @@ Node * Graph::createNoneGenerator() {
   return n;
 }
 
-Node * Graph::createFusionGroup(int device) {
+Node * Graph::createFusionGroup() {
   auto n = create(prim::FusionGroup, 0);
   n->g_(attr::Subgraph,std::make_shared<Graph>(current_scope()));
-  n->i_(attr::device, device);
   return n;
 }
 
@@ -1324,12 +1330,6 @@ Value* Graph::insertConstant(
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   return jit::insertConstant(*this, std::move(val), loc, scope);
-}
-
-Value* Graph::insertDummyWorld() {
-  auto node = create(prim::DummyWorld, 1);
-  node->output()->setType(WorldType::get());
-  return insertNode(node)->output();
 }
 
 std::string Graph::toString() const {

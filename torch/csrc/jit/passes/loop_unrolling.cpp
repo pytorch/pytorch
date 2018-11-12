@@ -12,7 +12,7 @@ namespace torch { namespace jit {
 namespace {
 
 static constexpr int64_t kUnrollFactor = 8;
-static constexpr int64_t kMaxBodySize = 16;
+static constexpr int64_t kMaxBodySize = 32;
 static constexpr int64_t kMaxBodyRepeats = 64;
 
 bool isTrueConstant(Value *val) {

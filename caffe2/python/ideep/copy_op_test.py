@@ -9,7 +9,7 @@ from random import randint
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 
-@unittest.skipIf(not workspace.C.use_ideep, "No IDEEP support.")
+@unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class CopyTest(unittest.TestCase):
     def _get_deep_device(self):
         return caffe2_pb2.DeviceOption(device_type=caffe2_pb2.IDEEP)
@@ -31,6 +31,7 @@ class CopyTest(unittest.TestCase):
         X_ideep = workspace.FetchBlob("X_ideep")
         np.testing.assert_allclose(X, X_ideep)
 
+    @unittest.skipIf(True, "zero dim is NOT supported for now.")
     def test_copy_to_ideep_zero_dim(self):
         op = core.CreateOperator(
                 "CopyCPUToIDEEP",
@@ -63,6 +64,7 @@ class CopyTest(unittest.TestCase):
         X_ideep = workspace.FetchBlob("X")
         np.testing.assert_allclose(X, X_ideep)
 
+    @unittest.skipIf(True, "zero dim is NOT supported for now.")
     def test_copy_from_ideep_zero_dim(self):
         op = core.CreateOperator(
                 "CopyIDEEPToCPU",
@@ -93,3 +95,6 @@ class CopyTest(unittest.TestCase):
         workspace.RunOperatorOnce(op)
         X_ideep = workspace.FetchBlob("X")
         np.testing.assert_allclose(X, X_ideep)
+
+if __name__ == "__main__":
+    unittest.main()

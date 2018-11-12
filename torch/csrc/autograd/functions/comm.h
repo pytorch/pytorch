@@ -19,7 +19,7 @@ struct Scatter : public Function {
       std::vector<at::Device> devices,
       const c10::optional<std::vector<int64_t>>& chunk_sizes = c10::nullopt,
       int64_t dim = 0,
-      const c10::optional<std::vector<at::cuda::CUDAStream>>& streams =
+      const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams =
           c10::nullopt,
       bool unsqueeze_scalars = false);
 
@@ -28,7 +28,7 @@ struct Scatter : public Function {
   std::vector<at::Device> devices_;
   c10::optional<std::vector<int64_t>> chunk_sizes_;
   int64_t dim_;
-  c10::optional<std::vector<at::cuda::CUDAStream>> streams_;
+  c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams_;
   bool unsqueeze_scalars_;
 };
 

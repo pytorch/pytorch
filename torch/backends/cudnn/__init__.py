@@ -2,6 +2,7 @@ import os
 import ctypes
 import sys
 import torch
+import types
 import warnings
 from torch.version import cuda
 from contextlib import contextmanager
@@ -455,17 +456,18 @@ class ContextProp(object):
                                "after disable_global_flags; please use flags() context manager instead")
 
 
-class CudnnModule(object):
-    def __init__(self, m):
-        self.__dict__ = m.__dict__
-        # You have to retain the old module, otherwise it will
-        # get GC'ed and a lot of things will break.  See:
-        # https://stackoverflow.com/questions/47540722/how-do-i-use-the-sys-modules-replacement-trick-in-init-py-on-python-2
-        self.__old_mod = m
+class CudnnModule(types.ModuleType):
+    def __init__(self, m, name):
+        super(CudnnModule, self).__init__(name)
+        self.m = m
+
+    def __getattr__(self, attr):
+        return self.m.__getattribute__(attr)
+
     enabled = ContextProp(torch._C._get_cudnn_enabled, torch._C._set_cudnn_enabled)
     deterministic = ContextProp(torch._C._get_cudnn_deterministic, torch._C._set_cudnn_deterministic)
     benchmark = ContextProp(torch._C._get_cudnn_benchmark, torch._C._set_cudnn_benchmark)
 
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
-sys.modules[__name__] = CudnnModule(sys.modules[__name__])
+sys.modules[__name__] = CudnnModule(sys.modules[__name__], __name__)

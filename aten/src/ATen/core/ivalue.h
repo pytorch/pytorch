@@ -6,6 +6,7 @@
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <ATen/core/blob.h>
 #include <ATen/core/intrusive_ptr.h>
+#include <ATen/core/thread_pool.h>
 
 #include <type_traits>
 
@@ -63,10 +64,6 @@ struct C10_EXPORT List : c10::intrusive_ptr_target {
   }
 };
 
-struct World {
-  int64_t world_id;
-};
-
 struct Future;
 
 struct C10_EXPORT Tuple : public List<IValue> {
@@ -104,7 +101,6 @@ using GenericList = List<IValue>;
   _(TensorList) \
   _(Blob) \
   _(GenericList) \
-  _(World) \
   _(Future) \
 
 struct CAFFE2_API IValue final {
@@ -212,17 +208,6 @@ struct CAFFE2_API IValue final {
   double toDouble() const {
     AT_ASSERT(isDouble());
     return payload.as_double;
-  }
-
-  // World
-  IValue(ivalue::World w)
-  : tag(Tag::World), is_intrusive_ptr(false) {
-    payload.as_world = w;
-  }
-  bool isWorld() const { return Tag::World == tag; }
-  ivalue::World toWorld() const {
-    AT_ASSERT(isWorld());
-    return payload.as_world;
   }
 
   // Future
@@ -354,7 +339,7 @@ struct CAFFE2_API IValue final {
   }
 
   // None
-  bool isNone() {
+  bool isNone() const {
     return Tag::None == tag;
   }
   std::string toNone() const {
@@ -369,7 +354,7 @@ struct CAFFE2_API IValue final {
       *this = s.toLong();
     }
   }
-  bool isScalar() {
+  bool isScalar() const {
     return isDouble() || isInt() || isBool();
   }
   at::Scalar toScalar() const {
@@ -408,6 +393,9 @@ struct CAFFE2_API IValue final {
 
   template<typename T>
   optional<T> toOptional();
+
+  // this is a shallow comparison of two IValues to test the object identity
+  bool isSameIdentity(IValue& rhs);
 
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
@@ -449,7 +437,6 @@ struct CAFFE2_API IValue final {
     double as_double;
     bool as_bool;
     c10::intrusive_ptr_target* as_intrusive_ptr;
-    ivalue::World as_world;
   } payload;
   Tag tag;
   bool is_intrusive_ptr;
@@ -457,19 +444,59 @@ struct CAFFE2_API IValue final {
 
 // Future
 struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
-  explicit Future(IValue result_) : result(result_), ready(true) {}
+ private:
+  c10::intrusive_ptr<Future> intrusive_from_this() {
+    c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
+                                           // from a raw `this` pointer
+                                           // so we need to bump the refcount
+                                           // to account for this ownership
+    return c10::intrusive_ptr<Future>::reclaim(this);
+  }
 
-  IValue get() const {
-    AT_ASSERT(ready);
-    return result;
+ public:
+  void wait() {
+    if (completed()) {
+      return;
+    }
+    c10::global_work_queue.workOnTasksUntilCompleted(intrusive_from_this());
+    AT_ASSERT(completed());
+  }
+
+  void markCompleted(IValue value) {
+    value_ = std::move(value);
+    completed_ = true;
+    for (auto& callback : callbacks) {
+      callback();
+    }
+    callbacks.clear();
+  }
+
+  // Get the result of the current future.
+  IValue value() {
+    AT_ASSERT(completed());
+    return value_;
+  }
+
+  void addCallback(std::function<void(void)> callback) {
+    if (completed()) {
+      callback();
+    }
+    callbacks.push_back(callback);
+  }
+
+  // Check if the current future has completed
+  bool completed() {
+    return completed_;
   }
 
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const Future& v);
 
-  IValue result;
-  bool ready = false;
+ private:
+  IValue value_; // when finished the value
+  bool completed_ = false; // is this future complete
+  std::vector<std::function<void(void)>> callbacks;
 };
 
 #undef TORCH_FORALL_TAGS
@@ -501,7 +528,6 @@ DEFINE_TO(std::vector<bool>, toBoolListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
 DEFINE_TO(std::vector<IValue>, toGenericListRef)
 DEFINE_TO(std::string, toStringRef)
-DEFINE_TO(ivalue::World, toWorld)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(IValue, toIValue)
 
@@ -622,5 +648,36 @@ inline optional<T> IValue::toOptional() {
   }
   return this->to<T>();
 }
+
+inline bool IValue::isSameIdentity(IValue& rhs) {
+  // We choose to not use memcmp for payload check due to potential random padding characters on union type
+
+  // Semantics:
+  // 1. None is None, False is False, and True is True are all true
+  // 2. If it is a tensor type, we need to take undefined tensor into account
+  // 3. Undefined_tensor is None and vice versa should be true
+  // 4. If it is a reference type (i.e. is_intrusive_ptr), then is is True when the pointed-to object is the same.
+  // 5. False for all other comparisons.
+  if (this->isNone() && rhs.isNone()) {
+    return true;
+  } else if (this->isBool() && rhs.isBool()) {
+    // for bool type, do equality check
+    return this->toBool() == rhs.toBool();
+  } else if (this->isTensor() && rhs.isTensor()) {
+    // for tensor type, just check the as_intrusive_ptr since is_intrusive_ptr is false for undefined tensor
+    return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+  } else if (this->isTensor() && rhs.isNone()) {
+    // special case: undefined tensor and None are the same identity
+    return !this->is_intrusive_ptr;
+  } else if (this->isNone() && rhs.isTensor()) {
+    // special case: undefined tensor and None are the same identity
+    return !rhs.is_intrusive_ptr;
+  } else {
+    // for objects holding in IValue, do shallow compare on pointer address to testify the identity
+    return this->is_intrusive_ptr && rhs.is_intrusive_ptr
+        && this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+  }
+}
+
 
 } // namespace c10

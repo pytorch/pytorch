@@ -21,12 +21,33 @@ at::Tensor dispatch_type_conversion(
   }
   AutoNoGIL no_gil;
 
-  const int32_t tensor_device = self.is_cuda() ? self.get_device() : -1;
-  at::DeviceGuard device_guard(device_index.value_or(tensor_device));
+  // TODO: Make this less CUDA specific
+  at::Device device = self.device();
+  if (device_index && *device_index != -1) {
+    device = at::Device(at::kCUDA, *device_index);
+  }
+  at::DeviceGuard device_guard(device);
 
-  if (self.is_cuda() && type.is_cuda() && tensor_device != at::current_device()) {
-    // copy if the devices are different even if the types are the same
-    return type.copy(self, non_blocking);
+  if (self.device().type() == type.device_type()) {
+    switch (self.device().type()) {
+      case at::DeviceType::CPU:
+        // Do nothing, there is only one CPU "device"
+        // TODO: Maybe this wouldn't be true with NUMA
+        break;
+      case at::DeviceType::CUDA:
+        if (self.device().index() != at::current_device()) {
+          // copy if the devices are different even if the types are the same
+          return type.copy(self, non_blocking);
+        }
+        break;
+      default:
+        // This assert failed because you tried to use copy() on a non-CUDA
+        // device.  We couldn't figure out if this would have resulted in
+        // a cross-device copy, because at::current_device() only knows about
+        // the current CUDA device.  Fix current_device to take a DeviceType
+        // and provide information for things that are not CUDA too!
+        AT_ASSERT(0);
+    }
   }
 
   // Don't specialize cross-backend copies
