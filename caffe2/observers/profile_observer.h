@@ -31,9 +31,11 @@ namespace caffe2 {
 
 /**
  * This observer displays a description of each operator executed in a network.
- * This includes input and tensors (name, size, type), arguments, and execution
- * time. This can be used to analyze different performance characteristics.
- * NOTE: Currently this observer only supports synchronized computation
+ * This includes input and tensors (name, size, type), arguments, analytical
+ *cost and execution time. This can be used to analyze different performance
+ *characteristics. NOTE: Currently this observer only supports synchronized
+ *computation. And for RNN, --caffe2_rnn_executor=False need to be set if want
+ *to get the cost summary at the net level.
  **/
 
 class ProfileObserver;
@@ -52,21 +54,30 @@ class ProfileCounter {
 class ProfileOperatorObserver : public ProfileCounter,
                                 public ObserverBase<OperatorBase> {
  public:
+  struct DetailedStat {
+    string opType;
+    struct OpSchema::Cost c;
+  };
   explicit ProfileOperatorObserver(OperatorBase* subject) = delete;
   explicit ProfileOperatorObserver(
       OperatorBase* subject,
+      DetailedStat* stat,
       ProfileObserver* netObserver)
-      : ObserverBase<OperatorBase>(subject), netObserver_(netObserver) {
+      : ObserverBase<OperatorBase>(subject),
+        stat_(stat),
+        netObserver_(netObserver) {
+    stat->opType = subject->debug_def().type();
     if (subject) {
       net_position_ = subject->net_position();
     }
   }
   explicit ProfileOperatorObserver(
       OperatorBase* subject,
+      DetailedStat* stat,
       ProfileObserver* netObserver,
       int net_position,
       int rnn_order)
-      : ProfileOperatorObserver(subject, netObserver) {
+      : ProfileOperatorObserver(subject, stat, netObserver) {
     net_position_ = net_position;
     rnn_order_ = rnn_order;
   }
@@ -86,7 +97,37 @@ class ProfileOperatorObserver : public ProfileCounter,
     return ss.str();
   }
 
+  OpSchema::Cost getOpCost() {
+    const string& op_type = subject_->debug_def().type();
+    auto* schema = OpSchemaRegistry::Schema(op_type);
+    OpSchema::Cost cost;
+    if (schema && schema->HasCostInferenceFunction()) {
+      vector<TensorShape> shapes = subject_->InputTensorShapes();
+
+      auto known_shapes = std::accumulate(
+          shapes.begin(),
+          shapes.end(),
+          true,
+          [](bool acc, const TensorShape& shape) {
+            return acc && !shape.unknown_shape();
+          });
+      if (known_shapes) {
+        cost = schema->InferCost(subject_->debug_def(), shapes);
+      }
+    }
+    return cost;
+  }
+
+  void updateDetailedStat(const OpSchema::Cost cost) {
+    stat_->c.flops += cost.flops;
+    stat_->c.bytes_read += cost.bytes_read;
+    stat_->c.bytes_written += cost.bytes_written;
+    stat_->c.params_bytes += cost.params_bytes;
+  }
+
  protected:
+  DetailedStat* stat_;
+  OpSchema::Cost cost_;
   ProfileObserver* netObserver_;
   int net_position_; // Needed because this is not visible in RNN Executor
   int rnn_order_ = OperatorBase::kNoNetPositionSet;
@@ -96,20 +137,41 @@ class ProfileOperatorObserver : public ProfileCounter,
   void Stop() override;
 };
 
-class ProfileObserver final : public OperatorAttachingNetObserver<
-                                  ProfileOperatorObserver,
-                                  ProfileObserver> {
+class ProfileObserver final : public ObserverBase<NetBase> {
  public:
   explicit ProfileObserver(NetBase* subject)
-      : OperatorAttachingNetObserver<ProfileOperatorObserver, ProfileObserver>(
-            subject,
-            this) {}
+      : ObserverBase<NetBase>(subject),
+        detailedOpStats_(subject->GetOperators().size()),
+        net_name_(subject->Name()) {
+    const auto& ops = subject->GetOperators();
+    for (int i = 0; i < ops.size(); i++) {
+      ops[i]->AttachObserver(caffe2::make_unique<ProfileOperatorObserver>(
+          ops[i], &detailedOpStats_[i], this));
+    }
+  }
+  ~ProfileObserver();
+  CaffeMap<string, OpSchema::Cost> getAggregatedOpTypeCost() const {
+    CaffeMap<string, OpSchema::Cost> cost_per_op_type;
+    for (int idx = 0; idx < detailedOpStats_.size(); ++idx) {
+      const auto& stat = detailedOpStats_[idx];
+      uint64_t flops = stat.c.flops;
+      uint64_t bytes_read = stat.c.bytes_read;
+      uint64_t bytes_written = stat.c.bytes_written;
+
+      cost_per_op_type[stat.opType].flops += flops;
+      cost_per_op_type[stat.opType].bytes_read += bytes_read;
+      cost_per_op_type[stat.opType].bytes_written += bytes_written;
+    }
+    return cost_per_op_type;
+  }
 
   void Start() override{};
   void Stop() override{};
 
  private:
   vector<const ProfileOperatorObserver*> operator_observers_;
+  std::vector<ProfileOperatorObserver::DetailedStat> detailedOpStats_;
+  std::string net_name_;
 };
 
 } // namespace caffe2
