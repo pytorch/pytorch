@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/util/ArrayRef.h>
+#include <ATen/core/ArrayRef.h>
 #include <ATen/cuda/CUDAStream.h>
 #include <ATen/cuda/CUDAContext.h>
 
