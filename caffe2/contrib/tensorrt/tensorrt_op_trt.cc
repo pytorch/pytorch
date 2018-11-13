@@ -51,7 +51,7 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
       logger_(
           (nvinfer1::ILogger::Severity)(OperatorBase::GetSingleArgument<int>(
               "log_verbosity",
-              FLAGS_caffe2_log_level))),
+              FLAGS_minloglevel))),
       max_batch_size_(
           OperatorBase::GetSingleArgument<int>("max_batch_size", 1)) {
   {

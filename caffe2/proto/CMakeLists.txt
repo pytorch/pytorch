@@ -1,10 +1,5 @@
 file(GLOB Caffe2_PROTOBUF_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*.proto")
 
-#file(GLOB ONNX_PROTOBUF_FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/onnx/onnx/onnx.proto")
-#list(APPEND Caffe2_PROTOBUF_FILES ${ONNX_PROTOBUF_FILES})
-
-#message ("########################################################## ${Caffe2_PROTOBUF_FILES}")
-
 caffe2_protobuf_generate_cpp_py(Caffe2_PROTO_SRCS Caffe2_PROTO_HEADERS Caffe2_PROTO_PY ${Caffe2_PROTOBUF_FILES})
 
 add_library(Caffe2_PROTO OBJECT ${Caffe2_PROTO_HEADERS} ${Caffe2_PROTO_SRCS})

@@ -102,72 +102,14 @@ endif()
 
 # Optionally, find TensorRT
 if(CAFFE2_USE_TENSORRT)
-
-
-
-
-
-
-
-
-
-
-
-
-
-  #
-#  find_package(TensorRT)
-#
-##  find_path(TENSORRT_INCLUDE_DIR NvInfer.h
-##    HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
-##    PATH_SUFFIXES include)
-##
-##
-##  find_library(TENSORRT_LIBRARY_1 nvinfer
-##          HINTS ${TENSORRT_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
-##          PATH_SUFFIXES lib lib64 lib/x64)
-##  find_library(TENSORRT_LIBRARY_2 nvcaffe_parser
-##          HINTS ${TENSORRT_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
-##          PATH_SUFFIXES lib lib64 lib/x64)
-##  find_library(TENSORRT_LIBRARY_3 nvinfer_plugin
-##          HINTS ${TENSORRT_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
-##          PATH_SUFFIXES lib lib64 lib/x64)
-##  find_library(TENSORRT_LIBRARY_4 nvonnxparser
-##          HINTS ${TENSORRT_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
-##          PATH_SUFFIXES lib lib64 lib/x64)
-##  find_library(TENSORRT_LIBRARY_5 nvonnxparser_runtime
-##          HINTS ${TENSORRT_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
-##          PATH_SUFFIXES lib lib64 lib/x64)
-##  find_library(TENSORRT_LIBRARY_6 nvparsers
-##          HINTS ${TENSORRT_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
-##          PATH_SUFFIXES lib lib64 lib/x64)
-#
-##  set(TENSORRT_LIBRARY
-##          TENSORRT_LIBRARY_1
-##          TENSORRT_LIBRARY_2
-##          TENSORRT_LIBRARY_3
-##          TENSORRT_LIBRARY_4
-##          TENSORRT_LIBRARY_5
-##          TENSORRT_LIBRARY_6
-##          )
-#
-##  find_library(TENSORRT_LIBRARY nvinfer
-##    nvcaffe_parser nvinfer_plugin nvonnxparser nvonnxparser_runtime nvparsers
-##    HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
-##    PATH_SUFFIXES lib lib64 lib/x64)
-#
-##  include(FindPackageHandleStandardArgs)
-##  find_package_handle_standard_args(
-##    TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARY)
-
   find_path(TENSORRT_INCLUDE_DIR NvInfer.h
     HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES include)
-  find_library(TENSORRT_LIBRARIES nvinfer
+  find_library(TENSORRT_LIBRARY nvinfer
     HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES lib lib64 lib/x64)
   find_package_handle_standard_args(
-    TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARIES)
+    TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARY)
   if(NOT TENSORRT_FOUND)
     message(WARNING
       "Caffe2: Cannot find TensorRT library. Turning the option off")
@@ -291,19 +233,10 @@ set_property(
 
 # TensorRT
 if(CAFFE2_USE_TENSORRT)
-#  add_library(caffe2::tensorrt INTERFACE IMPORTED)
-##  set_property(
-##      TARGET caffe2::tensorrt PROPERTY IMPORTED_LOCATION
-##      ${TENSORRT_LIBRARIES})
-#target_link_libraries(caffe2::tensorrt INTERFACE ${TENSORRT_LIBRARIES})
-#set_property(
-#      TARGET caffe2::tensorrt PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-#      ${TENSORRT_INCLUDE_DIR})
-
   add_library(caffe2::tensorrt UNKNOWN IMPORTED)
   set_property(
       TARGET caffe2::tensorrt PROPERTY IMPORTED_LOCATION
-      ${TENSORRT_LIBRARIES})
+      ${TENSORRT_LIBRARY})
   set_property(
       TARGET caffe2::tensorrt PROPERTY INTERFACE_INCLUDE_DIRECTORIES
       ${TENSORRT_INCLUDE_DIR})

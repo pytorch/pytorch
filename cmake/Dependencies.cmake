@@ -421,10 +421,6 @@ if(USE_OPENCV)
   if(OpenCV_FOUND)
     include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCV_LIBS})
-    find_package(TIFF)
-    if(TIFF_FOUND)
-      list(APPEND Caffe2_MAIN_LIBS ${TIFF_LIBRARY})
-    endif()
     message(STATUS "OpenCV found (${OpenCV_CONFIG_PATH})")
   else()
     message(WARNING "Not compiling with OpenCV. Suppress this warning with -DUSE_OPENCV=OFF")
@@ -652,32 +648,6 @@ if(USE_CUDA)
     endif()
     if(CAFFE2_USE_TENSORRT)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
-
-
-
-
-#
-#      find_package(TensorRT)
-#      if(NOT TENSORRT_FOUND)
-#        message(WARNING
-#                "Caffe2: Cannot find TensorRT library. Turning the option off")
-#        set(CAFFE2_USE_TENSORRT OFF)
-##      else()
-##        list(APPEND Caffe2_DEPENDENCY_LIBS ${TENSORRT_LIBRARIES})
-#      endif()
-#
-
-
-
-
-
-#      #      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2_tensorrt)
-##      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS ${caffe2_tensorrt})
-#
-#message("===================== ${LINK_LIBRARIES}")
-#      message("///////////////////// ${Caffe2_DEPENDENCY_LIBS}")
-#
-
     else()
       caffe2_update_option(USE_TENSORRT OFF)
     endif()
