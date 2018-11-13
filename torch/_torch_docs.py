@@ -1977,7 +1977,7 @@ Example::
 
 add_docstr(torch.get_default_dtype,
            r"""
-get_default_dtype() -> :class:`torch.dtype`
+get_default_dtype() -> torch.dtype
 
 Get the current default floating point :class:`torch.dtype`.
 
