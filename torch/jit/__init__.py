@@ -1355,6 +1355,7 @@ _builtin_blacklist = {
     'dropout2d',
     'dropout3d',
     'feature_alpha_dropout',
+    'bilinear',
 }
 
 
@@ -1401,29 +1402,6 @@ def _find_builtin(fn):
     return _get_builtin_table().get(id(fn))
 
 
-# Python equivalents for the empty list construction builtins. We need
-# these otherwise the tests won't execute in regular Python mode.
-def _construct_empty_int_list():
-    return []
-
-
-_register_builtin(_construct_empty_int_list, 'aten::_construct_empty_int_list')
-
-
-def _construct_empty_float_list():
-    return []
-
-
-_register_builtin(_construct_empty_float_list, 'aten::_construct_empty_float_list')
-
-
-def _construct_empty_tensor_list():
-    return []
-
-
-_register_builtin(_construct_empty_tensor_list, 'aten::_construct_empty_tensor_list')
-
-
 _register_builtin(len, 'aten::len')
 
 
@@ -1442,6 +1420,11 @@ class _disable_tracing(object):
         torch._C._set_tracing_state(self.state)
         self.state = None
 
+
+# for use in python if using annotate
+def annotate(the_type, the_value):
+    # noop in python
+    return the_value
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

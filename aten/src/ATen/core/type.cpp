@@ -105,6 +105,10 @@ StringTypePtr StringType::get() {
   static auto value = StringType::create();
   return value;
 }
+OptionalTypePtr OptionalType::ofTensor() {
+  static auto value = OptionalType::create(DynamicType::get());
+  return value;
+}
 ListTypePtr ListType::ofTensors() {
   static auto value = ListType::create(DynamicType::get());
   return value;

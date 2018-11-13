@@ -465,9 +465,13 @@ if (BUILD_PYTHON)
   # Python site-packages
   # Get canonical directory for python site packages (relative to install
   # location).  It varies from system to system.
+  # We should pin the path separator to the forward slash on Windows. 
+  # More details can be seen at
+  # https://github.com/pytorch/pytorch/tree/master/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
   pycmd(PYTHON_SITE_PACKAGES "
+      import os
       from distutils import sysconfig
-      print(sysconfig.get_python_lib(prefix=''))
+      print(sysconfig.get_python_lib(prefix='').replace(os.sep, '/'))
   ")
   SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
   # ---[ Options.

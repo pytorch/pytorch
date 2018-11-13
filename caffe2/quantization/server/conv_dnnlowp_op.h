@@ -103,12 +103,12 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   std::vector<dnnlowp::RequantizationParams> requantization_params_;
 
   // used in fast path for T == uint8_t
-  std::vector<std::unique_ptr<fbgemm2::PackBMatrix<std::int8_t>>> Wq_packed_;
+  std::vector<std::unique_ptr<fbgemm::PackBMatrix<std::int8_t>>> Wq_packed_;
 
   // For depthwise 3x3 conv
-  std::unique_ptr<fbgemm2::Packed3x3ConvMatrix> Wq_depthwise_3x3_packed_;
+  std::unique_ptr<fbgemm::Packed3x3ConvMatrix> Wq_depthwise_3x3_packed_;
   // For depthwise 3x3x3 conv
-  std::unique_ptr<fbgemm2::Packed3x3x3ConvMatrix> Wq_depthwise_3x3x3_packed_;
+  std::unique_ptr<fbgemm::Packed3x3x3ConvMatrix> Wq_depthwise_3x3x3_packed_;
 
   // pre-computed biases and offsets
   std::vector<std::int32_t> b_quantized_;

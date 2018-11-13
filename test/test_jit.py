@@ -29,7 +29,7 @@ from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
 import random
-
+from typing import List, Optional
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
 
@@ -1493,6 +1493,30 @@ class TestJit(JitTestCase):
         x = torch.randn(5, 5)
         self.assertEqual(foo(x), x + x + x)
 
+    def test_trace_script(self):
+        @torch.jit.script
+        def func1(x):
+            # type: (Tuple[Tensor, Tensor]) -> Tensor
+            return x[0] + x[1]
+
+        @torch.jit.script
+        def func2(x):
+            # type: (List[Tensor]) -> Tensor
+            return x[0] + x[1]
+
+        a = torch.randn(5)
+        b = torch.randn(5)
+
+        expected = func1((a, b))
+        traced = torch.jit.trace(func1, ((a, b),))
+        result = traced((a, b))
+        self.assertEqual(expected, result)
+
+        expected = func2((a, b))
+        traced = torch.jit.trace(func2, ((a, b),))
+        result = traced((a, b))
+        self.assertEqual(expected, result)
+
     def test_einsum(self):
         def outer(x, y):
             return torch.einsum('i,j->ij', (x, y))
@@ -2769,6 +2793,26 @@ class TestScript(JitTestCase):
 
         return ge
 
+    def test_type_annotate(self):
+
+        def foo(a):
+            return torch.jit.annotate(torch.Tensor, a)
+
+        self.checkScript(foo, (torch.rand(3),))
+
+        def bar():
+            a = torch.jit.annotate(List[int], [])
+            for i in range(10):
+                a.append(4)
+            return a
+
+        self.checkScript(bar, ())
+
+        with self.assertRaisesRegex(RuntimeError, "expected"):
+            @torch.jit.script
+            def baz(a):
+                return torch.jit.annotate(int, a)
+
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
 
@@ -3482,7 +3526,7 @@ a")
 
         @torch.jit.script
         def foo2(x):
-            return torch.cat(torch.jit._construct_empty_tensor_list(), dim=1)
+            return torch.cat([], dim=1)
 
         @torch.jit.script
         def foo3(x):
@@ -3517,13 +3561,13 @@ a")
             self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
-            x = torch.jit._construct_empty_int_list()
+            x = torch.jit.annotate(List[int], [])
             if True:
                 x = [1, 2, 3]
-            y = torch.jit._construct_empty_float_list()
+            y = torch.jit.annotate(List[float], [])
             if True:
                 y = [1.0, 2.0, 3.0]
-            z = torch.jit._construct_empty_tensor_list()
+            z = []
             if True:
                 z = [torch.randn([1])]
             return
@@ -3538,7 +3582,7 @@ a")
             self.checkScript(reassign_bad_type, (), optimize=False)
 
         def reassign_nested():
-            x = torch.jit._construct_empty_int_list()
+            x = torch.jit.annotate(List[int], [])
             if True:
                 x = [1, 2, 3]
                 if True:
@@ -3588,7 +3632,7 @@ a")
         self.checkScript(func, ())
 
         def func2():
-            a = torch.jit._construct_empty_tensor_list()
+            a = []
             return len(a) == 0
 
         self.checkScript(func2, ())
@@ -3644,7 +3688,7 @@ a")
 
         def test_list_add_empty():
             a = [1, 2, 3]
-            b = torch.jit._construct_empty_int_list()
+            b = torch.jit.annotate(List[int], [])
             c = a + b
             return c == [1, 2, 3]
 
@@ -3701,7 +3745,7 @@ a")
 
         def test_backward_slice():
             a = [0, 1, 2, 3, 4]
-            return a[3:2] == torch.jit._construct_empty_int_list()
+            return a[3:2] == torch.jit.annotate(List[int], [])
         self.checkScript(test_backward_slice, ())
 
         def test_over_slice():
@@ -3742,7 +3786,7 @@ a")
         self.checkScript(test_append_if_else, ())
 
         def test_append_loop():
-            a = torch.jit._construct_empty_int_list()
+            a = torch.jit.annotate(List[int], [])
             for i in range(5):
                 a.append(i)
 
@@ -3750,7 +3794,7 @@ a")
         self.checkScript(test_append_loop, ())
 
         def test_append_loop_if():
-            a = torch.jit._construct_empty_int_list()
+            a = torch.jit.annotate(List[int], [])
             for i in range(5):
                 if i > 3:
                     a.append(i)
@@ -3761,7 +3805,7 @@ a")
         self.checkScript(test_append_loop_if, ())
 
         def test_nested_loop():
-            a = torch.jit._construct_empty_int_list()
+            a = torch.jit.annotate(List[int], [])
             for i in range(2):
                 for j in range(2):
                     a.append(i + j)
@@ -4177,13 +4221,48 @@ a")
 
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
 
-    def test_script_None(self):
-        def func(x):
+    def test_script_optional_none(self):
+        def none_stmt(x):
             output = None
             output = x
             return output
 
-        self.checkScript(func, [torch.arange(0, 2)], optimize=True)
+        def none_args(x):
+            # type: (Optional[Tensor]) -> Optional[Tensor]
+            return None
+
+        self.checkScript(none_stmt, [torch.arange(0, 2)], optimize=True)
+        self.checkScript(none_args, [None], optimize=True)
+
+        # test undefined tensor None as default param
+        def test_script_optional_tensor_none(x=None):
+            # type: (Optional[Tensor]) -> Tensor
+            res = torch.zeros(1, dtype=torch.int8)
+            if x is None:
+                res = res + 1
+            else:
+                res = torch.jit._unwrap_optional(x)
+            return res
+
+        fn = test_script_optional_tensor_none
+        scripted_fn = torch.jit.script(fn)
+        self.assertEqual(fn(), scripted_fn())
+        self.assertEqual(fn(torch.zeros(1)), scripted_fn(torch.zeros(1)))
+
+        # test typical None as default param
+        def test_script_optional_other_none(x=None):
+            # type: (Optional[float]) -> float
+            res = 2.0
+            if x is None:
+                res = res + 1.0
+            else:
+                res = torch.jit._unwrap_optional(x)
+            return res
+
+        fn = test_script_optional_other_none
+        scripted_fn = torch.jit.script(fn)
+        self.assertEqual(fn(), scripted_fn())
+        self.assertEqual(fn(1.0), scripted_fn(1.0))
 
     def test_script_clamp_none(self):
         def test_script_clamp_max_none(x):
@@ -9878,6 +9957,61 @@ class TestAsync(JitTestCase):
             def wait_script(x):
                 fut = torch.jit._fork(x)
                 return fut
+
+    def test_async_script_multi_waits(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.neg(x).t() + x
+
+        @torch.jit.script
+        def wait_script(x):
+            fut = torch.jit._fork(foo, x)
+
+            # wait twice on the same future
+            y1 = torch.jit._wait(fut)
+            y2 = torch.jit._wait(fut)
+            return y1, y2
+
+        x = torch.rand(2, 2)
+        y1, y2 = wait_script(x)
+        self.assertEqual(y1, y2)
+
+    def test_async_script_multi_forks(self):
+        @torch.jit.script
+        def foo1(x):
+            return torch.neg(x).t() + x
+
+        @torch.jit.script
+        def foo2(x, y):
+            return torch.neg(x).t() + x + torch.neg(y).t()
+
+        @torch.jit.script
+        def foo3(x, y, z):
+            return torch.neg(z).t() + y.t() + x
+
+        x1 = torch.rand(10, 10)
+        x2 = torch.rand(10, 10)
+        x3 = torch.rand(10, 10)
+
+        @torch.jit.script
+        def wait_script(x1, x2, x3):
+            f1 = torch.jit._fork(foo1, x1)
+            f2 = torch.jit._fork(foo2, x1, x2)
+            f3 = torch.jit._fork(foo3, x1, x2, x3)
+            f4 = torch.jit._fork(foo1, x2)
+            f5 = torch.jit._fork(foo2, x2, x3)
+
+            # ignore some forks
+            y1 = torch.jit._wait(f1)
+            y2 = torch.jit._wait(f2)
+            y3 = torch.jit._wait(f3)
+
+            return y1, y2, y3
+
+        y1, y2, y3 = wait_script(x1, x2, x3)
+        self.assertEqual(y1, foo1(x1))
+        self.assertEqual(y2, foo2(x1, x2))
+        self.assertEqual(y3, foo3(x1, x2, x3))
 
 for test in autograd_method_tests:
     add_autograd_test(*test)
