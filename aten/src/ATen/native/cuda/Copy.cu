@@ -235,10 +235,10 @@ Tensor& _copy__cuda(Tensor& self, const Tensor& src) {
   return self;
 }
 
-Tensor _copy_from_cuda(const Tensor& src, const Tensor& self) {
-  Tensor self_ = self;
-  _copy__cuda(self_, src);
-  return self;
+Tensor _copy_from_cuda(const Tensor& self, const Tensor& dst) {
+  Tensor dst_ = dst;
+  _copy__cuda(dst_, self);
+  return dst;
 }
 
 } // namespace native
