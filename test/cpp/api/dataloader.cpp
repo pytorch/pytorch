@@ -855,15 +855,16 @@ struct OrderingTestDataset : datasets::BatchDataset<DummyDataset, int> {
   }
 };
 
-TEST(DataLoaderTest, EnforcesOrderingAmongThreadsWhenConfigured) {
-  auto data_loader = torch::data::make_data_loader(
-      OrderingTestDataset{},
-      DataLoaderOptions().batch_size(1).workers(4).enforce_ordering(true));
-  size_t index = 0;
-  for (int value : *data_loader) {
-    ASSERT_EQ(value, index++);
-  }
-}
+// FIXME(psag): test is flaky
+// TEST(DataLoaderTest, EnforcesOrderingAmongThreadsWhenConfigured) {
+//   auto data_loader = torch::data::make_data_loader(
+//       OrderingTestDataset{},
+//       DataLoaderOptions().batch_size(1).workers(4).enforce_ordering(true));
+//   size_t index = 0;
+//   for (int value : *data_loader) {
+//     ASSERT_EQ(value, index++);
+//   }
+// }
 
 TEST(DataLoaderTest, Reset) {
   DummyDataset dataset;
