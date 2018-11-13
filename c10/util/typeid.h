@@ -57,7 +57,7 @@ namespace caffe2 {
  * use TypeIdentifier with custom types. This is for example used to store the
  * dtype of tensors.
  */
-class CAFFE2_API TypeIdentifier final
+class C10_API TypeIdentifier final
     : public at::IdWrapper<TypeIdentifier, uint16_t> {
  public:
   static TypeIdentifier createTypeId();
@@ -80,7 +80,7 @@ class CAFFE2_API TypeIdentifier final
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  CAFFE2_API static TypeIdentifier Get();
+  C10_API static TypeIdentifier Get();
 
  private:
   constexpr explicit TypeIdentifier(uint16_t id) : IdWrapper(id) {}
@@ -147,7 +147,7 @@ struct TypeMetaData final {
 // due to type erasure. E.g. somebody calling TypeMeta::copy() for
 // non-copyable type. Right now just throws exception but is implemented
 // in .cpp to manage dependencies
-[[noreturn]] CAFFE2_API void _ThrowRuntimeTypeLogicError(const std::string& msg);
+[[noreturn]] C10_API void _ThrowRuntimeTypeLogicError(const std::string& msg);
 
 /**
  * Placement new function for the type.
@@ -321,7 +321,7 @@ class _Uninitialized final {};
  * stores some additional data such as the item size and the name of the type
  * for run-time inspection.
  */
-class CAFFE2_API TypeMeta {
+class C10_API TypeMeta {
  public:
   using New = detail::TypeMetaData::New;
   using PlacementNew = detail::TypeMetaData::PlacementNew;
@@ -442,7 +442,7 @@ class CAFFE2_API TypeMeta {
   const detail::TypeMetaData* data_;
 
   template<class T>
-  CAFFE2_API static const detail::TypeMetaData* _typeMetaDataInstance() noexcept;
+  C10_API static const detail::TypeMetaData* _typeMetaDataInstance() noexcept;
 };
 
 template<>
@@ -476,7 +476,7 @@ inline std::ostream& operator<<(
  *
  * NOTE: the macro needs to be invoked in ::caffe2 namespace
  */
-// Implementation note: in MSVC, we will need to prepend the CAFFE2_API
+// Implementation note: in MSVC, we will need to prepend the C10_API
 // keyword in order to get things compiled properly. in Linux, gcc seems to
 // create attribute ignored error for explicit template instantiations, see
 //   http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0537r0.html
@@ -518,12 +518,12 @@ inline std::ostream& operator<<(
     return TypeIdentifier(PreallocatedId);                                    \
   }                                                                           \
   namespace detail {                                                          \
-  CAFFE2_API extern const TypeMetaData                                        \
+  C10_API extern const TypeMetaData                                           \
       MACRO_CONCAT(_typeMetaDataInstance_preallocated_, PreallocatedId);      \
   }
 #define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)               \
   namespace detail {                                                          \
-  CAFFE2_API const TypeMetaData                                               \
+  C10_EXPORT const TypeMetaData                                               \
     MACRO_CONCAT(_typeMetaDataInstance_preallocated_, PreallocatedId)         \
       = _makeTypeMetaDataInstance<T>(_typeName<T>(#T));                       \
   }                                                                           \
