@@ -292,12 +292,12 @@ Tensor& _copy__cuda(Tensor& self, const Tensor& src, bool non_blocking) {
 }
 
 Tensor _copy_from_cuda(
-    const Tensor& src,
     const Tensor& self,
+    const Tensor& dst,
     bool non_blocking) {
-  Tensor self_ = self;
-  _copy__cuda(self_, src, non_blocking);
-  return self;
+  Tensor dst_ = dst;
+  _copy__cuda(dst_, self);
+  return dst;
 }
 
 } // namespace native

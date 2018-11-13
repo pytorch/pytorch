@@ -439,7 +439,7 @@
     CPU: _copy__cpu
     CUDA: _copy__cuda
 
-- func: _copy_from(Tensor src, Tensor self, bool non_blocking=false) -> Tensor
+- func: _copy_from(Tensor self, Tensor dst, bool non_blocking=false) -> Tensor
   cpu_half: True
   dispatch:
     CUDA: _copy_from_cuda
