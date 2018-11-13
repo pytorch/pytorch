@@ -6,7 +6,7 @@ template <typename T>
 bool BatchPermutationDNNLowPOp<T>::RunOnDevice() {
   using namespace dnnlowp;
 
-  BaseType::ParseDNNLowPOperatorArguments_();
+  this->ParseDNNLowPOperatorArguments_();
 
   // Choose quantization params
   in_qparams_[INPUT] =

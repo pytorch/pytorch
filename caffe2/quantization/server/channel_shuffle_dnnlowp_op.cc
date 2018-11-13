@@ -27,7 +27,7 @@ template <typename T>
 bool ChannelShuffleDNNLowPOp<T>::RunOnDeviceWithOrderNCHW() {
   using namespace dnnlowp;
 
-  BaseType::ParseDNNLowPOperatorArguments_();
+  this->ParseDNNLowPOperatorArguments_();
 
   // Choose quantization params
   TensorQuantizationParams in_qparams =
@@ -70,7 +70,7 @@ template <typename T>
 bool ChannelShuffleDNNLowPOp<T>::RunOnDeviceWithOrderNHWC() {
   using namespace dnnlowp;
 
-  BaseType::ParseDNNLowPOperatorArguments_();
+  this->ParseDNNLowPOperatorArguments_();
 
   // Choose quantization params
   TensorQuantizationParams in_qparams =
