@@ -47,12 +47,12 @@ class CuDNNDropoutOpBase : public Operator<CUDAContext> {
   }
 
  protected:
-  void SetUpDataDesc(const std::int64_t N) {
+  void SetUpDataDesc(const cudnnDataType_t type, const const std::int64_t N) {
     if (cached_data_numel_ != N) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           data_desc_,
           GetCudnnTensorFormat(StorageOrder::NCHW),
-          cudnnTypeWrapper<T>::type,
+          type,
           1,
           1,
           1,
@@ -111,7 +111,7 @@ class CuDNNDropoutOp final : public CuDNNDropoutOpBase {
     mask->Resize(reserve_space_size_in_bytes_);
     std::uint8_t* mask_data = mask->template mutable_data<std::uint8_t>();
     SetDropoutDescriptor();
-    SetUpDataDesc(N);
+    SetUpDataDesc(cudnnTypeWrapper<T>::type, N);
     CUDNN_ENFORCE(cudnnDropoutForward(
         cudnn_wrapper_.inline_cudnn_handle(),
         dropout_desc_,
@@ -166,7 +166,7 @@ class CuDNNDropoutGradientOp final : public CuDNNDropoutOpBase {
     const std::uint8_t* mask_data = mask.data<std::uint8_t>();
     T* dX_data = dX->mutable_data<T>();
     RestoreDropoutDescriptor();
-    SetUpDataDesc(N);
+    SetUpDataDesc(cudnnTypeWrapper<T>::type, N);
     CUDNN_ENFORCE(cudnnDropoutBackward(
         cudnn_wrapper_.inline_cudnn_handle(),
         dropout_desc_,
