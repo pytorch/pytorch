@@ -126,7 +126,7 @@ RecordFunction::RecordFunction(const char* name, int64_t current_sequence_nr)
 
 #ifdef USE_CUDA
 static void onEachDevice(std::function<void(int)> op) {
-  at::cuda::CUDAGuard device_guard;
+  at::cuda::OptionalCUDAGuard device_guard;
   int count;
   TORCH_CUDA_CHECK(cudaGetDeviceCount(&count));
   for(int i = 0; i < count; i++) {

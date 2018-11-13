@@ -13,6 +13,7 @@
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/TensorOptions.h"
 #include "TH/THRandom.h"
+#include "TH/THGenerator.hpp"
 #include "c10/util/Exception.h"
 
 #include <algorithm>
@@ -428,6 +429,7 @@ Tensor randn_like(const Tensor& self, const TensorOptions& options) {
 namespace {
 template <typename scalar_t>
 void randperm_cpu(Tensor& result, int64_t n, THGenerator* generator) {
+  std::lock_guard<std::mutex> lock(generator->mutex);
   scalar_t *r__data = result.data<scalar_t>();
 
   result.resize_({n});

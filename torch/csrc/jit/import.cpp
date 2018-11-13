@@ -237,6 +237,10 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
     return GeneratorType::get();
   } else if (kind == "StringType") {
     return StringType::get();
+  } else if (kind.find("OptionalType") == 0) {
+    onnx::TypeProto elem_proto(type_proto);
+    elem_proto.set_denotation(kind.substr(strlen("OptionalType:")));
+    return OptionalType::create(buildType(elem_proto));
   } else if (kind.find("TypeVar:") == 0) {
     return VarType::create(kind.substr(strlen("TypeVar:")));
   } else {

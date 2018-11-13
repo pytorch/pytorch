@@ -545,7 +545,7 @@ def device_guard(option, formals, is_factory_method, dispatch_options):
             tensor_arguments = [f for f in formals if f['dynamic_type'] in {'Tensor', 'TensorList'}]
             if tensor_arguments:
                 tensor_argument = tensor_arguments[0]['name']
-                return 'const DeviceGuard device_guard({});'.format(tensor_argument)
+                return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(tensor_argument)
     return '// DeviceGuard omitted'
 
 
@@ -831,6 +831,8 @@ def create_generic(top_env, declarations):
         broadcast_arg = get_broadcast_argument(option)
         # "s_" for "same size".
         option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
+        if option['mode'] == 'TH':
+            option['device_guard'] = False
         option['device_guard_declaration'] = device_guard(option, formals, False, False)
 
         env = nested_dict(option, top_env)
