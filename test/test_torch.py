@@ -9303,7 +9303,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(b.data.type(), b_copy.type())
 
     def test_cartesian_prod(self):
-        a = torch.tensor(1)
+        a = torch.tensor([1])
         b = torch.tensor([1, 2, 3])
         c = torch.tensor([1, 2])
         prod = torch.cartesian_prod(a, b, c)
