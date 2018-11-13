@@ -314,11 +314,32 @@ inline Tensor Tensor::index(TensorList indices) const {
 inline Tensor & Tensor::index_copy_(int64_t dim, const Tensor & index, const Tensor & source) {
     return type().index_copy_(*this, dim, index, source);
 }
+inline Tensor Tensor::index_copy(int64_t dim, const Tensor & index, const Tensor & source) const {
+    return type().index_copy(*this, dim, index, source);
+}
 inline Tensor Tensor::index_put(TensorList indices, const Tensor & values) const {
     return type().index_put(*this, indices, values);
 }
 inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values) {
     return type().index_put_(*this, indices, values);
+}
+inline Tensor Tensor::index_add(int64_t dim, const Tensor & index, const Tensor & source) const {
+    return type().index_add(*this, dim, index, source);
+}
+inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, Scalar source) const {
+    return type().index_fill(*this, dim, index, source);
+}
+inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, const Tensor & source) const {
+    return type().scatter(*this, dim, index, source);
+}
+inline Tensor Tensor::scatter_add(int64_t dim, const Tensor & index, const Tensor & source) const {
+    return type().scatter_add(*this, dim, index, source);
+}
+inline Tensor Tensor::masked_scatter(const Tensor & mask, const Tensor & source) const {
+    return type().masked_scatter(*this, mask, source);
+}
+inline Tensor Tensor::masked_fill(const Tensor & mask, Scalar source) const {
+    return type().masked_fill(*this, mask, source);
 }
 inline Tensor Tensor::inverse() const {
     return type().inverse(*this);
@@ -785,37 +806,12 @@ inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) con
 inline Scalar Tensor::_local_scalar() const {
     return type()._local_scalar(*this);
 }
-inline Tensor Tensor::index_copy(int64_t dim, const Tensor & index, const Tensor & source) const {
-    return type().index_copy(*this, dim, index, source);
-}
-inline Tensor Tensor::index_put(TensorList indices, const Tensor & values) const {
-    return type().index_put(*this, indices, values);
 inline void* Tensor::data_ptr() const {
     return type().data_ptr(*this);
 }
 inline Tensor & Tensor::set_(Storage source) {
     return type().set_(*this, source);
 }
-inline Tensor Tensor::index_add(int64_t dim, const Tensor & index, const Tensor & source) const {
-    return type().index_add(*this, dim, index, source);
-}
-inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, Scalar source) const {
-    return type().index_fill(*this, dim, index, source);
-}
-inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, const Tensor & source) const {
-    return type().scatter(*this, dim, index, source);
-}
-inline Tensor Tensor::scatter_add(int64_t dim, const Tensor & index, const Tensor & source) const {
-    return type().scatter_add(*this, dim, index, source);
-}
-inline Tensor Tensor::masked_scatter(const Tensor & mask, const Tensor & source) const {
-    return type().masked_scatter(*this, mask, source);
-}
-inline Tensor Tensor::masked_fill(const Tensor & mask, Scalar source) const {
-    return type().masked_fill(*this, mask, source);
-}
-inline Tensor Tensor::inverse() const {
-    return type().inverse(*this);
 inline Tensor & Tensor::set_(Storage source, int64_t storage_offset, IntList size, IntList stride) {
     return type().set_(*this, source, storage_offset, size, stride);
 }
