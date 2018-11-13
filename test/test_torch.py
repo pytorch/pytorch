@@ -9260,7 +9260,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(c1, expected)
         self.assertEqual(c2, expected)
 
-
     @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
     def test_reverse_binary_ops_multiple_device(self):
         self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to("cuda:1"))    # __radd__
