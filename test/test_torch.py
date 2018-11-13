@@ -9318,7 +9318,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
         # test single input
         prod = torch.cartesian_prod(b)
-        self.assertEqual(b.view(-1, 1), prod)
+        self.assertEqual(b, prod)
 
     def test_combinations(self):
         a = torch.tensor([1, 2, 3])

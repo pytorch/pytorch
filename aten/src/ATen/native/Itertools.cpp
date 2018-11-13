@@ -31,6 +31,12 @@ namespace at {
 namespace native{
 
 Tensor cartesian_prod(TensorList tensors) {
+  for(const Tensor &t : tensors) {
+    AT_CHECK(t.dim() == 1, "Expect a 1D vector, but got", t);
+  }
+  if (tensors.size() == 1) {
+    return tensors[0];
+  }
   std::vector<Tensor> grids = at::meshgrid(tensors);
   for(Tensor &t : grids) {
     t = t.flatten();
