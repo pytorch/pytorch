@@ -1841,6 +1841,11 @@ class TestNN(NNTestCase):
                 self.assertEqual(last_train_u, m.weight_u)
                 self.assertEqual(last_train_v, m.weight_v)
 
+                # FIXME: the code below is flaky when executed with DataParallel
+                # see https://github.com/pytorch/pytorch/issues/13818
+                if apply_dp:
+                    continue
+
                 # test backward works with multiple forwards in mixed training
                 # and eval modes
                 # it uses training mode so we need to reset `u` and `v` vectors
