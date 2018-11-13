@@ -44,7 +44,7 @@ BatchMatMulDNNLowPOp<T>::BatchMatMulDNNLowPOp(
 
 template <typename T>
 bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
-  BaseType::ParseDNNLowPOperatorArguments_();
+  this->ParseDNNLowPOperatorArguments_();
 
   const auto& A = InputTensorCPU_(0);
   const auto& B = InputTensorCPU_(1);

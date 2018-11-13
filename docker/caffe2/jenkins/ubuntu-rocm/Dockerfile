@@ -60,9 +60,10 @@ ENV PATH /opt/rocm/bin:$PATH
 ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
 ENV PATH /opt/rocm/opencl/bin:$PATH
-ENV THRUST_ROOT /data/Thrust
 ENV MIOPEN_DISABLE_CACHE 1
 ENV HIP_PLATFORM hcc
+ENV LANG C.UTF-8
+ENV LC_ALL C.UTF-8
 
 # Compile/install ccache for faster builds
 ADD ./install_ccache.sh install_ccache.sh

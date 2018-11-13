@@ -210,14 +210,14 @@ static std::vector<Tensor> typeConvertIndices(const Variable& self, const variab
 static Variable dispatch_index(const Variable& self, const variable_list& indices) {
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
+  OptionalDeviceGuard device_guard(device_of(self));
   return self.index(converted_indices);
 }
 
 static Variable dispatch_index_put_(Variable& self, const variable_list& indices, const Variable& value) {
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
+  OptionalDeviceGuard device_guard(device_of(self));
   return self.index_put_(converted_indices, value);
 }
 
@@ -275,7 +275,7 @@ static THPObjectPtr wrapTuple(PyObject* index) {
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  DeviceGuard device_guard(self_);
+  OptionalDeviceGuard device_guard(device_of(self_));
 
   // handle simple types: integers, slices, ellipsis
   if (index == Py_None) {
@@ -336,7 +336,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  DeviceGuard device_guard(self_);
+  OptionalDeviceGuard device_guard(device_of(self_));
   auto value = valueToTensor(self_.type(), py_value);
 
   // handle simple types: integers, slices, ellipsis, bool
