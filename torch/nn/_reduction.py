@@ -26,7 +26,9 @@ def get_enum(reduction):
 
 
 # We use these functions in torch/legacy as well, in which case we'll silence the warning
+@weak_script
 def legacy_get_string(size_average, reduce, emit_warning=True):
+    # type: (bool, bool, bool) -> str
     warning = "size_average and reduce args will be deprecated, please use reduction='{}' instead."
 
     if size_average is None:
@@ -45,5 +47,7 @@ def legacy_get_string(size_average, reduce, emit_warning=True):
     return ret
 
 
+@weak_script
 def legacy_get_enum(size_average, reduce, emit_warning=True):
+    # type: (bool, bool, bool) -> int
     return get_enum(legacy_get_string(size_average, reduce, emit_warning))
