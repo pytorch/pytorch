@@ -112,7 +112,11 @@ EOL
 
 cat >ci_scripts/test_libtorch.bat <<EOL
 call ci_scripts/setup_pytorch_env.bat
-cd build/bin
+dir
+dir %CD%\\test 
+dir %CD%\\test\\torch
+dir %CD%\\test\\torch\\lib
+cd %CD%\\test\\torch\\lib
 set PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt/bin/x64;%CD%\\..\\..\\torch\\lib;%PATH%
 test_api.exe --gtest_filter="-IntegrationTest.MNIST*"
 EOL
