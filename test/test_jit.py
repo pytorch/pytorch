@@ -9565,6 +9565,7 @@ nn_module_tests = [
     ('Tanh', (), ((S,),)),
     ('Tanhshrink', (), ((S,),)),
     ('Threshold', (2., 2.), ((S,),)),
+    ('Sequential', (torch.nn.Sigmoid(), torch.nn.Threshold(1., 2.)), ((S,),)),
 ]
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
@@ -9848,6 +9849,8 @@ def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
 
             # Create module to use the script method
             class TheModule(torch.jit.ScriptModule):
+                __constants__ = ['submodule']
+
                 def __init__(self):
                     super(TheModule, self).__init__()
                     self.submodule = nn_module(*constructor_args)
