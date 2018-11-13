@@ -5,11 +5,12 @@ namespace caffe2 {
 template <>
 bool PerplexityOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
+  auto* Y = Output(0);
 
   DCHECK_EQ(X.dim(), 1);
   int N = X.dim32(0);
 
-  auto* Y = Output(0, vector<int64_t>(), at::dtype<float>());
+  Y->Resize(vector<int64_t>());
   const auto* Xdata = X.data<float>();
 
   float perplexity = 1.0;
