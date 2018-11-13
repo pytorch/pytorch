@@ -87,6 +87,7 @@ class TestDropout(serial.SerializedTestCase):
             ratio=ratio,
             engine=engine,
             is_test=False)
+        op.device_option.CopyFrom(gc)
         X = np.ones(N).astype(np.float32)
         workspace.FeedBlob("X", X, device_option=gc)
         workspace.RunOperatorOnce(op)
