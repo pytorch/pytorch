@@ -341,7 +341,11 @@ endforeach()
 # Set C++11 support
 set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
 if (NOT MSVC)
-  list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
+  # from CMake 3.5 onwards, the host flag -std=c++11 is automatically propagated to nvcc
+  if (${CMAKE_VERSION} VERSION_LESS 3.5)
+    list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
+  endif()
+
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
 endif()
 
