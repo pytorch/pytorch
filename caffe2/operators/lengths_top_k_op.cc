@@ -9,11 +9,10 @@ bool LengthsTopKOp<T, Context>::RunOnDevice() {
   int N = Y.dim32(0);
   const T* X_data = X.template data<T>();
   const int* input_len = Y.template data<int>();
-  auto* output_topk_values = Output(TOPK_VALUES_OUT);
-  auto* output_topk_indices = Output(TOPK_INDICES_OUT);
 
-  output_topk_values->Resize(N * k_);
-  output_topk_indices->Resize(N * k_);
+  auto* output_topk_values = Output(TOPK_VALUES_OUT, {N * k_}, at::dtype<T>());
+  auto* output_topk_indices =
+      Output(TOPK_INDICES_OUT, {N * k_}, at::dtype<int>());
   std::vector<int> output_dims = std::vector<int>({N, k_});
   output_topk_values->Reshape(output_dims);
   output_topk_indices->Reshape(output_dims);
@@ -77,7 +76,6 @@ bool LengthsTopKGradientOp<T, Context>::RunOnDevice() {
   auto& input_topk = Input(DER_TOPK_IN);
   CAFFE_ENFORCE_EQ(
       input_topk.numel(), N * k_, "input_topk shape is not correct");
-  auto* X_out = Output(DER_X_OUT);
 
   const int* input_len_data = input_len.template data<int>();
   const int* input_indices_data = input_indices.template data<int>();
@@ -87,7 +85,7 @@ bool LengthsTopKGradientOp<T, Context>::RunOnDevice() {
   for (int i = 0; i < N; i++) {
     num_indices += input_len_data[i];
   }
-  X_out->Resize(num_indices);
+  auto* X_out = Output(DER_X_OUT, {num_indices}, at::dtype<T>());
   std::vector<int> output_dims = std::vector<int>({num_indices});
   X_out->Reshape(output_dims);
   T* X_out_data = X_out->template mutable_data<T>();

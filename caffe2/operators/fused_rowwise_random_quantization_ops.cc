@@ -15,7 +15,6 @@ bool FloatToFusedRandRowwiseQuantizedOp<Context>::RunOnDevice() {
   CAFFE_ENFORCE(IS_LITTLE_ENDIAN, "Unsupported endianness");
 
   const auto& input = Input(DATA_FLOAT);
-  auto* output = Output(DATA_FUSED_QUANTIZED);
 
   CAFFE_ENFORCE_EQ(
       input.dim(),
@@ -40,7 +39,8 @@ bool FloatToFusedRandRowwiseQuantizedOp<Context>::RunOnDevice() {
   size_t segment_size = (input_columns + data_per_byte - 1) / data_per_byte;
   const std::vector<int64_t> output_dimensions = {
       input_rows, 10 + static_cast<int64_t>(segment_size)};
-  output->Resize(output_dimensions);
+  auto* output =
+      Output(DATA_FUSED_QUANTIZED, output_dimensions, at::dtype<uint8_t>());
 
   const auto* input_data = input.template data<float>();
   auto* output_data = output->template mutable_data<uint8_t>();
@@ -78,7 +78,7 @@ bool FusedRandRowwiseQuantizedToFloatOp<Context>::RunOnDevice() {
   CAFFE_ENFORCE(IS_LITTLE_ENDIAN, "Unsupported endianness");
 
   const auto& input = Input(DATA_FUSED_QUANTIZED);
-  auto* output = Output(DATA_FLOAT);
+
   CAFFE_ENFORCE_EQ(input.dim(), 2, "Expect input to be a matrix.");
   CAFFE_ENFORCE_GE(
       input.numel(),
@@ -96,7 +96,7 @@ bool FusedRandRowwiseQuantizedToFloatOp<Context>::RunOnDevice() {
   const size_t output_columns = (input_columns - 10) * (8 / bitwidth) - tail;
   const std::vector<int64_t> output_dimensions = {
       input_rows, static_cast<int64_t>(output_columns)};
-  output->Resize(output_dimensions);
+  auto* output = Output(DATA_FLOAT, output_dimensions, at::dtype<float>());
   auto* output_data = output->template mutable_data<float>();
   for (size_t row = 0; row < input_rows; ++row) {
     math::decompress_and_dequantize(
