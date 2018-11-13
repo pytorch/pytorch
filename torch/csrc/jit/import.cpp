@@ -411,6 +411,10 @@ std::shared_ptr<script::Module> load(std::istream& in) {
 std::shared_ptr<script::Module> load(const std::string& filename) {
   std::ifstream in(filename, std::ios_base::binary);
 
+  if (in.fail()) {
+    throw std::runtime_error("load: could not open file " + filename);
+  }
+
   auto module = load(in);
 
   return module;
