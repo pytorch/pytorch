@@ -28,6 +28,8 @@ JIT_TEST(TopologicalIndex)
 JIT_TEST(TopologicalMove)
 JIT_TEST(SubgraphUtils)
 
+JIT_TEST(THNNConv)
+
 #define JIT_TEST_CUDA(name)    \
   TEST(JitTest, name##_CUDA) { \
     test##name();              \
