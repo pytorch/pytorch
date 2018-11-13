@@ -640,7 +640,7 @@ struct CodeImpl {
 };
 
 // InterpreterState state that and used to compute a Code
-struct InterpreterStateImpl {
+struct InterpreterStateImpl : c10::intrusive_ptr_target {
   InterpreterStateImpl(const Code & code)
   : function(code.pImpl),
     int_data(function->int_data.data()),
@@ -649,9 +649,12 @@ struct InterpreterStateImpl {
   }
 
  private:
-  bool runImpl(Stack& stack, InterpreterState& parent) {
-    // std::cout << *function->graph << "\n";
-    // function->dump(std::cout);
+  c10::intrusive_ptr<InterpreterStateImpl> intrusive_from_this() {
+    c10::raw::intrusive_ptr::incref(this);
+    return c10::intrusive_ptr<InterpreterStateImpl>::reclaim(this);
+  }
+
+  bool runImpl(Stack& stack) {
     auto & instructions = function->instructions;
     size_t last = instructions.size();
 
@@ -675,8 +678,9 @@ struct InterpreterStateImpl {
 
           getOrCreateFuture();
 
-          e.future->addCallback([parent](){
-            c10::global_work_queue.schedule(InterpreterContinuation(parent, Stack()));
+          InterpreterState state(intrusive_from_this());
+          e.future->addCallback([state](){
+            c10::global_work_queue.schedule(InterpreterContinuation(state, Stack()));
           });
 
           if (get(inst.inputs.free_flags, 0)) {
@@ -717,14 +721,14 @@ struct InterpreterStateImpl {
     return future;
   }
 
-  c10::intrusive_ptr<Future> runAsync(Stack& stack, InterpreterState& parent) {
+  c10::intrusive_ptr<Future> runAsync(Stack& stack) {
     getOrCreateFuture();
-    runImpl(stack, parent);
+    runImpl(stack);
     return future;
   }
 
-  void run(Stack& stack, InterpreterState& parent) {
-    if (runImpl(stack, parent)) {
+  void run(Stack& stack) {
+    if (runImpl(stack)) {
       future->wait();
 
       auto num_outputs = function->preprocess.n_outputs;
@@ -798,25 +802,21 @@ const std::vector<GraphExecutor*>& Code::grad_executors() {
 }
 
 InterpreterState::InterpreterState(const Code & code)
-  : pImpl(new InterpreterStateImpl(code)) {}
+  : pImpl(c10::make_intrusive<InterpreterStateImpl>(code)) {}
 InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::run(Stack& stack) {
-  pImpl->run(stack, *this);
+  static_cast<InterpreterStateImpl*>(pImpl.get())->run(stack);
 }
 
 c10::intrusive_ptr<Future> InterpreterState::runAsync(Stack& stack) {
-  return pImpl->runAsync(stack, *this);
-}
-
-InterpreterState InterpreterState::clone() const {
-  return InterpreterState(new InterpreterStateImpl(*pImpl));
+  return static_cast<InterpreterStateImpl*>(pImpl.get())->runAsync(stack);
 }
 
 c10::intrusive_ptr<Future> InterpreterState::getFuture() {
-  return pImpl->getOrCreateFuture();
+  return static_cast<InterpreterStateImpl*>(pImpl.get())->getOrCreateFuture();
 }
 
-InterpreterState::InterpreterState(InterpreterStateImpl * pImpl) : pImpl(pImpl) {}
-
+InterpreterState::InterpreterState(c10::intrusive_ptr<c10::intrusive_ptr_target> pImpl_)
+    : pImpl(std::move(pImpl_)) {}
 }}

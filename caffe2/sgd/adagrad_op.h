@@ -1,6 +1,7 @@
 #pragma once
 
 #include "caffe2/core/operator.h"
+#include "caffe2/perfkernels/adagrad.h"
 
 namespace caffe2 {
 
@@ -16,11 +17,7 @@ void adagrad_update(
     float decay,
     const float* lr,
     Context* /*context*/) {
-  for (auto i = 0; i < N; ++i) {
-    float gi = g[i];
-    float hi = nh[i] = decay * h[i] + gi * gi;
-    nw[i] = w[i] + lr[0] * gi / (std::sqrt(hi) + epsilon);
-  }
+  return adagrad_update(N, w, g, h, nw, nh, epsilon, decay, lr[0]);
 }
 
 template <typename Context>
