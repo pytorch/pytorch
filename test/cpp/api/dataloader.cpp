@@ -8,7 +8,6 @@
 #include <test/cpp/api/support.h>
 
 #include <ATen/core/ArrayRef.h>
-#include <c10/util/Optional.h>
 
 #include <algorithm>
 #include <chrono>
@@ -607,7 +606,7 @@ struct TestIndexDataset
 
 struct TestIndexSampler : public samplers::Sampler<TestIndex> {
   explicit TestIndexSampler(size_t size) : size_(size) {}
-  void reset(optional<size_t> new_size = nullopt) override {}
+  void reset(torch::optional<size_t> new_size = nullopt) override {}
   torch::optional<TestIndex> next(size_t batch_size) override {
     if (index_ >= size_) {
       return torch::nullopt;
