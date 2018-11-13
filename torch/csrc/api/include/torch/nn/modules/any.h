@@ -3,14 +3,13 @@
 #include <torch/detail/static.h>
 #include <torch/nn/module.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/Device.h>
-#include "c10/util/Optional.h"
 
 #include <memory>
 #include <type_traits>
@@ -39,6 +38,7 @@ namespace nn {
 ///
 /// \rst
 /// .. code-block:: cpp
+///
 ///   struct GenericTrainer {
 ///     torch::nn::AnyModule module;
 ///
@@ -58,6 +58,7 @@ namespace nn {
 ///
 /// \rst
 /// .. code-block:: cpp
+///
 ///   torch::nn::AnyModule module(torch::nn::Linear(3, 4));
 ///   // Linear takes a tensor as input, but we are passing an integer.
 ///   // This will compile, but throw a `torch::Error` exception at runtime.
@@ -80,6 +81,7 @@ namespace nn {
 ///
 /// \rst
 /// .. code-block:: cpp
+///
 ///   torch::nn::AnyModule module(torch::nn::Linear(3, 4));
 ///   auto output = module.forward(torch::ones({2, 3}));
 ///
@@ -98,6 +100,7 @@ namespace nn {
 ///
 /// \rst
 /// .. code-block:: cpp
+///
 ///   torch::nn::AnyModule module(torch::nn::Linear(3, 4));
 ///   std::shared_ptr<nn::Module> ptr = module.ptr();
 ///   torch::nn::Linear linear(module.get<torch::nn::Linear>());
@@ -135,7 +138,7 @@ class AnyModule {
 
   /// Creates a deep copy of an `AnyModule` if it contains a module, else an
   /// empty `AnyModule` if it is empty.
-  AnyModule clone(c10::optional<Device> device = c10::nullopt) const;
+  AnyModule clone(optional<Device> device = nullopt) const;
 
   /// Assigns a module to the `AnyModule` (to circumvent the explicit
   /// constructor).
@@ -334,7 +337,7 @@ struct AnyModule::Placeholder : public AnyModule::Value::Placeholder {
 
   /// Returns a `Placeholder` with a deep copy of this `AnyModule`.
   virtual std::unique_ptr<Placeholder> clone(
-      c10::optional<Device> device) const = 0;
+      optional<Device> device) const = 0;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyModule::Holder ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -399,7 +402,7 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
   }
 
   std::unique_ptr<Placeholder> clone(
-      c10::optional<Device> device) const override {
+      optional<Device> device) const override {
     return torch::make_unique<Holder>(
         std::dynamic_pointer_cast<ModuleType>(module->clone(device)));
   }
@@ -435,7 +438,7 @@ inline AnyModule& AnyModule::operator=(const AnyModule& other) {
   return *this;
 }
 
-inline AnyModule AnyModule::clone(c10::optional<Device> device) const {
+inline AnyModule AnyModule::clone(optional<Device> device) const {
   AnyModule clone;
   clone.content_ = content_ ? content_->clone(device) : nullptr;
   return clone;

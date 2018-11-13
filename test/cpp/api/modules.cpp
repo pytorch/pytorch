@@ -7,7 +7,7 @@
 #include <torch/nn/modules/embedding.h>
 #include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>
@@ -52,7 +52,7 @@ TEST_F(ModulesTest, Conv1d) {
     ASSERT_EQ(y.size(i), 2);
   }
 
-  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 3 * 2 * 3);
+  ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3);
 }
 
 TEST_F(ModulesTest, Conv2dEven) {
@@ -68,7 +68,7 @@ TEST_F(ModulesTest, Conv2dEven) {
     ASSERT_EQ(y.size(i), 2);
   }
 
-  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 3 * 2 * 3 * 3);
+  ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 3);
 }
 
 TEST_F(ModulesTest, Conv2dUneven) {
@@ -84,7 +84,7 @@ TEST_F(ModulesTest, Conv2dUneven) {
     ASSERT_EQ(y.size(i), 2);
   }
 
-  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 3 * 2 * 3 * 2);
+  ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 2);
 }
 
 TEST_F(ModulesTest, Conv3d) {
@@ -100,8 +100,7 @@ TEST_F(ModulesTest, Conv3d) {
     ASSERT_EQ(y.size(i), 2);
   }
 
-  ASSERT_TRUE(
-      model->parameters()["weight"].grad().numel() == 3 * 2 * 3 * 3 * 3);
+  ASSERT_TRUE(model->weight.grad().numel() == 3 * 2 * 3 * 3 * 3);
 }
 
 TEST_F(ModulesTest, Linear) {
@@ -116,7 +115,7 @@ TEST_F(ModulesTest, Linear) {
   ASSERT_EQ(y.size(0), 10);
   ASSERT_EQ(y.size(1), 2);
 
-  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 2 * 5);
+  ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
 }
 
 TEST_F(ModulesTest, SimpleContainer) {
@@ -140,7 +139,7 @@ TEST_F(ModulesTest, SimpleContainer) {
 TEST_F(ModulesTest, EmbeddingBasic) {
   const int64_t dict_size = 10;
   Embedding model(dict_size, 2);
-  ASSERT_TRUE(model->parameters().contains("weight"));
+  ASSERT_TRUE(model->named_parameters().contains("weight"));
   ASSERT_EQ(model->weight.ndimension(), 2);
   ASSERT_EQ(model->weight.size(0), dict_size);
   ASSERT_EQ(model->weight.size(1), 2);
@@ -157,7 +156,7 @@ TEST_F(ModulesTest, EmbeddingBasic) {
   ASSERT_EQ(y.size(0), 10);
   ASSERT_EQ(y.size(1), 2);
 
-  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 2 * dict_size);
+  ASSERT_EQ(model->weight.grad().numel(), 2 * dict_size);
 }
 
 TEST_F(ModulesTest, EmbeddingList) {
@@ -191,7 +190,7 @@ TEST_F(ModulesTest, Dropout) {
 
 TEST_F(ModulesTest, Parameters) {
   auto model = std::make_shared<NestedModel>();
-  auto parameters = model->parameters();
+  auto parameters = model->named_parameters();
   ASSERT_EQ(parameters["param"].size(0), 3);
   ASSERT_EQ(parameters["param"].size(1), 2);
   ASSERT_EQ(parameters["param"].size(2), 21);
@@ -307,7 +306,7 @@ TEST_F(ModulesTest, Linear_CUDA) {
   ASSERT_EQ(y.size(0), 10);
   ASSERT_EQ(y.size(1), 2);
 
-  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 2 * 5);
+  ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
 }
 
 TEST_F(ModulesTest, Linear2_CUDA) {
@@ -324,5 +323,5 @@ TEST_F(ModulesTest, Linear2_CUDA) {
   ASSERT_EQ(y.size(0), 10);
   ASSERT_EQ(y.size(1), 2);
 
-  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 2 * 5);
+  ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
 }

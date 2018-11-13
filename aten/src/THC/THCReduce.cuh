@@ -26,7 +26,7 @@ __device__ __forceinline__ IndexType getReduceNoncontigDimSliceIndex() {
 template <typename T>
 struct SimpleCopyOp
 {
-  __device__ __forceinline__ T operator()(const T val) const 
+  __device__ __forceinline__ T operator()(volatile const T val) const volatile
   {
     return val;
   }
@@ -35,7 +35,7 @@ struct SimpleCopyOp
 __device__ __forceinline__ int lastpow2(int n)
 {
   int out = 1 << (31 - __clz(n));
-  if(n == out) 
+  if(n == out)
     out >>= 1;
   return out;
 }
@@ -44,7 +44,7 @@ template
   <typename T,
    typename U,
    typename IndexType,
-   typename AccT, 
+   typename AccT,
    typename ModifyOp,
    typename ReduceOp,
    typename FinalizeOp>
@@ -61,19 +61,19 @@ __device__ __forceinline__ void reduceChunk
    AccT* shmem,
    ModifyOp modifyOp,
    ReduceOp reduceOp,
-   FinalizeOp finalizeOp) 
+   FinalizeOp finalizeOp)
 {
   AccT load_reg[4];
   AccT local_reg = init;
-  
+
   //Unroll this loop
   //for(IndexType i=threadIdx.y; i<reductionSize; i+=blockDim.y){
   //  local_reg += in[inOffset + i*reductionStride];
   //}
   if(inbounds)
-    for(IndexType i = threadIdx.y; i < reductionSize; i += blockDim.y*4) 
+    for(IndexType i = threadIdx.y; i < reductionSize; i += blockDim.y*4)
     {
-      if (i + blockDim.y*3 < reductionSize) 
+      if (i + blockDim.y*3 < reductionSize)
       {
         const AccT val0 = scalar_cast<AccT>(in[inOffset + i*reductionStride]);
         load_reg[0] = modifyOp(val0);
@@ -87,8 +87,8 @@ __device__ __forceinline__ void reduceChunk
         local_reg = reduceOp(local_reg, load_reg[1]);
         local_reg = reduceOp(local_reg, load_reg[2]);
         local_reg = reduceOp(local_reg, load_reg[3]);
-      } 
-      else if (i + blockDim.y*2 < reductionSize) 
+      }
+      else if (i + blockDim.y*2 < reductionSize)
       {
         const AccT val0 = scalar_cast<AccT>(in[inOffset + i*reductionStride]);
         load_reg[0] = modifyOp(val0);
@@ -99,8 +99,8 @@ __device__ __forceinline__ void reduceChunk
         local_reg = reduceOp(local_reg, load_reg[0]);
         local_reg = reduceOp(local_reg, load_reg[1]);
         local_reg = reduceOp(local_reg, load_reg[2]);
-      } 
-      else if (i + blockDim.y < reductionSize) 
+      }
+      else if (i + blockDim.y < reductionSize)
       {
         const AccT val0 = scalar_cast<AccT>(in[inOffset + i*reductionStride]);
         load_reg[0] = modifyOp(val0);
@@ -108,28 +108,30 @@ __device__ __forceinline__ void reduceChunk
         load_reg[1] = modifyOp(val1);
         local_reg = reduceOp(local_reg, load_reg[0]);
         local_reg = reduceOp(local_reg, load_reg[1]);
-      } 
-      else if (i < reductionSize) 
+      }
+      else if (i < reductionSize)
       {
         const AccT val0 = scalar_cast<AccT>(in[inOffset + i*reductionStride]);
         local_reg = reduceOp(local_reg, modifyOp(val0));
       }
     }
-  
+
   *shmem = local_reg;
   for(int i = lastpow2(shmem_lim); i > 0; i >>= 1)
   {
     __syncthreads();
-    if(threadIdx.y < i && threadIdx.y + i < shmem_lim) 
+    if(threadIdx.y < i && threadIdx.y + i < shmem_lim)
        *shmem = reduceOp(*shmem, *(shmem + i*blockDim.x));
   }
 
-  if(threadIdx.y == 0 && inbounds)
-    out[outOffset] = scalar_cast<T>(finalizeOp(*shmem));
+  if(threadIdx.y == 0 && inbounds) {
+    T &&o_ele = static_cast<T>(finalizeOp(*shmem));
+    out[outOffset] = o_ele;
+  }
 }
 
 // Kernel that handles an entire reduction of a slice of a tensor per each thread
-template 
+template
   <typename T,
    typename IndexType,
    typename AccT,
@@ -170,7 +172,7 @@ __global__ void kernelReduceNoncontigDim_shared
   if(gridDim.y == 1)
     reduceChunk
       (out.data,
-       in.data, 
+       in.data,
        inbounds,
        reductionStride,
        reductionSize,
@@ -183,43 +185,43 @@ __global__ void kernelReduceNoncontigDim_shared
        reduceOp,
        finalizeOp);
   else
-  { 
+  {
     int* semaphore = semaphores + blockIdx.x;
-  
+
     const IndexType chunkStart = blockIdx.y*CHUNKPERBLOCK;
-    const IndexType chunkSize = reductionSize - chunkStart < CHUNKPERBLOCK ? 
+    const IndexType chunkSize = reductionSize - chunkStart < CHUNKPERBLOCK ?
                                 reductionSize - chunkStart : CHUNKPERBLOCK;
     const IndexType reductionStrideStaging = totalSlices;
     const IndexType stagingOffset = sliceIndex;
 
     reduceChunk
       (stagingData,
-       in.data, 
+       in.data,
        inbounds,
        reductionStride,
        chunkSize,
        inOffset + chunkStart*reductionStride,
        stagingOffset + blockIdx.y*reductionStrideStaging,
-       chunkSize < blockDim.y ? chunkSize : blockDim.y, 
+       chunkSize < blockDim.y ? chunkSize : blockDim.y,
        init,
        shmem,
        modifyOp,
        reduceOp,
        SimpleCopyOp<AccT>());
-  
+
     __threadfence(); // make sure writes are globally visible
     __syncthreads(); // if multiple warps in this block wrote to staging, make sure they're all done
-  
+
     if(threadIdx.x == 0 && threadIdx.y == 0)
     {
       int old = atomicAdd(semaphore, 1);
       isLastBlockDone = (old == gridDim.y - 1);
     }
-  
+
     __syncthreads();
- 
+
     // The staging area contains gridDim.y elements along each slice.  The final reduction
-    // begins by treating the first blockDim.y elements as "init" values. 
+    // begins by treating the first blockDim.y elements as "init" values.
     if(isLastBlockDone)
     {
       if(threadIdx.y < gridDim.y)
@@ -227,13 +229,13 @@ __global__ void kernelReduceNoncontigDim_shared
       IndexType remaining = gridDim.y < blockDim.y ? 0 : gridDim.y - blockDim.y;
       reduceChunk
         (out.data,
-         stagingData, 
+         stagingData,
          inbounds,
          reductionStrideStaging,
          remaining, // if 0, loop in reduceChunk is skipped, otherwise...
          stagingOffset + blockDim.y*reductionStrideStaging, // ...loop begins at blockDim+1th element
          outOffset,
-         gridDim.y < blockDim.y ? gridDim.y : blockDim.y, 
+         gridDim.y < blockDim.y ? gridDim.y : blockDim.y,
          init,
          shmem,
          SimpleCopyOp<AccT>(),
@@ -395,7 +397,7 @@ inline bool getContigReduceGrid(ptrdiff_t elements, dim3& grid) {
 // all in where i and the out's 0 are indexed at dimension `dim`
 template <typename ScalarType,
 typename TensorType,
-typename ModifyOp, 
+typename ModifyOp,
 typename ReduceOp,
 typename FinalizeOp,
 typename AccT>
@@ -455,7 +457,7 @@ bool THC_reduceDim(THCState* state,
       int blockdimx = 32;
       int griddimx = THCCeilDiv((int64_t)outElements, (int64_t)blockdimx);
 
-      // Each warp reduces at most 4 slices.  This heuristic can be tuned, 
+      // Each warp reduces at most 4 slices.  This heuristic can be tuned,
       // but locking blockdimy to 16 is robust and reasonably performant.
       int blockdimy = 16;
 
@@ -471,10 +473,10 @@ bool THC_reduceDim(THCState* state,
       if(1024 < outElements && outElements <= 2048 && reductionSize >= 2048) coop = true;
       if(2048 < outElements && outElements <= 4096 && reductionSize >= 2048) coop = true;
       // Each block reduces at most CHUNKPERBLOCK (currently 256) slices.
-      if(coop) 
+      if(coop)
         griddimy = THCCeilDiv((int64_t)reductionSize, (int64_t)CHUNKPERBLOCK);
 
-      grid = dim3(griddimx, griddimy, 1); 
+      grid = dim3(griddimx, griddimy, 1);
       block = dim3(blockdimx, blockdimy, 1);
     }
   }
@@ -553,7 +555,7 @@ bool THC_reduceDim(THCState* state,
           THCudaFree(state, semaphores);                                     \
         }                                                                    \
     }                                                                        \
-  }                                                                    
+  }
 
 #define HANDLE_IN_CASE(TYPE, OUT, IN)                     \
   {                                                       \
@@ -586,7 +588,7 @@ bool THC_reduceDim(THCState* state,
   }
 
   if(THCTensor_canUse32BitIndexMath(state, out) &&
-     THCTensor_canUse32BitIndexMath(state, in)) 
+     THCTensor_canUse32BitIndexMath(state, in))
   {
     TensorInfo<ScalarType,
                unsigned int> outInfo =
@@ -599,8 +601,8 @@ bool THC_reduceDim(THCState* state,
     inInfo.reduceDim(dim);
     inInfo.collapseDims();
     HANDLE_OUT_CASE(unsigned int, outInfo.dims, inInfo.dims);
-  } 
-  else 
+  }
+  else
   {
     TensorInfo<ScalarType,
                uint64_t> outInfo =
@@ -615,7 +617,7 @@ bool THC_reduceDim(THCState* state,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time. 
+    large (64-bit indexed) tensors to reduce compilation time.
     */
     if (outInfo.dims == 1 && inInfo.dims == 1) {
       HANDLE_CASE(uint64_t, 1, 1);

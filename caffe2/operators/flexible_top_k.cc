@@ -30,13 +30,13 @@ bool FlexibleTopKOp<T, Context>::RunOnDevice() {
   const int64_t* k_data = k.template data<int64_t>();
 
   // get flatten shape of input
-  CAFFE_ENFORCE_GT(input.ndim(), 0);
-  vector<int64_t> input_dims = input.dims().vec();
+  CAFFE_ENFORCE_GT(input.dim(), 0);
+  vector<int64_t> input_dims = input.sizes().vec();
   vector<int64_t> linear_shape = {
       size_to_dim_(input_dims.size() - 1, input_dims), input_dims.back()};
   CAFFE_ENFORCE_EQ(
       linear_shape[0],
-      k.size(),
+      k.numel(),
       "first n-1 dims of input data and K does not match.");
 
   int64_t output_size = 0;
@@ -106,15 +106,15 @@ bool FlexibleTopKGradientOp<T, Context>::RunOnDevice() {
   const int64_t* indices_data = indices.template data<int64_t>();
 
   // Resize output tensors to be as orignial_input size and initialized with 0
-  CAFFE_ENFORCE_GT(original_input.ndim(), 0);
-  vector<int64_t> original_dims = original_input.dims().vec();
+  CAFFE_ENFORCE_GT(original_input.dim(), 0);
+  vector<int64_t> original_dims = original_input.sizes().vec();
   output->Resize(original_dims);
   T* output_data = output->template mutable_data<T>();
   math::Set<T, Context>(
-      output->size(), static_cast<T>(0), output_data, &context_);
+      output->numel(), static_cast<T>(0), output_data, &context_);
 
   int64_t index_offset = 0;
-  for (int64_t i = 0; i < k.size(); ++i) {
+  for (int64_t i = 0; i < k.numel(); ++i) {
     // offset of output_data
     int64_t output_offset = i * original_dims.back();
     for (int64_t j = 0; j < k_data[i]; ++j) {

@@ -1,4 +1,4 @@
 sphinx>=1.7.5
 sphinx_rtd_theme
 breathe
-git+http://github.com/svenevs/exhale.git@master#egg=exhale
+exhale>=0.2.1

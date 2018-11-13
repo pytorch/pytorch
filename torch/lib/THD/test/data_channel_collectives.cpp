@@ -10,6 +10,7 @@
 #include <THPP/tensors/THTensor.hpp>
 
 #include <unistd.h>
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -18,7 +19,6 @@
 #include <mutex>
 #include <set>
 #include <thread>
-#include <array>
 
 constexpr std::array<int, 4> WORKERS_NUM = {2, 4, 7, 13};
 constexpr int MASTER_PORT = 45678;
@@ -28,7 +28,6 @@ std::vector<std::thread> g_all_workers;
 std::mutex g_mutex;
 std::string g_data_channel_type;
 std::unique_ptr<Barrier> g_barrier;
-
 
 void test_send_recv_tensor(std::shared_ptr<thd::DataChannel> data_channel) {
   if (g_data_channel_type == "gloo") {
@@ -45,8 +44,9 @@ void test_send_recv_tensor(std::shared_ptr<thd::DataChannel> data_channel) {
   }
 }
 
-void test_send_recv_tensor_any_source(std::shared_ptr<thd::DataChannel> data_channel,
-                                      int workers) {
+void test_send_recv_tensor_any_source(
+    std::shared_ptr<thd::DataChannel> data_channel,
+    int workers) {
   if (g_data_channel_type == "gloo") {
     return; // XXX: Gloo does not support send/recv from any source
   }
@@ -94,14 +94,18 @@ void test_broadcast(std::shared_ptr<thd::DataChannel> data_channel) {
   }
 }
 
-void _test_reduce_helper(std::shared_ptr<thd::DataChannel> data_channel,
-                         THDReduceOp op_type, int64_t init_value, int64_t expected_value) {
+void _test_reduce_helper(
+    std::shared_ptr<thd::DataChannel> data_channel,
+    THDReduceOp op_type,
+    int64_t init_value,
+    int64_t expected_value) {
   if (data_channel->getRank() == 0) {
     auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, init_value);
     data_channel->reduce(*int_tensor, op_type, 0);
     ASSERT_TENSOR_VALUE(int, *int_tensor, expected_value)
   } else {
-    auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
+    auto int_tensor =
+        buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
     data_channel->reduce(*int_tensor, op_type, 0);
   }
 }
@@ -111,36 +115,54 @@ void test_reduce(std::shared_ptr<thd::DataChannel> data_channel, int workers) {
     return; // XXX: Gloo does not support reduce
   }
 
-  _test_reduce_helper(data_channel, THDReduceOp::THDReduceSUM,
-                      2, 2 + (workers * (workers + 1) / 2));
-  _test_reduce_helper(data_channel, THDReduceOp::THDReducePRODUCT,
-                      2, 2 * factorial(workers));
+  _test_reduce_helper(
+      data_channel,
+      THDReduceOp::THDReduceSUM,
+      2,
+      2 + (workers * (workers + 1) / 2));
+  _test_reduce_helper(
+      data_channel, THDReduceOp::THDReducePRODUCT, 2, 2 * factorial(workers));
   _test_reduce_helper(data_channel, THDReduceOp::THDReduceMIN, 10010, 1);
-  _test_reduce_helper(data_channel, THDReduceOp::THDReduceMAX,
-                      -1, data_channel->getNumProcesses() - 1);
+  _test_reduce_helper(
+      data_channel,
+      THDReduceOp::THDReduceMAX,
+      -1,
+      data_channel->getNumProcesses() - 1);
 }
 
-void _test_allReduce_helper(std::shared_ptr<thd::DataChannel> data_channel,
-                            THDReduceOp op_type, int64_t init_value, int64_t expected_value) {
+void _test_allReduce_helper(
+    std::shared_ptr<thd::DataChannel> data_channel,
+    THDReduceOp op_type,
+    int64_t init_value,
+    int64_t expected_value) {
   if (data_channel->getRank() == 0) {
     auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5, 6, 7, 100}, init_value);
     data_channel->allReduce(*int_tensor, op_type, 0);
     ASSERT_TENSOR_VALUE(int, *int_tensor, expected_value)
   } else {
-    auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5, 6, 7, 100}, data_channel->getRank());
+    auto int_tensor =
+        buildTensor<int>({1, 2, 3, 4, 5, 6, 7, 100}, data_channel->getRank());
     data_channel->allReduce(*int_tensor, op_type, 0);
     ASSERT_TENSOR_VALUE(int, *int_tensor, expected_value)
   }
 }
 
-void test_allReduce(std::shared_ptr<thd::DataChannel> data_channel, int workers) {
-  _test_allReduce_helper(data_channel, THDReduceOp::THDReduceSUM,
-                         2, 2 + (workers * (workers + 1) / 2));
-  _test_allReduce_helper(data_channel, THDReduceOp::THDReducePRODUCT,
-                         2, 2 * factorial(workers));
+void test_allReduce(
+    std::shared_ptr<thd::DataChannel> data_channel,
+    int workers) {
+  _test_allReduce_helper(
+      data_channel,
+      THDReduceOp::THDReduceSUM,
+      2,
+      2 + (workers * (workers + 1) / 2));
+  _test_allReduce_helper(
+      data_channel, THDReduceOp::THDReducePRODUCT, 2, 2 * factorial(workers));
   _test_allReduce_helper(data_channel, THDReduceOp::THDReduceMIN, 10010, 1);
-  _test_allReduce_helper(data_channel, THDReduceOp::THDReduceMAX,
-                         -1, data_channel->getNumProcesses() - 1);
+  _test_allReduce_helper(
+      data_channel,
+      THDReduceOp::THDReduceMAX,
+      -1,
+      data_channel->getNumProcesses() - 1);
 }
 
 void test_scatter(std::shared_ptr<thd::DataChannel> data_channel) {
@@ -204,13 +226,17 @@ void test_barrier(std::shared_ptr<thd::DataChannel> data_channel) {
       int64_t time_after_barrier = nowInMilliseconds() + BARRIER_WAIT_TIME;
       auto time_tensor = buildTensor<int64_t>({1}, time_after_barrier);
       data_channel->broadcast(*time_tensor, i);
-      std::this_thread::sleep_for(std::chrono::milliseconds(BARRIER_WAIT_TIME + 10));
+      std::this_thread::sleep_for(
+          std::chrono::milliseconds(BARRIER_WAIT_TIME + 10));
       data_channel->barrier();
     } else {
       auto time_tensor = buildTensor<int64_t>({1}, -1);
-      data_channel->broadcast(*time_tensor, i); // get expected time after barrier
+      data_channel->broadcast(
+          *time_tensor, i); // get expected time after barrier
       data_channel->barrier();
-      assert(nowInMilliseconds() >= reinterpret_cast<int64_t*>(time_tensor->data())[0]);
+      assert(
+          nowInMilliseconds() >=
+          reinterpret_cast<int64_t*>(time_tensor->data())[0]);
     }
   }
 }
@@ -225,8 +251,7 @@ void test_isend(std::shared_ptr<thd::DataChannel> data_channel) {
     for (size_t i = 1; i < data_channel->getNumProcesses(); ++i) {
       auto tensor = buildTensor<int>({1, 2, 3, 4, 5}, i);
       requests.push_back(std::shared_ptr<thd::DataChannel::Request>(
-        data_channel->isend(*tensor, i)
-      ));
+          data_channel->isend(*tensor, i)));
     }
 
     for (auto request : requests) {
@@ -251,8 +276,7 @@ void test_irecv(std::shared_ptr<thd::DataChannel> data_channel) {
     for (size_t i = 1; i < data_channel->getNumProcesses(); ++i) {
       tensors.push_back(buildTensor<int>({1, 2, 3, 4, 5}, -1));
       requests.push_back(std::shared_ptr<thd::DataChannel::Request>(
-        data_channel->ireceive(*tensors.back(), i)
-      ));
+          data_channel->ireceive(*tensors.back(), i)));
     }
 
     for (size_t i = 0; i < requests.size(); ++i) {
@@ -261,11 +285,11 @@ void test_irecv(std::shared_ptr<thd::DataChannel> data_channel) {
       ASSERT_TENSOR_VALUE(int, *tensors.at(i), i + 1)
     }
   } else {
-    auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
+    auto int_tensor =
+        buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
     data_channel->send(*int_tensor, 0);
   }
 }
-
 
 void test_interlaces(std::shared_ptr<thd::DataChannel> data_channel) {
   if (g_data_channel_type == "gloo") {
@@ -277,8 +301,7 @@ void test_interlaces(std::shared_ptr<thd::DataChannel> data_channel) {
     for (size_t i = 1; i < data_channel->getNumProcesses(); ++i) {
       auto tensor = buildTensor<int>({1, 2, 3, 4, 5}, 10);
       requests.push_back(std::shared_ptr<thd::DataChannel::Request>(
-        data_channel->isend(*tensor, i)
-      ));
+          data_channel->isend(*tensor, i)));
     }
 
     data_channel->barrier();
@@ -290,8 +313,7 @@ void test_interlaces(std::shared_ptr<thd::DataChannel> data_channel) {
   } else {
     auto int_tensor1 = buildTensor<int>({1, 2, 3, 4, 5}, -1);
     auto request = std::shared_ptr<thd::DataChannel::Request>(
-      data_channel->ireceive(*int_tensor1, 0)
-    );
+        data_channel->ireceive(*int_tensor1, 0));
 
     data_channel->barrier();
 
@@ -305,8 +327,8 @@ void test_interlaces(std::shared_ptr<thd::DataChannel> data_channel) {
 }
 
 /*
- * In group tests we call same functions in processes which do not belong to those
- * groups to check if it will not affect any computations.
+ * In group tests we call same functions in processes which do not belong to
+ * those groups to check if it will not affect any computations.
  *
  * Processes which do not belong to group do not have to call those methods!
  */
@@ -315,8 +337,10 @@ void test_interlaces(std::shared_ptr<thd::DataChannel> data_channel) {
 // GROUPS //
 ////////////
 
-void test_broadcast_group(std::shared_ptr<thd::DataChannel> data_channel,
-                          THDGroup group, std::vector<thd::rank_type> group_ranks) {
+void test_broadcast_group(
+    std::shared_ptr<thd::DataChannel> data_channel,
+    THDGroup group,
+    std::vector<thd::rank_type> group_ranks) {
   if (contains(group_ranks, data_channel->getRank())) {
     auto int_tensor = buildTensor({1, 2, 3, 4, 5}, -1);
     if (data_channel->getRank() == group_ranks[0])
@@ -331,15 +355,18 @@ void test_broadcast_group(std::shared_ptr<thd::DataChannel> data_channel,
   }
 }
 
-void test_reduce_group(std::shared_ptr<thd::DataChannel> data_channel,
-                       THDGroup group, std::vector<thd::rank_type> group_ranks) {
+void test_reduce_group(
+    std::shared_ptr<thd::DataChannel> data_channel,
+    THDGroup group,
+    std::vector<thd::rank_type> group_ranks) {
   if (g_data_channel_type == "gloo") {
     return; // XXX: Gloo does not support reduce
   }
 
   if (contains(group_ranks, data_channel->getRank())) {
     auto int_tensor = buildTensor({1, 2, 3, 4, 5}, 10);
-    data_channel->reduce(*int_tensor, THDReduceOp::THDReduceSUM, group_ranks[0], group);
+    data_channel->reduce(
+        *int_tensor, THDReduceOp::THDReduceSUM, group_ranks[0], group);
     if (data_channel->getRank() == group_ranks[0]) {
       ASSERT_TENSOR_VALUE(int, *int_tensor, 10 * group_ranks.size())
     } else {
@@ -347,13 +374,16 @@ void test_reduce_group(std::shared_ptr<thd::DataChannel> data_channel,
     }
   } else {
     auto int_tensor = buildTensor({1, 2, 3, 4, 5}, 1000);
-    data_channel->reduce(*int_tensor, THDReduceOp::THDReduceSUM, group_ranks[0], group);
+    data_channel->reduce(
+        *int_tensor, THDReduceOp::THDReduceSUM, group_ranks[0], group);
     ASSERT_TENSOR_VALUE(int, *int_tensor, 1000)
   }
 }
 
-void test_allReduce_group(std::shared_ptr<thd::DataChannel> data_channel,
-                          THDGroup group, std::vector<thd::rank_type> group_ranks) {
+void test_allReduce_group(
+    std::shared_ptr<thd::DataChannel> data_channel,
+    THDGroup group,
+    std::vector<thd::rank_type> group_ranks) {
   if (contains(group_ranks, data_channel->getRank())) {
     auto int_tensor = buildTensor({1, 2, 3, 4, 5, 6, 7, 100}, 10);
     data_channel->allReduce(*int_tensor, THDReduceOp::THDReduceSUM, group);
@@ -365,8 +395,10 @@ void test_allReduce_group(std::shared_ptr<thd::DataChannel> data_channel,
   }
 }
 
-void test_scatter_group(std::shared_ptr<thd::DataChannel> data_channel,
-                        THDGroup group, std::vector<thd::rank_type> group_ranks) {
+void test_scatter_group(
+    std::shared_ptr<thd::DataChannel> data_channel,
+    THDGroup group,
+    std::vector<thd::rank_type> group_ranks) {
   if (g_data_channel_type == "gloo") {
     return; // XXX: Gloo does not support scatter
   }
@@ -391,9 +423,10 @@ void test_scatter_group(std::shared_ptr<thd::DataChannel> data_channel,
   }
 }
 
-
-void test_gather_group(std::shared_ptr<thd::DataChannel> data_channel,
-                       THDGroup group, std::vector<thd::rank_type> group_ranks) {
+void test_gather_group(
+    std::shared_ptr<thd::DataChannel> data_channel,
+    THDGroup group,
+    std::vector<thd::rank_type> group_ranks) {
   if (g_data_channel_type == "gloo") {
     return; // XXX: Gloo does not support gather
   }
@@ -401,7 +434,8 @@ void test_gather_group(std::shared_ptr<thd::DataChannel> data_channel,
   std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
   std::vector<thpp::Tensor*> raw_tensors;
   if (contains(group_ranks, data_channel->getRank())) {
-    auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
+    auto int_tensor =
+        buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
     if (data_channel->getRank() == group_ranks[0]) {
       for (size_t i = 0; i < group_ranks.size(); ++i) {
         tensors.push_back(buildTensor<int>({1, 2, 3, 4, 5}, -1));
@@ -421,12 +455,15 @@ void test_gather_group(std::shared_ptr<thd::DataChannel> data_channel,
   }
 }
 
-void test_allGather_group(std::shared_ptr<thd::DataChannel> data_channel,
-                          THDGroup group, std::vector<thd::rank_type> group_ranks) {
+void test_allGather_group(
+    std::shared_ptr<thd::DataChannel> data_channel,
+    THDGroup group,
+    std::vector<thd::rank_type> group_ranks) {
   std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
   std::vector<thpp::Tensor*> raw_tensors;
   if (contains(group_ranks, data_channel->getRank())) {
-    auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
+    auto int_tensor =
+        buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
     for (size_t i = 0; i < group_ranks.size(); ++i) {
       tensors.push_back(buildTensor<int>({1, 2, 3, 4, 5}, -1));
       raw_tensors.push_back(tensors.back().get());
@@ -442,25 +479,34 @@ void test_allGather_group(std::shared_ptr<thd::DataChannel> data_channel,
   }
 }
 
-void test_barrier_group(std::shared_ptr<thd::DataChannel> data_channel,
-                        THDGroup group, std::vector<thd::rank_type> group_ranks) {
+void test_barrier_group(
+    std::shared_ptr<thd::DataChannel> data_channel,
+    THDGroup group,
+    std::vector<thd::rank_type> group_ranks) {
   if (contains(group_ranks, data_channel->getRank())) {
     for (int i = 0; i < group_ranks.size(); ++i) {
       if (data_channel->getRank() == group_ranks[i]) {
         int64_t time_after_barrier = nowInMilliseconds() + BARRIER_WAIT_TIME;
         auto time_tensor = buildTensor<int64_t>({1}, time_after_barrier);
         data_channel->broadcast(*time_tensor, group_ranks[i], group);
-        std::this_thread::sleep_for(std::chrono::milliseconds(BARRIER_WAIT_TIME + 10));
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(BARRIER_WAIT_TIME + 10));
         data_channel->barrier(group);
       } else {
         auto time_tensor = buildTensor<int64_t>({1}, -1);
-        data_channel->broadcast(*time_tensor, group_ranks[i], group); // get expected time after barrier
+        data_channel->broadcast(
+            *time_tensor,
+            group_ranks[i],
+            group); // get expected time after barrier
         data_channel->barrier(group);
-        assert(nowInMilliseconds() >= reinterpret_cast<int64_t*>(time_tensor->data())[0]);
+        assert(
+            nowInMilliseconds() >=
+            reinterpret_cast<int64_t*>(time_tensor->data())[0]);
       }
     }
   } else {
-    std::this_thread::sleep_for(std::chrono::milliseconds(BARRIER_WAIT_TIME + 100));
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(BARRIER_WAIT_TIME + 100));
     data_channel->barrier(group);
   }
 }
@@ -469,7 +515,8 @@ void test_barrier_group(std::shared_ptr<thd::DataChannel> data_channel,
 // EXCEPTIONS //
 ////////////////
 
-void test_send_recv_invalid_rank(std::shared_ptr<thd::DataChannel> data_channel) {
+void test_send_recv_invalid_rank(
+    std::shared_ptr<thd::DataChannel> data_channel) {
   if (g_data_channel_type == "gloo") {
     return; // XXX: Gloo does not support send/recv
   }
@@ -481,10 +528,10 @@ void test_send_recv_invalid_rank(std::shared_ptr<thd::DataChannel> data_channel)
   auto rank = data_channel->getRank();
   auto int_tensor = buildTensor({1, 2, 3, 4, 5}, -1);
 
-  { // cannot send or receive to self
-    ASSERT_THROWS(std::logic_error, data_channel->send(*int_tensor, rank))
-    ASSERT_THROWS(std::logic_error, data_channel->receive(*int_tensor, rank))
-  }
+  {// cannot send or receive to self
+   ASSERT_THROWS(std::logic_error, data_channel->send(*int_tensor, rank))
+       ASSERT_THROWS(
+           std::logic_error, data_channel->receive(*int_tensor, rank))}
 
   { // cannot send or receive to/from process with rank -1
     ASSERT_THROWS(std::out_of_range, data_channel->send(*int_tensor, -1))
@@ -506,55 +553,44 @@ void test_process_not_in_group(std::shared_ptr<thd::DataChannel> data_channel) {
 
   THDGroup group = data_channel->newGroup({1});
   std::vector<std::shared_ptr<thpp::IntTensor>> tensors = {
-    buildTensor<int>({1, 2, 3, 4, 5}, -1)
-  };
-  std::vector<thpp::Tensor*> raw_tensors = {
-    tensors.back().get()
-  };
+      buildTensor<int>({1, 2, 3, 4, 5}, -1)};
+  std::vector<thpp::Tensor*> raw_tensors = {tensors.back().get()};
 
   if (data_channel->getRank() == 1) {
     ASSERT_THROWS(
-      std::logic_error,
-      data_channel->broadcast(*int_tensor, 0, group)
-    )
+        std::logic_error, data_channel->broadcast(*int_tensor, 0, group))
 
     if (g_data_channel_type == "gloo") {
       return; // XXX: Gloo does not support scatter/gather/reduce
     }
 
     ASSERT_THROWS(
-      std::logic_error,
-      data_channel->reduce(*int_tensor, THDReduceOp::THDReduceSUM, 0, group)
-    )
+        std::logic_error,
+        data_channel->reduce(*int_tensor, THDReduceOp::THDReduceSUM, 0, group))
 
     ASSERT_THROWS(
-      std::logic_error,
-      data_channel->scatter(raw_tensors, *int_tensor, 0, group)
-    )
+        std::logic_error,
+        data_channel->scatter(raw_tensors, *int_tensor, 0, group))
 
     ASSERT_THROWS(
-      std::logic_error,
-      data_channel->gather(raw_tensors, *int_tensor, 0, group)
-    )
+        std::logic_error,
+        data_channel->gather(raw_tensors, *int_tensor, 0, group))
   }
 }
 
 // input_tensors does not match size of group
-void test_tensors_do_not_match_group_size(std::shared_ptr<thd::DataChannel> data_channel) {
+void test_tensors_do_not_match_group_size(
+    std::shared_ptr<thd::DataChannel> data_channel) {
   auto int_tensor = buildTensor({1, 2, 3, 4, 5}, -1);
   THDGroup group = data_channel->newGroup({1, 2});
   std::vector<std::shared_ptr<thpp::IntTensor>> tensors = {
-    buildTensor<int>({1, 2, 3, 4, 5}, -1)
-  };
-  std::vector<thpp::Tensor*> raw_tensors = {
-    tensors.back().get()
-  };
+      buildTensor<int>({1, 2, 3, 4, 5}, -1)};
+  std::vector<thpp::Tensor*> raw_tensors = {tensors.back().get()};
 
   if (data_channel->getRank() == 1 || data_channel->getRank() == 2) {
     ASSERT_THROWS(
-      std::logic_error,
-      data_channel->allGather(raw_tensors, *int_tensor, group)
-    )
+        std::logic_error,
+        data_channel->allGather(raw_tensors, *int_tensor, group))
 
     if (g_data_channel_type == "gloo") {
       return; // XXX: Gloo does not support scatter/gather
@@ -562,36 +598,30 @@ void test_tensors_do_not_match_group_size(std::shared_ptr<thd::DataChannel> data
 
     if (data_channel->getRank() == 1) {
       ASSERT_THROWS(
-        std::logic_error,
-        data_channel->scatter(raw_tensors, *int_tensor, 1, group)
-      )
+          std::logic_error,
+          data_channel->scatter(raw_tensors, *int_tensor, 1, group))
 
       ASSERT_THROWS(
-        std::logic_error,
-        data_channel->gather(raw_tensors, *int_tensor, 1, group)
-      )
+          std::logic_error,
+          data_channel->gather(raw_tensors, *int_tensor, 1, group))
     }
   }
 }
 
 // input_tensors are not the same
-void test_tensors_are_not_the_same(std::shared_ptr<thd::DataChannel> data_channel) {
+void test_tensors_are_not_the_same(
+    std::shared_ptr<thd::DataChannel> data_channel) {
   auto int_tensor = buildTensor({1, 2, 3, 4, 5}, -1);
   THDGroup group = data_channel->newGroup({1, 2});
   std::vector<std::shared_ptr<thpp::IntTensor>> tensors = {
-    buildTensor<int>({1, 2, 3, 4, 5}, -1),
-    buildTensor<int>({1, 2, 3, 4}, -1)
-  };
-  std::vector<thpp::Tensor*> raw_tensors = {
-    tensors[0].get(),
-    tensors[1].get()
-  };
+      buildTensor<int>({1, 2, 3, 4, 5}, -1),
+      buildTensor<int>({1, 2, 3, 4}, -1)};
+  std::vector<thpp::Tensor*> raw_tensors = {tensors[0].get(), tensors[1].get()};
 
   if (data_channel->getRank() == 1 || data_channel->getRank() == 2) {
     ASSERT_THROWS(
-      std::logic_error,
-      data_channel->allGather(raw_tensors, *int_tensor, group)
-    )
+        std::logic_error,
+        data_channel->allGather(raw_tensors, *int_tensor, group))
 
     if (g_data_channel_type == "gloo") {
       return; // XXX: Gloo does not support scatter/gather
@@ -599,19 +629,19 @@ void test_tensors_are_not_the_same(std::shared_ptr<thd::DataChannel> data_channe
 
     if (data_channel->getRank() == 1) {
       ASSERT_THROWS(
-        std::logic_error,
-        data_channel->scatter(raw_tensors, *int_tensor, 1, group)
-      )
+          std::logic_error,
+          data_channel->scatter(raw_tensors, *int_tensor, 1, group))
 
       ASSERT_THROWS(
-        std::logic_error,
-        data_channel->gather(raw_tensors, *int_tensor, 1, group)
-      )
+          std::logic_error,
+          data_channel->gather(raw_tensors, *int_tensor, 1, group))
     }
   }
 }
 
-void run_all_tests(std::shared_ptr<thd::DataChannel> data_channel, int workers) {
+void run_all_tests(
+    std::shared_ptr<thd::DataChannel> data_channel,
+    int workers) {
   test_send_recv_tensor(data_channel);
   test_send_recv_tensor_any_source(data_channel, workers);
   test_send_recv_scalar(data_channel);
@@ -643,13 +673,13 @@ void run_all_tests(std::shared_ptr<thd::DataChannel> data_channel, int workers) 
   test_tensors_are_not_the_same(data_channel);
 }
 
-
 void init_tcp_master(int workers) {
   g_mutex.lock();
   setenv(WORLD_SIZE_ENV, std::to_string((workers + 1)).data(), 1);
   setenv(RANK_ENV, "0", 1);
   setenv(MASTER_PORT_ENV, std::to_string(MASTER_PORT).data(), 1);
-  auto masterChannel = std::make_shared<thd::DataChannelTCP>(thd::getInitConfig("env://")); // reads all env variable
+  auto masterChannel = std::make_shared<thd::DataChannelTCP>(
+      thd::getInitConfig("env://")); // reads all env variable
   g_mutex.unlock();
 
   assert(masterChannel->init());
@@ -661,12 +691,15 @@ void init_tcp_master(int workers) {
   }
 }
 
-
 void init_tcp_worker(unsigned int id, int workers) {
   g_mutex.lock();
   setenv(RANK_ENV, std::to_string(id).data(), 1);
-  setenv(MASTER_ADDR_ENV, std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
-  auto worker_channel = std::make_shared<thd::DataChannelTCP>(thd::getInitConfig("env://")); // reads all env variable
+  setenv(
+      MASTER_ADDR_ENV,
+      std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(),
+      1);
+  auto worker_channel = std::make_shared<thd::DataChannelTCP>(
+      thd::getInitConfig("env://")); // reads all env variable
   g_mutex.unlock();
 
   assert(worker_channel->init());
@@ -679,7 +712,8 @@ void init_gloo_master(int workers) {
   setenv(WORLD_SIZE_ENV, std::to_string((workers + 1)).data(), 1);
   setenv(RANK_ENV, "0", 1);
   setenv(MASTER_PORT_ENV, std::to_string(MASTER_PORT).data(), 1);
-  auto masterChannel = std::make_shared<thd::DataChannelGloo>(thd::getInitConfig("env://")); // reads all env variable
+  auto masterChannel = std::make_shared<thd::DataChannelGloo>(
+      thd::getInitConfig("env://")); // reads all env variable
   g_mutex.unlock();
 
   assert(masterChannel->init());
@@ -691,8 +725,12 @@ void init_gloo_master(int workers) {
 void init_gloo_worker(unsigned int id, int workers) {
   g_mutex.lock();
   setenv(RANK_ENV, std::to_string(id).data(), 1);
-  setenv(MASTER_ADDR_ENV, std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(), 1);
-  auto worker_channel = std::make_shared<thd::DataChannelGloo>(thd::getInitConfig("env://")); // reads all env variable
+  setenv(
+      MASTER_ADDR_ENV,
+      std::string("127.0.0.1:" + std::to_string(MASTER_PORT)).data(),
+      1);
+  auto worker_channel = std::make_shared<thd::DataChannelGloo>(
+      thd::getInitConfig("env://")); // reads all env variable
   g_mutex.unlock();
 
   assert(worker_channel->init());
@@ -712,8 +750,7 @@ void init_mpi_process() {
 }
 #endif // WITH_MPI
 
-
-int main(int argc, char const *argv[]) {
+int main(int argc, char const* argv[]) {
 #ifdef WITH_MPI
   if (argc == 1) {
 #endif // WITH_MPI
@@ -764,7 +801,14 @@ int main(int argc, char const *argv[]) {
 
     // start MPI processes
     std::cout << "MPI:" << std::endl;
-    execlp("mpirun", "mpirun", "-n", std::to_string(WORKERS_NUM[0] + 1).data(), argv[0], "1", NULL);
+    execlp(
+        "mpirun",
+        "mpirun",
+        "-n",
+        std::to_string(WORKERS_NUM[0] + 1).data(),
+        argv[0],
+        "1",
+        NULL);
   } else {
     g_data_channel_type = "mpi";
     init_mpi_process();

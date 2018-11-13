@@ -21,8 +21,7 @@ inline std::shared_ptr<void> init_state<void>() {
 template <class T>
 using is_output_arg = std::is_same<Tensor*, T>;
 template <class ParameterDef>
-using extract_type_t =
-    c10::guts::result_of_t<decltype (&ParameterDef::parse)(ArgumentHelper)>;
+using extract_type_t = typename ParameterDef::type;
 } // namespace details
 
 /**
@@ -278,6 +277,7 @@ class C10OperatorWrapper final : public Operator<Context> {
 
 template <class ParameterDef>
 struct ParameterHelper final {
+  using type = typename ParameterDef::type;
   static typename ParameterDef::type parse(const ArgumentHelper& helper) {
     return helper.GetSingleArgument<typename ParameterDef::type>(
         ParameterDef::name(), ParameterDef::default_value());

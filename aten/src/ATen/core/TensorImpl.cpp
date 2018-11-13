@@ -19,8 +19,8 @@ const Tensor& TensorImpl::grad() const {
 
 TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, Allocator *allocator, bool is_variable)
     : TensorImpl({}, type_id, data_type, is_variable) {
-  // UndefinedTensors and SparseTensors don't have storages.
-  if (type_id != UndefinedTensorId() && data_type.id() != caffe2::TypeIdentifier::uninitialized()
+  // Variables, UndefinedTensors and SparseTensors don't have storages.
+  if (!is_variable && type_id != UndefinedTensorId() && data_type.id() != caffe2::TypeIdentifier::uninitialized()
       && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
     storage_ = Storage(data_type, 0, allocator, true);
   }
@@ -37,8 +37,7 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::Ty
       data_type_(data_type),
       type_id_(type_id),
       is_variable_(is_variable) {
-  strides_.reset(new int64_t[1]);
-  strides_[0] = 1;
+  strides_.push_back(1);
 }
 
 IntList TensorImpl::sizes() const {
@@ -46,20 +45,13 @@ IntList TensorImpl::sizes() const {
 }
 
 IntList TensorImpl::strides() const {
-  AT_ASSERTM(strides_,
-             "Caffe2 tensors don't (yet) have meaningful strides and cannot "
-             "be used in PyTorch.");
-  return IntList{strides_.get(), sizes_.size()};
+  return strides_;
 }
 
 bool TensorImpl::compute_contiguous() const {
   bool is_contiguous = true;
   if (is_empty())
     return is_contiguous;
-  if (!strides_) {
-    // Special case for Caffe2 tensors which don't have strides set.
-    return true;
-  }
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
     if (size(d) != 1) {
@@ -90,9 +82,6 @@ int64_t TensorImpl::size(int64_t d) const {
 }
 
 int64_t TensorImpl::stride(int64_t d) const {
-  AT_ASSERTM(strides_,
-             "Caffe2 tensors don't (yet) have meaningful strides and cannot "
-             "be used in PyTorch.");
   d = at::maybe_wrap_dim(d, dim(), false);
   return strides_[d];
 }

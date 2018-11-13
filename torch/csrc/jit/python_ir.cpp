@@ -16,6 +16,8 @@
 
 namespace torch { namespace jit {
 
+using c10::Type;
+
 std::string getPythonName(const PyObject* obj_) {
   AutoGIL gil;
   PyObject* obj = const_cast<PyObject*>(obj_);
@@ -413,6 +415,7 @@ void initPythonIRBindings(PyObject * module_) {
     })
     ;
 
+  using ::c10::Type;
   py::class_<Type,std::shared_ptr<Type>>(m,"Type")
     .def("__repr__",[](Type & t) {
       return t.python_str();
@@ -429,6 +432,8 @@ void initPythonIRBindings(PyObject * module_) {
           return "DynamicType";
         case TypeKind::TensorType:
           return "TensorType";
+        case TypeKind::OptionalType:
+          return "OptionalType";
         case TypeKind::NumberType:
           return "NumberType";
         case TypeKind::NoneType:
@@ -453,8 +458,8 @@ void initPythonIRBindings(PyObject * module_) {
           return "BoolType";
         case TypeKind::VarType:
           return "VarType";
-        case TypeKind::WorldType:
-          return "WorldType";
+        case TypeKind::FutureType:
+          return "FutureType";
         }
         // not reachable, but some compilers complain
         AT_ERROR("Unknown Type Kind");
@@ -477,7 +482,7 @@ void initPythonIRBindings(PyObject * module_) {
     .def("isSubtypeOf", [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
         return self->isSubtypeOf(other);
     })
-    .def_static("inferFrom", inferTypeFrom);
+    .def_static("inferFrom", c10::inferTypeFrom);
 
   py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
     .def_static("get", &NumberType::get);

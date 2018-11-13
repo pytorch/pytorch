@@ -42,7 +42,7 @@ class AffineChannelOp final : public Operator<Context> {
     }
     const int N = X.dim32(0);
     const int C = X.dim32(1);
-    const int HxW = X.size() / (N * C);
+    const int HxW = X.numel() / (N * C);
     Y->ResizeLike(X);
     math::AffineChannel<T, Context, StorageOrder::NCHW>(
         N,
@@ -68,10 +68,10 @@ class AffineChannelOp final : public Operator<Context> {
           "In-place affine_channel_op is not supported when "
           "is_learnable = true.");
     }
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
-    const int HxW = X.size() / (N * C);
+    const int HxW = X.numel() / (N * C);
     Y->ResizeLike(X);
     math::AffineChannel<T, Context, StorageOrder::NHWC>(
         N,

@@ -19,10 +19,10 @@
 
 #include "ATen/core/Backtrace.h"
 #include "ATen/core/Half.h"
-#include "ATen/core/IdWrapper.h"
-#include "ATen/core/Macros.h"
+#include "c10/macros/Macros.h"
 #include "c10/util/C++17.h"
 #include "c10/util/Exception.h"
+#include "c10/util/IdWrapper.h"
 #include "caffe2/core/macros.h"
 
 #include "c10/util/Type.h"
@@ -106,7 +106,7 @@ namespace at {
 using DataType = caffe2::TypeIdentifier;
 }
 
-AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
+C10_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
 
 namespace caffe2 {
 
@@ -170,29 +170,19 @@ inline void _PlacementNewNotDefault(void* /*ptr*/, size_t /*n*/) {
 
 template<
     typename T,
-    c10::guts::enable_if_t<
-        std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr>
+    c10::guts::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
-  return nullptr;
+  return
+    (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+    ? nullptr
+    : &_PlacementNew<T>;
 }
 
-template <
+template<
     typename T,
-    c10::guts::enable_if_t<
-        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
-        std::is_default_constructible<T>::value
-    >* = nullptr>
+    c10::guts::enable_if_t<!std::is_default_constructible<T>::value>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
-  return &_PlacementNew<T>;
-}
-
-template <
-    typename T,
-    c10::guts::enable_if_t<
-        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
-        !std::is_default_constructible<T>::value
-    >* = nullptr>
-inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
+  static_assert(!std::is_fundamental<T>::value && !std::is_pointer<T>::value, "this should have picked the other SFINAE case");
   return &_PlacementNewNotDefault<T>;
 }
 
@@ -246,29 +236,21 @@ inline void _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
 
 template<
     typename T,
-    c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr
+    c10::guts::enable_if_t<std::is_copy_assignable<T>::value>* = nullptr
     >
 inline constexpr TypeMetaData::Copy* _PickCopy() {
-  return nullptr;
+  return
+    (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+    ? nullptr
+    : &_Copy<T>;
 }
 
-template <
+template<
     typename T,
-    c10::guts::enable_if_t<
-        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
-        std::is_copy_assignable<T>::value
-    >* = nullptr>
+    c10::guts::enable_if_t<!std::is_copy_assignable<T>::value>* = nullptr
+    >
 inline constexpr TypeMetaData::Copy* _PickCopy() {
-  return &_Copy<T>;
-}
-
-template <
-    typename T,
-    c10::guts::enable_if_t<
-        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
-        !std::is_copy_assignable<T>::value
-    >* = nullptr>
-inline constexpr TypeMetaData::Copy* _PickCopy() {
+  static_assert(!std::is_fundamental<T>::value && !std::is_pointer<T>::value, "this should have picked the other SFINAE case");
   return &_CopyNotAllowed<T>;
 }
 
@@ -283,20 +265,12 @@ inline void _PlacementDelete(void* ptr, size_t n) {
   }
 }
 
-template<
-    typename T,
-    c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr
-    >
+template <typename T>
 inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
-  return nullptr;
-}
-
-template<
-    typename T,
-    c10::guts::enable_if_t<!(std::is_fundamental<T>::value || std::is_pointer<T>::value)>* = nullptr
-    >
-inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
-  return &_PlacementDelete<T>;
+  return
+    (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+    ? nullptr
+    : &_PlacementDelete<T>;
 }
 
 template <typename T>
@@ -377,7 +351,7 @@ class CAFFE2_API TypeMeta {
  private:
   // TypeMeta can only be created by Make, making sure that we do not
   // create incorrectly mixed up TypeMeta objects.
-  constexpr TypeMeta(const detail::TypeMetaData* data) noexcept : data_(data) {}
+  explicit constexpr TypeMeta(const detail::TypeMetaData* data) noexcept : data_(data) {}
 
  public:
   /**
@@ -482,6 +456,12 @@ inline bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 }
 inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
+}
+
+inline std::ostream& operator<<(
+    std::ostream& stream,
+    caffe2::TypeMeta typeMeta) {
+  return stream << typeMeta.name();
 }
 
 /**

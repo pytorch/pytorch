@@ -5,6 +5,7 @@
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/stack.h"
+#include "torch/csrc/jit/type.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/utils/variadic.h"
@@ -46,6 +47,8 @@ struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState
   std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq> value_map;
   std::shared_ptr<Graph> graph;
   bool warn = true;
+  std::function<std::string(const Variable& var)> lookup_var_name_fn =
+    [](const Variable& var) {return "";};
 };
 
 
@@ -81,9 +84,28 @@ struct ArgumentStash {
     return info;
   }
 
+  // Value stashing: Use these methods to stash arguments which correspond
+  // to regular Value*'s in the graph. i.e. they don't require special
+  // handling like in the case of IntLists
+  TORCH_API static void stashValue(const std::string& arg_name,
+                                   size_t idx,
+                                   const Variable& var,
+                                   TypePtr type=nullptr);
+
+  static bool hasValue(const std::string& arg_name) {
+    return stash.values.count(arg_name) > 0;
+  }
+
+  static Value* popValue(const std::string& arg_name) {
+    auto info = stash.values.at(arg_name);
+    stash.values.erase(arg_name);
+    return info;
+  }
+
 private:
   static thread_local ArgumentStash stash;
   std::unordered_map<std::string, IntListTrace> intlists;
+  std::unordered_map<std::string, Value*> values;
 };
 
 // Retrieve or set the current tracing state. Returns a nullptr if tracing is disabled.

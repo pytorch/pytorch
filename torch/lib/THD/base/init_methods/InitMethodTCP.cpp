@@ -2,22 +2,22 @@
 #include "InitMethodUtils.hpp"
 
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <unistd.h>
-#include <sys/types.h>
 #include <sys/socket.h>
-#include <fcntl.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <set>
-#include <thread>
 #include <cstring>
-#include <random>
-#include <sstream>
 #include <iterator>
+#include <random>
+#include <set>
+#include <sstream>
+#include <thread>
 
 constexpr size_t num_rand_bytes = 32;
 constexpr size_t max_msg_length = 4000;
@@ -26,12 +26,11 @@ namespace thd {
 namespace init {
 namespace {
 
-std::string getRandomString()
-{
+std::string getRandomString() {
   static constexpr char charset[] =
-    "0123456789"
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    "abcdefghijklmnopqrstuvwxyz";
+      "0123456789"
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      "abcdefghijklmnopqrstuvwxyz";
   int fd;
   uint8_t rand_bytes[num_rand_bytes];
   ssize_t bytes_read;
@@ -43,7 +42,8 @@ std::string getRandomString()
 
   std::string str;
   str.reserve(num_rand_bytes);
-  for (uint8_t *byte = rand_bytes; byte != rand_bytes + num_rand_bytes; ++byte) {
+  for (uint8_t* byte = rand_bytes; byte != rand_bytes + num_rand_bytes;
+       ++byte) {
     str.push_back(charset[(*byte) % (sizeof(charset) - 1)]);
   }
   return str;
@@ -57,14 +57,14 @@ struct MulticastMessage {
   int rank;
 
   MulticastMessage(std::string group_name, port_type port, int rank)
-    : uid(getRandomString())
-    , group_name(group_name)
-    , addresses(getInterfaceAddresses())
-    , port(port)
-    , rank(rank) {}
+      : uid(getRandomString()),
+        group_name(group_name),
+        addresses(getInterfaceAddresses()),
+        port(port),
+        rank(rank) {}
 
   MulticastMessage(std::string msg) {
-    std::istringstream ss {msg};
+    std::istringstream ss{msg};
     ss >> uid >> group_name >> port >> rank;
     addresses = {std::istream_iterator<std::string>(ss),
                  std::istream_iterator<std::string>()};
@@ -82,11 +82,13 @@ struct MulticastMessage {
 
 bool isMulticastAddress(struct sockaddr* address) {
   if (address->sa_family == AF_INET) {
-    struct sockaddr_in *address_ipv4 = reinterpret_cast<struct sockaddr_in*>(address);
+    struct sockaddr_in* address_ipv4 =
+        reinterpret_cast<struct sockaddr_in*>(address);
     uint32_t host_addr = ntohl(address_ipv4->sin_addr.s_addr);
     return (host_addr & 0xF0000000) == 0xE0000000;
   } else if (address->sa_family == AF_INET6) {
-    struct sockaddr_in6 *address_ipv6 = reinterpret_cast<struct sockaddr_in6*>(address);
+    struct sockaddr_in6* address_ipv6 =
+        reinterpret_cast<struct sockaddr_in6*>(address);
     auto& addr_bytes = address_ipv6->sin6_addr.s6_addr;
     // NOTE: address is in network byte order
     return addr_bytes[0] == 0xff;
@@ -95,48 +97,69 @@ bool isMulticastAddress(struct sockaddr* address) {
   }
 }
 
-int bindMulticastSocket(struct sockaddr* address, struct sockaddr_storage *sock_addr,
-                        int timeout_sec = 1, int ttl = 1) {
+int bindMulticastSocket(
+    struct sockaddr* address,
+    struct sockaddr_storage* sock_addr,
+    int timeout_sec = 1,
+    int ttl = 1) {
   struct timeval timeout = {.tv_sec = timeout_sec, .tv_usec = 0};
 
   int socket, optval;
   SYSCHECK(socket = ::socket(address->sa_family, SOCK_DGRAM, 0));
-  optval = 1; SYSCHECK(::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)));
+  optval = 1;
+  SYSCHECK(
+      ::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)));
 
   if (address->sa_family == AF_INET) {
-    struct sockaddr_in *sock_addr_ipv4 = reinterpret_cast<struct sockaddr_in*>(sock_addr);
-    struct sockaddr_in *address_ipv4 = reinterpret_cast<struct sockaddr_in*>(address);
+    struct sockaddr_in* sock_addr_ipv4 =
+        reinterpret_cast<struct sockaddr_in*>(sock_addr);
+    struct sockaddr_in* address_ipv4 =
+        reinterpret_cast<struct sockaddr_in*>(address);
     std::memset(sock_addr_ipv4, 0, sizeof(*sock_addr_ipv4));
     sock_addr_ipv4->sin_family = address->sa_family;
     sock_addr_ipv4->sin_addr.s_addr = INADDR_ANY;
     sock_addr_ipv4->sin_port = address_ipv4->sin_port;
 
-    SYSCHECK(::bind(socket, reinterpret_cast<struct sockaddr*>(sock_addr_ipv4), sizeof(*sock_addr_ipv4)));
-    SYSCHECK(::setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)));
+    SYSCHECK(::bind(
+        socket,
+        reinterpret_cast<struct sockaddr*>(sock_addr_ipv4),
+        sizeof(*sock_addr_ipv4)));
+    SYSCHECK(::setsockopt(
+        socket, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout)));
 
     struct ip_mreq mreq;
     mreq.imr_multiaddr = address_ipv4->sin_addr;
     mreq.imr_interface.s_addr = htonl(INADDR_ANY);
-    SYSCHECK(::setsockopt(socket, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)));
-    SYSCHECK(::setsockopt(socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)));
+    SYSCHECK(
+        ::setsockopt(socket, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)));
+    SYSCHECK(::setsockopt(
+        socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)));
 
     sock_addr_ipv4->sin_addr = address_ipv4->sin_addr;
   } else if (address->sa_family == AF_INET6) {
-    struct sockaddr_in6 *sock_addr_ipv6 = reinterpret_cast<struct sockaddr_in6*>(sock_addr);
-    struct sockaddr_in6 *address_ipv6 = reinterpret_cast<struct sockaddr_in6*>(address);
+    struct sockaddr_in6* sock_addr_ipv6 =
+        reinterpret_cast<struct sockaddr_in6*>(sock_addr);
+    struct sockaddr_in6* address_ipv6 =
+        reinterpret_cast<struct sockaddr_in6*>(address);
     std::memset(sock_addr_ipv6, 0, sizeof(*sock_addr_ipv6));
     sock_addr_ipv6->sin6_family = address->sa_family;
     sock_addr_ipv6->sin6_addr = in6addr_any;
     sock_addr_ipv6->sin6_port = address_ipv6->sin6_port;
 
-    SYSCHECK(::bind(socket, reinterpret_cast<struct sockaddr*>(sock_addr_ipv6), sizeof(*sock_addr_ipv6)));
-    SYSCHECK(::setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)));
+    SYSCHECK(::bind(
+        socket,
+        reinterpret_cast<struct sockaddr*>(sock_addr_ipv6),
+        sizeof(*sock_addr_ipv6)));
+    SYSCHECK(::setsockopt(
+        socket, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout)));
 
     struct ipv6_mreq mreq;
     mreq.ipv6mr_multiaddr = address_ipv6->sin6_addr;
     mreq.ipv6mr_interface = 0;
-    SYSCHECK(::setsockopt(socket, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &ttl, sizeof(ttl)));
-    SYSCHECK(::setsockopt(socket, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq, sizeof(mreq)));
+    SYSCHECK(::setsockopt(
+        socket, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &ttl, sizeof(ttl)));
+    SYSCHECK(::setsockopt(
+        socket, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq, sizeof(mreq)));
 
     sock_addr_ipv6->sin6_addr = address_ipv6->sin6_addr;
   }
@@ -145,8 +168,11 @@ int bindMulticastSocket(struct sockaddr* address, struct sockaddr_storage *sock_
 }
 
 // messages
-std::vector<MulticastMessage> getMessages(struct sockaddr* addr, rank_type world_size,
-                                          std::string group_name, std::string packed_msg) {
+std::vector<MulticastMessage> getMessages(
+    struct sockaddr* addr,
+    rank_type world_size,
+    std::string group_name,
+    std::string packed_msg) {
   struct sockaddr_storage sock_addr;
   int socket = bindMulticastSocket(addr, &sock_addr);
   // NOTE: Multicast membership is dropped on close
@@ -160,11 +186,14 @@ std::vector<MulticastMessage> getMessages(struct sockaddr* addr, rank_type world
   }
 
   auto broadcast = [socket, &sock_addr, &packed_msg]() {
-    SYSCHECK(::sendto(socket, packed_msg.c_str(), packed_msg.size() + 1, 0,
-                reinterpret_cast<struct sockaddr*>(&sock_addr),
-                sock_addr.ss_family == AF_INET
-                    ? sizeof(struct sockaddr_in)
-                    : sizeof(struct sockaddr_in6)));
+    SYSCHECK(::sendto(
+        socket,
+        packed_msg.c_str(),
+        packed_msg.size() + 1,
+        0,
+        reinterpret_cast<struct sockaddr*>(&sock_addr),
+        sock_addr.ss_family == AF_INET ? sizeof(struct sockaddr_in)
+                                       : sizeof(struct sockaddr_in6)));
   };
 
   broadcast();
@@ -175,7 +204,8 @@ std::vector<MulticastMessage> getMessages(struct sockaddr* addr, rank_type world
       SYSCHECK(::recv(socket, recv_message, sizeof(recv_message), 0));
       std::string recv_message_str(recv_message);
 
-      if (recv_message_str == packed_msg) continue; // ignore multicast loopback
+      if (recv_message_str == packed_msg)
+        continue; // ignore multicast loopback
 
       // We should ignore messages coming from different group
       auto recv_msg = MulticastMessage(recv_message_str);
@@ -183,9 +213,11 @@ std::vector<MulticastMessage> getMessages(struct sockaddr* addr, rank_type world
         continue;
       }
 
-      msgs.insert(recv_message_str); // set will automatically deduplicate messages
+      msgs.insert(
+          recv_message_str); // set will automatically deduplicate messages
     } catch (const std::system_error& e) {
-      // Check if this was really a timeout from `recvfrom` or a different error.
+      // Check if this was really a timeout from `recvfrom` or a different
+      // error.
       if (errno != EAGAIN && errno != EWOULDBLOCK)
         throw;
     }
@@ -205,13 +237,16 @@ std::vector<MulticastMessage> getMessages(struct sockaddr* addr, rank_type world
   return unpacked_msgs;
 }
 
-
-InitMethod::Config initTCPMaster(std::string address, std::string str_port,
-                                 rank_type world_size, int assigned_rank) {
+InitMethod::Config initTCPMaster(
+    std::string address,
+    std::string str_port,
+    rank_type world_size,
+    int assigned_rank) {
   InitMethod::Config config;
   if (assigned_rank == -1) {
-    throw std::invalid_argument("tcp:// method with non-multicast addresses "
-                                "requires manual rank assignment");
+    throw std::invalid_argument(
+        "tcp:// method with non-multicast addresses "
+        "requires manual rank assignment");
   }
 
   config.rank = convertToRank(assigned_rank);
@@ -220,30 +255,36 @@ InitMethod::Config initTCPMaster(std::string address, std::string str_port,
   if (config.rank == 0) {
     config.master.listen_port = port;
     std::tie(config.master.listen_socket, std::ignore) = listen(port);
-    config.public_address = discoverWorkers(config.master.listen_socket, world_size);
+    config.public_address =
+        discoverWorkers(config.master.listen_socket, world_size);
   } else {
     config.worker.master_addr = address;
     config.worker.master_port = port;
-    std::tie(std::ignore, config.public_address) = discoverMaster({address}, port);
+    std::tie(std::ignore, config.public_address) =
+        discoverMaster({address}, port);
   }
 
   return config;
 }
 
-InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size,
-                                    int assigned_rank, struct sockaddr* addr) {
+InitMethod::Config initTCPMulticast(
+    std::string group_name,
+    rank_type world_size,
+    int assigned_rank,
+    struct sockaddr* addr) {
   InitMethod::Config config;
 
   int listen_socket;
   port_type listen_port;
   std::tie(listen_socket, listen_port) = listen();
-  ResourceGuard listen_socket_guard([listen_socket]() { ::close(listen_socket); });
+  ResourceGuard listen_socket_guard(
+      [listen_socket]() { ::close(listen_socket); });
 
-  MulticastMessage msg {group_name, listen_port, assigned_rank};
+  MulticastMessage msg{group_name, listen_port, assigned_rank};
   std::string packed_msg = msg.pack();
 
-  std::vector<MulticastMessage> msgs = getMessages(addr, world_size, group_name,
-                                                   packed_msg);
+  std::vector<MulticastMessage> msgs =
+      getMessages(addr, world_size, group_name, packed_msg);
 
   std::vector<MulticastMessage*> sorted_msgs(msgs.size());
 
@@ -260,8 +301,10 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
   // insert them into free slots
   size_t free_pos = 0;
   for (auto& msg : msgs) {
-    if (msg.rank >= 0) continue; // These were sorted in the previous loop
-    while (sorted_msgs[free_pos] != nullptr) free_pos++;
+    if (msg.rank >= 0)
+      continue; // These were sorted in the previous loop
+    while (sorted_msgs[free_pos] != nullptr)
+      free_pos++;
     sorted_msgs[free_pos] = &msg;
   }
 
@@ -273,18 +316,18 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
       if (config.rank == 0) {
         listen_socket_guard.release();
         config.master = {
-          .listen_socket = listen_socket,
-          .listen_port = master_msg.port,
+            .listen_socket = listen_socket,
+            .listen_port = master_msg.port,
         };
 
         config.public_address = discoverWorkers(listen_socket, world_size);
       } else {
         std::string master_address;
         std::tie(master_address, config.public_address) =
-          discoverMaster(master_msg.addresses, master_msg.port);
+            discoverMaster(master_msg.addresses, master_msg.port);
         config.worker = {
-          .master_addr = master_address,
-          .master_port = master_msg.port,
+            .master_addr = master_address,
+            .master_port = master_msg.port,
         };
       }
       break;
@@ -294,21 +337,23 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
   return config;
 }
 
-
 } // anonymous namespace
 
-InitMethod::Config initTCP(std::string argument, int world_size_r,
-                           std::string group_name, int rank) {
-
+InitMethod::Config initTCP(
+    std::string argument,
+    int world_size_r,
+    std::string group_name,
+    int rank) {
   group_name.append("#"); // To make sure it's not empty
   argument.erase(0, 6); // chop "tcp://"
   rank_type world_size;
   try {
     world_size = convertToRank(world_size_r);
-  } catch(std::exception& e) {
+  } catch (std::exception& e) {
     if (world_size_r == -1) {
-      throw std::invalid_argument("world_size is not set - it is required for "
-                                  "`tcp://` init methods with this backend");
+      throw std::invalid_argument(
+          "world_size is not set - it is required for "
+          "`tcp://` init methods with this backend");
     }
     throw std::invalid_argument("invalid world_size");
   }
@@ -320,22 +365,24 @@ InitMethod::Config initTCP(std::string argument, int world_size_r,
   // Resolve addr and select init method
   struct addrinfo hints = {0};
   hints.ai_family = AF_UNSPEC;
-  struct addrinfo *res;
+  struct addrinfo* res;
   if (::getaddrinfo(address.c_str(), str_port.c_str(), &hints, &res)) {
     throw std::invalid_argument("invalid init address");
   }
   ResourceGuard res_guard([res]() { ::freeaddrinfo(res); });
 
-  for (struct addrinfo *head = res; head != NULL; head = head->ai_next) {
-    if (head->ai_family != AF_INET && head->ai_family != AF_INET6) continue;
+  for (struct addrinfo* head = res; head != NULL; head = head->ai_next) {
+    if (head->ai_family != AF_INET && head->ai_family != AF_INET6)
+      continue;
     try {
       if (isMulticastAddress(head->ai_addr)) {
         return initTCPMulticast(group_name, world_size, rank, head->ai_addr);
       } else {
         return initTCPMaster(address, str_port, world_size, rank);
       }
-    } catch (std::exception &e) {
-      if (!head->ai_next) throw;
+    } catch (std::exception& e) {
+      if (!head->ai_next)
+        throw;
     }
   }
   throw std::runtime_error("failed to initialize THD using given address");
