@@ -8234,12 +8234,14 @@ a")
             def __init__(self, in_features, out_features):
                 super(Weak, self).__init__()
                 self.weight = torch.nn.Parameter(torch.ones(out_features, in_features))
+                self.bias = torch.nn.Parameter(torch.ones(out_features))
                 self.register_buffer("buffer", torch.ones(out_features))
                 self.submodule = Submodule()
 
             @torch._jit_internal.weak_script_method
             def forward(self, x):
-                return F.linear(x, self.weight) + self.buffer + self.submodule(x)
+                return F.linear(x, self.weight, self.bias) \
+                    + self.buffer + self.submodule(x)
 
         class Strong(torch.jit.ScriptModule):
             def __init__(self, weak):
@@ -9027,7 +9029,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_cosine_similarity',
     'test_nn_normalize',
     'test_nn_fold',
-    'test_nn_linear',
     'test_nn_max_unpool1d',
     'test_nn_lp_pool1d',
     'test_nn_lp_pool2d',
