@@ -8,7 +8,7 @@ namespace jit {
 namespace script {
 
 
-Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl, bool is_method) {
+inline Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl, bool is_method) {
   auto expected_num_annotations = decl.params().size();
   if (is_method) {
     // `self` argument

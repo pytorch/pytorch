@@ -30,7 +30,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::RunOnDevice() {
   using namespace std;
   using namespace dnnlowp;
 
-  BaseType::ParseDNNLowPOperatorArguments_();
+  this->ParseDNNLowPOperatorArguments_();
 
   chrono::time_point<chrono::system_clock> t_very_begin, t_begin, t_end;
 
@@ -221,7 +221,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::RunOnDevice() {
   if (!dequantize_output_) {
     RunOnDeviceEpilogue_();
   } else {
-    BaseType::MeasureQuantizationError_();
+    this->MeasureQuantizationError_();
   }
 
   if (VLOG_IS_ON(3)) {

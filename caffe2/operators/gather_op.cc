@@ -78,11 +78,17 @@ OUTPUT:
     .TensorInferenceFunction([](const OperatorDef& /* unused */,
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out(1);
-      for (auto d : in[1].dims()) {
-        out[0].add_dims(d);
-      }
-      for (int i = 1; i < in[0].dims_size(); ++i) {
-        out[0].add_dims(in[0].dims(i));
+      if (in[0].dims(0) == 0) {
+        for (int i = 0; i < in[0].dims_size(); ++i) {
+          out[0].add_dims(in[0].dims(i));
+        }
+      } else {
+        for (auto d : in[1].dims()) {
+          out[0].add_dims(d);
+        }
+        for (int i = 1; i < in[0].dims_size(); ++i) {
+          out[0].add_dims(in[0].dims(i));
+        }
       }
       out[0].set_data_type(in[0].data_type());
       return out;
