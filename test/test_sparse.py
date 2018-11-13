@@ -1725,6 +1725,7 @@ class TestSparse(TestCase):
         do_test(self.SparseTensor(3, 0).data)
         do_test(self.SparseTensor(3, 0).detach())
 
+
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
         super(TestUncoalescedSparse, self).setUp()
