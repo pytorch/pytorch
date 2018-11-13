@@ -44,7 +44,7 @@ short-perf-test-cpu
 short-perf-test-gpu
 py2-clang7-rocmdeb-ubuntu16.04-build
 py2-clang7-rocmdeb-ubuntu16.04-test
-py2-rocmrpm-centos7.5-build
+py2-devtoolset7-rocmrpm-centos7.5-build
 pytorch-ppc64le-cuda9.2-cudnn7-py3-build
 pytorch-ppc64le-cuda9.2-cudnn7-py3-test
 pytorch-ppc64le-cuda9.1-cudnn7-py3-build

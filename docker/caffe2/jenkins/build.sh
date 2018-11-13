@@ -39,10 +39,8 @@ fi
 if [[ "$image" == *rocm* ]]; then
   ROCM_VERSION="$(echo "${image}" | perl -n -e'/rocm(\d+\.\d+\.\d+|nightly)/ && print $1')"
   DOCKERFILE="${OS}-rocm/Dockerfile"
-  if [[ "$image" == *centos* ]]; then
-    # newer cmake version needed
-    CMAKE_VERSION=3.6.3
-  fi
+  # newer cmake version needed
+  CMAKE_VERSION=3.6.3
 fi
 
 if [[ "$image" == *conda* ]]; then
@@ -70,6 +68,11 @@ if [[ "$image" == *-clang* ]]; then
   CLANG_VERSION="$(echo "${image}" | perl -n -e'/clang(\d+(\.\d+)?)/ && print $1')"
 fi
 
+
+if [[ "$image" == *-devtoolset* ]]; then
+  DEVTOOLSET_VERSION="$(echo "${image}" | perl -n -e'/devtoolset(\d+(\.\d+)?)/ && print $1')"
+fi
+
 # Copy over common scripts to directory containing the Dockerfile to build
 cp -a common/* "$(dirname ${DOCKERFILE})"
 
@@ -88,6 +91,7 @@ docker build \
        --build-arg "JENKINS_GID=${JENKINS_GID:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
        --build-arg "CENTOS_VERSION=${CENTOS_VERSION}" \
+       --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
        --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
        --build-arg "ANACONDA_VERSION=${ANACONDA_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
