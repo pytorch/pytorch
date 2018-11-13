@@ -1727,6 +1727,7 @@ class TestNN(NNTestCase):
         self.assertIsInstance(m, nn.Linear)
 
     @skipIfRocm
+    @unittest.skipIf(TEST_CUDA and torch.version.cuda.startswith('8.'), 'Test is flaky on CUDA 8')
     def test_spectral_norm(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
