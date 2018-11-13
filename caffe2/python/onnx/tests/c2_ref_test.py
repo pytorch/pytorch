@@ -489,6 +489,36 @@ class TestCaffe2Basic(DownloadingTestCase):
             np.testing.assert_almost_equal(output[0], vals)
             np.testing.assert_almost_equal(ws.FetchBlob(op.output[0]), vals)
 
+    def test_concat(self):
+        I0 = np.random.randn(20, 4).astype(np.float32)
+        I1 = np.random.randn(20, 4).astype(np.float32)
+        for i in range(2):
+            predict_net = caffe2_pb2.NetDef()
+            predict_net.name = 'test-concat-net'
+            predict_net.external_input[:] = ['I0', 'I1']
+            predict_net.external_output[:] = ['Y', 'output_dim']
+            predict_net.op.extend([
+                core.CreateOperator(
+                    'Concat',
+                    inputs=['I0', 'I1'],
+                    outputs=['Y', 'output_dim'],
+                    axis=1,
+                    add_axis=(1 if i == 0 else 0),
+                ),
+            ])
+            ws, c2_outputs = c2_native_run_net(
+                init_net=None,
+                predict_net=predict_net,
+                inputs=[I0, I1])
+            onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+                predict_net=predict_net,
+                value_info={
+                    'I0': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[I0.dtype], I0.shape),
+                    'I1': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[I1.dtype], I1.shape),
+                })
+            onnx_outputs = c2.run_model(onnx_model, inputs=[I0, I1])
+            self.assertSameOutputs(c2_outputs, onnx_outputs)
+
     def test_slice(self):
         X = np.random.randn(1, 2, 3).astype(np.float32)
         starts = np.array([0, 1, 0], dtype=np.int32)
