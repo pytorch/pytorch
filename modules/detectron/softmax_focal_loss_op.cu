@@ -69,7 +69,7 @@ __global__ void SoftmaxFocalLossKernel(
     int n = i / (W * H * A);
     const int label = static_cast<int>(targets[i]);
 
-    float Np = max(weight_pos[0], 1.0);
+    float Np = fmaxf(weight_pos[0], 1.0f);
     float z = (label == 0) * (1 - alpha) / Np +
               (label >= 1) * alpha / Np;
 
