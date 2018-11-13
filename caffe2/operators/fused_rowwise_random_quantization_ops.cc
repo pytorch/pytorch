@@ -18,12 +18,12 @@ bool FloatToFusedRandRowwiseQuantizedOp<Context>::RunOnDevice() {
   auto* output = Output(DATA_FUSED_QUANTIZED);
 
   CAFFE_ENFORCE_EQ(
-      input.ndim(),
+      input.dim(),
       2,
       "Expect input to be a matrix. Reshape the input tensor to a matrix for usage.");
 
-  const auto input_rows = input.dim(0);
-  const auto input_columns = input.dim(1);
+  const auto input_rows = input.size(0);
+  const auto input_columns = input.size(1);
 
   // The "fused" representation stores the [bitwidth][tail][min][max]
   // with the row-wise quantized data in one tensor. Since we store 8/bitwidth
@@ -44,7 +44,7 @@ bool FloatToFusedRandRowwiseQuantizedOp<Context>::RunOnDevice() {
 
   const auto* input_data = input.template data<float>();
   auto* output_data = output->template mutable_data<uint8_t>();
-  const size_t output_columns = static_cast<size_t>(output->dim(1));
+  const size_t output_columns = static_cast<size_t>(output->size(1));
   memset(output_data, 0, output->numel());
 
   if (random_) {
@@ -79,14 +79,14 @@ bool FusedRandRowwiseQuantizedToFloatOp<Context>::RunOnDevice() {
 
   const auto& input = Input(DATA_FUSED_QUANTIZED);
   auto* output = Output(DATA_FLOAT);
-  CAFFE_ENFORCE_EQ(input.ndim(), 2, "Expect input to be a matrix.");
+  CAFFE_ENFORCE_EQ(input.dim(), 2, "Expect input to be a matrix.");
   CAFFE_ENFORCE_GE(
       input.numel(),
       4,
       "Expect input to have size greater than or equal to 4.");
 
-  const auto input_rows = input.dim(0);
-  const auto input_columns = input.dim(1);
+  const auto input_rows = input.size(0);
+  const auto input_columns = input.size(1);
   const auto* input_data = input.template data<uint8_t>();
   const size_t bitwidth = input_data[0];
   CAFFE_ENFORCE(

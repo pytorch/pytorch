@@ -180,7 +180,7 @@ AT_ERROR("${api_name} only supports a 0-dimensional ${check_name} tensor, but go
 """)
 
 SPARSE_CHECK = CodeTemplate("""\
-if(${check_name}.type().is_sparse()) {
+if(${check_name}.is_sparse()) {
     return static_cast<const TypeExtendedInterface*>(this)->${api_name}(${sparse_actuals});
 }""")
 
@@ -545,7 +545,7 @@ def device_guard(option, formals, is_factory_method, dispatch_options):
             tensor_arguments = [f for f in formals if f['dynamic_type'] in {'Tensor', 'TensorList'}]
             if tensor_arguments:
                 tensor_argument = tensor_arguments[0]['name']
-                return 'const DeviceGuard device_guard({});'.format(tensor_argument)
+                return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(tensor_argument)
     return '// DeviceGuard omitted'
 
 

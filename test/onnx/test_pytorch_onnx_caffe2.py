@@ -747,6 +747,12 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(4, 3, 2, 1, requires_grad=True)
         self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_upsample(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        model = nn.Upsample(scale_factor=2, mode='nearest')
+        self.run_model_test(model, train=False, input=(x),
+                            batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_repeat_dim_overflow(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -959,6 +965,22 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.zeros(3, 4)
         self.run_model_test(ZerosFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_implicit_expand(self):
+        class ImplicitExpandExportMod(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        x = torch.randn(3, 4)
+        self.run_model_test(ImplicitExpandExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_reduce_sum(self):
+        class ReduceSumNegativeIndices(torch.nn.Module):
+            def forward(self, x):
+                return x.sum(-1)
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(ReduceSumNegativeIndices(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
 
 # a bit of metaprogramming to set up all the rnn tests

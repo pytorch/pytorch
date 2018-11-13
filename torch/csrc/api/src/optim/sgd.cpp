@@ -4,7 +4,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
@@ -24,6 +24,11 @@ void SGD::step() {
     }
 
     auto update = options.learning_rate_ * p.grad();
+
+    if (options.weight_decay_ > 0) {
+      update += options.learning_rate_ * options.weight_decay_ * p;
+    }
+
     if (options.momentum_ != 0) {
       const auto dampening = iteration_ == 0 ? 1 : 1 - options.dampening_;
       auto& momentum = buffer_at(momentum_buffers, i);
@@ -35,10 +40,6 @@ void SGD::step() {
       } else {
         update = momentum;
       }
-    }
-
-    if (options.weight_decay_ > 0) {
-      update += options.learning_rate_ * options.weight_decay_ * p;
     }
 
     NoGradGuard guard;

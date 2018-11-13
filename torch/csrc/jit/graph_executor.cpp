@@ -350,6 +350,7 @@ struct GraphExecutorImpl {
   }
 
   std::shared_ptr<Graph> graphFor(const Stack& stack) const {
+    JIT_ASSERT(stack.size() >= num_inputs);
     auto inputs = last(stack, num_inputs);
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
 
@@ -496,7 +497,7 @@ private:
     auto state = tracer::getTracingState();
     auto inputs = last(stack, num_inputs);
     auto input_values = fmap(inputs, [](const IValue & v) {
-      return tracer::getValueTrace(v.toTensor());
+      return tracer::getNestedValueTrace(v);
     });
 
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs, num_flat_inputs);

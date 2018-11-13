@@ -1717,11 +1717,16 @@ class TestNN(NNTestCase):
         m = torch.nn.utils.weight_norm(m, dim=None)
         self.assertEqual(m(input), expected_output)
 
+        with self.assertRaisesRegex(RuntimeError, 'register two weight_norm hooks'):
+            m = torch.nn.utils.weight_norm(m)
+            m = torch.nn.utils.weight_norm(m)
+
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
+    @skipIfRocm
     def test_spectral_norm(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
@@ -1734,8 +1739,9 @@ class TestNN(NNTestCase):
         # weight_u should be just a reused buffer
         self.assertTrue(hasattr(m, 'weight_u'))
         self.assertTrue('weight_u' in m._buffers)
-        self.assertTrue('weight' in m._buffers)
+        self.assertTrue('weight_v' in m._buffers)
         # weight should be a plain attribute, not counted as a buffer or a param
+        self.assertFalse('weight' in m._buffers)
         self.assertFalse('weight' in m._parameters)
         # it should also be sharing storage as `weight_orig`
         self.assertEqual(m.weight_orig.storage(), m.weight.storage())
@@ -1749,58 +1755,173 @@ class TestNN(NNTestCase):
         self.assertTrue(hasattr(m, 'weight'))
         self.assertTrue('weight' in m._parameters)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_spectral_norm_dp(self):
-        for requires_grad in (True, False):
-            m = nn.Linear(5, 7).to(torch.device('cuda'))
-            m.weight.requires_grad_(requires_grad)
+        with self.assertRaisesRegex(RuntimeError, 'register two spectral_norm hooks'):
             m = torch.nn.utils.spectral_norm(m)
-            dpm = torch.nn.DataParallel(m, [0, 1])
-            self.assertTrue(hasattr(m, 'weight_u'))
-            u0 = m.weight_u.clone()
+            m = torch.nn.utils.spectral_norm(m)
 
-            # assert that u is updated
-            input = torch.randn(2, 5, device=torch.device('cuda'))
-            dpm(input)
-            self.assertNotEqual(u0, m.weight_u)
+        # test correctness in training/eval modes and cpu/multi-gpu settings
+        for apply_dp in (True, False):
+            if apply_dp:
+                if not TEST_MULTIGPU:
+                    continue
+                device = torch.device('cuda:0')
 
-            # test that eval works
-            dpm.eval()
-            eval_out0 = dpm(input)
-            self.assertEqual(eval_out0, dpm(input))
+                def maybe_wrap(m):
+                    return torch.nn.DataParallel(m, [0, 1])
+            else:
+                device = torch.device('cpu')
 
-    def test_spectral_norm_eval_remove(self):
-        inp = torch.randn(3, 5)
-        m = nn.Linear(5, 7)
-        m = torch.nn.utils.spectral_norm(m)
-        x0 = m(inp)
-        m.eval()
-        # test that eval mode and removing / adding+removing doesn't change weight and output
-        x1 = m(inp)
-        x2 = m(inp)
-        self.assertEqual(x0, x1)
-        self.assertEqual(x0, x2)
-        # test that we can backward several times without running into problems
-        x1 = m(inp)
-        x1.sum().backward()
-        x1 = m(inp)
-        x1.sum().backward()
-        # test removing
-        m = torch.nn.utils.remove_spectral_norm(m)
-        x3 = m(inp)
-        self.assertEqual(x0, x3)
-        m = torch.nn.utils.spectral_norm(m)
-        m = torch.nn.utils.remove_spectral_norm(m)
-        x4 = m(inp)
-        self.assertEqual(x0, x4)
-        # check that removing after train doesn't change output
-        m.train()
-        m = torch.nn.utils.spectral_norm(m)
-        for i in range(5):
-            x0 = m(inp)
-        m = torch.nn.utils.remove_spectral_norm(m)
-        x1 = m(inp)
-        self.assertEqual(x0, x1)
+                def maybe_wrap(m):
+                    return m
+
+            for requires_grad in (True, False):
+                m = nn.Linear(3, 4).to(device)
+                m.weight.requires_grad_(requires_grad)
+                m = torch.nn.utils.spectral_norm(m)
+                wrapped_m = maybe_wrap(m)
+                self.assertTrue(hasattr(m, 'weight_u'))
+                u0 = m.weight_u.clone()
+                v0 = m.weight_v.clone()
+
+                # TEST TRAINING BEHAVIOR
+
+                # assert that u and v are updated
+                input = torch.randn(2, 3, device=device)
+                out = wrapped_m(input)
+                self.assertNotEqual(u0, m.weight_u)
+                self.assertNotEqual(v0, m.weight_v)
+
+                # assert that backprop reaches weight_orig
+                # can't use gradcheck because the function changes as we
+                # activate through it in training mode
+                if requires_grad:
+                    torch.autograd.grad(out.sum(), m.weight_orig)
+
+                # test backward works with multiple forwards
+                # it uses training mode so we need to reset `u` and `v` vectors
+                # to same value at beginning for finite difference test to pass
+                saved_u = m.weight_u.clone()
+                saved_v = m.weight_v.clone()
+
+                def fn(input):
+                    m.weight_u.data.copy_(saved_u)
+                    m.weight_v.data.copy_(saved_v)
+                    out0 = wrapped_m(input)
+                    out1 = wrapped_m(input)
+                    return out0 + out1
+
+                torch.autograd.gradcheck(fn, (input.clone().requires_grad_(),))
+
+                # test removing
+                pre_remove_out = wrapped_m(input)
+                m = torch.nn.utils.remove_spectral_norm(m)
+                self.assertEqual(wrapped_m(input), pre_remove_out)
+
+                m = torch.nn.utils.spectral_norm(m)
+                for i in range(3):
+                    pre_remove_out = wrapped_m(input)
+                m = torch.nn.utils.remove_spectral_norm(m)
+                self.assertEqual(wrapped_m(input), pre_remove_out)
+
+                # TEST EVAL BEHAVIOR
+
+                m = torch.nn.utils.spectral_norm(m)
+                wrapped_m(input)
+                last_train_out = wrapped_m(input)
+                last_train_u = m.weight_u.clone()
+                last_train_v = m.weight_v.clone()
+                wrapped_m.zero_grad()
+                wrapped_m.eval()
+
+                eval_out0 = wrapped_m(input)
+                # assert eval gives same result as last training iteration
+                self.assertEqual(eval_out0, last_train_out)
+                # assert doing more iteartion in eval don't change things
+                self.assertEqual(eval_out0, wrapped_m(input))
+                self.assertEqual(last_train_u, m.weight_u)
+                self.assertEqual(last_train_v, m.weight_v)
+
+                # test backward works with multiple forwards in mixed training
+                # and eval modes
+                # it uses training mode so we need to reset `u` and `v` vectors
+                # to same value at beginning for finite difference test to pass
+                saved_u = m.weight_u.clone()
+                saved_v = m.weight_v.clone()
+
+                def fn(input):
+                    m.weight_u.data.copy_(saved_u)
+                    m.weight_v.data.copy_(saved_v)
+                    wrapped_m.train()
+                    out0 = wrapped_m(input)
+                    wrapped_m.eval()
+                    out1 = wrapped_m(input)
+                    wrapped_m.train()
+                    out2 = wrapped_m(input)
+                    wrapped_m.eval()
+                    out3 = wrapped_m(input)
+                    return out0 + out1 + out2 + out3
+
+                torch.autograd.gradcheck(fn, (input.clone().requires_grad_(),))
+
+                # assert that backprop reaches weight_orig in eval
+                if requires_grad:
+                    def fn(weight):
+                        return wrapped_m(input)
+
+                    torch.autograd.gradcheck(fn, (m.weight_orig,))
+
+    def test_spectral_norm_load_state_dict(self):
+        inp = torch.randn(2, 3)
+        for activate_times in (0, 3):
+            # Test backward compatibility
+            # At version None -> 1: weight becomes not a buffer and v vector becomes a buffer
+            m = nn.Linear(3, 5)
+            snm = torch.nn.utils.spectral_norm(m)
+            snm.train()
+            for _ in range(activate_times):
+                snm(inp)
+
+            # craft a version None state_dict
+            version_none_state_dict = deepcopy(snm.state_dict())
+            self.assertEqual({'weight_orig', 'bias', 'weight_u', 'weight_v'}, set(version_none_state_dict.keys()))
+            self.assertIn('spectral_norm', version_none_state_dict._metadata[''])
+            del version_none_state_dict._metadata['']['spectral_norm']       # remove metadata info
+            del version_none_state_dict['weight_v']                          # remove v vector
+            version_none_state_dict['weight'] = snm.weight.detach().clone()  # set W as a buffer
+
+            # normal state_dict
+            version_latest_state_dict = deepcopy(snm.state_dict())
+
+            snm.eval()
+            out0_eval = snm(inp)
+            snm.train()
+            out1_train = snm(inp)
+            out2_train = snm(inp)
+            snm.eval()
+            out3_eval = snm(inp)
+
+            snm.load_state_dict(version_none_state_dict)
+            if activate_times > 0:
+                # since in loading version None state dict, we assume that the
+                # values in the state dict have gone through at lease one
+                # forward, we only test for equivalence when activate_times > 0.
+                snm.eval()
+                self.assertEqual(out0_eval, snm(inp))
+                snm.train()
+                self.assertEqual(out1_train, snm(inp))
+                self.assertEqual(out2_train, snm(inp))
+                snm.eval()
+                self.assertEqual(out3_eval, snm(inp))
+
+            # Test normal loading
+            snm.load_state_dict(version_latest_state_dict)
+            snm.eval()
+            self.assertEqual(out0_eval, snm(inp))
+            snm.train()
+            self.assertEqual(out1_train, snm(inp))
+            self.assertEqual(out2_train, snm(inp))
+            snm.eval()
+            self.assertEqual(out3_eval, snm(inp))
 
     def test_spectral_norm_dim(self):
         inp = torch.randn(2, 3, 10, 12)
@@ -1831,6 +1952,11 @@ class TestNN(NNTestCase):
         m = torch.nn.utils.spectral_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
+
+    def test_threshold_int(self):
+        x = torch.tensor([-3, -2, -1, 0, 1, 2, 3])
+        expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
+        self.assertEqual(F.threshold(x, 0, 99), expected)
 
     def test_embedding_sparse_basic(self):
         embedding = nn.Embedding(10, 20, sparse=True)
@@ -1904,7 +2030,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @skipIfRocm
     def test_embedding_max_norm_cuda(self, dtype=torch.float):
         embedding = nn.Embedding(22, 5, max_norm=1.0).to("cuda", dtype=dtype)
         # nn.Embedding only takes LongTensor as input
@@ -2663,6 +2788,17 @@ class TestNN(NNTestCase):
     def test_Conv2d_naive_groups_cuda(self, dtype=torch.float):
         self._test_Conv2d_naive_groups("cuda", dtype)
 
+    def test_batchnorm_grad(self):
+        self._test_batchnorm_grad()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
+    def test_batchnorm_grad_cuda(self):
+        self._test_batchnorm_grad("cuda")
+        if TEST_CUDNN:
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_grad("cuda")
+
     def test_batchnorm_eval(self):
         self._test_batchnorm_eval()
 
@@ -2670,6 +2806,9 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_batchnorm_eval_cuda(self, dtype=torch.float):
         self._test_batchnorm_eval("cuda", dtype)
+        if TEST_CUDNN:
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_eval("cuda", dtype)
 
     def test_batchnorm_simple_average(self):
         self._test_batchnorm_simple_average()
@@ -2678,6 +2817,9 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_batchnorm_simple_average_cuda(self):
         self._test_batchnorm_simple_average(torch.cuda.FloatTensor)
+        if TEST_CUDNN:
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_simple_average(torch.cuda.FloatTensor)
 
     def test_MaxPool1d_indices(self):
         self._test_maxpool_indices(1)
@@ -2820,7 +2962,6 @@ class TestNN(NNTestCase):
         self._test_gather(-1)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_gather_gpu(self):
         self._test_gather(0)
 
@@ -3022,7 +3163,6 @@ class TestNN(NNTestCase):
         self.assertRaises(AssertionError, lambda: dp.data_parallel(l, i, (0, 1)))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel(self):
         l = nn.Linear(10, 5).float().cuda()
         i = Variable(torch.randn(20, 10).float().cuda(1))
@@ -3212,7 +3352,6 @@ class TestNN(NNTestCase):
         self.assertEqual(out.data, expected_out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel_device_args(self):
         cuda0 = torch.device('cuda:0')
         cuda1 = torch.device('cuda:1')
@@ -4011,7 +4150,10 @@ class TestNN(NNTestCase):
 
         self.assertEqual(x_leaf.grad, grad_x, dtype2prec[dtype])
         for p1, p2 in zip(lstm.parameters(), lstm2.parameters()):
-            self.assertEqual(p1.grad, p2.grad, dtype2prec[dtype])
+            prec = dtype2prec[dtype]
+            if dtype == torch.float16:
+                prec = 2e-2
+            self.assertEqual(p1.grad, p2.grad, prec)
 
     def test_variable_sequence(self):
         self._test_variable_sequence()
@@ -4036,7 +4178,6 @@ class TestNN(NNTestCase):
             (hx + cx).sum().backward()
 
     @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
-    @skipIfRocm
     def test_cudnn_rnn_dropout_states_device(self):
         rnn = nn.RNN(10, 20, num_layers=2, dropout=.5)
         device = 1
@@ -4283,7 +4424,7 @@ class TestNN(NNTestCase):
 
             # input and hiddens are not at the same device
             with self.assertRaisesRegex(RuntimeError,
-                                        r"Expected object of backend CPU but got backend CUDA for argument"):
+                                        r"Input and hidden tensors are not at the same device"):
                 if mode is 'LSTM':
                     model(input, (hidden.to('cuda:0'), hidden.to('cuda:0')))
                 else:
@@ -4633,7 +4774,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @skipIfRocm
     def test_noncontig_conv_grad_cuda(self, dtype=torch.float):
         # FIXME: remove after adding non-contiguous grad tests for all modules
         module = nn.Conv2d(3, 5, kernel_size=3, padding=1).to("cuda", dtype)
@@ -4892,6 +5032,9 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_batchnorm_update_stats_cuda(self):
         self._test_batchnorm_update_stats("cuda", torch.float)
+        if TEST_CUDNN:
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_update_stats("cuda", torch.float)
 
     def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
         input = torch.rand(2, 10)
@@ -4926,6 +5069,18 @@ class TestNN(NNTestCase):
         for size in wrong_sizes:
             with self.assertRaises(RuntimeError):
                 F.batch_norm(input, running_mean, running_var, bias=Parameter(torch.rand(size)))
+
+    def _test_batchnorm_grad(self, device="cpu", dtype=torch.double):
+        bs, n_feat, size_feat = 4, 5, 6
+        input = torch.arange(bs * n_feat * size_feat, device=device,
+                             requires_grad=True, dtype=dtype).view(bs, n_feat, size_feat)
+        weight = torch.arange(1, n_feat + 1, device=device, requires_grad=True, dtype=dtype)
+        bias = torch.arange(n_feat, device=device, requires_grad=True, dtype=dtype)
+        running_mean = 1 - torch.arange(n_feat, device=device, dtype=dtype)
+        running_var = 2 * torch.arange(n_feat, device=device, dtype=dtype)
+        for training in [False, True]:
+            _assertGradAndGradgradChecks(self, F.batch_norm, (input, running_mean, running_var, weight, bias,
+                                                              training, 0.1, 0.0001))
 
     def _test_batchnorm_eval(self, device="cpu", dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)
@@ -5963,14 +6118,17 @@ class TestNN(NNTestCase):
     @staticmethod
     def _test_conv_noncontig_weights(self, device):
         for dim in (1, 2, 3):
-            for grouped in (True, False):
+            for grouped in (False, True):
                 nc = 3
                 groups = 3 if grouped else 1
                 w = torch.randn([3] * dim, device=device)
                 w = w.expand([nc, int(nc / groups)] + list(w.shape))
-                x = torch.randn([1, nc] + ([5] * dim), device=device)
-                getattr(F, 'conv{}d'.format(dim))(x, w, groups=groups)
-                getattr(F, 'conv_transpose{}d'.format(dim))(x, w, groups=groups)
+                w = w.detach().requires_grad_()
+                x = torch.randn([1, nc] + ([5] * dim), device=device, requires_grad=True)
+                y = getattr(F, 'conv{}d'.format(dim))(x, w, groups=groups)
+                y.sum().backward()
+                y = getattr(F, 'conv_transpose{}d'.format(dim))(x, w, groups=groups)
+                y.sum().backward()
 
     def test_conv_noncontig_weights(self):
         self._test_conv_noncontig_weights(self, torch.device('cpu'))
@@ -6103,7 +6261,6 @@ class TestNN(NNTestCase):
                                                no_weight)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_cudnn_noncontiguous_weight(self):
         # Noncontiguous weights must be contiguous() before being
         # passed to cuDNN
@@ -7613,7 +7770,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -7623,7 +7779,6 @@ new_module_tests = [
         check_eval=True,
         desc='2d_simple_average',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -7633,7 +7788,6 @@ new_module_tests = [
         check_eval=True,
         desc='momentum',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -7652,7 +7806,6 @@ new_module_tests = [
         check_eval=True,
         desc='not_tracking_stats',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -7660,7 +7813,6 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
-        decorator=skipIfRocm,
     ),
     dict(
         module_name='BatchNorm3d',
@@ -7669,7 +7821,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_simple_average',
-        decorator=skipIfRocm,
     ),
     dict(
         module_name='BatchNorm3d',
@@ -7678,7 +7829,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
-        decorator=skipIfRocm,
     ),
     dict(
         module_name='BatchNorm3d',
@@ -7695,7 +7845,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
-        decorator=skipIfRocm,
     ),
     dict(
         module_name='InstanceNorm1d',
@@ -7840,7 +7989,6 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv1d',
@@ -7849,7 +7997,6 @@ new_module_tests = [
         cudnn=True,
         desc='stride',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv1d',
@@ -7858,7 +8005,6 @@ new_module_tests = [
         cudnn=True,
         desc='pad1',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv1d',
@@ -7867,7 +8013,6 @@ new_module_tests = [
         cudnn=True,
         desc='pad2',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv1d',
@@ -7876,7 +8021,6 @@ new_module_tests = [
         cudnn=True,
         desc='pad1size1',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv1d',
@@ -7885,29 +8029,26 @@ new_module_tests = [
         cudnn=True,
         desc='pad2size1',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv1d_dilated',
         constructor=lambda: nn.Conv1d(4, 5, kernel_size=3, dilation=2),
         input_size=(2, 4, 10),
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv1d_groups',
         constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
         input_size=(2, 4, 6),
         cudnn=True,
-        skip_double=TEST_WITH_ROCM,
         test_cuda=(not TEST_WITH_ROCM),
+        decorator=skipIfRocm
     ),
     dict(
         fullname='ConvTranspose1d',
         constructor=lambda: nn.ConvTranspose1d(3, 4, kernel_size=3, stride=(3,), padding=1, output_padding=(1,)),
         cudnn=True,
         input_size=(1, 3, 7),
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='ConvTranspose1d',
@@ -7915,7 +8056,6 @@ new_module_tests = [
         input_size=(1, 3, 6),
         cudnn=True,
         desc='no_bias',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='ConvTranspose1d',
@@ -7923,14 +8063,12 @@ new_module_tests = [
         input_size=(1, 3, 6),
         cudnn=True,
         desc='dilated',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='ConvTranspose1d_groups',
         constructor=lambda: nn.ConvTranspose1d(4, 6, 3, stride=(3,), padding=1, output_padding=(1,), groups=2),
         cudnn=True,
         input_size=(2, 4, 7),
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='MaxPool1d',
@@ -7948,7 +8086,6 @@ new_module_tests = [
         constructor_args=(3, 4, (3, 2)),
         input_size=(2, 3, 7, 5),
         cudnn=True,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv2d',
@@ -7957,6 +8094,7 @@ new_module_tests = [
         cudnn=True,
         desc='strided',
         test_cuda=(not TEST_WITH_ROCM),
+        decorator=skipIfRocm
     ),
     dict(
         module_name='Conv2d',
@@ -7965,6 +8103,7 @@ new_module_tests = [
         cudnn=True,
         desc='padding',
         test_cuda=(not TEST_WITH_ROCM),
+        decorator=skipIfRocm
     ),
     dict(
         module_name='Conv2d',
@@ -7972,7 +8111,6 @@ new_module_tests = [
         input_size=(2, 3, 8, 8),
         cudnn=True,
         desc='dilated',
-        decorator=skipIfRocm,
     ),
     dict(
         module_name='Conv2d',
@@ -7980,27 +8118,26 @@ new_module_tests = [
         input_size=(2, 3, 6, 5),
         cudnn=True,
         desc='no_bias',
-        decorator=skipIfRocm,
     ),
     dict(
         fullname='Conv2d_groups',
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
         cudnn=True,
-        decorator=skipIfRocm,
+        decorator=skipIfRocm
     ),
     dict(
         fullname='Conv2d_groups_thnn',
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
-        decorator=skipIfRocm,
+        test_cuda=(not TEST_WITH_ROCM),
+        decorator=skipIfRocm
     ),
     dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
         cudnn=True,
         input_size=(1, 3, 7, 6),
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -8008,7 +8145,6 @@ new_module_tests = [
         input_size=(1, 3, 6, 7),
         cudnn=True,
         desc='dilated',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -8016,14 +8152,12 @@ new_module_tests = [
         input_size=(1, 3, 6, 7),
         cudnn=True,
         desc='no_bias',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='ConvTranspose2d_groups',
         constructor=lambda: nn.ConvTranspose2d(2, 4, (2, 3), groups=2),
         input_size=(1, 2, 4, 5),
         cudnn=True,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv2d_depthwise',
@@ -8180,7 +8314,6 @@ new_module_tests = [
         constructor_args=(3, 4, (2, 3, 4)),
         input_size=(2, 3, 3, 4, 5),
         cudnn=True,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv3d',
@@ -8188,7 +8321,6 @@ new_module_tests = [
         input_size=(2, 3, 3, 4, 5),
         cudnn=True,
         desc='no_bias',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv3d',
@@ -8196,7 +8328,6 @@ new_module_tests = [
         input_size=(2, 3, 5, 5, 5),
         cudnn=True,
         desc='stride',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv3d',
@@ -8204,33 +8335,28 @@ new_module_tests = [
         input_size=(2, 3, 5, 5, 5),
         cudnn=True,
         desc='stride_padding',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv3d_groups',
         constructor=lambda: nn.Conv3d(4, 6, kernel_size=3, groups=2),
         input_size=(2, 4, 4, 5, 4),
         cudnn=True,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv3d_dilated',
         constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2),
         input_size=(2, 3, 5, 5, 5),
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv3d_dilated_strided',
         constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2, stride=2),
         input_size=(2, 3, 5, 5, 5),
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='ConvTranspose3d',
         constructor_args=(2, 3, (2, 3, 2)),
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -8238,7 +8364,6 @@ new_module_tests = [
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
         desc='dilated',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='MaxPool3d',

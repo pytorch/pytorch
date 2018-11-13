@@ -33,13 +33,13 @@ class SquaredL2DistanceGradientOp final : public Operator<Context> {
     auto& dDistance = Input(2);
     auto* dX = Output(0);
     auto* dY = Output(1);
-    int N = X.ndim() > 0 ? X.dim32(0) : 1;
+    int N = X.dim() > 0 ? X.dim32(0) : 1;
     int D = N > 0 ? X.numel() / N : 0;
-    CAFFE_ENFORCE(X.ndim() == Y.ndim());
-    for (int i = 0; i < X.ndim(); ++i) {
+    CAFFE_ENFORCE(X.dim() == Y.dim());
+    for (int i = 0; i < X.dim(); ++i) {
       CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
     }
-    CAFFE_ENFORCE(dDistance.ndim() == 1);
+    CAFFE_ENFORCE(dDistance.dim() == 1);
     CAFFE_ENFORCE(dDistance.dim32(0) == N);
     dX->ResizeLike(X);
     dY->ResizeLike(Y);
@@ -194,7 +194,7 @@ class DotProductWithPaddingGradientOp final : public Operator<Context> {
     auto* dY = Output(DER_Y_OUT);
     int N, D, DX, DY, restD;
     if (X.numel() > 0) {
-      N = X.ndim() > 0 ? X.dim32(0) : 1;
+      N = X.dim() > 0 ? X.dim32(0) : 1;
       DX = X.numel() / N;
       DY = Y.numel() / N;
     } else {
@@ -205,9 +205,9 @@ class DotProductWithPaddingGradientOp final : public Operator<Context> {
     CAFFE_ENFORCE(!replicate_ || DX % DY == 0 || DY % DX == 0);
     D = std::min(DX, DY);
     restD = std::max(DX, DY) - D;
-    CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
+    CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
     CAFFE_ENFORCE_EQ(X.dim32(0), Y.dim32(0));
-    CAFFE_ENFORCE_EQ(dDot.ndim(), 1);
+    CAFFE_ENFORCE_EQ(dDot.dim(), 1);
     CAFFE_ENFORCE_EQ(dDot.dim32(0), N);
     dX->ResizeLike(X);
     dY->ResizeLike(Y);

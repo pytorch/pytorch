@@ -207,7 +207,15 @@ Engine::~Engine() = default;
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
 #ifdef USE_CUDA
-  at::cuda::CUDAGuard guard(device);
+  // NB: We MUST NOT construct the guard for device -1,
+  // as in some settings we compile with USE_CUDA, but
+  // have lazy stubs for CUDA functionality (so actually
+  // attempting to setup a guard(-1) will cause an
+  // error, because it will still query cudaGetDevice).
+  at::cuda::OptionalCUDAGuard guard;
+  if (device != -1) {
+    guard.set_index(device);
+  }
 #endif
   worker_device = device;
   thread_main(nullptr);
@@ -412,7 +420,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     AutoGradMode grad_mode(false);
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
-      at::DeviceGuard guard(output);
+      at::OptionalDeviceGuard guard(device_of(output));
       if (output.defined() && output.ne(output).any().item<uint8_t>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";

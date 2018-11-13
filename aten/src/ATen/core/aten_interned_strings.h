@@ -8,7 +8,7 @@
 // To explicitly use interned strings as symbols in your code, you must add
 // them to this list.
 
-#if !AT_MOBILE
+#if !C10_MOBILE
 #define FORALL_ATEN_BASE_SYMBOLS(_) \
 _(aten, RoiPooling2d_backward) \
 _(aten, RoiPooling2d_forward) \
@@ -81,8 +81,6 @@ _(aten, _floor) \
 _(aten, _fused_dropout) \
 _(aten, _ger) \
 _(aten, _gesv_helper) \
-_(aten, _gesv_single) \
-_(aten, _getri_single) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
 _(aten, _inverse_helper) \
@@ -103,6 +101,7 @@ _(aten, _pack_padded_sequence_backward) \
 _(aten, _pad_packed_sequence) \
 _(aten, _pdist_backward) \
 _(aten, _pdist_forward) \
+_(aten, _potrs_helper) \
 _(aten, _prod) \
 _(aten, _prodall) \
 _(aten, _range) \
@@ -284,6 +283,7 @@ _(aten, data_ptr) \
 _(aten, det) \
 _(aten, detach) \
 _(aten, diag) \
+_(aten, diag_embed) \
 _(aten, diagflat) \
 _(aten, diagonal) \
 _(aten, digamma) \
@@ -481,6 +481,8 @@ _(aten, mv) \
 _(aten, mvlgamma) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
+_(aten, native_batch_norm) \
+_(aten, native_batch_norm_backward) \
 _(aten, native_clone) \
 _(aten, native_get_device) \
 _(aten, native_norm) \
@@ -633,9 +635,6 @@ _(aten, th_pow) \
 _(aten, th_resize_as) \
 _(aten, th_tensor) \
 _(aten, th_zero) \
-_(aten, thnn_batch_norm) \
-_(aten, thnn_batch_norm_backward) \
-_(aten, thnn_batch_norm_forward) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
@@ -659,7 +658,6 @@ _(aten, thnn_conv_transpose3d_backward) \
 _(aten, thnn_conv_transpose3d_forward) \
 _(aten, threshold) \
 _(aten, threshold_backward) \
-_(aten, threshold_forward) \
 _(aten, to) \
 _(aten, to_sparse) \
 _(aten, to_dense) \

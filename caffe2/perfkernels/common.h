@@ -45,6 +45,8 @@ In foo.cc, do:
 
 #pragma once
 
+#include "caffe2/utils/cpuid.h"
+
 // DO macros: these should be used in your entry function, similar to foo()
 // above, that routes implementations based on CPU capability.
 

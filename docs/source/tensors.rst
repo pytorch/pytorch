@@ -201,6 +201,7 @@ view of a storage and defines numeric operations on it.
    .. autoattribute:: device
       :annotation:
    .. automethod:: diag
+   .. automethod:: diag_embed
    .. automethod:: dim
    .. automethod:: dist
    .. automethod:: div
@@ -360,6 +361,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: slogdet
    .. automethod:: sort
    .. automethod:: split
+   .. automethod:: sparse_mask
    .. automethod:: sqrt
    .. automethod:: sqrt_
    .. automethod:: squeeze

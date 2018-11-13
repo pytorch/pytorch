@@ -229,7 +229,7 @@ struct Attributes {
     return s;
   }
 
-  void printValue(std::ostream & out, Symbol & name) const {
+  void printValue(std::ostream & out, const Symbol & name) const {
     switch(kindOf(name)) {
       case AttributeKind::f:
         out << f(name);

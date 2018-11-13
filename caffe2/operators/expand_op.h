@@ -35,9 +35,9 @@ class ExpandOp final : public Operator<Context> {
     const int ndim = shape_dims.size();
     const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
     std::vector<int> Y_dims;
-    Y_dims.reserve(std::max(ndim, X.ndim()));
+    Y_dims.reserve(std::max(ndim, X.dim()));
     // ndim, X.ndim() might equal to 0
-    for (int i = ndim - 1, j = X.ndim() - 1; i >= 0 || j >= 0; --i, --j) {
+    for (int i = ndim - 1, j = X.dim() - 1; i >= 0 || j >= 0; --i, --j) {
       const int shape_x = (j >= 0 ? X_dims[j] : 1);
       // In PyTorch expand treats -1 as a special value to indicate
       // preserving the size of that dimension.
@@ -81,12 +81,12 @@ class ExpandGradientOp final : public Operator<Context> {
     const auto& dY = Input(0);
     const auto& X = Input(1);
     auto* dX = Output(0);
-    const int ndim = dY.ndim();
+    const int ndim = dY.dim();
     const std::vector<int> dX_dims(X.sizes().cbegin(), X.sizes().cend());
     const std::vector<int> dY_dims(dY.sizes().cbegin(), dY.sizes().cend());
     dX->ResizeLike(X);
     std::vector<int> axes;
-    const int offset = ndim - X.ndim();
+    const int offset = ndim - X.dim();
     for (int i = 0; i < ndim; i++) {
       if (i < offset || dX_dims[i - offset] == 1) {
         axes.push_back(i);

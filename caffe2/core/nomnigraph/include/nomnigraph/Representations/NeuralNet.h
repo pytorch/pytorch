@@ -153,7 +153,6 @@ class CAFFE2_API NeuralNetData : public Data {
 
  private:
   NNDataKind kind_;
-  size_t version_ = 0;
 };
 
 class CAFFE2_API Tensor : public NeuralNetData {
@@ -184,6 +183,11 @@ class CAFFE2_API Tensor : public NeuralNetData {
   const std::string getName() const {
     return name_;
   }
+
+  void setName(const std::string& name) {
+    name_ = name;
+  }
+
   ~Tensor() {}
 
  private:

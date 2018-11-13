@@ -21,7 +21,7 @@ void filler_init(
       // Shape input must be in CPU context
       auto& input = *inputs[0];
       CAFFE_ENFORCE_EQ(
-          input.ndim(),
+          input.dim(),
           1,
           "When input_as_shape is true, the input must be a 1D tensor of "
           "data type int64_t");

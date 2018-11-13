@@ -49,7 +49,13 @@ PyObject* c10d_init(PyObject* _unused) {
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp);
 
-  py::enum_<::c10d::ReduceOp>(module, "ReduceOp")
+  py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
+An enum-like class of available reduce operations: ``SUM``, ``PRODUCT``,
+``MIN``, and ``MAX``.
+
+The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
+They are used in specifying strategies for reduction collectives, e.g.,
+:func:`reduce`, :func:`all_reduce_multigpu`, etc.)")
       .value("SUM", ::c10d::ReduceOp::SUM)
       .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
       .value("MIN", ::c10d::ReduceOp::MIN)
@@ -146,7 +152,18 @@ PyObject* c10d_init(PyObject* _unused) {
               "allreduce",
               &::c10d::ProcessGroup::allreduce,
               py::call_guard<py::gil_scoped_release>())
-
+          .def(
+              "allreduce",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& xs,
+                 ::c10d::ReduceOp op) {
+                ::c10d::AllreduceOptions opts;
+                opts.reduceOp = op;
+                return pg.allreduce(xs, opts);
+              },
+              py::arg("tensors"),
+              py::arg("op") = ::c10d::ReduceOp::SUM,
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "allreduce",
               [](::c10d::ProcessGroup& pg, at::Tensor& x, ::c10d::ReduceOp op) {
@@ -387,11 +404,20 @@ PyObject* c10d_init(PyObject* _unused) {
 
 #ifdef USE_CUDA
   module.def(
+      "_dist_bucket_tensors",
+      &::c10d::bucketTensors,
+      py::arg("tensors"),
+      py::arg("bucket_size"),
+      py::arg("fine_grained"),
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
       "_dist_broadcast_coalesced",
       &::c10d::distBroadcastCoalesced,
       py::arg("process_group"),
       py::arg("tensors"),
       py::arg("buffer_size"),
+      py::arg("fine_grained"),
       py::call_guard<py::gil_scoped_release>());
 
   module.def(

@@ -3,7 +3,7 @@
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/rnn.h>
 #include <torch/optim/adam.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>
@@ -45,7 +45,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
 
     const auto backend = cuda ? torch::kCUDA : torch::kCPU;
     auto inputs =
-        torch::rand({nlen, bs, 1}, backend).round().toType(torch::kFloat32);
+        torch::rand({nlen, bs, 1}, backend).round().to(torch::kFloat32);
     auto labels = inputs.sum(0).detach();
     inputs.set_requires_grad(true);
 
@@ -111,8 +111,8 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   // Make sure the outputs match pytorch outputs
   LSTM model(2, 2);
   for (auto& v : model->parameters()) {
-    float size = v->numel();
-    auto p = static_cast<float*>(v->storage().data());
+    float size = v.numel();
+    auto p = static_cast<float*>(v.storage().data());
     for (size_t i = 0; i < size; i++) {
       p[i] = i / size;
     }
