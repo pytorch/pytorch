@@ -1,6 +1,7 @@
 #include "caffe2/operators/dropout_op.h"
 
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "caffe2/core/context_gpu.h"
@@ -15,6 +16,10 @@ namespace caffe2 {
 #if CUDNN_VERSION_MIN(7, 0, 0)
 
 namespace {
+
+std::string GetStatesBlobName(const std::string& mask_blob_name) {
+  return "cudnn_dropout_states_" + mask_blob_name;
+}
 
 class CuDNNDropoutOpBase : public Operator<CUDAContext> {
  public:
@@ -35,7 +40,6 @@ class CuDNNDropoutOpBase : public Operator<CUDAContext> {
       CUDNN_ENFORCE(cudnnCreateDropoutDescriptor(&dropout_desc_));
       CUDNN_ENFORCE(cudnnDropoutGetStatesSize(
           cudnn_wrapper_.inline_cudnn_handle(), &states_size_in_bytes_));
-      states_.Resize(states_size_in_bytes_);
     }
   }
 
@@ -78,7 +82,8 @@ class CuDNNDropoutOpBase : public Operator<CUDAContext> {
   const std::uint64_t random_seed_;
   std::int64_t cached_data_numel_;
 
-  Tensor states_{CUDA};
+  Blob* states_blob_ = nullptr;
+  Tensor* states_ = nullptr;
 };
 
 class CuDNNDropoutOp final : public CuDNNDropoutOpBase {
@@ -86,7 +91,14 @@ class CuDNNDropoutOp final : public CuDNNDropoutOpBase {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
 
   CuDNNDropoutOp(const OperatorDef& operator_def, Workspace* ws)
-      : CuDNNDropoutOpBase(operator_def, ws) {}
+      : CuDNNDropoutOpBase(operator_def, ws) {
+    if (!is_test_) {
+      states_blob_ = ws->CreateBlob(GetStatesBlobName(operator_def.output(1)));
+      CAFFE_ENFORCE_NE(states_blob_, nullptr);
+      states_ = BlobGetMutableTensor(states_blob_, CUDA);
+      CAFFE_ENFORCE_NE(states_, nullptr);
+    }
+  }
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
@@ -127,10 +139,11 @@ class CuDNNDropoutOp final : public CuDNNDropoutOpBase {
  private:
   void SetDropoutDescriptor() {
     if (!states_initialized_) {
-      uint8_t* states_data = states->template mutable_data<uint8_t>();
       {
         // Need to protect as clashes with NCCL
         std::lock_guard<std::mutex> lock(CUDAContext::mutex());
+        states_->Resize(states_size_in_bytes_);
+        uint8_t* states_data = states_->template mutable_data<uint8_t>();
         CUDNN_ENFORCE(cudnnSetDropoutDescriptor(
             dropout_desc_,
             cudnn_wrapper_.inline_cudnn_handle(),
@@ -149,7 +162,12 @@ class CuDNNDropoutGradientOp final : public CuDNNDropoutOpBase {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
 
   CuDNNDropoutGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : CuDNNDropoutOpBase(operator_def, ws) {}
+      : CuDNNDropoutOpBase(operator_def, ws) {
+    states_blob_ = ws->CreateBlob(GetStatesBlobName(operator_def.input(1)));
+    CAFFE_ENFORCE_NE(states_blob_, nullptr);
+    states_ = BlobGetMutableTensor(states_blob_, CUDA);
+    CAFFE_ENFORCE_NE(states_, nullptr);
+  }
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
@@ -182,10 +200,10 @@ class CuDNNDropoutGradientOp final : public CuDNNDropoutOpBase {
  private:
   void RestoreDropoutDescriptor() {
     if (!states_initialized_) {
-      std::uint8_t* states_data = states_.mutable_data<std::uint8_t>();
       {
         // Need to protect as clashes with NCCL
         std::lock_guard<std::mutex> lock(CUDAContext::mutex());
+        std::uint8_t* states_data = states_->mutable_data<std::uint8_t>();
         CUDNN_ENFORCE(cudnnRestoreDropoutDescriptor(
             dropout_desc_,
             cudnn_wrapper_.inline_cudnn_handle(),
