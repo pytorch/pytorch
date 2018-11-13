@@ -526,11 +526,20 @@ RegisterOperators reg({
         prim::fork,
         [](const Node* node) {
           Code code(node->g(attr::Subgraph));
+          int n_inputs = node->inputs().size();
           JIT_ASSERT(node->blocks().size() == 0);
           JIT_ASSERT(node->hasAttribute(attr::Subgraph));
           return [=](Stack& stack) {
-            InterpreterState(code).run(stack);
-            push(stack, Future(pop(stack)));
+            // Move inputs to a separate stack
+            InterpreterState forked_interprester(code);
+            InterpreterContinuation continuation(
+                forked_interprester,
+                Stack(stack.end() - n_inputs, stack.end()));
+            drop(stack, n_inputs);
+
+            push(stack, forked_interprester.getFuture());
+
+            c10::global_work_queue.schedule(std::move(continuation));
             return 0;
           };
         }),
@@ -538,7 +547,12 @@ RegisterOperators reg({
         "aten::wait(Future(t) self) -> t",
         [](const Node* node) {
           return [=](Stack& stack) {
-            push(stack, pop(stack).toFuture()->get());
+            auto future = pop(stack).toFuture();
+            if (future->completed()) {
+              push(stack, future->value());
+            } else {
+              throw Suspend(future);
+            }
             return 0;
           };
         }),
@@ -881,27 +895,6 @@ Operator(                                                                      \
     DEFINE_BOOL_OP(aten::__and__, a && b)
     DEFINE_BOOL_OP(aten::__or__, a || b)
 
-    Operator("aten::_construct_empty_int_list() -> int[]",
-        [](const Node* node) -> Operation {
-          return [=](Stack& stack){
-            push(stack, std::vector<int64_t>());
-            return 0;
-        };
-      }),
-    Operator("aten::_construct_empty_float_list() -> float[]",
-        [](const Node* node) -> Operation {
-          return [=](Stack& stack){
-            push(stack, std::vector<double>());
-            return 0;
-        };
-      }),
-    Operator("aten::_construct_empty_tensor_list() -> Tensor[]",
-        [](const Node* node) -> Operation {
-          return [=](Stack& stack){
-            push(stack, std::vector<at::Tensor>());
-            return 0;
-        };
-      }),
     Operator(
         "aten::neg(int self) -> int",
         [](const Node* node) {
