@@ -51,7 +51,7 @@ class CuDNNDropoutOpBase : public Operator<CUDAContext> {
   }
 
  protected:
-  void SetUpDataDesc(const cudnnDataType_t type, const const std::int64_t N) {
+  void SetUpDataDesc(const cudnnDataType_t type, const std::int64_t N) {
     if (cached_data_numel_ != N) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           data_desc_,
@@ -94,9 +94,9 @@ class CuDNNDropoutOp final : public CuDNNDropoutOpBase {
       : CuDNNDropoutOpBase(operator_def, ws) {
     if (!is_test_) {
       states_blob_ = ws->CreateBlob(GetStatesBlobName(operator_def.output(1)));
-      CAFFE_ENFORCE_NE(states_blob_, nullptr);
+      CAFFE_ENFORCE(states_blob_ != nullptr);
       states_ = BlobGetMutableTensor(states_blob_, CUDA);
-      CAFFE_ENFORCE_NE(states_, nullptr);
+      CAFFE_ENFORCE(states_ != nullptr);
     }
   }
 
@@ -163,10 +163,10 @@ class CuDNNDropoutGradientOp final : public CuDNNDropoutOpBase {
 
   CuDNNDropoutGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : CuDNNDropoutOpBase(operator_def, ws) {
-    states_blob_ = ws->CreateBlob(GetStatesBlobName(operator_def.input(1)));
-    CAFFE_ENFORCE_NE(states_blob_, nullptr);
+    states_blob_ = ws->GetBlob(GetStatesBlobName(operator_def.input(1)));
+    CAFFE_ENFORCE(states_blob_ != nullptr);
     states_ = BlobGetMutableTensor(states_blob_, CUDA);
-    CAFFE_ENFORCE_NE(states_, nullptr);
+    CAFFE_ENFORCE(states_ != nullptr);
   }
 
   bool RunOnDevice() override {
