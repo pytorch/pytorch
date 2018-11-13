@@ -174,7 +174,7 @@ class CuDNNDropoutGradientOp final : public CuDNNDropoutOpBase {
         dY_data,
         data_desc_,
         dX_data,
-        mask_data,
+        const_cast<std::uint8_t*>(mask_data),
         reserve_space_size_in_bytes_));
     return true;
   }
@@ -182,7 +182,7 @@ class CuDNNDropoutGradientOp final : public CuDNNDropoutOpBase {
  private:
   void RestoreDropoutDescriptor() {
     if (!states_initialized_) {
-      const std::uint8_t* states_data = states_.data<std::uint8_t>();
+      std::uint8_t* states_data = states_.mutable_data<std::uint8_t>();
       {
         // Need to protect as clashes with NCCL
         std::lock_guard<std::mutex> lock(CUDAContext::mutex());
