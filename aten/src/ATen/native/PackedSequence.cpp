@@ -22,6 +22,11 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
   AT_CHECK(lengths[batch_size - 1] > 0,
            "Length of all samples has to be greater than 0, but found an element "
            "in 'lengths' that is <= 0");
+  for(auto i = 0; i < batch_size - 1; i++ ) {
+    if (lengths[batch_size - 1 - i] > lengths[batch_size - 2 - i]) {
+      AT_ERROR("'lengths' array has to be sorted in decreasing order");
+    }
+  }
 
   std::vector<at::Tensor> steps;
   steps.reserve(batch_size);
@@ -67,8 +72,6 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
         (*batch_sizes++) = current_batch_size;
       }
       prev_l = l;
-    } else if (prev_l > l) {
-      AT_ERROR("'lengths' array has to be sorted in decreasing order");
     }
   }
 
