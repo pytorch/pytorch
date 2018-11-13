@@ -473,11 +473,7 @@ def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
-    if stride is None:
-        _stride = torch.jit.annotate(List[int], [])
-    else:
-        _stride = torch.jit._unwrap_optional(stride)
-    out = avg_pool1d(input.pow(norm_type), kernel_size, _stride, 0, ceil_mode)
+    out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1. / norm_type)
 
 
