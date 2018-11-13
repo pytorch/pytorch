@@ -891,7 +891,7 @@ Operator(                                                                      \
     // in c++ int division rounds to the integer closer to 0, in python floordiv
     // rounds to lower integer
     DEFINE_GENERIC_OP(aten::floordiv,
-      int64_t(std::floor(static_cast<double>(a) / static_cast<double>(b))),
+      static_cast<int64_t>(std::floor(static_cast<double>(a) / static_cast<double>(b))),
       std::floor(a / b), int, float)
     DEFINE_INT_FLOAT_OP(aten::floordiv, std::floor(a / b), float)
 
