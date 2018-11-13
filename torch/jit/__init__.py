@@ -1274,6 +1274,8 @@ class _ConstModuleList(ScriptModule):
     def __init__(self, modules):
         super(_ConstModuleList, self).__init__()
         for i, module in enumerate(modules):
+            if _is_weak_type(type(module)):
+                module = _make_strong(module)
             self.add_module(str(i), module)
 
     def __getitem__(self, idx):
