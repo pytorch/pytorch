@@ -472,15 +472,6 @@ Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Sc
   }
 }
 
-Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, IntList sizes, IntList strides, const Scalar & alpha) {
-  // if input was column-major, return grad as column-order for efficiency
-  if (strides[0] == 1 && strides[1] == sizes[0]) {
-    return maybe_multiply(mat2.mm(grad.t()).t(), alpha);
-  } else {
-    return maybe_multiply(grad.mm(mat2.t()), alpha);
-  }
-}
-
 Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, const Tensor & mat1, const Scalar & alpha) {
   // if input was column-major, return grad as column-order for efficiency
   if (mat1.is_sparse()) {
@@ -1883,7 +1874,7 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     bool training,
     double eps,
     const Tensor & save_mean,
-    const Tensor & save_std,
+    const Tensor & save_invstd,
     std::array<bool,3> output_mask) {
 
   bool affine = gamma.defined();
@@ -1907,9 +1898,12 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   for (auto s : input.sizes().slice(2)) {
     M *= s;
   }
-  auto mu = unsqueeze_dim1(training ? save_mean : running_mean, input);
+  // for half inputs, save_mean, save_invstd are float (ideally, we would cast
+  // everything else, but not now)
+  auto mu = unsqueeze_dim1(training ? save_mean.to(input.type().scalarType()) : running_mean, input);
   auto input_sub_mu = input - mu;
-  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(training ? save_std : running_var.add(Scalar(eps)).pow(-0.5), input);
+  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(training ? save_invstd.to(input.type().scalarType())
+					            : running_var.add(Scalar(eps)).pow(-0.5), input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
   auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
 

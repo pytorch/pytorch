@@ -33,13 +33,13 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
     const auto& lengths = Input(LENGTHS);
     auto* output = Output(0);
 
-    CAFFE_ENFORCE_EQ(indices.ndim(), 1, "INDICES must be a vector");
-    CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(indices.dim(), 1, "INDICES must be a vector");
+    CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTHS must be a vector");
 
     const float* weights = nullptr;
     if (with_weights) {
       const auto& weights_input = Input(WEIGHTS);
-      CAFFE_ENFORCE_EQ(weights_input.ndim(), 1, "WEIGHTS must be a vector");
+      CAFFE_ENFORCE_EQ(weights_input.dim(), 1, "WEIGHTS must be a vector");
       CAFFE_ENFORCE_EQ(
           weights_input.numel(),
           indices.numel(),

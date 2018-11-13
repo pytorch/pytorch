@@ -28,6 +28,30 @@ RegisterOperators reg({
           return 0;
         }),
     Operator(
+        "aten::size(Tensor self) -> int[]",
+        [](Stack& stack) {
+          autograd::profiler::RecordFunction record("sizes");
+          auto result = (std::move(pop(stack))).toTensor().sizes();
+          pack(stack, std::move(result));
+          return 0;
+        }),
+    Operator(
+        "aten::list_with_default(int[] list, int[] defaults) -> int[]",
+        [](Stack& stack) {
+          autograd::profiler::RecordFunction record("sizes");
+          auto list = peek(stack, 0, 2).toIntListRef();
+          auto defaults = peek(stack, 1, 2).toIntListRef();
+          drop(stack, 2);
+
+          JIT_ASSERT(defaults.size() > list.size());
+
+          // TODO: allow list of optionals to be filled in with defaults
+          // i.e. list_with_default([1, 2, None], [1, 2, 3]) -> [1, 2, 3]
+
+          push(stack, list);
+          return 0;
+        }),
+    Operator(
         "aten::format(str self, ...) -> str",
         [](const Node* node) {
           size_t num_inputs = node->inputs().size();
@@ -56,7 +80,7 @@ RegisterOperators reg({
             }
 
             drop(stack, num_inputs);
-            stack.push_back(ss.str());
+            push(stack, ss.str());
             return 0;
           };
         })

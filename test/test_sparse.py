@@ -675,6 +675,45 @@ class TestSparse(TestCase):
         test_shape(2, 20, [3, 17, 19, 5])
         test_shape(2, 20, [3, 17, 19, 0])
 
+    @skipIfRocm
+    def test_cat(self):
+        # shapes: list of tuples (sparse_dims, nnz, sizes)
+        def test_shapes(shapes, dim, fail_message=None):
+            inputs = [self._gen_sparse(shape[0], shape[1], shape[2])[0]
+                      for shape in shapes]
+            if fail_message:
+                with self.assertRaisesRegex(RuntimeError, fail_message):
+                    torch.cat(inputs, dim)
+            else:
+                result = torch.cat(inputs, dim)
+                dense_result = torch.cat([t.to_dense() for t in inputs], dim)
+                self.assertEqual(dense_result, result.to_dense())
+
+        test_shapes(
+            [(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4]), (3, 10, [2, 4, 4])], 1)
+
+        # mismatched sizes
+        test_shapes([(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4])], 0,
+                    "Concatenating tensor.*of sizes \\[2, 1, 4].*of sizes \\[2, 3, 4]")
+        # hybrid sparse/dense
+        test_shapes(
+            [(2, 10, [2, 3, 4]), (2, 10, [2, 1, 4]), (2, 10, [2, 4, 4])], 1)
+        test_shapes([(2, 10, [2, 3, 4]), (2, 10, [2, 1, 4])], 2,
+                    "Concatenating.*along non-sparse dimension 2")
+        # mismatched dimensions
+        test_shapes([(2, 10, [2, 3, 4]), (3, 10, [2, 3, 4])], 0,
+                    "has dimension: sparse 3, dense 0.*Concatenating with tensor of dimensions 2, 1")
+        # wrapped dimension
+        test_shapes(
+            [(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4]), (3, 10, [2, 4, 4])], -2)
+
+        # sparse with dense
+        sp = self._gen_sparse(3, 10, [2, 3, 4])[0]
+        dn = sp.to_dense()
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Concatenating dense tensor.*with sparse"):
+            torch.cat((sp, dn))
+
     @cpu_only
     def test_mm(self):
         def test_shape(di, dj, dk, nnz):
@@ -1281,7 +1320,6 @@ class TestSparse(TestCase):
         test_shape(3, 0, [100, 100, 0])
 
     @cpu_only  # not really, but we only really want to run this once
-    @skipIfRocm
     def test_factory(self):
         for test_empty_tensor in [True, False]:
             if test_empty_tensor:
@@ -1519,7 +1557,6 @@ class TestSparse(TestCase):
         test_tensor(indices, values, False, True)  # An empty tensor's data_ptr is always equal to 0
 
     @cpu_only  # just run once, we test both cpu and cuda
-    @skipIfRocm
     def test_constructor_device_legacy(self):
         i = torch.tensor([[0, 1, 1], [2, 0, 2]])
         v = torch.tensor([3., 4., 5.])
@@ -1589,7 +1626,6 @@ class TestSparse(TestCase):
         do_test(self.SparseTensor(3, 0))
         do_test(self.SparseTensor(3, 3))
 
-    @skipIfRocm
     def _test_resize_shape(self, x_i, x_v, x_size, y_i, y_v, y_size):
         x_v_numel = torch.zeros(x_v).numel()
         y_v_numel = torch.zeros(y_v).numel()
@@ -1664,7 +1700,6 @@ class TestSparse(TestCase):
             self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
                                     [1, 1], [1, 2, 0], [2, 2, 0])
 
-    @skipIfRocm
     def test_is_nonzero(self):
         self.assertTrue(torch.sparse_coo_tensor(([0],), 1., (1,)).is_nonzero())
         self.assertFalse(torch.sparse_coo_tensor(([0],), 0., (1,)).is_nonzero())

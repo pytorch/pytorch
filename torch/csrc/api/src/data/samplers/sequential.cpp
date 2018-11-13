@@ -1,6 +1,6 @@
 #include <torch/data/samplers/sequential.h>
 #include <torch/serialize/archive.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <algorithm>
 #include <cstddef>

@@ -166,7 +166,7 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(0);
   const auto& Y = Input(1);
   auto& dY = Input(2);
-  CAFFE_ENFORCE_EQ(dY.ndim(), 4);
+  CAFFE_ENFORCE_EQ(dY.dim(), 4);
   auto* dX = Output(0);
   // TODO(Yangqing): Add shape checks.
   dX->ResizeLike(X);

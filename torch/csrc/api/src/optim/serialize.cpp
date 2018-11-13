@@ -1,7 +1,7 @@
 #include <torch/optim/serialize.h>
 
 #include <torch/serialize/archive.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <cstddef>
 #include <cstdint>

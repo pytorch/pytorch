@@ -319,7 +319,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   /// variables.
   void set_requires_grad(bool requires_grad) override {
     AT_CHECK(
-        !requires_grad || at::isFloatingType(type().scalarType()),
+        !requires_grad || at::isFloatingType(at::typeMetaToScalarType(dtype())),
         "Only Tensors of floating point dtype can require gradients");
     requires_grad_ = requires_grad;
   }
