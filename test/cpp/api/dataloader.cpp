@@ -7,7 +7,7 @@
 
 #include <test/cpp/api/support.h>
 
-#include <ATen/core/ArrayRef.h>
+#include <c10/util/ArrayRef.h>
 
 #include <algorithm>
 #include <chrono>

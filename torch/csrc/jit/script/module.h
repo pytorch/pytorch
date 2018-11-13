@@ -13,7 +13,7 @@
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include <ATen/core/ArrayRef.h>
+#include <c10/util/ArrayRef.h>
 #include "c10/util/Optional.h"
 
 #include <functional>

@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include <ATen/core/AlignOf.h>
+#include <c10/util/AlignOf.h>
 #include <c10/macros/Macros.h>
 
 #include <algorithm>

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/DeviceGuard.h>
-#include <ATen/core/ArrayRef.h>
+#include <c10/util/ArrayRef.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/CUDAGuardImpl.h>
 #include <c10/DeviceType.h>
