@@ -220,8 +220,8 @@ TEST(TestStream, CUDAEventSyncTest) {
   const auto wait_stream0 = at::cuda::getStreamFromPool();
   const auto wait_stream1 = at::cuda::getStreamFromPool();
 
-  wait_stream0.synchronize_with(event);
-  wait_stream1.synchronize_with(event);
+  event.block(wait_stream0);
+  event.block(wait_stream1);
 
   cudaStreamSynchronize(wait_stream0);
   ASSERT_TRUE(event.happened());
@@ -246,7 +246,7 @@ TEST(TestStream, CrossDeviceTest) {
 
   ASSERT_EQ_CUDA(event0.device(), 1);
 
-  stream0.synchronize_with(event0);
+  event0.block(stream0);
 
   cudaStreamSynchronize(stream0);
   ASSERT_TRUE(event0.happened());
