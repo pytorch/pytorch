@@ -253,20 +253,17 @@ void launchFusion(
 
   // Adds (flattened) output arguments
   outputs.reserve(fusion.outputDesc().size());
-  const auto ref_options = device >= 0 ?
-      inputs[0].options().device_index(device) :
-      inputs[0].options().device(at::Device{at::DeviceType::CPU});
+  const auto& ref_options = inputs[0].options();
   for (size_t i = 0; i < fusion.outputDesc().size(); ++i) {
     const auto& c = fusion.concatDesc()[i];
-    const auto& od = fusion.outputDesc()[i];
     if (c.isNoop()) {
-      outputs.push_back(at::empty(map_size, ref_options.dtype(od.scalar_type)));
+      outputs.push_back(at::empty(map_size, ref_options));
       addTensorInfo(fusion.outputDesc()[i], outputs[i]);
     } else {
       size_t small_size = map_size[c.dim()];
       std::vector<int64_t> concat_size(map_size.begin(), map_size.end());
       concat_size[c.dim()] = small_size * c.nSubTensors();
-      outputs.push_back(at::empty(concat_size, ref_options.dtype(od.scalar_type)));
+      outputs.push_back(at::empty(concat_size, ref_options));
       const auto& o = outputs[i];
       size_t offset = 0;
       for (size_t j = 0; j < c.nSubTensors(); ++j) {
