@@ -333,6 +333,7 @@ class BuildExtension(build_ext):
         check_compiler_abi_compatibility(compiler)
 
     def _add_compile_flag(self, extension, flag):
+        extension.extra_compile_args = copy.copy(extension.extra_compile_args)
         if isinstance(extension.extra_compile_args, dict):
             for args in extension.extra_compile_args.values():
                 args.append(flag)
@@ -633,13 +634,13 @@ def load_inline(name,
     as its docstring.
 
     The sources in ``cuda_sources`` are concatenated into a separate ``.cu``
-    file and  prepended with ``ATen/ATen.h``, ``cuda.h`` and ``cuda_runtime.h``
-    includes. The ``.cpp`` and ``.cu`` files are compiled separately, but
-    ultimately linked into a single library. Note that no bindings are
-    generated for functions in ``cuda_sources`` per  se. To bind to a CUDA
-    kernel, you must create a C++ function that calls it, and either declare or
-    define this C++ function in one of the ``cpp_sources`` (and include its
-    name in ``functions``).
+    file and  prepended with ``torch/types.h``, ``cuda.h`` and
+    ``cuda_runtime.h`` includes. The ``.cpp`` and ``.cu`` files are compiled
+    separately, but ultimately linked into a single library. Note that no
+    bindings are generated for functions in ``cuda_sources`` per  se. To bind
+    to a CUDA kernel, you must create a C++ function that calls it, and either
+    declare or define this C++ function in one of the ``cpp_sources`` (and
+    include its name in ``functions``).
 
     See :func:`load` for a description of arguments omitted below.
 
@@ -702,7 +703,7 @@ def load_inline(name,
     sources = [cpp_source_path]
 
     if cuda_sources:
-        cuda_sources.insert(0, '#include <ATen/ATen.h>')
+        cuda_sources.insert(0, '#include <torch/types.h>')
         cuda_sources.insert(1, '#include <cuda.h>')
         cuda_sources.insert(2, '#include <cuda_runtime.h>')
 

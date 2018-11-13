@@ -2,6 +2,7 @@
 
 #include <torch/data/datasets/base.h>
 #include <torch/data/example.h>
+#include <torch/types.h>
 
 #include <cstddef>
 #include <string>
@@ -25,10 +26,16 @@ class MNIST : public Dataset<MNIST> {
   Example<> get(size_t index) override;
 
   /// Returns the size of the dataset.
-  size_t size() const override;
+  optional<size_t> size() const override;
 
   /// Returns true if this is the training subset of MNIST.
   bool is_train() const noexcept;
+
+  /// Returns all images stacked into a single tensor.
+  const Tensor& images() const;
+
+  /// Returns all targets stacked into a single tensor.
+  const Tensor& targets() const;
 
  private:
   Tensor images_, targets_;

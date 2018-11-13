@@ -135,13 +135,13 @@ class TensorFetcher : public BlobFetcherBase {
     void* outPtr;
     if (result.copied) {
       result.obj = py::reinterpret_steal<py::object>(
-          PyArray_SimpleNew(tensor.ndim(), npy_dims.data(), numpy_type));
+          PyArray_SimpleNew(tensor.dim(), npy_dims.data(), numpy_type));
       outPtr = static_cast<void*>(
           PyArray_DATA(reinterpret_cast<PyArrayObject*>(result.obj.ptr())));
     } else {
       outPtr = const_cast<Tensor&>(tensor).raw_mutable_data();
       result.obj = py::reinterpret_steal<py::object>(PyArray_SimpleNewFromData(
-          tensor.ndim(), npy_dims.data(), numpy_type, outPtr));
+          tensor.dim(), npy_dims.data(), numpy_type, outPtr));
     }
 
     if (numpy_type == NPY_OBJECT) {

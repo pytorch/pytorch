@@ -56,6 +56,14 @@ def _cudnn_convolution_algo_count(direction):
         return st.sampled_from([-1])
 
 
+def nhwc2nchw(tensor):
+    return tensor.transpose((0, tensor.ndim - 1) + tuple(range(1, tensor.ndim - 1)))
+
+
+def nchw2nhwc(tensor):
+    return tensor.transpose((0,) + tuple(range(2, tensor.ndim)) + (1,))
+
+
 class TestConvolution(serial.SerializedTestCase):
     # CUDNN does NOT support different padding values and we skip it
     @given(op_type=st.sampled_from(["Conv", "Conv2D"]),
@@ -282,10 +290,10 @@ class TestConvolution(serial.SerializedTestCase):
                    or "CUDNN_STATUS_NOT_SUPPORTED" not in es:
                     raise e
 
-    def _nd_convolution_nchw(self, n, input_channels, output_channels,
-                             batch_size, stride, size, kernel, dilation, pad,
-                             use_bias, engine, force_algo_fwd, force_algo_dgrad,
-                             force_algo_wgrad, gc, dc):
+    def _nd_convolution(self, n, input_channels, output_channels,
+                        batch_size, stride, size, kernel, dilation, pad,
+                        order, use_bias, engine, force_algo_fwd, force_algo_dgrad,
+                        force_algo_wgrad, gc, dc):
         dkernel = dilation * (kernel - 1) + 1
         for op_type in ["Conv", "Conv" + str(n) + "D"]:
             op = core.CreateOperator(
@@ -296,7 +304,7 @@ class TestConvolution(serial.SerializedTestCase):
                 kernels=[kernel] * n,
                 dilations=[dilation] * n,
                 pads=[pad] * n * 2,
-                order="NCHW",
+                order=order,
                 engine=engine,
                 force_algo_fwd=force_algo_fwd,
                 force_algo_dgrad=force_algo_dgrad,
@@ -311,6 +319,9 @@ class TestConvolution(serial.SerializedTestCase):
             X = np.random.rand(*input_dims).astype(np.float32) - 0.5
             w = np.random.rand(*filter_dims).astype(np.float32) - 0.5
             b = np.random.rand(output_channels).astype(np.float32) - 0.5
+            if order == "NHWC":
+                X = nchw2nhwc(X)
+                w = nchw2nhwc(w)
 
             inputs = [X, w, b] if use_bias else [X, w]
 
@@ -331,25 +342,31 @@ class TestConvolution(serial.SerializedTestCase):
            kernel=st.integers(1, 2),
            dilation=st.integers(1, 3),
            pad=st.integers(0, 3),
+           order=st.sampled_from(["NCHW", "NHWC"]),
            use_bias=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]),
            force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
            force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
            force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
            **hu.gcs)
-    def test_1d_convolution_nchw(self, input_channels, output_channels,
-                                 batch_size, stride, size, kernel, dilation,
-                                 pad, use_bias, engine,
-                                 force_algo_fwd, force_algo_dgrad,
-                                 force_algo_wgrad,
-                                 gc, dc):
+    def test_1d_convolution(self, input_channels, output_channels,
+                            batch_size, stride, size, kernel, dilation,
+                            pad, order, use_bias, engine,
+                            force_algo_fwd, force_algo_dgrad,
+                            force_algo_wgrad,
+                            gc, dc):
         if hiputl.run_in_hip(gc, dc):
             # currently miopen only supports 2d conv
             assume(engine != 'CUDNN')  # CUDNN is aliased to MIOPEN for HIP
+        # TODO: 1D conv in NHWC not implemented for GPU yet.
+        assume(order == "NCHW" or gc.device_type == caffe2_pb2.CPU)
+        if order == "NHWC":
+            dc = [d for d in dc if d.device_type == caffe2_pb2.CPU]
 
-        self._nd_convolution_nchw(
+        self._nd_convolution(
             1, input_channels, output_channels, batch_size, stride, size,
-            kernel, dilation, pad, use_bias, engine, force_algo_fwd, force_algo_dgrad,
+            kernel, dilation, pad, order, use_bias,
+            engine, force_algo_fwd, force_algo_dgrad,
             force_algo_wgrad, gc, dc
         )
 
@@ -361,21 +378,27 @@ class TestConvolution(serial.SerializedTestCase):
            kernel=st.integers(1, 2),
            dilation=st.integers(1, 2),
            pad=st.integers(0, 2),
+           order=st.sampled_from(["NCHW", "NHWC"]),
            use_bias=st.booleans(),
            engine=st.sampled_from([""]), # TODO: add "CUDNN"
            force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
            force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
            force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
            **hu.gcs)
-    def test_3d_convolution_nchw(self, input_channels, output_channels,
-                                 batch_size, stride, size, kernel, dilation,
-                                 pad, use_bias, engine,
-                                 force_algo_fwd, force_algo_dgrad,
-                                 force_algo_wgrad,
-                                 gc, dc):
-        self._nd_convolution_nchw(
+    def test_3d_convolution(self, input_channels, output_channels,
+                            batch_size, stride, size, kernel, dilation,
+                            pad, order, use_bias, engine,
+                            force_algo_fwd, force_algo_dgrad,
+                            force_algo_wgrad,
+                            gc, dc):
+        # TODO: 3D conv in NHWC not implemented for GPU yet.
+        assume(order == "NCHW" or gc.device_type == caffe2_pb2.CPU)
+        if order == "NHWC":
+            dc = [d for d in dc if d.device_type == caffe2_pb2.CPU]
+        self._nd_convolution(
             3, input_channels, output_channels, batch_size, stride, size,
-            kernel, dilation, pad, use_bias, engine, force_algo_fwd, force_algo_dgrad,
+            kernel, dilation, pad, order, use_bias,
+            engine, force_algo_fwd, force_algo_dgrad,
             force_algo_wgrad, gc, dc
         )
 

@@ -260,6 +260,7 @@ Other Operations
 .. autofunction:: broadcast_tensors
 .. autofunction:: cross
 .. autofunction:: diag
+.. autofunction:: diag_embed
 .. autofunction:: diagflat
 .. autofunction:: diagonal
 .. autofunction:: einsum

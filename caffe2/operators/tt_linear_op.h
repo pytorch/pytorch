@@ -32,8 +32,8 @@ class TTLinearOp final : public Operator<Context> {
     const auto& cores = Input(2); // 1D array containing the TT-cores
     auto* Y = Output(0);
 
-    CAFFE_ENFORCE(X.ndim() > 1, "Number of dimensions in X: ", X.ndim());
-    CAFFE_ENFORCE(b.ndim() == 1, "Number of dimensions in b: ", b.ndim());
+    CAFFE_ENFORCE(X.dim() > 1, "Number of dimensions in X: ", X.dim());
+    CAFFE_ENFORCE(b.dim() == 1, "Number of dimensions in b: ", b.dim());
     CAFFE_ENFORCE(
         inp_sizes_.size() == out_sizes_.size(),
         "inp_sizes has size: ",
@@ -41,9 +41,9 @@ class TTLinearOp final : public Operator<Context> {
         ", out_sizes has size: ",
         out_sizes_.size());
     CAFFE_ENFORCE(
-        cores.ndim() == 1, "Number of dimensions in cores: ", cores.ndim());
+        cores.dim() == 1, "Number of dimensions in cores: ", cores.dim());
     // batch size
-    const int batch_size = X.ndim() > 1 ? X.dim32(0) : 1;
+    const int batch_size = X.dim() > 1 ? X.dim32(0) : 1;
 
     // dimension d of tensors
     const int d = inp_sizes_.size();

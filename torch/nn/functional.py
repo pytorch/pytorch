@@ -3,64 +3,21 @@ from __future__ import division
 
 import warnings
 import math
+import types
 from operator import mul
 from functools import reduce
 
 import torch
 from torch._C import _infer_size, _add_docstr
+from . import _reduction as _Reduction
 from . import _functions
 from .modules import utils
 from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
+from . import _VF
 from .._jit_internal import weak_script
-
-_VF = torch._C._VariableFunctions
-
-
-class _Reduction:
-    # NB: Keep this class in sync with enums in aten/src/ATen/core/Reduction.h
-
-    @staticmethod
-    def get_enum(reduction):
-        if reduction == 'none':
-            return 0
-        elif reduction == 'mean':
-            return 1
-        elif reduction == 'elementwise_mean':
-            warnings.warn("reduction='elementwise_mean' is deprecated, please use reduction='mean' instead.")
-            return 1
-        elif reduction == 'sum':
-            return 2
-        raise ValueError(reduction + " is not a valid value for reduction")
-
-    # In order to support previous versions, accept boolean size_average and reduce
-    # and convert them into the new constants for now
-
-    # We use these functions in torch/legacy as well, in which case we'll silence the warning
-    @staticmethod
-    def legacy_get_string(size_average, reduce, emit_warning=True):
-        warning = "size_average and reduce args will be deprecated, please use reduction='{}' instead."
-
-        if size_average is None:
-            size_average = True
-        if reduce is None:
-            reduce = True
-
-        if size_average and reduce:
-            ret = 'mean'
-        elif reduce:
-            ret = 'sum'
-        else:
-            ret = 'none'
-        if emit_warning:
-            warnings.warn(warning.format(ret))
-        return ret
-
-    @staticmethod
-    def legacy_get_enum(size_average, reduce, emit_warning=True):
-        return _Reduction.get_enum(_Reduction.legacy_get_string(size_average, reduce, emit_warning))
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
@@ -577,7 +534,9 @@ Args:
 """)
 
 
+@torch._jit_internal.weak_script
 def adaptive_avg_pool2d(input, output_size):
+    # type: (Tensor, BroadcastingList2[int]) -> Tensor
     r"""
     Applies a 2D adaptive average pooling over an input signal composed of
     several input planes.
@@ -588,11 +547,13 @@ def adaptive_avg_pool2d(input, output_size):
         output_size: the target output size (single integer or
             double-integer tuple)
     """
-    output_size = _list_with_default(output_size, input.size())
-    return torch._C._nn.adaptive_avg_pool2d(input, output_size)
+    _output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
 
+@torch._jit_internal.weak_script
 def adaptive_avg_pool3d(input, output_size):
+    # type: (Tensor, BroadcastingList3[int]) -> Tensor
     r"""
     Applies a 3D adaptive average pooling over an input signal composed of
     several input planes.
@@ -603,12 +564,14 @@ def adaptive_avg_pool3d(input, output_size):
         output_size: the target output size (single integer or
             triple-integer tuple)
     """
-    output_size = _list_with_default(output_size, input.size())
-    return torch._C._nn.adaptive_avg_pool3d(input, output_size)
+    _output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_avg_pool3d(input, _output_size)
 
 
 # Activation functions
+@torch._jit_internal.weak_script
 def dropout(input, p=0.5, training=True, inplace=False):
+    # type: (Tensor, float, bool, bool) -> Tensor
     r"""
     During training, randomly zeroes some of the elements of the input
     tensor with probability :attr:`p` using samples from a Bernoulli
@@ -621,26 +584,32 @@ def dropout(input, p=0.5, training=True, inplace=False):
         training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if p < 0 or p > 1:
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.dropout_ if inplace else _VF.dropout
-    return f(input, p, training)
+    return (_VF.dropout_(input, p, training)
+            if inplace
+            else _VF.dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def alpha_dropout(input, p=0.5, training=False, inplace=False):
+    # type: (Tensor, float, bool, bool) -> Tensor
     r"""Applies alpha dropout to the input.
 
     See :class:`~torch.nn.AlphaDropout` for details.
     """
-    if p < 0 or p > 1:
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.alpha_dropout_ if inplace else _VF.alpha_dropout
-    return f(input, p, training)
+    return (_VF.alpha_dropout_(input, p, training)
+            if inplace
+            else _VF.alpha_dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def dropout2d(input, p=0.5, training=True, inplace=False):
+    # type: (Tensor, float, bool, bool) -> Tensor
     r"""
     Randomly zero out entire channels (a channel is a 2D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
@@ -655,14 +624,17 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
         training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if p < 0 or p > 1:
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.feature_dropout_ if inplace else _VF.feature_dropout
-    return f(input, p, training)
+    return (_VF.feature_dropout_(input, p, training)
+            if inplace
+            else _VF.feature_dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def dropout3d(input, p=0.5, training=True, inplace=False):
+    # type: (Tensor, float, bool, bool) -> Tensor
     r"""
     Randomly zero out entire channels (a channel is a 3D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
@@ -679,47 +651,59 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
     """
     # This is 100% the same code as dropout2d. We duplicate this code so that
     # stack traces are not confusing.
-    if p < 0 or p > 1:
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.feature_dropout_ if inplace else _VF.feature_dropout
-    return f(input, p, training)
+    return (_VF.feature_dropout_(input, p, training)
+            if inplace
+            else _VF.feature_dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
-    if p < 0 or p > 1:
+    # type: (Tensor, float, bool, bool) -> Tensor
+    if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
-    f = _VF.feature_alpha_dropout_ if inplace else _VF.feature_alpha_dropout
-    return f(input, p, training)
+    return (_VF.feature_alpha_dropout_(input, p, training)
+            if inplace
+            else _VF.feature_alpha_dropout(input, p, training))
 
 
+@torch._jit_internal.weak_script
 def threshold(input, threshold, value, inplace=False):
+    # type: (Tensor, float, float, bool) -> Tensor
     r"""Thresholds each element of the input Tensor.
 
     See :class:`~torch.nn.Threshold` for more details.
     """
     if inplace:
-        return torch._C._nn.threshold_(input, threshold, value)
-    return torch._C._nn.threshold(input, threshold, value)
+        result = _VF.threshold_(input, threshold, value)
+    else:
+        result = _VF.threshold(input, threshold, value)
+    return result
 
 
-threshold_ = _add_docstr(torch._C._nn.threshold_, r"""
+threshold_ = _add_docstr(_VF.threshold_, r"""
 threshold_(input, threshold, value) -> Tensor
 
 In-place version of :func:`~threshold`.
 """)
 
 
+@torch._jit_internal.weak_script
 def relu(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""relu(input, inplace=False) -> Tensor
 
     Applies the rectified linear unit function element-wise. See
     :class:`~torch.nn.ReLU` for more details.
     """
     if inplace:
-        return torch.relu_(input)
-    return torch.relu(input)
+        result = torch.relu_(input)
+    else:
+        result = torch.relu(input)
+    return result
 
 
 relu_ = _add_docstr(torch.relu_, r"""
@@ -752,7 +736,9 @@ def glu(input, dim=-1):
     return torch._C._nn.glu(input, dim)
 
 
+@torch._jit_internal.weak_script
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
+    # type: (Tensor, float, float, bool) -> Tensor
     r"""
     hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
 
@@ -760,8 +746,10 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
     details.
     """
     if inplace:
-        return torch._C._nn.hardtanh_(input, min_val, max_val)
-    return torch._C._nn.hardtanh(input, min_val, max_val)
+        result = torch._C._nn.hardtanh_(input, min_val, max_val)
+    else:
+        result = torch._C._nn.hardtanh(input, min_val, max_val)
+    return result
 
 
 hardtanh_ = _add_docstr(torch._C._nn.hardtanh_, r"""
@@ -771,25 +759,31 @@ In-place version of :func:`~hardtanh`.
 """)
 
 
+@torch._jit_internal.weak_script
 def relu6(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""relu6(input, inplace=False) -> Tensor
 
     Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`.
 
     See :class:`~torch.nn.ReLU6` for more details.
     """
-    return hardtanh(input, 0, 6, inplace)
+    return hardtanh(input, 0., 6., inplace)
 
 
+@torch._jit_internal.weak_script
 def elu(input, alpha=1., inplace=False):
+    # type: (Tensor, float, bool) -> Tensor
     r"""Applies element-wise,
     :math:`\text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))`.
 
     See :class:`~torch.nn.ELU` for more details.
     """
     if inplace:
-        return torch._C._nn.elu_(input, alpha)
-    return torch._C._nn.elu(input, alpha)
+        result = torch._C._nn.elu_(input, alpha)
+    else:
+        result = torch._C._nn.elu(input, alpha)
+    return result
 
 
 elu_ = _add_docstr(torch._C._nn.elu_, r"""
@@ -799,7 +793,9 @@ In-place version of :func:`~elu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def selu(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
     r"""selu(input, inplace=False) -> Tensor
 
     Applies element-wise,
@@ -810,8 +806,11 @@ def selu(input, inplace=False):
     See :class:`~torch.nn.SELU` for more details.
     """
     if inplace:
-        return torch.selu_(input)
-    return torch.selu(input)
+        result = torch.selu_(input)
+    else:
+        result = torch.selu(input)
+    return result
+
 
 selu_ = _add_docstr(torch.selu_, r"""
 selu_(input) -> Tensor
@@ -820,7 +819,9 @@ In-place version of :func:`~selu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def celu(input, alpha=1., inplace=False):
+    # type: (Tensor, float, bool) -> Tensor
     r"""celu(input, alpha=1., inplace=False) -> Tensor
 
     Applies element-wise,
@@ -829,8 +830,10 @@ def celu(input, alpha=1., inplace=False):
     See :class:`~torch.nn.CELU` for more details.
     """
     if inplace:
-        return torch.celu_(input, alpha)
-    return torch.celu(input, alpha)
+        result = torch.celu_(input, alpha)
+    else:
+        result = torch.celu(input, alpha)
+    return result
 
 celu_ = _add_docstr(torch.celu_, r"""
 celu_(input, alpha=1.) -> Tensor
@@ -839,7 +842,9 @@ In-place version of :func:`~celu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def leaky_relu(input, negative_slope=0.01, inplace=False):
+    # type: (Tensor, float, bool) -> Tensor
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
@@ -849,8 +854,10 @@ def leaky_relu(input, negative_slope=0.01, inplace=False):
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
     if inplace:
-        return torch._C._nn.leaky_relu_(input, negative_slope)
-    return torch._C._nn.leaky_relu(input, negative_slope)
+        result = torch._C._nn.leaky_relu_(input, negative_slope)
+    else:
+        result = torch._C._nn.leaky_relu(input, negative_slope)
+    return result
 
 
 leaky_relu_ = _add_docstr(torch._C._nn.leaky_relu_, r"""
@@ -862,6 +869,7 @@ In-place version of :func:`~leaky_relu`.
 
 @torch._jit_internal.weak_script
 def prelu(input, weight):
+    # type: (Tensor, Tensor) -> Tensor
     r"""prelu(input, weight) -> Tensor
 
     Applies element-wise the function
@@ -873,7 +881,9 @@ def prelu(input, weight):
     return torch.prelu(input, weight)
 
 
+@torch._jit_internal.weak_script
 def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
+    # type: (Tensor, float, float, bool, bool) -> Tensor
     r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Tensor
 
     Randomized leaky ReLU.
@@ -881,8 +891,10 @@ def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
     See :class:`~torch.nn.RReLU` for more details.
     """
     if inplace:
-        return torch.rrelu_(input, lower, upper, training)
-    return torch.rrelu(input, lower, upper, training)
+        result = torch.rrelu_(input, lower, upper, training)
+    else:
+        result = torch.rrelu(input, lower, upper, training)
+    return result
 
 
 rrelu_ = _add_docstr(torch.rrelu_, r"""
@@ -940,13 +952,16 @@ softplus(input, beta=1, threshold=20) -> Tensor
 """)
 
 
+@torch._jit_internal.weak_script
 def _get_softmax_dim(name, ndim, stacklevel):
-    warnings.warn("Implicit dimension choice for " + name + " has been deprecated. "
-                  "Change the call to include dim=X as an argument.", stacklevel=stacklevel)
+    # type: (str, int, int) -> int
+    warnings.warn("Implicit dimension choice for {} has been deprecated. "
+                  "Change the call to include dim=X as an argument.".format(name), stacklevel=stacklevel)
     if ndim == 0 or ndim == 1 or ndim == 3:
-        return 0
+        ret = 0
     else:
-        return 1
+        ret = 1
+    return ret
 
 
 def softmin(input, dim=None, _stacklevel=3, dtype=None):
@@ -972,7 +987,9 @@ def softmin(input, dim=None, _stacklevel=3, dtype=None):
         return (-input).softmax(dim, dtype=dtype)
 
 
+@torch._jit_internal.weak_script
 def softmax(input, dim=None, _stacklevel=3, dtype=None):
+    # type: (Tensor, Optional[int], int, Optional[int]) -> Tensor
     r"""Applies a softmax function.
 
     Softmax is defined as:
@@ -1000,10 +1017,14 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
     """
     if dim is None:
         dim = _get_softmax_dim('softmax', input.dim(), _stacklevel)
-    if dtype is None:
-        return input.softmax(dim)
     else:
-        return input.softmax(dim, dtype=dtype)
+        dim = torch.jit._unwrap_optional(dim)
+    if dtype is None:
+        ret = input.softmax(dim)
+    else:
+        dtype = torch.jit._unwrap_optional(dtype)
+        ret = input.softmax(dim, dtype=dtype)
+    return ret
 
 
 def _sample_gumbel(shape, eps=1e-10, out=None):
@@ -1107,6 +1128,7 @@ See :class:`~torch.nn.Softshrink` for more details.
 """)
 
 
+@torch._jit_internal.weak_script
 def tanh(input):
     r"""tanh(input) -> Tensor
 
@@ -1119,6 +1141,7 @@ def tanh(input):
     return input.tanh()
 
 
+@torch._jit_internal.weak_script
 def sigmoid(input):
     r"""sigmoid(input) -> Tensor
 
@@ -1152,7 +1175,9 @@ def linear(input, weight, bias=None):
     return output
 
 
+@torch._jit_internal.weak_script
 def bilinear(input1, input2, weight, bias=None):
+    # type: (Tensor, Tensor, Tensor, Optional[Tensor]) -> Tensor
     return torch.bilinear(input1, input2, weight, bias)
 
 
@@ -1439,8 +1464,10 @@ def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
 
 # loss
 
+@torch._jit_internal.weak_script
 def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
              reduction='mean'):
+    # type: (Tensor, Tensor, Tensor, Tensor, int, str) -> Tensor
     r"""The Connectionist Temporal Classification loss.
 
     See :class:`~torch.nn.CTCLoss` for details.
@@ -1453,7 +1480,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
             `T = input length`, and `N = batch size`.
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
-        targets: :math:`(N, S)` or `(sum(target_lenghts))`.
+        targets: :math:`(N, S)` or `(sum(target_lengths))`.
             Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
         input_lengths: :math:`(N)`.
             Lengths of the inputs (must each be :math:`\leq T`)
@@ -1469,7 +1496,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
     Example::
 
         >>> log_probs = torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_()
-        >>> targets = torch.randint(1, 21, (16, 30), dtype=torch.long)
+        >>> targets = torch.randint(1, 20, (16, 30), dtype=torch.long)
         >>> input_lengths = torch.full((16,), 50, dtype=torch.long)
         >>> target_lengths = torch.randint(10,30,(16,), dtype=torch.long)
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)

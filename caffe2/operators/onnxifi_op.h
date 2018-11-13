@@ -14,6 +14,14 @@ namespace caffe2 {
 
 template <typename T, typename Context>
 class OnnxifiOp final : public Operator<Context> {
+  struct TensorInfo {
+    TensorInfo() {}
+    TensorInfo(TensorInfo&&) = default;
+    TensorInfo& operator=(TensorInfo&&) = default;
+    std::vector<uint64_t> dims;
+    uint64_t onnxifi_type;
+  };
+
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   OnnxifiOp(const OperatorDef& operator_def, Workspace* ws)
@@ -35,14 +43,15 @@ class OnnxifiOp final : public Operator<Context> {
       output_desc_.back().name = output.c_str();
 
       // For output, we try to get its output size hint
-      const std::string key = c10::str("output_size_hint_", output_idx);
-      auto output_size_hint = this->template GetRepeatedArgument<int>(key);
-      if (!output_size_hint.empty()) {
-        std::vector<int64_t> dims;
-        for (const auto v : output_size_hint) {
-          dims.push_back(v);
+      const std::string key = c10::str("output_shape_hint_", output_idx);
+      auto output_shape_hint = this->template GetRepeatedArgument<int>(key);
+      if (!output_shape_hint.empty()) {
+        TensorInfo info;
+        info.onnxifi_type = output_shape_hint.front();
+        for (int i = 1; i < output_shape_hint.size(); ++i) {
+          info.dims.push_back(output_shape_hint[i]);
         }
-        output_size_hints_.emplace(output_idx, std::move(dims));
+        output_shape_hints_.emplace(output_idx, std::move(info));
       }
       ++output_idx;
     }
@@ -127,11 +136,17 @@ class OnnxifiOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  private:
-  void SetOutputShape(int output_idx, std::vector<int64_t>* dims) {
-    const auto it = output_size_hints_.find(output_idx);
-    if (it != output_size_hints_.end()) {
-      *dims = it->second;
+  uint64_t SetOutputShapeAndType(int output_idx, std::vector<size_t>* dims) {
+    uint64_t type = ONNXIFI_DATATYPE_FLOAT32;
+    const auto it = output_shape_hints_.find(output_idx);
+    if (it != output_shape_hints_.end()) {
+      std::copy(
+          it->second.dims.begin(),
+          it->second.dims.end(),
+          std::back_inserter(*dims));
+      type = it->second.onnxifi_type;
     }
+    return type;
   }
 
   void BuildPropertyList(
@@ -163,7 +178,7 @@ class OnnxifiOp final : public Operator<Context> {
   std::vector<std::vector<uint64_t>> output_shapes_;
 
   // output shape hints
-  std::unordered_map<int, std::vector<int64_t>> output_size_hints_;
+  std::unordered_map<int, TensorInfo> output_shape_hints_;
 };
 
 } // namespace caffe2
