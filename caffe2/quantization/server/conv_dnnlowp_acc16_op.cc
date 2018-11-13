@@ -57,7 +57,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWC() {
 
 template <bool ReluFused>
 bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
-  if (!this->GetQuantizationParameters_()) {
+  if (!BaseType::GetQuantizationParameters_()) {
     return false;
   }
 
