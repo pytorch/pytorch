@@ -4951,10 +4951,10 @@ class TestNN(NNTestCase):
         pos_weight = torch.tensor([1., 1.])
 
         out1 = nn.BCEWithLogitsLoss()(output, target)
-        self.assertTrue(torch.isfinite(out1))
+        self.assertTrue(torch.isfinite(out1).all().item())
 
         out2 = nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target)
-        self.assertTrue(torch.isfinite(out2))
+        self.assertTrue(torch.isfinite(out2).all().item())
 
     def test_bce_loss_broadcasts_weights(self):
         sigmoid = nn.Sigmoid()
