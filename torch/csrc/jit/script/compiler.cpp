@@ -265,7 +265,7 @@ struct Environment {
 
   void setSugaredVar(const SourceRange& loc, const std::string& name, SugaredValuePtr value) {
     Value* as_simple_value = asSimple(value);
-    if (as_simple_value)
+    if (as_simple_value && !as_simple_value->hasUniqueName())
       as_simple_value->setUniqueName(name);
     // prevent re-assignment involving any sugared values
     // any reassignment like:
@@ -469,10 +469,12 @@ Value* tryMatchArgument(
     value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
-  if (value->type()->isSubtypeOf(NoneType::get())){
+  if (value->type()->isSubtypeOf(NoneType::get()) && !concrete_type->isSubtypeOf(NoneType::get())){
     if (concrete_type->isSubtypeOf(GeneratorType::get())) {
       value = graph.insertNode(graph.createNoneGenerator())->output();
-    } else if (concrete_type->isSubtypeOf(DynamicType::get())) {
+    }
+    if (concrete_type->isSubtypeOf(OptionalType::ofTensor())) {
+      // create undefined tensor when None pass to a optional[tensor] formal arg
       value = graph.insertNode(graph.createUndefined())->output();
     }
   }
@@ -884,7 +886,6 @@ struct to_ir {
                           << (schema.returns().size() > 1 ? "s" : "")
                           << " but found no return statement";
     }
-
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(graph);
@@ -1180,7 +1181,7 @@ private:
             max_trip_count->range(), emitExpr(max_trip_count.value()));
       } else {
         max_trip_count_val =
-            materializeConstant((int64_t)INT_MAX, *graph, range, integral_constants);
+            materializeConstant(std::numeric_limits<int64_t>::max(), *graph, range, integral_constants);
       }
       if (cond) {
         cond_val = emitCond(cond.value());
@@ -1317,8 +1318,7 @@ private:
   void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
     auto string_input = insertConstant(*graph, exception, loc);
-    graph->insertNode(graph->create(prim::RaiseException, {string_input}, 0)
-                        ->setSourceLocation(std::make_shared<SourceRange>(loc)));
+    graph->insert(prim::RaiseException, {string_input}, {}, loc);
   }
 
   void emitAssert(const Assert& stmt) {
@@ -2286,18 +2286,16 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, con
           Symbol::aten(builtin_cast_methods().at(field)),
           NamedValue(loc, "self", value));
     }
-    if (field == "dtype") {
-      auto* node = m.graph()->create(prim::TensorDType, {value});
-      node->output()->setType(IntType::get());
-      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
-    } else if (field == "device") {
-      auto* node = m.graph()->create(prim::TensorDevice, {value});
-      node->output()->setType(ListType::create(IntType::get()));
-      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
-    } else if (field == "shape") {
-      auto* node = m.graph()->create(prim::TensorShape, {value});
-      node->output()->setType(ListType::create(IntType::get()));
-      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
+    // functions that are just direct property lookups on tensor
+    // must be registered as prim::<name>(Tensor t) -> <return_type>
+    static const std::unordered_set<std::string> fields = {
+      "dtype",
+      "device",
+      "shape",
+    };
+    if (fields.count(field)) {
+      auto r = m.graph()->insert(Symbol::fromQualString("prim::"+field), {value});
+      return std::make_shared<SimpleValue>(r);
     }
   }
   if (getValue()->type()->isSubtypeOf(NumberType::get())) {

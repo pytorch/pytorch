@@ -217,10 +217,8 @@ if not ONNX_NAMESPACE:
 try:
     import ninja
     USE_NINJA = True
-    ninja_global = NinjaBuilder('global')
 except ImportError:
     USE_NINJA = False
-    ninja_global = None
 
 # Constant known variables used throughout this file
 cwd = os.path.dirname(os.path.abspath(__file__))
@@ -233,9 +231,14 @@ rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
 # full absolute path to the dir above
 full_site_packages = distutils.sysconfig.get_python_lib()
 # CMAKE: full path to python library
-cmake_python_library = "{}/{}".format(
-    distutils.sysconfig.get_config_var("LIBDIR"),
-    distutils.sysconfig.get_config_var("INSTSONAME"))
+if IS_WINDOWS:
+    cmake_python_library = "{}/libs/python{}.lib".format(
+        distutils.sysconfig.get_config_var("prefix"),
+        distutils.sysconfig.get_config_var("VERSION"))
+else:
+    cmake_python_library = "{}/{}".format(
+        distutils.sysconfig.get_config_var("LIBDIR"),
+        distutils.sysconfig.get_config_var("INSTSONAME"))
 cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 
 
@@ -457,7 +460,7 @@ class build_deps(PytorchCommand):
         def check_file(f):
             if not os.path.exists(f):
                 print("Could not find {}".format(f))
-                print("Did you run 'git submodule update --init'?")
+                print("Did you run 'git submodule update --init --recursive'?")
                 sys.exit(1)
 
         check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
@@ -633,12 +636,16 @@ class build_ext(build_ext_parent):
         else:
             print('-- Building without distributed package')
 
-        generate_code(ninja_global)
-
         if USE_NINJA:
+            ninja_builder = NinjaBuilder('global')
+
+            generate_code(ninja_builder)
+
             # before we start the normal build make sure all generated code
             # gets built
-            ninja_global.run()
+            ninja_builder.run()
+        else:
+            generate_code(None)
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -819,6 +826,8 @@ else:
         '-Wno-missing-braces',
         # gcc7 seems to report spurious warnings with this enabled
         "-Wno-stringop-overflow",
+        # gcc7 also reports spurious warnings with this enabled
+        "-Wno-maybe-uninitialized",
     ]
     if check_env_flag('WERROR'):
         extra_compile_args.append('-Werror')
@@ -1017,6 +1026,7 @@ if USE_ROCM:
     rocfft_include_path = '/opt/rocm/rocfft/include'
     hiprand_include_path = '/opt/rocm/hiprand/include'
     rocrand_include_path = '/opt/rocm/rocrand/include'
+    thrust_include_path = '/opt/rocm/include/'
     hip_lib_path = '/opt/rocm/hip/lib'
     hcc_lib_path = '/opt/rocm/hcc/lib'
     include_dirs.append(rocm_include_path)
@@ -1026,6 +1036,7 @@ if USE_ROCM:
     include_dirs.append(hipsparse_include_path)
     include_dirs.append(hiprand_include_path)
     include_dirs.append(rocrand_include_path)
+    include_dirs.append(thrust_include_path)
     include_dirs.append(tmp_install_path + "/include/THCUNN")
     extra_link_args.append('-L' + hip_lib_path)
     extra_link_args.append('-Wl,-rpath,' + hip_lib_path)
@@ -1202,6 +1213,7 @@ if __name__ == '__main__':
                 'lib/include/c10/*.h',
                 'lib/include/c10/macros/*.h',
                 'lib/include/c10/util/*.h',
+                'lib/include/c10/detail/*.h',
                 'lib/include/caffe2/core/*.h',
                 'lib/include/caffe2/proto/*.h',
                 'lib/include/torch/*.h',

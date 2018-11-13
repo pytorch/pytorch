@@ -90,7 +90,7 @@ bool shape_is_fast(const at::Tensor& lhs, const at::Tensor& rhs) {
 
 RegisterOperators mm_tree_reduction_reg({
   Operator(
-    Symbol::prim("MMTreeReduce"),
+    prim::MMTreeReduce,
     [](const Node* node) {
       size_t num_inputs = node->inputs().size();
       return [num_inputs](Stack& stack) {

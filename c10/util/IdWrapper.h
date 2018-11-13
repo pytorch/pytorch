@@ -4,7 +4,7 @@
 #include <functional>
 #include <utility>
 
-namespace at {
+namespace c10 {
 
 /**
  * This template simplifies generation of simple classes that wrap an id
@@ -17,7 +17,7 @@ namespace at {
  *
  * Then in the global top level namespace:
  *
- *   AT_DEFINE_HASH_FOR_IDWRAPPER(MyIdType);
+ *   C10_DEFINE_HASH_FOR_IDWRAPPER(MyIdType);
  *
  * That's it - equality operators and hash functions are automatically defined
  * for you, given the underlying type supports it.
@@ -64,9 +64,9 @@ class CAFFE2_API IdWrapper {
   underlying_type id_;
 };
 
-} // namespace at
+} // namespace c10
 
-#define AT_DEFINE_HASH_FOR_IDWRAPPER(ClassName) \
+#define C10_DEFINE_HASH_FOR_IDWRAPPER(ClassName)\
   namespace std {                               \
   template <>                                   \
   struct hash<ClassName> {                      \

@@ -45,7 +45,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
 
     const auto backend = cuda ? torch::kCUDA : torch::kCPU;
     auto inputs =
-        torch::rand({nlen, bs, 1}, backend).round().toType(torch::kFloat32);
+        torch::rand({nlen, bs, 1}, backend).round().to(torch::kFloat32);
     auto labels = inputs.sum(0).detach();
     inputs.set_requires_grad(true);
 

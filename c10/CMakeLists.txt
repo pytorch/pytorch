@@ -1,3 +1,9 @@
+cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+project(c10 CXX)
+
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Main build file for the C10 library.
 #
 # Note that the C10 library should maintain minimal dependencies - especially,
@@ -17,10 +23,13 @@ configure_file(
 # Note: if you want to add ANY dependency to the c10 library, make sure you
 # check with the core PyTorch developers as the dependendency will be
 # transitively passed on to all libraries dependent on PyTorch.
-file(GLOB_RECURSE C10_SRCS *.cpp)
-# exclude test files
+file(GLOB C10_SRCS
+        *.cpp
+        detail/*.cpp
+        macros/*.cpp
+        util/*.cpp
+        )
 file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
-exclude(C10_SRCS "${C10_SRCS}" ${C10_ALL_TEST_FILES})
 file(GLOB_RECURSE C10_HEADERS *.h)
 add_library(c10 ${C10_SRCS} ${C10_HEADERS})
 # If building shared library, set dllimport/dllexport proper.
