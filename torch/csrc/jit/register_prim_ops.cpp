@@ -895,6 +895,9 @@ Operator(                                                                      \
       std::floor(a / b), int, float)
     DEFINE_INT_FLOAT_OP(aten::floordiv, std::floor(a / b), float)
 
+    //only used in loop unrolling, not exposed to end users
+    DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b)
+
     DEFINE_INT_OP(aten::__and__, a & b)
     DEFINE_INT_OP(aten::__or__, a | b)
     DEFINE_INT_OP(aten::__xor__, a ^ b)
