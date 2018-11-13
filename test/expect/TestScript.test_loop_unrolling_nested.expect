@@ -7,7 +7,7 @@ graph(%x : Dynamic) {
       %7 : int = prim::TensorToNum(%x)
       %8 : int = prim::Constant[value=0]()
       %9 : int = prim::Constant[value=8]()
-      %10 : int = aten::floordiv(%7, %9)
+      %10 : int = aten::__round_to_zero_floordiv(%7, %9)
       %11 : int = prim::Constant[value=8]()
       %12 : int = aten::mul(%10, %11)
       %13 : int = aten::sub(%7, %12)
