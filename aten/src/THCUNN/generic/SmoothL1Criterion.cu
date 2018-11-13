@@ -41,7 +41,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
     thrust::plus<accreal>(), smoothl1_functor<scalar_t, accreal>()
   );
 
-  if (reduction == Reduction::ElementwiseMean)
+  if (reduction == Reduction::Mean)
     sum /= size;
 
   THCTensor_(free)(state, input);
@@ -78,7 +78,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
   THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);
-  scalar_t norm = ScalarConvert<accreal, scalar_t>::to(reduction == Reduction::ElementwiseMean ? accreal(1)/size : accreal(1));
+  scalar_t norm = ScalarConvert<accreal, scalar_t>::to(reduction == Reduction::Mean ? accreal(1)/size : accreal(1));
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);

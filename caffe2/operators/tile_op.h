@@ -30,24 +30,24 @@ class TileOp : public Operator<Context> {
       // InputSize() == 3: tiles is specified and axis.
       // Anything specified as input will override the arguments
       CAFFE_ENFORCE(
-          Input(1).ndim() == 1 && Input(1).size() == 1,
+          Input(1).dim() == 1 && Input(1).numel() == 1,
           "Input `tiles` should be a vector of size 1.");
 
       const auto& input1 = Input(1);
       context_.CopyItemsToCPU(
-          input1.meta(),
+          input1.dtype(),
           1,
           static_cast<const char*>(input1.raw_data()),
           &(temp_params[0]));
 
       if (InputSize() > 2) {
         CAFFE_ENFORCE(
-            Input(2).ndim() == 1 && Input(2).size() == 1,
+            Input(2).dim() == 1 && Input(2).numel() == 1,
             "Input `axis` should be a vector of size 1.");
 
         const auto& input2 = Input(2);
         context_.CopyItemsToCPU(
-            input2.meta(),
+            input2.dtype(),
             1,
             static_cast<const char*>(input2.raw_data()),
             &(temp_params[1]));
@@ -72,7 +72,7 @@ class TileOp : public Operator<Context> {
     const auto axis = input.canonical_axis_index(axis_);
 
     // reshape output to be input tiled along the axis
-    vector<int64_t> output_dims(input.dims().vec());
+    vector<int64_t> output_dims(input.sizes().vec());
     output_dims[axis_] = output_dims[axis_] * tiles_;
     output->Resize(output_dims);
 
@@ -91,10 +91,10 @@ class TileOp : public Operator<Context> {
      */
     const char* input_data = static_cast<const char*>(input.raw_data());
     char* output_data =
-        static_cast<char*>(output->raw_mutable_data(input.meta()));
+        static_cast<char*>(output->raw_mutable_data(input.dtype()));
 
     DoTile(
-        input.meta(),
+        input.dtype(),
         input.itemsize(),
         outer_dim,
         inner_dim,
@@ -144,24 +144,24 @@ class TileGradientOp : public Operator<Context> {
       // InputSize() == 3: tiles is specified and axis.
       // Anything specified as input will override the arguments
       CAFFE_ENFORCE(
-          Input(1).ndim() == 1 && Input(1).size() == 1,
+          Input(1).dim() == 1 && Input(1).numel() == 1,
           "Input `tiles` should be a vector of size 1.");
 
       const auto& input1 = Input(1);
       context_.CopyItemsToCPU(
-          input1.meta(),
+          input1.dtype(),
           1,
           static_cast<const char*>(input1.raw_data()),
           &(temp_params[0]));
 
       if (InputSize() > 2) {
         CAFFE_ENFORCE(
-            Input(2).ndim() == 1 && Input(2).size() == 1,
+            Input(2).dim() == 1 && Input(2).numel() == 1,
             "Input `axis` should be a vector of size 1.");
 
         const auto& input2 = Input(2);
         context_.CopyItemsToCPU(
-            input2.meta(),
+            input2.dtype(),
             1,
             static_cast<const char*>(input2.raw_data()),
             &(temp_params[1]));
@@ -187,7 +187,7 @@ class TileGradientOp : public Operator<Context> {
     const auto axis = input.canonical_axis_index(axis_);
 
     // reshape output to be input "untiled" along the axis
-    vector<int64_t> output_dims(input.dims().vec());
+    vector<int64_t> output_dims(input.sizes().vec());
     output_dims[axis_] = output_dims[axis_] / tiles_;
     output->Resize(output_dims);
 
@@ -208,10 +208,10 @@ class TileGradientOp : public Operator<Context> {
      */
     const char* input_data = static_cast<const char*>(input.raw_data());
     char* output_data =
-        static_cast<char*>(output->raw_mutable_data(input.meta()));
+        static_cast<char*>(output->raw_mutable_data(input.dtype()));
 
     DoTileGradient(
-        input.meta(),
+        input.dtype(),
         input.itemsize(),
         outer_dim,
         inner_dim,

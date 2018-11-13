@@ -38,6 +38,12 @@ int64_t wrapDim(int64_t dim, at::IntList sizes) {
   return dim;
 }
 
+// TODO: Would be better to make JIT not assume that CUDA devices
+// are the only thing that exist.
+static at::Device jitDeviceIndexToDevice(int device) {
+  return device == -1 ? at::kCPU : at::Device(at::kCUDA, device);
+}
+
 IValue representativeValue(Value* v) {
   TypePtr type_ = v->type();
   // if the value is actually constant, just use it!
@@ -46,9 +52,9 @@ IValue representativeValue(Value* v) {
   }
   if (CompleteTensorTypePtr type = type_->cast<CompleteTensorType>()) {
     auto backend = type->device() == -1 ? at::Backend::CPU : at::Backend::CUDA;
-    at::DeviceGuard device_guard(type->device());
+    at::DeviceGuard device_guard(jitDeviceIndexToDevice(type->device()));
     auto& attype = at::getNonVariableType(backend, type->scalarType());
-    auto t = attype.tensor(type->sizes(), type->strides()).zero_();
+    auto t = at::empty_strided(type->sizes(), type->strides(), attype.options()).zero_();
     return autograd::make_variable(t, /*requires_grad=*/false);
   } else if (type_->isSubtypeOf(FloatType::get())) {
     return 0.f;
@@ -71,15 +77,15 @@ c10::optional<std::vector<std::shared_ptr<T>>> gatherTensorTypes(Node* node) {
   std::vector<std::shared_ptr<T>> tensor_types;
 
   auto & schema = node->schema();
-  auto & args = schema.arguments;
+  auto & args = schema.arguments();
   // can't handle varargs primitives because we don't know what should be a Tensor
-  if (schema.is_vararg) {
+  if (schema.is_vararg()) {
     return c10::nullopt;
   }
   for (size_t i = 0; i < args.size(); ++i) {
-    if (args[i].type->isSubtypeOf(ListType::ofTensors())) {
+    if (args[i].type()->isSubtypeOf(ListType::ofTensors())) {
       return c10::nullopt;
-    } else if (args[i].type->isSubtypeOf(DynamicType::get())) {
+    } else if (args[i].type()->isSubtypeOf(DynamicType::get())) {
       if (auto type = node->input(i)->type()->cast<T>()) {
         tensor_types.push_back(type);
       } else {
@@ -348,6 +354,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     }
     case prim::PythonOp:
     case prim::Print:
+    case prim::RaiseException:
     case prim::Undefined: {
       setUnshapedType(node);
       return;
@@ -429,7 +436,6 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::t(Tensor self) -> Tensor",
     "aten::sigmoid(Tensor self) -> Tensor",
     "aten::tanh(Tensor self) -> Tensor",
-    "aten::exp(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
     "aten::asin(Tensor self) -> Tensor",
     "aten::atan(Tensor self) -> Tensor",
@@ -438,7 +444,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::contiguous(Tensor self) -> Tensor",
     "aten::bernoulli(Tensor self, *, Generator generator) -> Tensor",
     "aten::celu(Tensor self, Scalar alpha) -> Tensor",
-    "aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor",
+    "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
     "aten::clamp_max(Tensor self, Scalar max) -> Tensor",
     "aten::clamp_min(Tensor self, Scalar min) -> Tensor",
     "aten::alpha_dropout(Tensor input, float p, bool train) -> Tensor",
@@ -531,8 +537,6 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::mul(Tensor self, Tensor other) -> Tensor",
     "aten::div(Tensor self, Tensor other) -> Tensor",
     "aten::pow(Tensor self, Tensor exponent) -> Tensor",
-    "aten::min(Tensor self, Tensor other) -> Tensor",
-    "aten::max(Tensor self, Tensor other) -> Tensor",
     "aten::fmod(Tensor self, Tensor other) -> Tensor",
     "aten::remainder(Tensor self, Tensor other) -> Tensor",
     "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
@@ -645,15 +649,15 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
   //     Knowing the type and device of weights or biases is usually enough to
   //     infer the output type.
   static const register_formula_for nn_ops_first_input_preserving {{
-    "aten::batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
-    "aten::conv1d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
-    "aten::conv2d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
-    "aten::conv3d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
+    "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
+    "aten::conv1d(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
+    "aten::conv2d(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
+    "aten::conv3d(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
     "aten::conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad) -> Tensor",
-    "aten::conv_transpose1d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
-    "aten::conv_transpose2d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
-    "aten::conv_transpose3d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
-    "aten::convolution(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor",
+    "aten::conv_transpose1d(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
+    "aten::conv_transpose2d(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
+    "aten::conv_transpose3d(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
+    "aten::convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor",
     "aten::adaptive_avg_pool1d(Tensor self, int[] output_size) -> Tensor",
     "aten::adaptive_avg_pool2d(Tensor self, int[] output_size) -> Tensor",
     "aten::adaptive_avg_pool3d(Tensor self, int[] output_size) -> Tensor",
@@ -1012,7 +1016,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
       node->output()->setType(weight_type->withDim(indices_type->dim() + 1));
       return true;
     }
-  } else if (node->matches("aten::bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor bias) -> Tensor")) {
+  } else if (node->matches("aten::bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor")) {
     if (auto type = input_type(0)) {
       node->output()->setType(type);
       return true;

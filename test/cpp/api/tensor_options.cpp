@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <ATen/Context.h>
 #include <ATen/Functions.h>
@@ -50,7 +50,7 @@ TEST(TensorOptionsTest, UtilityFunctionsReturnTheRightTensorOptions) {
   options = device_index(1);
   REQUIRE_OPTIONS(kCUDA, 1, kFloat, kStrided);
 
-  options = dtype(kByte).layout(kSparse).device({kCUDA, 2}).device_index(3);
+  options = dtype(kByte).layout(kSparse).device(kCUDA, 2).device_index(3);
   REQUIRE_OPTIONS(kCUDA, 3, kByte, kSparse);
 }
 
@@ -59,6 +59,9 @@ TEST(TensorOptionsTest, ConstructsWellFromCPUTypes) {
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
 
   options = TensorOptions({kCPU, 0});
+  REQUIRE_OPTIONS(kCPU, 0, kFloat, kStrided);
+
+  options = TensorOptions("cpu:0");
   REQUIRE_OPTIONS(kCPU, 0, kFloat, kStrided);
 
   options = TensorOptions(kInt);

@@ -18,6 +18,8 @@ using at::Tensor;
 using at::IntList;
 using at::Type;
 using at::TensorGeometry;
+using at::ScalarType;
+using c10::optional;
 
 inline std::vector<Tensor> unpack_list(at::ArrayRef<SavedVariable> xs) {
   // NB: we must explicitly do the conversion in the lambda, otherwise template

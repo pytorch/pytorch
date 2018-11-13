@@ -175,13 +175,6 @@ class GetBatchMatMulGradient : public GradientMakerBase {
     auto trans_both_arg = vector<Argument>{MakeArgument<int>("trans_a", 1),
                                            MakeArgument<int>("trans_b", 1)};
 
-    if (ArgumentHelper::HasArgument(Def(), "use_scratch")) {
-      no_trans_arg.push_back(MakeArgument<int>("use_scratch", 1));
-      trans_a_arg.push_back(MakeArgument<int>("use_scratch", 1));
-      trans_b_arg.push_back(MakeArgument<int>("use_scratch", 1));
-      trans_both_arg.push_back(MakeArgument<int>("use_scratch", 1));
-    }
-
     if (trans_a) {
       if (trans_b) {
         // A'B':

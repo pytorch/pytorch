@@ -24,7 +24,9 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   }
   if (should_compute_output(1)) {
     at::DeviceGuard device_guard(src_device);
-    if (grad.is_cuda() && grad.get_device() != src_device) {
+    // TODO: What if !grad.is_cuda(), but src_device is CUDA?
+    // This code is kind of weirdly asymmetric.
+    if (grad.is_cuda() && grad.device() != src_device) {
       grad_inputs[1] = src_type->copy(grad);
     } else {
       grad_inputs[1] = grad.toType(*src_type);

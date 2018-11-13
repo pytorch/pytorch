@@ -26,28 +26,28 @@ class ReservoirSamplingOp final : public Operator<Context> {
     auto* output = Output(RESERVOIR);
     const auto& input = Input(DATA);
 
-    CAFFE_ENFORCE_GE(input.ndim(), 1);
+    CAFFE_ENFORCE_GE(input.dim(), 1);
 
-    bool output_initialized = output->size() > 0 &&
+    bool output_initialized = output->numel() > 0 &&
         (static_cast<std::shared_ptr<std::vector<TensorCPU>>*>(
-             output->raw_mutable_data(input.meta()))[0] != nullptr);
+             output->raw_mutable_data(input.dtype()))[0] != nullptr);
 
     if (output_initialized) {
-      CAFFE_ENFORCE_EQ(output->ndim(), input.ndim());
-      for (size_t i = 1; i < input.ndim(); ++i) {
-        CAFFE_ENFORCE_EQ(output->dim(i), input.dim(i));
+      CAFFE_ENFORCE_EQ(output->dim(), input.dim());
+      for (size_t i = 1; i < input.dim(); ++i) {
+        CAFFE_ENFORCE_EQ(output->size(i), input.size(i));
       }
     }
 
-    auto num_entries = input.dims()[0];
+    auto num_entries = input.sizes()[0];
 
     if (!output_initialized) {
       // IMPORTANT: Force the output to have the right type before reserving,
       // so that the output gets the right capacity
-      auto dims = input.dims().vec();
+      auto dims = input.sizes().vec();
       dims[0] = 0;
       output->Resize(dims);
-      output->raw_mutable_data(input.meta());
+      output->raw_mutable_data(input.dtype());
       output->ReserveSpace(numToCollect_);
     }
 
@@ -71,7 +71,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
     }
 
     auto* num_visited_tensor = Output(NUM_VISITED);
-    CAFFE_ENFORCE_EQ(1, num_visited_tensor->size());
+    CAFFE_ENFORCE_EQ(1, num_visited_tensor->numel());
     auto* num_visited = num_visited_tensor->template mutable_data<int64_t>();
     if (!output_initialized) {
       *num_visited = 0;
@@ -90,16 +90,16 @@ class ReservoirSamplingOp final : public Operator<Context> {
     std::set<int64_t> unique_object_ids;
     if (InputSize() > OBJECT_ID) {
       const auto& object_id = Input(OBJECT_ID);
-      CAFFE_ENFORCE_EQ(object_id.ndim(), 1);
-      CAFFE_ENFORCE_EQ(object_id.size(), num_entries);
+      CAFFE_ENFORCE_EQ(object_id.dim(), 1);
+      CAFFE_ENFORCE_EQ(object_id.numel(), num_entries);
       object_id_data = object_id.template data<int64_t>();
       unique_object_ids.insert(
-          object_id_data, object_id_data + object_id.size());
+          object_id_data, object_id_data + object_id.numel());
     }
 
     const auto num_new_entries = countNewEntries(unique_object_ids);
     auto num_to_copy = std::min<int32_t>(num_new_entries, numToCollect_);
-    auto output_batch_size = output_initialized ? output->dim(0) : 0;
+    auto output_batch_size = output_initialized ? output->size(0) : 0;
     auto output_num =
         std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
     // output_num is >= output_batch_size
@@ -109,7 +109,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
     }
 
     auto* output_data =
-        static_cast<char*>(output->raw_mutable_data(input.meta()));
+        static_cast<char*>(output->raw_mutable_data(input.dtype()));
     auto* pos_to_object_data = pos_to_object
         ? pos_to_object->template mutable_data<int64_t>()
         : nullptr;
@@ -159,7 +159,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
       } else {
         // replace
         context_.CopyItemsSameDevice(
-            input.meta(),
+            input.dtype(),
             block_size,
             input_data + i * block_bytesize,
             output_data + pos * block_bytesize);
@@ -197,7 +197,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
   int32_t countNewEntries(const std::set<int64_t>& unique_object_ids) {
     const auto& input = Input(DATA);
     if (InputSize() <= OBJECT_ID) {
-      return input.dim(0);
+      return input.size(0);
     }
     const auto& object_to_pos_map =
         OperatorBase::Input<MapType64To32>(OBJECT_TO_POS_MAP_IN);

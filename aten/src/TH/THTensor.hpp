@@ -9,6 +9,13 @@
 #include <atomic>
 #include <ATen/ATen.h>
 
+// Returns a Tensor given a TensorImpl. The TensorImpl remains valid after the
+// the Tensor is destroyed.
+inline at::Tensor THTensor_wrap(THTensor* tensor) {
+  c10::raw::intrusive_ptr::incref(tensor);
+  return at::Tensor(c10::intrusive_ptr<at::TensorImpl>::reclaim(tensor));
+}
+
 inline const int64_t* THTensor_getSizePtr(THTensor* tensor) {
   return tensor->sizes().data();
 }
@@ -55,17 +62,17 @@ inline int THTensor_nDimensionLegacyNoScalars(const THTensor* tensor) {
   if (tensor->dim() == 0) {
     return 1;
   } else {
-    return tensor->dim();  
+    return tensor->dim();
   }
 }
 
 inline int THTensor_nDimensionLegacyAll(const THTensor* tensor) {
   if (tensor->is_empty()) {
-    return 0;  
+    return 0;
   } else if (tensor->dim() == 0) {
     return 1;
   } else {
-    return tensor->dim();  
+    return tensor->dim();
   }
 }
 

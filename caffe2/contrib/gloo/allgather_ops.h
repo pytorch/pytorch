@@ -74,8 +74,8 @@ class AllgatherOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(OutputSize(), 1);
     auto comm_size =
         OperatorBase::Input<std::shared_ptr<::gloo::Context>>(0)->size;
-    const auto dims =
-        std::vector<int64_t>(1, (InputSize() - 1) * Input(1).size() * comm_size);
+    const auto dims = std::vector<int64_t>(
+        1, (InputSize() - 1) * Input(1).numel() * comm_size);
     Output(0)->Resize(dims);
 
     // Store which inputs/outputs this instance initialized with
@@ -84,15 +84,15 @@ class AllgatherOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(init_.outputs.size(), 1);
 
     // Verify tensors all have same size
-    size_t size = Input(1).size();
+    size_t size = Input(1).numel();
     for (auto i = 2; i < InputSize(); i++) {
-      CAFFE_ENFORCE_EQ(Input(i).size(), size);
+      CAFFE_ENFORCE_EQ(Input(i).numel(), size);
     }
 
     // Verify tensors all have same type
-    TypeMeta meta = Input(1).meta();
+    TypeMeta meta = Input(1).dtype();
     for (auto i = 2; i < InputSize(); i++) {
-      CAFFE_ENFORCE(Input(i).meta() == meta);
+      CAFFE_ENFORCE(Input(i).dtype() == meta);
     }
 
     // Finally initialize the algorithm
@@ -111,8 +111,8 @@ class AllgatherOp final : public Operator<Context> {
   void update(GlooParameters& params) {
     params.context = OperatorBase::Input<std::shared_ptr<::gloo::Context>>(0);
     params.inputs.resize(InputSize() - 1);
-    params.size = Input(1).size();
-    params.meta = Input(1).meta();
+    params.size = Input(1).numel();
+    params.meta = Input(1).dtype();
     for (auto i = 0; i < params.inputs.size(); i++) {
       params.inputs[i] = Input(i + 1).raw_data();
     }

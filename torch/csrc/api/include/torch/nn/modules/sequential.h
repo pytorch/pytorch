@@ -5,7 +5,7 @@
 #include <torch/nn/module.h>
 #include <torch/nn/modules/any.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <c10/util/Exception.h>
 
@@ -104,7 +104,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// Special cloning function for `Sequential` because it does not use
   /// `reset()`.
   std::shared_ptr<Module> clone(
-      c10::optional<Device> device = c10::nullopt) const override {
+      optional<Device> device = nullopt) const override {
     auto clone = std::make_shared<SequentialImpl>();
     for (const auto& module : modules_) {
       clone->push_back(module.clone(device));

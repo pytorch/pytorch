@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/core/IdWrapper.h"
+#include "c10/util/IdWrapper.h"
 
 namespace c10 {
 
@@ -19,4 +19,4 @@ public:
 
 }
 
-AT_DEFINE_HASH_FOR_IDWRAPPER(c10::LayoutId)
+C10_DEFINE_HASH_FOR_IDWRAPPER(c10::LayoutId)

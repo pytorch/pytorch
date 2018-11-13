@@ -1,52 +1,52 @@
 # Loss functions
 
-- name: binary_cross_entropy(Tensor self, Tensor target, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean)
+- name: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean)
   cname: BCECriterion
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
 
-- name: l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: AbsCriterion
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
 
-- name: mse_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: mse_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: MSECriterion
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
 
-- name: multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean)
+- name: multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor? weight={}, int64_t reduction=Reduction::Mean)
   cname: MultiMarginCriterion
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
 
-- name: multilabel_margin_loss(Tensor self, LongTensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: multilabel_margin_loss(Tensor self, LongTensor target, int64_t reduction=Reduction::Mean)
   cname: MultiLabelMarginCriterion
   buffers: [is_target]
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
     is_target: target_->dim() == 0
 
-- name: nll_loss(Tensor self, LongTensor target, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean, int64_t ignore_index=-100)
+- name: nll_loss(Tensor self, LongTensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
   cname: ClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
     total_weight: 'true'
 
-- name: nll_loss2d(Tensor self, LongTensor target, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean, int64_t ignore_index=-100)
+- name: nll_loss2d(Tensor self, LongTensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
     total_weight: 'true'
 
-- name: smooth_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: smooth_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: SmoothL1Criterion
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
 
-- name: soft_margin_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: soft_margin_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: SoftMarginCriterion
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
@@ -101,12 +101,6 @@
 
 - name: softshrink(Tensor self, Scalar lambd=0.5)
   cname: SoftShrink
-  scalar_check:
-    output: self_->dim() == 0
-
-- name: threshold(Tensor self, Scalar threshold, Scalar value)
-  cname: Threshold
-  has_inplace: True
   scalar_check:
     output: self_->dim() == 0
 
@@ -223,44 +217,32 @@
     output: self_->dim() == 0
     grad_input: output_->dim() == 0
 
-# Batch normalization
-
-# The buffers here are somewhat hazardous, because their type will be
-# based off of self, even though you may plausibly wish running_mean
-# and running_var to have different precision than self (e.g.,
-# BatchNorm on half).  Fortunately, THNN doesn't actually ever do this,
-# so the buffer allocation code is "correct".  If you ever do fix this,
-# you should just port the function entirely to a native ATen function.
-- name: thnn_batch_norm(Tensor self, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double momentum, double eps)
-  cname: BatchNormalization
-  buffers: [save_mean, save_std]
-
 # Convolutions
 
-- name: thnn_conv_transpose2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, IntList[2] dilation=1)
+- name: thnn_conv_transpose2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, IntList[2] dilation=1)
   cname: SpatialFullDilatedConvolution
   buffers: [columns, ones]
 
-- name: thnn_conv_transpose3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1)
+- name: thnn_conv_transpose3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1)
   cname: VolumetricFullDilatedConvolution
   buffers: [finput, fgrad_input]
 
-- name: thnn_conv2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0)
+- name: thnn_conv2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0)
   cname: SpatialConvolutionMM
   buffers: [finput, fgrad_input]
 
-- name: thnn_conv_depthwise2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
+- name: thnn_conv_depthwise2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
   cname: SpatialDepthwiseConvolution
   buffers: []
 
-- name: thnn_conv3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0)
+- name: thnn_conv3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0)
   cname: VolumetricConvolutionMM
   buffers: [finput, fgrad_input]
 
-- name: thnn_conv_dilated2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
+- name: thnn_conv_dilated2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
   cname: SpatialDilatedConvolution
   buffers: [columns, ones]
 
-- name: thnn_conv_dilated3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1)
+- name: thnn_conv_dilated3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1)
   cname: VolumetricDilatedConvolution
   buffers: [columns, ones]

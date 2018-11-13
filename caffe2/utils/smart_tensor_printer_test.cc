@@ -28,12 +28,9 @@ void expect_stderr_contains(const std::vector<T>& values) {
 template <typename T>
 void printTensorAndCheck(const std::vector<T>& values) {
   testing::internal::CaptureStderr();
-  CPUContext cpuContext;
 
-  Tensor tensor(
-      std::vector<int64_t>{static_cast<int64_t>(values.size())},
-      values,
-      &cpuContext);
+  Tensor tensor =
+      TensorCPUFromValues<T>({static_cast<int64_t>(values.size())}, values);
 
   SmartTensorPrinter::PrintTensor(tensor);
   expect_stderr_contains(values);

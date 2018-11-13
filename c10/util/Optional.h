@@ -13,6 +13,11 @@
 // - Move to `c10` namespace.
 // - Remove macro use in line 478 because the nvcc device compiler cannot handle
 // it.
+// - revise constructor logic so that it is consistent with c++ 17 standard documented
+// here in (8): https://en.cppreference.com/w/cpp/utility/optional/optional, and
+// could be able to support initialization of optionals from convertible type U, also
+// remove two old constructors optional(const T&) and optional(T&&) as it could be
+// handled by the template<U=T> case with default template argument.
 
 #ifndef C10_UTIL_OPTIONAL_H_
 #define C10_UTIL_OPTIONAL_H_
@@ -399,9 +404,34 @@ class optional : private OptionalBase<T> {
     }
   }
 
-  constexpr optional(const T& v) : OptionalBase<T>(v) {}
+  // see https://github.com/akrzemi1/Optional/issues/16
+  // and https://en.cppreference.com/w/cpp/utility/optional/optional,
+  // in constructor 8, the std::optional spec can allow initialization
+  // of optionals from convertible type U
+  //
+  // 8 - implicit move construct from value
+  template<
+      typename U = T,
+      TR2_OPTIONAL_REQUIRES(
+          std::is_constructible<T, U&&>::value
+          && !std::is_same<typename std::decay<U>::type, in_place_t>::value
+          && !std::is_same<typename std::decay<U>::type, optional<T>>::value
+          && std::is_convertible<U&&, T>
+      )
+    >
+  constexpr optional(U&& u) : OptionalBase<T>(std::forward<U>(u)) {}
 
-  constexpr optional(T&& v) : OptionalBase<T>(constexpr_move(v)) {}
+  // 8 - explicit move construct from value
+  template<
+      typename U = T,
+      TR2_OPTIONAL_REQUIRES(
+          std::is_constructible<T, U&&>::value
+          && !std::is_same<typename std::decay<U>::type, in_place_t>::value
+          && !std::is_same<typename std::decay<U>::type, optional<T>>::value
+          && !std::is_convertible<U&&, T>
+      )
+    >
+  explicit constexpr optional(U&& u) : OptionalBase<T>(std::forward<U>(u)) {}
 
   template <class... Args>
   explicit constexpr optional(in_place_t, Args&&... args)
@@ -448,9 +478,12 @@ class optional : private OptionalBase<T> {
     return *this;
   }
 
-  template <class U>
+  template<class U = T>
   auto operator=(U&& v) -> typename std::enable_if<
-      std::is_same<typename std::decay<U>::type, T>::value,
+          std::is_constructible<T, U>::value
+          && !std::is_same<typename std::decay<U>::type, optional<T>>::value
+          && (std::is_scalar<T>::value || std::is_same<typename std::decay<U>::type, T>::value)
+          && std::is_assignable<T&, U>::value,
       optional&>::type {
     if (initialized()) {
       contained_val() = std::forward<U>(v);
@@ -612,8 +645,21 @@ class optional : private OptionalBase<T> {
   }
 };
 
+
+// XXX: please refrain from using optional<T&>, since it is being against with
+// the optional standard in c++ 17, see the debate and the details here:
+// http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2012/n3406#rationale.refs
+// if you need it, consider using optional<std::reference_wrapper<T>> or * pointer
+//
+// we leave the implementation here in case we want to reconsider using it in the
+// future if it becomes a definitely necessary case.
 template <class T>
 class optional<T&> {
+  // add this assert to prevent user from using optional reference as indicated above
+  static_assert(sizeof(T) == 0, "optional references is ill-formed, \
+    consider use optional of a std::reference_wrapper of type T to \
+    hold a reference if you really need to");
+
   static_assert(!std::is_same<T, nullopt_t>::value, "bad T");
   static_assert(!std::is_same<T, in_place_t>::value, "bad T");
   T* ref;
@@ -624,9 +670,11 @@ class optional<T&> {
 
   constexpr optional(nullopt_t) noexcept : ref(nullptr) {}
 
-  constexpr optional(T& v) noexcept : ref(detail_::static_addressof(v)) {}
+  template<typename U = T>
+  constexpr optional(U& u) noexcept : ref(detail_::static_addressof(u)) {}
 
-  optional(T&&) = delete;
+  template<typename U = T>
+  optional(U&&) = delete;
 
   constexpr optional(const optional& rhs) noexcept : ref(rhs.ref) {}
 
@@ -1031,7 +1079,8 @@ struct hash<c10::optional<T&>> {
 };
 } // namespace std
 
-// TODO: remove at::optional when done moving files
+// Plan on record is to land 'using namespace c10' to bridge c10 into at:: and
+// caffe2:: namespaces. Until that lands, proceeding one name at a time.
 namespace at {
 template <class T>
 using optional = c10::optional<T>;
