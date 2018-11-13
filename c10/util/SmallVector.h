@@ -13,7 +13,7 @@
 
 // ATen: modified from llvm::SmallVector.
 // replaced report_bad_alloc_error with std::bad_alloc
-// replaced isPodLike<T> with AT_IS_TRIVIALLY_COPYABLE
+// replaced isPodLike<T> with C10_IS_TRIVIALLY_COPYABLE (moved to Macros.h)
 // replaced iterator_range constructor with inline Container&& constructor
 // removed LLVM_NODISCARD and LLVM_ATTRIBUTE_ALWAYS_INLINE qualifiers
 // removed LLVM_UNLIKELY
@@ -34,12 +34,6 @@
 #include <new>
 #include <type_traits>
 #include <utility>
-
-#if __GNUG__ && __GNUC__ < 5
-#define AT_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
-#else
-#define AT_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
-#endif
 
 namespace c10 {
 
@@ -386,8 +380,8 @@ class SmallVectorTemplateBase<T, true> : public SmallVectorTemplateCommon<T> {
 /// reduce code duplication based on the SmallVector 'N' template parameter.
 template <typename T>
 class SmallVectorImpl
-    : public SmallVectorTemplateBase<T, AT_IS_TRIVIALLY_COPYABLE(T)> {
-  using SuperClass = SmallVectorTemplateBase<T, AT_IS_TRIVIALLY_COPYABLE(T)>;
+    : public SmallVectorTemplateBase<T, C10_IS_TRIVIALLY_COPYABLE(T)> {
+  using SuperClass = SmallVectorTemplateBase<T, C10_IS_TRIVIALLY_COPYABLE(T)>;
 
  public:
   using iterator = typename SuperClass::iterator;
@@ -397,7 +391,7 @@ class SmallVectorImpl
  protected:
   // Default ctor - Initialize to empty.
   explicit SmallVectorImpl(unsigned N)
-      : SmallVectorTemplateBase<T, AT_IS_TRIVIALLY_COPYABLE(T)>(N * sizeof(T)) {
+      : SmallVectorTemplateBase<T, C10_IS_TRIVIALLY_COPYABLE(T)>(N * sizeof(T)) {
   }
 
  public:
