@@ -4939,6 +4939,17 @@ class TestNN(NNTestCase):
         grad = output.grad
         self.assertEqual(grad, expected_grad)
 
+    def test_bce_with_logits_stability(self):
+        output = torch.tensor([0., -120.])
+        target = torch.tensor([0., 1.])
+        pos_weight = torch.tensor([1., 1.])
+
+        out1 = nn.BCEWithLogitsLoss()(output, target)
+        self.assertTrue(torch.isfinite(out1).all().item())
+
+        out2 = nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target)
+        self.assertTrue(torch.isfinite(out2).all().item())
+
     def test_bce_loss_broadcasts_weights(self):
         sigmoid = nn.Sigmoid()
         target = torch.rand(16, 4)
