@@ -41,7 +41,7 @@
 #define AT_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
 #endif
 
-namespace at {
+namespace c10 {
 
 namespace detail {
 
@@ -1038,19 +1038,19 @@ std::ostream& operator<<(std::ostream & out, const SmallVector<T, N>& list) {
   return out;
 }
 
-} // end namespace at
+} // end namespace c10
 
 namespace std {
 
 /// Implement std::swap in terms of SmallVector swap.
 template <typename T>
-inline void swap(at::SmallVectorImpl<T>& LHS, at::SmallVectorImpl<T>& RHS) {
+inline void swap(c10::SmallVectorImpl<T>& LHS, c10::SmallVectorImpl<T>& RHS) {
   LHS.swap(RHS);
 }
 
 /// Implement std::swap in terms of SmallVector swap.
 template <typename T, unsigned N>
-inline void swap(at::SmallVector<T, N>& LHS, at::SmallVector<T, N>& RHS) {
+inline void swap(c10::SmallVector<T, N>& LHS, c10::SmallVector<T, N>& RHS) {
   LHS.swap(RHS);
 }
 
