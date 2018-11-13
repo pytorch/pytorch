@@ -655,13 +655,10 @@ def argsort(input, dim=None, descending=False):
 
 def cartesian_prod(*tensors):
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
-    python's `itertools.product`. The difference is, if the arguments is a sequence of
-    size :math:`k`, `itertools.prod` generate :math:`k`-tuples, while `torch.cartesian_prod`
-    create :math:`k` output tensors.
+    python's `itertools.product`.
 
     Arguments:
-        *tensors: any number of scalars or 1 dimensional tensors. Scalars will be treated as
-        tensors of size :math:`(1,)` automatically.
+        *tensors: any number of 1 dimensional tensors.
 
     Returns:
         Tensor: A tensor equivalent to converting all the input tensors into lists,
