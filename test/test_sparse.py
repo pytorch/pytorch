@@ -977,7 +977,6 @@ class TestSparse(TestCase):
             # test partial sum (only coalesce input supported)
             for td in test_dims:
                 for k in keepdim:
-                    print(td, k, '\n td, k-------------------')
                     S, _, _ = self._gen_sparse(sparse_dims, nnz, with_size)
                     self.assertTrue(S.is_coalesced())
                     run_tests(S.requires_grad_(True), td, k)

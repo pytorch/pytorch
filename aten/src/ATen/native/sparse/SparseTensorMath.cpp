@@ -818,7 +818,8 @@ Tensor sspaddmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
 // sparse.sum()
 //
 // This implementation calls coalesce() to do the sum reduction on
-// sparse dims.
+// sparse dims. Ideally in the future there should be unified reduction function
+// for ops like sum, max, and min.
 // --------------------------------------------------------------------
 Tensor _sparse_sum(const SparseTensor& input) {
   return input.coalesce().values().sum();
@@ -990,13 +991,9 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad, const SparseTensor& input, I
   AT_CHECK(!input.is_cuda(), "sparse_sum_backward_cpu: expected 'input' to be CPU tensor, but got CUDA tensor");
 
   const int64_t input_dim = input.dim();
+  auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
   auto dims_to_sum_v = dims_to_sum.vec();
   maybe_wrap_dims(dims_to_sum_v, input_dim);
-  constexpr size_t dim_bitset_size = 64;
-  std::bitset<dim_bitset_size> dims_to_sum_b;
-  for (auto d : dims_to_sum_v) {
-    dims_to_sum_b[d] = true;
-  }
 
   LongTensor input_indices = input._indices();
   Tensor input_values = input._values();

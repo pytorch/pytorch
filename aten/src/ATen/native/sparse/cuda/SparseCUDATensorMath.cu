@@ -6,6 +6,7 @@
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include "ATen/WrapDimUtilsMulti.h"
 
 #include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
@@ -518,13 +519,9 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad, const SparseTensor& input, 
   AT_CHECK(input.is_cuda(), "sparse_sum_backward_cuda: expected 'input' to be CUDA tensor, but got CPU tensor");
 
   const int64_t input_dim = input.dim();
+  auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
   auto dims_to_sum_v = dims_to_sum.vec();
   maybe_wrap_dims(dims_to_sum_v, input_dim);
-  constexpr size_t dim_bitset_size = 64;
-  std::bitset<dim_bitset_size> dims_to_sum_b;
-  for (auto d : dims_to_sum_v) {
-    dims_to_sum_b[d] = true;
-  }
 
   LongTensor input_indices = input._indices();
   Tensor input_values = input._values();

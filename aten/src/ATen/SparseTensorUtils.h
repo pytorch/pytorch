@@ -3,8 +3,6 @@
 
 namespace at { namespace sparse {
 
-constexpr size_t dim_bitset_size = 64;
-
 // Just for documentary purposes
 using SparseTensor = Tensor;
 using LongTensor = Tensor;
