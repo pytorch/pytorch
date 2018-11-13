@@ -1984,23 +1984,27 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
     return torch.cosine_embedding_loss(input1, input2, target, margin, reduction)
 
 
+@torch._jit_internal.weak_script
 def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
                       reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, int, int, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
     r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
                           reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     if p != 1 and p != 2:
         raise ValueError('only p == 1 and p == 2 supported')
-    if weight is not None and weight.dim() != 1:
-        raise ValueError('weight must be one-dimensional')
+    if weight is not None:
+        weight = torch.jit._unwrap_optional(weight)
+        if weight.dim() != 1:
+            raise ValueError('weight must be one-dimensional')
 
-    return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, reduction)
+    return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, reduction_enum)
 
 
 pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""

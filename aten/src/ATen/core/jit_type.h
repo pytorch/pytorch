@@ -758,6 +758,9 @@ struct CAFFE2_API BoolType : public Type {
     return "bool";
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
+    if(auto rhs_ = rhs->cast<OptionalType>()) {
+      return this->isSubtypeOf(rhs_->getElementType());
+    }
     return *this == *rhs || rhs->kind() == TypeKind::BoolType;
   }
   static const TypeKind Kind = TypeKind::BoolType;
