@@ -112,6 +112,14 @@ bool MNIST::is_train() const noexcept {
   return images_.size(0) == kTrainSize;
 }
 
+const Tensor& MNIST::images() const {
+  return images_;
+}
+
+const Tensor& MNIST::targets() const {
+  return targets_;
+}
+
 } // namespace datasets
 } // namespace data
 } // namespace torch

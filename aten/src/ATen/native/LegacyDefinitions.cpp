@@ -5,10 +5,6 @@ namespace at { namespace native {
 
 // Methods
 
-int64_t ndimension(const Tensor& self) {
-  return self._th_ndimension();
-}
-
 void* data_ptr(const Tensor & self) {
   return self.unsafeGetTensorImpl()->slow_data();
 }
@@ -29,12 +25,8 @@ Tensor & set_(Tensor& self) {
   return self._th_set_();
 }
 
-bool is_contiguous(const Tensor& self) {
-  return self._th_is_contiguous();
-}
-
 bool is_set_to(const Tensor& self, const Tensor & tensor) {
-  return self._th_is_set_to(tensor);
+  return at::_th_is_set_to(self, tensor);
 }
 
 Tensor & masked_fill_(Tensor& self, const Tensor & mask, Scalar value) {
@@ -50,7 +42,7 @@ Tensor & masked_scatter_(Tensor& self, const Tensor & mask, const Tensor & sourc
 }
 
 Tensor view(const Tensor& self, IntList size) {
-  return self._th_view(size);
+  return at::_th_view(self, size);
 }
 
 Tensor & put_(Tensor& self, const Tensor & index, const Tensor & source, bool accumulate) {
@@ -769,7 +761,7 @@ Tensor renorm(const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
 }
 
 Tensor unfold(const Tensor & self, int64_t dimension, int64_t size, int64_t step) {
-  return self._th_unfold(dimension, size, step);
+  return at::_th_unfold(self, dimension, size, step);
 }
 
 bool equal(const Tensor & self, const Tensor & other) {

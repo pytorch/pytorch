@@ -192,9 +192,15 @@ DEBUG = check_env_flag('DEBUG')
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
+IS_PPC = (platform.machine() == 'ppc64le')
 
 BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
-USE_MKLDNN = check_env_flag('USE_MKLDNN', 'ON')
+# ppc64le does not support MKLDNN
+if IS_PPC:
+    USE_MKLDNN = check_env_flag('USE_MKLDNN', 'OFF')
+else:
+    USE_MKLDNN = check_env_flag('USE_MKLDNN', 'ON')
+
 USE_CUDA_STATIC_LINK = check_env_flag('USE_CUDA_STATIC_LINK')
 RERUN_CMAKE = True
 
@@ -451,7 +457,7 @@ class build_deps(PytorchCommand):
         def check_file(f):
             if not os.path.exists(f):
                 print("Could not find {}".format(f))
-                print("Did you run 'git submodule update --init'?")
+                print("Did you run 'git submodule update --init --recursive'?")
                 sys.exit(1)
 
         check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))

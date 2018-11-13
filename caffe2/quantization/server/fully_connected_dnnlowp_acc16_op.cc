@@ -67,7 +67,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
         }
       }
 
-      Wq_outlier_.reset(new fbgemm2::CompressedSparseColumn(K, N));
+      Wq_outlier_.reset(new fbgemm::CompressedSparseColumn(K, N));
       Wq_outlier_->RowIdx().resize(outlier_cnt);
       Wq_outlier_->Values().resize(outlier_cnt);
 
@@ -97,8 +97,8 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
       LOG(INFO) << "copy_to_32bit_frequency " << copy_to_32bit_frequency_;
     }
 
-    Wq_acc16_packed_.reset(new fbgemm2::PackBMatrix<int8_t, int16_t>(
-        fbgemm2::matrix_op_t::Transpose,
+    Wq_acc16_packed_.reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
+        fbgemm::matrix_op_t::Transpose,
         K,
         N,
         reinterpret_cast<const int8_t*>(W_quantized_.data()),
@@ -114,7 +114,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
   Y_shape_cache_[canonical_axis] = N;
   Y->Resize(Y_shape_cache_);
 
-  using namespace fbgemm2;
+  using namespace fbgemm;
   // main GEMM
   // TODO : omp parallelization
   Y_int32_.resize(Y->size());

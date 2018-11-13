@@ -50,8 +50,11 @@ class ReshapeOp : public Operator<Context> {
 
       // Bit awkward, but needed so works on both CPU and CUDA contexts
       std::vector<T> tmpv(shape.numel());
-      context_.CopyBytesToCPU(shape.numel() * sizeof(T), shape_data, &tmpv[0]);
-      actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.numel());
+      if (shape.numel() > 0) {
+        context_.CopyBytesToCPU(
+            shape.numel() * sizeof(T), shape_data, &tmpv[0]);
+        actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.numel());
+      }
     }
 
     // Copy over the dimensions for those that are specified zero.
