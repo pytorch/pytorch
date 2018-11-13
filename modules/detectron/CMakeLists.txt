@@ -14,7 +14,9 @@ if (BUILD_CAFFE2_OPS)
     target_link_libraries(caffe2_detectron_ops_gpu caffe2_gpu)
     install(TARGETS caffe2_detectron_ops_gpu DESTINATION lib)
 
-  elseif(USE_ROCM)
+  elseif(0)
+  # To-do: Enable it with proper compilation flags for appropriate sources
+  # elseif(USE_ROCM)
     set(Caffe2_HIP_INCLUDES ${Caffe2_HIP_INCLUDES} ${CMAKE_CURRENT_SOURCE_DIR})
     hip_include_directories(${Caffe2_HIP_INCLUDES})
     set_source_files_properties(${Detectron_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
