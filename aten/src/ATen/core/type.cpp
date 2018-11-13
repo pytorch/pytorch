@@ -166,6 +166,13 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
     return static_cast<TypePtr>(DynamicType::get());;
   }
 
+  // if t1 is None and t2 is a concrete type, return Optional[t2] and vice versa
+  if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
+    return OptionalType::create(t2);
+  } else if (t2->isSubtypeOf(NoneType::get()) && !t1->isSubtypeOf(NoneType::get())) {
+    return OptionalType::create(t1);
+  }
+
   //types which contain other types
   if (t1->cast<ListType>() && t2->cast<ListType>()) {
     auto unified_type = unifyTypes(t1->cast<ListType>()->getElementType(), t2->cast<ListType>()->getElementType());
@@ -252,9 +259,9 @@ TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
       return OptionalType::create(matchTypeVariables(
           opt_formal->getElementType(), opt_actual->getElementType(), type_env));
     } else {
-      std::stringstream ss;
-      ss << "cannot match a optional to " << actual->str();
-      throw TypeMatchError(ss.str());
+      // If the actual type is a non-optional, allow matching to the formal if
+      // its element type matches the actual
+      return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
     }
   }
 
