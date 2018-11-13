@@ -985,9 +985,6 @@ Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum, bool keepdim)
 // - assign zero values to input gradients if cannot find matched indices at grad
 // - grad.values might have zeros
 // --------------------------------------------------------------------
-
-
-
 Tensor _sparse_sum_backward_cpu(const Tensor& grad, const SparseTensor& input, IntList dims_to_sum, bool keepdim) {
   AT_CHECK(!grad.is_cuda(), "sparse_sum_backward_cpu: expected 'grad' to be CPU tensor, but got CUDA tensor");
   AT_CHECK(!input.is_cuda(), "sparse_sum_backward_cpu: expected 'input' to be CPU tensor, but got CUDA tensor");
@@ -1077,7 +1074,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad, const SparseTensor& input, I
         std::iota(grad_sparse_dim_to_keep_v.begin(), grad_sparse_dim_to_keep_v.end(), 0);
       }
 
-      auto grad_indices_1D = flatten_indices_by_dims(grad_indices, grad.sizes(), grad_sparse_dim_to_keep_v);
+      auto grad_indices_1D = flatten_indices_by_dims(grad_indices, grad.sizes(), grad_sparse_dim_to_keep_v); // flatten indices on all sparse_dim of grad, output indices is coalesced and sorted
       auto grad_indices_1D_accessor = grad_indices_1D.accessor<int64_t, 1>();
       auto input_indices_1D = flatten_indices_by_dims(input_indices, input_sizes, sparse_dims_to_keep_v);
       auto input_indices_1D_accessor = input_indices_1D.accessor<int64_t, 1>();

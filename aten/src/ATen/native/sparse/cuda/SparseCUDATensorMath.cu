@@ -611,13 +611,10 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad, const SparseTensor& input, 
         std::iota(grad_sparse_dim_to_keep_v.begin(), grad_sparse_dim_to_keep_v.end(), 0);
       }
 
-      auto grad_indices_1D = flatten_indices_by_dims(grad_indices, grad.sizes(), grad_sparse_dim_to_keep_v);
+      auto grad_indices_1D = flatten_indices_by_dims(grad_indices, grad.sizes(), grad_sparse_dim_to_keep_v); // flatten indices on all sparse_dim of grad, output indices is coalesced and sorted
       auto input_indices_1D = flatten_indices_by_dims(input_indices, input_sizes, sparse_dims_to_keep_v);
       thrust_ptr grad_indices_iter(grad_indices_1D.data<int64_t>());
       thrust_ptr input_indices_iter(input_indices_1D.data<int64_t>());
-
-      // sort grad 1D indices
-      thrust::sort(policy, grad_indices_iter, grad_indices_iter + grad_nnz);
 
       // store lower_bound of input indices at grad indices
       LongTensor input_indices_pos = at::empty_like(input_indices_1D);

@@ -111,7 +111,26 @@ inline LongTensor flatten_indices(const Tensor& indices, IntList full_size, bool
   }
 }
 
-// flatten indices from nD to 1D
+// Flatten sparse tensor's indices from nD to 1D, similar to NOTE [ Flatten Sparse Indices ],
+// except this one allows partial flatten: only flatten on specified dims. Note that
+// the flatten indices might be uncoalesced if dims_to_flatten.size() < sparse_dim.
+// Also if input indices is already coalesced, the flattened indices will also be sorted.
+//
+// args:
+//    indices: sparse tensor indices
+//    sizes: sparse tensor sizes
+//    dims_to_flatten: a list of dim index to flatten
+//
+// Ex1:
+//   indices = [[2, 4, 0],
+//             [3, 1, 3]]
+//   sizes = [2, 12]
+//   dims_to_flatten = [0, 1]
+//   new_indices = [ 2 * 12 + 3, 4 * 12 + 1, 0 * 12 + 3 ] = [27, 49, 3]
+//
+// Ex2:
+//   dims_to_flatten = [1]
+//   new_indices = [ 3, 1, 3 ]  # uncoalesced
 inline LongTensor flatten_indices_by_dims(const LongTensor& indices, const IntList& sizes, const IntList& dims_to_flatten){
   LongTensor new_indices = at::zeros({indices.size(1)}, indices.options());
   for (auto d : dims_to_flatten) {
