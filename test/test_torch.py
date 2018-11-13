@@ -2981,12 +2981,12 @@ class _TestTorchMixin(object):
         self.assertEqual(r1, r2, 0)
         self.assertEqual(r2, r3[:-1], 0)
 
-        self.assertRaises(RuntimeError, lambda: torch.arange(0, float('nan')))
-        self.assertRaises(RuntimeError, lambda: torch.arange(0, float('-inf')))
-        self.assertRaises(RuntimeError, lambda: torch.arange(0, float('inf')))
-        self.assertRaises(RuntimeError, lambda: torch.arange(float('-inf'), 10))
-        self.assertRaises(RuntimeError, lambda: torch.arange(float('nan'), 10))
-        self.assertRaises(RuntimeError, lambda: torch.arange(float('inf'), 10))
+        self.assertRaisesRegex(RuntimeError, 'unsupported range', lambda: torch.arange(0, float('nan')))
+        self.assertRaisesRegex(RuntimeError, 'unsupported range', lambda: torch.arange(0, float('-inf')))
+        self.assertRaisesRegex(RuntimeError, 'unsupported range', lambda: torch.arange(0, float('inf')))
+        self.assertRaisesRegex(RuntimeError, 'unsupported range', lambda: torch.arange(float('-inf'), 10))
+        self.assertRaisesRegex(RuntimeError, 'unsupported range', lambda: torch.arange(float('nan'), 10))
+        self.assertRaisesRegex(RuntimeError, 'unsupported range', lambda: torch.arange(float('inf'), 10))
 
     def test_arange_inference(self):
         saved_dtype = torch.get_default_dtype()

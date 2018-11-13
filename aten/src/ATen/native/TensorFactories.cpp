@@ -78,7 +78,7 @@ Tensor arange(
     Scalar step,
     const TensorOptions& options) {
   AT_CHECK(
-    finite(end.toDouble()) && finite(start.toDouble()),
+    std::isfinite(end.toDouble()) && std::isfinite(start.toDouble()),
     "unsupported range: ", start, " -> ", end
   );
   // Note [Native bindings for legacy TH factory functions]
