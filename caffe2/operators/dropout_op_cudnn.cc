@@ -108,6 +108,7 @@ class CuDNNDropoutOp final : public CuDNNDropoutOpBase {
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
+    Y->ResizeLike(X);
     const int N = X.numel();
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
