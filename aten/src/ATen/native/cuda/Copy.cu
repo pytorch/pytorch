@@ -32,11 +32,10 @@ struct CopyOp {
 // device-to-device copy, does type conversion
 template <typename dst_T, typename src_T>
 void copy_device_to_device(Tensor& dst, const Tensor& src) {
-  if (dst.is_same(src) || dst.dim() == 0) {
+  auto numel = dst.numel();
+  if (dst.is_same(src) || numel == 0) {
     return;
   }
-
-  auto numel = dst.numel();
 
   // We can memcpy the memory if:
   // -both tensors are contiguous; or,
