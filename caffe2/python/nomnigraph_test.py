@@ -249,6 +249,9 @@ class TestBindings(test_util.TestCase):
         nn.createEdge(n2, n3)
         self.assertEqual(n3.name[0], "a")
         self.assertNotEqual(n1.name, n3.name)
+        n1 = nn.createUniqueDataNode("b")
+        n2 = nn.createUniqueDataNode("b")
+        self.assertNotEqual(n1.name, n2.name)
 
     def test_convertToProto(self):
         net = core.Net("name")
