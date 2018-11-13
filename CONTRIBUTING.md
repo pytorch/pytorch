@@ -385,6 +385,31 @@ cmake ..
 cmake --build .
 ```
 
+### AMD development tips
+
+PyTorch has experimental support for AMD GPUs.  Installing the correct
+version of the ROCm toolchain can be a bit involved, so our current
+recommended way of getting the required environment is via the
+Docker image `bddppq/pytorch-rocm:230-ubuntu`:
+
+```
+docker run -it bddppq/pytorch-rocm:230-ubuntu /bin/bash
+```
+
+To build with ROCm support, you will need to run the HIPIFY script,
+which transpiles CUDA code into HIP code.  Your build commands will
+look like:
+
+```
+python tools/amd_build/build_pytorch_amd.py
+python tools/amd_build/build_caffe2_amd.py
+USE_ROCM=1 python setup.py rebuild develop
+```
+
+Warning: the HIPIFY scripts modify your source tree **in place**, so
+make sure that you have staged any local changes that you don't want to
+be clobbered.
+
 ### Known MSVC (and MSVC with NVCC) bugs
 
 The PyTorch codebase sometimes likes to use exciting C++ features, and
