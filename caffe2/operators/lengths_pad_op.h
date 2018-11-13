@@ -26,7 +26,6 @@ class LengthsPadOp : public Operator<Context> {
   bool DoRunWithType() {
     auto& data = Input(DATA);
     auto& lengths = Input(LENGTHS);
-    auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTHS must be 1-D");
     CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
@@ -48,7 +47,7 @@ class LengthsPadOp : public Operator<Context> {
 
     auto shape = data.sizes().vec();
     shape[0] = lengths_size * target_length_;
-    output->Resize(shape);
+    auto* output = Output(0, shape, at::dtype<T>());
 
     auto block_size = data.size_from_dim(1);
     auto src_data = data.template data<T>();

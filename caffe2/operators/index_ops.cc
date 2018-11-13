@@ -226,8 +226,8 @@ class IndexSizeOp : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
-    auto* out = Output(0);
-    out->Resize(std::vector<int64_t>{});
+
+    auto* out = Output(0, std::vector<int64_t>{}, at::dtype<int64_tValue>());
     *out->template mutable_data<int64_tValue>() = base->Size();
     return true;
   }

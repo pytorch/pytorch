@@ -8234,12 +8234,14 @@ a")
             def __init__(self, in_features, out_features):
                 super(Weak, self).__init__()
                 self.weight = torch.nn.Parameter(torch.ones(out_features, in_features))
+                self.bias = torch.nn.Parameter(torch.ones(out_features))
                 self.register_buffer("buffer", torch.ones(out_features))
                 self.submodule = Submodule()
 
             @torch._jit_internal.weak_script_method
             def forward(self, x):
-                return F.linear(x, self.weight) + self.buffer + self.submodule(x)
+                return F.linear(x, self.weight, self.bias) \
+                    + self.buffer + self.submodule(x)
 
         class Strong(torch.jit.ScriptModule):
             def __init__(self, weak):
@@ -9027,7 +9029,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_cosine_similarity',
     'test_nn_normalize',
     'test_nn_fold',
-    'test_nn_linear',
     'test_nn_max_unpool1d',
     'test_nn_lp_pool1d',
     'test_nn_lp_pool2d',
@@ -9548,6 +9549,7 @@ S = 5
 #     module name,
 #     constructor arguments,
 #     args (tuple represents shape of a tensor arg),
+#     use_as_constant (should the submodule be listed in __constants__?)
 # )
 nn_module_tests = [
     ('AlphaDropout', (), ((S,),)),
@@ -9565,6 +9567,7 @@ nn_module_tests = [
     ('Tanh', (), ((S,),)),
     ('Tanhshrink', (), ((S,),)),
     ('Threshold', (2., 2.), ((S,),)),
+    ('Sequential', (torch.nn.Sigmoid(), torch.nn.Threshold(1., 2.)), ((S,),), True),
 ]
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
@@ -9832,7 +9835,8 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
     post_add_test(test_name, skipTestIf, do_test)
 
 
-def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
+def add_nn_module_test(module_name, constructor_args, call_args,
+                       use_as_constant=False, skipTestIf=()):
     def do_test(self):
         nn_module = getattr(torch.nn, module_name)
 
@@ -9846,8 +9850,14 @@ def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
             call = "self.submodule({})".format(call_args_str)
             script = script_method_template.format(method_args, call)
 
+            submodule_constants = []
+            if use_as_constant:
+                submodule_constants = ['submodule']
+
             # Create module to use the script method
             class TheModule(torch.jit.ScriptModule):
+                __constants__ = submodule_constants
+
                 def __init__(self):
                     super(TheModule, self).__init__()
                     self.submodule = nn_module(*constructor_args)

@@ -31,18 +31,17 @@ class LayerNormOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    auto* mean = Output(1);
-    auto* sig = Output(2);
+
     CAFFE_ENFORCE_GE(X.dim(), 2, "LayerNorm requires input dim >= 2.");
     const int canonical_axis = X.canonical_axis_index(axis_);
     const int M = X.size_to_dim(canonical_axis);
     const int N = X.size_from_dim(canonical_axis);
     Y->ResizeLike(X);
-    std::vector<int> moments_dims(
+    std::vector<int64_t> moments_dims(
         X.dims().cbegin(), X.dims().cbegin() + canonical_axis);
     moments_dims.push_back(1);
-    mean->Resize(moments_dims);
-    sig->Resize(moments_dims);
+    auto* mean = Output(1, moments_dims, at::dtype<T>());
+    auto* sig = Output(2, moments_dims, at::dtype<T>());
     scale_.Resize(M);
     bias_.Resize(M);
 

@@ -176,8 +176,7 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
   }
 
   if (OutputSize() > 1) {
-    auto* roi_batch_splits = Output(1);
-    roi_batch_splits->Resize(batch_size);
+    auto* roi_batch_splits = Output(1, {batch_size}, at::dtype<float>());
     Eigen::Map<EArrXf> roi_batch_splits_map(
         roi_batch_splits->template mutable_data<float>(), batch_size);
     roi_batch_splits_map =
