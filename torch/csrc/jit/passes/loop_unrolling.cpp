@@ -142,7 +142,7 @@ void replaceLoopCounter(Node *loop) {
   Value* init_counter = graph->insertConstant(0);
 
   loop->insertInput(2, init_counter);
-  loop->insertOutput(0);
+  loop->insertOutput(0)->setType(IntType::get());
 
   Value * internal_counter = body->insertInput(1)->setType(init_counter->type());
   body->inputs()[0]->replaceAllUsesWith(internal_counter);
