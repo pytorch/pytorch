@@ -23,7 +23,7 @@ if (BUILD_CAFFE2_OPS)
         ${Detectron_CPU_SRCS}
         ${Detectron_HIP_SRCS})
     set_target_properties(caffe2_detectron_ops_hip PROPERTIES LINKER_LANGUAGE HIP)
-    target_compile_options(caffe2_detectron_ops_hip PRIVATE ${HIP_HIPCC_FLAGS})
+    target_compile_options(caffe2_detectron_ops_hip PRIVATE ${HIP_HCC_FLAGS})
     target_link_libraries(caffe2_detectron_ops_hip caffe2_hip)
     install(TARGETS caffe2_detectron_ops_hip DESTINATION lib)
 
