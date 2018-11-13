@@ -172,7 +172,8 @@ Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepd
 }
 
 std::vector<int64_t> reverse_list(const IntList list) {
-  auto result = std::vector<int64_t>(list.size());
+  auto result = std::vector<int64_t>();
+  result.reserve(list.size());
   for (auto iter = list.rbegin(); iter != list.rend(); iter++) {
     result.push_back(*iter);
   }

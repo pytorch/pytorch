@@ -38,7 +38,10 @@ static inline Tensor roll_common(const Tensor& self, IntList shifts, IntList dim
     auto flattened = self.contiguous().view(self.numel());
     return roll(flattened, shifts[0], 0).view(self.sizes());
   }
-  AT_CHECK(shifts.size() == dims.size(), "shifts and dimensions must align");
+  AT_CHECK(
+    shifts.size() == dims.size(),
+    "shifts and dimensions must align. shifts: ", shifts.size(), ", dims:", dims.size()
+  );
   AT_CHECK(dims.size() > 1, "this code should only be reached for handling multi-dim rolling" );
   auto tail_shifts = shifts.slice(1);
   auto tail_dims = dims.slice(1);
