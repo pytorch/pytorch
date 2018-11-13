@@ -587,6 +587,104 @@ void testTHNNConv() {
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
+void testATenNativeBatchNorm() {
+  // aten::native_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+  std::vector<int64_t> input_size = {4, 3, 15, 17}; // B x C x H x W
+  bool training = true;
+  float momentum = 0.9;
+  float eps = 1e-5;
+
+  // make inputs
+  at::Tensor input = torch::randn(input_size);
+  at::Tensor weight = torch::randn({input_size[1]});
+  at::Tensor bias = torch::randn({input_size[1]});
+  at::Tensor running_mean = torch::randn({input_size[1]});
+  at::Tensor running_var = torch::randn({input_size[1]});
+
+  // running_mean and running_var are changed in-place, so clone and send them
+  at::Tensor running_mean_eager = running_mean.clone();
+  at::Tensor running_var_eager = running_var.clone();
+  at::Tensor running_mean_jit = running_mean.clone();
+  at::Tensor running_var_jit = running_var.clone();
+
+  // run forward eagerly
+  at::Tensor output, savemean, saveinvstd;
+  std::tie(output, savemean, saveinvstd) = at::native_batch_norm(input, weight, bias, running_mean_eager, running_var_eager, training, momentum, eps);
+
+  // make grad_outputs
+  at::Tensor grad_output = torch::randn_like(output);
+  at::Tensor grad_savemean = torch::zeros_like(savemean);
+  at::Tensor grad_saveinvstd = torch::zeros_like(saveinvstd);
+
+  // run backward eagerly
+  at::Tensor grad_input, grad_weight, grad_bias;
+  // aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor weight, Tensor running_mean, Tensor running_var, Tensor save_mean, Tensor save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  std::tie(grad_input, grad_weight, grad_bias) = at::native_batch_norm_backward(grad_output, input, weight,
+										running_mean_eager, running_var_eager,
+										savemean, saveinvstd, training, eps, {true, true, true});
+
+  // make JIT graph
+  auto graph = std::make_shared<Graph>();
+  auto training_val = graph->insertConstant(IValue(training));
+  auto momentum_val = graph->insertConstant(IValue(momentum));
+  auto eps_val = graph->insertConstant(IValue(eps));
+
+  auto inputg = graph->addInput("self");
+  auto weightg = graph->addInput("weight");
+  auto biasg = graph->addInput("bias");
+  auto running_meang = graph->addInput("running_mean");
+  auto running_varg = graph->addInput("running_var");
+
+  Value* bn = graph->insert(aten::native_batch_norm, {inputg, weightg, biasg, running_meang, running_varg, training_val, momentum_val, eps_val});
+  auto outputs = bn->node()->outputs();
+  for (auto output : outputs) {
+    graph->registerOutput(output);
+  }
+  LowerAllTuples(graph);
+  graph->lint();
+
+  // differentiate JIT graph
+  EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
+  ConstantPropagation(graph);
+  auto grad_spec = differentiate(graph);
+  LowerGradOf(*grad_spec.df);
+
+  // prepare JIT inputs / gradients
+  tensor_list tensors_in;
+  tensors_in.push_back(input);
+  tensors_in.push_back(weight);
+  tensors_in.push_back(bias);
+  tensors_in.push_back(running_mean_jit);
+  tensors_in.push_back(running_var_jit);
+
+  tensor_list tensor_grads_in;
+  tensor_grads_in.push_back(grad_output);
+  tensor_grads_in.push_back(grad_savemean);
+  tensor_grads_in.push_back(grad_saveinvstd);
+
+  // Get outputs from the interpreter
+  tensor_list tensors_out, tensor_grads_out;
+  std::tie(tensors_out, tensor_grads_out) =
+    runGradient(grad_spec, tensors_in, tensor_grads_in);
+
+  // prepare expected structs
+  tensor_list expected_tensors_out, expected_tensor_grads_out;
+  expected_tensors_out.push_back(output);
+  expected_tensors_out.push_back(savemean);
+  expected_tensors_out.push_back(saveinvstd);
+  expected_tensors_out.push_back(running_mean_eager);
+  expected_tensors_out.push_back(running_var_eager);
+  expected_tensor_grads_out.push_back(grad_input);
+  expected_tensor_grads_out.push_back(grad_weight);
+  expected_tensor_grads_out.push_back(grad_bias);
+
+  tensors_out.push_back(running_mean_jit);
+  tensors_out.push_back(running_var_jit);
+
+  // Compare results
+  assertAllClose(tensors_out, expected_tensors_out);
+  assertAllClose(tensor_grads_out, expected_tensor_grads_out);
+}
 
 using var_meta_type = std::vector<int64_t>;
 using var_meta_list = std::vector<var_meta_type>;

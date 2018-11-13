@@ -29,6 +29,7 @@ JIT_TEST(TopologicalMove)
 JIT_TEST(SubgraphUtils)
 
 JIT_TEST(THNNConv)
+JIT_TEST(ATenNativeBatchNorm)
 
 #define JIT_TEST_CUDA(name)    \
   TEST(JitTest, name##_CUDA) { \

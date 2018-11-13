@@ -79,6 +79,7 @@ bool isDifferentiable(Node * n) {
     "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
     "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)",
     "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)",
+    "aten::native_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
   };
 
   // TODO: add support for the following fusible operators.
@@ -420,6 +421,29 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       JIT_ASSERT(outputs.size() == size_t(3));
 
       return {outputs[0], outputs[1], nullptr, outputs[2], nullptr, nullptr};
+
+    } else if (node->matches("aten::native_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)")) {
+      auto graph = node->owningGraph();
+      auto bnNode = graph->create(aten::native_batch_norm_backward, 3);
+      auto grad_out = grads.at(0);
+      bnNode->addInput(grad_out);
+      bnNode->addInput(inputs.at(0));
+      bnNode->addInput(inputs.at(1));
+      bnNode->addInput(inputs.at(3));
+      bnNode->addInput(inputs.at(4));
+      bnNode->addInput(outputs.at(1));
+      bnNode->addInput(outputs.at(2));
+      bnNode->addInput(inputs.at(5));
+      bnNode->addInput(inputs.at(7));
+      bnNode->addInput(graph->insertConstant(std::vector<bool>{true, true, true}));
+      graph->insertNode(bnNode);
+      auto outputs = fmap<SymbolicVariable>(bnNode->outputs());
+      outputs.emplace_back();
+      outputs.emplace_back();
+      outputs.emplace_back();
+      outputs.emplace_back();
+      outputs.emplace_back();
+      return outputs;
 
     } else if (node->matches("aten::log_softmax(Tensor self, int dim) -> Tensor")) {
       JIT_ASSERT(grads.size() == 1);
