@@ -6821,7 +6821,7 @@ class _TestTorchMixin(object):
             self.assertEqual(x, x.roll(0, 1).roll(0, -1))
             self.assertEqual(x, x.roll(1, x.size(1)))
             self.assertEqual(x, x.roll(1))
-            self.assertEqual(x, x.roll((1,1), (3,1)))
+            self.assertEqual(x, x.roll((1, 1), (3, 1)))
 
             # unbind
             self.assertEqual((), x.unbind(0))
