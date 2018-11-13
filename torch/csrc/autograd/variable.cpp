@@ -34,7 +34,7 @@ Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge, Va
   // set_requires_grad also checks error conditions.
   set_requires_grad(requires_grad);
   AT_CHECK(
-      !get_autograd_meta()->grad_fn_ || !get_autograd_meta()->requires_grad_,
+      !autograd_meta->grad_fn_ || !autograd_meta->requires_grad_,
       "requires_grad should be false if grad_fn is set");
   if (!data_.defined()) {
     throw std::runtime_error("data is undefined");
@@ -180,15 +180,7 @@ void Variable::Impl::set_data(Tensor new_data) {
 }
 
 void Variable::Impl::release_resources() {
-  Variable::AutogradMeta* autograd_meta = get_autograd_meta();
-  if (autograd_meta) {
-    if (autograd_meta->is_view_) {
-      Variable::DifferentiableViewMeta* diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(autograd_meta);
-      delete diff_view_meta;
-    } else {
-      delete autograd_meta;
-    }
-  }
+  delete get_autograd_meta();
   data_.reset();
 }
 

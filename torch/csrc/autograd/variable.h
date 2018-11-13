@@ -313,11 +313,7 @@ struct TORCH_API Variable::AutogradMeta {
   // get_grad_accumulator.
   std::mutex mutex_;
 
-  virtual ~AutogradMeta() {
-    grad_.reset();
-    grad_fn_.reset();
-    hooks_.clear();
-  }
+  virtual ~AutogradMeta() {}
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -332,11 +328,6 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
   /// grad_fn field is stale if attr_version !=
   /// version_counter.current_version().
   uint32_t attr_version;
-
-  DifferentiableViewMeta(){};
-  ~DifferentiableViewMeta() override {
-    base_.reset();
-  }
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
