@@ -930,12 +930,12 @@ bool Node::moveBeforeTopologicallyValid(Node* n) {
 namespace {
 struct WorkingSet {
  public:
-  explicit WorkingSet(Node* mover) {
+  explicit WorkingSet(const Node* mover) {
     add(mover);
   }
 
   // Add `n` to the working set
-  void add(Node* n) {
+  void add(const Node* n) {
     nodes_.push_back(n);
     for (const auto user : getUsersSameBlock(n)) {
       users_[user]++;
@@ -953,12 +953,12 @@ struct WorkingSet {
     nodes_.pop_front();
   }
 
-  const std::list<Node*>& nodes() {
+  const std::list<const Node*>& nodes() {
     return nodes_;
   }
 
   // Does the working set depend on `n`?
-  bool dependsOn(Node* n) const {
+  bool dependsOn(const Node* n) const {
     if (nodes_.empty()) {
       return false;
     }
@@ -971,16 +971,16 @@ struct WorkingSet {
   }
 
   // Does the working set produce any values consumed by `n`?
-  bool producesFor(Node* n) const {
+  bool producesFor(const Node* n) const {
     // This equivalent to asking: does the total use-set of all the nodes in the
     // working set include `n`?
     return users_.count(n) != 0;
   }
 
   // Does the working set consume any values produced by `n`?
-  bool consumesFrom(Node* n) const {
+  bool consumesFrom(const Node* n) const {
     const auto users = getUsersSameBlock(n);
-    return std::any_of(nodes_.begin(), nodes_.end(), [&](Node* node) {
+    return std::any_of(nodes_.begin(), nodes_.end(), [&](const Node* node) {
       return users.count(node) != 0;
     });
   }
@@ -989,8 +989,8 @@ struct WorkingSet {
   // Get all users of outputs of `n`, in the same block as `n`.
   // This means if there is an `if` node that uses an output of `n` in some
   // inner sub-block, we will consider the whole `if` node a user of `n`.
-  std::unordered_set<Node*> getUsersSameBlock(Node* n) const {
-    std::unordered_set<Node*> users;
+  std::unordered_set<const Node*> getUsersSameBlock(const Node* n) const {
+    std::unordered_set<const Node*> users;
     for (const auto output : n->outputs()) {
       for (const auto& use : output->uses()) {
         if (use.user->owningBlock() == n->owningBlock()) {
@@ -1011,9 +1011,9 @@ struct WorkingSet {
     return users;
   }
 
-  std::list<Node*> nodes_;
+  std::list<const Node*> nodes_;
   // users => # of working set nodes it uses
-  std::unordered_map<Node*, size_t> users_;
+  std::unordered_map<const Node*, size_t> users_;
 };
 } // namespace
 
@@ -1092,18 +1092,17 @@ bool Node::tryMove(Node* movePoint, MoveSide moveSide) {
     this->move(movePoint, moveSide);
 
     // Then move all of its dependencies on the other side of `movePoint`
-    const auto reversed =
+    moveSide =
         moveSide == MoveSide::BEFORE ? MoveSide::AFTER : MoveSide::BEFORE;
-    for (auto toMove : workingSet.nodes()) {
-      toMove->move(curNode, reversed);
-      curNode = toMove;
-    }
-  } else {
-    // Just append/prepend everything to `movePoint`
-    for (auto toMove : workingSet.nodes()) {
-      toMove->move(curNode, moveSide);
-      curNode = toMove;
-    }
+  }
+
+  // Move the rest of the working set to the appropriate side
+  for (auto toMove : workingSet.nodes()) {
+    // We inserted these nodes into the working set as const to ensure
+    // const-correctness there, but they need to be cast back to mut here
+    auto toMoveMut = const_cast<Node*>(toMove);
+    toMoveMut->move(curNode, moveSide);
+    curNode = toMoveMut;
   }
   return true;
 }
