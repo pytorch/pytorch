@@ -20,7 +20,7 @@ struct ExecutionPlanState {
 };
 
 struct GraphExecutorState {
-  const Graph* graph;
+  const Graph* graph = nullptr;
   ExecutionPlanState fallback; // XXX: members of this field are optional
   std::unordered_map<ArgumentSpec, ExecutionPlanState> execution_plans;
 };
@@ -36,6 +36,7 @@ struct TORCH_API GraphExecutor {
   std::shared_ptr<Graph> graph() const;
   std::shared_ptr<Graph> graphFor(const Stack& inputs) const;
   GraphExecutorState getDebugState();
+  void debugDisableAutodiffSubgraphInlining();
 private:
   std::shared_ptr<GraphExecutorImpl> pImpl;
 };

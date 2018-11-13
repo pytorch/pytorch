@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/core/ATenGeneral.h>
-#include <ATen/core/Error.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
 #include <atomic>
 #include <stdexcept>
-#include <ATen/core/C++17.h>
 
 namespace c10 {
 
@@ -33,7 +33,7 @@ namespace c10 {
 // tells us if the object was allocated by us.  If it wasn't, no
 // intrusive_ptr for you!
 
-class AT_CORE_API intrusive_ptr_target {
+class CAFFE2_API intrusive_ptr_target {
   // Note [Weak references for intrusive refcounting]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // Here's the scheme:
@@ -114,7 +114,7 @@ class AT_CORE_API intrusive_ptr_target {
 
 namespace detail {
 template <class TTarget>
-struct AT_CORE_EXPORT intrusive_target_default_null_type final {
+struct C10_EXPORT intrusive_target_default_null_type final {
   static constexpr TTarget* singleton() noexcept {
     return nullptr;
   }
@@ -136,11 +136,14 @@ class weak_intrusive_ptr;
 template <
     class TTarget,
     class NullType = detail::intrusive_target_default_null_type<TTarget>>
-class AT_CORE_EXPORT intrusive_ptr final {
+class C10_EXPORT intrusive_ptr final {
  private:
-  static_assert(
-      std::is_base_of<intrusive_ptr_target, TTarget>::value,
-      "intrusive_ptr can only be used for classes that inherit from intrusive_ptr_target.");
+//  the following static assert would be nice to have but it requires
+//  the target class T to be fully defined when intrusive_ptr<T> is instantiated
+//  this is a problem for classes that contain pointers to themselves
+//  static_assert(
+//      std::is_base_of<intrusive_ptr_target, TTarget>::value,
+//      "intrusive_ptr can only be used for classes that inherit from intrusive_ptr_target.");
 #ifndef _WIN32
   // This static_assert triggers on MSVC
   //  error C2131: expression did not evaluate to a constant
@@ -391,7 +394,7 @@ inline bool operator!=(
 template <
     typename TTarget,
     class NullType = detail::intrusive_target_default_null_type<TTarget>>
-class AT_CORE_EXPORT weak_intrusive_ptr final {
+class C10_EXPORT weak_intrusive_ptr final {
  private:
   static_assert(
       std::is_base_of<intrusive_ptr_target, TTarget>::value,
@@ -739,13 +742,13 @@ namespace std {
 // To allow intrusive_ptr and weak_intrusive_ptr inside std::unordered_map or
 // std::unordered_set, we need std::hash
 template <class TTarget, class NullType>
-struct AT_CORE_EXPORT hash<c10::intrusive_ptr<TTarget, NullType>> {
+struct C10_EXPORT hash<c10::intrusive_ptr<TTarget, NullType>> {
   size_t operator()(const c10::intrusive_ptr<TTarget, NullType>& x) const {
     return std::hash<TTarget*>()(x.get());
   }
 };
 template <class TTarget, class NullType>
-struct AT_CORE_EXPORT hash<c10::weak_intrusive_ptr<TTarget, NullType>> {
+struct C10_EXPORT hash<c10::weak_intrusive_ptr<TTarget, NullType>> {
   size_t operator()(const c10::weak_intrusive_ptr<TTarget, NullType>& x) const {
     return std::hash<TTarget*>()(x._unsafe_get_target());
   }

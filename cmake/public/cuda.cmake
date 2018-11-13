@@ -342,7 +342,7 @@ endforeach()
 set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
 if (NOT MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
+  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
 endif()
 
 # Debug and Release symbol support
@@ -354,10 +354,6 @@ if (MSVC)
       list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MD")
     endif()
   elseif(${CMAKE_BUILD_TYPE} MATCHES "Debug")
-    message(FATAL_ERROR
-            "Caffe2 currently does not support the combination of MSVC, Cuda "
-            "and Debug mode. Either set USE_CUDA=OFF or set the build type "
-            "to Release")
     if (${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MTd")
     else()

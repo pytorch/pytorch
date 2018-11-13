@@ -302,7 +302,7 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
         ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
 
-  AT_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
+  C10_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
 
   bool RunOnDevice() override {
     if (InputSize() == 4) {

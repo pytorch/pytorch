@@ -19,6 +19,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/Exceptions.h"
 
 namespace py = pybind11;
 
@@ -26,16 +27,21 @@ namespace torch { namespace jit {
 
 namespace {
 
-Operation createPythonOperation(Node* op_) {
+// Note: const_cast is used twice below to acquire a handle to a pyobject.
+Operation createPythonOperation(const Node* op_) {
   AutoGIL gil;
-  PythonOp* op = static_cast<PythonOp*>(op_);
-  py::function func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
+  const PythonOp* op = static_cast<const PythonOp*>(op_);
+  const py::function func =
+    py::reinterpret_borrow<const py::function>(py::handle(const_cast<PythonOp*>(op)->pyobj.get()));
+
   size_t num_inputs = 0;
   for(auto arg_type : op->cconv) {
     if(arg_type == 'd')
       num_inputs++;
   }
+
   JIT_ASSERT(op->outputs().size() == 1);
+
   return [=](Stack & stack) {
     AutoGIL gil;
     py::tuple py_inputs(op->cconv.size());
@@ -44,8 +50,8 @@ Operation createPythonOperation(Node* op_) {
     size_t next_tensor = 0;
     for (auto arg_type : op->cconv) {
       if (arg_type == 'c') {
-        py_inputs[i] = py::reinterpret_borrow<py::object>(
-            op->scalar_args[next_scalar++].get());
+        py_inputs[i] =
+          py::reinterpret_borrow<const py::object>(const_cast<PythonOp*>(op)->scalar_args[next_scalar++].get());
       } else if (arg_type == 'd') {
         py_inputs[i] = toPyObject(std::move(peek(stack, next_tensor, num_inputs)));
         next_tensor++;
@@ -53,8 +59,12 @@ Operation createPythonOperation(Node* op_) {
       i++;
     }
     drop(stack, num_inputs);
-    py::object py_output(func(*py_inputs));
-    stack.push_back(returnToIValue(op->output()->type(), py_output));
+    try {
+      py::object py_output(func(*py_inputs));
+      stack.push_back(returnToIValue(op->output()->type(), py_output));
+    } catch (py::error_already_set & e) {
+      throw std::runtime_error(e.what());
+    }
     return 0;
   };
 }

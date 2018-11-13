@@ -124,6 +124,7 @@ def _split_tensor_list_constants(g, block):
 
 
 def _optimize_graph(graph, operator_export_type):
+    torch._C._jit_pass_remove_inplace_ops(graph)
     # we record now record some ops like ones/zeros
     # into a trace where we previously recorded constants
     # use constant prop to maintain our current level of onnx support
@@ -138,7 +139,7 @@ def _optimize_graph(graph, operator_export_type):
     torch._C._jit_pass_canonicalize_ops(graph)
     torch._C._jit_pass_lint(graph)
 
-    torch._C._jit_pass_peephole(graph)
+    torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_lint(graph)
 
     # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
@@ -147,7 +148,7 @@ def _optimize_graph(graph, operator_export_type):
     torch._C._jit_pass_erase_number_types(graph)
     # onnx does not support tuples, so try to remove them
     torch._C._jit_pass_lower_all_tuples(graph)
-    torch._C._jit_pass_peephole(graph)
+    torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_lint(graph)
 
     if operator_export_type != OperatorExportTypes.RAW:
@@ -512,18 +513,11 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 else:
                     raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
                         n.kindOf("value")))
-            elif op_name == "ListConstruct":
-                t = n.output().type()
-                # Tensor lists are used mostly for inputs to cat/stack. They need to be handled
-                # in those symbolics, and should become dead afterwards.
-                if t == torch._C.ListType.ofTensors():
-                    return None
-                elif t == torch._C.ListType.ofInts():
-                    unsqueezed = [g.op("Unsqueeze", input, axes_i=[0]) for input in inputs]
-                    return g.op("Concat", *unsqueezed, axis_i=0)
-            elif op_name == "Undefined":
-                # Undefined is not an ONNX operator; keep it as prim::Undefined
-                # and let the exporter handle finally eliminating these
+            elif op_name == "Undefined" or op_name == "None" or op_name == "ListConstruct":
+                # Undefined/None is not an ONNX operator; keep it as prim::Undefined/
+                # prim::None and let the exporter handle finally eliminating these
+
+                # For ListConstruct, it will be erased in the ONNX peephole pass
                 return None
             elif op_name == 'Loop' or op_name == 'If':
                 new_op_outputs = g.op(op_name, *inputs, outputs=n.outputsSize())

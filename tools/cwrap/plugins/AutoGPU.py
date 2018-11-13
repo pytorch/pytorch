@@ -10,5 +10,5 @@ class AutoGPU(CWrapPlugin):
     def process_pre_arg_assign(self, template, option):
         if not option.get('device_guard', True):
             return template
-        call = 'at::DeviceGuard device_guard(get_device(args));'
+        call = 'at::cuda::CUDAGuard device_guard(get_device(args));'
         return [call] + template

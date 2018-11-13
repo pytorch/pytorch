@@ -33,7 +33,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
         THCIndexTensor_(data)(state, target),
         THCTensor_(data)(state, istarget),
         1, dim,
-        reduction == Reduction::ElementwiseMean
+        reduction == Reduction::Mean
         );
     THCudaCheck(cudaGetLastError());
   }
@@ -59,7 +59,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
           THCIndexTensor_(data)(state, target),
           THCTensor_(data)(state, istarget),
           nframe, dim,
-          reduction == Reduction::ElementwiseMean
+          reduction == Reduction::Mean
           );
       THCudaCheck(cudaGetLastError());
       THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, scalar_t>::to(THCTensor_(sumall)(state, output_tmp)));
@@ -122,7 +122,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         THCIndexTensor_(data)(state, target),
         THCTensor_(data)(state, istarget),
         1, gradInput->size(0),
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         reduction != Reduction::None);
 
   }
@@ -145,7 +145,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         THCIndexTensor_(data)(state, target),
         THCTensor_(data)(state, istarget),
         gradInput->size(0), gradInput->size(1),
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         reduction != Reduction::None);
   }
   else

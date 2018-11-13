@@ -13,37 +13,38 @@
 #include "ATen/Tensor.h"
 #include "ATen/core/TensorOptions.h"
 #include "ATen/DeviceGuard.h"
+#include "ATen/SparseTensorUtils.h"
 
 namespace at {
 
 Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   Tensor b_src;
-  std::tie(b_src) = expand_inplace(self, src, "copy");
+  if (is_sparse()) {
+    b_src = src;
+  } else {
+    std::tie(b_src) = expand_inplace(self, src, "copy");
+  }
   return s_copy_(self, b_src, non_blocking);
 }
 
 Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device> to_device) const {
-  DeviceGuard device_guard;
-  if (to_device.has_value()) {
-    device_guard.set_index(to_device.value().index());
-  }
+  OptionalDeviceGuard device_guard(to_device);
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
+  Tensor r;
   if (is_sparse()) {
-    auto indices = src._indices();
-    auto values = src._values();
-    auto & this_dense = toBackend(is_cuda() ? Backend::CUDA : Backend::CPU);
-    auto & this_dense_idx = this_dense.toScalarType(ScalarType::Long);
-    auto indices_copy = this_dense_idx.copy(indices, non_blocking);
-    auto values_copy = this_dense.copy(values, non_blocking);
-    return _sparse_coo_tensor_unsafe(indices_copy, values_copy, src.sizes());
+    r = at::empty({0}, this->options());
   } else {
-    Tensor r = this->tensor(src.sizes());
-    r.copy_(src, non_blocking);
-    return r;
+    r = at::empty(src.sizes(), this->options());
   }
+  r.copy_(src, non_blocking);
+  return r;
 }
 
-void TypeDefault::backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+void TypeDefault::backward(
+    Tensor& self,
+    c10::optional<Tensor> gradient,
+    bool keep_graph,
+    bool create_graph) const {
   AT_ERROR("backward is not implemented for Tensor");
 }
 
@@ -83,14 +84,14 @@ Tensor TypeDefault::tensorFromBlob(void * data, IntList sizes, const std::functi
 }
 Tensor TypeDefault::tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter) const {
   auto storage = storageFromBlob(data, computeStorageSize(sizes, strides), deleter);
-  return tensor(storage, 0, sizes, strides);
+  return _th_tensor(storage, 0, sizes, strides);
 }
 Tensor TypeDefault::tensorWithAllocator(IntList sizes, Allocator* allocator) const {
   return tensorWithAllocator(sizes, defaultStrides(sizes), std::move(allocator));
 }
 Tensor TypeDefault::tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const {
   auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
-  return tensor(storage, 0, sizes, strides);
+  return _th_tensor(storage, 0, sizes, strides);
 }
 
 Storage TypeDefault::storage(bool resizable) const {
@@ -125,7 +126,7 @@ Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
 
 
 Tensor TypeDefault::scalarTensor(Scalar s) const {
-  return tensor({}).fill_(s);
+  return at::empty({}, this->options()).fill_(s);
 }
 
 ${type_method_definitions}

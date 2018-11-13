@@ -30,134 +30,86 @@ transformer = Transformer()
 
 
 class TestTransformations(tu.TestCase):
-    def test_transformer_AddNNPACK(self):
+    def _base_test_net(self):
         net = core.Net("net")
         net.Conv(["X", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW")
-        net.Relu(["Y"], ["Y2"])
+        return net
+
+    def _add_nnpack(self, net):
         transformer.AddNNPACK(net)
         assert tu.str_compare(net.Proto().op[0].engine, "NNPACK")
 
-    def test_transformer_FuseNNPACKConvRelu(self):
-        net = core.Net("net")
-        net.Conv(["X", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW")
-        net.Relu(["Y"], ["Y2"])
-        transformer.AddNNPACK(net)  # get the NNPACK engine
-        assert tu.str_compare(net.Proto().op[0].engine, "NNPACK")
+    def _fuse_nnpack_convrelu(self, net, expected_result_num_ops,
+    expected_activation_arg=True):
+        self._add_nnpack(net)
         transformer.FuseNNPACKConvRelu(net)
-        assert len(net.Proto().op) == 1
+        self.assertEquals(tu.numOps(net), expected_result_num_ops)
         has_activation_arg = False
         for arg in net.Proto().op[0].arg:
             if tu.str_compare(arg.name, "activation"):
                 assert tu.str_compare(arg.s, "Relu")
                 has_activation_arg = True
-        assert has_activation_arg
+        if expected_activation_arg:
+            assert has_activation_arg
+        else:
+            assert not has_activation_arg
+
+    def test_transformer_AddNNPACK(self):
+        net = self._base_test_net()
+        net.Relu(["Y"], ["Y2"])
+        self._add_nnpack(net)
+
+    def test_transformer_FuseNNPACKConvRelu(self):
+        net = self._base_test_net()
+        net.Relu(["Y"], ["Y2"])
+        self._fuse_nnpack_convrelu(net, 1)
 
     def test_noFuseNNPACKConvRelu(self):
-        net = core.Net("net")
-        net.Conv(["X", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW")
+        net = self._base_test_net()
         net.Relu(["Y"], ["Y2"])
         net.Relu(["Y"], ["Y3"])
-        transformer.AddNNPACK(net)  # get the NNPACK engine
-        assert tu.str_compare(net.Proto().op[0].engine, "NNPACK")
-        transformer.FuseNNPACKConvRelu(net)
-        assert len(net.Proto().op) == 3
-        has_activation_arg = False
-        for arg in net.Proto().op[0].arg:
-            if tu.str_compare(arg.name, "activation") and tu.str_compare(arg.s, "Relu"):
-                has_activation_arg = True
-        assert not has_activation_arg
+        self._fuse_nnpack_convrelu(net, 3, expected_activation_arg=False)
 
     def test_transformer_FuseNNPACKConvReluNoInplace(self):
-        net = core.Net("net")
-        net.Conv(["X", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW")
+        net = self._base_test_net()
         net.Relu(["Y"], ["X"])
-        transformer.AddNNPACK(net)  # get the NNPACK engine
-        assert tu.str_compare(net.Proto().op[0].engine, "NNPACK")
-        transformer.FuseNNPACKConvRelu(net)
-        assert len(net.Proto().op) == 1
-        has_activation_arg = False
-        for arg in net.Proto().op[0].arg:
-            if tu.str_compare(arg.name, "activation"):
-                assert tu.str_compare(arg.s, "Relu")
-                has_activation_arg = True
-        assert has_activation_arg
+        self._fuse_nnpack_convrelu(net, 1)
         assert net.Proto().op[0].output[0] != net.Proto().op[0].input[0]
 
     def test_transformer_FuseNNPACKConvReluInplaceRelu(self):
-        net = core.Net("net")
-        net.Conv(["X", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW")
+        net = self._base_test_net()
         net.Relu(["Y"], ["Y"])
-        transformer.AddNNPACK(net)  # get the NNPACK engine
-        assert tu.str_compare(net.Proto().op[0].engine, "NNPACK")
-        transformer.FuseNNPACKConvRelu(net)
-        assert len(net.Proto().op) == 1
-        has_activation_arg = False
-        for arg in net.Proto().op[0].arg:
-            if tu.str_compare(arg.name, "activation"):
-                assert tu.str_compare(arg.s, "Relu")
-                has_activation_arg = True
-        assert has_activation_arg
+        self._fuse_nnpack_convrelu(net, 1)
         assert net.Proto().op[0].output[0] != net.Proto().op[0].input[0]
 
     def test_transformer_FuseNNPACKConvReluPingPongNaming(self):
-        net = core.Net("net")
-        net.Conv(["X", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW")
+        net = self._base_test_net()
         net.Relu(["Y"], ["X"])
         net.Conv(["X", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW")
-        transformer.AddNNPACK(net)  # get the NNPACK engine
-        assert tu.str_compare(net.Proto().op[0].engine, "NNPACK")
-        transformer.FuseNNPACKConvRelu(net)
-        assert len(net.Proto().op) == 2
-        has_activation_arg = False
-        for arg in net.Proto().op[0].arg:
-            if tu.str_compare(arg.name, "activation"):
-                assert tu.str_compare(arg.s, "Relu")
-                has_activation_arg = True
-        assert has_activation_arg
+        self._fuse_nnpack_convrelu(net, 2)
         assert net.Proto().op[0].output[0] != net.Proto().op[0].input[0]
         assert net.Proto().op[1].output[0] != net.Proto().op[1].input[0]
 
     def test_transformer_FuseNNPACKConvReluFollowedByMultipleInputOp(self):
-        net = core.Net("net")
-        net.Conv(["X", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW")
+        net = self._base_test_net()
         net.Relu(["Y"], ["Y2"])
         net.Conv(["Y2", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW")
         net.Relu(["Y"], ["Y2"])
-        transformer.AddNNPACK(net)  # get the NNPACK engine
-        assert tu.str_compare(net.Proto().op[0].engine, "NNPACK")
-        transformer.FuseNNPACKConvRelu(net)
-        assert len(net.Proto().op) == 2
-        has_activation_arg = False
-        for arg in net.Proto().op[0].arg:
-            if tu.str_compare(arg.name, "activation"):
-                assert tu.str_compare(arg.s, "Relu")
-                has_activation_arg = True
-        assert has_activation_arg
+        self._fuse_nnpack_convrelu(net, 2)
         assert net.Proto().op[0].output[0] != net.Proto().op[0].input[0]
         assert net.Proto().op[1].output[0] != net.Proto().op[1].input[0]
 
     def test_transformer_FuseNNPACKConvReluInplaceFollowedByMultipleInputOp(self):
-        net = core.Net("net")
-        net.Conv(["X", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW")
+        net = self._base_test_net()
         net.Relu(["Y"], ["Y"])
         net.Conv(["Y", "w", "b"], ["Y2"], stride=1, pad=0, kernel=3, order="NCHW")
         net.Relu(["Y2"], ["Y2"])
-        transformer.AddNNPACK(net)  # get the NNPACK engine
-        assert tu.str_compare(net.Proto().op[0].engine, "NNPACK")
-        transformer.FuseNNPACKConvRelu(net)
-        assert len(net.Proto().op) == 2
-        has_activation_arg = False
-        for arg in net.Proto().op[0].arg:
-            if tu.str_compare(arg.name, "activation"):
-                assert tu.str_compare(arg.s, "Relu")
-                has_activation_arg = True
-        assert has_activation_arg
+        self._fuse_nnpack_convrelu(net, 2)
         assert net.Proto().op[0].output[0] != net.Proto().op[0].input[0]
         assert net.Proto().op[1].output[0] != net.Proto().op[1].input[0]
 
     def test_transformer_SinkMaxPool(self):
-        net = core.Net("net")
-        net.Conv(["X", "w", "b"], ["Y"], stride=1, pad=0, kernel=3, order="NCHW")
+        net = self._base_test_net()
         net.MaxPool(["Y"], ["Y1"], kernel=3)
         net.Relu(["Y1"], ["Y1"])
         transformer.SinkMaxPool(net)
@@ -205,7 +157,7 @@ class TestTransformations(tu.TestCase):
         transformer.FuseConvBN(net)
 
         # Ensure fusion
-        assert len(net.Proto().op) == 1
+        assert tu.numOps(net) == 1
         workspace.RunNetOnce(net)
         postTransformOutput = workspace.FetchBlob("Y2").flatten()
         # Check that there is no numerical difference
@@ -256,7 +208,7 @@ class TestTransformations(tu.TestCase):
         transformer.FuseConvBN(net)
 
         # Ensure fusion
-        assert len(net.Proto().op) == 1
+        assert tu.numOps(net) == 1
         workspace.RunNetOnce(net)
         postTransformOutput = workspace.FetchBlob("Y2").flatten()
         # Check that there is no numerical difference
@@ -307,7 +259,7 @@ class TestTransformations(tu.TestCase):
         transformer.FuseConvBN(net)
 
         # Ensure fusion
-        assert len(net.Proto().op) == 1
+        assert tu.numOps(net) == 1
         workspace.RunNetOnce(net)
         postTransformOutput = workspace.FetchBlob("Y2").flatten()
         print("pre")
@@ -365,7 +317,7 @@ class TestTransformations(tu.TestCase):
         transformer.FuseConvBN(net)
 
         # Ensure fusion
-        assert len(net.Proto().op) == 1
+        assert tu.numOps(net) == 1
         workspace.RunNetOnce(net)
         postTransformOutput = workspace.FetchBlob("Y2").flatten()
         # Check that there is no numerical difference

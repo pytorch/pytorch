@@ -1,17 +1,16 @@
 #pragma once
 
 #include <ATen/CPUGeneral.h>
-#include "ATen/core/ATenGeneral.h"
-#include "ATen/CUDAStream.h"
-#include "ATen/core/Generator.h"
 #include "ATen/Type.h"
 #include "ATen/TypeExtendedInterface.h"
 #include "ATen/Utils.h"
-#include "ATen/core/Error.h"
-#include "ATen/detail/CUDAHooksInterface.h"
-#include "ATen/core/VariableHooksInterface.h"
-#include "ATen/detail/ComplexHooksInterface.h"
+#include "ATen/core/ATenGeneral.h"
+#include "ATen/core/Generator.h"
 #include "ATen/core/LegacyTypeDispatch.h"
+#include "ATen/core/VariableHooksInterface.h"
+#include "ATen/detail/CUDAHooksInterface.h"
+#include "ATen/detail/ComplexHooksInterface.h"
+#include "c10/util/Exception.h"
 
 // This is temporary
 #include "ATen/core/ATenCoreTest.h"

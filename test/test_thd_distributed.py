@@ -8,6 +8,7 @@ import time
 import unittest
 from contextlib import contextmanager
 from functools import reduce, wraps
+import tempfile
 
 import torch
 import torch.cuda
@@ -15,9 +16,8 @@ import torch.distributed.deprecated as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from common import TestCase
+from common_utils import TestCase, run_tests
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
-from torch.autograd import Variable
 
 
 BACKEND = os.environ["BACKEND"]
@@ -152,6 +152,36 @@ class Barrier(object):
             if time.time() - start_time > timeout:
                 raise RuntimeError("barrier timeout")
             time.sleep(0.1)
+
+
+# The test network must live at top level so we can test pickling it.
+
+
+class _FC2(nn.Module):
+
+    def __init__(self):
+        super(_FC2, self).__init__()
+        self.fc = nn.Linear(10, 50, bias=True)
+        self.fc.bias.requires_grad = False
+
+    def forward(self, x):
+        x = self.fc(x)
+        return x
+
+
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.fc1 = nn.Linear(2, 10, bias=False)
+        self.fc2 = _FC2()
+        self.fc3 = nn.Linear(50, 4, bias=False)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = self.relu(self.fc1(x))
+        x = self.relu(self.fc2(x))
+        x = self.fc3(x)
+        return F.softmax(x, dim=1)
 
 
 class _DistTestBase(object):
@@ -896,26 +926,13 @@ class _DistTestBase(object):
         self._test_all_gather_multigpu_helper(group, group_id, rank, rank_to_GPU)
 
     def _create_Net(self):
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.fc1 = nn.Linear(2, 10, bias=False)
-                self.fc2 = nn.Linear(10, 50, bias=False)
-                self.fc3 = nn.Linear(50, 4, bias=False)
-                self.relu = nn.ReLU()
-
-            def forward(self, x):
-                x = self.relu(self.fc1(x))
-                x = self.relu(self.fc2(x))
-                x = self.fc3(x)
-                return F.softmax(x, dim=1)
-
         return Net()
 
     def _model_step(self, model):
         for param in model.parameters():
-            param.data += param.grad
-            param.grad = None
+            if param.grad is not None:
+                param.data += param.grad
+                param.grad = None
 
     def _prepare_dummy_data(self, local_bs):
         # global_bs for DDP should be divisible by WORLD_SIZE
@@ -961,6 +978,14 @@ class _DistTestBase(object):
 
             # Shuffle the input so that DDP input is different
             input = input[torch.randperm(batch_size)]
+
+        # Test that saving and loading work
+        # gloo serialization doesn't work, see #12261
+        if BACKEND != "gloo":
+            with tempfile.TemporaryFile() as tmp_file:
+                torch.save(model_DDP, tmp_file)
+                tmp_file.seek(0)
+                saved_model_DDP = torch.load(tmp_file)
 
     @unittest.skipIf(
         BACKEND != "nccl" and BACKEND != "gloo",
@@ -1099,9 +1124,12 @@ if BACKEND == "tcp" or BACKEND == "gloo" or BACKEND == "nccl":
                 getattr(fn, "skip_if_no_gpu", False) or
                 getattr(fn, "skip_if_small_worldsize", False)
             )
-            self.JOIN_TIMEOUT = get_timeout(self.id())
-            for p in self.processes:
-                p.join(self.JOIN_TIMEOUT)
+            join_timeout = get_timeout(self.id())
+            for rank, process in enumerate(self.processes):
+                process.join(join_timeout)
+                self.assertFalse(
+                    process.is_alive(),
+                    "Timeout waiting for rank %d to terminate" % rank)
 
             first_process = self.processes[0]
             for p in self.processes:
@@ -1145,4 +1173,4 @@ if __name__ == "__main__":
         not torch.cuda._initialized
     ), "test_distributed must not have initialized CUDA context on main process"
 
-    unittest.main()
+    run_tests()

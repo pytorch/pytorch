@@ -16,6 +16,8 @@
 
 namespace torch { namespace jit {
 
+using c10::Type;
+
 std::string getPythonName(const PyObject* obj_) {
   AutoGIL gil;
   PyObject* obj = const_cast<PyObject*>(obj_);
@@ -92,23 +94,23 @@ struct ConcretePythonOp : public PythonOp {
  // recover the autograd.Function instance, if this PythonOp's function
  // was originally SomeFunction.apply
  // used in ONNX for discovering symbolics
- virtual at::optional<THPObjectPtr> autogradFunction() const override {
+ virtual c10::optional<THPObjectPtr> autogradFunction() const override {
    AutoGIL gil;
    py::handle obj = const_cast<PyObject*>(pyobj.get());
 
    auto r = py::getattr(obj, "__self__", py::none());
    if(r.is_none())
-     return at::nullopt;
+     return c10::nullopt;
 
    auto apply = py::getattr(r, "apply", py::none());
    if(apply.is_none())
-     return at::nullopt;
+     return c10::nullopt;
 
    auto c = PyObject_RichCompareBool(apply.ptr(), obj.ptr(), Py_NE);
    if(PyErr_Occurred())
      throw py::error_already_set();
    if(c)
-     return at::nullopt;
+     return c10::nullopt;
 
    return THPObjectPtr(r.release().ptr());
  }
@@ -195,8 +197,6 @@ void initPythonIRBindings(PyObject * module_) {
     .def("copy",[](Graph &g) {
       return g.copy();
     })
-    .GS(advanceStage)
-    .GS(stage)
     .GS(eraseInput)
     .GS(registerOutput)
     .def("create",[](Graph & g, const char * str) {
@@ -251,8 +251,6 @@ void initPythonIRBindings(PyObject * module_) {
     .VS(unique)
     .VS(uniqueName)
     .VS(setUniqueName)
-    .VS(setStage)
-    .VS(stage)
     .VS(offset)
     .VS(uses)
     .VS(replaceAllUsesWith)
@@ -296,8 +294,6 @@ void initPythonIRBindings(PyObject * module_) {
       return n.outputs().size();
     })
     .NS(kind)
-    .NS(stage)
-    .NS(setStage)
     .def("inputs",[](Node &n) {
       return py::make_iterator(n.inputs().begin(), n.inputs().end());
     })
@@ -419,6 +415,7 @@ void initPythonIRBindings(PyObject * module_) {
     })
     ;
 
+  using ::c10::Type;
   py::class_<Type,std::shared_ptr<Type>>(m,"Type")
     .def("__repr__",[](Type & t) {
       return t.python_str();
@@ -435,6 +432,8 @@ void initPythonIRBindings(PyObject * module_) {
           return "DynamicType";
         case TypeKind::TensorType:
           return "TensorType";
+        case TypeKind::OptionalType:
+          return "OptionalType";
         case TypeKind::NumberType:
           return "NumberType";
         case TypeKind::NoneType:
@@ -455,6 +454,12 @@ void initPythonIRBindings(PyObject * module_) {
           return "StringType";
         case TypeKind::GeneratorType:
           return "GeneratorType";
+        case TypeKind::BoolType:
+          return "BoolType";
+        case TypeKind::VarType:
+          return "VarType";
+        case TypeKind::FutureType:
+          return "FutureType";
         }
         // not reachable, but some compilers complain
         AT_ERROR("Unknown Type Kind");
@@ -477,7 +482,7 @@ void initPythonIRBindings(PyObject * module_) {
     .def("isSubtypeOf", [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
         return self->isSubtypeOf(other);
     })
-    .def_static("inferFrom", inferTypeFrom);
+    .def_static("inferFrom", c10::inferTypeFrom);
 
   py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
     .def_static("get", &NumberType::get);
@@ -487,6 +492,8 @@ void initPythonIRBindings(PyObject * module_) {
     .def_static("get", &FloatType::get);
   py::class_<DynamicType, Type, std::shared_ptr<DynamicType>>(m, "DynamicType")
     .def_static("get", &DynamicType::get);
+  py::class_<BoolType, Type, std::shared_ptr<BoolType>>(m, "BoolType")
+    .def_static("get", &BoolType::get);
 
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
     .def(py::init([](std::vector<TypePtr> a){ return TupleType::create(a); }))

@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ATen/core/Macros.h>
+#include <c10/macros/Macros.h>
 
 namespace at {
 
-AT_CORE_API int CoreTest();
+CAFFE2_API int CoreTest();
 }

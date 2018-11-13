@@ -49,13 +49,13 @@ class MomentumSGDOp final : public Operator<Context> {
     // Iter live on the CPU
     CAFFE_ENFORCE(OperatorBase::InputIsTensorType(GRAD, device_type));
     CAFFE_ENFORCE(OperatorBase::InputIsTensorType(MOMENTUM, device_type));
-    CAFFE_ENFORCE(Input(LR).size() == 1);
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENTUM).size());
+    CAFFE_ENFORCE(Input(LR).numel() == 1);
+    CAFFE_ENFORCE(Input(GRAD).numel() == Input(MOMENTUM).numel());
     Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
     Output(OUTPUT_MOMENTUM)->ResizeLike(Input(MOMENTUM));
 
     momentum_sgd_update<Context>(
-        Input(GRAD).size(),
+        Input(GRAD).numel(),
         Input(GRAD).template data<T>(),
         Input(MOMENTUM).template data<T>(),
         Output(OUTPUT_GRAD)->template mutable_data<T>(),
@@ -89,13 +89,13 @@ class MomentumSGDUpdateOp final : public Operator<Context> {
     // Iter live on the CPU
     CAFFE_ENFORCE(OperatorBase::InputIsTensorType(GRAD, device_type));
     CAFFE_ENFORCE(OperatorBase::InputIsTensorType(MOMENTUM, device_type));
-    CAFFE_ENFORCE_EQ(Input(LR).size(), 1);
-    CAFFE_ENFORCE_EQ(Input(GRAD).size(), Input(MOMENTUM).size());
+    CAFFE_ENFORCE_EQ(Input(LR).numel(), 1);
+    CAFFE_ENFORCE_EQ(Input(GRAD).numel(), Input(MOMENTUM).numel());
     Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
     Output(OUTPUT_MOMENTUM)->ResizeLike(Input(MOMENTUM));
 
     momentum_sgd_update<Context>(
-        Input(GRAD).size(),
+        Input(GRAD).numel(),
         Input(GRAD).template data<T>(),
         Input(MOMENTUM).template data<T>(),
         Output(OUTPUT_GRAD)->template mutable_data<T>(),
@@ -129,10 +129,11 @@ class SparseMomentumSGDUpdateOp final : public Operator<Context> {
     Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
 
     // Enforce shapes
-    CAFFE_ENFORCE_EQ(Input(LR).size(), 1);
-    CAFFE_ENFORCE_EQ(Input(PARAM).size(), Input(MOMENTUM).size());
-    CAFFE_ENFORCE_EQ(Input(PARAM).size_from_dim(1),
-        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+    CAFFE_ENFORCE_EQ(Input(LR).numel(), 1);
+    CAFFE_ENFORCE_EQ(Input(PARAM).numel(), Input(MOMENTUM).numel());
+    CAFFE_ENFORCE_EQ(
+        Input(PARAM).size_from_dim(1),
+        Input(GRAD).size_from_dim(Input(INDICES).dim()));
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, Input(INDICES));
@@ -140,8 +141,8 @@ class SparseMomentumSGDUpdateOp final : public Operator<Context> {
 
   template <typename SIndex>
   bool DoRunWithType() {
-    auto block_size = Input(PARAM).size() / Input(PARAM).dim(0);
-    auto n = Input(GRAD).size() / block_size;
+    auto block_size = Input(PARAM).numel() / Input(PARAM).size(0);
+    auto n = Input(GRAD).numel() / block_size;
 
     const auto* gradIn = Input(GRAD).template data<T>();
     const auto* momentumIn = Input(MOMENTUM).template data<T>();
@@ -158,8 +159,8 @@ class SparseMomentumSGDUpdateOp final : public Operator<Context> {
       auto offsetI = i * block_size;
       auto offsetIdx = idx * block_size;
 
-      CAFFE_ENFORCE(offsetIdx + block_size <= Input(PARAM).size());
-      CAFFE_ENFORCE(offsetI + block_size <= Input(GRAD).size());
+      CAFFE_ENFORCE(offsetIdx + block_size <= Input(PARAM).numel());
+      CAFFE_ENFORCE(offsetI + block_size <= Input(GRAD).numel());
 
       momentum_sgd_update<Context>(
           block_size,

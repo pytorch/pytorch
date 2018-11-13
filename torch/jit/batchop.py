@@ -214,8 +214,8 @@ def batch_where(data, mask, dims, data1, mask1, dims1, data2, mask2, dims2):
 
 
 @torch.jit.script
-def batch_where_scalar(cond_, data1, mask1, dims1, data2, mask2, dims2):
-    cond = torch.zeros([1], dtype=torch.uint8) * cond_
+def batch_where_scalar(cond, data1, mask1, dims1, data2, mask2, dims2):
+    cond = torch.zeros([1], dtype=torch.uint8)
     res_data = torch.where(cond, data1, data2)
     res_mask = torch.where(cond, mask1, mask2)
     res_dims = torch.where(cond, dims1, dims2)
@@ -278,7 +278,7 @@ def batch_dim(data, mask, dims):
 @torch.jit.script
 def batch_squeeze(data, mask, dims, dim_):
     if int(dim_) < 0:
-        dim_ += data.dim()
+        dim_ = dim_ + data.dim()
     dim = int(dim_)
     # if dim == 0:
     #     raise ValueError("cannot do squeeze along batch_dim")
@@ -291,7 +291,7 @@ def batch_squeeze(data, mask, dims, dim_):
 @torch.jit.script
 def batch_unsqueeze(data, mask, dims, dim_):
     if int(dim_) < 0:
-        dim_ += data.dim() + 1
+        dim_ = dim_ + data.dim() + 1
     dim = int(dim_)
     # if dim == 0:
     #     raise ValueError("cannot do unsqueeze along batch_dim")
@@ -304,7 +304,7 @@ def batch_unsqueeze(data, mask, dims, dim_):
 @torch.jit.script
 def batch_argmax(data, mask, dims, dim_, keepdim_):
     dim = int(dim_)
-    keepdim = int(keepdim_)
+    keepdim = bool(keepdim_)
     # if dim == 0:
     #     raise ValueError("cannot do argmax along batch_dim")
     batch_size = data.size(0)
@@ -338,8 +338,8 @@ def batch_argmax(data, mask, dims, dim_, keepdim_):
 def batch_topk(data, mask, dims, k_, dim_, largest_, sorted_):
     k = int(k_)
     dim = int(dim_)
-    largest = int(largest_)
-    sorted = int(sorted_)
+    largest = bool(largest_)
+    sorted = bool(sorted_)
     # if dim == 0:
     #     raise ValueError("cannot do topk along batch_dim")
     batch_size = data.size(0)

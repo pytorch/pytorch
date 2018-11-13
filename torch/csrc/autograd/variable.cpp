@@ -10,7 +10,7 @@
 #include "torch/csrc/autograd/variable_version.h"
 
 #include <ATen/ATen.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <list>
 #include <memory>
@@ -22,7 +22,7 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type().type_id(), data.type().typeMeta(), data.type().allocator(), /* is variable */ true),
+    : TensorImpl(data.type_id(), data.dtype(), /*allocator=*/nullptr, /* is variable */ true),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),
@@ -54,7 +54,7 @@ IntList Variable::Impl::strides() const {
 }
 
 bool Variable::Impl::is_contiguous() const {
-  AT_ERROR("variable impl does not have is_contiguous");
+  return data_.is_contiguous();
 }
 
 int64_t Variable::Impl::dim() const {
@@ -85,12 +85,20 @@ void Variable::Impl::set_storage_offset(int64_t storage_offset) {
   AT_ERROR("variable impl does not have set_storage_offset");
 }
 
+void* Variable::Impl::slow_data() const {
+  return data_.unsafeGetTensorImpl()->slow_data();
+}
+
 const at::Storage& Variable::Impl::storage() const {
   return data_.storage();
 }
 
 int64_t Variable::Impl::storage_offset() const {
   return data_.storage_offset();
+}
+
+int64_t Variable::Impl::get_device_slow() const {
+  return data_.get_device();
 }
 
 std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
@@ -115,12 +123,6 @@ std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
   return result;
 }
 
-Variable Variable::Impl::detach() const {
-  auto detached = make_variable(data_, /*requires_grad=*/false);
-  detached.set_version_counter(version_counter_);
-  return detached;
-}
-
 void Variable::Impl::detach_() {
   if (is_view_) {
     AT_ERROR("Can't detach views in-place. Use detach() instead");
@@ -131,7 +133,7 @@ void Variable::Impl::detach_() {
 }
 
 void Variable::Impl::backward(
-    at::optional<Tensor> gradient,
+    c10::optional<Tensor> gradient,
     bool keep_graph,
     bool create_graph) {
   std::vector<Edge> edges;
@@ -172,7 +174,7 @@ void Variable::Impl::release_resources() {
   hooks_.clear();
 }
 
-Variable::ViewImpl::ViewImpl(Variable base, at::Tensor data, Edge gradient_edge)
+Variable::DifferentiableViewImpl::DifferentiableViewImpl(Variable base, at::Tensor data, Edge gradient_edge)
     : Variable::Impl(std::move(data), false, std::move(gradient_edge)),
       base_(std::move(base)) {
   AT_CHECK(base_.defined(), "base is undefined");
@@ -184,7 +186,7 @@ Variable::ViewImpl::ViewImpl(Variable base, at::Tensor data, Edge gradient_edge)
   attr_version = version_counter_.current_version();
 }
 
-std::shared_ptr<Function>& Variable::ViewImpl::get_grad_fn() {
+std::shared_ptr<Function>& Variable::DifferentiableViewImpl::get_grad_fn() {
   std::lock_guard<std::mutex> lock(mutex_);
   if (!grad_fn_ && !base_.requires_grad()) {
     return grad_fn_;
@@ -208,7 +210,7 @@ std::shared_ptr<Function>& Variable::ViewImpl::get_grad_fn() {
   return grad_fn_;
 }
 
-void Variable::ViewImpl::rebase_history(Edge gradient_edge) {
+void Variable::DifferentiableViewImpl::rebase_history(Edge gradient_edge) {
   AT_ASSERT(gradient_edge.input_nr == 0);
   AT_ASSERT(gradient_edge.function);
   AT_CHECK(
@@ -221,7 +223,7 @@ void Variable::ViewImpl::rebase_history(Edge gradient_edge) {
   get_grad_fn(); // trigger an update to the view's grad_fn
 }
 
-void Variable::ViewImpl::release_resources() {
+void Variable::DifferentiableViewImpl::release_resources() {
   Variable::Impl::release_resources();
   base_.reset();
 }
@@ -229,7 +231,7 @@ void Variable::ViewImpl::release_resources() {
 void Variable::rebase_history(Edge gradient_edge) {
   AT_ASSERT(gradient_edge.function != nullptr);
   if (is_view()) {
-    auto& impl = static_cast<Variable::ViewImpl&>(*get());
+    auto& impl = static_cast<Variable::DifferentiableViewImpl&>(*get());
     impl.rebase_history(std::move(gradient_edge));
   } else {
     set_gradient_edge(std::move(gradient_edge));

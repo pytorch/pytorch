@@ -7,7 +7,7 @@
 #include "caffe2/operators/reshape_op.h"
 #include "caffe2/utils/math.h"
 
-CAFFE2_DECLARE_string(caffe_test_root);
+C10_DECLARE_string(caffe_test_root);
 
 namespace caffe2 {
 
@@ -23,7 +23,7 @@ static void AddConstInput(
   auto* tensor = BlobGetMutableTensor(blob, CUDA);
   tensor->Resize(shape);
   math::Set<float, CUDAContext>(
-      tensor->size(), value, tensor->template mutable_data<float>(), &context);
+      tensor->numel(), value, tensor->template mutable_data<float>(), &context);
   return;
 }
 
@@ -45,8 +45,8 @@ TEST(ReshapeOpGPUTest, testReshapeWithScalar) {
   EXPECT_TRUE(op->Run());
   Blob* XNew = ws.GetBlob("XNew");
   const Tensor& XNewTensor = XNew->Get<Tensor>();
-  EXPECT_EQ(1, XNewTensor.ndim());
-  EXPECT_EQ(1, XNewTensor.size());
+  EXPECT_EQ(1, XNewTensor.dim());
+  EXPECT_EQ(1, XNewTensor.numel());
 }
 
 } // namespace caffe2

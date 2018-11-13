@@ -14,15 +14,14 @@ void specializeUndef(Graph & g) {
   enum class State { Defined, Undefined, Unknown };
   std::unordered_map<Value*, State> state;
 
-  auto inputs = g.inputs();
-  for (size_t i = 0; i < inputs.size(); i++) {
-    auto tp = inputs[i]->type();
+  for (Value* input : g.inputs()) {
+    auto tp = input->type();
     if (tp->isSubtypeOf(UndefinedTensorType::get())) {
-      state[inputs[i]] = State::Undefined;
+      state[input] = State::Undefined;
     } else if (tp->isSubtypeOf(DynamicType::get())) {
-      state[inputs[i]] = State::Defined;
+      state[input] = State::Defined;
     } else {
-      state[inputs[i]] = State::Unknown;
+      state[input] = State::Unknown;
     }
   }
 

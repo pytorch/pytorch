@@ -54,11 +54,7 @@ set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS}
 # TODO Remove the CMake_xxx variables above and add them to the variables for the local library target below instead
 
 set(LIB_SOURCES_CPU
-        Array.cpp
-        Optional.cpp
-        Metaprogramming.cpp
-        TypeList.cpp
-        TypeTraits.cpp
+        dummy.cpp
         )
 
 set(LIB_SOURCES_GPU
@@ -70,10 +66,6 @@ set(LIB_SOURCES_HIP
         )
 
 set(TEST_SOURCES_CPU
-        Array_test.cpp
-        Metaprogramming_test.cpp
-        TypeList_test.cpp
-        TypeTraits_test.cpp
         )
 
 set(LIB_SOURCES_GPU

@@ -5,6 +5,8 @@
 #include "torch/csrc/python_headers.h"
 
 #include <ATen/Device.h>
+#include <ATen/core/ScalarType.h>
+#include <ATen/core/Backend.h>
 
 #include <memory>
 #include <string>
@@ -13,8 +15,6 @@ struct THPDtype;
 struct THPLayout;
 
 namespace at {
-enum class Backend;
-enum class ScalarType;
 struct Storage;
 struct Type;
 } // namespace at

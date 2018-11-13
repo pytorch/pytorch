@@ -110,6 +110,7 @@ An empty sparse tensor can be constructed by specifying its size:
     .. method:: mm
     .. method:: mul
     .. method:: mul_
+    .. method:: narrow_copy
     .. method:: resizeAs_
     .. method:: size
     .. method:: spadd

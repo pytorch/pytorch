@@ -1,5 +1,4 @@
-#define CATCH_CONFIG_MAIN
-#include "catch_utils.hpp"
+#include "gtest/gtest.h"
 
 #include "ATen/ATen.h"
 #include "ATen/DLConvertor.h"
@@ -10,18 +9,13 @@
 #include "test_seed.h"
 
 using namespace at;
-
-CATCH_TEST_CASE( "dlconvertor", "[cpu]" ) {
-
+TEST(TestDlconvertor, TestDlconvertor) {
   manual_seed(123, at::kCPU);
 
-  CATCH_INFO( "convert ATen to DLTensor" );
-
-  Tensor a = rand({3,4});
+  Tensor a = rand({3, 4});
   DLManagedTensor* dlMTensor = toDLPack(a);
 
-  CATCH_INFO( "convert DLTensor to ATen" );
   Tensor b = fromDLPack(dlMTensor);
 
-  CATCH_REQUIRE(a.equal(b));
+  ASSERT_TRUE(a.equal(b));
 }

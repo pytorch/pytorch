@@ -9,9 +9,9 @@
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/passes/batch_mm.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/erase_number_types.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/inplace_check.h"
 #include "torch/csrc/jit/passes/peephole.h"
@@ -55,7 +55,7 @@ struct ExecutionPlan {
     , graph(std::move(graph)) {}
 
   void run(Stack& stack) const {
-    return InterpreterState(code).runOneStage(stack);
+    return InterpreterState(code).run(stack);
   }
 
   operator bool() const {
@@ -81,7 +81,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     ivalue_captures.reserve(capture_size);
   }
 
-  virtual variable_list apply(variable_list&& inputs) override {
+  variable_list apply(variable_list&& inputs) override {
     Stack stack;
     stack.reserve(is_var_capture.size() + inputs.size());
     stack.insert(stack.end(), std::make_move_iterator(inputs.begin()),
@@ -90,7 +90,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     auto ivalue_capture_it = ivalue_captures.begin();
     for (bool is_var : is_var_capture) {
       if (is_var) {
-        stack.push_back(var_capture_it->unpack(this->shared_from_this()));
+        stack.emplace_back(var_capture_it->unpack(this->shared_from_this()));
         ++var_capture_it;
       } else {
         stack.push_back(*ivalue_capture_it);
@@ -108,9 +108,9 @@ struct DifferentiableGraphBackward : public autograd::Function {
         auto output = std::move(stack[i]).toTensor();
         const auto & edge = next_edge(i);
         if (output.defined()) {
-          outputs.push_back(std::move(output));
+          outputs.emplace_back(std::move(output));
         } else if (edge.is_valid()) {
-          outputs.push_back(edge.function->input_metadata(edge.input_nr).zeros_like());
+          outputs.emplace_back(edge.function->input_metadata(edge.input_nr).zeros_like());
         } else {
           outputs.emplace_back();
         }
@@ -169,7 +169,7 @@ struct DifferentiableGraphOp {
     }
 
     detachVariables(stack);
-    InterpreterState(f).runOneStage(stack);
+    InterpreterState(f).run(stack);
 
     {
       auto outputs = last(stack, num_outputs);
@@ -250,7 +250,7 @@ void packGradient(Gradient gradient, Node *dnode) {
        ->is_(attr::df_output_vjps, fmap<int64_t>(gradient.df_output_vjps));
 }
 
-Gradient getGradient(Node *n) {
+Gradient getGradient(const Node *n) {
   JIT_ASSERT(n->kind() == prim::DifferentiableGraph);
   Gradient grad;
   grad.f = n->g(attr::Subgraph);
@@ -268,7 +268,7 @@ Gradient getGradient(Node *n) {
 RegisterOperators reg_graph_executor_ops({
   Operator(
     prim::DifferentiableGraph,
-    [](Node *n) -> Operation {
+    [](const Node *n) -> Operation {
       return DifferentiableGraphOp(getGradient(n));
     })
 });
@@ -316,12 +316,26 @@ struct GraphExecutorImpl {
     return total;
   }
 
+  inline bool hasMutableOperators(Block* block) {
+    for(auto n : block->nodes()) {
+      if(n->kind().is_aten() && n->schema().is_mutable())
+        return true;
+      for(auto b : n->blocks()) {
+        if(hasMutableOperators(b))
+          return true;
+      }
+    }
+    return false;
+  }
+
   GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
-    : graph(prepareGraph(graph))
-    , optimize(optimize)
-    , num_inputs(this->graph->inputs().size())
-    , num_flat_inputs(countFlatInputs(graph))
-    , num_outputs(this->graph->outputs().size()) {}
+      : graph(prepareGraph(graph)),
+        // until we have correct alias analysis any use of mutable operators
+        // disables all optimization
+        optimize(optimize && !hasMutableOperators(this->graph->block())),
+        num_inputs(this->graph->inputs().size()),
+        num_flat_inputs(countFlatInputs(graph)),
+        num_outputs(this->graph->outputs().size()) {}
 
   // entry point where execution begins
   void run(Stack & stack) {
@@ -336,6 +350,7 @@ struct GraphExecutorImpl {
   }
 
   std::shared_ptr<Graph> graphFor(const Stack& stack) const {
+    JIT_ASSERT(stack.size() >= num_inputs);
     auto inputs = last(stack, num_inputs);
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
 
@@ -359,6 +374,14 @@ struct GraphExecutorImpl {
       state.execution_plans.emplace(entry.first, entry.second.getDebugState());
     }
     return state;
+  }
+
+  // This function should be used only for testing purposes
+  void debugDisableAutodiffSubgraphInlining() {
+    // Allow single-node autodiff subgraphs
+    autodiffSubgraphNodeThreshold = 1;
+    // Don't inline autodiff subgraphs into autograd functions
+    autodiffSubgraphInlineThreshold = 1;
   }
 
 private:
@@ -416,14 +439,14 @@ private:
     // Phase 5. Apply non-differentiable optimizations to the graphs we've found
     //          (or the whole grpah if we know we won't need its derivative).
     if (needsGradient(opt_graph)) {
-      auto diff_nodes = CreateAutodiffSubgraphs(*opt_graph);
+      auto diff_nodes = CreateAutodiffSubgraphs(*opt_graph, autodiffSubgraphNodeThreshold);
       for (Node * dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
         runNondiffOptimization(gradient.f);
         packGradient(gradient, dnode);
       }
-      InlineAutodiffSubgraphs(opt_graph);
+      InlineAutodiffSubgraphs(opt_graph, autodiffSubgraphInlineThreshold);
     } else {
       runNondiffOptimization(opt_graph);
     }
@@ -435,6 +458,7 @@ private:
   void runOptimization(std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
+    ConstantPooling(graph);
     UnrollLoops(graph);
     PeepholeOptimize(graph);
     CheckInplace(graph);
@@ -473,7 +497,7 @@ private:
     auto state = tracer::getTracingState();
     auto inputs = last(stack, num_inputs);
     auto input_values = fmap(inputs, [](const IValue & v) {
-      return tracer::getValueTrace(v.toTensor());
+      return tracer::getNestedValueTrace(v);
     });
 
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
@@ -523,6 +547,10 @@ private:
   // GraphExecutors can be accessed from multiple threads, so this thread needs to be
   // held every time we access the fallback or plan_cache.
   std::mutex compile_mutex;
+
+  // Some tunable parameters
+  size_t autodiffSubgraphNodeThreshold = 2;
+  size_t autodiffSubgraphInlineThreshold = 5;
 };
 
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)
@@ -542,6 +570,10 @@ std::shared_ptr<Graph> GraphExecutor::graphFor(const Stack& inputs) const {
 
 GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
+}
+
+void GraphExecutor::debugDisableAutodiffSubgraphInlining() {
+  return pImpl->debugDisableAutodiffSubgraphInlining();
 }
 
 

@@ -7,7 +7,7 @@ from itertools import product
 import torch
 import torch.cuda
 from torch.nn.functional import _Reduction
-from common import TestCase, to_gpu, freeze_rng_state, is_iterable, TEST_WITH_ROCM
+from common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, TEST_WITH_ROCM
 from common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 import torch.backends.cudnn
@@ -41,7 +41,6 @@ module_tests = [
         constructor_args=(10, 8),
         input_size=(4, 10),
         reference_fn=lambda i, p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8),
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Linear',
@@ -103,20 +102,17 @@ module_tests = [
         constructor_args=(1,),
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, True).expand(10, 20)),
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softmax2d',
         input_size=(1, 3, 10, 20),
         reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, False)),
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LogSoftmax',
         constructor_args=(1,),
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1, True).expand(10, 20)).log_(),
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LogSoftmax',
@@ -124,14 +120,12 @@ module_tests = [
         input_size=(1, 3, 10, 20),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1, False)).log_(),
         desc='multiparam',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='ELU',
         constructor_args=(2.,),
         input_size=(3, 2, 5),
         reference_fn=lambda x, _: torch.where(x >= 0, x, 2 * (x.exp() - 1)),
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     # TODO: reference function
     dict(
@@ -204,7 +198,6 @@ module_tests = [
         input_size=(2, 3, 4),
         desc='1d_multiparam',
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='PReLU',
@@ -218,7 +211,6 @@ module_tests = [
         input_size=(2, 3, 4, 5),
         desc='2d_multiparam',
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='PReLU',
@@ -232,40 +224,35 @@ module_tests = [
         input_size=(2, 3, 4, 5, 6),
         desc='3d_multiparam',
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softsign',
         input_size=(3, 2, 5),
         reference_fn=lambda i, _: i.div(1 + torch.abs(i)),
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softmin',
         constructor_args=(1,),
         input_size=(10, 20),
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softmin',
         constructor_args=(1,),
         input_size=(2, 3, 5, 10),
         desc='multidim',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Tanhshrink',
         input_size=(2, 3, 4, 5),
-        test_cuda=(not TEST_WITH_ROCM)
     ),
 ]
 
 
-def kldivloss_reference(input, target, reduction='elementwise_mean'):
+def kldivloss_reference(input, target, reduction='mean'):
     safe_target = target * (target > 0).type_as(target)
     safe_target_log = (safe_target + (target <= 0).type_as(target)).log()
     result = safe_target * (safe_target_log - input)
-    if reduction == 'elementwise_mean':
+    if reduction == 'mean':
         return result.mean()
     elif reduction == 'sum':
         return result.sum()
@@ -273,7 +260,7 @@ def kldivloss_reference(input, target, reduction='elementwise_mean'):
 
 
 def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
-                        reduction='elementwise_mean'):
+                        reduction='mean'):
     assert input.dim() >= 3
     N = input.size(0)
     C = input.size(1)
@@ -291,7 +278,7 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
         output[tup] = -input[tuple(input_index)] * norm
         total_weight += norm
 
-    if reduction == 'elementwise_mean':
+    if reduction == 'mean':
         return output.sum() / total_weight
     elif reduction == 'sum':
         return output.sum()
@@ -299,7 +286,7 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
 
 
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
-                      reduction='elementwise_mean'):
+                      reduction='mean'):
 
     def nll_loss_helper(input, target, weight, ignore_index):
         if target == ignore_index:
@@ -312,7 +299,7 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
                           for i, t in zip(input, target)]
     losses, weights = zip(*losses_and_weights)
     losses_tensor = input.new_tensor(losses)
-    if reduction == 'elementwise_mean':
+    if reduction == 'mean':
         return sum(losses_tensor) / sum(weights)
     elif reduction == 'sum':
         return sum(losses_tensor)
@@ -320,12 +307,12 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
         return losses_tensor
 
 
-def smoothl1loss_reference(input, target, reduction='elementwise_mean'):
+def smoothl1loss_reference(input, target, reduction='mean'):
     abs_diff = (input - target).abs()
     ge_one_mask = (abs_diff >= 1).type_as(abs_diff)
     lt_one_mask = (abs_diff < 1).type_as(abs_diff)
     output = ge_one_mask * (abs_diff - 0.5) + lt_one_mask * 0.5 * (abs_diff ** 2)
-    if reduction == 'elementwise_mean':
+    if reduction == 'mean':
         return output.mean()
     elif reduction == 'sum':
         return output.sum()
@@ -348,7 +335,7 @@ def _multilabelmarginloss_reference(input, target):
     return sum
 
 
-def multilabelmarginloss_reference(input, target, reduction='elementwise_mean'):
+def multilabelmarginloss_reference(input, target, reduction='mean'):
     if input.dim() == 1:
         n = 1
         dim = input.size(0)
@@ -361,28 +348,28 @@ def multilabelmarginloss_reference(input, target, reduction='elementwise_mean'):
         for i in range(0, n):
             output[i] = _multilabelmarginloss_reference(input[i], target[i])
 
-    if reduction == 'elementwise_mean':
+    if reduction == 'mean':
         return output.mean() / dim
     elif reduction == 'sum':
         return output.sum() / dim
     return output / dim
 
 
-def hingeembeddingloss_reference(input, target, margin=1.0, reduction='elementwise_mean'):
+def hingeembeddingloss_reference(input, target, margin=1.0, reduction='mean'):
     margin_clamp = (margin - input).clamp(min=0).type_as(input)
     output = torch.where(target == 1, input, margin_clamp)
 
-    if reduction == 'elementwise_mean':
+    if reduction == 'mean':
         return output.mean()
     elif reduction == 'sum':
         return output.sum()
     return output
 
 
-def softmarginloss_reference(input, target, reduction='elementwise_mean'):
+def softmarginloss_reference(input, target, reduction='mean'):
     output = (1 + (-input * target).exp()).log()
 
-    if reduction == 'elementwise_mean':
+    if reduction == 'mean':
         return output.mean()
     elif reduction == 'sum':
         return output.sum()
@@ -400,7 +387,7 @@ def _multimarginloss_reference(input, target_idx, p, margin, weight):
     return output
 
 
-def multimarginloss_reference(input, target, p=1, margin=1, weight=None, reduction='elementwise_mean'):
+def multimarginloss_reference(input, target, p=1, margin=1, weight=None, reduction='mean'):
     if input.dim() == 1:
         n = 1
         dim = input.size(0)
@@ -414,14 +401,14 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, reducti
         for x in range(0, n):
             output[x] = _multimarginloss_reference(input[x], target[x], p, margin, weight)
 
-        if reduction == 'elementwise_mean':
+        if reduction == 'mean':
             return output.mean() / dim
         elif reduction == 'sum':
             return output.sum() / dim
         return output / dim
 
 
-def cosineembeddingloss_reference(input1, input2, target, margin=0, reduction='elementwise_mean'):
+def cosineembeddingloss_reference(input1, input2, target, margin=0, reduction='mean'):
     def _cos(a, b):
         cos = a.new(a.size(0))
         for i in range(0, a.size(0)):
@@ -430,7 +417,7 @@ def cosineembeddingloss_reference(input1, input2, target, margin=0, reduction='e
 
     output = torch.where(target == 1, 1 - _cos(input1, input2), (_cos(input1, input2) - margin).clamp(min=0))
 
-    if reduction == 'elementwise_mean':
+    if reduction == 'mean':
         return output.mean()
     elif reduction == 'sum':
         return output.sum()
@@ -438,7 +425,7 @@ def cosineembeddingloss_reference(input1, input2, target, margin=0, reduction='e
 
 
 def tripletmarginloss_reference(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False,
-                                reduction='elementwise_mean'):
+                                reduction='mean'):
     d_p = torch.pairwise_distance(anchor, positive, p, eps)
     d_n = torch.pairwise_distance(anchor, negative, p, eps)
     if swap:
@@ -446,16 +433,16 @@ def tripletmarginloss_reference(anchor, positive, negative, margin=1.0, p=2, eps
         d_n = torch.min(d_n, d_s)
 
     output = torch.clamp(margin + d_p - d_n, min=0.0)
-    if reduction == 'elementwise_mean':
+    if reduction == 'mean':
         return output.mean()
     elif reduction == 'sum':
         return output.sum()
     return output
 
 
-def marginrankingloss_reference(input1, input2, target, margin=0, reduction='elementwise_mean'):
+def marginrankingloss_reference(input1, input2, target, margin=0, reduction='mean'):
     output = (-target * (input1 - input2) + margin).clamp(min=0)
-    if reduction == 'elementwise_mean':
+    if reduction == 'mean':
         return output.mean()
     elif reduction == 'sum':
         return output.sum()
@@ -463,9 +450,9 @@ def marginrankingloss_reference(input1, input2, target, margin=0, reduction='ele
 
 
 # this directly follows Graves et al's paper, in contrast to the production implementation, it does not use log-space
-def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0, reduction='elementwise_mean'):
-    input_lengths = torch.tensor(input_lengths, dtype=torch.long)
-    target_lengths = torch.tensor(target_lengths, dtype=torch.long)
+def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0, reduction='mean'):
+    input_lengths = torch.as_tensor(input_lengths, dtype=torch.long)
+    target_lengths = torch.as_tensor(target_lengths, dtype=torch.long)
     dt = log_probs.dtype
     log_probs = log_probs.double()  # we need the accuracy as we are not in logspace
     targets = targets.long()
@@ -492,7 +479,7 @@ def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0
             alpha = probs[t, targets_prime] * alpha_next
         losses.append(-alpha[-2:].sum().log()[None])
     output = torch.cat(losses, 0)
-    if reduction == 'elementwise_mean':
+    if reduction == 'mean':
         return (output / target_lengths.to(dtype=output.dtype, device=output.device)).mean()
     elif reduction == 'sum':
         return output.sum()
@@ -573,14 +560,13 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             kldivloss_reference(i, t, get_reduction(m)),
         check_sum_reduction=True,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MSELoss',
         input_size=(2, 3, 4, 5),
         target_size=(2, 3, 4, 5),
         reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() / (i.numel()
-                                      if get_reduction(m) == 'elementwise_mean' else 1)),
+                                      if get_reduction(m) == 'mean' else 1)),
         check_sum_reduction=True,
     ),
     dict(
@@ -590,7 +576,6 @@ criterion_tests = [
         reference_fn=lambda i, t, m: -(t * i.log() + (1 - t) * (1 - i).log()).sum() /
             (i.numel() if get_reduction(m) else 1),
         check_gradgrad=False,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='BCELoss',
@@ -601,7 +586,6 @@ criterion_tests = [
             (i.numel() if get_reduction(m) else 1),
         desc='weights',
         check_gradgrad=False,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='CrossEntropyLoss',
@@ -622,7 +606,6 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             hingeembeddingloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='HingeEmbeddingLoss',
@@ -633,7 +616,6 @@ criterion_tests = [
             hingeembeddingloss_reference(i, t, margin=0.5, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MultiLabelMarginLoss',
@@ -660,7 +642,6 @@ criterion_tests = [
         target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
         reference_fn=lambda i, t, m: -(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()).sum() / i.numel(),
         check_gradgrad=False,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MultiMarginLoss',
@@ -739,7 +720,6 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             cosineembeddingloss_reference(i[0], i[1], t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='CosineEmbeddingLoss',
@@ -750,7 +730,6 @@ criterion_tests = [
             cosineembeddingloss_reference(i[0], i[1], t, margin=0.7, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MarginRankingLoss',
@@ -759,7 +738,6 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             marginrankingloss_reference(i[0], i[1], t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MarginRankingLoss',
@@ -770,7 +748,6 @@ criterion_tests = [
             marginrankingloss_reference(i[0], i[1], t, margin=0.5, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
 ]
 

@@ -16,8 +16,8 @@ class AlgorithmsCache {
   // combination of tensor dimensions & compute data type.
   //
   TAlgorithm getAlgorithm(
-      const std::vector<int64_t>& tensorDimensions1,
-      const std::vector<int64_t>& tensorDimensions2,
+      at::IntList tensorDimensions1,
+      at::IntList tensorDimensions2,
       int algorithmFlags, // Differentiate between algorithms with different
                           // parameters in a generic way
       std::function<TAlgorithm()> generatingFunc);
@@ -28,8 +28,8 @@ class AlgorithmsCache {
 
 template <typename TAlgorithm>
 TAlgorithm AlgorithmsCache<TAlgorithm>::getAlgorithm(
-    const std::vector<int64_t>& tensorDimensions1,
-    const std::vector<int64_t>& tensorDimensions2,
+    at::IntList tensorDimensions1,
+    at::IntList tensorDimensions2,
     int algorithmFlags,
     std::function<TAlgorithm()> generatingFunc) {
   int64_t seed = 0;

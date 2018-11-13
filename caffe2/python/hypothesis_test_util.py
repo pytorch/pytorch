@@ -50,6 +50,7 @@ import hypothesis.strategies as st
 import logging
 import numpy as np
 import os
+import six
 
 
 def is_sandcastle():
@@ -259,7 +260,7 @@ device_options = _device_options_no_hip + ([hip_do] if workspace.has_hip_support
 
 # Include device option for each GPU
 expanded_device_options = [cpu_do] + (
-    [caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA, cuda_gpu_id=i)
+    [caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA, device_id=i)
      for i in range(workspace.NumCudaDevices())]
     if workspace.has_gpu_support else [])
 
@@ -355,6 +356,7 @@ class HypothesisTestCase(test_util.TestCase):
     A unittest.TestCase subclass with some helper functions for
     utilizing the `hypothesis` (hypothesis.readthedocs.io) library.
     """
+
     def assertDeviceChecks(
         self,
         device_options,
@@ -689,5 +691,5 @@ class HypothesisTestCase(test_util.TestCase):
             if regexp is None:
                 self.assertRaises(exception, workspace.RunOperatorOnce, op)
             else:
-                self.assertRaisesRegexp(
-                    exception, regexp, workspace.RunOperatorOnce, op)
+                six.assertRaisesRegex(
+                    self, exception, regexp, workspace.RunOperatorOnce, op)

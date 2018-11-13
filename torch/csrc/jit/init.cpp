@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
+#include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/remove_expands.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
@@ -14,6 +15,7 @@
 #include "torch/csrc/jit/passes/erase_number_types.h"
 #include "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"
@@ -21,6 +23,7 @@
 #include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/canonicalize_ops.h"
+#include "torch/csrc/jit/passes/remove_inplace_ops.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/to_batch.h"
@@ -32,9 +35,11 @@
 #include "torch/csrc/jit/batched/BatchTensor.h"
 #include "torch/csrc/jit/pybind_utils.h"
 #include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/serialization.h"
 #include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/script/jit_exception.h"
+
+#include "caffe2/serialize/inline_container.h"
 
 #include <pybind11/functional.h>
 
@@ -46,6 +51,13 @@
 #include <utility>
 
 namespace torch  { namespace jit {
+
+// TODO: make a fake future for python
+namespace detail {
+class Future {
+
+};
+}
 
 namespace {
 
@@ -63,10 +75,18 @@ bool loadPythonClasses() {
 
 } // anonymous namespace
 
-extern std::string runJITCPPTests();
+#if defined(_WIN32)
+std::string runJITCPPTests() {
+  AT_ERROR("JIT tests not yet supported on Windows");
+}
+#else
+std::string runJITCPPTests();
+#endif
 
 void initJITBindings(PyObject *module) {
   auto m = py::handle(module).cast<py::module>();
+
+  py::register_exception<JITException>(m, "JITException");
 
   py::class_<python::IODescriptor>(m, "IODescriptor");
 
@@ -81,7 +101,13 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_cse", [](std::shared_ptr<Graph>& g) {
      return EliminateCommonSubexpression(g); // overload resolution
    })
-   .def("_jit_pass_peephole", PeepholeOptimize)
+   .def("_jit_pass_remove_inplace_ops", [](std::shared_ptr<Graph> g) {
+      return RemoveInplaceOps(g);
+   })
+   .def("_jit_pass_constant_pooling", ConstantPooling)
+   .def("_jit_pass_peephole", [](const std::shared_ptr<Graph>& g, bool addmm_fusion_enabled) {
+     return PeepholeOptimize(g, addmm_fusion_enabled);
+   }, py::arg("graph"), py::arg("addmm_fusion_enabled") = false)
    .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
      return Canonicalize(g);
    })
@@ -195,12 +221,14 @@ void initJITBindings(PyObject *module) {
       .def(
           py::init([](py::function func,
                       py::tuple inputs,
+                      py::function var_name_lookup_fn,
                       bool optimize) {
-              auto graph = tracer::createGraphByTracing(func, toStack(inputs));
+              auto graph = tracer::createGraphByTracing(func, toStack(inputs), var_name_lookup_fn);
               return GraphExecutor(graph, optimize);
           }),
           py::arg("func"),
           py::arg("inputs"),
+          py::arg("var_name_lookup_fn"),
           py::arg("optimize") = true)
       .def(
           py::init([](std::shared_ptr<Graph> graph, bool optimize) {
@@ -227,21 +255,26 @@ void initJITBindings(PyObject *module) {
         return createPyObjectForStack(std::move(stack));
       });
 
-
-    py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
+  py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
-      .def("write_record", &PyTorchFileWriter::writeRecord)
+      .def(
+          "write_record",
+          [](PyTorchFileWriter& self, const char* data, size_t size) {
+            return self.writeRecord(data, size);
+          })
       .def("write_end_of_file", &PyTorchFileWriter::writeEndOfFile);
 
-    py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
+  py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
-      .def("get_record_with_key", [](PyTorchFileReader &self, uint64_t key) {
-        at::DataPtr data;
-        size_t size;
-        std::tie(data, size) = self.getRecordWithKey(key);
-        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
-      })
-      .def("get_last_record", [](PyTorchFileReader &self){
+      .def(
+          "get_record_with_key",
+          [](PyTorchFileReader& self, uint64_t key) {
+            at::DataPtr data;
+            size_t size;
+            std::tie(data, size) = self.getRecordWithKey(key);
+            return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+          })
+      .def("get_last_record", [](PyTorchFileReader& self) {
         at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getLastRecord();
@@ -266,25 +299,25 @@ void initJITBindings(PyObject *module) {
         return invokeOperatorFromPython(
             *op, std::move(args), std::move(kwargs));
       }, py::name(qualified_name.c_str()), py::doc(docstring.str().c_str()));
-    } catch (const at::Error& error) {
+    } catch (const c10::Error& error) {
       throw std::runtime_error(error.what_without_backtrace());
     }
   }, py::arg("qualified_name"));
 
   py::class_<FunctionSchema>(m, "FunctionSchema")
-  .def_property_readonly("name", [](FunctionSchema& self) { return self.name; })
-  .def_property_readonly("arguments", [](FunctionSchema& self) { return self.arguments; })
-  .def_property_readonly("returns", [](FunctionSchema& self) { return self.returns; });
+  .def_property_readonly("name", [](FunctionSchema& self) { return self.name(); })
+  .def_property_readonly("arguments", [](FunctionSchema& self) { return self.arguments(); })
+  .def_property_readonly("returns", [](FunctionSchema& self) { return self.returns(); });
   py::class_<Argument>(m, "Argument")
-  .def_property_readonly("name", [](Argument& self) { return self.name; })
-  .def_property_readonly("type", [](Argument& self) { return self.type; })
+  .def_property_readonly("name", [](Argument& self) { return self.name(); })
+  .def_property_readonly("type", [](Argument& self) { return self.type(); })
   .def_property_readonly("N", [](Argument& self) -> py::object {
-    return (self.N) ? py::cast(*self.N) :  py::none();
+    return (self.N()) ? py::cast(*self.N()) :  py::none();
   })
   .def_property_readonly("default_value", [](Argument& self) -> py::object {
-    if(!self.default_value)
+    if(!self.default_value())
       return py::none();
-    IValue v = *self.default_value;
+    IValue v = *self.default_value();
     return toPyObject(std::move(v));
   });
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
@@ -293,6 +326,17 @@ void initJITBindings(PyObject *module) {
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
         return op->schema();
       });
+  });
+
+  py::class_<detail::Future>(m, "Future");
+
+  m.def("fork", [](script::Module &sm, py::args args) {
+    // TODO: this is a fake stub
+    return detail::Future();
+  });
+
+  m.def("wait", [](detail::Future &fut) {
+    // TODO: this is a fake stub
   });
 
 

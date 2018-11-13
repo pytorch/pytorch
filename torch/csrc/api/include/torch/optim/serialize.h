@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/serialize/archive.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <cstddef>
 #include <cstdint>

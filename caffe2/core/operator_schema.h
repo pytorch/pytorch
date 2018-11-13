@@ -9,9 +9,9 @@
 #include <vector>
 #include <unordered_map>
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/filler.h"
 
@@ -161,6 +161,13 @@ class CAFFE2_API OpSchema {
    * @brief Sets the corresponding onnx schema name
    */
   OpSchema& InheritOnnxSchema(const std::string& onnx_schema_name);
+
+  /**
+   * @brief Shortcut to InheritOnnxSchema(type_)
+   */
+  OpSchema& InheritOnnxSchema() {
+    return InheritOnnxSchema(type_);
+  }
 
   /**
    * @brief Sets the tensor inference function to produce the same output as
@@ -576,18 +583,30 @@ OpSchema::Cost PointwiseCostInference(
 
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                                     \
-  CAFFE2_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
+#define OPERATOR_SCHEMA(name)                                       \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
       &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #else // CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                                     \
-  CAFFE2_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
+#define OPERATOR_SCHEMA(name)                                       \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #endif // CAFFE2_NO_OPERATOR_SCHEMA
 
+#ifdef CAFFE2_NO_GRADIENT_OPS
+
+#define GRADIENT_OPERATOR_SCHEMA(name)                              \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
+      1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
+
+#else
+
+#define GRADIENT_OPERATOR_SCHEMA(name) OPERATOR_SCHEMA(name)
+
+#endif
 #endif // CAFFE2_CORE_OPERATOR_SCHEMA_H_

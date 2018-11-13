@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -63,6 +65,13 @@ template<typename func_t>
 void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      gpu_nullary_kernel(sub_iter, f);
+    }
+    return;
+  }
+
   char* out_data = (char*)iter.data_ptr(0);
 
   using traits = function_traits<func_t>;
@@ -92,6 +101,13 @@ void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
 template<typename func_t>
 void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
+
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      gpu_unary_kernel(sub_iter, f);
+    }
+    return;
+  }
 
   char* out_data = (char*)iter.data_ptr(0);
   const char* in1_data = (char*)iter.data_ptr(1);

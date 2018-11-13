@@ -44,7 +44,7 @@ torch/csrc/cudnn/cuDNN.cpp
 torch/csrc/generated
 torch/csrc/generic/TensorMethods.cpp
 torch/csrc/jit/generated/*
-torch/csrc/jit/fusers/Config.h
+torch/csrc/jit/fuser/config.h
 torch/csrc/nn/THCUNN.cpp
 torch/csrc/nn/THCUNN.cwrap
 torch/csrc/nn/THNN_generic.cpp
@@ -206,3 +206,6 @@ caffe2.egg-info
 # Visual Studio Code files
 .vscode
 .vs
+
+# YouCompleteMe config file
+.ycm_extra_conf.py

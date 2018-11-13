@@ -1,12 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/C++17.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/GridSampler.h>
 #include <ATen/native/cpu/GridSamplerKernel.h>
 #include <ATen/cpu/vml.h>
+#include <c10/util/C++17.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -745,8 +745,8 @@ static inline void grid_sample_2d_grid_slice_iterator(
           // prevents illegal memory access, sets the exceeding offsets to zero
           i_offsets = iVec::set(iVec(0), i_offsets, len);
         }
-        apply_fn(gather<sizeof(scalar_t)>(grid_ptr_x, i_offsets),
-                 gather<sizeof(scalar_t)>(grid_ptr_y, i_offsets),
+        apply_fn(vec256::gather<sizeof(scalar_t)>(grid_ptr_x, i_offsets),
+                 vec256::gather<sizeof(scalar_t)>(grid_ptr_y, i_offsets),
                  spatial_offset, len);
 
         i_offsets = i_offsets + i_offsets_delta;

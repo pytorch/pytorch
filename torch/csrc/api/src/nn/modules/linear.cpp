@@ -1,6 +1,6 @@
 #include <torch/nn/modules/linear.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <cmath>
@@ -23,8 +23,8 @@ void LinearImpl::reset() {
 
   const auto stdv = 1.0 / std::sqrt(weight.size(1));
   NoGradGuard no_grad;
-  for (auto& p : parameters()) {
-    p->uniform_(-stdv, stdv);
+  for (auto& p : this->parameters()) {
+    p.uniform_(-stdv, stdv);
   }
 }
 

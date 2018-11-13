@@ -8,15 +8,12 @@
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/utils/object_ptr.h"
 
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
+#include "c10/DeviceGuard.h"
 
 #include <vector>
 #include <utility>
 #include <memory>
-
-namespace at {
-struct DeviceGuard;
-} // namespace at
 
 namespace torch { namespace jit { struct Graph; }}
 namespace torch { namespace autograd {
@@ -24,10 +21,10 @@ namespace torch { namespace autograd {
 struct VariableInfo {
   explicit VariableInfo(const Variable& var);
 
-  Variable zeros(at::DeviceGuard& device_guard) const;
+  Variable zeros(at::OptionalDeviceGuard& device_guard) const;
 
   at::Type* type;
-  int32_t device = -1;
+  at::Device device = at::kCPU;
   std::vector<int64_t> size;
   bool requires_grad;
 };

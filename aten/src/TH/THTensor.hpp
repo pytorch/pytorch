@@ -9,6 +9,13 @@
 #include <atomic>
 #include <ATen/ATen.h>
 
+// Returns a Tensor given a TensorImpl. The TensorImpl remains valid after the
+// the Tensor is destroyed.
+inline at::Tensor THTensor_wrap(THTensor* tensor) {
+  c10::raw::intrusive_ptr::incref(tensor);
+  return at::Tensor(c10::intrusive_ptr<at::TensorImpl>::reclaim(tensor));
+}
+
 inline const int64_t* THTensor_getSizePtr(THTensor* tensor) {
   return tensor->sizes().data();
 }
@@ -41,7 +48,7 @@ inline void THTensor_maybe_zero_dim(THTensor *tensor, bool condition_when_zero_d
 }
 
 // [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
-// nDimension                 corresponds to the "true" ATen dimension. TODO: implement.
+// nDimension                 corresponds to the "true" ATen dimension.
 // nDimensionLegacyNoScalars  correpsonds to the ATen dimension, except scalars are viewed as 1-dimensional tensors.
 // nDimensionLegacyAll        corresponds to the ATen dimension, except scalars are viewed as 1-dimensional tensors
 //                            and tensors with a dimension of size zero are collapsed to 0-dimensional tensors.
@@ -55,17 +62,17 @@ inline int THTensor_nDimensionLegacyNoScalars(const THTensor* tensor) {
   if (tensor->dim() == 0) {
     return 1;
   } else {
-    return tensor->dim();  
+    return tensor->dim();
   }
 }
 
 inline int THTensor_nDimensionLegacyAll(const THTensor* tensor) {
   if (tensor->is_empty()) {
-    return 0;  
+    return 0;
   } else if (tensor->dim() == 0) {
     return 1;
   } else {
-    return tensor->dim();  
+    return tensor->dim();
   }
 }
 
@@ -110,8 +117,10 @@ TH_API void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *siz
 
 TH_CPP_API void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride);
 TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_);
-TH_CPP_API at::optional<std::vector<int64_t>> THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride,
-                                                                      at::IntList newshape);
+TH_CPP_API c10::optional<std::vector<int64_t>> THTensor_compute_stride(
+    at::IntList oldshape,
+    at::IntList oldstride,
+    at::IntList newshape);
 
 #include "generic/THTensor.hpp"
 #include "THGenerateAllTypes.h"

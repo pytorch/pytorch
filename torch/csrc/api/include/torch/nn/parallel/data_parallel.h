@@ -3,7 +3,7 @@
 #include <torch/cuda.h>
 #include <torch/nn/module.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <torch/csrc/autograd/functions/comm.h>
 #include <torch/csrc/cuda/comm.h>
@@ -12,9 +12,8 @@
 #include <ATen/Device.h>
 #include <ATen/OptionsGuard.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/Error.h>
 #include <ATen/core/TensorOptions.h>
-#include <ATen/core/optional.h>
+#include <c10/util/Exception.h>
 
 #include <cstddef>
 #include <exception>
@@ -72,7 +71,7 @@ template <typename ModuleType>
 std::vector<Tensor> parallel_apply(
     std::vector<ModuleType>& modules,
     const std::vector<Tensor>& inputs,
-    const at::optional<std::vector<Device>>& devices = at::nullopt) {
+    const optional<std::vector<Device>>& devices = nullopt) {
   AT_CHECK(
       modules.size() == inputs.size(), "Must have as many inputs as modules");
   if (devices) {
@@ -135,8 +134,8 @@ template <typename ModuleType>
 Tensor data_parallel(
     ModuleType module,
     Tensor input,
-    at::optional<std::vector<Device>> devices = at::nullopt,
-    at::optional<Device> output_device = at::nullopt,
+    optional<std::vector<Device>> devices = nullopt,
+    optional<Device> output_device = nullopt,
     int64_t dim = 0) {
   if (!devices) {
     const auto device_count = torch::cuda::device_count();
@@ -157,7 +156,7 @@ Tensor data_parallel(
   }
 
 #ifdef USE_CUDA
-  autograd::Scatter scatter(*devices, /*chunk_sizes=*/at::nullopt, dim);
+  autograd::Scatter scatter(*devices, /*chunk_sizes=*/nullopt, dim);
   auto scattered_inputs = fmap<Tensor>(scatter.apply({std::move(input)}));
 
   auto replicas = replicate(module, *devices);
