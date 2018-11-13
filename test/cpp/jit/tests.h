@@ -1199,6 +1199,26 @@ void testTopologicalIndex() {
     ASSERT_FALSE(node3->isBefore(node2));
     ASSERT_FALSE(node3->isAfter(node4));
 
+    // Built up a block structure
+    //  node3
+    //   /\        ...
+    //  A  B     block1
+    //      \      ...
+    //      C    block2
+    auto block1 = node3->addBlock();
+    auto A = graph.create(prim::Undefined);
+    block1->appendNode(A);
+    auto B = graph.create(prim::Undefined);
+    block1->appendNode(B);
+    auto block2 = B->addBlock();
+    auto C = graph.create(prim::Undefined);
+    block2->appendNode(C);
+
+    // Check isAfter on different block levels
+    ASSERT_TRUE(node1->isBefore(A));
+    ASSERT_TRUE(A->isBefore(B));
+    ASSERT_TRUE(A->isBefore(C));
+
     // make sure things don't blow up on deletions
     node2->destroy();
     auto node2p = graph.create(prim::Undefined);
