@@ -6095,7 +6095,7 @@ python's `itertools.combinations` when `with_replacement` is set to `False`, and
 `itertools.combinations_with_replacement` when `with_replacement` is set to `True`.
 
 Arguments:
-    tensor (Tensor): the tensor.
+    tensor (Tensor): 1D vector.
     r (int, optional): number of elements to combine
     with_replacement (boolean, optional): whether to allow duplication in combination
 
