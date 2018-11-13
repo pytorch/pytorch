@@ -11,13 +11,13 @@ template<>
 bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
-  auto* distance = Output(0);
+
   CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
   for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
   int N = X.dim() > 0 ? X.dim32(0) : 1;
-  distance->Resize(N);
+  auto* distance = Output(0, {N}, at::dtype<float>());
   int D = N > 0 ? X.numel() / N : 0;
   float* distance_data = distance->template mutable_data<float>();
   const float* X_data = X.data<float>();
@@ -39,13 +39,13 @@ template <>
 bool L1DistanceOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
-  auto* distance = Output(0);
+
   CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
   for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
   int N = X.dim() > 0 ? X.dim32(0) : 1;
-  distance->Resize(N);
+  auto* distance = Output(0, {N}, at::dtype<float>());
   int D = N > 0 ? X.numel() / N : 0;
 
   const float* X_data = X.data<float>();
@@ -112,14 +112,14 @@ template <>
 bool CosineSimilarityOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
-  auto* result = Output(COS_OUT);
+
   CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
   for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
   const int N = X.dim() > 0 ? X.dim32(0) : 1;
   const int D = X.size_from_dim(1);
-  result->Resize(N);
+  auto* result = Output(COS_OUT, {N}, at::dtype<float>());
   float* result_data = result->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
@@ -207,7 +207,7 @@ template <>
 bool DotProductOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
-  auto* result = Output(DOT_OUT);
+
   CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
   for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i), "dimension at ", i);
@@ -220,7 +220,7 @@ bool DotProductOp<float, CPUContext>::RunOnDevice() {
     N = 0;
     D = 0;
   }
-  result->Resize(N);
+  auto* result = Output(DOT_OUT, {N}, at::dtype<float>());
   float* result_data = result->template mutable_data<float>();
   const float* X_data = X.template data<float>();
   const float* Y_data = Y.template data<float>();
@@ -298,7 +298,7 @@ template <>
 bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
-  auto* result = Output(DOT_OUT);
+
   CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
   CAFFE_ENFORCE_EQ(X.dim32(0), Y.dim32(0));
 
@@ -315,7 +315,7 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
 
   D = std::min(DX, DY);
   restD = std::max(DX, DY) - D;
-  result->Resize(N);
+  auto* result = Output(DOT_OUT, {N}, at::dtype<float>());
   float* result_data = result->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
