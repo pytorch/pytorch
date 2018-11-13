@@ -18,6 +18,8 @@ TEST(NeuralNetGraph, ReplaceGraph) {
 
   auto input1 = graph.createNode(util::make_unique<Tensor>("input1"));
   auto input2 = graph.createNode(util::make_unique<Tensor>("input2"));
+  // Test renaming blob
+  nn::get<Tensor>(input2)->setName("input2_renamed");
   auto sum = graph.createNode(util::make_unique<Sum>());
   auto sumOutput = graph.createNode(util::make_unique<Tensor>("sumOutput"));
   auto relu = graph.createNode(util::make_unique<Relu>());

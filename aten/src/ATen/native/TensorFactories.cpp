@@ -13,6 +13,7 @@
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/TensorOptions.h"
 #include "TH/THRandom.h"
+#include "TH/THGenerator.hpp"
 #include "c10/util/Exception.h"
 
 #include <algorithm>
@@ -151,7 +152,7 @@ Tensor empty_like(const Tensor& self) {
 }
 
 Tensor empty_like(const Tensor& self, const TensorOptions& options) {
-  if (options.layout() == kSparse && self.type().is_sparse()) {
+  if (options.layout() == kSparse && self.is_sparse()) {
     auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
     return res;
@@ -428,6 +429,7 @@ Tensor randn_like(const Tensor& self, const TensorOptions& options) {
 namespace {
 template <typename scalar_t>
 void randperm_cpu(Tensor& result, int64_t n, THGenerator* generator) {
+  std::lock_guard<std::mutex> lock(generator->mutex);
   scalar_t *r__data = result.data<scalar_t>();
 
   result.resize_({n});
@@ -523,7 +525,7 @@ Tensor zeros_like(const Tensor& self) {
 }
 
 Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
-  if (options.layout() == kSparse && self.type().is_sparse()) {
+  if (options.layout() == kSparse && self.is_sparse()) {
     auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
     return res;

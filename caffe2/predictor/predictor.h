@@ -35,6 +35,9 @@ class CAFFE2_API Predictor {
   // Postcondition:
   //   outputs->size() == run_net.external_inputs.size()
 
+  // NOTE: output is a part of thread local workspace
+  // and is only valid until the next predictor execution.
+
   // Returns true on success
   bool operator()(const TensorList& inputs, TensorList* outputs);
 

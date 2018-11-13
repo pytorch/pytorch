@@ -131,8 +131,9 @@ class SparseMomentumSGDUpdateOp final : public Operator<Context> {
     // Enforce shapes
     CAFFE_ENFORCE_EQ(Input(LR).numel(), 1);
     CAFFE_ENFORCE_EQ(Input(PARAM).numel(), Input(MOMENTUM).numel());
-    CAFFE_ENFORCE_EQ(Input(PARAM).size_from_dim(1),
-        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+    CAFFE_ENFORCE_EQ(
+        Input(PARAM).size_from_dim(1),
+        Input(GRAD).size_from_dim(Input(INDICES).dim()));
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, Input(INDICES));

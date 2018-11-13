@@ -2,7 +2,7 @@
 
 #include <torch/data/datasets/base.h>
 #include <torch/data/example.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <cstddef>
 #include <string>
@@ -30,6 +30,12 @@ class MNIST : public Dataset<MNIST> {
 
   /// Returns true if this is the training subset of MNIST.
   bool is_train() const noexcept;
+
+  /// Returns all images stacked into a single tensor.
+  const Tensor& images() const;
+
+  /// Returns all targets stacked into a single tensor.
+  const Tensor& targets() const;
 
  private:
   Tensor images_, targets_;

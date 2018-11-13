@@ -162,14 +162,17 @@ def create_tcp_store(addr):
     """
     Creates a TCP store. Retries if the chosen port is already in use.
     """
-    while True:
+    ports = []
+    for _ in range(10):
         try:
             port = common.find_free_port()
+            ports.append(port)
             return c10d.TCPStore(addr, port, True)
         except RuntimeError as error:
             if str(error) == "Address already in use":
                 continue
             raise
+    raise RuntimeError("Unable to find free port (tried %s)" % ", ".join(ports))
 
 
 class TCPStoreTest(TestCase, StoreTestBase):
@@ -1124,7 +1127,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).cuda(gpus[0]),
             device_ids=gpus,
-            process_group=process_group)
+            process_group=process_group,
+            bucket_cap_mb=0.001)
 
         model.cuda(gpus[0])
 
@@ -1336,7 +1340,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             model,
             device_ids=[gpus[0]],
             process_group=process_group,
-            bucket_cap_mb=1,
+            bucket_cap_mb=0.001,
         )
 
         # Input 2**15, so that the gradients will overflow with a

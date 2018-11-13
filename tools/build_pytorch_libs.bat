@@ -22,6 +22,7 @@ if not exist torch\lib\tmp_install mkdir torch\lib\tmp_install
 
 : Variable defaults
 set /a USE_CUDA=0
+set /a USE_FBGEMM=0
 set /a USE_ROCM=0
 set /a USE_NNPACK=0
 set /a USE_QNNPACK=0
@@ -40,6 +41,11 @@ if "%1"=="" (
 
 if "%1"=="--use-cuda" (
   set /a USE_CUDA=1
+  goto :process_args_processed
+)
+
+if "%1"=="--use-fbgemm" (
+  set /a USE_FBGEMM=1
   goto :process_args_processed
 )
 
@@ -198,12 +204,30 @@ goto:eof
 : libtorch-specific build functionality
 :build_caffe2
   @setlocal
+  : Note [Backslash munging on Windows]
+  : In CMake, Windows native backslashes are not well handled. 
+  : It will cause a warning as the following
+  :   CMake Warning (dev) at cmake (source_group):
+  :    Syntax error in cmake code at cmake
+  :    when parsing string
+  :      Header Files C:\include\cudnn.h
+  :    Invalid escape sequence \i
+  : which is said to become an error in the future.
+  : As an alternative, we should use forward slashes instead.
+  : Here those paths should be escaped before passing to CMake. 
+  set NVTOOLEXT_HOME=%NVTOOLEXT_HOME:\=/%
+  set CUDNN_INCLUDE_DIR=%CUDNN_INCLUDE_DIR:\=/%
+  set CUDNN_LIB_DIR=%CUDNN_LIB_DIR:\=/%
+  set CUDNN_LIBRARY=%CUDNN_LIBRARY:\=/%
+  set PYTORCH_PYTHON_LIBRARY=%PYTORCH_PYTHON_LIBRARY:\=/%
+
   IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
   if not exist build mkdir build
   pushd build
   cmake .. %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
                   -DTORCH_BUILD_VERSION="%PYTORCH_BUILD_VERSION%" ^
+                  -DPYTHON_LIBRARY="%PYTORCH_PYTHON_LIBRARY%" ^
                   -DBUILD_TORCH="%BUILD_TORCH%" ^
                   -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
                   -DNO_API=ON ^
@@ -216,6 +240,7 @@ goto:eof
                   -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
                   -DUSE_CUDA=%USE_CUDA% ^
                   -DUSE_DISTRIBUTED=%USE_DISTRIBUTED% ^
+                  -DUSE_FBGEMM=%USE_FBGEMM% ^
                   -DUSE_NUMPY=%USE_NUMPY% ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
                   -DUSE_LEVELDB=%USE_LEVELDB% ^

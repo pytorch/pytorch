@@ -22,14 +22,12 @@ includes = [
     "caffe2/**/*_test*",
     "caffe2/core/*",
     "caffe2/db/*",
+    "caffe2/utils/*",
 ]
 
 ignores = [
     "caffe2/operators/depthwise_3x3_conv_op.cu",
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
-    "caffe2/operators/top_k.cu",
-    "caffe2/operators/top_k_radix_selection.cuh",
-    "caffe2/operators/top_k_heap_selection.cuh",
     "caffe2/operators/pool_op_cudnn.cu",
     '**/hip/**',
 ]

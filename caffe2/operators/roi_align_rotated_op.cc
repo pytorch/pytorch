@@ -298,7 +298,7 @@ bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
     return true;
   }
 
-  CAFFE_ENFORCE_EQ(R.ndim(), 2);
+  CAFFE_ENFORCE_EQ(R.dim(), 2);
   // Each element of R is [batch_id center_x center_y width height angle].
   // If R has 6 columns, the first column is the index, otherwise 0.
   CAFFE_ENFORCE(R.dim32(1) == 5 || R.dim32(1) == 6);
