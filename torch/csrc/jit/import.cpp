@@ -1,4 +1,5 @@
 #include <google/protobuf/util/json_util.h>
+#include <google/protobuf/util/type_resolver_util.h>
 
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/ir.h"
@@ -351,30 +352,6 @@ MethodDecoder::MethodDecoder(
   }
 }
 
-at::ScalarType tensorProtoTypeToATenType(caffe2::TensorProto_DataType data_type) {
-  switch(data_type) {
-    // NB: handle BOOL
-    case caffe2::TensorProto_DataType_UINT8:
-      return at::kByte;
-    case caffe2::TensorProto_DataType_INT8:
-      return at::kChar;
-    case caffe2::TensorProto_DataType_INT16:
-      return at::kShort;
-    case caffe2::TensorProto_DataType_INT32:
-      return at::kInt;
-    case caffe2::TensorProto_DataType_INT64:
-      return at::kLong;
-    case caffe2::TensorProto_DataType_FLOAT16:
-      return at::kHalf;
-    case caffe2::TensorProto_DataType_FLOAT:
-      return at::kFloat;
-    case caffe2::TensorProto_DataType_DOUBLE:
-      return at::kDouble;
-    default:
-      AT_ERROR("Unsupported TensorProto data type");
-  }
-}
-
 // this is a deserializer class which loads script modules from pt files. the
 // content of the file is written using PyTorchStreamWriter, for details please
 // check caffe2/serialize/inline_container.h. all the records except the last
@@ -393,10 +370,25 @@ class ScriptModuleDeserializer final {
     at::DataPtr data_ptr;
     size_t data_size;
     std::tie(data_ptr, data_size) = reader_.getLastRecord();
+    // NB: cannot use JsonStringToMessage, since fbcode's protobuf is too old
+    // be consistent with JsonStringToMessage
+    std::string url_prefix = "type.googleapis.com";
+    std::unique_ptr<::google::protobuf::util::TypeResolver> resolver(
+        ::google::protobuf::util::NewTypeResolverForDescriptorPool(
+          url_prefix, model_def.GetDescriptor()->file()->pool()));
     std::string json_string = std::string(static_cast<char*>(data_ptr.get()),
         static_cast<char*>(data_ptr.get()) + data_size);
-    AT_ASSERT(::google::protobuf::util::JsonStringToMessage(json_string, &model_def) ==
-      ::google::protobuf::util::Status::OK);
+    std::string binary_string;
+    auto convert_result = ::google::protobuf::util::JsonToBinaryString(
+        resolver.get(), url_prefix + "/" + model_def.GetDescriptor()->full_name(),
+        json_string, &binary_string);
+    if (!convert_result.ok()) {
+      std::stringstream ss;
+      ss << convert_result;
+      AT_ERROR(ss.str());
+    }
+    AT_ASSERTM(model_def.ParseFromString(binary_string),
+        "JSON transcoder produced invalid protobuf output.");
     moduleLookup_ = module_lookup;
     const auto& module_def = model_def.main_module();
     collectParamsInfo(module_def, module_def.name());

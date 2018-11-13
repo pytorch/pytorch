@@ -1,4 +1,5 @@
 #include <google/protobuf/util/json_util.h>
+#include <google/protobuf/util/type_resolver_util.h>
 
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/autograd/symbolic.h"
@@ -434,7 +435,7 @@ void GraphEncoder::EncodeTensor(
 
 class MethodEncoder: public EncoderBase {
  public:
-  MethodEncoder(script::Method& method,
+  MethodEncoder(const script::Method& method,
       std::string* torch_script,
       std::unordered_map<const void*, uint64_t>* storage_map,
       std::unordered_map<at::Tensor*, std::string>* parameter_map,
@@ -474,7 +475,7 @@ class MethodEncoder: public EncoderBase {
   size_t type_counter_ = 0;
 };
 
-MethodEncoder::MethodEncoder(script::Method& method,
+MethodEncoder::MethodEncoder(const script::Method& method,
     std::string* torch_script,
     std::unordered_map<const void*, uint64_t>* storage_map,
     std::unordered_map<at::Tensor*, std::string>* parameter_map,
@@ -848,36 +849,11 @@ void dump(const onnx::ModelProto& model, std::ostream& stream, size_t indent) {
   stream << idt(indent) << "}\n";
 }
 
-// aten type ==> caffe2::TensorProto type
-caffe2::TensorProto_DataType atenTypeToTensorProtoType(at::ScalarType aten_type) {
-  switch(aten_type) {
-    case at::kDouble:
-      return caffe2::TensorProto_DataType_DOUBLE;
-    case at::kFloat:
-      return caffe2::TensorProto_DataType_FLOAT;
-    case at::kHalf:
-      return caffe2::TensorProto_DataType_FLOAT16;
-    case at::kByte:
-      return caffe2::TensorProto_DataType_UINT8;
-    case at::kChar:
-      return caffe2::TensorProto_DataType_INT8;
-    case at::kShort:
-      return caffe2::TensorProto_DataType_INT16;
-    case at::kInt:
-      return caffe2::TensorProto_DataType_INT32;
-    case at::kLong:
-      return caffe2::TensorProto_DataType_INT64;
-    default:
-      AT_ERROR("unexpected aten scalar type");
-  }
-}
-
 class ScriptModuleSerializer final {
 
  public:
   ScriptModuleSerializer(const std::string& filename) :
     ofs_(filename, std::ofstream::out | std::ofstream::trunc | std::ofstream::binary),
-    //ofs_(filename, std::ofstream::out),
     writer_(&ofs_) {
       // TODO appropriate support for mmap, right now we still use stream writer
   }
@@ -886,8 +862,21 @@ class ScriptModuleSerializer final {
     torch::ModelDef model_def;
     convertToModel(module, &model_def);
     std::string output;
-    AT_ASSERT(::google::protobuf::util::MessageToJsonString(model_def, &output) ==
-        ::google::protobuf::util::Status::OK);
+    // NB: cannot use MessageToJsonString, since fbcode's protobuf is too old
+    // be consistent with MessageToJsonString
+    std::string url_prefix = "type.googleapis.com";
+    std::unique_ptr<::google::protobuf::util::TypeResolver> resolver(
+        ::google::protobuf::util::NewTypeResolverForDescriptorPool(
+          url_prefix, model_def.GetDescriptor()->file()->pool()));
+    ::google::protobuf::util::Status convert_result =
+      ::google::protobuf::util::BinaryToJsonString(resolver.get(),
+          url_prefix + "/" + model_def.GetDescriptor()->full_name(),
+          model_def.SerializeAsString(), &output);
+    if (!convert_result.ok()) {
+      std::stringstream ss;
+      ss << convert_result;
+      AT_ERROR(ss.str());
+    }
     auto record_id = writer_.writeRecord(output.data(), output.size());
     writer_.writeEndOfFile();
 
@@ -969,7 +958,6 @@ class ScriptModuleSerializer final {
         AT_ASSERT(t.type().elementSizeInBytes() * t.storage().size() == record_size);
         record_id = writer_.writeRecord(t.storage().data(),
             t.type().elementSizeInBytes() * t.storage().size());
-        //std::cout << "===> record_id: " << record_id << std::endl;
       } else {
         record_id = writer_.writeRecord(tensor.storage().data(),
             record_size);
