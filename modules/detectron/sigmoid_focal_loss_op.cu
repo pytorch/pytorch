@@ -45,7 +45,7 @@ __global__ void SigmoidFocalLossKernel(
     float c1 = (t == (d + 1));
     float c2 = (t != -1 & t != (d + 1));
 
-    float Np = max(weight_pos[0], 1.0);
+    float Np = fmaxf(weight_pos[0], 1.0f);
     float zn = (1.0 - alpha) / Np;
     float zp = alpha / Np;
 
@@ -86,7 +86,7 @@ __global__ void SigmoidFocalLossGradientKernel(
       int a = c / num_classes;   // current anchor
       int d = c % num_classes;   // current class
 
-      float Np = max(weight_pos[0], 1.0);
+      float Np = fmaxf(weight_pos[0], 1.0f);
       float zn = (1.0 - alpha) / Np;
       float zp = alpha / Np;
       int t = targets[n * (H * W * A) + a * (H * W) + y * W + x];
