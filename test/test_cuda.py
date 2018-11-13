@@ -833,7 +833,7 @@ class TestCuda(TestCase):
         tensor = torch.zeros(1024, device='cuda')
 
         with self.assertRaisesRegex(RuntimeError, "Tried to allocate 80.00 GiB"):
-            torch.randn(1024 * 1024 * 1024 * 80, dtype=torch.int8, device='cuda')
+            torch.empty(1024 * 1024 * 1024 * 80, dtype=torch.int8, device='cuda')
 
         # ensure out of memory error doesn't disturb subsequent kernel
         tensor.fill_(1)
