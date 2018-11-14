@@ -1,7 +1,7 @@
 #pragma once
 
 #include <string>
-#include "../THD.h"
+#include <THD/THD.h>
 #include "../base/DataChannel.h"
 
 THD_API void THDProcessGroupInit(

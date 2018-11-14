@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../THD.h"
+#include <THD/THD.h>
 
 #ifndef _THD_CORE
 struct _THDRequest;

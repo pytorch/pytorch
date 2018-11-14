@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../DataChannel.hpp"
+#include <THD/base/DataChannel.hpp>
 
 #include <atomic>
 #include <condition_variable>

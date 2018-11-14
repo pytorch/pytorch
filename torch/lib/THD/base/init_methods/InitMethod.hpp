@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../ChannelUtils.hpp"
+#include <THD/base/ChannelUtils.hpp>
 
 #include <stdexcept>
 #include <string>
