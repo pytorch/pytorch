@@ -158,8 +158,8 @@ __global__ void kernelReduceNoncontigDim_shared
   IndexType sliceIndex  = blockIdx.x*blockDim.x + threadIdx.x;
 
   __shared__ int isLastBlockDone;
-  extern __shared__ char local_reduce[];
-  AccT* shmem = &(reinterpret_cast<AccT*>(local_reduce))[threadIdx.x + threadIdx.y*blockDim.x];
+  __shared__ AccT local_reduce[THC_NONCONTIG_REDUCE_BLOCK_SIZE];
+  AccT* shmem = &(local_reduce)[threadIdx.x + threadIdx.y*blockDim.x];
 
   // This kernel is intended for the latency-bound case, so we want to launch enough blocks
   // to cover the entire output.  This means we don't need grid-stride loops.
@@ -536,8 +536,7 @@ bool THC_reduceDim(THCState* state,
                                                                              \
         kernelReduceNoncontigDim_shared                                      \
           <ScalarType, TYPE, AccT, ModifyOp, ReduceOp, FinalizeOp,  OUT, IN> \
-          <<<grid, block, THC_NONCONTIG_REDUCE_BLOCK_SIZE * sizeof(AccT),    \
-             THCState_getCurrentStream(state)>>>                             \
+          <<<grid, block, 0, THCState_getCurrentStream(state)>>>             \
           (outInfo,                                                          \
            inInfo,                                                           \
            reductionStride,                                                  \
