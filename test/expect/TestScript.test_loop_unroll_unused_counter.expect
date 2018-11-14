@@ -4,7 +4,7 @@ graph(%x : Dynamic) {
   %3 : int = prim::Constant[value=1]()
   %4 : int = prim::TensorToNum(%x)
   %5 : int = prim::Constant[value=8]()
-  %6 : int = aten::floordiv(%4, %5)
+  %6 : int = aten::__round_to_zero_floordiv(%4, %5)
   %7 : int = prim::Constant[value=8]()
   %8 : int = aten::mul(%6, %7)
   %9 : int = aten::sub(%4, %8)
