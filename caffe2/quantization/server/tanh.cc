@@ -25,7 +25,7 @@ static int GetPassRegionEnd_(
   int in_pos_qmax = (1 << (num_in_bits - 1)) - 1;
 
   float scale_multiplier = in_qparams.scale / out_qparams.scale;
-  int log2_scale_multiplier = (int)round(log2(scale_multiplier));
+  int log2_scale_multiplier = nearbyint(log2(scale_multiplier));
 
   int x_q;
   for (x_q = 0; x_q < in_pos_qmax; ++x_q) {
@@ -76,7 +76,7 @@ Tanh<T>::Tanh(double max_abs_err) : max_abs_err_(max_abs_err) {
     double y_begin = tanh((i - 0.5) * in_qparams_.scale);
     double y_end = tanh((i + 0.5) * in_qparams_.scale);
 
-    int y_avg_q = (int)round((y_begin + y_end) / 2 / out_qparams_.scale);
+    int y_avg_q = nearbyint((y_begin + y_end) / 2 / out_qparams_.scale);
     assert(y_avg_q*out_qparams_.scale - y_begin < max_abs_err);
     assert(y_end - y_avg_q*out_qparams_.scale < max_abs_err);
     assert(y_avg_q >= 0);
@@ -110,7 +110,7 @@ T Tanh<T>::Compute(T x) const {
   if (x_mag < x_pq_index_) {
     // pass region
     float scale_multiplier = in_qparams_.scale / out_qparams_.scale;
-    int log2_scale_multiplier = (int)round(log2(scale_multiplier));
+    int log2_scale_multiplier = nearbyint(log2(scale_multiplier));
     if (log2_scale_multiplier < 0) {
       y = x_sgn * (x_mag >> (-log2_scale_multiplier));
     }

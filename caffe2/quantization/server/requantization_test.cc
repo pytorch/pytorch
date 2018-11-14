@@ -46,9 +46,9 @@ TEST(Requantization, BatchRequantizationUnitTest) {
 
     for (int j = 0; j < LEN; ++j) {
       expected[j] = clamp(
-        target_qparams.zero_point +
-          std::round((double)src[j] * real_multiplier),
-        8);
+          target_qparams.zero_point +
+              std::nearbyint(static_cast<double>(src[j]) * real_multiplier),
+          8);
     }
 
     unsigned long long cycle_begin = __rdtsc();
