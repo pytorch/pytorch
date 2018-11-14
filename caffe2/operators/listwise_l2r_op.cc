@@ -176,14 +176,14 @@ bool LambdaRankNdcgOp<float, CPUContext>::RunOnDevice() {
   auto& y = Input(PRED);
   auto& r = Input(REL);
   auto& sid = Input(SESSION_LENS);
-
+  auto* loss = Output(LOSS);
   auto* dy = Output(DPRED);
 
   const auto* session_lengths = sid.template data<int>();
   CAFFE_ENFORCE(y.dim() == 1);
   CAFFE_ENFORCE(y.numel() == r.numel());
   dy->Resize(y.numel());
-  auto* loss = Output(LOSS, {sid.numel()}, at::dtype<float>());
+  loss->Resize(sid.numel());
   auto loss_vec = loss->template mutable_data<float>();
   int start_id = 0;
   for (int i = 0; i < sid.numel(); i++) {
@@ -201,7 +201,7 @@ bool LambdaRankNdcgGradientOp<float, CPUContext>::RunOnDevice() {
   auto& sids = Input(SESSION_LENS);
   auto& dy_cache = Input(DY_CACHE);
   auto& dLoss = Input(DLOSS);
-
+  auto* dy = Output(DY);
   CAFFE_ENFORCE(y.dim() == 1);
   CAFFE_ENFORCE(dy_cache.dim() == 1);
   CAFFE_ENFORCE(dy_cache.numel() > 0);
@@ -212,7 +212,7 @@ bool LambdaRankNdcgGradientOp<float, CPUContext>::RunOnDevice() {
 
   ConstEigenVectorArrayMap<float> dy_cache_vec(
       dy_cache.template data<float>(), dy_cache.numel());
-  auto* dy = Output(DY, {dy_cache.numel()}, at::dtype<float>());
+  dy->Resize(dy_cache.numel());
   EigenVectorArrayMap<float> dy_vec(
       dy->template mutable_data<float>(), dy->numel());
   auto multiplier = dLoss.template data<float>();
