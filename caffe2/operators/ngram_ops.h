@@ -49,8 +49,8 @@ class NGramFromCategoricalOp : public Operator<Context> {
     auto N = floats.size(0);
     auto D = floats.size_from_dim(1);
     const F* floats_data = floats.template data<F>();
-    auto* output = Output(0);
-    output->Resize(N);
+
+    auto* output = Output(0, {N}, at::dtype<T>());
     auto* output_data = output->template mutable_data<T>();
     math::Set<T, Context>(output->numel(), 0, output_data, &context_);
 

@@ -15,7 +15,7 @@ template <typename T, typename Data_T>
 bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& data = Input(DATA);
   const auto& lengths = Input(LENGTHS);
-  auto* output = Output(0);
+
   Tensor* presence_mask = nullptr;
   if (return_presence_mask_) {
     presence_mask = Output(1);
@@ -54,7 +54,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
       data.sizes().vec(); // Shape of output is batch_size x max_len x ...
   shape[0] = max_length;
   shape.insert(shape.begin(), lengths.numel());
-  output->Resize(shape);
+  auto* output = Output(0, shape, at::dtype(data.dtype()));
 
   // create output tensor
   auto* out = static_cast<char*>(output->raw_mutable_data(data.dtype()));

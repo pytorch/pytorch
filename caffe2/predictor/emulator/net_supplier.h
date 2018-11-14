@@ -10,9 +10,13 @@ namespace emulator {
 struct RunnableNet {
   const caffe2::NetDef& netdef;
   const Filler* filler;
+  std::string debug_info;
 
-  RunnableNet(const caffe2::NetDef& netdef_, const Filler* filler_)
-      : netdef(netdef_), filler(filler_) {}
+  RunnableNet(
+      const caffe2::NetDef& netdef_,
+      const Filler* filler_,
+      const std::string& info_ = "")
+      : netdef(netdef_), filler(filler_), debug_info(info_) {}
 };
 
 /*
@@ -61,7 +65,7 @@ class MutatingNetSupplier : public NetSupplier {
       new_net = &nets_.back();
     }
     mutator_(new_net);
-    return RunnableNet(*new_net, orig.filler);
+    return RunnableNet(*new_net, orig.filler, orig.debug_info);
   }
 
  private:
