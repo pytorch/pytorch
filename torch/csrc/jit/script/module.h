@@ -78,11 +78,11 @@ struct Method {
     }
     return get_executor().graphFor(inputs);
   }
-  std::shared_ptr<Graph> graph() const {
+  TORCH_API std::shared_ptr<Graph> graph() const {
     return graph_;
   }
 
-  const std::string & name() const {
+  TORCH_API const std::string & name() const {
     return name_;
   }
   // emit a function call by inlining the callees Graph into this one
@@ -92,13 +92,13 @@ struct Method {
   std::vector<Value*> emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
 
   // if this isn't yet defined, run its method_creator function
-  void ensure_defined();
+  TORCH_API void ensure_defined();
 
 
   size_t num_inputs() const {
     return graph()->inputs().size() - member_inputs.size();
   }
-  Value * get_or_add_parameter(at::Tensor* slot) {
+  TORCH_API Value * get_or_add_parameter(at::Tensor* slot) {
     auto it = member_input_index.find(slot);
     if(it != member_input_index.end()) {
       return graph()->inputs().at(it->second);
@@ -160,7 +160,7 @@ struct Method {
     return *this;
   }
 
-  const FunctionSchema& getSchema() const {
+  TORCH_API const FunctionSchema& getSchema() const {
     if(schema == nullptr) {
       schema = make_unique<FunctionSchema>(defaultSchemaFor(*this));
     }
