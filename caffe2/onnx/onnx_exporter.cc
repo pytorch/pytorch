@@ -1,5 +1,6 @@
 #include "caffe2/onnx/onnx_exporter.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/tensor_impl.h"
 #include "caffe2/onnx/helper.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/map_utils.h"
@@ -644,27 +645,77 @@ ConvertedResult OnnxExporter::CreateLrnNodes(
 ConvertedResult OnnxExporter::CreateConcatNodes(
     const caffe2::OperatorDef& def,
     const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
-  auto result = CommonCaffe2OpToOnnxNodes(def);
+  caffe2::OperatorDef mdef(def); // The modified def without add_axis
+  // In caffe2, we can optionally add an axis specified by `add_axis`
+  int add_axis = 0;
+  for (int i = 0; i < mdef.arg_size(); ++i) {
+    const auto& arg = mdef.arg(i);
+    if (arg.name() == "add_axis") {
+      add_axis = arg.i();
+      ArgumentHelper::RemoveArgument(mdef, i);
+      break;
+    }
+  }
+
+  auto result = CommonCaffe2OpToOnnxNodes(mdef);
   auto& nodes = result.first;
+  nodes.reserve(nodes.size() + 3);
+  auto& const_tensors = result.second;
 
   CAFFE_ENFORCE_EQ(nodes.size(), 1);
   auto& node = nodes.back();
   bool explicit_axis = false;
-  for (const auto& a : def.arg()) {
-    if (a.name() == "axis") {
-      explicit_axis = true;
-      break;
-    }
+  int axis = -1;
+  if (ArgumentHelper::HasArgument(mdef, "axis")) {
+    axis = ArgumentHelper::GetSingleArgument(mdef, "axis", -1);
+    explicit_axis = true;
   }
   if (!explicit_axis) {
-    node.add_attribute()->CopyFrom(MakeAttribute("axis", 1L));
+    node.add_attribute()->CopyFrom(MakeAttribute("axis", 1));
   }
 
+  // If we have add_axis, we need to add a reshape node
+  auto final_output = node.output(0);
+  if (add_axis > 0) {
+    CAFFE_ENFORCE_GE(axis, 0);
+    std::vector<int64_t> dims;
+    const auto& shape0 = shapes.at(mdef.input(0));
+    for (int i = 1; i < mdef.input_size(); ++i) {
+      const auto& shape = shapes.at(mdef.input(i));
+      CAFFE_ENFORCE_EQ(shape.dims(axis), shape0.dims(axis));
+    }
+    for (const auto d : shape0.dims()) {
+      dims.push_back(d);
+    }
+    dims.insert(dims.begin() + axis, mdef.input_size());
+
+    auto concat_output = dummy_->NewDummyName();
+    *node.mutable_output(0) = concat_output;
+    const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
+    nodes.emplace_back(MakeNode(
+        "Reshape",
+        {concat_output, const_tensors.back().name()},
+        {final_output}));
+  }
+
+  // If we have two output, we need to output the split_info, which can be
+  // statically inferred from the input shapes
   if (node.output_size() == 2) {
-    std::string shape_input = node.output(0);
-    std::string shape_output = node.output(1);
+    std::string second_output = node.output(1);
     node.mutable_output()->RemoveLast();
-    nodes.emplace_back(AddShapeNode(shape_input, shape_output));
+    std::vector<int32_t> split_info;
+    int adj_size = shapes.at(mdef.input(0)).dims_size() + (add_axis ? 1 : 0);
+    int canonical_axis = canonical_axis_index_(axis, adj_size);
+    CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
+    for (int i = 0; i < mdef.input_size(); ++i) {
+      split_info.push_back(
+          add_axis ? 1 : shapes.at(mdef.input(i)).dims(canonical_axis));
+    }
+    auto split_info_tensor =
+        MakeTensor("split_info", split_info, TensorProto::INT32);
+    auto cnode = MakeNode("Constant", {}, {second_output});
+    cnode.add_attribute()->CopyFrom(MakeAttribute("value", split_info_tensor));
+    nodes.emplace_back(std::move(cnode));
   }
   return result;
 }

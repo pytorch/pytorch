@@ -1,12 +1,13 @@
 #pragma once
 
 #include <cstddef>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace data {
 namespace samplers {
 /// A base class for custom index types.
-struct CustomBatchRequest {
+struct TORCH_API CustomBatchRequest {
   virtual ~CustomBatchRequest() = default;
 
   /// The number of elements accessed by this index.

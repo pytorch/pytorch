@@ -1,23 +1,14 @@
-def script(a1, b1):
-  t5 = aten::lt(a1, 10)
-  t6 = prim::TensorToBool(t5)
-  a = a1
-  b = b1
-  c = 0
-  t7 = t6
-  while t7:
-    a2 = aten::add(a, 1, 1)
-    b2 = aten::add(b, 1, 1)
-    t15 = aten::gt(a2, b2)
-    t16 = prim::TensorToBool(t15)
-    if t16:
-      c4 = 2
+def script(self,
+    a_1: Tensor,
+    b_1: Tensor) -> Tensor:
+  a, b, c = a_1, b_1, 0
+  t = bool(aten.lt(a_1, 10))
+  while t:
+    a_2 = aten.add(a, 1, 1)
+    b_2 = aten.add(b, 1, 1)
+    if bool(aten.gt(a_2, b_2)):
+      c_4 = 2
     else:
-      c4 = 3
-    t21 = aten::lt(a2, 10)
-    t7 = prim::TensorToBool(t21)
-    a = a2
-    b = b2
-    c = c4
-  t27 = aten::add(a, 1, 1)
-  return aten::add(t27, c, 1)
+      c_4 = 3
+    t, a, b, c = bool(aten.lt(a_2, 10)), a_2, b_2, c_4
+  return aten.add(aten.add(a, 1, 1), c, 1)
