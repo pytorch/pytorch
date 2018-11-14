@@ -168,16 +168,6 @@ void launchFusion(
 , const int device
 , const at::ArrayRef<at::Tensor>& inputs
 , std::vector<at::Tensor>& outputs) {
-  // Allocates tensors for outputs
-  auto& ref_type = inputs[0].type();
-  outputs.reserve(fusion.outputDesc().size());
-  for (const auto& od : fusion.outputDesc()) {
-    if (device >= 0) // GPU
-      outputs.push_back(at::empty({0}, ref_type.options().dtype(od.scalar_type).device_index(device)));
-    else // CPU
-      outputs.push_back(at::empty({0}, ref_type.options().dtype(od.scalar_type).device(at::Device{at::DeviceType::CPU})));
-  }
-
   // Fails if fusion and given inputs disagree
   JIT_ASSERT(inputs.size() == fusion.inputDesc().size());
 
@@ -262,17 +252,19 @@ void launchFusion(
   }
 
   // Adds (flattened) output arguments
+  outputs.reserve(fusion.outputDesc().size());
+  const auto& ref_options = inputs[0].options();
   for (size_t i = 0; i < fusion.outputDesc().size(); ++i) {
     const auto& c = fusion.concatDesc()[i];
-    auto& o = outputs[i];
     if (c.isNoop()) {
-      o.resize_(map_size);
+      outputs.push_back(at::empty(map_size, ref_options));
       addTensorInfo(fusion.outputDesc()[i], outputs[i]);
     } else {
       size_t small_size = map_size[c.dim()];
       std::vector<int64_t> concat_size(map_size.begin(), map_size.end());
       concat_size[c.dim()] = small_size * c.nSubTensors();
-      o.resize_(concat_size);
+      outputs.push_back(at::empty(concat_size, ref_options));
+      const auto& o = outputs[i];
       size_t offset = 0;
       for (size_t j = 0; j < c.nSubTensors(); ++j) {
         // because the concatenated_output stays live, the underlying data
