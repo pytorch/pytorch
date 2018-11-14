@@ -19,6 +19,7 @@ import torch.distributed as c10d
 from torch.nn.parallel import DistributedDataParallel
 
 from common_utils import TestCase, load_tests, run_tests
+from common_utils import retry_on_address_already_in_use_error
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -263,6 +264,7 @@ class RendezvousEnvTest(TestCase):
                 gen = c10d.rendezvous('env://')
                 next(gen)
 
+    @retry_on_address_already_in_use_error
     def test_nominal(self):
         os.environ['WORLD_SIZE'] = '2'
         os.environ['MASTER_ADDR'] = '127.0.0.1'
@@ -336,6 +338,7 @@ class RendezvousTCPTest(TestCase):
             gen = c10d.rendezvous('tcp://127.0.0.1:23456?rank=0')
             next(gen)
 
+    @retry_on_address_already_in_use_error
     def test_nominal(self):
         addr = 'localhost'
         port = common.find_free_port()
