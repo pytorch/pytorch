@@ -263,10 +263,12 @@ def _nested_map(condition, fn, condition_msg=None):
 
     return _map
 
+
 def _jit_unwrap_structured(obj):
     if hasattr(obj, "_jit_unwrap"):
         return obj._jit_unwrap()
     return obj
+
 
 def _iter_filter(condition, allow_unknown=False, condition_msg=None,
                  conversion=None):
@@ -315,7 +317,8 @@ def _unflatten(input, proto):
 
 _iter_jit_values = _iter_filter(lambda o: o is None or isinstance(o, torch._C.Value),
                                 condition_msg="jit's Values or None")
-_iter_tensors = _iter_filter(lambda x: isinstance(x, torch.Tensor), condition_msg="Tensors", conversion=_jit_unwrap_structured)
+_iter_tensors = _iter_filter(lambda x: isinstance(x, torch.Tensor), condition_msg="Tensors",
+                             conversion=_jit_unwrap_structured)
 _iter_tensors_permissive = _iter_filter(lambda x: isinstance(x, torch.Tensor),
                                         allow_unknown=True,
                                         condition_msg="Tensors (permissive)")
