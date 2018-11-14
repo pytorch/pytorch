@@ -12,7 +12,7 @@
 #include "ATen/ScalarType.h"
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/TensorOptions.h"
-#include "TH/THRandom.h"
+#include <TH/THRandom.h>
 #include "TH/THGenerator.hpp"
 #include "c10/util/Exception.h"
 
