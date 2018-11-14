@@ -29,7 +29,6 @@ list(APPEND Caffe2_CPU_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/fully_connected_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/fully_connected_rowwise_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/lstm_unit_dnnlowp_op.cc"
-  "${CMAKE_CURRENT_SOURCE_DIR}/op_wrapper.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/pool_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/quantize_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/sigmoid_dnnlowp_op.cc"

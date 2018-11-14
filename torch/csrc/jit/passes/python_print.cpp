@@ -104,20 +104,46 @@ class PythonPrintPass {
     // some names are valid identifiers but off limits because
     // they are keywords or namespaces used in the output
     const static std::unordered_set<std::string> reserved_names = {
+      // identifiers in the environment while parsing
       "aten",
       "prim",
       "CONSTANTS",
-      "int",
-      "float",
-      "bool",
-      "print",
-      "return",
-      "while",
-      "for",
-      "if",
-      "True",
-      "False",
       "fork",
+      "attribute",
+      // the python keywords
+      "False",
+      "None",
+      "True",
+      "and",
+      "as",
+      "assert",
+      "break",
+      "class",
+      "continue",
+      "def",
+      "del",
+      "elif",
+      "else",
+      "except",
+      "finally",
+      "for",
+      "from",
+      "global",
+      "if",
+      "import",
+      "in",
+      "is",
+      "lambda",
+      "nonlocal",
+      "not",
+      "or",
+      "pass",
+      "raise",
+      "return",
+      "try",
+      "while",
+      "with",
+      "yield",
     };
 
     std::string name = candidate;
@@ -378,6 +404,75 @@ class PythonPrintPass {
     return tensor_constants.size() - 1;
   }
 
+  void printMaybeAnnoatatedConstantList(
+      std::ostream& stmt,
+      const char* the_type,
+      size_t list_size,
+      IValue the_list) {
+    if(list_size == 0) {
+      stmt << "annotate(" << the_type << ", [])";
+    } else {
+      stmt << the_list;
+    }
+  }
+
+  // unix isprint but insensitive to locale
+  static bool isPrint(char s) {
+    return s > 0x1f && s < 0x7f;
+  }
+
+  void printQuotedString(std::ostream& stmt, const std::string& str) {
+    stmt << "\"";
+    for(auto s : str) {
+      switch (s) {
+        case '\\':
+          stmt << "\\\\";
+          break;
+        case '\'':
+          stmt << "\\'";
+          break;
+        case '\"':
+          stmt << "\\\"";
+          break;
+        case '\a':
+          stmt << "\\a";
+          break;
+        case '\b':
+          stmt << "\\b";
+          break;
+        case '\f':
+          stmt << "\\f";
+          break;
+        case '\n':
+          stmt << "\\n";
+          break;
+        case '\r':
+          stmt << "\\r";
+          break;
+        case '\t':
+          stmt << "\\t";
+          break;
+        case '\v':
+          stmt << "\\v";
+          break;
+        default:
+          if (isPrint(s)) {
+            stmt << s;
+          } else {
+            // C++ io has stateful formatting settings. Messing with
+            // them is probably worse than doing this manually.
+            char buf[4] = "000";
+            buf[2] += s % 8; s /= 8;
+            buf[1] += s % 8; s /= 8;
+            buf[0] += s;
+            stmt << "\\" << buf;
+          }
+          break;
+      }
+    }
+    stmt << "\"";
+  }
+
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
   void printRHS(std::ostream& stmt, const Node* node) {
     switch(node->kind()) {
@@ -398,9 +493,7 @@ class PythonPrintPass {
         if(v.isTensor()) {
           stmt << "CONSTANTS.c" << addTensorConstant(std::move(v).toTensor());
         } else if(v.isString()) {
-          // TODO: escape the string correctly by implementing a subset of
-          // string escapes in both printing and parsing.
-          stmt << "\"" << v.toStringRef() << "\"";
+          printQuotedString(stmt, v.toStringRef());
         } else if(v.isTensorList()) {
           auto tl = v.toTensorListRef();
           stmt << "[";
@@ -410,8 +503,13 @@ class PythonPrintPass {
             delim = ", ";
           }
           stmt << "]";
+        } else if(v.isBoolList()) {
+          printMaybeAnnoatatedConstantList(stmt, "bool", v.toBoolListRef().size(), v);
+        } else if(v.isIntList()) {
+          printMaybeAnnoatatedConstantList(stmt, "int", v.toIntListRef().size(), v);
+        } else if(v.isDoubleList()) {
+          printMaybeAnnoatatedConstantList(stmt, "float", v.toDoubleListRef().size(), v);
         } else {
-          // TODO: ensure floats always print with their periods
           stmt << v;
         }
       } break;
@@ -445,10 +543,15 @@ class PythonPrintPass {
              << node->i(attr::end) << "]";
       } break;
       case prim::ListConstruct: {
-        // TODO: when the list is empty and is not a list of tensors,
+        // when the list is empty and is not a list of tensors,
         // we need to annotate it, otherwise it won't be possible
         // to infer the type on import
-        printValueList(stmt, node->inputs(), "[", "]");
+        if (node->inputs().size() == 0 &&
+            !node->output()->type()->isSubtypeOf(DynamicType::get())) {
+          stmt << "annotate(" << node->output()->type()->python_str() << ", [])";
+        } else {
+          printValueList(stmt, node->inputs(), "[", "]");
+        }
       } break;
       case prim::fork: {
         // the subgraph gets emitted as another function
@@ -456,7 +559,7 @@ class PythonPrintPass {
         std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
         worklist.emplace_back(graph.get(), name);
         // and we put a call to fork which invokes that function.
-        stmt << "fork(" << name;
+        stmt << "fork(self." << name;
         for(const Value* v : node->inputs()) {
           stmt << ", " << useOf(v);
         }
@@ -464,8 +567,20 @@ class PythonPrintPass {
       } break;
       default: {
         Symbol kind = node->kind();
-        stmt << kind.ns().toUnqualString() << "." << kind.toUnqualString();
-        printValueList(stmt, node->inputs(), "(", ")");
+        stmt << kind.ns().toUnqualString() << "." << kind.toUnqualString() << "(";
+        const FunctionSchema& schema = node->schema();
+        for (size_t i = 0; i < schema.arguments().size(); ++i) {
+            auto v = useOf(node->inputs().at(i));
+            auto arg = schema.arguments().at(i);
+            if (i > 0) {
+              stmt << ", ";
+            }
+            if (arg.kwarg_only()) {
+              stmt << arg.name() << "=";
+            }
+            stmt << v;
+        }
+        stmt << ")";
       } break;
     }
   }
@@ -483,11 +598,9 @@ class PythonPrintPass {
     // current graph is used to de-dup names within a single graph
     scanBlock(graph.block());
     assignValuesToTheirUniqueNames(graph.inputs());
-    out << "def " << name << "(\n";
-    const char * delim = "    ";
+    out << "def " << name << "(self";
     for(auto input : graph.inputs()) {
-      out << delim << useOf(input) << ": " << input->type()->python_str();
-      delim = ",\n    ";
+      out << ",\n    " << useOf(input) << ": " << input->type()->python_str();
     }
     out << ") -> " << resultType(graph)->python_str() << ":\n";
     {

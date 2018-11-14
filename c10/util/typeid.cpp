@@ -1,4 +1,4 @@
-#include <ATen/core/typeid.h>
+#include <c10/util/typeid.h>
 #include <c10/util/Exception.h>
 
 #include <atomic>

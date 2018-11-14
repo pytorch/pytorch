@@ -53,7 +53,6 @@
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
 namespace c10 {} // namespace c10
-namespace c10 { namespace detail {} }
 
 // Since C10 is the core library for caffe2 (and aten), we will simply reroute
 // all abstractions defined in c10 to be available in caffe2 as well.
@@ -61,7 +60,6 @@ namespace c10 { namespace detail {} }
 // c10 namespace where possible.
 namespace caffe2 {using namespace c10;}
 namespace at {using namespace c10;}
-namespace at { namespace detail { using namespace c10::detail; }}
 
 // C10_NORETURN
 #if defined(_MSC_VER)
