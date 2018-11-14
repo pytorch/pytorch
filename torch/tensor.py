@@ -179,7 +179,7 @@ class Tensor(torch._C._TensorBase):
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
       In-place size / stride / storage changes (such as `resize_` / `resize_as_` / `set_` / `transpose_`)
-      on the returned tensor will not be seen in the original tensor.
+      on the returned tensor are not allowed, to ensure consistency with the original tensor.
     """)
 
     detach_ = _add_docstr(_C._TensorBase.detach_, r"""
