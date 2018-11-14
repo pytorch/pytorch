@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/utils/subgraph_utils.h"
 
 namespace torch {
 namespace jit {
@@ -40,6 +41,9 @@ class SubgraphSlicer {
       }
     }
 
+    // Done constructing subgraphs. Do some post-processing cleanup:
+    // 1. Run CSE to delete redundanet constant nodes.
+    // 2. We may need to re-inline ones that are too small.
     auto curNode = *block_->nodes().rbegin();
     while (curNode != *block_->nodes().rend()) {
       for (auto subBlock : curNode->blocks()) {
@@ -66,171 +70,23 @@ class SubgraphSlicer {
   }
 
  private:
-  static Graph& getSubgraph(Node* n) {
-    JIT_ASSERT(n->kind() == prim::DifferentiableGraph);
-    return *n->g(attr::Subgraph);
-  }
-
   // Inline this node's group subgraph into the outer graph if it's smaller
   // than the specified minimum size.
   //
   // Returns true if an inlining has occured, false otherwise.
   bool inlineIfTooSmall(Node* n) {
     JIT_ASSERT(n->kind() == prim::DifferentiableGraph);
-    auto& subgraph = getSubgraph(n);
+    auto subgraph = SubgraphUtils::getSubgraph(n);
     size_t i = 0;
-    for (auto it = subgraph.nodes().begin(); it != subgraph.nodes().end();
+    for (auto it = subgraph->nodes().begin(); it != subgraph->nodes().end();
          ++it) {
       if (++i >= minSubgraphSize_) {
         return false;
       }
     }
 
-    unmergeGroup(n);
+    SubgraphUtils::unmergeSubgraph(n);
     return true;
-  }
-
-  // Move nodes from producerGroup's subgraph to the top-level graph.
-  // This destroys `producerGroup`.
-  std::vector<Node*> unmergeGroup(Node* producerGroup) {
-    JIT_ASSERT(producerGroup->kind() == prim::DifferentiableGraph);
-
-    std::vector<Node*> temporary_nodes;
-    auto& producerSubgraph = getSubgraph(producerGroup);
-
-    // Initialize a map of inner graph values to outer graph values
-    std::unordered_map<const Value*, Value*> innerToOuter;
-    const auto innerInputs = producerSubgraph.inputs();
-    const auto outerInputs = producerGroup->inputs();
-    for (size_t i = 0; i < innerInputs.size(); ++i) {
-      innerToOuter[innerInputs[i]] = outerInputs[i];
-    }
-
-    // Clone all nodes
-    for (auto inner : producerSubgraph.nodes()) {
-      Node* outer = block_->owningGraph()->createClone(
-          inner, [&](Value* k) -> Value* { return innerToOuter.at(k); });
-      outer->insertBefore(producerGroup);
-      temporary_nodes.emplace_back(outer);
-      const auto innerOutputs = inner->outputs();
-      const auto outerOutputs = outer->outputs();
-      for (size_t i = 0; i < innerOutputs.size(); ++i)
-        innerToOuter[innerOutputs[i]] = outerOutputs[i];
-    }
-
-    // Replace uses of producerGroup outputs and destroy the producer
-    const auto subgraphOutputs = producerSubgraph.outputs();
-    for (size_t i = 0; i < subgraphOutputs.size(); ++i) {
-      const auto outerOutput = innerToOuter.at(subgraphOutputs[i]);
-      producerGroup->outputs()[i]->replaceAllUsesWith(outerOutput);
-    }
-    producerGroup->destroy();
-
-    return temporary_nodes;
-  }
-
-  // Combine the nodes in two groups together. The nodes will end up in
-  // `consumerGroup`, and `producerGroup` will be deleted.
-  void mergeGroups(Node* consumerGroup, Node* producerGroup) {
-    // Extract the nodes in `producerGroup` into the outer graph
-    const auto nodes = unmergeGroup(producerGroup);
-    // Then merge them into `consumerGroup`
-    for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
-      mergeNodeIntoGroup(consumerGroup, *it);
-    }
-  }
-
-  // Merge node `n` into `group`'s subgraph
-  Node* mergeNodeIntoGroup(Node* group, Node* n) {
-    JIT_ASSERT(group->kind() == prim::DifferentiableGraph);
-    JIT_ASSERT(n->kind() != prim::DifferentiableGraph);
-
-    auto& subgraph = getSubgraph(group);
-
-    // Map from values in the surrounding graph to inputs in the subgraph
-    std::unordered_map<Value*, Value*> inputsMap;
-
-    JIT_ASSERT(group->inputs().size() == subgraph.inputs().size());
-    size_t i = 0;
-    for (auto input : group->inputs()) {
-      inputsMap[input] = subgraph.inputs()[i];
-      i++;
-    }
-
-    // Add n's inputs to the group's input list if we don't already have them
-    WithInsertPoint guard(*subgraph.nodes().begin());
-    for (auto input : n->inputs()) {
-      if (inputsMap.count(input) == 0) {
-        // Clone constants inside the subgraph instead of referencing them, to
-        // enable more optimizations
-        if (auto value = toIValue(input)) {
-          auto nv = subgraph.insertConstant(*value);
-          inputsMap[input] = nv;
-        } else {
-          // The common case: this is a regular input, so just register it with
-          // the group node and inner subgraph
-          group->addInput(input);
-          auto inputToGraph = subgraph.addInput();
-          inputToGraph->setType(input->type());
-          inputsMap[input] = inputToGraph;
-        }
-      }
-    }
-
-    // Merge the node into the graph
-    auto mergedNode = subgraph.insertNode(
-        subgraph.createClone(n, [&](Value* v) { return inputsMap[v]; }));
-
-    // If n's outputs were inputs to `group`, remove them since we just merged
-    // n in.
-    //
-    // i.e.,
-    // x = f(w); group(x, y, z) becomes group(w, y, z).
-    // x, y, z = f(w); group(x, y, z) becomes group(w).
-    auto inputs = group->inputs();
-    for (size_t i = 0; i < n->outputs().size(); ++i) {
-      auto it = std::find(inputs.begin(), inputs.end(), n->outputs()[i]);
-      if (it != inputs.end()) {
-        size_t p = it - inputs.begin();
-        group->removeInput(p);
-        subgraph.inputs()[p]->replaceAllUsesWith(mergedNode->outputs()[i]);
-        subgraph.eraseInput(p);
-      }
-    }
-
-    // Add n's outputs to the group node and inner subgraph outputs.
-    for (size_t i = 0; i < n->outputs().size(); i++) {
-      auto oldOutput = n->outputs()[i];
-
-      // Only register the output in the group node if it's actually used
-      // outside the subgraph.
-      const auto hasUsesOutsideGroup = std::any_of(
-          oldOutput->uses().cbegin(),
-          oldOutput->uses().cend(),
-          [&](const Use& use) { return use.user->isAfter(group); });
-
-      if (hasUsesOutsideGroup) {
-        auto newOutput = mergedNode->outputs()[i];
-        subgraph.registerOutput(newOutput);
-        auto groupOutput = group->addOutput();
-        groupOutput->copyMetadata(oldOutput);
-        oldOutput->replaceAllUsesWith(groupOutput);
-      }
-    }
-
-    // Remove the original node now that the merge is complete
-    n->destroy();
-
-    return mergedNode;
-  }
-
-  // Create a group node that contains only `n`
-  // `n` is destroyed.
-  Node* createSingletonGroup(Node* n) {
-    auto group = block_->owningGraph()->createDifferentiableSubgraph();
-    group->insertBefore(n);
-    mergeNodeIntoGroup(group, n);
-    return group;
   }
 
   value_list sortReverseTopological(ArrayRef<Value*> inputs) {
@@ -261,7 +117,8 @@ class SubgraphSlicer {
   std::pair<graph_node_list::iterator, bool> scanNode(Node* consumer) {
     if (shouldConsiderForMerge(consumer)) {
       if (consumer->kind() != prim::DifferentiableGraph) {
-        consumer = createSingletonGroup(consumer);
+        consumer = SubgraphUtils::createSingletonSubgraph(consumer,
+            prim::DifferentiableGraph);
       }
       auto inputs = sortReverseTopological(consumer->inputs());
       for (auto input : inputs) {
@@ -287,11 +144,7 @@ class SubgraphSlicer {
       return c10::nullopt;
     }
 
-    if (producer->kind() == prim::DifferentiableGraph) {
-      mergeGroups(consumer, producer);
-    } else {
-      mergeNodeIntoGroup(consumer, producer);
-    }
+    SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
 
     return consumer;
   }
