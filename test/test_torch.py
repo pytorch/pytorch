@@ -2986,7 +2986,8 @@ class _TestTorchMixin(object):
         self.assertRaisesRegex(RuntimeError, 'unsupported range', lambda: torch.arange(0, float('inf')))
         self.assertRaisesRegex(RuntimeError, 'unsupported range', lambda: torch.arange(float('-inf'), 10))
         self.assertRaisesRegex(RuntimeError, 'unsupported range', lambda: torch.arange(float('nan'), 10))
-        self.assertRaisesRegex(RuntimeError, 'unsupported range', lambda: torch.arange(float('inf'), 10))
+        self.assertRaisesRegex(RuntimeError, 'unsupported range', lambda: torch.arange(float('inf')))
+        self.assertRaisesRegex(RuntimeError, 'unsupported range', lambda: torch.arange(float('-nan')))
 
     def test_arange_inference(self):
         saved_dtype = torch.get_default_dtype()

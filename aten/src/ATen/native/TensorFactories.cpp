@@ -77,10 +77,6 @@ Tensor arange(
     Scalar end,
     Scalar step,
     const TensorOptions& options) {
-  AT_CHECK(
-    std::isfinite(end.toDouble()) && std::isfinite(start.toDouble()),
-    "unsupported range: ", start, " -> ", end
-  );
   // Note [Native bindings for legacy TH factory functions]
   return getFactoryType(options)._th_arange(start, end, step);
 }
