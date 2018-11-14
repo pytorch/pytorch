@@ -387,6 +387,18 @@ class TestCppExtension(common.TestCase):
         self.assertIn('bn.weight', p)
         self.assertIn('bn.bias', p)
 
+    def test_returns_shared_library_path_when_return_library_path_is_true(self):
+        library_path = torch.utils.cpp_extension.load_inline(
+            name="return_library_path",
+            cpp_sources="void foo() { }",
+            functions="foo",
+            verbose=True,
+            return_library_path=True)
+
+        self.assertTrue(os.path.exists(library_path))
+        extensions = {'linux': '.so', 'darwin': '.dylib', 'win32': '.dll'}
+        self.assertTrue(os.path.splitext(library_path), extensions[sys.platform])
+
 
 if __name__ == '__main__':
     common.run_tests()
