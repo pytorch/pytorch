@@ -21,7 +21,7 @@ class InputArchive;
 namespace torch {
 namespace optim {
 
-struct RMSpropOptions {
+struct TORCH_API RMSpropOptions {
   RMSpropOptions(double learning_rate);
   TORCH_ARG(double, learning_rate);
   TORCH_ARG(double, alpha) = 0.99;
@@ -31,7 +31,7 @@ struct RMSpropOptions {
   TORCH_ARG(bool, centered) = false;
 };
 
-class RMSprop : public Optimizer {
+class TORCH_API RMSprop : public Optimizer {
  public:
   template <typename ParameterContainer>
   explicit RMSprop(
