@@ -114,8 +114,8 @@ class ReshapeOp : public Operator<Context> {
     }
 
     // Write the original shape to the second output.
-
-    auto* old_shape = Output(1, {input.dim()}, at::dtype<T>());
+    auto* old_shape = Output(1);
+    old_shape->Resize(input.dim());
     T* old_shape_data = old_shape->template mutable_data<T>();
     for (int i = 0; i < input.dim(); ++i) {
       math::Set<T, Context>(1, input.size(i), old_shape_data + i, &context_);
