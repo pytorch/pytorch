@@ -2425,34 +2425,32 @@ Args:
 """)
 
 
-def cosine_similarity(x1, x2, dim=1, eps=1e-8):
-    r"""Returns cosine similarity between x1 and x2, computed along dim.
+cosine_similarity = _add_docstr(torch.cosine_similarity, r"""
+cosine_similarity(x1, x2, dim=1, eps=1e-8) -> Tensor
 
-    .. math ::
-        \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
+Returns cosine similarity between x1 and x2, computed along dim.
 
-    Args:
-        x1 (Tensor): First input.
-        x2 (Tensor): Second input (of size matching x1).
-        dim (int, optional): Dimension of vectors. Default: 1
-        eps (float, optional): Small value to avoid division by zero.
-            Default: 1e-8
+.. math ::
+    \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
 
-    Shape:
-        - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
-        - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
+Args:
+    x1 (Tensor): First input.
+    x2 (Tensor): Second input (of size matching x1).
+    dim (int, optional): Dimension of vectors. Default: 1
+    eps (float, optional): Small value to avoid division by zero.
+        Default: 1e-8
 
-    Example::
+Shape:
+    - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
+    - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
 
-        >>> input1 = torch.randn(100, 128)
-        >>> input2 = torch.randn(100, 128)
-        >>> output = F.cosine_similarity(input1, input2)
-        >>> print(output)
-    """
-    w12 = torch.sum(x1 * x2, dim)
-    w1 = torch.norm(x1, 2, dim)
-    w2 = torch.norm(x2, 2, dim)
-    return w12 / (w1 * w2).clamp(min=eps)
+Example::
+
+    >>> input1 = torch.randn(100, 128)
+    >>> input2 = torch.randn(100, 128)
+    >>> output = F.cosine_similarity(input1, input2)
+    >>> print(output)
+""")
 
 
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False, size_average=None,
