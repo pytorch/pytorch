@@ -38,9 +38,11 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         outputs = {}
         for order in ["NCHW", "NHWC"]:
-            # NHWC not supported in MIOpen, run HIP
+            # MIOPEN doesn't work with NHWC, fallback to use normal hip
             if hiputl.run_in_hip(gc, dc) and order == "NHWC":
                 tmp_engine = ""
+            else:
+                tmp_engine = engine
             op = core.CreateOperator(
                 "ConvTranspose",
                 ["X", "w", "b"] if use_bias else ["X", "w"],
@@ -107,7 +109,10 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
         outputs = {}
         for order in ["NCHW", "NHWC"]:
             if hiputl.run_in_hip(gc, dc) and order == "NHWC":
+                # MIOPEN doesn't work with NHWC, fallback to use normal hip
                 tmp_engine = ""
+            else:
+                tmp_engine = engine
             op = core.CreateOperator(
                 "ConvTranspose",
                 ["X", "w", "b"] if use_bias else ["X", "w"],
