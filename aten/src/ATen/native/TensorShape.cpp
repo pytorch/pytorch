@@ -675,6 +675,7 @@ Tensor _unsafe_view(const Tensor& self, IntList size) {
 
 static Tensor unsqueeze_sparse(Tensor const &self, int64_t dim /* should already be wrapped */) {
   int64_t sparse_dim = self.sparse_dim();
+  int64_t dense_dim = self.dense_dim();
   auto indices = self._indices();
   auto sizes = self.sizes().vec();
   sizes.insert(sizes.begin() + dim, 1);
@@ -684,9 +685,11 @@ static Tensor unsqueeze_sparse(Tensor const &self, int64_t dim /* should already
       native::zeros({1, indices.size(1)}, indices.options().dtype(kLong)),
       indices.narrow(0, dim, indices.size(0) - dim)
     });
-    return native::sparse_coo_tensor(new_indices, self._values(), sizes, self.options());
+    return _sparse_coo_tensor_with_dims_and_tensors(
+        sparse_dim + 1, dense_dim, sizes, new_indices, self._values(), self.options());
   } else {
-    return native::sparse_coo_tensor(indices, self._values().unsqueeze(dim - sparse_dim + 1), sizes, self.options());
+    return _sparse_coo_tensor_with_dims_and_tensors(
+        sparse_dim, dense_dim + 1, sizes, indices, self._values().unsqueeze(dim - sparse_dim + 1), self.options());
   }
 }
 
