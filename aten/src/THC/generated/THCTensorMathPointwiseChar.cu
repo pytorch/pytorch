@@ -2,4 +2,4 @@
 #include "THCTensor.hpp"
 #include "THCStream.h"
 #include "../generic/THCTensorMathPointwise.cu"
-#include "../THCGenerateCharType.h"
+#include <THC/THCGenerateCharType.h>
