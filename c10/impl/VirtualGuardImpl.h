@@ -1,9 +1,9 @@
 #pragma once
 
-#include <c10/detail/DeviceGuardImplInterface.h>
+#include <c10/impl/DeviceGuardImplInterface.h>
 
 namespace c10 {
-namespace detail {
+namespace impl {
 
 /**
  * An implementation of DeviceGuardImplInterface which delegates
@@ -44,4 +44,4 @@ private:
   const DeviceGuardImplInterface* impl_ = nullptr;
 };
 
-}} // namespace c10::detail
+}} // namespace c10::impl

@@ -18,7 +18,10 @@ if __name__ == '__main__':
     os.environ['PYTORCH_PYTHON'] = sys.executable
 
     tools_path = os.path.dirname(os.path.abspath(__file__))
-    build_pytorch_libs = os.path.join(tools_path, 'build_pytorch_libs.sh')
+    if sys.platform == 'win32':
+        build_pytorch_libs = os.path.join(tools_path, 'build_pytorch_libs.bat')
+    else:
+        build_pytorch_libs = os.path.join(tools_path, 'build_pytorch_libs.sh')
 
     command = [build_pytorch_libs, '--use-nnpack']
     USE_MKLDNN = check_env_flag('USE_MKLDNN', 'ON')

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <iosfwd>
 #include <memory>
 #include <string>
@@ -24,7 +26,7 @@ namespace serialize {
 /// A recursive representation of tensors that can be deserialized from a file
 /// or stream. In most cases, users should not have to interact with this class,
 /// and should instead use `torch::load`.
-class InputArchive final {
+class TORCH_API InputArchive final {
  public:
   /// Default-constructs the `InputArchive`.
   InputArchive();
