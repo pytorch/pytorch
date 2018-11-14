@@ -483,14 +483,14 @@ class LengthsRangeFillOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-
+    auto* output = Output(0);
     auto* input_data = input.template data<int32_t>();
 
     CAFFE_ENFORCE_EQ(input.dim(), 1, "Input must be a vector.");
 
     auto len_sum = std::accumulate(input_data, input_data + input.numel(), 0);
 
-    auto* output = Output(0, {len_sum}, at::dtype<int32_t>());
+    output->Resize(len_sum);
     auto* output_data = output->template mutable_data<int32_t>();
 
     int32_t offset = 0;

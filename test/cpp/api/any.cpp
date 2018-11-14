@@ -119,7 +119,11 @@ TEST_F(AnyModuleTest, GetWithCorrectTypeSucceeds) {
 }
 
 TEST_F(AnyModuleTest, GetWithIncorrectTypeThrows) {
-  struct N : torch::nn::Module {};
+  struct N : torch::nn::Module {
+    torch::Tensor forward(torch::Tensor input) {
+      return input;
+    }
+  };
   AnyModule any(M{5});
   ASSERT_THROWS_WITH(any.get<N>(), "Attempted to cast module");
 }
@@ -139,7 +143,11 @@ TEST_F(AnyModuleTest, PtrWithGoodDowncastSuccceeds) {
 }
 
 TEST_F(AnyModuleTest, PtrWithBadDowncastThrows) {
-  struct N : torch::nn::Module {};
+  struct N : torch::nn::Module {
+    torch::Tensor forward(torch::Tensor input) {
+      return input;
+    }
+  };
   AnyModule any(M{5});
   ASSERT_THROWS_WITH(any.ptr<N>(), "Attempted to cast module");
 }
