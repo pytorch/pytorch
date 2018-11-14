@@ -377,7 +377,7 @@ int main(int argc, char** argv) {
   // If we are within an openmpi mpirun, then skip the exec
   if (!std::getenv("OMPI_COMM_WORLD_SIZE")) {
     std::cout << "Execute mpiexec from: " << STR(MPIEXEC) << std::endl;
-    execl(STR(MPIEXEC), "-np 2", argv[0]);
+    execl(STR(MPIEXEC), "-np 2", argv[0], (char *)nullptr);
   }
 
   testAllreduce();
