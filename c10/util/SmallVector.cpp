@@ -14,9 +14,9 @@
 // ATen: modified from llvm::SmallVector.
 // replaced report_bad_alloc_error with std::bad_alloc
 
-#include <ATen/core/SmallVector.h>
+#include <c10/util/SmallVector.h>
 
-namespace at {
+namespace c10 {
 
 /// grow_pod - This is an implementation of the grow() method which only works
 /// on POD-like datatypes and is out of line to reduce code duplication.
@@ -49,4 +49,4 @@ void SmallVectorBase::grow_pod(
   this->CapacityX = (char*)this->BeginX + NewCapacityInBytes;
 }
 
-} // namespace at
+} // namespace c10

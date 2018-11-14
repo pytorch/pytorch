@@ -123,4 +123,11 @@ namespace at {using namespace c10;}
 #define C10_MOBILE 0
 #endif // ANDROID / IOS / MACOS
 
+// Portably determine if a type T is trivially copyable or not.
+#if __GNUG__ && __GNUC__ < 5
+#define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
+#else
+#define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
+#endif
+
 #endif // C10_MACROS_MACROS_H_
