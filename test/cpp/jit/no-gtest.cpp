@@ -26,6 +26,8 @@ std::string runJITCPPTests() {
   testIValue();
   testProto();
   testSchemaParser();
+  testTopologicalIndex();
+  testTopologicalMove();
   return out.str();
 }
 

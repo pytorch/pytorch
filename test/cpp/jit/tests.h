@@ -40,6 +40,7 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
@@ -333,7 +334,7 @@ void testFromQualString() {
     try {
       Symbol::fromQualString(input);
       ASSERT_TRUE(0);
-    } catch (std::runtime_error c) {
+    } catch (const std::exception& c) {
     }
   }
 }
@@ -583,6 +584,12 @@ void testADFormulas() {
        unary_pointwise,
        [](const VL& v) -> VL { return {v[0].tanh()}; }},
       {"t", unary_pointwise_2d, [](const VL& v) -> VL { return {v[0].t()}; }},
+      {"view",
+        unary_pointwise_2d,
+        [](const VL& v) -> VL { return {v[0].view({3, 2})}; }},
+      {"expand",
+        {{2, 1}},
+        [](const VL& v) -> VL { return {v[0].expand({2, 3})}; }},
       {"mm",
        {{10, 12}, {12, 15}},
        [](const VL& v) -> VL { return {v[0].mm(v[1])}; }},
@@ -607,6 +614,7 @@ void testADFormulas() {
     // Trace and differentiate the op
     auto graph = trace(test, vars_in);
     EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
+    ConstantPropagation(graph);
     auto grad_spec = differentiate(graph);
     LowerGradOf(*grad_spec.df);
     // Get outputs from the interpreter
@@ -1190,6 +1198,26 @@ void testTopologicalIndex() {
     ASSERT_FALSE(node3->isBefore(node1));
     ASSERT_FALSE(node3->isBefore(node2));
     ASSERT_FALSE(node3->isAfter(node4));
+
+    // Built up a block structure
+    //  node3
+    //   /\        ...
+    //  A  B     block1
+    //      \      ...
+    //      C    block2
+    auto block1 = node3->addBlock();
+    auto A = graph.create(prim::Undefined);
+    block1->appendNode(A);
+    auto B = graph.create(prim::Undefined);
+    block1->appendNode(B);
+    auto block2 = B->addBlock();
+    auto C = graph.create(prim::Undefined);
+    block2->appendNode(C);
+
+    // Check isAfter on different block levels
+    ASSERT_TRUE(node1->isBefore(A));
+    ASSERT_TRUE(A->isBefore(B));
+    ASSERT_TRUE(A->isBefore(C));
 
     // make sure things don't blow up on deletions
     node2->destroy();

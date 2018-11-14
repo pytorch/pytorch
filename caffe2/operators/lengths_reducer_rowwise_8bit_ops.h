@@ -38,12 +38,11 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
     auto& lengthsInput = Input(LENGTHS);
     auto* output = Output(0);
     auto* scale_bias = Input(SCALE_BIAS).template data<float>();
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
     const int64_t outputSize = lengthsInput.size(0);
 
     auto& indicesInput = Input(INDICES);
-    CAFFE_ENFORCE_EQ(
-        2, Input(SCALE_BIAS).ndim(), "scale_bias has to be matrix");
+    CAFFE_ENFORCE_EQ(2, Input(SCALE_BIAS).dim(), "scale_bias has to be matrix");
     CAFFE_ENFORCE_EQ(
         dataInput.size(0),
         Input(SCALE_BIAS).size(0),
@@ -52,7 +51,7 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
         2,
         Input(SCALE_BIAS).size(1),
         "the second dim of scale_bias has to be equal to 2");
-    CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
+    CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
     const IndexType* indices = indicesInput.template data<IndexType>();
     int64_t dataToReduceSize = indicesInput.size(0);
 
@@ -150,7 +149,7 @@ class Rowwise8BitQuantizedToFloatOp : public Operator<Context> {
     auto& input = Input(DATA_UINT8);
     auto& scale_bias = Input(SCALE_BIAS);
     auto* output = Output(DATA_FLOAT);
-    CAFFE_ENFORCE_EQ(2, scale_bias.ndim(), "scale_bias has to be matrix");
+    CAFFE_ENFORCE_EQ(2, scale_bias.dim(), "scale_bias has to be matrix");
     CAFFE_ENFORCE_EQ(
         input.size(0),
         scale_bias.size(0),

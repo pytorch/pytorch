@@ -1,7 +1,8 @@
 #pragma once
 
 #include <torch/data/samplers/base.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <cstddef>
 #include <vector>
@@ -22,22 +23,22 @@ class SequentialSampler : public Sampler<> {
  public:
   /// Creates a `SequentialSampler` that will return indices in the range
   /// `0...size - 1`.
-  explicit SequentialSampler(size_t size);
+  TORCH_API explicit SequentialSampler(size_t size);
 
   /// Resets the `SequentialSampler` to zero.
-  void reset() override;
+  TORCH_API void reset() override;
 
   /// Returns the next batch of indices.
-  optional<std::vector<size_t>> next(size_t batch_size) override;
+  TORCH_API optional<std::vector<size_t>> next(size_t batch_size) override;
 
   /// Serializes the `SequentialSampler` to the `archive`.
-  void save(serialize::OutputArchive& archive) const override;
+  TORCH_API void save(serialize::OutputArchive& archive) const override;
 
   /// Deserializes the `SequentialSampler` from the `archive`.
-  void load(serialize::InputArchive& archive) override;
+  TORCH_API void load(serialize::InputArchive& archive) override;
 
   /// Returns the current index of the `SequentialSampler`.
-  size_t index() const noexcept;
+  TORCH_API size_t index() const noexcept;
 
  private:
   size_t size_;

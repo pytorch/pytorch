@@ -1529,9 +1529,10 @@ Example::
 
 add_docstr(torch.erfc,
            r"""
-erfc(tensor, out=None) -> Tensor
+erfc(input, out=None) -> Tensor
 
-Computes the complementary error function of each element. The complementary error function is defined as follows:
+Computes the complementary error function of each element of :attr:`input`.
+The complementary error function is defined as follows:
 
 .. math::
     \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
@@ -1548,16 +1549,16 @@ Example::
 
 add_docstr(torch.erfinv,
            r"""
-erfinv(tensor, out=None) -> Tensor
+erfinv(input, out=None) -> Tensor
 
-Computes the inverse error function of each element. The inverse error function is defined
-in the range :math:`(-1, 1)` as:
+Computes the inverse error function of each element of :attr:`input`.
+The inverse error function is defined in the range :math:`(-1, 1)` as:
 
 .. math::
     \mathrm{erfinv}(\mathrm{erf}(x)) = x
 
 Args:
-    tensor (Tensor): the input tensor
+    input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
 
 Example::
@@ -1568,20 +1569,16 @@ Example::
 
 add_docstr(torch.exp,
            r"""
-exp(tensor, out=None) -> Tensor
+exp(input, out=None) -> Tensor
 
 Returns a new tensor with the exponential of the elements
-of :attr:`input`.
+of the input tensor :attr:`input`.
 
 .. math::
     y_{i} = e^{x_{i}}
 
 Args:
     input (Tensor): the input tensor
-    out (Tensor, optional): the output tensor
-
-Args:
-    tensor (Tensor): the input tensor
     out (Tensor, optional): the output tensor
 
 Example::
@@ -1592,7 +1589,7 @@ Example::
 
 add_docstr(torch.expm1,
            r"""
-expm1(tensor, out=None) -> Tensor
+expm1(input, out=None) -> Tensor
 
 Returns a new tensor with the exponential of the elements minus 1
 of :attr:`input`.
@@ -1602,10 +1599,6 @@ of :attr:`input`.
 
 Args:
     input (Tensor): the input tensor
-    out (Tensor, optional): the output tensor
-
-Args:
-    tensor (Tensor): the input tensor
     out (Tensor, optional): the output tensor
 
 Example::
@@ -1692,9 +1685,9 @@ Example::
 
 add_docstr(torch.frac,
            r"""
-frac(tensor, out=None) -> Tensor
+frac(input, out=None) -> Tensor
 
-Computes the fractional portion of each element in :attr:`tensor`.
+Computes the fractional portion of each element in :attr:`input`.
 
 .. math::
     \text{out}_{i} = \text{input}_{i} - \left\lfloor \text{input}_{i} \right\rfloor
@@ -1984,7 +1977,7 @@ Example::
 
 add_docstr(torch.get_default_dtype,
            r"""
-get_default_dtype() -> :class:`torch.dtype`
+get_default_dtype() -> torch.dtype
 
 Get the current default floating point :class:`torch.dtype`.
 
@@ -3422,11 +3415,21 @@ returned such that:
 .. math::
     c = (u u^T)^{-1} b
 
-.. note:: :attr:`b` is always a 2-D tensor, use `b.unsqueeze(1)` to convert a vector.
+`torch.potrs(b, u)` can take in 2D inputs `b, u` or inputs that are
+batches of 2D matrices. If the inputs are batches, then returns
+batched outputs `c`
+
+.. note::
+
+    The :attr:`out` keyword only supports 2D matrix inputs, that is,
+    `b, u` must be 2D matrices.
 
 Args:
-    b (Tensor): the right hand side 2-D tensor
-    u (Tensor): the input 2-D tensor, a upper or lower triangular Cholesky factor
+    b (Tensor): input matrix of size :math:`(*, m, k)`,
+                where :math:`*` is zero or more batch dimensions
+    u (Tensor): input matrix of size :math:`(*, m, m)`,
+                where :math:`*` is zero of more batch dimensions composed of
+                upper or lower triangular Cholesky factor
     upper (bool, optional): whether to return a upper (default) or lower triangular matrix
     out (Tensor, optional): the output tensor for `c`
 
@@ -4159,11 +4162,11 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4)
+    >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
     >>> a
-    tensor([ 1.0382, -1.4526, -0.9709,  0.4542])
+    tensor([ 0.7000, -1.2000,  0.0000,  2.3000])
     >>> torch.sign(a)
-    tensor([ 1., -1., -1.,  1.])
+    tensor([ 1., -1.,  0.,  1.])
 """)
 
 add_docstr(torch.sin,
@@ -4689,10 +4692,12 @@ Example::
 
 add_docstr(torch.roll,
            r"""
-roll(input, shifts, dims) -> Tensor
+roll(input, shifts, dims=None) -> Tensor
 
 Roll the tensor along the given dimension. Elements that are shifted beyond the
-last position are re-introduced at the first position.
+last position are re-introduced at the first position. If a dimension is not
+specified, the tensor will be flattened before rolling and then restored
+to the original shape.
 
 Args:
     input (Tensor): the input tensor

@@ -30,7 +30,7 @@ class ReduceOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
@@ -93,7 +93,7 @@ class ReduceGradientOp final : public Operator<Context> {
     const auto& X = Input(1);
     const auto& Y = Input(2);
     auto* dX = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);

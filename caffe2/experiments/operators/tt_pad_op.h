@@ -39,7 +39,7 @@ class TTPadOp final : public Operator<Context> {
     auto* X_pad = Output(0);
     CAFFE_ENFORCE(&X == X_pad);
 
-    CAFFE_ENFORCE(X.ndim() == 2, X.ndim());
+    CAFFE_ENFORCE(X.dim() == 2, X.dim());
 
     auto X_dim0 = X.size(0);
     auto X_dim1 = X.size(1);

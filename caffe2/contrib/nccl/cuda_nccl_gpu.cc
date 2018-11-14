@@ -270,7 +270,7 @@ void NCCL<T>::AllGather(const NCCLExecution& ex) {
       [n](const NCCLElement& ctx) {
         CAFFE_ENFORCE_NE(ctx.src, ctx.dst);
         std::vector<int64_t> dims;
-        dims.reserve(ctx.src->ndim() + 1);
+        dims.reserve(ctx.src->dim() + 1);
         dims.push_back(n);
         for (auto d : ctx.src->sizes()) {
           dims.push_back(d);

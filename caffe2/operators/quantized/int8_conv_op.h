@@ -19,7 +19,7 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
   Int8ConvOp(const OperatorDef& def, Workspace* ws)
-      : ConvPoolOpBase(def, ws), gemm_context_(ws->GetThreadPool()) {
+      : ConvPoolOpBase(def, ws) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NHWC,
         "Int8Conv only supports NHWC order");
@@ -60,7 +60,7 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
       initQNNPACK();
 
       pthreadpool_t threadpool =
-          reinterpret_cast<pthreadpool_t>(gemm_context_.threadPool());
+          reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
 
       if (this->qnnpackObject_ == nullptr) {
         CAFFE_ENFORCE(
@@ -149,7 +149,6 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
   }
 
  private:
-  C2GEMMContext gemm_context_;
   // QNNPACK convolution object
   qnnp_operator_t qnnpackObject_{nullptr};
   // batch size in the previous call to RunOnDeviceWithOrderNHWC

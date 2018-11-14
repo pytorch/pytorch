@@ -133,8 +133,8 @@ void _check_inputs(
     auto input = inputs[i];
     auto output = outputs[i];
 
-    if (!(input.type().is_cuda() && !input.type().is_sparse() &&
-          output.type().is_cuda() && !output.type().is_sparse())) {
+    if (!(input.is_cuda() && !input.is_sparse() &&
+          output.is_cuda() && !output.is_sparse())) {
       throw std::runtime_error(
           "input and output elements have to be cuda dense Tensors");
     }
@@ -242,7 +242,7 @@ void broadcast(
   const auto comms = user_comms.empty() ? _get_communicators(tensors)
                                         : ArrayRef<ncclComm_t>(user_comms);
 
-  at::cuda::CUDAGuard device_guard;
+  at::cuda::OptionalCUDAGuard device_guard;
   AutoNcclGroup nccl_group_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
     int device = tensors[i].get_device();
@@ -289,7 +289,7 @@ void reduce(
   auto comms_ref = user_comms.empty() ? _get_communicators(inputs)
                                       : ArrayRef<ncclComm_t>(user_comms);
 
-  at::cuda::CUDAGuard device_guard;
+  at::cuda::OptionalCUDAGuard device_guard;
   AutoNcclGroup nccl_group_guard;
   for (size_t i = 0; i < len; i++) {
     int device = inputs[i].device().index();

@@ -56,7 +56,7 @@ class AbstractSortedSegmentRangeOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* output = Output(0);
 
-    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
+    CAFFE_ENFORCE_EQ(1, segment_ids.dim(), "SEGMENT_IDS must be a vector");
     auto N = segment_ids.size(0);
     CAFFE_ENFORCE_EQ(
         N,
@@ -134,7 +134,7 @@ class AbstractSortedSegmentRangeGradientOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* data_grads = Output(0);
 
-    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
+    CAFFE_ENFORCE_EQ(1, segment_ids.dim(), "SEGMENT_IDS must be a vector");
     int64_t N = segment_ids.size(0);
 
     const SIndex* s_ids = segment_ids.template data<SIndex>();
@@ -294,7 +294,7 @@ class AbstractReduceFrontOrBackOp : public Operator<Context> {
     // to the reducer class
     int64_t in_block_size = FirstDim
         ? data.size_from_dim(num_reduce_dims_)
-        : data.size_to_dim(data.ndim() - num_reduce_dims_);
+        : data.size_to_dim(data.dim() - num_reduce_dims_);
     return DispatchHelper<typename Reducer::FixedDispatch>::call(
         this, in_block_size);
   }
@@ -304,7 +304,7 @@ class AbstractReduceFrontOrBackOp : public Operator<Context> {
     auto& data = Input(0);
     auto* output = Output(0);
 
-    CAFFE_ENFORCE_LE(num_reduce_dims_, data.ndim());
+    CAFFE_ENFORCE_LE(num_reduce_dims_, data.dim());
 
     typename Reducer::Meta ctx(FirstDim);
     ctx.observeInput(0, data, num_reduce_dims_);
@@ -327,7 +327,7 @@ class AbstractReduceFrontOrBackOp : public Operator<Context> {
 
     const int block_size = FirstDim
         ? data.size_from_dim(num_reduce_dims_)
-        : data.size_from_dim(data.ndim() - num_reduce_dims_);
+        : data.size_from_dim(data.dim() - num_reduce_dims_);
 
     const int num_blocks = block_size > 0 ? data.numel() / block_size : 0;
 
@@ -399,7 +399,7 @@ class AbstractReduceFrontOrBackGradientOp : public Operator<Context> {
 
     int64_t block_size = FirstDim
         ? data_grads->size_from_dim(num_reduce_dims_)
-        : data_grads->size_from_dim(data_grads->ndim() - num_reduce_dims_);
+        : data_grads->size_from_dim(data_grads->dim() - num_reduce_dims_);
     int64_t block_num = block_size > 0 ? data_grads->numel() / block_size : 0;
 
     T* out = data_grads->template mutable_data<T>();
@@ -620,14 +620,14 @@ class AbstractSortedSegmentOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* output = Output(0);
 
-    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
+    CAFFE_ENFORCE_EQ(1, segment_ids.dim(), "SEGMENT_IDS must be a vector");
     int64_t N = segment_ids.size(0);
     const int64_t M = dataInput.size(0);
 
     const IndexType* idxs;
     if (SparseFused) { // static if
       auto& indices = Input(INDICES);
-      CAFFE_ENFORCE_EQ(1, indices.ndim(), "INDICES must be a vector");
+      CAFFE_ENFORCE_EQ(1, indices.dim(), "INDICES must be a vector");
       CAFFE_ENFORCE_EQ(
           N,
           indices.size(0),
@@ -741,7 +741,7 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* data_grads = Output(0);
 
-    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
+    CAFFE_ENFORCE_EQ(1, segment_ids.dim(), "SEGMENT_IDS must be a vector");
     int64_t N = segment_ids.size(0);
 
     typename ReducerGradient::Meta ctx(segment_grads, 1);
@@ -1024,14 +1024,14 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* output = Output(0);
 
-    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
+    CAFFE_ENFORCE_EQ(1, segment_ids.dim(), "SEGMENT_IDS must be a vector");
     int64_t N = segment_ids.size(0);
     const int64_t M = data.size(0);
 
     const IndexType* idxs;
     if (SparseFused) { // static if
       auto& indices = Input(INDICES);
-      CAFFE_ENFORCE_EQ(1, indices.ndim(), "INDICES must be a vector");
+      CAFFE_ENFORCE_EQ(1, indices.dim(), "INDICES must be a vector");
       CAFFE_ENFORCE_EQ(
           N,
           indices.size(0),
@@ -1157,7 +1157,7 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
     auto& segment_ids = Input(SEGMENT_IDS);
     auto* data_grads = Output(0);
 
-    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
+    CAFFE_ENFORCE_EQ(1, segment_ids.dim(), "SEGMENT_IDS must be a vector");
     int64_t N = segment_ids.size(0);
 
     typename ReducerGradient::Meta ctx(segment_grads, 1);
@@ -1418,7 +1418,7 @@ class AbstractLengthsOp : public Operator<Context> {
     auto& lengthsInput = Input(LENGTHS);
     auto* output = Output(0);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
     const int64_t dataSize = dataInput.size(0);
     // Either first dim the data or how much we pull in indexies from it
     int64_t dataToReduceSize;
@@ -1427,7 +1427,7 @@ class AbstractLengthsOp : public Operator<Context> {
     const IndexType* indices;
     if (SparseFused) { // static if
       auto& indicesInput = Input(INDICES);
-      CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
+      CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
       indices = indicesInput.template data<IndexType>();
       dataToReduceSize = indicesInput.size(0);
     } else {
@@ -1547,10 +1547,10 @@ class AbstractLengthsGradientOp : public Operator<Context> {
     auto& lengthsInput = Input(LENGTHS);
     auto* dataGradsOutput = Output(0);
 
-    CAFFE_ENFORCE(lengthsInput.ndim() == 1, "LENGTHS must be a vector");
+    CAFFE_ENFORCE(lengthsInput.dim() == 1, "LENGTHS must be a vector");
     int64_t reducedDataSize = 0;
     int64_t numSegments = lengthsInput.size(0);
-    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(numSegments == segmentGradsInput.size(0));
     const TLengths* lengths = lengthsInput.template data<TLengths>();
     for (int64_t i = 0; i < numSegments; ++i) {
@@ -1654,9 +1654,9 @@ class AbstractLengthsWithMainInputGradientOp : public Operator<Context> {
     auto& lengthsInput = Input(LENGTHS);
     auto* dataGradsOutput = Output(0);
 
-    CAFFE_ENFORCE(lengthsInput.ndim() == 1, "LENGTHS must be a vector");
+    CAFFE_ENFORCE(lengthsInput.dim() == 1, "LENGTHS must be a vector");
     int64_t numSegments = lengthsInput.size(0);
-    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(numSegments == segmentGradsInput.size(0));
     const TLengths* lengths = lengthsInput.template data<TLengths>();
 
@@ -1756,9 +1756,9 @@ class AbstractLengthsWithMainInputAndForwardOutputGradientOp
     auto& forwardOutputInput = Input(FORWARD_OUTPUT);
     auto* dataGradsOutput = Output(0);
 
-    CAFFE_ENFORCE(lengthsInput.ndim() == 1, "LENGTHS must be a vector");
+    CAFFE_ENFORCE(lengthsInput.dim() == 1, "LENGTHS must be a vector");
     int64_t numSegments = lengthsInput.size(0);
-    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(numSegments == segmentGradsInput.size(0));
     const TLengths* lengths = lengthsInput.template data<TLengths>();
 
@@ -1770,7 +1770,7 @@ class AbstractLengthsWithMainInputAndForwardOutputGradientOp
       ctx.observeOriginalInput(aux_num, aux_in, aux_grad, 1);
     }
 
-    CAFFE_ENFORCE(forwardOutputInput.ndim() > 0);
+    CAFFE_ENFORCE(forwardOutputInput.dim() > 0);
     CAFFE_ENFORCE(numSegments == forwardOutputInput.size(0));
     const T* forwardOutput = forwardOutputInput.template data<T>();
 

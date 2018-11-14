@@ -43,6 +43,7 @@ fi
 
 # Options for building only a subset of the libraries
 USE_CUDA=0
+USE_FBGEMM=0
 USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
@@ -57,6 +58,9 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-cuda)
           USE_CUDA=1
+          ;;
+      --use-fbgemm)
+          USE_FBGEMM=1
           ;;
       --use-rocm)
           USE_ROCM=1
@@ -141,11 +145,6 @@ if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
     GLOO_FLAGS+=" -DUSE_IBVERBS=1"
     THD_FLAGS="-DUSE_GLOO_IBVERBS=1"
 fi
-CWRAP_FILES="\
-$BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
-$BASE_DIR/torch/lib/THNN/generic/THNN.h;\
-$BASE_DIR/torch/lib/THCUNN/generic/THCUNN.h;\
-$BASE_DIR/torch/lib/ATen/nn.yaml"
 CUDA_NVCC_FLAGS=$C_FLAGS
 if [[ -z "$CUDA_DEVICE_DEBUG" ]]; then
   CUDA_DEVICE_DEBUG=0
@@ -212,6 +211,7 @@ function build_caffe2() {
 		       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
 		       -DUSE_CUDA=$USE_CUDA \
 		       -DUSE_DISTRIBUTED=$USE_DISTRIBUTED \
+		       -DUSE_FBGEMM=$USE_FBGEMM \
 		       -DUSE_NUMPY=$USE_NUMPY \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \

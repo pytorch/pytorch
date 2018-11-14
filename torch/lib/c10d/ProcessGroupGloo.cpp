@@ -21,8 +21,6 @@
 #include <gloo/cuda_allreduce_halving_doubling.h>
 #include <gloo/cuda_allreduce_ring_chunked.h>
 #include <gloo/cuda_broadcast_one_to_all.h>
-
-#include <c10d/private/CUDAUtils.hpp>
 #endif
 
 #include <gloo/rendezvous/context.h>
@@ -189,14 +187,14 @@ at::Tensor pinnedLike(at::Tensor& tensor) {
 // that new work on the new streams is serialized w.r.t. all operations
 // on the tensors in the input vector.
 void initializeStreamsEvents(
-    at::cuda::CUDAGuard& guard,
     std::vector<at::Tensor>& inputs,
     std::vector<at::cuda::CUDAStream>& streams,
     std::vector<at::cuda::CUDAEvent>& events) {
+  at::cuda::OptionalCUDAGuard guard;
   streams.reserve(inputs.size());
   events.resize(inputs.size());
   for (size_t i = 0; i < inputs.size(); i++) {
-    guard.set_device(inputs[i].get_device());
+    guard.set_index(inputs[i].get_device());
     // Record event on current stream
     events[i].record(at::cuda::getCurrentCUDAStream());
     // Get a non-default stream to execute asynchronous CUDA operations
@@ -523,7 +521,7 @@ void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
 
   // Create algorithm against first context
   auto& context = contexts_[0];
-  at::DeviceGuard guard(entry.src[0]);
+  at::OptionalDeviceGuard guard(at::device_of(entry.src[0]));
 
   if (backend == at::Backend::CPU) {
     if (getSize() < 16) {
@@ -576,7 +574,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 
   // Create algorithm against first context
   auto& context = contexts_[0];
-  at::DeviceGuard guard(entry.src[0]);
+  at::OptionalDeviceGuard guard(device_of(entry.src[0]));
 
   if (backend == at::Backend::CPU) {
     entry.algorithm =
@@ -619,7 +617,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 //
 EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
 #ifdef USE_CUDA
-  at::cuda::CUDAGuard deviceGuard;
+  at::cuda::OptionalCUDAGuard deviceGuard;
 #endif
   auto entry = std::unique_ptr<AlgorithmEntry>(new AlgorithmEntry);
   entry->key = key;
@@ -758,23 +756,23 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
       int rootTensor,
       uint32_t tag)
       : AsyncBroadcastWork(context, inputs, rootRank, rootTensor, tag) {
-    at::cuda::CUDAGuard guard;
-    initializeStreamsEvents(guard, inputs, streams, events);
+    initializeStreamsEvents(inputs, streams, events);
 
     // Create pinned host side tensors.
     tmp = pinnedLike(inputs[rootTensor]);
+    at::cuda::OptionalCUDAStreamGuard guard;
     if (context->rank == rootRank) {
-      guard.set_stream(streams[rootTensor]);
+      guard.reset_stream(streams[rootTensor]);
       tmp.copy_(inputs[rootTensor], /* non_blocking */ true);
     }
   }
 
   void run() override {
-    at::cuda::CUDAGuard guard;
+    at::cuda::OptionalCUDAStreamGuard guard;
 
     // Synchronize with copy operation if applicable.
     if (context->rank == rootRank) {
-      guard.set_stream(streams[rootTensor]);
+      guard.reset_stream(streams[rootTensor]);
       AT_CUDA_CHECK(cudaStreamSynchronize(streams[rootTensor]));
     }
 
@@ -783,18 +781,18 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
     // Kick off copy back to the CUDA tensors.
     for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_stream(streams[i]);
+      guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp, /* non_blocking */ true);
       events[i].record(streams[i]);
     }
   }
 
   void synchronize() override {
-    at::cuda::CUDAGuard guard;
+    at::cuda::OptionalCUDAGuard guard;
 
     // Synchronize with the copy back to CUDA tensors.
     for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_device(inputs[i].get_device());
+      guard.set_index(inputs[i].get_device());
       events[i].block(at::cuda::getCurrentCUDAStream());
     }
   }
@@ -815,22 +813,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     throw std::invalid_argument("ProcessGroupGloo::broadcast: " + msg);
   };
 
-  if (opts.rootRank < 0 || opts.rootRank >= size_) {
-    invalidArgument("invalid root rank: " + std::to_string(opts.rootRank));
-  }
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  assertRootTensor(invalidArgument, opts.rootTensor, inputs.size());
+  assertDense(invalidArgument, inputs);
+  assertTypeAndSizesMatch(invalidArgument, inputs);
 
-  if (opts.rootTensor < 0 || opts.rootTensor >= inputs.size()) {
-    invalidArgument("invalid root tensor: " + std::to_string(opts.rootTensor));
-  }
-
-  const auto& layout = inputs[0].layout();
   const auto& device = inputs[0].device();
-  const auto& type = inputs[0].type();
-  const auto& sizes = inputs[0].sizes();
-  if (layout != at::kStrided) {
-    invalidArgument("only supports dense tensors");
-  }
-
   switch (device.type()) {
     case at::kCPU:
 #ifdef USE_CUDA
@@ -839,12 +827,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
       break;
     default:
       invalidArgument("unsupported device type");
-  }
-
-  // Expect all input tensors to have the same type and sizes
-  for (size_t i = 1; i < inputs.size(); i++) {
-    assertTypeMatch(invalidArgument, type, inputs, i);
-    assertSizesMatch(invalidArgument, sizes, inputs, i);
   }
 
   std::shared_ptr<AsyncBroadcastWork> work;
@@ -918,23 +900,22 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
       ReduceOp reduceOp,
       uint32_t tag)
       : AsyncAllreduceWork(context, inputs, reduceOp, tag) {
-    at::cuda::CUDAGuard guard;
-    initializeStreamsEvents(guard, inputs, streams, events);
+    initializeStreamsEvents(inputs, streams, events);
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmp.reserve(inputs.size());
+    at::cuda::OptionalCUDAStreamGuard guard;
     for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_stream(streams[i]);
+      guard.reset_stream(streams[i]);
       tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
   }
 
   void run() override {
-    at::cuda::CUDAGuard guard;
-
     // Synchronize with copy operations.
+    at::cuda::OptionalCUDAGuard device_guard;
     for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_device(inputs[i].get_device());
+      device_guard.set_index(inputs[i].get_device());
       AT_CUDA_CHECK(cudaStreamSynchronize(streams[i]));
     }
 
@@ -942,19 +923,19 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
     allreduce(tmp);
 
     // Kick off copy back to the CUDA tensors.
+    at::cuda::OptionalCUDAStreamGuard stream_guard;
     for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_stream(streams[i]);
+      stream_guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
     }
   }
 
   void synchronize() override {
-    at::cuda::CUDAGuard guard;
-
     // Synchronize with the copy back to CUDA tensors.
+    at::cuda::OptionalCUDAGuard guard;
     for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_device(inputs[i].get_device());
+      guard.set_index(static_cast<at::DeviceIndex>(inputs[i].get_device()));
       events[i].block(at::cuda::getCurrentCUDAStream());
     }
   }
@@ -975,18 +956,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     throw std::invalid_argument("ProcessGroupGloo::allreduce: " + msg);
   };
 
-  if (inputs.size() == 0) {
-    invalidArgument("requires non-empty tensor list");
-  }
+  assertNonEmpty(invalidArgument, inputs);
+  assertDense(invalidArgument, inputs);
+  assertTypeAndSizesMatch(invalidArgument, inputs);
 
-  const auto& layout = inputs[0].layout();
   const auto& device = inputs[0].device();
-  const auto& type = inputs[0].type();
-  const auto& sizes = inputs[0].sizes();
-  if (layout != at::kStrided) {
-    invalidArgument("only supports dense tensors");
-  }
-
   switch (device.type()) {
     case at::kCPU:
 #ifdef USE_CUDA
@@ -995,12 +969,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
       break;
     default:
       invalidArgument("unsupported device type");
-  }
-
-  // Expect all input tensors to have the same type and sizes
-  for (size_t i = 1; i < inputs.size(); i++) {
-    assertTypeMatch(invalidArgument, type, inputs, i);
-    assertSizesMatch(invalidArgument, sizes, inputs, i);
   }
 
   std::shared_ptr<AsyncAllreduceWork> work;
@@ -1080,23 +1048,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
     throw std::invalid_argument("ProcessGroupGloo::reduce: " + msg);
   };
 
-  if (opts.rootRank < 0 || opts.rootRank >= size_) {
-    invalidArgument("invalid root rank: " + std::to_string(opts.rootRank));
-  }
-
-  if (opts.rootTensor < 0 || opts.rootTensor >= inputs.size()) {
-    invalidArgument("invalid root tensor: " + std::to_string(opts.rootTensor));
-  }
-
-  if (inputs.size() != 1) {
-    invalidArgument("requires a single input/output tensor");
-  }
-
-  const auto& layout = inputs[0].layout();
-  const auto& device = inputs[0].device();
-  if (layout != at::kStrided || device.type() != at::kCPU) {
-    invalidArgument("only supports dense CPU tensors");
-  }
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  assertRootTensor(invalidArgument, opts.rootTensor, inputs.size());
+  assertSingleElement(invalidArgument, inputs);
+  assertDense(invalidArgument, inputs);
+  assertCPU(invalidArgument, inputs);
 
   auto work = std::make_shared<AsyncReduceWork>(
       contexts_[0],
@@ -1169,34 +1125,25 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   }
 
   for (size_t i = 0; i < outputs.size(); i++) {
-    if (outputs[i].size() != inputs.size() * getSize()) {
+    const auto expected = inputs.size() * getSize();
+    const auto actual = outputs[i].size();
+    if (actual != expected) {
       invalidArgument(
           "invalid output tensor list at index " + std::to_string(i) +
-          " (expected length " + std::to_string(getSize()) + ", got " +
-          std::to_string(outputs[i].size()) + ")");
+          " (expected length " + std::to_string(expected) + ", got " +
+          std::to_string(actual) + ")");
     }
   }
 
-  const auto& layout = inputs[0].layout();
-  const auto& device = inputs[0].device();
+  assertDense(invalidArgument, inputs);
+  assertCPU(invalidArgument, inputs);
+
+  // Expect all input/output tensors to have the same type and sizes
   const auto& type = inputs[0].type();
   const auto& sizes = inputs[0].sizes();
-  if (layout != at::kStrided || device.type() != at::kCPU) {
-    invalidArgument("only supports dense CPU tensors");
-  }
-
-  // Expect all input tensors to have the same type and sizes
-  for (size_t i = 1; i < inputs.size(); i++) {
-    assertTypeMatch(invalidArgument, type, inputs, i);
-    assertSizesMatch(invalidArgument, sizes, inputs, i);
-  }
-
-  // Expect all output tensors to have the same type and sizes
+  assertTypeAndSizesMatch(invalidArgument, inputs, type, sizes);
   for (size_t i = 0; i < outputs.size(); i++) {
-    for (size_t j = 1; j < outputs[i].size(); j++) {
-      assertTypeMatch(invalidArgument, type, outputs[i], j);
-      assertSizesMatch(invalidArgument, sizes, outputs[i], j);
-    }
+    assertTypeAndSizesMatch(invalidArgument, outputs[i], type, sizes);
   }
 
   auto work = std::make_shared<AsyncAllgatherWork>(
@@ -1264,33 +1211,21 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
     throw std::invalid_argument("ProcessGroupGloo::gather: " + msg);
   };
 
-  if (opts.rootRank < 0 || opts.rootRank >= size_) {
-    invalidArgument("invalid root rank: " + std::to_string(opts.rootRank));
-  }
-
-  if (inputs.size() != 1) {
-    invalidArgument("requires a single input tensor");
-  }
-
-  const auto& layout = inputs[0].layout();
-  const auto& device = inputs[0].device();
-  const auto& type = inputs[0].type();
-  const auto& sizes = inputs[0].sizes();
-  if (layout != at::kStrided || device.type() != at::kCPU) {
-    invalidArgument("only supports dense CPU tensors");
-  }
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  assertSingleElementInput(invalidArgument, inputs);
+  assertDense(invalidArgument, inputs);
+  assertCPU(invalidArgument, inputs);
 
   if (getRank() == opts.rootRank) {
     if (outputs.size() != 1 || outputs[0].size() != getSize()) {
       invalidArgument(
-          "requires single output tensor list, "
-          "itself containing <size> output tensors");
+          "requires a single-element output list "
+          "containing a list with <size> tensors");
     }
-    const auto& output = outputs[0];
-    for (size_t i = 0; i < output.size(); i++) {
-      assertTypeMatch(invalidArgument, type, output, i);
-      assertSizesMatch(invalidArgument, sizes, output, i);
-    }
+
+    const auto& type = inputs[0].type();
+    const auto& sizes = inputs[0].sizes();
+    assertTypeAndSizesMatch(invalidArgument, outputs[0], type, sizes);
   } else {
     if (outputs.size() != 0) {
       invalidArgument("requires empty output on non-root");
@@ -1352,33 +1287,20 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
     throw std::invalid_argument("ProcessGroupGloo::scatter: " + msg);
   };
 
-  if (opts.rootRank < 0 || opts.rootRank >= size_) {
-    invalidArgument("invalid root rank: " + std::to_string(opts.rootRank));
-  }
-
-  if (outputs.size() != 1) {
-    invalidArgument("requires a single output tensor");
-  }
-
-  const auto& layout = outputs[0].layout();
-  const auto& device = outputs[0].device();
-  const auto& type = outputs[0].type();
-  const auto& sizes = outputs[0].sizes();
-  if (layout != at::kStrided || device.type() != at::kCPU) {
-    invalidArgument("only supports dense CPU tensors");
-  }
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  assertSingleElementOutput(invalidArgument, outputs);
+  assertDense(invalidArgument, outputs);
+  assertCPU(invalidArgument, outputs);
 
   if (getRank() == opts.rootRank) {
     if (inputs.size() != 1 || inputs[0].size() != getSize()) {
       invalidArgument(
-          "requires single input tensor list, "
-          "itself containing <size> input tensors");
+          "requires a single-element input list "
+          "containing a list with <size> tensors");
     }
-    const auto& input = inputs[0];
-    for (size_t i = 0; i < input.size(); i++) {
-      assertTypeMatch(invalidArgument, type, input, i);
-      assertSizesMatch(invalidArgument, sizes, input, i);
-    }
+    const auto& type = outputs[0].type();
+    const auto& sizes = outputs[0].sizes();
+    assertTypeAndSizesMatch(invalidArgument, inputs[0], type, sizes);
   } else {
     if (inputs.size() != 0) {
       invalidArgument("requires empty input on non-root");

@@ -8,6 +8,7 @@ import caffe2.python.hypothesis_test_util as hu
 from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
+import six
 
 
 def SubFunctionThatThrowsRuntimeError():
@@ -48,9 +49,7 @@ class PythonOpTest(hu.HypothesisTestCase):
 
     def test_exception(self):
         op = CreatePythonOperator(MainOpFunctionThatThrowsRuntimeError, [], [])
-        with self.assertRaisesRegexp(
-            RuntimeError, "This is an intentional exception."
-        ):
+        with six.assertRaisesRegex(self, RuntimeError, "This is an intentional exception."):
             workspace.RunOperatorOnce(op)
 
     @given(x=hu.tensor())

@@ -33,7 +33,7 @@ class LayerNormOp final : public Operator<Context> {
     auto* Y = Output(0);
     auto* mean = Output(1);
     auto* sig = Output(2);
-    CAFFE_ENFORCE_GE(X.ndim(), 2, "LayerNorm requires input dim >= 2.");
+    CAFFE_ENFORCE_GE(X.dim(), 2, "LayerNorm requires input dim >= 2.");
     const int canonical_axis = X.canonical_axis_index(axis_);
     const int M = X.size_to_dim(canonical_axis);
     const int N = X.size_from_dim(canonical_axis);

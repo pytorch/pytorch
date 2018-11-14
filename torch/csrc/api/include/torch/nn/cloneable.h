@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/nn/module.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <ATen/OptionsGuard.h>
@@ -52,10 +52,10 @@ class Cloneable : public virtual Module {
         "and not the constructor?");
     for (const auto& parameter : parameters_) {
       if (device) {
-        copy->parameters_[parameter.key].copy_(
+        copy->parameters_[parameter.key()].copy_(
             *parameter, /*non_blocking=*/true);
       } else {
-        copy->parameters_[parameter.key].set_data(
+        copy->parameters_[parameter.key()].set_data(
             autograd::Variable(*parameter).data().clone());
       }
     }
@@ -67,9 +67,9 @@ class Cloneable : public virtual Module {
         "and not the constructor?");
     for (const auto& buffer : buffers_) {
       if (device) {
-        copy->buffers_[buffer.key].copy_(*buffer, /*non_blocking=*/true);
+        copy->buffers_[buffer.key()].copy_(*buffer, /*non_blocking=*/true);
       } else {
-        copy->buffers_[buffer.key].set_data(
+        copy->buffers_[buffer.key()].set_data(
             autograd::Variable(*buffer).data().clone());
       }
     }
@@ -80,7 +80,7 @@ class Cloneable : public virtual Module {
         "Are you sure you called register_module() inside reset() "
         "and not the constructor?");
     for (const auto& child : children_) {
-      copy->children_[child.key]->clone_(*child.value, device);
+      copy->children_[child.key()]->clone_(*child.value(), device);
     }
     return copy;
   }

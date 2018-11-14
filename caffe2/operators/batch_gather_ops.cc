@@ -48,7 +48,8 @@ Example:
 )DOC")
     .Input(0, "DATA", "Tensor of rank r >= 2.")
     .Input(1, "INDICES", "Tensor of int32/int64 indices, of any rank q.")
-    .Output(0, "OUTPUT", "Tensor of rank (q - 1) + (r - 1).");
+    .Output(0, "OUTPUT", "Tensor of rank (q - 1) + (r - 1).")
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(BatchGatherGradient).NumInputs(3).NumOutputs(1);
 

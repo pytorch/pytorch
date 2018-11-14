@@ -113,7 +113,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         THCStorage_(set)(LIBRARY_STATE self->cdata, i, value);
 #endif
       }
-    } catch (std::runtime_error &e) {
+    } catch (const std::exception &e) {
       THPUtils_setError("tried to construct a storage from a sequence (%s), "
           "but one of the items was of type %s instead of %s",
           THPUtils_typename(first_arg),

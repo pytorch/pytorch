@@ -765,7 +765,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     if (kernel_.size() <= 2) {
       math::Im2Col<T, Context, StorageOrder::NHWC>(
           C,
-          X.dim(1),
+          X.size(1),
           kernel_.size() == 2 ? X.dim32(2) : 1,
           kernel_h(),
           kernel_.size() == 2 ? kernel_w() : 1,
@@ -857,7 +857,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       if (kernel_.size() <= 2) {
         math::Col2Im<T, Context, StorageOrder::NHWC>(
             C,
-            X.dim(1),
+            X.size(1),
             kernel_.size() == 2 ? X.dim32(2) : 1,
             kernel_h(),
             kernel_.size() == 2 ? kernel_w() : 1,

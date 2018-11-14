@@ -2,7 +2,7 @@
 
 #include <torch/data/datasets/base.h>
 #include <torch/data/example.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <cstddef>
 #include <vector>

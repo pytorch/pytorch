@@ -1,3 +1,17 @@
+"""
+To run this file by hand from the root of the PyTorch
+repository, run:
+
+python -m tools.jit.gen_jit_dispatch \
+       build/aten/src/ATen/Declarations.yaml \
+       $OUTPUT_DIR \
+       tools/jit/templates
+
+Where $OUTPUT_DIR is where you would like the files to be
+generated.  In the full build system, OUTPUT_DIR is
+torch/csrc/jit/generated/
+"""
+
 import os
 import argparse
 import re
@@ -30,6 +44,7 @@ TYPE_MAP = {
     'Scalar': 'Scalar',
     'Scalar?': 'Scalar?',
     'Tensor': 'Tensor',
+    'Tensor?': 'Tensor?',
     'TensorList': 'Tensor[]',
     # this appears in return values instead of TensorList
     # since TensorList is a ArrayRef in arguments but a vector
@@ -55,6 +70,8 @@ def jit_type_of(arg):
     if is_sized_intlist_arg(arg):
         typ = 'int[{}]'.format(arg['size'])
 
+    if arg.get('is_nullable') and '?' not in typ:
+        typ = '{}?'.format(typ)
     return typ
 
 

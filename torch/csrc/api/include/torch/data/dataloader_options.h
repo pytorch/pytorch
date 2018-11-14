@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/arg.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <chrono>
 #include <cstddef>

@@ -125,23 +125,23 @@ void initializeRecurrentInput(
   auto inputBlob = ws->GetBlob(rc.input);
   CAFFE_ENFORCE(inputBlob);
   const auto& input = inputBlob->template Get<Tensor>();
-  CAFFE_ENFORCE_GE(input.ndim(), 1, rc.input);
-  CAFFE_ENFORCE_LE(input.ndim(), 3, rc.input);
+  CAFFE_ENFORCE_GE(input.dim(), 1, rc.input);
+  CAFFE_ENFORCE_LE(input.dim(), 3, rc.input);
 
-  const auto stateSize = input.size(input.ndim() - 1);
+  const auto stateSize = input.size(input.dim() - 1);
   // Sometimes we want to provide more than one initial step.
   // For example, if we do a convolution op in step net
   // and need a sufficient left padding around the input.
   // This could be used together with links where window != 1.
   auto initialStateLength = 1;
-  if (input.ndim() == 3) {
+  if (input.dim() == 3) {
     initialStateLength = input.size(0);
   }
   // States at [0, ..., (T + initialStateLength - 1)] (inclusive)
   state->Resize(seqLen + initialStateLength, batchSize, stateSize);
 
-  if (input.ndim() >= 2) {
-    CAFFE_ENFORCE_EQ(input.size(input.ndim() - 2), batchSize, rc.input);
+  if (input.dim() >= 2) {
+    CAFFE_ENFORCE_EQ(input.size(input.dim() - 2), batchSize, rc.input);
     context->template CopySameDevice<T>(
         batchSize * stateSize * initialStateLength,
         input.template data<T>(),
@@ -679,7 +679,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       CAFFE_ENFORCE(gBlob);
       auto* g = BlobGetMutableTensor(gBlob, Context::GetDeviceType());
       g->ResizeLike(p);
-      CAFFE_ENFORCE_EQ(g->ndim(), 3);
+      CAFFE_ENFORCE_EQ(g->dim(), 3);
       const auto timestep = g->numel() / g->size(0);
       // Fill the last timestep with zeros for the gradient
       math::Set<T, Context>(
@@ -782,7 +782,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       CAFFE_ENFORCE(pBlob);
       auto* p = BlobGetMutableTensor(pBlob, Context::GetDeviceType());
 
-      if (Input(inputId).ndim() >= 2) {
+      if (Input(inputId).dim() >= 2) {
         // Gradient states blob should live. And if it gets changed by the
         // backward pass, then output should be changed as well. Thus it should
         // be okay to share data here

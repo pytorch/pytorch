@@ -68,7 +68,7 @@ class AffineChannelOp final : public Operator<Context> {
           "In-place affine_channel_op is not supported when "
           "is_learnable = true.");
     }
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
     const int HxW = X.numel() / (N * C);

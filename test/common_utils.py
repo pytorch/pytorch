@@ -18,6 +18,7 @@ import warnings
 import random
 import contextlib
 import socket
+import time
 from collections import OrderedDict
 from functools import wraps
 from itertools import product
@@ -629,6 +630,25 @@ def find_free_port():
     return sockname[1]
 
 
+def retry_on_address_already_in_use_error(func):
+    """Reruns a test if it sees "Address already in use" error."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        tries_remaining = 10
+        while True:
+            try:
+                return func(*args, **kwargs)
+            except RuntimeError as error:
+                if str(error) == "Address already in use":
+                    tries_remaining -= 1
+                    if tries_remaining == 0:
+                        raise
+                    time.sleep(random.random())
+                    continue
+                raise
+    return wrapper
+
+
 # Methods for matrix generation
 # Used in test_autograd.py and test_torch.py
 def prod_single_zero(dim_size):
@@ -662,9 +682,9 @@ def random_symmetric_psd_matrix(l):
     return A.mm(A.transpose(0, 1))
 
 
-def random_symmetric_pd_matrix(l, eps=1e-5):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1)) + torch.eye(l) * eps
+def random_symmetric_pd_matrix(l, *batches):
+    A = torch.randn(*(batches + (l, l)))
+    return A.matmul(A.transpose(-2, -1)) + torch.eye(l) * 1e-5
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):

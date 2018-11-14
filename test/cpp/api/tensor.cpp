@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <ATen/ATen.h>
 
@@ -200,10 +200,10 @@ TEST(TensorTest, ContainsCorrectValuesWhenConstructedFromVector) {
     ASSERT_TRUE(exactly_equal(tensor[i], v.at(i)));
   }
 
-  std::vector<float> w = {1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9, 10.0};
+  std::vector<double> w = {1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9, 10.0};
   tensor = at::tensor(w);
   ASSERT_EQ(tensor.numel(), w.size());
-  ASSERT_EQ(tensor.dtype(), at::kFloat);
+  ASSERT_EQ(tensor.dtype(), at::kDouble);
   for (size_t i = 0; i < w.size(); ++i) {
     ASSERT_TRUE(almost_equal(tensor[i], w.at(i)));
   }

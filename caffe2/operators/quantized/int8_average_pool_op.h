@@ -170,7 +170,7 @@ class Int8AveragePoolOp final : public ConvPoolOpBase<CPUContext> {
     CHECK_EQ(Y_offset, X.zero_point);
     CHECK_EQ(Y_scale, X.scale);
 
-    CHECK_EQ(X.t.ndim(), 4);
+    CHECK_EQ(X.t.dim(), 4);
     const int channels = X.t.dim32(3);
     ConvPoolOpBase<CPUContext>::SetOutputSize(X.t, &(Y->t), channels);
 

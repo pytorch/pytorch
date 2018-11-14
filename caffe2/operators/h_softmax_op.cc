@@ -76,11 +76,11 @@ bool HSoftmaxOp<float, CPUContext>::RunOnDevice() {
   auto* intermediate_output = Output(1);
 
   // Batch size
-  int M = X.ndim() > 1 ? X.dim32(0) : 1;
+  int M = X.dim() > 1 ? X.dim32(0) : 1;
   // Input feature dimension
   int K = X.numel() / M;
-  CAFFE_ENFORCE_GE(W.ndim(), 2); // N*K
-  CAFFE_ENFORCE_EQ(b.ndim(), 1); // N
+  CAFFE_ENFORCE_GE(W.dim(), 2); // N*K
+  CAFFE_ENFORCE_EQ(b.dim(), 1); // N
   CAFFE_ENFORCE_EQ(K, W.numel() / (W.dim32(0)));
   // Sum of output dimensions of all hierarchy nodes
   int N = W.dim32(0);
@@ -217,7 +217,7 @@ bool HSoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
       intermediate_output.numel(), 0.f, dOutput_data, &context_);
 
   // Batch size
-  int M = X.ndim() > 1 ? X.dim32(0) : 1;
+  int M = X.dim() > 1 ? X.dim32(0) : 1;
   // Input feature dimension
   int K = X.numel() / M;
   const auto* labeldata = label.data<int>();
@@ -344,11 +344,11 @@ bool HSoftmaxSearchOp<float, CPUContext>::RunOnDevice() {
   auto* Y_names = Output(0);
   auto* Y_scores = Output(1);
   // Batch size
-  int M = X.ndim() > 1 ? X.dim32(0) : 1;
+  int M = X.dim() > 1 ? X.dim32(0) : 1;
   // Input feature dimension
   int K = X.numel() / M;
-  CAFFE_ENFORCE(W.ndim() == 2, "Weight must be a matrix."); // N*K
-  CAFFE_ENFORCE(b.ndim() == 1, "Bias must be a vector."); // N
+  CAFFE_ENFORCE(W.dim() == 2, "Weight must be a matrix."); // N*K
+  CAFFE_ENFORCE(b.dim() == 1, "Bias must be a vector."); // N
   CAFFE_ENFORCE(K == W.numel() / (W.dim32(0)), "feature dimension mismatch.");
   // Sum of output dimensions of all hierarchy nodes
   int N = W.dim32(0);
@@ -419,7 +419,7 @@ template <typename T, class Context>
 bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
   const auto& Y = Input(0);
   auto treeOutput = Output(0);
-  CAFFE_ENFORCE_EQ(Y.ndim(), 1, "Input labels must be a vector.");
+  CAFFE_ENFORCE_EQ(Y.dim(), 1, "Input labels must be a vector.");
   const auto y_data = Y.template data<T>();
   treeOutput->Resize(1);
   std::vector<int> labelCounts;

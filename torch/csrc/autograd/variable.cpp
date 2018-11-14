@@ -22,7 +22,7 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type().type_id(), data.type().typeMeta(), data.type().allocator(), /* is variable */ true),
+    : TensorImpl(data.type_id(), data.dtype(), /*allocator=*/nullptr, /* is variable */ true),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),
@@ -54,7 +54,7 @@ IntList Variable::Impl::strides() const {
 }
 
 bool Variable::Impl::is_contiguous() const {
-  AT_ERROR("variable impl does not have is_contiguous");
+  return data_.is_contiguous();
 }
 
 int64_t Variable::Impl::dim() const {

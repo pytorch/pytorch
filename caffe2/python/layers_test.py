@@ -185,6 +185,28 @@ class TestLayers(LayersTestCase):
         predict_net = self.get_predict_net()
         self.assertNetContainOps(predict_net, [mat_mul_spec])
 
+    def testFCwithAxis2(self):
+        input_dim = 10
+        output_dim = 30
+        max_length = 20
+        input_record = self.new_record(
+            schema.Struct(
+                ('history_sequence', schema.Scalar((np.float32, (max_length,
+                    input_dim)))),
+            )
+        )
+        fc_out = self.model.FC(
+            input_record.history_sequence, output_dim,
+            axis=2)
+        self.model.output_schema = fc_out
+        self.assertEqual(
+            schema.Scalar((np.float32, (max_length, output_dim))),
+            fc_out
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
+
     def testSparseLookupSumPooling(self):
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('sparse', schema.Struct(

@@ -1,7 +1,7 @@
 #include <torch/nn/modules/conv.h>
 
 #include <torch/expanding_array.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <cmath>
@@ -12,15 +12,6 @@
 
 namespace torch {
 namespace nn {
-template <size_t D>
-ConvOptions<D>::ConvOptions(
-    int64_t input_channels,
-    int64_t output_channels,
-    ExpandingArray<D> kernel_size)
-    : input_channels_(input_channels),
-      output_channels_(output_channels),
-      kernel_size_(std::move(kernel_size)) {}
-
 template <size_t D, typename Derived>
 ConvImpl<D, Derived>::ConvImpl(ConvOptions<D> options)
     : options(std::move(options)) {
@@ -64,7 +55,7 @@ void ConvImpl<D, Derived>::reset() {
   const auto stdv = 1.0 / std::sqrt(number_of_features);
   NoGradGuard no_grad;
   for (auto& p : this->parameters()) {
-    p->uniform_(-stdv, stdv);
+    p.uniform_(-stdv, stdv);
   }
 }
 

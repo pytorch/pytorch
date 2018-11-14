@@ -89,7 +89,7 @@ class SparseAdadeltaOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(Input(LR).numel(), 1);
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),
-        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+        Input(GRAD).size_from_dim(Input(INDICES).dim()));
 
     // Enforce domain constraints for attributes
     CAFFE_ENFORCE_GE(epsilon_, 0.0f);

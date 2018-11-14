@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/SpatialAveragePooling.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   THCState *state,

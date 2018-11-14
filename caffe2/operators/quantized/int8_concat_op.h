@@ -47,7 +47,7 @@ class Int8ConcatOp final : public Operator<CPUContext> {
     }
     for (auto i = 1; i < InputSize(); ++i) {
       const auto& Xi = Inputs()[i]->template Get<Int8TensorCPU>();
-      CHECK_EQ(Xi.t.ndim(), Y_dims.size());
+      CHECK_EQ(Xi.t.dim(), Y_dims.size());
       for (auto j = 0; j < Y_dims.size(); ++j) {
         if (j != axis_) {
           CHECK_EQ(Xi.t.size(j), Y_dims[j]);

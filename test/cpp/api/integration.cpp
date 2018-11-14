@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <torch/data.h>
 #include <torch/nn/modules/batchnorm.h>
 #include <torch/nn/modules/conv.h>
 #include <torch/nn/modules/dropout.h>
@@ -7,16 +8,19 @@
 #include <torch/optim/adam.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/sgd.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>
 
+#include <cmath>
+#include <cstdlib>
+#include <random>
+
 using namespace torch::nn;
 using namespace torch::test;
 
-#include <cmath>
-#include <random>
+const double kPi = 3.1415926535898;
 
 class CartPole {
   // Translated from openai/gym's cartpole.py
@@ -31,7 +35,7 @@ class CartPole {
   double tau = 0.02; // seconds between state updates;
 
   // Angle at which to fail the episode
-  double theta_threshold_radians = 12 * 2 * M_PI / 360;
+  double theta_threshold_radians = 12 * 2 * kPi / 360;
   double x_threshold = 2.4;
   int steps_beyond_done = -1;
 
@@ -104,115 +108,33 @@ class CartPole {
 
 template <typename M, typename F, typename O>
 bool test_mnist(
-    uint32_t batch_size,
-    uint32_t num_epochs,
-    bool useGPU,
+    size_t batch_size,
+    size_t number_of_epochs,
+    bool with_cuda,
     M&& model,
     F&& forward_op,
     O&& optimizer) {
-  struct MNIST_Reader {
-    FILE* fp_;
-
-    explicit MNIST_Reader(const char* path) {
-      fp_ = fopen(path, "rbe");
-      if (!fp_)
-        throw std::runtime_error("failed to open file");
-    }
-
-    ~MNIST_Reader() {
-      if (fp_)
-        fclose(fp_);
-    }
-
-    uint32_t read_int() {
-      uint8_t buf[4];
-      if (fread(buf, sizeof(buf), 1, fp_) != 1) {
-        throw std::runtime_error("failed to read an integer");
-      }
-      return buf[0] << 24u | buf[1] << 16u | buf[2] << 8u | buf[3];
-    }
-
-    uint8_t read_byte() {
-      uint8_t i;
-      if (fread(&i, sizeof(i), 1, fp_) != 1) {
-        throw std::runtime_error("failed to read an byte");
-      }
-      return i;
-    }
-  };
-
-  auto readData = [&](std::string fn) {
-    MNIST_Reader rd(fn.c_str());
-
-    /* int image_magic = */ rd.read_int();
-    int image_count = rd.read_int();
-    int image_rows = rd.read_int();
-    int image_cols = rd.read_int();
-
-    auto data = torch::empty({image_count, 1, image_rows, image_cols});
-    auto a_data = data.accessor<float, 4>();
-
-    for (int c = 0; c < image_count; c++) {
-      for (int i = 0; i < image_rows; i++) {
-        for (int j = 0; j < image_cols; j++) {
-          a_data[c][0][i][j] = float(rd.read_byte()) / 255;
-        }
-      }
-    }
-
-    return data.toBackend(useGPU ? torch::Backend::CUDA : torch::Backend::CPU);
-  };
-
-  auto readLabels = [&](std::string fn) {
-    MNIST_Reader rd(fn.c_str());
-    /* int label_magic = */ rd.read_int();
-    int label_count = rd.read_int();
-
-    auto data = torch::empty({label_count}, torch::kInt64);
-    auto a_data = data.accessor<int64_t, 1>();
-
-    for (int i = 0; i < label_count; ++i) {
-      a_data[i] = static_cast<int64_t>(rd.read_byte());
-    }
-    return data.toBackend(useGPU ? torch::Backend::CUDA : torch::Backend::CPU);
-  };
-
-  auto trdata = readData("test/cpp/api/mnist/train-images-idx3-ubyte");
-  auto trlabel = readLabels("test/cpp/api/mnist/train-labels-idx1-ubyte");
-  auto tedata = readData("test/cpp/api/mnist/t10k-images-idx3-ubyte");
-  auto telabel = readLabels("test/cpp/api/mnist/t10k-labels-idx1-ubyte");
-
-  if (useGPU) {
-    model->to(torch::kCUDA);
+  std::string mnist_path = "mnist";
+  if (const char* user_mnist_path = getenv("TORCH_CPP_TEST_MNIST_PATH")) {
+    mnist_path = user_mnist_path;
   }
 
-  std::random_device device;
-  std::mt19937 generator(device());
+  auto train_dataset =
+      torch::data::datasets::MNIST(
+          mnist_path, torch::data::datasets::MNIST::Mode::kTrain)
+          .map(torch::data::transforms::Stack<>());
 
-  for (auto epoch = 0U; epoch < num_epochs; epoch++) {
-    auto shuffled_inds = std::vector<int>(trdata.size(0));
-    for (int i = 0; i < trdata.size(0); i++) {
-      shuffled_inds[i] = i;
-    }
-    std::shuffle(shuffled_inds.begin(), shuffled_inds.end(), generator);
+  auto data_loader =
+      torch::data::make_data_loader(std::move(train_dataset), batch_size);
 
-    const auto backend = useGPU ? torch::kCUDA : torch::kCPU;
-    auto inp =
-        torch::empty({batch_size, 1, trdata.size(2), trdata.size(3)}, backend);
-    auto lab =
-        torch::empty({batch_size}, torch::device(backend).dtype(torch::kInt64));
-    for (auto p = 0U; p < shuffled_inds.size() - batch_size; p++) {
-      inp[p % batch_size] = trdata[shuffled_inds[p]];
-      lab[p % batch_size] = trlabel[shuffled_inds[p]];
+  torch::Device device(with_cuda ? torch::kCUDA : torch::kCPU);
+  model->to(device);
 
-      if (p % batch_size != batch_size - 1)
-        continue;
-      inp.set_requires_grad(true);
-      torch::Tensor x = forward_op(inp);
-      inp.set_requires_grad(false);
-      torch::Tensor y = lab;
-      torch::Tensor loss = torch::nll_loss(x, y);
-
+  for (size_t epoch = 0; epoch < number_of_epochs; epoch++) {
+    for (torch::data::Example<> batch : *data_loader) {
+      auto data = batch.data.to(device), targets = batch.target.to(device);
+      torch::Tensor prediction = forward_op(std::move(data));
+      torch::Tensor loss = torch::nll_loss(prediction, std::move(targets));
       optimizer.zero_grad();
       loss.backward();
       optimizer.step();
@@ -220,9 +142,14 @@ bool test_mnist(
   }
 
   torch::NoGradGuard guard;
-  auto result = std::get<1>(forward_op(tedata).max(1));
-  torch::Tensor correct = (result == telabel).toType(torch::kFloat32);
-  return correct.sum().item<float>() > telabel.size(0) * 0.8;
+  torch::data::datasets::MNIST test_dataset(
+      mnist_path, torch::data::datasets::MNIST::Mode::kTest);
+  auto images = test_dataset.images().to(device),
+       targets = test_dataset.targets().to(device);
+
+  auto result = std::get<1>(forward_op(images).max(/*dim=*/1));
+  torch::Tensor correct = (result == targets).to(torch::kFloat32);
+  return correct.sum().item<float>() > (test_dataset.size().value() * 0.8);
 }
 
 struct IntegrationTest : torch::test::SeedingFixture {};
@@ -354,8 +281,8 @@ TEST_F(IntegrationTest, MNIST_CUDA) {
 
   ASSERT_TRUE(test_mnist(
       32, // batch_size
-      3, // num_epochs
-      true, // useGPU
+      3, // number_of_epochs
+      true, // with_cuda
       model,
       forward,
       optimizer));
@@ -390,8 +317,8 @@ TEST_F(IntegrationTest, MNISTBatchNorm_CUDA) {
 
   ASSERT_TRUE(test_mnist(
       32, // batch_size
-      3, // num_epochs
-      true, // useGPU
+      3, // number_of_epochs
+      true, // with_cuda
       model,
       forward,
       optimizer));

@@ -22,7 +22,7 @@ class Int8TensorCPUSerializer : public BlobSerializerBase {
     blob_proto.set_type("Int8TensorCPU");
     QTensorProto& proto = *blob_proto.mutable_qtensor();
     proto.set_name(name);
-    for (int i = 0; i < tensor.t.ndim(); ++i) {
+    for (int i = 0; i < tensor.t.dim(); ++i) {
       proto.add_dims(tensor.t.dim32(i));
     }
     proto.set_precision(8);
