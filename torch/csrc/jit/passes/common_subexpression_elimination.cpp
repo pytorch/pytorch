@@ -64,7 +64,7 @@ void EliminateCommonSubexpression(Block * block,
 }
 
 void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
-  EliminateCommonSubexpression(graph->block());
+  EliminateCommonSubexpression(graph->block(), [](Node*){ return nullptr; });
 }
 
 }}

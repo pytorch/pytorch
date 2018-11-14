@@ -13,8 +13,11 @@ namespace {
 
 class SubgraphSlicer {
  public:
-  SubgraphSlicer(Block* block, size_t minSubgraphSize)
-      : block_(block), minSubgraphSize_(minSubgraphSize) {}
+  SubgraphSlicer(
+      Block* block,
+      std::shared_ptr<Graph> graph,
+      size_t minSubgraphSize)
+      : block_(block), graph_(std::move(graph)), minSubgraphSize_(minSubgraphSize) {}
 
   void run(std::vector<Node*>& diffGraphs) {
     // We need to run the slicer multiple times in order to get all merge
@@ -47,7 +50,7 @@ class SubgraphSlicer {
     auto curNode = *block_->nodes().rbegin();
     while (curNode != *block_->nodes().rend()) {
       for (auto subBlock : curNode->blocks()) {
-        SubgraphSlicer(subBlock, minSubgraphSize_).run(diffGraphs);
+        SubgraphSlicer(subBlock, graph_, minSubgraphSize_).run(diffGraphs);
       }
 
       // Save the previous node, since we might delete `curNode` in next block
@@ -66,7 +69,7 @@ class SubgraphSlicer {
     }
     // Run CSE one more time to eliminate duplicates that may have occured
     // while re-inlining subgraphs.
-    EliminateCommonSubexpression(block_);
+    EliminateCommonSubexpression(graph_);
   }
 
  private:
@@ -150,6 +153,7 @@ class SubgraphSlicer {
   }
 
   Block* block_;
+  std::shared_ptr<Graph> graph_;
   size_t minSubgraphSize_;
 };
 } // anonymous namespace
@@ -158,7 +162,7 @@ std::vector<Node*> CreateAutodiffSubgraphs(
     std::shared_ptr<Graph> graph,
     size_t threshold) {
   std::vector<Node*> diff_nodes;
-  SubgraphSlicer(graph->block(), threshold).run(diff_nodes);
+  SubgraphSlicer(graph->block(), graph, threshold).run(diff_nodes);
   return diff_nodes;
 }
 
