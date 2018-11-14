@@ -92,7 +92,8 @@ OUTPUT:
       }
       out[0].set_data_type(in[0].data_type());
       return out;
-    });
+    })
+    .InheritOnnxSchema();
 
 class GetGatherGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
