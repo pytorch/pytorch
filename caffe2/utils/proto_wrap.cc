@@ -4,16 +4,16 @@
 #include <google/protobuf/stubs/common.h>
 #include <google/protobuf/generated_message_util.h>
 
-//namespace ONNX_NAMESPACE {
-//
-//// ONNX wrapper functions for protobuf's GetEmptyStringAlreadyInited() function
-//// used to avoid duplicated global variable in the case when protobuf
-//// is built with hidden visibility.
-//CAFFE2_API const ::std::string& GetEmptyStringAlreadyInited() {
-//  return ::google::protobuf::internal::GetEmptyStringAlreadyInited();
-//}
-//
-//}  // namespace ONNX_NAMESPACE
+namespace ONNX_NAMESPACE {
+
+// ONNX wrapper functions for protobuf's GetEmptyStringAlreadyInited() function
+// used to avoid duplicated global variable in the case when protobuf
+// is built with hidden visibility.
+CAFFE2_API const ::std::string& GetEmptyStringAlreadyInited() {
+  return ::google::protobuf::internal::GetEmptyStringAlreadyInited();
+}
+
+}  // namespace ONNX_NAMESPACE
 
 namespace caffe2 {
 
