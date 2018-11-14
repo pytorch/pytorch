@@ -2602,12 +2602,6 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
   throw ErrorReport(loc) << value->type()->str() << " cannot be used as a tuple";
 }
 
-void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what) {
-  if(expected != actual) {
-    throw ErrorReport(loc) << "expected " << expected << " " << what << " but found " << actual;
-  }
-}
-
 } // namespace script
 } // namespace jit
 } // namespace torch

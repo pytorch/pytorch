@@ -210,6 +210,8 @@ struct SharedParserData {
       }
       //handle escaped characters. advances past escaped quotation marks,
       //escaped newlines and escaped backslashes
+      //multi-char escapes like \x1A are handled fine here because the
+      //remainder of the escape are valid string characters anyway
       if (str[end] == '\\') {
         end++;
       }
