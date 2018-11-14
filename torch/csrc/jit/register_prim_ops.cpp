@@ -888,9 +888,19 @@ Operator(                                                                      \
     DEFINE_INT_FLOAT_OP(aten::remainder, fmod((b + fmod(a, b)), b), float)
 
 
-    // TODO: Support python floordiv (//)
-    // Right now aten::floordiv is only used by loop unrolling
-    DEFINE_INT_OP(aten::floordiv, a / b)
+    // in c++ int division rounds to the integer closer to 0, in python floordiv
+    // rounds to lower integer
+    DEFINE_GENERIC_OP(aten::floordiv,
+      static_cast<int64_t>(std::floor(static_cast<double>(a) / static_cast<double>(b))),
+      std::floor(a / b), int, float)
+    DEFINE_INT_FLOAT_OP(aten::floordiv, std::floor(a / b), float)
+
+    //only used in loop unrolling, not exposed to end users
+    DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b)
+
+    DEFINE_INT_OP(aten::__and__, a & b)
+    DEFINE_INT_OP(aten::__or__, a | b)
+    DEFINE_INT_OP(aten::__xor__, a ^ b)
 
     // NB: This is the python truediv operation
     Operator("aten::div(int a, int b) -> float",
@@ -921,6 +931,7 @@ Operator(                                                                      \
 
     DEFINE_BOOL_OP(aten::__and__, a && b)
     DEFINE_BOOL_OP(aten::__or__, a || b)
+    DEFINE_BOOL_OP(aten::__xor__, a != b)
 
     Operator(
         "aten::neg(int self) -> int",

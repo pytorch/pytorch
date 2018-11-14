@@ -1,4 +1,4 @@
-def script(
+def script(self,
     a_1: Tensor,
     i_1: Tensor) -> Tensor:
   a, i = a_1, i_1

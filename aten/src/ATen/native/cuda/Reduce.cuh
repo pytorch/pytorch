@@ -419,7 +419,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const func_t& op, ident_t id
   int64_t num_outputs = iter.num_output_elements();
   int64_t inputs_per_output = iter.numel() / num_outputs;
 
-  auto config = ReduceConfig(sizeof(scalar_t), num_outputs, inputs_per_output);
+  auto config = ReduceConfig(sizeof(arg_t), num_outputs, inputs_per_output);
 
   if (iter.ndim() == 0 || iter.strides(/*arg=*/1)[0] == sizeof(scalar_t)) {
     // Split the input across lanes if the input is contiguous in the reduced

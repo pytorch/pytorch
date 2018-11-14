@@ -1691,6 +1691,14 @@ private:
         return aten::__isnot__;
       case TK_NOT:
         return aten::__not__;
+      case TK_FLOOR_DIV:
+        return aten::floordiv;
+      case '&':
+        return aten::__and__;
+      case '|':
+        return aten::__or__;
+      case '^':
+        return aten::__xor__;
       default:
         throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
@@ -1907,7 +1915,11 @@ private:
       case '/':
       case '+':
       case '-':
-      case '%': {
+      case '%':
+      case '&':
+      case '|':
+      case '^':
+      case TK_FLOOR_DIV: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
@@ -2588,12 +2600,6 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     return fmap(unpack->outputs(), make_simple_value);
   }
   throw ErrorReport(loc) << value->type()->str() << " cannot be used as a tuple";
-}
-
-void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what) {
-  if(expected != actual) {
-    throw ErrorReport(loc) << "expected " << expected << " " << what << " but found " << actual;
-  }
 }
 
 } // namespace script
