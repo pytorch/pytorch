@@ -78,7 +78,7 @@ bool isDifferentiable(Node * n) {
     "aten::log_softmax(Tensor self, int dim) -> Tensor",
     "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
     "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)",
-    "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding) -> (Tensor, Tensor, Tensor)",
+    "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)",
     "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
   };
 
@@ -403,7 +403,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       });
       return {backward_value->node()->output(0), nullptr, nullptr, nullptr, nullptr, nullptr};
 
-    } else if (node->matches("aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding) -> (Tensor, Tensor, Tensor)")) {
+    } else if (node->matches("aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)")) {
       auto graph = node->owningGraph();
 
       auto convNode = graph->create(aten::thnn_conv2d_backward, 3);
