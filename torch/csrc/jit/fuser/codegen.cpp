@@ -80,7 +80,7 @@ static const char* scalarTypeName(const at::ScalarType type) {
 static std::string encodeRHS(const Node* n) {
   static std::unordered_map<NodeKind, std::string> simple_map_ops = {
     // unary
-    {aten::abs, "absf(${0})"},
+    {aten::abs, "fabs(${0})"},
     {aten::sigmoid, "1.f / (1.f + expf(-${0}))"},
     {aten::relu, "${0} < 0 ? 0.f : ${0} "},
     {aten::log, "logf(${0})"},
