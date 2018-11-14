@@ -80,7 +80,7 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
   }
 }
 
-TEST(OptionsGuardTest, TestFunctionality_CUDA) {
+TEST(OptionsGuardTest, TestFunctionality_MultiCUDA) {
   Tensor tensor;
   {
     OptionsGuard guard(device(kCUDA));
