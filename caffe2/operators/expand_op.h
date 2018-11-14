@@ -30,6 +30,7 @@ class ExpandOp final : public Operator<Context> {
         Y_shape_tensor.numel(),
         Y_shape_tensor.template data<int64_t>(),
         shape_dims.data());
+    auto* Y = Output(0);
 
     const int ndim = shape_dims.size();
     const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
@@ -48,10 +49,7 @@ class ExpandOp final : public Operator<Context> {
       Y_dims.push_back(std::max(shape_x, shape_y));
     }
     std::reverse(Y_dims.begin(), Y_dims.end());
-    // TODO: remove when the function in math are changed to use vector<int64_t>
-    std::vector<int64_t> Y_dims_int64;
-    std::copy(Y_dims.begin(), Y_dims.end(), std::back_inserter(Y_dims_int64));
-    auto* Y = Output(0, Y_dims_int64, at::dtype<T>());
+    Y->Resize(Y_dims);
     math::Broadcast<T, Context>(
         X_dims.size(),
         X_dims.data(),
