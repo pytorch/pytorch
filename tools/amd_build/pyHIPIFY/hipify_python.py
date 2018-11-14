@@ -32,6 +32,7 @@ import shutil
 import sys
 import os
 import json
+import subprocess
 
 from enum import Enum
 from pyHIPIFY import constants
@@ -204,26 +205,6 @@ class disablefuncmode(Enum):
     EMPTYBODY = 6
 
 
-def update_progress_bar(total, progress):
-    """Displays and updates a console progress bar."""
-    barLength, status = 20, ""
-    progress = float(progress) / float(total)
-    if progress >= 1.:
-        progress, status = 1, "\r\n"
-
-    # Number of blocks to display. Used to visualize progress.
-    block = int(round(barLength * progress))
-    text = "\r[{}] {:.0f}% {}".format(
-        "#" * block + "-" * (barLength - block), round(progress * 100, 0),
-        status)
-
-    # Send the progress to stdout.
-    sys.stderr.write(text)
-
-    # Send the buffered text to stdout!
-    sys.stderr.flush()
-
-
 def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), hipify_caffe2=False):
     def _fnmatch(filepath, patterns):
         return any(fnmatch.fnmatch(filepath, pattern) for pattern in patterns)
@@ -232,11 +213,24 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), hi
         """Helper method to see if filename ends with certain extension"""
         return os.path.splitext(filename)[1] in extensions
 
-    for (dirpath, _, filenames) in os.walk(root_path, topdown=True):
-        for fn in filenames:
-            filepath = os.path.join(dirpath, fn)
-            rel_filepath = os.path.relpath(filepath, root_path)
-            if _fnmatch(rel_filepath, includes) and (not _fnmatch(rel_filepath, ignores)) and match_extensions(fn):
+    # This is a very rough heuristic; really, we want to avoid scanning
+    # any file which is not checked into source control, but this script
+    # needs to work even if you're in a Git or Hg checkout, so easier to
+    # just blacklist the biggest time sinks that won't matter in the
+    # end.
+    for (abs_dirpath, dirs, filenames) in os.walk(root_path, topdown=True):
+        rel_dirpath = os.path.relpath(abs_dirpath, root_path)
+        if rel_dirpath == '.':
+            # Blah blah blah O(n) blah blah
+            if ".git" in dirs:
+                dirs.remove(".git")
+            if "build" in dirs:
+                dirs.remove("build")
+            if "third_party" in dirs:
+                dirs.remove("third_party")
+        for filename in filenames:
+            filepath = os.path.join(rel_dirpath, filename)
+            if _fnmatch(filepath, includes) and (not _fnmatch(filepath, ignores)) and match_extensions(filepath):
                 if hipify_caffe2 and not is_caffe2_gpu_file(filepath):
                     continue
 
@@ -244,6 +238,7 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), hi
 
 
 def preprocess(
+        output_directory,
         all_files,
         show_detailed=False,
         show_progress=True,
@@ -265,14 +260,19 @@ def preprocess(
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
-        preprocessor(filepath, stats, hipify_caffe2, hip_suffix, extensions_to_hip_suffix)
-        # Update the progress
+        preprocessor(output_directory, filepath, stats, hipify_caffe2, hip_suffix, extensions_to_hip_suffix)
+        # Show what happened
         if show_progress:
-            print(filepath)
-            update_progress_bar(total_count, finished_count)
+            print(
+                filepath, "->",
+                get_hip_file_path(
+                    filepath,
+                    hipify_caffe2=hipify_caffe2,
+                    hip_suffix=hip_suffix,
+                    extensions_to_hip_suffix=extensions_to_hip_suffix))
             finished_count += 1
 
-    print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC)
+    print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
 
     # Show detailed summary
     if show_detailed:
@@ -713,38 +713,84 @@ def disable_function(input_string, function, replace_style):
 
 
 def get_hip_file_path(filepath, hipify_caffe2, hip_suffix, extensions_to_hip_suffix):
-    """ Returns the new name of the hipified file """
+    """
+    Returns the new name of the hipified file
+    """
+    # At the moment, PyTorch is HIPIFYed in-place.  We'd prefer for this
+    # to not be the case, but we can't conveniently do this until we
+    # also fix up PyTorch's build system to know how to handle things
+    # out-of-place.
     if not hipify_caffe2:
         return filepath
 
     dirpath, filename = os.path.split(filepath)
     filename_without_ext, ext = os.path.splitext(filename)
 
-    if 'gpu' in filename_without_ext:
-        filename_without_ext = filename_without_ext.replace('gpu', 'hip')
-    else:
-        filename_without_ext += '_hip'
+    # Here's the plan:
+    #
+    # In Caffe2, we will always put the HIPified file in a hip
+    # subdirectory of the same directory.  Furthermore, we will
+    # edit the filename so that it contains _hip some way; either
+    # replacing _gpu with _hip, or adding _hip at the end if there
+    # is no _gpu.
+    #
+    # Examples:
+    #
+    #       caffe2/utils/math_gpu.cu   ==>  caffe2/utils/hip/math_hip.cu
+    #       caffe2/operators/tan_op.cu  ==>  caffe2/operators/hip/tan_op_hip.cu
+    #
+    # In C10, our strategy is a little different, because the naming
+    # convention and file organization is a little different.
+    # CUDA files will be in a cuda/ directory; so we put the HIP
+    # files in a parallel hip/ directory and convert occurrences of CUDA
+    # to HIP.
+    #
+    # Examples:
+    #
+    #       c10/cuda/CUDAFunctions.h  ==>  c10/hip/HIPFunctions.h
+    #
 
     # extensions are either specified, or .cu
     if ext in extensions_to_hip_suffix or ext == '.cu':
         ext = '.' + hip_suffix
 
-    return os.path.join(dirpath, 'hip', filename_without_ext + ext)
+    # Figure out if we're Caffe2 or C10
+
+    if dirpath.startswith('c10'):
+        # Forgive me Windows, for I have sinned.  This is hella not the
+        # right way to replace a path... if the slashes are not
+        # normalized correctly this is unlikely to work on Windows.
+        dirpath = dirpath.replace(os.path.join('c10', 'cuda'), os.path.join('c10', 'hip'))
+        filename_without_ext = filename_without_ext.replace('CUDA', 'HIP')
+        return os.path.join(dirpath, filename_without_ext + ext)
+    else:
+        # It was historically important to give the HIP file a different
+        # name than the original file, because old versions of hcc had a bug
+        # where if two object files had the same base filename, they would
+        # clobber each other.  This is probably fixed, but we liked the
+        # file name convention so it's stuck.
+        if 'gpu' in filename_without_ext:
+            filename_without_ext = filename_without_ext.replace('gpu', 'hip')
+        else:
+            filename_without_ext += '_hip'
+        return os.path.join(dirpath, 'hip', filename_without_ext + ext)
 
 
 def is_caffe2_gpu_file(filepath):
+    if filepath.startswith("c10/cuda"):
+        return True
     filename = os.path.basename(filepath)
     _, ext = os.path.splitext(filename)
     return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
 
-def preprocessor(filepath, stats, hipify_caffe2, hip_suffix, extensions_to_hip_suffix):
+def preprocessor(output_directory, filepath, stats, hipify_caffe2, hip_suffix, extensions_to_hip_suffix):
     """ Executes the CUDA -> HIP conversion on the specified file. """
-    fin_path = filepath
+    fin_path = os.path.join(output_directory, filepath)
     with open(fin_path, 'r') as fin:
         output_source = fin.read()
 
-    fout_path = get_hip_file_path(filepath, hipify_caffe2, hip_suffix, extensions_to_hip_suffix)
+    fout_path = os.path.join(output_directory, get_hip_file_path(filepath, hipify_caffe2, hip_suffix, extensions_to_hip_suffix))
     if not os.path.exists(os.path.dirname(fout_path)):
         os.makedirs(os.path.dirname(fout_path))
 
@@ -823,10 +869,10 @@ def fix_static_global_kernels(in_txt):
     return in_txt
 
 
-def get_kernel_template_params(the_file, KernelDictionary, template_param_to_value):
+def get_kernel_template_params(output_directory, the_file, KernelDictionary, template_param_to_value):
     """Scan for __global__ kernel definitions then extract its argument types, and static cast as necessary"""
     # Read the kernel file.
-    with openf(the_file, "r") as f:
+    with openf(os.path.join(output_directory, the_file), "r") as f:
         # Extract all kernels with their templates inside of the file
         string = f.read()
 
@@ -1339,6 +1385,7 @@ def hipify(
 
     # Start Preprocessor
     preprocess(
+        output_directory,
         all_files,
         show_detailed=show_detailed,
         show_progress=show_progress,
@@ -1351,6 +1398,7 @@ def hipify(
         KernelTemplateParams = {}
         for filepath in all_files:
             get_kernel_template_params(
+                output_directory,
                 filepath,
                 KernelTemplateParams,
                 CAFFE2_TEMPLATE_MAP if hipify_caffe2 else PYTORCH_TEMPLATE_MAP)
@@ -1358,11 +1406,13 @@ def hipify(
         # Execute the Clang Tool to Automatically add static casts
         for filepath in all_files:
             add_static_casts(
-                get_hip_file_path(
-                    filepath,
-                    hipify_caffe2=hipify_caffe2,
-                    hip_suffix=hip_suffix,
-                    extensions_to_hip_suffix=extensions_to_hip_suffix),
+                os.path.join(
+                    output_directory,
+                    get_hip_file_path(
+                        filepath,
+                        hipify_caffe2=hipify_caffe2,
+                        hip_suffix=hip_suffix,
+                        extensions_to_hip_suffix=extensions_to_hip_suffix)),
                 KernelTemplateParams)
 
 

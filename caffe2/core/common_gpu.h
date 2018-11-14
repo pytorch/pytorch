@@ -25,7 +25,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 
-#include "c10/cuda/math_compat.h"
+#include "c10/cuda/CUDAMathCompat.h"
 
 // Defines CAFFE2_CUDA_EXPORT and CAFFE2_CUDA_IMPORT. On Windows, this
 // corresponds to different declarations (dllexport and dllimport). On
