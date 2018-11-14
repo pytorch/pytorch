@@ -102,6 +102,38 @@ class TestCaffe2Basic(DownloadingTestCase):
         output = c2_rep.run({"X": X, "Y": Y})
         np.testing.assert_almost_equal(output["W3"], W_ref)
 
+    def test_upsample_bilinear(self):
+        X = np.random.randn(1, 1, 2, 2).astype(np.float32)
+        width_scale = 2.0
+        height_scale = 2.0
+
+        predict_net = caffe2_pb2.NetDef()
+        predict_net.name = 'test-upsample-net'
+        predict_net.external_input[:] = ['X']
+        predict_net.external_output[:] = ['Y']
+        predict_net.op.extend([
+            core.CreateOperator(
+                'UpsampleBilinear',
+                inputs=['X'],
+                outputs=['Y'],
+                width_scale=width_scale,
+                height_scale=height_scale,
+            ),
+        ])
+        ws, c2_outputs = c2_native_run_net(
+            init_net=None,
+            predict_net=predict_net,
+            inputs=[X])
+
+        onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+            predict_net=predict_net,
+            value_info={
+                'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape)
+            })
+        print(onnx_model)
+        onnx_outputs = c2.run_model(onnx_model, inputs=[X])
+        self.assertSameOutputs(c2_outputs, onnx_outputs)
+
     def test_upsample(self):
         X = np.random.randn(1, 1, 2, 2).astype(np.float32)
         width_scale = 2.0

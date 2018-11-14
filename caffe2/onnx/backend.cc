@@ -190,6 +190,17 @@ float OnnxAttributes::get(const std::string& key) const {
 }
 
 template <>
+std::string OnnxAttributes::get(const std::string& key) const {
+  std::string value;
+  const auto it = onnx_attrs_.find(key);
+  if (it != onnx_attrs_.end()) {
+    const AttributeProto& attr = *it->second;
+    value = attr.s();
+  }
+  return value;
+}
+
+template <>
 ::google::protobuf::RepeatedPtrField<std::string> OnnxAttributes::get(
     const std::string& key) const {
   ::google::protobuf::RepeatedPtrField<std::string> value;
@@ -1214,6 +1225,7 @@ Caffe2Ops Caffe2Backend::CreateUpsample(
     OnnxNode* onnx_node,
     const ConversionContext& ctx) {
   auto& attributes = onnx_node->attributes;
+  auto mode = attributes.get<::std::string>("mode");
   attributes.remove("mode");
 
   if (ctx.opset_version() >= 7 && ctx.opset_version() < 9) {
@@ -1256,10 +1268,20 @@ Caffe2Ops Caffe2Backend::CreateUpsample(
         {arg_starts, arg_ends});
 
     // Upsample
+    std::string c2_op_name;
+    if (mode == "linear") {
+        c2_op_name = "UpsampleBilinear";
+    } else if (mode == "nearest") {
+        c2_op_name = "ResizeNearest";
+    } else {
+        VLOG(2) << "Operator " << node.name() << " contains unsupported mode " << mode << std::endl;
+    }
+    std::cerr << mode << " " << c2_op_name << std::endl;
+
     c2_op = ret.ops.Add();
     BuildOperator(
         c2_op,
-        "ResizeNearest",
+        c2_op_name,
         {node.input(0), sliced_input},
         {node.output(0)},
         {});

@@ -168,7 +168,8 @@ output_height = floor(output_height * height_scale)
         1,
         "scales",
         "1D, 2-element, Scales tensor, [height_scale, width_scale]")
-    .Output(0, "Y", "Output tensor");
+    .Output(0, "Y", "Output tensor")
+    .InheritOnnxSchema("Upsample");
 
 // Input: dY, output: dX
 OPERATOR_SCHEMA(UpsampleBilinearGradient)

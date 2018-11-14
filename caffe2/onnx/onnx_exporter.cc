@@ -279,7 +279,9 @@ OnnxExporter::get_special_operators() const {
           {"Reshape", &OnnxExporter::CreateReshapeNodes},
           {"Slice", &OnnxExporter::CreateSliceNodes},
           {"ChannelShuffle", &OnnxExporter::CreateChannelShuffleNodes},
-          {"ResizeNearest", &OnnxExporter::CreateUpsampleNodes}};
+          {"ResizeNearest", &OnnxExporter::CreateUpsampleNodes},
+          {"UpsampleBilinear", &OnnxExporter::CreateUpsampleNodes},
+          };
   return kSpecialOperators;
 }
 
@@ -816,7 +818,11 @@ ConvertedResult OnnxExporter::CreateUpsampleNodes(
   std::vector<std::string> inputs = {def.input(0), resolved_scale};
   std::vector<std::string> outputs(def.output().begin(), def.output().end());
   auto node = MakeNode("Upsample", inputs, outputs, def.name());
-  node.add_attribute()->CopyFrom(MakeAttribute("mode", "nearest"));
+  if(def.type() == "UpsampleBilinear") {
+      node.add_attribute()->CopyFrom(MakeAttribute("mode", "linear"));
+  } else {
+      node.add_attribute()->CopyFrom(MakeAttribute("mode", "nearest"));
+  }
   nodes.emplace_back(node);
   return result;
 }
