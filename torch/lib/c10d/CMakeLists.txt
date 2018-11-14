@@ -84,6 +84,7 @@ target_compile_options(c10d PUBLIC
   -Wno-missing-field-initializers
   -Wno-write-strings
   -Wno-unknown-pragmas
+  -Wpessimizing-move
   )
 
 
