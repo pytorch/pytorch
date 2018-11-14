@@ -70,12 +70,4 @@ Type & UndefinedType::toScalarType(ScalarType s) const {
   AT_ERROR("toScalarType not implemented for UndefinedType to non-UndefinedType");
 }
 
-Tensor & UndefinedType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
-  AT_ERROR("s_copy not defined for UndefinedType");
-}
-
-Tensor & UndefinedType::_s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const {
-  AT_ERROR("_s_copy_from not defined for UndefinedType");
-}
-
 }
