@@ -231,6 +231,7 @@ goto:eof
                   -DUSE_NNPACK=%USE_NNPACK% ^
                   -DUSE_LEVELDB=%USE_LEVELDB% ^
                   -DUSE_LMDB=%USE_LMDB% ^
+                  -DUSE_REDIS=%USE_REDIS% ^
                   -DUSE_OPENCV=%USE_OPENCV% ^
                   -DUSE_QNNPACK=%USE_QNNPACK% ^
                   -DUSE_FFMPEG=%USE_FFMPEG% ^
@@ -241,6 +242,7 @@ goto:eof
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
                   -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^
                   -DUSE_MKLDNN=%USE_MKLDNN% ^
+                  -DUSE_NUMA=%USE_NUMA% ^
                   -DATEN_NO_CONTRIB=1 ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^

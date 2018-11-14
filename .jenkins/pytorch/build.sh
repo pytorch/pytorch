@@ -115,6 +115,20 @@ if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc5.4* ]]; then
   export DEBUG=1
 fi
 
+if [ -n "${INSTALLED_DB}" ]; then
+  export USE_LEVELDB=1
+  export USE_LMDB=1
+  export USE_REDIS=1
+fi
+
+if [ -n "${INSTALLED_VISION}" ]; then
+  # NUMA fails tests
+  export NO_NUMA=1
+  export USE_OPENCV=1
+  # Unfortunately video ops seem to be failing
+  # export USE_FFMPEG=1
+fi
+
 # ppc64le build fails when WERROR=1
 # set only when building other architectures
 # only use for "python setup.py install" line

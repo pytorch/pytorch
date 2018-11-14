@@ -43,8 +43,9 @@ def hotpatch_var(var, prefix='USE_'):
 def hotpatch_build_env_vars():
     # Before we run the setup_helpers, let's look for NO_* and WITH_*
     # variables and hotpatch environment with the USE_* equivalent
-    use_env_vars = ['CUDA', 'CUDNN', 'FBGEMM', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
-                    'OPENCV', 'TENSORRT', 'QNNPACK', 'FFMPEG', 'SYSTEM_NCCL',
+    use_env_vars = ['CUDA', 'CUDNN', 'FBGEMM', 'MIOPEN', 'MKLDNN', 'NNPACK',
+                    'DISTRIBUTED', 'LEVELDB', 'LMDB', 'REDIS', 'NUMA',
+                    'TENSORRT', 'QNNPACK', 'OPENCV', 'FFMPEG', 'SYSTEM_NCCL',
                     'GLOO_IBVERBS']
     list(map(hotpatch_var, use_env_vars))
 

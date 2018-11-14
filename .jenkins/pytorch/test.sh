@@ -25,6 +25,12 @@ if [ -n "${IN_CIRCLECI}" ]; then
   fi
 fi
 
+# TODO: move this to Docker
+# Need networkx 2.0 because bellmand_ford was moved in 2.1 . Scikit-image by
+# defaults installs the most recent networkx version, so we install this lower
+# version explicitly before scikit-image pulls it in as a dependency
+pip -q install --user networkx==2.0
+
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # JIT C++ extensions require ninja.
@@ -118,6 +124,12 @@ test_aten() {
   fi
 }
 
+test_caffe2() {
+  # Test Caffe2
+  # Run all of the C++ and python tests for Caffe2.
+  .jenkins/caffe2/test.sh
+}
+
 test_torchvision() {
   rm -rf ninja
 
@@ -165,22 +177,25 @@ test_custom_script_ops() {
   fi
 }
 
-if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
-  test_torchvision
-  test_python_nn
-  test_python_all_except_nn
-  test_aten
-  test_libtorch
-  test_custom_script_ops
-else
-  if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
-    test_torchvision
-    test_python_nn
-  elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
-    test_torchvision
-    test_python_all_except_nn
-    test_aten
-    test_libtorch
-    test_custom_script_ops
-  fi
-fi
+test_caffe2
+# if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
+#   test_torchvision
+#   test_python_nn
+#   test_python_all_except_nn
+#   test_aten
+#   test_libtorch
+#   test_custom_script_ops
+#   test_caffe2
+# else
+#   if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+#     test_torchvision
+#     test_python_nn
+#   elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+#     test_torchvision
+#     test_python_all_except_nn
+#     test_aten
+#     test_libtorch
+#     test_custom_script_ops
+#     test_caffe2
+#   fi
+# fi

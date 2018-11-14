@@ -45,6 +45,9 @@
 #   NO_NNPACK
 #     disables NNPACK build
 #
+#   NO_NUMA
+#     disables use of NUMA
+#
 #   NO_QNNPACK
 #     disables QNNPACK build (quantized 8-bit operators)
 #
@@ -62,16 +65,19 @@
 #     toggle features related to distributed support
 #
 #   USE_OPENCV
-#     enables use of OpenCV for additional operators
+#     enables use of OpenCV for additional Caffe2 operators
 #
 #   USE_FFMPEG
-#     enables use of ffmpeg for additional operators
+#     enables use of ffmpeg for additional Caffe2 operators
 #
 #   USE_LEVELDB
-#     enables use of LevelDB for storage
+#     enables use of LevelDB for Caffe2 storage
 #
 #   USE_LMDB
-#     enables use of LMDB for storage
+#     enables use of LMDB for Caffe2 storage
+#
+#   USE_REDIS
+#     enables use of Redis for Caffe2 storage
 #
 #   BUILD_BINARY
 #     enables the additional binaries/ build
@@ -148,14 +154,14 @@ import importlib
 from tools.setup_helpers.env import (check_env_flag, check_negative_env_flag,
                                      hotpatch_build_env_vars)
 
-
 hotpatch_build_env_vars()
 
 from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.build import (BUILD_BINARY, BUILD_TEST,
                                        BUILD_CAFFE2_OPS, USE_LEVELDB,
-                                       USE_LMDB, USE_OPENCV, USE_TENSORRT,
-                                       USE_FFMPEG, USE_FBGEMM)
+                                       USE_LMDB, USE_REDIS, USE_NUMA,
+                                       USE_OPENCV, USE_TENSORRT, USE_FFMPEG,
+                                       USE_FBGEMM)
 from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
 from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
@@ -388,9 +394,11 @@ def build_libs(libs):
     my_env["INSTALL_TEST"] = "ON" if BUILD_TEST else "OFF"
     my_env["USE_LEVELDB"] = "ON" if USE_LEVELDB else "OFF"
     my_env["USE_LMDB"] = "ON" if USE_LMDB else "OFF"
+    my_env["USE_REDIS"] = "ON" if USE_REDIS else "OFF"
     my_env["USE_OPENCV"] = "ON" if USE_OPENCV else "OFF"
     my_env["USE_TENSORRT"] = "ON" if USE_TENSORRT else "OFF"
     my_env["USE_FFMPEG"] = "ON" if USE_FFMPEG else "OFF"
+    my_env["USE_NUMA"] = "ON" if USE_NUMA else "OFF"
     my_env["USE_DISTRIBUTED"] = "ON" if USE_DISTRIBUTED else "OFF"
     my_env["USE_SYSTEM_NCCL"] = "ON" if USE_SYSTEM_NCCL else "OFF"
     if VERBOSE_SCRIPT:
