@@ -13,7 +13,7 @@ void THNN_(MSECriterion_updateOutput)(
   THCUNN_assertSameGPU(state, 3, input, target, output);
 
   if (reduction != Reduction::None) {
-    THCTensor_(resize1d)(state, output, 1);
+    THCTensor_(resize0d)(state, output);
 
     ptrdiff_t size = THCTensor_(nElement)(state, input);
 
@@ -36,7 +36,7 @@ void THNN_(MSECriterion_updateOutput)(
     THCTensor_(free)(state, input);
     THCTensor_(free)(state, target);
 
-    THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, scalar_t>::to(sum));
+    THCTensor_(set0d)(state, output, ScalarConvert<accreal, scalar_t>::to(sum));
     return;
   }
 
@@ -65,7 +65,7 @@ void THNN_(MSECriterion_updateGradInput)(
 
     THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
     accreal norm = reduction == Reduction::Mean ? (accreal)(2)/size : (accreal)(2);
-    norm *= ScalarConvert<scalar_t, accreal>::to(THCTensor_(get1d)(state, gradOutput, 0));
+    norm *= ScalarConvert<scalar_t, accreal>::to(THCTensor_(get0d)(state, gradOutput));
 
     input = THCTensor_(newContiguous)(state, input);
     target = THCTensor_(newContiguous)(state, target);

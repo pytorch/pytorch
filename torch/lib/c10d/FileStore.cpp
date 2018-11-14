@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <cstdio>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -181,30 +182,53 @@ off_t refresh(
       pos = file.tell();
     }
   }
+  file.seek(0, SEEK_SET);
   return pos;
 }
 
 } // namespace
 
-FileStore::FileStore(const std::string& path) : Store(), path_(path), pos_(0) {}
+FileStore::FileStore(const std::string& path, int numWorkers)
+    : Store(),
+      path_(path),
+      pos_(0),
+      numWorkers_(numWorkers),
+      cleanupKey_("cleanup/"),
+      regularPrefix_("/") {
+  if (numWorkers_ < 1) {
+    throw std::runtime_error(
+        "Number of workers for FileStore should be greater than zero");
+  }
+}
 
-FileStore::~FileStore() {}
+FileStore::~FileStore() {
+  // cleanup key will be different from all rest keys since all rest keys will
+  // have a regular prefix.
+  auto numFinishedWorker = addHelper(cleanupKey_, 1);
+  // The last worker cleans up the file
+  if (numFinishedWorker == numWorkers_) {
+    // Best effort removal without checking the return
+    std::remove(path_.c_str());
+  }
+}
 
 void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
+  std::string regKey = regularPrefix_ + key;
   File file(path_, O_RDWR | O_CREAT);
   auto lock = file.lockExclusive();
   file.seek(0, SEEK_END);
-  file.write(key);
+  file.write(regKey);
   file.write(value);
 }
 
 std::vector<uint8_t> FileStore::get(const std::string& key) {
+  std::string regKey = regularPrefix_ + key;
   const auto start = std::chrono::steady_clock::now();
-  while (cache_.count(key) == 0) {
+  while (true) {
     File file(path_, O_RDONLY);
     auto lock = file.lockShared();
     auto size = file.size();
-    if (size == pos_) {
+    if (cache_.count(regKey) == 0 && size == pos_) {
       // No new entries; release the shared lock and sleep for a bit
       lock.unlock();
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -215,14 +239,18 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
     }
-
+    // Always refresh since even though the key exists in the cache,
+    // it might be outdated
     pos_ = refresh(file, pos_, cache_);
+    if (cache_.count(regKey) != 0) {
+      break;
+    }
   }
 
-  return cache_[key];
+  return cache_[regKey];
 }
 
-int64_t FileStore::add(const std::string& key, int64_t i) {
+int64_t FileStore::addHelper(const std::string& key, int64_t i) {
   File file(path_, O_RDWR | O_CREAT);
   auto lock = file.lockExclusive();
   pos_ = refresh(file, pos_, cache_);
@@ -234,13 +262,18 @@ int64_t FileStore::add(const std::string& key, int64_t i) {
     auto len = value.size();
     ti += std::stoll(std::string(buf, len));
   }
-
+  // Always seek to the end to write
+  file.seek(0, SEEK_END);
   // File cursor is at the end of the file now, and we have an
   // exclusive lock, so we can write the new value.
   file.write(key);
   file.write(std::to_string(ti));
-
   return ti;
+}
+
+int64_t FileStore::add(const std::string& key, int64_t i) {
+  std::string regKey = regularPrefix_ + key;
+  return addHelper(regKey, i);
 }
 
 bool FileStore::check(const std::vector<std::string>& keys) {
@@ -249,7 +282,8 @@ bool FileStore::check(const std::vector<std::string>& keys) {
   pos_ = refresh(file, pos_, cache_);
 
   for (const auto& key : keys) {
-    if (cache_.count(key) == 0) {
+    std::string regKey = regularPrefix_ + key;
+    if (cache_.count(regKey) == 0) {
       return false;
     }
   }

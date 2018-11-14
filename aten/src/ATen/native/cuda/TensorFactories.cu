@@ -42,11 +42,22 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
 Tensor empty_cuda(IntList size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == at::Backend::CUDA);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'
-  auto storage_impl = c10::make_intrusive<at::StorageImpl>(
-    options.dtype(), 0, cuda::getCUDADeviceAllocator(), true);
+
+  auto* allocator = at::cuda::getCUDADeviceAllocator();
+  int64_t nelements = prod_intlist(size);
+  auto dtype = options.dtype();
+  auto storage_impl = c10::make_intrusive<StorageImpl>(
+    dtype,
+    nelements,
+    allocator->allocate(nelements * dtype.itemsize()),
+    allocator,
+    /*resizeable=*/true);
 
   auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId(), false);
-  resize_cuda_(tensor, size); // avoid dispatch overhead
+  // Default TensorImpl has size [0]
+  if (size.size() != 1 || size[0] != 0) {
+    tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
+  }
   return tensor;
 }
 

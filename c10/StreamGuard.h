@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/detail/InlineStreamGuard.h>
+#include <c10/impl/InlineStreamGuard.h>
 
 namespace c10 {
 
@@ -69,7 +69,7 @@ struct StreamGuard {
   Device original_device() const { return guard_.original_device(); }
 
 private:
-  c10::detail::InlineStreamGuard<detail::VirtualGuardImpl> guard_;
+  c10::impl::InlineStreamGuard<impl::VirtualGuardImpl> guard_;
 };
 
 /**
@@ -120,7 +120,7 @@ struct OptionalStreamGuard {
   void reset() { guard_.reset(); }
 
 private:
-  c10::detail::InlineOptionalStreamGuard<detail::VirtualGuardImpl> guard_;
+  c10::impl::InlineOptionalStreamGuard<impl::VirtualGuardImpl> guard_;
 };
 
 } // namespace c10

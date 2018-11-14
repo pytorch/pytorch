@@ -1,12 +1,12 @@
 #pragma once
 
-#include <c10/detail/DeviceGuardImplInterface.h>
+#include <c10/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 
 namespace at {
 namespace detail {
 
-struct CPUGuardImpl final : public c10::detail::DeviceGuardImplInterface {
+struct CPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   CPUGuardImpl() {}
   DeviceType type() const override {
     return DeviceType::CPU;
