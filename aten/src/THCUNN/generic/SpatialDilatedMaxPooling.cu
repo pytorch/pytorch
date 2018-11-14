@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/SpatialDilatedMaxPooling.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
                          THCState *state,

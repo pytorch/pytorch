@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/Square.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 void THNN_(Square_updateOutput)(
            THCState *state,

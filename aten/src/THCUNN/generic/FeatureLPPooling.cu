@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/FeatureLPPooling.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 // non-batch mode:
 // [feature dim]

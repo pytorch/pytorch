@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/Sqrt.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 void THNN_(Sqrt_updateOutput)(
            THCState *state,

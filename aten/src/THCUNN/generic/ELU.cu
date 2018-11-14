@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/ELU.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 
 void THNN_(ELU_updateOutput)(

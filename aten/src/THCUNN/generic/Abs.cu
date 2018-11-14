@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/Abs.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 void THNN_(Abs_updateOutput)(
            THCState *state,

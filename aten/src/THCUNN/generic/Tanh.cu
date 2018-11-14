@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/Tanh.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 void THNN_(Tanh_updateOutput)(
            THCState *state,
