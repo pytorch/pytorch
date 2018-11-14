@@ -1186,7 +1186,6 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @skipIfRocm
     def test_poisson_gpu_sample(self):
         set_rng_seed(1)
         for rate in [0.12, 0.9, 4.0]:
@@ -2254,7 +2253,6 @@ class TestDistributions(TestCase):
                         self.assertEqual(expanded.event_shape, indep_dist.event_shape)
                         self.assertEqual(expanded.batch_shape, expanded_shape)
 
-    @skipIfRocm
     def test_cdf_icdf_inverse(self):
         # Tests the invertibility property on the distributions
         for Dist, params in EXAMPLES:
