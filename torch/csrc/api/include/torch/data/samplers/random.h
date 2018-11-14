@@ -2,6 +2,7 @@
 
 #include <torch/data/samplers/base.h>
 #include <torch/types.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <cstddef>
 #include <vector>
@@ -25,22 +26,22 @@ class RandomSampler : public Sampler<> {
   /// The constructor will eagerly allocate all required indices, which is the
   /// sequence `0 ... size - 1`. `index_dtype` is the data type of the stored
   /// indices. You can change it to influence memory usage.
-  explicit RandomSampler(int64_t size, Dtype index_dtype = torch::kInt64);
+  TORCH_API explicit RandomSampler(int64_t size, Dtype index_dtype = torch::kInt64);
 
   /// Resets the `RandomSampler` to a new set of indices.
-  void reset() override;
+  TORCH_API void reset() override;
 
   /// Returns the next batch of indices.
-  optional<std::vector<size_t>> next(size_t batch_size) override;
+  TORCH_API optional<std::vector<size_t>> next(size_t batch_size) override;
 
   /// Serializes the `RandomSampler` to the `archive`.
-  void save(serialize::OutputArchive& archive) const override;
+  TORCH_API void save(serialize::OutputArchive& archive) const override;
 
   /// Deserializes the `RandomSampler` from the `archive`.
-  void load(serialize::InputArchive& archive) override;
+  TORCH_API void load(serialize::InputArchive& archive) override;
 
   /// Returns the current index of the `RandomSampler`.
-  size_t index() const noexcept;
+  TORCH_API size_t index() const noexcept;
 
  private:
   Tensor indices_;

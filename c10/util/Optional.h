@@ -361,7 +361,7 @@ class optional : private OptionalBase<T> {
 
   void clear() noexcept {
     if (initialized())
-      dataptr()->T::~T();
+      dataptr()->~T();
     OptionalBase<T>::init_ = false;
   }
 

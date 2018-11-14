@@ -9,7 +9,7 @@ bool BatchSparseToDenseOp<T, Context>::RunOnDevice() {
   auto& lengths = Input(LENGTHS);
   auto& indices = Input(INDICES);
   auto& values = Input(VALUES);
-  auto* output = Output(0);
+
   CAFFE_ENFORCE_EQ(indices.numel(), values.numel());
   CAFFE_ENFORCE_EQ(lengths.dim(), 1);
   CAFFE_ENFORCE_EQ(indices.dim(), 1);
@@ -37,7 +37,7 @@ bool BatchSparseToDenseOp<T, Context>::RunOnDevice() {
     CAFFE_ENFORCE(dense_last_dim_ >= 1, "The last dim of dense must be >= 1");
   }
   output_shape.push_back(dense_last_dim_);
-  output->Resize(output_shape);
+  auto* output = Output(0, output_shape, at::dtype<T>());
   T* output_data = output->template mutable_data<T>();
   math::Set(
       output->numel(), static_cast<T>(default_value_), output_data, &context_);
@@ -65,7 +65,7 @@ bool BatchDenseToSparseOp<T, Context>::RunOnDevice() {
   auto& lengths = Input(LENGTHS);
   auto& indices = Input(INDICES);
   auto& dense = Input(DENSE);
-  auto* output = Output(0);
+
   CAFFE_ENFORCE_EQ(lengths.dim(), 1);
   CAFFE_ENFORCE_EQ(indices.dim(), 1);
   CAFFE_ENFORCE_EQ(dense.dim(), 2);
@@ -81,7 +81,7 @@ bool BatchDenseToSparseOp<T, Context>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(batch_size, dense.size(0));
   dense_last_dim_ = dense.size(1);
   vector<int64_t> output_shape = indices.sizes().vec();
-  output->Resize(output_shape);
+  auto* output = Output(0, output_shape, at::dtype<T>());
   T* output_data = output->template mutable_data<T>();
 
   int64_t k = 0;

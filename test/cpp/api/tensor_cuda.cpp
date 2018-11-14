@@ -18,7 +18,7 @@ TEST(TensorTest, AllocatesTensorOnTheCorrectDevice_MultiCUDA) {
   ASSERT_EQ(tensor.device().index(), 1);
 }
 
-TEST(TensorTest, ToDevice_CUDA) {
+TEST(TensorTest, ToDevice_MultiCUDA) {
   auto tensor = at::empty({3, 4});
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
 
@@ -59,7 +59,7 @@ TEST(TensorTest, ToDevice_CUDA) {
   REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kInt, at::kStrided);
 }
 
-TEST(TensorTest, ToTensorAndTensorAttributes_CUDA) {
+TEST(TensorTest, ToTensorAndTensorAttributes_MultiCUDA) {
   auto tensor = at::empty({3, 4});
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
 
@@ -97,7 +97,7 @@ TEST(TensorTest, ToDoesNotCopyWhenOptionsAreAllTheSame_CUDA) {
   ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
 }
 
-TEST(TensorTest, ToDeviceAndDtype_CUDA) {
+TEST(TensorTest, ToDeviceAndDtype_MultiCUDA) {
   auto tensor = at::empty({3, 4});
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
 

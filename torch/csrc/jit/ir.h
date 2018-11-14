@@ -700,7 +700,13 @@ struct Block {
   Graph * owningGraph() {
     return graph_;
   }
+  const Graph * owningGraph() const {
+    return graph_;
+  }
   Node * owningNode() {
+    return owning_node_;
+  }
+  const Node * owningNode() const {
     return owning_node_;
   }
   // clone all inputs, nodes, and outputs from src and append them
