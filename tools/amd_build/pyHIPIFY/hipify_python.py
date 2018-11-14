@@ -32,6 +32,7 @@ import shutil
 import sys
 import os
 import json
+import subprocess
 
 from enum import Enum
 from pyHIPIFY import constants
@@ -232,15 +233,17 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), hi
         """Helper method to see if filename ends with certain extension"""
         return os.path.splitext(filename)[1] in extensions
 
-    for (dirpath, _, filenames) in os.walk(root_path, topdown=True):
-        for fn in filenames:
-            filepath = os.path.join(dirpath, fn)
-            rel_filepath = os.path.relpath(filepath, root_path)
-            if _fnmatch(rel_filepath, includes) and (not _fnmatch(rel_filepath, ignores)) and match_extensions(fn):
-                if hipify_caffe2 and not is_caffe2_gpu_file(filepath):
-                    continue
+    # NB: Don't use os.walk, so we don't recurse into .git
+    # NB: This doesn't handle files with weird names, but you
+    # shouldn't check such files into PyTorch repository anyway
+    rel_filepaths = subprocess.check_output(["git", "ls-files"]).decode('utf-8').strip().split()
+    for rel_filepath in rel_filepaths:
+        filepath = os.path.join(root_path, rel_filepath)
+        if _fnmatch(rel_filepath, includes) and (not _fnmatch(rel_filepath, ignores)) and match_extensions(rel_filepath):
+            if hipify_caffe2 and not is_caffe2_gpu_file(filepath):
+                continue
 
-                yield filepath
+            yield filepath
 
 
 def preprocess(
