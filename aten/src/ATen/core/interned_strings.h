@@ -68,6 +68,7 @@ namespace c10 {
   _(prim, NoneGenerator)           \
   _(prim, MMTreeReduce)            \
   _(aten, floordiv)                \
+  _(aten, __round_to_zero_floordiv)\
   _(prim, fork)                    \
   _(prim, RaiseException)          \
   _(aten, append)                  \
