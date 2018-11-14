@@ -20,6 +20,8 @@
 using namespace torch::nn;
 using namespace torch::test;
 
+const double kPi = 3.1415926535898;
+
 class CartPole {
   // Translated from openai/gym's cartpole.py
  public:
@@ -33,7 +35,7 @@ class CartPole {
   double tau = 0.02; // seconds between state updates;
 
   // Angle at which to fail the episode
-  double theta_threshold_radians = 12 * 2 * M_PI / 360;
+  double theta_threshold_radians = 12 * 2 * kPi / 360;
   double x_threshold = 2.4;
   int steps_beyond_done = -1;
 

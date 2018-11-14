@@ -2,6 +2,7 @@
 #include "lexer.h"
 #include "tree.h"
 #include "tree_views.h"
+#include "c10/util/Optional.h"
 
 namespace torch {
 namespace jit {
@@ -240,6 +241,21 @@ struct Parser {
     return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len;
   }
 
+  static bool isOctal(char c) {
+    return c >= '0' && c < '8';
+  }
+
+  c10::optional<char> parseOctal(const std::string& str, size_t pos) {
+    if (pos + 3 >= str.size())
+      return c10::nullopt;
+    size_t c = 0;
+    for(size_t i = 0, b = 64; i < 3; ++i, b /= 8) {
+      c += b * (str[pos + i] - '0');
+    }
+    if(c >= 256)
+      return c10::nullopt;
+    return c;
+  }
   std::string parseString(const SourceRange& range, const std::string &str) {
     int quote_len = isCharCount(str[0], str, 0, 3) ? 3 : 1;
     auto ret_str = str.substr(quote_len, str.size() - quote_len * 2);
@@ -247,6 +263,7 @@ struct Parser {
     while(pos != std::string::npos) {
       //invariant: pos has to escape a character because it is a valid string
       char c = ret_str[pos + 1];
+      size_t to_erase = 2;
       switch (ret_str[pos + 1]) {
         case '\\':
         case '\'':
@@ -268,10 +285,20 @@ struct Parser {
         case 'v':
           c = '\v';
           break;
+        case 'h':
+          throw ErrorReport(range)
+              << "unsupported hex specifier";
         default:
-          throw ErrorReport(range) << " octal and hex escaped sequences are not supported";
+          // \0NN
+          if (auto v = parseOctal(str, pos)) {
+            to_erase = 4;
+            c = *v;
+          } else {
+            throw ErrorReport(range)
+                << " ill formed octal specifier";
+          }
       }
-      ret_str.replace(pos, /* num to erase */ 2, /* num copies */ 1, c);
+      ret_str.replace(pos, to_erase, /* num copies */ 1, c);
       pos = ret_str.find('\\', pos + 1);
     }
     return ret_str;

@@ -1,5 +1,4 @@
 #include "caffe2/core/typeid.h"
-#include "caffe2/core/types.h"
 #include <gtest/gtest.h>
 
 namespace caffe2 {
