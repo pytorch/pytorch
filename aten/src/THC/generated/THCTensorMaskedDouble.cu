@@ -2,4 +2,4 @@
 #include "THCTensor.hpp"
 #include "THCStream.h"
 #include "../generic/THCTensorMasked.cu"
-#include "../THCGenerateDoubleType.h"
+#include <THC/THCGenerateDoubleType.h>

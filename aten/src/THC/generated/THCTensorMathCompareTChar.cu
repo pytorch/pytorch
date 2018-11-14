@@ -2,4 +2,4 @@
 #include "THCTensor.hpp"
 #include "THCStream.h"
 #include "../generic/THCTensorMathCompareT.cu"
-#include "../THCGenerateCharType.h"
+#include <THC/THCGenerateCharType.h>
