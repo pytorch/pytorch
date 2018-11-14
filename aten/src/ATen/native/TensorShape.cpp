@@ -61,6 +61,8 @@ static bool sizes_match_except(IntList s1, IntList s2, int64_t dim_except /* sho
   return true;
 }
 
+// Check to see if the shape of tensors is compatible
+// for being concatenated along a given dimension.
 static void check_cat_sparse_dims(Tensor const &t,
   int64_t pos /* used only for debug messages */,
   IntList sizes,
@@ -164,6 +166,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
     }
     auto sizes_copy = sizes.vec();
     sizes_copy[wrapped] = total_size;
+    // This can create an uncoalesced tensor
     return native::sparse_coo_tensor(native::cat(idxs_pieces, 1), native::cat(vals_pieces), sizes_copy, tensors[0].options());
   }
 }
