@@ -699,7 +699,7 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
 
 void testCreateAutodiffSubgraphs(std::ostream& out = std::cout) {
   auto graph = build_lstm();
-  CreateAutodiffSubgraphs(*graph, /*threshold=*/2);
+  CreateAutodiffSubgraphs(graph, /*threshold=*/2);
   out << "testCreateAutodiffSubgraphs\n";
   out << *graph << "\n";
 }

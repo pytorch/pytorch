@@ -154,9 +154,11 @@ class SubgraphSlicer {
 };
 } // anonymous namespace
 
-std::vector<Node*> CreateAutodiffSubgraphs(Graph& graph, size_t threshold) {
+std::vector<Node*> CreateAutodiffSubgraphs(
+    std::shared_ptr<Graph> graph,
+    size_t threshold) {
   std::vector<Node*> diff_nodes;
-  SubgraphSlicer(graph.block(), threshold).run(diff_nodes);
+  SubgraphSlicer(graph->block(), threshold).run(diff_nodes);
   return diff_nodes;
 }
 

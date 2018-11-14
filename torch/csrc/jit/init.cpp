@@ -133,7 +133,7 @@ void initJITBindings(PyObject *module) {
      return ConstantPropagation(g);
    })
    .def("_jit_pass_erase_shape_information", EraseShapeInformation)
-   .def("_jit_pass_create_autodiff_subgraphs", [](Graph& graph) {
+   .def("_jit_pass_create_autodiff_subgraphs", [](std::shared_ptr<Graph> graph) {
      CreateAutodiffSubgraphs(graph);
    })
    .def("_jit_run_cpp_tests", [] {
