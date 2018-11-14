@@ -1276,7 +1276,6 @@ Caffe2Ops Caffe2Backend::CreateUpsample(
     } else {
         VLOG(2) << "Operator " << node.name() << " contains unsupported mode " << mode << std::endl;
     }
-    std::cerr << mode << " " << c2_op_name << std::endl;
 
     c2_op = ret.ops.Add();
     BuildOperator(
