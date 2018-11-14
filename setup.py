@@ -192,11 +192,11 @@ DEBUG = check_env_flag('DEBUG')
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
-IS_PPC = (platform.machine() == 'ppc64le')
+IS_PPC_AAR = (platform.machine() == 'ppc64le' or platform.machine() == 'aarch64')
 
 BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
 # ppc64le does not support MKLDNN
-if IS_PPC:
+if IS_PPC_AAR:
     USE_MKLDNN = check_env_flag('USE_MKLDNN', 'OFF')
 else:
     USE_MKLDNN = check_env_flag('USE_MKLDNN', 'ON')
