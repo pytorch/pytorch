@@ -29,7 +29,6 @@ class BatchMatMulOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& A = Input(0);
     const auto& B = Input(1);
-    auto* Y = Output(0);
 
     auto ndims_A = A.dim();
     auto dims_A = A.sizes().vec();
@@ -86,7 +85,7 @@ class BatchMatMulOp final : public Operator<Context> {
           dims_B[0],
           "Vector-vector product requires each of the vectors to "
           "be the same size.");
-      Y->Resize(1);
+      auto* Y = Output(0, {1}, at::dtype<T>());
       math::Dot<T, Context>(
           dims_A[0], data_A, data_B, Y->template mutable_data<T>(), &context_);
     } else {
@@ -240,7 +239,7 @@ class BatchMatMulOp final : public Operator<Context> {
       }
 
       // Allocate output tensor
-      Y->Resize(new_dims);
+      auto* Y = Output(0, new_dims, at::dtype<T>());
       auto* Y_data = Y->template mutable_data<T>();
 
       // Zero batch dimension indicates no elements
