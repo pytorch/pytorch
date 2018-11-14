@@ -1,6 +1,9 @@
 #ifndef CAFFE2_OPERATORS_DROPOUT_OP_H_
 #define CAFFE2_OPERATORS_DROPOUT_OP_H_
 
+#include <cstdlib>
+#include <ctime>
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -18,6 +21,8 @@ class DropoutOp final : public Operator<Context> {
         OP_SINGLE_ARG(float, "ratio", ratio_, 0.5f) {
     CAFFE_ENFORCE_GE(ratio_, 0);
     CAFFE_ENFORCE_LT(ratio_, 1);
+    // srand for Eigen
+    std::srand(operator_def.device_option().random_seed());
   }
 
   bool RunOnDevice() override {
