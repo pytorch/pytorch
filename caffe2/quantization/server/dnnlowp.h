@@ -74,8 +74,9 @@ T Quantize(float src, std::int32_t zero_point, float scale,
            bool result_is_signed = std::is_signed<T>::value) {
   const float transformed_val = zero_point + src / scale;
   return clamp<std::int64_t, T>(
-      (std::int64_t)round(transformed_val),
-      result_precision, result_is_signed);
+      static_cast<std::int64_t>(std::nearbyint(transformed_val)),
+      result_precision,
+      result_is_signed);
 }
 
 template <typename T>
