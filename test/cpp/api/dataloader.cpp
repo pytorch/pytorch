@@ -565,7 +565,7 @@ struct UncopyableDataset : datasets::Dataset<UncopyableDataset, int> {
   std::unordered_set<std::thread::id> thread_ids;
 };
 
-TEST(DataTest, TestSharedDatasetReallyIsShared) {
+TEST(DataTest, SharedBatchDatasetReallyIsShared) {
   auto shared_dataset =
       torch::data::datasets::make_shared_dataset<UncopyableDataset>(
           "uncopyable");
@@ -579,7 +579,7 @@ TEST(DataTest, TestSharedDatasetReallyIsShared) {
   ASSERT_EQ(shared_dataset->thread_ids.size(), 3);
 }
 
-TEST(DataTest, TestSharedDatasetDoesNotIncurCopyWhenPassedDatasetObject) {
+TEST(DataTest, SharedBatchDatasetDoesNotIncurCopyWhenPassedDatasetObject) {
   // This will not compile if a copy is made.
   auto shared_dataset =
       torch::data::datasets::make_shared_dataset<UncopyableDataset>(

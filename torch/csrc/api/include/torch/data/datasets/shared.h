@@ -16,19 +16,19 @@ namespace datasets {
 /// thread-safe access itself.
 ///
 /// Use `torch::data::datasets::make_shared_dataset()` to create a new
-/// `SharedDataset` like you would a `std::shared_ptr`.
+/// `SharedBatchDataset` like you would a `std::shared_ptr`.
 template <typename UnderlyingDataset>
-class SharedDataset : BatchDataset<
-                          SharedDataset<UnderlyingDataset>,
+class SharedBatchDataset : BatchDataset<
+                          SharedBatchDataset<UnderlyingDataset>,
                           typename UnderlyingDataset::BatchType,
                           typename UnderlyingDataset::BatchRequestType> {
  public:
   using BatchType = typename UnderlyingDataset::BatchType;
   using BatchRequestType = typename UnderlyingDataset::BatchRequestType;
 
-  /// Constructs a new `SharedDataset` from a `shared_ptr` to the
+  /// Constructs a new `SharedBatchDataset` from a `shared_ptr` to the
   /// `UnderlyingDataset`.
-  /* implicit */ SharedDataset(
+  /* implicit */ SharedBatchDataset(
       std::shared_ptr<UnderlyingDataset> shared_dataset)
       : dataset_(std::move(shared_dataset)) {}
 
@@ -66,11 +66,11 @@ class SharedDataset : BatchDataset<
   std::shared_ptr<UnderlyingDataset> dataset_;
 };
 
-/// Constructs a new `SharedDataset` by creating a
+/// Constructs a new `SharedBatchDataset` by creating a
 /// `shared_ptr<UnderlyingDatase>`. All arguments are forwarded to
 /// `make_shared<UnderlyingDataset>`.
 template <typename UnderlyingDataset, typename... Args>
-SharedDataset<UnderlyingDataset> make_shared_dataset(Args&&... args) {
+SharedBatchDataset<UnderlyingDataset> make_shared_dataset(Args&&... args) {
   return std::make_shared<UnderlyingDataset>(std::forward<Args>(args)...);
 }
 } // namespace datasets
