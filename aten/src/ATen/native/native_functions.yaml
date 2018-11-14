@@ -1259,6 +1259,9 @@
 
 - func: _pdist_backward(Tensor grad, Tensor self, double p, Tensor pdist) -> Tensor
 
+- func: cosine_similarity(Tensor x1, Tensor x2, int64_t dim=1, double eps=1e-8) -> Tensor
+  variants: function
+
 - func: permute(Tensor self, IntList dims) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
