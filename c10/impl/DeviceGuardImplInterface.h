@@ -10,7 +10,7 @@
 #include <atomic>
 
 namespace c10 {
-namespace detail {
+namespace impl {
 
 /**
  * DeviceGuardImplInterface represents the virtual interface which provides
@@ -118,7 +118,7 @@ public:
 };
 
 #define C10_REGISTER_GUARD_IMPL(DevType, DeviceGuardImpl) \
-  static ::c10::detail::DeviceGuardImplRegistrar C10_ANONYMOUS_VARIABLE(g_##DeviceType)(::c10::DeviceType::DevType, new DeviceGuardImpl());
+  static ::c10::impl::DeviceGuardImplRegistrar C10_ANONYMOUS_VARIABLE(g_##DeviceType)(::c10::DeviceType::DevType, new DeviceGuardImpl());
 
 inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
   auto p = device_guard_impl_registry[static_cast<size_t>(type)].load();
@@ -126,4 +126,4 @@ inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
   return p;
 }
 
-}} // namespace c10::detail
+}} // namespace c10::impl

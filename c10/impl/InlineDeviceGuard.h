@@ -3,13 +3,13 @@
 // This file provides implementations of InlineDeviceGuard and InlineOptionalDeviceGuard.
 
 #include <c10/Device.h>
-#include <c10/detail/DeviceGuardImplInterface.h>
-#include <c10/detail/VirtualGuardImpl.h>
+#include <c10/impl/DeviceGuardImplInterface.h>
+#include <c10/impl/VirtualGuardImpl.h>
 #include <c10/util/Optional.h>
 #include <c10/util/C++17.h>
 
 namespace c10 {
-namespace detail {
+namespace impl {
 
 
 
@@ -34,7 +34,7 @@ namespace detail {
  *
  * If you are in a hurry, you can use InlineDeviceGuard directly:
  *
- *    using CUDAGuard = detail::InlineDeviceGuard<CUDAGuardImpl>;
+ *    using CUDAGuard = impl::InlineDeviceGuard<CUDAGuardImpl>;
  *
  * However, you can provide a better user experience if you explicitly write a
  * wrapper class that itself contains the template instantiation:
@@ -43,7 +43,7 @@ namespace detail {
  *    public:
  *      // ... the API ...
  *    private:
- *      detail::InlineDeviceGuard<CUDAGuardImpl> guard_;
+ *      impl::InlineDeviceGuard<CUDAGuardImpl> guard_;
  *    }
  *
  * The wrapper class provides a good place to write documentation, and helps
@@ -140,7 +140,7 @@ public:
   /// Optional argument is for testing only.
   template <typename U=T>
   typename std::enable_if<std::is_same<U, VirtualGuardImpl>::value >::type
-  reset_device(at::Device device, const detail::DeviceGuardImplInterface* impl = nullptr) {
+  reset_device(at::Device device, const impl::DeviceGuardImplInterface* impl = nullptr) {
     auto index = device.index();
     if (index == -1) return;
     if (device.type() == original_device_.type()) {
@@ -387,4 +387,4 @@ private:
   optional<InlineDeviceGuard<T>> guard_;
 };
 
-}} // namespace c10::detail
+}} // namespace c10::impl
