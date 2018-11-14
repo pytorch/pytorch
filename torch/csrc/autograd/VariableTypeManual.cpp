@@ -1,5 +1,8 @@
 #include "c10/util/Optional.h"
 #include "torch/csrc/autograd/VariableTypeUtils.h"
+#include "torch/csrc/utils/memory.h"
+
+#include <torch/csrc/utils/memory.h>
 
 using namespace at;
 using namespace torch::autograd::generated;
@@ -71,11 +74,12 @@ std::vector<std::unique_ptr<Type>> type_to_variable_type;
 // XXX - this is not threadsafe with uses of Variables
 void register_variable_type_for(TypeExtendedInterface* baseType) {
   AT_ASSERT(baseType);
-  size_t base_id = static_cast<size_t>(baseType->ID());
+  const auto base_id = static_cast<size_t>(baseType->ID());
   if(type_to_variable_type.size() <= base_id) {
     type_to_variable_type.resize(base_id + 1);
   }
-  type_to_variable_type[base_id].reset(new VariableType(&at::globalContext(), baseType));
+  type_to_variable_type[base_id] =
+      make_unique<VariableType>(&at::globalContext(), baseType);
 }
 
 struct VariableTypeRegistry {
@@ -174,17 +178,31 @@ std::vector<at::Type*> VariableType::allCUDATypes() {
   return allTypesForBackends({ Backend::CUDA, Backend::SparseCUDA });
 }
 
-Variable & VariableType::checked_cast_variable(const Tensor & t, const char * name, int pos) {
+const Variable & VariableType::checked_cast_variable(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
-  if (!isVariableType(t.type())) {
+  if (!t.is_variable()) {
     AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
   }
-  return as_variable_ref(const_cast<Tensor&>(t));
+  return as_variable_ref(t);
 }
 
-Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
+Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, int pos) {
+  if (!t.defined()) {
+    AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
+  }
+  if (!t.is_variable()) {
+    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
+  }
+  return as_variable_ref(t);
+}
+
+const Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
+  return checked_cast_variable(t, name, pos).data();
+}
+
+Tensor & VariableType::unpack(Tensor & t, const char * name, int pos) {
   return checked_cast_variable(t, name, pos).data();
 }
 
@@ -251,9 +269,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
     grad_fn->src_type = &src.type();
-    if (src.is_cuda()) {
-      grad_fn->src_device = src.get_device();
-    }
+    grad_fn->src_device = src.device();
   }
   if (self.is_sparse() && src.is_sparse()) baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
   else if (!self.is_sparse() && !src.is_sparse()) baseType->s_copy_(self_, src_, non_blocking);
@@ -310,7 +326,7 @@ Tensor VariableType::detach(const Tensor & self) const {
 
   }
   // <NON_GENERATED_CODE>
-  auto result = as_variable_ref(const_cast<Tensor&>(self)).detach();
+  auto result = as_variable_ref(const_cast<Tensor&>(self)).detach(); // NOLINT(cppcoreguidelines-pro-type-const-cast)
   // </NON_GENERATED_CODE>
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, result);

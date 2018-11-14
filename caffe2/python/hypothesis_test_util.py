@@ -50,6 +50,7 @@ import hypothesis.strategies as st
 import logging
 import numpy as np
 import os
+import six
 
 
 def is_sandcastle():
@@ -357,6 +358,7 @@ class HypothesisTestCase(test_util.TestCase):
     A unittest.TestCase subclass with some helper functions for
     utilizing the `hypothesis` (hypothesis.readthedocs.io) library.
     """
+
     def assertDeviceChecks(
         self,
         device_options,
@@ -691,5 +693,5 @@ class HypothesisTestCase(test_util.TestCase):
             if regexp is None:
                 self.assertRaises(exception, workspace.RunOperatorOnce, op)
             else:
-                self.assertRaisesRegexp(
-                    exception, regexp, workspace.RunOperatorOnce, op)
+                six.assertRaisesRegex(
+                    self, exception, regexp, workspace.RunOperatorOnce, op)

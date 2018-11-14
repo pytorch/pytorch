@@ -72,10 +72,12 @@ elseif(BLAS STREQUAL "MKL")
   if(MKL_FOUND)
     include_directories(SYSTEM ${MKL_INCLUDE_DIR})
     list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
+    set(CAFFE2_USE_MKL ON)
   else()
     message(WARNING "MKL could not be found. Defaulting to Eigen")
     set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
     set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
+    set(CAFFE2_USE_MKL OFF)
   endif()
 elseif(BLAS STREQUAL "vecLib")
   find_package(vecLib REQUIRED)
@@ -83,6 +85,36 @@ elseif(BLAS STREQUAL "vecLib")
   list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${vecLib_LINKER_LIBS})
 else()
   message(FATAL_ERROR "Unrecognized blas option:" ${BLAS})
+endif()
+
+
+if (NOT BUILD_ATEN_MOBILE)
+  set(AT_MKL_ENABLED 0)
+  set(AT_MKL_MT 0)
+  set(USE_BLAS 1)
+  if(NOT (ATLAS_FOUND OR OPENBLAS_FOUND OR MKL_FOUND OR VECLIB_FOUND))
+    find_package(BLAS)
+    if (NOT BLAS_FOUND)
+      set(USE_BLAS 0)
+    endif()
+  endif()
+
+  if (MKL_FOUND)
+    ADD_DEFINITIONS(-DTH_BLAS_MKL)
+    if(NOT MKL_INCLUDE_DIR)
+      MESSAGE(FATAL_ERROR "MKL is used, but MKL header files are not found. \
+        You can get them by `conda install mkl-include` if using conda (if \
+        it is missing, run `conda upgrade -n root conda` first), and \
+        `pip install mkl-devel` if using pip. If build fails with header files \
+        available in the system, please make sure that CMake will search the \
+        directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
+	endif()
+    if (MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
+      ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
+      set(AT_MKL_MT 1)
+    endif()
+    set(AT_MKL_ENABLED 1)
+  endif()
 endif()
 
 # Directory where NNPACK and cpuinfo will download and build all dependencies
@@ -262,6 +294,43 @@ if(BUILD_TEST)
   # Recover build options.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 endif()
+
+# ---[ FBGEMM
+if(USE_FBGEMM)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+  if(NOT DEFINED FBGEMM_SOURCE_DIR)
+    set(FBGEMM_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fbgemm" CACHE STRING "FBGEMM source directory")
+  endif()
+  if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
+    message(WARNING
+      "A compiler with AVX512 support is required for FBGEMM. "
+      "Not compiling with FBGEMM. "
+      "Turn this warning off by USE_FBGEMM=OFF.")
+    set(USE_FBGEMM OFF)
+  endif()
+  if(MSVC)
+    set(USE_FBGEMM OFF)
+  endif()
+  if(USE_FBGEMM AND NOT TARGET fbgemm)
+    set(FBGEMM_BUILD_TESTS OFF CACHE BOOL "")
+    set(FBGEMM_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
+    add_subdirectory("${FBGEMM_SOURCE_DIR}")
+    set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
+    set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
+    set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
+  endif()
+
+  if(USE_FBGEMM)
+    list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
+  endif()
+endif()
+
+if(USE_FBGEMM)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}")
+endif()
+
 
 # ---[ LMDB
 if(USE_LMDB)
@@ -483,15 +552,13 @@ endif()
 
 # ---[ pybind11
 find_package(pybind11 CONFIG)
-if((DEFINED pybind11_DIR) AND pybind11_DIR)
-  get_target_property(pybind11_INCLUDE_DIRS pybind11::pybind11 INTERFACE_INCLUDE_DIRECTORIES)
-else()
+if(NOT pybind11_FOUND)
   find_package(pybind11)
 endif()
 
 if(pybind11_FOUND)
     message(STATUS "System pybind11 found")
-    message(STATUS "pybind11l include dirs: " ${pybind11_INCLUDE_DIRS})
+    message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
     include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
 else()
     message(STATUS "Using third_party/pybind11.")
@@ -606,25 +673,32 @@ if(NOT BUILD_ATEN_MOBILE)
     message(INFO "Compiling with HIP for AMD.")
     caffe2_update_option(USE_ROCM ON)
 
-    list(APPEND HIP_HIPCC_FLAGS -fPIC)
-    list(APPEND HIP_HIPCC_FLAGS -D__HIP_PLATFORM_HCC__=1)
-    list(APPEND HIP_HIPCC_FLAGS -DCUDA_HAS_FP16=1)
-    list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
-    list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
-    list(APPEND HIP_HIPCC_FLAGS -DHIP_VERSION=${HIP_VERSION_MAJOR})
-    list(APPEND HIP_HIPCC_FLAGS -Wno-macro-redefined)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-inconsistent-missing-override)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-exceptions)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-shift-count-negative)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-shift-count-overflow)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-unused-command-line-argument)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-duplicate-decl-specifier)
-    
+    list(APPEND HIP_CXX_FLAGS -fPIC)
+    list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_HCC__=1)
+    list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
+    list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
+    list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
+    list(APPEND HIP_CXX_FLAGS -DHIP_VERSION=${HIP_VERSION_MAJOR})
+    list(APPEND HIP_CXX_FLAGS -Wno-macro-redefined)
+    list(APPEND HIP_CXX_FLAGS -Wno-inconsistent-missing-override)
+    list(APPEND HIP_CXX_FLAGS -Wno-exceptions)
+    list(APPEND HIP_CXX_FLAGS -Wno-shift-count-negative)
+    list(APPEND HIP_CXX_FLAGS -Wno-shift-count-overflow)
+    list(APPEND HIP_CXX_FLAGS -Wno-unused-command-line-argument)
+    list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
+    list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
+    list(APPEND HIP_CXX_FLAGS -DROCBLAS_FP16=0)
+
     if(CMAKE_BUILD_TYPE MATCHES Debug)
-       list(APPEND HIP_HIPCC_FLAGS -g)
-       list(APPEND HIP_HIPCC_FLAGS -O0)
+       list(APPEND HIP_CCX_FLAGS -g)
+       list(APPEND HIP_CCX_FLAGS -O0)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
-    list(APPEND HIP_HIPCC_FLAGS -DCAFFE2_USE_MIOPEN)
+
+    set(HIP_HCC_FLAGS ${HIP_CXX_FLAGS})
+    # Ask hcc to generate device code during compilation so we can use
+    # host linker to link.
+    list(APPEND HIP_HCC_FLAGS -fno-gpu-rdc)
+    list(APPEND HIP_HCC_FLAGS -amdgpu-target=${HCC_AMDGPU_TARGET})
 
     set(Caffe2_HIP_INCLUDES
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
@@ -659,17 +733,6 @@ if(USE_ROCM)
  include_directories(SYSTEM ${HIPRAND_PATH}/include)
  include_directories(SYSTEM ${ROCRAND_PATH}/include)
  include_directories(SYSTEM ${THRUST_PATH})
-
- # load HIP cmake module and load platform id
- EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig -P OUTPUT_VARIABLE PLATFORM)
- EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig --cpp_config OUTPUT_VARIABLE HIP_CXX_FLAGS)
-
- # Link with HIPCC https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_porting_guide.md#linking-with-hipcc
- # SET(CMAKE_CXX_LINK_EXECUTABLE ${HIP_HIPCC_EXECUTABLE})
-
- # Show message that we're using ROCm.
- MESSAGE(STATUS "ROCM TRUE:")
- MESSAGE(STATUS "CMAKE_CXX_COMPILER: " ${CMAKE_CXX_COMPILER})
 endif()
 
 # ---[ NCCL
@@ -864,12 +927,12 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   endif()
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
   # We will build onnx as static libs and embed it directly into the binary.
-  set(BUILD_SHARED_LIBS OFF)
   if (MSVC AND BUILD_SHARED_LIBS)
     # That also means we want to export all symbols from the shared
     # library we are building
     set(ONNX_BUILD_MAIN_LIB ON)
   endif()
+  set(BUILD_SHARED_LIBS OFF)
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
   set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
   # If linking local protobuf, make sure ONNX has the same protobuf
@@ -1194,30 +1257,6 @@ if (NOT BUILD_ATEN_MOBILE)
       CACHE BOOL "Copy the required BLAS DLLs into the TH install dirs")
   ENDIF()
 
-  FIND_PACKAGE(BLAS)
-  SET(AT_MKL_ENABLED 0)
-  SET(AT_MKL_MT 0)
-  IF (BLAS_FOUND)
-    SET(USE_BLAS 1)
-    IF (BLAS_INFO STREQUAL "mkl")
-      ADD_DEFINITIONS(-DTH_BLAS_MKL)
-      IF(NOT BLAS_INCLUDE_DIR)
-        MESSAGE(FATAL_ERROR "MKL is used, but MKL header files are not found. \
-          You can get them by `conda install mkl-include` if using conda (if \
-          it is missing, run `conda upgrade -n root conda` first), and \
-          `pip install mkl-devel` if using pip. If build fails with header files \
-          available in the system, please make sure that CMake will search the \
-          directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
-      ENDIF()
-      IF (MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
-        ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
-        SET(AT_MKL_MT 1)
-      ENDIF()
-      INCLUDE_DIRECTORIES(SYSTEM ${BLAS_INCLUDE_DIR})  # include MKL headers
-      SET(AT_MKL_ENABLED 1)
-    ENDIF()
-  ENDIF()
-
   FIND_PACKAGE(LAPACK)
   IF (LAPACK_FOUND)
     SET(USE_LAPACK 1)
@@ -1248,19 +1287,24 @@ if (NOT BUILD_ATEN_MOBILE)
     set(AT_ROCM_ENABLED 1)
   ENDIF()
 
-  if (NO_MKLDNN)
-    message("disabling MKLDNN because NO_MKLDNN is set")
-    set(AT_MKLDNN_ENABLED 0)
-  else()
-    find_package(MKLDNN)
-    if(NOT MKLDNN_FOUND)
-      message(STATUS "MKLDNN not found. Compiling without MKLDNN support")
-      set(AT_MKLDNN_ENABLED 0)
-    else()
-      include_directories(SYSTEM ${MKLDNN_INCLUDE_DIRS})
-      set(AT_MKLDNN_ENABLED 1)
-    endif()
-  endif()
+  SET(AT_MKLDNN_ENABLED 0)
+  SET(CAFFE2_USE_MKLDNN OFF)
+  IF (USE_MKLDNN)
+    FIND_PACKAGE(MKLDNN)
+    INCLUDE(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
+    IF(MKLDNN_FOUND)
+      SET(AT_MKLDNN_ENABLED 1)
+      INCLUDE_DIRECTORIES(SYSTEM ${MKLDNN_INCLUDE_DIR})
+      IF(BUILD_CAFFE2_OPS)
+        SET(CAFFE2_USE_MKLDNN ON)
+        LIST(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkldnn)
+      ENDIF(BUILD_CAFFE2_OPS)
+    ELSE()
+      MESSAGE(WARNING "MKLDNN could not be found.")
+    ENDIF()
+  ELSE()
+    MESSAGE("disabling MKLDNN because USE_MKLDNN is not set")
+  ENDIF()
 
   IF(UNIX AND NOT APPLE)
      INCLUDE(CheckLibraryExists)

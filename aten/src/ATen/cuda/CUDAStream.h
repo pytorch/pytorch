@@ -7,6 +7,7 @@
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <c10/util/Exception.h>
+#include <c10/Stream.h>
 
 /*
 * A CUDAStream interface. See CUDAStream.cpp for implementation details.
@@ -59,7 +60,7 @@ struct CUDAEvent;
 
 namespace detail {
 
-// Pointer-based API (for internal use)
+// Pointer-based API (for internal use, backwards compatibility with C-based API)
 AT_CUDA_API CUDAStreamInternals* CUDAStream_getDefaultStream(int64_t device = -1);
 
 AT_CUDA_API CUDAStreamInternals* CUDAStream_getStreamFromPool(
@@ -71,8 +72,8 @@ AT_CUDA_API CUDAStreamInternals* CUDAStream_getCurrentStream(int64_t device = -1
 AT_CUDA_API void CUDAStream_setStream(CUDAStreamInternals* internals);
 AT_CUDA_API void CUDAStream_uncheckedSetStream(CUDAStreamInternals* internals);
 
-AT_CUDA_API cudaStream_t CUDAStream_stream(CUDAStreamInternals*);
-AT_CUDA_API int64_t CUDAStream_device(CUDAStreamInternals*);
+AT_CUDA_API cudaStream_t CUDAStream_stream(const CUDAStreamInternals*);
+AT_CUDA_API int64_t CUDAStream_device(const CUDAStreamInternals*);
 
 } // namespace detail
 
@@ -80,32 +81,32 @@ AT_CUDA_API int64_t CUDAStream_device(CUDAStreamInternals*);
 // Allows use as a cudaStream_t, copying, moving, and metadata access.
 struct AT_CUDA_API CUDAStream {
 
-  // Constructors
-  /* implicit */ CUDAStream(CUDAStreamInternals* internals_in)
-    : internals_{internals_in} {
-    AT_ASSERT(internals_in);
+  enum Unchecked { UNCHECKED };
+
+  explicit CUDAStream(const CUDAStreamInternals*);
+
+  explicit CUDAStream(Stream stream) : stream_(stream) {
+    AT_CHECK(stream_.device_type() == DeviceType::CUDA);
   }
 
-  // Returns true if the CUDAStream is not null.
-  explicit operator bool() const noexcept { return internals_ != nullptr; }
+  explicit CUDAStream(Unchecked, Stream stream) : stream_(stream) {}
 
   // Implicit conversion to cudaStream_t
-  operator cudaStream_t() const { return detail::CUDAStream_stream(internals_); }
-
-  // Less than operator (to allow use in sets)
-  friend bool operator<(const CUDAStream& left, const CUDAStream& right) {
-    return left.internals_ < right.internals_;
-  }
+  operator cudaStream_t() const { return stream(); }
+  operator Stream() const { return unwrap(); }
 
   // Getters
-  int64_t device() const { return detail::CUDAStream_device(internals_); }
-  cudaStream_t stream() const { return detail::CUDAStream_stream(internals_); }
-  CUDAStreamInternals* internals() const { return internals_; }
+  int64_t device_index() const { return stream_.device_index(); }
+  Device device() const { return Device(DeviceType::CUDA, device_index()); }
+  cudaStream_t stream() const { return detail::CUDAStream_stream(internals()); }
+  CUDAStreamInternals* internals() const;
+
+  Stream unwrap() const { return stream_; }
 
   void synchronize_with(const CUDAEvent& event) const;
 
 private:
-  CUDAStreamInternals* internals_ = nullptr;
+  Stream stream_;
 };
 
 } // namespace cuda

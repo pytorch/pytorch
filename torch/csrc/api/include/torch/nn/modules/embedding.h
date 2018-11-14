@@ -2,7 +2,7 @@
 
 #include <torch/nn/cloneable.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <cstddef>
 #include <vector>
@@ -11,7 +11,7 @@ namespace torch {
 namespace nn {
 
 /// Options for the `Embedding` module.
-struct EmbeddingOptions {
+struct TORCH_API EmbeddingOptions {
   EmbeddingOptions(int64_t count, int64_t dimension);
   /// The number of embeddings (number of rows in the table).
   TORCH_ARG(int64_t, count);
@@ -20,7 +20,7 @@ struct EmbeddingOptions {
 };
 
 /// Performs a lookup in a fixed size embedding table.
-class EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
+class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
  public:
   EmbeddingImpl(int64_t count, int64_t dimension)
       : EmbeddingImpl(EmbeddingOptions(count, dimension)) {}

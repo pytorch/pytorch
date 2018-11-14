@@ -112,22 +112,17 @@
   tensor1: grad * tensor2 * value
   tensor2: grad * tensor1 * value
 
-- name: th_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
+- name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
-  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
+  mat1: mm_mat1_backward(grad, mat2, mat1, alpha)
   mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
 
-- name: s_native_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
-  self: maybe_multiply(grad, beta)
-  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
-  mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
-
-- name: _addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta, Scalar alpha)
+- name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
   mat: grad.ger(vec) * alpha
   vec: mat.t().mv(grad) * alpha
 
-- name: _addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta, Scalar alpha)
+- name: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
   vec1: grad.mv(vec2) * alpha
   vec2: grad.t().mv(vec1) * alpha
@@ -184,6 +179,9 @@
 - name: ceil(Tensor self)
   self: zeros_like(grad)
 
+- name: cholesky(Tensor self, bool upper)
+  self: cholesky_backward(grad, upper, result)
+
 # For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
 - name: clamp(Tensor self, Scalar? min, Scalar? max)
@@ -211,11 +209,17 @@
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
-- name: _cumprod(Tensor self, int64_t dim)
+- name: cumprod(Tensor self, int64_t dim)
   self: cumprod_backward(grad, self, dim)
 
-- name: _cumsum(Tensor self, int64_t dim)
+- name: cumprod(Tensor self, int64_t dim, *, ScalarType dtype)
+  self: cumprod_backward(grad, self, dim, dtype)
+
+- name: cumsum(Tensor self, int64_t dim)
   self: cumsum_backward(grad, dim)
+
+- name: cumsum(Tensor self, int64_t dim, *, ScalarType dtype)
+  self: cumsum_backward(grad, dim, self.type().scalarType())
 
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad)
   self, weight, bias: conv_tbc_backward(grad, self, weight, bias, pad)
@@ -325,11 +329,7 @@
   self: grad.mv(vec2)
   vec2: grad.t().mv(self)
 
-- name: _gesv_single(Tensor self, Tensor A)
-  self: gesv_backward_self(grad, self, A)
-  A: gesv_backward_A(grad, self, A, solution)
-
-- name: _gesv_helper(Tensor self, Tensor A)
+- name: gesv(Tensor self, Tensor A)
   self: gesv_backward_self(grad, self, A)
   A: gesv_backward_A(grad, self, A, result0)
 
@@ -490,8 +490,8 @@
   self: grad.clone().masked_fill_(self >= other, 0)
   other: grad.clone().masked_fill_(self < other, 0)
 
-- name: _mm(Tensor self, Tensor mat2)
-  self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), 1)
+- name: mm(Tensor self, Tensor mat2)
+  self: mm_mat1_backward(grad, mat2, self, 1)
   mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
 
 - name: mode(Tensor self, int64_t dim, bool keepdim)
@@ -510,6 +510,14 @@
 
 - name: mvlgamma(Tensor self, int64_t p)
   self: mvlgamma_backward(grad, self, p)
+
+- name: native_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double momentum, double eps)
+  input, weight, bias: native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, eps, grad_input_mask)
+
+- name: native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor weight, Tensor running_mean, Tensor running_var, Tensor save_mean, Tensor save_invstd, bool train, double eps, std::array<bool,3> output_mask)
+  input, weight, grad_out: batchnorm_double_backward(input, weight, grads[0], grads[1], grads[2], grad_out, running_mean, running_var, train, eps, save_mean, save_invstd, grad_input_mask)
+  save_mean: not_implemented("native_batch_norm_backward save_mean")
+  save_invstd: not_implemented("native_batch_norm_backward save_invstd")
 
 - name: ne_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -563,15 +571,12 @@
 - name: poisson(Tensor self, Generator generator)
   self: zeros_like(self)
 
-- name: potrf(Tensor self, bool upper)
-  self: potrf_backward(grad, upper, output)
-
 - name: potri(Tensor self, bool upper)
   self: not_implemented("potri")
 
 - name: potrs(Tensor self, Tensor input2, bool upper)
-  self: not_implemented("potri")
-  input2: not_implemented("potri")
+  self: not_implemented("potrs")
+  input2: not_implemented("potrs")
 
 - name: pow(Tensor self, Scalar exponent)
   self: pow_backward(grad, self, exponent)
@@ -681,7 +686,7 @@
   self: slogdet_backward(grads, self, result0, result1)
 
 - name: sort(Tensor self, int64_t dim, bool descending)
-  self: index_select_backward(grad, dim, indices, self.sizes(), true)
+  self: index_select_backward(grad, dim, result1, self.sizes(), true)
 
 - name: split(Tensor self, int64_t split_size, int64_t dim)
   self: split_backward(grads, split_size, dim, self.sizes(), self.type())
@@ -717,6 +722,13 @@
 - name: sub(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
 
+- name: rsub(Tensor self, Tensor other, *, Scalar alpha)
+  self: -grad * alpha
+  other: grad
+
+- name: rsub(Tensor self, Scalar other, *, Scalar alpha)
+  self: -grad * alpha
+
 - name: sum(Tensor self)
   self: grad.expand(self.sizes())
 
@@ -733,16 +745,19 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type().scalarType())
 
 - name: svd(Tensor self, bool some, bool compute_uv)
-  self: svd_backward(grads, self, some, compute_uv, res1, res2, res3)  # resX are defined in Declarations.cwrap
+  self: svd_backward(grads, self, some, compute_uv, result0, result1, result2)
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
-  self: symeig_backward(grads, self, eigenvectors, upper, res1, res2)
+  self: symeig_backward(grads, self, eigenvectors, upper, result0, result1)
 
 - name: t(Tensor self)
   self: grad.t()
 
 - name: flip(Tensor self, IntList dims)
   self: grad.flip(dims)
+
+- name: roll(Tensor self, IntList shifts, IntList dims)
+  self: grad.roll( -shifts[0], dims)
 
 - name: rot90(Tensor self, int64_t k, IntList dims)
   self: grad.rot90(-k, dims)
@@ -757,7 +772,7 @@
   self: _tanh_backward(grad, result)
 
 - name: topk(Tensor self, int64_t k, int64_t dim, bool largest, bool sorted)
-  self: index_select_backward(grad, dim, indices, self.sizes(), true)
+  self: index_select_backward(grad, dim, result1, self.sizes(), true)
 
 - name: trace(Tensor self)
   self: trace_backward(grad, self.sizes())
@@ -775,7 +790,7 @@
   self: grad.triu(diagonal)
 
 - name: trtrs(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular)
-  self, A: trtrs_backward(grads[0], grads[1], self, A, res1, upper, transpose, unitriangular, grad_input_mask)
+  self, A: trtrs_backward(grads[0], grads[1], self, A, result0, upper, transpose, unitriangular, grad_input_mask)
 
 - name: trunc(Tensor self)
   self: zeros_like(grad)
@@ -893,7 +908,11 @@
   self: soft_margin_loss_backward(grad, self, target, reduction)
 
 - name: relu(Tensor self)
-  self: threshold_backward(grad, self, 0, 0)
+  self: threshold_backward(grad, self, 0)
+
+# NB: `output` instead of `self` saves memory. It avoids saving a copy of self.
+- name: relu_(Tensor self)
+  self: threshold_backward(grad, output, 0)
 
 - name: elu_forward(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale)
   self: elu_backward(grad, alpha, scale, input_scale, output)
@@ -947,11 +966,11 @@
 - name: softshrink_forward(Tensor self, Scalar lambd)
   self: softshrink_backward(grad, self, lambd)
 
-- name: threshold_forward(Tensor self, Scalar threshold, Scalar value)
-  self: threshold_backward(grad, self, threshold, value)
+- name: threshold(Tensor self, Scalar threshold, Scalar value)
+  self: threshold_backward(grad, self, threshold)
 
-- name: threshold_forward_(Tensor self, Scalar threshold, Scalar value)
-  self: threshold_backward(grad, output, threshold, value)
+- name: threshold_(Tensor self, Scalar threshold, Scalar value)
+  self: threshold_backward(grad, output, threshold)
 
 - name: reflection_pad1d_forward(Tensor self, IntList padding)
   self: reflection_pad1d_backward(grad, self, padding)
@@ -1018,14 +1037,6 @@
 
 - name: max_unpool3d_forward(Tensor self, Tensor indices, IntList output_size, IntList stride, IntList padding)
   self: max_unpool3d_backward(grad, self, indices, output_size, stride, padding)
-
-- name: thnn_batch_norm_forward(Tensor self, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double momentum, double eps)
-  self, weight, bias: thnn_batch_norm_backward(grad.contiguous(), self, weight, running_mean, running_var, training, eps, save_mean, save_std, grad_input_mask)
-
-- name: thnn_batch_norm_backward(Tensor grad_output, Tensor self, Tensor weight, Tensor running_mean, Tensor running_var, bool training, double eps, Tensor save_mean, Tensor save_std, std::array<bool,3> output_mask)
-  self, weight, grad_output: batchnorm_double_backward(self, weight, grads[0], grads[1], grads[2], grad_output, running_mean, running_var, training, eps, save_mean, save_std, grad_input_mask)
-  save_mean: not_implemented("thnn_batch_norm_backward save_mean")
-  save_std: not_implemented("thnn_batch_norm_backward save_std")
 
 - name: thnn_conv_transpose2d_forward(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding, IntList output_padding, IntList dilation)
   self, weight, bias: thnn_conv_transpose2d_backward(grad, self, weight, kernel_size, stride, padding, output_padding, dilation, columns, ones, grad_input_mask)
@@ -1201,8 +1212,8 @@
   grad_output: softshrink_backward(grad, self, lambd)
   self: zeros_like(grad)
 
-- name: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold, Scalar value)
-  grad_output: threshold_backward(grad, self, threshold, value)
+- name: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold)
+  grad_output: threshold_backward(grad, self, threshold)
   self: zeros_like(grad)
 
 - name: upsample_linear1d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
@@ -1277,7 +1288,7 @@
 # work.)
 # NB2: The quotes around the gradient are needed to appease YAML parsing rules.
 - name: cudnn_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double exponential_average_factor, double epsilon)
-  input, weight, bias: "training ? cudnn_batch_norm_backward(input, grad.contiguous(), weight, running_mean, running_var, result1, result2, epsilon) : thnn_batch_norm_backward(grad.contiguous(), input, weight, running_mean, running_var, training, epsilon, result1, result2, grad_input_mask)"
+  input, weight, bias: "training ? cudnn_batch_norm_backward(input, grad.contiguous(), weight, running_mean, running_var, result1, result2, epsilon) : native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, epsilon, grad_input_mask)"
 
 # HACK: save_mean and save_var are going to be passed in as
 # requires_grad variables (even though we'll never backprop through
@@ -1309,7 +1320,7 @@
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, benchmark, deterministic, true, grad_input_mask)
 
 - name: miopen_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double exponential_average_factor, double epsilon)
-  input, weight, bias: "training ? miopen_batch_norm_backward(input, grad.contiguous(), weight, running_mean, running_var, result1, result2, epsilon) : thnn_batch_norm_backward(grad.contiguous(), input, weight, running_mean, running_var, training, epsilon, result1, result2, grad_input_mask)"
+  input, weight, bias: "training ? miopen_batch_norm_backward(input, grad.contiguous(), weight, running_mean, running_var, result1, result2, epsilon) : native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, epsilon, grad_input_mask)"
 
 - name: miopen_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor running_mean, Tensor running_var, Tensor save_mean, Tensor save_var, double epsilon)
   save_mean: not_implemented("miopen_batch_norm_backward save_mean")

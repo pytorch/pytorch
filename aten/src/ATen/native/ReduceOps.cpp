@@ -102,7 +102,7 @@ static std::unique_ptr<TensorIterator> make_reduction(
 }
 
 static inline Tensor cumsum(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
-  return at::_cumsum(integer_upcast(self, dtype), dim);
+  return at::_th_cumsum(integer_upcast(self, dtype), dim);
 }
 
 Tensor cumsum(const Tensor& self, int64_t dim, ScalarType dtype) {
@@ -122,7 +122,7 @@ static inline Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim
       " and ",
       at::toString(dtype.value()),
       ".");
-  return at::_cumsum_out(result, self.toType(result.type().scalarType()), dim);
+  return at::_th_cumsum_out(result, self.toType(result.type().scalarType()), dim);
 }
 
 Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
@@ -134,7 +134,7 @@ Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim) {
 }
 
 static inline Tensor cumprod(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
-  return at::_cumprod(integer_upcast(self, dtype), dim);
+  return at::_th_cumprod(integer_upcast(self, dtype), dim);
 }
 
 Tensor cumprod(const Tensor& self, int64_t dim, ScalarType dtype) {
@@ -154,7 +154,7 @@ static inline Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t di
       " and ",
       at::toString(dtype.value()),
       ".");
-  return at::_cumprod_out(result, self.toType(result.type().scalarType()), dim);
+  return at::_th_cumprod_out(result, self.toType(result.type().scalarType()), dim);
 }
 
 Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
@@ -431,7 +431,7 @@ Tensor& norm_out(Tensor &result, const Tensor &self, Scalar p, int64_t dim, bool
 }
 
 Tensor _norm(const Tensor &self, Scalar p) {
-  if (self.type().is_sparse()) {
+  if (self.is_sparse()) {
     return at::native_norm(self, p);
   } else {
     AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,

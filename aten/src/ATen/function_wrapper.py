@@ -180,7 +180,7 @@ AT_ERROR("${api_name} only supports a 0-dimensional ${check_name} tensor, but go
 """)
 
 SPARSE_CHECK = CodeTemplate("""\
-if(${check_name}.type().is_sparse()) {
+if(${check_name}.is_sparse()) {
     return static_cast<const TypeExtendedInterface*>(this)->${api_name}(${sparse_actuals});
 }""")
 
@@ -527,6 +527,7 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('buffers', Optional[List[str]]),
     ('returns', List[ReturnType]),
     ('inplace', bool),
+    ('is_factory_method', bool),
     ('abstract', bool),
     ('requires_tensor', bool),
     ('device_guard', bool),
@@ -544,7 +545,7 @@ def device_guard(option, formals, is_factory_method, dispatch_options):
             tensor_arguments = [f for f in formals if f['dynamic_type'] in {'Tensor', 'TensorList'}]
             if tensor_arguments:
                 tensor_argument = tensor_arguments[0]['name']
-                return 'const DeviceGuard device_guard({});'.format(tensor_argument)
+                return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(tensor_argument)
     return '// DeviceGuard omitted'
 
 
@@ -830,6 +831,8 @@ def create_generic(top_env, declarations):
         broadcast_arg = get_broadcast_argument(option)
         # "s_" for "same size".
         option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
+        if option['mode'] == 'TH':
+            option['device_guard'] = False
         option['device_guard_declaration'] = device_guard(option, formals, False, False)
 
         env = nested_dict(option, top_env)
@@ -924,6 +927,7 @@ def create_generic(top_env, declarations):
             buffers=buffer_names,
             returns=option['returns'],
             inplace=option['inplace'],
+            is_factory_method=False,
             # See Note [Abstract ATen methods]
             abstract=abstract,
             requires_tensor=option.get('requires_tensor', False),
@@ -1070,7 +1074,8 @@ def create_generic(top_env, declarations):
 
         is_method = 'method' in option['variants']
         is_namespace_function = 'function' in option['variants']
-        is_factory_method = find_formal('TensorOptions', formals) and not dispatch_options
+        is_factory_method = find_formal('TensorOptions', formals) and \
+            not dispatch_options and 'method' not in option['variants']
         is_deprecated_factory_method = len(formals) > 0 and \
             formals[0]['dynamic_type'] == 'Type' and \
             option['return_type'] == 'Tensor' and option['deprecated']
@@ -1171,6 +1176,7 @@ def create_generic(top_env, declarations):
             buffers=None,
             returns=option['returns'],
             inplace=option['inplace'],
+            is_factory_method=is_factory_method,
             # See Note [Abstract ATen methods]
             abstract=abstract,
             requires_tensor=option.get('requires_tensor', False),

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/data/datasets/base.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <ATen/core/ArrayRef.h>
 
@@ -16,9 +16,11 @@ namespace datasets {
 template <typename SourceDataset, typename AppliedTransform>
 struct MapDataset : BatchDataset<
                         MapDataset<SourceDataset, AppliedTransform>,
-                        typename AppliedTransform::OutputBatchType> {
+                        typename AppliedTransform::OutputBatchType,
+                        typename SourceDataset::BatchRequestType> {
   using DatasetType = SourceDataset;
   using TransformType = AppliedTransform;
+  using BatchRequestType = typename SourceDataset::BatchRequestType;
   using OutputBatchType = typename TransformType::OutputBatchType;
 
   MapDataset(DatasetType dataset, TransformType transform)
@@ -26,11 +28,12 @@ struct MapDataset : BatchDataset<
 
   /// Gets a batch from the source dataset and applies the transform to it,
   /// returning the result.
-  OutputBatchType get_batch(ArrayRef<size_t> indices) override {
+  OutputBatchType get_batch(BatchRequestType indices) override {
     return transform.apply_batch(dataset.get_batch(indices));
   }
 
-  size_t size() const override {
+  /// Returns the size of the source dataset.
+  optional<size_t> size() const noexcept {
     return dataset.size();
   }
 

@@ -5,7 +5,6 @@ from __future__ import print_function
 import argparse
 from datetime import datetime
 import os
-import shlex
 import shutil
 import signal
 import subprocess
@@ -13,6 +12,7 @@ import sys
 import tempfile
 
 import torch
+import torch._six
 from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM
 import torch.distributed as dist
@@ -30,6 +30,7 @@ TESTS = [
     'indexing',
     'jit',
     'multiprocessing',
+    'multiprocessing_spawn',
     'nccl',
     'nn',
     'numba_integration',
@@ -87,42 +88,66 @@ THD_DISTRIBUTED_TESTS_CONFIG = {
 SIGNALS_TO_NAMES_DICT = dict((getattr(signal, n), n) for n in dir(signal)
                              if n.startswith('SIG') and '_' not in n)
 
+CPP_EXTENSIONS_ERROR = """
+Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
+but it could not be found. Install ninja with `pip install ninja`
+or `conda install ninja`. Alternatively, disable C++ extensions test with
+`run_test.py --exclude cpp_extensions`.
+"""
+
 
 def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-def shell(command, cwd):
+def shell(command, cwd=None):
     sys.stdout.flush()
     sys.stderr.flush()
-    return subprocess.call(
-        shlex.split(command), universal_newlines=True, cwd=cwd)
+    # The folloing cool snippet is copied from Py3 core library subprocess.call
+    # only the with
+    #   1. `except KeyboardInterrupt` block added for SIGINT handling.
+    #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do
+    #      `p.wait()` in a `final` block for the code to be portable.
+    #
+    # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
+    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
+    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
+    try:
+        return p.wait()
+    except KeyboardInterrupt:
+        # Give `p` a chance to handle KeyboardInterrupt. Without this,
+        # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
+        exit_status = p.wait(timeout=5)
+        if exit_status is not None:
+            return exit_status
+        else:
+            p.kill()
+            raise
+    except:  # noqa E722, copied from python core library
+        p.kill()
+        raise
+    finally:
+        # Always call p.wait() to ensure exit
+        p.wait()
 
 
-def get_shell_output(command):
-    return subprocess.check_output(shlex.split(command)).decode().strip()
-
-
-def run_test(python, test_module, test_directory, options):
+def run_test(executable, test_module, test_directory, options):
     unittest_args = options.additional_unittest_args
     if options.verbose:
         unittest_args.append('--verbose')
-    unittest_args = ' '.join(unittest_args)
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    return shell('{} {}.py {}'.format(python, test_module, unittest_args),
-                 test_directory)
+    command = executable + [test_module + '.py'] + unittest_args
+    return shell(command, test_directory)
 
 
-def test_cpp_extensions(python, test_module, test_directory, options):
+def test_cpp_extensions(executable, test_module, test_directory, options):
     try:
         cpp_extension.verify_ninja_availability()
     except RuntimeError:
-        print(
-            'Ninja is not available. Skipping C++ extensions test. '
-            "Install ninja with 'pip install ninja' or 'conda install ninja'.")
-        return 0
-    return_code = shell('{} setup.py install --root ./install'.format(python),
+        print(CPP_EXTENSIONS_ERROR)
+        return 1
+    return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
                         os.path.join(test_directory, 'cpp_extensions'))
     if return_code != 0:
         return return_code
@@ -139,12 +164,12 @@ def test_cpp_extensions(python, test_module, test_directory, options):
 
         assert install_directory, 'install_directory must not be empty'
         os.environ['PYTHONPATH'] = os.pathsep.join([install_directory, python_path])
-        return run_test(python, test_module, test_directory, options)
+        return run_test(executable, test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
 
 
-def test_distributed(python, test_module, test_directory, options):
+def test_distributed(executable, test_module, test_directory, options):
     mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
     if options.verbose and not mpi_available:
         print_to_stderr(
@@ -182,12 +207,12 @@ def test_distributed(python, test_module, test_directory, options):
                         'mpiexec -n 1 --noprefix bash -c ""', shell=True,
                         stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
 
-                    mpiexec = 'mpiexec -n 3 {} {}'.format(noprefix_opt, python)
+                    mpiexec = ['mpiexec', '-n', '3', noprefix_opt] + executable
 
                     return_code = run_test(mpiexec, test_module,
                                            test_directory, options)
                 else:
-                    return_code = run_test(python, test_module, test_directory,
+                    return_code = run_test(executable, test_module, test_directory,
                                            options)
                 if return_code != 0:
                     return return_code
@@ -225,7 +250,10 @@ def parse_args():
         action='store_true',
         help='print verbose information and test-by-test results')
     parser.add_argument(
-        '-p', '--python', help='the python interpreter to execute tests with')
+        '-pt', '--pytest', action='store_true',
+        help='If true, use `pytest` to execute the tests. E.g., this runs '
+             'TestTorch with pytest in verbose and coverage mode: '
+             'python run_test.py -vci torch -pt')
     parser.add_argument(
         '-c', '--coverage', action='store_true', help='enable coverage')
     parser.add_argument(
@@ -270,13 +298,14 @@ def parse_args():
     return parser.parse_args()
 
 
-def get_python_command(options):
+def get_executable_command(options):
     if options.coverage:
-        return 'coverage run --parallel-mode --source torch'
-    elif options.python:
-        return options.python
+        executable = ['coverage', 'run', '--parallel-mode', '--source torch']
     else:
-        return os.environ.get('PYCMD', 'python')
+        executable = [sys.executable]
+    if options.pytest:
+        executable += ['-m', 'pytest']
+    return executable
 
 
 def find_test_index(test, selected_tests, find_last_index=False):
@@ -356,7 +385,8 @@ def get_selected_tests(options):
 
 def main():
     options = parse_args()
-    python = get_python_command(options)
+    executable = get_executable_command(options)  # this is a list
+    print_to_stderr('Test executor: {}'.format(executable))
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)
 
@@ -364,7 +394,7 @@ def main():
         print_to_stderr('Selected tests: {}'.format(', '.join(selected_tests)))
 
     if options.coverage:
-        shell('coverage erase')
+        shell(['coverage', 'erase'])
 
     for test in selected_tests:
         test_name = 'test_{}'.format(test)
@@ -373,7 +403,7 @@ def main():
         # Printing the date here can help diagnose which tests are slow
         print_to_stderr('Running {} ... [{}]'.format(test_name, datetime.now()))
         handler = CUSTOM_HANDLERS.get(test_module, run_test)
-        return_code = handler(python, test_name, test_directory, options)
+        return_code = handler(executable, test_name, test_directory, options)
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool), 'Return code should be an integer'
         if return_code != 0:
@@ -386,8 +416,8 @@ def main():
             raise RuntimeError(message)
 
     if options.coverage:
-        shell('coverage combine')
-        shell('coverage html')
+        shell(['coverage', 'combine'])
+        shell(['coverage', 'html'])
 
 
 if __name__ == '__main__':

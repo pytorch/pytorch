@@ -153,7 +153,6 @@ class CAFFE2_API NeuralNetData : public Data {
 
  private:
   NNDataKind kind_;
-  size_t version_ = 0;
 };
 
 class CAFFE2_API Tensor : public NeuralNetData {
@@ -184,6 +183,11 @@ class CAFFE2_API Tensor : public NeuralNetData {
   const std::string getName() const {
     return name_;
   }
+
+  void setName(const std::string& name) {
+    name_ = name;
+  }
+
   ~Tensor() {}
 
  private:
@@ -474,8 +478,6 @@ CAFFE2_API std::set<NNGraph::NodeRef> getOutputs(const NNSubgraph& sg);
 
 // Get the name of the node regardless of underlying type.
 CAFFE2_API std::string getName(NNGraph::NodeRef n);
-
-CAFFE2_API void deleteSubgraph(NNModule* nn, NNGraph::SubgraphType& sg);
 
 // Replace the producer of the first argument with the second argument
 CAFFE2_API void replaceProducer(

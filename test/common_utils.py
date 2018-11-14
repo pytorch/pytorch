@@ -77,12 +77,13 @@ def _check_module_exists(name):
             return True
         except ImportError:
             return False
-    elif PY34:  # Python [3, 3.4)
+    elif not PY34:  # Python [3, 3.4)
         import importlib
         loader = importlib.find_loader(name)
         return loader is not None
     else:  # Python >= 3.4
         import importlib
+        import importlib.util
         spec = importlib.util.find_spec(name)
         return spec is not None
 
@@ -661,9 +662,9 @@ def random_symmetric_psd_matrix(l):
     return A.mm(A.transpose(0, 1))
 
 
-def random_symmetric_pd_matrix(l, eps=1e-5):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1)) + torch.eye(l) * eps
+def random_symmetric_pd_matrix(l, *batches):
+    A = torch.randn(*(batches + (l, l)))
+    return A.matmul(A.transpose(-2, -1)) + torch.eye(l) * 1e-5
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
@@ -677,7 +678,11 @@ def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     return A
 
 
-def random_fullrank_matrix_distinct_singular_value(l, *batches):
+def random_fullrank_matrix_distinct_singular_value(l, *batches, **kwargs):
+    silent = kwargs.get("silent", False)
+    if silent and not torch._C.has_lapack:
+        return torch.ones(l, l)
+
     if len(batches) == 0:
         A = torch.randn(l, l)
         u, _, v = A.svd()
@@ -779,6 +784,30 @@ THESE_TAKE_WAY_TOO_LONG = {
     'test_multinomial_invalid_probs',
 }
 
+
+running_script_path = None
+
+
+def set_running_script_path():
+    global running_script_path
+    try:
+        running_file = os.path.abspath(os.path.realpath(sys.argv[0]))
+        if running_file.endswith('.py'):  # skip if the running file is not a script
+            running_script_path = running_file
+    except Exception:
+        pass
+
+
+def check_test_defined_in_running_script(test_case):
+    if running_script_path is None:
+        return
+    test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
+    assert test_case_class_file == running_script_path, "Class of loaded TestCase \"{}\" " \
+        "is not defined in the running script \"{}\", but in \"{}\". Did you " \
+        "accidentally import a unittest.TestCase from another file?".format(
+            test_case.id(), running_script_path, test_case_class_file)
+
+
 num_shards = os.environ.get('TEST_NUM_SHARDS', None)
 shard = os.environ.get('TEST_SHARD', None)
 if num_shards is not None and shard is not None:
@@ -786,9 +815,11 @@ if num_shards is not None and shard is not None:
     shard = int(shard)
 
     def load_tests(loader, tests, pattern):
+        set_running_script_path()
         test_suite = unittest.TestSuite()
         for test_group in tests:
             for test in test_group:
+                check_test_defined_in_running_script(test)
                 name = test.id().split('.')[-1]
                 if name in THESE_TAKE_WAY_TOO_LONG:
                     continue
@@ -797,4 +828,12 @@ if num_shards is not None and shard is not None:
                     test_suite.addTest(test)
         return test_suite
 else:
-    load_tests = None
+
+    def load_tests(loader, tests, pattern):
+        set_running_script_path()
+        test_suite = unittest.TestSuite()
+        for test_group in tests:
+            for test in test_group:
+                check_test_defined_in_running_script(test)
+                test_suite.addTest(test)
+        return test_suite

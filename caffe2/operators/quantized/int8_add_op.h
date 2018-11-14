@@ -51,7 +51,7 @@ void Int8Add(
     uint8_t* Y_data,
     uint8_t Y_activation_min,
     uint8_t Y_activation_max,
-    C2GEMMContext* gemm_context) {
+    ThreadPool* threadPool) {
   CHECK_GT(X0_offset, -256);
   CHECK_GT(X1_offset, -256);
   CHECK_LT(X0_offset, 256);
@@ -147,7 +147,7 @@ void Int8Add(
       Y_data[n * D + d] = static_cast<uint8_t>(clamped_Y);
     }
   };
-  gemm_context->threadPool()->run(f, N);
+  threadPool->run(f, N);
 }
 
 } // namespace
@@ -157,7 +157,7 @@ class Int8AddOp final : public Operator<CPUContext> {
  public:
   Int8AddOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
-        gemm_context_(ws->GetThreadPool()) {}
+        ws_(ws) {}
 
   bool RunOnDevice() override {
     CAFFE_ENFORCE_EQ(Inputs().size(), 2);
@@ -193,8 +193,8 @@ class Int8AddOp final : public Operator<CPUContext> {
 
     Int8Add(
         X0.t.template data<uint8_t>(),
-        X0.t.size() / X0.t.dim(X0.t.ndim() - 1),
-        X0.t.dim(X0.t.ndim() - 1),
+        X0.t.numel() / X0.t.size(X0.t.dim() - 1),
+        X0.t.size(X0.t.dim() - 1),
         X0_offset,
         X0_multiplier,
         X0_shift,
@@ -208,12 +208,12 @@ class Int8AddOp final : public Operator<CPUContext> {
         Y->t.template mutable_data<uint8_t>(),
         activationLimits(Y->scale, Y->zero_point, Ac).first,
         activationLimits(Y->scale, Y->zero_point, Ac).second,
-        &gemm_context_);
+        ws_->GetThreadPool());
     return true;
   }
 
  private:
-  C2GEMMContext gemm_context_;
+  Workspace* ws_;
 };
 
 } // namespace int8

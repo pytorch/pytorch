@@ -19,7 +19,7 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
   Int8ConvOp(const OperatorDef& def, Workspace* ws)
-      : ConvPoolOpBase(def, ws), gemm_context_(ws->GetThreadPool()) {
+      : ConvPoolOpBase(def, ws) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NHWC,
         "Int8Conv only supports NHWC order");
@@ -47,10 +47,10 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
     Y->scale = Y_scale;
     Y->zero_point = Y_offset;
 
-    const auto M = W.t.dim(0);
-    const auto KH = W.t.dim(1);
-    const auto KW = W.t.dim(2);
-    const auto KC = W.t.dim(3);
+    const auto M = W.t.size(0);
+    const auto KH = W.t.size(1);
+    const auto KW = W.t.size(2);
+    const auto KC = W.t.size(3);
     const auto C = X.t.dim32(3);
     const bool isDepthwise = this->group_ > 1 && this->group_ == M &&
         this->group_ == C && KC == 1 && KH * KW == 9 && dilation_w() == 1;
@@ -60,7 +60,7 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
       initQNNPACK();
 
       pthreadpool_t threadpool =
-          reinterpret_cast<pthreadpool_t>(gemm_context_.threadPool());
+          reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
 
       if (this->qnnpackObject_ == nullptr) {
         CAFFE_ENFORCE(
@@ -103,33 +103,33 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
       uint8_t* inputPtr = X.t.template mutable_data<uint8_t>();
       if ((isDepthwise && this->group_ < 8) ||
           (!isDepthwise && C / this->group_ < 8)) {
-        buffer->Resize(std::vector<int64_t>{X.t.size() + 8});
+        buffer->Resize(std::vector<int64_t>{X.t.numel() + 8});
         inputPtr = buffer->template mutable_data<uint8_t>() + 8;
-        memcpy(inputPtr, X.t.template data<uint8_t>(), X.t.size());
+        memcpy(inputPtr, X.t.template data<uint8_t>(), X.t.numel());
       }
 
-      if (lastBatchSize_ != static_cast<size_t>(X.t.dim(0)) ||
-          lastInputHeight_ != static_cast<size_t>(X.t.dim(1)) ||
-          lastInputWidth_ != static_cast<size_t>(X.t.dim(2)) ||
+      if (lastBatchSize_ != static_cast<size_t>(X.t.size(0)) ||
+          lastInputHeight_ != static_cast<size_t>(X.t.size(1)) ||
+          lastInputWidth_ != static_cast<size_t>(X.t.size(2)) ||
           lastInputPointer_ != inputPtr ||
           lastOutputPointer_ != Y->t.template mutable_data<uint8_t>()) {
         const qnnp_status setupStatus = qnnp_setup_convolution2d_nhwc_q8(
             this->qnnpackObject_,
-            X.t.dim(0),
-            X.t.dim(1),
-            X.t.dim(2),
+            X.t.size(0),
+            X.t.size(1),
+            X.t.size(2),
             inputPtr,
-            X.t.dim(3) /* input pixel stride */,
+            X.t.size(3) /* input pixel stride */,
             Y->t.template mutable_data<uint8_t>(),
-            Y->t.dim(3) /* output pixel stride */,
+            Y->t.size(3) /* output pixel stride */,
             nullptr /* threadpool */);
         CAFFE_ENFORCE(
             setupStatus == qnnp_status_success,
             "failed to setup QNNPACK convolution object");
 
-        lastBatchSize_ = static_cast<size_t>(X.t.dim(0));
-        lastInputHeight_ = static_cast<size_t>(X.t.dim(1));
-        lastInputWidth_ = static_cast<size_t>(X.t.dim(2));
+        lastBatchSize_ = static_cast<size_t>(X.t.size(0));
+        lastInputHeight_ = static_cast<size_t>(X.t.size(1));
+        lastInputWidth_ = static_cast<size_t>(X.t.size(2));
         lastInputPointer_ = inputPtr;
         lastOutputPointer_ = Y->t.template mutable_data<uint8_t>();
       }
@@ -149,7 +149,6 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
   }
 
  private:
-  C2GEMMContext gemm_context_;
   // QNNPACK convolution object
   qnnp_operator_t qnnpackObject_{nullptr};
   // batch size in the previous call to RunOnDeviceWithOrderNHWC

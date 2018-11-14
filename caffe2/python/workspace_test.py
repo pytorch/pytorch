@@ -117,6 +117,9 @@ class TestWorkspace(unittest.TestCase):
 
         """ test in-place initialization """
         tensor.init([2, 3], core.DataType.INT32)
+        for x in range(2):
+            for y in range(3):
+                tensor.data[x, y] = 0
         tensor.data[1, 1] = 100
         val = np.zeros([2, 3], dtype=np.int32)
         val[1, 1] = 100
@@ -356,17 +359,7 @@ class TestWorkspaceGPU(test_util.TestCase):
         self.assertEqual(pattern.shape[0], workspace.NumHipDevices())
 
 
-@unittest.skipIf(not workspace.C.has_mkldnn, "No MKLDNN support.")
-class TestWorkspaceMKLDNN(test_util.TestCase):
-
-    def testFeedFetchBlobMKLDNN(self):
-        arr = np.random.randn(2, 3).astype(np.float32)
-        workspace.FeedBlob(
-            "testblob_mkldnn", arr, core.DeviceOption(caffe2_pb2.MKLDNN))
-        fetched = workspace.FetchBlob("testblob_mkldnn")
-        np.testing.assert_array_equal(arr, fetched)
-
-@unittest.skipIf(not workspace.C.use_ideep, "No IDEEP support.")
+@unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class TestWorkspaceIDEEP(test_util.TestCase):
 
     def testFeedFetchBlobIDEEP(self):

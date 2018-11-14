@@ -189,12 +189,69 @@ class TestBindings(test_util.TestCase):
             count += 1
         assert count == 1
 
+    def test_delete_subgraph(self):
+        mg = ng.NNMatchGraph()
+        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)
+        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)
+        testm = mg.createNode(ng.NeuralNetOperator("test"))
+        mg.createEdge(test2m, xm)
+        mg.createEdge(xm, testm)
+
+        nn = ng.NNModule()
+        test2 = nn.dataFlow.createNode(ng.NeuralNetOperator("test2"))
+        x = nn.dataFlow.createNode(ng.NeuralNetData("X"))
+        test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))
+        nn.dataFlow.createEdge(test2, x)
+        nn.dataFlow.createEdge(x, test)
+
+        for m in nn.match(mg):
+            match = m
+        nn.deleteSubgraph(match)
+        assert len(nn.controlFlow) == 0
+
+    def test_replace_subraph(self):
+        mg = ng.NNMatchGraph()
+        test2m = mg.createNode(ng.NeuralNetOperator("test2"), strict=True)
+        xm = mg.createNode(ng.NeuralNetData("X"), strict=True)
+        testm = mg.createNode(ng.NeuralNetOperator("test"))
+        mg.createEdge(test2m, xm)
+        mg.createEdge(xm, testm)
+
+        nn = ng.NNModule()
+        test2 = nn.dataFlow.createNode(ng.NeuralNetOperator("test2"))
+        x = nn.dataFlow.createNode(ng.NeuralNetData("X"))
+        test = nn.dataFlow.createNode(ng.NeuralNetOperator("test"))
+        nn.dataFlow.createEdge(test2, x)
+        nn.dataFlow.createEdge(x, test)
+
+        for m in nn.match(mg):
+            match = m
+        new_op = nn.dataFlow.createNode(ng.NeuralNetOperator("new_op"))
+        nn.replaceSubgraph(match, new_op, [], [])
+        assert len(nn.controlFlow) == 1
+        assert nn.controlFlow[0].name == "new_op"
+
     def test_genericGraph(self):
         g = ng.Graph()
         n1 = g.createNode("hello1")
         n2 = g.createNode("hello2")
         e = g.createEdge(n1, n2)
         ng.render(g)
+
+    def test_createUniqueDataNode(self):
+        net = core.Net("name")
+        nn = ng.NNModule(net)
+        n1 = nn.createUniqueDataNode("a")
+        self.assertEqual(n1.name[0], "a")
+        n2 = nn.dataFlow.createNode(ng.Operator("test1"))
+        nn.createEdge(n1, n2)
+        n3 = nn.createUniqueDataNode("a")
+        nn.createEdge(n2, n3)
+        self.assertEqual(n3.name[0], "a")
+        self.assertNotEqual(n1.name, n3.name)
+        n1 = nn.createUniqueDataNode("b")
+        n2 = nn.createUniqueDataNode("b")
+        self.assertNotEqual(n1.name, n2.name)
 
     def test_convertToProto(self):
         net = core.Net("name")
@@ -258,6 +315,42 @@ class TestBindings(test_util.TestCase):
         nn.dataFlow.deleteNode(node)
         assert len(nn.dataFlow.getMutableNodes()) == 0
 
+    def test_replace_producer(self):
+        net = core.Net("name")
+        net.FC(["X", "W"], ["Y"])
+        nn = ng.NNModule(net)
+        fc = nn.controlFlow[0]
+        test_op = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        nn.replaceProducer(fc.outputs[0], test_op)
+        nn.deleteNode(fc)
+        assert len(nn.controlFlow) == 1
+        assert nn.controlFlow[0].name == "TestOp"
+
+    def test_replace_all_uses_with(self):
+        net = core.Net("name")
+        net.FC(["X", "W"], ["Y"])
+        net.FC(["X", "W2"], ["Y2"])
+        nn = ng.NNModule(net)
+        fc = nn.controlFlow[0]
+        test_tensor = nn.dataFlow.createNode(ng.NeuralNetData("T"))
+        nn.replaceAllUsesWith(fc.inputs[0], test_tensor)
+
+        for op in nn.controlFlow:
+            assert op.inputs[0].name == "T"
+
+    def test_replace_as_consumer(self):
+        net = core.Net("name")
+        net.FC(["X", "W"], ["Y"])
+        nn = ng.NNModule(net)
+        fc = nn.controlFlow[0]
+        test_op = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        nn.replaceAsConsumer(fc, test_op)
+        nn.deleteNode(fc)
+        assert len(nn.controlFlow) == 1
+        assert nn.controlFlow[0].name == "TestOp"
+        assert nn.controlFlow[0].inputs[0].name == "X"
+        assert nn.controlFlow[0].inputs[1].name == "W"
+
     def test_annotation_basic(self):
         annot = ng.Annotation()
         annot.setDevice("woot")
@@ -294,6 +387,14 @@ class TestBindings(test_util.TestCase):
         # access in a different way
         d_2 = nn.controlFlow[0].annotation.device_option
         assert d == d_2
+
+    def test_has_device_option(self):
+        nn = ng.NNModule()
+        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        assert not node.annotation.hasDeviceOption()
+        d = caffe2_pb2.DeviceOption()
+        node.annotation.device_option = d
+        assert node.annotation.hasDeviceOption()
 
     def test_distributed_annotations(self):
         nn = ng.NNModule()

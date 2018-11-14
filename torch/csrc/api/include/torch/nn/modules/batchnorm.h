@@ -2,7 +2,7 @@
 
 #include <torch/nn/cloneable.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <cstdint>
 
@@ -10,7 +10,7 @@ namespace torch {
 namespace nn {
 
 /// Options for the `BatchNorm` module.
-struct BatchNormOptions {
+struct TORCH_API BatchNormOptions {
   /* implicit */ BatchNormOptions(int64_t features);
   /// The number of features of the input tensor.
   /// Changing this parameter after construction __has no effect__.
@@ -45,7 +45,7 @@ struct BatchNormOptions {
 ///   BatchNorm. In C++, there is only one `BatchNorm` module, which works for
 ///   any of these dimensions.
 /// \endrst
-class BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
+class TORCH_API BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
  public:
   explicit BatchNormImpl(int64_t features)
       : BatchNormImpl(BatchNormOptions(features)) {}

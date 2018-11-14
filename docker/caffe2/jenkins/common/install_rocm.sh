@@ -32,6 +32,15 @@ install_ubuntu() {
                    rocrand \
                    hip-thrust
 
+    pushd /tmp
+    wget https://github.com/scchan/hcc/releases/download/19-host_linker_relative_path_rocdl/rocm19wb_20181109.tgz
+    tar -xzf rocm19wb_20181109.tgz
+    pushd rocm19wb_20181109/deb
+    apt install -y ./hcc-1.2.18445-Linux.deb ./hip_base-1.5.18435.deb ./hip_hcc-1.5.18435.deb ./hip_doc-1.5.18435.deb ./hip_samples-1.5.18435.deb
+    popd
+    rm -rf rocm19wb_20181109.tgz rocm19wb_20181109
+    popd
+
     # HIP has a bug that drops DEBUG symbols in generated MakeFiles.
     # https://github.com/ROCm-Developer-Tools/HIP/pull/588
     if [[ -f /opt/rocm/hip/cmake/FindHIP.cmake ]]; then
@@ -50,11 +59,6 @@ install_centos() {
   yum update -y
   yum install -y wget
   yum install -y openblas-devel
-
-  yum install -y centos-release-scl
-  yum install -y devtoolset-7
-
-  echo "source scl_source enable devtoolset-7" >> /root/.bashrc
 
   yum install -y epel-release
   yum install -y dkms kernel-headers-`uname -r` kernel-devel-`uname -r`
@@ -81,6 +85,15 @@ install_centos() {
                    hipsparse \
                    rocrand
 
+
+  pushd /tmp
+  wget https://github.com/scchan/hcc/releases/download/19-host_linker_relative_path_rocdl/rocm19wb_20181109.tgz
+  tar -xzf rocm19wb_20181109.tgz
+  pushd rocm19wb_20181109/rpm
+  rpm -i --replacefiles hcc-1.2.18445-Linux.rpm hip_base-1.5.18435.rpm hip_hcc-1.5.18435.rpm hip_doc-1.5.18435.rpm hip_samples-1.5.18435.rpm
+  popd
+  rm -rf rocm19wb_20181109.tgz rocm19wb_20181109
+  popd
 
   # Cleanup
   yum clean all

@@ -42,14 +42,14 @@ class Int8GivenTensorFillOp final : public Operator<CPUContext> {
   }
 
   bool Fill(Int8TensorCPU* output) {
-    DCHECK_EQ(output->t.size(), values_.size())
-        << "output size: " << output->t.size()
-        << " given size: " << values_.size();
+    DCHECK_EQ(output->t.numel(), values_.numel())
+        << "output size: " << output->t.numel()
+        << " given size: " << values_.numel();
     auto* data = output->t.template mutable_data<uint8_t>();
     const uint8_t* values_data = values_.template data<uint8_t>();
-    if (output->t.size()) {
+    if (output->t.numel()) {
       context_.template CopySameDevice<uint8_t>(
-          output->t.size(), values_data, data);
+          output->t.numel(), values_data, data);
     }
     return true;
   }
@@ -90,14 +90,14 @@ class Int8GivenIntTensorFillOp final : public Operator<CPUContext> {
   }
 
   bool Fill(Int8TensorCPU* output) {
-    DCHECK_EQ(output->t.size(), values_.size())
-        << "output size: " << output->t.size()
-        << " given size: " << values_.size();
+    DCHECK_EQ(output->t.numel(), values_.numel())
+        << "output size: " << output->t.numel()
+        << " given size: " << values_.numel();
     auto* data = output->t.template mutable_data<int32_t>();
     const auto* values_data = values_.template data<int32_t>();
-    if (output->t.size()) {
+    if (output->t.numel()) {
       context_.template CopySameDevice<int32_t>(
-          output->t.size(), values_data, data);
+          output->t.numel(), values_data, data);
     }
     return true;
   }

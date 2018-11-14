@@ -138,7 +138,7 @@ std::unique_ptr<Blob> randomTensor(
   auto* t = BlobGetMutableTensor(blob.get(), CPU);
   t->Resize(dims);
   math::RandUniform<float, CPUContext>(
-      t->size(), -1.0, 1.0, t->template mutable_data<float>(), ctx);
+      t->numel(), -1.0, 1.0, t->template mutable_data<float>(), ctx);
   return blob;
 }
 
@@ -187,8 +187,8 @@ TEST_F(PredictorTest, SimpleBatchSized) {
   (*p_)(input, &output);
   EXPECT_EQ(output.size(), 1);
   EXPECT_EQ(output.front().sizes().size(), 2);
-  EXPECT_EQ(output.front().dim(0), 1);
-  EXPECT_EQ(output.front().dim(1), 10);
+  EXPECT_EQ(output.front().size(0), 1);
+  EXPECT_EQ(output.front().size(1), 10);
   EXPECT_NEAR(output.front().data<float>()[4], 0.1209, 1E-4);
 }
 
@@ -204,8 +204,8 @@ TEST_F(PredictorTest, SimpleBatchSizedMapInput) {
   (*p_)(input, &output);
   EXPECT_EQ(output.size(), 1);
   EXPECT_EQ(output.front().sizes().size(), 2);
-  EXPECT_EQ(output.front().dim(0), 1);
-  EXPECT_EQ(output.front().dim(1), 10);
+  EXPECT_EQ(output.front().size(0), 1);
+  EXPECT_EQ(output.front().size(1), 10);
   EXPECT_NEAR(output.front().data<float>()[4], 0.1209, 1E-4);
 }
 

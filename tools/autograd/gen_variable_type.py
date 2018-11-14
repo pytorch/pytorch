@@ -50,8 +50,6 @@ DONT_RECORD_TRACE = {
 
 # These functions have their names recorded under trace renamed,
 RENAME_TRACE = {
-    'th_addmm': 'addmm',
-    's_native_addmm': 'addmm',
     'zero': 'zeros_like',
     'fill': 'full_like',
 }
@@ -169,7 +167,7 @@ def find_factory_functions(declarations):
     FACTORY_FUNCTION_NAMES = set()
 
     for declaration in declarations:
-        if any(arg['simple_type'] == 'TensorOptions' for arg in declaration['arguments']):
+        if declaration['is_factory_method']:
             FACTORY_FUNCTION_NAMES.add(declaration['api_name'])
 
 
@@ -183,13 +181,6 @@ def should_trace(declaration):
     name = declaration['name']
     base_name = name[:-1] if declaration['inplace'] else name[:-4] if name.endswith('_out') else name
     if base_name in DONT_RECORD_TRACE or name in DONT_RECORD_TRACE:
-        return False
-    # We need to disable these because their inner implementations implement
-    # broadcasting, and if we trace them top level we will lose the expand nodes.
-    # However, we can't use DONT_RECORD_TRACE, because we must only disable
-    # these for overloads that come from native (the TH overloads still "work")
-    overload = [arg['simple_type'] for arg in declaration['arguments'] if not arg.get('output', False)]
-    if base_name == 'addmm' and overload == ['Tensor', 'Tensor', 'Tensor', 'Scalar', 'Scalar']:
         return False
     return True
 
@@ -280,8 +271,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         # Factory methods usually do not appear in `VariableType` at all, since they
         # don't dispatch via `Type`; except in the case where the implementation is 'abstract'
         # in which case they do!
-        if (not declaration['abstract'] and
-                any(arg['simple_type'] == 'TensorOptions' for arg in declaration['arguments'])):
+        if declaration['is_factory_method']:
             continue
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:

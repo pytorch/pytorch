@@ -37,7 +37,7 @@ __global__ void SpatialSoftmaxKernel(const int N, const int A,
     float max_val = -FLT_MAX;
     for(int c = a * num_classes; c < (a + 1) * num_classes; ++c) {
       int idx = i * (H * W * D) +  c * (H * W) + y * W + x;
-      max_val = max(max_val, Xdata[idx]);
+      max_val = fmaxf(max_val, Xdata[idx]);
     }
     // Exponentiate
     float expsum = 0.0f;
@@ -69,7 +69,7 @@ __global__ void SoftmaxFocalLossKernel(
     int n = i / (W * H * A);
     const int label = static_cast<int>(targets[i]);
 
-    float Np = max(weight_pos[0], 1.0);
+    float Np = fmaxf(weight_pos[0], 1.0f);
     float z = (label == 0) * (1 - alpha) / Np +
               (label >= 1) * alpha / Np;
 
@@ -103,7 +103,7 @@ __global__ void SoftmaxFocalLossGradientWeightKernel(
     int a = (i / (W * H)) % A;
     int n = i / (W * H * A);
     const int label = static_cast<int>(targets[i]);
-    float Np = max(weight_pos[0], 1.0);
+    float Np = fmaxf(weight_pos[0], 1.0f);
     float z =  (label == 0) * (1 - alpha) / Np +
                (label >= 1) * alpha / Np;
 

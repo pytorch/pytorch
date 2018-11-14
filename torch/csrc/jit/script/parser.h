@@ -2,13 +2,14 @@
 #include "lexer.h"
 #include "tree.h"
 #include "tree_views.h"
+#include "c10/util/Optional.h"
 
 namespace torch {
 namespace jit {
 namespace script {
 
 
-Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl, bool is_method) {
+inline Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl, bool is_method) {
   auto expected_num_annotations = decl.params().size();
   if (is_method) {
     // `self` argument
@@ -57,14 +58,29 @@ struct Parser {
         List<Expr>(makeList(range, std::move(inputs))),
         List<Attribute>(makeList(range, std::move(attributes))));
   }
+
+  static bool followsTuple(int kind) {
+    switch(kind) {
+      case TK_PLUS_EQ:
+      case TK_MINUS_EQ:
+      case TK_TIMES_EQ:
+      case TK_DIV_EQ:
+      case TK_NEWLINE:
+      case '=':
+      case ')':
+        return true;
+      default:
+        return false;
+    }
+  }
+
   // exp | expr, | expr, expr, ...
-  TreeRef parseExpOrExpTuple(int end) {
+  Expr parseExpOrExpTuple() {
     auto prefix = parseExp();
     if(L.cur().kind == ',') {
       std::vector<Expr> exprs = { prefix };
-      while(L.cur().kind != end) {
-        L.expect(',');
-        if (L.cur().kind == end)
+      while(L.nextIf(',')) {
+        if (followsTuple(L.cur().kind))
           break;
         exprs.push_back(parseExp());
       }
@@ -98,7 +114,7 @@ struct Parser {
           prefix = TupleLiteral::create(L.cur().range, listExpr);
           break;
         }
-        prefix = parseExpOrExpTuple(')');
+        prefix = parseExpOrExpTuple();
         L.expect(')');
       } break;
       case '[': {
@@ -127,7 +143,7 @@ struct Parser {
     }
     return prefix;
   }
-  TreeRef parseOptionalReduction() {
+  TreeRef parseAssignmentOp() {
     auto r = L.cur().range;
     switch (L.cur().kind) {
       case TK_PLUS_EQ:
@@ -225,6 +241,21 @@ struct Parser {
     return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len;
   }
 
+  static bool isOctal(char c) {
+    return c >= '0' && c < '8';
+  }
+
+  c10::optional<char> parseOctal(const std::string& str, size_t pos) {
+    if (pos + 3 >= str.size())
+      return c10::nullopt;
+    size_t c = 0;
+    for(size_t i = 0, b = 64; i < 3; ++i, b /= 8) {
+      c += b * (str[pos + i] - '0');
+    }
+    if(c >= 256)
+      return c10::nullopt;
+    return c;
+  }
   std::string parseString(const SourceRange& range, const std::string &str) {
     int quote_len = isCharCount(str[0], str, 0, 3) ? 3 : 1;
     auto ret_str = str.substr(quote_len, str.size() - quote_len * 2);
@@ -232,6 +263,7 @@ struct Parser {
     while(pos != std::string::npos) {
       //invariant: pos has to escape a character because it is a valid string
       char c = ret_str[pos + 1];
+      size_t to_erase = 2;
       switch (ret_str[pos + 1]) {
         case '\\':
         case '\'':
@@ -253,10 +285,20 @@ struct Parser {
         case 'v':
           c = '\v';
           break;
+        case 'h':
+          throw ErrorReport(range)
+              << "unsupported hex specifier";
         default:
-          throw ErrorReport(range) << " octal and hex escaped sequences are not supported";
+          // \0NN
+          if (auto v = parseOctal(str, pos)) {
+            to_erase = 4;
+            c = *v;
+          } else {
+            throw ErrorReport(range)
+                << " ill formed octal specifier";
+          }
       }
-      ret_str.replace(pos, /* num to erase */ 2, /* num copies */ 1, c);
+      ret_str.replace(pos, to_erase, /* num copies */ 1, c);
       pos = ret_str.find('\\', pos + 1);
     }
     return ret_str;
@@ -356,12 +398,23 @@ struct Parser {
   // 'first' has already been parsed since expressions can exist
   // alone on a line:
   // first[,other,lhs] = rhs
-  Assign parseAssign(List<Expr> list) {
-    auto red = parseOptionalReduction();
-    auto rhs = parseExpOrExpTuple(TK_NEWLINE);
+  TreeRef parseAssign(Expr lhs) {
+    auto op = parseAssignmentOp();
+    auto rhs = parseExpOrExpTuple();
     L.expect(TK_NEWLINE);
-    return Assign::create(list.range(), list, AssignKind(red), Expr(rhs));
+    if (op->kind() == '=') {
+      return Assign::create(lhs.range(), lhs, Expr(rhs));
+    } else {
+      // this is an augmented assignment
+      if (lhs.kind() == TK_TUPLE_LITERAL) {
+        throw ErrorReport(lhs.range())
+            << " augmented assignment can only have one LHS expression";
+      }
+      return AugAssign::create(
+          lhs.range(), lhs, AugAssignKind(op), Expr(rhs));
+    }
   }
+
   TreeRef parseStmt() {
     switch (L.cur().kind) {
       case TK_IF:
@@ -382,13 +435,35 @@ struct Parser {
         auto values = parseList(TK_NOTHING, ',', TK_NEWLINE, &Parser::parseExp);
         return Return::create(range, values);
       }
+      case TK_RAISE: {
+        auto range = L.next().range;
+        auto expr = parseExp();
+        L.expect(TK_NEWLINE);
+        return Raise::create(range, expr);
+      }
+      case TK_ASSERT: {
+        auto range = L.next().range;
+        auto cond = parseExp();
+        Maybe<Expr> maybe_first = Maybe<Expr>::create(range);
+        if (L.nextIf(','))  {
+          auto msg = parseExp();
+          maybe_first = Maybe<Expr>::create(range, Expr(msg));
+        }
+        L.expect(TK_NEWLINE);
+        return Assert::create(range, cond, maybe_first);
+      }
+      case TK_PASS: {
+        auto range = L.next().range;
+        L.expect(TK_NEWLINE);
+        return Pass::create(range);
+      }
       default: {
-        List<Expr> exprs = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
+        auto lhs = parseExpOrExpTuple();
         if (L.cur().kind != TK_NEWLINE) {
-          return parseAssign(exprs);
+          return parseAssign(lhs);
         } else {
           L.expect(TK_NEWLINE);
-          return ExprStmt::create(exprs[0].range(), exprs);
+          return ExprStmt::create(lhs.range(), lhs);
         }
       }
     }

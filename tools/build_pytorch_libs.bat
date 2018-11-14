@@ -1,11 +1,13 @@
 :: @echo off
-cd "%~dp0/.."
+cd "%~dp0\.."
 
+set PATH=%INSTALL_DIR%\bin;%PATH%
+
+: The following environment variables are used exclusively by cmake and should have forward slashes rather than backslashes
 set BASE_DIR=%cd:\=/%
 set TORCH_LIB_DIR=%cd:\=/%/torch/lib
 set INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install
 set THIRD_PARTY_DIR=%cd:\=/%/third_party
-set PATH=%INSTALL_DIR%/bin;%PATH%
 set BASIC_C_FLAGS= /I%INSTALL_DIR%/include /I%INSTALL_DIR%/include/TH /I%INSTALL_DIR%/include/THC /I%INSTALL_DIR%/include/THS /I%INSTALLDIR%/include/THCS /I%INSTALLDIR%/include/THPP /I%INSTALLDIR%/include/THNN /I%INSTALLDIR%/include/THCUNN
 set BASIC_CUDA_FLAGS= -I%INSTALL_DIR%/include -I%INSTALL_DIR%/include/TH -I%INSTALL_DIR%/include/THC -I%INSTALL_DIR%/include/THS -I%INSTALLDIR%/include/THCS -I%INSTALLDIR%/include/THPP -I%INSTALLDIR%/include/THNN -I%INSTALLDIR%/include/THCUNN
 set LDFLAGS=/LIBPATH:%INSTALL_DIR%/lib
@@ -14,54 +16,76 @@ set LDFLAGS=/LIBPATH:%INSTALL_DIR%/lib
 set CWRAP_FILES=%BASE_DIR%/torch/lib/ATen/Declarations.cwrap;%BASE_DIR%/torch/lib/ATen/Local.cwrap;%BASE_DIR%/torch/lib/THNN/generic/THNN.h;%BASE_DIR%/torch/lib/THCUNN/generic/THCUNN.h;%BASE_DIR%/torch/lib/ATen/nn.yaml
 set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
 set LINK_FLAGS=/DEBUG:FULL
+: End cmake variables
 
-mkdir torch/lib/tmp_install
+if not exist torch\lib\tmp_install mkdir torch\lib\tmp_install
 
-IF "%~1"=="--use-cuda" (
+: Variable defaults
+set /a USE_CUDA=0
+set /a USE_FBGEMM=0
+set /a USE_ROCM=0
+set /a USE_NNPACK=0
+set /a USE_QNNPACK=0
+set /a USE_GLOO_IBVERBS=0
+set /a USE_MKLDNN=0
+
+set /a NO_NNPACK=1
+
+set _BUILD_ARGS=
+
+: Process command line arguments
+:process_args
+if "%1"=="" (
+  goto :process_args_exit
+)
+
+if "%1"=="--use-cuda" (
   set /a USE_CUDA=1
-  shift
-) ELSE (
-  set /a USE_CUDA=0
+  goto :process_args_processed
 )
 
-IF "%~1"=="--use-rocm" (
+if "%1"=="--use-fbgemm" (
+  set /a USE_FBGEMM=1
+  goto :process_args_processed
+)
+
+if "%1"=="--use-rocm" (
   set /a USE_ROCM=1
-  shift
-) ELSE (
-  set /a USE_ROCM=0
+  goto :process_args_processed
 )
 
-IF "%~1"=="--use-nnpack" (
-  set /a NO_NNPACK=0
+if "%1"=="--use-nnpack" (
   set /a USE_NNPACK=1
-  shift
-) ELSE (
-  set /a NO_NNPACK=1
-  set /a USE_NNPACK=0
+  set /a NO_NNPACK=0
+  goto :process_args_processed
 )
 
-IF "%~1"=="--use-qnnpack" (
+if "%1"=="--use-qnnpack" (
   set /a USE_QNNPACK=1
-  shift
-) ELSE (
-  set /a USE_QNNPACK=0
+  goto :process_args_processed
 )
 
-IF "%~1"=="--use-mkldnn" (
-  set /a NO_MKLDNN=0
-  shift
-) ELSE (
-  set /a NO_MKLDNN=1
+if "%1"=="--use-mkldnn" (
+  set /a USE_MKLDNN=1
+  goto :process_args_processed
 )
 
-IF "%~1"=="--use-gloo-ibverbs" (
-  set /a USE_GLOO_IBVERBS=1
+if "%1"=="--use-gloo-ibverbs" (
   echo Warning: gloo iverbs is enabled but build is not yet implemented 1>&2
-  shift
-) ELSE (
-  set /a USE_GLOO_IBVERBS=0
+  set /a USE_GLOO_IBVERBS=1
+  goto :process_args_processed
 )
 
+set _BUILD_ARGS=%_BUILD_ARGS% %1
+:: Fall-through intended
+
+:process_args_processed
+shift
+goto :process_args
+
+:process_args_exit
+
+: Set vars based on environment state
 set BUILD_TYPE=Release
 IF "%DEBUG%"=="1" (
   set BUILD_TYPE=Debug
@@ -93,30 +117,32 @@ IF "%CMAKE_GENERATOR%"=="" (
   )
 )
 
+: Invoke functionality for each build requested
+FOR %%a IN (%_BUILD_ARGS%) DO (
+  echo --------------------------------------------------------------------------------
+  echo ^|
+  echo ^|  Building %%a
+  echo ^|
+  echo --------------------------------------------------------------------------------
 
-:read_loop
-if "%1"=="" goto after_loop
-if "%1"=="caffe2" (
-  call:build_caffe2 %~1
-) ELSE (
-  set "IS_OURS="
-  IF "%1"=="libshm_windows" set IS_OURS=1
-  if defined IS_OURS (
-    cd torch\lib
-    call:build %~1
-    cd ..\..
+  IF "%%a"=="caffe2" (
+    call:build_caffe2 %%a
   ) ELSE (
-    cd third_party
-    call:build %~1
-    cd ..
+    IF "%%a"=="libshm_windows" (
+      SET IS_OURS=1
+      pushd torch\lib
+      call:build %%a
+      popd
+    ) ELSE (
+      pushd third_party
+      call:build %%a
+      popd
+    )
   )
 )
-shift
-goto read_loop
 
-:after_loop
-
-cd torch/lib
+: Copy Artifacts
+cd torch\lib
 
 copy /Y tmp_install\lib\* .
 IF EXIST ".\tmp_install\bin" (
@@ -130,11 +156,12 @@ cd ..\..
 
 goto:eof
 
+: Generate Build Functionality
 :build
   @setlocal
   IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
-  mkdir build\%~1
-  cd build/%~1
+  if not exist build mkdir build\%~1
+  pushd build\%~1
   cmake ../../%~1 %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_MODULE_PATH=%BASE_DIR%/cmake/FindCUDA ^
                   -DTorch_FOUND="1" ^
@@ -163,26 +190,46 @@ goto:eof
                   -DBUILD_TEST=%BUILD_TEST% ^
                   -DNO_NNPACK=%NO_NNPACK% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
+  IF ERRORLEVEL 1 exit 1
+  IF NOT ERRORLEVEL 0 exit 1
 
   %MAKE_COMMAND%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
-  cd ../..
+  popd
   @endlocal
 
 goto:eof
 
+: libtorch-specific build functionality
 :build_caffe2
   @setlocal
+  : Note [Backslash munging on Windows]
+  : In CMake, Windows native backslashes are not well handled. 
+  : It will cause a warning as the following
+  :   CMake Warning (dev) at cmake (source_group):
+  :    Syntax error in cmake code at cmake
+  :    when parsing string
+  :      Header Files C:\include\cudnn.h
+  :    Invalid escape sequence \i
+  : which is said to become an error in the future.
+  : As an alternative, we should use forward slashes instead.
+  : Here those paths should be escaped before passing to CMake. 
+  set NVTOOLEXT_HOME=%NVTOOLEXT_HOME:\=/%
+  set CUDNN_INCLUDE_DIR=%CUDNN_INCLUDE_DIR:\=/%
+  set CUDNN_LIB_DIR=%CUDNN_LIB_DIR:\=/%
+  set CUDNN_LIBRARY=%CUDNN_LIBRARY:\=/%
+  set PYTORCH_PYTHON_LIBRARY=%PYTORCH_PYTHON_LIBRARY:\=/%
+
   IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
-  mkdir build
-  cd build
+  if not exist build mkdir build
+  pushd build
   cmake .. %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
                   -DTORCH_BUILD_VERSION="%PYTORCH_BUILD_VERSION%" ^
+                  -DPYTHON_LIBRARY="%PYTORCH_PYTHON_LIBRARY%" ^
                   -DBUILD_TORCH="%BUILD_TORCH%" ^
                   -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
-                  -DNO_API=ON ^
                   -DBUILD_SHARED_LIBS="%BUILD_SHARED_LIBS%" ^
                   -DBUILD_PYTHON=%BUILD_PYTHON% ^
                   -DBUILD_BINARY=%BUILD_BINARY% ^
@@ -192,6 +239,7 @@ goto:eof
                   -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
                   -DUSE_CUDA=%USE_CUDA% ^
                   -DUSE_DISTRIBUTED=%USE_DISTRIBUTED% ^
+                  -DUSE_FBGEMM=%USE_FBGEMM% ^
                   -DUSE_NUMPY=%USE_NUMPY% ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
                   -DUSE_LEVELDB=%USE_LEVELDB% ^
@@ -205,10 +253,7 @@ goto:eof
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
                   -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^
-                  -DNO_MKLDNN=%NO_MKLDNN% ^
-                  -DMKLDNN_INCLUDE_DIR="%MKLDNN_INCLUDE_DIR%" ^
-                  -DMKLDNN_LIB_DIR="%MKLDNN_LIB_DIR%" ^
-                  -DMKLDNN_LIBRARY="%MKLDNN_LIBRARY%" ^
+                  -DUSE_MKLDNN=%USE_MKLDNN% ^
                   -DATEN_NO_CONTRIB=1 ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
@@ -216,11 +261,14 @@ goto:eof
                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
                   -DCMAKE_SHARED_LINKER_FLAGS="%USER_LDFLAGS%" ^
                   -DUSE_ROCM=%USE_ROCM%
+  IF ERRORLEVEL 1 exit 1
+  IF NOT ERRORLEVEL 0 exit 1
 
   %MAKE_COMMAND%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
-  cd ..
+
+  popd
   @endlocal
 
 goto:eof

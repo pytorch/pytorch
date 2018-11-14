@@ -7,7 +7,6 @@ from caffe2.python import core
 from hypothesis import assume, given
 
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python.test_util import IN_CIRCLECI_FLAKY_ENV
 import hypothesis.strategies as st
 import numpy as np
 
@@ -115,7 +114,6 @@ class TestReduceFrontSum(hu.HypothesisTestCase):
             atol=1e-4,
             rtol=1e-4)
 
-    @unittest.skipIf(IN_CIRCLECI_FLAKY_ENV, "FIXME: flaky test in CircleCI")
     @given(batch_size=st.integers(1, 3),
            stride=st.integers(1, 3),
            pad=st.integers(0, 3),

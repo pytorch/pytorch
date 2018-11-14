@@ -50,7 +50,7 @@ def _find_cuda_home():
     return cuda_home
 
 
-MINIMUM_GCC_VERSION = (4, 9)
+MINIMUM_GCC_VERSION = (4, 9, 0)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
 ABI_INCOMPATIBILITY_WARNING = '''
 
@@ -67,6 +67,24 @@ for instructions on how to install GCC 4.9 or higher.
 
                               !! WARNING !!
 '''
+WRONG_COMPILER_WARNING = '''
+
+                               !! WARNING !!
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Your compiler ({user_compiler}) is not compatible with the compiler Pytorch was
+built with for this platform, which is {pytorch_compiler} on {platform}. Please
+use {pytorch_compiler} to to compile your extension. Alternatively, you may
+compile PyTorch from source using {user_compiler}, and then you can also use
+{user_compiler} to compile your extension.
+
+See https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md for help
+with compiling PyTorch from source.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+                              !! WARNING !!
+'''
+ACCEPTED_COMPILERS_FOR_PLATFORM = {'darwin': ['clang++', 'clang'], 'linux': ['g++', 'gcc']}
 CUDA_HOME = _find_cuda_home()
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
@@ -101,6 +119,26 @@ def get_default_build_root():
     return os.path.realpath(os.path.join(tempfile.gettempdir(), 'torch_extensions'))
 
 
+def check_compiler_ok_for_platform(compiler):
+    '''
+    Verifies that the compiler is the expected one for the current platform.
+
+    Arguments:
+        compiler (str): The compiler executable to check.
+
+    Returns:
+        True if the compiler is gcc/g++ on Linux or clang/clang++ on macOS,
+        and always True for Windows.
+    '''
+    if IS_WINDOWS:
+        return True
+    which = subprocess.check_output(['which', compiler], stderr=subprocess.STDOUT)
+    # Use os.path.realpath to resolve any symlinks, in particular from 'c++' to e.g. 'g++'.
+    compiler_path = os.path.realpath(which.decode().strip())
+    accepted_compilers = ACCEPTED_COMPILERS_FOR_PLATFORM[sys.platform]
+    return any(name in compiler_path for name in accepted_compilers)
+
+
 def check_compiler_abi_compatibility(compiler):
     '''
     Verifies that the given compiler is ABI-compatible with PyTorch.
@@ -117,39 +155,39 @@ def check_compiler_abi_compatibility(compiler):
         return True
     if os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') in ['ON', '1', 'YES', 'TRUE', 'Y']:
         return True
+
+    # First check if the compiler is one of the expected ones for the particular platform.
+    if not check_compiler_ok_for_platform(compiler):
+        warnings.warn(WRONG_COMPILER_WARNING.format(
+            user_compiler=compiler,
+            pytorch_compiler=ACCEPTED_COMPILERS_FOR_PLATFORM[sys.platform][0],
+            platform=sys.platform))
+        return False
+
+    if sys.platform == 'darwin':
+        # There is no particular minimum version we need for clang, so we're good here.
+        return True
     try:
-        check_cmd = '{}' if IS_WINDOWS else '{} --version'
-        info = subprocess.check_output(
-            check_cmd.format(compiler).split(), stderr=subprocess.STDOUT)
+        if sys.platform == 'linux':
+            minimum_required_version = MINIMUM_GCC_VERSION
+            version = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
+            version = version.split('.')
+        else:
+            minimum_required_version = MINIMUM_MSVC_VERSION
+            compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
+            match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info)
+            version = (0, 0, 0) if match is None else match.groups()
     except Exception:
         _, error, _ = sys.exc_info()
-        warnings.warn('Error checking compiler version: {}'.format(error))
-    else:
-        info = info.decode().lower()
-        if 'gcc' in info or 'g++' in info:
-            # Sometimes the version is given as "major.x" instead of semver.
-            version = re.search(r'(\d+)\.(\d+|x)', info)
-            if version is not None:
-                major, minor = version.groups()
-                minor = 0 if minor == 'x' else int(minor)
-                if (int(major), minor) >= MINIMUM_GCC_VERSION:
-                    return True
-                else:
-                    # Append the detected version for the warning.
-                    compiler = '{} {}'.format(compiler, version.group(0))
-        elif 'Microsoft' in info:
-            info = info.decode().lower()
-            version = re.search(r'(\d+)\.(\d+)\.(\d+)', info)
-            if version is not None:
-                major, minor, revision = version.groups()
-                if (int(major), int(minor),
-                        int(revision)) >= MINIMUM_MSVC_VERSION:
-                    return True
-                else:
-                    # Append the detected version for the warning.
-                    compiler = '{} {}'.format(compiler, version.group(0))
+        warnings.warn('Error checking compiler version for {}: {}'.format(compiler, error))
+        return False
 
+    if tuple(map(int, version)) >= minimum_required_version:
+        return True
+
+    compiler = '{} {}'.format(compiler, version.group(0))
     warnings.warn(ABI_INCOMPATIBILITY_WARNING.format(compiler))
+
     return False
 
 
@@ -192,6 +230,8 @@ class BuildExtension(build_ext):
                 original_compiler = self.compiler.compiler_so
                 if _is_cuda_file(src):
                     nvcc = _join_cuda_home('bin', 'nvcc')
+                    if not isinstance(nvcc, list):
+                        nvcc = [nvcc]
                     self.compiler.set_executable('compiler_so', nvcc)
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
@@ -293,6 +333,7 @@ class BuildExtension(build_ext):
         check_compiler_abi_compatibility(compiler)
 
     def _add_compile_flag(self, extension, flag):
+        extension.extra_compile_args = copy.copy(extension.extra_compile_args)
         if isinstance(extension.extra_compile_args, dict):
             for args in extension.extra_compile_args.values():
                 args.append(flag)
@@ -593,13 +634,13 @@ def load_inline(name,
     as its docstring.
 
     The sources in ``cuda_sources`` are concatenated into a separate ``.cu``
-    file and  prepended with ``ATen/ATen.h``, ``cuda.h`` and ``cuda_runtime.h``
-    includes. The ``.cpp`` and ``.cu`` files are compiled separately, but
-    ultimately linked into a single library. Note that no bindings are
-    generated for functions in ``cuda_sources`` per  se. To bind to a CUDA
-    kernel, you must create a C++ function that calls it, and either declare or
-    define this C++ function in one of the ``cpp_sources`` (and include its
-    name in ``functions``).
+    file and  prepended with ``torch/types.h``, ``cuda.h`` and
+    ``cuda_runtime.h`` includes. The ``.cpp`` and ``.cu`` files are compiled
+    separately, but ultimately linked into a single library. Note that no
+    bindings are generated for functions in ``cuda_sources`` per  se. To bind
+    to a CUDA kernel, you must create a C++ function that calls it, and either
+    declare or define this C++ function in one of the ``cpp_sources`` (and
+    include its name in ``functions``).
 
     See :func:`load` for a description of arguments omitted below.
 
@@ -662,7 +703,7 @@ def load_inline(name,
     sources = [cpp_source_path]
 
     if cuda_sources:
-        cuda_sources.insert(0, '#include <ATen/ATen.h>')
+        cuda_sources.insert(0, '#include <torch/types.h>')
         cuda_sources.insert(1, '#include <cuda.h>')
         cuda_sources.insert(2, '#include <cuda_runtime.h>')
 

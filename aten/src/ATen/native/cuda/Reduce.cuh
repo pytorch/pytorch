@@ -60,25 +60,25 @@ struct ReduceConfig {
     return dim3(div_up(num_outputs, step_output), ctas_per_output);
   }
 
-  AT_HOST_DEVICE bool should_warp_reduce() const {
+  C10_HOST_DEVICE bool should_warp_reduce() const {
     return input_mult[LANE] != 0;
   }
 
-  AT_HOST_DEVICE bool should_block_reduce() const {
+  C10_HOST_DEVICE bool should_block_reduce() const {
     return input_mult[WARP] != 0;
   }
 
-  AT_HOST_DEVICE bool should_global_reduce() const {
+  C10_HOST_DEVICE bool should_global_reduce() const {
     return input_mult[CTA] != 0;
   }
 
-  AT_DEVICE bool should_store(int output_idx) const {
+  C10_DEVICE bool should_store(int output_idx) const {
     return output_idx < num_outputs &&
       (!should_warp_reduce() || threadIdx.x == 0) &&
       (!should_block_reduce() || threadIdx.y == 0);
   }
 
-  AT_HOST_DEVICE int input_idx() const {
+  C10_HOST_DEVICE int input_idx() const {
     int lane = threadIdx.x;
     int warp = threadIdx.y;
     int cta2 = blockIdx.y;
@@ -87,7 +87,7 @@ struct ReduceConfig {
             cta2 * input_mult[CTA]);
   }
 
-  AT_HOST_DEVICE int output_idx() const {
+  C10_HOST_DEVICE int output_idx() const {
     int lane = threadIdx.x;
     int warp = threadIdx.y;
     int cta1 = blockIdx.x;
@@ -96,11 +96,11 @@ struct ReduceConfig {
             cta1 * step_output);
   }
 
-  AT_DEVICE int shared_memory_offset(int offset) const {
+  C10_DEVICE int shared_memory_offset(int offset) const {
     return threadIdx.x + (threadIdx.y + offset) * blockDim.x;
   }
 
-  AT_DEVICE int staging_memory_offset(int cta2) const {
+  C10_DEVICE int staging_memory_offset(int cta2) const {
     int offset = cta2 + blockIdx.x * gridDim.y;
     if (!should_warp_reduce()) {
       offset = threadIdx.x + offset * blockDim.x;
@@ -119,7 +119,11 @@ struct ReduceConfig {
     if (!should_global_reduce()) {
       return 0;
     }
-    return element_size_bytes * num_outputs * ctas_per_output;
+    int size = element_size_bytes * num_outputs * ctas_per_output;
+    if (!should_warp_reduce()) {
+      size *= block().x;
+    }
+    return size;
   }
 
   int semaphore_size() const {
@@ -226,7 +230,7 @@ struct ReduceOp {
     , semaphores(semaphores) {
   }
 
-  AT_DEVICE void run() const {
+  C10_DEVICE void run() const {
     int output_idx = config.output_idx();
     int input_idx = config.input_idx();
     auto base_offsets = output_calc.get(output_idx);
@@ -255,7 +259,7 @@ struct ReduceOp {
     }
   }
 
-  AT_DEVICE Array<scalar_t, vt0> load_inputs(const scalar_t* data, int offset) const {
+  C10_DEVICE Array<scalar_t, vt0> load_inputs(const scalar_t* data, int offset) const {
     int end = config.num_inputs;
     int stride = input_calc.strides_[0][0] / sizeof(scalar_t);
     if (input_calc.dims == 1) {
@@ -269,7 +273,7 @@ struct ReduceOp {
     }
   }
 
-  AT_DEVICE arg_t thread_reduce_once(const scalar_t* data, int offset) const {
+  C10_DEVICE arg_t thread_reduce_once(const scalar_t* data, int offset) const {
     auto values = load_inputs(data, offset);
 
     arg_t value;
@@ -280,7 +284,7 @@ struct ReduceOp {
     return value;
   }
 
-  AT_DEVICE arg_t thread_reduce(const scalar_t* data) const {
+  C10_DEVICE arg_t thread_reduce(const scalar_t* data) const {
     arg_t value = ident;
     int idx = config.input_idx();
     while (idx < config.num_inputs) {
@@ -291,7 +295,7 @@ struct ReduceOp {
     return value;
   }
 
-  AT_DEVICE arg_t warp_reduce(arg_t value) const {
+  C10_DEVICE arg_t warp_reduce(arg_t value) const {
     for (int offset = 1; offset < warpSize; offset <<= 1) {
       arg_t other = WARP_SHFL_DOWN(value, offset);
       value = op(value, other);
@@ -299,7 +303,7 @@ struct ReduceOp {
     return value;
   }
 
-  AT_DEVICE arg_t block_reduce(arg_t value) const {
+  C10_DEVICE arg_t block_reduce(arg_t value) const {
     extern __shared__ char shared_memory[];
     arg_t* shared = (arg_t*)shared_memory;
     shared[config.shared_memory_offset(0)] = value;
@@ -315,9 +319,10 @@ struct ReduceOp {
     return value;
   }
 
-  AT_DEVICE bool mark_block_finished() const {
+  C10_DEVICE bool mark_block_finished() const {
     extern __shared__ int is_last_block_done_shared[];
 
+    __syncthreads();
     if (threadIdx.x == 0 && threadIdx.y == 0) {
       int prev_blocks_finished = atomicAdd(&semaphores[blockIdx.x], 1);
       is_last_block_done_shared[0] = (prev_blocks_finished == gridDim.y - 1);
@@ -330,7 +335,7 @@ struct ReduceOp {
     return is_last_block_done;
   }
 
-  AT_DEVICE arg_t global_reduce(arg_t value, scalar_t* out) const {
+  C10_DEVICE arg_t global_reduce(arg_t value, scalar_t* out) const {
     arg_t* reduce_buffer = (arg_t*)buffer;
 
     bool should_store = config.should_store(config.output_idx());
@@ -414,7 +419,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const func_t& op, ident_t id
   int64_t num_outputs = iter.num_output_elements();
   int64_t inputs_per_output = iter.numel() / num_outputs;
 
-  auto config = ReduceConfig(sizeof(scalar_t), num_outputs, inputs_per_output);
+  auto config = ReduceConfig(sizeof(arg_t), num_outputs, inputs_per_output);
 
   if (iter.ndim() == 0 || iter.strides(/*arg=*/1)[0] == sizeof(scalar_t)) {
     // Split the input across lanes if the input is contiguous in the reduced

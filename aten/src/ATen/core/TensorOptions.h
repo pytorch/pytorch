@@ -8,6 +8,7 @@
 #include <ATen/core/ScalarTypeUtils.h>
 
 #include "c10/util/Optional.h"
+#include "c10/util/C++17.h"
 
 #include <cstddef>
 #include <iosfwd>
@@ -58,6 +59,51 @@ CAFFE2_API const DefaultTensorOptions& getDefaultTensorOptions();
 ///     at::zeros({2,2}, at::device({at::kCUDA, 1})); // place on device 1
 ///     at::zeros({2,2}, at::requires_grad());
 ///
+
+/// NOTE [ TensorOptions Constructors ]
+///
+/// TensorOptions is like a dictionary with entries from the set:
+/// {requires_grad, is_variable, device, dtype, layout}, where each entry may be
+/// unspecified (i.e., is optional). It is used to specify the properties of
+/// tensors in many places both in C++ internal and API, e.g., tensor factory
+/// methods like `at::empty({10}, options)`, tensor conversions like
+/// `tensor.to(...)`, etc.
+///
+/// To provide a simple API that is consistent with Python, where one can do
+/// `torch.empty(sizes, X)` with `X` being a `torch.device`, `torch.dtype`, or a
+/// `torch.layout`, we want TensorOptions to be implicitly convertible from
+/// `ScalarType dtype`, `Layout layout` and `Device device`. Therefore, we have
+/// three implicit constructors from each of these three types.
+///
+/// This is sufficient for `ScalarType` and `Layout` as they are simple Enum
+/// classes. However, `Device` is an ordinary class with implicit constructors
+/// `Device(DeviceType, DeviceIndex = -1)` and `Device(std::string)` to be
+/// consistent with Python API, where strings are treated as equivalent with a
+/// `torch.device` object (e.g., "cuda:1" can be passed to everywhere a
+/// `torch.device("cuda:1")` is accepted). To support the syntax
+/// `at::empty({10}, {kCUDA, 1})` and `tensor.to(kCUDA)`, we need to make sure
+/// that `TensorOptions` is implicitly constructible with any argments that a
+/// `Device` can constructed from. So we have,
+///
+///    /* implicit */ TensorOptions(T&& device) : TensorOptions() {
+///      this->set_device(device);
+///    }
+///
+///    template <typename... Args,
+///             typename = std::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
+///    /* implicit */  TensorOptions(Args&&... args)
+///     : TensorOptions(Device(std::forward<Args>(args)...)) {}
+///
+///
+/// But this will be problematic. Consider this: `TensorOptions({kCUDA, 1})`.
+/// Compiler will compain about ambiguity between the copy constructor and the
+/// `Device` constructor because `{kCUDA, 1}` can be converted to both a
+/// `TensorOption` and a `Device`.
+///
+/// To get around this, we templatize the `Device` constructor. Since overload
+/// resolution is done before template resolution, our problem is solved.
+
+
 struct CAFFE2_API TensorOptions {
   TensorOptions()
     : requires_grad_(false)
@@ -75,21 +121,37 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Constructs a `TensorOptions` object with the given device.
-  /* implicit */ TensorOptions(Device device) : TensorOptions() {
-    this->set_device(device);
+  /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
+  template<typename T,
+           typename = c10::guts::enable_if_t<std::is_same<c10::guts::decay_t<T>, Device>::value>>
+  /* implicit */ TensorOptions(T&& device) : TensorOptions() {
+    this->set_device(std::forward<T>(device));
   }
+
+  /// Constructs a `TensorOptions` object from arguments allowed in `Device`
+  /// constructors.
+  ///
+  /// See NOTE [ TensorOptions Constructors ].
+  ///
+  /// NB: Ideally we only allow implicit constructors here. But there is no easy
+  ///     way to detect them. So we have this one that allows explicit
+  ///     constructors too.
+  template <typename... Args,
+            typename = c10::guts::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
+   /* implicit */ TensorOptions(Args&&... args)
+    : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
   /// Constructs a `TensorOptions` object from a backend, forwarded to the
   /// `Device` constructor.
   /* implicit */ TensorOptions(Backend backend)
       : TensorOptions(Device(backendToDeviceType(backend))) {}
 
-  /// Constructs a `TensorOptions` object from a device type, forwarded to the
-  /// `Device` constructor.
-  /* implicit */ TensorOptions(DeviceType device_type)
-      : TensorOptions(Device(device_type)) {}
-
   /// Constructs a `TensorOptions` object with the given dtype.
+  /* implicit */ TensorOptions(caffe2::TypeMeta dtype) : TensorOptions() {
+    this->set_dtype(dtype);
+  }
+
+  /// legacy constructor to support ScalarType
   /* implicit */ TensorOptions(ScalarType dtype) : TensorOptions() {
     this->set_dtype(dtype);
   }
@@ -141,6 +203,13 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Return a copy of `TensorOptions` with `dtype` set to the given one.
+  C10_NODISCARD TensorOptions dtype(optional<caffe2::TypeMeta> dtype) const noexcept {
+    TensorOptions r = *this;
+    r.set_dtype(dtype);
+    return r;
+  }
+
+  // legacy function to support ScalarType
   C10_NODISCARD TensorOptions dtype(optional<ScalarType> dtype) const noexcept {
     TensorOptions r = *this;
     r.set_dtype(dtype);
@@ -150,8 +219,7 @@ struct CAFFE2_API TensorOptions {
   // Since dtype is taken...
   template <typename T>
   TensorOptions& dtype() {
-    // TODO: Fix after @roy-li's fix
-    dtype_ = CTypeToScalarType<T>::to();
+    dtype_ = caffe2::TypeMeta::Make<T>();
     has_dtype_ = true;
     return *this;
   }
@@ -199,7 +267,7 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Returns the dtype of the `TensorOptions`.
-  ScalarType dtype() const noexcept {
+  caffe2::TypeMeta dtype() const noexcept {
     return has_dtype_ ? dtype_ : getDefaultTensorOptions().dtype();
   }
 
@@ -210,7 +278,7 @@ struct CAFFE2_API TensorOptions {
 
   /// Returns the dtype of the `TensorOptions`, or `c10::nullopt` if
   /// device is not specified.
-  optional<ScalarType> dtype_opt() const noexcept {
+  optional<caffe2::TypeMeta> dtype_opt() const noexcept {
     return has_dtype_ ? c10::make_optional(dtype_) : c10::nullopt;
   }
 
@@ -299,9 +367,19 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Mutably set the dtype of `TensorOptions`.
-  void set_dtype(optional<ScalarType> dtype) & noexcept {
+  void set_dtype(optional<caffe2::TypeMeta> dtype) & noexcept {
     if (dtype) {
       dtype_ = *dtype;
+      has_dtype_ = true;
+    } else {
+      has_dtype_ = false;
+    }
+  }
+
+  // legacy function to support ScalarType
+  void set_dtype(optional<ScalarType> dtype) & noexcept {
+    if (dtype) {
+      dtype_ = scalarTypeToTypeMeta(*dtype);
       has_dtype_ = true;
     } else {
       has_dtype_ = false;
@@ -344,13 +422,12 @@ struct CAFFE2_API TensorOptions {
   // NB: We didn't use c10::optional here, because then we can't pack
   // the has_***_ boolean fields.
 
-  Device     device_  = at::kCPU; // 64-bit (TODO: this should be 32-bit)
+  caffe2::TypeMeta dtype_ = caffe2::TypeMeta::Make<float>(); // 64-bit
+  Device device_ = at::kCPU; // 32-bit
+  Layout layout_ = at::kStrided; // 8-bit
 
   // Bitmask required here to get this to fit inside 32 bits (or even 64 bits,
   // for that matter)
-
-  ScalarType dtype_   = at::kFloat;  // 8-bit
-  Layout     layout_  = at::kStrided; // 8-bit
 
   bool requires_grad_     : 1;
   bool is_variable_       : 1;
@@ -370,8 +447,13 @@ static_assert( sizeof(TensorOptions) <= sizeof(int64_t) * 2,
 
 /// Convenience function that returns a `TensorOptions` object with the `dtype`
 /// set to the given one.
-inline TensorOptions dtype(ScalarType dtype) {
+inline TensorOptions dtype(caffe2::TypeMeta dtype) {
   return TensorOptions().dtype(dtype);
+}
+
+// legacy function to support ScalarType
+inline TensorOptions dtype(ScalarType dtype) {
+  return TensorOptions().dtype(scalarTypeToTypeMeta(dtype));
 }
 
 /// Convenience function that returns a `TensorOptions` object with the `layout`
@@ -398,7 +480,7 @@ inline TensorOptions requires_grad(bool requires_grad = true) {
   return TensorOptions().requires_grad(requires_grad);
 }
 
-std::ostream& operator<<(
+CAFFE2_API std::ostream& operator<<(
     std::ostream& stream,
     const TensorOptions& options);
 
@@ -424,8 +506,7 @@ DefaultTensorOptions& DefaultTensorOptions::merge(const TensorOptions& options) 
 
 template <typename T>
 inline TensorOptions dtype() {
-  // TODO: Fix after @roy-li's fix
-  return dtype(CTypeToScalarType<T>::to());
+  return dtype(caffe2::TypeMeta::Make<T>());
 }
 
 } // namespace at

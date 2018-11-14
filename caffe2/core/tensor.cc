@@ -44,7 +44,7 @@ void TensorPrinter::PrintMeta(const Tensor& tensor) {
 std::string TensorPrinter::MetaStr(const Tensor& tensor) {
   std::stringstream meta_stream;
   meta_stream << "Tensor " << tensor_name_ << " of type "
-              << tensor.meta().name() << ". Dims: (";
+              << tensor.dtype().name() << ". Dims: (";
   for (const auto dim : tensor.sizes()) {
     meta_stream << dim << ",";
   }
@@ -54,7 +54,7 @@ std::string TensorPrinter::MetaStr(const Tensor& tensor) {
 
 TypeMeta GetTensorType(const void* c) {
   const Tensor* tc = static_cast<const Tensor*>(c);
-  return tc->meta();
+  return tc->dtype();
 }
 
 // TODO(jerryzh): Remove
@@ -120,8 +120,59 @@ void TensorVectorResize(
 Tensor empty(at::IntList dims, at::TensorOptions options) {
   // TODO: merge this with at::empty after Tensor is merged
   auto tensor = Tensor(dims, options.device().type());
-  tensor.raw_mutable_data(scalarTypeToTypeMeta(options.dtype()));
+  tensor.raw_mutable_data(options.dtype());
   return tensor;
+}
+
+void ReinitializeTensor(
+    Tensor* tensor,
+    at::IntList dims,
+    at::TensorOptions options) {
+  CAFFE_ENFORCE(options.device_opt() != c10::nullopt);
+  if (*tensor) {
+    if (tensor->GetDevice() == options.device()) {
+      if (tensor->sizes() != dims) {
+        // Resize when the dims doesn't match
+        tensor->Resize(dims);
+      }
+      if (tensor->dtype() == options.dtype()) {
+        tensor->raw_mutable_data();
+      } else {
+        C10_LOG_EVERY_MS(WARNING, 1000)
+            << "Changing the data type of Tensor is discouraged."
+            << " Attempt to change data type from: " << tensor->dtype()
+            << " to: " << options.dtype();
+        // create a new Tensor when the data_type doesn't match
+        *tensor = caffe2::empty(dims, options);
+      }
+      return;
+    }
+    // create a new Tensor when device doesn't match
+  }
+
+  VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<Tensor>()
+          << " dims: " << dims;
+  *tensor = caffe2::empty(dims, options);
+}
+
+void ReinitializeAndCopyFrom(
+    Tensor* t,
+    at::TensorOptions options,
+    const Tensor& src,
+    BaseContext* context) {
+  auto device_type = options.device().type();
+  CAFFE_ENFORCE(t != nullptr, "Target tensor ptr is null.");
+  if (!*t || device_type != t->GetDeviceType()) {
+    *t = Tensor(device_type);
+  }
+  CAFFE_ENFORCE(
+      !t->dtype_initialized() || t->dtype() == src.dtype(),
+      "We don't allow a change of data type in ReinitializeAndCopyFrom. Attempt to "
+      " change from: ",
+      t->dtype(),
+      " to: ",
+      src.dtype());
+  t->CopyFrom(src, context);
 }
 
 namespace {

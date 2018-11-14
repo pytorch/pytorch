@@ -16,11 +16,8 @@ from torch.cuda._utils import _get_device_index
 
 
 class DistributedDataParallel(Module):
-    r"""Implements distributed data parallelism that is based on c10d at the
-    module level.
-
-    Currently this module is EXPERIMENTAL ONLY and should not be
-    used by normal users. Instead, please use DistributedDataParallel.
+    r"""Implements distributed data parallelism that is based on
+    torch.distributed package at the module level.
 
     This container parallelizes the application of the given module by
     splitting the input across the specified devices by chunking in the batch
@@ -35,12 +32,54 @@ class DistributedDataParallel(Module):
     See also: :ref:`distributed-basics` and :ref:`cuda-nn-dataparallel-instead`.
     The same constraints on input as in :class:`torch.nn.DataParallel` apply.
 
-    Creation of this class requires the c10d process group to be already
-    initialized. This class will basically operate on the provided c10d
-    process group.
+    Creation of this class requires that ``torch.distributed`` to be already
+    initialized, by calling :func:`torch.distributed.init_process_group`
+
+    ``DistributedDataParallel`` can be used in the following two ways:
+
+    (1) Single-Process Multi-GPU
+
+    In this case, a single process will be
+    spawned on each host/node and each process will operate on all the GPUs
+    of the node where it's running. To use ``DistributedDataParallel`` in
+    this way, you can simply construct the model as the following:
+
+        >>> torch.distributed.init_process_group(backend="nccl")
+        >>> model = DistributedDataParallel(model) # device_ids will include all GPU devices be default
+
+    (2) Multi-Process Single-GPU
+
+    This is the highly recommended way to use ``DistributedDataParallel``, with
+    multiple processes, each of which operates on a single GPU. This is
+    currently the fastest approach to do data parallel training using PyTorch
+    and applies to both single-node(multi-GPU) and multi-node data
+    parallel training. It is proven to be significantly faster than
+    :class:`torch.nn.DataParallel` for single-node multi-GPU data
+    parallel training.
+
+    Here is how to use it: on each host with N GPUs, you should spawn up N
+    processes, while ensuring that each process invidually works on a single GPU
+    from 0 to N-1. Therefore, it is your job to ensure that your training script
+    operates on a single given GPU by calling:
+
+        >>> torch.cuda.set_device(i)
+
+    where i is from 0 to N-1. In each process, you should refer the following
+    to construct this module:
+
+        >>> torch.distributed.init_process_group(backend='nccl', world_size=4, init_method='...')
+        >>> model = DistributedDataParallel(model, device_ids=[i], output_device=i)
+
+    In order to spawn up multiple processes per node, you can use either
+    ``torch.distributed.launch`` or ``torch.multiprocessing.spawn``
+
+    .. note:: ``nccl`` backend is currently the fastest and
+        highly recommended backend to be used with Multi-Process Single-GPU
+        distributed training and this applies to both single-node and multi-node
+        distributed training
 
     .. warning::
-        This module works only with the ``gloo`` and ``nccl`` process groups.
+        This module works only with the ``gloo`` and ``nccl`` backends.
 
     .. warning::
         Constructor, forward method, and differentiation of the output (or a
@@ -53,7 +92,7 @@ class DistributedDataParallel(Module):
         time it is created. No parameters should be added nor removed later.
         Same applies to buffers.
 
-    -- warning::
+    .. warning::
         This module assumes all parameters are registered in the model of each
         distributed processes are in the same order. The module itself will
         conduct gradient all-reduction following the reverse order of the
@@ -70,13 +109,18 @@ class DistributedDataParallel(Module):
         parameters).
 
     .. warning::
-        If you plan on using this module with a ``nccl`` process group or
-        a ``gloo`` process group (that uses Infiniband), together with a
-        DataLoader that uses multiple workers, please change the multiprocessing
-        start method to ``forkserver`` (Python 3 only) or ``spawn``.
-        Unfortunately Gloo (that uses Infiniband) and NCCL2 are not fork safe,
-        and you will likely experience deadlocks if you don't change this
-        setting.
+
+        If you plan on using this module with a ``nccl`` backend or a ``gloo``
+        backend (that uses Infiniband), together with a DataLoader that uses
+        multiple workers, please change the multiprocessing start method to
+        ``forkserver`` (Python 3 only) or ``spawn``. Unfortunately
+        Gloo (that uses Infiniband) and NCCL2 are not fork safe, and you will
+        likely experience deadlocks if you don't change this setting.
+
+    .. warning::
+        Forward and backward hooks defined on :attr:`module` and its submodules
+        won't be invoked anymore, unless the hooks are initialized in the
+        :meth:`forward` method.
 
     .. note::
         Parameters are never broadcast between processes. The module performs
@@ -85,11 +129,6 @@ class DistributedDataParallel(Module):
         (e.g. BatchNorm stats) are broadcast from the module in process of rank
         0, to all other replicas in the system in every iteration.
 
-    .. warning::
-        Forward and backward hooks defined on :attr:`module` and its submodules
-        won't be invoked anymore, unless the hooks are initialized in the
-        :meth:`forward` method.
-
     Args:
         module (Module): module to be parallelized
         device_ids (list of int or torch.device): CUDA devices (default: all devices)
@@ -97,9 +136,10 @@ class DistributedDataParallel(Module):
         broadcast_buffers (bool): flag that enables syncing (broadcasting) buffers of
                            the module at beginning of the forward function.
                            (default: True)
-        process_group: the c10d process group to be used for distributed data
-                       all-reduction. If None, the default process group will
-                       be used. (default: None)
+        process_group: the process group to be used for distributed data
+                       all-reduction. If None, the default process group, which
+                       is created by ```torch.distributed.init_process_group```,
+                       will be used. (default: None)
         bucket_cap_mb: DistributedDataParallel will bucket parameters into
                        multiple buckets so that gradient reduction of each
                        bucket can potentially overlap with backward computation.
@@ -110,8 +150,7 @@ class DistributedDataParallel(Module):
         module (Module): the module to be parallelized
 
     Example::
-        >>> store = torch.distributed.FileStore("/tmp/tempfile.txt")
-        >>> pg = torch.distributed.ProcessGroupGloo(store, rank, world_size)
+        >>> torch.distributed.init_process_group(backend='nccl', world_size=4, init_method='...')
         >>> net = torch.nn.DistributedDataParallel(model, pg)
     """
     def __init__(self, module, device_ids=None,
@@ -141,7 +180,7 @@ class DistributedDataParallel(Module):
         MB = 1024 * 1024
 
         # used for intra-node param sync and inter-node sync as well
-        self.broadcast_bucket_size = 25 * MB
+        self.broadcast_bucket_size = 250 * MB
 
         # Sync params and buffers
         module_states = list(self.module.state_dict().values())
@@ -175,7 +214,10 @@ class DistributedDataParallel(Module):
         # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
         param_buckets = []
         # Split the parameters into buckets and by types as well
-        param_buckets = [list(_take_tensors(m.parameters(), bucket_bytes_cap)) for m in self._module_copies]
+        param_buckets = [dist._dist_bucket_tensors(list(m.parameters()),
+                                                   int(bucket_bytes_cap),
+                                                   fine_grained=False)
+                         for m in self._module_copies]
 
         self.bucket_sizes = []
         self.bucket_map = {}
@@ -186,11 +228,11 @@ class DistributedDataParallel(Module):
             self.bucket_sizes.append(0)
             # Now, we transpose again, so we iterate over bucket_elems, but getting tuples
             # of params from each device.
-            for idx, param_tuple in enumerate(zip(*param_buckets_tuple)):
+            for param_tuple in zip(*param_buckets_tuple):
                 if not param_tuple[0].requires_grad:
                     continue
                 for p in param_tuple:
-                    self.bucket_map[p] = (bucket_idx, idx)
+                    self.bucket_map[p] = (bucket_idx, self.bucket_sizes[bucket_idx])
                 self.bucket_sizes[bucket_idx] += 1
 
         self.buckets = [[[None for _ in range(self.bucket_sizes[i])]
@@ -261,7 +303,7 @@ class DistributedDataParallel(Module):
             module.train(mode)
 
     def _dist_broadcast_coalesced(self, tensors, buffer_size):
-        dist._dist_broadcast_coalesced(self.process_group, tensors, buffer_size)
+        dist._dist_broadcast_coalesced(self.process_group, tensors, buffer_size, False)
 
     def _sync_params(self):
         if len(self.device_ids) > 1:

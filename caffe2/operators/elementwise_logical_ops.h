@@ -34,8 +34,8 @@ class WhereOp final : public Operator<Context> {
     auto& right = Input(2);
     auto* output = Output(0);
     if (enable_broadcast_) {
-      CAFFE_ENFORCE_EQ(select.ndim(), 1);
-      CAFFE_ENFORCE_EQ(select.dim(0), right.dim(0));
+      CAFFE_ENFORCE_EQ(select.dim(), 1);
+      CAFFE_ENFORCE_EQ(select.size(0), right.size(0));
       CAFFE_ENFORCE_EQ(left.sizes(), right.sizes());
     } else {
       CAFFE_ENFORCE_EQ(select.sizes(), left.sizes());
@@ -54,13 +54,13 @@ class WhereOp final : public Operator<Context> {
         size_t offset = i * block_size;
         if (select_data[i]) {
           context_.CopyItemsSameDevice(
-              output->meta(),
+              output->dtype(),
               block_size,
               left_data + offset,
               output_data + offset);
         } else {
           context_.CopyItemsSameDevice(
-              output->meta(),
+              output->dtype(),
               block_size,
               right_data + offset,
               output_data + offset);

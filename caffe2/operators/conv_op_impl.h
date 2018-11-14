@@ -25,7 +25,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int G = group_;
-  CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+  CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
   CAFFE_ENFORCE_EQ(
       C,
@@ -47,8 +47,8 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, M);
   const vector<int> X_dims = GetDims(X);
   const vector<int> Y_dims = GetDims(*Y);
-  const int X_HxW = X.size() / (N * C);
-  const int Y_HxW = Y->size() / (N * M);
+  const int X_HxW = X.numel() / (N * C);
+  const int Y_HxW = Y->numel() / (N * M);
   const vector<int> img_shape(X.sizes().cbegin() + 1, X.sizes().cend());
   vector<int> buffer_shape(Y_dims.size() + 1);
   buffer_shape[0] = C * kernel_size;
@@ -60,7 +60,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int kernel_dim = C / G * kernel_size;
   const int X_stride = C * X_HxW;
   const int Y_stride = M * Y_HxW;
-  const int filter_stride = filter.size() / G;
+  const int filter_stride = filter.numel() / G;
 
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
   // and width.
@@ -69,7 +69,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const T* bias_data = nullptr;
   if (InputSize() == 3) {
     const auto& bias = Input(BIAS);
-    CAFFE_ENFORCE_EQ(bias.ndim(), 1);
+    CAFFE_ENFORCE_EQ(bias.dim(), 1);
     CAFFE_ENFORCE_EQ(bias.dim32(0), M);
     bias_data = bias.template data<T>();
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
@@ -184,90 +184,130 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 // The implementations.
 template <typename T, class Context>
 bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
-  CAFFE_ENFORCE_EQ(
+  CAFFE_ENFORCE_LE(
       kernel_.size(),
-      2,
-      "Only 2d convolution is supported for NHWC storage type");
-
+      3,
+      "Only 1-3d convolution is supported for NHWC storage type");
   const Tensor& X = Input(INPUT);
-  auto& filter = Input(FILTER);
+  const auto& filter = Input(FILTER);
   Tensor* Y = Output(0);
-  CAFFE_ENFORCE_EQ(X.ndim(), 4);
-  const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
-
-  CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+  const int N = X.dim32(0), C = X.dim32(X.dim() - 1);
+  const int G = group_;
+  CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
-  CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h());
-  CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_w());
-  CAFFE_ENFORCE_EQ(filter.dim32(3), C / group_);
+  CAFFE_ENFORCE_EQ(
+      C,
+      filter.dim32(filter.dim() - 1) * G,
+      "Convolution op: input channels does not match: # of input channels ",
+      C,
+      " is not equal to kernel channels * group: ",
+      filter.dim32(filter.dim() - 1),
+      "*",
+      G);
+  CAFFE_ENFORCE_EQ(
+      M % G, 0, "The number of output channels is not divisible by group.");
 
-  ConvPoolOpBase<Context>::SetOutputSize(X, Y, filter.dim32(0));
+  int kernel_size = 1;
+  for (std::size_t i = 0; i < kernel_.size(); ++i) {
+    CAFFE_ENFORCE_EQ(filter.dim32(i + 1), kernel_[i]);
+    kernel_size *= kernel_[i];
+  }
+  ConvPoolOpBase<Context>::SetOutputSize(X, Y, M);
+  const vector<int> Y_dims = GetDims(*Y);
+  const int X_HxW = X.numel() / (N * C);
+  const int Y_HxW = Y->numel() / (N * M);
+  const vector<int> img_shape(X.sizes().cbegin() + 1, X.sizes().cend());
+  vector<int> buffer_shape(Y_dims.size() + 1);
+  std::copy(Y_dims.cbegin(), Y_dims.cend(), buffer_shape.begin());
+  buffer_shape.back() = C * kernel_size;
+
+  const int buffer_size = C * kernel_size * Y_HxW;
+
   // The dimension of each kernel
-  const int kernel_dim = kernel_h() * kernel_w() * (C / group_);
+  const int kernel_dim = C / G * kernel_size;
   // The offset corresponding to a single input image, and a single output
   // image.
-  const int input_offset = H * W * C;
-  const int output_offset = Y->size() / Y->dim32(0);
+  const int input_offset = X_HxW * C;
+  const int output_offset = Y->numel() / Y->dim32(0);
+
   // The output image size is the spatial size of the output.
-  const int output_image_size = Y->dim32(1) * Y->dim32(2);
-  // The col buffer is stored in HWC order as well - kernel_dim, and the height
-  // and width.
+  // The col buffer is stored in HWC order as well - the height and width, and
+  // kernel_dim.
   const T* X_data = X.template data<T>();
   const T* filter_data = filter.template data<T>();
   const T* bias_data = nullptr;
-  T* Y_data = Y->template mutable_data<T>();
   if (InputSize() == 3) {
     const auto& bias = Input(BIAS);
-    CAFFE_ENFORCE_EQ(bias.ndim(), 1);
+    CAFFE_ENFORCE_EQ(bias.dim(), 1);
     CAFFE_ENFORCE_EQ(bias.dim32(0), M);
     bias_data = bias.template data<T>();
   }
+  T* Y_data = Y->template mutable_data<T>();
+
   // Specialized path for 1 by 1 convolution with stride 1, pad 0 - we
   // can skip im2col.
   if (kernel_dim == (C / group_) && !HasPad() && !HasStride()) {
-    const int HxW = X.size() / (N * C);
     if (bias_data != nullptr) {
+      // For this specialized path, we need a bigger bias_multiplier_ because
+      // we're doing just 1 big GEMM.
       ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
-          N * HxW, &bias_multiplier_);
+          N * X_HxW, &bias_multiplier_);
     }
     return Run1x1ConvOnDeviceWithOrderNHWC(
-        N, C, HxW, M, X_data, filter_data, bias_data, Y_data);
+        N, C, X_HxW, M, X_data, filter_data, bias_data, Y_data);
   }
 
   if (bias_data != nullptr) {
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
-        output_image_size, &bias_multiplier_);
+        Y_HxW, &bias_multiplier_);
   }
   auto f = [&](Tensor* col_buffer) {
-    col_buffer->Resize(
-        vector<int64_t>{Y->dim32(1), Y->dim32(2), kernel_h(), kernel_w(), C});
+    col_buffer->Resize(buffer_shape);
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     // Im2Col, followed by gemm.
     for (int image_id = 0; image_id < N; ++image_id) {
-      math::Im2Col<T, Context, StorageOrder::NHWC>(
-          C,
-          H,
-          W,
-          kernel_h(),
-          kernel_w(),
-          dilation_h(),
-          dilation_w(),
-          pad_t(),
-          pad_l(),
-          pad_b(),
-          pad_r(),
-          stride_h(),
-          stride_w(),
-          X_data,
-          col_buffer_data,
-          &context_,
-          group_);
+      if (kernel_.size() <= 2) {
+        math::Im2Col<T, Context, StorageOrder::NHWC>(
+            C,
+            X.dim32(1),
+            kernel_.size() == 2 ? X.dim32(2) : 1,
+            kernel_h(),
+            kernel_.size() == 2 ? kernel_w() : 1,
+            dilation_h(),
+            kernel_.size() == 2 ? dilation_w() : 1,
+            pad_t(),
+            kernel_.size() == 2 ? pad_l() : 0,
+            kernel_.size() == 2 ? pad_b() : pad_l(),
+            kernel_.size() == 2 ? pad_r() : 0,
+            stride_h(),
+            kernel_.size() == 2 ? stride_w() : 1,
+            X_data,
+            col_buffer_data,
+            &context_,
+            group_);
+      } else {
+        math::Im2ColNd<T, Context, StorageOrder::NHWC>(
+            kernel_.size(),
+            C * X_HxW,
+            buffer_size,
+            img_shape.data(),
+            buffer_shape.data(),
+            kernel_.data(),
+            stride_.data(),
+            dilation_.data(),
+            pads_.data(),
+            X_data,
+            col_buffer_data,
+            &context_);
+      }
       // Weight term
       for (int group_id = 0; group_id < group_; ++group_id) {
+        // col_buffer_data in G (H W) (R S C/G) layout
+        // filter_data in G K/G (R S C/G) layout
         math::GemmEx<T, Context>(
             CblasNoTrans,
             CblasTrans,
-            output_image_size,
+            Y_HxW,
             M / group_,
             kernel_dim,
             1,
@@ -285,7 +325,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
         math::Gemm<T, Context>(
             CblasNoTrans,
             CblasNoTrans,
-            output_image_size,
+            Y_HxW,
             M,
             1,
             1,
@@ -452,25 +492,25 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int output_image_size = this->GetDimsSize(dY);
 
   ConvPoolOpBase<Context>::ComputePads(input_dims);
-  CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
+  CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
-  CAFFE_ENFORCE(filter.dim32(1) * group_ == C);
+  CAFFE_ENFORCE_EQ(C, filter.dim32(1) * group_);
 
   int kernel_dims_size = 1;
   for (int i = 0; i < kernel_.size(); ++i) {
-    CAFFE_ENFORCE(filter.dim32(i + 2) == kernel_[i]);
+    CAFFE_ENFORCE_EQ(filter.dim32(i + 2), kernel_[i]);
     kernel_dims_size *= kernel_[i];
   }
 
-  CAFFE_ENFORCE(M % group_ == 0);
+  CAFFE_ENFORCE_EQ(M % group_, 0);
   dfilter->ResizeLike(filter);
   // The dimension of each kernel
   const int kernel_dim = C / group_ * kernel_dims_size;
   // The offset corresponding to a single input image, and a single output
   // image.
   const int input_offset = C / group_ * input_image_size;
-  const int output_offset = dY.size() / dY.dim32(0) / group_;
-  const int filter_offset = filter.size() / group_;
+  const int output_offset = dY.numel() / dY.dim32(0) / group_;
+  const int filter_offset = filter.numel() / group_;
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
   // and width.
 
@@ -496,13 +536,13 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   T* dfilter_data = dfilter->template mutable_data<T>();
 
   // Pre-setting the gradients to zero.
-  math::Set<T, Context>(dfilter->size(), 0, dfilter_data, &context_);
+  math::Set<T, Context>(dfilter->numel(), 0, dfilter_data, &context_);
 
   T* dbias_data = nullptr;
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);
     dbias->Resize(M);
-    if (bias_multiplier_.size() != output_image_size) {
+    if (bias_multiplier_.numel() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
       math::Set<T, Context>(
@@ -512,7 +552,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           &context_);
     }
     dbias_data = dbias->template mutable_data<T>();
-    math::Set<T, Context>(dbias->size(), 0, dbias_data, &context_);
+    math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
   }
 
   for (int image_id = 0; image_id < N; ++image_id) {
@@ -650,28 +690,49 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
   auto* dfilter = Output(FILTER_GRAD);
+  const int N = X.dim32(0), C = X.dim32(X.dim() - 1);
 
-  const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
-  ConvPoolOpBase<Context>::ComputePads({H, W});
-  CAFFE_ENFORCE_EQ(filter.ndim(), 4);
+  const vector<int> input_dims = this->GetDims(X);
+  const int input_image_size = this->GetDimsSize(X);
+
+  const vector<int> output_dims = this->GetDims(dY);
+  // The output image size is the spatial size of the output.
+  const int output_image_size = this->GetDimsSize(dY);
+
+  ConvPoolOpBase<Context>::ComputePads(input_dims);
+  CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
-  CAFFE_ENFORCE_EQ(filter.dim32(1), kernel_h());
-  CAFFE_ENFORCE_EQ(filter.dim32(2), kernel_w());
-  CAFFE_ENFORCE_EQ(filter.dim32(3), C / group_);
-  dfilter->ResizeLike(filter);
+  CAFFE_ENFORCE_EQ(C, filter.dim32(filter.dim() - 1) * group_);
 
+  int kernel_dims_size = 1;
+  for (int i = 0; i < kernel_.size(); ++i) {
+    CAFFE_ENFORCE_EQ(filter.dim32(i + 1), kernel_[i]);
+    kernel_dims_size *= kernel_[i];
+  }
+
+  CAFFE_ENFORCE_EQ(M % group_, 0);
+  dfilter->ResizeLike(filter);
   // The dimension of each kernel
-  const int kernel_dim = kernel_h() * kernel_w() * (C / group_);
+  const int kernel_dim = C / group_ * kernel_dims_size;
   // The offset corresponding to a single input image, and a single output
   // image.
-  const int input_offset = H * W * C;
-  const int output_offset = dY.size() / dY.dim32(0);
-  // The output image size is the spatial size of the output.
-  const int output_image_size = dY.dim32(1) * dY.dim32(2);
-  // The col buffer is stored in CHW order as well - kernel_dim, and the height
-  // and width.
-  col_buffer_.Resize(output_image_size, group_ * kernel_dim);
+  const int input_offset = C * input_image_size;
+  const int output_offset = dY.numel() / dY.dim32(0);
 
+  // The col buffer is stored in HWC order as well - the height and width, and
+  // kernel_dim.
+  vector<int> img_shape(X.sizes().cbegin() + 1, X.sizes().cend());
+  vector<int> col_buffer_shape(output_dims.size() + 1);
+  std::copy(output_dims.cbegin(), output_dims.cend(), col_buffer_shape.begin());
+  col_buffer_shape.back() = C * kernel_dims_size;
+  col_buffer_.Resize(col_buffer_shape);
+
+  if (kernel_.size() != 2) {
+    SetDeviceTensor(img_shape, &img_shape_device_);
+    SetDeviceTensor(col_buffer_shape, &col_buffer_shape_device_);
+  }
+
+  const int col_buffer_size = C * kernel_dims_size * output_image_size;
   const T* Xdata = X.template data<T>();
   const T* const filter_data = filter.template data<T>();
   const T* const dYdata = dY.template data<T>();
@@ -679,15 +740,15 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   T* dfilter_data = dfilter->template mutable_data<T>();
 
   // Pre-setting the gradients to zero.
-  math::Set<T, Context>(dfilter->size(), 0, dfilter_data, &context_);
+  math::Set<T, Context>(dfilter->numel(), 0, dfilter_data, &context_);
 
   T* dbias_data = nullptr;
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);
     dbias->Resize(M);
     dbias_data = dbias->template mutable_data<T>();
-    math::Set<T, Context>(dbias->size(), 0, dbias_data, &context_);
-    if (bias_multiplier_.size() != output_image_size) {
+    math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
+    if (bias_multiplier_.numel() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
       math::Set<T, Context>(
@@ -701,24 +762,40 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   for (int image_id = 0; image_id < N; ++image_id) {
     // When we compute the gradient with respect to the filters, we need to do
     // im2col to allow gemm-type computation.
-    math::Im2Col<T, Context, StorageOrder::NHWC>(
-        C,
-        H,
-        W,
-        kernel_h(),
-        kernel_w(),
-        dilation_h(),
-        dilation_w(),
-        pad_t(),
-        pad_l(),
-        pad_b(),
-        pad_r(),
-        stride_h(),
-        stride_w(),
-        Xdata,
-        col_buffer_data,
-        &context_,
-        group_);
+    if (kernel_.size() <= 2) {
+      math::Im2Col<T, Context, StorageOrder::NHWC>(
+          C,
+          X.size(1),
+          kernel_.size() == 2 ? X.dim32(2) : 1,
+          kernel_h(),
+          kernel_.size() == 2 ? kernel_w() : 1,
+          dilation_h(),
+          kernel_.size() == 2 ? dilation_w() : 1,
+          pad_t(),
+          kernel_.size() == 2 ? pad_l() : 0,
+          kernel_.size() == 2 ? pad_b() : pad_l(),
+          kernel_.size() == 2 ? pad_r() : 0,
+          stride_h(),
+          kernel_.size() == 2 ? stride_w() : 1,
+          Xdata,
+          col_buffer_data,
+          &context_,
+          group_);
+    } else {
+      math::Im2ColNd<T, Context, StorageOrder::NHWC>(
+          kernel_.size(),
+          C * input_image_size,
+          col_buffer_size,
+          img_shape.data(),
+          col_buffer_shape.data(),
+          kernel_.data(),
+          stride_.data(),
+          dilation_.data(),
+          pads_.data(),
+          Xdata,
+          col_buffer_data,
+          &context_);
+    }
     // Gradient with respect to filter.
     for (int group_id = 0; group_id < group_; ++group_id) {
       math::GemmEx<T, Context>(
@@ -751,7 +828,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           &context_);
     }
     Xdata += input_offset;
-  }
+  } // for each image
 
   if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
     // Compute the gradient w.r.t. the input.
@@ -777,26 +854,42 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
             group_ * kernel_dim,
             &context_);
       }
-      math::Col2Im<T, Context, StorageOrder::NHWC>(
-          C,
-          H,
-          W,
-          kernel_h(),
-          kernel_w(),
-          dilation_h(),
-          dilation_w(),
-          pad_t(),
-          pad_l(),
-          pad_b(),
-          pad_r(),
-          stride_h(),
-          stride_w(),
-          col_buffer_data,
-          dXdata,
-          &context_,
-          group_);
+      if (kernel_.size() <= 2) {
+        math::Col2Im<T, Context, StorageOrder::NHWC>(
+            C,
+            X.size(1),
+            kernel_.size() == 2 ? X.dim32(2) : 1,
+            kernel_h(),
+            kernel_.size() == 2 ? kernel_w() : 1,
+            dilation_h(),
+            kernel_.size() == 2 ? dilation_w() : 1,
+            pad_t(),
+            kernel_.size() == 2 ? pad_l() : 0,
+            kernel_.size() == 2 ? pad_b() : pad_l(),
+            kernel_.size() == 2 ? pad_r() : 0,
+            stride_h(),
+            kernel_.size() == 2 ? stride_w() : 1,
+            col_buffer_data,
+            dXdata,
+            &context_,
+            group_);
+      } else {
+        math::Col2ImNd<T, Context, StorageOrder::NHWC>(
+            kernel_.size(),
+            C * input_image_size,
+            col_buffer_size,
+            img_shape.data(),
+            col_buffer_shape.data(),
+            kernel_.data(),
+            stride_.data(),
+            dilation_.data(),
+            pads_.data(),
+            col_buffer_data,
+            dXdata,
+            &context_);
+      }
       dXdata += input_offset;
-    }
+    } // for each image
   }
   return true;
 }

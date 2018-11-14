@@ -3,7 +3,7 @@
 #include <torch/expanding_array.h>
 #include <torch/nn/cloneable.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <cstddef>
 #include <vector>
@@ -17,7 +17,10 @@ struct ConvOptions {
   ConvOptions(
       int64_t input_channels,
       int64_t output_channels,
-      ExpandingArray<D> kernel_size);
+      ExpandingArray<D> kernel_size) : 
+		input_channels_(input_channels),
+		output_channels_(output_channels),
+		kernel_size_(std::move(kernel_size)) {}
 
   /// The number of channels the input volumes will have.
   /// Changing this parameter after construction __has no effect__.
@@ -100,7 +103,7 @@ class ConvImpl : public torch::nn::Cloneable<Derived> {
 /// Applies convolution over a 1-D input.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv1d to learn about
 /// the exact behavior of this module.
-class Conv1dImpl : public ConvImpl<1, Conv1dImpl> {
+class TORCH_API Conv1dImpl : public ConvImpl<1, Conv1dImpl> {
  public:
   using ConvImpl<1, Conv1dImpl>::ConvImpl;
   Tensor forward(Tensor input);
@@ -120,7 +123,7 @@ TORCH_MODULE(Conv1d);
 /// Applies convolution over a 2-D input.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv2d to learn about
 /// the exact behavior of this module.
-class Conv2dImpl : public ConvImpl<2, Conv2dImpl> {
+class TORCH_API Conv2dImpl : public ConvImpl<2, Conv2dImpl> {
  public:
   using ConvImpl<2, Conv2dImpl>::ConvImpl;
   Tensor forward(Tensor input);
@@ -140,7 +143,7 @@ TORCH_MODULE(Conv2d);
 /// Applies convolution over a 3-D input.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv3d to learn about
 /// the exact behavior of this module.
-class Conv3dImpl : public ConvImpl<3, Conv3dImpl> {
+class TORCH_API Conv3dImpl : public ConvImpl<3, Conv3dImpl> {
  public:
   using ConvImpl<3, Conv3dImpl>::ConvImpl;
   Tensor forward(Tensor input);

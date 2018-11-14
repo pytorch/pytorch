@@ -1,6 +1,10 @@
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/function.h"
 
+#ifdef USE_CUDA
+#include "ATen/cuda/CUDAGuard.h"
+#endif
+
 #include <sstream>
 
 namespace torch { namespace autograd { namespace profiler {
@@ -122,7 +126,7 @@ RecordFunction::RecordFunction(const char* name, int64_t current_sequence_nr)
 
 #ifdef USE_CUDA
 static void onEachDevice(std::function<void(int)> op) {
-  at::DeviceGuard device_guard;
+  at::cuda::OptionalCUDAGuard device_guard;
   int count;
   TORCH_CUDA_CHECK(cudaGetDeviceCount(&count));
   for(int i = 0; i < count; i++) {

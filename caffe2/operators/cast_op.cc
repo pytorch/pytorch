@@ -10,7 +10,7 @@ bool CastOp<CPUContext>::DoRunWithType() {
   output->ResizeLike(input);
   const auto* data = input.template data<SrcType>();
   auto* out = output->template mutable_data<DstType>();
-  auto N = input.size();
+  auto N = input.numel();
   for (int64_t i = 0; i < N; ++i) {
     out[i] = static_cast<DstType>(data[i]);
   }

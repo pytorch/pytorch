@@ -21,8 +21,8 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(INPUT);
   const auto& filter = Input(FILTER);
   auto* Y = Output(0);
-  const int image_ndim = X.ndim() - 2;
-  CAFFE_ENFORCE_EQ(X.ndim() + image_ndim, filter.ndim());
+  const int image_ndim = X.dim() - 2;
+  CAFFE_ENFORCE_EQ(X.dim() + image_ndim, filter.dim());
   lc_op_util::ShapeParams shape;
   shape.N = X.dim32(0);
   shape.C = X.dim32(1);
@@ -81,7 +81,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const T* bias_data = nullptr;
   if (InputSize() == 3) {
     const auto& bias = Input(BIAS);
-    CAFFE_ENFORCE_EQ(bias.ndim(), image_ndim + 1);
+    CAFFE_ENFORCE_EQ(bias.dim(), image_ndim + 1);
     for (int i = 0; i < image_ndim; ++i) {
       CAFFE_ENFORCE_EQ(bias.dim32(i), output_image_dims[i]);
     }
@@ -114,8 +114,8 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       kernel_.size(),
       2,
       "Only 2d locally connected op is supported for NHWC storage type.");
-  const int image_ndim = X.ndim() - 2;
-  CAFFE_ENFORCE_EQ(X.ndim() + image_ndim, filter.ndim());
+  const int image_ndim = X.dim() - 2;
+  CAFFE_ENFORCE_EQ(X.dim() + image_ndim, filter.dim());
   lc_op_util::ShapeParams shape;
   shape.N = X.dim32(0);
   shape.C = X.dim32(3);
@@ -158,7 +158,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const T* bias_data = nullptr;
   if (InputSize() == 3) {
     const auto& bias = Input(BIAS);
-    CAFFE_ENFORCE_EQ(bias.ndim(), image_ndim + 1);
+    CAFFE_ENFORCE_EQ(bias.dim(), image_ndim + 1);
     for (int i = 0; i < image_ndim; ++i) {
       CAFFE_ENFORCE_EQ(bias.dim32(i), output_image_dims[i]);
     }
@@ -373,8 +373,8 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const auto& filter = Input(FILTER);
   const auto& dY = Input(OUTPUT_GRAD);
   auto* dfilter = Output(FILTER_GRAD);
-  const int image_ndim = X.ndim() - 2;
-  CAFFE_ENFORCE_EQ(X.ndim() + image_ndim, filter.ndim());
+  const int image_ndim = X.dim() - 2;
+  CAFFE_ENFORCE_EQ(X.dim() + image_ndim, filter.dim());
 
   lc_op_util::ShapeParams shape;
   shape.N = X.dim32(0);
@@ -465,8 +465,8 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       kernel_.size(),
       2,
       "Only 2d locally connected op is supported for NHWC storage type.");
-  const int image_ndim = X.ndim() - 2;
-  CAFFE_ENFORCE_EQ(X.ndim() + image_ndim, filter.ndim());
+  const int image_ndim = X.dim() - 2;
+  CAFFE_ENFORCE_EQ(X.dim() + image_ndim, filter.dim());
   lc_op_util::ShapeParams shape;
   shape.N = X.dim32(0);
   shape.C = X.dim32(3);

@@ -1,0 +1,22 @@
+ModelProto {
+  producer_name: "pytorch"
+  domain: ""
+  doc_string: ""
+  graph:
+    GraphProto {
+      name: "torch-jit-export"
+      inputs: [{name: "x", type:Tensor dims: 2}]
+      outputs: [{name: "7", type:Tensor dims: 2}]
+      initializers: []
+      nodes: [
+        Node {type: "Constant", inputs: [], outputs: [1], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
+        Node {type: "Gather", inputs: [x,1], outputs: [2], attributes: [{ name: 'axis', type: int, value: 0}]},
+        Node {type: "Constant", inputs: [], outputs: [3], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
+        Node {type: "Shape", inputs: [3], outputs: [4], attributes: []},
+        Node {type: "Expand", inputs: [2,4], outputs: [5], attributes: []},
+        Node {type: "Cast", inputs: [5], outputs: [6], attributes: [{ name: 'to', type: int, value: 11}]},
+        Node {type: "Add", inputs: [6,x], outputs: [7], attributes: []}
+      ]
+    }
+  opset_import: [OperatorSetIdProto { domain: }],
+}

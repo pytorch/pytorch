@@ -35,9 +35,14 @@ needs_sphinx = '1.6'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    'sphinx.ext.intersphinx',
     'breathe',
     'exhale'
 ]
+
+intersphinx_mapping = {
+    'pytorch': ('https://pytorch.org/docs/master', None)
+}
 
 # Setup absolute paths for communicating with breathe / exhale where
 # items are expected / should be trimmed by.
@@ -88,6 +93,8 @@ exhale_args = {
     # Example of adding contents directives on custom kinds with custom title
     "contentsTitle": "Page Contents",
     "kindsWithContentsDirectives": ["class", "file", "namespace", "struct"],
+    # Exclude PIMPL files from class hierarchy tree and namespace pages.
+    "listingExclude": [r".*Impl$"],
     ############################################################################
     # Main library page layout example configuration.                          #
     ############################################################################

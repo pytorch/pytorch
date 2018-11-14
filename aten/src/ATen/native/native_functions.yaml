@@ -201,17 +201,21 @@
 
 - func: as_strided(Tensor self, IntList size, IntList stride) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: as_strided_(Tensor self, IntList size, IntList stride) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: as_strided(Tensor self, IntList size, IntList stride, int64_t storage_offset) -> Tensor
   variants: function, method
+  device_guard: false
   python_default_init:
     storage_offset: self.storage_offset()
 
 - func: as_strided_(Tensor self, IntList size, IntList stride, int64_t storage_offset) -> Tensor
   variants: function, method
+  device_guard: false
   python_default_init:
     storage_offset: self.storage_offset()
 
@@ -326,6 +330,7 @@
     CUDA: bmm_out_cuda
 
 - func: broadcast_tensors(TensorList tensors) -> TensorList
+  device_guard: false
 
 - func: cat(TensorList tensors, int64_t dim=0) -> Tensor
 
@@ -350,6 +355,7 @@
 
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
   variants: function, method
+  device_guard: false
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   variants: function, method
@@ -410,22 +416,27 @@
 
 - func: _convolution_double_backward(Tensor? ggI, Tensor? ggW, Tensor? ggb, Tensor gO, Tensor weight, Tensor self, IntList stride, IntList padding, IntList dilation, bool transposed, IntList output_padding, int64_t groups, bool benchmark, bool deterministic, bool cudnn_enabled, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
 
-- func: conv1d(Tensor input, Tensor weight, Tensor bias={}, IntList[1] stride=1, IntList[1] padding=0, IntList[1] dilation=1, int64_t groups=1) -> Tensor
+- func: conv1d(Tensor input, Tensor weight, Tensor? bias={}, IntList[1] stride=1, IntList[1] padding=0, IntList[1] dilation=1, int64_t groups=1) -> Tensor
 
-- func: conv2d(Tensor input, Tensor weight, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1, int64_t groups=1) -> Tensor
+- func: conv2d(Tensor input, Tensor weight, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1, int64_t groups=1) -> Tensor
 
-- func: conv3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1, int64_t groups=1) -> Tensor
+- func: conv3d(Tensor input, Tensor weight, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1, int64_t groups=1) -> Tensor
 
 - func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad=0) -> Tensor
 
 - func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int64_t pad) -> (Tensor, Tensor, Tensor)
 
 # NB: we inherit the goofy argument order from PyTorch torch.nn.functional
-- func: conv_transpose1d(Tensor input, Tensor weight, Tensor bias={}, IntList[1] stride=1, IntList[1] padding=0, IntList[1] output_padding=0, int64_t groups=1, IntList[1] dilation=1) -> Tensor
+- func: conv_transpose1d(Tensor input, Tensor weight, Tensor? bias={}, IntList[1] stride=1, IntList[1] padding=0, IntList[1] output_padding=0, int64_t groups=1, IntList[1] dilation=1) -> Tensor
 
-- func: conv_transpose2d(Tensor input, Tensor weight, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, int64_t groups=1, IntList[2] dilation=1) -> Tensor
+- func: conv_transpose2d(Tensor input, Tensor weight, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, int64_t groups=1, IntList[2] dilation=1) -> Tensor
 
-- func: conv_transpose3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
+- func: conv_transpose3d(Tensor input, Tensor weight, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
+
+- func: _copy_(Tensor self, Tensor src) -> Tensor
+  cpu_half: True
+  dispatch:
+    CPU: _copy__cpu
 
 - func: cos(Tensor self) -> Tensor
   variants: function, method
@@ -455,7 +466,7 @@
     CPU: _cosh_out_cpu
     CUDA: _cosh_out_cuda
 
-- func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::Mean) -> Tensor
 
 - func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
   return:
@@ -562,10 +573,10 @@
 
 - func: cumprod_out(Tensor result, Tensor self, int64_t dim) -> Tensor
 
-- func: ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0, int64_t reduction=Reduction::Mean) -> Tensor
 
 # convenience function that converts to intlists for you
-- func: ctc_loss(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int64_t blank=0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: ctc_loss(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int64_t blank=0, int64_t reduction=Reduction::Mean) -> Tensor
 
 - func: _ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0) -> (Tensor, Tensor)
   dispatch:
@@ -578,6 +589,9 @@
     CUDA: ctc_loss_backward_gpu
 
 - func: det(Tensor self) -> Tensor
+  variants: function, method
+
+- func: diag_embed(Tensor self, int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) -> Tensor
   variants: function, method
 
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
@@ -731,9 +745,11 @@
 
 - func: expand(Tensor self, IntList size, *, bool implicit=false) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  device_guard: false
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  device_guard: false
 
 - func: eye(int64_t n, TensorOptions options={}) -> Tensor
 
@@ -823,7 +839,7 @@
 
 - func: hamming_window(int64_t window_length, bool periodic, double alpha, double beta, TensorOptions options={}) -> Tensor
 
-- func: hinge_embedding_loss(Tensor self, Tensor target, double margin=1.0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: hinge_embedding_loss(Tensor self, Tensor target, double margin=1.0, int64_t reduction=Reduction::Mean) -> Tensor
 
 - func: ger(Tensor self, Tensor vec2) -> Tensor
   variants: function, method
@@ -898,6 +914,7 @@
 - func: inverse_out(Tensor result, Tensor self) -> Tensor
 
 - func: _inverse_helper(Tensor self) -> Tensor
+  variants: function
   dispatch:
     CPU: _inverse_helper_cpu
     CUDA: _inverse_helper_cuda
@@ -929,9 +946,9 @@
   variants: function, method
   device_guard: false
 
-- func: kl_div(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: kl_div(Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
 
-- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
   dispatch:
     CPU: kl_div_backward_cpu
     CUDA: kl_div_backward_cuda
@@ -943,7 +960,7 @@
 
 - func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
 
-- func: linear(Tensor input, Tensor weight, Tensor bias={}) -> Tensor
+- func: linear(Tensor input, Tensor weight, Tensor? bias={}) -> Tensor
 
 - func: linspace(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
 
@@ -1046,7 +1063,7 @@
 
 - func: logsumexp_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
 
-- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::Mean) -> Tensor
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -1211,6 +1228,17 @@
 
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
   variants: function, method
+  device_guard: false
+
+- func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: batch_norm_cpu
+    CUDA: batch_norm_cuda
+
+- func: native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, double eps, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: batch_norm_backward_cpu
+    CUDA: batch_norm_backward_cuda
 
 - func: ones(IntList size, TensorOptions options={}) -> Tensor
 
@@ -1311,9 +1339,11 @@
 
 - func: reshape(Tensor self, IntList shape) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: reshape_as(Tensor self, Tensor other) -> Tensor
   variants: method
+  device_guard: false
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   dispatch:
@@ -1389,6 +1419,7 @@
 
 - func: select(Tensor self, int64_t dim, int64_t index) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: selu(Tensor self) -> Tensor
 
@@ -1452,6 +1483,7 @@
 
 - func: slice(Tensor self, int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: slogdet(Tensor self) -> (Tensor, Tensor)
   variants: function, method
@@ -1513,21 +1545,27 @@
 
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
   variants: function, method
+  device_guard: false
 
 - func: split_with_sizes(Tensor self, IntList split_sizes, int64_t dim=0) -> TensorList
   variants: function, method
+  device_guard: false
 
 - func: squeeze(Tensor self) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: squeeze(Tensor self, int64_t dim) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: squeeze_(Tensor self) -> Tensor
   variants: method
+  device_guard: false
 
 - func: squeeze_(Tensor self, int64_t dim) -> Tensor
   variants: method
+  device_guard: false
 
 - func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -1660,11 +1698,25 @@
 - func: tensordot(Tensor self, Tensor other, IntList dims_self, IntList dims_other) -> Tensor
   variants: function
 
+# TODO: namespace threshold in 'nn'
+- func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
+  variants: function
+
+- func: threshold_(Tensor self, Scalar threshold, Scalar value) -> Tensor
+  variants: function
+
+- func: threshold_out(Tensor result, Tensor self, Scalar threshold, Scalar value) -> Tensor
+
+- func: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor
+  variants: function
+
 - func: transpose(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method
+  device_guard: false
 
 - func: flip(Tensor self, IntList dims) -> Tensor
   variants: function, method
@@ -1672,13 +1724,19 @@
     CPU: flip_cpu
     CUDA: flip_cuda
 
+- func: roll(Tensor self, IntList[1] shifts, IntList[1] dims={}) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: roll_cpu
+    CUDA: roll_cuda
+
 # default IntList value {0,1} should not add space after comma, since native_parse.py uses ', ' to split args
 - func: rot90(Tensor self, int64_t k=1, IntList dims={0,1}) -> Tensor
   variants: function, method
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim=1) -> Tensor
 
-- func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, double margin=1.0, double p=2, double eps=1e-6, bool swap=false, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+- func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, double margin=1.0, double p=2, double eps=1e-6, bool swap=false, int64_t reduction=Reduction::Mean) -> Tensor
 
 - func: trunc(Tensor self) -> Tensor
   variants: function, method
@@ -1713,9 +1771,11 @@
 
 - func: unsqueeze(Tensor self, int64_t dim) -> Tensor
   variants: function, method
+  device_guard: false
 
 - func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
   variants: method
+  device_guard: false
 
 - func: var(Tensor self, bool unbiased=true) -> Tensor
   variants: function, method
@@ -1727,6 +1787,7 @@
 
 - func: view_as(Tensor self, Tensor other) -> Tensor
   variants: method
+  device_guard: false
 
 # we define both of these because 'where' does the broadcast and '_s_where' doesn't;
 # this allows us to implicitly calculate the broadcast derivative, while only dealing with the
@@ -1875,6 +1936,13 @@
 
 - func: sub_(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   variants: method
+
+- func: rsub(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+
+# For C++ only, until we have conversion from C++ numbers to Tensor
+- func: rsub(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
+  variants: function
 
 - func: s_native_addmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   dispatch:
@@ -2211,15 +2279,18 @@
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
 
+# to(Device) must not exist because all constructors of Device also works for
+# TensorOptions. Otherwise, an ambiguity error is thrown.
+# See NOTE [ TensorOptions Constructors ].
+- func: to(Tensor self, TensorOptions options, bool non_blocking=false, bool copy=false) -> Tensor
+  variants: method
+  device_guard: False
+
 - func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
 
 - func: to(Tensor self, ScalarType dtype, bool non_blocking=false, bool copy=false) -> Tensor
-  variants: method
-  device_guard: False
-
-- func: to(Tensor self, Device device, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
 
@@ -2294,11 +2365,7 @@
 
 # wrappers for legacy TH methods
 
-- func: storage_offset(Tensor self) -> int64_t
-  variants: method
-  device_guard: false
-
-- func: ndimension(Tensor self) -> int64_t
+- func: data_ptr(Tensor self) -> void*
   variants: method
   device_guard: false
 
@@ -2318,25 +2385,18 @@
   variants: method
   device_guard: false
 
-- func: is_contiguous(Tensor self) -> bool
-  variants: method
-  device_guard: false
-
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
   device_guard: false
 
 - func: masked_fill_(Tensor self, Tensor mask, Scalar value) -> Tensor
   variants: method
-  device_guard: false
 
 - func: masked_fill_(Tensor self, Tensor mask, Tensor value) -> Tensor
   variants: method
-  device_guard: false
 
 - func: masked_scatter_(Tensor self, Tensor mask, Tensor source) -> Tensor
   variants: method
-  device_guard: false
 
 - func: view(Tensor self, IntList size) -> Tensor
   variants: method
@@ -2344,346 +2404,579 @@
 
 - func: put_(Tensor self, Tensor index, Tensor source, bool accumulate=false) -> Tensor
   variants: method
-  device_guard: false
 
 - func: index_add_(Tensor self, int64_t dim, Tensor index, Tensor source) -> Tensor
   variants: method
-  device_guard: false
 
 - func: index_fill_(Tensor self, int64_t dim, Tensor index, Scalar value) -> Tensor
   variants: method
-  device_guard: false
 
 - func: index_fill_(Tensor self, int64_t dim, Tensor index, Tensor value) -> Tensor
   variants: method
-  device_guard: false
 
 - func: scatter_(Tensor self, int64_t dim, Tensor index, Tensor src) -> Tensor
   variants: method
-  device_guard: false
 
 - func: scatter_(Tensor self, int64_t dim, Tensor index, Scalar value) -> Tensor
   variants: method
-  device_guard: false
 
 - func: scatter_add_(Tensor self, int64_t dim, Tensor index, Tensor src) -> Tensor
   variants: method
-  device_guard: false
 
 - func: lt_(Tensor self, Scalar other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: lt_(Tensor self, Tensor other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: gt_(Tensor self, Scalar other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: gt_(Tensor self, Tensor other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: le_(Tensor self, Scalar other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: le_(Tensor self, Tensor other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: ge_(Tensor self, Scalar other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: ge_(Tensor self, Tensor other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: eq_(Tensor self, Scalar other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: eq_(Tensor self, Tensor other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: ne_(Tensor self, Scalar other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: ne_(Tensor self, Tensor other) -> Tensor
   variants: method
-  device_guard: false
+
+- func: __and__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: __and__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: __iand__(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+- func: __iand__(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: __or__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: __or__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: __ior__(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+- func: __ior__(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: __xor__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: __xor__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: __ixor__(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+- func: __ixor__(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: __lshift__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: __lshift__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: __ilshift__(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+- func: __ilshift__(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: __rshift__(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: __rshift__(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: __irshift__(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+- func: __irshift__(Tensor self, Tensor other) -> Tensor
+  variants: method
 
 - func: lgamma_(Tensor self) -> Tensor
   variants: method
-  device_guard: false
 
 - func: atan2_(Tensor self, Tensor other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: tril_(Tensor self, int64_t diagonal=0) -> Tensor
   variants: method
-  device_guard: false
 
 - func: triu_(Tensor self,  int64_t diagonal=0) -> Tensor
   variants: method
-  device_guard: false
 
 - func: digamma_(Tensor self) -> Tensor
   variants: method
-  device_guard: false
 
 - func: polygamma_(Tensor self, int64_t n) -> Tensor
   variants: method
-  device_guard: false
 
 - func: erfinv_(Tensor self) -> Tensor
   variants: method
-  device_guard: false
 
 - func: frac_(Tensor self) -> Tensor
   variants: method
-  device_guard: false
 
 - func: renorm_(Tensor self, Scalar p, int64_t dim, Scalar maxnorm) -> Tensor
   variants: method
-  device_guard: false
 
 - func: reciprocal_(Tensor self) -> Tensor
   variants: method
-  device_guard: false
 
 - func: neg_(Tensor self) -> Tensor
   variants: method
-  device_guard: false
 
 - func: pow_(Tensor self, Scalar exponent) -> Tensor
   variants: method
-  device_guard: false
 
 - func: pow_(Tensor self, Tensor exponent) -> Tensor
   variants: method
-  device_guard: false
 
 - func: lerp_(Tensor self, Tensor end, Scalar weight) -> Tensor
   variants: method
-  device_guard: false
 
 - func: sign_(Tensor self) -> Tensor
   variants: method
-  device_guard: false
 
 - func: fmod_(Tensor self, Scalar other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: fmod_(Tensor self, Tensor other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: remainder_(Tensor self, Scalar other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: remainder_(Tensor self, Tensor other) -> Tensor
   variants: method
-  device_guard: false
 
 - func: addbmm_(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: method
-  device_guard: false
+
+- func: addbmm_out(Tensor result, Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: method, function
 
 - func: addcmul_(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method
-  device_guard: false
 
 - func: addcdiv_(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method
-  device_guard: false
 
 - func: random_(Tensor self, int64_t from, int64_t to, *, Generator* generator=nullptr) -> Tensor
   variants: method
-  device_guard: false
 
 - func: random_(Tensor self, int64_t to, *, Generator* generator=nullptr) -> Tensor
   variants: method
-  device_guard: false
 
 - func: random_(Tensor self, *, Generator* generator=nullptr) -> Tensor
   variants: method
-  device_guard: false
 
 - func: uniform_(Tensor self, double from=0, double to=1, *, Generator* generator=nullptr) -> Tensor
   variants: method
-  device_guard: false
 
 - func: normal_(Tensor self, double mean=0, double std=1, *, Generator* generator=nullptr) -> Tensor
   variants: method
-  device_guard: false
 
 - func: cauchy_(Tensor self, double median=0, double sigma=1, *, Generator* generator=nullptr) -> Tensor
   variants: method
-  device_guard: false
 
 - func: log_normal_(Tensor self, double mean=1, double std=2, *, Generator* generator=nullptr) -> Tensor
   variants: method
-  device_guard: false
 
 - func: exponential_(Tensor self, double lambd=1, *, Generator* generator=nullptr) -> Tensor
   variants: method
-  device_guard: false
 
 - func: geometric_(Tensor self, double p, *, Generator* generator=nullptr) -> Tensor
   variants: method
-  device_guard: false
 
 # wrappers for TH functions
 
 - func: diag_out(Tensor result, Tensor self, int64_t diagonal=0) -> Tensor
-  device_guard: false
 
 - func: diag(Tensor self, int64_t diagonal=0) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: cross_out(Tensor result, Tensor self, Tensor other, int64_t dim=-1) -> Tensor
-  device_guard: false
 
 - func: cross(Tensor self, Tensor other, int64_t dim=-1) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: triu_out(Tensor result, Tensor self, int64_t diagonal=0) -> Tensor
-  device_guard: false
 
 - func: triu(Tensor self, int64_t diagonal=0) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: tril_out(Tensor result, Tensor self, int64_t diagonal=0) -> Tensor
-  device_guard: false
 
 - func: tril(Tensor self, int64_t diagonal=0) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: trace(Tensor self) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: ne_out(Tensor result, Tensor self, Scalar other) -> Tensor
-  device_guard: false
 
 - func: ne(Tensor self, Scalar other) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: ne_out(Tensor result, Tensor self, Tensor other) -> Tensor
-  device_guard: false
 
 - func: ne(Tensor self, Tensor other) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: eq_out(Tensor result, Tensor self, Scalar other) -> Tensor
-  device_guard: false
 
 - func: eq(Tensor self, Scalar other) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: eq_out(Tensor result, Tensor self, Tensor other) -> Tensor
-  device_guard: false
 
 - func: eq(Tensor self, Tensor other) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: ge_out(Tensor result, Tensor self, Scalar other) -> Tensor
-  device_guard: false
 
 - func: ge(Tensor self, Scalar other) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: ge_out(Tensor result, Tensor self, Tensor other) -> Tensor
-  device_guard: false
 
 - func: ge(Tensor self, Tensor other) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: le_out(Tensor result, Tensor self, Scalar other) -> Tensor
-  device_guard: false
 
 - func: le(Tensor self, Scalar other) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: le_out(Tensor result, Tensor self, Tensor other) -> Tensor
-  device_guard: false
 
 - func: le(Tensor self, Tensor other) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: gt_out(Tensor result, Tensor self, Scalar other) -> Tensor
-  device_guard: false
 
 - func: gt(Tensor self, Scalar other) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: gt_out(Tensor result, Tensor self, Tensor other) -> Tensor
-  device_guard: false
 
 - func: gt(Tensor self, Tensor other) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: lt_out(Tensor result, Tensor self, Scalar other) -> Tensor
-  device_guard: false
 
 - func: lt(Tensor self, Scalar other) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: lt_out(Tensor result, Tensor self, Tensor other) -> Tensor
-  device_guard: false
 
 - func: lt(Tensor self, Tensor other) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: take_out(Tensor result, Tensor self, Tensor index) -> Tensor
-  device_guard: false
 
 - func: take(Tensor self, Tensor index) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: index_select_out(Tensor result, Tensor self, int64_t dim, Tensor index) -> Tensor
-  device_guard: false
 
 - func: index_select(Tensor self, int64_t dim, Tensor index) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: masked_select_out(Tensor result, Tensor self, Tensor mask) -> Tensor
-  device_guard: false
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
   variants: method, function
-  device_guard: false
 
 - func: nonzero_out(Tensor result, Tensor self) -> Tensor
-  device_guard: false
 
 - func: nonzero(Tensor self) -> Tensor
   variants: method, function
+
+- func: gather_out(Tensor result, Tensor self, int64_t dim, Tensor index) -> Tensor
+
+- func: gather(Tensor self, int64_t dim, Tensor index) -> Tensor
+  variants: method, function
+
+- func: addcmul_out(Tensor result, Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
+
+- func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
+  variants: method, function
+
+- func: addcdiv_out(Tensor result, Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
+
+- func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
+  variants: method, function
+
+- func: gels_out(Tensor X, Tensor qr, Tensor self, Tensor A) -> (Tensor, Tensor)
+
+- func: gels(Tensor self, Tensor A) -> (Tensor, Tensor)
+  variants: method, function
+
+- func: trtrs_out(Tensor X, Tensor M, Tensor self, Tensor A, bool upper=true, bool transpose=false, bool unitriangular=false) -> (Tensor, Tensor)
+
+- func: trtrs(Tensor self, Tensor A, bool upper=true, bool transpose=false, bool unitriangular=false) -> (Tensor, Tensor)
+  variants: method, function
+
+- func: symeig_out(Tensor e, Tensor V, Tensor self, bool eigenvectors=false, bool upper=true) -> (Tensor, Tensor)
+
+- func: symeig(Tensor self, bool eigenvectors=false, bool upper=true) -> (Tensor, Tensor)
+  variants: method, function
+
+- func: eig_out(Tensor e, Tensor v, Tensor self, bool eigenvectors=false) -> (Tensor, Tensor)
+
+- func: eig(Tensor self, bool eigenvectors=false) -> (Tensor, Tensor)
+  variants: method, function
+
+- func: svd_out(Tensor U, Tensor S, Tensor V, Tensor self, bool some=true, bool compute_uv=true) -> (Tensor, Tensor, Tensor)
+
+- func: svd(Tensor self, bool some=true, bool compute_uv=true) -> (Tensor, Tensor, Tensor)
+  variants: method, function
+
+- func: cholesky_out(Tensor result, Tensor self, bool upper=false) -> Tensor
+
+- func: cholesky(Tensor self, bool upper=false) -> Tensor
+  variants: method, function
+
+- func: potrs_out(Tensor result, Tensor self, Tensor input2, bool upper=true) -> Tensor
+
+- func: potrs(Tensor self, Tensor input2, bool upper=true) -> Tensor
+  variants: method, function
+
+- func: _potrs_helper(Tensor self, Tensor A, bool upper) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _potrs_helper_cpu
+    CUDA: _potrs_helper_cuda
+
+- func: potri_out(Tensor result, Tensor self, bool upper=true) -> Tensor
+
+- func: potri(Tensor self, bool upper=true) -> Tensor
+  variants: method, function
+
+- func: pstrf_out(Tensor u, Tensor piv, Tensor self, bool upper=true, Scalar tol=-1) -> (Tensor, Tensor)
+
+- func: pstrf(Tensor self, bool upper=true, Scalar tol=-1) -> (Tensor, Tensor)
+  variants: method, function
+
+- func: qr_out(Tensor Q, Tensor R, Tensor self) -> (Tensor, Tensor)
+
+- func: qr(Tensor self) -> (Tensor, Tensor)
+  variants: method, function
+
+- func: geqrf_out(Tensor result0, Tensor result1, Tensor self) -> (Tensor, Tensor)
+
+- func: geqrf(Tensor self) -> (Tensor, Tensor)
+  variants: method, function
+
+- func: orgqr_out(Tensor result, Tensor self, Tensor input2) -> Tensor
+
+- func: orgqr(Tensor self, Tensor input2) -> Tensor
+  variants: method, function
+
+- func: ormqr_out(Tensor result, Tensor self, Tensor input2, Tensor input3, bool left=true, bool transpose=false) -> Tensor
+
+- func: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=true, bool transpose=false) -> Tensor
+  variants: method, function
+
+- func: btrifact_out(Tensor A_LU, Tensor pivots, Tensor self, *, bool pivot=true) -> (Tensor, Tensor)
+
+- func: btrifact(Tensor self, *, bool pivot=true) -> (Tensor, Tensor)
+  variants: method, function
+
+- func: btrifact_with_info_out(Tensor A_LU, Tensor pivots, Tensor info, Tensor self, *, bool pivot=true) -> (Tensor, Tensor, Tensor)
+
+- func: btrifact_with_info(Tensor self, *, bool pivot=true) -> (Tensor, Tensor, Tensor)
+  variants: method, function
+
+- func: btrisolve_out(Tensor result, Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
+
+- func: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
+  variants: method, function
+
+- func: multinomial_out(Tensor result, Tensor self, int64_t num_samples, bool replacement=false, *, Generator* generator=nullptr) -> Tensor
+
+- func: multinomial(Tensor self, int64_t num_samples, bool replacement=false, *, Generator* generator=nullptr) -> Tensor
+  variants: method, function
+
+- func: lgamma_out(Tensor result, Tensor self) -> Tensor
+
+- func: lgamma(Tensor self) -> Tensor
+  variants: method, function
+
+- func: digamma_out(Tensor result, Tensor self) -> Tensor
+
+- func: digamma(Tensor self) -> Tensor
+  variants: method, function
+
+- func: polygamma_out(Tensor result, int64_t n, Tensor self) -> Tensor
+
+- func: polygamma(int64_t n, Tensor self) -> Tensor
+  variants: method, function
+
+- func: erfinv_out(Tensor result, Tensor self) -> Tensor
+
+- func: erfinv(Tensor self) -> Tensor
+  variants: method, function
+
+- func: frac_out(Tensor result, Tensor self) -> Tensor
+
+- func: frac(Tensor self) -> Tensor
+  variants: method, function
+
+- func: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
+  variants: method, function
+
+- func: reciprocal_out(Tensor result, Tensor self) -> Tensor
+
+- func: reciprocal(Tensor self) -> Tensor
+  variants: method, function
+
+- func: neg_out(Tensor result, Tensor self) -> Tensor
+
+- func: neg(Tensor self) -> Tensor
+  variants: method, function
+
+- func: atan2_out(Tensor result, Tensor self, Tensor other) -> Tensor
+
+- func: atan2(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: lerp_out(Tensor result, Tensor self, Tensor end, Scalar weight) -> Tensor
+
+- func: lerp(Tensor self, Tensor end, Scalar weight) -> Tensor
+  variants: method, function
+
+- func: histc_out(Tensor result, Tensor self, int64_t bins=100, Scalar min=0, Scalar max=0) -> Tensor
+
+- func: histc(Tensor self, int64_t bins=100, Scalar min=0, Scalar max=0) -> Tensor
+  variants: method, function
+
+- func: sign_out(Tensor result, Tensor self) -> Tensor
+
+- func: sign(Tensor self) -> Tensor
+  variants: method, function
+
+- func: fmod_out(Tensor result, Tensor self, Scalar other) -> Tensor
+
+- func: fmod(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: fmod_out(Tensor result, Tensor self, Tensor other) -> Tensor
+
+- func: fmod(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: remainder_out(Tensor result, Tensor self, Scalar other) -> Tensor
+
+- func: remainder(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: remainder_out(Tensor result, Tensor self, Tensor other) -> Tensor
+
+- func: remainder(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: min_out(Tensor result, Tensor self, Tensor other) -> Tensor
+
+- func: min(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: min(Tensor self) -> Tensor
+  variants: method, function
+
+- func: max_out(Tensor result, Tensor self, Tensor other) -> Tensor
+
+- func: max(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: max(Tensor self) -> Tensor
+  variants: method, function
+
+- func: median(Tensor self) -> Tensor
+  variants: method, function
+
+- func: sort_out(Tensor values, Tensor indices, Tensor self, int64_t dim=-1, bool descending=false) -> (Tensor, Tensor)
+
+- func: sort(Tensor self, int64_t dim=-1, bool descending=false) -> (Tensor, Tensor)
+  variants: method, function
+
+- func: topk_out(Tensor values, Tensor indices, Tensor self, int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) -> (Tensor, Tensor)
+
+- func: topk(Tensor self, int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) -> (Tensor, Tensor)
+  variants: method, function
+
+- func: all(Tensor self) -> Tensor
+  variants: method, function
+
+- func: any(Tensor self) -> Tensor
+  variants: method, function
+
+- func: renorm_out(Tensor result, Tensor self, Scalar p, int64_t dim, Scalar maxnorm) -> Tensor
+
+- func: renorm(Tensor self, Scalar p, int64_t dim, Scalar maxnorm) -> Tensor
+  variants: method, function
+
+- func: unfold(Tensor self, int64_t dimension, int64_t size, int64_t step) -> Tensor
+  variants: method
   device_guard: false
+
+- func: equal(Tensor self, Tensor other) -> bool
+  variants: method, function
+
+- func: pow_out(Tensor result, Tensor self, Tensor exponent) -> Tensor
+
+- func: pow(Tensor self, Tensor exponent) -> Tensor
+  variants: method, function
+
+- func: pow_out(Tensor result, Scalar self, Tensor exponent) -> Tensor
+
+- func: pow(Scalar self, Tensor exponent) -> Tensor
+
+- func: normal_out(Tensor output, Tensor mean, double std=1, *, Generator* generator=nullptr) -> Tensor
+
+- func: normal(Tensor mean, double std=1, *, Generator* generator=nullptr) -> Tensor
+
+- func: normal_out(Tensor output, double mean, Tensor std, *, Generator* generator=nullptr) -> Tensor
+
+- func: normal(double mean, Tensor std, *, Generator* generator=nullptr) -> Tensor
+
+- func: normal_out(Tensor output, Tensor mean, Tensor std, *, Generator* generator=nullptr) -> Tensor
+
+- func: normal(Tensor mean, Tensor std, *, Generator* generator=nullptr) -> Tensor
+
+- func: alias(Tensor self) -> Tensor
+  variants: method, function
+
+- func: _dirichlet_grad_out(Tensor output, Tensor x, Tensor alpha, Tensor total) -> Tensor
+
+- func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor

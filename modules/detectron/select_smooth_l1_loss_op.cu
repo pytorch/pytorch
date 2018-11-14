@@ -44,9 +44,9 @@ __global__ void SelectSmoothL1Kernel(
       float abs_val = abs(val);
       #endif
       if (abs_val < beta) {
-        out[ind] = (0.5 * val * val / beta) / max(S[0], 1.0);
+        out[ind] = (0.5 * val * val / beta) / fmaxf(S[0], 1.0f);
       } else {
-        out[ind] = (abs_val - 0.5 * beta) / max(S[0], 1.0);
+        out[ind] = (abs_val - 0.5 * beta) / fmaxf(S[0], 1.0f);
       }
     }
   }
@@ -85,9 +85,9 @@ __global__ void SelectSmoothL1GradientKernel(
       float abs_val = abs(val);
       #endif
       if (abs_val < beta) {
-        out[ind] = norm * d_loss * val / beta / max(S[0], 1.0);
+        out[ind] = norm * d_loss * val / beta / fmaxf(S[0], 1.0f);
       } else {
-        out[ind] = norm * d_loss * ((float(0) < val) - (val < float(0))) / max(S[0], 1.0);
+        out[ind] = norm * d_loss * ((float(0) < val) - (val < float(0))) / fmaxf(S[0], 1.0f);
       }
     }
   }

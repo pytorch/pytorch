@@ -1,22 +1,6 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/Formatting.h>
-
-#define TORCH_FORALL_TAGS(_) \
-  _(None)                    \
-  _(Tensor)                  \
-  _(Double)                  \
-  _(Int)                     \
-  _(Bool)                    \
-  _(Tuple)                   \
-  _(IntList)                 \
-  _(DoubleList)              \
-  _(BoolList)                \
-  _(String)                  \
-  _(TensorList)              \
-  _(Blob)                    \
-  _(GenericList)             \
-  _(World)                   \
-  _(Future)                  \
+#include <cmath>
 
 namespace c10 {
 namespace ivalue {
@@ -26,16 +10,19 @@ CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
   return c10::make_intrusive<ConstantString>(std::move(str_));
 }
 
+} // namespace ivalue
+
 namespace {
 
-template<typename Elem>
-std::ostream& printList(std::ostream & out, const List<Elem> &v,
-  const std::string start, const std::string delim, const std::string finish) {
+template<typename List>
+std::ostream& printList(std::ostream & out, const List &v,
+  const std::string start, const std::string finish) {
   out << start;
-  for(size_t i = 0; i < v.elements().size(); ++i) {
+  for(size_t i = 0; i < v->elements().size(); ++i) {
     if(i > 0)
-      out << delim;
-    out << v.elements()[i];
+      out << ", ";
+    // make sure we use ivalue printing, and not default printing for the element type
+    out << IValue(v->elements()[i]);
   }
   out << finish;
   return out;
@@ -43,37 +30,41 @@ std::ostream& printList(std::ostream & out, const List<Elem> &v,
 
 } // anonymous namespace
 
-template<typename PointerType>
-std::ostream& operator<<(std::ostream & out, const Shared<PointerType> & v) {
-  return out << *v;
-}
-
-std::ostream& operator<<(std::ostream & out, const ConstantString & v) {
-  return out << v.string();
-}
-
-std::ostream& operator<<(std::ostream & out, const Future & v) {
-  return out << "Future";
-}
-
-template<typename Elem>
-std::ostream& operator<<(std::ostream & out, const List<Elem> & v) {
-  return printList<Elem>(out, v, "[", ", ", "]");
-}
-
-// tuple case
-template<>
-std::ostream& operator<<(std::ostream & out, const List<IValue> & v) {
-  return printList<IValue>(out, v, "(", ", ", ")");
-}
-
-} // namespace ivalue
-
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
   switch(v.tag) {
-    #define DEFINE_CASE(x) case IValue::Tag::x: return out << v.to ## x();
-    TORCH_FORALL_TAGS(DEFINE_CASE)
-    #undef DEFINE_CASE
+    case IValue::Tag::None:
+      return out << v.toNone();
+    case IValue::Tag::Tensor:
+      return out << v.toTensor();
+    case IValue::Tag::Double: {
+      double d = v.toDouble();
+      int64_t i = int64_t(d);
+      if (std::isnormal(d) && double(i) == d) {
+        return out << i << ".";
+      }
+      return out << v.toDouble();
+    } case IValue::Tag::Int:
+      return out << v.toInt();
+    case IValue::Tag::Bool:
+      return out << v.toBool();
+    case IValue::Tag::Tuple:
+      return printList(out, v.toTuple(), "(", ")");
+    case IValue::Tag::IntList:
+      return printList(out, v.toIntList(), "[", "]");
+    case IValue::Tag::DoubleList:
+      return printList(out, v.toDoubleList(), "[", "]");
+    case IValue::Tag::BoolList:
+      return printList(out, v.toBoolList(), "[", "]");
+    case IValue::Tag::String:
+      return out << v.toStringRef();
+    case IValue::Tag::TensorList:
+      return printList(out, v.toTensorList(), "[", "]");
+    case IValue::Tag::Blob:
+      return out << v.toBlob();
+    case IValue::Tag::GenericList:
+      return printList(out, v.toGenericList(), "[", "]");
+    case IValue::Tag::Future:
+      return out << "Future";
   }
   AT_ERROR("Tag not found\n");
 }

@@ -15,8 +15,8 @@ namespace torch { namespace autograd {
 struct CopyBackwards : public Function {
   variable_list apply(variable_list&& grads) override;
 
-  at::Type *src_type;
-  int32_t src_device = -1;
+  at::Type *src_type = nullptr; // initialized for safety.
+  at::Device src_device = at::kCPU;
 };
 
 // Performs grad[idx] = fn(grad[idx]), but out-of-place. The slicing operation

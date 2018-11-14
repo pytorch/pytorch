@@ -5,7 +5,6 @@ set(LIB_SOURCES
         DispatchTable.cpp
         KernelRegistration.cpp
         LayoutId.cpp
-        LeftRight.cpp
         OpSchema.cpp
         OpSchemaRegistration.cpp
 )

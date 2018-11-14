@@ -117,9 +117,13 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
   gain_.Resize(N);
   auto* gain_data = gain_.template mutable_data<float>();
   EigenVectorArrayMap<float> gain_vec(gain_data, gain_.numel());
-  // Gain vector = 2^rel = exp{rel * log(2)}
-  gain_vec = (r_vec * log2f_).exp();
 
+  if (use_ndcg_as_loss_ && !use_exp_gain_) {
+    gain_vec = r_vec;
+  } else {
+    // Gain vector = 2^rel = exp{rel * log(2)}
+    gain_vec = (r_vec * log2f_).exp();
+  }
   ResizeInvLogITensor(N);
   ComputeDiscounts(ideal_idx_data, N);
   auto* ideal_discount_data = discount_.template mutable_data<float>();
@@ -176,7 +180,7 @@ bool LambdaRankNdcgOp<float, CPUContext>::RunOnDevice() {
   auto* dy = Output(DPRED);
 
   const auto* session_lengths = sid.template data<int>();
-  CAFFE_ENFORCE(y.ndim() == 1);
+  CAFFE_ENFORCE(y.dim() == 1);
   CAFFE_ENFORCE(y.numel() == r.numel());
   dy->Resize(y.numel());
   loss->Resize(sid.numel());
@@ -198,8 +202,8 @@ bool LambdaRankNdcgGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dy_cache = Input(DY_CACHE);
   auto& dLoss = Input(DLOSS);
   auto* dy = Output(DY);
-  CAFFE_ENFORCE(y.ndim() == 1);
-  CAFFE_ENFORCE(dy_cache.ndim() == 1);
+  CAFFE_ENFORCE(y.dim() == 1);
+  CAFFE_ENFORCE(dy_cache.dim() == 1);
   CAFFE_ENFORCE(dy_cache.numel() > 0);
   CAFFE_ENFORCE(y.numel() == dy_cache.numel());
 

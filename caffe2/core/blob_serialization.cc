@@ -205,22 +205,21 @@ void TensorSerializer::Serialize(
         "created a tensor of non-zero shape but never filled its data via "
         "mutable_data() calls. This means that it makes no sense to serialize "
         "the tensor content.");
-  } else {
-    // Uncomment this when we try to remove this behavior entirely, see T35723601
-    //LOG(ERROR)
-    //    << "You're trying to serialize tensor with zero numel and no dtype. "
-    //    << "This is a legacy behavior and it WILL BREAK. Contact PyTorch team "
-    //    << "for details or see D10380678. Offending blob name: " << name;
+  } else if (!input.dtype_initialized()) {
+    C10_LOG_EVERY_MS(WARNING, 1000)
+        << "You're trying to serialize tensor with zero numel and no dtype. "
+        << "This is a legacy behavior and it WILL BREAK. Contact PyTorch team "
+        << "for details. Offending blob name: " << name;
   }
 
   TensorProto& proto = *proto_ptr;
   proto.mutable_segment()->set_begin(chunkBegin);
   proto.mutable_segment()->set_end(chunkBegin + chunkSize);
 
-  for (int i = 0; i < input.ndim(); ++i) {
-    proto.add_dims(input.dim(i));
+  for (int i = 0; i < input.dim(); ++i) {
+    proto.add_dims(input.size(i));
   }
-  const TensorProto::DataType data_type = TypeMetaToDataType(input.meta());
+  const TensorProto::DataType data_type = TypeMetaToDataType(input.dtype());
   proto.set_data_type(data_type);
   StoreDeviceDetail(input, &proto);
   auto uniq_ptr = CreateContext(input.GetDevice());
@@ -331,8 +330,8 @@ void TensorSerializer::Serialize(
       if (chunkSize > 0) {
         const char* raw_data = static_cast<const char*>(input.raw_data());
         for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
-          proto.add_string_data(
-              SerializeBlob(raw_data + i * input.itemsize(), input.meta(), ""));
+          proto.add_string_data(SerializeBlob(
+              raw_data + i * input.itemsize(), input.dtype(), ""));
         }
       }
     } break;

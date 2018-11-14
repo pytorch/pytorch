@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <ATen/ATen.h>
 
@@ -23,7 +23,7 @@ bool almost_equal(at::Tensor left, T right, T tolerance = 1e-4) {
       tensor.device().type() == at::Device((device_), (index_)).type());   \
   ASSERT_TRUE(                                                             \
       tensor.device().index() == at::Device((device_), (index_)).index()); \
-  ASSERT_EQ(tensor.dtype(), (type_));                                  \
+  ASSERT_EQ(tensor.dtype(), (type_));                                      \
   ASSERT_TRUE(tensor.layout() == (layout_))
 
 TEST(TensorTest, ToDtype) {
@@ -38,7 +38,40 @@ TEST(TensorTest, ToDtype) {
 
   tensor = tensor.to(at::kDouble);
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kDouble, at::kStrided);
+
+  tensor = tensor.to(at::TensorOptions(at::kInt));
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kInt, at::kStrided);
+
+  tensor = tensor.to(at::TensorOptions(at::kChar));
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kChar, at::kStrided);
+
+  tensor = tensor.to(at::TensorOptions(at::kDouble));
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kDouble, at::kStrided);
 }
+
+TEST(TensorTest, ToTensorAndTensorAttributes) {
+  auto tensor = at::empty({3, 4});
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
+
+  auto other = at::empty({3, 4}, at::kInt);
+  tensor = tensor.to(other);
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kInt, at::kStrided);
+
+  other = at::empty({3, 4}, at::kDouble);
+  tensor = tensor.to(other.dtype());
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kDouble, at::kStrided);
+  tensor = tensor.to(other.device());
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kDouble, at::kStrided);
+
+  other = at::empty({3, 4}, at::kLong);
+  tensor = tensor.to(other.device(), other.dtype());
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kLong, at::kStrided);
+
+  other = at::empty({3, 4}, at::kInt);
+  tensor = tensor.to(other.options());
+  REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kInt, at::kStrided);
+}
+
 
 // Not currently supported.
 // TEST(TensorTest, ToLayout) {
@@ -52,52 +85,59 @@ TEST(TensorTest, ToDtype) {
 //   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
 // }
 
-// TEST(TensorTest, ToDevice ", "[cuda]) {
-//   auto tensor = at::empty({3, 4});
-//   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
-//
-//   tensor = tensor.to({at::kCUDA, 1});
-//   REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kFloat, at::kStrided);
-//
-//   tensor = tensor.to({at::kCUDA, 0});
-//   REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kFloat, at::kStrided);
-//
-//   tensor = tensor.to({at::kCUDA, 1});
-//   REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kFloat, at::kStrided);
-//
-//   tensor = tensor.to(at::Device(at::kCPU));
-//   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
-// }
-//
-// TEST(TensorTest, ToDeviceAndDtype ", "[cuda]) {
-//   auto tensor = at::empty({3, 4});
-//   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
-//
-//   tensor = tensor.to({at::kCUDA, 1}, at::kInt);
-//   REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kInt, at::kStrided);
-// }
-
-TEST(TensorTest, ToOptionsRespectsRequiresGrad) {
+TEST(TensorTest, ToOptionsWithRequiresGrad) {
   {
+    // Respects requires_grad
     auto tensor = torch::empty({3, 4}, at::requires_grad());
     ASSERT_TRUE(tensor.requires_grad());
 
     tensor = tensor.to(at::kDouble);
     ASSERT_TRUE(tensor.requires_grad());
+
+    // Throws if requires_grad is set in TensorOptions
+    ASSERT_THROW(tensor.to(at::TensorOptions().requires_grad(true)), c10::Error);
+    ASSERT_THROW(tensor.to(at::TensorOptions().requires_grad(false)), c10::Error);
   }
   {
     auto tensor = torch::empty({3, 4});
     ASSERT_FALSE(tensor.requires_grad());
 
+    // Respects requires_grad
     tensor = tensor.to(at::kDouble);
     ASSERT_FALSE(tensor.requires_grad());
+
+    // Throws if requires_grad is set in TensorOptions
+    ASSERT_THROW(tensor.to(at::TensorOptions().requires_grad(true)), c10::Error);
+    ASSERT_THROW(tensor.to(at::TensorOptions().requires_grad(false)), c10::Error);
   }
 }
 
 TEST(TensorTest, ToDoesNotCopyWhenOptionsAreAllTheSame) {
-  auto tensor = at::empty({3, 4}, at::kFloat);
-  auto hopefully_not_copy = tensor.to(at::kFloat);
-  ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+  {
+    auto tensor = at::empty({3, 4}, at::kFloat);
+    auto hopefully_not_copy = tensor.to(at::kFloat);
+    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+  }
+  {
+    auto tensor = at::empty({3, 4}, at::kFloat);
+    auto hopefully_not_copy = tensor.to(tensor.options());
+    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+  }
+  {
+    auto tensor = at::empty({3, 4}, at::kFloat);
+    auto hopefully_not_copy = tensor.to(tensor.dtype());
+    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+  }
+  {
+    auto tensor = at::empty({3, 4}, at::kFloat);
+    auto hopefully_not_copy = tensor.to(tensor.device());
+    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+  }
+  {
+    auto tensor = at::empty({3, 4}, at::kFloat);
+    auto hopefully_not_copy = tensor.to(tensor);
+    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+  }
 }
 
 TEST(TensorTest, ContainsCorrectValueForSingleValue) {
@@ -160,10 +200,10 @@ TEST(TensorTest, ContainsCorrectValuesWhenConstructedFromVector) {
     ASSERT_TRUE(exactly_equal(tensor[i], v.at(i)));
   }
 
-  std::vector<float> w = {1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9, 10.0};
+  std::vector<double> w = {1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9, 10.0};
   tensor = at::tensor(w);
   ASSERT_EQ(tensor.numel(), w.size());
-  ASSERT_EQ(tensor.dtype(), at::kFloat);
+  ASSERT_EQ(tensor.dtype(), at::kDouble);
   for (size_t i = 0; i < w.size(); ++i) {
     ASSERT_TRUE(almost_equal(tensor[i], w.at(i)));
   }

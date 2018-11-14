@@ -34,7 +34,7 @@ using c10::optional;
 struct TORCH_API VariableType final : public at::TypeDefault {
   VariableType(Context* context, at::TypeExtendedInterface* baseType);
   at::ScalarType scalarType() const override;
-  virtual caffe2::TypeMeta typeMeta() const override;
+  caffe2::TypeMeta typeMeta() const override;
   at::Backend backend() const override;
   at::Allocator* allocator() const override;
   at::Device getDeviceFromPtr(void * data) const override;
@@ -70,8 +70,10 @@ struct TORCH_API VariableType final : public at::TypeDefault {
 
 private:
   // checks that t is actually a Variable
-  static Variable & checked_cast_variable(const Tensor & t, const char * name, int pos);
-  static at::Tensor & unpack(const Tensor & t, const char * name, int pos);
+  static const Variable & checked_cast_variable(const Tensor & t, const char * name, int pos);
+  static Variable & checked_cast_variable(Tensor & t, const char * name, int pos);
+  static at::Tensor & unpack(Tensor & t, const char * name, int pos);
+  static const at::Tensor & unpack(const Tensor & t, const char * name, int pos);
   static at::SparseTensorRef unpack(SparseTensorRef t, const char * name, int pos);
   static at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
   static std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);

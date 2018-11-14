@@ -825,6 +825,51 @@ Example::
     tensor([-2.1763, -0.4713, -0.6986,  1.3702])
 """)
 
+add_docstr(torch.cholesky, r"""
+cholesky(a, upper=False, out=None) -> Tensor
+
+Computes the Cholesky decomposition of a symmetric positive-definite
+matrix :math:`A`.
+
+If :attr:`upper` is ``True``, the returned matrix `U` is upper-triangular, and
+the decomposition has the form:
+
+.. math::
+
+  A = U^TU
+
+If :attr:`upper` is ``False``, the returned matrix `L` is lower-triangular, and
+the decomposition has the form:
+
+.. math::
+
+    A = LL^T
+
+Args:
+    a (Tensor): the input 2-D tensor, a symmetric positive-definite matrix
+    upper (bool, optional): flag that indicates whether to return the
+                            upper or lower triangular matrix. Default: ``False``
+    out (Tensor, optional): the output matrix
+
+Example::
+
+    >>> a = torch.randn(3, 3)
+    >>> a = torch.mm(a, a.t()) # make symmetric positive definite
+    >>> l = torch.cholesky(a)
+    >>> a
+    tensor([[ 2.4112, -0.7486,  1.4551],
+            [-0.7486,  1.3544,  0.1294],
+            [ 1.4551,  0.1294,  1.6724]])
+    >>> l
+    tensor([[ 1.5528,  0.0000,  0.0000],
+            [-0.4821,  1.0592,  0.0000],
+            [ 0.9371,  0.5487,  0.7023]])
+    >>> torch.mm(l, l.t())
+    tensor([[ 2.4112, -0.7486,  1.4551],
+            [-0.7486,  1.3544,  0.1294],
+            [ 1.4551,  0.1294,  1.6724]])
+""")
+
 add_docstr(torch.clamp,
            r"""
 clamp(input, min, max, out=None) -> Tensor
@@ -1108,6 +1153,68 @@ Get the k-th diagonal of a given matrix::
     tensor([ 0.0255, 0.1374])
 """)
 
+add_docstr(torch.diag_embed,
+           r"""
+diag_embed(input, offset=0, dim1=-2, dim2=-1) -> Tensor
+
+Creates a tensor whose diagonals of certain 2D planes (specified by
+:attr:`dim1` and :attr:`dim2`) are filled by :attr:`input`.
+To facilitate creating batched diagonal matrices, the 2D planes formed by
+the last two dimensions of the returned tensor are chosen by default.
+
+The argument :attr:`offset` controls which diagonal to consider:
+
+- If :attr:`offset` = 0, it is the main diagonal.
+- If :attr:`offset` > 0, it is above the main diagonal.
+- If :attr:`offset` < 0, it is below the main diagonal.
+
+The size of the new matrix will be calculated to make the specified diagonal
+of the size of the last input dimension.
+Note that for :attr:`offset` other than :math:`0`, the order of :attr:`dim1`
+and :attr:`dim2` matters. Exchanging them is equivalent to changing the
+sign of :attr:`offset`.
+
+Applying :meth:`torch.diagonal` to the output of this function with
+the same arguments yields a matrix identical to input. However,
+:meth:`torch.diagonal` has different default dimensions, so those
+need to be explicitly specified.
+
+Args:
+    input (Tensor): the input tensor. Must be at least 1-dimensional.
+    offset (int, optional): which diagonal to consider. Default: 0
+        (main diagonal).
+    dim1 (int, optional): first dimension with respect to which to
+        take diagonal. Default: -2.
+    dim2 (int, optional): second dimension with respect to which to
+        take diagonal. Default: -1.
+
+Example::
+
+    >>> a = torch.randn(2, 3)
+    >>> torch.diag_embed(a)
+    tensor([[[ 1.5410,  0.0000,  0.0000],
+             [ 0.0000, -0.2934,  0.0000],
+             [ 0.0000,  0.0000, -2.1788]],
+
+            [[ 0.5684,  0.0000,  0.0000],
+             [ 0.0000, -1.0845,  0.0000],
+             [ 0.0000,  0.0000, -1.3986]]])
+
+    >>> torch.diag_embed(a, offset=1, dim1=0, dim2=2)
+    tensor([[[ 0.0000,  1.5410,  0.0000,  0.0000],
+             [ 0.0000,  0.5684,  0.0000,  0.0000]],
+
+            [[ 0.0000,  0.0000, -0.2934,  0.0000],
+             [ 0.0000,  0.0000, -1.0845,  0.0000]],
+
+            [[ 0.0000,  0.0000,  0.0000, -2.1788],
+             [ 0.0000,  0.0000,  0.0000, -1.3986]],
+
+            [[ 0.0000,  0.0000,  0.0000,  0.0000],
+             [ 0.0000,  0.0000,  0.0000,  0.0000]]])
+""")
+
+
 add_docstr(torch.diagflat,
            r"""
 diagflat(input, diagonal=0) -> Tensor
@@ -1168,6 +1275,11 @@ The argument :attr:`offset` controls which diagonal to consider:
 - If :attr:`offset` > 0, it is above the main diagonal.
 - If :attr:`offset` < 0, it is below the main diagonal.
 
+Applying :meth:`torch.diag_embed` to the output of this function with
+the same arguments yields a diagonal matrix with the diagonal entries
+of the input. However, :meth:`torch.diag_embed` has different default
+dimensions, so those need to be explicitly specified.
+
 Args:
     input (Tensor): the input tensor. Must be at least 2-dimensional.
     offset (int, optional): which diagonal to consider. Default: 0
@@ -1207,7 +1319,7 @@ Examples::
 
 add_docstr(torch.digamma,
            r"""
-digamma(input) -> Tensor
+digamma(input, out=None) -> Tensor
 
 Computes the logarithmic derivative of the gamma function on `input`.
 
@@ -1417,9 +1529,10 @@ Example::
 
 add_docstr(torch.erfc,
            r"""
-erfc(tensor, out=None) -> Tensor
+erfc(input, out=None) -> Tensor
 
-Computes the complementary error function of each element. The complementary error function is defined as follows:
+Computes the complementary error function of each element of :attr:`input`.
+The complementary error function is defined as follows:
 
 .. math::
     \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
@@ -1436,16 +1549,16 @@ Example::
 
 add_docstr(torch.erfinv,
            r"""
-erfinv(tensor, out=None) -> Tensor
+erfinv(input, out=None) -> Tensor
 
-Computes the inverse error function of each element. The inverse error function is defined
-in the range :math:`(-1, 1)` as:
+Computes the inverse error function of each element of :attr:`input`.
+The inverse error function is defined in the range :math:`(-1, 1)` as:
 
 .. math::
     \mathrm{erfinv}(\mathrm{erf}(x)) = x
 
 Args:
-    tensor (Tensor): the input tensor
+    input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
 
 Example::
@@ -1456,20 +1569,16 @@ Example::
 
 add_docstr(torch.exp,
            r"""
-exp(tensor, out=None) -> Tensor
+exp(input, out=None) -> Tensor
 
 Returns a new tensor with the exponential of the elements
-of :attr:`input`.
+of the input tensor :attr:`input`.
 
 .. math::
     y_{i} = e^{x_{i}}
 
 Args:
     input (Tensor): the input tensor
-    out (Tensor, optional): the output tensor
-
-Args:
-    tensor (Tensor): the input tensor
     out (Tensor, optional): the output tensor
 
 Example::
@@ -1480,7 +1589,7 @@ Example::
 
 add_docstr(torch.expm1,
            r"""
-expm1(tensor, out=None) -> Tensor
+expm1(input, out=None) -> Tensor
 
 Returns a new tensor with the exponential of the elements minus 1
 of :attr:`input`.
@@ -1490,10 +1599,6 @@ of :attr:`input`.
 
 Args:
     input (Tensor): the input tensor
-    out (Tensor, optional): the output tensor
-
-Args:
-    tensor (Tensor): the input tensor
     out (Tensor, optional): the output tensor
 
 Example::
@@ -1580,9 +1685,9 @@ Example::
 
 add_docstr(torch.frac,
            r"""
-frac(tensor, out=None) -> Tensor
+frac(input, out=None) -> Tensor
 
-Computes the fractional portion of each element in :attr:`tensor`.
+Computes the fractional portion of each element in :attr:`input`.
 
 .. math::
     \text{out}_{i} = \text{input}_{i} - \left\lfloor \text{input}_{i} \right\rfloor
@@ -1872,7 +1977,7 @@ Example::
 
 add_docstr(torch.get_default_dtype,
            r"""
-get_default_dtype() -> :class:`torch.dtype`
+get_default_dtype() -> torch.dtype
 
 Get the current default floating point :class:`torch.dtype`.
 
@@ -2975,7 +3080,7 @@ narrow(input, dimension, start, length) -> Tensor
 
 Returns a new tensor that is a narrowed version of :attr:`input` tensor. The
 dimension :attr:`dim` is input from :attr:`start` to :attr:`start + length`. The
-returned tensor and :attr:`self` tensor share the same underlying storage.
+returned tensor and :attr:`input` tensor share the same underlying storage.
 
 Args:
     input (Tensor): the tensor to narrow
@@ -3249,51 +3354,6 @@ Args:
 
 """)
 
-add_docstr(torch.potrf, r"""
-potrf(a, upper=True, out=None) -> Tensor
-
-Computes the Cholesky decomposition of a symmetric positive-definite
-matrix :math:`A`.
-
-If :attr:`upper` is ``True``, the returned matrix `U` is upper-triangular, and
-the decomposition has the form:
-
-.. math::
-
-  A = U^TU
-
-If :attr:`upper` is ``False``, the returned matrix `L` is lower-triangular, and
-the decomposition has the form:
-
-.. math::
-
-    A = LL^T
-
-Args:
-    a (Tensor): the input 2-D tensor, a symmetric positive-definite matrix
-    upper (bool, optional): flag that indicates whether to return the
-                            upper or lower triangular matrix
-    out (Tensor, optional): the output matrix
-
-Example::
-
-    >>> a = torch.randn(3, 3)
-    >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.potrf(a)
-    >>> a
-    tensor([[ 2.4112, -0.7486,  1.4551],
-            [-0.7486,  1.3544,  0.1294],
-            [ 1.4551,  0.1294,  1.6724]])
-    >>> u
-    tensor([[ 1.5528, -0.4821,  0.9371],
-            [ 0.0000,  1.0592,  0.5486],
-            [ 0.0000,  0.0000,  0.7023]])
-    >>> torch.mm(u.t(), u)
-    tensor([[ 2.4112, -0.7486,  1.4551],
-            [-0.7486,  1.3544,  0.1294],
-            [ 1.4551,  0.1294,  1.6724]])
-""")
-
 add_docstr(torch.potri, r"""
 potri(u, upper=True, out=None) -> Tensor
 
@@ -3322,7 +3382,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.potrf(a)
+    >>> u = torch.cholesky(a)
     >>> a
     tensor([[  0.9935,  -0.6353,   1.5806],
             [ -0.6353,   0.8769,  -1.7183],
@@ -3355,11 +3415,21 @@ returned such that:
 .. math::
     c = (u u^T)^{-1} b
 
-.. note:: :attr:`b` is always a 2-D tensor, use `b.unsqueeze(1)` to convert a vector.
+`torch.potrs(b, u)` can take in 2D inputs `b, u` or inputs that are
+batches of 2D matrices. If the inputs are batches, then returns
+batched outputs `c`
+
+.. note::
+
+    The :attr:`out` keyword only supports 2D matrix inputs, that is,
+    `b, u` must be 2D matrices.
 
 Args:
-    b (Tensor): the right hand side 2-D tensor
-    u (Tensor): the input 2-D tensor, a upper or lower triangular Cholesky factor
+    b (Tensor): input matrix of size :math:`(*, m, k)`,
+                where :math:`*` is zero or more batch dimensions
+    u (Tensor): input matrix of size :math:`(*, m, m)`,
+                where :math:`*` is zero of more batch dimensions composed of
+                upper or lower triangular Cholesky factor
     upper (bool, optional): whether to return a upper (default) or lower triangular matrix
     out (Tensor, optional): the output tensor for `c`
 
@@ -3367,7 +3437,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.potrf(a)
+    >>> u = torch.cholesky(a)
     >>> a
     tensor([[ 0.7747, -1.9549,  1.3086],
             [-1.9549,  6.7546, -5.4114],
@@ -4618,6 +4688,41 @@ Example::
 
             [[ 2,  3],
              [ 0,  1]]])
+""")
+
+add_docstr(torch.roll,
+           r"""
+roll(input, shifts, dims=None) -> Tensor
+
+Roll the tensor along the given dimension. Elements that are shifted beyond the
+last position are re-introduced at the first position. If a dimension is not
+specified, the tensor will be flattened before rolling and then restored
+to the original shape.
+
+Args:
+    input (Tensor): the input tensor
+    shifts (int or tuple of ints): The number of places by which the elements
+        of the tensor are shifted
+    dims (int or tuple of ints): Axis along which to roll
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8]).view(4, 2)
+    >>> x
+    tensor([[1, 2],
+            [3, 4],
+            [5, 6],
+            [7, 8]])
+    >>> torch.roll(x, 1, 0)
+    tensor([[7, 8],
+            [1, 2],
+            [3, 4],
+            [5, 6]])
+    >>> torch.roll(x, -1, 0)
+    tensor([[3, 4],
+            [5, 6],
+            [7, 8],
+            [1, 2]])
 """)
 
 add_docstr(torch.rot90,

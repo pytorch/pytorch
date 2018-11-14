@@ -91,7 +91,7 @@ __device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFuncti
   // warp shuffle scan for CC 3.0+
   if (threadIdx.x == 0) {
     int current = 0;
-    for (int i = 0; i < blockDim.x / 32; ++i) {
+    for (int i = 0; i < blockDim.x / kWarpSize; ++i) {
       T v = smem[i];
       smem[i] = binop(smem[i], current);
       current = binop(current, v);
@@ -125,7 +125,7 @@ __device__ void exclusiveBinaryPrefixScan(T* smem, bool in, T* out, T* carry, Bi
 #if defined(__HIP_PLATFORM_HCC__)
   *carry = smem[math::divUp<int>(blockDim.x, kWarpSize) - 1];
 #else
-  *carry = smem[(blockDim.x / 32) - 1];
+  *carry = smem[(blockDim.x / kWarpSize) - 1];
 #endif  // __HIP_PLATFORM_HCC__
 
   if (KillWARDependency) {
