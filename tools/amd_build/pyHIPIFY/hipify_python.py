@@ -243,8 +243,7 @@ def preprocess(
         show_detailed=False,
         show_progress=True,
         hipify_caffe2=False,
-        hip_suffix='cc',
-        extensions_to_hip_suffix=()):
+        hip_suffix='cc'):
     """
     Call preprocessor on selected files.
 
@@ -260,7 +259,7 @@ def preprocess(
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
-        preprocessor(output_directory, filepath, stats, hipify_caffe2, hip_suffix, extensions_to_hip_suffix)
+        preprocessor(output_directory, filepath, stats, hipify_caffe2, hip_suffix)
         # Show what happened
         if show_progress:
             print(
@@ -268,8 +267,7 @@ def preprocess(
                 get_hip_file_path(
                     filepath,
                     hipify_caffe2=hipify_caffe2,
-                    hip_suffix=hip_suffix,
-                    extensions_to_hip_suffix=extensions_to_hip_suffix))
+                    hip_suffix=hip_suffix))
             finished_count += 1
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
@@ -712,7 +710,7 @@ def disable_function(input_string, function, replace_style):
     return output_string
 
 
-def get_hip_file_path(filepath, hipify_caffe2, hip_suffix, extensions_to_hip_suffix):
+def get_hip_file_path(filepath, hipify_caffe2, hip_suffix):
     """
     Returns the new name of the hipified file
     """
@@ -724,56 +722,60 @@ def get_hip_file_path(filepath, hipify_caffe2, hip_suffix, extensions_to_hip_suf
         return filepath
 
     dirpath, filename = os.path.split(filepath)
-    filename_without_ext, ext = os.path.splitext(filename)
+    root, ext = os.path.splitext(filename)
 
     # Here's the plan:
     #
-    # In Caffe2, we will always put the HIPified file in a hip
-    # subdirectory of the same directory.  Furthermore, we will
-    # edit the filename so that it contains _hip some way; either
-    # replacing _gpu with _hip, or adding _hip at the end if there
-    # is no _gpu.
+    # In general, we need to disambiguate the HIPified filename so that
+    # it gets a different name from the original Caffe2 filename, so
+    # that we don't overwrite the original file.  (Additionally,
+    # hcc historically had a bug where if you had two files with
+    # the same basename, they would clobber each other.)
     #
-    # Examples:
+    # There's a lot of different naming conventions across PyTorch
+    # and Caffe2, but the general recipe is to convert occurrences
+    # of cuda/gpu to hip, and add hip if there are no occurrences
+    # of cuda/gpu anywhere.
     #
-    #       caffe2/utils/math_gpu.cu   ==>  caffe2/utils/hip/math_hip.cu
-    #       caffe2/operators/tan_op.cu  ==>  caffe2/operators/hip/tan_op_hip.cu
+    # Concretely, we do the following:
     #
-    # In C10, our strategy is a little different, because the naming
-    # convention and file organization is a little different.
-    # CUDA files will be in a cuda/ directory; so we put the HIP
-    # files in a parallel hip/ directory and convert occurrences of CUDA
-    # to HIP.
+    #   - If there is a directory component named "cuda", replace
+    #     it with "hip", AND
     #
-    # Examples:
+    #   - If the file name contains "CUDA", replace it with "HIP", AND
     #
-    #       c10/cuda/CUDAFunctions.h  ==>  c10/hip/HIPFunctions.h
+    #   - If the file name contains "gpu", replace it with "hip".
     #
+    # If NONE of the above occurred, then append "_hip" to the end of
+    # the filename (before the extension).
+    #
+    # Furthermore, ALWAYS replace '.cu' with '.cc', to appease the hcc
+    # compiler.
+    #
+    # This isn't set in stone; we might adjust this to support other
+    # naming conventions.
+    #
+    # In the near future, we intend to also change cu/cuh file extension
+    # to hcc/hcch rather than cc; however, the hcc compiler does not
+    # currently support this file extension.
 
-    # extensions are either specified, or .cu
-    if ext in extensions_to_hip_suffix or ext == '.cu':
+    if ext == '.cu':
         ext = '.' + hip_suffix
 
-    # Figure out if we're Caffe2 or C10
+    orig_dirpath = dirpath
+    orig_root = root
 
-    if dirpath.startswith('c10'):
-        # Forgive me Windows, for I have sinned.  This is hella not the
-        # right way to replace a path... if the slashes are not
-        # normalized correctly this is unlikely to work on Windows.
-        dirpath = dirpath.replace(os.path.join('c10', 'cuda'), os.path.join('c10', 'hip'))
-        filename_without_ext = filename_without_ext.replace('CUDA', 'HIP')
-        return os.path.join(dirpath, filename_without_ext + ext)
-    else:
-        # It was historically important to give the HIP file a different
-        # name than the original file, because old versions of hcc had a bug
-        # where if two object files had the same base filename, they would
-        # clobber each other.  This is probably fixed, but we liked the
-        # file name convention so it's stuck.
-        if 'gpu' in filename_without_ext:
-            filename_without_ext = filename_without_ext.replace('gpu', 'hip')
-        else:
-            filename_without_ext += '_hip'
-        return os.path.join(dirpath, 'hip', filename_without_ext + ext)
+    dirpath = dirpath.replace('cuda', 'hip')
+    root = root.replace('gpu', 'hip')
+    root = root.replace('CUDA', 'HIP')
+
+    if dirpath == orig_dirpath:
+        dirpath = os.path.join(dirpath, 'hip')
+
+    if root == orig_root:
+        root += "_hip"
+
+    return os.path.join(dirpath, root + ext)
 
 
 def is_caffe2_gpu_file(filepath):
@@ -784,13 +786,13 @@ def is_caffe2_gpu_file(filepath):
     return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
 
-def preprocessor(output_directory, filepath, stats, hipify_caffe2, hip_suffix, extensions_to_hip_suffix):
+def preprocessor(output_directory, filepath, stats, hipify_caffe2, hip_suffix):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
     with open(fin_path, 'r') as fin:
         output_source = fin.read()
 
-    fout_path = os.path.join(output_directory, get_hip_file_path(filepath, hipify_caffe2, hip_suffix, extensions_to_hip_suffix))
+    fout_path = os.path.join(output_directory, get_hip_file_path(filepath, hipify_caffe2, hip_suffix))
     if not os.path.exists(os.path.dirname(fout_path)):
         os.makedirs(os.path.dirname(fout_path))
 
@@ -1256,8 +1258,7 @@ def main():
         hipify_caffe2=args.hipify_caffe2,
         ignores=args.ignores,
         show_progress=args.show_progress,
-        hip_suffix=args.hip_suffix,
-        extensions_to_hip_suffix=args.extensions_to_hip_suffix)
+        hip_suffix=args.hip_suffix)
 
 
 def hipify(
@@ -1272,7 +1273,6 @@ def hipify(
     ignores=(),
     show_progress=True,
     hip_suffix='cc',
-    extensions_to_hip_suffix=(),
 ):
     if project_directory == "":
         project_directory = os.getcwd()
@@ -1390,8 +1390,7 @@ def hipify(
         show_detailed=show_detailed,
         show_progress=show_progress,
         hipify_caffe2=hipify_caffe2,
-        hip_suffix=hip_suffix,
-        extensions_to_hip_suffix=extensions_to_hip_suffix)
+        hip_suffix=hip_suffix)
 
     # Extract all of the kernel parameter and template type information.
     if add_static_casts_option:
@@ -1411,8 +1410,7 @@ def hipify(
                     get_hip_file_path(
                         filepath,
                         hipify_caffe2=hipify_caffe2,
-                        hip_suffix=hip_suffix,
-                        extensions_to_hip_suffix=extensions_to_hip_suffix)),
+                        hip_suffix=hip_suffix)),
                 KernelTemplateParams)
 
 
