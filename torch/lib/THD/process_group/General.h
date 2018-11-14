@@ -2,7 +2,7 @@
 
 #include <string>
 #include <THD/THD.h>
-#include "../base/DataChannel.h"
+#include <THD/base/DataChannel.h>
 
 THD_API void THDProcessGroupInit(
     THDChannelType channel_type,
