@@ -65,8 +65,8 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
            " but each b matrix is ", self.size(-2), " by ", self.size(-1));
 }
 
-// Validates input shapes for inverse
-static inline void inverseCheckInputs(const Tensor& self) {
+// Validates input shapes for operations on batches of square matrices (inverse, cholesky)
+static inline void squareCheckInputs(const Tensor& self) {
   AT_CHECK(self.size(-1) == self.size(-2),
            "A must be batches of square matrices, "
            "but they are ", self.size(-1), " by ", self.size(-2), " matrices");

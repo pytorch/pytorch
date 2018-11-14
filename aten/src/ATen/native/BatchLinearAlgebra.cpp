@@ -27,6 +27,10 @@ extern "C" void sgetri_(int *n, float *a, int *lda, int *ipiv, float *work, int 
 // potrs
 extern "C" void dpotrs_(char *uplo, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
 extern "C" void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
+
+// potrf
+extern "C" void dpotrf_(char *uplo, int *n, double *a, int *lda, int *info);
+extern "C" void spotrf_(char *uplo, int *n, float *a, int *lda, int *info);
 #endif
 
 namespace at {
@@ -52,6 +56,11 @@ void lapackGetri(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, int lwo
 template<class scalar_t>
 void lapackPotrs(char uplo, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info) {
   AT_ERROR("potrs only takes float or double Tensors");
+}
+
+template<class scalar_t>
+void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info) {
+  AT_ERROR("cholesky only takes float or double Tensors");
 }
 
 #ifdef USE_LAPACK
@@ -86,6 +95,14 @@ template<> void lapackPotrs<double>(char uplo, int n, int nrhs, double *a, int l
 template<> void lapackPotrs<float>(char uplo, int n, int nrhs, float *a, int lda, float *b, int ldb, int *info) {
   spotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
 }
+
+template<> void lapackCholesky<double>(char uplo, int n, double *a, int lda, int *info) {
+  dpotrf_(&uplo, &n, a, &lda, info);
+}
+
+template<> void lapackCholesky<float>(char uplo, int n, float *a, int lda, int *info) {
+  spotrf_(&uplo, &n, a, &lda, info);
+}
 #endif
 
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
@@ -109,8 +126,8 @@ static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 
   auto ipiv = at::empty({n}, b.type().toScalarType(kInt));
 
+  int info;
   for (int64_t i = 0; i < batch_size; i++) {
-    int info;
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
     lapackGesv<scalar_t>(n, nrhs, A_working_ptr, n, ipiv.data<int>(), b_working_ptr, n, &info);
@@ -213,7 +230,7 @@ Tensor inverse(const Tensor &self) {
   if (self.dim() == 2) {
     return at::_th_getri_single(self);
   }
-  inverseCheckInputs(self);
+  squareCheckInputs(self);
   return at::_inverse_helper(self);
 }
 
@@ -282,6 +299,69 @@ Tensor& potrs_out(Tensor& result, const Tensor& self, const Tensor& A, bool uppe
            "torch.potrs() with the `out` keyword does not support batching. "
            "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
   return at::_th_potrs_single_out(result, self, A, upper);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template<typename scalar_t>
+static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos) {
+#ifndef USE_LAPACK
+  AT_ERROR("cholesky: LAPACK library not found in compilation");
+#endif
+
+  char uplo = upper ? 'U' : 'L';
+
+  auto self_data = self.data<scalar_t>();
+  auto self_matrix_stride = matrixStride(self);
+
+  auto batch_size = batchCount(self);
+  auto n = self.size(-2);
+
+  int info;
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    lapackCholesky<scalar_t>(uplo, n, self_working_ptr, n, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+}
+
+Tensor _cholesky_helper_cpu(const Tensor& self, bool upper) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "cholesky", [&]{
+    apply_cholesky<scalar_t>(self_working_copy, upper, infos);
+  });
+  batchCheckErrors(infos, "cholesky");
+  return self_working_copy;
+}
+
+Tensor cholesky(const Tensor &self, bool upper) {
+  if (self.size(-1) == 0) {
+    return at::empty_like(self);
+  }
+  if (self.dim() == 2) {
+    return at::_th_potrf_single(self, upper);
+  }
+  squareCheckInputs(self);
+
+  // TODO: Once triu, tril is implemented for batched tensors, this
+  // can be simplified.
+  auto raw_cholesky_output = at::_cholesky_helper(self, upper);
+  int64_t n = self.size(-1);
+  auto indices = at::ones({n, n}, self.options().dtype(at::kByte));
+  indices = upper ? indices.tril(-1).expand_as(self) : indices.triu(1).expand_as(self);
+  return at::where(indices, at::zeros({}, self.options()), raw_cholesky_output);
+}
+
+Tensor& cholesky_out(Tensor &result, const Tensor &self, bool upper) {
+  if (self.size(-1) == 0) {
+    return result.resize_as_(self);
+  }
+  result.copy_(native::cholesky(self, upper));
+  return result;
 }
 
 }}  // namespace at::native
