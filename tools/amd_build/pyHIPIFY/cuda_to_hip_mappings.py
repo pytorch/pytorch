@@ -2252,6 +2252,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cudnn" ,("miopen", API_CAFFE2)),
     ("namespace cuda", ("namespace hip", API_CAFFE2)),
     ("cuda::", ("hip::", API_CAFFE2)),
+    ("thrust::hip::", ("thrust::cuda::", API_CAFFE2)), # undo thrust namespace rewrite
     ("c10/cuda/", ("c10/hip/", API_CAFFE2)),
 ])
 
