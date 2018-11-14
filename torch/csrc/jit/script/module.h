@@ -151,7 +151,7 @@ struct Method {
     return retval;
   }
 
-  std::vector<at::Tensor*> params() {
+  std::vector<at::Tensor*> params() const {
     return member_inputs;
   }
 
@@ -182,7 +182,7 @@ struct Method {
     return get_executor().debugDisableAutodiffSubgraphInlining();
   }
 
-  bool is_optimized() {
+  bool is_optimized() const {
     return optimize;
   }
 
