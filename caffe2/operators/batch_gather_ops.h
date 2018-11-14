@@ -22,7 +22,6 @@ class BatchGatherOp final : public Operator<Context> {
   bool DoRunWithType() {
     auto& data = Input(DATA);
     auto& indices = Input(INDICES);
-    auto* output = Output(0);
 
     CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
 
@@ -30,7 +29,7 @@ class BatchGatherOp final : public Operator<Context> {
     shape.push_back(data.size(0));
     shape.insert(shape.end(), indices.sizes().begin(), indices.sizes().end());
     shape.insert(shape.end(), data.sizes().begin() + 2, data.sizes().end());
-    output->Resize(shape);
+    auto* output = Output(0, shape, at::dtype(data.dtype()));
 
     auto block_size = data.size_from_dim(2);
     auto block_bytesize = block_size * data.dtype().itemsize();

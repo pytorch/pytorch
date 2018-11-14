@@ -124,8 +124,8 @@ FOR %%a IN (%_BUILD_ARGS%) DO (
   echo ^|  Building %%a
   echo ^|
   echo --------------------------------------------------------------------------------
-  
-  IF "%%a"=="caffe2" ( 
+
+  IF "%%a"=="caffe2" (
     call:build_caffe2 %%a
   ) ELSE (
     IF "%%a"=="libshm_windows" (
@@ -192,7 +192,7 @@ goto:eof
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
-  
+
   %MAKE_COMMAND%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
@@ -214,11 +214,12 @@ goto:eof
   :    Invalid escape sequence \i
   : which is said to become an error in the future.
   : As an alternative, we should use forward slashes instead.
-  : Here those paths should be espaced before passing to CMake. 
+  : Here those paths should be escaped before passing to CMake. 
   set NVTOOLEXT_HOME=%NVTOOLEXT_HOME:\=/%
   set CUDNN_INCLUDE_DIR=%CUDNN_INCLUDE_DIR:\=/%
   set CUDNN_LIB_DIR=%CUDNN_LIB_DIR:\=/%
   set CUDNN_LIBRARY=%CUDNN_LIBRARY:\=/%
+  set PYTORCH_PYTHON_LIBRARY=%PYTORCH_PYTHON_LIBRARY:\=/%
 
   IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
   if not exist build mkdir build
@@ -226,9 +227,9 @@ goto:eof
   cmake .. %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
                   -DTORCH_BUILD_VERSION="%PYTORCH_BUILD_VERSION%" ^
+                  -DPYTHON_LIBRARY="%PYTORCH_PYTHON_LIBRARY%" ^
                   -DBUILD_TORCH="%BUILD_TORCH%" ^
                   -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
-                  -DNO_API=ON ^
                   -DBUILD_SHARED_LIBS="%BUILD_SHARED_LIBS%" ^
                   -DBUILD_PYTHON=%BUILD_PYTHON% ^
                   -DBUILD_BINARY=%BUILD_BINARY% ^
@@ -262,11 +263,11 @@ goto:eof
                   -DUSE_ROCM=%USE_ROCM%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
-  
+
   %MAKE_COMMAND%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
-  
+
   popd
   @endlocal
 

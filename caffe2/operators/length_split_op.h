@@ -49,8 +49,7 @@ class LengthsSplitOp final : public Operator<Context> {
         "`n_split` must contain a positive value for defined behavior.");
     const auto M = L.numel();
 
-    auto* Y = Output(0);
-    Y->Resize(M * n_split_);
+    auto* Y = Output(0, {M * n_split_}, at::dtype<int32_t>());
 
     const int32_t* Ldata = L.template data<int32_t>();
     int32_t* Ydata = Y->template mutable_data<int32_t>();

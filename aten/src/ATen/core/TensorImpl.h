@@ -911,7 +911,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     AT_ASSERTM(
         src.is_contiguous(),
         "Right now only copy of contiguous source Tensor is supported.");
-    CAFFE_ENFORCE_WITH_CALLER(
+    AT_ASSERTM(
         src.storage_initialized(),
         "Cannot copy from an uninitialized Tensor");
 
