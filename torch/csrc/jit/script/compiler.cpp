@@ -451,7 +451,7 @@ Value* tryMatchArgument(
     value = graph.insertNode(graph.createList(value->type(), repeated))->output();
   }
 
-  at::MatchTypeReturn matched_type =
+  const MatchTypeReturn matched_type =
       matchTypeVariables(arg.type(), value->type(), type_env);
   if (!matched_type.type) {
     err() << "could not match type " << value->type()->str() << " to "

@@ -459,7 +459,7 @@ bool Operator::matches(const Node* node) const {
 
   TypeEnv type_env;
   for(size_t i = 0; i < formals.size(); ++i) {
-    at::MatchTypeReturn matched_type =
+    const MatchTypeReturn matched_type =
         matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
     if (!matched_type.type) {
       return false;
