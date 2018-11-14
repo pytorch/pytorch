@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <algorithm>
 #include <functional>
 #include <iterator>
@@ -29,7 +31,7 @@ namespace detail {
 /// mechanism. All it specifies is that optimizers must be supplied with a
 /// vector of parameters. It also defines certain methods that all optimizers
 /// shall have, such as `zero_grad`.
-class OptimizerBase {
+class TORCH_API OptimizerBase {
  public:
   /// Constructs the `Optimizer` from a vector of parameters.
   explicit OptimizerBase(std::vector<Tensor> parameters);
@@ -79,12 +81,12 @@ class OptimizerBase {
 };
 
 /// Serializes an `OptimizerBase` into an `OutputArchive`.
-serialize::OutputArchive& operator<<(
+TORCH_API serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
     const OptimizerBase& optimizer);
 
 /// Deserializes a `Tensor` from an `InputArchive`.
-serialize::InputArchive& operator>>(
+TORCH_API serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
     OptimizerBase& optimizer);
 } // namespace detail
