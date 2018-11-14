@@ -636,12 +636,9 @@ void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
   ptrdiff_t size;
   scalar_t i = 0;
 
-  AT_CHECK(
-    std::isfinite(xmin) && std::isfinite(xmax),
-    "unsupported range: ", xmin, " -> ", xmax
-  );
-
   THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
+  THArgCheck(std::isfinite(xmin) && std::isfinite(xmax)
+              , 1, "unsupported range: ", xmin, " -> ", xmax);
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
               , 2, "upper bound and larger bound inconsistent with step sign");
 
