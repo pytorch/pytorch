@@ -29,7 +29,7 @@ Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge, Va
   autograd_meta->is_view_ = false;
   autograd_meta->output_nr_ = gradient_edge.input_nr;
   autograd_meta->pyobj_ = nullptr;
-  data_.unsafeGetTensorImpl()->autograd_meta_ = autograd_meta;
+  data_.unsafeGetTensorImpl()->set_autograd_meta(autograd_meta);
 
   // set_requires_grad also checks error conditions.
   set_requires_grad(requires_grad);
@@ -174,8 +174,8 @@ void Variable::Impl::set_data(Tensor new_data) {
   auto new_data_copy = at::Tensor(new_data.getIntrusivePtr()->shallow_copy_and_detach());
   // NOTE: this is the only place where we change the ownership of the AutogradMeta pointer
   // (moving it from the old TensorImpl to the new TensorImpl)
-  new_data_copy.unsafeGetTensorImpl()->autograd_meta_ = autograd_meta;
-  data_.unsafeGetTensorImpl()->autograd_meta_ = nullptr;
+  new_data_copy.unsafeGetTensorImpl()->set_autograd_meta(autograd_meta);
+  data_.unsafeGetTensorImpl()->set_autograd_meta(nullptr);
   data_ = std::move(new_data_copy);
 }
 
