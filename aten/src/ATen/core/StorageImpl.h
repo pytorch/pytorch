@@ -4,7 +4,7 @@
 #include <ATen/core/ScalarType.h>
 #include <ATen/core/ScalarTypeUtils.h>
 
-#include <c10/util/intrusive_ptr.h>
+#include <ATen/core/intrusive_ptr.h>
 
 namespace at {
 

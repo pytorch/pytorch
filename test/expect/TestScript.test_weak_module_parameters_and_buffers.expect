@@ -6,14 +6,114 @@ graph(%x : Dynamic
       %5 : Dynamic
       %6 : Dynamic) {
   %7 : int = prim::Constant[value=1]()
-  %8 : Dynamic = aten::linear(%x, %1, %2)
-  %9 : Dynamic = aten::add(%8, %3, %7)
-  %10 : Dynamic = aten::add(%x, %9, %7)
-  %11 : Dynamic = aten::linear(%x, %1, %2)
-  %12 : Dynamic = aten::add(%11, %3, %7)
-  %13 : Dynamic = aten::add(%10, %12, %7)
-  %14 : Dynamic = aten::linear(%x, %4, %5)
-  %15 : Dynamic = aten::add(%14, %6, %7)
-  %16 : Dynamic = aten::add(%13, %15, %7)
-  return (%16);
+  %8 : int = prim::Constant[value=2]()
+  %9 : int = aten::dim(%x)
+  %10 : bool = aten::eq(%9, %8)
+  %11 : bool = prim::If(%10)
+    block0() {
+      %12 : None = prim::None()
+      %13 : bool = aten::__isnot__(%2, %12)
+      -> (%13)
+    }
+    block1() {
+      -> (%10)
+    }
+  %ret.2 : Dynamic = prim::If(%11)
+    block0() {
+      %15 : Dynamic = aten::_unwrap_optional(%2)
+      %16 : Dynamic = aten::t(%1)
+      %ret.3 : Dynamic = aten::addmm(%15, %x, %16, %7, %7)
+      -> (%ret.3)
+    }
+    block1() {
+      %18 : Dynamic = aten::t(%1)
+      %output.3 : Dynamic = aten::matmul(%x, %18)
+      %20 : None = prim::None()
+      %21 : bool = aten::__isnot__(%2, %20)
+      %output.4 : Dynamic = prim::If(%21)
+        block0() {
+          %23 : Dynamic = aten::_unwrap_optional(%2)
+          %output.5 : Dynamic = aten::add_(%output.3, %23, %7)
+          -> (%output.5)
+        }
+        block1() {
+          -> (%output.3)
+        }
+      -> (%output.4)
+    }
+  %25 : Dynamic = aten::add(%ret.2, %3, %7)
+  %26 : Dynamic = aten::add(%x, %25, %7)
+  %27 : int = aten::dim(%x)
+  %28 : bool = aten::eq(%27, %8)
+  %29 : bool = prim::If(%28)
+    block0() {
+      %30 : None = prim::None()
+      %31 : bool = aten::__isnot__(%2, %30)
+      -> (%31)
+    }
+    block1() {
+      -> (%28)
+    }
+  %ret.4 : Dynamic = prim::If(%29)
+    block0() {
+      %33 : Dynamic = aten::_unwrap_optional(%2)
+      %34 : Dynamic = aten::t(%1)
+      %ret.5 : Dynamic = aten::addmm(%33, %x, %34, %7, %7)
+      -> (%ret.5)
+    }
+    block1() {
+      %36 : Dynamic = aten::t(%1)
+      %output.6 : Dynamic = aten::matmul(%x, %36)
+      %38 : None = prim::None()
+      %39 : bool = aten::__isnot__(%2, %38)
+      %output.7 : Dynamic = prim::If(%39)
+        block0() {
+          %41 : Dynamic = aten::_unwrap_optional(%2)
+          %output.8 : Dynamic = aten::add_(%output.6, %41, %7)
+          -> (%output.8)
+        }
+        block1() {
+          -> (%output.6)
+        }
+      -> (%output.7)
+    }
+  %43 : Dynamic = aten::add(%ret.4, %3, %7)
+  %44 : Dynamic = aten::add(%26, %43, %7)
+  %45 : int = aten::dim(%x)
+  %46 : bool = aten::eq(%45, %8)
+  %47 : bool = prim::If(%46)
+    block0() {
+      %48 : None = prim::None()
+      %49 : bool = aten::__isnot__(%5, %48)
+      -> (%49)
+    }
+    block1() {
+      -> (%46)
+    }
+  %ret : Dynamic = prim::If(%47)
+    block0() {
+      %51 : Dynamic = aten::_unwrap_optional(%5)
+      %52 : Dynamic = aten::t(%4)
+      %ret.1 : Dynamic = aten::addmm(%51, %x, %52, %7, %7)
+      -> (%ret.1)
+    }
+    block1() {
+      %54 : Dynamic = aten::t(%4)
+      %output.1 : Dynamic = aten::matmul(%x, %54)
+      %56 : None = prim::None()
+      %57 : bool = aten::__isnot__(%5, %56)
+      %output : Dynamic = prim::If(%57)
+        block0() {
+          %59 : Dynamic = aten::_unwrap_optional(%5)
+          %output.2 : Dynamic = aten::add_(%output.1, %59, %7)
+          -> (%output.2)
+        }
+        block1() {
+          -> (%output.1)
+        }
+      -> (%output)
+    }
+  %61 : Dynamic = aten::add(%ret, %6, %7)
+  %62 : Dynamic = aten::add(%44, %61, %7)
+  return (%62);
 }

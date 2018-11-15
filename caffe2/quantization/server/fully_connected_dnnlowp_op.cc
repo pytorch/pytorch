@@ -9,7 +9,8 @@
 #include "mmio.h"
 
 C10_DEFINE_bool(
-    dnnlowp_enforce_default_caffe2_operators, false,
+    dnnlowp_enforce_default_caffe2_operators,
+    false,
     "When true, enforce to use the default Caffe2 operators inside DNNLOWP"
     "instead of using its own implementation that uses AVX2 instructions"
     "(currently only honored by FC)");
@@ -22,15 +23,16 @@ using namespace std;
 
 template <typename T>
 FullyConnectedDNNLowPOp<T>::FullyConnectedDNNLowPOp(
-    const OperatorDef& operator_def, Workspace *ws)
-  : BaseType(operator_def, ws),
-    axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
-    axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
-    is_weight_constant_(
-        OperatorBase::GetSingleArgument<bool>("constant_weight", true)) {
+    const OperatorDef& operator_def,
+    Workspace* ws)
+    : BaseType(operator_def, ws),
+      axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
+      axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
+      is_weight_constant_(
+          OperatorBase::GetSingleArgument<bool>("constant_weight", true)) {
   if (!is_weight_constant_) {
-    LOG(INFO) <<
-      operator_def.output(0) << " is_weight_constant " << is_weight_constant_;
+    LOG(INFO) << operator_def.output(0) << " is_weight_constant "
+              << is_weight_constant_;
   }
 
   VLOG(2) << "DNNLOWP FC with output " << operator_def.output(0);
@@ -41,31 +43,29 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
   using namespace std;
   using namespace dnnlowp;
 
-  BaseType::ParseDNNLowPOperatorArguments_();
+  this->ParseDNNLowPOperatorArguments_();
 
-  if ((!GetCpuId().avx2() ||
-        FLAGS_dnnlowp_enforce_default_caffe2_operators) &&
+  if ((!GetCpuId().avx2() || FLAGS_dnnlowp_enforce_default_caffe2_operators) &&
       dequantize_output_) {
     if (!GetCpuId().avx2()) {
       static int log_occurences = 0;
       if (log_occurences < 32) {
         ++log_occurences;
-        LOG(WARNING) <<
-            "Falling back to the default Caffe2 operator because AVX2 "
-            "instruction is not available";
+        LOG(WARNING)
+            << "Falling back to the default Caffe2 operator because AVX2 "
+               "instruction is not available";
       }
     } else {
       static int log_occurences = 0;
       if (log_occurences < 32) {
         ++log_occurences;
-        LOG(WARNING) <<
-            "Falling back to the default Caffe2 operator because "
-            "dnnlowp_enforce_default_caffe2_operators option is on";
+        LOG(WARNING) << "Falling back to the default Caffe2 operator because "
+                        "dnnlowp_enforce_default_caffe2_operators option is on";
       }
     }
 
     Fp32Op_()->DequantizeInput();
-    FullyConnectedOp<CPUContext> *fp32_op = Fp32Op_()->Get();
+    FullyConnectedOp<CPUContext>* fp32_op = Fp32Op_()->Get();
     if (!fp32_op->RunOnDevice()) {
       return false;
     }
@@ -103,21 +103,21 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
 
   const auto& X = InputTensorCPU_(0);
   const auto& W = InputTensorCPU_(1);
-  auto *Y = OutputTensorCPU_(0);
+  auto* Y = OutputTensorCPU_(0);
   const auto canonical_axis = X.canonical_axis_index(axis_);
   const auto M = X.size_to_dim(canonical_axis);
   const auto K = X.size_from_dim(canonical_axis);
   const auto canonical_axis_w = W.canonical_axis_index(axis_w_);
   const int N = W.size_to_dim(canonical_axis_w);
 
-  const T_signed *Wdata = W_quantized_.data();
+  const T_signed* Wdata = W_quantized_.data();
 
   Y_shape_cache_ = X.sizes().vec();
   Y_shape_cache_.resize(canonical_axis + 1);
   Y_shape_cache_[canonical_axis] = N;
   Y->Resize(Y_shape_cache_);
 
-  const T *Xdata = nullptr;
+  const T* Xdata = nullptr;
   vector<T> X_temp;
 
   if (VLOG_IS_ON(3)) {
@@ -129,7 +129,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
   }
   if (Wq_packed_) {
     // fast path to use fbgemm
-    using namespace fbgemm2;
+    using namespace fbgemm;
 
     if (X.template IsType<T>() || !dequantize_output_) {
       // Only when input and output are float, we don't need input to be
@@ -142,8 +142,8 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
       if (VLOG_IS_ON(3)) {
         t_end = chrono::system_clock::now();
         double dt = chrono::duration<double>(t_end - t_begin).count();
-        VLOG(3) <<
-          "@PERF this=" << this << " input quantization: " << dt * 1e3 << " ms";
+        VLOG(3) << "@PERF this=" << this << " input quantization: " << dt * 1e3
+                << " ms";
         t_begin = chrono::system_clock::now();
       }
     }
@@ -276,8 +276,8 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
     if (VLOG_IS_ON(3)) {
       t_end = chrono::system_clock::now();
       double dt = chrono::duration<double>(t_end - t_begin).count();
-      VLOG(3) <<
-        "@PERF this=" << this << " input quantization: " << dt * 1e3 << " ms";
+      VLOG(3) << "@PERF this=" << this << " input quantization: " << dt * 1e3
+              << " ms";
       t_begin = chrono::system_clock::now();
     }
 
@@ -297,17 +297,11 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
   if (FLAGS_caffe2_dnnlowp_dump_tensors) {
     // Dump input activation
     StoreMatrixInMatrixMarketFormat(
-        M,
-        K,
-        Xdata,
-        OperatorBase::debug_def().input(0));
+        M, K, Xdata, OperatorBase::debug_def().input(0));
 
     // Dump weight
     StoreMatrixInMatrixMarketFormat(
-        N,
-        K,
-        Wdata,
-        OperatorBase::debug_def().input(1));
+        N, K, Wdata, OperatorBase::debug_def().input(1));
   }
 
   if (VLOG_IS_ON(3)) {
@@ -323,7 +317,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
   // row_offset, and const_offset in this way.
   if (dequantize_output_) {
     if (!Wq_packed_) {
-      float *Ydata = OutputTensorCPU_(0)->template mutable_data<float>();
+      float* Ydata = OutputTensorCPU_(0)->template mutable_data<float>();
 
       for (int i = 0; i < M; ++i) {
         int32_t row_offset = 0;
@@ -334,16 +328,16 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
 
         for (int j = 0; j < N; ++j) {
           Y_int32_[i * N + j] -=
-            in_qparams_[0].zero_point * column_offsets_[j] + row_offset;
-          Ydata[i * N + j] =
-            Y_int32_[i * N + j] * in_qparams_[0].scale * in_qparams_[1].scale +
-            b_dequantized_data_[j];
+              in_qparams_[0].zero_point * column_offsets_[j] + row_offset;
+          Ydata[i * N + j] = Y_int32_[i * N + j] * in_qparams_[0].scale *
+                  in_qparams_[1].scale +
+              b_dequantized_data_[j];
         }
       }
     }
   } else {
     if (!Wq_packed_) {
-      T *Ydata = GetQuantizedOutputData_();
+      T* Ydata = GetQuantizedOutputData_();
       for (int i = 0; i < M; ++i) {
         int32_t row_offset = 0;
         for (int k = 0; k < K; ++k) {
@@ -353,11 +347,11 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
 
         for (int j = 0; j < N; ++j) {
           Y_int32_[i * N + j] -=
-            in_qparams_[0].zero_point * column_offsets_[j] + row_offset;
+              in_qparams_[0].zero_point * column_offsets_[j] + row_offset;
           Y_int32_[i * N + j] += b_quantized_data_[j];
 
-          Ydata[i * N + j] = Requantize<T>(
-            Y_int32_[i * N + j], requantization_params_);
+          Ydata[i * N + j] =
+              Requantize<T>(Y_int32_[i * N + j], requantization_params_);
         }
       }
     }
@@ -392,16 +386,16 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
 
   chrono::time_point<chrono::system_clock> t_begin, t_end;
   if (VLOG_IS_ON(3)) {
-      t_begin = chrono::system_clock::now();
-    }
+    t_begin = chrono::system_clock::now();
+  }
   // Choose quantization for X
   in_qparams_[0] = GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
 
   if (VLOG_IS_ON(3)) {
     t_end = chrono::system_clock::now();
     double dt = chrono::duration<double>(t_end - t_begin).count();
-    VLOG(3) << "@PERF this=" << this
-    << " GetInputTensorQuantizationParamsOf " << dt * 1e3 << " ms";
+    VLOG(3) << "@PERF this=" << this << " GetInputTensorQuantizationParamsOf "
+            << dt * 1e3 << " ms";
     t_begin = chrono::system_clock::now();
   }
 
@@ -449,7 +443,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
       if (fast_path) {
         // fast path using fbgemm
         Wq_packed_ = GetOrCreateFbgemmPackBMatrix<int32_t>(
-            fbgemm2::matrix_op_t::Transpose,
+            fbgemm::matrix_op_t::Transpose,
             K,
             N,
             W.raw_data(),
@@ -492,8 +486,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
   if (VLOG_IS_ON(3)) {
     t_end = chrono::system_clock::now();
     double dt = chrono::duration<double>(t_end - t_begin).count();
-    VLOG(3) << "@PERF this=" << this
-    << " Quantize W " << dt * 1e3 << " ms";
+    VLOG(3) << "@PERF this=" << this << " Quantize W " << dt * 1e3 << " ms";
     t_begin = chrono::system_clock::now();
   }
   // Pre-compute column_offset
@@ -510,8 +503,8 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
   if (VLOG_IS_ON(3)) {
     t_end = chrono::system_clock::now();
     double dt = chrono::duration<double>(t_end - t_begin).count();
-    VLOG(3) << "@PERF this=" << this
-    << " Calculate column offset " << dt * 1e3 << " ms";
+    VLOG(3) << "@PERF this=" << this << " Calculate column offset " << dt * 1e3
+            << " ms";
     t_begin = chrono::system_clock::now();
   }
   if (Wq_packed_ && !FLAGS_caffe2_dnnlowp_dump_tensors) {
@@ -520,8 +513,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
   }
 
   // Quantize bias
-  if (!is_weight_constant_ ||
-      (!b_quantized_data_ && !b_dequantized_data_) ||
+  if (!is_weight_constant_ || (!b_quantized_data_ && !b_dequantized_data_) ||
       in_qparams_[0].scale != in_qparams0_scale_old_) {
     const auto& bias = InputTensorCPU_(2);
     if (OperatorBase::InputIsType<int8::Int8TensorCPU>(2)) {
@@ -569,8 +561,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
   if (VLOG_IS_ON(3)) {
     t_end = chrono::system_clock::now();
     double dt = chrono::duration<double>(t_end - t_begin).count();
-    VLOG(3) << "@PERF this=" << this
-    << " Quantize bias " << dt * 1e3 << " ms";
+    VLOG(3) << "@PERF this=" << this << " Quantize bias " << dt * 1e3 << " ms";
     t_begin = chrono::system_clock::now();
   }
 
@@ -578,12 +569,11 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
     GetOutputQuantizationParams_();
 
     float real_multiplier =
-      in_qparams_[0].scale * in_qparams_[1].scale / out_qparams_.scale;
-    requantization_params_ =
-      qfactory_->ChooseRequantizationMultiplier(real_multiplier, out_qparams_);
+        in_qparams_[0].scale * in_qparams_[1].scale / out_qparams_.scale;
+    requantization_params_ = qfactory_->ChooseRequantizationMultiplier(
+        real_multiplier, out_qparams_);
     requantization_param_selected_ = true;
-  }
-  else {
+  } else {
     if (measure_quantization_error_) {
       // to measure quantization error, run ref impl.
       Fp32Op_()->DequantizeInput();
@@ -593,19 +583,25 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
   if (VLOG_IS_ON(3)) {
     t_end = chrono::system_clock::now();
     double dt = chrono::duration<double>(t_end - t_begin).count();
-    VLOG(3) << "@PERF this=" << this
-    << " GetOutputQuantizationParams " << dt * 1e3 << " ms";
+    VLOG(3) << "@PERF this=" << this << " GetOutputQuantizationParams "
+            << dt * 1e3 << " ms";
     t_begin = chrono::system_clock::now();
   }
   return true;
 }
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  FC, DNNLOWP, FullyConnectedDNNLowPOp<uint8_t>);
+    FC,
+    DNNLOWP,
+    FullyConnectedDNNLowPOp<uint8_t>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  FC, DNNLOWP_16, FullyConnectedDNNLowPOp<uint16_t>);
+    FC,
+    DNNLOWP_16,
+    FullyConnectedDNNLowPOp<uint16_t>);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  Int8FC, DNNLOWP, FullyConnectedDNNLowPOp<uint8_t>);
+    Int8FC,
+    DNNLOWP,
+    FullyConnectedDNNLowPOp<uint8_t>);
 
 } // namespace caffe2

@@ -265,7 +265,7 @@ struct Environment {
 
   void setSugaredVar(const SourceRange& loc, const std::string& name, SugaredValuePtr value) {
     Value* as_simple_value = asSimple(value);
-    if (as_simple_value)
+    if (as_simple_value && !as_simple_value->hasUniqueName())
       as_simple_value->setUniqueName(name);
     // prevent re-assignment involving any sugared values
     // any reassignment like:
@@ -296,8 +296,8 @@ struct Environment {
             as_simple_value->type()->kind() == TypeKind::ListType) {
           errMsg << "\n. (Note: empty lists are constructed as Tensor[]; "
                  << "if you want an empty list of a different type, "
-                 << "use `_construct_empty_foo_list`, "
-                 << "where `foo` is `int` or `float`)";
+                 << "use `torch.jit.annotate(List[T], [])`, "
+                 << "where `T` is the type of elements in the list)";
         }
         throw ErrorReport(loc) << errMsg.str();
       }
@@ -451,15 +451,16 @@ Value* tryMatchArgument(
     value = graph.insertNode(graph.createList(value->type(), repeated))->output();
   }
 
-  TypePtr concrete_type;
-  try {
-    concrete_type = matchTypeVariables(arg.type(), value->type(), type_env);
-  } catch(TypeMatchError& e) {
+  const MatchTypeReturn matched_type =
+      matchTypeVariables(arg.type(), value->type(), type_env);
+  if (!matched_type.type) {
     err() << "could not match type " << value->type()->str() << " to "
-          << arg.type()->str() << " in argument '" << arg.name() << "': " << e.what() << "\n"
+          << arg.type()->str() << " in argument '" << arg.name()
+          << "': " << matched_type.errMsg << "\n"
           << named_value.locOr(loc);
     return nullptr;
   }
+  const auto concrete_type = *matched_type.type;
 
   // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
   if (convertibleToList(value->type(), concrete_type) &&
@@ -469,10 +470,12 @@ Value* tryMatchArgument(
     value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
-  if (value->type()->isSubtypeOf(NoneType::get())){
+  if (value->type()->isSubtypeOf(NoneType::get()) && !concrete_type->isSubtypeOf(NoneType::get())){
     if (concrete_type->isSubtypeOf(GeneratorType::get())) {
       value = graph.insertNode(graph.createNoneGenerator())->output();
-    } else if (concrete_type->isSubtypeOf(DynamicType::get())) {
+    }
+    if (concrete_type->isSubtypeOf(OptionalType::ofTensor())) {
+      // create undefined tensor when None pass to a optional[tensor] formal arg
       value = graph.insertNode(graph.createUndefined())->output();
     }
   }
@@ -780,6 +783,7 @@ inline bool isSupportedListElementType(TypePtr type) {
 }
 
 static FunctionSchema extractSchemaFromDef(const Def &def, bool is_method);
+TypePtr parseTypeFromExpr(Expr expr);
 
 struct to_ir {
   to_ir(
@@ -883,7 +887,6 @@ struct to_ir {
                           << (schema.returns().size() > 1 ? "s" : "")
                           << " but found no return statement";
     }
-
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(graph);
@@ -1179,7 +1182,7 @@ private:
             max_trip_count->range(), emitExpr(max_trip_count.value()));
       } else {
         max_trip_count_val =
-            materializeConstant((int64_t)INT_MAX, *graph, range, integral_constants);
+            materializeConstant(std::numeric_limits<int64_t>::max(), *graph, range, integral_constants);
       }
       if (cond) {
         cond_val = emitCond(cond.value());
@@ -1316,8 +1319,7 @@ private:
   void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
     auto string_input = insertConstant(*graph, exception, loc);
-    graph->insertNode(graph->create(prim::RaiseException, {string_input}, 0)
-                        ->setSourceLocation(std::make_shared<SourceRange>(loc)));
+    graph->insert(prim::RaiseException, {string_input}, {}, loc);
   }
 
   void emitAssert(const Assert& stmt) {
@@ -1690,6 +1692,14 @@ private:
         return aten::__isnot__;
       case TK_NOT:
         return aten::__not__;
+      case TK_FLOOR_DIV:
+        return aten::floordiv;
+      case '&':
+        return aten::__and__;
+      case '|':
+        return aten::__or__;
+      case '^':
+        return aten::__xor__;
       default:
         throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
@@ -1732,12 +1742,13 @@ private:
     return getValues(trees.tree()->trees(), maybe_unpack);
   }
 
-  std::shared_ptr<SugaredValue> emitApplyExpr(Apply &apply, size_t n_binders) {
-    auto sv = emitSugaredExpr(apply.callee(), 1);
-    auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
+  std::vector<NamedValue> emitAttributes(const List<Attribute> attributes) {
+    return fmap(attributes, [&](const Attribute& attr) {
       return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
     });
-
+  }
+  std::shared_ptr<SugaredValue> emitApplyExpr(Apply &apply, size_t n_binders) {
+    auto sv = emitSugaredExpr(apply.callee(), 1);
     auto loc = apply.callee().range();
     if (auto fork_value = dynamic_cast<ForkValue*>(sv.get())) {
       auto& trees = apply.inputs().tree()->trees();
@@ -1748,15 +1759,34 @@ private:
       auto forked = emitSugaredExpr(Expr(trees[0]), 1);
       TreeList sliced_trees(trees.begin() + 1, trees.end());
       auto inputs = getNamedValues(sliced_trees, true);
+      auto attributes = emitAttributes(apply.attributes());
       return emitForkExpr(loc, forked, inputs, attributes);
+    } else if (auto annotate_value = dynamic_cast<AnnotateValue*>(sv.get())) {
+      if (apply.inputs().size() != 2) {
+        throw ErrorReport(loc)
+            << "expected exactly two arguments to attribute but found "
+            << apply.inputs().size();
+      }
+      if (apply.attributes().size() > 0) {
+        throw ErrorReport(loc) << "attribute takes no keyword arguments";
+      }
+      TypePtr type = parseTypeFromExpr(apply.inputs()[0]);
+      Value* expr = emitExpr(apply.inputs()[1], type);
+      if (!expr->type()->isSubtypeOf(type)) {
+        throw ErrorReport(apply.inputs())
+            << "expected an expression of type " << type->python_str()
+            << " but found " << expr->type()->python_str();
+      }
+      return std::make_shared<SimpleValue>(expr);
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
+      auto attributes = emitAttributes(apply.attributes());
       return sv->call(loc, method, inputs, attributes, n_binders);
     }
   }
 
-  Value* emitExpr(Expr tree) {
-    return emitSugaredExpr(tree, 1)->asValue(tree.range(), method);
+  Value* emitExpr(Expr tree, TypePtr type_hint = nullptr) {
+    return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
   }
 
   NodeKind reverseComparision(NodeKind kind) {
@@ -1774,7 +1804,12 @@ private:
 
   // any expression that can produce a SugaredValue is handled here
   // expressions that only return a single Value* are handled in emitSimpleExpr
-  std::shared_ptr<SugaredValue> emitSugaredExpr(Expr tree, size_t n_binders) {
+  // type_hint is set if there is a type that this value is expected to be
+  // e.g. a : List[int] = []
+  // or a = torch.jit.annotate(List[int], [])
+  // the caller is responsible for checking that the result matches type_hint
+  // emitSugaredExpr is free to ignore it.
+  std::shared_ptr<SugaredValue> emitSugaredExpr(Expr tree, size_t n_binders, TypePtr type_hint=nullptr) {
     switch(tree.kind()) {
       case TK_VAR:
         return environment_stack->getSugaredVar(Var(tree).name());
@@ -1788,7 +1823,7 @@ private:
         return emitApplyExpr(apply, n_binders);
       } break;
       default:
-        return std::make_shared<SimpleValue>(emitSimpleExpr(tree));
+        return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
     }
   }
 
@@ -1863,7 +1898,8 @@ private:
   }
 
   Value* emitSimpleExpr(
-      const TreeRef& tree) {
+      const TreeRef& tree,
+      TypePtr type_hint = nullptr) {
     switch (tree->kind()) {
       case '@':
       case TK_POW:
@@ -1880,7 +1916,11 @@ private:
       case '/':
       case '+':
       case '-':
-      case '%': {
+      case '%':
+      case '&':
+      case '|':
+      case '^':
+      case TK_FLOOR_DIV: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
@@ -1933,9 +1973,16 @@ private:
         auto ll = ListLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
 
-        // If this is an empty list literal `[]`, construct an empty Tensor[]
-        const auto elem_type =
-            values.empty() ? DynamicType::get() : values.at(0)->type();
+        // determine the element type of the list
+        // if we have a type hint of List[T], use T
+        // if the list is non-empty use type_of(list[0])
+        // otherwise assume it is List[Tensor]
+        TypePtr elem_type = DynamicType::get();
+        if (type_hint && type_hint->kind() == TypeKind::ListType) {
+          elem_type = type_hint->expect<ListType>()->getElementType();
+        } else if (!values.empty()) {
+          elem_type = values.at(0)->type();
+        }
         for (auto v : values) {
           if (v->type() != elem_type) {
             throw ErrorReport(tree)
@@ -2252,18 +2299,16 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, con
           Symbol::aten(builtin_cast_methods().at(field)),
           NamedValue(loc, "self", value));
     }
-    if (field == "dtype") {
-      auto* node = m.graph()->create(prim::TensorDType, {value});
-      node->output()->setType(IntType::get());
-      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
-    } else if (field == "device") {
-      auto* node = m.graph()->create(prim::TensorDevice, {value});
-      node->output()->setType(ListType::create(IntType::get()));
-      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
-    } else if (field == "shape") {
-      auto* node = m.graph()->create(prim::TensorShape, {value});
-      node->output()->setType(ListType::create(IntType::get()));
-      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
+    // functions that are just direct property lookups on tensor
+    // must be registered as prim::<name>(Tensor t) -> <return_type>
+    static const std::unordered_set<std::string> fields = {
+      "dtype",
+      "device",
+      "shape",
+    };
+    if (fields.count(field)) {
+      auto r = m.graph()->insert(Symbol::fromQualString("prim::"+field), {value});
+      return std::make_shared<SimpleValue>(r);
     }
   }
   if (getValue()->type()->isSubtypeOf(NumberType::get())) {
@@ -2343,8 +2388,6 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
   return map;
 }
 
-TypePtr parseTypeFromExpr(Expr expr);
-
 const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscript_to_type_fns() {
   static std::unordered_map<std::string, std::function<TypePtr(Subscript)>> map = {
     {"Tuple", [](Subscript subscript) -> TypePtr {
@@ -2372,30 +2415,44 @@ const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscr
   return map;
 }
 
+bool  isTorch(Expr expr) {
+  return expr.kind() == TK_VAR && Var(expr).name().name() == "torch";
+}
+
+// gets the base type name given namespaces where the types live
+// turns torch.Tensor -> Tensor, X -> X
+c10::optional<std::string> parseBaseTypeName(Expr expr) {
+  switch (expr.kind()) {
+    case TK_VAR: {
+      return Var(expr).name().name();
+    }
+    case '.': {
+      auto select = Select(expr);
+      const std::string& name = select.selector().name();
+      if (isTorch(select.value()) && name == "Tensor")
+        return "Tensor";
+    }
+  }
+  return at::nullopt;
+}
+
 TypePtr parseTypeFromExpr(Expr expr) {
-  if (expr.kind() == TK_VAR) {
-    auto ident = Var(expr).name();
-    auto itr = ident_to_type_lut().find(ident.name());
+  if (expr.kind() == TK_SUBSCRIPT) {
+    auto subscript = Subscript(expr);
+    auto value_name = parseBaseTypeName(subscript.value());
+    if (!value_name) {
+      throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
+    }
+    if (!subscript_to_type_fns().count(*value_name)) {
+      throw ErrorReport(subscript.range()) << "Unknown type constructor " << *value_name;
+    }
+    return subscript_to_type_fns().at(*value_name)(subscript);
+  } else if (auto name = parseBaseTypeName(expr)) {
+    auto itr = ident_to_type_lut().find(*name);
     if (itr != ident_to_type_lut().end()) {
       return itr->second;
     }
-    throw ErrorReport(expr.range()) << "Unknown type name " << ident.name();
-  } else if (expr.kind() == TK_SUBSCRIPT) {
-    auto subscript = Subscript(expr);
-    if (subscript.value().kind() != TK_VAR) {
-      throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
-    }
-    auto value_name = Var(subscript.value()).name().name();
-    if (!subscript_to_type_fns().count(value_name)) {
-      throw ErrorReport(subscript.range()) << "Unknown type constructor " << value_name;
-    }
-    return subscript_to_type_fns().at(value_name)(subscript);
-  } else if (expr.kind() == '.') {
-    auto select = Select(expr);
-    if (select.value().kind() == TK_VAR && Var(select.value()).name().name() == "torch"
-        && select.selector().name() == "Tensor") {
-      return ident_to_type_lut().at("Tensor");
-    }
+    throw ErrorReport(expr) << "Unknown type name " << *name;
   }
   throw ErrorReport(expr.range()) << "Expression of type " << kindToString(expr.kind())
                                   << " cannot be used in a type expression";
@@ -2544,12 +2601,6 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     return fmap(unpack->outputs(), make_simple_value);
   }
   throw ErrorReport(loc) << value->type()->str() << " cannot be used as a tuple";
-}
-
-void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what) {
-  if(expected != actual) {
-    throw ErrorReport(loc) << "expected " << expected << " " << what << " but found " << actual;
-  }
 }
 
 } // namespace script

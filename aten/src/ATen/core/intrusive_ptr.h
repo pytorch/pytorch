@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/ATenGeneral.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <atomic>

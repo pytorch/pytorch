@@ -44,11 +44,11 @@ class ConvDNNLowPAcc16Op final
       const std::uint8_t* col_buffer,
       vector<std::int32_t>* Y_int32);
 
-  std::vector<std::unique_ptr<fbgemm2::PackBMatrix<std::int8_t, std::int16_t>>>
+  std::vector<std::unique_ptr<fbgemm::PackBMatrix<std::int8_t, std::int16_t>>>
       Wq_acc16_packed_;
 
   // Wq outlier in CSC format
-  std::vector<fbgemm2::CompressedSparseColumn> Wq_outlier_;
+  std::vector<fbgemm::CompressedSparseColumn> Wq_outlier_;
 
   int nbits_in_non_outlier_;
   int copy_to_32bit_frequency_;

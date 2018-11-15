@@ -2,7 +2,7 @@
 
 #include <memory>
 #include "General.h"
-#include "base/DataChannel.hpp"
+#include <THD/base/DataChannel.hpp>
 
 namespace thd {
 extern std::unique_ptr<DataChannel> dataChannel;

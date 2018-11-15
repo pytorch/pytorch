@@ -1,10 +1,10 @@
 #ifdef WITH_GLOO
-#include "../base/data_channels/DataChannelGloo.hpp"
+#include <THD/base/data_channels/DataChannelGloo.hpp>
 #endif // WITH_GLOO
 #ifdef WITH_MPI
-#include "../base/data_channels/DataChannelMPI.hpp"
+#include <THD/base/data_channels/DataChannelMPI.hpp>
 #endif // WITH_MPI
-#include "../base/data_channels/DataChannelTCP.hpp"
+#include <THD/base/data_channels/DataChannelTCP.hpp>
 #include "TestUtils.hpp"
 
 #include <THPP/tensors/THTensor.hpp>

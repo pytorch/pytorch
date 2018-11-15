@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/THCStorage.cpp"
 #else
 
-#include <c10/util/intrusive_ptr.h>
+#include <ATen/core/intrusive_ptr.h>
 #include <c10/util/typeid.h>
 
 scalar_t* THCStorage_(data)(THCState *state, const THCStorage *self)

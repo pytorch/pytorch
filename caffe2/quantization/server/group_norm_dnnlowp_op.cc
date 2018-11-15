@@ -316,7 +316,7 @@ GroupNormDNNLowPOp<T>::GroupNormDNNLowPOp(
 
 template <typename T>
 bool GroupNormDNNLowPOp<T>::RunOnDevice() {
-  BaseType::ParseDNNLowPOperatorArguments_();
+  this->ParseDNNLowPOperatorArguments_();
   if (!GetQuantizationParameters()) {
     return false;
   }

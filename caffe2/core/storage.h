@@ -19,7 +19,7 @@
 #include <ATen/core/Allocator.h>
 #include <c10/Device.h>
 #include <c10/DeviceType.h>
-#include <c10/util/intrusive_ptr.h>
+#include <ATen/core/intrusive_ptr.h>
 #include <ATen/core/Storage.h>
 #include <ATen/core/StorageImpl.h>
 

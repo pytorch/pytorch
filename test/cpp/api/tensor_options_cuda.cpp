@@ -80,7 +80,7 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
   }
 }
 
-TEST(OptionsGuardTest, TestFunctionality_CUDA) {
+TEST(OptionsGuardTest, TestFunctionality_MultiCUDA) {
   Tensor tensor;
   {
     OptionsGuard guard(device(kCUDA));
@@ -124,19 +124,4 @@ TEST(OptionsGuardTest, DeviceGuardOptionsGuardInteraction_MultiCUDA) {
       }
     }
   }
-}
-
-TEST(DeviceGuardTest, IsMovable_CUDA) {
-  DeviceGuard first(CUDADevice(1));
-  ASSERT_EQ(first.original_device(), CUDADevice(0));
-  ASSERT_EQ(first.last_device(), CUDADevice(1));
-  DeviceGuard second(std::move(first));
-  ASSERT_EQ(second.original_device(), CUDADevice(0));
-  ASSERT_EQ(second.last_device(), CUDADevice(1));
-  ASSERT_EQ(first.original_device(), CPUDevice());
-  DeviceGuard third;
-  third = std::move(second);
-  ASSERT_EQ(third.original_device(), CUDADevice(0));
-  ASSERT_EQ(third.last_device(), CUDADevice(1));
-  ASSERT_EQ(second.original_device(), CPUDevice());
 }

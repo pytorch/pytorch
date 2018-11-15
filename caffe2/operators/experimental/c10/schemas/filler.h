@@ -3,7 +3,7 @@
 #include <c10/core/dispatch/DeviceId.h>
 #include "caffe2/core/tensor.h"
 #include <c10/util/Array.h>
-#include <ATen/core/ArrayRef.h>
+#include <c10/util/ArrayRef.h>
 
 namespace caffe2 {
 namespace ops {

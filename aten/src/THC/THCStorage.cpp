@@ -8,7 +8,7 @@
 #include "generic/THCStorage.cpp"
 #include "THCGenerateAllTypes.h"
 
-#include <c10/util/intrusive_ptr.h>
+#include <ATen/core/intrusive_ptr.h>
 
 void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 {
