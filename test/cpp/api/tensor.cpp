@@ -228,14 +228,16 @@ TEST(TensorTest, UsesOptionsThatAreSupplied) {
 }
 
 TEST(TensorTest, FromBlob) {
-  std::vector<int32_t> v = {1, 2, 3};
-  auto tensor = torch::from_blob(v.data(), v.size(), torch::kInt32);
+  std::vector<double> v = {1.0, 2.0, 3.0};
+  auto tensor = torch::from_blob(
+      v.data(), v.size(), torch::dtype(torch::kFloat64).requires_grad(true));
   ASSERT_TRUE(tensor.is_variable());
-  ASSERT_EQ(tensor.dtype(), torch::kInt32);
+  ASSERT_TRUE(tensor.requires_grad());
+  ASSERT_EQ(tensor.dtype(), torch::kFloat64);
   ASSERT_EQ(tensor.numel(), 3);
-  ASSERT_EQ(tensor[0].item<int32_t>(), 1);
-  ASSERT_EQ(tensor[1].item<int32_t>(), 2);
-  ASSERT_EQ(tensor[2].item<int32_t>(), 3);
+  ASSERT_EQ(tensor[0].item<double>(), 1);
+  ASSERT_EQ(tensor[1].item<double>(), 2);
+  ASSERT_EQ(tensor[2].item<double>(), 3);
 }
 
 TEST(TensorTest, FromBlobUsesDeleter) {
@@ -260,7 +262,10 @@ TEST(TensorTest, FromBlobWithStrides) {
   };
   // clang-format on
   auto tensor = torch::from_blob(
-      v.data(), /*sizes=*/{3, 3}, /*strides=*/{1, 3}, /*dtype=*/torch::kInt32);
+      v.data(),
+      /*sizes=*/{3, 3},
+      /*strides=*/{1, 3},
+      torch::kInt32);
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.dtype(), torch::kInt32);
   ASSERT_EQ(tensor.numel(), 9);

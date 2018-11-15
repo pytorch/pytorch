@@ -4,6 +4,8 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/ArrayRef.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/tracer.h>
 
 #include <functional>
 #include <initializer_list>
@@ -43,8 +45,9 @@ inline at::Tensor from_blob(
     at::IntList strides,
     const std::function<void(void*)>& deleter,
     const at::TensorOptions& options = {}) {
-  return at::from_blob(
-      data, sizes, strides, deleter, options.is_variable(true));
+  at::Tensor tensor =
+      at::from_blob(data, sizes, strides, deleter, options.is_variable(false));
+  return autograd::make_variable(tensor, options.requires_grad());
 }
 
 inline at::Tensor from_blob(
@@ -52,12 +55,12 @@ inline at::Tensor from_blob(
     at::IntList sizes,
     at::IntList strides,
     const at::TensorOptions& options = {}) {
-  return at::from_blob(
+  return torch::from_blob(
       data,
       sizes,
       strides,
       /*deleter=*/[](void*) {},
-      options.is_variable(true));
+      options);
 }
 
 inline at::Tensor from_blob(
@@ -65,15 +68,16 @@ inline at::Tensor from_blob(
     at::IntList sizes,
     const std::function<void(void*)>& deleter,
     const at::TensorOptions& options = {}) {
-  return at::from_blob(data, sizes, deleter, options.is_variable(true));
+  at::Tensor tensor =
+      at::from_blob(data, sizes, deleter, options.is_variable(false));
+  return autograd::make_variable(tensor, options.requires_grad());
 }
 
 inline at::Tensor from_blob(
     void* data,
     at::IntList sizes,
     const at::TensorOptions& options = {}) {
-  return at::from_blob(
-      data, sizes, /*deleter=*/[](void*) {}, options.is_variable(true));
+  return torch::from_blob(data, sizes, /*deleter=*/[](void*) {}, options);
 }
 
 ${function_definitions}
