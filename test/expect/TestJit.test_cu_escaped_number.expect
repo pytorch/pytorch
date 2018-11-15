@@ -1,0 +1,3 @@
+def script(self,
+    a: Tensor) -> Tuple[]:
+  print("hi\016")

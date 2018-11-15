@@ -391,9 +391,7 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, reducti
     if input.dim() == 1:
         n = 1
         dim = input.size(0)
-        output = input.new(1)
-        output[0] = _multimarginloss_reference(input, target[0], p, margin, weight) / dim
-        return output
+        return _multimarginloss_reference(input, target[0], p, margin, weight) / dim
     else:
         n = input.size(0)
         dim = input.size(1)
@@ -1149,8 +1147,6 @@ class CriterionTest(TestBase):
             out = test_case._forward_criterion(module, input, target, extra_args=self.extra_args)
             ref_args = (deepcopy(input), deepcopy(target)) + self.extra_args + (module,)
             expected_out = self.reference_fn(*ref_args)
-            if isinstance(expected_out, torch.Tensor):
-                expected_out = expected_out.item()
             test_case.assertEqual(out, expected_out)
 
         if self.check_forward_only:

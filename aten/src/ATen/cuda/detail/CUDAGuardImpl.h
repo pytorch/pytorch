@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/detail/DeviceGuardImplInterface.h>
+#include <c10/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 
 #include <ATen/cuda/Exceptions.h>
@@ -12,7 +12,7 @@ namespace at {
 namespace cuda {
 namespace detail {
 
-struct CUDAGuardImpl final : public c10::detail::DeviceGuardImplInterface {
+struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
   CUDAGuardImpl() {}
   CUDAGuardImpl(DeviceType) {}

@@ -182,18 +182,16 @@ void apply(Function function, Ts&&... ts) {
   (void)_;
 }
 
-template <typename... Ts, typename Function, typename Accessor>
-auto unpack(Function function, Accessor accessor)
-    -> decltype(function(std::declval<Ts>()...)) {
-  return unpack<Ts...>(
+template <typename ReturnType, typename... Ts, typename Function, typename Accessor>
+ReturnType unpack(Function function, Accessor accessor) {
+  return ReturnType(unpack<ReturnType, Ts...>(
       std::move(function),
       std::move(accessor),
-      typename MakeIndices<sizeof...(Ts)>::indices());
+      typename MakeIndices<sizeof...(Ts)>::indices()));
 }
 
-template <typename... Ts, typename Function, typename Accessor, size_t... Is>
-auto unpack(Function function, Accessor accessor, Indices<Is...>)
-    -> decltype(function(std::declval<Ts>()...)) {
-  return function(accessor.template operator()<Ts>(Is)...);
+template <typename ReturnType, typename... Ts, typename Function, typename Accessor, size_t... Is>
+ReturnType unpack(Function function, Accessor accessor, Indices<Is...>) {
+  return ReturnType(function(accessor.template operator()<Ts>(Is)...));
 }
 } // namespace torch
