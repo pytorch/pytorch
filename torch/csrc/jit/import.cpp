@@ -250,7 +250,7 @@ TypePtr MethodDecoder::buildType(const onnx::TypeProto& type_proto) {
     return GeneratorType::get();
   } else if (kind == "StringType") {
     return StringType::get();
-  } else if (kind.find("OptionalType") == 0) {
+  } else if (kind == "OptionalType") {
     auto subkind = shape_proto.dim(0);
     auto it = value_type_map_.find(subkind.dim_param());
     JIT_ASSERT(it != value_type_map_.end());
