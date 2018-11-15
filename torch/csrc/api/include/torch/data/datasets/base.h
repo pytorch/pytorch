@@ -45,6 +45,17 @@ class BatchDataset {
   /// Returns the size of the dataset, or an empty optional if it is unsized.
   virtual optional<size_t> size() const = 0;
 
+  // Resets any internal state of the dataset. `Dataloader` will call this
+  // at the begining of each epoch. If the dataset is stateless, then this
+  // method will be no-op, hence the default implemenation.
+  virtual void reset() {}
+
+  /// Serializes any internal state of the `Dataset` to the `archive`.
+  virtual void save(serialize::OutputArchive& archive) {};
+
+  /// Deserializes a `Dataset` from the `archive`.
+  virtual void load(serialize::InputArchive& archive) {};
+
   /// Creates a `MapDataset` that applies the given `transform` to this dataset.
   template <typename TransformType>
   MapDataset<Self, TransformType> map(TransformType transform) & {
