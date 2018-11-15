@@ -253,7 +253,6 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/serialize/tensor.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
   )
 endif()
@@ -344,10 +343,16 @@ endif()
 
 if(USE_CUDA)
   if(MSVC)
+    if (NOT NVTOOLEXT_HOME)
+      set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
+    endif()
+    if ($ENV{NVTOOLEXT_HOME})
+      set(NVTOOLEXT_HOME $ENV{NVTOOLEXT_HOME})
+    endif()
     set(TORCH_CUDA_LIBRARIES
       ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
       ${CUDA_LIBRARIES})
-    target_include_directories(torch PRIVATE "${NVTOOLEXT_HOME}/include")
+    target_include_directories(torch PUBLIC "${NVTOOLEXT_HOME}/include")
   elseif(APPLE)
     set(TORCH_CUDA_LIBRARIES
       ${CUDA_TOOLKIT_ROOT_DIR}/lib/libcudart.dylib

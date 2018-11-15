@@ -1,9 +1,9 @@
 #pragma once
 
-#include <c10/detail/InlineDeviceGuard.h>
+#include <c10/impl/InlineDeviceGuard.h>
 
 namespace c10 {
-namespace detail {
+namespace impl {
 
 /**
  * A StreamGuard is an RAII class that changes the current device
@@ -184,4 +184,4 @@ private:
   optional<InlineStreamGuard<T>> guard_;
 };
 
-}} // namespace c10::detail
+}} // namespace c10::impl

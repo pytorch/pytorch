@@ -1,12 +1,12 @@
 #pragma once
 
 #include <ATen/DeviceGuard.h>
-#include <ATen/core/ArrayRef.h>
+#include <c10/util/ArrayRef.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/CUDAGuardImpl.h>
 #include <c10/DeviceType.h>
-#include <c10/detail/InlineDeviceGuard.h>
-#include <c10/detail/InlineStreamGuard.h>
+#include <c10/impl/InlineDeviceGuard.h>
+#include <c10/impl/InlineStreamGuard.h>
 
 #include <cstddef>
 #include <vector>
@@ -60,7 +60,7 @@ struct CUDAGuard {
 
  private:
   /// The guard for the current device.
-  c10::detail::InlineDeviceGuard<detail::CUDAGuardImpl> guard_;
+  c10::impl::InlineDeviceGuard<at::cuda::detail::CUDAGuardImpl> guard_;
 };
 
 /// A variant of OptionalDeviceGuard that is specialized for CUDA.  See
@@ -112,7 +112,7 @@ struct OptionalCUDAGuard {
   void reset() { guard_.reset(); }
 
 private:
-  c10::detail::InlineOptionalDeviceGuard<detail::CUDAGuardImpl> guard_;
+  c10::impl::InlineOptionalDeviceGuard<at::cuda::detail::CUDAGuardImpl> guard_;
 };
 
 /// A variant of StreamGuard that is specialized for CUDA.  See CUDAGuard
@@ -169,7 +169,7 @@ struct CUDAStreamGuard {
   Device original_device() const { return guard_.original_device(); }
 
 private:
-  c10::detail::InlineStreamGuard<detail::CUDAGuardImpl> guard_;
+  c10::impl::InlineStreamGuard<at::cuda::detail::CUDAGuardImpl> guard_;
 };
 
 /// A variant of OptionalStreamGuard that is specialized for CUDA.  See CUDAGuard
@@ -232,7 +232,7 @@ struct OptionalCUDAStreamGuard {
   void reset() { guard_.reset(); }
 
 private:
-  c10::detail::InlineOptionalStreamGuard<detail::CUDAGuardImpl> guard_;
+  c10::impl::InlineOptionalStreamGuard<at::cuda::detail::CUDAGuardImpl> guard_;
 };
 
 // TODO: Implement this generically in c10.  You'll need some way to get

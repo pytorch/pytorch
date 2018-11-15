@@ -416,22 +416,22 @@
 
 - func: _convolution_double_backward(Tensor? ggI, Tensor? ggW, Tensor? ggb, Tensor gO, Tensor weight, Tensor self, IntList stride, IntList padding, IntList dilation, bool transposed, IntList output_padding, int64_t groups, bool benchmark, bool deterministic, bool cudnn_enabled, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
 
-- func: conv1d(Tensor input, Tensor weight, Tensor bias={}, IntList[1] stride=1, IntList[1] padding=0, IntList[1] dilation=1, int64_t groups=1) -> Tensor
+- func: conv1d(Tensor input, Tensor weight, Tensor? bias={}, IntList[1] stride=1, IntList[1] padding=0, IntList[1] dilation=1, int64_t groups=1) -> Tensor
 
-- func: conv2d(Tensor input, Tensor weight, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1, int64_t groups=1) -> Tensor
+- func: conv2d(Tensor input, Tensor weight, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1, int64_t groups=1) -> Tensor
 
-- func: conv3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1, int64_t groups=1) -> Tensor
+- func: conv3d(Tensor input, Tensor weight, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1, int64_t groups=1) -> Tensor
 
 - func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad=0) -> Tensor
 
 - func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int64_t pad) -> (Tensor, Tensor, Tensor)
 
 # NB: we inherit the goofy argument order from PyTorch torch.nn.functional
-- func: conv_transpose1d(Tensor input, Tensor weight, Tensor bias={}, IntList[1] stride=1, IntList[1] padding=0, IntList[1] output_padding=0, int64_t groups=1, IntList[1] dilation=1) -> Tensor
+- func: conv_transpose1d(Tensor input, Tensor weight, Tensor? bias={}, IntList[1] stride=1, IntList[1] padding=0, IntList[1] output_padding=0, int64_t groups=1, IntList[1] dilation=1) -> Tensor
 
-- func: conv_transpose2d(Tensor input, Tensor weight, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, int64_t groups=1, IntList[2] dilation=1) -> Tensor
+- func: conv_transpose2d(Tensor input, Tensor weight, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, int64_t groups=1, IntList[2] dilation=1) -> Tensor
 
-- func: conv_transpose3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
+- func: conv_transpose3d(Tensor input, Tensor weight, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
 
 - func: _copy_(Tensor self, Tensor src) -> Tensor
   cpu_half: True
@@ -680,10 +680,13 @@
     CUDA: resize_cuda_
 
 - func: empty_out(Tensor result, IntList size) -> Tensor
+  device_guard: False
 
 - func: empty_like(Tensor self) -> Tensor
+  device_guard: False
 
 - func: empty_like(Tensor self, *, TensorOptions options) -> Tensor
+  device_guard: False
 
 - func: empty_strided(IntList size, IntList stride, *, TensorOptions options={}) -> Tensor
 
@@ -960,7 +963,7 @@
 
 - func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
 
-- func: linear(Tensor input, Tensor weight, Tensor bias={}) -> Tensor
+- func: linear(Tensor input, Tensor weight, Tensor? bias={}) -> Tensor
 
 - func: linspace(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
 
@@ -1255,6 +1258,9 @@
 - func: _pdist_forward(Tensor self, double p=2) -> Tensor
 
 - func: _pdist_backward(Tensor grad, Tensor self, double p, Tensor pdist) -> Tensor
+
+- func: cosine_similarity(Tensor x1, Tensor x2, int64_t dim=1, double eps=1e-8) -> Tensor
+  variants: function
 
 - func: permute(Tensor self, IntList dims) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -1662,9 +1668,11 @@
 - func: prod_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
 
 - func: t(Tensor self) -> Tensor
+  device_guard: False
   variants: function, method
 
 - func: t_(Tensor self) -> Tensor
+  device_guard: False
   variants: method
 
 - func: tan(Tensor self) -> Tensor

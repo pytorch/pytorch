@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <iosfwd>
 #include <memory>
 #include <string>
@@ -20,7 +22,7 @@ struct Module;
 
 namespace torch {
 namespace serialize {
-class OutputArchive final {
+class TORCH_API OutputArchive final {
  public:
   /// Default-constructs the `OutputArchive`.
   OutputArchive();

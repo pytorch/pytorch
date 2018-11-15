@@ -4162,11 +4162,11 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4)
+    >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
     >>> a
-    tensor([ 1.0382, -1.4526, -0.9709,  0.4542])
+    tensor([ 0.7000, -1.2000,  0.0000,  2.3000])
     >>> torch.sign(a)
-    tensor([ 1., -1., -1.,  1.])
+    tensor([ 1., -1.,  0.,  1.])
 """)
 
 add_docstr(torch.sin,

@@ -410,6 +410,7 @@ def _unpool_output_size(input, kernel_size, stride, padding, output_size):
     return output_size
 
 
+@torch._jit_internal.weak_script
 def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
     r"""Computes a partial inverse of :class:`MaxPool1d`.
@@ -465,6 +466,7 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
 
 
 def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
+    # type: (Tensor, int, int, Optional[List[int]], bool) -> Tensor
     r"""Applies a 1D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
@@ -713,7 +715,9 @@ In-place version of :func:`~relu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def glu(input, dim=-1):
+    # type: (Tensor, int) -> Tensor
     r"""
     glu(input, dim=-1) -> Tensor
 
@@ -1095,7 +1099,9 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
     return y
 
 
+@torch._jit_internal.weak_script
 def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
+    # type: (Tensor, Optional[int], int, Optional[int]) -> Tensor
     r"""Applies a softmax followed by a logarithm.
 
     While mathematically equivalent to log(softmax(x)), doing these two
@@ -1113,10 +1119,14 @@ def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
     """
     if dim is None:
         dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
-    if dtype is None:
-        return input.log_softmax(dim)
     else:
-        return input.log_softmax(dim, dtype=dtype)
+        dim = torch.jit._unwrap_optional(dim)
+    if dtype is None:
+        ret = input.log_softmax(dim)
+    else:
+        _dtype = torch.jit._unwrap_optional(dtype)
+        ret = input.log_softmax(dim, dtype=_dtype)
+    return ret
 
 
 softshrink = _add_docstr(torch._C._nn.softshrink, r"""
@@ -1153,7 +1163,9 @@ def sigmoid(input):
     return input.sigmoid()
 
 
+@torch._jit_internal.weak_script
 def linear(input, weight, bias=None):
+    # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
     r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
@@ -1167,12 +1179,13 @@ def linear(input, weight, bias=None):
     """
     if input.dim() == 2 and bias is not None:
         # fused op is marginally faster
-        return torch.addmm(bias, input, weight.t())
-
-    output = input.matmul(weight.t())
-    if bias is not None:
-        output += bias
-    return output
+        ret = torch.addmm(torch.jit._unwrap_optional(bias), input, weight.t())
+    else:
+        output = input.matmul(weight.t())
+        if bias is not None:
+            output += torch.jit._unwrap_optional(bias)
+        ret = output
+    return ret
 
 
 @torch._jit_internal.weak_script
@@ -1407,6 +1420,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 
 def instance_norm(input, running_mean=None, running_var=None, weight=None,
                   bias=None, use_input_stats=True, momentum=0.1, eps=1e-5):
+    # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor  # noqa
     r"""Applies Instance Normalization for each channel in each data sample in a
     batch.
 
@@ -1437,7 +1451,8 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
                             torch.backends.cudnn.enabled)
 
 
-def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
+def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1.):
+    # type: (Tensor, int, float, float, float) -> Tensor
     r"""Applies local response normalization over an input signal composed of
     several input planes, where channels occupy the second dimension.
     Applies normalization across channels.
@@ -1507,6 +1522,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
 
 def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
              reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], int, Optional[bool], str) -> Tensor
     r"""The negative log likelihood loss.
 
     See :class:`~torch.nn.NLLLoss` for details.
@@ -1549,7 +1565,9 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         >>> output.backward()
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_string(size_average, reduce)
+        _size_average = torch.jit._unwrap_optional(size_average)
+        _reduce = torch.jit._unwrap_optional(reduce)
+        reduction = _Reduction.legacy_get_string(_size_average, _reduce)
     dim = input.dim()
     if dim < 2:
         raise ValueError('Expected 2 or more dimensions (got {})'.format(dim))
@@ -1558,9 +1576,9 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         raise ValueError('Expected input batch_size ({}) to match target batch_size ({}).'
                          .format(input.size(0), target.size(0)))
     if dim == 2:
-        return torch._C._nn.nll_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
+        ret = torch._C._nn.nll_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
     elif dim == 4:
-        return torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
+        ret = torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
     elif dim == 3 or dim > 4:
         n = input.size(0)
         c = input.size(1)
@@ -1570,14 +1588,20 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
                 out_size, target.size()))
         input = input.contiguous().view(n, c, 1, -1)
         target = target.contiguous().view(n, 1, -1)
+        reduction_enum = _Reduction.get_enum(reduction)
         if reduction is not 'none':
-            return torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
-        out = torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
-        return out.view(out_size)
+            ret = torch._C._nn.nll_loss2d(
+                input, target, weight, reduction_enum, ignore_index)
+        else:
+            out = torch._C._nn.nll_loss2d(
+                input, target, weight, reduction_enum, ignore_index)
+            ret = out.view(out_size)
+    return ret
 
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=None, eps=1e-8,
                      reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, bool, bool, Optional[bool], float, Optional[bool], str) -> Tensor
     r"""Poisson negative log likelihood loss.
 
     See :class:`~torch.nn.PoissonNLLLoss` for details.
@@ -1626,7 +1650,9 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     return torch.sum(loss)
 
 
+@torch._jit_internal.weak_script
 def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""The `Kullback-Leibler divergence`_ Loss.
 
     See :class:`~torch.nn.KLDivLoss` for details.
@@ -1651,10 +1677,12 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             specifying either of those two args will override :attr:`reduction`. Default: 'mean'
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        _size_average = torch.jit._unwrap_optional(size_average)
+        _reduce = torch.jit._unwrap_optional(reduce)
+        _reduction_enum = _Reduction.legacy_get_enum(_size_average, _reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch.kl_div(input, target, reduction)
+        _reduction_enum = _Reduction.get_enum(reduction)
+    return torch.kl_div(input, target, _reduction_enum)
 
 
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
@@ -1706,6 +1734,7 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
 
 def binary_cross_entropy(input, target, weight=None, size_average=None,
                          reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
     r"""Function that measures the Binary Cross Entropy
     between the target and the output.
 
@@ -1740,9 +1769,11 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         >>> loss.backward()
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        _size_average = torch.jit._unwrap_optional(size_average)
+        _reduce = torch.jit._unwrap_optional(reduce)
+        _reduction_enum = _Reduction.legacy_get_enum(_size_average, _reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
+        _reduction_enum = _Reduction.get_enum(reduction)
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                       "Please ensure they have the same size.".format(target.size(), input.size()))
@@ -1754,7 +1785,8 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 
-    return torch._C._nn.binary_cross_entropy(input, target, weight, reduction)
+    return torch._C._nn.binary_cross_entropy(
+        input, target, weight, _reduction_enum)
 
 
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=None,
@@ -1835,6 +1867,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
 
 
 def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     Function that takes the mean element-wise absolute value difference.
@@ -2392,34 +2425,32 @@ Args:
 """)
 
 
-def cosine_similarity(x1, x2, dim=1, eps=1e-8):
-    r"""Returns cosine similarity between x1 and x2, computed along dim.
+cosine_similarity = _add_docstr(torch.cosine_similarity, r"""
+cosine_similarity(x1, x2, dim=1, eps=1e-8) -> Tensor
 
-    .. math ::
-        \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
+Returns cosine similarity between x1 and x2, computed along dim.
 
-    Args:
-        x1 (Tensor): First input.
-        x2 (Tensor): Second input (of size matching x1).
-        dim (int, optional): Dimension of vectors. Default: 1
-        eps (float, optional): Small value to avoid division by zero.
-            Default: 1e-8
+.. math ::
+    \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
 
-    Shape:
-        - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
-        - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
+Args:
+    x1 (Tensor): First input.
+    x2 (Tensor): Second input (of size matching x1).
+    dim (int, optional): Dimension of vectors. Default: 1
+    eps (float, optional): Small value to avoid division by zero.
+        Default: 1e-8
 
-    Example::
+Shape:
+    - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
+    - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
 
-        >>> input1 = torch.randn(100, 128)
-        >>> input2 = torch.randn(100, 128)
-        >>> output = F.cosine_similarity(input1, input2)
-        >>> print(output)
-    """
-    w12 = torch.sum(x1 * x2, dim)
-    w1 = torch.norm(x1, 2, dim)
-    w2 = torch.norm(x2, 2, dim)
-    return w12 / (w1 * w2).clamp(min=eps)
+Example::
+
+    >>> input1 = torch.randn(100, 128)
+    >>> input2 = torch.randn(100, 128)
+    >>> output = F.cosine_similarity(input1, input2)
+    >>> print(output)
+""")
 
 
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False, size_average=None,

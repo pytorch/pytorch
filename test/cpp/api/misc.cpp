@@ -53,7 +53,9 @@ TEST(NNInitTest, CanInitializeTensorThatRequiresGrad) {
   ASSERT_EQ(torch::nn::init::ones_(tensor).sum().item<int32_t>(), 12);
 }
 
+#if !defined(_WIN32)
 TEST(TempFileTest, MatchesExpectedPattern) {
   torch::utils::TempFile pattern = torch::utils::make_tempfile("test-pattern-");
   ASSERT_NE(pattern.name.find("test-pattern-"), std::string::npos);
 }
+#endif // !defined(_WIN32)

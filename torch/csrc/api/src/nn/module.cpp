@@ -62,6 +62,14 @@ const std::string& Module::name() const noexcept {
   // destroyed even if it is not the most-derived class.
   if (!name_.has_value()) {
     name_ = c10::demangle(typeid(*this).name());
+#if defined(_WIN32)
+    // Windows adds "struct" or "class" as a prefix.
+    if (name_->find("struct ") == 0) {
+      name_->erase(name_->begin(), name_->begin() + 7);
+    } else if (name_->find("class ") == 0) {
+      name_->erase(name_->begin(), name_->begin() + 6);
+    }
+#endif // defined(_WIN32)
   }
   return *name_;
 }
