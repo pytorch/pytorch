@@ -1823,9 +1823,9 @@ class TestSparse(TestCase):
     def test_allow_size_or_storage_change(self):
         def do_test(t):
             a = self.SparseTensor(3, 3)
-            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data or .detach()"):
                 t.resize_as_(a)
-            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data or .detach()"):
                 t.transpose_(0, 1)
 
         do_test(self.SparseTensor(3, 0).data)

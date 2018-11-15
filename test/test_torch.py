@@ -9411,19 +9411,19 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     def test_allow_size_or_storage_change(self):
         def do_test(t):
             a = torch.tensor([[1], [2]])
-            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data or .detach()"):
                 t.resize_((2, 1))
-            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data or .detach()"):
                 t.resize_as_(a)
-            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data or .detach()"):
                 t.set_()
-            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data or .detach()"):
                 t.set_(a)
-            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data or .detach()"):
                 t.set_(a.storage())
-            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data or .detach()"):
                 t.set_(source=a.storage(), storage_offset=0, size=(1, 1), stride=(1, 1))
-            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data"):
+            with self.assertRaisesRegex(RuntimeError, "not allowed on Tensor created from .data or .detach()"):
                 t.transpose_(0, 1)
 
         do_test(torch.tensor([[1, 2]]).data)
