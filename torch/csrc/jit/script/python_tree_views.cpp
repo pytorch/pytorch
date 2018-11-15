@@ -122,9 +122,8 @@ void initTreeViewBindings(PyObject *module) {
 
 
   py::class_<Assign, Stmt>(m, "Assign")
-    .def(py::init([](std::vector<Expr> lhs, const Expr& rhs) {
-      auto r = lhs.at(0).range();
-      return Assign::create(r, List<Expr>::create(r, std::move(lhs)), rhs);
+    .def(py::init([](const Expr& lhs, const Expr& rhs) {
+      return Assign::create(lhs.range(), lhs, rhs);
     }));
   py::class_<AugAssign, Stmt>(m, "AugAssign")
     .def(py::init([](const Expr& lhs, std::string kind_str, const Expr& rhs) {
@@ -169,9 +168,8 @@ void initTreeViewBindings(PyObject *module) {
         wrap_list(range, std::move(body)));
   }));
   py::class_<ExprStmt, Stmt>(m, "ExprStmt")
-    .def(py::init([](std::vector<Expr>& exprs) {
-      auto r = exprs[0].range();
-      return ExprStmt::create(r, wrap_list(r, std::move(exprs)));
+    .def(py::init([](const Expr& expr) {
+      return ExprStmt::create(expr.range(), expr);
     }));
 
   py::class_<Var, Expr>(m, "Var")

@@ -29,6 +29,8 @@ fi
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # JIT C++ extensions require ninja.
   pip install -q ninja --user
+  # ninja is installed in /var/lib/jenkins/.local/bin
+  export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
   # TODO: move this to Docker
   pip install -q hypothesis --user
@@ -143,7 +145,7 @@ test_libtorch() {
      else
        "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
      fi
-     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+     python tools/download_mnist.py --quiet -d mnist
      OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
   fi
 }

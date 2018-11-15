@@ -44,6 +44,7 @@ TYPE_MAP = {
     'Scalar': 'Scalar',
     'Scalar?': 'Scalar?',
     'Tensor': 'Tensor',
+    'Tensor?': 'Tensor?',
     'TensorList': 'Tensor[]',
     # this appears in return values instead of TensorList
     # since TensorList is a ArrayRef in arguments but a vector
@@ -69,6 +70,8 @@ def jit_type_of(arg):
     if is_sized_intlist_arg(arg):
         typ = 'int[{}]'.format(arg['size'])
 
+    if arg.get('is_nullable') and '?' not in typ:
+        typ = '{}?'.format(typ)
     return typ
 
 

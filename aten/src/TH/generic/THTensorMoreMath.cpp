@@ -3,6 +3,7 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
+#include <TH/THGenerator.hpp>
 
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
 {
@@ -650,6 +651,7 @@ void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
 
 void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
 {
+  std::lock_guard<std::mutex> lock(_generator->mutex);
   scalar_t *r__data;
   int64_t r__stride_0;
   int64_t i;
@@ -2065,11 +2067,29 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
 
 accreal THTensor_(dist)(THTensor *tensor, THTensor *src, scalar_t value)
 {
-  scalar_t sum = 0;
-  TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                   sum += TH_MATH_NAME(pow)(
-                     TH_MATH_NAME(fabs)(*tensor_data - *src_data), value););
-  return TH_MATH_NAME(pow)(sum, 1.0/value);
+  scalar_t sum;
+  if (value == INFINITY) {
+    sum = -1.0;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum = THMax(sum, TH_MATH_NAME(fabs)(*tensor_data - *src_data)););
+    return sum;
+  } else if (value == -INFINITY) {
+    sum = INFINITY;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum = THMin(sum, TH_MATH_NAME(fabs)(*tensor_data - *src_data)););
+    return sum;
+  } else if (value == 0.0) {
+    sum = 0.0;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum += (*tensor_data - *src_data != 0.0););
+    return sum;
+  } else {
+    sum = 0.0;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum += TH_MATH_NAME(pow)(
+                       TH_MATH_NAME(fabs)(*tensor_data - *src_data), value););
+    return TH_MATH_NAME(pow)(sum, 1.0/value);
+  }
 }
 
 accreal THTensor_(meanall)(THTensor *tensor)

@@ -92,13 +92,23 @@ bool InstanceNormGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 
     // for each channel
     // dl/dbias = sum_j dl/dy_j
-    bias_grad_arr += output_grad_mat.rowwise().sum();
+    auto bias_grad_delta = output_grad_mat.rowwise().sum();
+    if (n == 0) {
+      bias_grad_arr = bias_grad_delta;
+    } else {
+      bias_grad_arr += bias_grad_delta;
+    }
     // for each channel
     // dl/dscale = sum_j dl/dy_j (x_j - mu) / stdev
-    scale_grad_arr +=
+    auto scale_grad_delta =
         ((input_grad_mat.colwise() * inv_stdev_arr) * output_grad_mat)
             .rowwise()
             .sum();
+    if (n == 0) {
+      scale_grad_arr = scale_grad_delta;
+    } else {
+      scale_grad_arr += scale_grad_delta;
+    }
 
     // dl/dx_j = this gross thing
     // Derived gradient and manually massaged it to minimize extra storage

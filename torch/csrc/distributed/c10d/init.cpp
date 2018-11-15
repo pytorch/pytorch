@@ -49,7 +49,13 @@ PyObject* c10d_init(PyObject* _unused) {
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp);
 
-  py::enum_<::c10d::ReduceOp>(module, "ReduceOp")
+  py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
+An enum-like class of available reduce operations: ``SUM``, ``PRODUCT``,
+``MIN``, and ``MAX``.
+
+The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
+They are used in specifying strategies for reduction collectives, e.g.,
+:func:`reduce`, :func:`all_reduce_multigpu`, etc.)")
       .value("SUM", ::c10d::ReduceOp::SUM)
       .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
       .value("MIN", ::c10d::ReduceOp::MIN)
@@ -115,7 +121,7 @@ PyObject* c10d_init(PyObject* _unused) {
               py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)
-      .def(py::init<const std::string&>());
+      .def(py::init<const std::string&, int>());
 
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
       .def(py::init<const std::string&, int, bool>());
@@ -397,6 +403,14 @@ PyObject* c10d_init(PyObject* _unused) {
           py::call_guard<py::gil_scoped_release>());
 
 #ifdef USE_CUDA
+  module.def(
+      "_dist_bucket_tensors",
+      &::c10d::bucketTensors,
+      py::arg("tensors"),
+      py::arg("bucket_size"),
+      py::arg("fine_grained"),
+      py::call_guard<py::gil_scoped_release>());
+
   module.def(
       "_dist_broadcast_coalesced",
       &::c10d::distBroadcastCoalesced,

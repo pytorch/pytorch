@@ -1,28 +1,28 @@
 graph(%a : Dynamic
       %b : Dynamic) {
-  %c2.1 : int = prim::Constant[value=1]()
+  %c0.1 : int = prim::Constant[value=1]()
   %3 : bool = prim::TensorToBool(%a)
-  %c0.4 : int, %c1 : int = prim::If(%3)
+  %c0.5 : int, %c1 : int = prim::If(%3)
     block0() {
       %6 : bool = prim::TensorToBool(%b)
-      %c0.3 : int = prim::If(%6)
+      %c0.4 : int = prim::If(%6)
         block0() {
           %8 : int = prim::Constant[value=2]()
           -> (%8)
         }
         block1() {
-          -> (%c2.1)
+          -> (%c0.1)
         }
-      -> (%c0.3, %c2.1)
+      -> (%c0.4, %c0.1)
     }
     block1() {
       %9 : int = prim::Constant[value=2]()
-      -> (%c2.1, %9)
+      -> (%c0.1, %9)
     }
-  %c0.5 : int = aten::add(%c0.4, %c2.1)
+  %c0.6 : int = aten::add(%c0.5, %c0.1)
   %11 : int = prim::Constant[value=5]()
-  %12 : Dynamic = aten::add(%a, %c0.5, %c2.1)
-  %13 : Dynamic = aten::add(%12, %c1, %c2.1)
-  %14 : Dynamic = aten::add(%13, %11, %c2.1)
+  %12 : Dynamic = aten::add(%a, %c0.6, %c0.1)
+  %13 : Dynamic = aten::add(%12, %c1, %c0.1)
+  %14 : Dynamic = aten::add(%13, %11, %c0.1)
   return (%14);
 }

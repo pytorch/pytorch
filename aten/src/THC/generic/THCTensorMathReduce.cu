@@ -261,18 +261,47 @@ accreal THCTensor_(dist)(THCState *state, THCTensor *self,
   thrust::device_ptr<scalar_t> src_data(THCTensor_(data)(state, src));
 
   THCThrustAllocator thrustAlloc(state);
-  accreal result = thrust::inner_product(
-#if CUDA_VERSION >= 7000
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
-#endif
-    self_data, self_data+size, src_data, scalar_cast<accreal>(0),
-    thrust::plus<accreal>(),
-    ThrustTensorDistOp<scalar_t, accreal>(value));
+  accreal result;
 
+  if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(INFINITY))) {
+    result = thrust::inner_product(
+#if CUDA_VERSION >= 7000
+      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+#endif
+      self_data, self_data+size, src_data, scalar_cast<accreal>(0),
+      ReduceMax<accreal>(),
+      ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(1)));
+  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(-INFINITY))) {
+    result = thrust::inner_product(
+#if CUDA_VERSION >= 7000
+      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+#endif
+      self_data, self_data+size, src_data, scalar_cast<accreal>(INFINITY),
+      ReduceMin<accreal>(),
+      ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(1)));
+  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(0))) {
+    result = thrust::inner_product(
+#if CUDA_VERSION >= 7000
+      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+#endif
+      self_data, self_data+size, src_data, scalar_cast<accreal>(0),
+      thrust::plus<accreal>(),
+      ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(0)));
+  } else {
+    result = thrust::inner_product(
+#if CUDA_VERSION >= 7000
+      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+#endif
+      self_data, self_data+size, src_data, scalar_cast<accreal>(0),
+      thrust::plus<accreal>(),
+      ThrustTensorDistOp<scalar_t, accreal>(value));
+
+    result = THCNumerics<accreal>::pow(result, THCNumerics<accreal>::cinv(value));
+  }
   THCTensor_(free)(state, src);
   THCTensor_(free)(state, self);
 
-  return THCNumerics<accreal>::pow(result, THCNumerics<accreal>::cinv(value));
+  return result;
 }
 
 #endif

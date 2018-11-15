@@ -1977,7 +1977,7 @@ Example::
 
 add_docstr(torch.get_default_dtype,
            r"""
-get_default_dtype() -> :class:`torch.dtype`
+get_default_dtype() -> torch.dtype
 
 Get the current default floating point :class:`torch.dtype`.
 
@@ -3415,11 +3415,21 @@ returned such that:
 .. math::
     c = (u u^T)^{-1} b
 
-.. note:: :attr:`b` is always a 2-D tensor, use `b.unsqueeze(1)` to convert a vector.
+`torch.potrs(b, u)` can take in 2D inputs `b, u` or inputs that are
+batches of 2D matrices. If the inputs are batches, then returns
+batched outputs `c`
+
+.. note::
+
+    The :attr:`out` keyword only supports 2D matrix inputs, that is,
+    `b, u` must be 2D matrices.
 
 Args:
-    b (Tensor): the right hand side 2-D tensor
-    u (Tensor): the input 2-D tensor, a upper or lower triangular Cholesky factor
+    b (Tensor): input matrix of size :math:`(*, m, k)`,
+                where :math:`*` is zero or more batch dimensions
+    u (Tensor): input matrix of size :math:`(*, m, m)`,
+                where :math:`*` is zero of more batch dimensions composed of
+                upper or lower triangular Cholesky factor
     upper (bool, optional): whether to return a upper (default) or lower triangular matrix
     out (Tensor, optional): the output tensor for `c`
 
@@ -4152,11 +4162,11 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4)
+    >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
     >>> a
-    tensor([ 1.0382, -1.4526, -0.9709,  0.4542])
+    tensor([ 0.7000, -1.2000,  0.0000,  2.3000])
     >>> torch.sign(a)
-    tensor([ 1., -1., -1.,  1.])
+    tensor([ 1., -1.,  0.,  1.])
 """)
 
 add_docstr(torch.sin,
@@ -4682,10 +4692,12 @@ Example::
 
 add_docstr(torch.roll,
            r"""
-roll(input, shifts, dims) -> Tensor
+roll(input, shifts, dims=None) -> Tensor
 
 Roll the tensor along the given dimension. Elements that are shifted beyond the
-last position are re-introduced at the first position.
+last position are re-introduced at the first position. If a dimension is not
+specified, the tensor will be flattened before rolling and then restored
+to the original shape.
 
 Args:
     input (Tensor): the input tensor

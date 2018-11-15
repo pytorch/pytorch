@@ -12,7 +12,7 @@ namespace at {
 
 constexpr size_t dim_bitset_size = 64;
 
-static inline std::bitset<dim_bitset_size> dim_list_to_bitset(IntList dims, int64_t ndims, bool wrap_scalar=true) {
+static inline std::bitset<dim_bitset_size> dim_list_to_bitset(IntList dims, int64_t ndims) {
   AT_CHECK(ndims <= (int64_t) dim_bitset_size, "only tensors with up to ", dim_bitset_size, " dims are supported");
   std::bitset<dim_bitset_size> seen;
   for (size_t i = 0; i < dims.size(); i++) {

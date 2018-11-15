@@ -33,9 +33,14 @@ def warn(string: str):
   print(string)
 )SCRIPT";
 
+auto python_builtins_source_overloads = R"SCRIPT(
+def warn(string: str, stacklevel: int):
+  print(string)
+)SCRIPT";
+
 auto _ntuple_ops = CodeTemplate(
 R"SCRIPT(
-def _${name}(x: BroadcastingList[${Scalar}, ${Length}]) -> List[${Scalar}]:
+def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
   return x
 )SCRIPT");
 
@@ -69,8 +74,8 @@ private:
         *module, source, script::nativeResolver, /*self=*/nullptr);
     modules.push_back(module);
     for (auto& method : module->get_methods()) {
-      builtins_by_name[Symbol::fromQualString("aten::" + method.key)].push_back(
-          method.value.get());
+      builtins_by_name[Symbol::fromQualString("aten::" + method.key())].push_back(
+          method->get());
     }
   }
   void loadBuiltinFunctions() {
@@ -80,6 +85,7 @@ private:
       loadSource(scalar_operators_source.format(env));
     }
     loadSource(python_builtins_source);
+    loadSource(python_builtins_source_overloads);
 
     using str_pair = std::pair<std::string, std::string>;
     const std::vector<str_pair> name_len = {

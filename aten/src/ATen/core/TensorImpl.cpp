@@ -37,8 +37,7 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::Ty
       data_type_(data_type),
       type_id_(type_id),
       is_variable_(is_variable) {
-  strides_.reset(new int64_t[1]);
-  strides_[0] = 1;
+  strides_.push_back(1);
 }
 
 IntList TensorImpl::sizes() const {
@@ -46,7 +45,7 @@ IntList TensorImpl::sizes() const {
 }
 
 IntList TensorImpl::strides() const {
-  return IntList{strides_.get(), sizes_.size()};
+  return strides_;
 }
 
 bool TensorImpl::compute_contiguous() const {

@@ -238,16 +238,7 @@ class StmtBuilder(Builder):
             # then it is a docstring. Just ignore it.
             return None
         else:
-            return ExprStmt([build_expr(ctx, value)])
-
-    @staticmethod
-    def get_assign_lhs_expr(ctx, expr):
-        var = build_expr(ctx, expr)
-        if not isinstance(var, Var) and not isinstance(var, Starred):
-            raise NotSupportedError(var.range(),
-                                    "the only expressions allowed on the left hand side of "
-                                    "assignments are variable names and starred expressions")
-        return var
+            return ExprStmt(build_expr(ctx, value))
 
     @staticmethod
     def build_Assign(ctx, stmt):
@@ -256,9 +247,8 @@ class StmtBuilder(Builder):
             start_point = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + 1)
             raise NotSupportedError(ctx.make_raw_range(start_point.start, rhs.range().end),
                                     "Performing multiple assignments in a single line isn't supported")
-        py_lhs = stmt.targets[0]
-        py_lhs_exprs = py_lhs.elts if isinstance(py_lhs, ast.Tuple) else [py_lhs]
-        return Assign([StmtBuilder.get_assign_lhs_expr(ctx, e) for e in py_lhs_exprs], rhs)
+        lhs = build_expr(ctx, stmt.targets[0])
+        return Assign(lhs, rhs)
 
     @staticmethod
     def build_Return(ctx, stmt):
@@ -287,7 +277,7 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_AugAssign(ctx, stmt):
-        lhs = StmtBuilder.get_assign_lhs_expr(ctx, stmt.target)
+        lhs = build_expr(ctx, stmt.target)
         rhs = build_expr(ctx, stmt.value)
         op = type(stmt.op)
         if op in StmtBuilder.augassign_map:
@@ -312,7 +302,7 @@ class StmtBuilder(Builder):
     def build_For(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
         return For(
-            r, [StmtBuilder.get_assign_lhs_expr(ctx, stmt.target)],
+            r, [build_expr(ctx, stmt.target)],
             [build_expr(ctx, stmt.iter)], build_stmts(ctx, stmt.body))
 
     @staticmethod
@@ -328,7 +318,7 @@ class StmtBuilder(Builder):
         if stmt.dest:
             raise NotSupportedError(r, "print statements with non-default destinations aren't supported")
         args = [build_expr(ctx, val) for val in stmt.values]
-        return ExprStmt([Apply(Var(Ident(r, "print")), args, [])])
+        return ExprStmt(Apply(Var(Ident(r, "print")), args, []))
 
     @staticmethod
     def build_Pass(ctx, stmt):
@@ -344,6 +334,10 @@ class ExprBuilder(Builder):
         ast.Div: '/',
         ast.Pow: '**',
         ast.Mod: '%',
+        ast.FloorDiv: '//',
+        ast.BitAnd: '&',
+        ast.BitXor: '^',
+        ast.BitOr: '|',
     }
 
     if not PY2:

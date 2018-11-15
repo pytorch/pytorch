@@ -2,7 +2,6 @@ set(TORCH_API_TEST_DIR "${TORCH_ROOT}/test/cpp/api")
 set(TORCH_API_TEST_SOURCES
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${TORCH_API_TEST_DIR}/any.cpp
-  ${TORCH_API_TEST_DIR}/cursor.cpp
   ${TORCH_API_TEST_DIR}/dataloader.cpp
   ${TORCH_API_TEST_DIR}/expanding-array.cpp
   ${TORCH_API_TEST_DIR}/integration.cpp
@@ -12,7 +11,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/module.cpp
   ${TORCH_API_TEST_DIR}/modules.cpp
   ${TORCH_API_TEST_DIR}/optim.cpp
-  ${TORCH_API_TEST_DIR}/ordered-dict.cpp
+  ${TORCH_API_TEST_DIR}/ordered_dict.cpp
   ${TORCH_API_TEST_DIR}/rnn.cpp
   ${TORCH_API_TEST_DIR}/sequential.cpp
   ${TORCH_API_TEST_DIR}/serialize.cpp

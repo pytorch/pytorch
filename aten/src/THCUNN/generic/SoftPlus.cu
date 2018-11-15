@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/SoftPlus.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 void THNN_(SoftPlus_updateOutput)(
            THCState *state,

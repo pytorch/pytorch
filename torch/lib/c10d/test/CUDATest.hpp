@@ -1,8 +1,5 @@
 #pragma once
 
-#include <cuda.h>
-#include <cuda_runtime.h>
-
 #include <ATen/cuda/CUDAStream.h>
 
 namespace c10d {
