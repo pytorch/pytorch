@@ -1215,6 +1215,8 @@ if __name__ == '__main__':
                 'lib/include/c10/macros/*.h',
                 'lib/include/c10/util/*.h',
                 'lib/include/c10/impl/*.h',
+                'lib/include/c10/cuda/*.h',
+                'lib/include/c10/cuda/impl/*.h',
                 'lib/include/caffe2/core/*.h',
                 'lib/include/caffe2/proto/*.h',
                 'lib/include/torch/*.h',
