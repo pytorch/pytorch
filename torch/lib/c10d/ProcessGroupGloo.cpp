@@ -1217,7 +1217,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
   assertCPU(invalidArgument, inputs);
 
   if (getRank() == opts.rootRank) {
-    if (outputs.size() != 1 || outputs[0].size() != getSize()) {
+    if (outputs.size() != 1 ||
+        outputs[0].size() != static_cast<size_t>(getSize())) {
       invalidArgument(
           "requires a single-element output list "
           "containing a list with <size> tensors");
@@ -1293,7 +1294,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   assertCPU(invalidArgument, outputs);
 
   if (getRank() == opts.rootRank) {
-    if (inputs.size() != 1 || inputs[0].size() != getSize()) {
+    if (inputs.size() != 1 ||
+        inputs[0].size() != static_cast<size_t>(getSize())) {
       invalidArgument(
           "requires a single-element input list "
           "containing a list with <size> tensors");
