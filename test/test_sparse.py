@@ -1828,8 +1828,8 @@ class TestSparse(TestCase):
             with self.assertRaisesRegex(RuntimeError, "resize_ is not allowed on Tensor created from .data or .detach()"):
                 t.resize_as_(a)
             with self.assertRaisesRegex(RuntimeError, "resize_and_clear_ is not allowed on Tensor created from .data or .detach()"):
-                t.mul_(a)
-            with self.assertRaisesRegex(RuntimeError, "set_coalesced not allowed on Tensor created from .data or .detach()"):
+                t.mul_(t)
+            with self.assertRaisesRegex(RuntimeError, "set_coalesced is not allowed on Tensor created from .data or .detach()"):
                 t._coalesced_(True)
 
         do_test(self.SparseTensor(3, 0).data)
