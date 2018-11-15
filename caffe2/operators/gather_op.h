@@ -26,8 +26,11 @@ class GatherOp : public Operator<Context> {
     auto* output = Output(0);
 
     CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
-    auto shape = indices.sizes().vec();
-    shape.insert(shape.end(), data.sizes().begin() + 1, data.sizes().end());
+    auto shape = data.sizes().vec();
+    if (data.size(0) > 0) {
+      shape = indices.sizes().vec();
+      shape.insert(shape.end(), data.sizes().begin() + 1, data.sizes().end());
+    }
     output->Resize(shape);
 
     int block_size = data.size_from_dim(1);
@@ -38,6 +41,9 @@ class GatherOp : public Operator<Context> {
     const Index* idxs = indices.template data<Index>();
     auto out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
 
+    if (output->numel() == 0) {
+      return true;
+    }
     for (int i = 0; i < N; ++i) {
       auto idx = idxs[i];
       if (idx < 0) {

@@ -29,15 +29,15 @@ inline TensorImpl* resize_impl_cuda_(
     TensorImpl* self,
     IntList size,
     c10::optional<IntList> stride,
-    bool device_guard=true) {
+    bool device_guard = true) {
   if (self->sizes() == size && (!stride || self->strides() == stride)) {
     return self;
   }
 
   // NB: We don't need to hold the device guard when calling from TH
-  c10::optional<cuda::CUDAGuard> guard;
+  cuda::OptionalCUDAGuard guard;
   if (device_guard) {
-    guard = cuda::CUDAGuard(self->storage().device().index());
+    guard.set_index(self->storage().device().index());
   }
 
   int64_t storage_size = 1;

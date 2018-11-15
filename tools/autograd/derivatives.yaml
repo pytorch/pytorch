@@ -112,14 +112,9 @@
   tensor1: grad * tensor2 * value
   tensor2: grad * tensor1 * value
 
-- name: _th_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
+- name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
-  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
-  mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
-
-- name: s_native_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
-  self: maybe_multiply(grad, beta)
-  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
+  mat1: mm_mat1_backward(grad, mat2, mat1, alpha)
   mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
 
 - name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta, Scalar alpha)
@@ -580,8 +575,8 @@
   self: not_implemented("potri")
 
 - name: potrs(Tensor self, Tensor input2, bool upper)
-  self: not_implemented("potri")
-  input2: not_implemented("potri")
+  self: not_implemented("potrs")
+  input2: not_implemented("potrs")
 
 - name: pow(Tensor self, Scalar exponent)
   self: pow_backward(grad, self, exponent)

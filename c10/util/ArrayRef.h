@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include <ATen/core/SmallVector.h>
+#include <c10/util/SmallVector.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 
@@ -23,7 +23,7 @@
 #include <iterator>
 #include <vector>
 
-namespace at {
+namespace c10 {
 
 /// ArrayRef - Represent a constant reference to an array (0 or more elements
 /// consecutively in memory), i.e. a start pointer and a length.  It allows
@@ -232,39 +232,39 @@ std::ostream& operator<<(std::ostream & out, ArrayRef<T> list) {
 }
 
 // WARNING: Template instantiation will NOT be willing to do an implicit
-// conversions to get you to an at::ArrayRef, which is why we need so
+// conversions to get you to an c10::ArrayRef, which is why we need so
 // many overloads.
 
 template <typename T>
-bool operator==(at::ArrayRef<T> a1, at::ArrayRef<T> a2) {
+bool operator==(c10::ArrayRef<T> a1, c10::ArrayRef<T> a2) {
   return a1.equals(a2);
 }
 
 template <typename T>
-bool operator!=(at::ArrayRef<T> a1, at::ArrayRef<T> a2) {
+bool operator!=(c10::ArrayRef<T> a1, c10::ArrayRef<T> a2) {
   return !a1.equals(a2);
 }
 
 template <typename T>
-bool operator==(std::vector<T> a1, at::ArrayRef<T> a2) {
-  return at::ArrayRef<T>(a1).equals(a2);
+bool operator==(std::vector<T> a1, c10::ArrayRef<T> a2) {
+  return c10::ArrayRef<T>(a1).equals(a2);
 }
 
 template <typename T>
-bool operator!=(std::vector<T> a1, at::ArrayRef<T> a2) {
-  return !at::ArrayRef<T>(a1).equals(a2);
+bool operator!=(std::vector<T> a1, c10::ArrayRef<T> a2) {
+  return !c10::ArrayRef<T>(a1).equals(a2);
 }
 
 template <typename T>
-bool operator==(at::ArrayRef<T> a1, std::vector<T> a2) {
-  return a1.equals(at::ArrayRef<T>(a2));
+bool operator==(c10::ArrayRef<T> a1, std::vector<T> a2) {
+  return a1.equals(c10::ArrayRef<T>(a2));
 }
 
 template <typename T>
-bool operator!=(at::ArrayRef<T> a1, std::vector<T> a2) {
-  return !a1.equals(at::ArrayRef<T>(a2));
+bool operator!=(c10::ArrayRef<T> a1, std::vector<T> a2) {
+  return !a1.equals(c10::ArrayRef<T>(a2));
 }
 
 using IntList = ArrayRef<int64_t>;
 
-} // namespace at
+} // namespace c10

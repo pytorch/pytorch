@@ -206,12 +206,14 @@ const Histogram *DynamicHistogram::Finalize() {
 
       // dst_bin_cnt is the count from src_bin that should go to dst_bin
       // The remainder should go to dst_bin2
-      // TODO: This is only run at the beginning when there is only
-      // one bin, we should optimize this with the unlikely compiler hints
-      uint64_t dst_bin_cnt = src_bin_width == 0 ? 0 : std::min(
-        (uint64_t)round(
-          (dst_bin_end - src_bin_begin) / src_bin_width * bins[i]),
-        bins[i]);
+      // rint is the fastest way to round
+      // (https://stackoverflow.com/questions/485525/round-for-float-in-c/5849630)
+      uint64_t dst_bin_cnt = src_bin_width == 0
+          ? 0
+          : std::min(
+                static_cast<uint64_t>(rint(
+                    (dst_bin_end - src_bin_begin) / src_bin_width * bins[i])),
+                bins[i]);
 
       final_histogram_->Add(dst_bin_begin + dst_bin_width / 2, dst_bin_cnt);
       if (dst_bin_cnt < bins[i]) {

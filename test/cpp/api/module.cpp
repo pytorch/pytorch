@@ -3,8 +3,8 @@
 #include <torch/nn/module.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/rnn.h>
-#include <torch/types.h>
 #include <torch/nn/modules/sequential.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>
@@ -149,10 +149,10 @@ TEST_F(ModuleTest, CanGetName) {
   AGIUnit agi;
   // Call it twice just to make sure there are no bugs in the lazy
   // initialization semantics.
-  EXPECT_TRUE(agi.name() == "AGIUnit");
-  EXPECT_TRUE(agi.name() == "AGIUnit");
-  EXPECT_TRUE(test::AGIUnit().name() == "test::AGIUnit");
-  EXPECT_TRUE(test::AGIUnit2().name() == "Foo");
+  EXPECT_EQ(agi.name(), "AGIUnit");
+  EXPECT_EQ(agi.name(), "AGIUnit");
+  EXPECT_EQ(test::AGIUnit().name(), "test::AGIUnit");
+  EXPECT_EQ(test::AGIUnit2().name(), "Foo");
 }
 
 TEST_F(ModuleTest, AsCastsModulesCorrectly) {
@@ -398,7 +398,9 @@ TEST_F(ModuleTest, CloneToDevicePreservesTheDeviceOfParameters_CUDA) {
   }
 }
 
-TEST_F(ModuleTest, CloningToAParticularDevicePlacesAllParametersThere_CUDA) {
+TEST_F(
+    ModuleTest,
+    CloningToAParticularDevicePlacesAllParametersThere_MultiCUDA) {
   struct TestModule : public Cloneable<TestModule> {
     TestModule() {
       reset();

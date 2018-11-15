@@ -194,7 +194,7 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
     std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
     auto comms = user_comms.empty() ? _get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
-    at::cuda::CUDAGuard device_guard;
+    at::cuda::OptionalCUDAGuard device_guard;
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
@@ -274,7 +274,7 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
     std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
     auto comms = user_comms.empty() ? _get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
-    at::cuda::CUDAGuard device_guard;
+    at::cuda::OptionalCUDAGuard device_guard;
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
@@ -337,7 +337,7 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
     std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
     auto comms = user_comms.empty() ? _get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
-    at::cuda::CUDAGuard device_guard;
+    at::cuda::OptionalCUDAGuard device_guard;
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();

@@ -5,7 +5,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/tracer.h>
 #include <ATen/ATen.h>
-#include <ATen/core/ArrayRef.h>
+#include <c10/util/ArrayRef.h>
 
 #include <functional>
 #include <initializer_list>

@@ -81,8 +81,6 @@ _(aten, _floor) \
 _(aten, _fused_dropout) \
 _(aten, _ger) \
 _(aten, _gesv_helper) \
-_(aten, _gesv_single) \
-_(aten, _getri_single) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
 _(aten, _inverse_helper) \
@@ -103,6 +101,7 @@ _(aten, _pack_padded_sequence_backward) \
 _(aten, _pad_packed_sequence) \
 _(aten, _pdist_backward) \
 _(aten, _pdist_forward) \
+_(aten, _potrs_helper) \
 _(aten, _prod) \
 _(aten, _prodall) \
 _(aten, _range) \
@@ -259,6 +258,7 @@ _(aten, copy_sparse_to_sparse) \
 _(aten, cos) \
 _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
+_(aten, cosine_similarity) \
 _(aten, cross) \
 _(aten, ctc_loss) \
 _(aten, cudnn_affine_grid_generator) \

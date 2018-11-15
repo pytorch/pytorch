@@ -122,6 +122,17 @@ class DistributedDataParallel(Module):
         won't be invoked anymore, unless the hooks are initialized in the
         :meth:`forward` method.
 
+    .. warning::
+        You should never try to change your model's parameters after wrapping
+        up your model with DistributedDataParallel. In other words, when
+        wrapping up your model with DistributedDataParallel, the constructor of
+        DistributedDataParallel will register the additional gradient
+        reduction functions on all the parameters of the model itself at the
+        time of construction. If you change the model's parameters after
+        the DistributedDataParallel construction, this is not supported and
+        unexpected behaviors can happen, since some parameters' gradient
+        reduction functions might not get called.
+
     .. note::
         Parameters are never broadcast between processes. The module performs
         an all-reduce step on gradients and assumes that they will be modified
