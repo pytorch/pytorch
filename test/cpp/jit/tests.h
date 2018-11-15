@@ -40,6 +40,7 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
@@ -1497,11 +1498,13 @@ void testDynamicDAG() {
 struct TopoMoveTestFixture {
   TopoMoveTestFixture() {
     createGraph();
+    aliasDb = AliasAnalysis(graph);
   }
 
   // Nodes are named after their output.
   // e.g. "a" is an alias for "the node that outputs the value `a`"
   void createGraph() {
+    graph = std::make_shared<Graph>();
     createNode("a", {});
     createNode("b", {"a"});
     createNode("c", {});
@@ -1522,7 +1525,7 @@ struct TopoMoveTestFixture {
     createNode("r", {"q"});
     createNode("s", {"q"});
 
-    graph.lint();
+    graph->lint();
   }
 
   void createNode(
@@ -1533,7 +1536,7 @@ struct TopoMoveTestFixture {
     for (const auto name : inputNames) {
       inputs.push_back(nodes.at(name)->output());
     }
-    auto node = graph.appendNode(graph.create(prim::Undefined, inputs));
+    auto node = graph->appendNode(graph->create(prim::Undefined, inputs));
     node->output()->setUniqueName(name);
     nodes[name] = node;
 
@@ -1545,16 +1548,16 @@ struct TopoMoveTestFixture {
       }
 
       auto block = node->blocks().at(0);
-      block->appendNode(graph.create(prim::Undefined, blockDeps));
+      block->appendNode(graph->create(prim::Undefined, blockDeps));
     }
   }
 
   bool moveBeforeTopologicallyValid(
       const std::string& toInsert,
       const std::string& insertPoint) {
-    std::function<bool(Node*, Node*)> func = [](Node* toInsert,
+    std::function<bool(Node*, Node*)> func = [this](Node* toInsert,
                                                 Node* insertPoint) {
-      return toInsert->moveBeforeTopologicallyValid(insertPoint);
+      return toInsert->moveBeforeTopologicallyValid(insertPoint, *aliasDb);
     };
     return moveWithChecks(toInsert, insertPoint, func);
   }
@@ -1562,9 +1565,9 @@ struct TopoMoveTestFixture {
   bool moveAfterTopologicallyValid(
       const std::string& toInsert,
       const std::string& insertPoint) {
-    std::function<bool(Node*, Node*)> func = [](Node* toInsert,
+    std::function<bool(Node*, Node*)> func = [this](Node* toInsert,
                                                 Node* insertPoint) {
-      return toInsert->moveAfterTopologicallyValid(insertPoint);
+      return toInsert->moveAfterTopologicallyValid(insertPoint, *aliasDb);
     };
     return moveWithChecks(toInsert, insertPoint, func);
   }
@@ -1592,7 +1595,7 @@ struct TopoMoveTestFixture {
 
     const auto couldMove = func(n, insert);
     // Check the graph is okay
-    graph.lint();
+    graph->lint();
 
     // If this is the picture of nodes
     // <some nodes> ... toInsert ... <some more nodes> ... insertPoint
@@ -1623,7 +1626,8 @@ struct TopoMoveTestFixture {
     }
   }
 
-  Graph graph;
+  std::shared_ptr<Graph> graph;
+  c10::optional<AliasDb> aliasDb;
   std::unordered_map<std::string, Node*> nodes;
 };
 
@@ -1728,6 +1732,57 @@ void testTopologicalMove() {
     JIT_ASSERT(!fixture.moveAfterTopologicallyValid("n", "o"));
     JIT_ASSERT(fixture.moveBeforeTopologicallyValid("o", "p"));
     fixture.checkPostCondition("o", "p", false);
+  }
+}
+
+void testAliasAnalysis() {
+  {
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->addInput();
+
+    // addsB = b + b
+    // c = a + b
+    // a += b
+    // d = c + c
+    auto addsB = graph->insert(aten::add, {b, b});
+    auto c = graph->insert(aten::add, {a, b});
+    auto aMut = graph->insert(aten::add_, {a, b});
+    auto d = graph->insert(aten::add, {c, c});
+
+    graph->lint();
+
+    const auto aliasDb = AliasAnalysis(graph);
+    // Can't move past a mutation of a used value
+    JIT_ASSERT(!c->node()->moveAfterTopologicallyValid(aMut->node(), aliasDb));
+    JIT_ASSERT(d->node()->moveAfterTopologicallyValid(c->node(), aliasDb));
+
+    // b should alias to a (since they are both inputs)
+    JIT_ASSERT(
+        !addsB->node()->moveAfterTopologicallyValid(aMut->node(), aliasDb));
+    JIT_ASSERT(addsB->node()->moveAfterTopologicallyValid(c->node(), aliasDb));
+
+    graph->lint();
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->addInput();
+
+    auto constant = graph->insertConstant(1);
+    auto fresh = graph->insert(aten::rand, {constant});
+    auto usesB = graph->insert(aten::add, {b, fresh});
+    auto aliasesB = graph->insert(aten::select, {a, constant, constant});
+    auto mutatesAliasOfB = graph->insert(aten::add_, {aliasesB, fresh});
+    auto c = graph->insert(aten::add, {fresh, aliasesB});
+    graph->lint();
+
+    const auto aliasDb = AliasAnalysis(graph);
+
+    JIT_ASSERT(!aliasesB->node()->moveAfterTopologicallyValid(
+        mutatesAliasOfB->node(), aliasDb));
+    JIT_ASSERT(!usesB->node()->moveAfterTopologicallyValid(
+        mutatesAliasOfB->node(), aliasDb));
   }
 }
 } // namespace

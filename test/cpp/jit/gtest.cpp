@@ -27,6 +27,7 @@ JIT_TEST(SchemaParser)
 JIT_TEST(TopologicalIndex)
 JIT_TEST(TopologicalMove)
 JIT_TEST(SubgraphUtils)
+JIT_TEST(AliasAnalysis)
 
 #define JIT_TEST_CUDA(name)    \
   TEST(JitTest, name##_CUDA) { \
