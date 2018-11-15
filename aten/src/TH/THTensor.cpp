@@ -154,9 +154,8 @@ c10::optional<std::vector<int64_t>> THTensor_compute_stride(
 
 // NB: Steals ownership of storage
 void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
-  AT_CHECK(tensor->allow_size_or_storage_change(), "THTensor_stealAndSetStoragePtr is not allowed on Tensor created from .data");
   // Caffe2 might have tensors whose storages are null, but we
   // don't allow it in PyTorch.
   AT_ASSERT(storage);
-  tensor->storage_ = at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage));
+  tensor->set_storage(at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage)));
 }
