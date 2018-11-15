@@ -379,7 +379,19 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
 
     miopenTensorDescriptor_t biasDesc;
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&biasDesc));
+
+    size_t bias_size = 0;
+    MIOPEN_ENFORCE(miopenGetRNNLayerBiasSize(
+        miopen_wrapper_.inline_miopen_handle(),
+        rnnDesc_,
+        layer,
+        param_id,
+        &bias_size));
+
     void* bias;
+    miopen_wrapper_.with_miopen_state(0, [&](MIOPENState* state) {
+        bias = state->workspace().get(bias_size);
+    });
 
     MIOPEN_ENFORCE(miopenGetRNNLayerBias(
         miopen_wrapper_.inline_miopen_handle(),
@@ -390,10 +402,10 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
         Input(1).template data<T>(),
         param_id, 
         biasDesc,
-        &bias));
-    int numBiasDims;
-    std::vector<int> biasDims;
-    std::vector<int> strideDims;
+        bias));
+
+    std::array<int, 3> biasDims {1,1,1};
+    std::array<int, 3> strideDims {1,1,1};
     miopenDataType_t dt;
 
     MIOPEN_ENFORCE(miopenGetTensorDescriptor(
@@ -419,7 +431,21 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
         weight_constants[param_type] + 4 * (input_type == "recurrent");
     miopenTensorDescriptor_t matrixParamDesc;
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&matrixParamDesc));
+
+    size_t param_size = 0;
+    MIOPEN_ENFORCE(miopenGetRNNLayerParamSize(
+        miopen_wrapper_.inline_miopen_handle(),
+        rnnDesc_,
+        layer,
+        xDesc_->descs()[0],
+        param_id,
+        &param_size));
+
     void* pmatrix;
+    miopen_wrapper_.with_miopen_state(0, [&](MIOPENState* state) {
+        pmatrix = state->workspace().get(param_size);
+    });
+
     MIOPEN_ENFORCE(miopenGetRNNLayerParam(
         miopen_wrapper_.inline_miopen_handle(),
         rnnDesc_,
@@ -429,15 +455,16 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
         Input(1).template data<T>(),
         param_id, 
         matrixParamDesc,
-        &pmatrix));
-    int numDims;
-    std::vector<int> matDims;
-    std::vector<int> strideDims;
+        pmatrix));
+
+    std::array<int, 3> matDims {1,1,1};
+    std::array<int, 3> strideDims {1,1,1};
     miopenDataType_t dt;
 
     MIOPEN_ENFORCE(miopenGetTensorDescriptor(
         matrixParamDesc, &dt, matDims.data(), strideDims.data()));
-    CAFFE_ENFORCE_EQ(numDims, 3);
+    CAFFE_ENFORCE_EQ(matDims.size(), 3);
+
     if (mode == SET_PARAM) {
       CAFFE_ENFORCE_EQ(matDims[0] * matDims[1] * matDims[2], Input(2).size());
       context_.template CopySameDevice<T>(
