@@ -402,7 +402,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   void release_resources() override;
 
   Variable::AutogradMeta* get_autograd_meta() const {
-    return static_cast<Variable::AutogradMeta*>(data_.unsafeGetTensorImpl()->autograd_meta_);
+    return static_cast<Variable::AutogradMeta*>(data_.unsafeGetTensorImpl()->autograd_meta());
   }
 
   int64_t storage_offset() const override;

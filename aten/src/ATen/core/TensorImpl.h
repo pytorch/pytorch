@@ -886,6 +886,20 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return allow_size_or_storage_change_;
   }
 
+  /**
+   * Set the pointer to autograd metadata.
+   */
+  void set_autograd_meta(void* autograd_meta) {
+    autograd_meta_ = autograd_meta;
+  }
+
+  /**
+   * Return the pointer to autograd metadata.
+   */
+  void* autograd_meta() const {
+    return autograd_meta_;
+  }
+
   // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
   // because it requires unique ownership.
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
@@ -1461,11 +1475,9 @@ protected:
     is_contiguous_ = compute_contiguous();
   }
 
-public:
-  void* autograd_meta_ = nullptr;
-
 protected:
   at::Storage storage_;
+  void* autograd_meta_ = nullptr;
 
   // We could save a word or two by combining the SmallVector structs,
   // since their size is redundant, and if we need to overflow the buffer space
