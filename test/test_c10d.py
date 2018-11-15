@@ -440,7 +440,7 @@ class MultiProcessTestCase(TestCase):
         return self.rank == 0
 
 
-class ProcessGroupGlooTest(MultiProcessTestCase):
+class ProcessGroupMultiProcessTest(MultiProcessTestCase):
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
         opts.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
@@ -541,9 +541,15 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_broadcast_basics_cuda(self):
         self._test_broadcast_basics(lambda t: t.clone().cuda())
 
-    def _test_broadcast_stress(self, inputs):
+    def _test_broadcast_stress(self, inputs, backend):
         store = c10d.FileStore(self.file.name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
+        if backend == "gloo":
+            pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
+        elif backend == "nccl":
+            pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        else:
+            raise RuntimeError("Invalid backend")
+
         work_handles = [
             pg.broadcast(inputs[i], root=(i % self.world_size))
             for i in range(len(inputs))
@@ -558,14 +564,20 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 "Mismatch in iteration %d" % i,
             )
 
-    def test_broadcast_stress(self):
+    def test_broadcast_stress_gloo(self):
         inputs = [torch.Tensor([i * self.world_size + self.rank]) for i in range(1000)]
-        self._test_broadcast_stress(inputs)
+        self._test_broadcast_stress(inputs, "gloo")
 
     @skip_if_not_multigpu
-    def test_broadcast_stress_cuda(self):
+    def test_broadcast_stress_gloo_cuda(self):
         inputs = [torch.Tensor([i * self.world_size + self.rank]).cuda() for i in range(1000)]
-        self._test_broadcast_stress(inputs)
+        self._test_broadcast_stress(inputs, "gloo")
+
+    @skip_if_not_multigpu
+    @skip_if_not_nccl
+    def test_broadcast_stress_nccl_cuda(self):
+        inputs = [torch.Tensor([i * self.world_size + self.rank]).cuda() for i in range(1000)]
+        self._test_broadcast_stress(inputs, "nccl")
 
     def test_allreduce_checks(self):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -611,9 +623,15 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_allreduce_basics_cuda(self):
         self._test_allreduce_basics(lambda t: t.clone().cuda())
 
-    def _test_allreduce_stress(self, inputs):
+    def _test_allreduce_stress(self, inputs, backend):
         store = c10d.FileStore(self.file.name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
+        if backend == "gloo":
+            pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
+        elif backend == "nccl":
+            pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        else:
+            raise RuntimeError("Invalid backend")
+
         work_handles = [pg.allreduce(inputs[i]) for i in range(len(inputs))]
         for i, work_handle in enumerate(work_handles):
             work_handle.wait()
@@ -626,14 +644,20 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 "Mismatch in iteration %d" % i,
             )
 
-    def test_allreduce_stress(self):
+    def test_allreduce_stress_gloo(self):
         inputs = [torch.Tensor([i + self.rank]) for i in range(1000)]
-        self._test_allreduce_stress(inputs)
+        self._test_allreduce_stress(inputs, "gloo")
 
     @skip_if_not_multigpu
-    def test_allreduce_stress_cuda(self):
+    def test_allreduce_stress_gloo_cuda(self):
         inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
-        self._test_allreduce_stress(inputs)
+        self._test_allreduce_stress(inputs, "gloo")
+
+    @skip_if_not_multigpu
+    @skip_if_not_nccl
+    def test_allreduce_stress_nccl_cuda(self):
+        inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
+        self._test_allreduce_stress(inputs, "nccl")
 
     def test_scatter_checks(self):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -971,7 +995,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self.assertFalse(pg.barrier().wait())
 
 
-class ProcessGroupNCCLTest(TestCase):
+class ProcessGroupNCCLSingleProcessTest(TestCase):
     MAIN_PROCESS_RANK = 0
 
     def setUp(self):
