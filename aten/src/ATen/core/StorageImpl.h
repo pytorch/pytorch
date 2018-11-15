@@ -2,7 +2,7 @@
 
 #include <ATen/core/Allocator.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/ScalarTypeUtils.h>
+#include <c10/core/ScalarTypeUtils.h>
 
 #include <c10/util/intrusive_ptr.h>
 
