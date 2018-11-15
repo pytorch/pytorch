@@ -33,7 +33,7 @@ ignores = [
     '**/hip/**',
 ]
 
-file_extensions = ['.cc', '.cu', '.h', '.cuh']
+file_extensions = ['.cc', '.cu', '.h', '.cuh', '.in']
 
 parser = argparse.ArgumentParser(
     description="The Script to Hipify Caffe2")
