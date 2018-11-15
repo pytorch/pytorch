@@ -9070,6 +9070,8 @@ EXCLUDE_SCRIPT = {
     'test_nn_lp_pool1d',
     'test_nn_lp_pool2d',
     'test_nn_gumbel_softmax',
+    'test_nn_poisson_nll_loss',
+    'test_nn_poisson_nll_loss_full',
 
     # undefined tensors as constants
     'test_nn_instance_norm',
@@ -9697,6 +9699,7 @@ nn_functional_tests = [
     ('local_response_norm', (S, S, S), (2, ),),
     ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]), None, None),),
     ('poisson_nll_loss', (S, 2), ((S, 2),),),
+    ('poisson_nll_loss', (S, 2), ((S, 2), True, True), 'full'),
     ('kl_div', F.log_softmax(torch.randn(S, 10), 1), (F.softmax(torch.randn(S, 10), 1),),),
     ('cross_entropy', (3, S), (torch.randint(S, (3,), dtype=torch.int64),),),
     ('binary_cross_entropy_with_logits', (3,), (torch.empty(3).random_(2), ),),
@@ -9726,6 +9729,8 @@ nn_functional_tests = [
                                    1, 1, non_differentiable(torch.randn(S))),),
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)), \
                                                            non_differentiable(torch.randn(3, 2))),),
+    ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)), \
+                                                           non_differentiable(torch.randn(3, 2)), True), 'size_average'),
     ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), \
      (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
       torch.randint(1, S, (S,), dtype=torch.long))),
