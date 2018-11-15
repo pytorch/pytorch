@@ -6,7 +6,7 @@
 #include <ATen/StorageImpl.h>
 #include "THStorageFunctions.h"
 
-#include <ATen/ScalarType.h>
+#include <c10/core/ScalarType.h>
 
 // Note [Weak references for intrusive refcounting]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

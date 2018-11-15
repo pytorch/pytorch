@@ -5,7 +5,7 @@
 #include "torch/csrc/python_headers.h"
 
 #include <ATen/Device.h>
-#include <ATen/core/ScalarType.h>
+#include <c10/core/ScalarType.h>
 #include <ATen/core/Backend.h>
 
 #include <memory>

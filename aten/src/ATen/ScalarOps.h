@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/core/Scalar.h"
+#include <c10/core/Scalar.h>
 #include "ATen/Tensor.h"
 
 namespace c10 {

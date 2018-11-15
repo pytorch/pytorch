@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/core/Allocator.h>
-#include <ATen/core/ScalarType.h>
+#include <c10/core/ScalarType.h>
 #include <ATen/core/ScalarTypeUtils.h>
 
 #include <c10/util/intrusive_ptr.h>
