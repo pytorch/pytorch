@@ -1217,6 +1217,12 @@ Node* Graph::createUndefined() {
   return create(prim::Undefined);
 }
 
+Node* Graph::createNone(TypePtr typ) {
+  Node * n = create(prim::None);
+  n->output()->setType(OptionalType::create(typ));
+  return n;
+}
+
 Node * Graph::createNoneGenerator() {
   auto n = create(prim::NoneGenerator);
   n->output()->setType(GeneratorType::get());

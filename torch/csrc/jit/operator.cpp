@@ -534,6 +534,7 @@ const Operator& getOperatorFor(const Node* node) {
   for(auto & candidate : candidates) {
     er << "  " << candidate->schema() << "\n";
   }
+  er << *node->owningGraph() << "\n";
   throw er;
 }
 
