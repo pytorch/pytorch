@@ -171,7 +171,7 @@ def check_compiler_abi_compatibility(compiler):
         if sys.platform == 'linux':
             minimum_required_version = MINIMUM_GCC_VERSION
             version = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
-            if not isinstance(version,str):
+            if not isinstance(version, str):
                 version = version.decode()
             version = version.split('.')
         else:
