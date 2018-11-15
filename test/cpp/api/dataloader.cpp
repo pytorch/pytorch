@@ -13,6 +13,7 @@
 #include <chrono>
 #include <future>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -833,57 +834,83 @@ TEST(DataLoaderTest, RespectsTimeout) {
   ASSERT_LT(duration.count(), 1);
 }
 
+struct Barrier {
+  void wait(size_t target) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    ++counter_;
+    cv_.wait(lock, [this, target] { return this->counter_ == target; });
+    cv_.notify_all();
+  }
+
+  size_t counter_{0};
+  std::condition_variable cv_;
+  std::mutex mutex_;
+};
+
+namespace ordering_test {
 namespace {
-std::atomic<size_t> ordering_test_counter{0};
-std::condition_variable ordering_test_cv;
-std::mutex ordering_test_mutex;
-const std::array<size_t, 4> ordering_test_order = {3, 1, 0, 2};
-std::atomic<size_t> ordering_test_index{0};
+const size_t kNumberOfWorkers = 10;
+const std::vector<size_t> kOrderInWhichWorkersReturnTheirBatch =
+    {3, 7, 0, 5, 4, 8, 2, 1, 9, 6};
 } // namespace
 
-struct OrderingTestDataset : datasets::BatchDataset<DummyDataset, int> {
-  OrderingTestDataset() = default;
+struct Dataset : datasets::BatchDataset<Dataset, size_t> {
+  Dataset() = default;
 
   // This copy constructor will be called when we copy the dataset into a
   // particular thread.
-  OrderingTestDataset(const OrderingTestDataset& other)
-      : id(ordering_test_counter++) {}
+  Dataset(const Dataset& other) {
+    static std::atomic<size_t> counter{0};
+    thread_id_ = counter.fetch_add(1);
+  }
 
-  OrderingTestDataset(OrderingTestDataset&& other) noexcept = default;
-  OrderingTestDataset& operator=(const OrderingTestDataset& other) = delete;
-  OrderingTestDataset& operator=(OrderingTestDataset&& other) noexcept = delete;
+  Dataset(Dataset&& other) noexcept = default;
+  Dataset& operator=(const Dataset& other) = delete;
+  Dataset& operator=(Dataset&& other) noexcept = delete;
 
-  int get_batch(torch::ArrayRef<size_t> indices) override {
-    std::unique_lock<std::mutex> lock(ordering_test_mutex);
-    // block until order.at(index) == my_thread_id (until it's this thread's
-    // turn)
-    ordering_test_cv.wait(lock, [this] {
-      return ordering_test_order.at(ordering_test_index.load()) == this->id;
-    });
-    // Make one step in the order.
-    ++ordering_test_index;
+  size_t get_batch(torch::ArrayRef<size_t> indices) override {
+    static Barrier barrier;
+    static auto order_iterator = kOrderInWhichWorkersReturnTheirBatch.begin();
+    static std::condition_variable cv;
+    static std::mutex mutex;
+
+    // Wait for all threads to get an index batch and arrive here.
+    barrier.wait(kNumberOfWorkers);
+
+    std::unique_lock<std::mutex> lock(mutex);
+    cv.wait(lock, [this] { return *order_iterator == this->thread_id_; });
+    ++order_iterator;
     lock.unlock();
-    // Wake up the other threads to check if it's their turn to return.
-    ordering_test_cv.notify_all();
+    cv.notify_all();
 
-    return id;
+    return indices.front();
   }
 
-  torch::optional<size_t> size() const {
-    return 4;
+  torch::optional<size_t> size() const override {
+    return kNumberOfWorkers;
   }
 
-  size_t id = 0;
+  size_t thread_id_ = 0;
 };
+
+} // namespace ordering_test
 
 TEST(DataLoaderTest, EnforcesOrderingAmongThreadsWhenConfigured) {
   auto data_loader = torch::data::make_data_loader(
-      OrderingTestDataset{},
-      DataLoaderOptions().batch_size(1).workers(4).enforce_ordering(true));
-  size_t index = 0;
-  for (int value : *data_loader) {
-    ASSERT_EQ(value, index++);
+      ordering_test::Dataset{},
+      DataLoaderOptions()
+          .batch_size(1)
+          .workers(ordering_test::kNumberOfWorkers)
+          .enforce_ordering(true),
+      torch::data::samplers::SequentialSampler(
+          ordering_test::kNumberOfWorkers));
+  std::vector<size_t> output;
+  for (size_t value : *data_loader) {
+    output.push_back(value);
   }
+  std::vector<size_t> expected(ordering_test::kNumberOfWorkers);
+  std::iota(expected.begin(), expected.end(), size_t(0));
+  ASSERT_EQ(expected, output);
 }
 
 TEST(DataLoaderTest, Reset) {
