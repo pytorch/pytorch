@@ -224,7 +224,7 @@ class CosineAnnealingLR(_LRScheduler):
 
     .. math::
         \eta_{t+1} = \eta_{min} + (\eta_t - \eta_{min})\frac{1 +
-        \cos(\frac{T_{cur}+1}{T_{max}}\pi)}{1 + \cos(\frac{T_{cur}}{T_{max}}\pi)}
+        \cos(\frac{T_{cur+1}}{T_{max}}\pi)}{1 + \cos(\frac{T_{cur}}{T_{max}}\pi)}
 
     When last_epoch=-1, sets initial lr as lr. Notice that because the schedule
     is defined recursively, the learning rate can be simultaneously modified
