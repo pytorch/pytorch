@@ -673,11 +673,35 @@ Tensor _unsafe_view(const Tensor& self, IntList size) {
   return self.view(size);
 }
 
+static Tensor unsqueeze_sparse(Tensor const &self, int64_t dim /* should already be wrapped */) {
+  int64_t sparse_dim = self.sparse_dim();
+  int64_t dense_dim = self.dense_dim();
+  auto indices = self._indices();
+  auto sizes = self.sizes().vec();
+  sizes.insert(sizes.begin() + dim, 1);
+  if (dim <= sparse_dim) {
+    auto new_indices = native::cat({
+      indices.narrow(0, 0, dim),
+      native::zeros({1, indices.size(1)}, indices.options().dtype(kLong)),
+      indices.narrow(0, dim, indices.size(0) - dim)
+    });
+    return _sparse_coo_tensor_with_dims_and_tensors(
+        sparse_dim + 1, dense_dim, sizes, new_indices, self._values(), self.options());
+  } else {
+    return _sparse_coo_tensor_with_dims_and_tensors(
+        sparse_dim, dense_dim + 1, sizes, indices, self._values().unsqueeze(dim - sparse_dim + 1), self.options());
+  }
+}
+
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
 
-  auto g = inferUnsqueezeGeometry(self, dim);
-  return self.as_strided(std::get<0>(g), std::get<1>(g));
+  if (self.is_sparse()) {
+    return unsqueeze_sparse(self, dim);
+  } else {
+    auto g = inferUnsqueezeGeometry(self, dim);
+    return self.as_strided(std::get<0>(g), std::get<1>(g));
+  }
 }
 
 Tensor & unsqueeze_(Tensor& self, int64_t dim) {
@@ -760,6 +784,6 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
   }
   return grids;
 }
-
 }
+
 }

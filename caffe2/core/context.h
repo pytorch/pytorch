@@ -10,7 +10,7 @@
 #include "caffe2/core/context_base.h"
 #include "caffe2/core/event.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 #include "caffe2/proto/caffe2_pb.h"
 
 #include <ATen/core/ATenCoreTest.h>
