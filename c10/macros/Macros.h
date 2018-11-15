@@ -54,6 +54,7 @@
 // the c10 namespace but not any nontrivial files.
 namespace c10 {} // namespace c10
 namespace c10 { namespace cuda {} }
+namespace c10 { namespace hip {} }
 
 // Since C10 is the core library for caffe2 (and aten), we will simply reroute
 // all abstractions defined in c10 to be available in caffe2 as well.
@@ -62,6 +63,7 @@ namespace c10 { namespace cuda {} }
 namespace caffe2 { using namespace c10; }
 namespace at { using namespace c10; }
 namespace at { namespace cuda { using namespace c10::cuda; }}
+namespace at { namespace hip { using namespace c10::hip; }}
 
 // C10_NORETURN
 #if defined(_MSC_VER)
