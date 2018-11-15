@@ -578,7 +578,6 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
 }
 
 Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
-  AT_CHECK(self.unsafeGetTensorImpl()->allow_size_or_storage_change(), "transpose_ is not allowed on Tensor created from .data");
   auto ndims = self.dim();
   dim0 = maybe_wrap_dim(dim0, ndims);
   dim1 = maybe_wrap_dim(dim1, ndims);
