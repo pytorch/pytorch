@@ -119,6 +119,15 @@ def spawn(fn, args=(), nprocs=1, join=True):
         :class:`~SpawnContext` if ``join`` is ``False``
 
     """
+    # python version check
+    if not ((sys.version_info[0] == 3 and sys.version_info[1] >= 4) or
+            sys.version_info[0] > 3):
+        raise RuntimeError("Requires python 3.4 or higher to use "
+                           "torch.multiprocessing.spawn helper to launch "
+                           "multiple processes. If you are using this for "
+                           "distributed training and have a lower version of "
+                           "python, please use torch.distributed.launch "
+                           "instead.")
     mp = multiprocessing.get_context('spawn')
     error_queues = []
     processes = []
