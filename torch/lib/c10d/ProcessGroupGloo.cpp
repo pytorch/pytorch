@@ -737,7 +737,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
 
     // Copy to non-root tensors
     for (size_t i = 0; i < inputs.size(); i++) {
-      if (i == rootTensor) {
+      if (i == static_cast<size_t>(rootTensor)) {
         continue;
       }
       inputs[i].copy_(inputs[rootTensor]);
