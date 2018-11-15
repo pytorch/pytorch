@@ -43,7 +43,11 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       if ((c == FP_NORMAL || c == FP_ZERO) && double(i) == d) {
         return out << i << ".";
       }
-      return out << v.toDouble();
+      auto orig_prec = out.precision();
+      return out
+        << std::setprecision(std::numeric_limits<double>::max_digits10)
+        << v.toDouble()
+        << std::setprecision(orig_prec);
     } case IValue::Tag::Int:
       return out << v.toInt();
     case IValue::Tag::Bool:
