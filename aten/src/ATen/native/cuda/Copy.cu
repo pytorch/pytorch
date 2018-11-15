@@ -202,7 +202,7 @@ void copy_to_cpu(Tensor& dst, const Tensor& src) {
 
 template <typename dst_T>
 void _copy__cuda(Tensor& dst, const Tensor& src) {
-  AT_CHECK(self.numel() == src.numel(), "sizes do not match");
+  AT_CHECK(dst.numel() == src.numel(), "sizes do not match");
   AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "_copy__cuda", [&]() {
     if (dst.is_cuda() && src.is_cuda()) {
       copy_device_to_device<dst_T, scalar_t>(dst, src);
