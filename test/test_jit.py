@@ -219,6 +219,32 @@ class JitTestCase(TestCase):
         if not JitTestCase._restored_warnings:
             torch.jit.TracerWarning.ignore_lib_warnings()
             JitTestCase._restored_warnings = True
+        if os.environ.get('TORCH_JIT_TEST_PRETTY_PRINT', False):
+            torch._C._jit_set_emit_module_hook(self.emitModuleHook)
+
+    def tearDown(self):
+        # needs to be cleared because python might be unloaded before
+        # the callback gets destucted
+        torch._C._jit_set_emit_module_hook(None)
+
+    def emitModuleHook(self, module):
+        # disable the hook while we parse code, otherwise we will re-enter the hook
+        torch._C._jit_set_emit_module_hook(None)
+        for name in module._method_names():
+            graph = module._get_method(name).graph
+            try:
+                pp, constant_table = graph.python_print()
+            except RuntimeError as e:
+                if "could not export python function" not in str(e):
+                    raise
+                else:
+                    continue
+
+            pp = "op_version_set = 0\n{}".format(pp)
+            sm = torch.jit.ScriptModule()
+            torch._C._jit_import_method(sm, pp, constant_table)
+
+        torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def getExportImportCopy(self, m):
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
@@ -2079,6 +2105,16 @@ class TestJit(JitTestCase):
         ''')
         self.assertExpected(cu.foo.graph.pretty_print())
 
+    def test_import_method(self):
+        @torch.jit.script
+        def foo(x, y):
+            return 2 * x + y
+
+        r = foo.graph.pretty_print()
+        mod = torch.jit.ScriptModule()
+        torch._C._jit_import_method(mod, "op_version_set = 0\n{}".format(r), [])
+        self.assertExpected(mod.script.graph.pretty_print())
+
     def test_function_default_values(self):
         outer_var = torch.tensor(20)
         outer_var2 = torch.tensor(30)
@@ -2832,10 +2868,9 @@ class TestScript(JitTestCase):
 
         self.checkScript(bar, ())
 
-        with self.assertRaisesRegex(RuntimeError, "expected"):
-            @torch.jit.script
-            def baz(a):
-                return torch.jit.annotate(int, a)
+        def baz(a):
+            return torch.jit.annotate(float, a)
+        self.checkScript(baz, (torch.rand(()),))
 
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
@@ -7411,7 +7446,7 @@ a")
         def test_test():
             return torch.jit._unwrap_optional(1)
 
-        with self.assertRaisesRegex(RuntimeError, "is actually of type None"):
+        with self.assertRaisesRegex(RuntimeError, "cannot match an Optional\\[T\\] to None"):
             @torch.jit.script
             def test_no_type():
                 # type: () -> int
