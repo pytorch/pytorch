@@ -833,7 +833,7 @@ class TestCuda(TestCase):
         tensor = torch.zeros(1024, device='cuda')
 
         with self.assertRaisesRegex(RuntimeError, "Tried to allocate 80.00 GiB"):
-            torch.randn(1024 * 1024 * 1024 * 80, dtype=torch.int8, device='cuda')
+            torch.empty(1024 * 1024 * 1024 * 80, dtype=torch.int8, device='cuda')
 
         # ensure out of memory error doesn't disturb subsequent kernel
         tensor.fill_(1)
@@ -1528,6 +1528,22 @@ class TestCuda(TestCase):
         self.assertEqual(x.sum().cpu(), y.sum())
         self.assertEqual(x.sum(dim=(-1, -2)).cpu(), y.sum(dim=(-1, -2)))
         self.assertEqual(x.sum(dim=(1, 3)).cpu(), y.sum(dim=(1, 3)))
+
+    @skipIfRocm
+    def test_sum_fp16(self):
+        x = torch.zeros(10, device='cuda', dtype=torch.float16)
+        self.assertEqual(x.sum(), 0)
+
+        x = torch.ones(65504, device='cuda', dtype=torch.float16)
+        self.assertEqual(x.sum(), 65504)
+
+        a = torch.zeros(1203611).bernoulli_(0.0005)
+        x = a.to(device='cuda', dtype=torch.float16)
+        self.assertEqual(x.sum().item(), a.sum().item())
+
+        a = torch.zeros(100, 121, 80).bernoulli_(0.0005)
+        x = a.to(device='cuda', dtype=torch.float16)
+        self.assertEqual(x.sum((0, 2)).float().cpu(), a.sum((0, 2)))
 
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
