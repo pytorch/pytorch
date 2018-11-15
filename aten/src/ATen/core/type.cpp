@@ -6,7 +6,7 @@ namespace c10 {
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
   if(auto value = t.cast<CompleteTensorType>()) {
-    out << at::toString(value->scalarType()) << "(";
+    out << toString(value->scalarType()) << "(";
     auto& sizes = value->sizes();
     auto& strides = value->strides();
     AT_ASSERT(sizes.size() == strides.size());
@@ -24,7 +24,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     }
     out << ")";
   } else if (auto value = t.cast<TensorType>()) {
-    out << at::toString(value->scalarType()) << "(";
+    out << toString(value->scalarType()) << "(";
     for (int i = 0; i < value->dim(); ++i) {
       if (i > 0) {
         out << ", ";

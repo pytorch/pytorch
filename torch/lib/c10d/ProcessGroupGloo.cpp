@@ -564,7 +564,7 @@ void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
 #endif
 
   throw std::runtime_error(
-      "Unhandled backend: " + std::string(at::toString(backend)));
+      "Unhandled backend: " + std::string(toString(backend)));
 }
 
 template <typename T>
@@ -602,7 +602,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 #endif
 
   throw std::runtime_error(
-      "Unhandled backend: " + std::string(at::toString(backend)));
+      "Unhandled backend: " + std::string(toString(backend)));
 }
 
 // Constructs an AlgorithmEntry instance, except for the algorithm

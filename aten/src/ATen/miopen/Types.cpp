@@ -12,7 +12,7 @@ miopenDataType_t getMiopenDataType(const at::Tensor& tensor) {
     return miopenHalf;
   }
   std::string msg("getMiopenDataType() not supported for ");
-  msg += at::toString(tensor.type().scalarType());
+  msg += toString(tensor.type().scalarType());
   throw std::runtime_error(msg);
 }
 
