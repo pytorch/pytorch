@@ -53,6 +53,8 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
   Device src_device = src.device();
   Device dst_device = dst.device();
 
+  cuda::CUDAGuard device_guard(src_device);
+
   // Try to enable p2p access. This also handles the case src_device ==
   // dst_device.
   bool p2pEnabled = THCState_getPeerToPeerAccess(
@@ -70,7 +72,7 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
   // stream on the dst device that wishes to synchronize may not be
   // the same index as the one on the src device.
   CUDAStream copy_stream = getCurrentCUDAStream(src_device.index());
-  if (src_device != dst_device && copy_stream == NULL) {
+  if (src_device != dst_device && copy_stream == nullptr) {
     // This is a cross-device copy on the default stream. We perform a
     // two-way barrier between both devices' default streams before
     // the copy. This ensures that any write-after-write and
@@ -79,14 +81,12 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
     // we perform the copy.
     // src waits on dst barrier (src already waits on src)
     CUDAEvent dst_ready;
-    DeviceGuard device_guard_dst{dst_device};
+    device_guard.set_device(dst_device);
     dst_ready.record(getDefaultCUDAStream(dst_device.index()));
 
-    DeviceGuard device_guard_src{src_device};
+    device_guard.set_device(src_device);
     dst_ready.block(copy_stream);
   }
-
-  DeviceGuard device_guard{src_device};
 
   if (memcpy_eligible) {
     // Perform the copy
@@ -128,12 +128,12 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
       }
 
       // Make sure the dst is contiguous
-      DeviceGuard device_guard_dst{dst_device};
+      device_guard.set_device(dst_device);
       Tensor dst_contig = dst.contiguous();
 
       // Now, we are ready for a cross-device memcpy of contiguous
       // data, of the same layout and type
-      DeviceGuard device_guard_src{src_device};
+      device_guard.set_device(src_device);
 
       AT_CUDA_CHECK(cudaMemcpyAsync(
           dst_contig.data<dst_T>(),
@@ -143,12 +143,12 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
           copy_stream));
 
       if (!dst.is_contiguous()) {
-        copy_device_to_device<dst_T, dst_T>(dst_contig, dst);
+        copy_device_to_device<dst_T, dst_T>(dst, dst_contig);
       }
     }
   }
 
-  if (src_device != dst_device && copy_stream == NULL) {
+  if (src_device != dst_device && copy_stream == nullptr) {
     // dst waits on src barrier (dst already waits on dst). We cannot
     // operate on dst's copy until the copy is complete.
 
@@ -156,7 +156,7 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
     CUDAEvent src_ready;
     src_ready.record(copy_stream);
 
-    DeviceGuard device_guard{dst_device};
+    device_guard.set_device(dst_device);
     src_ready.block(getDefaultCUDAStream(dst_device.index()));
   }
 
@@ -202,6 +202,7 @@ void copy_to_cpu(Tensor& dst, const Tensor& src) {
 
 template <typename dst_T>
 void _copy__cuda(Tensor& dst, const Tensor& src) {
+  AT_CHECK(self.numel() == src.numel(), "sizes do not match");
   AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "_copy__cuda", [&]() {
     if (dst.is_cuda() && src.is_cuda()) {
       copy_device_to_device<dst_T, scalar_t>(dst, src);
@@ -209,6 +210,7 @@ void _copy__cuda(Tensor& dst, const Tensor& src) {
       if (std::is_same<dst_T, scalar_t>::value) {
         copy_from_cpu(dst, src);
       }
+      // Do a dtype converting copy on the CPU, then copy to device
       Tensor srcf = at::empty_like(src, src.options().dtype(dst.dtype()));
       _copy_(srcf, src);
       copy_from_cpu(dst, srcf);
@@ -216,6 +218,7 @@ void _copy__cuda(Tensor& dst, const Tensor& src) {
       if (std::is_same<dst_T, scalar_t>::value) {
         copy_to_cpu(dst, src);
       }
+      // Do a dtype converting copy on the same device, then copy to CPU
       Tensor srcf = at::empty_like(src, dst.options().dtype(src.dtype()));
       copy_to_cpu(srcf, src);
       _copy_(dst, srcf);

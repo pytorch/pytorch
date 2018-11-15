@@ -19,6 +19,7 @@ void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
 
 template <typename self_T>
 void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
+  AT_CHECK(self.numel() == src.numel(), "sizes do not match");
   AT_DISPATCH_ALL_TYPES_AND_HALF(
       src.type(), "_copy__cpu", [&]() { _copy__cpu<self_T, scalar_t>(self, src); });
 }
