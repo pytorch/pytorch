@@ -27,12 +27,16 @@ using namespace torch::data; // NOLINT
 const std::chrono::milliseconds kMillisecond(1);
 
 struct DummyDataset : datasets::Dataset<DummyDataset, int> {
+  explicit DummyDataset(size_t size = 100) : size_(size) {}
+
   int get(size_t index) override {
     return 1 + index;
   }
   torch::optional<size_t> size() const override {
-    return 100;
+    return size_;
   }
+
+  size_t size_;
 };
 
 TEST(DataTest, DatasetCallsGetCorrectly) {
@@ -750,15 +754,43 @@ TEST(DataLoaderTest, IteratorsShareState) {
 TEST(DataLoaderTest, CanDereferenceIteratorMultipleTimes) {
   DummyDataset dataset;
   auto data_loader =
-      torch::data::make_data_loader(dataset, dataset.size().value());
-  auto i = data_loader->begin();
-  ASSERT_NE(i, data_loader->end());
-  ASSERT_EQ(i->size(), dataset.size().value());
-  ASSERT_NE(i, data_loader->end());
-  ASSERT_EQ(i->size(), dataset.size().value());
-  ASSERT_NE(i, data_loader->end());
-  ASSERT_EQ(i->size(), dataset.size().value());
-  ASSERT_EQ(++i, data_loader->end());
+      torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
+          dataset,
+          /*batch_size=*/1);
+  auto iterator = data_loader->begin();
+  std::vector<int> expected = {1};
+  ASSERT_EQ(*iterator, expected);
+  ASSERT_EQ(*iterator, expected);
+  ++iterator;
+  expected[0] = 2;
+  ASSERT_EQ(*iterator, expected);
+  ASSERT_EQ(*iterator, expected);
+  ++iterator;
+  expected[0] = 3;
+  ASSERT_EQ(*iterator, expected);
+  ASSERT_EQ(*iterator, expected);
+}
+
+TEST(DataLoaderTest, CanUseIteratorAlgorithms) {
+  struct D : datasets::BatchDataset<D, int> {
+    int get_batch(torch::ArrayRef<size_t> indices) override {
+      return 1 + indices.front();
+    }
+    torch::optional<size_t> size() const override {
+      return 10;
+    }
+  };
+
+  D dataset;
+  auto data_loader =
+      torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
+          dataset, 1);
+  std::vector<int> values;
+  std::copy(
+      data_loader->begin(), data_loader->end(), std::back_inserter(values));
+  std::vector<int> expected(dataset.size().value());
+  std::iota(expected.begin(), expected.end(), size_t(1));
+  ASSERT_EQ(values, expected);
 }
 
 TEST(DataLoaderTest, CallingBeginWhileOtherIteratorIsInFlightThrows) {
