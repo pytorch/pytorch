@@ -43,22 +43,6 @@ cmake --version
 pip install -q -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  # This is necessary in order to cross compile (or else we'll have missing GPU device).
-  export HCC_AMDGPU_TARGET=gfx900
-
-  # These environment variables are not set on CI when we were running as the Jenkins user.
-  # The HIP Utility scripts require these environment variables to be set in order to run without error.
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
-
-  # This environment variable enabled HCC Optimizations that speed up the linking stage.
-  # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
-  export KMTHINLTO=1
-
-  # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
-  sudo apt-get -qq install libc++1
-  sudo apt-get -qq install libc++abi1
-
   # When hcc runs out of memory, it silently exits without stopping
   # the build process, leaving undefined symbols in the shared lib
   # which will cause undefined symbol errors when later running
@@ -76,6 +60,11 @@ fi
 # TODO: Don't install this here
 if ! which conda; then
   pip install -q mkl mkl-devel
+  if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc7.2* ]] || [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc4.8* ]]; then
+    export USE_MKLDNN=1
+  else
+    export USE_MKLDNN=0
+  fi
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -116,6 +105,15 @@ if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
   # TODO: Don't run this here
   pip install -q -r requirements.txt || true
   LC_ALL=C make html
+  popd
+fi
+
+# Test standalone c10 build
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
+  mkdir -p c10/build
+  pushd c10/build
+  cmake ..
+  make -j
   popd
 fi
 

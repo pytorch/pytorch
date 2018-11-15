@@ -9,10 +9,10 @@ bool StringJoinOp<CPUContext>::DoRunWithType() {
   const auto& input = Input(0);
   auto* output = Output(0);
   CAFFE_ENFORCE_GT(input.numel(), 0);
-  CAFFE_ENFORCE_LE(input.ndim(), 2, "Only 1-D and 2-D tensors are supported");
+  CAFFE_ENFORCE_LE(input.dim(), 2, "Only 1-D and 2-D tensors are supported");
 
   const auto* inputData = input.data<T>();
-  int rowSize = (input.ndim() == 2) ? input.size(1) : 1;
+  int rowSize = (input.dim() == 2) ? input.size(1) : 1;
   if (this->axis_ == 0) {
     output->Resize(input.size(0));
     auto* outputData = output->template mutable_data<std::string>();

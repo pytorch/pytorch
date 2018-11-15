@@ -51,7 +51,7 @@ class SpatialBNOp : public Operator<Context> {
     const auto& bias = Input(BIAS);
     auto* Y = Output(OUTPUT);
 
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     CAFFE_ENFORCE_GE(ndim, 3);
     const int N = X.dim32(0);
     const int C =
@@ -302,7 +302,7 @@ class SpatialBNGradientOp : public Operator<Context> {
     const auto& scale = Input(SCALE);
     const auto& mean = Input(SAVED_MEAN);
     const auto& rstd = Input(SAVED_INV_STD);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     CAFFE_ENFORCE_GE(ndim, 3);
     const int N = X.dim32(0);
     const int C =

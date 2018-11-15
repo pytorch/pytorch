@@ -26,15 +26,15 @@ class ReservoirSamplingOp final : public Operator<Context> {
     auto* output = Output(RESERVOIR);
     const auto& input = Input(DATA);
 
-    CAFFE_ENFORCE_GE(input.ndim(), 1);
+    CAFFE_ENFORCE_GE(input.dim(), 1);
 
     bool output_initialized = output->numel() > 0 &&
         (static_cast<std::shared_ptr<std::vector<TensorCPU>>*>(
              output->raw_mutable_data(input.dtype()))[0] != nullptr);
 
     if (output_initialized) {
-      CAFFE_ENFORCE_EQ(output->ndim(), input.ndim());
-      for (size_t i = 1; i < input.ndim(); ++i) {
+      CAFFE_ENFORCE_EQ(output->dim(), input.dim());
+      for (size_t i = 1; i < input.dim(); ++i) {
         CAFFE_ENFORCE_EQ(output->size(i), input.size(i));
       }
     }
@@ -90,7 +90,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
     std::set<int64_t> unique_object_ids;
     if (InputSize() > OBJECT_ID) {
       const auto& object_id = Input(OBJECT_ID);
-      CAFFE_ENFORCE_EQ(object_id.ndim(), 1);
+      CAFFE_ENFORCE_EQ(object_id.dim(), 1);
       CAFFE_ENFORCE_EQ(object_id.numel(), num_entries);
       object_id_data = object_id.template data<int64_t>();
       unique_object_ids.insert(

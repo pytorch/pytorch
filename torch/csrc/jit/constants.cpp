@@ -63,7 +63,7 @@ Value* insertConstant(
 RegisterOperators reg({
   // Implementation of constant node, computes and IValue
   Operator(
-      prim::Constant,
+      FunctionSchema(prim::Constant, {}, {}, /*vararg=*/false, /*varret=*/true),
       [](const Node* node) -> Operation {
         TypePtr type = node->output()->type();
         if(type->isSubtypeOf(DynamicType::get())) {

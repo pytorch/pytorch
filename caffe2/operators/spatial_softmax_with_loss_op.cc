@@ -80,8 +80,8 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
 
   float* Pdata = P->template mutable_data<float>();
   const float* weights = (InputSize() > 2 ? Input(2).data<float>() : nullptr);
-  CAFFE_ENFORCE_EQ(X.ndim(), 4);
-  CAFFE_ENFORCE_EQ(T.ndim(), 3);
+  CAFFE_ENFORCE_EQ(X.dim(), 4);
+  CAFFE_ENFORCE_EQ(T.dim(), 3);
   CAFFE_ENFORCE_EQ(T.dim32(0), N);
 
   int H = X.dim32(2);
@@ -168,8 +168,8 @@ bool SpatialSoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   D = X.dim32(1);
   dX->ResizeLike(X);
   CAFFE_ENFORCE_EQ(T.dim32(0), N);
-  CAFFE_ENFORCE_EQ(X.ndim(), 4);
-  CAFFE_ENFORCE_EQ(T.ndim(), 3);
+  CAFFE_ENFORCE_EQ(X.dim(), 4);
+  CAFFE_ENFORCE_EQ(T.dim(), 3);
 
   int H = X.dim32(2);
   int W = X.dim32(3);

@@ -89,7 +89,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
 inline void assertTypeMatch(
     std::function<void(const std::string&)> fn,
     const at::Type& type,
-    const std::vector<at::Tensor>& tensors,
+    const at::ArrayRef<at::Tensor>& tensors,
     size_t index) {
   if (tensors[index].type() != type) {
     fn("invalid tensor type at index " + std::to_string(index) + " (expected " +
@@ -100,12 +100,99 @@ inline void assertTypeMatch(
 inline void assertSizesMatch(
     std::function<void(const std::string&)> fn,
     const at::IntList& sizes,
-    const std::vector<at::Tensor>& tensors,
+    const at::ArrayRef<at::Tensor>& tensors,
     size_t index) {
   if (tensors[index].sizes() != sizes) {
     fn("invalid tensor size at index " + std::to_string(index) + " (expected " +
        toString(sizes) + ", got " + toString(tensors[index].sizes()) + ")");
   }
+}
+
+inline void assertNonEmpty(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  if (tensors.size() == 0) {
+    fn("requires non-empty tensor list");
+  }
+}
+
+inline void assertSingleElement(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  if (tensors.size() != 1) {
+    fn("requires a single-element tensor list");
+  }
+}
+
+inline void assertSingleElementInput(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  if (tensors.size() != 1) {
+    fn("requires a single-element input tensor list");
+  }
+}
+
+inline void assertSingleElementOutput(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  if (tensors.size() != 1) {
+    fn("requires a single-element output tensor list");
+  }
+}
+
+inline void assertRootRank(
+    std::function<void(const std::string&)> fn,
+    int rank,
+    int size) {
+  if (rank < 0 || rank >= size) {
+    fn("invalid root rank: " + std::to_string(rank));
+  }
+}
+
+inline void assertRootTensor(
+    std::function<void(const std::string&)> fn,
+    int rank,
+    int size) {
+  if (rank < 0 || rank >= size) {
+    fn("invalid root tensor: " + std::to_string(rank));
+  }
+}
+
+inline void assertDense(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  const auto& layout = tensors[0].layout();
+  if (layout != at::kStrided) {
+    fn("only supports dense tensors");
+  }
+}
+
+inline void assertCPU(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  const auto& device = tensors[0].device();
+  if (device.type() != at::kCPU) {
+    fn("only supports CPU tensors");
+  }
+}
+
+inline void assertTypeAndSizesMatch(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors,
+    const at::Type& type,
+    const at::IntList& sizes) {
+  for (size_t i = 0; i < tensors.size(); i++) {
+    assertTypeMatch(fn, type, tensors, i);
+    assertSizesMatch(fn, sizes, tensors, i);
+  }
+}
+
+inline void assertTypeAndSizesMatch(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  const auto& type = tensors[0].type();
+  const auto sizes = tensors[0].sizes();
+  assertTypeAndSizesMatch(fn, tensors.slice(1), type, sizes);
 }
 
 // Copied from torch/csrc/utils/functional.h.

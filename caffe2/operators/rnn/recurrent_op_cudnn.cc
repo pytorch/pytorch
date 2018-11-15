@@ -60,7 +60,7 @@ void RecurrentBaseOp<T>::initialize(
     Tensor* hiddenOutput,
     Tensor* cellOutput) {
   static_assert(sizeof(T) == 4, ""); // workaround clang bug
-  CAFFE_ENFORCE_GE(input.ndim(), 3);
+  CAFFE_ENFORCE_GE(input.dim(), 3);
   const int seqLength = input.size(0);
   const int batchSize = input.size(1);
   const int inputDim = input.size(2);

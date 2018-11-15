@@ -21,8 +21,8 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
     presence_mask = Output(1);
   }
 
-  CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
-  CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
+  CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTH should be 1-D");
 
   // Find the length of the longest sequence.
   const T* l = lengths.template data<T>();
@@ -118,8 +118,8 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& lengths = Input(LENGTHS);
   auto* output = Output(0);
 
-  CAFFE_ENFORCE_GE(data.ndim(), 2, "DATA should be at least 2-D");
-  CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
+  CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTH should be 1-D");
   if (max_length_ != -1) {
     CAFFE_ENFORCE_EQ(
         max_length_,

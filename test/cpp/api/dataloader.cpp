@@ -3,11 +3,11 @@
 #include <torch/data.h>
 #include <torch/data/detail/sequencers.h>
 #include <torch/serialize.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <test/cpp/api/support.h>
 
-#include <ATen/core/ArrayRef.h>
+#include <c10/util/ArrayRef.h>
 
 #include <algorithm>
 #include <chrono>
@@ -833,26 +833,47 @@ TEST(DataLoaderTest, RespectsTimeout) {
   ASSERT_LT(duration.count(), 1);
 }
 
-struct OrderingTestDataset : datasets::BatchDataset<DummyDataset, int> {
-  int get_batch(torch::ArrayRef<size_t> indices) override {
-    static int thread_counter = 0;
-    thread_local int thread_id = thread_counter++;
-    static std::condition_variable cv;
-    static std::mutex mutex;
-    static std::array<size_t, 4> order = {3, 1, 0, 2};
-    static std::atomic<size_t> index{0};
+namespace {
+std::atomic<size_t> ordering_test_counter{0};
+std::condition_variable ordering_test_cv;
+std::mutex ordering_test_mutex;
+const std::array<size_t, 4> ordering_test_order = {3, 1, 0, 2};
+std::atomic<size_t> ordering_test_index{0};
+} // namespace
 
-    std::unique_lock<std::mutex> lock(mutex);
-    cv.wait(lock, [&] { return order.at(index) == thread_id; });
-    ++index;
-    cv.notify_all();
+struct OrderingTestDataset : datasets::BatchDataset<DummyDataset, int> {
+  OrderingTestDataset() = default;
+
+  // This copy constructor will be called when we copy the dataset into a
+  // particular thread.
+  OrderingTestDataset(const OrderingTestDataset& other)
+      : id(ordering_test_counter++) {}
+
+  OrderingTestDataset(OrderingTestDataset&& other) noexcept = default;
+  OrderingTestDataset& operator=(const OrderingTestDataset& other) = delete;
+  OrderingTestDataset& operator=(OrderingTestDataset&& other) noexcept = delete;
+
+  int get_batch(torch::ArrayRef<size_t> indices) override {
+    std::unique_lock<std::mutex> lock(ordering_test_mutex);
+    // block until order.at(index) == my_thread_id (until it's this thread's
+    // turn)
+    ordering_test_cv.wait(lock, [this] {
+      return ordering_test_order.at(ordering_test_index.load()) == this->id;
+    });
+    // Make one step in the order.
+    ++ordering_test_index;
     lock.unlock();
-    return thread_id;
+    // Wake up the other threads to check if it's their turn to return.
+    ordering_test_cv.notify_all();
+
+    return id;
   }
 
   torch::optional<size_t> size() const {
     return 4;
   }
+
+  size_t id = 0;
 };
 
 TEST(DataLoaderTest, EnforcesOrderingAmongThreadsWhenConfigured) {

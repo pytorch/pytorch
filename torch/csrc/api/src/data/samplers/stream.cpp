@@ -1,6 +1,6 @@
 #include <torch/data/samplers/stream.h>
 #include <torch/serialize/archive.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <c10/util/Exception.h>
 

@@ -211,6 +211,7 @@ void fillInputBlob(
     }
     caffe2::TensorProto* tensor_proto =
         tensor_kv.second.mutable_protos(iteration % protos_size);
+    BlobSetTensor(blob, EmptyTensorFromProto(*tensor_proto));
     if (tensor_proto->data_type() == caffe2::TensorProto::STRING) {
       caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
       int total_size = tensor_proto->string_data_size();
@@ -218,9 +219,12 @@ void fillInputBlob(
         (tensor->mutable_data<string>())[i] = tensor_proto->string_data(i);
       }
     } else if (tensor_proto->data_type() == caffe2::TensorProto::FLOAT) {
-      blob->Reset(new caffe2::Tensor(serializer.Deserialize(*tensor_proto)));
+      serializer.Deserialize(
+          *tensor_proto, BlobGetMutableTensor(blob, caffe2::DeviceType::CPU));
+    } else {
+      // todo: for other types
+      CAFFE_THROW("data type not supported yet: ", tensor_proto->data_type());
     }
-    // todo: for other types
   }
 }
 

@@ -48,10 +48,10 @@ bool APMeterOp<float, CPUContext>::RunOnDevice() {
   auto& label = Input(LABEL);
   auto* Y = Output(0);
   // Check dimensions
-  DCHECK_EQ(X.ndim(), 2);
+  DCHECK_EQ(X.dim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
-  DCHECK_EQ(label.ndim(), 2);
+  DCHECK_EQ(label.dim(), 2);
   DCHECK_EQ(label.dim32(0), N);
   DCHECK_EQ(label.dim32(1), D);
   Y->Resize(D);

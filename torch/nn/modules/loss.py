@@ -5,7 +5,7 @@ from .module import Module
 from .container import Sequential
 from .activation import LogSoftmax
 from .. import functional as F
-from ..functional import _Reduction
+from .. import _reduction as _Reduction
 
 
 class _Loss(Module):
@@ -1148,7 +1148,7 @@ class CTCLoss(_Loss):
             `T = input length`, and `N = batch size`.
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
-        targets: Tensor of size :math:`(N, S)` or `(sum(target_lenghts))`.
+        targets: Tensor of size :math:`(N, S)` or `(sum(target_lengths))`.
             Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
         input_lengths: Tuple or tensor of size :math:`(N)`.
             Lengths of the inputs (must each be :math:`\leq T`)
@@ -1160,7 +1160,7 @@ class CTCLoss(_Loss):
 
         >>> ctc_loss = nn.CTCLoss()
         >>> log_probs = torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_()
-        >>> targets = torch.randint(1, 21, (16, 30), dtype=torch.long)
+        >>> targets = torch.randint(1, 20, (16, 30), dtype=torch.long)
         >>> input_lengths = torch.full((16,), 50, dtype=torch.long)
         >>> target_lengths = torch.randint(10,30,(16,), dtype=torch.long)
         >>> loss = ctc_loss(log_probs, targets, input_lengths, target_lengths)

@@ -31,7 +31,7 @@ namespace {
 Operation createPythonOperation(const Node* op_) {
   AutoGIL gil;
   const PythonOp* op = static_cast<const PythonOp*>(op_);
-  const py::function func = 
+  const py::function func =
     py::reinterpret_borrow<const py::function>(py::handle(const_cast<PythonOp*>(op)->pyobj.get()));
 
   size_t num_inputs = 0;
@@ -50,7 +50,7 @@ Operation createPythonOperation(const Node* op_) {
     size_t next_tensor = 0;
     for (auto arg_type : op->cconv) {
       if (arg_type == 'c') {
-        py_inputs[i] = 
+        py_inputs[i] =
           py::reinterpret_borrow<const py::object>(const_cast<PythonOp*>(op)->scalar_args[next_scalar++].get());
       } else if (arg_type == 'd') {
         py_inputs[i] = toPyObject(std::move(peek(stack, next_tensor, num_inputs)));
@@ -63,7 +63,7 @@ Operation createPythonOperation(const Node* op_) {
       py::object py_output(func(*py_inputs));
       stack.push_back(returnToIValue(op->output()->type(), py_output));
     } catch (py::error_already_set & e) {
-      throw python_error();
+      throw std::runtime_error(e.what());
     }
     return 0;
   };

@@ -26,7 +26,7 @@ __device__ __forceinline__ IndexType getReduceNoncontigDimSliceIndex() {
 template <typename T>
 struct SimpleCopyOp
 {
-  __device__ __forceinline__ T operator()(const T val) const
+  __device__ __forceinline__ T operator()(volatile const T val) const volatile
   {
     return val;
   }
@@ -124,8 +124,10 @@ __device__ __forceinline__ void reduceChunk
        *shmem = reduceOp(*shmem, *(shmem + i*blockDim.x));
   }
 
-  if(threadIdx.y == 0 && inbounds)
-    out[outOffset] = scalar_cast<T>(finalizeOp(*shmem));
+  if(threadIdx.y == 0 && inbounds) {
+    T &&o_ele = static_cast<T>(finalizeOp(*shmem));
+    out[outOffset] = o_ele;
+  }
 }
 
 // Kernel that handles an entire reduction of a slice of a tensor per each thread

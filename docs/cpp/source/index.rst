@@ -61,15 +61,15 @@ a taste of this interface:
   #include <torch/csrc/autograd/variable.h>
   #include <torch/csrc/autograd/function.h>
 
-  at::Tensor a = torch::ones({2, 2}, at::requires_grad());
-  at::Tensor b = torch::randn({2, 2});
+  torch::Tensor a = torch::ones({2, 2}, torch::requires_grad());
+  torch::Tensor b = torch::randn({2, 2});
   auto c = a + b;
   c.backward(); // a.grad() will now hold the gradient of c w.r.t. a.
 
 The ``at::Tensor`` class in ATen is not differentiable by default. To add the
 differentiability of tensors the autograd API provides, you must use tensor
 factory functions from the `torch::` namespace instead of the `at` namespace.
-For example, while a tensor created with `at::ones` will not be differentiable,
+For example, while a tensor created with `torch::ones` will not be differentiable,
 a tensor created with `torch::ones` will be.
 
 C++ Frontend

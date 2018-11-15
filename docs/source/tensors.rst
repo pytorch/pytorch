@@ -361,6 +361,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: slogdet
    .. automethod:: sort
    .. automethod:: split
+   .. automethod:: sparse_mask
    .. automethod:: sqrt
    .. automethod:: sqrt_
    .. automethod:: squeeze

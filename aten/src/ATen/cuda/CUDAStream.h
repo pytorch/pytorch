@@ -81,19 +81,27 @@ AT_CUDA_API int64_t CUDAStream_device(const CUDAStreamInternals*);
 // Allows use as a cudaStream_t, copying, moving, and metadata access.
 struct AT_CUDA_API CUDAStream {
 
+  enum Unchecked { UNCHECKED };
+
   explicit CUDAStream(const CUDAStreamInternals*);
 
   explicit CUDAStream(Stream stream) : stream_(stream) {
-    AT_ASSERT(stream_.device_type() == DeviceType::CUDA);
+    AT_CHECK(stream_.device_type() == DeviceType::CUDA);
   }
+
+  explicit CUDAStream(Unchecked, Stream stream) : stream_(stream) {}
 
   // Implicit conversion to cudaStream_t
   operator cudaStream_t() const { return stream(); }
+  operator Stream() const { return unwrap(); }
 
   // Getters
   int64_t device_index() const { return stream_.device_index(); }
+  Device device() const { return Device(DeviceType::CUDA, device_index()); }
   cudaStream_t stream() const { return detail::CUDAStream_stream(internals()); }
   CUDAStreamInternals* internals() const;
+
+  Stream unwrap() const { return stream_; }
 
   void synchronize_with(const CUDAEvent& event) const;
 

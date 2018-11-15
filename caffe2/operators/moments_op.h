@@ -24,7 +24,7 @@ class MomentsOp final : public Operator<Context> {
     const auto& X = Input(0);
     auto* mean = Output(0);
     auto* variance = Output(1);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
@@ -84,7 +84,7 @@ class MomentsGradientOp final : public Operator<Context> {
     const auto& X = Input(2);
     const auto& mean = Input(3);
     auto* dX = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);

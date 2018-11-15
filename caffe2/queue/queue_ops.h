@@ -153,7 +153,7 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
           auto oldSize = out->numel();
 
           CAFFE_ENFORCE(
-              in.ndim() > 0,
+              in.dim() > 0,
               "Empty tensor to dequeue at column ",
               col,
               " within ",

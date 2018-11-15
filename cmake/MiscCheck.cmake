@@ -182,6 +182,33 @@ if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
 endif()
 cmake_pop_check_state()
 
+# ---[ Check if the compiler has AVX512F support.
+cmake_push_check_state(RESET)
+if (MSVC)
+  set(CMAKE_REQUIRED_FLAGS "/D__AVX512F__")
+else()
+  set(CMAKE_REQUIRED_FLAGS "-mavx512f")
+endif()
+CHECK_CXX_SOURCE_COMPILES(
+    "#if defined(_MSC_VER)
+     #include <intrin.h>
+     #else
+     #include <x86intrin.h>
+     #endif
+     __m512 addConstant(__m512 arg) {
+       return _mm512_add_ps(arg, _mm512_set1_ps(1.f));
+     }
+     int main() {
+       __m512i a = _mm512_set1_epi32(1);
+       __m256i ymm = _mm512_extracti64x4_epi64(a, 0);
+       __mmask16 m = _mm512_cmp_epi32_mask(a, a, _MM_CMPINT_EQ);
+       __m512i r = _mm512_andnot_si512(a, a);
+       }" CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
+if (CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
+  message(STATUS "Current compiler supports avx512f extension. Will build fbgemm.")
+endif()
+cmake_pop_check_state()
+
 # ---[ Checks if compiler supports -fvisibility=hidden
 check_cxx_compiler_flag("-fvisibility=hidden" COMPILER_SUPPORTS_HIDDEN_VISIBILITY)
 check_cxx_compiler_flag("-fvisibility-inlines-hidden" COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY)

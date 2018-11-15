@@ -64,7 +64,7 @@ bool ResizeNearestOp<float, CPUContext>::RunOnDevice() {
             input_width = X.dim32(3);
   if (InputSize() == 2) {
     const auto& scales = Input(1);
-    CAFFE_ENFORCE_EQ(scales.ndim(), 1);
+    CAFFE_ENFORCE_EQ(scales.dim(), 1);
     CAFFE_ENFORCE_EQ(scales.numel(), 2);
     const float* scales_data = scales.data<float>();
     height_scale_ = scales_data[0];
@@ -118,7 +118,7 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
   const int output_width = X.dim32(3);
   if (InputSize() == 3) {
     const auto& scales = Input(2);
-    CAFFE_ENFORCE_EQ(scales.ndim(), 1);
+    CAFFE_ENFORCE_EQ(scales.dim(), 1);
     CAFFE_ENFORCE_EQ(scales.numel(), 2);
     const float* scales_data = scales.data<float>();
     height_scale_ = scales_data[0];

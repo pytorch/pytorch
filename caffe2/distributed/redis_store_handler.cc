@@ -14,7 +14,8 @@ RedisStoreHandler::RedisStoreHandler(
     std::string& prefix)
     : host_(host), port_(port), prefix_(prefix) {
   struct timeval tv = {
-      .tv_sec = 5, .tv_usec = 0,
+      .tv_sec = 5,
+      .tv_usec = 0,
   };
 
   redis_ = redisConnectWithTimeout(host.c_str(), port, tv);
@@ -51,9 +52,11 @@ void RedisStoreHandler::set(const std::string& name, const std::string& data) {
       " (perhaps you reused a run ID you have used before?)");
 }
 
-std::string RedisStoreHandler::get(const std::string& name) {
+std::string RedisStoreHandler::get(
+    const std::string& name,
+    const std::chrono::milliseconds& timeout) {
   // Block until key is set
-  wait({name});
+  wait({name}, timeout);
 
   auto key = compoundKey(name);
   void* ptr = redisCommand(redis_, "GET %b", key.c_str(), (size_t)key.size());
@@ -114,4 +117,4 @@ void RedisStoreHandler::wait(
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 }
-}
+} // namespace caffe2

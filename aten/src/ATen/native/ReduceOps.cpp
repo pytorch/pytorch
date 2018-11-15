@@ -431,7 +431,7 @@ Tensor& norm_out(Tensor &result, const Tensor &self, Scalar p, int64_t dim, bool
 }
 
 Tensor _norm(const Tensor &self, Scalar p) {
-  if (self.type().is_sparse()) {
+  if (self.is_sparse()) {
     return at::native_norm(self, p);
   } else {
     AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,

@@ -83,7 +83,7 @@ class CuDNNNHWC2NCHWOp final : public CuDNNOrderSwithOpBase {
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
     const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
@@ -124,7 +124,7 @@ class CuDNNNCHW2NHWCOp final : public CuDNNOrderSwithOpBase {
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = X.dim32(1);
     const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());

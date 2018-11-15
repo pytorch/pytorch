@@ -44,7 +44,11 @@ class BroadcastingListCls(object):
     def __getitem__(self, types):
         return
 
-BroadcastingList = BroadcastingListCls()
+# mypy doesn't support parameters on types, so we have to explicitly type each
+# list size
+BroadcastingList1 = BroadcastingListCls()
+for i in range(2, 7):
+    globals()["BroadcastingList{}".format(i)] = BroadcastingList1
 
 
 class Module(object):

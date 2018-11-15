@@ -70,9 +70,9 @@ class _BatchNorm(Module):
         return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
                'track_running_stats={track_running_stats}'.format(**self.__dict__)
 
-    def _load_from_state_dict(self, state_dict, prefix, metadata, strict,
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        version = metadata.get('version', None)
+        version = local_metadata.get('version', None)
 
         if (version is None or version < 2) and self.track_running_stats:
             # at version 2: added num_batches_tracked buffer
@@ -82,7 +82,7 @@ class _BatchNorm(Module):
                 state_dict[num_batches_tracked_key] = torch.tensor(0, dtype=torch.long)
 
         super(_BatchNorm, self)._load_from_state_dict(
-            state_dict, prefix, metadata, strict,
+            state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
 
 

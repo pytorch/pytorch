@@ -57,17 +57,18 @@ namespace c10 {
   _(prim, IntToFloat)              \
   _(prim, FloatToInt)              \
   _(prim, StringToFloat)           \
-  _(prim, TensorDevice)            \
-  _(prim, TensorDType)             \
-  _(prim, TensorShape)             \
+  _(prim, device)            \
+  _(prim, dtype)             \
+  _(prim, shape)             \
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
   _(prim, AnyDefined)              \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
   _(prim, NoneGenerator)           \
+  _(prim, MMTreeReduce)            \
   _(aten, floordiv)                \
-  _(prim, MemoryFence)             \
+  _(aten, __round_to_zero_floordiv)\
   _(prim, fork)                    \
   _(prim, RaiseException)          \
   _(aten, append)                  \
@@ -75,6 +76,8 @@ namespace c10 {
   _(aten, __not__)                 \
   _(aten, __is__)                  \
   _(aten, __isnot__)               \
+  _(aten, copy_)                   \
+  _(aten, _set_item)               \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \

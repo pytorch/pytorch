@@ -133,7 +133,7 @@ void initJITBindings(PyObject *module) {
      return ConstantPropagation(g);
    })
    .def("_jit_pass_erase_shape_information", EraseShapeInformation)
-   .def("_jit_pass_create_autodiff_subgraphs", [](Graph& graph) {
+   .def("_jit_pass_create_autodiff_subgraphs", [](std::shared_ptr<Graph> graph) {
      CreateAutodiffSubgraphs(graph);
    })
    .def("_jit_run_cpp_tests", [] {
@@ -221,12 +221,14 @@ void initJITBindings(PyObject *module) {
       .def(
           py::init([](py::function func,
                       py::tuple inputs,
+                      py::function var_name_lookup_fn,
                       bool optimize) {
-              auto graph = tracer::createGraphByTracing(func, toStack(inputs));
+              auto graph = tracer::createGraphByTracing(func, toStack(inputs), var_name_lookup_fn);
               return GraphExecutor(graph, optimize);
           }),
           py::arg("func"),
           py::arg("inputs"),
+          py::arg("var_name_lookup_fn"),
           py::arg("optimize") = true)
       .def(
           py::init([](std::shared_ptr<Graph> graph, bool optimize) {

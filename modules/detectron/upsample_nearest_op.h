@@ -38,14 +38,14 @@ class UpsampleNearestOp final : public Operator<Context> {
     auto& X = Input(0);
     auto* Y = Output(0);
     auto out_shape = X.sizes().vec();
-    out_shape[X.ndim() - 1] *= scale_;
-    out_shape[X.ndim() - 2] *= scale_;
+    out_shape[X.dim() - 1] *= scale_;
+    out_shape[X.dim() - 2] *= scale_;
     Y->Resize(out_shape);
 
     int d1;
     int d2;
     int d3;
-    if (X.ndim() == 3) {
+    if (X.dim() == 3) {
       d1 = Y->dim32(0);
       d2 = Y->dim32(1);
       d3 = Y->dim32(2);

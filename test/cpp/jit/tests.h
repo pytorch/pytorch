@@ -40,11 +40,14 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/passes/utils/subgraph_utils.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/hash.h"
@@ -333,7 +336,7 @@ void testFromQualString() {
     try {
       Symbol::fromQualString(input);
       ASSERT_TRUE(0);
-    } catch (std::runtime_error c) {
+    } catch (const std::exception& c) {
     }
   }
 }
@@ -583,6 +586,12 @@ void testADFormulas() {
        unary_pointwise,
        [](const VL& v) -> VL { return {v[0].tanh()}; }},
       {"t", unary_pointwise_2d, [](const VL& v) -> VL { return {v[0].t()}; }},
+      {"view",
+        unary_pointwise_2d,
+        [](const VL& v) -> VL { return {v[0].view({3, 2})}; }},
+      {"expand",
+        {{2, 1}},
+        [](const VL& v) -> VL { return {v[0].expand({2, 3})}; }},
       {"mm",
        {{10, 12}, {12, 15}},
        [](const VL& v) -> VL { return {v[0].mm(v[1])}; }},
@@ -607,6 +616,7 @@ void testADFormulas() {
     // Trace and differentiate the op
     auto graph = trace(test, vars_in);
     EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
+    ConstantPropagation(graph);
     auto grad_spec = differentiate(graph);
     LowerGradOf(*grad_spec.df);
     // Get outputs from the interpreter
@@ -689,9 +699,39 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
 
 void testCreateAutodiffSubgraphs(std::ostream& out = std::cout) {
   auto graph = build_lstm();
-  CreateAutodiffSubgraphs(*graph, /*threshold=*/2);
+  CreateAutodiffSubgraphs(graph, /*threshold=*/2);
   out << "testCreateAutodiffSubgraphs\n";
   out << *graph << "\n";
+}
+
+void testSubgraphUtils() {
+  auto graph = build_lstm();
+  EliminateCommonSubexpression(graph);
+
+  std::vector<Node*> originalNodes(
+      graph->nodes().begin(), graph->nodes().end());
+
+  // Merge everything into a single subgraph
+  bool first = true;
+  Node* subgraph;
+  for (auto it = graph->nodes().rbegin(); it != graph->nodes().rend();) {
+    if (first) {
+      subgraph = SubgraphUtils::createSingletonSubgraph(
+          *it, prim::DifferentiableGraph);
+      it = ++subgraph->reverseIterator();
+      first = false;
+    }
+
+    SubgraphUtils::mergeNodeIntoSubgraph(*it, subgraph);
+    it = ++subgraph->reverseIterator();
+  }
+
+  // Unmerge and compare with original node listing
+  SubgraphUtils::unmergeSubgraph(subgraph);
+  EliminateCommonSubexpression(graph);
+
+  std::vector<Node*> newNodes(graph->nodes().begin(), graph->nodes().end());
+  ASSERT_EQ(originalNodes.size(), newNodes.size());
 }
 
 autograd::Variable var(at::Type& t, at::IntList sizes, bool requires_grad) {
@@ -1190,6 +1230,26 @@ void testTopologicalIndex() {
     ASSERT_FALSE(node3->isBefore(node1));
     ASSERT_FALSE(node3->isBefore(node2));
     ASSERT_FALSE(node3->isAfter(node4));
+
+    // Built up a block structure
+    //  node3
+    //   /\        ...
+    //  A  B     block1
+    //      \      ...
+    //      C    block2
+    auto block1 = node3->addBlock();
+    auto A = graph.create(prim::Undefined);
+    block1->appendNode(A);
+    auto B = graph.create(prim::Undefined);
+    block1->appendNode(B);
+    auto block2 = B->addBlock();
+    auto C = graph.create(prim::Undefined);
+    block2->appendNode(C);
+
+    // Check isAfter on different block levels
+    ASSERT_TRUE(node1->isBefore(A));
+    ASSERT_TRUE(A->isBefore(B));
+    ASSERT_TRUE(A->isBefore(C));
 
     // make sure things don't blow up on deletions
     node2->destroy();

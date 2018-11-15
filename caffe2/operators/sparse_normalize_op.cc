@@ -7,8 +7,8 @@ namespace caffe2 {
 template <>
 bool SparseNormalizeOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(
-     Input(PARAM).size_from_dim(1),
-     Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+      Input(PARAM).size_from_dim(1),
+      Input(GRAD).size_from_dim(Input(INDICES).dim()));
 
   return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
      this, Input(INDICES));

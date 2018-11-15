@@ -69,7 +69,38 @@ class TestPutOps(TestCase):
         self.assertIn(stat_name + sum_postfix, stat_dict)
         self.assertIn(stat_name + count_postfix, stat_dict)
         self.assertEquals(stat_dict[stat_name + sum_postfix],
-         9 * magnitude_expand)
+            9223372036854775807)
+        self.assertEquals(stat_dict[stat_name + count_postfix], 1)
+
+    def test_clamp_with_out_of_bounds(self):
+        put_value = float(1e20)
+        magnitude_expand = 1000000000000
+        stat_name = "stat".encode('ascii')
+        sum_postfix = "/stat_value/sum".encode("ascii")
+        count_postfix = "/stat_value/count".encode("ascii")
+
+        workspace.FeedBlob("value", np.array([put_value], dtype=np.float))
+
+        workspace.RunOperatorOnce(core.CreateOperator(
+            "AveragePut",
+            "value",
+            [],
+            stat_name=stat_name,
+            magnitude_expand=magnitude_expand,
+            bound=True))
+
+        workspace.RunOperatorOnce(core.CreateOperator(
+            'StatRegistryExport', [], ['k', 'v', 't']))
+
+        k = workspace.FetchBlob('k')
+        v = workspace.FetchBlob('v')
+
+        stat_dict = dict(zip(k, v))
+
+        self.assertIn(stat_name + sum_postfix, stat_dict)
+        self.assertIn(stat_name + count_postfix, stat_dict)
+        self.assertEquals(stat_dict[stat_name + sum_postfix],
+            9223372036854775807)
         self.assertEquals(stat_dict[stat_name + count_postfix], 1)
 
     def test_avg_put_ops(self):

@@ -29,9 +29,11 @@ message ExternalDataProto {
   optional SourceType source_type = 1 [default = INLINE_CONTAINER];
   // used together with type
   optional string record_id = 2;
+  // the size of the entire record (in bytes)
+  optional uint64 record_size = 5;
   // the offset of the starting point, the content may be shared between
   // multiple tensors
-  optional int64 offset = 3;
+  optional int64 offset = 3 [default = 0];
   // the strides of the content
   repeated int64 strides = 4;
 }
