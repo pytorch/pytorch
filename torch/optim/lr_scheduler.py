@@ -160,6 +160,7 @@ class StepLR(_LRScheduler):
         return [group['lr'] * self.gamma
                 for group in self.optimizer.param_groups]
 
+
 class MultiStepLR(_LRScheduler):
     """Decays the learning rate of each parameter group by gamma once the
     number of epoch reaches one of the milestones. Notice that such decay can
@@ -217,6 +218,7 @@ class ExponentialLR(_LRScheduler):
         return [group['lr'] * self.gamma
                 for group in self.optimizer.param_groups]
 
+
 class CosineAnnealingLR(_LRScheduler):
     r"""Set the learning rate of each parameter group using a cosine annealing
     schedule, where :math:`\eta_{max}` is set to the initial lr and
@@ -261,6 +263,7 @@ class CosineAnnealingLR(_LRScheduler):
                 (1 + math.cos(math.pi * (self.last_epoch - 1) / self.T_max)) *
                 (group['lr'] - self.eta_min) + self.eta_min
                 for group in self.optimizer.param_groups]
+
 
 class ReduceLROnPlateau(object):
     """Reduce learning rate when a metric has stopped improving.
