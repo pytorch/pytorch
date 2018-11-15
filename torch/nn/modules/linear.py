@@ -47,13 +47,11 @@ class Linear(Module):
 
     Attributes:
         weight: the learnable weights of the module of shape
-            :math:`(\text{out\_features}, \text{in\_features})`. The values are
-            initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
-            :math:`k = \frac{1}{\text{in\_features}}`
+            :math:`(\text{out\_features}, \text{in\_features})`. 
+            The values are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, 
+            where :math:`k = \frac{3}{\text{in\_features}}`
         bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`.
-                If :attr:`bias` is ``True``, the values are initialized from
-                :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                :math:`k = \frac{1}{\text{in\_features}}`
+                If :attr:`bias` is ``True``, the values are initialized with zeros
 
     Examples::
 
@@ -77,11 +75,11 @@ class Linear(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        std = 1 / self.in_features ** 0.5
+        bound = std * 3 ** 0.5
+        init.uniform_(self.weight, -bound, bound)
         if self.bias is not None:
-            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in)
-            init.uniform_(self.bias, -bound, bound)
+            init.constant_(self.bias, 0)
 
     def forward(self, input):
         return F.linear(input, self.weight, self.bias)
@@ -115,11 +113,9 @@ class Bilinear(Module):
         weight: the learnable weights of the module of shape
             :math:`(\text{out\_features}, \text{in1\_features}, \text{in2\_features})`.
             The values are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
-            :math:`k = \frac{1}{\text{in1\_features}}`
-        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`.
-                If :attr:`bias` is ``True``, the values are initialized from
-                :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
-                :math:`k = \frac{1}{\text{in1\_features}}`
+            :math:`k = \frac{3}{\text{in1\_features} \text{in2\_features}}`
+        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`
+            If :attr:`bias` is ``True``, the values are initialized with zeros
 
     Examples::
 
@@ -146,10 +142,11 @@ class Bilinear(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        bound = 1 / math.sqrt(self.weight.size(1))
+        std = 1 / math.sqrt(self.in1_features * self.in2_features)
+        bound = std * 3 ** 0.5
         init.uniform_(self.weight, -bound, bound)
         if self.bias is not None:
-            init.uniform_(self.bias, -bound, bound)
+            init.constant_(self.bias, 0)
 
     def forward(self, input1, input2):
         return F.bilinear(input1, input2, self.weight, self.bias)
