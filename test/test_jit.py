@@ -1452,6 +1452,27 @@ class TestJit(JitTestCase):
     def test_ge_unoptimized(self):
         self.run_ge_tests(False, False)
 
+    def _test_proper_fused_abs(self, device='cpu'):
+
+        @torch.jit.script
+        def func(x):
+            return x.abs() * 2
+
+        a = torch.randn(5, device=device)
+        self.assertEqual(func(a), a.abs() * 2)
+        self.assertAllFused(func.graph_for(a))
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_proper_fused_abs_cpu(self):
+        self._test_proper_fused_abs()
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @skipIfRocm
+    def test_proper_fused_abs_cuda(self):
+        self._test_proper_fused_abs(device="cuda")
+
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_ge_optimized(self):

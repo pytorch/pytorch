@@ -97,7 +97,7 @@ static_assert(
     "We make an assumption that int is always int32 for numpy "
     "type mapping.");
 
-int CaffeToNumpyType(const TypeMeta& dtype);
+int CaffeToNumpyType(const TypeMeta& meta);
 const TypeMeta& NumpyTypeToCaffe(int numpy_type);
 
 class TensorFetcher : public BlobFetcherBase {
@@ -106,12 +106,12 @@ class TensorFetcher : public BlobFetcherBase {
     return FetchTensor(blob.Get<Tensor>(), true).obj;
   }
 
-  // Checks whether the data with type `dtype` needs to be copied in the context
+  // Checks whether the data with type `meta` needs to be copied in the context
   // of `tensor`
-  bool NeedsCopy(const Tensor* tensor, const TypeMeta& dtype) const {
+  bool NeedsCopy(const Tensor* tensor, const TypeMeta& meta) const {
 #ifdef USE_NUMPY
     return tensor->GetDeviceType() != CPU ||
-        CaffeToNumpyType(dtype) == NPY_OBJECT;
+        CaffeToNumpyType(meta) == NPY_OBJECT;
 #else
     return tensor->GetDeviceType() != CPU;
 #endif // USE_NUMPY
@@ -176,15 +176,18 @@ class TensorFetcher : public BlobFetcherBase {
 template <class Context>
 class TensorFeeder : public BlobFeederBase {
  public:
-  Tensor FeedTensor(const DeviceOption& option, PyArrayObject* original_array) {
+  void FeedTensor(
+      const DeviceOption& option,
+      PyArrayObject* original_array,
+      Tensor* tensor) {
 #ifdef USE_NUMPY
     PyArrayObject* array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
 
     const auto npy_type = PyArray_TYPE(array);
-    const TypeMeta& dtype = NumpyTypeToCaffe(npy_type);
+    const TypeMeta& meta = NumpyTypeToCaffe(npy_type);
     CAFFE_ENFORCE(
-        dtype.id() != TypeIdentifier::uninitialized(),
+        meta.id() != TypeIdentifier::uninitialized(),
         "This numpy data type is not supported: ",
         PyArray_TYPE(array),
         ".");
@@ -197,16 +200,14 @@ class TensorFeeder : public BlobFeederBase {
     for (int i = 0; i < ndim; ++i) {
       dims.push_back(npy_dims[i]);
     }
+    tensor->Resize(dims);
 
-    Tensor tensor;
     // Now, copy the data to the tensor.
     switch (npy_type) {
       case NPY_OBJECT: {
         PyObject** input = reinterpret_cast<PyObject**>(PyArray_DATA(array));
-        tensor = caffe2::empty(
-            dims, at::dtype<std::string>().device(Context::GetDeviceType()));
-        auto* outPtr = tensor.template mutable_data<std::string>();
-        for (int i = 0; i < tensor.numel(); ++i) {
+        auto* outPtr = tensor->template mutable_data<std::string>();
+        for (int i = 0; i < tensor->numel(); ++i) {
           char* str;
           Py_ssize_t strSize;
 #if PY_MAJOR_VERSION > 2
@@ -238,23 +239,23 @@ class TensorFeeder : public BlobFeederBase {
             "instead of unicode strings.");
         break;
       default:
-        tensor = caffe2::empty(
-            dims, at::TensorOptions(dtype).device(Context::GetDeviceType()));
         context.CopyBytesFromCPU(
-            tensor.numel() * dtype.itemsize(),
+            tensor->numel() * meta.itemsize(),
             static_cast<void*>(PyArray_DATA(array)),
-            tensor.raw_mutable_data());
+            tensor->raw_mutable_data(meta));
     }
     context.FinishDeviceComputation();
 #else
     CAFFE_THROW("Caffe2 compiled without NumPy support.");
 #endif // USE_NUMPY
-    return tensor;
   }
 
   virtual void
   Feed(const DeviceOption& option, PyArrayObject* original_array, Blob* blob) {
-    blob->Reset<Tensor>(new Tensor(FeedTensor(option, original_array)));
+    FeedTensor(
+        option,
+        original_array,
+        BlobGetMutableTensor(blob, Context::GetDeviceType()));
   }
 };
 
