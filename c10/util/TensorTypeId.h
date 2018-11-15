@@ -38,3 +38,4 @@ C10_API std::ostream& operator<<(std::ostream&, at::TensorTypeId);
 } // namespace at
 
 C10_DEFINE_HASH_FOR_IDWRAPPER(at::TensorTypeId)
+
