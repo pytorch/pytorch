@@ -1,4 +1,4 @@
-graph(%0 : Double(2, 2, 2, 2)
+graph(%input : Double(2, 2, 2, 2)
       %1 : Double(2)
       %2 : Double(2)
       %3 : Double(2)
@@ -8,6 +8,6 @@ graph(%0 : Double(2, 2, 2, 2)
   %7 : float = prim::Constant[value=0.1](), scope: BatchNorm2d
   %8 : float = prim::Constant[value=1e-05](), scope: BatchNorm2d
   %9 : bool = prim::Constant[value=1](), scope: BatchNorm2d
-  %10 : Double(2, 2, 2, 2) = aten::batch_norm(%0, %1, %2, %3, %4, %6, %7, %8, %9), scope: BatchNorm2d
+  %10 : Double(2, 2, 2, 2) = aten::batch_norm(%input, %1, %2, %3, %4, %6, %7, %8, %9), scope: BatchNorm2d
   return (%10);
 }

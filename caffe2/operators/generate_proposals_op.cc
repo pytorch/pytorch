@@ -11,7 +11,7 @@ namespace {
 size_t ComputeStartIndex(
     const TensorCPU& tensor,
     const std::vector<int>& index) {
-  DCHECK_EQ(index.size(), tensor.ndim());
+  DCHECK_EQ(index.size(), tensor.dim());
 
   size_t ret = 0;
   for (int i = 0; i < index.size(); i++) {
@@ -32,7 +32,7 @@ utils::ConstTensorView<T> GetSubTensorView(
     return utils::ConstTensorView<T>(nullptr, {});
   }
 
-  std::vector<int> start_dims(tensor.ndim(), 0);
+  std::vector<int> start_dims(tensor.dim(), 0);
   start_dims.at(0) = dim0_start_index;
   auto st_idx = ComputeStartIndex(tensor, start_dims);
   auto ptr = tensor.data<T>() + st_idx;
@@ -54,8 +54,8 @@ ERMatXf ComputeAllAnchors(
     int width,
     float feat_stride) {
   const auto K = height * width;
-  const auto A = anchors.dim(0);
-  const auto box_dim = anchors.dim(1);
+  const auto A = anchors.size(0);
+  const auto box_dim = anchors.size(1);
   CAFFE_ENFORCE(box_dim == 4 || box_dim == 5);
 
   ERMatXf shift_x = (ERVecXf::LinSpaced(width, 0.0, width - 1.0) * feat_stride)
@@ -224,14 +224,14 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   auto* out_rois = Output(0);
   auto* out_rois_probs = Output(1);
 
-  CAFFE_ENFORCE_EQ(scores.ndim(), 4, scores.ndim());
+  CAFFE_ENFORCE_EQ(scores.dim(), 4, scores.dim());
   CAFFE_ENFORCE(scores.template IsType<float>(), scores.dtype().name());
-  const auto num_images = scores.dim(0);
-  const auto A = scores.dim(1);
-  const auto height = scores.dim(2);
-  const auto width = scores.dim(3);
+  const auto num_images = scores.size(0);
+  const auto A = scores.size(1);
+  const auto height = scores.size(2);
+  const auto width = scores.size(3);
   const auto K = height * width;
-  const auto box_dim = anchors.dim(1);
+  const auto box_dim = anchors.size(1);
   CAFFE_ENFORCE(box_dim == 4 || box_dim == 5);
 
   // bbox_deltas: (num_images, A * box_dim, H, W)
@@ -255,8 +255,8 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
 
   Eigen::Map<const ERArrXXf> im_info(
       im_info_tensor.data<float>(),
-      im_info_tensor.dim(0),
-      im_info_tensor.dim(1));
+      im_info_tensor.size(0),
+      im_info_tensor.size(1));
 
   const int roi_col_count = box_dim + 1;
   out_rois->Resize(0, roi_col_count);

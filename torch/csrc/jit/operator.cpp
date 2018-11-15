@@ -1,8 +1,9 @@
 #include "ATen/ATen.h"
+#include "torch/csrc/jit/alias_info.h"
 #include "torch/csrc/jit/script/lexer.h"
 #include "torch/csrc/jit/script/tree.h"
 #include "torch/csrc/jit/operator.h"
-
+#include "torch/csrc/jit/passes/python_print.h"
 #include "torch/csrc/jit/script/error_report.h"
 
 namespace torch { namespace jit {
@@ -25,19 +26,13 @@ struct SchemaParser {
     bool is_vararg = false;
     size_t idx = 0;
     parseList('(', ',', ')', [&] {
+      if(is_vararg)
+        throw ErrorReport(L.cur()) << "... must be the last element of the argument list";
       if (L.nextIf('*')) {
-        auto tok = L.cur();
-        if (tok.kind == TK_IDENT) {
-          is_vararg = true;
-          arguments.push_back(parseArgument(
-              idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only, writes));
-        } else {
-          kwarg_only = true;
-        }
+        kwarg_only = true;
+      } else if(L.nextIf(TK_DOTS)) {
+        is_vararg = true;
       } else {
-        if (is_vararg) {
-          AT_ERROR("Found argument after varargs declaration");
-        }
         arguments.push_back(parseArgument(
             idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only, writes));
       }
@@ -80,7 +75,6 @@ struct SchemaParser {
       {"float", FloatType::get() },
       {"int", IntType::get() },
       {"bool", BoolType::get() },
-      {"World", WorldType::get() },
     };
     auto tok = L.expect(TK_IDENT);
     auto text = tok.text();
@@ -213,8 +207,8 @@ struct SchemaParser {
           return static_cast<int64_t>(at::Device::Type::CPU);
         } else if("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
-        } else if("ElementwiseMean" == text) {
-          return static_cast<int64_t>(Reduction::ElementwiseMean);
+        } else if("Mean" == text) {
+          return static_cast<int64_t>(Reduction::Mean);
         } else {
           throw ErrorReport(L.cur().range) << "invalid numeric default value";
         }
@@ -390,7 +384,7 @@ public:
     registerPendingOperators();
     auto it = operators_by_sig_literal.find(name);
     if (it == operators_by_sig_literal.end()) {
-      auto op_ptr_it = operators_by_sig.find(name);
+      auto op_ptr_it = operators_by_sig.find(canonicalSchemaString(parseSchema(name)));
       // Handy debugging code that dumps all operators we know about on mismatch
 #if 0
       if (op_ptr_it == operators_by_sig.end()) {
@@ -425,6 +419,16 @@ OperatorRegistry& getRegistry() {
 } // anonymous namespace
 
 void registerOperator(Operator&& op) {
+  if(op.schema().is_varret()) {
+    Symbol s = Symbol::fromQualString(op.schema().name());
+    if (!printerHasSpecialCaseFor(s)) {
+      std::cout << c10::str(
+          "missing special case in python printer for non-schematized operator ",
+          op.schema().name(),
+          ". File a bug to add a case for this operator.\n");
+    }
+  }
+
   getRegistry().registerOperator(std::move(op));
 }
 
@@ -455,13 +459,13 @@ bool Operator::matches(const Node* node) const {
 
   TypeEnv type_env;
   for(size_t i = 0; i < formals.size(); ++i) {
-    try {
-      TypePtr formal = matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
-      // mismatched input type
-      if (!actuals[i]->type()->isSubtypeOf(formal)) {
-        return false;
-      }
-    } catch(TypeMatchError& err) {
+    const MatchTypeReturn matched_type =
+        matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
+    if (!matched_type.type) {
+      return false;
+    }
+    TypePtr formal = *matched_type.type;
+    if (!actuals[i]->type()->isSubtypeOf(formal)) {
       return false;
     }
   }

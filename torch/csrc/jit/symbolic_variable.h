@@ -284,7 +284,7 @@ private:
 
 // shorter method so that toVar(v) + toVar(c) is short.
 static inline SymbolicVariable toVar(Value * v) {
-  return SymbolicVariable(v);
+  return {v};
 }
 
 template<typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value>::type>

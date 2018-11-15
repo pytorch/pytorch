@@ -5,15 +5,15 @@ namespace caffe2 {
 template <>
 bool PercentileOp<CPUContext>::RunOnDevice() {
   const auto& original_values = Input(X);
-  CAFFE_ENFORCE_EQ(original_values.ndim(), 2);
-  const auto num_examples = original_values.dim(0);
+  CAFFE_ENFORCE_EQ(original_values.dim(), 2);
+  const auto num_examples = original_values.size(0);
   const float* original_values_data = original_values.template data<float>();
-  const auto num_features = original_values.dim(1);
+  const auto num_features = original_values.size(1);
 
   const auto& value_pct_pairs = Input(VAL_PCT_PAIRS);
-  CAFFE_ENFORCE_EQ(value_pct_pairs.ndim(), 2);
-  CAFFE_ENFORCE_EQ(value_pct_pairs.dim(1), 2);
-  const int num_values = value_pct_pairs.dim(0);
+  CAFFE_ENFORCE_EQ(value_pct_pairs.dim(), 2);
+  CAFFE_ENFORCE_EQ(value_pct_pairs.size(1), 2);
+  const int num_values = value_pct_pairs.size(0);
   const float* value_pct_data = value_pct_pairs.template data<float>();
 
   const auto& lengths = Input(LENS);

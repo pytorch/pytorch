@@ -47,7 +47,7 @@ class Im2ColOp final : public Operator<Context> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto* Y = Output(0);
-    CAFFE_ENFORCE(4 == X.ndim());
+    CAFFE_ENFORCE(4 == X.dim());
 
     int N = 0, C = 0, H = 0, W = 0;
     switch (order_) {
@@ -190,7 +190,7 @@ class Col2ImOp final : public Operator<Context> {
     auto& Z = Input(1);
     auto* Y = Output(0);
     Y->ResizeLike(Z);
-    CAFFE_ENFORCE(4 == Y->ndim());
+    CAFFE_ENFORCE(4 == Y->dim());
 
     int N = 0, C = 0, H = 0, W = 0;
     switch (order_) {

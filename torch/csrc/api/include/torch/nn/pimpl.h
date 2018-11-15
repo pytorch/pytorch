@@ -2,7 +2,7 @@
 
 #include <torch/arg.h>
 #include <torch/serialize/archive.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <torch/csrc/utils/variadic.h>
 
@@ -56,9 +56,13 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   template <
       typename Head,
       typename... Tail,
-      typename = torch::disable_if_t<
-          detail::is_module_holder_of<Head, ContainedType>::value &&
-          (sizeof...(Tail) == 0)>>
+      typename = typename std::enable_if<
+      !(
+          torch::detail::is_module_holder_of<Head, ContainedType>::value
+          && (sizeof...(Tail) == 0)
+       )
+      >::type
+          >
   explicit ModuleHolder(Head&& head, Tail&&... tail)
       : impl_(new Contained(
             std::forward<Head>(head),

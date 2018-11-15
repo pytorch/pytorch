@@ -1,6 +1,8 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
-
+#include "ATen/AccumulateType.h"
+#include "ATen/CPUApplyUtils.h"
+#include "ATen/Parallel.h"
 #include "ATen/Config.h"
 
 #include "ATen/detail/CUDAHooksInterface.h"
@@ -23,6 +25,198 @@ namespace {
     }
     return t;
   }
+}
+
+// TensorAccessor when it is defined to work around undefined...
+template <typename scalar_t>
+static TensorAccessor<scalar_t, 1> conditional_accessor_1d(const Tensor& t) {
+  if (! t.defined()) {
+    return TensorAccessor<scalar_t, 1>(nullptr, nullptr, nullptr);
+  }
+  return t.accessor<scalar_t, 1>();
+}
+
+
+template<typename scalar_t>
+std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_template(const Tensor& input, const Tensor& weight, const Tensor& bias,
+                               const Tensor& running_mean, const Tensor& running_var, bool train, double momentum, double eps) {
+
+  using accscalar_t = at::acc_type<scalar_t, false>;
+  Tensor output = at::empty_like(input);
+
+  int64_t n_input = input.size(1);
+  int64_t n = input.numel() / n_input;
+
+  Tensor save_mean;
+  Tensor save_invstd;
+  const int64_t zero = 0;
+  if (train) {
+    save_mean = at::empty({n_input}, input.options());
+    save_invstd = at::empty({n_input}, input.options());
+  }
+  auto save_mean_a = conditional_accessor_1d<scalar_t>(save_mean);
+  auto save_invstd_a = conditional_accessor_1d<scalar_t>(save_invstd);
+
+  auto running_mean_a = conditional_accessor_1d<scalar_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<scalar_t>(running_var);
+
+  parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
+      for (int64_t f = b_begin; f < b_end; ++f) {
+        Tensor in = input.select(1, f);
+        Tensor out = output.select(1, f);
+
+        scalar_t mean, invstd;
+
+        if (train) {
+          // compute mean per input
+          accscalar_t sum = 0;
+          CPU_tensor_apply1<scalar_t>(in, [&] (const scalar_t& i) {
+              sum += i;
+            });
+
+          mean = (scalar_t) (sum / n);
+          save_mean_a[f] = mean;
+
+          // compute variance per input
+          sum = 0;
+          CPU_tensor_apply1<scalar_t>(in, [&] (const scalar_t& i) {
+              sum += (i - mean) * (i - mean);
+            });
+
+          if (sum == 0 && eps == 0.0) {
+            invstd = 0;
+          } else {
+            invstd = (scalar_t) (1 / std::sqrt(sum/n + eps));
+          }
+          save_invstd_a[f] = invstd;
+
+          // update running averages
+          if (running_mean.defined()) {
+            running_mean_a[f] = momentum * mean + (1 - momentum) * running_mean_a[f];
+          }
+          if (running_var.defined()) {
+            accscalar_t unbiased_var = sum / (n - 1);
+            running_var_a[f] = momentum * unbiased_var + (1 - momentum) * running_var_a[f];
+          }
+        } else {
+          mean = running_mean_a[f];
+          invstd = 1 / std::sqrt(running_var_a[f] + eps);
+        }
+
+        // compute output
+        scalar_t w = weight.defined() ? weight.data<scalar_t>()[f * weight.stride(0)] : 1;
+        scalar_t b = bias.defined() ? bias.data<scalar_t>()[f * bias.stride(0)] : 0;
+
+        CPU_tensor_apply2<scalar_t,scalar_t>(out, in, [&](scalar_t& o, const scalar_t& i) {
+            o = ((i - mean) * invstd) * w + b;
+          });
+      }
+    });
+  return std::make_tuple(output, save_mean, save_invstd);
+}
+
+
+template<typename scalar_t>
+std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor& grad_out_, const Tensor& input, const Tensor& weight,
+                                                                    const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
+                                                                    bool train, double eps, std::array<bool,3> grad_input_mask) {
+
+  using accscalar_t = at::acc_type<scalar_t, false>;
+
+  Tensor grad_input;
+  Tensor grad_weight;
+  Tensor grad_bias;
+  if (grad_input_mask[0]) {
+    grad_input = at::empty_like(input);
+  }
+  if (grad_input_mask[1]) {
+    grad_weight = at::empty_like(weight);
+  }
+  if (grad_input_mask[2]) {
+    grad_bias = at::empty_like(weight);
+  }
+
+  auto weight_a = conditional_accessor_1d<scalar_t>(weight);
+  auto grad_weight_a = conditional_accessor_1d<scalar_t>(grad_weight);
+  auto grad_bias_a = conditional_accessor_1d<scalar_t>(grad_bias);
+
+  int64_t n_input = input.size(1);
+  int64_t n = input.numel() / n_input;
+
+  auto save_mean_a = conditional_accessor_1d<scalar_t>(save_mean);
+  auto save_invstd_a = conditional_accessor_1d<scalar_t>(save_invstd);
+
+  auto running_mean_a = conditional_accessor_1d<scalar_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<scalar_t>(running_var);
+
+
+  parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
+      for (int64_t f = b_begin; f < b_end; ++f) {
+        Tensor in = input.select(1, f);
+        Tensor grad_out = grad_out_.select(1, f);
+
+        scalar_t w = weight.defined() ? weight_a[f] : 1;
+
+        scalar_t mean, invstd;
+        if (train) {
+          mean = save_mean_a[f];
+          invstd = save_invstd_a[f];
+        } else {
+          mean = running_mean_a[f];
+          invstd = 1 / std::sqrt(running_var_a[f] + eps);
+        }
+
+        // sum over all gradOutput in feature plane
+        accscalar_t sum = 0;
+        CPU_tensor_apply1<scalar_t>(grad_out, [&](const scalar_t& g) {
+            sum += g;
+          });
+
+        // dot product of the Q(X) and gradOuput
+        accscalar_t dotp = 0;
+        CPU_tensor_apply2<scalar_t,scalar_t>(in, grad_out, [&](const scalar_t& i, const scalar_t& go) {
+            dotp += (i - mean) * go;
+          });
+
+        if (grad_input_mask[0]) {
+          Tensor grad_in = grad_input.select(1, f);
+          if (train) {
+            // when in training mode
+            // Q(X) = X - E[x] ; i.e. input centered to zero mean
+            // Y = Q(X) / σ    ; i.e. BN output before weight and bias
+            // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y) / σ * w
+
+            // projection of gradOutput on to output scaled by std
+            scalar_t k = (scalar_t) dotp * invstd * invstd / n;
+
+            CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, in, [&](scalar_t& gi, const scalar_t& i) {
+                gi = (i - mean)* k;
+              });
+
+            accscalar_t grad_mean = sum / n;
+            CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, grad_out, [&](scalar_t& gi, const scalar_t& go) {
+            gi = (go - grad_mean - gi) * invstd * w;
+              });
+          } else {
+            // when in evaluation mode
+            // Q(X) = X - running_mean  ; i.e. input centered to zero mean
+            // Y = Q(X) / running_std    ; i.e. BN output before weight and bias
+            // dL/dX = w / running_std
+            CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, grad_out, [&](scalar_t& gi, const scalar_t& go) {
+                gi = go * invstd * w;
+              });
+          }
+        }
+        if (grad_input_mask[1]) {
+          grad_weight_a[f] = dotp * invstd;
+        }
+
+        if (grad_input_mask[2]) {
+          grad_bias_a[f] = sum;
+        }
+      }
+    });
+  return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
 Tensor batch_norm(
@@ -49,7 +243,7 @@ Tensor batch_norm(
   }
 
   bool use_cudnn = false;
-  use_cudnn = (input.type().is_cuda()
+  use_cudnn = (input.is_cuda()
                && (input.type().scalarType() != at::kHalf
                  || weight.type().scalarType() == at::kFloat)
                && weight.defined() && bias.defined()
@@ -68,7 +262,7 @@ Tensor batch_norm(
                         training, momentum, eps));
   }
 
-  bool use_miopen = (input.type().is_cuda()
+  bool use_miopen = (input.is_cuda()
                && input.dim() <= MIOPEN_DIM_MAX
                && input.type().scalarType() != at::kDouble
                && (input.type().scalarType() == weight.type().scalarType())
@@ -86,9 +280,8 @@ Tensor batch_norm(
                         training, momentum, eps));
   }
 
-  return at::thnn_batch_norm(
-            input.contiguous(), weight, bias,
-            running_mean, running_var, training, momentum, eps);
+  return std::get<0>(at::native_batch_norm(input, weight, bias,
+                                           running_mean, running_var, training, momentum, eps));
 }
 
 Tensor instance_norm(
@@ -224,6 +417,22 @@ Tensor group_norm(const Tensor& input, int64_t num_groups,
     } else {
       return out.add(bias.view(affine_param_shape));
     }
+}
+
+std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const Tensor& weight, const Tensor& bias,
+                                                  const Tensor& running_mean, const Tensor& running_var,
+                                                  bool train, double momentum, double eps) {
+  return AT_DISPATCH_FLOATING_TYPES(self.type(), "batch_norm", [&] {
+      return batch_norm_cpu_template<scalar_t>(self, weight, bias, running_mean, running_var, train, momentum, eps);
+    });
+}
+
+std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_out, const Tensor& self, const Tensor& weight,
+                                                           const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
+                                                           bool train, double eps, std::array<bool,3> grad_input_mask) {
+  return AT_DISPATCH_FLOATING_TYPES(self.type(), "batch_norm_backward", [&] {
+      return batch_norm_backward_cpu_template<scalar_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, eps, grad_input_mask);
+    });
 }
 
 }} // at::native

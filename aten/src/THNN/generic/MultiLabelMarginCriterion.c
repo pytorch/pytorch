@@ -87,7 +87,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     }
 
     sum /= dim;
-    if (reduction == Reduction::ElementwiseMean)
+    if (reduction == Reduction::Mean)
       sum /= nframe;
     THTensor_(fastSet1d)(output, 0, sum);
 
@@ -197,7 +197,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   THTensor_(zero)(gradInput);
   gradInput_data = gradInput->data<scalar_t>();
 
-  g = reduction == Reduction::ElementwiseMean ? (1./((scalar_t)(nframe*dim))) : (1./((scalar_t)dim));
+  g = reduction == Reduction::Mean ? (1./((scalar_t)(nframe*dim))) : (1./((scalar_t)dim));
 
   for (t = 0; t < nframe; t++)
   {

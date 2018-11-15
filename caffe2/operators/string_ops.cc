@@ -9,16 +9,16 @@ bool StringJoinOp<CPUContext>::DoRunWithType() {
   const auto& input = Input(0);
   auto* output = Output(0);
   CAFFE_ENFORCE_GT(input.numel(), 0);
-  CAFFE_ENFORCE_LE(input.ndim(), 2, "Only 1-D and 2-D tensors are supported");
+  CAFFE_ENFORCE_LE(input.dim(), 2, "Only 1-D and 2-D tensors are supported");
 
   const auto* inputData = input.data<T>();
-  int rowSize = (input.ndim() == 2) ? input.dim(1) : 1;
+  int rowSize = (input.dim() == 2) ? input.size(1) : 1;
   if (this->axis_ == 0) {
-    output->Resize(input.dim(0));
+    output->Resize(input.size(0));
     auto* outputData = output->template mutable_data<std::string>();
 
     int offset = 0;
-    for (int i = 0; i < input.dim(0); ++i) {
+    for (int i = 0; i < input.size(0); ++i) {
       std::stringstream stream;
       std::copy(
           inputData + offset,
@@ -28,12 +28,12 @@ bool StringJoinOp<CPUContext>::DoRunWithType() {
       offset += rowSize;
     }
   } else if (this->axis_ == 1) {
-    output->Resize(input.dim(1));
+    output->Resize(input.size(1));
     auto* outputData = output->template mutable_data<std::string>();
 
-    for (int j = 0; j < input.dim(1); ++j) {
+    for (int j = 0; j < input.size(1); ++j) {
       std::stringstream stream;
-      for (int i = 0; i < input.dim(0); ++i) {
+      for (int i = 0; i < input.size(0); ++i) {
         stream << inputData[i * rowSize + j] << delimiter_;
       }
       outputData[j] = stream.str();

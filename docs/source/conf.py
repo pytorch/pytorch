@@ -167,8 +167,6 @@ def setup(app):
     # and can be moved outside of this function (and the setup(app) function
     # can be deleted).
     html_css_files = [
-        'https://fonts.googleapis.com/css?family=Lato',
-        'css/pytorch_theme.css',  # relative to paths in `html_static_path`
         'https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css'
     ]
 

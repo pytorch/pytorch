@@ -11,8 +11,8 @@ bool BatchOneHotOp<CPUContext>::DoRunWithType() {
   auto& input = Input(X);
   auto& lens = Input(LENS);
   auto& vals = Input(VALS);
-  CAFFE_ENFORCE_GE(input.ndim(), 1);
-  auto N = input.dim(0);
+  CAFFE_ENFORCE_GE(input.dim(), 1);
+  auto N = input.size(0);
   auto D = input.size_from_dim(1);
   CAFFE_ENFORCE_EQ(lens.numel(), D);
 
@@ -110,8 +110,8 @@ bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
   auto& input = Input(X);
   auto& lens = Input(LENS);
   auto& boundaries = Input(BOUNDARIES);
-  CAFFE_ENFORCE_GE(input.ndim(), 1);
-  auto N = input.dim(0);
+  CAFFE_ENFORCE_GE(input.dim(), 1);
+  auto N = input.size(0);
   auto D = input.size_from_dim(1);
   CAFFE_ENFORCE_EQ(lens.numel(), D);
 
@@ -176,8 +176,8 @@ class SegmentOneHotOp : public Operator<CPUContext> {
     auto& lengths = Input(0);
     auto& indices = Input(1);
     auto& index_size_tensor = Input(2);
-    CAFFE_ENFORCE(lengths.ndim() == 1);
-    CAFFE_ENFORCE(indices.ndim() == 1);
+    CAFFE_ENFORCE(lengths.dim() == 1);
+    CAFFE_ENFORCE(indices.dim() == 1);
     CAFFE_ENFORCE(index_size_tensor.numel() == 1);
     auto batch_size = lengths.numel();
     auto index_size = *index_size_tensor.data<int64_t>();

@@ -191,7 +191,7 @@ class EnsureDenseOp final : public Operator<Context> {
   bool RunOnDevice() override {
     const auto& input = Input(0);
     auto* output = Output(0);
-    CAFFE_ENFORCE_GT(input.ndim(), 0, "Input has to be at least a vector.");
+    CAFFE_ENFORCE_GT(input.dim(), 0, "Input has to be at least a vector.");
     // it is allowed to have the output inplace overwrite the input but also
     // allow the output to be copied from the input
     if (&input != output) {
@@ -509,10 +509,10 @@ class ScatterWeightedSumOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(&X0, output, "In place operation is required");
 
     CAFFE_ENFORCE_GT(X0.numel(), 0);
-    CAFFE_ENFORCE_GT(X0.ndim(), 0, "X0 has to be at least the vector");
+    CAFFE_ENFORCE_GT(X0.dim(), 0, "X0 has to be at least the vector");
     CAFFE_ENFORCE_EQ(weight0.numel(), 1);
     int64_t M = X0.numel();
-    int64_t N = X0.dim(0);
+    int64_t N = X0.size(0);
     int64_t K = indices.numel();
     int64_t block_size = M / N;
     T* data = output->template mutable_data<T>();
@@ -662,9 +662,9 @@ class ScatterAssignOp : public Operator<Context> {
     auto* output = Output(0);
     CAFFE_ENFORCE_EQ(&input, output, "In place operation is required");
 
-    CAFFE_ENFORCE_GT(input.ndim(), 0, "X0 has to be at least the vector");
+    CAFFE_ENFORCE_GT(input.dim(), 0, "X0 has to be at least the vector");
     int64_t M = input.numel();
-    int64_t N = input.dim(0);
+    int64_t N = input.size(0);
     int64_t K = indices.numel();
     int64_t block_size = M / N;
     CAFFE_ENFORCE_EQ(slices.numel(), block_size * K);
@@ -765,12 +765,12 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
   template <typename Index>
   bool DoRunWithType() {
     auto& input = Input(0);
-    if (input.ndim() == 2) {
+    if (input.dim() == 2) {
       CAFFE_ENFORCE(
           input.dim32(0) == 1 || input.dim32(1) == 1,
           "Input must be a vector.");
     } else {
-      CAFFE_ENFORCE_EQ(input.ndim(), 1, "Input must be a vector.");
+      CAFFE_ENFORCE_EQ(input.dim(), 1, "Input must be a vector.");
     }
     auto* input_data = input.template data<Index>();
     auto input_size = input.numel();
@@ -778,13 +778,13 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
     // segment id starts from 0
     auto num_segments = input_size ? input_data[input_size - 1] + 1 : 0;
     if (InputSize() > 1) {
-      CAFFE_ENFORCE_GE(Input(1).ndim(), 1);
+      CAFFE_ENFORCE_GE(Input(1).dim(), 1);
       CAFFE_ENFORCE_LE(
           num_segments,
-          Input(1).dim(0),
+          Input(1).size(0),
           "The number of segments inferred should *NOT* be larger "
           "than the size of Input(1)'s first dimension");
-      num_segments = Input(1).dim(0);
+      num_segments = Input(1).size(0);
     }
     CAFFE_ENFORCE(0 <= num_segments, "Indices must be in 0..K-1 range");
     output->Resize(num_segments);
@@ -829,13 +829,13 @@ class SegmentIdsToRangesOp : public Operator<Context> {
     // segment id starts from 0
     auto num_segments = input_size ? input_data[input_size - 1] + 1 : 0;
     if (InputSize() > 1) {
-      CAFFE_ENFORCE_GE(Input(1).ndim(), 1);
+      CAFFE_ENFORCE_GE(Input(1).dim(), 1);
       CAFFE_ENFORCE_LE(
           num_segments,
-          Input(1).dim(0),
+          Input(1).size(0),
           "The number of segments inferred should *NOT* be larger "
           "than the size of Input(1)'s first dimension");
-      num_segments = Input(1).dim(0);
+      num_segments = Input(1).size(0);
     }
     CAFFE_ENFORCE(0 <= num_segments, "Indices must be in 0..K-1 range");
     output->Resize(num_segments, 2);
@@ -1012,12 +1012,12 @@ class GatherRangesOp : public Operator<Context> {
     auto* outputData = Output(0);
     auto* outputLengths = Output(1);
 
-    auto batchSize = ranges.dim(0);
-    CAFFE_ENFORCE(data.ndim() == 1, "Data has to be 1-D");
-    CAFFE_ENFORCE(ranges.ndim() == 3, "Ranges must be 3-D");
-    CAFFE_ENFORCE(ranges.dim(1) > 0, "There has to be at least one range");
+    auto batchSize = ranges.size(0);
+    CAFFE_ENFORCE(data.dim() == 1, "Data has to be 1-D");
+    CAFFE_ENFORCE(ranges.dim() == 3, "Ranges must be 3-D");
+    CAFFE_ENFORCE(ranges.size(1) > 0, "There has to be at least one range");
     CAFFE_ENFORCE_EQ(
-        ranges.dim(2), 2, "Ranges last dimention should be of size 2");
+        ranges.size(2), 2, "Ranges last dimention should be of size 2");
 
     auto* rawData = static_cast<const char*>(data.raw_data());
     auto* rangesData = ranges.template data<Index>();
@@ -1091,9 +1091,9 @@ class LengthsGatherOp : public Operator<Context> {
     auto& indices = Input(INDICES);
     auto* output = Output(0);
 
-    CAFFE_ENFORCE_GE(items.ndim(), 1, "ITEMS should be at least 1-D");
-    CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTHS should be 1-D");
-    CAFFE_ENFORCE_EQ(indices.ndim(), 1, "INDICES should be 1-D");
+    CAFFE_ENFORCE_GE(items.dim(), 1, "ITEMS should be at least 1-D");
+    CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTHS should be 1-D");
+    CAFFE_ENFORCE_EQ(indices.dim(), 1, "INDICES should be 1-D");
 
     const auto* lengths_data = lengths.template data<int32_t>();
     const auto* indices_data = indices.template data<Index>();
@@ -1116,7 +1116,7 @@ class LengthsGatherOp : public Operator<Context> {
       running_offset += lengths_data[i];
     }
     CAFFE_ENFORCE_EQ(
-        items.dim(0),
+        items.size(0),
         running_offset,
         "LENGTHS must match the first dimension of ITEMS");
 
@@ -1234,7 +1234,7 @@ class RangeOp : public Operator<Context> {
     T step = 1;
 
     for (int i = 0; i < InputSize(); ++i) {
-      CAFFE_ENFORCE_EQ(Input(0).ndim(), 0, "All inputs must be scalar.");
+      CAFFE_ENFORCE_EQ(Input(0).dim(), 0, "All inputs must be scalar.");
     }
 
     switch (InputSize()) {

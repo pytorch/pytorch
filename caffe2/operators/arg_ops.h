@@ -31,7 +31,7 @@ class ArgOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     if (axis_ == -1) {
       axis_ = ndim - 1;
     }

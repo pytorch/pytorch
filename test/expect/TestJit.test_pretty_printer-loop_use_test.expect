@@ -1,15 +1,10 @@
-def script(y1):
-  x = aten::add(y1, 1, 1)
-  z1 = aten::add(x, 5, 1)
-  t9 = aten::lt(y1, 8)
-  t10 = prim::TensorToBool(t9)
-  y = y1
-  z = z1
-  t11 = t10
-  while t11:
-    y2 = aten::add(y, 1, 1)
-    t17 = aten::lt(y2, 8)
-    t11 = prim::TensorToBool(t17)
-    y = y2
-    z = x
-  return (x, z)
+def script(self,
+    y_1: Tensor) -> Tuple[Tensor, Tensor]:
+  x = aten.add(y_1, 1, 1)
+  z_1 = aten.add(x, 5, 1)
+  y, z = y_1, z_1
+  t = bool(aten.lt(y_1, 8))
+  while t:
+    y_2 = aten.add_(y, 1, 1)
+    t, y, z = bool(aten.lt(y_2, 8)), y_2, x
+  return x, z

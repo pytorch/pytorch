@@ -37,31 +37,31 @@ class GatherRangesToDenseOp final : public Operator<Context> {
   bool DoRunWithType() {
     auto& data = Input(DATA);
     auto& ranges = Input(RANGES);
-    CAFFE_ENFORCE_EQ(data.ndim(), 1, "Data has to be 1-D");
-    CAFFE_ENFORCE_EQ(ranges.ndim(), 3, "Ranges has to be 3-D");
+    CAFFE_ENFORCE_EQ(data.dim(), 1, "Data has to be 1-D");
+    CAFFE_ENFORCE_EQ(ranges.dim(), 3, "Ranges has to be 3-D");
     if (InputSize() == 3) {
       auto& key = Input(KEY);
-      CAFFE_ENFORCE_EQ(key.ndim(), 1, "Key has to be 1-D");
+      CAFFE_ENFORCE_EQ(key.dim(), 1, "Key has to be 1-D");
       CAFFE_ENFORCE(
           key.dtype().template Match<int64_t>(), "Key has to be type int64_t");
     }
     CAFFE_ENFORCE_EQ(
-        ranges.dim(1),
+        ranges.size(1),
         lengths_.size(),
         "Nummber of ranges should match number of lengths");
     CAFFE_ENFORCE_EQ(
-        ranges.dim(1),
+        ranges.size(1),
         OutputSize(),
         "Nummber of ranges should match number of outputs");
     CAFFE_ENFORCE_EQ(
-        ranges.dim(2), 2, "Ranges last dimension should be of size 2");
+        ranges.size(2), 2, "Ranges last dimension should be of size 2");
 
     auto* rawData = static_cast<const char*>(data.raw_data());
     auto* rangesData = ranges.template data<Index>();
     int rangesDataOffset = 0;
     auto itemsize = data.dtype().itemsize();
 
-    auto batchSize = ranges.dim(0);
+    auto batchSize = ranges.size(0);
     vector<int64_t> outputDims{batchSize, 0};
     vector<char*> outputRawData;
     for (int i = 0; i < OutputSize(); ++i) {

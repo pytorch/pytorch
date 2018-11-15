@@ -149,7 +149,7 @@ class TestCppExtension(common.TestCase):
 
     def test_inline_jit_compile_extension_with_functions_as_list(self):
         cpp_source = '''
-        at::Tensor tanh_add(at::Tensor x, at::Tensor y) {
+        torch::Tensor tanh_add(torch::Tensor x, torch::Tensor y) {
           return x.tanh() + y.tanh();
         }
         '''
@@ -170,7 +170,7 @@ class TestCppExtension(common.TestCase):
 
     def test_inline_jit_compile_extension_with_functions_as_dict(self):
         cpp_source = '''
-        at::Tensor tanh_add(at::Tensor x, at::Tensor y) {
+        torch::Tensor tanh_add(torch::Tensor x, torch::Tensor y) {
           return x.tanh() + y.tanh();
         }
         '''
@@ -186,14 +186,14 @@ class TestCppExtension(common.TestCase):
 
     def test_inline_jit_compile_extension_multiple_sources_and_no_functions(self):
         cpp_source1 = '''
-        at::Tensor sin_add(at::Tensor x, at::Tensor y) {
+        torch::Tensor sin_add(torch::Tensor x, torch::Tensor y) {
           return x.sin() + y.sin();
         }
         '''
 
         cpp_source2 = '''
         #include <torch/extension.h>
-        at::Tensor sin_add(at::Tensor x, at::Tensor y);
+        torch::Tensor sin_add(torch::Tensor x, torch::Tensor y);
         PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           m.def("sin_add", &sin_add, "sin(x) + sin(y)");
         }
@@ -224,8 +224,8 @@ class TestCppExtension(common.TestCase):
           }
         }
 
-        at::Tensor cos_add(at::Tensor x, at::Tensor y) {
-          auto output = at::zeros_like(x);
+        torch::Tensor cos_add(torch::Tensor x, torch::Tensor y) {
+          auto output = torch::zeros_like(x);
           const int threads = 1024;
           const int blocks = (output.numel() + threads - 1) / threads;
           cos_add_kernel<<<blocks, threads>>>(x.data<float>(), y.data<float>(), output.data<float>(), output.numel());
@@ -234,7 +234,7 @@ class TestCppExtension(common.TestCase):
         '''
 
         # Here, the C++ source need only declare the function signature.
-        cpp_source = 'at::Tensor cos_add(at::Tensor x, at::Tensor y);'
+        cpp_source = 'torch::Tensor cos_add(torch::Tensor x, torch::Tensor y);'
 
         module = torch.utils.cpp_extension.load_inline(
             name='inline_jit_extension_cuda',
@@ -258,7 +258,7 @@ class TestCppExtension(common.TestCase):
 
     def test_lenient_flag_handling_in_jit_extensions(self):
         cpp_source = '''
-        at::Tensor tanh_add(at::Tensor x, at::Tensor y) {
+        torch::Tensor tanh_add(torch::Tensor x, torch::Tensor y) {
           return x.tanh() + y.tanh();
         }
         '''
@@ -303,8 +303,8 @@ class TestCppExtension(common.TestCase):
             }
         }
 
-        at::Tensor half_test(at::Tensor input) {
-            auto output = at::empty(1, input.options().dtype(at::kFloat));
+        torch::Tensor half_test(torch::Tensor input) {
+            auto output = torch::empty(1, input.options().dtype(torch::kFloat));
             AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "half_test", [&] {
                 half_test_kernel<scalar_t><<<1, 1>>>(
                     input.data<scalar_t>(),
@@ -316,7 +316,7 @@ class TestCppExtension(common.TestCase):
 
         module = torch.utils.cpp_extension.load_inline(
             name='half_test_extension',
-            cpp_sources='at::Tensor half_test(at::Tensor input);',
+            cpp_sources='torch::Tensor half_test(torch::Tensor input);',
             cuda_sources=cuda_source,
             functions=['half_test'],
             verbose=True)
@@ -353,7 +353,6 @@ class TestCppExtension(common.TestCase):
             name='cpp_api_extension',
             sources='cpp_extensions/cpp_api_extension.cpp',
             extra_include_paths=api_include,
-            extra_cflags=[] if IS_WINDOWS else ['-UTORCH_API_INCLUDE_EXTENSION_H'],
             verbose=True)
 
         net = module.Net(3, 5)

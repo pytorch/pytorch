@@ -1,17 +1,24 @@
 #include "torch/csrc/utils/tensor_flatten.h"
 
+#include <map>
 #include <unordered_map>
 
 namespace torch { namespace utils {
 
 using namespace at;
 
-std::vector<TensorGroup> take_tensors(TensorList tensors, size_t size_limit) {
+std::vector<TensorGroup> take_tensors(
+    TensorList tensors,
+    size_t size_limit,
+    bool fine_grained) {
   std::vector<TensorGroup> results;
-  results.reserve(tensors.size()); // an overapproximation, but at least we won't have to copy stuff around
-  std::unordered_map<at::Type*, TensorGroup> groups;
+  // an overapproximation, but at least we won't have to copy stuff around
+  results.reserve(tensors.size());
+  std::map<TypeID, TensorGroup> groups;
+  size_t cur_group_size = 0;
+
   for (const auto & tensor : tensors) {
-    auto & type = tensor.type();
+    auto& type = tensor.type();
     size_t tensor_size;
     if (type.is_sparse()) {
       const auto& indices = tensor._indices();
@@ -21,20 +28,37 @@ std::vector<TensorGroup> take_tensors(TensorList tensors, size_t size_limit) {
     } else {
       tensor_size = tensor.numel() * type.elementSizeInBytes();
     }
-    auto & type_group = groups[&type];
+
+    auto& type_group = groups[type.ID()];
     type_group.tensors.push_back(tensor);
-    type_group.size += tensor_size;
-    if (type_group.size + tensor_size >= size_limit) {
-      results.emplace_back();
-      std::swap(results.back(), type_group);
+
+    if (fine_grained) {
+      cur_group_size += tensor_size;
+      // Regardless the type, the current total size exceeds the limit
+      if (cur_group_size >= size_limit) {
+        // Spill all types to separate groups in results
+        for (auto& entry : groups) {
+          auto& group = entry.second;
+          results.emplace_back(std::move(group));
+        }
+        cur_group_size = 0;
+        groups.clear();
+      }
+    } else {
+      type_group.size += tensor_size;
+      if (type_group.size >= size_limit) {
+        results.emplace_back();
+        std::swap(results.back(), type_group);
+      }
     }
   }
   // End case. Look for any remaining groups and return them.
-  for (auto & entry : groups) {
-    auto & group = entry.second;
-    if (group.size > 0) {
-      results.emplace_back(std::move(group));
+  for (auto& entry : groups) {
+    auto& group = entry.second;
+    if (!fine_grained && group.size == 0) {
+      continue;
     }
+    results.emplace_back(std::move(group));
   }
   return results;
 }

@@ -3,7 +3,8 @@
 #include <torch/nn/module.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/rnn.h>
-#include <torch/tensor.h>
+#include <torch/nn/modules/sequential.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>
@@ -39,13 +40,13 @@ TEST_F(ModuleTest, ZeroGrad) {
   auto loss = module->forward(weight).sum();
   loss.backward();
   for (auto& parameter : module->parameters()) {
-    auto grad = parameter->grad();
+    auto grad = parameter.grad();
     ASSERT_TRUE(grad.defined());
     ASSERT_NE(grad.sum().item<float>(), 0);
   }
   module->zero_grad();
   for (auto& parameter : module->parameters()) {
-    auto grad = parameter->grad();
+    auto grad = parameter.grad();
     ASSERT_TRUE(grad.defined());
     ASSERT_EQ(grad.sum().item<float>(), 0);
   }
@@ -54,8 +55,8 @@ TEST_F(ModuleTest, ZeroGrad) {
 TEST_F(ModuleTest, ZeroGradWithUndefined) {
   struct TestModule : torch::nn::Module {
     TestModule() {
-      x = register_parameter("x", torch::ones(5, at::requires_grad()));
-      y = register_parameter("y", torch::ones(5, at::requires_grad()));
+      x = register_parameter("x", torch::ones(5, torch::requires_grad()));
+      y = register_parameter("y", torch::ones(5, torch::requires_grad()));
     }
     torch::Tensor x, y;
   };
@@ -148,13 +149,13 @@ TEST_F(ModuleTest, CanGetName) {
   AGIUnit agi;
   // Call it twice just to make sure there are no bugs in the lazy
   // initialization semantics.
-  EXPECT_TRUE(agi.name() == "AGIUnit");
-  EXPECT_TRUE(agi.name() == "AGIUnit");
-  EXPECT_TRUE(test::AGIUnit().name() == "test::AGIUnit");
-  EXPECT_TRUE(test::AGIUnit2().name() == "Foo");
+  EXPECT_EQ(agi.name(), "AGIUnit");
+  EXPECT_EQ(agi.name(), "AGIUnit");
+  EXPECT_EQ(test::AGIUnit().name(), "test::AGIUnit");
+  EXPECT_EQ(test::AGIUnit2().name(), "Foo");
 }
 
-TEST_F(ModuleTest, TestAsCastsModulesCorrectly) {
+TEST_F(ModuleTest, AsCastsModulesCorrectly) {
   Linear module(3, 4);
   ASSERT_EQ(module->as<Linear>(), module.get());
   ASSERT_EQ(module->as<LinearImpl>(), module.get());
@@ -185,47 +186,47 @@ TEST_F(ModuleTest, TestAsCastsModulesCorrectly) {
 TEST_F(ModuleTest, Conversion_MultiCUDA) {
   Linear module(128, 64);
   for (auto& parameter : module->parameters()) {
-    ASSERT_EQ(parameter->device(), torch::Device(torch::kCPU));
-    ASSERT_EQ(parameter->dtype(), torch::kFloat32);
+    ASSERT_EQ(parameter.device(), torch::Device(torch::kCPU));
+    ASSERT_EQ(parameter.dtype(), torch::kFloat32);
   }
   {
     module->to({torch::kCUDA, 0});
     for (auto& parameter : module->parameters()) {
-      ASSERT_EQ(parameter->device().type(), torch::Device::Type::CUDA);
-      ASSERT_EQ(parameter->device().index(), 0);
+      ASSERT_EQ(parameter.device().type(), torch::Device::Type::CUDA);
+      ASSERT_EQ(parameter.device().index(), 0);
     }
-    module->to({at::kCUDA, 1});
+    module->to({torch::kCUDA, 1});
     for (auto& parameter : module->parameters()) {
-      ASSERT_EQ(parameter->device().type(), torch::Device::Type::CUDA);
-      ASSERT_EQ(parameter->device().index(), 1);
+      ASSERT_EQ(parameter.device().type(), torch::Device::Type::CUDA);
+      ASSERT_EQ(parameter.device().index(), 1);
     }
   }
   {
     module->to(torch::Device(torch::kCPU));
     for (auto& parameter : module->parameters()) {
-      ASSERT_EQ(parameter->device().type(), torch::Device::Type::CPU);
+      ASSERT_EQ(parameter.device().type(), torch::Device::Type::CPU);
     }
   }
   {
     module->to(torch::kInt32);
     for (auto& parameter : module->parameters()) {
-      ASSERT_EQ(parameter->dtype(), torch::kInt32);
+      ASSERT_EQ(parameter.dtype(), torch::kInt32);
     }
   }
   {
     module->to(torch::kFloat64);
     for (auto& parameter : module->parameters()) {
-      ASSERT_EQ(parameter->dtype(), torch::kFloat64);
+      ASSERT_EQ(parameter.dtype(), torch::kFloat64);
     }
   }
   {
     module->to(torch::Device(torch::kCUDA, 1), torch::kUInt8);
     for (auto& parameter : module->parameters()) {
-      ASSERT_EQ(parameter->device().type(), torch::Device::Type::CUDA);
-      ASSERT_EQ(parameter->device().index(), 1);
+      ASSERT_EQ(parameter.device().type(), torch::Device::Type::CUDA);
+      ASSERT_EQ(parameter.device().index(), 1);
     }
     for (auto& parameter : module->parameters()) {
-      ASSERT_EQ(parameter->dtype(), torch::kUInt8);
+      ASSERT_EQ(parameter.dtype(), torch::kUInt8);
     }
   }
 }
@@ -268,30 +269,30 @@ TEST_F(ModuleTest, CloneCreatesDistinctParameters) {
   torch::NoGradGuard no_grad;
 
   auto module2 = module->clone();
-  auto params1 = module->parameters();
-  auto params2 = module2->parameters();
+  auto params1 = module->named_parameters();
+  auto params2 = module2->named_parameters();
   ASSERT_EQ(params1.size(), 6);
   ASSERT_EQ(params2.size(), 6);
   for (auto& param : params1) {
-    ASSERT_FALSE(pointer_equal(param.value, params2[param.key]));
-    ASSERT_TRUE(param->allclose(params2[param.key]));
+    ASSERT_FALSE(pointer_equal(param.value(), params2[param.key()]));
+    ASSERT_TRUE(param->allclose(params2[param.key()]));
     param->add_(2);
   }
   for (auto& param : params1) {
-    ASSERT_FALSE(param->allclose(params2[param.key]));
+    ASSERT_FALSE(param->allclose(params2[param.key()]));
   }
 
-  auto buffers1 = module->buffers();
-  auto buffers2 = module2->buffers();
+  auto buffers1 = module->named_buffers();
+  auto buffers2 = module2->named_buffers();
   ASSERT_EQ(buffers1.size(), 1);
   ASSERT_EQ(buffers2.size(), 1);
   for (auto& buffer : buffers1) {
-    ASSERT_FALSE(pointer_equal(buffer.value, buffers2[buffer.key]));
-    ASSERT_TRUE(buffer->allclose(buffers2[buffer.key]));
+    ASSERT_FALSE(pointer_equal(buffer.value(), buffers2[buffer.key()]));
+    ASSERT_TRUE(buffer->allclose(buffers2[buffer.key()]));
     buffer->add_(2);
   }
   for (auto& buffer : buffers1) {
-    ASSERT_FALSE(buffer->allclose(buffers2[buffer.key]));
+    ASSERT_FALSE(buffer->allclose(buffers2[buffer.key()]));
   }
 }
 
@@ -310,16 +311,19 @@ TEST_F(ModuleTest, ClonePreservesExternalReferences) {
     torch::NoGradGuard no_grad;
     module->weight += 1;
   }
-  ASSERT_TRUE(pointer_equal(module->weight, module->parameters()["weight"]));
-  ASSERT_TRUE(module->weight.allclose(module->parameters()["weight"]));
+  ASSERT_TRUE(
+      pointer_equal(module->weight, module->named_parameters()["weight"]));
+  ASSERT_TRUE(module->weight.allclose(module->named_parameters()["weight"]));
 
   auto module2 = std::dynamic_pointer_cast<TestModule>(
       std::shared_ptr<Module>(module->clone()));
   ASSERT_FALSE(pointer_equal(module2->weight, module->weight));
-  ASSERT_TRUE(pointer_equal(module2->weight, module2->parameters()["weight"]));
-  ASSERT_TRUE(module2->weight.allclose(module2->parameters()["weight"]));
+  ASSERT_TRUE(
+      pointer_equal(module2->weight, module2->named_parameters()["weight"]));
+  ASSERT_TRUE(module2->weight.allclose(module2->named_parameters()["weight"]));
   ASSERT_TRUE(module2->weight.allclose(module->weight));
-  ASSERT_FALSE(pointer_equal(module2->weight, module->parameters()["weight"]));
+  ASSERT_FALSE(
+      pointer_equal(module2->weight, module->named_parameters()["weight"]));
 }
 
 TEST_F(ModuleTest, CloneCopiesTheValuesOfVariablesOfSubmodules) {
@@ -354,9 +358,10 @@ TEST_F(ModuleTest, CloneCopiesTheValuesOfVariablesOfSubmodules) {
   auto b = std::dynamic_pointer_cast<NestedModule>(a->clone());
 
   ASSERT_FALSE(pointer_equal(b->module->weight, a->module->weight));
+  ASSERT_TRUE(pointer_equal(
+      b->module->weight, b->module->named_parameters()["weight"]));
   ASSERT_TRUE(
-      pointer_equal(b->module->weight, b->module->parameters()["weight"]));
-  ASSERT_TRUE(b->module->parameters()["weight"].allclose(a->module->weight));
+      b->module->named_parameters()["weight"].allclose(a->module->weight));
   ASSERT_TRUE(b->module->weight.allclose(a->module->weight));
   ASSERT_EQ(b->module->value, a->module->value);
 }
@@ -384,16 +389,18 @@ TEST_F(ModuleTest, CloneToDevicePreservesTheDeviceOfParameters_CUDA) {
 
   auto clone = m.clone();
   for (const auto& parameter : clone->parameters()) {
-    ASSERT_EQ(parameter->device().type(), device.type());
-    ASSERT_EQ(parameter->device().index(), device.index());
+    ASSERT_EQ(parameter.device().type(), device.type());
+    ASSERT_EQ(parameter.device().index(), device.index());
   }
   for (const auto& buffer : clone->buffers()) {
-    ASSERT_EQ(buffer->device().type(), device.type());
-    ASSERT_EQ(buffer->device().index(), device.index());
+    ASSERT_EQ(buffer.device().type(), device.type());
+    ASSERT_EQ(buffer.device().index(), device.index());
   }
 }
 
-TEST_F(ModuleTest, CloningToAParticularDevicePlacesAllParametersThere_CUDA) {
+TEST_F(
+    ModuleTest,
+    CloningToAParticularDevicePlacesAllParametersThere_MultiCUDA) {
   struct TestModule : public Cloneable<TestModule> {
     TestModule() {
       reset();
@@ -414,12 +421,12 @@ TEST_F(ModuleTest, CloningToAParticularDevicePlacesAllParametersThere_CUDA) {
   // everything is on CPU here
   auto clone = m.clone(device);
   for (const auto& parameter : clone->parameters()) {
-    ASSERT_EQ(parameter->device().type(), device.type());
-    ASSERT_EQ(parameter->device().index(), device.index());
+    ASSERT_EQ(parameter.device().type(), device.type());
+    ASSERT_EQ(parameter.device().index(), device.index());
   }
   for (const auto& buffer : clone->buffers()) {
-    ASSERT_EQ(buffer->device().type(), device.type());
-    ASSERT_EQ(buffer->device().index(), device.index());
+    ASSERT_EQ(buffer.device().type(), device.type());
+    ASSERT_EQ(buffer.device().index(), device.index());
   }
 }
 
@@ -436,11 +443,12 @@ struct ParameterTestModule : Module {
 TEST_F(ModuleTest, HasCorrectNumberOfParameters) {
   ParameterTestModule module;
   ASSERT_EQ(module.parameters().size(), 3);
+  ASSERT_EQ(module.named_parameters().size(), 3);
 }
 
 TEST_F(ModuleTest, ContainsParametersWithTheCorrectName) {
   ParameterTestModule module;
-  auto parameters = module.parameters();
+  auto parameters = module.named_parameters();
   ASSERT_TRUE(parameters.contains("a"));
   ASSERT_TRUE(parameters.contains("b"));
   ASSERT_TRUE(parameters.contains("c"));
@@ -459,11 +467,12 @@ struct BufferTestModule : Module {
 TEST_F(ModuleTest, HasCorrectNumberOfBuffers) {
   BufferTestModule module;
   ASSERT_EQ(module.buffers().size(), 3);
+  ASSERT_EQ(module.named_buffers().size(), 3);
 }
 
 TEST_F(ModuleTest, ContainsBuffersWithTheCorrectName) {
   BufferTestModule module;
-  auto buffers = module.buffers();
+  auto buffers = module.named_buffers();
   ASSERT_TRUE(buffers.contains("a"));
   ASSERT_TRUE(buffers.contains("b"));
   ASSERT_TRUE(buffers.contains("c"));
@@ -499,4 +508,326 @@ TEST_F(ModuleTest, NullptrConstructorLeavesTheModuleHolderInEmptyState) {
   ASSERT_FALSE(a);
   ASSERT_TRUE(a.is_empty());
   ASSERT_THROWS_WITH(a->x_, "Accessing empty ModuleHolder");
+}
+
+struct TestModule : public torch::nn::Module {
+  TestModule(int64_t size) {
+    p1 = register_parameter("p1", torch::randn({size}));
+    p2 = register_parameter("p2", torch::randn({size}));
+    b1 = register_buffer("b1", torch::randn({size}));
+    b2 = register_buffer("b2", torch::randn({size}));
+  }
+
+  torch::Tensor forward(torch::Tensor input) {
+    return input;
+  }
+
+  torch::Tensor p1, p2, b1, b2;
+};
+
+TEST_F(ModuleTest, ModulesReturnsExpectedSubmodulesForFlatModel) {
+  torch::nn::Sequential model(TestModule(1), TestModule(2), TestModule(3));
+  std::vector<std::shared_ptr<torch::nn::Module>> modules = model->modules();
+  std::vector<std::shared_ptr<torch::nn::Module>> expected = {
+      model.ptr(), model[0], model[1], model[2]};
+  ASSERT_EQ(modules.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    // Assert pointer equality.
+    ASSERT_EQ(modules[i].get(), expected[i].get());
+  }
+}
+
+TEST_F(ModuleTest, ModulesExcludesSelfWhenIncludeSelfSetToFalse) {
+  torch::nn::Sequential model(TestModule(1), TestModule(2), TestModule(3));
+  std::vector<std::shared_ptr<torch::nn::Module>> modules =
+      model->modules(/*include_self=*/false);
+  std::vector<std::shared_ptr<torch::nn::Module>> expected = {
+      model[0], model[1], model[2]};
+  ASSERT_EQ(modules.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    // Assert pointer equality.
+    ASSERT_EQ(modules[i].get(), expected[i].get());
+  }
+}
+
+TEST_F(ModuleTest, NamedModulesReturnsExpectedNamedSubmodulesForFlatModel) {
+  torch::nn::Sequential model(TestModule(1), TestModule(2), TestModule(3));
+  torch::OrderedDict<std::string, std::shared_ptr<torch::nn::Module>> modules =
+      model->named_modules();
+  std::vector<std::shared_ptr<torch::nn::Module>> expected = {
+      model.ptr(), model[0], model[1], model[2]};
+  ASSERT_EQ(modules.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    // Assert pointer equality.
+    ASSERT_EQ(modules[i].key(), i ? std::to_string(i - 1) : std::string());
+    ASSERT_EQ(modules[i].value().get(), expected[i].get());
+  }
+}
+
+TEST_F(ModuleTest, NamedModulesExcludesSelfWhenIncludeSelfSetToFalse) {
+  torch::nn::Sequential model(TestModule(1), TestModule(2), TestModule(3));
+  torch::OrderedDict<std::string, std::shared_ptr<torch::nn::Module>> modules =
+      model->named_modules(
+          /*name_prefix=*/std::string(), /*include_self=*/false);
+  std::vector<std::shared_ptr<torch::nn::Module>> expected = {
+      model[0], model[1], model[2]};
+  ASSERT_EQ(modules.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    // Assert pointer equality.
+    ASSERT_EQ(modules[i].key(), std::to_string(i));
+    ASSERT_EQ(modules[i].value().get(), expected[i].get());
+  }
+}
+
+TEST_F(ModuleTest, ChildrenReturnsExpectedSubmodulesForFlatModel) {
+  torch::nn::Sequential model(TestModule(1), TestModule(2), TestModule(3));
+  std::vector<std::shared_ptr<torch::nn::Module>> modules = model->children();
+  std::vector<std::shared_ptr<torch::nn::Module>> expected = {
+      model[0], model[1], model[2]};
+  ASSERT_EQ(modules.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    // Assert pointer equality.
+    ASSERT_EQ(modules[i].get(), expected[i].get());
+  }
+
+  // For this flat model, this should be true.
+  ASSERT_EQ(modules, model->modules(/*include_self=*/false));
+}
+
+TEST_F(ModuleTest, NamedChildrenReturnsExpectedNamedSubmodulesForFlatModel) {
+  torch::nn::Sequential model(TestModule(1), TestModule(2), TestModule(3));
+  torch::OrderedDict<std::string, std::shared_ptr<torch::nn::Module>> modules =
+      model->named_children();
+  std::vector<std::shared_ptr<torch::nn::Module>> expected = {
+      model[0], model[1], model[2]};
+  ASSERT_EQ(modules.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    // Assert pointer equality.
+    ASSERT_EQ(modules[i].key(), std::to_string(i));
+    ASSERT_EQ(modules[i].value().get(), expected[i].get());
+  }
+}
+
+TEST_F(ModuleTest, ParametersReturnsExpectedTensorsForFlatModel) {
+  TestModule module(1);
+  std::vector<torch::Tensor> parameters = module.parameters();
+  ASSERT_EQ(parameters.size(), 2);
+  ASSERT_EQ(parameters[0].data<float>(), module.p1.data<float>());
+  ASSERT_EQ(parameters[1].data<float>(), module.p2.data<float>());
+}
+
+TEST_F(ModuleTest, NamedParametersReturnsExpectedTensorsForFlatModel) {
+  TestModule module(1);
+  torch::OrderedDict<std::string, torch::Tensor> parameters =
+      module.named_parameters();
+  ASSERT_EQ(parameters.size(), 2);
+  ASSERT_EQ(parameters[0].key(), "p1");
+  ASSERT_EQ(parameters[0]->data<float>(), module.p1.data<float>());
+  ASSERT_EQ(parameters[1].key(), "p2");
+  ASSERT_EQ(parameters[1]->data<float>(), module.p2.data<float>());
+}
+
+TEST_F(ModuleTest, BuffersReturnsExpectedTensorsForFlatModel) {
+  TestModule module(1);
+  std::vector<torch::Tensor> buffers = module.buffers();
+  ASSERT_EQ(buffers.size(), 2);
+  ASSERT_EQ(buffers[0].data<float>(), module.b1.data<float>());
+  ASSERT_EQ(buffers[1].data<float>(), module.b2.data<float>());
+}
+
+TEST_F(ModuleTest, NamedBuffersReturnsExpectedTensorsForFlatModel) {
+  TestModule module(1);
+  torch::OrderedDict<std::string, torch::Tensor> buffers =
+      module.named_buffers();
+  ASSERT_EQ(buffers.size(), 2);
+  ASSERT_EQ(buffers[0].key(), "b1");
+  ASSERT_EQ(buffers[0]->data<float>(), module.b1.data<float>());
+  ASSERT_EQ(buffers[1].key(), "b2");
+  ASSERT_EQ(buffers[1]->data<float>(), module.b2.data<float>());
+}
+
+struct TestContainer : torch::nn::Module {
+  TestContainer(int64_t number, std::vector<TestContainer> modules = {})
+      : tensor(torch::tensor(number)) {
+    for (size_t i = 0; i < modules.size(); ++i) {
+      register_module(
+          std::to_string(i),
+          std::make_shared<TestContainer>(std::move(modules[i])));
+    }
+  }
+  torch::Tensor tensor;
+};
+
+int64_t get_test_container_item(std::shared_ptr<torch::nn::Module> module) {
+  return std::dynamic_pointer_cast<TestContainer>(module)
+      ->tensor.item<int64_t>();
+}
+
+std::shared_ptr<TestContainer> make_deeply_nested_test_container() {
+  return std::make_shared<TestContainer>(TestContainer(
+      0,
+      {TestContainer(1, {TestContainer(2), TestContainer(3)}),
+       TestContainer(4),
+       TestContainer(
+           5,
+           {TestContainer(6),
+            TestContainer(7, {TestContainer(8), TestContainer(9)})})}));
+}
+
+std::vector<std::pair<std::string, int64_t>>
+make_key_value_pairs_for_deeply_nested_container() {
+  return {{"test_prefix", 0},
+          {"test_prefix.0", 1},
+          {"test_prefix.0.0", 2},
+          {"test_prefix.0.1", 3},
+          {"test_prefix.1", 4},
+          {"test_prefix.2", 5},
+          {"test_prefix.2.0", 6},
+          {"test_prefix.2.1", 7},
+          {"test_prefix.2.1.0", 8},
+          {"test_prefix.2.1.1", 9}};
+}
+
+TEST_F(ModuleTest, ModulesReturnsExpectedSubmodulesForDeepModel) {
+  auto model = make_deeply_nested_test_container();
+  std::vector<std::shared_ptr<torch::nn::Module>> modules = model->modules();
+
+  ASSERT_EQ(modules.size(), 10);
+  for (size_t i = 0; i < modules.size(); ++i) {
+    ASSERT_EQ(get_test_container_item(modules[i]), i);
+  }
+}
+
+TEST_F(ModuleTest, NamedModulesReturnsExpectedNamedSubmodulesForDeepModel) {
+  auto model = make_deeply_nested_test_container();
+  torch::OrderedDict<std::string, std::shared_ptr<torch::nn::Module>> modules =
+      model->named_modules(/*name_prefix=*/"test_prefix");
+  auto expected = make_key_value_pairs_for_deeply_nested_container();
+
+  ASSERT_EQ(modules.size(), expected.size());
+
+  for (size_t i = 0; i < expected.size(); ++i) {
+    ASSERT_EQ(modules[i].key(), expected[i].first);
+    ASSERT_EQ(get_test_container_item(modules[i].value()), expected[i].second);
+  }
+}
+
+TEST_F(ModuleTest, ChildrensReturnsExpectedSubmodulesForDeepModel) {
+  auto model = make_deeply_nested_test_container();
+  std::vector<std::shared_ptr<torch::nn::Module>> modules = model->children();
+
+  ASSERT_EQ(modules.size(), 3);
+  ASSERT_EQ(get_test_container_item(modules[0]), 1);
+  ASSERT_EQ(get_test_container_item(modules[1]), 4);
+  ASSERT_EQ(get_test_container_item(modules[2]), 5);
+}
+
+TEST_F(ModuleTest, NamedChildrensReturnsExpectedNamedSubmodulesForDeepModel) {
+  auto model = make_deeply_nested_test_container();
+  torch::OrderedDict<std::string, std::shared_ptr<torch::nn::Module>> modules =
+      model->named_children();
+
+  ASSERT_EQ(modules.size(), 3);
+
+  ASSERT_EQ(get_test_container_item(modules[0].value()), 1);
+  ASSERT_EQ(modules[0].key(), "0");
+
+  ASSERT_EQ(get_test_container_item(modules[1].value()), 4);
+  ASSERT_EQ(modules[1].key(), "1");
+
+  ASSERT_EQ(get_test_container_item(modules[2].value()), 5);
+  ASSERT_EQ(modules[2].key(), "2");
+}
+
+TEST_F(ModuleTest, ModuleApplyIteratesCorreclty) {
+  auto model = make_deeply_nested_test_container();
+  int64_t index = 0;
+  model->apply([&index](torch::nn::Module& module) {
+    ASSERT_EQ(module.as<TestContainer>()->tensor.item<int64_t>(), index++);
+  });
+  ASSERT_EQ(index, 10);
+}
+
+TEST_F(ModuleTest, ConstModuleApplyIteratesCorreclty) {
+  std::shared_ptr<const TestContainer> model =
+      make_deeply_nested_test_container();
+  int64_t index = 0;
+  model->apply([&index](const torch::nn::Module& module) {
+    ASSERT_EQ(module.as<TestContainer>()->tensor.item<int64_t>(), index++);
+  });
+  ASSERT_EQ(index, 10);
+}
+
+TEST_F(ModuleTest, NamedModuleApplyIteratesCorreclty) {
+  auto model = make_deeply_nested_test_container();
+  auto expected = make_key_value_pairs_for_deeply_nested_container();
+  int64_t index = 0;
+  model->apply(
+      [&index, expected](const std::string& name, torch::nn::Module& module) {
+        ASSERT_EQ(name, expected[index].first);
+        ASSERT_EQ(
+            module.as<TestContainer>()->tensor.item<int64_t>(),
+            expected[index++].second);
+      },
+      /*name_prefix=*/"test_prefix");
+  ASSERT_EQ(index, 10);
+}
+
+TEST_F(ModuleTest, ConstNamedModuleApplyIteratesCorreclty) {
+  std::shared_ptr<const TestContainer> model =
+      make_deeply_nested_test_container();
+  auto expected = make_key_value_pairs_for_deeply_nested_container();
+  int64_t index = 0;
+  model->apply(
+      [&index, &expected](
+          const std::string& name, const torch::nn::Module& module) {
+        ASSERT_EQ(name, expected[index].first);
+        ASSERT_EQ(
+            module.as<const TestContainer>()->tensor.item<int64_t>(),
+            expected[index++].second);
+      },
+      /*name_prefix=*/"test_prefix");
+  ASSERT_EQ(index, 10);
+}
+
+TEST_F(ModuleTest, ModulePointerApplyIteratesCorreclty) {
+  auto model = make_deeply_nested_test_container();
+  int64_t index = 0;
+  model->apply([&index](const std::shared_ptr<torch::nn::Module>& module) {
+    ASSERT_EQ(get_test_container_item(module), index++);
+  });
+  ASSERT_EQ(index, 10);
+}
+
+TEST_F(ModuleTest, NamedModulePointerApplyIteratesCorreclty) {
+  auto model = make_deeply_nested_test_container();
+  auto expected = make_key_value_pairs_for_deeply_nested_container();
+  int64_t index = 0;
+  model->apply(
+      [&index, &expected](
+          const std::string& name,
+          const std::shared_ptr<torch::nn::Module>& module) {
+        ASSERT_EQ(name, expected[index].first);
+        ASSERT_EQ(get_test_container_item(module), expected[index++].second);
+      },
+      /*name_prefix=*/"test_prefix");
+  ASSERT_EQ(index, 10);
+}
+
+TEST_F(ModuleTest, ThrowsWhenAttemptingtoGetTopLevelModuleAsSharedPtr) {
+  {
+    TestModule module(1);
+    ASSERT_THROWS_WITH(
+        module.modules(),
+        "It looks like you attempted to retrieve "
+        "your top-level module as a shared_ptr")
+  }
+  {
+    TestModule module(1);
+    ASSERT_NO_THROW(module.modules(/*include_self=*/false));
+  }
+  {
+    auto module = std::make_shared<TestModule>(1);
+    ASSERT_NO_THROW(module->modules());
+  }
 }

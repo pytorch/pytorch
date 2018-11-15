@@ -97,7 +97,7 @@ bool AffineChannelGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const auto& scale = is_learnable_ ? Input(2) : Input(1);
   auto* dX = Output(0);
   dX->ResizeLike(dY);
-  const int ndim = dY.ndim();
+  const int ndim = dY.dim();
   const int C = dY.dim32(ndim - 1);
   const int rows = dY.numel() / C;
   const int cols = C;

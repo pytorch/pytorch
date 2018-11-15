@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/Macros.h>
+#include <c10/macros/Macros.h>
 
 namespace at {
 

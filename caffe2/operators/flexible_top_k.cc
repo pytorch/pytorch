@@ -30,7 +30,7 @@ bool FlexibleTopKOp<T, Context>::RunOnDevice() {
   const int64_t* k_data = k.template data<int64_t>();
 
   // get flatten shape of input
-  CAFFE_ENFORCE_GT(input.ndim(), 0);
+  CAFFE_ENFORCE_GT(input.dim(), 0);
   vector<int64_t> input_dims = input.sizes().vec();
   vector<int64_t> linear_shape = {
       size_to_dim_(input_dims.size() - 1, input_dims), input_dims.back()};
@@ -106,7 +106,7 @@ bool FlexibleTopKGradientOp<T, Context>::RunOnDevice() {
   const int64_t* indices_data = indices.template data<int64_t>();
 
   // Resize output tensors to be as orignial_input size and initialized with 0
-  CAFFE_ENFORCE_GT(original_input.ndim(), 0);
+  CAFFE_ENFORCE_GT(original_input.dim(), 0);
   vector<int64_t> original_dims = original_input.sizes().vec();
   output->Resize(original_dims);
   T* output_data = output->template mutable_data<T>();

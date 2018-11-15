@@ -45,11 +45,11 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
     auto& indicesInput = Input(INDICES);
     auto& lengthsInput = Input(LENGTHS);
 
-    CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    const int64_t N = dataInput.dim(0);
+    CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
+    const int64_t N = dataInput.size(0);
     const int D = dataInput.size_from_dim(1);
-    const int64_t M = lengthsInput.dim(0);
+    const int64_t M = lengthsInput.size(0);
     const int64_t indices_size = indicesInput.numel();
 
     auto* output = Output(0);
@@ -66,7 +66,7 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
     if (USE_WEIGHT) {
       // static if
       auto& weightInput = Input(WEIGHT);
-      CAFFE_ENFORCE_EQ(1, weightInput.ndim(), "WEIGHT must be a vector");
+      CAFFE_ENFORCE_EQ(1, weightInput.dim(), "WEIGHT must be a vector");
       if (!USE_POSITIONAL_WEIGHT) {
         CAFFE_ENFORCE_EQ(
             weightInput.numel(),

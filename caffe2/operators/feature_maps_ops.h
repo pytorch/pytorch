@@ -199,7 +199,7 @@ class MergeSingleListFeatureTensorsOp : public Operator<Context> {
           outKeysData[keysOffset] = featureIDs_[inputIndex];
           outValuesLengthsData[keysOffset] = inLengthsData[exampleIndex];
           context_.CopyItemsSameDevice(
-              inValues.meta(),
+              inValues.dtype(),
               inLengthsData[exampleIndex],
               &inValues.template data<T>()[inValuesOffset_[inputIndex]],
               &outValuesValuesData[valuesOffset]);
@@ -269,7 +269,7 @@ class MergeSingleListOrMapFeatureTensorsGradientOp : public Operator<Context> {
         if (inPresenceData[exampleIndex]) {
           T* outFeatureValues = Output(inputIndex)->template mutable_data<T>();
           context_.CopyItemsSameDevice(
-              inValuesValuesGrad.meta(),
+              inValuesValuesGrad.dtype(),
               inLengthsData[exampleIndex],
               &inValuesValuesGradData[inValuesValuesOffset],
               &outFeatureValues[outValuesOffset[inputIndex]]);
@@ -368,12 +368,12 @@ class MergeSingleMapFeatureTensorsOp : public Operator<Context> {
           outKeysData[keysOffset] = featureIDs_[inputIndex];
           outValuesLengthsData[keysOffset] = inLengthsData[exampleIndex];
           context_.CopyItemsSameDevice(
-              inKeys.meta(),
+              inKeys.dtype(),
               inLengthsData[exampleIndex],
               &inKeys.template data<K>()[inValuesOffset_[inputIndex]],
               &outValuesKeysData[valuesOffset]);
           context_.CopyItemsSameDevice(
-              inValues.meta(),
+              inValues.dtype(),
               inLengthsData[exampleIndex],
               &inValues.template data<V>()[inValuesOffset_[inputIndex]],
               &outValuesValuesData[valuesOffset]);
@@ -511,7 +511,7 @@ class MergeMultiScalarFeatureTensorsGradientOp : public Operator<Context> {
         if (inLengthsData[exampleIndex] > 0) {
           T* outFeatureValues = Output(inputIndex)->template mutable_data<T>();
           context_.CopyItemsSameDevice(
-              inValuesGrad.meta(),
+              inValuesGrad.dtype(),
               inLengthsData[exampleIndex],
               &inValuesGradData[inValuesOffset],
               &outFeatureValues[outValuesOffset[inputIndex]]);
@@ -598,7 +598,7 @@ class MergeMultiListFeatureTensorsOp : public Operator<Context> {
           outValuesLengthsData[outKeysOffset] =
               inValuesLengthsData[inKeysOffset_[inputIndex]];
           context_.CopyItemsSameDevice(
-              inValuesValues.meta(),
+              inValuesValues.dtype(),
               inValuesLengthsData[inKeysOffset_[inputIndex]],
               &inValuesValues
                    .template data<T>()[inValuesValuesOffset_[inputIndex]],
@@ -704,13 +704,13 @@ class MergeMultiMapFeatureTensorsOp : public Operator<Context> {
           outValuesLengthsData[outKeysOffset] =
               inValuesLengthsData[inKeysOffset_[inputIndex]];
           context_.CopyItemsSameDevice(
-              inValuesKeys.meta(),
+              inValuesKeys.dtype(),
               inValuesLengthsData[inKeysOffset_[inputIndex]],
               &inValuesKeys
                    .template data<K>()[inValuesValuesOffset_[inputIndex]],
               &outValuesKeysData[outValuesValuesOffset]);
           context_.CopyItemsSameDevice(
-              inValuesValues.meta(),
+              inValuesValues.dtype(),
               inValuesLengthsData[inKeysOffset_[inputIndex]],
               &inValuesValues
                    .template data<V>()[inValuesValuesOffset_[inputIndex]],
@@ -792,7 +792,7 @@ class MergeMultiListOrMapFeatureTensorsGradientOp : public Operator<Context> {
         if (valuesLengthCopy > 0) {
           T* outFeatureValues = Output(inputIndex)->template mutable_data<T>();
           context_.CopyItemsSameDevice(
-              inValuesValuesGrad.meta(),
+              inValuesValuesGrad.dtype(),
               valuesLengthCopy,
               &inValuesValuesGradData[inValuesValuesOffset],
               &outFeatureValues[outValuesValuesOffset[inputIndex]]);

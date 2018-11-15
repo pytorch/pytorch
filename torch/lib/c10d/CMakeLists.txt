@@ -54,7 +54,6 @@ set(C10D_SRCS
   )
 
 if(C10D_USE_CUDA)
-  list(APPEND C10D_SRCS CUDAUtils.cpp)
   set(C10D_LIBS
     caffe2_gpu
     )
@@ -81,6 +80,7 @@ set_property(TARGET c10d PROPERTY CXX_STANDARD 11)
 target_compile_options(c10d PUBLIC
   -Wall
   -Wextra
+  -Werror
   -Wno-unused-parameter
   -Wno-missing-field-initializers
   -Wno-write-strings
@@ -110,10 +110,6 @@ target_include_directories(c10d PUBLIC
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 # For torch/csrc/utils/hash.h and torch/csrc/utils/functional.h
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
-
-if(C10D_USE_CUDA)
-  copy_header(CUDAUtils.hpp)
-endif()
 
 copy_header(FileStore.hpp)
 copy_header(PrefixStore.hpp)
@@ -146,7 +142,7 @@ install(TARGETS c10d
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib)
 
-option(BUILD_EXAMPLES "Build examples" ON)
+option(BUILD_EXAMPLES "Build examples" OFF)
 if(BUILD_EXAMPLES)
   add_subdirectory(example)
 endif()

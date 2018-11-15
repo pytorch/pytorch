@@ -282,6 +282,10 @@ const char* cublasGetErrorString(cublasStatus_t error) {
     return "CUBLAS_STATUS_LICENSE_ERROR";
 #endif  // CUDA_VERSION >= 6050
 #endif  // CUDA_VERSION >= 6000
+#ifdef __HIPCC__
+  case rocblas_status_invalid_size:
+    return "rocblas_status_invalid_size";
+#endif
   }
   // To suppress compiler warning.
   return "Unrecognized cublas error string";
@@ -315,6 +319,10 @@ const char* curandGetErrorString(curandStatus_t error) {
     return "CURAND_STATUS_ARCH_MISMATCH";
   case CURAND_STATUS_INTERNAL_ERROR:
     return "CURAND_STATUS_INTERNAL_ERROR";
+#ifdef __HIPCC__
+  case HIPRAND_STATUS_NOT_IMPLEMENTED:
+    return "HIPRAND_STATUS_NOT_IMPLEMENTED";
+#endif
   }
   // To suppress compiler warning.
   return "Unrecognized curand error string";

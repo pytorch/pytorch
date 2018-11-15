@@ -59,9 +59,25 @@ static void CanonicalizeOps(Block* block) {
 
       auto mm_result = mat1.mm(mat2);
       auto result = mat + mm_result;
+      (static_cast<Value*>(result))->setType(it->output()->type());
 
       it->output()->replaceAllUsesWith(result);
       it.destroyCurrent();
+    } else if (it->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
+               it->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
+               it->matches("aten::mul(Tensor self, Tensor other) -> Tensor") ||
+               it->matches("aten::div(Tensor self, Tensor other) -> Tensor")) {
+      if (auto other = it->get<at::Tensor>(attr::other)) {
+        if (other->dim() == 0) {
+          WithInsertPoint insert_guard {*it};
+          auto graph = it->owningGraph();
+          auto new_other = graph->insertConstant(other->_local_scalar());
+          std::vector<Value*> inputs = it->inputs().vec();
+          inputs.at(1) = new_other;
+          Value * new_output = graph->insertNode(graph->create(it->kind(), inputs))->output();
+          it->output()->replaceAllUsesWith(new_output);
+        }
+      }
     } else if (it->matches("aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]",
                            /*const_inputs=*/{attr::chunks, attr::dim})) {
       if (auto orig_outputs = getChunkOutputs(*it)) {

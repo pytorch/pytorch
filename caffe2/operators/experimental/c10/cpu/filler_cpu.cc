@@ -1,4 +1,4 @@
-#include "caffe2/core/dispatch/KernelRegistration.h"
+#include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/filler.h"
 #include "caffe2/utils/math.h"
 
@@ -21,7 +21,7 @@ void filler_init(
       // Shape input must be in CPU context
       auto& input = *inputs[0];
       CAFFE_ENFORCE_EQ(
-          input.ndim(),
+          input.dim(),
           1,
           "When input_as_shape is true, the input must be a 1D tensor of "
           "data type int64_t");

@@ -2,8 +2,8 @@
 
 #include <iostream>
 #include <string>
-#include "ATen/core/IdWrapper.h"
-#include "ATen/core/Macros.h"
+#include "c10/util/IdWrapper.h"
+#include "c10/macros/Macros.h"
 
 namespace at {
 
@@ -37,4 +37,4 @@ CAFFE2_API std::ostream& operator<<(std::ostream&, at::TensorTypeId);
 
 } // namespace at
 
-AT_DEFINE_HASH_FOR_IDWRAPPER(at::TensorTypeId)
+C10_DEFINE_HASH_FOR_IDWRAPPER(at::TensorTypeId)

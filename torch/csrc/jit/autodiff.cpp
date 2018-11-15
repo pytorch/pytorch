@@ -36,6 +36,7 @@ bool isDifferentiable(Node * n) {
     "aten::sigmoid(Tensor self) -> Tensor",
     "aten::tanh(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
+    "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
     "aten::exp(Tensor self) -> Tensor",
     "aten::t(Tensor self) -> Tensor",
     "aten::neg(Tensor self) -> Tensor",
@@ -74,6 +75,9 @@ bool isDifferentiable(Node * n) {
     "aten::sinh(Tensor self) -> Tensor",
     "aten::tan(Tensor self) -> Tensor",
     "aten::trunc(Tensor self) -> Tensor",
+    "aten::log_softmax(Tensor self, int dim) -> Tensor",
+    "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
+    "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)"
   };
 
   // TODO: add support for the following fusible operators.
@@ -88,6 +92,15 @@ bool isDifferentiable(Node * n) {
     return true;
   if (differentiable_ops.find(n))
     return true;
+
+  if (n->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor")) {
+    return n->get<std::vector<int64_t>>(attr::size) && n->is_constant(attr::implicit) &&
+      n->namedInput(attr::self)->type()->cast<CompleteTensorType>();
+  }
+  if (n->matches("aten::view(Tensor self, int[] size) -> Tensor")) {
+    return n->get<std::vector<int64_t>>(attr::size) &&
+      n->namedInput(attr::self)->type()->cast<CompleteTensorType>();
+  }
 
   // linear blocks may appear as inputs to graph executors, but they are removed
   // before differentiation occurs
@@ -178,6 +191,10 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       } else {
         return {grads.at(0), nullptr, nullptr};
       }
+    } else if (node->matches("aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor")) {
+      auto threshold = node->get<at::Scalar>(attr::threshold).value();
+      return {grads.at(0) * (inputs.at(0) > threshold).type_as(outputs.at(0)), nullptr, nullptr};
+
     } else if (node->matches("aten::exp(Tensor self) -> Tensor")) {
       return {grads.at(0) * (outputs.at(0))};
 
@@ -308,8 +325,9 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         squeezed_dims.push_back(i);
       }
       SymbolicVariable returned_grad = grads.at(0);
-      for (auto it = squeezed_dims.begin(); it != squeezed_dims.end(); ++it)
-        returned_grad = returned_grad.unsqueeze(*it);
+      for (const auto& dim : squeezed_dims) {
+        returned_grad = returned_grad.unsqueeze(dim);
+      }
       return {returned_grad};
 
     } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor", /*const_inputs=*/attr::dim)) {
@@ -333,7 +351,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       // of equal sizes. We can use a single split operation to handle that.
       if (std::all_of(tensor_inputs.begin(), tensor_inputs.end(), has_first_sizes)) {
         auto tensor_grads = grads.at(0).chunk(tensor_inputs.size(), dim);
-        tensor_grads.push_back(nullptr); // for attr::dim
+        tensor_grads.emplace_back(nullptr); // for attr::dim
         return tensor_grads;
       } else {
         size_t offset = 0;
@@ -343,11 +361,50 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
           tensor_grads.push_back(grad.narrow(dim, offset, input.sizes()[dim]));
           offset += input.sizes()[dim];
         }
-        tensor_grads.push_back(nullptr); // for attr::dim
+        tensor_grads.emplace_back(nullptr); // for attr::dim
         return tensor_grads;
       }
     } else if (comparison_ops.find(node)) {
       return {nullptr, nullptr};
+
+    } else if (node->matches("aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor")) {
+      JIT_ASSERT(grads.size() == 1);
+      auto graph = node->owningGraph();
+      auto backward_value = graph->insert(aten::avg_pool2d_backward, {
+        grads.at(0).value(),
+        node->namedInput(attr::self),
+        node->namedInput(attr::kernel_size),
+        node->namedInput(attr::stride),
+        node->namedInput(attr::padding),
+        node->namedInput(attr::ceil_mode),
+        node->namedInput(attr::count_include_pad)});
+      return {backward_value->node()->output(0), nullptr, nullptr, nullptr, nullptr, nullptr};
+
+    } else if (node->matches("aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)")) {
+      JIT_ASSERT(grads.size() == 2);
+      auto graph = node->owningGraph();
+      auto backward_value = graph->insert(aten::max_pool2d_with_indices_backward, {
+        grads.at(0).value(),
+        node->namedInput(attr::self),
+        node->namedInput(attr::kernel_size),
+        node->namedInput(attr::stride),
+        node->namedInput(attr::padding),
+        node->namedInput(attr::dilation),
+        node->namedInput(attr::ceil_mode),
+        outputs.at(1).value()
+      });
+      return {backward_value->node()->output(0), nullptr, nullptr, nullptr, nullptr, nullptr};
+
+    } else if (node->matches("aten::log_softmax(Tensor self, int dim) -> Tensor")) {
+      JIT_ASSERT(grads.size() == 1);
+      auto graph = node->owningGraph();
+      auto backward_value = graph->insert(aten::_log_softmax_backward_data, {
+        grads.at(0).value(),
+        outputs.at(0).value(),
+        node->namedInput(attr::dim),
+        node->namedInput(attr::self)
+      });
+      return {backward_value->node()->output(0), nullptr};
 
     } else if (node->kind() == prim::Constant) {
       return {};

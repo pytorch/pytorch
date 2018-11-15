@@ -135,7 +135,7 @@ class MaxReductionOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& X = Input(0);
-    CAFFE_ENFORCE_EQ(X.ndim(), 3);
+    CAFFE_ENFORCE_EQ(X.dim(), 3);
 
     const int batch_size = X.dim32(0);
     const int M = X.dim32(1);

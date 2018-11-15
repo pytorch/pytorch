@@ -25,8 +25,8 @@ def _batch_potrf_lower(bmat):
     Applies a Cholesky decomposition to all matrices in a batch of arbitrary shape.
     """
     n = bmat.size(-1)
-    cholesky = torch.stack([m.potrf(upper=False) for m in bmat.reshape(-1, n, n)])
-    return cholesky.reshape(bmat.shape)
+    cholesky_ = torch.stack([m.cholesky(upper=False) for m in bmat.reshape(-1, n, n)])
+    return cholesky_.reshape(bmat.shape)
 
 
 def _batch_diag(bmat):

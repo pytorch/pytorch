@@ -17,6 +17,7 @@ Node* preRecordPythonTrace(
 std::shared_ptr<Graph> createGraphByTracing(
     py::function func,
     Stack inputs,
+    py::function var_name_lookup_fn,
     c10::optional<size_t> num_real_inputs = {});
 } // namespace tracer
 

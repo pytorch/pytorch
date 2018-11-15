@@ -18,6 +18,9 @@ NAME_PARAM_REGEX = r'(\w+)\((.*)\)'
 def argument_to_declaration(param, func=None):
     arg = {}
     arg['type'], name = param.split(' ')
+    if (arg['type'].endswith('?')):
+        arg['is_nullable'] = True
+        arg['type'] = arg['type'].rstrip('?')
     if arg['type'] == 'Tensor':
         arg['type'] = 'THTensor*'
     elif arg['type'] == 'LongTensor':

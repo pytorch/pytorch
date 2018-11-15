@@ -167,11 +167,11 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   const float* weights = (InputSize() > 2 ? Input(2).data<float>() : nullptr);
 
   if (label_prob_mode_) {
-    CAFFE_ENFORCE_GE(T.ndim(), 2);
+    CAFFE_ENFORCE_GE(T.dim(), 2);
     CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
     CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), D);
   } else {
-    if (T.ndim() == canonical_axis) {
+    if (T.dim() == canonical_axis) {
       CAFFE_ENFORCE_EQ(T.numel(), N);
     } else {
       CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
@@ -273,11 +273,11 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   dX->ResizeLike(X);
 
   if (label_prob_mode_) {
-    CAFFE_ENFORCE_GE(T.ndim(), 2);
+    CAFFE_ENFORCE_GE(T.dim(), 2);
     CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);
     CAFFE_ENFORCE_EQ(T.size_from_dim(canonical_axis), D);
   } else {
-    if (T.ndim() == canonical_axis) {
+    if (T.dim() == canonical_axis) {
       CAFFE_ENFORCE_EQ(T.numel(), N);
     } else {
       CAFFE_ENFORCE_EQ(T.size_to_dim(canonical_axis), N);

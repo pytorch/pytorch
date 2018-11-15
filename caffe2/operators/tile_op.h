@@ -30,7 +30,7 @@ class TileOp : public Operator<Context> {
       // InputSize() == 3: tiles is specified and axis.
       // Anything specified as input will override the arguments
       CAFFE_ENFORCE(
-          Input(1).ndim() == 1 && Input(1).numel() == 1,
+          Input(1).dim() == 1 && Input(1).numel() == 1,
           "Input `tiles` should be a vector of size 1.");
 
       const auto& input1 = Input(1);
@@ -42,7 +42,7 @@ class TileOp : public Operator<Context> {
 
       if (InputSize() > 2) {
         CAFFE_ENFORCE(
-            Input(2).ndim() == 1 && Input(2).numel() == 1,
+            Input(2).dim() == 1 && Input(2).numel() == 1,
             "Input `axis` should be a vector of size 1.");
 
         const auto& input2 = Input(2);
@@ -144,7 +144,7 @@ class TileGradientOp : public Operator<Context> {
       // InputSize() == 3: tiles is specified and axis.
       // Anything specified as input will override the arguments
       CAFFE_ENFORCE(
-          Input(1).ndim() == 1 && Input(1).numel() == 1,
+          Input(1).dim() == 1 && Input(1).numel() == 1,
           "Input `tiles` should be a vector of size 1.");
 
       const auto& input1 = Input(1);
@@ -156,7 +156,7 @@ class TileGradientOp : public Operator<Context> {
 
       if (InputSize() > 2) {
         CAFFE_ENFORCE(
-            Input(2).ndim() == 1 && Input(2).numel() == 1,
+            Input(2).dim() == 1 && Input(2).numel() == 1,
             "Input `axis` should be a vector of size 1.");
 
         const auto& input2 = Input(2);

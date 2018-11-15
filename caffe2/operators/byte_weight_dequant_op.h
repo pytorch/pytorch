@@ -26,7 +26,7 @@ class ByteWeightDequantOp : public Operator<Context> {
     float bin_interval = (max_ - min_) / 255.0;
     int total = 1;
     for (int i = 0; i < shape_.size(); i++) {
-      total *= Y->dim(i);
+      total *= Y->size(i);
     }
     const uint8_t* Xdata;
     if (WI.template IsType<uint8_t>()) {

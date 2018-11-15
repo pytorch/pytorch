@@ -81,8 +81,8 @@ bool GFtrlOp<T, Context>::RunOnDevice() {
   Output(OUTPUT_VAR)->ResizeLike(Input(VAR));
   Output(OUTPUT_N_Z)->ResizeLike(Input(N_Z));
   gftrl_update<Context>(
-      Input(GRAD).dim(0), // # of output nodes
-      Input(GRAD).numel() / Input(GRAD).dim(0), // # of input features
+      Input(GRAD).size(0), // # of output nodes
+      Input(GRAD).numel() / Input(GRAD).size(0), // # of input features
       Input(VAR).template data<T>(),
       Input(N_Z).template data<T>(),
       Input(GRAD).template data<T>(),

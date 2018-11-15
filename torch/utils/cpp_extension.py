@@ -72,10 +72,11 @@ WRONG_COMPILER_WARNING = '''
                                !! WARNING !!
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-Your compiler ({0}) is not compatible with the compiler Pytorch was built with
-for this platform, which is {1} on {2}. Please use {1} to to compile your
-extension. Alternatively, you may compile PyTorch from source using {0}, and
-then you can also use {0} to compile your extension.
+Your compiler ({user_compiler}) is not compatible with the compiler Pytorch was
+built with for this platform, which is {pytorch_compiler} on {platform}. Please
+use {pytorch_compiler} to to compile your extension. Alternatively, you may
+compile PyTorch from source using {user_compiler}, and then you can also use
+{user_compiler} to compile your extension.
 
 See https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md for help
 with compiling PyTorch from source.
@@ -158,9 +159,9 @@ def check_compiler_abi_compatibility(compiler):
     # First check if the compiler is one of the expected ones for the particular platform.
     if not check_compiler_ok_for_platform(compiler):
         warnings.warn(WRONG_COMPILER_WARNING.format(
-            compiler,
-            ACCEPTED_COMPILERS_FOR_PLATFORM[sys.platform][0],
-            sys.platform))
+            user_compiler=compiler,
+            pytorch_compiler=ACCEPTED_COMPILERS_FOR_PLATFORM[sys.platform][0],
+            platform=sys.platform))
         return False
 
     if sys.platform == 'darwin':
@@ -229,6 +230,8 @@ class BuildExtension(build_ext):
                 original_compiler = self.compiler.compiler_so
                 if _is_cuda_file(src):
                     nvcc = _join_cuda_home('bin', 'nvcc')
+                    if not isinstance(nvcc, list):
+                        nvcc = [nvcc]
                     self.compiler.set_executable('compiler_so', nvcc)
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
@@ -330,6 +333,7 @@ class BuildExtension(build_ext):
         check_compiler_abi_compatibility(compiler)
 
     def _add_compile_flag(self, extension, flag):
+        extension.extra_compile_args = copy.copy(extension.extra_compile_args)
         if isinstance(extension.extra_compile_args, dict):
             for args in extension.extra_compile_args.values():
                 args.append(flag)
@@ -630,13 +634,13 @@ def load_inline(name,
     as its docstring.
 
     The sources in ``cuda_sources`` are concatenated into a separate ``.cu``
-    file and  prepended with ``ATen/ATen.h``, ``cuda.h`` and ``cuda_runtime.h``
-    includes. The ``.cpp`` and ``.cu`` files are compiled separately, but
-    ultimately linked into a single library. Note that no bindings are
-    generated for functions in ``cuda_sources`` per  se. To bind to a CUDA
-    kernel, you must create a C++ function that calls it, and either declare or
-    define this C++ function in one of the ``cpp_sources`` (and include its
-    name in ``functions``).
+    file and  prepended with ``torch/types.h``, ``cuda.h`` and
+    ``cuda_runtime.h`` includes. The ``.cpp`` and ``.cu`` files are compiled
+    separately, but ultimately linked into a single library. Note that no
+    bindings are generated for functions in ``cuda_sources`` per  se. To bind
+    to a CUDA kernel, you must create a C++ function that calls it, and either
+    declare or define this C++ function in one of the ``cpp_sources`` (and
+    include its name in ``functions``).
 
     See :func:`load` for a description of arguments omitted below.
 
@@ -699,7 +703,7 @@ def load_inline(name,
     sources = [cpp_source_path]
 
     if cuda_sources:
-        cuda_sources.insert(0, '#include <ATen/ATen.h>')
+        cuda_sources.insert(0, '#include <torch/types.h>')
         cuda_sources.insert(1, '#include <cuda.h>')
         cuda_sources.insert(2, '#include <cuda_runtime.h>')
 

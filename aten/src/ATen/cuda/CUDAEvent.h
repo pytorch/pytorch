@@ -61,6 +61,7 @@ struct AT_CUDA_API CUDAEvent {
   int64_t device() const { return device_index_; }
   cudaEvent_t event() const { return event_; }
 
+  // Note: cudaEventQuery can be safely called from any device
   bool happened() const {
     return (was_recorded_ && cudaEventQuery(event_) == cudaSuccess);
   }
@@ -71,23 +72,30 @@ struct AT_CUDA_API CUDAEvent {
     if (!was_recorded_) record(stream);
   }
 
+  // Note: cudaEventRecord must be called on the same device as the stream.
   void record(const CUDAStream& stream) {
+    at::cuda::CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
+
     if (is_created_) {
       AT_ASSERT(device_index_ == stream.device_index());
     } else {
-      create(stream.device_index());
+      AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
+      is_created_ = true;
+      device_index_ = stream.device_index();
     }
 
     AT_CUDA_CHECK(cudaEventRecord(event_, stream));
     was_recorded_ = true;
   }
 
-  void block (const CUDAStream& stream) {
+  // Note: cudaStreamWaitEvent must be called on the same device as the stream.
+  // The event has no actual GPU resources associated with it.
+  void block(const CUDAStream& stream) {
     if (is_created_) {
+      at::cuda::CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
       AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
     }
   }
-
 
 private:
   unsigned int flags_ = DEFAULT_FLAGS;
@@ -102,14 +110,6 @@ private:
     std::swap(was_recorded_, other.was_recorded_);
     std::swap(device_index_, other.device_index_);
     std::swap(event_, other.event_);
-  }
-
-  void create(const int64_t device) {
-    at::cuda::CUDAGuard device_index_guard(static_cast<int16_t>(device));
-    AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
-
-    is_created_ = true;
-    device_index_ = device;
   }
 };
 

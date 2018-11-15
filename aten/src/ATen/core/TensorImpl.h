@@ -177,6 +177,30 @@ namespace detail {
         AT_ERROR("Unsupported layout: ", options.layout());
     }
   }
+
+  inline DeviceType computeDeviceType(TensorTypeId tid) {
+    if (tid == CPUTensorId()) {
+      return DeviceType::CPU;
+    } else if (tid == CUDATensorId()) {
+      return DeviceType::CUDA;
+    } else if (tid == MKLDNNTensorId()) {
+      return DeviceType::MKLDNN;
+    } else if (tid == OpenGLTensorId()) {
+      return DeviceType::IDEEP;
+    } else if (tid == OpenCLTensorId()) {
+      return DeviceType::OPENCL;
+    } else if (tid == IDEEPTensorId()) {
+      return DeviceType::IDEEP;
+    } else if (tid == HIPTensorId()) {
+      return DeviceType::HIP;
+    } else if (tid == SparseCPUTensorId()) {
+      return DeviceType::CPU;
+    } else if (tid == SparseCUDATensorId()) {
+      return DeviceType::CUDA;
+    } else {
+      AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
+    }
+  }
 } // namespace detail
 
 /**
@@ -413,6 +437,32 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       return storage().device().index();
     }
     return get_device_slow();
+  }
+
+  Device device() const {
+    // Special case the common case for performance reasons
+    // TODO: This is a little convoluted so it would be good to investigate
+    // caching device on TensorImpl (#12934) to speed up device() calls in all cases.
+    const auto tid = type_id();
+    if (tid == CPUTensorId() || tid == CUDATensorId()) {
+      // NB: storage(), not storage_, b/c of Variable.
+      const auto& mystorage = storage();
+      if (mystorage) {
+        return mystorage.device();
+      }
+    }
+    const auto device_type = detail::computeDeviceType(tid);
+    bool is_cuda = device_type == DeviceType::CUDA;
+    return Device(device_type, is_cuda ? get_device() : -1);
+  }
+
+  Layout layout() const {
+    // NB: This method is not virtual and avoid dispatches for perf.
+    if (is_sparse()) {
+      return kSparse;
+    } else {
+      return kStrided;
+    }
   }
 
   /**
@@ -681,19 +731,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void resize_dim(int64_t ndim) {
-    auto old_dim = sizes_.size();
     sizes_.resize(ndim, 0);
-    if (old_dim != sizes_.size()) {
-      auto new_strides = c10::guts::make_unique<int64_t[]>(ndim);
-      for (size_t i = 0; i < std::min(old_dim, static_cast<size_t>(ndim)); i++) {
-        new_strides[i] = strides_[i];
-      }
-      for (size_t i = old_dim; i < static_cast<size_t>(ndim); i++) {
-        // If ndim < old_dim, this loop never executes
-        new_strides[i] = 0;
-      }
-      strides_ = std::move(new_strides);
-    }
+    strides_.resize(ndim, 0);
     refresh_numel();
     refresh_contiguous();
   }
@@ -735,17 +774,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     storage_offset_ = storage_offset;
   }
 
-  /* Sets the storage of this tensor to be new_storage */
-  void set_storage(const Storage& new_storage) {
-    auto* new_storage_ = new_storage.unsafeGetStorageImpl();
-    auto* old_storage_ = storage_.unsafeGetStorageImpl();
-    AT_ASSERTM(old_storage_, "Tensor: invalid null storage");
-    if (new_storage_ == old_storage_) {
-      return;
-    }
-    storage_ = new_storage;
-  }
-
   /**
    * Like set_sizes_and_strides but assumes contiguous strides.
    *
@@ -759,7 +787,12 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   void set_sizes_contiguous(at::IntList new_size) {
     AT_ASSERT(!is_variable());
     auto old_dim = sizes_.size();
-    sizes_ = new_size.vec();
+    auto new_dim = new_size.size();
+
+    sizes_.resize(new_dim);
+    for (size_t dim = 0; dim < new_dim; ++dim) {
+      sizes_[dim] = new_size[dim];
+    }
 
     update_to_contiguous_strides(old_dim);
     refresh_numel();
@@ -784,13 +817,14 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         ") must match dimensionality of strides (",
         new_stride.size(),
         ")");
-    auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
-    sizes_ = new_size.vec();
-    if (old_dim != new_dim) {
-      strides_.reset(new int64_t[new_dim]);
+
+    sizes_.resize(new_dim);
+    for (size_t dim = 0; dim < new_dim; ++dim) {
+      sizes_[dim] = new_size[dim];
     }
 
+    strides_.resize(new_dim);
     if (new_dim > 0) {
       for (size_t dim = new_dim - 1; ; dim--) {
         if (new_stride[dim] >= 0) {
@@ -877,6 +911,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     AT_ASSERTM(
         src.is_contiguous(),
         "Right now only copy of contiguous source Tensor is supported.");
+    AT_ASSERTM(
+        src.storage_initialized(),
+        "Cannot copy from an uninitialized Tensor");
 
     if ((void*)&src == (void*)this) {
       return;
@@ -886,10 +923,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // Uninitialized storages are guaranteed to be uniquely owned,
     // so we don't need to swap in this case.
     if (storage_initialized()) {
-      // If the dtype changed, we need to reallocate;
-      // If the src storage is uninitialized, we need to reallocate
-      // to preserve the unique storage invariant.
-      if (data_type_ != src.dtype() || !src.storage_initialized()) {
+      // If the dtype changed, we need to reallocate storage.
+      if (data_type_ != src.dtype()) {
         // NB: copy preserves device_type
         // This storage will get initialized by the mutable_data call below.
         storage_ = at::Storage(device_type(), src.dtype());
@@ -898,14 +933,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     data_type_ = src.dtype();
     Resize(src.sizes());
 
-    if (src.storage_initialized() && numel() > 0) {
-
-      // Only do an actual data copy if we actually have an initialized storage
-      // to copy from (NB: we have !storage_initialized() at this point if
-      // data_type_ != src.dtype() but src.storage_initialized(), since
-      // we're waiting for the raw_mutable_data call to actually initialize
-      // the storage)
-
+    if (numel() > 0) {
       if (data_type_.copy()) {
         AT_ASSERTM(
             device_type() == ::at::DeviceType::CPU,
@@ -1215,12 +1243,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       }
       const at::Allocator* allocator = storage_.allocator();
       // TODO: Get rid of StaticContext
-      AT_ASSERTM(
-          allocator == nullptr,
-          "Allocator in storage_ is not used within Caffe2 functions. \
-           we are using global function to get the allocator based on device \
-           type.");
-      allocator = caffe2::GetAllocator(storage_.device_type());
+      if (allocator == nullptr) {
+        allocator = caffe2::GetAllocator(storage_.device_type());
+      }
       if (meta.placementNew()) {
         // For types that need placement new, we will call it, as well as
         // making sure that when the data is freed, it calls the right
@@ -1339,9 +1364,7 @@ private:
   }
 
   inline void update_to_contiguous_strides(size_t old_dim) {
-    if (old_dim != sizes_.size()) {
-      strides_ = c10::guts::make_unique<int64_t[]>(sizes_.size());
-    }
+    strides_.resize(sizes_.size(), 0);
     if (dim() > 0) {
       int last_idx = dim() - 1;
       strides_[last_idx] = 1;
@@ -1391,8 +1414,12 @@ public:
   at::Storage storage_; // TODO: Fix visibility on me
 
 protected:
-  std::vector<int64_t> sizes_;
-  std::unique_ptr<int64_t[]> strides_; // this saves two words
+  // We could save a word or two by combining the SmallVector structs,
+  // since their size is redundant, and if we need to overflow the buffer space
+  // we could keep the two pointers together. However, that would require
+  // implementing another struct from scratch, so only do this if we're desperate.
+  at::SmallVector<int64_t,5> sizes_;
+  at::SmallVector<int64_t,5> strides_;
 
   int64_t storage_offset_ = 0;
   // If sizes and strides are empty, the numel is 1!!  However, most of the
@@ -1434,11 +1461,9 @@ protected:
 // https://fburl.com/q5enpv98
 //
 // For reference, we OOMed at 160 bytes (20 words) per TensorImpl.
-// This is not counting overhead from strides out-of-line allocation, and
-// StorageImpl space.  We're currently comfortably under this number;
-// let's keep it that way.  (One currently approved pending size
-// increase is inlining sizes and strides as small vectors, to reduce
-// dynamic allocations.)
+// This is not counting overhead from strides out-of-line allocation and
+// StorageImpl space and this is from before we inlined sizes and strides
+// directly into TensorImpl as SmallVectors.
 //
 // Our memory usage on 32-bit systems is suboptimal, but we're not checking
 // for it at the moment (to help avoid rage inducing cycles when the
@@ -1450,17 +1475,29 @@ protected:
 //    strong refcount           TODO: pack these into one word
 //    weak refcount
 //    storage pointer
-//    sizes vector (start)
-//    sizes vector (end)
-//    sizes vector (reserved)   TODO: get rid of me
-//    strides pointer
+//    sizes SmallVector (begin)
+//    sizes SmallVector (end)
+//    sizes SmallVector (capacity)
+//    sizes SmallVector (pre-allocated 0)
+//    sizes SmallVector (pre-allocated 1)
+//    sizes SmallVector (pre-allocated 2)
+//    sizes SmallVector (pre-allocated 3)
+//    sizes SmallVector (pre-allocated 4)
+//    strides SmallVector (begin)
+//    strides SmallVector (end)
+//    strides SmallVector (capacity)
+//    strides SmallVector (pre-allocated 0)
+//    strides SmallVector (pre-allocated 1)
+//    strides SmallVector (pre-allocated 2)
+//    strides SmallVector (pre-allocated 3)
+//    strides SmallVector (pre-allocated 4)
 //    storage offset
 //    numel
 //    data type pointer
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 12,
+              sizeof(TensorImpl) == sizeof(int64_t) * 24,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 

@@ -19,6 +19,8 @@ from caffe2.python.models.download import downloadFromURLToFile, getURLFromName,
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.onnx.tests.test_utils import TestCase
 
+ONNXIFI_DATATYPE_FLOAT32 = 1
+
 
 def _print_net(net):
     for i in net.external_input:
@@ -51,7 +53,7 @@ class OnnxifiTest(TestCase):
             ["X"],
             ["Y"],
             onnx_model=model_def.SerializeToString(),
-            output_size_hint_0=[batch_size, 1, 3, 2])
+            output_shape_hint_0=[ONNXIFI_DATATYPE_FLOAT32, batch_size, 1, 3, 2])
         workspace.FeedBlob("X", X)
         workspace.RunOperatorOnce(op)
         Y = workspace.FetchBlob("Y")
@@ -92,7 +94,7 @@ class OnnxifiTest(TestCase):
             ["Y"],
             onnx_model=model_def.SerializeToString(),
             initializers=["W", "W"],
-            output_size_hint_0=[1, 1, 3, 3])
+            output_shape_hint_0=[ONNXIFI_DATATYPE_FLOAT32, 1, 1, 3, 3])
         workspace.FeedBlob("X", X)
         workspace.FeedBlob("W", W)
         workspace.RunOperatorOnce(op)

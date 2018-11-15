@@ -193,7 +193,7 @@ bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
   auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
                         // (aka "gradInput")
 
-  CAFFE_ENFORCE_EQ(R.ndim(), 2);
+  CAFFE_ENFORCE_EQ(R.dim(), 2);
   // if R has 5 columns, the first column is the index, otherwise 0
   CAFFE_ENFORCE(R.dim32(1) == 4 || R.dim32(1) == 5);
 

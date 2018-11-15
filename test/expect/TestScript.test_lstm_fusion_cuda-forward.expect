@@ -5,27 +5,27 @@ graph(%x : Float(*, *)
       %w_hh : Float(*, *)
       %b_ih : Float(*)
       %b_hh : Float(*)) {
-  %7 : Float(*, *), %8 : Float(*, *) = prim::DifferentiableGraph_0(%w_ih, %x, %w_hh, %hx, %b_ih, %b_hh, %cx)
-  return (%8, %7);
+  %hy : Float(*, *), %cy : Float(*, *) = prim::DifferentiableGraph_0(%cx, %b_hh, %b_ih, %hx, %w_hh, %x, %w_ih)
+  return (%hy, %cy);
 }
 with prim::DifferentiableGraph_0 = graph(%0 : Float(*, *)
-      %1 : Float(*, *)
-      %2 : Float(*, *)
+      %1 : Float(*)
+      %2 : Float(*)
       %3 : Float(*, *)
-      %4 : Float(*)
-      %5 : Float(*)
+      %4 : Float(*, *)
+      %5 : Float(*, *)
       %6 : Float(*, *)) {
-  %7 : Float(*, *) = aten::t(%0)
-  %8 : Float(*, *) = aten::mm(%1, %7)
-  %9 : Float(*, *) = aten::t(%2)
+  %7 : Float(*, *) = aten::t(%6)
+  %8 : Float(*, *) = aten::mm(%5, %7)
+  %9 : Float(*, *) = aten::t(%4)
   %10 : Float(*, *) = aten::mm(%3, %9)
   %11 : int = prim::Constant[value=1]()
-  %12 : Float(*, *) = prim::FusionGroup_0[device=0](%4, %8, %10)
-  %13 : Dynamic[] = prim::ListConstruct(%12, %5)
+  %12 : Float(*, *) = prim::FusionGroup_0(%2, %8, %10)
+  %13 : Dynamic[] = prim::ListConstruct(%12, %1)
   %14 : Dynamic[] = aten::broadcast_tensors(%13)
   %15 : Dynamic, %16 : Dynamic = prim::ListUnpack(%14)
-  %hy : Float(*, *), %18 : Float(*, *), %cy : Float(*, *), %outgate.1 : Float(*, *), %cellgate.1 : Float(*, *), %forgetgate.1 : Float(*, *), %ingate.1 : Float(*, *) = prim::FusionGroup_1[device=0](%6, %16, %15)
-  return (%cy, %hy, %7, %9, %ingate.1, %forgetgate.1, %cellgate.1, %outgate.1, %18);
+  %hy : Float(*, *), %18 : Float(*, *), %cy : Float(*, *), %outgate.1 : Float(*, *), %cellgate.1 : Float(*, *), %forgetgate.1 : Float(*, *), %ingate.1 : Float(*, *) = prim::FusionGroup_1(%0, %16, %15)
+  return (%hy, %cy, %7, %9, %ingate.1, %forgetgate.1, %cellgate.1, %outgate.1, %18);
 }
 with prim::FusionGroup_0 = graph(%0 : Float(*)
       %1 : Float(*, *)
