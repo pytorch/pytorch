@@ -21,7 +21,6 @@ struct SchemaParser {
     }
     std::vector<Argument> arguments;
     std::vector<Argument> returns;
-    std::vector<Symbol> writes;
     bool kwarg_only = false;
     bool is_vararg = false;
     size_t idx = 0;
@@ -34,7 +33,7 @@ struct SchemaParser {
         is_vararg = true;
       } else {
         arguments.push_back(parseArgument(
-            idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only, writes));
+            idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only));
       }
     });
     idx = 0;
@@ -42,14 +41,14 @@ struct SchemaParser {
     if (L.cur().kind == '(') {
       parseList('(', ',', ')', [&] {
         returns.push_back(
-            parseArgument(idx++, /*is_return=*/true, /*kwarg_only=*/false, writes));
+            parseArgument(idx++, /*is_return=*/true, /*kwarg_only=*/false));
       });
     } else {
       returns.push_back(
-          parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false, writes));
+          parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
     }
-    return FunctionSchema { name, std::move(arguments), std::move(returns),
-                            is_vararg, false, std::move(writes) };
+    return FunctionSchema{
+        name, std::move(arguments), std::move(returns), is_vararg, false};
   }
 
   std::vector<FunctionSchema> parseDeclarations() {
@@ -89,47 +88,60 @@ struct SchemaParser {
     }
     return it->second;
   }
-  static void addToWrites(std::vector<Symbol>& writes, const Symbol& alias_set) {
-    auto it = std::find(writes.begin(), writes.end(), alias_set);
-    if(it == writes.end())
-      writes.push_back(alias_set);
-  }
   // Examples:
   // Tensor(a) // Tensor is in set a
   // Tensor(a!) // it is also written to
   // Tensor!  // shorthand for Tensor(fresh_identifier!)
-  std::vector<Symbol> parseAliasAnnotation(std::vector<Symbol>& writes) {
-    std::vector<Symbol> sets;
-    if(L.nextIf('(')) {
+  // Tensor(a! -> a|b) // Tensor is in set a, written to,
+  //                      and after the write is in set a AND b.
+  c10::optional<AliasInfo> parseAliasAnnotation() {
+    std::set<Symbol> sets;
+    AliasInfo alias_info;
+    if (L.nextIf('(')) {
       // optional 'alias set annotation'
-      sets.push_back(Symbol::fromQualString("alias::"+L.expect(TK_IDENT).text()));
-      if(L.nextIf('!')) {
-        addToWrites(writes, sets.back());
+      parseList(TK_NOTHING, '|', TK_NOTHING, [&] {
+        if (L.nextIf('*')) {
+          alias_info = AliasInfo::createWildcard();
+
+          // If we found a wildcard, ignore all subsequent annotations
+        } else if (!alias_info.isWildcard()) {
+          alias_info.addSet(
+              Symbol::fromQualString("alias::" + L.expect(TK_IDENT).text()));
+        }
+      });
+      if (L.nextIf('!')) {
+        alias_info.setIsWrite(true);
       }
       L.expect(')');
-    } else if(L.nextIf('!')) {
-      sets.push_back(Symbol::fromQualString("alias::$"+std::to_string(next_id++)));
-      addToWrites(writes, sets.back());
+    } else if (L.nextIf('!')) {
+      alias_info.addSet(
+          Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
+      alias_info.setIsWrite(true);
+    } else{
+      return c10::nullopt;
     }
-    return sets;
+
+    return alias_info;
   }
-  std::pair<TypePtr, AliasInfo> parseType(std::vector<Symbol>& writes) {
+
+  std::pair<TypePtr, c10::optional<AliasInfo>> parseType() {
     TypePtr value;
-    AliasInfo alias_info;
+    c10::optional<AliasInfo> alias_info;
+    // Tuple type
     if (L.cur().kind == '(') {
       std::vector<TypePtr> types;
-      std::vector<AliasInfo> alias_infos;
-      parseList('(', ',', ')', [&]{
-        auto r = parseType(writes);
+      parseList('(', ',', ')', [&] {
+        auto r = parseType();
         types.push_back(std::move(r.first));
-        alias_infos.push_back(std::move(r.second));
+        if (alias_info && r.second) {
+          alias_info->addContainedType(std::move(*r.second));
+        }
       });
       value = TupleType::create(std::move(types));
-      alias_info = AliasInfo({}, std::move(alias_infos));
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
       L.next(); // Future
       L.expect('(');
-      auto p = parseType(writes);
+      auto p = parseType();
       auto subtype = std::move(p.first);
       auto subalias = std::move(p.second);
       L.expect(')');
@@ -137,7 +149,7 @@ struct SchemaParser {
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
       L.next();
       value = DynamicType::get();
-      alias_info = AliasInfo(parseAliasAnnotation(writes));
+      alias_info = parseAliasAnnotation();
     } else {
       value = parseBaseType();
     }
@@ -146,7 +158,11 @@ struct SchemaParser {
         L.next(); // [
         L.next(); // ]
         value = ListType::create(value);
-        alias_info = AliasInfo(parseAliasAnnotation(writes), {std::move(alias_info)});
+        auto container = parseAliasAnnotation();
+        if (container && alias_info) {
+          container->addContainedType(std::move(*alias_info));
+        }
+        alias_info = std::move(container);
       } else if(L.nextIf('?')) {
         value = OptionalType::create(value);
       } else {
@@ -156,9 +172,9 @@ struct SchemaParser {
     return std::make_pair(std::move(value), std::move(alias_info));
   }
 
-  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only, std::vector<Symbol>& writes) {
+  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
     Argument result;
-    auto p = parseType(writes);
+    auto p = parseType();
     auto type = std::move(p.first);
     auto alias_info = std::move(p.second);
     c10::optional<int32_t> N;
@@ -170,7 +186,11 @@ struct SchemaParser {
       type = ListType::create(type);
       N = std::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
-      alias_info = AliasInfo(parseAliasAnnotation(writes), {std::move(alias_info)});
+      auto container = parseAliasAnnotation();
+      if (container && alias_info) {
+        container->addContainedType(std::move(*alias_info));
+      }
+      alias_info = std::move(container);
     }
     if(is_return) {
       // optionally named return values
@@ -185,7 +205,13 @@ struct SchemaParser {
         default_value = parseDefaultValue(type, N);
       }
     }
-    return Argument(std::move(name), std::move(type), N, std::move(default_value), !is_return && kwarg_only, std::move(alias_info));
+    return Argument(
+        std::move(name),
+        std::move(type),
+        N,
+        std::move(default_value),
+        !is_return && kwarg_only,
+        std::move(alias_info));
   }
   IValue parseSingleConstant(TypeKind kind) {
     switch(L.cur().kind) {
