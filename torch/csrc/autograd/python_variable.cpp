@@ -105,7 +105,7 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
 static int THPVariable_clear(THPVariable *self)
 {
   Py_CLEAR(self->backward_hooks);
-  if (self->cdata.defined() && self->cdata.get_autograd_meta()) {
+  if (self->cdata.defined()) {
     if (auto grad_acc = self->cdata.try_get_grad_accumulator()) {
       grad_acc->pre_hooks().clear();
     }
