@@ -1,5 +1,5 @@
 #include "c10/util/TensorTypeId.h"
-#include "caffe2/utils/string_utils.h"
+#include "c10/util/string_utils.h"
 
 namespace at {
 
