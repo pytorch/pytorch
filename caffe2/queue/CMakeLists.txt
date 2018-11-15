@@ -10,7 +10,7 @@ file(GLOB tmp *_test.cc)
 exclude(Caffe2_GPU_SRCS "${Caffe2_GPU_SRCS}" ${tmp})
 
 # ---[ HIP files.
-file(GLOB_RECURSE tmp *_hip.cc)
+file(GLOB_RECURSE tmp *.hip)
 set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${tmp})
 # exclude test files
 file(GLOB tmp *_test.cc)
@@ -44,4 +44,3 @@ set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} PARENT_SCOPE)
 set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS} PARENT_SCOPE)
 set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} PARENT_SCOPE)
 set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS} PARENT_SCOPE)
-

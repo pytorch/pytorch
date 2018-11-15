@@ -24,13 +24,7 @@ file(GLOB tmp *_test.cc)
 exclude(Caffe2_GPU_SRCS "${Caffe2_GPU_SRCS}" ${tmp})
 
 # ------[ HIP sources
-file(GLOB_RECURSE tmp *_hip.cc)
-set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${tmp})
-# ------[ HIP device sources
-file(GLOB_RECURSE tmp *_hipdev.cc)
-set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${tmp})
-# ---[ MIOPEN files
-file(GLOB_RECURSE tmp *_miopen.cc)
+file(GLOB_RECURSE tmp *.hip)
 set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${tmp})
 
 # ---[ CPU files.

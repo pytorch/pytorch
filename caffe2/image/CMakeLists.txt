@@ -13,12 +13,12 @@ if(USE_OPENCV AND OpenCV_FOUND)
 
   # ---[ HIP files
   # ------[ general hip
-  file(GLOB_RECURSE tmp *_hip.cc)
+  file(GLOB_RECURSE tmp *.hip)
   set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${tmp})
   # exclude test files
   file(GLOB_RECURSE tmp *_test.cc)
   exclude(Caffe2_HIP_SRCS "${Caffe2_HIP_SRCS}" ${tmp})
-  
+
   # ---[ CPU files.
   file(GLOB tmp *.cc)
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${tmp})
@@ -35,7 +35,7 @@ if(USE_OPENCV AND OpenCV_FOUND)
   # ---[ HIP test files
   file(GLOB_RECURSE tmp *_hip_test.cc)
   set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS} ${tmp})
-  
+
   # ---[ CPU test files
   file(GLOB tmp *_test.cc)
   set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS} ${tmp})

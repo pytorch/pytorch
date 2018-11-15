@@ -11,7 +11,7 @@ exclude(Caffe2_GPU_SRCS "${Caffe2_GPU_SRCS}" ${tmp})
 
 # ---[ HIP files
 # ------[ general GPU
-file(GLOB_RECURSE tmp *_hip.cc)
+file(GLOB_RECURSE tmp *.hip)
 set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${tmp})
 # exclude test files
 file(GLOB_RECURSE tmp *_test.cc)
