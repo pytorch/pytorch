@@ -1,13 +1,13 @@
-graph(%y.1 : Float(*, *)
-      %z.2 : Long(*, *)
+graph(%x.1 : Float(*, *)
+      %y.1 : Long(*, *)
       %z.1 : Float(*, *)) {
   %3 : bool = prim::Constant[value=1]()
   %x : Float(*, *), %y : Dynamic, %z : Dynamic = prim::If(%3)
     block0() {
-      -> (%y.1, %z.2, %z.1)
+      -> (%x.1, %y.1, %z.1)
     }
     block1() {
-      -> (%y.1, %y.1, %z.2)
+      -> (%x.1, %x.1, %y.1)
     }
   return (%x, %y, %z);
 }

@@ -6,7 +6,7 @@ graph(%x : Dynamic) {
 }
 graph(%x : Dynamic) {
   %1 : int = prim::Constant[value=1]()
-  %2 : Dynamic[] = aten::_construct_empty_tensor_list()
+  %2 : Dynamic[] = prim::ListConstruct()
   %3 : Dynamic = aten::cat(%2, %1)
   return (%3);
 }

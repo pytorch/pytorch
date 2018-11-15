@@ -10,9 +10,9 @@ namespace caffe2 {
  * sharing the same weight.
  */
 template <typename ACC_T>
-std::shared_ptr<fbgemm2::PackBMatrix<int8_t, ACC_T>>
+std::shared_ptr<fbgemm::PackBMatrix<int8_t, ACC_T>>
 GetOrCreateFbgemmPackBMatrix(
-    fbgemm2::matrix_op_t trans,
+    fbgemm::matrix_op_t trans,
     std::int32_t m,
     std::int32_t n,
     const void* orig_data,

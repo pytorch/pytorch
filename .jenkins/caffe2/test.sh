@@ -49,20 +49,6 @@ fi
 
 mkdir -p $TEST_DIR/{cpp,python}
 
-if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
-
-  # Pin individual runs to specific gpu so that we can schedule
-  # multiple jobs on machines that have multi-gpu.
-  NUM_AMD_GPUS=$(/opt/rocm/bin/rocminfo | grep 'Device Type.*GPU' | wc -l)
-  if (( $NUM_AMD_GPUS == 0 )); then
-      echo >&2 "No AMD GPU detected!"
-      exit 1
-  fi
-  export HIP_VISIBLE_DEVICES=$(($BUILD_NUMBER % $NUM_AMD_GPUS))
-fi
-
 cd "${WORKSPACE}"
 
 # C++ tests
@@ -127,10 +113,6 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/piecewise_linear_transform_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/softmax_ops_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/unique_ops_test.py")
-
-  # Our cuda top_k op has some asm code, the hipified version doesn't
-  # compile yet, so we don't have top_k operator for now
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/top_k_test.py")
 fi
 
 # Python tests

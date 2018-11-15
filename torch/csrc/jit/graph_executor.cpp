@@ -439,7 +439,7 @@ private:
     // Phase 5. Apply non-differentiable optimizations to the graphs we've found
     //          (or the whole grpah if we know we won't need its derivative).
     if (needsGradient(opt_graph)) {
-      auto diff_nodes = CreateAutodiffSubgraphs(*opt_graph, autodiffSubgraphNodeThreshold);
+      auto diff_nodes = CreateAutodiffSubgraphs(opt_graph, autodiffSubgraphNodeThreshold);
       for (Node * dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
@@ -497,7 +497,7 @@ private:
     auto state = tracer::getTracingState();
     auto inputs = last(stack, num_inputs);
     auto input_values = fmap(inputs, [](const IValue & v) {
-      return tracer::getValueTrace(v.toTensor());
+      return tracer::getNestedValueTrace(v);
     });
 
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs, num_flat_inputs);

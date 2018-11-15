@@ -22,6 +22,12 @@ enum class WaitResponseType : uint8_t { STOP_WAITING };
 // Simply start the daemon thread
 TCPStoreDaemon::TCPStoreDaemon(int storeListenSocket)
     : storeListenSocket_(storeListenSocket) {
+  // Use control pipe to signal instance destruction to the daemon thread.
+  if (pipe(controlPipeFd_.data()) == -1) {
+    throw std::runtime_error(
+        "Failed to create the control pipe to start the "
+        "TCPStoreDaemon run");
+  }
   daemonThread_ = std::thread(&TCPStoreDaemon::run, this);
 }
 
@@ -49,13 +55,6 @@ void TCPStoreDaemon::join() {
 }
 
 void TCPStoreDaemon::run() {
-  // Create the control pipe
-  if (pipe(controlPipeFd_.data()) == -1) {
-    throw std::runtime_error(
-        "Failed to create the control pipe to start the "
-        "TCPStoreDaemon run");
-  }
-
   std::vector<struct pollfd> fds;
   fds.push_back({.fd = storeListenSocket_, .events = POLLIN});
   // Push the read end of the pipe to signal the stopping of the daemon run

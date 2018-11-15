@@ -174,10 +174,10 @@ OutputMinMaxNetObserver::~OutputMinMaxNetObserver() {
     time_t rawtime;
     time(&rawtime);
     struct tm *timeinfo = localtime(&rawtime);
-    char buffer[1024];
-    strftime(buffer, 1024, "%Y-%m-%d-%H-%M-%S", timeinfo);
-    char buffer2[1024];
-    sprintf(buffer2, "global_%s.minmax", buffer);
+    char buffer[128] = {};
+    strftime(buffer, sizeof(buffer), "%Y-%m-%d-%H-%M-%S", timeinfo);
+    char buffer2[256] = {};
+    snprintf(buffer2, sizeof(buffer2), "global_%s.minmax", buffer);
 
     f.open(buffer2);
     int op_index = 0;

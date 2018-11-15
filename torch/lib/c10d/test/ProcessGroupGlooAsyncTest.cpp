@@ -45,7 +45,7 @@ class AsyncTest {
   }
 
   void start(int rank, int size) {
-    auto store = std::make_shared<::c10d::FileStore>(path_);
+    auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
@@ -85,7 +85,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     // and pass this along to the collective (since it uses the THC
     // getters to retrieve the current stream).
     //
-    at::cuda::CUDAGuard deviceGuard;
+    at::cuda::OptionalCUDAGuard deviceGuard;
     streams_.reserve(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
@@ -93,16 +93,8 @@ class AsyncInputIsOutputTest : public AsyncTest {
     }
   }
 
-  std::vector<at::cuda::CUDAGuard> createStreamGuard() {
-    std::vector<at::cuda::CUDAGuard> guards;
-    for (auto& stream : streams_) {
-      guards.push_back(at::cuda::CUDAGuard(stream));
-    }
-    return guards;
-  }
-
   void wait(std::shared_ptr<ProcessGroup::Work>& work) {
-    auto guards = createStreamGuard();
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
     if (!work->wait()) {
       throw work->exception();
     }
@@ -112,7 +104,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     std::vector<at::Tensor> outputs(numTensors_);
 
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Copy inputs to outputs
     for (auto i = 0; i < numTensors_; i++) {
@@ -137,10 +129,10 @@ class AsyncAllreduceTest : public AsyncInputIsOutputTest {
 
   std::shared_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every stream
-    at::cuda::CUDAGuard deviceGuard;
+    at::cuda::OptionalCUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 10 * 1000 * 1000);
@@ -163,10 +155,10 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
 
   std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every stream
-    at::cuda::CUDAGuard deviceGuard;
+    at::cuda::OptionalCUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 10 * 1000 * 1000);

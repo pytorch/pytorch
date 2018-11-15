@@ -57,16 +57,18 @@ namespace c10 {
   _(prim, IntToFloat)              \
   _(prim, FloatToInt)              \
   _(prim, StringToFloat)           \
-  _(prim, TensorDevice)            \
-  _(prim, TensorDType)             \
-  _(prim, TensorShape)             \
+  _(prim, device)            \
+  _(prim, dtype)             \
+  _(prim, shape)             \
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
   _(prim, AnyDefined)              \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
   _(prim, NoneGenerator)           \
+  _(prim, MMTreeReduce)            \
   _(aten, floordiv)                \
+  _(aten, __round_to_zero_floordiv)\
   _(prim, fork)                    \
   _(prim, RaiseException)          \
   _(aten, append)                  \
