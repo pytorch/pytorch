@@ -486,7 +486,9 @@ inline std::ostream& operator<<(
 //   http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0537r0.html
 //   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=51930
 // and as a result, we define these two macros slightly differently.
-#if defined(_MSC_VER) || defined(__clang__)
+#if defined(_MSC_VER) && defined(__clang__)
+#define EXPORT_IF_NOT_GCC
+#elif defined(_MSC_VER) || defined(__clang__)
 #define EXPORT_IF_NOT_GCC C10_EXPORT
 #else
 #define EXPORT_IF_NOT_GCC
