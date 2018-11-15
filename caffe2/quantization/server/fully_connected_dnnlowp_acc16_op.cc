@@ -22,7 +22,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
   using namespace std;
   using namespace dnnlowp;
 
-  BaseType::ParseDNNLowPOperatorArguments_();
+  this->ParseDNNLowPOperatorArguments_();
 
   // Get quantization parameters
   if (!GetQuantizationParameters_()) {
@@ -124,8 +124,8 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
         PackAWithRowOffset<uint8_t, int16_t>::rowOffsetBufferSize();
     int x_pack_buf_size_per_thread =
         PackAWithRowOffset<uint8_t, int16_t>::packedBufferSize();
-    BaseType::row_offsets_.resize(row_offset_size_per_thread);
-    BaseType::X_pack_buf_.resize(x_pack_buf_size_per_thread);
+    this->row_offsets_.resize(row_offset_size_per_thread);
+    this->X_pack_buf_.resize(x_pack_buf_size_per_thread);
 
     PackAWithRowOffset<uint8_t, int16_t> packA(
         matrix_op_t::NoTranspose,
@@ -148,7 +148,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
           in_qparams_[1].zero_point,
           packA.getRowOffsetBuffer(),
           column_offsets_.data(),
-          BaseType::b_quantized_data_);
+          this->b_quantized_data_);
 
       if (nbits_in_non_outlier_ < 8) {
         DoSpmdmOnInpBuffer<
@@ -187,7 +187,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
           in_qparams_[1].zero_point,
           packA.getRowOffsetBuffer(),
           column_offsets_.data(),
-          BaseType::b_dequantized_data_);
+          this->b_dequantized_data_);
 
       if (nbits_in_non_outlier_ < 8) {
         DoSpmdmOnInpBuffer<

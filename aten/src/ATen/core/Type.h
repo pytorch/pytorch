@@ -8,7 +8,7 @@
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/core/ArrayRef.h"
+#include <c10/util/ArrayRef.h>
 #include "ATen/core/Half.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
 #include "ATen/core/Reduction.h"
@@ -168,94 +168,9 @@ struct CAFFE2_API Type {
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
-  virtual Tensor & _th_set_(Tensor & self, Storage source) const = 0;
-  virtual Tensor & _th_set_(Tensor & self, Storage source, int64_t storage_offset, IntList size, IntList stride) const = 0;
-  virtual Tensor & _th_set_(Tensor & self, const Tensor & source) const = 0;
-  virtual Tensor & _th_set_(Tensor & self) const = 0;
-  virtual Tensor & s__th_masked_fill_(Tensor & self, const Tensor & mask, Scalar value) const = 0;
-  virtual Tensor & _th_masked_fill_(Tensor & self, const Tensor & mask, Scalar value) const = 0;
-  virtual Tensor & s__th_masked_fill_(Tensor & self, const Tensor & mask, const Tensor & value) const = 0;
-  virtual Tensor & _th_masked_fill_(Tensor & self, const Tensor & mask, const Tensor & value) const = 0;
-  virtual Tensor & s__th_masked_scatter_(Tensor & self, const Tensor & mask, const Tensor & source) const = 0;
-  virtual Tensor & _th_masked_scatter_(Tensor & self, const Tensor & mask, const Tensor & source) const = 0;
-  virtual Tensor & _th_put_(Tensor & self, const Tensor & index, const Tensor & source, bool accumulate) const = 0;
-  virtual Tensor & _th_index_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) const = 0;
-  virtual Tensor & _th_index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) const = 0;
-  virtual Tensor & _th_index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & value) const = 0;
-  virtual Tensor & _th_scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) const = 0;
-  virtual Tensor & _th_scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) const = 0;
-  virtual Tensor & _th_scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) const = 0;
-  virtual Tensor & _th_iand_(Tensor & self, Scalar other) const = 0;
-  virtual Tensor & s__th_iand_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_iand_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_ior_(Tensor & self, Scalar other) const = 0;
-  virtual Tensor & s__th_ior_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_ior_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_ixor_(Tensor & self, Scalar other) const = 0;
-  virtual Tensor & s__th_ixor_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_ixor_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_ilshift_(Tensor & self, Scalar other) const = 0;
-  virtual Tensor & s__th_ilshift_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_ilshift_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_irshift_(Tensor & self, Scalar other) const = 0;
-  virtual Tensor & s__th_irshift_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_irshift_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_lt_(Tensor & self, Scalar other) const = 0;
-  virtual Tensor & s__th_lt_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_lt_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_gt_(Tensor & self, Scalar other) const = 0;
-  virtual Tensor & s__th_gt_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_gt_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_le_(Tensor & self, Scalar other) const = 0;
-  virtual Tensor & s__th_le_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_le_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_ge_(Tensor & self, Scalar other) const = 0;
-  virtual Tensor & s__th_ge_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_ge_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_eq_(Tensor & self, Scalar other) const = 0;
-  virtual Tensor & s__th_eq_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_eq_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_ne_(Tensor & self, Scalar other) const = 0;
-  virtual Tensor & s__th_ne_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_ne_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_lgamma_(Tensor & self) const = 0;
-  virtual Tensor & _th_digamma_(Tensor & self) const = 0;
-  virtual Tensor & _th_polygamma_(Tensor & self, int64_t n) const = 0;
-  virtual Tensor & _th_erfinv_(Tensor & self) const = 0;
-  virtual Tensor & _th_frac_(Tensor & self) const = 0;
-  virtual Tensor & _th_renorm_(Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) const = 0;
-  virtual Tensor & _th_reciprocal_(Tensor & self) const = 0;
-  virtual Tensor & _th_neg_(Tensor & self) const = 0;
-  virtual Tensor & s__th_atan2_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_atan2_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_pow_(Tensor & self, Scalar exponent) const = 0;
-  virtual Tensor & s__th_pow_(Tensor & self, const Tensor & exponent) const = 0;
-  virtual Tensor & _th_pow_(Tensor & self, const Tensor & exponent) const = 0;
-  virtual Tensor & s__th_lerp_(Tensor & self, const Tensor & end, Scalar weight) const = 0;
-  virtual Tensor & _th_lerp_(Tensor & self, const Tensor & end, Scalar weight) const = 0;
-  virtual Tensor & _th_sign_(Tensor & self) const = 0;
-  virtual Tensor & _th_fmod_(Tensor & self, Scalar other) const = 0;
-  virtual Tensor & s__th_fmod_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_fmod_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_remainder_(Tensor & self, Scalar other) const = 0;
-  virtual Tensor & s__th_remainder_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_remainder_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor & _th_tril_(Tensor & self, int64_t diagonal) const = 0;
   virtual Tensor & _th_triu_(Tensor & self, int64_t diagonal) const = 0;
-  virtual Tensor & _th_addbmm_(Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & s__th_addcmul_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual Tensor & _th_addcmul_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
-  virtual Tensor & s__th_addcdiv_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
-  virtual Tensor & _th_addcdiv_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
-  virtual Tensor & _th_random_(Tensor & self, int64_t from, int64_t to, Generator * generator) const = 0;
-  virtual Tensor & _th_random_(Tensor & self, int64_t to, Generator * generator) const = 0;
-  virtual Tensor & _th_random_(Tensor & self, Generator * generator) const = 0;
-  virtual Tensor & _th_uniform_(Tensor & self, double from, double to, Generator * generator) const = 0;
-  virtual Tensor & _th_normal_(Tensor & self, double mean, double std, Generator * generator) const = 0;
-  virtual Tensor & _th_cauchy_(Tensor & self, double median, double sigma, Generator * generator) const = 0;
-  virtual Tensor & _th_log_normal_(Tensor & self, double mean, double std, Generator * generator) const = 0;
-  virtual Tensor & _th_exponential_(Tensor & self, double lambd, Generator * generator) const = 0;
-  virtual Tensor & _th_geometric_(Tensor & self, double p, Generator * generator) const = 0;
   virtual Tensor abs(const Tensor & self) const = 0;
   virtual Tensor & abs_(Tensor & self) const = 0;
   virtual Tensor acos(const Tensor & self) const = 0;

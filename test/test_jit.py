@@ -234,6 +234,7 @@ class JitTestCase(TestCase):
         buffer = io.BytesIO()
         torch.jit.save(imported, buffer)
         buffer.seek(0)
+
         return torch.jit.load(buffer)
 
     def assertGraphContains(self, graph, kind):
@@ -2069,12 +2070,35 @@ class TestJit(JitTestCase):
         def python_op_name_test(y):
             return python_fn(y)
 
+        @torch.jit.script
+        def empty_int_list_test(y):
+            x = torch.jit.annotate(List[int], [])
+            return x[0]
+
+        @torch.jit.script
+        def empty_float_list_test(y):
+            return [1.0, 2.0, 3.0]
+
+        @torch.jit.script
+        def print_weird_test(y):
+            print("hi\016")
+
         self.assertExpected(if_test.graph.pretty_print(), "if_test")
         self.assertExpected(if_one.graph.pretty_print(), "if_one")
         self.assertExpected(while_test.graph.pretty_print(), "while_test")
         self.assertExpected(while_if_test.graph.pretty_print(), "while_if_test")
         self.assertExpected(loop_use_test.graph.pretty_print(), "loop_use_test")
         self.assertExpected(python_op_name_test.graph.pretty_print(), "python_op_name_test")
+        self.assertExpected(empty_int_list_test.graph.pretty_print(), "empty_int_list_test")
+        self.assertExpected(empty_float_list_test.graph.pretty_print(), "empty_float_list_test")
+        self.assertExpected(print_weird_test.graph.pretty_print(), "print_weird_test")
+
+    def test_cu_escaped_number(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(a):
+                print("hi\016")
+        ''')
+        self.assertExpected(cu.foo.graph.pretty_print())
 
     def test_function_default_values(self):
         outer_var = torch.tensor(20)
@@ -3699,6 +3723,17 @@ a")
 
         self.checkScript(test_non_equality, (), optimize=True)
 
+        def test_list_equality_as_cond():
+            a = [1, 2, 3]
+            b = [3]
+            if a == b:
+                c = 1
+            else:
+                c = 2
+            return c
+
+        self.checkScript(test_list_equality_as_cond, (), optimize=True)
+
         def test_list_add():
             a = [1, 2, 3]
             b = [2]
@@ -4473,51 +4508,44 @@ a")
                 # Replace this with another unsupported op when/if it gets supported
                 return x << y
 
+    def test_bitwise_ops(self):
+
+        def int_test():
+            return 2 & 3, 2 ^ 3, 2 | 3
+
+        self.checkScript(int_test, ())
+
+        def bool_test(x, y):
+            # type: (bool, bool) -> Tuple[bool, bool, bool]
+            return x & y, x ^ y, x | y
+
+        self.checkScript(bool_test, (True, False))
+        self.checkScript(bool_test, (True, True))
+
+        def tensor_test(x, y):
+            return x & y, x ^ y, x | y
+
+        x = torch.tensor(2)
+        y = torch.tensor(3)
+
+        self.checkScript(tensor_test, (x, y))
+
     def test_number_math(self):
         template = dedent('''
-        # int, int -> int
-        def func1():
-            return 7 {op} 2
-
-        def func2():
-            return 3 {op} 2
-
-        def func3():
-            return -7 {op} 3
-
-        def func4():
-            return 7 {op} -3
-
-        # float, float -> float
-        def func5():
-            return 3.14 {op} 0.125
-
-        def func6():
-            return 3.14 {op} 3.14
-
-        def func7():
-            return -0.5 {op} 2.0
-
-        def func8():
-            return 3.5 {op} -2.0
-
+        def func():
+            return {scalar1} {op} {scalar2}
         ''')
-        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=']
+        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=', '//']
+        scalars = ['7', '2', '3', '-3', '3.14', '0.125', '-0.5', '2.0', '-2.0']
+        scalar_pairs = [(scalar1, scalar2) for scalar1 in scalars for scalar2 in scalars]
+        for scalar1, scalar2 in scalar_pairs:
+            for op in ops:
+                code = template.format(op=op, scalar1=scalar1, scalar2=scalar2)
+                scope = {}
+                exec(code, globals(), scope)
+                cu = torch.jit.CompilationUnit(code)
 
-        for op in ops:
-            code = template.format(op=op)
-            scope = {}
-            exec(code, globals(), scope)
-            cu = torch.jit.CompilationUnit(code)
-
-            self.assertEqual(cu.func1(), scope['func1']())
-            self.assertEqual(cu.func2(), scope['func2']())
-            self.assertEqual(cu.func3(), scope['func3']())
-            self.assertEqual(cu.func4(), scope['func4']())
-            self.assertEqual(cu.func5(), scope['func5']())
-            self.assertEqual(cu.func6(), scope['func6']())
-            self.assertEqual(cu.func7(), scope['func7']())
-            self.assertEqual(cu.func8(), scope['func8']())
+                self.assertEqual(cu.func(), scope['func']())
 
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)
@@ -7400,10 +7428,15 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
             test_script(None)
 
-        with self.assertRaisesRegex(RuntimeError, "cannot match a optional to int"):
+        @torch.jit.script
+        def test_test():
+            return torch.jit._unwrap_optional(1)
+
+        with self.assertRaisesRegex(RuntimeError, "is actually of type None"):
             @torch.jit.script
-            def test_test():
-                return torch.jit._unwrap_optional(1)
+            def test_no_type():
+                # type: () -> int
+                return torch.jit._unwrap_optional(None)
 
     def test_indexing_error(self):
         with self.assertRaisesRegex(RuntimeError, "Indexing only supported on lists, tensors, and tuples"):
@@ -8267,12 +8300,14 @@ a")
             def __init__(self, in_features, out_features):
                 super(Weak, self).__init__()
                 self.weight = torch.nn.Parameter(torch.ones(out_features, in_features))
+                self.bias = torch.nn.Parameter(torch.ones(out_features))
                 self.register_buffer("buffer", torch.ones(out_features))
                 self.submodule = Submodule()
 
             @torch._jit_internal.weak_script_method
             def forward(self, x):
-                return F.linear(x, self.weight) + self.buffer + self.submodule(x)
+                return F.linear(x, self.weight, self.bias) \
+                    + self.buffer + self.submodule(x)
 
         class Strong(torch.jit.ScriptModule):
             def __init__(self, weak):
@@ -8352,6 +8387,31 @@ a")
             return 3
 
         self.checkScript(foo, (True,))
+
+    def test_optional_conversion(self):
+        @torch.jit.script
+        def other_fn(x=None):
+            # type: (Optional[int]) -> int
+            return torch.jit._unwrap_optional(x)
+
+        @torch.jit.script
+        def fn(x):
+            # type: (int) -> int
+            return other_fn(x)
+
+        self.assertEqual(fn(2), 2)
+
+        @torch.jit.script
+        def unify_to_optional(x):
+            # type: (bool) -> Optional[int]
+            if x:
+                a = None
+            else:
+                a = 2
+            return a
+
+        self.assertEqual(unify_to_optional(True), None)
+        self.assertEqual(unify_to_optional(False), 2)
 
     def test_lhs_indexing(self):
         def foo(a, b):
@@ -9032,10 +9092,8 @@ EXCLUDE_SCRIPT = {
     'test_nn_pixel_shuffle',
     'test_nn_interpolate',
     'test_nn_pad',
-    'test_nn_cosine_similarity',
     'test_nn_normalize',
     'test_nn_fold',
-    'test_nn_linear',
     'test_nn_max_unpool1d',
     'test_nn_lp_pool1d',
     'test_nn_lp_pool2d',
@@ -9556,6 +9614,7 @@ S = 5
 #     module name,
 #     constructor arguments,
 #     args (tuple represents shape of a tensor arg),
+#     use_as_constant (should the submodule be listed in __constants__?)
 # )
 nn_module_tests = [
     ('AlphaDropout', (), ((S,),)),
@@ -9573,6 +9632,7 @@ nn_module_tests = [
     ('Tanh', (), ((S,),)),
     ('Tanhshrink', (), ((S,),)),
     ('Threshold', (2., 2.), ((S,),)),
+    ('Sequential', (torch.nn.Sigmoid(), torch.nn.Threshold(1., 2.)), ((S,),), True),
 ]
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
@@ -9588,7 +9648,6 @@ nn_module_tests = [
 #   fn to determine if test should be skipped,               // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
 #   kwargs for function,                                     // optional
-#   is inplace? if so skip grad tests,                       // optional
 # )
 nn_functional_tests = [
     # TODO: default arguments for None type not supported, add
@@ -9648,6 +9707,7 @@ nn_functional_tests = [
     ('softplus', (S, S, S), (),),
     ('softmin', (S, S, S), (0,),),
     ('softmax', (S, S, S), (0,),),
+    ('softmax', (S, S, S), (0, 3, torch.double), 'with_all_args'),
     ('tanh', (S, S, S), (),),
     ('sigmoid', (S, S, S), (),),
     ('log_softmax', (S, S, S), (0,),),
@@ -9840,7 +9900,8 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
     post_add_test(test_name, skipTestIf, do_test)
 
 
-def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
+def add_nn_module_test(module_name, constructor_args, call_args,
+                       use_as_constant=False, skipTestIf=()):
     def do_test(self):
         nn_module = getattr(torch.nn, module_name)
 
@@ -9854,8 +9915,14 @@ def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
             call = "self.submodule({})".format(call_args_str)
             script = script_method_template.format(method_args, call)
 
+            submodule_constants = []
+            if use_as_constant:
+                submodule_constants = ['submodule']
+
             # Create module to use the script method
             class TheModule(torch.jit.ScriptModule):
+                __constants__ = submodule_constants
+
                 def __init__(self):
                     super(TheModule, self).__init__()
                     self.submodule = nn_module(*constructor_args)

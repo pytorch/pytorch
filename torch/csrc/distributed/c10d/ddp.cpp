@@ -149,10 +149,7 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
   }
 
   // Stream guards, now the current stream is the worker stream
-  std::vector<at::cuda::CUDAGuard> cudaGuards;
-  for (size_t devIdx = 0; devIdx < devices.size(); ++devIdx) {
-    cudaGuards.push_back(at::cuda::CUDAGuard(workerStreams[devIdx]));
-  }
+  at::cuda::CUDAMultiStreamGuard cudaGuard(workerStreams);
 
   std::vector<at::Tensor> gradsBatchCoalesced;
   for (size_t devIdx = 0; devIdx < devices.size(); ++devIdx) {
@@ -181,7 +178,7 @@ void syncReduction(
   // and intra-node reduce to be operated on this worker stream to
   // improve performance
   at::cuda::CUDAStream workerStream = at::cuda::getStreamFromPool();
-  at::cuda::CUDAGuard cudaGuard = at::cuda::CUDAGuard(workerStream);
+  at::cuda::CUDAStreamGuard cudaGuard(workerStream);
 
   // Let the worker stream wait on the reduction stream
   reductionWork->wait();
@@ -199,13 +196,10 @@ void syncReduction(
   at::cuda::CUDAEvent event;
   event.record(workerStream);
 
-  // Now make the BW stream wait on it
-  auto bwDevice = cudaGuard.original_device();
-  AT_ASSERT(bwDevice.type() == at::kCUDA);
-  auto bwStream = cudaGuard.original_streams()[bwDevice.index()];
-
   // Now let the BW stream wait for the worker stream
-  event.block(bwStream);
+  // (NB: original_stream is the current stream PRIOR to the guard.  Might
+  // live on a completely different device than our current device here!)
+  event.block(cudaGuard.original_stream());
 }
 
 } // namespace c10d

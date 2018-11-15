@@ -17,25 +17,25 @@ graph(%a.1_data : Dynamic
   %16 : bool = prim::Constant[value=1]()
   %17 : int = prim::Constant[value=1]()
   %18 : Dynamic = aten::type_as(%8, %7)
-  %cond_mask.1 : Dynamic = aten::mul(%7, %18)
-  %20 : int = aten::dim(%cond_mask.1)
+  %data.2 : Dynamic = aten::mul(%7, %18)
+  %20 : int = aten::dim(%data.2)
   %21 : bool = aten::eq(%20, %17)
   %cond_data : Dynamic, %cond_mask : Dynamic, %data : Dynamic = prim::If(%21)
     block0() {
       %25 : int = aten::dim(%data.1)
       %26 : int = aten::sub(%25, %17)
-      %data.3 : Dynamic = prim::Loop(%26, %16, %cond_mask.1)
+      %data.4 : Dynamic = prim::Loop(%26, %16, %data.2)
         block0(%_ : int, %29 : Dynamic) {
           %30 : int = aten::dim(%29)
-          %data.2 : Dynamic = aten::unsqueeze(%29, %30)
-          -> (%16, %data.2)
+          %data.3 : Dynamic = aten::unsqueeze(%29, %30)
+          -> (%16, %data.3)
         }
-      %cond_data.1 : Dynamic = aten::expand_as(%data.3, %data.1)
-      %cond_mask.2 : Dynamic = aten::expand_as(%data.3, %mask)
-      -> (%cond_data.1, %cond_mask.2, %data.3)
+      %cond_data.1 : Dynamic = aten::expand_as(%data.4, %data.1)
+      %cond_mask.1 : Dynamic = aten::expand_as(%data.4, %mask)
+      -> (%cond_data.1, %cond_mask.1, %data.4)
     }
     block1() {
-      -> (%cond_mask.1, %cond_mask.1, %cond_mask.1)
+      -> (%data.2, %data.2, %data.2)
     }
   %res_data : Dynamic = aten::where(%cond_data, %data.1, %a.1_data)
   %res_mask : Dynamic = aten::where(%cond_mask, %mask, %a.1_mask)

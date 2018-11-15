@@ -25,6 +25,7 @@ configure_file(
 # transitively passed on to all libraries dependent on PyTorch.
 file(GLOB C10_SRCS
         *.cpp
+        impl/*.cpp
         macros/*.cpp
         util/*.cpp
         )

@@ -265,7 +265,7 @@ struct Environment {
 
   void setSugaredVar(const SourceRange& loc, const std::string& name, SugaredValuePtr value) {
     Value* as_simple_value = asSimple(value);
-    if (as_simple_value)
+    if (as_simple_value && !as_simple_value->hasUniqueName())
       as_simple_value->setUniqueName(name);
     // prevent re-assignment involving any sugared values
     // any reassignment like:
@@ -451,15 +451,16 @@ Value* tryMatchArgument(
     value = graph.insertNode(graph.createList(value->type(), repeated))->output();
   }
 
-  TypePtr concrete_type;
-  try {
-    concrete_type = matchTypeVariables(arg.type(), value->type(), type_env);
-  } catch(TypeMatchError& e) {
+  const MatchTypeReturn matched_type =
+      matchTypeVariables(arg.type(), value->type(), type_env);
+  if (!matched_type.type) {
     err() << "could not match type " << value->type()->str() << " to "
-          << arg.type()->str() << " in argument '" << arg.name() << "': " << e.what() << "\n"
+          << arg.type()->str() << " in argument '" << arg.name()
+          << "': " << matched_type.errMsg << "\n"
           << named_value.locOr(loc);
     return nullptr;
   }
+  const auto concrete_type = *matched_type.type;
 
   // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
   if (convertibleToList(value->type(), concrete_type) &&
@@ -886,7 +887,6 @@ struct to_ir {
                           << (schema.returns().size() > 1 ? "s" : "")
                           << " but found no return statement";
     }
-
     method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(graph);
@@ -1182,7 +1182,7 @@ private:
             max_trip_count->range(), emitExpr(max_trip_count.value()));
       } else {
         max_trip_count_val =
-            materializeConstant((int64_t)INT_MAX, *graph, range, integral_constants);
+            materializeConstant(std::numeric_limits<int64_t>::max(), *graph, range, integral_constants);
       }
       if (cond) {
         cond_val = emitCond(cond.value());
@@ -1319,8 +1319,7 @@ private:
   void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
     auto string_input = insertConstant(*graph, exception, loc);
-    graph->insertNode(graph->create(prim::RaiseException, {string_input}, 0)
-                        ->setSourceLocation(std::make_shared<SourceRange>(loc)));
+    graph->insert(prim::RaiseException, {string_input}, {}, loc);
   }
 
   void emitAssert(const Assert& stmt) {
@@ -1693,6 +1692,14 @@ private:
         return aten::__isnot__;
       case TK_NOT:
         return aten::__not__;
+      case TK_FLOOR_DIV:
+        return aten::floordiv;
+      case '&':
+        return aten::__and__;
+      case '|':
+        return aten::__or__;
+      case '^':
+        return aten::__xor__;
       default:
         throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
@@ -1909,7 +1916,11 @@ private:
       case '/':
       case '+':
       case '-':
-      case '%': {
+      case '%':
+      case '&':
+      case '|':
+      case '^':
+      case TK_FLOOR_DIV: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
@@ -2288,18 +2299,16 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, con
           Symbol::aten(builtin_cast_methods().at(field)),
           NamedValue(loc, "self", value));
     }
-    if (field == "dtype") {
-      auto* node = m.graph()->create(prim::TensorDType, {value});
-      node->output()->setType(IntType::get());
-      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
-    } else if (field == "device") {
-      auto* node = m.graph()->create(prim::TensorDevice, {value});
-      node->output()->setType(ListType::create(IntType::get()));
-      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
-    } else if (field == "shape") {
-      auto* node = m.graph()->create(prim::TensorShape, {value});
-      node->output()->setType(ListType::create(IntType::get()));
-      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
+    // functions that are just direct property lookups on tensor
+    // must be registered as prim::<name>(Tensor t) -> <return_type>
+    static const std::unordered_set<std::string> fields = {
+      "dtype",
+      "device",
+      "shape",
+    };
+    if (fields.count(field)) {
+      auto r = m.graph()->insert(Symbol::fromQualString("prim::"+field), {value});
+      return std::make_shared<SimpleValue>(r);
     }
   }
   if (getValue()->type()->isSubtypeOf(NumberType::get())) {
@@ -2592,12 +2601,6 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     return fmap(unpack->outputs(), make_simple_value);
   }
   throw ErrorReport(loc) << value->type()->str() << " cannot be used as a tuple";
-}
-
-void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what) {
-  if(expected != actual) {
-    throw ErrorReport(loc) << "expected " << expected << " " << what << " but found " << actual;
-  }
 }
 
 } // namespace script
