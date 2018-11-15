@@ -936,17 +936,15 @@ template<> inline TypePtr getTypePtr<std::vector<int64_t>>() { return ListType::
 
 CAFFE2_API TypePtr inferTypeFrom(const IValue& value);
 
-struct CAFFE2_API TypeMatchError : public std::exception {
-  TypeMatchError(std::string msg_)
-  : msg_(std::move(msg_)) {}
-  const char * what() const noexcept override {
-    return msg_.c_str();
-  }
-private:
-  std::string msg_;
-};
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
-CAFFE2_API TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv & type_env);
+struct MatchTypeReturn {
+  c10::optional<TypePtr> type; // nullopt if there is no match
+  std::string errMsg; // is there is no match, this contains the reason
+};
+
+CAFFE2_API MatchTypeReturn
+matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
+
 CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 
 } // namespace c10
