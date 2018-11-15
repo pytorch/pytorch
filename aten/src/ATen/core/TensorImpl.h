@@ -1485,6 +1485,11 @@ protected:
 
 protected:
   at::Storage storage_;
+  // This pointer points to an AutogradMeta struct that stores autograd-specific fields
+  // (such as grad_ / grad_fn_ / grad_accumulator_). It is declared as a void* pointer
+  // because we don't want to expose autograd types to libATen.
+  // This pointer always has unique ownership (meaning only one TensorImpl can own it
+  // at a time).
   void* autograd_meta_ = nullptr;
 
   // We could save a word or two by combining the SmallVector structs,
