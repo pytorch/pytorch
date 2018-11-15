@@ -113,13 +113,18 @@ function(caffe2_binary_target target_name_or_src)
 endfunction()
 
 function(caffe2_hip_binary_target target_name_or_src)
-  caffe2_binary_target(${target_name_or_src})
-
   if (ARGC GREATER 1)
     set(__target ${target_name_or_src})
+    prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${ARGN}")
   else()
     get_filename_component(__target ${target_name_or_src} NAME_WE)
+    prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${target_name_or_src}")
   endif()
+
+  set_source_files_properties(${__srcs} PROPERTIES LANGUAGE CXX)
+
+  caffe2_binary_target(${target_name_or_src})
+
   target_compile_options(${__target} PRIVATE ${HIP_CXX_FLAGS})
   target_include_directories(${__target} PRIVATE ${Caffe2_HIP_INCLUDES})
 endfunction()
