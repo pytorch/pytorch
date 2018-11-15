@@ -504,7 +504,7 @@ class TestNN(NNTestCase):
             output = criterion(*args)
         else:
             output = criterion(input, target, *extra_args)
-        return output.item()
+        return output
 
     def _backward_criterion(self, criterion, input, target, gradOutput=None, extra_args=None):
         if extra_args is None:
