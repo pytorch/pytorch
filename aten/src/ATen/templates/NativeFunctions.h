@@ -13,9 +13,11 @@
 #include <tuple>
 #include <vector>
 
+namespace c10 {
+class Scalar;
+}
 namespace at {
 struct Generator;
-class Scalar;
 class Tensor;
 struct Type;
 } // namespace at
