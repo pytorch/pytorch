@@ -12,15 +12,6 @@
 
 namespace torch {
 namespace nn {
-template <size_t D>
-ConvOptions<D>::ConvOptions(
-    int64_t input_channels,
-    int64_t output_channels,
-    ExpandingArray<D> kernel_size)
-    : input_channels_(input_channels),
-      output_channels_(output_channels),
-      kernel_size_(std::move(kernel_size)) {}
-
 template <size_t D, typename Derived>
 ConvImpl<D, Derived>::ConvImpl(ConvOptions<D> options)
     : options(std::move(options)) {

@@ -18,7 +18,7 @@
 
 #include <cstddef>
 
-namespace at {
+namespace c10 {
 
 /// \struct AlignedCharArray
 /// \brief Helper for building an aligned character array type.
@@ -168,6 +168,6 @@ template <
 struct AlignedCharArrayUnion
     : AlignedCharArray<
           alignof(detail::AlignerImpl<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>),
-          sizeof(::at::detail::
+          sizeof(::c10::detail::
                      SizerImpl<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>)> {};
-} // end namespace at
+} // end namespace c10
