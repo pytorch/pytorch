@@ -1,5 +1,10 @@
 #pragma once
 
+#include <string>
+#include <sstream>
+
+using std::string;
+
 namespace caffe2 {
 
 // to_string, stoi and stod implementation for Android related stuff.
