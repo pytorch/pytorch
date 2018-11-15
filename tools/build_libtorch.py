@@ -14,6 +14,7 @@ if __name__ == '__main__':
     options = parser.parse_args()
 
     os.environ['BUILD_TORCH'] = 'ON'
+    os.environ['BUILD_TEST'] = 'ON'
     os.environ['ONNX_NAMESPACE'] = 'onnx_torch'
     os.environ['PYTORCH_PYTHON'] = sys.executable
 
