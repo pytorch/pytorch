@@ -9062,23 +9062,19 @@ EXCLUDE_SCRIPT = {
     'test_nn_affine_grid',
 
     # unknown builtin op
-    'test_nn_softmin',
-    'test_nn_local_response_norm',
-    'test_nn_poisson_nll_loss',
     'test_nn_cross_entropy',
     'test_nn_binary_cross_entropy_with_logits',
-    'test_nn_multilabel_soft_margin_loss',
-    'test_nn_pixel_shuffle',
     'test_nn_interpolate',
-    'test_nn_pad',
-    'test_nn_normalize',
     'test_nn_fold',
     'test_nn_max_unpool1d',
     'test_nn_lp_pool1d',
     'test_nn_lp_pool2d',
-    'test_nn_instance_norm',
-    'test_nn_grid_sample',
     'test_nn_gumbel_softmax',
+
+    # undefined tensors as constants
+    'test_nn_instance_norm',
+    'test_nn_normalize',
+    'test_nn_multilabel_soft_margin_loss',
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
@@ -9744,6 +9740,7 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'multi_margin_loss',
     'binary_cross_entropy',
     'ctc_loss',
+    'grid_sample',
 ])
 
 
