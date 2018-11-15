@@ -1578,9 +1578,7 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         >>> output.backward()
     """
     if size_average is not None or reduce is not None:
-        _size_average = torch.jit._unwrap_optional(size_average)
-        _reduce = torch.jit._unwrap_optional(reduce)
-        reduction = _Reduction.legacy_get_string(_size_average, _reduce)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     dim = input.dim()
     if dim < 2:
         raise ValueError('Expected 2 or more dimensions (got {})'.format(dim))
@@ -1649,9 +1647,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
 
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_string(
-            torch.jit._unwrap_optional(size_average),
-            torch.jit._unwrap_optional(reduce))
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     if log_input:
         loss = torch.exp(input) - target * input
     else:
@@ -1695,12 +1691,10 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             specifying either of those two args will override :attr:`reduction`. Default: 'mean'
     """
     if size_average is not None or reduce is not None:
-        _size_average = torch.jit._unwrap_optional(size_average)
-        _reduce = torch.jit._unwrap_optional(reduce)
-        _reduction_enum = _Reduction.legacy_get_enum(_size_average, _reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        _reduction_enum = _Reduction.get_enum(reduction)
-    return torch.kl_div(input, target, _reduction_enum)
+        reduction_enum = _Reduction.get_enum(reduction)
+    return torch.kl_div(input, target, reduction_enum)
 
 
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
@@ -1747,9 +1741,7 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
         >>> loss.backward()
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_string(
-            torch.jit._unwrap_optional(size_average),
-            torch.jit._unwrap_optional(reduce))
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     return nll_loss(log_softmax(input, 1), target, weight, None, ignore_index, None, reduction)
 
 
@@ -1790,11 +1782,9 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         >>> loss.backward()
     """
     if size_average is not None or reduce is not None:
-        _size_average = torch.jit._unwrap_optional(size_average)
-        _reduce = torch.jit._unwrap_optional(reduce)
-        _reduction_enum = _Reduction.legacy_get_enum(_size_average, _reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        _reduction_enum = _Reduction.get_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                       "Please ensure they have the same size.".format(target.size(), input.size()))
@@ -1807,7 +1797,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         weight = weight.expand(new_size)
 
     return torch._C._nn.binary_cross_entropy(
-        input, target, weight, _reduction_enum)
+        input, target, weight, reduction_enum)
 
 
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=None,
@@ -1849,9 +1839,7 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
          >>> loss.backward()
     """
     if size_average is not None or reduce is not None:
-        reduction_enum = _Reduction.legacy_get_enum(
-            torch.jit._unwrap_optional(size_average),
-            torch.jit._unwrap_optional(reduce))
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
 
@@ -1977,9 +1965,7 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_string(
-            torch.jit._unwrap_optional(size_average),
-            torch.jit._unwrap_optional(reduce))
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     loss = -(target * logsigmoid(input) + (1 - target) * logsigmoid(-input))
 
