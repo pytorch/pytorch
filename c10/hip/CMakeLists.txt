@@ -9,7 +9,7 @@ include(../../cmake/public/utils.cmake)
 set(C10_HIP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/impl/hip_cmake_macros.h.in
-    ${CMAKE_BINARY_DIR}/c10/cuda/impl/hip_cmake_macros.h)
+    ${CMAKE_BINARY_DIR}/c10/hip/impl/hip_cmake_macros.h)
 
 # NB: All previous cu files are renamed into cc files.  This isn't tested at the
 # moment.
