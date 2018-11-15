@@ -198,7 +198,7 @@ void Graph::dumpPretty() {
 
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
-  int device;
+  at::Device device = at::kCPU;
   auto checkValue = [&](const Value* v) {
     if(CompleteTensorTypePtr type = v->type()->cast<CompleteTensorType>()) {
       if(!has_device) {
