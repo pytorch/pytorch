@@ -209,7 +209,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::Undefined,
+        "prim::Undefined() -> Tensor",
         [](const Node* node) {
           return [](Stack& stack) {
             stack.emplace_back(at::Tensor());
@@ -225,7 +225,7 @@ RegisterOperators reg({
         };
       }),
     Operator(
-        prim::NoneGenerator,
+        "prim::NoneGenerator() -> Generator",
         [](const Node* node) {
           return [](Stack& stack) {
             stack.emplace_back();

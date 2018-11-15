@@ -291,10 +291,15 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       }
       ret.type = OptionalType::create(*optionedType.type);
       return ret;
-    } else {
+    } else if (!actual->isSubtypeOf(NoneType::get())) {
       // If the actual type is a non-optional, allow matching to the formal if
-      // its element type matches the actual
+      // its element type matches the actual.
+      // Don't match None because it is already an optional (but one of
+      // unknown type).
       return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
+    } else {
+      ret.errMsg = "cannot match an Optional[T] to None, because there is no way to determine T from None.";
+      return ret;
     }
   }
 
