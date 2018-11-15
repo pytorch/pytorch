@@ -28,7 +28,8 @@ class Sampler {
 
   /// Resets the `Sampler`'s internal state.
   /// Typically called before a new epoch.
-  TORCH_API virtual void reset() = 0;
+  /// Optionally, accepts a new size when reseting the sampler.
+  virtual void reset(optional<size_t> new_size) = 0;
 
   /// Returns the next index if possible, or an empty optional if the
   /// sampler is exhausted for this epoch.

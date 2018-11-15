@@ -29,7 +29,7 @@ class RandomSampler : public Sampler<> {
   TORCH_API explicit RandomSampler(int64_t size, Dtype index_dtype = torch::kInt64);
 
   /// Resets the `RandomSampler` to a new set of indices.
-  TORCH_API void reset() override;
+  void reset(optional<size_t> new_size = nullopt) override;
 
   /// Returns the next batch of indices.
   TORCH_API optional<std::vector<size_t>> next(size_t batch_size) override;
