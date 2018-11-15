@@ -61,7 +61,7 @@ class StreamSampler : public Sampler<BatchSize> {
 /// Simply return batch_size as a single index item with each next call.
 class BatchSizeSampler : public Sampler<BatchSize> {
  public:
-  void reset() override {}
+  void reset(optional<size_t> new_size = nullopt) override {}
 
   optional<BatchSize> next(size_t batch_size) override {
     return BatchSize(batch_size);

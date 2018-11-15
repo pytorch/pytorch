@@ -974,15 +974,13 @@ TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
 }
 
 TEST(DataTest, DataLoaderWithChunkSupportSingleWorker) {
-  const size_t kBatchSize = 13;  
+  const size_t kBatchSize = 13;
 
   auto dataset = InfiniteStreamDataset().map(
       transforms::Lambda<int>([](int x) { return x + 1; }));
 
   auto data_loader = torch::data::make_chunk_data_loader(
-      std::move(dataset),
-      DataLoaderOptions().batch_size(kBatchSize),
-      samplers::BatchSizeSampler{});
+      std::move(dataset), DataLoaderOptions().batch_size(kBatchSize));
 
   auto iterator = data_loader->begin();
   for (size_t i = 0; i < 3; ++i, ++iterator) {
@@ -996,20 +994,18 @@ TEST(DataTest, DataLoaderWithChunkSupportSingleWorker) {
 }
 
 TEST(DataTest, DataLoaderWithChunkSupportMultiWorkers) {
-  const size_t kBatchSize = 13;  
-  
-  InfiniteStreamDataset dataset; 
+  const size_t kBatchSize = 13;
+
+  InfiniteStreamDataset dataset;
 
   auto data_loader = torch::data::make_chunk_data_loader(
       std::move(dataset),
-      DataLoaderOptions().batch_size(kBatchSize).workers(3),
-      samplers::BatchSizeSampler{});
+      DataLoaderOptions().batch_size(kBatchSize).workers(3));
 
   auto iterator = data_loader->begin();
   for (size_t i = 0; i < 3; ++i, ++iterator) {
     ASSERT_NE(iterator, data_loader->end());
     std::vector<int> batch = *iterator;
-    ASSERT_EQ(batch.size(), kBatchSize);   
+    ASSERT_EQ(batch.size(), kBatchSize);
   }
 }
-
