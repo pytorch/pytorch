@@ -834,18 +834,63 @@ TEST(DataLoaderTest, RespectsTimeout) {
   ASSERT_LT(duration.count(), 1);
 }
 
+// https://stackoverflow.com/questions/24465533/implementing-boostbarrier-in-c11
 struct Barrier {
-  void wait(size_t target) {
+  explicit Barrier(size_t target) : counter_(target) {}
+  void wait() {
     std::unique_lock<std::mutex> lock(mutex_);
-    ++counter_;
-    cv_.wait(lock, [this, target] { return this->counter_ == target; });
-    cv_.notify_all();
+    if (--counter_ == 0) {
+      cv_.notify_all();
+    } else {
+      cv_.wait(lock, [this] { return this->counter_ == 0; });
+    }
   }
 
-  size_t counter_{0};
+  size_t counter_;
   std::condition_variable cv_;
   std::mutex mutex_;
 };
+
+// On the OrderingTest: This test is intended to verify that the
+// `enforce_ordering` option of the dataloader works correctly. The reason this
+// flag exists is because when the dataloader has multiple workers (threads)
+// enabled and this flag is not set, the order in which worker threads finish
+// loading their respective batch and push it back to the dataloader's main
+// thread (for outside consumption) is not deterministic. Imagine the sampler is
+// a SequentialSampler with indices 0, 1, 2, 3. With batch size 1, each index
+// will be a single "job". Inside the dataloader, worker threads block until a
+// job is available. It is not deterministic which worker thread wakes up first
+// to dequeue a particular batch. Further, some worker threads may take longer
+// than others to read the data for their index. As such, it could be that
+// worker thread 2 finishes before all other threads and returns its batch to
+// the main thread. In that case, the dataloader iterator would return the datum
+// at index 2 first, and afterwards the datum from whatever thread finishes
+// next. As such, the user may see data from indices 2, 0, 3, 1. On another run
+// of the same dataloader on the same data, threads may be scheduled differently
+// and return in order 0, 2, 3, 1. To force this ordering to deterministically
+// be 0, 1, 2, 3, the `enforce_ordering` flag can be set to true. In that case,
+// the dataloader will use a *sequencer* internally which keeps track of which
+// datum is expected next, and buffers any other results until that next
+// expected value arrives. For example, workers 1, 2, 3 may finish before worker
+// 0. If `enforce_ordering` is true, the sequencer will internally buffer the
+// results from 1, 2, 3 until worker 0 finishes. Only then does the dataloader
+// return the datum from worker 0 to the user (and then datum 1 the next time,
+// then 2 and so on).
+//
+// The way the test works is that we start
+// `kNumberOfWorkers` workers in the dataloader, which each get an index from a
+// `SequentialSampler` in the range `0...kNumberOfWorkers-1`. Each worker thread
+// has a copy of the dataset, and thus `get_batch()` is called on the
+// thread-local copy in each worker. We want to simulate out-of-order completion
+// of these threads. For this, we first set a barrier in the `get_batch()`
+// method to make sure every worker has some index to fetch assigned. Further,
+// each worker thread has a unique ID in `0...kNumberOfWorkers-1`.
+// There is a hard-coded ordering, `kOrderInWhichWorkersReturnTheirBatch`, in
+// which we want the worker threads to return. For this, an iterator into this
+// order is maintained. When the derferenced iterator (the current order index)
+// matches the thread ID of a worker, it knows it can now return its index as
+// well as progress the iterator. Inside the dataloader, the sequencer should
+// buffer these indices such that they are ultimately returned in order.
 
 namespace ordering_test {
 namespace {
@@ -869,13 +914,13 @@ struct Dataset : datasets::BatchDataset<Dataset, size_t> {
   Dataset& operator=(Dataset&& other) noexcept = delete;
 
   size_t get_batch(torch::ArrayRef<size_t> indices) override {
-    static Barrier barrier;
+    static Barrier barrier(kNumberOfWorkers);
     static auto order_iterator = kOrderInWhichWorkersReturnTheirBatch.begin();
     static std::condition_variable cv;
     static std::mutex mutex;
 
     // Wait for all threads to get an index batch and arrive here.
-    barrier.wait(kNumberOfWorkers);
+    barrier.wait();
 
     std::unique_lock<std::mutex> lock(mutex);
     cv.wait(lock, [this] { return *order_iterator == this->thread_id_; });
