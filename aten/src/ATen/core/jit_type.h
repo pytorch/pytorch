@@ -527,7 +527,7 @@ struct CAFFE2_API ListType : public SingleElementType<TypeKind::ListType, ListTy
   static ListTypePtr ofFloats();
   static ListTypePtr ofBools();
 private:
-  using SingleElementType::SingleElementType;
+ ListType(TypePtr elem) : SingleElementType(elem) {}
 };
 
 struct FutureType;
