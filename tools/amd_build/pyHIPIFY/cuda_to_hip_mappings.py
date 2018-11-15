@@ -2267,7 +2267,7 @@ C10_MAPPINGS = collections.OrderedDict([
     ("cuda::compat::", ("hip::compat::", API_C10)),
     ("c10/cuda/CUDAException.h", ("c10/hip/HIPException.h", API_C10)),
     ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
-    ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPException.h", API_C10)),
+    ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
 ])
 
 # NB: C10 mappings are more specific than Caffe2 mappings, so run them
