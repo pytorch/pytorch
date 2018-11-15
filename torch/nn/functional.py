@@ -2333,9 +2333,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     else:
         mode_enum = 1
 
-    if padding_mode != 'zeros':
+    if padding_mode == 'zeros':
         padding_mode_enum = 0
-    elif padding_mode != 'border':
+    elif padding_mode == 'border':
         padding_mode_enum = 1
     else:
         padding_mode_enum = 2
