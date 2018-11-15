@@ -63,7 +63,16 @@ namespace c10 { namespace hip {} }
 namespace caffe2 { using namespace c10; }
 namespace at { using namespace c10; }
 namespace at { namespace cuda { using namespace c10::cuda; }}
-namespace at { namespace hip { using namespace c10::hip; }}
+
+// WARNING!!! THIS IS A GIANT HACK!!!
+// This line means you cannot simultaneously include c10/hip
+// and c10/cuda and then use them from the at::cuda namespace.
+// This is true in practice, because HIPIFY works inplace on
+// files in ATen/cuda, so it assumes that c10::hip is available
+// from at::cuda.  This namespace makes that happen.  When
+// HIPIFY is no longer out-of-place, we can switch the cuda
+// here to hip and everyone is happy.
+namespace at { namespace cuda { using namespace c10::hip; }}
 
 // C10_NORETURN
 #if defined(_MSC_VER)
