@@ -2250,6 +2250,10 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("CUDNN" ,("MIOPEN", API_CAFFE2)),
     ("CuDNN" ,("MIOPEN", API_CAFFE2)),
     ("cudnn" ,("miopen", API_CAFFE2)),
+    ("namespace cuda", ("namespace hip", API_CAFFE2)),
+    ("cuda::", ("hip::", API_CAFFE2)),
+    ("thrust::hip::", ("thrust::cuda::", API_CAFFE2)), # undo thrust namespace rewrite
+    ("c10/cuda/", ("c10/hip/", API_CAFFE2)),
 ])
 
 CUDA_TO_HIP_MAPPINGS = [CUDA_IDENTIFIER_MAP, CUDA_TYPE_NAME_MAP,
