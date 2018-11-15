@@ -6,7 +6,7 @@ set(Caffe2_DB_COMMON_GPU_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/create_db_op_gpu.cc"
 )
 set(Caffe2_DB_COMMON_HIP_SRC
-    "${CMAKE_CURRENT_SOURCE_DIR}/hip/create_db_op_gpu.hip"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hip/create_db_op_gpu.cc"
 )
 
 # Common files that are always going to be included.

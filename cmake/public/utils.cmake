@@ -121,8 +121,6 @@ function(caffe2_hip_binary_target target_name_or_src)
     prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${target_name_or_src}")
   endif()
 
-  set_source_files_properties(${__srcs} PROPERTIES LANGUAGE CXX)
-
   caffe2_binary_target(${target_name_or_src})
 
   target_compile_options(${__target} PRIVATE ${HIP_CXX_FLAGS})

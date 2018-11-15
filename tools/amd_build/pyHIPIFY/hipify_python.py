@@ -745,7 +745,7 @@ def get_hip_file_path(filepath, hipify_caffe2):
     # If NONE of the above occurred, then append "_hip" to the end of
     # the filename (before the extension).
     #
-    # Furthermore, ALWAYS replace '.cu' and '.cc' with '.hip'.
+    # Furthermore, ALWAYS replace '.cu' with '.hip'.
     #
     # This isn't set in stone; we might adjust this to support other
     # naming conventions.
@@ -754,7 +754,7 @@ def get_hip_file_path(filepath, hipify_caffe2):
     # to hcc/hcch rather than cc; however, the hcc compiler does not
     # currently support this file extension.
 
-    if ext in {'.cu', '.cc'}:
+    if ext == '.cu':
         ext = '.hip'
 
     orig_dirpath = dirpath
