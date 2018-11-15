@@ -246,10 +246,11 @@ class TensorFeeder : public BlobFeederBase {
             tensor.raw_mutable_data());
     }
     context.FinishDeviceComputation();
+    return tensor;
 #else
     CAFFE_THROW("Caffe2 compiled without NumPy support.");
+    return caffe2::Tensor(); // will not reach here
 #endif // USE_NUMPY
-    return tensor;
   }
 
   virtual void
