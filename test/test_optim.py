@@ -2,6 +2,7 @@ import math
 import unittest
 import functools
 from copy import deepcopy
+from bisect import bisect_right
 import torch
 from torch._six import inf
 import torch.optim as optim
@@ -470,6 +471,32 @@ class LambdaLRTestObject:
         else:
             return False
 
+class LegacyStepLR(StepLR):
+    def get_lr(self):
+        return [base_lr * self.gamma ** (self.last_epoch // self.step_size)
+                for base_lr in self.base_lrs]
+
+class LegacyMultiStepLR(MultiStepLR):
+    def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1):
+        self.milestones = sorted(milestones)
+        self.gamma = gamma
+        super(MultiStepLR, self).__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        return [base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch)
+                for base_lr in self.base_lrs]
+
+class LegacyExponentialLR(ExponentialLR):
+    def get_lr(self):
+        return [base_lr * self.gamma ** self.last_epoch
+                for base_lr in self.base_lrs]
+
+class LegacyCosineAnnealingLR(CosineAnnealingLR):
+    def get_lr(self):
+        return [self.eta_min + (base_lr - self.eta_min) *
+                (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
+                for base_lr in self.base_lrs]
+
 
 class TestLRScheduler(TestCase):
     def setUp(self):
@@ -515,6 +542,28 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
         scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         self._test(scheduler, targets, epochs)
+
+    def test_legacy_step_lr(self):
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+        legacy_scheduler = LegacyStepLR(self.opt, gamma = 0.1, step_size = 3)
+        self._test_against_legacy(scheduler, legacy_scheduler, 20)
+
+    def test_legacy_multi_step_lr(self):
+        scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
+        legacy_scheduler = LegacyMultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
+        self._test_against_legacy(scheduler, legacy_scheduler, 20)
+
+    def test_legacy_exp_lr(self):
+        scheduler = ExponentialLR(self.opt, gamma=0.9)
+        legacy_scheduler = LegacyExponentialLR(self.opt, gamma=0.9)
+        self._test_against_legacy(scheduler, legacy_scheduler, 20)
+
+    def test_legacy_cos_anneal_lr(self):
+        eta_min = 1e-10
+        epochs = 20
+        scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
+        legacy_scheduler = LegacyCosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
+        self._test_against_legacy(scheduler, legacy_scheduler, epochs)
 
     def test_reduce_lr_on_plateau1(self):
         epochs = 10
@@ -816,6 +865,20 @@ class TestLRScheduler(TestCase):
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                            epoch, target[epoch], param_group['lr']), delta=1e-5)
 
+    def _test_against_legacy(self, scheduler, legacy_scheduler, epochs = 10):
+        self.setUp()
+        targets = []
+        for epoch in range(epochs):
+            legacy_scheduler.step(epoch)
+            targets.append([group['lr'] for group in self.opt.param_groups])
+        self.setUp()
+        for epoch in range(epochs):
+            scheduler.step(epoch)
+            for i, param_group in enumerate(self.opt.param_groups):
+                self.assertAlmostEqual(targets[epoch][i], param_group['lr'],
+                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                           epoch, targets[epoch][i], param_group['lr']), delta=1e-5)
+
     def _test_reduce_lr_on_plateau(self, schedulers, targets, metrics, epochs=10, verbose=False):
         if isinstance(schedulers, _LRScheduler) or isinstance(schedulers, ReduceLROnPlateau):
             schedulers = [schedulers]
@@ -831,7 +894,6 @@ class TestLRScheduler(TestCase):
                 self.assertAlmostEqual(target[epoch], param_group['lr'],
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                            epoch, target[epoch], param_group['lr']), delta=1e-5)
-
 
 if __name__ == '__main__':
     run_tests()
