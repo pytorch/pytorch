@@ -154,8 +154,12 @@ class StepLR(_LRScheduler):
         super(StepLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
-        return [base_lr * self.gamma ** (self.last_epoch // self.step_size)
-                for base_lr in self.base_lrs]
+        if (self.last_epoch == 0) or (self.last_epoch % self.step_size != 0):
+            return [group['lr'] for group in self.optimizer.param_groups]
+        return [group['lr'] * self.gamma
+                for group in self.optimizer.param_groups]
+        # return [base_lr * self.gamma ** (self.last_epoch // self.step_size)
+        #         for base_lr in self.base_lrs]
 
 
 class MultiStepLR(_LRScheduler):
@@ -183,16 +187,21 @@ class MultiStepLR(_LRScheduler):
     """
 
     def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1):
-        if not list(milestones) == sorted(milestones):
-            raise ValueError('Milestones should be a list of'
-                             ' increasing integers. Got {}', milestones)
+        milestones = set(milestones)
+        #if not list(milestones) == sorted(milestones):
+        #    raise ValueError('Milestones should be a list of'
+        #                     ' increasing integers. Got {}', milestones)
         self.milestones = milestones
         self.gamma = gamma
         super(MultiStepLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
-        return [base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch)
-                for base_lr in self.base_lrs]
+        if self.last_epoch not in self.milestones:
+            return [group['lr'] for group in self.optimizer.param_groups]
+        return [group['lr'] * self.gamma
+                for group in self.optimizer.param_groups]
+        # return [base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch)
+        #         for base_lr in self.base_lrs]
 
 
 class ExponentialLR(_LRScheduler):
@@ -210,8 +219,12 @@ class ExponentialLR(_LRScheduler):
         super(ExponentialLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
-        return [base_lr * self.gamma ** self.last_epoch
-                for base_lr in self.base_lrs]
+        if self.last_epoch == 0:
+            return self.base_lrs
+        return [group['lr'] * self.gamma
+                for group in self.optimizer.param_groups]
+        # return [base_lr * self.gamma ** self.last_epoch
+        #         for base_lr in self.base_lrs]
 
 
 class CosineAnnealingLR(_LRScheduler):
@@ -246,9 +259,15 @@ class CosineAnnealingLR(_LRScheduler):
         super(CosineAnnealingLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
-        return [self.eta_min + (base_lr - self.eta_min) *
-                (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
-                for base_lr in self.base_lrs]
+        if self.last_epoch == 0:
+            return self.base_lrs
+        return [(1 + math.cos(math.pi * self.last_epoch / self.T_max)) /
+                (1 + math.cos(math.pi * (self.last_epoch - 1) / self.T_max)) *
+                (group['lr'] - self.eta_min) + self.eta_min
+                for group in self.optimizer.param_groups]
+        # return [self.eta_min + (base_lr - self.eta_min) *
+        #         (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
+        #         for base_lr in self.base_lrs]
 
 
 class ReduceLROnPlateau(object):
