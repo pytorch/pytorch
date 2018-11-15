@@ -451,15 +451,16 @@ Value* tryMatchArgument(
     value = graph.insertNode(graph.createList(value->type(), repeated))->output();
   }
 
-  TypePtr concrete_type;
-  try {
-    concrete_type = matchTypeVariables(arg.type(), value->type(), type_env);
-  } catch(TypeMatchError& e) {
+  const MatchTypeReturn matched_type =
+      matchTypeVariables(arg.type(), value->type(), type_env);
+  if (!matched_type.type) {
     err() << "could not match type " << value->type()->str() << " to "
-          << arg.type()->str() << " in argument '" << arg.name() << "': " << e.what() << "\n"
+          << arg.type()->str() << " in argument '" << arg.name()
+          << "': " << matched_type.errMsg << "\n"
           << named_value.locOr(loc);
     return nullptr;
   }
+  const auto concrete_type = *matched_type.type;
 
   // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
   if (convertibleToList(value->type(), concrete_type) &&
