@@ -504,7 +504,7 @@ class TestNN(NNTestCase):
             output = criterion(*args)
         else:
             output = criterion(input, target, *extra_args)
-        return output.item()
+        return output
 
     def _backward_criterion(self, criterion, input, target, gradOutput=None, extra_args=None):
         if extra_args is None:
@@ -1841,6 +1841,11 @@ class TestNN(NNTestCase):
                 self.assertEqual(last_train_u, m.weight_u)
                 self.assertEqual(last_train_v, m.weight_v)
 
+                # FIXME: the code below is flaky when executed with DataParallel
+                # see https://github.com/pytorch/pytorch/issues/13818
+                if apply_dp:
+                    continue
+
                 # test backward works with multiple forwards in mixed training
                 # and eval modes
                 # it uses training mode so we need to reset `u` and `v` vectors
@@ -2030,7 +2035,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @skipIfRocm
     def test_embedding_max_norm_cuda(self, dtype=torch.float):
         embedding = nn.Embedding(22, 5, max_norm=1.0).to("cuda", dtype=dtype)
         # nn.Embedding only takes LongTensor as input
@@ -2697,6 +2701,52 @@ class TestNN(NNTestCase):
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1,)))
 
+    def test_nn_scalars(self):
+        # One off tests to ensure scalars from nn.yaml are properly applied
+        def verify_scalars(input, output):
+            if input.dim() == 0:
+                self.assertEqual((), output.shape)
+            else:
+                self.assertNotEqual((), output.shape)
+            output.sum().backward()
+            self.assertEqual(input.shape, input.grad.shape)
+
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            for input_shape in [(5, 6), ()]:
+                for module in [torch.nn.ELU, torch.nn.Hardtanh, torch.nn.LeakyReLU, torch.nn.LogSigmoid,
+                               torch.nn.RReLU, torch.nn.Softshrink, torch.nn.Softplus, torch.nn.Sigmoid,
+                               torch.nn.Tanh]:
+                    input = torch.randn(input_shape, device=device, requires_grad=True)
+                    m = module()
+                    output = m(input)
+                    verify_scalars(input, output)
+
+    def test_nn_scalars_reductions(self):
+        # One off tests to ensure scalars from nn.yaml are properly applied
+        def verify_reduction_scalars(input, reduction, output):
+            if reduction != 'none' or input.dim() == 0:
+                self.assertEqual((), output.shape)
+            else:
+                self.assertNotEqual((), output.shape)
+            output.sum().backward()
+            self.assertEqual(input.shape, input.grad.shape)
+
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            for input_shape in [(5, 6), ()]:
+                for reduction in ['none', 'mean', 'sum']:
+                    for module in [torch.nn.BCELoss, torch.nn.L1Loss, torch.nn.MSELoss,
+                                   torch.nn.SmoothL1Loss, torch.nn.SoftMarginLoss]:
+                        input = torch.randn(input_shape, device=device, requires_grad=True)
+                        target = torch.empty(input_shape, device=device).random_(2)
+                        sigmoid = nn.Sigmoid()
+
+                        input = torch.randn(input_shape, device=device, requires_grad=True)
+                        m = module(reduction=reduction)
+                        output = m(sigmoid(input), target)
+                        verify_reduction_scalars(input, reduction, output)
+
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
@@ -2963,7 +3013,6 @@ class TestNN(NNTestCase):
         self._test_gather(-1)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_gather_gpu(self):
         self._test_gather(0)
 
@@ -3165,7 +3214,6 @@ class TestNN(NNTestCase):
         self.assertRaises(AssertionError, lambda: dp.data_parallel(l, i, (0, 1)))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel(self):
         l = nn.Linear(10, 5).float().cuda()
         i = Variable(torch.randn(20, 10).float().cuda(1))
@@ -3355,7 +3403,6 @@ class TestNN(NNTestCase):
         self.assertEqual(out.data, expected_out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel_device_args(self):
         cuda0 = torch.device('cuda:0')
         cuda1 = torch.device('cuda:1')
@@ -4182,7 +4229,6 @@ class TestNN(NNTestCase):
             (hx + cx).sum().backward()
 
     @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
-    @skipIfRocm
     def test_cudnn_rnn_dropout_states_device(self):
         rnn = nn.RNN(10, 20, num_layers=2, dropout=.5)
         device = 1
@@ -4779,7 +4825,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @skipIfRocm
     def test_noncontig_conv_grad_cuda(self, dtype=torch.float):
         # FIXME: remove after adding non-contiguous grad tests for all modules
         module = nn.Conv2d(3, 5, kernel_size=3, padding=1).to("cuda", dtype)
@@ -4944,6 +4989,17 @@ class TestNN(NNTestCase):
         expected_grad = torch.empty(3, 1).fill_(0.5)
         grad = output.grad
         self.assertEqual(grad, expected_grad)
+
+    def test_bce_with_logits_stability(self):
+        output = torch.tensor([0., -120.])
+        target = torch.tensor([0., 1.])
+        pos_weight = torch.tensor([1., 1.])
+
+        out1 = nn.BCEWithLogitsLoss()(output, target)
+        self.assertTrue(torch.isfinite(out1).all().item())
+
+        out2 = nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target)
+        self.assertTrue(torch.isfinite(out2).all().item())
 
     def test_bce_loss_broadcasts_weights(self):
         sigmoid = nn.Sigmoid()
@@ -6267,7 +6323,6 @@ class TestNN(NNTestCase):
                                                no_weight)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_cudnn_noncontiguous_weight(self):
         # Noncontiguous weights must be contiguous() before being
         # passed to cuDNN
@@ -7777,7 +7832,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -7787,7 +7841,6 @@ new_module_tests = [
         check_eval=True,
         desc='2d_simple_average',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -7797,7 +7850,6 @@ new_module_tests = [
         check_eval=True,
         desc='momentum',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -7816,7 +7868,6 @@ new_module_tests = [
         check_eval=True,
         desc='not_tracking_stats',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm3d',
@@ -7824,7 +7875,6 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
-        decorator=skipIfRocm,
     ),
     dict(
         module_name='BatchNorm3d',
@@ -7833,7 +7883,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_simple_average',
-        decorator=skipIfRocm,
     ),
     dict(
         module_name='BatchNorm3d',
@@ -7842,7 +7891,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
-        decorator=skipIfRocm,
     ),
     dict(
         module_name='BatchNorm3d',
@@ -7859,7 +7907,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
-        decorator=skipIfRocm,
     ),
     dict(
         module_name='InstanceNorm1d',
@@ -8004,7 +8051,6 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv1d',
@@ -8013,7 +8059,6 @@ new_module_tests = [
         cudnn=True,
         desc='stride',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv1d',
@@ -8022,7 +8067,6 @@ new_module_tests = [
         cudnn=True,
         desc='pad1',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv1d',
@@ -8031,7 +8075,6 @@ new_module_tests = [
         cudnn=True,
         desc='pad2',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv1d',
@@ -8040,7 +8083,6 @@ new_module_tests = [
         cudnn=True,
         desc='pad1size1',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv1d',
@@ -8049,29 +8091,26 @@ new_module_tests = [
         cudnn=True,
         desc='pad2size1',
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv1d_dilated',
         constructor=lambda: nn.Conv1d(4, 5, kernel_size=3, dilation=2),
         input_size=(2, 4, 10),
         skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv1d_groups',
         constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
         input_size=(2, 4, 6),
         cudnn=True,
-        skip_double=TEST_WITH_ROCM,
         test_cuda=(not TEST_WITH_ROCM),
+        decorator=skipIfRocm
     ),
     dict(
         fullname='ConvTranspose1d',
         constructor=lambda: nn.ConvTranspose1d(3, 4, kernel_size=3, stride=(3,), padding=1, output_padding=(1,)),
         cudnn=True,
         input_size=(1, 3, 7),
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='ConvTranspose1d',
@@ -8079,7 +8118,6 @@ new_module_tests = [
         input_size=(1, 3, 6),
         cudnn=True,
         desc='no_bias',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='ConvTranspose1d',
@@ -8087,14 +8125,12 @@ new_module_tests = [
         input_size=(1, 3, 6),
         cudnn=True,
         desc='dilated',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='ConvTranspose1d_groups',
         constructor=lambda: nn.ConvTranspose1d(4, 6, 3, stride=(3,), padding=1, output_padding=(1,), groups=2),
         cudnn=True,
         input_size=(2, 4, 7),
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='MaxPool1d',
@@ -8112,7 +8148,6 @@ new_module_tests = [
         constructor_args=(3, 4, (3, 2)),
         input_size=(2, 3, 7, 5),
         cudnn=True,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv2d',
@@ -8121,6 +8156,7 @@ new_module_tests = [
         cudnn=True,
         desc='strided',
         test_cuda=(not TEST_WITH_ROCM),
+        decorator=skipIfRocm
     ),
     dict(
         module_name='Conv2d',
@@ -8129,6 +8165,7 @@ new_module_tests = [
         cudnn=True,
         desc='padding',
         test_cuda=(not TEST_WITH_ROCM),
+        decorator=skipIfRocm
     ),
     dict(
         module_name='Conv2d',
@@ -8136,7 +8173,6 @@ new_module_tests = [
         input_size=(2, 3, 8, 8),
         cudnn=True,
         desc='dilated',
-        decorator=skipIfRocm,
     ),
     dict(
         module_name='Conv2d',
@@ -8144,27 +8180,26 @@ new_module_tests = [
         input_size=(2, 3, 6, 5),
         cudnn=True,
         desc='no_bias',
-        decorator=skipIfRocm,
     ),
     dict(
         fullname='Conv2d_groups',
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
         cudnn=True,
-        decorator=skipIfRocm,
+        decorator=skipIfRocm
     ),
     dict(
         fullname='Conv2d_groups_thnn',
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
-        decorator=skipIfRocm,
+        test_cuda=(not TEST_WITH_ROCM),
+        decorator=skipIfRocm
     ),
     dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
         cudnn=True,
         input_size=(1, 3, 7, 6),
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -8172,7 +8207,6 @@ new_module_tests = [
         input_size=(1, 3, 6, 7),
         cudnn=True,
         desc='dilated',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -8180,14 +8214,12 @@ new_module_tests = [
         input_size=(1, 3, 6, 7),
         cudnn=True,
         desc='no_bias',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='ConvTranspose2d_groups',
         constructor=lambda: nn.ConvTranspose2d(2, 4, (2, 3), groups=2),
         input_size=(1, 2, 4, 5),
         cudnn=True,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv2d_depthwise',
@@ -8344,7 +8376,6 @@ new_module_tests = [
         constructor_args=(3, 4, (2, 3, 4)),
         input_size=(2, 3, 3, 4, 5),
         cudnn=True,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv3d',
@@ -8352,7 +8383,6 @@ new_module_tests = [
         input_size=(2, 3, 3, 4, 5),
         cudnn=True,
         desc='no_bias',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv3d',
@@ -8360,7 +8390,6 @@ new_module_tests = [
         input_size=(2, 3, 5, 5, 5),
         cudnn=True,
         desc='stride',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='Conv3d',
@@ -8368,33 +8397,28 @@ new_module_tests = [
         input_size=(2, 3, 5, 5, 5),
         cudnn=True,
         desc='stride_padding',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv3d_groups',
         constructor=lambda: nn.Conv3d(4, 6, kernel_size=3, groups=2),
         input_size=(2, 4, 4, 5, 4),
         cudnn=True,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv3d_dilated',
         constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2),
         input_size=(2, 3, 5, 5, 5),
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv3d_dilated_strided',
         constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2, stride=2),
         input_size=(2, 3, 5, 5, 5),
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='ConvTranspose3d',
         constructor_args=(2, 3, (2, 3, 2)),
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -8402,7 +8426,6 @@ new_module_tests = [
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
         desc='dilated',
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='MaxPool3d',

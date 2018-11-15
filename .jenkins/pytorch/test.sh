@@ -145,7 +145,7 @@ test_libtorch() {
      else
        "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
      fi
-     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+     python tools/download_mnist.py --quiet -d mnist
      OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
   fi
 }

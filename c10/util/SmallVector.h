@@ -13,14 +13,14 @@
 
 // ATen: modified from llvm::SmallVector.
 // replaced report_bad_alloc_error with std::bad_alloc
-// replaced isPodLike<T> with AT_IS_TRIVIALLY_COPYABLE
+// replaced isPodLike<T> with C10_IS_TRIVIALLY_COPYABLE (moved to Macros.h)
 // replaced iterator_range constructor with inline Container&& constructor
 // removed LLVM_NODISCARD and LLVM_ATTRIBUTE_ALWAYS_INLINE qualifiers
 // removed LLVM_UNLIKELY
 
 #pragma once
 
-#include <ATen/core/AlignOf.h>
+#include <c10/util/AlignOf.h>
 #include <c10/macros/Macros.h>
 
 #include <algorithm>
@@ -35,13 +35,7 @@
 #include <type_traits>
 #include <utility>
 
-#if __GNUG__ && __GNUC__ < 5
-#define AT_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
-#else
-#define AT_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
-#endif
-
-namespace at {
+namespace c10 {
 
 namespace detail {
 
@@ -196,6 +190,16 @@ class SmallVectorTemplateCommon : public SmallVectorBase {
   /// Return a pointer to the vector's buffer, even if empty().
   const_pointer data() const {
     return const_pointer(begin());
+  }
+
+  // SmallVector::at is NOT from LLVM.
+  reference at(size_type idx) {
+    assert(idx < size());
+    return begin()[idx];
+  }
+  const_reference at(size_type idx) const {
+    assert(idx < size());
+    return begin()[idx];
   }
 
   reference operator[](size_type idx) {
@@ -376,8 +380,8 @@ class SmallVectorTemplateBase<T, true> : public SmallVectorTemplateCommon<T> {
 /// reduce code duplication based on the SmallVector 'N' template parameter.
 template <typename T>
 class SmallVectorImpl
-    : public SmallVectorTemplateBase<T, AT_IS_TRIVIALLY_COPYABLE(T)> {
-  using SuperClass = SmallVectorTemplateBase<T, AT_IS_TRIVIALLY_COPYABLE(T)>;
+    : public SmallVectorTemplateBase<T, C10_IS_TRIVIALLY_COPYABLE(T)> {
+  using SuperClass = SmallVectorTemplateBase<T, C10_IS_TRIVIALLY_COPYABLE(T)>;
 
  public:
   using iterator = typename SuperClass::iterator;
@@ -387,7 +391,7 @@ class SmallVectorImpl
  protected:
   // Default ctor - Initialize to empty.
   explicit SmallVectorImpl(unsigned N)
-      : SmallVectorTemplateBase<T, AT_IS_TRIVIALLY_COPYABLE(T)>(N * sizeof(T)) {
+      : SmallVectorTemplateBase<T, C10_IS_TRIVIALLY_COPYABLE(T)>(N * sizeof(T)) {
   }
 
  public:
@@ -1028,19 +1032,19 @@ std::ostream& operator<<(std::ostream & out, const SmallVector<T, N>& list) {
   return out;
 }
 
-} // end namespace at
+} // end namespace c10
 
 namespace std {
 
 /// Implement std::swap in terms of SmallVector swap.
 template <typename T>
-inline void swap(at::SmallVectorImpl<T>& LHS, at::SmallVectorImpl<T>& RHS) {
+inline void swap(c10::SmallVectorImpl<T>& LHS, c10::SmallVectorImpl<T>& RHS) {
   LHS.swap(RHS);
 }
 
 /// Implement std::swap in terms of SmallVector swap.
 template <typename T, unsigned N>
-inline void swap(at::SmallVector<T, N>& LHS, at::SmallVector<T, N>& RHS) {
+inline void swap(c10::SmallVector<T, N>& LHS, c10::SmallVector<T, N>& RHS) {
   LHS.swap(RHS);
 }
 

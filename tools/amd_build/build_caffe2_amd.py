@@ -22,15 +22,13 @@ includes = [
     "caffe2/**/*_test*",
     "caffe2/core/*",
     "caffe2/db/*",
-    "caffe2/utils/math_gpu*",
+    "caffe2/utils/*",
+    "c10/cuda/*",
 ]
 
 ignores = [
     "caffe2/operators/depthwise_3x3_conv_op.cu",
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
-    "caffe2/operators/top_k.cu",
-    "caffe2/operators/top_k_radix_selection.cuh",
-    "caffe2/operators/top_k_heap_selection.cuh",
     "caffe2/operators/pool_op_cudnn.cu",
     '**/hip/**',
 ]
@@ -57,5 +55,4 @@ hipify_python.hipify(
     ignores=ignores,
     hipify_caffe2=True,
     add_static_casts_option=True,
-    hip_suffix=args.hip_suffix,
-    extensions_to_hip_suffix=['.cc', '.cu'])
+    hip_suffix=args.hip_suffix)

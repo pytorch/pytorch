@@ -480,7 +480,7 @@ inline TensorOptions requires_grad(bool requires_grad = true) {
   return TensorOptions().requires_grad(requires_grad);
 }
 
-std::ostream& operator<<(
+CAFFE2_API std::ostream& operator<<(
     std::ostream& stream,
     const TensorOptions& options);
 

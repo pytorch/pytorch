@@ -22,7 +22,7 @@
 #include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
-#include "ATen/core/ArrayRef.h"
+#include <c10/util/ArrayRef.h>
 
 #include <algorithm>
 #include <atomic>
@@ -700,7 +700,13 @@ struct Block {
   Graph * owningGraph() {
     return graph_;
   }
+  const Graph * owningGraph() const {
+    return graph_;
+  }
   Node * owningNode() {
+    return owning_node_;
+  }
+  const Node * owningNode() const {
     return owning_node_;
   }
   // clone all inputs, nodes, and outputs from src and append them
@@ -833,6 +839,7 @@ public:
   TORCH_API Node* createUndefined();
   TORCH_API Node* createNoneGenerator();
   TORCH_API Node* createFusionGroup();
+  TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
   TORCH_API Node* createTupleUnpack(Value * v);
   TORCH_API Node* createTupleIndex(Value * tup, int64_t index);
@@ -868,7 +875,11 @@ public:
   // argument matching rules, and checks that the op matches a known schema
   // if this node successfully completes, it guarentees the node is a correctly-formed invocation
   // of opname
-  Value* insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs = {});
+  Value* insert(
+      Symbol opname,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs = {},
+      c10::optional<SourceRange> range = {});
 
   Node * appendNode(Node * n) {
     return block_->appendNode(n);

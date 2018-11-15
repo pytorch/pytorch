@@ -673,21 +673,27 @@ if(NOT BUILD_ATEN_MOBILE)
     message(INFO "Compiling with HIP for AMD.")
     caffe2_update_option(USE_ROCM ON)
 
-    list(APPEND HIP_HIPCC_FLAGS -fPIC)
-    list(APPEND HIP_HIPCC_FLAGS -D__HIP_PLATFORM_HCC__=1)
-    list(APPEND HIP_HIPCC_FLAGS -DCUDA_HAS_FP16=1)
-    list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
-    list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
-    list(APPEND HIP_HIPCC_FLAGS -DHIP_VERSION=${HIP_VERSION_MAJOR})
-    list(APPEND HIP_HIPCC_FLAGS -Wno-macro-redefined)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-inconsistent-missing-override)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-exceptions)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-shift-count-negative)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-shift-count-overflow)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-unused-command-line-argument)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-duplicate-decl-specifier)
-    list(APPEND HIP_HIPCC_FLAGS -DCAFFE2_USE_MIOPEN)
-    list(APPEND HIP_HIPCC_FLAGS -DROCBLAS_FP16=0)
+    list(APPEND HIP_CXX_FLAGS -fPIC)
+    list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_HCC__=1)
+    list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
+    list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
+    list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
+    list(APPEND HIP_CXX_FLAGS -DHIP_VERSION=${HIP_VERSION_MAJOR})
+    list(APPEND HIP_CXX_FLAGS -Wno-macro-redefined)
+    list(APPEND HIP_CXX_FLAGS -Wno-inconsistent-missing-override)
+    list(APPEND HIP_CXX_FLAGS -Wno-exceptions)
+    list(APPEND HIP_CXX_FLAGS -Wno-shift-count-negative)
+    list(APPEND HIP_CXX_FLAGS -Wno-shift-count-overflow)
+    list(APPEND HIP_CXX_FLAGS -Wno-unused-command-line-argument)
+    list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
+    list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
+    list(APPEND HIP_CXX_FLAGS -DROCBLAS_FP16=0)
+
+    set(HIP_HCC_FLAGS ${HIP_CXX_FLAGS})
+    # Ask hcc to generate device code during compilation so we can use
+    # host linker to link.
+    list(APPEND HIP_HCC_FLAGS -fno-gpu-rdc)
+    list(APPEND HIP_HCC_FLAGS -amdgpu-target=${HCC_AMDGPU_TARGET})
 
     set(Caffe2_HIP_INCLUDES
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
@@ -726,17 +732,6 @@ if(USE_ROCM)
  include_directories(SYSTEM ${HIPRAND_PATH}/include)
  include_directories(SYSTEM ${ROCRAND_PATH}/include)
  include_directories(SYSTEM ${THRUST_PATH})
-
- # load HIP cmake module and load platform id
- EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig -P OUTPUT_VARIABLE PLATFORM)
- EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig --cpp_config OUTPUT_VARIABLE HIP_CXX_FLAGS)
-
- # Link with HIPCC https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_porting_guide.md#linking-with-hipcc
- # SET(CMAKE_CXX_LINK_EXECUTABLE ${HIP_HIPCC_EXECUTABLE})
-
- # Show message that we're using ROCm.
- MESSAGE(STATUS "ROCM TRUE:")
- MESSAGE(STATUS "CMAKE_CXX_COMPILER: " ${CMAKE_CXX_COMPILER})
 endif()
 
 # ---[ NCCL

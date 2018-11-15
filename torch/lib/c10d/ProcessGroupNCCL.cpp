@@ -221,7 +221,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // Broadcast so that each process can have a unique NCCL ID
   broadcastUniqueNCCLID(&ncclID);
 
-  at::cuda::CUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::vector<at::cuda::CUDAStream> streamVal;
   streamVal.reserve(devices.size());
@@ -351,7 +351,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  at::cuda::CUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -398,7 +398,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  at::cuda::CUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -446,7 +446,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  at::cuda::CUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -514,7 +514,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
-  at::cuda::CUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -540,7 +540,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
   // Copy the flattened output tensors to the outputs
   for (size_t i = 0; i < outputTensors.size(); ++i) {
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-    at::cuda::CUDAGuard guard(ncclStream);
+    at::cuda::CUDAStreamGuard guard(ncclStream);
     for (size_t j = 0; j < outputTensors[0].size(); ++j) {
       outputTensors[i][j].copy_(flattenOutputTensors[i][j], true);
     }

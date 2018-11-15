@@ -334,6 +334,10 @@ class ExprBuilder(Builder):
         ast.Div: '/',
         ast.Pow: '**',
         ast.Mod: '%',
+        ast.FloorDiv: '//',
+        ast.BitAnd: '&',
+        ast.BitXor: '^',
+        ast.BitOr: '|',
     }
 
     if not PY2:

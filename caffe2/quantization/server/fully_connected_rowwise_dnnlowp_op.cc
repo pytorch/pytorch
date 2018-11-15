@@ -30,7 +30,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::RunOnDevice() {
   using namespace std;
   using namespace dnnlowp;
 
-  BaseType::ParseDNNLowPOperatorArguments_();
+  this->ParseDNNLowPOperatorArguments_();
 
   chrono::time_point<chrono::system_clock> t_very_begin, t_begin, t_end;
 
@@ -86,7 +86,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::RunOnDevice() {
   }
   if (Wq_packed_) {
     // fast path using fbgemm
-    using namespace fbgemm2;
+    using namespace fbgemm;
     int row_offset_size_per_thread = M;
     int x_pack_buf_size_per_thread =
         PackAMatrix<uint8_t>::packedBufferSize();
@@ -221,7 +221,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::RunOnDevice() {
   if (!dequantize_output_) {
     RunOnDeviceEpilogue_();
   } else {
-    BaseType::MeasureQuantizationError_();
+    this->MeasureQuantizationError_();
   }
 
   if (VLOG_IS_ON(3)) {
@@ -279,8 +279,8 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::GetQuantizationParameters_() {
         // fast path using fbgemm
         LOG(INFO)
             << "Using fast path with int8 fbgemm and generating Wq_packed_";
-        Wq_packed_.reset(new fbgemm2::PackBMatrix<int8_t>(
-            fbgemm2::matrix_op_t::Transpose,
+        Wq_packed_.reset(new fbgemm::PackBMatrix<int8_t>(
+            fbgemm::matrix_op_t::Transpose,
             K,
             N,
             reinterpret_cast<const int8_t*>(W_quantized_.data()),

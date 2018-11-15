@@ -114,6 +114,10 @@ def spawn(fn, args=(), nprocs=1, join=True):
         nprocs (int): Number of processes to spawn.
         join (bool): Perform a blocking join on all processes.
 
+    Returns:
+        None if ``join`` is ``True``,
+        :class:`~SpawnContext` if ``join`` is ``False``
+
     """
     mp = multiprocessing.get_context('spawn')
     error_queues = []
