@@ -2251,10 +2251,26 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("CuDNN" ,("MIOPEN", API_CAFFE2)),
     ("cudnn" ,("miopen", API_CAFFE2)),
     ("namespace cuda", ("namespace hip", API_CAFFE2)),
-    ("cuda::", ("hip::", API_CAFFE2)),
-    ("thrust::hip::", ("thrust::cuda::", API_CAFFE2)), # undo thrust namespace rewrite
-    ("c10/cuda/", ("c10/hip/", API_CAFFE2)),
 ])
 
+# We must tread very carefully here.  Blanket conversions like are done
+# in CAFFE2_SPECIFIC_MAPPINGS are not presently supported on PyTorch,
+# because a regex for CUDA will also match a filename like CUDAGuard.h,
+# but the HIPIFY script doesn't presently move the file and so the substitution
+# will be invalid.  Instead, we specifically list out every identifier
+# from c10/cuda which may be used externally, and do substitutions this
+# way.
+#
+# NB: if you want a transformation to ONLY apply to the c10/ directory,
+# put it as API_CAFFE2
+C10_MAPPINGS = collections.OrderedDict([
+    ("cuda::compat::", ("hip::compat::", API_C10)),
+    ("c10/cuda/CUDAException.h", ("c10/hip/HIPException.h", API_C10)),
+    ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
+    ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
+])
+
+# NB: C10 mappings are more specific than Caffe2 mappings, so run them
+# first
 CUDA_TO_HIP_MAPPINGS = [CUDA_IDENTIFIER_MAP, CUDA_TYPE_NAME_MAP,
-                        CUDA_INCLUDE_MAP, CUDA_SPARSE_MAP, PYTORCH_SPECIFIC_MAPPINGS, CAFFE2_SPECIFIC_MAPPINGS]
+                        CUDA_INCLUDE_MAP, CUDA_SPARSE_MAP, C10_MAPPINGS, PYTORCH_SPECIFIC_MAPPINGS, CAFFE2_SPECIFIC_MAPPINGS]
