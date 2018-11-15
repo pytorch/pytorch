@@ -386,6 +386,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual const Storage& storage() const;
 
+  void set_storage(const Storage& storage) {
+    AT_CHECK(allow_size_or_storage_change(), "set_storage is not allowed on Tensor created from .data");
+    storage_ = storage;
+  }
+
   // TODO: Delete me.
   friend struct Type;
 
@@ -1465,10 +1470,11 @@ protected:
   }
 
 public:
-  at::Storage storage_; // TODO: Fix visibility on me
   void* autograd_meta_ = nullptr;
 
 protected:
+  at::Storage storage_;
+
   // We could save a word or two by combining the SmallVector structs,
   // since their size is redundant, and if we need to overflow the buffer space
   // we could keep the two pointers together. However, that would require
