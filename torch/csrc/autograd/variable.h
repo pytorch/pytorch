@@ -407,6 +407,14 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 
   int64_t storage_offset() const override;
 
+  void set_allow_size_or_storage_change(bool value) override {
+    data_.unsafeGetTensorImpl()->set_allow_size_or_storage_change(value);
+  }
+
+  bool allow_size_or_storage_change() const override {
+    return data_.unsafeGetTensorImpl()->allow_size_or_storage_change();
+  }
+
   at::Tensor data_;
  private:
   int64_t get_device_slow() const override;

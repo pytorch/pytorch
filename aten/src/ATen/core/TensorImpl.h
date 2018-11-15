@@ -870,14 +870,14 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Set whether a tensor allows size or storage changes.
    */
-  void set_allow_size_or_storage_change(bool value) {
+  virtual void set_allow_size_or_storage_change(bool value) {
     allow_size_or_storage_change_ = value;
   }
 
   /**
    * True if a tensor allows size or storage changes.
    */
-  bool allow_size_or_storage_change() const {
+  virtual bool allow_size_or_storage_change() const {
     return allow_size_or_storage_change_;
   }
 
