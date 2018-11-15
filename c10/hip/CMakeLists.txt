@@ -3,6 +3,8 @@
 #
 # At the moment, this cmake is NOT standalone
 
+include(../../cmake/public/utils.cmake)
+
 # ---[ Configure macro file.
 set(C10_HIP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
 configure_file(
@@ -20,7 +22,7 @@ file(GLOB C10_HIP_SRCS
 
 # Mark the cc files as HIP files, so we call the compiler.  (They have to be
 # suffixed with cc, because the hcc compiler won't accept them otherwise.)
-filter_list(__c10_hip_srcs_cpp C10_HIP_SRCS "\\.cc$")
+file(GLOB __c10_hip_srcs_cpp *.cc impl/*.cc)
 set_source_files_properties(${__c10_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 
 file(GLOB_RECURSE C10_HIP_HEADERS *.h)

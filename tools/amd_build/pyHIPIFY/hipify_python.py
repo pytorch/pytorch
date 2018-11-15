@@ -767,6 +767,7 @@ def get_hip_file_path(filepath, hipify_caffe2, hip_suffix):
 
     dirpath = dirpath.replace('cuda', 'hip')
     root = root.replace('gpu', 'hip')
+    root = root.replace('cuda', 'hip')
     root = root.replace('CUDA', 'HIP')
 
     if dirpath == orig_dirpath:
