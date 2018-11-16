@@ -382,7 +382,14 @@ void addNomnigraphMethods(pybind11::module& m) {
 
   // Subgraph matching API
   py::class_<NNSubgraph> nnsubgraph(m, "NNSubgraph");
-  nnsubgraph.def("__len__", [](NNSubgraph& s) { return s.getNodes().size(); })
+  nnsubgraph.def(py::init<>())
+      .def("__len__", [](NNSubgraph& s) { return s.getNodes().size(); })
+      .def(
+          "addNode",
+          [](NNSubgraph* sg, NNGraph::NodeRef node) { sg->addNode(node); })
+      .def(
+          "induceEdges",
+          [](NNSubgraph* sg) { nom::algorithm::induceEdges(sg); })
       .def_property_readonly(
           "nodes",
           [](NNSubgraph& s) {
