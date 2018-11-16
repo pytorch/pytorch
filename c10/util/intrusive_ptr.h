@@ -32,7 +32,7 @@ namespace c10 {
 // tells us if the object was allocated by us.  If it wasn't, no
 // intrusive_ptr for you!
 
-class CAFFE2_API intrusive_ptr_target {
+class intrusive_ptr_target {
   // Note [Weak references for intrusive refcounting]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // Here's the scheme:
@@ -113,7 +113,7 @@ class CAFFE2_API intrusive_ptr_target {
 
 namespace detail {
 template <class TTarget>
-struct C10_EXPORT intrusive_target_default_null_type final {
+struct intrusive_target_default_null_type final {
   static constexpr TTarget* singleton() noexcept {
     return nullptr;
   }
@@ -135,7 +135,7 @@ class weak_intrusive_ptr;
 template <
     class TTarget,
     class NullType = detail::intrusive_target_default_null_type<TTarget>>
-class C10_EXPORT intrusive_ptr final {
+class intrusive_ptr final {
  private:
 //  the following static assert would be nice to have but it requires
 //  the target class T to be fully defined when intrusive_ptr<T> is instantiated
@@ -393,7 +393,7 @@ inline bool operator!=(
 template <
     typename TTarget,
     class NullType = detail::intrusive_target_default_null_type<TTarget>>
-class C10_EXPORT weak_intrusive_ptr final {
+class weak_intrusive_ptr final {
  private:
   static_assert(
       std::is_base_of<intrusive_ptr_target, TTarget>::value,
@@ -741,13 +741,13 @@ namespace std {
 // To allow intrusive_ptr and weak_intrusive_ptr inside std::unordered_map or
 // std::unordered_set, we need std::hash
 template <class TTarget, class NullType>
-struct C10_EXPORT hash<c10::intrusive_ptr<TTarget, NullType>> {
+struct hash<c10::intrusive_ptr<TTarget, NullType>> {
   size_t operator()(const c10::intrusive_ptr<TTarget, NullType>& x) const {
     return std::hash<TTarget*>()(x.get());
   }
 };
 template <class TTarget, class NullType>
-struct C10_EXPORT hash<c10::weak_intrusive_ptr<TTarget, NullType>> {
+struct hash<c10::weak_intrusive_ptr<TTarget, NullType>> {
   size_t operator()(const c10::weak_intrusive_ptr<TTarget, NullType>& x) const {
     return std::hash<TTarget*>()(x._unsafe_get_target());
   }
