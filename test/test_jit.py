@@ -10275,9 +10275,9 @@ def add_interpolate_module_tests():
     # testing where size is not none test_upsamplingNearest2d
     size = 4
     scale_factor = None
-    in_t = torch.ones(1, 1, 2, 2)
-    nn_module_tests.append(('Upsample', args, Variable(in_t), False, str(i)))
+    nn_module_tests.append(('Upsample', args, Variable(torch.ones(1, 1, 2, 2, 2)), False, str(i)))
 
+    in_t = torch.ones(1, 1, 2, 2)
     args = (size, scale_factor)
     nn_module_tests.append(('UpsamplingNearest2d', args, Variable(in_t), False,))
     nn_module_tests.append(('UpsamplingBilinear2d', args, Variable(in_t), False,))

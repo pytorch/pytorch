@@ -778,9 +778,6 @@ struct CAFFE2_API NoneType : public Type {
     return rhs.kind() == kind();
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
-    if(auto rhs_ = rhs->cast<OptionalType>()) {
-      return true;
-    }
     return rhs->kind() == TypeKind::NoneType;
   }
   std::string str() const override {

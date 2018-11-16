@@ -499,6 +499,18 @@ Value* tryConvertToType(
     }
   }
 
+  if (value->type()->isSubtypeOf(NoneType::get()) && !concrete_type->isSubtypeOf(NoneType::get())){
+    if (concrete_type->isSubtypeOf(GeneratorType::get())) {
+      value = graph.insertNode(graph.createNoneGenerator())->output();
+    } else if (concrete_type->isSubtypeOf(OptionalType::ofTensor())) {
+      // create undefined tensor when None pass to a optional[tensor] formal arg
+      value = graph.insertNode(graph.createUndefined())->output();
+    } else if (auto optional_type = concrete_type->cast<OptionalType>()) {
+      value = graph.insertNode(graph.createNone(optional_type->getElementType()))->output();
+    }
+    return value;
+  }
+
   //if the target type is an optional, allow the same matching logic to apply
   if (auto opt_concrete_type = concrete_type->cast<OptionalType>()) {
     concrete_type = opt_concrete_type->getElementType();
@@ -513,9 +525,14 @@ Value* tryConvertToType(
     value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
+<<<<<<< HEAD
   //implicit conversions
   if(allow_conversions) {
      if(concrete_type->isSubtypeOf(NumberType::get())
+=======
+  //implicit conversion of tensors to scalars
+  if(convert_tensors_to_nums && concrete_type->isSubtypeOf(NumberType::get())
+>>>>>>> fix optional matching
       && value->type()->isSubtypeOf(DynamicType::get())) {
       auto n = graph.createImplicitTensorToNum(concrete_type, value);
       value = graph.insertNode(n)
