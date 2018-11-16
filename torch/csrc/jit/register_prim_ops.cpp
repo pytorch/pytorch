@@ -833,17 +833,30 @@ Operator(                                                                      \
         return 0;
       }
     ),
-#define CREATE_LIST_OPS(decl_type, c_type) \
+    Operator(
+        "aten::append(Tensor[](a!) self, Tensor(c) el) -> Tensor[](a!)",
+        listAppend<Shared<TensorList>, at::Tensor>),
+    Operator("aten::select(Tensor[](a) list, int idx) -> Tensor(*)", listSelect<Shared<TensorList>>),
+    Operator("aten::_set_item(Tensor[](a!) l, int idx, Tensor el) -> Tensor[](a!)", listSetItem<Shared<TensorList>, at::Tensor>),
+
+  // Mutable ops for lists containing immutable types.
+#define CREATE_IMMUTABLE_LIST_OPS(decl_type, c_type) \
     Operator("aten::select(" decl_type "[] a, int b) -> " decl_type, listSelect<Shared<c_type>>), \
+    Operator( \
+        "aten::append(" decl_type "[](a!) self, " decl_type " el) -> " decl_type "[](a!)", \
+        listAppend<Shared<c_type>, c_type::ElemType>), \
     Operator("aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type " el) -> " decl_type"[](a!)", listSetItem<Shared<c_type>, c_type::ElemType>), \
+
+    CREATE_IMMUTABLE_LIST_OPS("int", IntList)
+    CREATE_IMMUTABLE_LIST_OPS("float", DoubleList)
+    CREATE_IMMUTABLE_LIST_OPS("t", GenericList)
+
+#define CREATE_LIST_OPS(decl_type, c_type) \
     Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>), \
     Operator("aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type "[]", listAdd<Shared<c_type>, c_type::ElemType>), \
     Operator( \
         "aten::slice(" decl_type "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type "[]", \
         listSlice<Shared<c_type>, c_type::ElemType>), \
-    Operator( \
-        "aten::append(" decl_type "[](a!) self, " decl_type " el) -> " decl_type "[](a!)", \
-        listAppend<Shared<c_type>, c_type::ElemType>), \
 
 
     CREATE_LIST_OPS("int", IntList)
