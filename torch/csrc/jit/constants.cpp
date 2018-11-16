@@ -15,7 +15,7 @@ Value* insertConstant(
   if(val.isTensor()) {
     at::Tensor ref = std::move(val).toTensor();
     if(!ref.defined()) {
-      throw constant_not_supported_error("undefined tensors cannot become constants");
+      return insertConstant(g, val, loc, scope);
     }
     if (ref.is_variable()) {
       ref = autograd::Variable(ref).data();
