@@ -1823,13 +1823,17 @@ class TestSparse(TestCase):
     def test_allow_size_or_storage_change(self):
         def do_test(t):
             a = self.SparseTensor(3, 3)
-            with self.assertRaisesRegex(RuntimeError, "raw_resize_ is not allowed on Tensor created from .data or .detach()"):
+            with self.assertRaisesRegex(RuntimeError,
+                                        "raw_resize_ is not allowed on Tensor created from .data or .detach()"):
                 t.transpose_(0, 1)
-            with self.assertRaisesRegex(RuntimeError, "resize_ is not allowed on Tensor created from .data or .detach()"):
+            with self.assertRaisesRegex(RuntimeError,
+                                        "resize_ is not allowed on Tensor created from .data or .detach()"):
                 t.resize_as_(a)
-            with self.assertRaisesRegex(RuntimeError, "resize_and_clear_ is not allowed on Tensor created from .data or .detach()"):
+            with self.assertRaisesRegex(RuntimeError,
+                                        "resize_and_clear_ is not allowed on Tensor created from .data or .detach()"):
                 t.mul_(t)
-            with self.assertRaisesRegex(RuntimeError, "set_coalesced is not allowed on Tensor created from .data or .detach()"):
+            with self.assertRaisesRegex(RuntimeError,
+                                        "set_coalesced is not allowed on Tensor created from .data or .detach()"):
                 t._coalesced_(True)
 
         do_test(self.SparseTensor(3, 0).data)
