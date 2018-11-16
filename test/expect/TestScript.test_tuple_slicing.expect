@@ -1,0 +1,20 @@
+graph(%a : Dynamic) {
+  %1 : int = prim::Constant[value=1]()
+  %2 : int = prim::Constant[value=2]()
+  %3 : int = prim::Constant[value=3]()
+  %4 : int = prim::Constant[value=4]()
+  %5 : bool = prim::TensorToBool(%a)
+  %b : Tuple = prim::If(%5)
+    block0() {
+      %b.1 : Tuple = prim::TupleConstruct(%1, %2, %3, %4)
+      -> (%b.1)
+    }
+    block1() {
+      %b.2 : Tuple = prim::TupleConstruct(%4, %3, %2, %1)
+      -> (%b.2)
+    }
+  %c : Tuple = prim::TupleSlice[beg=0, end=4](%b)
+  %e : Tuple = prim::TupleSlice[beg=1, end=3](%c)
+  %11 : int, %12 : int = prim::TupleUnpack(%e)
+  return (%11, %12);
+}

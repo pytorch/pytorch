@@ -40,7 +40,7 @@ REGISTER_CPU_OPERATOR(
         TensorTypes<float>,
         CPUContext,
         SoftsignFunctor<CPUContext>>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_GRADIENT_OPERATOR(
     SoftsignGradient,
     BinaryElementwiseOp<
         TensorTypes<float>,
@@ -108,7 +108,7 @@ Y:
     .Output(0, "output", "Output data blob with same shape as input")
     .InheritOnnxSchema();
 
-OPERATOR_SCHEMA(SoftsignGradient)
+GRADIENT_OPERATOR_SCHEMA(SoftsignGradient)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{1, 0}})

@@ -1,7 +1,9 @@
 #ifndef CAFFE2_CORE_EVENT_H_
 #define CAFFE2_CORE_EVENT_H_
 
-#include <ATen/core/DeviceType.h>
+#include <chrono>
+
+#include <c10/DeviceType.h>
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/proto/caffe2_pb.h"
@@ -103,6 +105,10 @@ class CAFFE2_API Event {
   void Reset() {
     CAFFE_ENFORCE(event_resetter_[type_]);
     event_resetter_[type_](this);
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+    caught_exception_ = nullptr;
+    exception_timestamp_ = 0;
+#endif // CAFFE2_USE_EXCEPTION_PTR
   }
 
   const DeviceOption& GetDeviceOption() const {
@@ -165,6 +171,53 @@ class CAFFE2_API Event {
     return type_;
   }
 
+  void SetFinishedWithException(const char* err_msg = nullptr) {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+    if (!caught_exception_) {
+      caught_exception_ = std::current_exception();
+      typedef std::chrono::high_resolution_clock clock;
+      exception_timestamp_ =
+          clock::now().time_since_epoch() / std::chrono::milliseconds(1);
+    }
+    CAFFE_ENFORCE(caught_exception_, "No exception found");
+#else
+    VLOG(1) << "No support for exceptions in Event";
+#endif // CAFFE2_USE_EXCEPTION_PTR
+    if (err_msg) {
+      SetFinished(err_msg);
+    } else {
+      SetFinished("Error happened during an operator run");
+    }
+  }
+
+  bool HasException() const {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+    return (bool)caught_exception_;
+#else
+    VLOG(1) << "No support for exceptions in Event";
+    return false;
+#endif // CAFFE2_USE_EXCEPTION_PTR
+  }
+
+  int64_t ExceptionTimestamp() const {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+    return exception_timestamp_;
+#else
+    VLOG(1) << "No support for exceptions in Event";
+    return 0;
+#endif // CAFFE2_USE_EXCEPTION_PTR
+  }
+
+  void RethrowException() const {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+    if (caught_exception_) {
+      std::rethrow_exception(caught_exception_);
+    }
+#else
+    VLOG(1) << "No support for exceptions in Event";
+#endif // CAFFE2_USE_EXCEPTION_PTR
+  }
+
   // event_ is going to be accessed by the EventCreate/Record/Wait/Finish
   // functions, but one should not use it outside the own Event functionalities.
   // In the future we may move it to a private member.
@@ -173,6 +226,11 @@ class CAFFE2_API Event {
  private:
   int type_;
   DeviceOption option_;
+
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  std::exception_ptr caught_exception_;
+  int64_t exception_timestamp_;
+#endif // CAFFE2_USE_EXCEPTION_PTR
 
   static EventCreateFunction event_creator_[MaxDeviceTypes];
   static EventRecordFunction event_recorder_[MaxDeviceTypes];

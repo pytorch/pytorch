@@ -51,7 +51,6 @@ class VideoInputOp final : public PrefetchOperator<Context> {
       std::bernoulli_distribution* mirror_this_clip);
 
   const db::DBReader* reader_;
-  CPUContext cpu_context_;
   Tensor prefetched_clip_rgb_{CPU};
   Tensor prefetched_clip_of_{CPU};
   Tensor prefetched_label_{CPU};

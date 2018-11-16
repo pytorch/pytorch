@@ -8,9 +8,6 @@
 #include <gtest/gtest.h>
 
 using TestGraph = nom::Graph<TestClass>;
-TestGraph::NodeRef createTestNode(TestGraph& g) {
-  return g.createNode(TestClass());
-}
 
 TEST(Basic, CreateNodeAndEdge) {
   TestGraph g;

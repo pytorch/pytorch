@@ -117,6 +117,10 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
   // Same # of filters as outputChannels
   THAssert(weight->size(0) == gradOutput->size(1));
 
+  weight = THCTensor_(newContiguous)(state, weight);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
+
+
   // Resize GradInput
   THCTensor_(resizeAs)(state, gradInput, input);
 
@@ -189,6 +193,9 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
 
 
   THCudaCheck(cudaGetLastError());
+
+  THCTensor_(free)(state, weight);
+  THCTensor_(free)(state, gradOutput);
 }
 
 void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
@@ -225,6 +232,8 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
 
   int depthwiseMultiplier = outputChannels / inputChannels;
 
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
+
   THCDeviceTensor<scalar_t, 4> dGradOutput = toDeviceTensor<scalar_t, 4>(state, gradOutput);
   THCDeviceTensor<scalar_t, 4> dInput = toDeviceTensor<scalar_t, 4>(state, input);
   THCDeviceTensor<scalar_t, 4> dGradWeight = toDeviceTensor<scalar_t, 4>(state, gradWeight);
@@ -249,6 +258,8 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
       width, height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
 
   THCudaCheck(cudaGetLastError());
+
+  THCTensor_(free)(state, gradOutput);
 }
 
 #endif

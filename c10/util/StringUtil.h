@@ -73,6 +73,28 @@ struct C10_API SourceLocation {
 
 std::ostream& operator<<(std::ostream& out, const SourceLocation& loc);
 
+/// Portable implementation of std::stoi, which works for Android builds.
+///
+/// TODO: You won't be able to call this unqualified, because ADL means that it
+/// will be ambiguous with std::stoi.  Maybe we should fix this by giving
+/// our version a different name.
+inline int stoi(const std::string& str) {
+#if defined(__ANDROID__)
+  std::stringstream ss;
+  int n = 0;
+  ss << str;
+  ss >> n;
+  return n;
+#else
+  return std::stoi(str);
+#endif // defined(__ANDROID__)
+}
+
 } // namespace c10
+
+// TODO: Remove me when namespace unification occurs
+namespace at {
+using c10::stoi;
+}
 
 #endif // C10_UTIL_STRINGUTIL_H_

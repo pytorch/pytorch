@@ -62,6 +62,15 @@ bool ResizeNearestOp<float, CPUContext>::RunOnDevice() {
             num_channels = X.dim32(1),
             input_height = X.dim32(2),
             input_width = X.dim32(3);
+  if (InputSize() == 2) {
+    const auto& scales = Input(1);
+    CAFFE_ENFORCE_EQ(scales.dim(), 1);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
+    const float* scales_data = scales.data<float>();
+    height_scale_ = scales_data[0];
+    width_scale_ = scales_data[1];
+  }
+
   int output_width = input_width * width_scale_;
   int output_height = input_height * height_scale_;
   Y->Resize(batch_size, num_channels, output_height, output_width);
@@ -99,7 +108,7 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(1);
   auto* dX = Output(0);
 
-  const auto inputDims = dY.dims();
+  const auto inputDims = dY.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
   const int batch_size = dY.dim32(0),
             num_channels = dY.dim32(1),
@@ -107,9 +116,17 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
             input_width = dY.dim32(3);
   const int output_height = X.dim32(2);
   const int output_width = X.dim32(3);
+  if (InputSize() == 3) {
+    const auto& scales = Input(2);
+    CAFFE_ENFORCE_EQ(scales.dim(), 1);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
+    const float* scales_data = scales.data<float>();
+    height_scale_ = scales_data[0];
+    width_scale_ = scales_data[1];
+  }
   dX->Resize(batch_size, num_channels, output_height, output_width);
   math::Set<float, CPUContext>(
-      dX->size(), 0.0f, dX->template mutable_data<float>(), &context_);
+      dX->numel(), 0.0f, dX->template mutable_data<float>(), &context_);
 
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
@@ -134,12 +151,13 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(ResizeNearest, ResizeNearestOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(ResizeNearestGradient,
-                      ResizeNearestGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    ResizeNearestGradient,
+    ResizeNearestGradientOp<float, CPUContext>);
 
 // Input: X, output: Y
 OPERATOR_SCHEMA(ResizeNearest)
-    .NumInputs(1)
+    .NumInputs(1, 2)
     .NumOutputs(1)
     .Arg("width_scale", "Scale along width dimension")
     .Arg("height_scale", "Scale along height dimension")
@@ -151,12 +169,16 @@ output_width = floor(input_width * width_scale)
 output_height = floor(output_height * height_scale)
 )DOC")
     .Input(0, "X", "Input tensor")
+    .Input(
+        1,
+        "scales", // the hack to support onnx spec
+        "1D, 2-element, Scales tensor, [height_scale, width_scale]")
     .Output(0, "Y", "Output tensor")
     .InheritOnnxSchema("Upsample");
 
 // Input: dY, output: dX
-OPERATOR_SCHEMA(ResizeNearestGradient)
-    .NumInputs(2)
+GRADIENT_OPERATOR_SCHEMA(ResizeNearestGradient)
+    .NumInputs(2, 3)
     .NumOutputs(1)
     .Arg("width_scale", "Scale along width dimension")
     .Arg("height_scale", "Scale along height dimension");
@@ -164,6 +186,15 @@ OPERATOR_SCHEMA(ResizeNearestGradient)
 class GetResizeNearestGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
+    if (def_.input().size() == 2) {
+      // this is a hack to support the second input as dynamic
+      // width_scale and height_scale to align with onnx change
+      return SingleGradientDef(
+          "ResizeNearestGradient",
+          "",
+          vector<string>{GO(0), I(0), I(1)},
+          vector<string>{GI(0)});
+    }
     return SingleGradientDef("ResizeNearestGradient",
                              "",
                              vector<string>{GO(0), I(0)},

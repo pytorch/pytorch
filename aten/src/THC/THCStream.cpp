@@ -5,15 +5,15 @@ THC_API THCStream* THCStream_defaultStream(int device) {
   return at::cuda::detail::CUDAStream_getDefaultStream(device);
 }
 
-THC_API THCStream* THCStream_new() { 
-  return at::cuda::detail::CUDAStream_createStream();
+THC_API THCStream* THCStream_new() {
+  return at::cuda::detail::CUDAStream_getStreamFromPool();
 }
 
 THC_API cudaStream_t THCStream_stream(THCStream* stream) {
   return at::cuda::detail::CUDAStream_stream(stream);
 }
 
-THC_API int THCStream_device(THCStream* stream) { 
+THC_API int THCStream_device(THCStream* stream) {
   return at::cuda::detail::CUDAStream_device(stream);
 }
 

@@ -278,7 +278,7 @@ def batch_dim(data, mask, dims):
 @torch.jit.script
 def batch_squeeze(data, mask, dims, dim_):
     if int(dim_) < 0:
-        dim_ += data.dim()
+        dim_ = dim_ + data.dim()
     dim = int(dim_)
     # if dim == 0:
     #     raise ValueError("cannot do squeeze along batch_dim")
@@ -291,7 +291,7 @@ def batch_squeeze(data, mask, dims, dim_):
 @torch.jit.script
 def batch_unsqueeze(data, mask, dims, dim_):
     if int(dim_) < 0:
-        dim_ += data.dim() + 1
+        dim_ = dim_ + data.dim() + 1
     dim = int(dim_)
     # if dim == 0:
     #     raise ValueError("cannot do unsqueeze along batch_dim")

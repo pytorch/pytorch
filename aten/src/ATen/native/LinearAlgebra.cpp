@@ -87,24 +87,6 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   return std::make_tuple(det.sign(), diag_U.abs_().log_().sum());
 }
 
-Tensor inverse(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  return at::native::inverse_out(result, self);
-}
-
-Tensor& inverse_out(Tensor &result, const Tensor &self) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "tensor should have CPU or CUDA backend");
-  AT_CHECK(self.dim() == 2, "tensor should be 2 dimensional");
-  AT_CHECK(self.size(0) == self.size(1), "tensor should be square");
-  AT_CHECK(at::isFloatingType(self.type().scalarType()), "tensor should be of floating-point type");
-  if (self.size(0) == 0) {
-    return result.resize_({0, 0});
-  } else {
-    return at::_getri_out(result, self);
-  }
-}
-
 Tensor pinverse(const Tensor& self, double rcond) {
   AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
            "pinverse(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
@@ -159,70 +141,70 @@ static void check_1d(const Tensor& t, const char* arg, const char* fn) {
 Tensor ger(const Tensor& self, const Tensor& vec2) {
   check_1d(self, "self", "ger");
   check_1d(vec2, "vec2", "ger");
-  return at::_ger(self, vec2);
+  return at::_th_ger(self, vec2);
 }
 
 Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
   check_1d(self, "self", "ger");
   check_1d(vec2, "vec2", "ger");
-  return at::_ger_out(result, self, vec2);
+  return at::_th_ger_out(result, self, vec2);
 }
 
 Tensor mm(const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
     return mat2.type().addmm(at::zeros({}, mat2.type()), self, mat2, 0, 1);
   }
-  return at::_mm(self, mat2);
+  return at::_th_mm(self, mat2);
 }
 
 Tensor& mm_out(Tensor& result, const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
     return at::addmm_out(result, at::zeros({}, mat2.options()), self, mat2, 0, 1);
   }
-  return at::_mm_out(result, self, mat2);
+  return at::_th_mm_out(result, self, mat2);
 }
 
 Tensor mv(const Tensor& self, const Tensor& vec) {
   check_1d(vec, "vec", "mv");
-  return at::_mv(self, vec);
+  return at::_th_mv(self, vec);
 }
 
 Tensor& mv_out(Tensor& result, const Tensor& self, const Tensor& vec) {
   check_1d(vec, "vec", "mv");
-  return at::_mv_out(result, self, vec);
+  return at::_th_mv_out(result, self, vec);
 }
 
 Tensor addmv(const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
   check_1d(vec, "vec", "addmv");
-  return at::_addmv(self, mat, vec, beta, alpha);
+  return at::_th_addmv(self, mat, vec, beta, alpha);
 }
 
 Tensor& addmv_(Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
   check_1d(vec, "vec", "addmv");
-  return at::_addmv_(self, mat, vec, beta, alpha);
+  return at::_th_addmv_(self, mat, vec, beta, alpha);
 }
 
 Tensor& addmv_out(Tensor &result, const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
   check_1d(vec, "vec", "addmv");
-  return at::_addmv_out(result, self, mat, vec, beta, alpha);
+  return at::_th_addmv_out(result, self, mat, vec, beta, alpha);
 }
 
 Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::_addr(self, vec1, vec2, beta, alpha);
+  return at::_th_addr(self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::_addr_(self, vec1, vec2, beta, alpha);
+  return at::_th_addr_(self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::_addr_out(result, self, vec1, vec2, beta, alpha);
+  return at::_th_addr_out(result, self, vec1, vec2, beta, alpha);
 }
 
 template <typename scalar_t, bool is_bmm>
@@ -376,7 +358,7 @@ Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) 
 Tensor dot(const Tensor& self, const Tensor& tensor) {
   check_1d(self, "self", "dot");
   check_1d(tensor, "tensor", "dot");
-  return at::_dot(self, tensor);
+  return at::_th_dot(self, tensor);
 }
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
@@ -507,7 +489,6 @@ Tensor matrix_power(const Tensor& a, int64_t n) {
   if (n == 0) {
     return a.clone().copy_(at::eye(a.size(-2), a.options()).expand_as(a));
   } else if (n < 0) {
-    AT_CHECK(a.dim() == 2, "Negative powers for batch matrices are currently not supported");
     Tensor a_ = at::inverse(a);
     n *= -1;
     return at::native::matrix_power(a_, n);

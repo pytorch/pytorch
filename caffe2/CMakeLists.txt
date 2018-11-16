@@ -64,6 +64,7 @@ endif()
 # ---[ Caffe2 build
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
+
 if(NOT BUILD_ATEN_ONLY)
   add_subdirectory(proto)
   add_subdirectory(contrib)
@@ -71,7 +72,8 @@ if(NOT BUILD_ATEN_ONLY)
   add_subdirectory(utils)
   add_subdirectory(predictor)
   add_subdirectory(core/nomnigraph)
-  add_subdirectory(core/dispatch)
+  add_subdirectory(core/nomscheduler)
+  add_subdirectory(serialize)
   if (USE_NVRTC)
     add_subdirectory(cuda_rtc)
   endif()
@@ -88,6 +90,13 @@ if(NOT BUILD_ATEN_ONLY)
   if (BUILD_CAFFE2_OPS)
     add_subdirectory(operators)
     add_subdirectory(operators/rnn)
+    if (USE_FBGEMM)
+      add_subdirectory(quantization)
+      add_subdirectory(quantization/server)
+    endif()
+    if (USE_QNNPACK)
+      add_subdirectory(operators/quantized)
+    endif()
   endif()
   add_subdirectory(opt)
   add_subdirectory(perfkernels)
@@ -220,7 +229,7 @@ target_include_directories(caffe2 INTERFACE $<INSTALL_INTERFACE:include>)
 target_include_directories(caffe2 PRIVATE ${Caffe2_CPU_INCLUDE})
 target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
-aten_set_target_props(caffe2)
+torch_set_target_props(caffe2)
 
 if (MSVC)
 target_compile_options(caffe2 INTERFACE "-std=c++11")
@@ -344,7 +353,7 @@ if(USE_CUDA)
   endif()
 
   # Set standard properties on the target
-  aten_set_target_props(caffe2_gpu)
+  torch_set_target_props(caffe2_gpu)
 
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
@@ -372,7 +381,7 @@ if(USE_ROCM)
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
-  target_compile_options(caffe2_hip PRIVATE ${HIP_HIPCC_FLAGS})
+  target_compile_options(caffe2_hip PRIVATE ${HIP_HCC_FLAGS})
   target_link_libraries(caffe2_hip PUBLIC caffe2)
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
@@ -381,10 +390,7 @@ if(USE_ROCM)
   target_include_directories(caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
 
   # Set standard properties on the target
-  aten_set_target_props(caffe2_hip)
-
-  # When a library has object files that contain device code, it needs to use hipcc/hcc to link.
-  set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
+  torch_set_target_props(caffe2_hip)
 
   caffe2_interface_library(caffe2_hip caffe2_hip_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
@@ -431,10 +437,11 @@ if (BUILD_TEST)
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
       set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
       get_filename_component(test_name ${test_src} NAME_WE)
-      hip_add_executable(${test_name} "${test_src}")
+      add_executable(${test_name} "${test_src}")
       target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
-      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDES})
+      target_compile_options(${test_name} PRIVATE ${HIP_CXX_FLAGS})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if (INSTALL_TEST)
         install(TARGETS ${test_name} DESTINATION test)
@@ -455,9 +462,13 @@ if (BUILD_PYTHON)
   # Python site-packages
   # Get canonical directory for python site packages (relative to install
   # location).  It varies from system to system.
+  # We should pin the path separator to the forward slash on Windows.
+  # More details can be seen at
+  # https://github.com/pytorch/pytorch/tree/master/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
   pycmd(PYTHON_SITE_PACKAGES "
+      import os
       from distutils import sysconfig
-      print(sysconfig.get_python_lib(prefix=''))
+      print(sysconfig.get_python_lib(prefix='').replace(os.sep, '/'))
   ")
   SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
   # ---[ Options.
@@ -507,9 +518,6 @@ if (BUILD_PYTHON)
   if (APPLE)
     set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
   endif()
-  if (WIN32)
-    set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
-  endif()
   target_include_directories(caffe2_pybind11_state PRIVATE $<INSTALL_INTERFACE:include>)
   target_include_directories(caffe2_pybind11_state PRIVATE ${Caffe2_CPU_INCLUDE})
 
@@ -535,9 +543,6 @@ if (BUILD_PYTHON)
     if (APPLE)
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
     endif()
-    if (WIN32)
-      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
-    endif()
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE ${Caffe2_CPU_INCLUDE})
     target_link_libraries(
@@ -555,19 +560,15 @@ if (BUILD_PYTHON)
   endif()
 
   if(USE_ROCM)
-    hip_add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
-    set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINKER_LANGUAGE HIP)
-    target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_HIPCC_FLAGS} -fvisibility=hidden)
+    add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
+    target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     if (APPLE)
       set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
     endif()
-    if (WIN32)
-      set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
-    endif()
     target_include_directories(caffe2_pybind11_state_hip PRIVATE $<INSTALL_INTERFACE:include>)
-    target_include_directories(caffe2_pybind11_state_hip PRIVATE ${Caffe2_CPU_INCLUDE})
+    target_include_directories(caffe2_pybind11_state_hip PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDES})
     target_link_libraries(
         caffe2_pybind11_state_hip caffe2_library caffe2_hip_library)
     if (WIN32)

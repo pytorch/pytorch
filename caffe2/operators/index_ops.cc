@@ -153,7 +153,7 @@ class IndexGetOp: public Operator<CPUContext> {
     dict->Get(
         keys.data<T>(),
         values->template mutable_data<int64_tValue>(),
-        keys.size());
+        keys.numel());
     return true;
   }
 };
@@ -175,9 +175,9 @@ class IndexLoadOp: public Operator<CPUContext> {
     CAFFE_ENFORCE(dict, "Wrong dictionary type given input keys.");
     const auto& keys = Input(1);
     const auto* keys_data = keys.data<T>();
-    auto keys_size = keys.size();
+    auto keys_size = keys.numel();
     if (skipFirstEntry_) {
-      CAFFE_ENFORCE(keys.size() > 0);
+      CAFFE_ENFORCE(keys.numel() > 0);
       ++keys_data;
       --keys_size;
     }
@@ -226,8 +226,8 @@ class IndexSizeOp : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
-    auto* out = Output(0);
-    out->Resize(std::vector<int64_t>{});
+
+    auto* out = Output(0, std::vector<int64_t>{}, at::dtype<int64_tValue>());
     *out->template mutable_data<int64_tValue>() = base->Size();
     return true;
   }
@@ -368,12 +368,12 @@ class IndexSerializer : public BlobSerializerBase {
     }
 
     CAFFE_ENFORCE(
-        tensor_out->size() <= std::numeric_limits<int32_t>::max(),
+        tensor_out->numel() <= std::numeric_limits<int32_t>::max(),
         "Index too large to be serialized.");
     BlobProto blob_proto;
     TensorSerializer ser;
     ser.Serialize(
-        *tensor_out, name, blob_proto.mutable_tensor(), 0, tensor_out->size());
+        *tensor_out, name, blob_proto.mutable_tensor(), 0, tensor_out->numel());
     blob_proto.set_name(name);
     blob_proto.set_type("std::unique_ptr<caffe2::IndexBase>");
 
@@ -381,7 +381,7 @@ class IndexSerializer : public BlobSerializerBase {
     os << base->maxElements() << " " << base->isFrozen();
     blob_proto.set_content(os.str());
 
-    acceptor(name, blob_proto.SerializeAsString());
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 
  private:
@@ -431,7 +431,7 @@ class IndexDeserializer : public BlobDeserializerBase {
       const Tensor& tensor_in) {
     base->reset(new Index<T>(maxElements));
     auto* dict = dynamic_cast_if_rtti<Index<T>*>(base->get());
-    dict->Load(tensor_in.data<T>(), tensor_in.size());
+    dict->Load(tensor_in.data<T>(), tensor_in.numel());
   }
 };
 

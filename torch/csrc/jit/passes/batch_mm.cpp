@@ -1,10 +1,12 @@
 #include "torch/csrc/jit/passes/batch_mm.h"
 
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/utils/functional.h"
 
 #include <ATen/ATen.h>
@@ -68,15 +70,59 @@ namespace torch { namespace jit {
 // the trees we formed and fuse them.
 
 // Tunable parameter. Set to something larger if it turns out to be better.
-static constexpr size_t min_fusion_size = 2;
+static constexpr size_t min_fusion_size = 4;
 
-static std::array<int64_t, 2> as_array(at::IntList sizes) {
-  JIT_ASSERT(sizes.size() == 2);
-  std::array<int64_t, 2> arr;
-  arr[0] = sizes[0];
-  arr[1] = sizes[1];
-  return arr;
+bool have_same_shape(at::TensorList inputs) {
+  auto expected_sizes = inputs[0].sizes();
+  return std::all_of(inputs.begin(), inputs.end(),
+                     [expected_sizes](const at::Tensor& t) {
+                       return t.sizes() == expected_sizes;
+                     });
 }
+
+bool shape_is_fast(const at::Tensor& lhs, const at::Tensor& rhs) {
+  size_t l = lhs.size(0);
+  size_t m = lhs.size(1);
+  size_t r = rhs.size(1);
+  // Numbers obtained by some simple benchmarks of fp32 gemms on a TITAN V
+  return m < 512 || ((l < 256 && r < 256) || (l > 256 && r > 256));
+}
+
+RegisterOperators mm_tree_reduction_reg({
+  Operator(
+    prim::MMTreeReduce,
+    [](const Node* node) {
+      size_t num_inputs = node->inputs().size();
+      return [num_inputs](Stack& stack) {
+        std::vector<at::Tensor> inputs;
+        inputs.reserve(num_inputs);
+        for (auto it = stack.end() - num_inputs; it != stack.end(); ++it) {
+          inputs.push_back(std::move(*it).toTensor());
+        }
+        drop(stack, num_inputs);
+
+        JIT_ASSERT(inputs.size() > 0);
+        JIT_ASSERT(inputs.size() % 2 == 0);
+        size_t side_num_elems = inputs.size() / 2;
+        auto lhs_inputs = at::TensorList(inputs).slice(0, side_num_elems);
+        auto rhs_inputs = at::TensorList(inputs).slice(side_num_elems);
+        // TODO: checking this is not free, so we should stop if this keeps failing
+        // TODO: benchmark to find when is this really a win, and add size constraints
+        if (have_same_shape(lhs_inputs) && have_same_shape(rhs_inputs) && shape_is_fast(lhs_inputs[0], rhs_inputs[0])) {
+          auto lhs = at::cat(lhs_inputs, /*dim=*/1);
+          auto rhs = at::cat(rhs_inputs, /*dim=*/0);
+          push(stack, at::mm(lhs, rhs));
+        } else {
+          auto acc = at::mm(inputs[0], inputs[side_num_elems]);
+          for (size_t i = 1; i < side_num_elems; ++i) {
+            acc.add_(at::mm(inputs[i], inputs[side_num_elems + i]));
+          }
+          push(stack, std::move(acc));
+        }
+        return 0;
+      };
+    })
+});
 
 // TreeTokens will be used to label nodes of the graph, if the nodes will fit
 // our mm/add tree pattern. Basically we do dynamic programming on DAGs, where
@@ -85,37 +131,37 @@ static std::array<int64_t, 2> as_array(at::IntList sizes) {
 // and build a larger tree.
 struct TreeToken {
   uint64_t tree_size = 0; // NOTE: measured in number of leaves i.e. mm ops
-  std::array<int64_t, 2> lhs_sizes;
-  std::array<int64_t, 2> rhs_sizes;
   Node *node = nullptr;
   bool is_root = false;
 
-  static TreeToken fromMM(Node *mm) {
+  static TreeToken mm(Node *mm) {
     TreeToken token;
     token.tree_size = 1;
-    Value *lhs = mm->inputs()[0];
-    Value *rhs = mm->inputs()[1];
-    token.lhs_sizes = as_array(lhs->type()->expect<CompleteTensorType>()->sizes());
-    token.rhs_sizes = as_array(rhs->type()->expect<CompleteTensorType>()->sizes());
     token.node = mm;
     token.is_root = true;
     return token;
   }
 
-  static TreeToken unify(Node *add, TreeToken& l, TreeToken& r) {
+  // NB: the returned token might be invalid, so make sure to check its boolean value!
+  static TreeToken transpose(Node *t, TreeToken& inp_token) {
+    TreeToken token;
+    if (!inp_token.node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+      return token;
+    }
+    token.tree_size = 1;
+    token.node = t;
+    token.is_root = true;
+    inp_token.is_root = false;
+    return token;
+  }
+
+  // NB: the returned token might be invalid, so make sure to check its boolean value!
+  static TreeToken add(Node *add, TreeToken& l, TreeToken& r) {
     TreeToken token;
     // See Note [Overlapping trees]
     if (&l == &r || !l.is_root || !r.is_root)
       return token;
-    // We can batch the tree only if all sizes match, because we need to
-    // cat inputs for both operands
-    if (l.lhs_sizes != r.lhs_sizes)
-      return token;
-    if (l.rhs_sizes != r.rhs_sizes)
-      return token;
     token.tree_size = l.tree_size + r.tree_size;
-    token.lhs_sizes = l.lhs_sizes;
-    token.rhs_sizes = l.rhs_sizes;
     token.node = add;
     token.is_root = true;
     l.is_root = r.is_root = false; // Reserve the subtrees, so they can't be used again.
@@ -126,16 +172,31 @@ struct TreeToken {
     return is_root;
   }
 
-  std::vector<Node*> gatherMatMuls() {
+  std::vector<Node*> removeTransposesAndGatherMatmuls() {
     std::vector<Node*> matmuls;
     std::vector<Node*> queue {node};
+    Graph* graph = node->owningGraph();
     while (!queue.empty()) {
       auto n = queue.back(); queue.pop_back();
-      if (n->kind() == aten::mm) {
+      if (n->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
         matmuls.push_back(n);
-      } else {
+      } else if (n->matches("aten::t(Tensor self) -> Tensor")) {
+        Node * input_node = n->input()->node();
+        JIT_ASSERT(input_node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor"));
+        // (AB)^T == B^TA^T
+        WithInsertPoint insert_guard { input_node };
+        Value * A = input_node->inputs()[0];
+        Value * B = input_node->inputs()[1];
+        Value * AT = graph->insert(aten::t, {A});
+        Value * BT = graph->insert(aten::t, {B});
+        Value * BTAT = graph->insert(aten::mm, {BT, AT});
+        n->output()->replaceAllUsesWith(BTAT);
+        matmuls.push_back(BTAT->node());
+      } else if (n->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
         queue.push_back(n->inputs()[0]->node());
         queue.push_back(n->inputs()[1]->node());
+      } else {
+        AT_ASSERTM(false, "Unsupported node found in a BatchMM tree!");
       }
     }
     return matmuls;
@@ -149,13 +210,14 @@ void BatchMMBlock(Block* block) {
   // Look for trees in the block
   std::unordered_map<Node*, TreeToken> tokens;
   for (auto node : block->nodes()) {
-    if (node->kind() == aten::mm &&
-        node->input(0)->type()->cast<CompleteTensorType>() &&
-        node->input(1)->type()->cast<CompleteTensorType>()) {
-      tokens[node] = TreeToken::fromMM(node);
-    } else if (node->kind() == aten::add) {
-      // NOTE: x + 2 is add[other={2}](%x)
-      if (node->inputs().size() != 2) continue;
+    if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+      tokens[node] = TreeToken::mm(node);
+    } else if (node->matches("aten::t(Tensor self) -> Tensor")) {
+      auto input_it = tokens.find(node->input()->node());
+      if (input_it != tokens.end()) {
+        tokens[node] = TreeToken::transpose(node, input_it->second);
+      }
+    } else if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
       Node *lhs = node->inputs()[0]->node();
       Node *rhs = node->inputs()[1]->node();
       auto lhs_it = tokens.find(lhs);
@@ -168,8 +230,9 @@ void BatchMMBlock(Block* block) {
       // we need to compute a transitive closure and actually check the dependencies.
       if (lhs_it != tokens.end() && rhs_it != tokens.end() &&
           lhs->output()->uses().size() == 1 && rhs->output()->uses().size() == 1) {
-        if (auto token = TreeToken::unify(node, lhs_it->second, rhs_it->second))
+        if (auto token = TreeToken::add(node, lhs_it->second, rhs_it->second)) {
           tokens[node] = token;
+        }
       }
     } else {
       for (auto block : node->blocks()) {
@@ -183,35 +246,26 @@ void BatchMMBlock(Block* block) {
     auto & root = item.second;
     if (!root || root.tree_size < min_fusion_size)
       continue;
-    auto matmuls = root.gatherMatMuls();
-    auto type_ = root.node->output()->type();
-    auto type = type_->expect<CompleteTensorType>();
-
-    auto batch_inputs = [&](Side s, std::array<int64_t, 2> cat_sizes) -> Value* {
-      int inputs_off = s == Side::LHS ? 0 : 1;
-      int cat_dim    = s == Side::LHS ? 1 : 0;
-      cat_sizes[cat_dim] *= matmuls.size(); // make them really cat_sizes
-
-      WithInsertPoint iguard { root.node };
-      auto inputs = fmap(matmuls, [=](Node *mm) -> SymbolicVariable { return mm->inputs()[inputs_off]; });
-      auto cat_output = SymbolicVariable::cat(inputs, cat_dim).value();
-      cat_output->setType(type->withSizes(cat_sizes));
-      return cat_output;
-    };
-
-    auto lhs_batch = batch_inputs(Side::LHS, root.lhs_sizes);
-    auto rhs_batch = batch_inputs(Side::RHS, root.rhs_sizes);
-    Node *batch_mm = graph->create(aten::mm, {lhs_batch, rhs_batch});
-    batch_mm->output()->setType(type_);
-    batch_mm->insertBefore(root.node);
-    root.node->output()->replaceAllUsesWith(batch_mm->output());
+    auto matmuls = root.removeTransposesAndGatherMatmuls();
+    WithInsertPoint insert_guard {root.node};
+    Node * tree_reduce = graph->insertNode(graph->create(Symbol::prim("MMTreeReduce")));
+    for (Node * matmul : matmuls) {
+      tree_reduce->addInput(matmul->inputs().at(0));
+    }
+    for (Node * matmul : matmuls) {
+      tree_reduce->addInput(matmul->inputs().at(1));
+    }
+    root.node->output()->replaceAllUsesWith(tree_reduce->output());
     // NB: don't bother with cleaning up after yourself. We'll use DCE for that.
   }
-  EliminateDeadCode(block);
 }
 
 void BatchMM(std::shared_ptr<Graph>& graph) {
   BatchMMBlock(graph->block());
+  EliminateDeadCode(graph);
+  // It's possible that transpose rearrangements have created sequences of consecutive
+  // transposes that didn't exist before.
+  PeepholeOptimize(graph);
 }
 
 }}

@@ -30,3 +30,4 @@ def prepare_multiprocessing_environment(path):
 
 
 TEST_MASTER_ADDR = '127.0.0.1'
+TEST_MASTER_PORT = 29500

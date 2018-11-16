@@ -291,7 +291,7 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
           "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
   }
 
-  return at::_indexCopy_(self, dim, index, source);
+  return at::_th_index_copy_(self, dim, index, source);
 }
 
 }} // at::native

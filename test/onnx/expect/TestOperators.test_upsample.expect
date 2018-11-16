@@ -3,26 +3,32 @@ producer_name: "pytorch"
 producer_version: "0.4"
 graph {
   node {
-    input: "0"
     output: "1"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 4
+        data_type: FLOAT
+        raw_data: "\000\000\200?\000\000\200?\000\000\000@\000\000\000@"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "input"
+    input: "1"
+    output: "2"
     op_type: "Upsample"
     attribute {
       name: "mode"
       s: "linear"
       type: STRING
     }
-    attribute {
-      name: "scales"
-      floats: 1
-      floats: 1
-      floats: 2
-      floats: 2
-      type: FLOATS
-    }
   }
   name: "torch-jit-export"
   input {
-    name: "0"
+    name: "input"
     type {
       tensor_type {
         elem_type: FLOAT
@@ -44,7 +50,7 @@ graph {
     }
   }
   output {
-    name: "1"
+    name: "2"
     type {
       tensor_type {
         elem_type: FLOAT

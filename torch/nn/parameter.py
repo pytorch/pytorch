@@ -25,6 +25,14 @@ class Parameter(torch.Tensor):
             data = torch.Tensor()
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        else:
+            result = type(self)(self.data.clone(), self.requires_grad)
+            memo[id(self)] = result
+            return result
+
     def __repr__(self):
         return 'Parameter containing:\n' + super(Parameter, self).__repr__()
 

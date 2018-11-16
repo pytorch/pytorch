@@ -86,12 +86,11 @@ class ImageInputOp final
 
   unique_ptr<db::DBReader> owned_reader_;
   const db::DBReader* reader_;
-  CPUContext cpu_context_;
   Tensor prefetched_image_{CPU};
   Tensor prefetched_label_{CPU};
-  vector<TensorCPU> prefetched_additional_outputs_;
-  Tensor prefetched_image_on_device_{Context::GetDeviceType()};
-  Tensor prefetched_label_on_device_{Context::GetDeviceType()};
+  vector<Tensor> prefetched_additional_outputs_;
+  Tensor prefetched_image_on_device_;
+  Tensor prefetched_label_on_device_;
   vector<Tensor> prefetched_additional_outputs_on_device_;
   // Default parameters for images
   PerImageArg default_arg_;
@@ -130,6 +129,7 @@ class ImageInputOp final
   int num_decode_threads_;
   int additional_inputs_offset_;
   int additional_inputs_count_;
+  std::vector<int> additional_output_sizes_;
   std::shared_ptr<TaskThreadPool> thread_pool_;
 
   // Output type for GPU transform path
@@ -195,6 +195,8 @@ ImageInputOp<Context>::ImageInputOp(
           0)),
       num_decode_threads_(
           OperatorBase::template GetSingleArgument<int>("decode_threads", 4)),
+      additional_output_sizes_(OperatorBase::template GetRepeatedArgument<int>(
+                                   "output_sizes", {})),
       thread_pool_(std::make_shared<TaskThreadPool>(num_decode_threads_)),
       // output type only supported with CUDA and use_gpu_transform for now
       output_type_(
@@ -220,9 +222,14 @@ ImageInputOp<Context>::ImageInputOp(
     "std_per_channel",
     {OperatorBase::template GetSingleArgument<float>("std", 1.)});
 
-  vector<int> additional_output_sizes =
-      OperatorBase::template GetRepeatedArgument<int>(
-          "output_sizes", vector<int>(OutputSize() - 2, 1));
+  if (additional_output_sizes_.size() == 0) {
+    additional_output_sizes_ = std::vector<int>(OutputSize() - 2, 1);
+  } else {
+    CAFFE_ENFORCE(
+      additional_output_sizes_.size() == OutputSize() - 2,
+      "If the output sizes are specified, they must be specified for all "
+      "additional outputs");
+  }
   additional_inputs_count_ = OutputSize() - 2;
 
   default_arg_.bounding_params = {
@@ -288,10 +295,6 @@ ImageInputOp<Context>::ImageInputOp(
   CAFFE_ENFORCE(
       !use_caffe_datum_ || OutputSize() == 2,
       "There can only be 2 outputs if the Caffe datum format is used");
-  CAFFE_ENFORCE(
-      additional_output_sizes.size() == OutputSize() - 2,
-      "If the output sizes are specified, they must be specified for all "
-      "additional outputs");
 
   CAFFE_ENFORCE(random_scale_.size() == 2,
       "Must provide [scale_min, scale_max]");
@@ -382,13 +385,11 @@ ImageInputOp<Context>::ImageInputOp(
     prefetched_label_.Resize(vector<int64_t>(1, batch_size_));
   }
 
-  for (int i = 0; i < additional_output_sizes.size(); ++i) {
-    prefetched_additional_outputs_on_device_.emplace_back(
-        Context::GetDeviceType());
-    prefetched_additional_outputs_.emplace_back(CPU);
-    prefetched_additional_outputs_[i].Resize(
-        int64_t(batch_size_), int64_t(additional_output_sizes[i]));
+  for (int i = 0; i < additional_output_sizes_.size(); ++i) {
+    prefetched_additional_outputs_on_device_.emplace_back();
+    prefetched_additional_outputs_.emplace_back();
   }
+
 }
 
 // Inception-stype scale jittering
@@ -634,7 +635,6 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
 
     for (int i = 0; i < additional_output_protos.size(); ++i) {
       auto additional_output_proto = additional_output_protos[i];
-
       if (additional_output_proto.data_type() == TensorProto::FLOAT) {
         float* additional_output =
             prefetched_additional_outputs_[i].template mutable_data<float>() +
@@ -1148,18 +1148,22 @@ bool ImageInputOp<Context>::Prefetch() {
         for (int i = 0; i < additional_inputs_count_; ++i) {
           int index = additional_inputs_offset_ + i;
           TensorProto additional_output_proto = protos.protos(index);
-
+          auto sizes = std::vector<int64_t>({batch_size_, additional_output_sizes_[i]});
           if (additional_output_proto.data_type() == TensorProto::FLOAT) {
-            prefetched_additional_outputs_[i].template mutable_data<float>();
+            prefetched_additional_outputs_[i] =
+                caffe2::empty(sizes, at::dtype<float>().device(CPU));
           } else if (
               additional_output_proto.data_type() == TensorProto::INT32) {
-            prefetched_additional_outputs_[i].template mutable_data<int>();
+            prefetched_additional_outputs_[i] =
+                caffe2::empty(sizes, at::dtype<int>().device(CPU));
           } else if (
               additional_output_proto.data_type() == TensorProto::INT64) {
-            prefetched_additional_outputs_[i].template mutable_data<int64_t>();
+            prefetched_additional_outputs_[i] =
+                caffe2::empty(sizes, at::dtype<int64_t>().device(CPU));
           } else if (
               additional_output_proto.data_type() == TensorProto::UINT8) {
-            prefetched_additional_outputs_[i].template mutable_data<uint8_t>();
+            prefetched_additional_outputs_[i] =
+                caffe2::empty(sizes, at::dtype<uint8_t>().device(CPU));
           } else {
             LOG(FATAL) << "Unsupported output type.";
           }
@@ -1207,13 +1211,19 @@ bool ImageInputOp<Context>::Prefetch() {
 
   // If the context is not CPUContext, we will need to do a copy in the
   // prefetch function as well.
+  auto device = at::device(Context::GetDeviceType());
   if (!std::is_same<Context, CPUContext>::value) {
-    prefetched_image_on_device_.CopyFrom(prefetched_image_, &cpu_context_);
-    prefetched_label_on_device_.CopyFrom(prefetched_label_, &cpu_context_);
+    // do sync copies
+    ReinitializeAndCopyFrom(
+        &prefetched_image_on_device_, device, prefetched_image_);
+    ReinitializeAndCopyFrom(
+        &prefetched_label_on_device_, device, prefetched_label_);
 
     for (int i = 0; i < prefetched_additional_outputs_on_device_.size(); ++i) {
-      prefetched_additional_outputs_on_device_[i].CopyFrom(
-          prefetched_additional_outputs_[i], &cpu_context_);
+      ReinitializeAndCopyFrom(
+          &prefetched_additional_outputs_on_device_[i],
+          device,
+          prefetched_additional_outputs_[i]);
     }
   }
 
@@ -1224,24 +1234,18 @@ bool ImageInputOp<Context>::Prefetch() {
 
 template <class Context>
 bool ImageInputOp<Context>::CopyPrefetched() {
-  auto type = Context::GetDeviceType();
-  auto* image_output = OperatorBase::Output<Tensor>(0, type);
-  auto* label_output = OperatorBase::Output<Tensor>(1, type);
-  vector<Tensor*> additional_outputs_output;
-
-  for (int i = 2; i < OutputSize(); ++i) {
-    additional_outputs_output.push_back(OperatorBase::Output<Tensor>(i, type));
-  }
+  auto type = Device(Context::GetDeviceType());
+  auto options = at::device(type);
 
   // Note(jiayq): The if statement below should be optimized away by the
   // compiler since std::is_same is a constexpr.
   if (std::is_same<Context, CPUContext>::value) {
-    image_output->CopyFrom(prefetched_image_, &context_);
-    label_output->CopyFrom(prefetched_label_, &context_);
+    OperatorBase::OutputTensorCopyFrom(0, options, prefetched_image_, &context_);
+    OperatorBase::OutputTensorCopyFrom(1, options, prefetched_label_, &context_);
 
-    for (int i = 0; i < additional_outputs_output.size(); ++i) {
-      additional_outputs_output[i]->CopyFrom(
-          prefetched_additional_outputs_[i], &context_);
+    for (int i = 2; i < OutputSize(); ++i) {
+      OperatorBase::OutputTensorCopyFrom(
+          i, options, prefetched_additional_outputs_[i - 2], &context_);
     }
   } else {
     // TODO: support color jitter and color lighting in gpu_transform
@@ -1258,12 +1262,21 @@ bool ImageInputOp<Context>::CopyPrefetched() {
             std_.size(), std_.data(), std_gpu_.template mutable_data<float>());
         mean_std_copied_ = true;
       }
+      const auto& X = prefetched_image_on_device_;
+      // data comes in as NHWC
+      const int N = X.dim32(0), C = X.dim32(3), H = X.dim32(1), W = X.dim32(2);
+      // data goes out as NCHW
+      auto dims = std::vector<int64_t>{N, C, H, W};
       // GPU transform kernel allows explicitly setting output type
       if (output_type_ == TensorProto_DataType_FLOAT) {
+        auto* image_output = OperatorBase::OutputTensor(
+            0, dims, at::dtype<float>().device(type));
         TransformOnGPU<uint8_t,float,Context>(prefetched_image_on_device_,
                                               image_output, mean_gpu_,
                                               std_gpu_, &context_);
       } else if (output_type_ == TensorProto_DataType_FLOAT16) {
+        auto* image_output = OperatorBase::OutputTensor(
+            0, dims, at::dtype<at::Half>().device(type));
         TransformOnGPU<uint8_t,at::Half,Context>(prefetched_image_on_device_,
                                                 image_output, mean_gpu_,
                                                 std_gpu_, &context_);
@@ -1271,13 +1284,15 @@ bool ImageInputOp<Context>::CopyPrefetched() {
         return false;
       }
     } else {
-      image_output->CopyFrom(prefetched_image_on_device_, &context_);
+      OperatorBase::OutputTensorCopyFrom(
+          0, type, prefetched_image_on_device_, &context_);
     }
-    label_output->CopyFrom(prefetched_label_on_device_, &context_);
+    OperatorBase::OutputTensorCopyFrom(
+        1, type, prefetched_label_on_device_, &context_);
 
-    for (int i = 0; i < additional_outputs_output.size(); ++i) {
-      additional_outputs_output[i]->CopyFrom(
-          prefetched_additional_outputs_on_device_[i], &context_);
+    for (int i = 2; i < OutputSize(); ++i) {
+      OperatorBase::OutputTensorCopyFrom(
+          i, type, prefetched_additional_outputs_on_device_[i - 2], &context_);
     }
   }
   return true;

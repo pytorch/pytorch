@@ -2,7 +2,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor_int8.h"
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 #include "caffe2/core/types.h"
 
 namespace caffe2 {
@@ -22,7 +22,7 @@ class Int8TensorCPUSerializer : public BlobSerializerBase {
     blob_proto.set_type("Int8TensorCPU");
     QTensorProto& proto = *blob_proto.mutable_qtensor();
     proto.set_name(name);
-    for (int i = 0; i < tensor.t.ndim(); ++i) {
+    for (int i = 0; i < tensor.t.dim(); ++i) {
       proto.add_dims(tensor.t.dim32(i));
     }
     proto.set_precision(8);
@@ -30,19 +30,20 @@ class Int8TensorCPUSerializer : public BlobSerializerBase {
     proto.set_bias(tensor.zero_point);
     proto.set_is_signed(false);
 
-    const TensorProto::DataType data_type = TypeMetaToDataType(tensor.t.meta());
+    const TensorProto::DataType data_type =
+        TypeMetaToDataType(tensor.t.dtype());
     proto.set_data_type(data_type);
     switch (data_type) {
       case TensorProto_DataType_INT32:
         detail::CopyToProtoAsIs(
-            tensor.t.size(),
+            tensor.t.numel(),
             tensor.t.template data<int32_t>(),
             proto.mutable_data(),
             &this->context_);
         break;
       case TensorProto_DataType_UINT8:
         detail::CopyToProtoWithCast(
-            tensor.t.size(),
+            tensor.t.numel(),
             tensor.t.template data<uint8_t>(),
             proto.mutable_data(),
             &this->context_);
@@ -51,7 +52,7 @@ class Int8TensorCPUSerializer : public BlobSerializerBase {
         CAFFE_ENFORCE(false, "Unsupported data type in Int8TensorCPU");
     }
 
-    acceptor(name, blob_proto.SerializeAsString());
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 
  private:
@@ -73,14 +74,14 @@ class Int8TensorCPUDeserializer : public TensorDeserializer {
     switch (proto.data_type()) {
       case TensorProto_DataType_INT32:
         detail::CopyFromProtoAsIs(
-            tensor->t.size(),
+            tensor->t.numel(),
             proto.data(),
             tensor->t.template mutable_data<int32_t>(),
             &this->context_);
         break;
       case TensorProto_DataType_UINT8:
         detail::CopyFromProtoWithCast(
-            tensor->t.size(),
+            tensor->t.numel(),
             proto.data(),
             tensor->t.template mutable_data<uint8_t>(),
             &this->context_);

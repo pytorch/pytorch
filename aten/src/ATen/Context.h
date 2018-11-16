@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/CPUGeneral.h>
-#include "ATen/CUDAStream.h"
 #include "ATen/Type.h"
 #include "ATen/TypeExtendedInterface.h"
 #include "ATen/Utils.h"

@@ -84,12 +84,12 @@ bool TensorProtosDBInput<Context>::Prefetch() {
           protos.mutable_protos(i)->clear_device_detail();
         }
         deserializer.Deserialize(protos.protos(i), &src);
-        DCHECK_EQ(src.size() * batch_size_, dst->size());
+        DCHECK_EQ(src.numel() * batch_size_, dst->numel());
         this->context_.CopyItemsSameDevice(
-            src.meta(),
-            src.size(),
+            src.dtype(),
+            src.numel(),
             src.raw_data(),
-            static_cast<char*>(dst->raw_mutable_data(src.meta())) +
+            static_cast<char*>(dst->raw_mutable_data(src.dtype())) +
                 src.nbytes() * item_id);
       }
     }

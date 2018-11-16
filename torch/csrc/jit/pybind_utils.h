@@ -17,6 +17,14 @@
 #include <utility>
 #include <vector>
 
+// The visibility attribute is to avoid a warning about storing a field in the
+// struct that has a different visibility (from pybind) than the struct.
+#ifdef _WIN32
+#define VISIBILITY_HIDDEN
+#else
+#define VISIBILITY_HIDDEN __attribute__((visibility("hidden")))
+#endif
+
 namespace torch { namespace jit {
 namespace detail {
 
@@ -28,7 +36,7 @@ namespace detail {
 inline void findErrorInKwargs(
     const FunctionSchema& schema,
     py::kwargs kwargs) {
-  const auto& arguments = schema.arguments;
+  const auto& arguments = schema.arguments();
   // First check if any of the kwargs are unknown, i.e. don't match the name of
   // any argument in the schema.
   for (const auto& kwarg : kwargs) {
@@ -36,12 +44,12 @@ inline void findErrorInKwargs(
     if(!std::count_if(
             arguments.begin(),
             arguments.end(),
-            [&key](const Argument& argument) { return argument.name == key; })) {
+            [&key](const Argument& argument) { return argument.name() == key; })) {
       throw std::runtime_error(c10::str(
           "Unknown keyword argument '",
           key,
           "' for operator '",
-          schema.name,
+          schema.name(),
           "'. Schema: ",
           schema));
     }
@@ -49,11 +57,11 @@ inline void findErrorInKwargs(
   // If there are unconsumed kwargs but none of them were unknown, the first
   // positional argument present in the kwargs is duplicated.
   for (const auto& argument : arguments) {
-    if (kwargs.contains(argument.name.c_str())) {
-      AT_ASSERT(!argument.default_value);
+    if (kwargs.contains(argument.name().c_str())) {
+      AT_ASSERT(!argument.default_value());
       throw std::runtime_error(c10::str(
           "Argument '",
-          argument.name,
+          argument.name(),
           "' specified both as positional and ",
           "keyword argument. Schema: ",
           schema));
@@ -87,7 +95,7 @@ inline Stack toStack(const py::tuple& inputs) {
   return toIValue(inputs).toTuple()->elements();
 }
 
-inline IValue toIValue(py::handle obj, const TypePtr& type);
+inline IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N = c10::nullopt);
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   std::vector<IValue> elems;
@@ -97,7 +105,7 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   return List<IValue>::create(std::move(elems));
 }
 
-inline IValue toIValue(py::handle obj, const TypePtr& type) {
+inline IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     switch (type->kind()) {
       case TypeKind::DynamicType:
       case TypeKind::TensorType:
@@ -114,6 +122,9 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
       case TypeKind::IntType:
         return py::cast<int64_t>(obj);
       case TypeKind::NoneType:
+        if(obj != Py_None)
+          throw py::cast_error();
+
         return {};
       case TypeKind::BoolType:
         return py::cast<bool>(obj);
@@ -139,10 +150,23 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
       case TypeKind::ListType: {
         const auto& elem_type = type->expect<ListType>()->getElementType();
         switch(elem_type->kind()) {
+          //allows single int/float to be broadcasted to a fixed size list
           case TypeKind::IntType:
-            return py::cast<std::vector<int64_t>>(obj);
+            if (!N || !py::isinstance<py::int_>(obj)) {
+              return py::cast<std::vector<int64_t>>(obj);
+            } else {
+              double value = py::cast<int64_t>(obj);
+              std::vector<double> repeated(*N, value);
+              return repeated;
+            }
           case TypeKind::FloatType:
-            return py::cast<std::vector<double>>(obj);
+            if (!N || !py::isinstance<py::float_>(obj)) {
+              return py::cast<std::vector<double>>(obj);
+            } else {
+              double value = py::cast<double>(obj);
+              std::vector<double> repeated(*N, value);
+              return repeated;
+            }
           case TypeKind::TensorType:
           case TypeKind::DynamicType:
             return py::cast<std::vector<at::Tensor>>(obj);
@@ -150,11 +174,25 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
             return createGenericList(obj, elem_type);
         }
       }
-      case TypeKind::WorldType:
-        AT_ERROR("World arguments should not be passed in by users");
+      case TypeKind::OptionalType: {
+        const auto& elem_type = type->expect<OptionalType>()->getElementType();
+        // check if it's a none obj since optional accepts NoneType
+        if (obj == Py_None)  {
+          if(elem_type->isSubtypeOf(DynamicType::get())) {
+            // return undefined tensor for Optional[Tensor]
+            return at::Tensor();
+          }
+          else {
+            // for other optional types, return an IValue() to denote a None
+            return {};
+          }
+        }
+        return toIValue(obj, type->expect<OptionalType>()->getElementType());
+      }
       case TypeKind::NumberType:
       case TypeKind::GeneratorType:
       case TypeKind::VarType:
+      case TypeKind::FutureType:
         break;
     }
   AT_ERROR("Missing cases in toIValue for type: ", type->str(), "! File a bug report.");
@@ -164,16 +202,16 @@ inline IValue argumentToIValue(
     const FunctionSchema& schema,
     size_t argumentPosition,
     py::handle object) {
-  const auto& argument = schema.arguments.at(argumentPosition);
+  const auto& argument = schema.arguments().at(argumentPosition);
   try {
-    return toIValue(object, argument.type);
+    return toIValue(object, argument.type(), argument.N());
   } catch (const py::cast_error& error) {
     throw std::runtime_error(c10::str(
-        schema.name,
+        schema.name(),
         "() expected value of type ",
-        argument.type->str(),
+        argument.type()->str(),
         " for argument '",
-        argument.name,
+        argument.name(),
         "' in position ",
         argumentPosition,
         ", but instead got value of type ",
@@ -216,8 +254,10 @@ inline py::object toPyObject(IValue&& ivalue) {
     return py::cast(ivalue.toDouble());
   } else if (ivalue.isInt()) {
     return py::cast(ivalue.toInt());
-  }else if (ivalue.isBool()) {
+  } else if (ivalue.isBool()) {
     return py::cast(ivalue.toBool());
+  } else if (ivalue.isString()) {
+    return py::cast(ivalue.toStringRef());
   } else if (ivalue.isIntList()) {
     return py::cast(ivalue.toIntListRef());
   } else if (ivalue.isDoubleList()) {
@@ -247,22 +287,43 @@ inline py::object toPyObject(IValue&& ivalue) {
   }
 }
 
+struct VISIBILITY_HIDDEN tuple_slice {
+  /*implicit*/ tuple_slice(py::tuple tup_)
+  : tup(std::move(tup_)), b(0), e(tup.size()) {}
+  tuple_slice(py::tuple tup_, int64_t b_)
+  : tup(std::move(tup_)), b(b_), e(tup.size()) {}
+  tuple_slice(py::tuple tup_, int64_t b_, int64_t e_)
+  : tup(std::move(tup_)), b(b_), e(e_) {}
+  py::detail::tuple_iterator begin() const {
+    return {tup, b};
+  }
+  py::detail::tuple_iterator end() const {
+    return {tup, e};
+  }
+  size_t size() const {
+    return e - b;
+  }
+  py::detail::tuple_accessor operator[](size_t index) const {
+    return {tup, b + index};
+  }
+private:
+  py::tuple tup;
+  int64_t b;
+  int64_t e;
+};
+
 inline Stack createStackForSchema(
     const FunctionSchema& schema,
-    py::args args,
+    tuple_slice args,
     py::kwargs kwargs = py::kwargs()) {
-  if(args.size() + kwargs.size() > schema.arguments.size()) {
+  if(args.size() + kwargs.size() > schema.arguments().size()) {
     throw std::runtime_error(c10::str(
-        schema.name,
-        "() expected at most ",
-        schema.arguments.size(),
+        schema.name(), "() expected at most ", schema.arguments().size(),
         " argument(s) but received ",
-        args.size() + kwargs.size(),
-        " argument(s). Declaration: ",
-        schema));
+        args.size() + kwargs.size(), " argument(s). Declaration: ", schema));
   }
   Stack stack;
-  stack.reserve(schema.arguments.size());
+  stack.reserve(schema.arguments().size());
 
   // First push all positional args.
   for (size_t i = 0; i < args.size(); ++i) {
@@ -274,18 +335,18 @@ inline Stack createStackForSchema(
   // in the kwargs dict and push it if found, or use its default value if it
   // has one.
   size_t consumed_kwargs = 0;
-  for (size_t i = args.size(); i < schema.arguments.size(); ++i) {
-    const auto& arg = schema.arguments[i];
-    if (kwargs.contains(arg.name.c_str())) {
-      push(stack, argumentToIValue(schema, i, kwargs[arg.name.c_str()]));
+  for (size_t i = args.size(); i < schema.arguments().size(); ++i) {
+    const auto& arg = schema.arguments()[i];
+    if (kwargs.contains(arg.name().c_str())) {
+      push(stack, argumentToIValue(schema, i, kwargs[arg.name().c_str()]));
       consumed_kwargs += 1;
-    } else if (arg.default_value) {
-      push(stack, *arg.default_value);
+    } else if (arg.default_value()) {
+      push(stack, *arg.default_value());
     } else {
       throw std::runtime_error(c10::str(
-          schema.name,
+          schema.name(),
           "() is missing value for argument '",
-          arg.name,
+          arg.name(),
           "'. Declaration: ",
           schema));
     }
@@ -334,7 +395,7 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(const py::tuple& tuple, at::Ar
 
 inline py::object invokeScriptMethodFromPython(
     script::Method& method,
-    py::args args, py::kwargs kwargs) {
+    tuple_slice args, py::kwargs kwargs) {
   auto stack = createStackForSchema(method.getSchema(), std::move(args), std::move(kwargs));
   {
     AutoNoGIL no_gil_guard;

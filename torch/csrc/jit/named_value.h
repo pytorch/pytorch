@@ -68,7 +68,7 @@ struct NamedValue {
 private:
  c10::optional<SourceRange> loc_;
  c10::optional<std::string> name_;
- Value* value_;
+ Value* value_{nullptr};
  // only valid if value_ == nullptr;
  IValue ivalue_;
 };

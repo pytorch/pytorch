@@ -25,8 +25,8 @@ def _batch_potrf_lower(bmat):
     Applies a Cholesky decomposition to all matrices in a batch of arbitrary shape.
     """
     n = bmat.size(-1)
-    cholesky = torch.stack([m.potrf(upper=False) for m in bmat.reshape(-1, n, n)])
-    return cholesky.reshape(bmat.shape)
+    cholesky_ = torch.stack([m.cholesky(upper=False) for m in bmat.reshape(-1, n, n)])
+    return cholesky_.reshape(bmat.shape)
 
 
 def _batch_diag(bmat):
@@ -34,15 +34,6 @@ def _batch_diag(bmat):
     Returns the diagonals of a batch of square matrices.
     """
     return torch.diagonal(bmat, dim1=-2, dim2=-1)
-
-
-def _batch_inverse(bmat):
-    r"""
-    Returns the inverses of a batch of square matrices.
-    """
-    n = bmat.size(-1)
-    flat_bmat_inv = torch.stack([m.inverse() for m in bmat.reshape(-1, n, n)])
-    return flat_bmat_inv.reshape(bmat.shape)
 
 
 def _batch_trtrs_lower(bb, bA):
@@ -145,7 +136,7 @@ class MultivariateNormal(Distribution):
             self._unbroadcasted_scale_tril = scale_tril
         else:
             if precision_matrix is not None:
-                self.covariance_matrix = _batch_inverse(precision_matrix).expand_as(loc_)
+                self.covariance_matrix = torch.inverse(precision_matrix).expand_as(loc_)
             self._unbroadcasted_scale_tril = _batch_potrf_lower(self.covariance_matrix)
 
     def expand(self, batch_shape, _instance=None):
@@ -181,7 +172,7 @@ class MultivariateNormal(Distribution):
     @lazy_property
     def precision_matrix(self):
         # TODO: use `torch.potri` on `scale_tril` once a backwards pass is implemented.
-        scale_tril_inv = _batch_inverse(self._unbroadcasted_scale_tril)
+        scale_tril_inv = torch.inverse(self._unbroadcasted_scale_tril)
         return torch.matmul(scale_tril_inv.transpose(-1, -2), scale_tril_inv).expand(
             self._batch_shape + self._event_shape + self._event_shape)
 

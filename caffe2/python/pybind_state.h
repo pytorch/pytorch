@@ -120,34 +120,34 @@ class TensorFetcher : public BlobFetcherBase {
   FetchedBlob FetchTensor(const Tensor& tensor, bool force_copy) {
 #ifdef USE_NUMPY
     FetchedBlob result;
-    CAFFE_ENFORCE_GE(tensor.size(), 0, "Trying to fetch uninitialized tensor");
-    const int numpy_type = CaffeToNumpyType(tensor.meta());
+    CAFFE_ENFORCE_GE(tensor.numel(), 0, "Trying to fetch uninitialized tensor");
+    const int numpy_type = CaffeToNumpyType(tensor.dtype());
     CAFFE_ENFORCE(
         numpy_type != -1,
         "This tensor's data type is not supported: ",
-        tensor.meta().name(),
+        tensor.dtype().name(),
         ".");
     std::vector<npy_intp> npy_dims;
-    for (const auto dim : tensor.dims()) {
+    for (const auto dim : tensor.sizes()) {
       npy_dims.push_back(dim);
     }
-    result.copied = force_copy || NeedsCopy(&tensor, tensor.meta());
+    result.copied = force_copy || NeedsCopy(&tensor, tensor.dtype());
     void* outPtr;
     if (result.copied) {
       result.obj = py::reinterpret_steal<py::object>(
-          PyArray_SimpleNew(tensor.ndim(), npy_dims.data(), numpy_type));
+          PyArray_SimpleNew(tensor.dim(), npy_dims.data(), numpy_type));
       outPtr = static_cast<void*>(
           PyArray_DATA(reinterpret_cast<PyArrayObject*>(result.obj.ptr())));
     } else {
       outPtr = const_cast<Tensor&>(tensor).raw_mutable_data();
       result.obj = py::reinterpret_steal<py::object>(PyArray_SimpleNewFromData(
-          tensor.ndim(), npy_dims.data(), numpy_type, outPtr));
+          tensor.dim(), npy_dims.data(), numpy_type, outPtr));
     }
 
     if (numpy_type == NPY_OBJECT) {
       PyObject** outObj = reinterpret_cast<PyObject**>(outPtr);
       auto* str = tensor.template data<std::string>();
-      for (int i = 0; i < tensor.size(); ++i) {
+      for (int i = 0; i < tensor.numel(); ++i) {
         outObj[i] = PyBytes_FromStringAndSize(str->data(), str->size());
         str++;
         // cleanup on failure
@@ -207,7 +207,7 @@ class TensorFeeder : public BlobFeederBase {
       case NPY_OBJECT: {
         PyObject** input = reinterpret_cast<PyObject**>(PyArray_DATA(array));
         auto* outPtr = tensor->template mutable_data<std::string>();
-        for (int i = 0; i < tensor->size(); ++i) {
+        for (int i = 0; i < tensor->numel(); ++i) {
           char* str;
           Py_ssize_t strSize;
 #if PY_MAJOR_VERSION > 2
@@ -240,7 +240,7 @@ class TensorFeeder : public BlobFeederBase {
         break;
       default:
         context.CopyBytesFromCPU(
-            tensor->size() * meta.itemsize(),
+            tensor->numel() * meta.itemsize(),
             static_cast<void*>(PyArray_DATA(array)),
             tensor->raw_mutable_data(meta));
     }

@@ -117,7 +117,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   *total_weight_data = total_weight_acc;
   *output_data = output_acc;
 
-  if (reduction == Reduction::ElementwiseMean && *total_weight_data)
+  if (reduction == Reduction::Mean && *total_weight_data)
     *output_data /= *total_weight_data;
 
   c10::raw::intrusive_ptr::decref(input);
@@ -188,7 +188,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   int64_t map_size = THTensor_(size)(input, 2) * THTensor_(size)(input, 3);
   int64_t sample_size = map_size * n_classes;
 
-  scalar_t normalize = (reduction == Reduction::ElementwiseMean) ? *total_weight_data : 1.0f;
+  scalar_t normalize = (reduction == Reduction::Mean) ? *total_weight_data : 1.0f;
 
   int b;
   #pragma omp parallel for

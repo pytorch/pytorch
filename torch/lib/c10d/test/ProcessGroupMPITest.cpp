@@ -318,7 +318,8 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
     std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> works;
     for (auto& tensors : allTensors) {
       // Kick off work
-      std::shared_ptr<::c10d::ProcessGroup::Work> work = pg->send(tensors, 1, 0);
+      std::shared_ptr<::c10d::ProcessGroup::Work> work =
+          pg->send(tensors, 1, 0);
       works.push_back(std::move(work));
     }
     for (auto& work : works) {
@@ -337,7 +338,8 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
     for (auto& tensors : allTensors) {
       // Kick off work
       if (!recvAnysource) {
-        std::shared_ptr<::c10d::ProcessGroup::Work> work = pg->recv(tensors, 0, 0);
+        std::shared_ptr<::c10d::ProcessGroup::Work> work =
+            pg->recv(tensors, 0, 0);
         works.push_back(std::move(work));
       } else {
         std::shared_ptr<::c10d::ProcessGroup::Work> work =
@@ -375,7 +377,7 @@ int main(int argc, char** argv) {
   // If we are within an openmpi mpirun, then skip the exec
   if (!std::getenv("OMPI_COMM_WORLD_SIZE")) {
     std::cout << "Execute mpiexec from: " << STR(MPIEXEC) << std::endl;
-    execl(STR(MPIEXEC), "-np 2", argv[0]);
+    execl(STR(MPIEXEC), "-np 2", argv[0], (char*)nullptr);
   }
 
   testAllreduce();

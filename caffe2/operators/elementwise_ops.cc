@@ -104,8 +104,8 @@ bool SumReduceLikeOp<CPUContext>::DoRunWithType() {
   C->ResizeLike(B);
   const T* Adata = A.template data<T>();
   auto* Cdata = C->template mutable_data<T>();
-  if (B.size() == 1) {
-    auto count = A.size();
+  if (B.numel() == 1) {
+    auto count = A.numel();
     SRLHelper::sum2one<T>(Adata, Cdata, count);
   } else {
     size_t pre, n, post;

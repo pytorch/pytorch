@@ -10,11 +10,14 @@ import torch
 import torch.cuda
 import torch.multiprocessing as mp
 import torch.utils.hooks
-from torch.autograd import Variable
 from torch.nn import Parameter
-from common import TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN
+from common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
+                          load_tests)
 from multiprocessing.reduction import ForkingPickler
 
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 TEST_REPEATS = 30
 HAS_SHM_FILES = os.path.isdir('/dev/shm')
@@ -54,7 +57,7 @@ def send_tensor(queue, event, tp):
 
 
 def call_backward():
-    x = torch.autograd.Variable(torch.randn(3, 3), requires_grad=True)
+    x = torch.randn(3, 3, requires_grad=True)
     x.sum().backward()
 
 

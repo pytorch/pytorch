@@ -5,7 +5,7 @@ namespace caffe2 {
 template <>
 bool SummarizeOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
-  const auto N = X.size();
+  const auto N = X.numel();
   CAFFE_ENFORCE_GT(N, 0);
 
   const float* Xdata = X.data<float>();

@@ -1,0 +1,15 @@
+graph(%x : Dynamic) {
+  %1 : string = prim::Constant[value="x is less than 2"]()
+  %2 : int = prim::Constant[value=2]()
+  %3 : Dynamic = aten::lt(%x, %2)
+  %4 : bool = prim::TensorToBool(%3)
+   = prim::If(%4)
+    block0() {
+       = prim::Print(%1)
+      -> ()
+    }
+    block1() {
+      -> ()
+    }
+  return (%x);
+}

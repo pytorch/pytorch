@@ -8,7 +8,7 @@
 // To explicitly use interned strings as symbols in your code, you must add
 // them to this list.
 
-#if !AT_MOBILE
+#if !C10_MOBILE
 #define FORALL_ATEN_BASE_SYMBOLS(_) \
 _(aten, RoiPooling2d_backward) \
 _(aten, RoiPooling2d_forward) \
@@ -81,10 +81,9 @@ _(aten, _floor) \
 _(aten, _fused_dropout) \
 _(aten, _ger) \
 _(aten, _gesv_helper) \
-_(aten, _gesv_single) \
-_(aten, _getri) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
+_(aten, _inverse_helper) \
 _(aten, _linspace) \
 _(aten, _local_scalar) \
 _(aten, _local_scalar_dense) \
@@ -96,19 +95,21 @@ _(aten, _logspace) \
 _(aten, _masked_scale) \
 _(aten, _mm) \
 _(aten, _mv) \
-_(aten, _native_sparse_coo_tensor_unsafe) \
 _(aten, _nnz) \
 _(aten, _pack_padded_sequence) \
 _(aten, _pack_padded_sequence_backward) \
 _(aten, _pad_packed_sequence) \
 _(aten, _pdist_backward) \
 _(aten, _pdist_forward) \
+_(aten, _potrs_helper) \
 _(aten, _prod) \
 _(aten, _prodall) \
 _(aten, _range) \
+_(aten, _reshape_from_tensor) \
 _(aten, _round) \
 _(aten, _rsqrt) \
 _(aten, _s_where) \
+_(aten, _shape_as_tensor) \
 _(aten, _sigmoid) \
 _(aten, _sigmoid_backward) \
 _(aten, _sigmoid_forward) \
@@ -116,6 +117,8 @@ _(aten, _sin) \
 _(aten, _sinh) \
 _(aten, _sparseDims) \
 _(aten, _sparse_add) \
+_(aten, _sparse_coo_tensor_with_dims) \
+_(aten, _sparse_coo_tensor_with_dims_and_tensors) \
 _(aten, _sparse_coo_tensor_unsafe) \
 _(aten, _sparse_dense_add) \
 _(aten, _sparse_div_scalar) \
@@ -184,6 +187,7 @@ _(aten, adaptive_max_pool3d) \
 _(aten, adaptive_max_pool3d_backward) \
 _(aten, adaptive_max_pool3d_forward) \
 _(aten, add) \
+_(aten, add_) \
 _(aten, addbmm) \
 _(aten, addcdiv) \
 _(aten, addcmul) \
@@ -232,12 +236,14 @@ _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
 _(aten, chain_matmul) \
+_(aten, cholesky) \
 _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \
 _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
+_(aten, constant_pad_nd) \
 _(aten, contiguous) \
 _(aten, conv1d) \
 _(aten, conv2d) \
@@ -252,6 +258,7 @@ _(aten, copy_sparse_to_sparse) \
 _(aten, cos) \
 _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
+_(aten, cosine_similarity) \
 _(aten, cross) \
 _(aten, ctc_loss) \
 _(aten, cudnn_affine_grid_generator) \
@@ -277,12 +284,14 @@ _(aten, data_ptr) \
 _(aten, det) \
 _(aten, detach) \
 _(aten, diag) \
+_(aten, diag_embed) \
 _(aten, diagflat) \
 _(aten, diagonal) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
 _(aten, div) \
+_(aten, div_) \
 _(aten, dot) \
 _(aten, dropout) \
 _(aten, eig) \
@@ -362,6 +371,7 @@ _(aten, index_copy) \
 _(aten, index_fill) \
 _(aten, index_put) \
 _(aten, index_select) \
+_(aten, indices) \
 _(aten, instance_norm) \
 _(aten, inverse) \
 _(aten, irfft) \
@@ -460,6 +470,7 @@ _(aten, mse_loss) \
 _(aten, mse_loss_backward) \
 _(aten, mse_loss_forward) \
 _(aten, mul) \
+_(aten, mul_) \
 _(aten, multi_margin_loss) \
 _(aten, multi_margin_loss_backward) \
 _(aten, multi_margin_loss_forward) \
@@ -471,12 +482,13 @@ _(aten, mv) \
 _(aten, mvlgamma) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
+_(aten, native_batch_norm) \
+_(aten, native_batch_norm_backward) \
 _(aten, native_clone) \
 _(aten, native_get_device) \
 _(aten, native_norm) \
 _(aten, native_pow) \
 _(aten, native_resize_as) \
-_(aten, native_sparse_coo_tensor) \
 _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
@@ -505,7 +517,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
-_(aten, potrf) \
 _(aten, potri) \
 _(aten, potrs) \
 _(aten, pow) \
@@ -607,6 +618,8 @@ _(aten, storage_offset) \
 _(aten, stride) \
 _(aten, strides) \
 _(aten, sub) \
+_(aten, sub_) \
+_(aten, rsub) \
 _(aten, sum) \
 _(aten, svd) \
 _(aten, symeig) \
@@ -623,9 +636,6 @@ _(aten, th_pow) \
 _(aten, th_resize_as) \
 _(aten, th_tensor) \
 _(aten, th_zero) \
-_(aten, thnn_batch_norm) \
-_(aten, thnn_batch_norm_backward) \
-_(aten, thnn_batch_norm_forward) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
@@ -649,8 +659,8 @@ _(aten, thnn_conv_transpose3d_backward) \
 _(aten, thnn_conv_transpose3d_forward) \
 _(aten, threshold) \
 _(aten, threshold_backward) \
-_(aten, threshold_forward) \
 _(aten, to) \
+_(aten, to_sparse) \
 _(aten, to_dense) \
 _(aten, topk) \
 _(aten, trace) \
@@ -683,6 +693,7 @@ _(aten, upsample_nearest3d_forward) \
 _(aten, upsample_trilinear3d) \
 _(aten, upsample_trilinear3d_backward) \
 _(aten, upsample_trilinear3d_forward) \
+_(aten, values) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
@@ -735,7 +746,7 @@ _(attr, cudnn_enabled) \
 _(attr, cx) \
 _(attr, cy) \
 _(attr, data) \
-_(attr, denseDims) \
+_(attr, dense_dim) \
 _(attr, descending) \
 _(attr, deterministic) \
 _(attr, device) \
@@ -929,7 +940,8 @@ _(attr, some) \
 _(attr, sorted) \
 _(attr, source) \
 _(attr, sparse) \
-_(attr, sparseDims) \
+_(attr, sparse_dim) \
+_(attr, sparse_dtype) \
 _(attr, spatialScale) \
 _(attr, split_size) \
 _(attr, split_sizes) \

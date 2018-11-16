@@ -19,6 +19,7 @@ class ResizeNearestOp final : public Operator<Context> {
       height_scale_ = static_cast<T>(
           this->template GetSingleArgument<float>("height_scale", 1));
     }
+
     CAFFE_ENFORCE_GT(width_scale_, 0);
     CAFFE_ENFORCE_GT(height_scale_, 0);
   }
@@ -40,6 +41,7 @@ class ResizeNearestGradientOp final : public Operator<Context> {
         this->template GetSingleArgument<float>("width_scale", 1));
     height_scale_ = static_cast<T>(
         this->template GetSingleArgument<float>("height_scale", 1));
+
     CAFFE_ENFORCE_GT(width_scale_, 0);
     CAFFE_ENFORCE_GT(height_scale_, 0);
   }

@@ -28,12 +28,12 @@ class RowMulOp : public Operator<Context> {
 
     // Dimension checking
     CAFFE_ENFORCE_EQ(
-        w.size(),
+        w.numel(),
         mat.dim32(0),
         "Length of w should be equal to the first dim of mat");
 
     auto block_size = mat.size_from_dim(1);
-    for (int i = 0; i < w.size(); i++) {
+    for (int i = 0; i < w.numel(); i++) {
       size_t offset = i * block_size;
       for (int j = 0; j < block_size; j++) {
         output_data[offset + j] = mat_data[offset + j] * w_data[i];

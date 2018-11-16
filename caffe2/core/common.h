@@ -31,10 +31,6 @@
 
 namespace caffe2 {
 
-// Since C10 is the core library for caffe2 (and aten), we will simply reroute
-// all abstractions defined in c10 to be available in caffe2 as well.
-using namespace c10;
-
 // Note(Yangqing): NVCC does not play well with unordered_map on some platforms,
 // forcing us to use std::map instead of unordered_map. This may affect speed
 // in some cases, but in most of the computation code we do not access map very
@@ -150,6 +146,14 @@ inline int stoi(const string& str) {
   return n;
 }
 
+inline uint64_t stoull(const string& str) {
+  std::stringstream ss;
+  uint64_t n = 0;
+  ss << str;
+  ss >> n;
+  return n;
+}
+
 inline double stod(const string& str, std::size_t* pos = 0) {
   std::stringstream ss;
   ss << str;
@@ -168,6 +172,7 @@ inline double stod(const string& str, std::size_t* pos = 0) {
 #define CAFFE2_TESTONLY_WE_ARE_USING_CUSTOM_STRING_FUNCTIONS 0
 using std::to_string;
 using std::stoi;
+using std::stoull;
 using std::stod;
 #endif // defined(__ANDROID__) || defined(CAFFE2_FORCE_STD_STRING_FALLBACK_TEST)
 

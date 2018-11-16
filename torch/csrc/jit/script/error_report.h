@@ -17,7 +17,7 @@ struct ErrorReport : public std::exception {
   : context(std::move(loc)) {}
   explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
   explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
-  virtual const char* what() const noexcept override {
+  const char* what() const noexcept override {
     std::stringstream msg;
     msg << "\n" << ss.str();
     if (context != nullptr) {

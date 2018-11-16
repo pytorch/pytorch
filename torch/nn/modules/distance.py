@@ -1,8 +1,10 @@
 import torch
 from .module import Module
 from .. import functional as F
+from ..._jit_internal import weak_module, weak_script_method
 
 
+@torch._jit_internal.weak_module
 class PairwiseDistance(Module):
     r"""
     Computes the batchwise pairwise distance between vectors :math:`v_1`, :math:`v_2` using the p-norm:
@@ -29,12 +31,15 @@ class PairwiseDistance(Module):
         >>> input2 = torch.randn(100, 128)
         >>> output = pdist(input1, input2)
     """
-    def __init__(self, p=2, eps=1e-6, keepdim=False):
+    __constants__ = ['norm', 'eps', 'keepdim']
+
+    def __init__(self, p=2., eps=1e-6, keepdim=False):
         super(PairwiseDistance, self).__init__()
         self.norm = p
         self.eps = eps
         self.keepdim = keepdim
 
+    @torch._jit_internal.weak_script_method
     def forward(self, x1, x2):
         return F.pairwise_distance(x1, x2, self.norm, self.eps, self.keepdim)
 

@@ -31,22 +31,22 @@ class MeanOp final : public Operator<Context> {
 
     // Dimension checking
     for (int i = 1; i < InputSize(); ++i) {
-      if (output->dims() != Input(i).dims()) {
+      if (output->sizes() != Input(i).sizes()) {
         CAFFE_THROW(
             "Check failed: output->dims() == Input(i).dims().",
             "Description: Input #",
             i,
             ", input dimension:",
-            Input(i).dims(),
+            Input(i).sizes(),
             " should match output dimension: ",
-            output->dims());
+            output->sizes());
       }
     }
 
     T* output_data = output->template mutable_data<T>();
     for (int i = 1; i < InputSize(); ++i) {
       math::Add(
-          output->size(),
+          output->numel(),
           output_data,
           Input(i).template data<T>(),
           output_data,
@@ -54,7 +54,7 @@ class MeanOp final : public Operator<Context> {
     }
 
     math::Scale(
-        output->size(),
+        output->numel(),
         1.0f / InputSize(),
         output_data,
         output_data,
@@ -70,7 +70,7 @@ class MeanOp final : public Operator<Context> {
       CAFFE_THROW(
           "Mean operator only supports 32-bit float, but",
           " input was of type ",
-          Input(0).meta().name());
+          Input(0).dtype().name());
     }
   }
 };
@@ -87,7 +87,7 @@ class MeanGradientOp : public Operator<Context> {
   bool DoRunWithType() {
     auto& dY = Input(0);
     const auto* dY_data = dY.template data<T>();
-    int size = dY.size();
+    int size = dY.numel();
 
     int num_inputs = OutputSize();
     float scale = 1.0f / num_inputs;
@@ -115,7 +115,7 @@ class MeanGradientOp : public Operator<Context> {
       CAFFE_THROW(
           "Mean operator only supports 32-bit float, but",
           " input was of type ",
-          Input(0).meta().name());
+          Input(0).dtype().name());
     }
   }
 };

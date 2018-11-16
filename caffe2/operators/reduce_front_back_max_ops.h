@@ -23,27 +23,27 @@ class MaxReduceDimsOp final : public Operator<Context> {
     auto* Y = Output(0);
 
     CAFFE_ENFORCE(
-        num_reduce_dims_ >= 0 && num_reduce_dims_ <= X.dims().size(),
+        num_reduce_dims_ >= 0 && num_reduce_dims_ <= X.sizes().size(),
         "For N-dim input tensor, support num_reduce_dims in range [0, N].");
 
     const int rows = FIRSTDIMS ? X.size_to_dim(num_reduce_dims_)
-                               : X.size_to_dim(X.ndim() - num_reduce_dims_);
+                               : X.size_to_dim(X.dim() - num_reduce_dims_);
     const int cols = FIRSTDIMS ? X.size_from_dim(num_reduce_dims_)
-                               : X.size_from_dim(X.ndim() - num_reduce_dims_);
+                               : X.size_from_dim(X.dim() - num_reduce_dims_);
 
     vector<int64_t> output_shape;
     int start_index = FIRSTDIMS ? num_reduce_dims_ : 0;
     int end_index =
-        FIRSTDIMS ? X.dims().size() : X.dims().size() - num_reduce_dims_;
+        FIRSTDIMS ? X.sizes().size() : X.sizes().size() - num_reduce_dims_;
 
     for (int i = start_index; i < end_index; ++i) {
-      output_shape.push_back(X.dims()[i]);
+      output_shape.push_back(X.sizes()[i]);
     }
     Y->Resize(output_shape);
     float* out_data = Y->template mutable_data<float>();
 
     if (cols == 0 || rows == 0) {
-      math::Set(Y->size(), static_cast<float>(0), out_data, &context_);
+      math::Set(Y->numel(), static_cast<float>(0), out_data, &context_);
       return true;
     }
 
@@ -56,7 +56,7 @@ class MaxReduceDimsOp final : public Operator<Context> {
           "Given lengths input, the number of reduce dimensions should be one.");
       const int batch_size = FIRSTDIMS ? cols : rows;
       CAFFE_ENFORCE(
-          lengths.size() == batch_size,
+          lengths.numel() == batch_size,
           "The size of lengths vector doesn't match the batch size.");
     }
 
@@ -94,9 +94,9 @@ class MaxReduceDimsGradientOp final : public Operator<Context> {
 
     dX->ResizeLike(X);
     const int rows = FIRSTDIMS ? X.size_to_dim(num_reduce_dims_)
-                               : X.size_to_dim(X.ndim() - num_reduce_dims_);
+                               : X.size_to_dim(X.dim() - num_reduce_dims_);
     const int cols = FIRSTDIMS ? X.size_from_dim(num_reduce_dims_)
-                               : X.size_from_dim(X.ndim() - num_reduce_dims_);
+                               : X.size_from_dim(X.dim() - num_reduce_dims_);
 
     const float* dYdata = dY.template data<float>();
     const float* Xdata = X.template data<float>();
@@ -111,7 +111,7 @@ class MaxReduceDimsGradientOp final : public Operator<Context> {
           "Given lengths input, the number of reduce dimensions should be one.");
       const int batch_size = FIRSTDIMS ? cols : rows;
       CAFFE_ENFORCE(
-          lengths.size() == batch_size,
+          lengths.numel() == batch_size,
           "The size of lengths vector doesn't match the batch size.");
     }
 

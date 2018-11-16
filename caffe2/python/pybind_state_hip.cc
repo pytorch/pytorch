@@ -27,8 +27,6 @@ namespace py = pybind11;
 
 void addHIPGlobalMethods(py::module& m) {
   m.def("num_hip_devices", &NumHipDevices);
-  m.def("set_default_gpu_id", &SetDefaultGPUID);
-  m.def("get_default_gpu_id", &GetDefaultGPUID);
   m.def("get_hip_version", &HipVersion);
   m.def("get_miopen_version", &miopenCompiledVersion);
   m.def("get_hip_peer_access_pattern", []() {

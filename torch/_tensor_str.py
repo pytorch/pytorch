@@ -27,7 +27,7 @@ def set_printoptions(
 
     Args:
         precision: Number of digits of precision for floating point output
-            (default = 8).
+            (default = 4).
         threshold: Total number of array elements which trigger summarization
             rather than full `repr` (default = 1000).
         edgeitems: Number of array items in summary at beginning and end of
@@ -72,65 +72,54 @@ class _Formatter(object):
         self.sci_mode = False
         self.max_width = 1
 
+        with torch.no_grad():
+            tensor_view = tensor.reshape(-1)
+
         if not self.floating_dtype:
-            copy = torch.empty(tensor.size(), dtype=torch.long).copy_(tensor).view(tensor.nelement())
-            for value in copy.tolist():
+            for value in tensor_view:
                 value_str = '{}'.format(value)
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
-            copy = torch.empty(tensor.size(), dtype=torch.float64).copy_(tensor).view(tensor.nelement())
-            copy_list = copy.tolist()
-            try:
-                for value in copy_list:
-                    if value != math.ceil(value):
-                        self.int_mode = False
-                        break
-            # nonfinites will throw errors
-            except (ValueError, OverflowError):
-                self.int_mode = False
+            nonzero_finite_vals = torch.masked_select(tensor_view, torch.isfinite(tensor_view) & tensor_view.ne(0))
+
+            if nonzero_finite_vals.numel() == 0:
+                # no valid number, do nothing
+                return
+
+            # Convert to double for easy calculation. HalfTensor overflows with 1e8, and there's no div() on CPU.
+            nonzero_finite_abs = nonzero_finite_vals.abs().double()
+            nonzero_finite_min = nonzero_finite_abs.min().double()
+            nonzero_finite_max = nonzero_finite_abs.max().double()
+
+            for value in nonzero_finite_vals:
+                if value != torch.ceil(value):
+                    self.int_mode = False
+                    break
 
             if self.int_mode:
-                for value in copy_list:
-                    value_str = '{:.0f}'.format(value)
-                    if math.isnan(value) or math.isinf(value):
-                        self.max_width = max(self.max_width, len(value_str))
-                    else:
-                        # in int_mode for floats, all numbers are integers, and we append a decimal to nonfinites
-                        # to indicate that the tensor is of floating type. add 1 to the len to account for this.
-                        self.max_width = max(self.max_width, len(value_str) + 1)
-
-            else:
-                copy_abs = copy.abs()
-                pos_inf_mask = copy_abs.eq(inf)
-                neg_inf_mask = copy_abs.eq(-inf)
-                nan_mask = copy_abs.ne(copy)
-                invalid_value_mask = pos_inf_mask + neg_inf_mask + nan_mask
-                if invalid_value_mask.all():
-                    example_value = 0
-                else:
-                    example_value = copy_abs[invalid_value_mask.eq(0)][0]
-                copy_abs[invalid_value_mask] = example_value
-
-                exp_min = copy_abs.min()
-                if exp_min != 0:
-                    exp_min = math.floor(math.log10(exp_min)) + 1
-                else:
-                    exp_min = 1
-                exp_max = copy_abs.max()
-                if exp_max != 0:
-                    exp_max = math.floor(math.log10(exp_max)) + 1
-                else:
-                    exp_max = 1
-
-                # these conditions for using scientific notation are based on numpy
-                if exp_max - exp_min > PRINT_OPTS.precision or exp_max > 8 or exp_min < -4:
+                # in int_mode for floats, all numbers are integers, and we append a decimal to nonfinites
+                # to indicate that the tensor is of floating type. add 1 to the len to account for this.
+                if nonzero_finite_max / nonzero_finite_min > 1000. or nonzero_finite_max > 1.e8:
                     self.sci_mode = True
-                    for value in copy_list:
+                    for value in nonzero_finite_vals:
                         value_str = ('{{:.{}e}}').format(PRINT_OPTS.precision).format(value)
                         self.max_width = max(self.max_width, len(value_str))
                 else:
-                    for value in copy_list:
+                    for value in nonzero_finite_vals:
+                        value_str = ('{:.0f}').format(value)
+                        self.max_width = max(self.max_width, len(value_str) + 1)
+            else:
+                # Check if scientific representation should be used.
+                if nonzero_finite_max / nonzero_finite_min > 1000.\
+                        or nonzero_finite_max > 1.e8\
+                        or nonzero_finite_min < 1.e-4:
+                    self.sci_mode = True
+                    for value in nonzero_finite_vals:
+                        value_str = ('{{:.{}e}}').format(PRINT_OPTS.precision).format(value)
+                        self.max_width = max(self.max_width, len(value_str))
+                else:
+                    for value in nonzero_finite_vals:
                         value_str = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
                         self.max_width = max(self.max_width, len(value_str))
 
@@ -139,12 +128,12 @@ class _Formatter(object):
 
     def format(self, value):
         if self.floating_dtype:
-            if self.int_mode:
+            if self.sci_mode:
+                ret = ('{{:{}.{}e}}').format(self.max_width, PRINT_OPTS.precision).format(value)
+            elif self.int_mode:
                 ret = '{:.0f}'.format(value)
                 if not (math.isinf(value) or math.isnan(value)):
                     ret += '.'
-            elif self.sci_mode:
-                ret = ('{{:{}.{}e}}').format(self.max_width, PRINT_OPTS.precision).format(value)
             else:
                 ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
         else:

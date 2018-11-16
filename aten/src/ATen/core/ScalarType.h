@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ATen/core/ArrayRef.h"
+#include <c10/util/ArrayRef.h>
 #include "ATen/core/Half.h"
-#include "ATen/core/typeid.h"
+#include <c10/util/typeid.h>
 
 #include <cstdint>
 #include <iostream>
@@ -93,17 +93,25 @@ static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 #undef DEFINE_CASE
 }
 
-static inline ScalarType dataTypeToScalarType(DataType dtype) {
+static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
 #define DEFINE_IF(ctype, name, _)                      \
-  if (dtype == caffe2::TypeIdentifier::Get<ctype>()) { \
+  if (dtype == caffe2::TypeMeta::Make<ctype>()) { \
     return ScalarType::name;                           \
   }
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_IF)
 #undef DEFINE_IF
-  if (dtype == at::DataType::uninitialized()) {
+  if (dtype == caffe2::TypeMeta()) {
     return ScalarType::Undefined;
   }
-  AT_ERROR("Unsupported DataType in ATen: ", dtype, " (please report this error)");
+  AT_ERROR("Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
+}
+
+static inline bool operator==(ScalarType t, caffe2::TypeMeta m) {
+  return typeMetaToScalarType(m) == t;
+}
+
+static inline bool operator==(caffe2::TypeMeta m, ScalarType t) {
+  return typeMetaToScalarType(m) == t;
 }
 
 #define DEFINE_CONSTANT(_,name,_2) \

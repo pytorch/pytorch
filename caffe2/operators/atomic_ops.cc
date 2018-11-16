@@ -2,7 +2,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
@@ -90,7 +90,7 @@ class CheckAtomicBoolOp final : public Operator<CPUContext> {
 REGISTER_CPU_OPERATOR(CreateMutex, CreateMutexOp);
 REGISTER_CPU_OPERATOR(AtomicFetchAdd, AtomicFetchAddOp);
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(CreateMutex, IDEEPFallbackOp<CreateMutexOp, SkipIndices<0>>);
 #endif
 

@@ -8,7 +8,7 @@
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/core/ArrayRef.h"
+#include <c10/util/ArrayRef.h>
 #include "ATen/core/Half.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
 #include "ATen/core/Reduction.h"
@@ -126,9 +126,9 @@ struct CAFFE2_API Type {
   }
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.
-  TensorOptions options(int32_t device_index = -1) const {
-    return TensorOptions().dtype(scalarType())
-                          .device({backendToDeviceType(backend()), device_index})
+  TensorOptions options(int16_t device_index = -1) const {
+    return TensorOptions().dtype(typeMeta())
+                          .device(backendToDeviceType(backend()), device_index)
                           .layout(layout())
                           .is_variable(is_variable());
   }

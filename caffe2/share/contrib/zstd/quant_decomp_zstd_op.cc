@@ -41,12 +41,12 @@ const uint8_t* GetCompressedPtr(const TensorCPU& compressed, size_t* out_size) {
       compressed.template IsType<std::string>());
 
   if (compressed.template IsType<uint8_t>()) {
-    *out_size = compressed.size();
+    *out_size = compressed.numel();
     return compressed.data<uint8_t>();
   }
 
   // string type
-  CAFFE_ENFORCE_EQ(compressed.size(), 1);
+  CAFFE_ENFORCE_EQ(compressed.numel(), 1);
   auto& str = compressed.data<std::string>()[0];
   *out_size = str.size();
   return reinterpret_cast<const uint8_t*>(str.data());
@@ -92,14 +92,14 @@ bool QuantDecompZstdOp::RunOnDevice() {
       op_compressed.template IsType<uint8_t>() ||
           // array with one string
           op_compressed.template IsType<std::string>(),
-      op_compressed.meta().name());
+      op_compressed.dtype().name());
 
   // op_compressed: compressed data, 1d
   if (op_compressed.template IsType<uint8_t>()) {
-    CAFFE_ENFORCE_EQ(op_compressed.ndim(), 1, op_compressed.ndim());
+    CAFFE_ENFORCE_EQ(op_compressed.dim(), 1, op_compressed.dim());
   } else {
     // string type has 0 dimension
-    CAFFE_ENFORCE_EQ(op_compressed.size(), 1, op_compressed.size());
+    CAFFE_ENFORCE_EQ(op_compressed.numel(), 1, op_compressed.numel());
   }
 
   auto tensors = GetTensorsProto(op_compressed);

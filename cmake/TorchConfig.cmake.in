@@ -14,6 +14,8 @@
 #
 #   torch
 
+include(FindPackageHandleStandardArgs)
+
 if ($ENV{TORCH_INSTALL_PREFIX})
   set(TORCH_INSTALL_PREFIX $ENV{TORCH_INSTALL_PREFIX})
 else()
@@ -37,7 +39,7 @@ endif()
 find_package(Caffe2 REQUIRED)
 
 find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
-add_library(torch SHARED IMPORTED)
+add_library(torch UNKNOWN IMPORTED)
 set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
 
 if (@USE_CUDA@)
@@ -67,11 +69,17 @@ if (@USE_CUDA@)
 endif()
 
 # When we build libtorch with the old GCC ABI, dependent libraries must too.
-set(TORCH_CXX_FLAGS "-D_GLIBCXX_USE_CXX11_ABI=@GLIBCXX_USE_CXX11_ABI@")
+if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  set(TORCH_CXX_FLAGS "-D_GLIBCXX_USE_CXX11_ABI=@GLIBCXX_USE_CXX11_ABI@")
+endif()
 
 set_target_properties(torch PROPERTIES
     IMPORTED_LOCATION "${TORCH_LIBRARY}"
     INTERFACE_INCLUDE_DIRECTORIES "${TORCH_INCLUDE_DIRS}"
-    INTERFACE_COMPILE_OPTIONS "${TORCH_CXX_FLAGS}"
     CXX_STANDARD 11
 )
+if (TORCH_CXX_FLAGS)
+  set_property(TARGET torch PROPERTY INTERFACE_COMPILE_OPTIONS "${TORCH_CXX_FLAGS}")
+endif()
+
+find_package_handle_standard_args(torch DEFAULT_MSG TORCH_LIBRARY TORCH_INCLUDE_DIRS)

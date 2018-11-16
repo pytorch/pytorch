@@ -7,7 +7,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   // Note(Yangqing): this one is copied from my Caffe implementation.
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
@@ -26,11 +26,11 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   }
   scale_->ResizeLike(X);
   float* scale_data = scale_->template mutable_data<float>();
-  math::Set<float, CPUContext>(X.size(), bias_, scale_data, &context_);
+  math::Set<float, CPUContext>(X.numel(), bias_, scale_data, &context_);
   Tensor padded_square(vector<int64_t>{C + size_ - 1, H, W}, CPU);
   float* padded_square_data = padded_square.template mutable_data<float>();
-  math::Set<float, CPUContext>(padded_square.size(), 0., padded_square_data,
-                               &context_);
+  math::Set<float, CPUContext>(
+      padded_square.numel(), 0., padded_square_data, &context_);
   const float alpha_over_size = alpha_ / size_;
   // go through the images
   for (int n = 0; n < N; ++n) {
@@ -60,8 +60,8 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     }
   }
   math::Powx<float, CPUContext>(
-      X.size(), scale_data, -beta_, Ydata, &context_);
-  math::Mul<float, CPUContext>(X.size(), Ydata, Xdata, Ydata, &context_);
+      X.numel(), scale_data, -beta_, Ydata, &context_);
+  math::Mul<float, CPUContext>(X.numel(), Ydata, Xdata, Ydata, &context_);
   return true;
 }
 
@@ -71,7 +71,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   // variants have I written...?
   auto& X = Input(0);
   auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
@@ -93,8 +93,8 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
 
   Tensor padded_square(vector<int64_t>(1, C + size_ - 1), CPU);
   float* padded_square_data = padded_square.template mutable_data<float>();
-  math::Set<float, CPUContext>(padded_square.size(), 0., padded_square_data,
-                               &context_);
+  math::Set<float, CPUContext>(
+      padded_square.numel(), 0., padded_square_data, &context_);
   const float alpha_over_size = alpha_ / size_;
 
   for (int n = 0; n < num_rows; ++n) {
@@ -113,8 +113,8 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
     }
   }
   math::Powx<float, CPUContext>(
-      X.size(), scale_data, -beta_, Ydata, &context_);
-  math::Mul<float, CPUContext>(X.size(), Ydata, Xdata, Ydata, &context_);
+      X.numel(), scale_data, -beta_, Ydata, &context_);
+  math::Mul<float, CPUContext>(X.numel(), Ydata, Xdata, Ydata, &context_);
   return true;
 }
 
@@ -124,7 +124,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& Y = Input(1);
   auto& dY = Input(2);
   auto* dX = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
@@ -132,8 +132,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const int image_size = C * H * W;
   // Loosely checking the size, assuming that the shapes will be the same as
   // long as the sizes check out.
-  DCHECK_EQ(X.size(), Y.size());
-  DCHECK_EQ(X.size(), dY.size());
+  DCHECK_EQ(X.numel(), Y.numel());
+  DCHECK_EQ(X.numel(), dY.numel());
   dX->ResizeLike(X);
 
   const float* Xdata = X.data<float>();
@@ -149,9 +149,9 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   Tensor padded_ratio(vector<int64_t>{C + size_ - 1, H, W}, CPU);
   float* padded_ratio_data = padded_ratio.template mutable_data<float>();
   // Compute scale(copied from LRNOp) - reusing padded_ratio
-  math::Set<float, CPUContext>(X.size(), bias_, scale_data, &context_);
-  math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
-                               &context_);
+  math::Set<float, CPUContext>(X.numel(), bias_, scale_data, &context_);
+  math::Set<float, CPUContext>(
+      padded_ratio.numel(), 0., padded_ratio_data, &context_);
   const float alpha_over_size = alpha_ / size_;
   // go through the images
   for (int n = 0; n < N; ++n) {
@@ -181,8 +181,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     }
   }
 
-  math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
-                               &context_);
+  math::Set<float, CPUContext>(
+      padded_ratio.numel(), 0., padded_ratio_data, &context_);
   Tensor accum_ratio(vector<int64_t>{H, W}, CPU);
   float* accum_ratio_data = accum_ratio.template mutable_data<float>();
 
@@ -200,8 +200,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
         scale_data + offset,
         padded_ratio_data + inverse_pre_pad * H * W, &context_);
     // Now, compute the accumulated ratios and the bottom diff
-    math::Set<float, CPUContext>(accum_ratio.size(), 0., accum_ratio_data,
-                                 &context_);
+    math::Set<float, CPUContext>(
+        accum_ratio.numel(), 0., accum_ratio_data, &context_);
     for (int c = 0; c < size_ - 1; ++c) {
       math::Axpy<float, CPUContext>(H * W, 1,
                                     padded_ratio_data + c * H * W,
@@ -227,7 +227,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& Y = Input(1);
   auto& dY = Input(2);
   auto* dX = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
@@ -236,8 +236,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const float* Xdata = X.data<float>();
   // Loosely checking the size, assuming that the shapes will be the same as
   // long as the sizes check out.
-  DCHECK_EQ(X.size(), Y.size());
-  DCHECK_EQ(X.size(), dY.size());
+  DCHECK_EQ(X.numel(), Y.numel());
+  DCHECK_EQ(X.numel(), dY.numel());
   dX->ResizeLike(X);
   if (!scale_) {
     scale_ = &local_scale_tensor_;
@@ -247,9 +247,9 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   float* padded_ratio_data = padded_ratio.template mutable_data<float>();
   float* scale_data = scale_->template mutable_data<float>();
   // Compute scale(copied from LRNOp) - reusing padded_ratio
-  math::Set<float, CPUContext>(X.size(), bias_, scale_data, &context_);
-  math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
-                               &context_);
+  math::Set<float, CPUContext>(X.numel(), bias_, scale_data, &context_);
+  math::Set<float, CPUContext>(
+      padded_ratio.numel(), 0., padded_ratio_data, &context_);
   const float alpha_over_size = alpha_ / size_;
 
   for (int n = 0; n < num_rows; ++n) {
@@ -268,8 +268,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
     }
   }
 
-  math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
-                               &context_);
+  math::Set<float, CPUContext>(
+      padded_ratio.numel(), 0., padded_ratio_data, &context_);
   // the ratio 2*alpha*beta/size
   const float cache_ratio = 2. * alpha_ * beta_ / size_;
   const float* Ydata = Y.data<float>();

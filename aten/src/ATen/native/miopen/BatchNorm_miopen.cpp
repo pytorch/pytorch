@@ -67,9 +67,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     checkAllDefined(c, {running_mean, running_var});
   }
   checkAllSameGPU(c, {input, weight, bias, running_mean, running_var});
-  if (input->type().scalarType() == ScalarType::Half) {
-    checkScalarType(c, weight, ScalarType::Float);
-  } else {
+  if (input->type().scalarType() != ScalarType::Half) {
     checkAllSameType(c, {input, weight});
   }
   checkAllSameType(c, {weight, bias, running_mean, running_var});

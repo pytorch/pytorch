@@ -93,12 +93,14 @@ void FileStoreHandler::set(const std::string& name, const std::string& data) {
   CAFFE_ENFORCE_EQ(rv, 0, "rename: ", strerror(errno));
 }
 
-std::string FileStoreHandler::get(const std::string& name) {
+std::string FileStoreHandler::get(
+    const std::string& name,
+    const std::chrono::milliseconds& timeout) {
   auto path = objectPath(name);
   std::string result;
 
   // Block until key is set
-  wait({name});
+  wait({name}, timeout);
 
   std::ifstream ifs(path.c_str(), std::ios::in);
   if (!ifs) {

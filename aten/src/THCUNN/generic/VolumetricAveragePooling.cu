@@ -203,7 +203,7 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   if (fiveDimensionalInput) {
     // Collapse batch and feature dimensions
     output = THCTensor_(newFoldBatchDim)(state, output);
-    
+
     THCTensor *old_input = input;
     input = THCTensor_(newFoldBatchDim)(state, input);
     THCTensor_(free)(state, old_input);

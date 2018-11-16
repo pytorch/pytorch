@@ -10,7 +10,7 @@ bool RMACRegionsOp<CPUContext>::RunOnDevice() {
   auto* output = Output(0); // RoIs
   output->Resize(0, 5); // [batch_id x1 y1 x2 y2] format of ROIPoolOp
 
-  if (X.size() == 0) {
+  if (X.numel() == 0) {
     return true;
   }
 

@@ -63,5 +63,10 @@ AT_DEFINE_TENSOR_TYPE(CPUTensorId);
 AT_DEFINE_TENSOR_TYPE(CUDATensorId);
 AT_DEFINE_TENSOR_TYPE(SparseCPUTensorId);
 AT_DEFINE_TENSOR_TYPE(SparseCUDATensorId);
+AT_DEFINE_TENSOR_TYPE(MKLDNNTensorId); // Caffe2 only
+AT_DEFINE_TENSOR_TYPE(OpenGLTensorId); // Caffe2 only
+AT_DEFINE_TENSOR_TYPE(OpenCLTensorId); // Caffe2 only
+AT_DEFINE_TENSOR_TYPE(IDEEPTensorId); // Caffe2 only
+AT_DEFINE_TENSOR_TYPE(HIPTensorId); // Caffe2 only
 
 } // namespace at

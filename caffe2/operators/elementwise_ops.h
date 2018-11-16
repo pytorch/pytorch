@@ -55,7 +55,7 @@ class UnaryElementwiseWithArgsOp final : public Operator<Context> {
     auto* Y = Output(0);
     Y->ResizeLike(X);
     return functor_(
-        X.size(),
+        X.numel(),
         X.template data<T>(),
         Y->template mutable_data<typename OutputTypeMap::template type<T>>(),
         &context_);
@@ -160,8 +160,8 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
           "In-place is allowed only with the first tensor when "
           "legacy-broadcasting");
       C->ResizeLike(A);
-      if (B.size() == 1) {
-        A_dims = {static_cast<int>(A.size())};
+      if (B.numel() == 1) {
+        A_dims = {static_cast<int>(A.numel())};
         B_dims = {1};
       } else {
         size_t pre, n, post;
@@ -172,8 +172,10 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
         B_dims = {static_cast<int>(n), 1};
       }
     } else {
-      std::copy(A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
-      std::copy(B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+      std::copy(
+          A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
+      std::copy(
+          B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
       const std::vector<int> C_dims =
           elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
               A_dims, B_dims);
@@ -260,8 +262,8 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
     vector<int> A_dims;
     vector<int> B_dims;
     if (legacy_broadcast_) {
-      if (B.size() == 1) {
-        A_dims = {static_cast<int>(A.size())};
+      if (B.numel() == 1) {
+        A_dims = {static_cast<int>(A.numel())};
         B_dims = {1};
       } else {
         size_t pre, n, post;
@@ -272,8 +274,10 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
         B_dims = {static_cast<int>(n), 1};
       }
     } else {
-      std::copy(A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
-      std::copy(B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+      std::copy(
+          A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
+      std::copy(
+          B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
     }
     const typename OutputTypeMap::template type<T>* C_data = nullptr;
     if (InputSize() == 4) {

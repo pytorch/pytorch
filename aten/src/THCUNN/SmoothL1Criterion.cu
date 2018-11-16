@@ -32,7 +32,7 @@ struct smoothl1_updateOutput_no_reduce_functor
   smoothl1_updateOutput_no_reduce_functor() {}
 
   __forceinline__ __host__ __device__ void operator()(
-      const Dtype *x, 
+      const Dtype *x,
       const Dtype *y,
       Dtype *out) const
   {
@@ -48,7 +48,7 @@ struct smoothl1_updateGradInput_no_reduce_functor
   smoothl1_updateGradInput_no_reduce_functor() {}
 
   __host__ __device__ void operator()(
-      const Dtype *x, 
+      const Dtype *x,
       const Dtype *y,
       Dtype *gradInput) const
   {

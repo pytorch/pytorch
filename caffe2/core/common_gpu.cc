@@ -194,7 +194,9 @@ void DeviceQuery(const int device) {
      << std::endl;
   ss << "Total registers per block:     " << prop.regsPerBlock << std::endl;
   ss << "Warp size:                     " << prop.warpSize << std::endl;
+#ifndef __HIPCC__
   ss << "Maximum memory pitch:          " << prop.memPitch << std::endl;
+#endif
   ss << "Maximum threads per block:     " << prop.maxThreadsPerBlock
      << std::endl;
   ss << "Maximum dimension of block:    "
@@ -205,13 +207,17 @@ void DeviceQuery(const int device) {
      << prop.maxGridSize[2] << std::endl;
   ss << "Clock rate:                    " << prop.clockRate << std::endl;
   ss << "Total constant memory:         " << prop.totalConstMem << std::endl;
+#ifndef __HIPCC__
   ss << "Texture alignment:             " << prop.textureAlignment << std::endl;
   ss << "Concurrent copy and execution: "
      << (prop.deviceOverlap ? "Yes" : "No") << std::endl;
+#endif
   ss << "Number of multiprocessors:     " << prop.multiProcessorCount
      << std::endl;
+#ifndef __HIPCC__
   ss << "Kernel execution timeout:      "
      << (prop.kernelExecTimeoutEnabled ? "Yes" : "No") << std::endl;
+#endif
   LOG(INFO) << ss.str();
   return;
 }
@@ -260,10 +266,12 @@ const char* cublasGetErrorString(cublasStatus_t error) {
     return "CUBLAS_STATUS_INVALID_VALUE";
   case CUBLAS_STATUS_ARCH_MISMATCH:
     return "CUBLAS_STATUS_ARCH_MISMATCH";
+#ifndef __HIPCC__
   case CUBLAS_STATUS_MAPPING_ERROR:
     return "CUBLAS_STATUS_MAPPING_ERROR";
   case CUBLAS_STATUS_EXECUTION_FAILED:
     return "CUBLAS_STATUS_EXECUTION_FAILED";
+#endif
   case CUBLAS_STATUS_INTERNAL_ERROR:
     return "CUBLAS_STATUS_INTERNAL_ERROR";
 #if CUDA_VERSION >= 6000
@@ -274,6 +282,10 @@ const char* cublasGetErrorString(cublasStatus_t error) {
     return "CUBLAS_STATUS_LICENSE_ERROR";
 #endif  // CUDA_VERSION >= 6050
 #endif  // CUDA_VERSION >= 6000
+#ifdef __HIPCC__
+  case rocblas_status_invalid_size:
+    return "rocblas_status_invalid_size";
+#endif
   }
   // To suppress compiler warning.
   return "Unrecognized cublas error string";
@@ -307,6 +319,10 @@ const char* curandGetErrorString(curandStatus_t error) {
     return "CURAND_STATUS_ARCH_MISMATCH";
   case CURAND_STATUS_INTERNAL_ERROR:
     return "CURAND_STATUS_INTERNAL_ERROR";
+#ifdef __HIPCC__
+  case HIPRAND_STATUS_NOT_IMPLEMENTED:
+    return "HIPRAND_STATUS_NOT_IMPLEMENTED";
+#endif
   }
   // To suppress compiler warning.
   return "Unrecognized curand error string";

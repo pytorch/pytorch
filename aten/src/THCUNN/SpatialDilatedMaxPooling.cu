@@ -87,7 +87,7 @@ __global__ void MaxPoolBackward(const int nthreads, const Dtype* top_diff,
         pwend = min((w + pad_w) / stride_w + 1, pooled_width);
     }
     for (int n = blockIdx.y; n < num; n += gridDim.y)
-       for (int c = blockIdx.z; c < channels; c+= gridDim.z) { 
+       for (int c = blockIdx.z; c < channels; c+= gridDim.z) {
 
         AccType gradient = AccType(0);
         int offset = (n * channels + c) * pooled_height * pooled_width;
@@ -105,7 +105,7 @@ __global__ void MaxPoolBackward(const int nthreads, const Dtype* top_diff,
         } else {
             if (top_mask[phstart * pooled_width + pwstart] - TH_INDEX_BASE == h * width + w) {
               gradient += ScalarConvert<Dtype, AccType>::to(top_diff[phstart * pooled_width + pwstart]);
-            }  
+            }
         }
         bottom_diff[(n*channels+c)*height*width+index] = ScalarConvert<AccType, Dtype>::to(gradient);
       }

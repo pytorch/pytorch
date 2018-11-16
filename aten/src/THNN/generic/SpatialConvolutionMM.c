@@ -46,7 +46,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
 
   if (exactInputHeight < kH || exactInputWidth < kW) {
     THError("Calculated padded input size per channel: (%ld x %ld). "
-      "Kernel size: (%ld x %ld). Kernel size can't be greater than actual input size",
+      "Kernel size: (%d x %d). Kernel size can't be greater than actual input size",
       exactInputHeight, exactInputWidth, kH, kW);
   }
 

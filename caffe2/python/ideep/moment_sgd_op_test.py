@@ -12,7 +12,7 @@ from hypothesis import given
 import caffe2.python.ideep_test_util as mu
 
 
-@unittest.skipIf(not workspace.C.use_ideep, "No IDEEP support.")
+@unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class TestMomentumSGDUpdateOps(hu.HypothesisTestCase):
     @given(n=st.integers(4, 8), nesterov=st.booleans(),
            **mu.gcs)

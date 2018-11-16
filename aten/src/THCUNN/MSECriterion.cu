@@ -33,8 +33,8 @@ struct mse_updateOutput_functor
   mse_updateOutput_functor() {}
 
   __device__ void operator()(
-      const Dtype *input, 
-      const Dtype *target, 
+      const Dtype *input,
+      const Dtype *target,
       Dtype *output)
   {
     Dtype diff = THCNumerics<Dtype>::sub(*input, *target);

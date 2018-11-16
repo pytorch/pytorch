@@ -81,7 +81,8 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
           // Get output channel
           size_t c = filterTensor->dim32(0);
           tensor->Resize(c);
-          tensor->mutable_data<float>();
+          float* tensor_data = tensor->mutable_data<float>();
+          memset(tensor_data, 0, tensor->nbytes());
           break;
         }
         convOrder++;

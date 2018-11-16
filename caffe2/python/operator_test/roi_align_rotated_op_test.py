@@ -204,3 +204,8 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
         )
         if gc.device_type == caffe2_pb2.CUDA:
             self.assertGradientChecks(gc, op, [X, R], 0, [0])
+
+
+if __name__ == '__main__':
+    import unittest
+    unittest.main()

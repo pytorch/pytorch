@@ -14,13 +14,27 @@ import torch.utils.data
 import torch.cuda
 import warnings
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+import torch.hub as hub
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common import IS_WINDOWS, IS_PPC, skipIfRocm
+from common_utils import IS_WINDOWS, IS_PPC, skipIfRocm, load_tests
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
+
+try:
+    import torchvision.models as models
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+
+
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 HAS_CUDA = torch.cuda.is_available()
 
-from common import TestCase, run_tests, download_file
+from common_utils import TestCase, run_tests, download_file
 
 
 class RandomDatasetMock(object):
@@ -211,7 +225,7 @@ class TestBottleneck(TestCase):
     def _run(self, command):
         """Returns (return-code, stdout, stderr)"""
         import subprocess
-        from common import PY3
+        from common_utils import PY3
 
         p = subprocess.Popen(command, stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, shell=True)
@@ -370,6 +384,33 @@ class TestONNXUtils(TestCase):
         dims1 = [3, 4]
         dims2 = [1, 1]
         try_check_onnx_broadcast(dims1, dims2, True, False)
+
+
+class TestHub(TestCase):
+    @classmethod
+    @skipIfNoTorchVision
+    def setUpClass(cls):
+        cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
+
+    @skipIfNoTorchVision
+    def test_load_from_github(self):
+        hub_model = hub.load(
+            'pytorch/vision',
+            'resnet18',
+            pretrained=True)
+        self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
+
+    @skipIfNoTorchVision
+    def test_set_dir(self):
+        temp_dir = tempfile.gettempdir()
+        hub.set_dir(temp_dir)
+        hub_model = hub.load(
+            'pytorch/vision',
+            'resnet18',
+            pretrained=True)
+        self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
+        assert os.path.exists(temp_dir + '/vision_master')
+        shutil.rmtree(temp_dir + '/vision_master')
 
 
 if __name__ == '__main__':

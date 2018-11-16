@@ -7,7 +7,7 @@ bool PerplexityOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
 
-  DCHECK_EQ(X.ndim(), 1);
+  DCHECK_EQ(X.dim(), 1);
   int N = X.dim32(0);
 
   Y->Resize(vector<int64_t>());

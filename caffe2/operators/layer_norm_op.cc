@@ -1,134 +1,102 @@
 #include "caffe2/operators/layer_norm_op.h"
+
 #include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
-namespace {
+template <>
 template <typename T>
-using EigenMatrixMapRowMajor = Eigen::Map<
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>;
-
-template <typename T>
-using ConstEigenMatrixMapRowMajor = Eigen::Map<
-    const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>;
-} // namespace
+void LayerNormOp<CPUContext>::ComputeStdDevAndFusedParams(
+    const int N,
+    const T* mean,
+    const T* var,
+    T* stddev,
+    T* scale,
+    T* bias) {
+  ConstEigenVectorArrayMap<T> var_arr(var, N);
+  EigenVectorArrayMap<T> stddev_arr(stddev, N);
+  EigenVectorArrayMap<T> scale_arr(scale, N);
+  scale_arr = (var_arr + static_cast<T>(epsilon_)).rsqrt();
+  stddev_arr = scale_arr * (var_arr + static_cast<T>(epsilon_));
+  EigenVectorArrayMap<T>(bias, N) =
+      -scale_arr * ConstEigenVectorArrayMap<T>(mean, N);
+}
 
 template <>
-template <>
-bool LayerNormOp<CPUContext>::DoRunWithType<float>() {
-  const auto& input = Input(0);
-  auto* output = Output(0);
-  auto* mean = Output(1);
-  auto* stdev = Output(2);
-
-  CAFFE_ENFORCE_GE(input.dims().size(), 2, "LayerNorm requires input dim >= 2");
-
-  const auto canonical_axis = input.canonical_axis_index(axis_);
-  const int left = input.size_to_dim(canonical_axis);
-  const int right = input.size_from_dim(canonical_axis);
-
-  output->ResizeLike(input);
-  std::vector<int64_t> stats_dims(
-      input.dims().begin(), input.dims().begin() + canonical_axis);
-  stats_dims.push_back(1);
-  mean->Resize(stats_dims);
-  stdev->Resize(stats_dims);
-
-  auto input_map = ConstEigenMatrixMapRowMajor<float>(
-      input.template data<float>(), left, right);
-  auto mean_map = EigenMatrixMapRowMajor<float>(
-      mean->template mutable_data<float>(), left, 1);
-  auto stdev_map = EigenMatrixMapRowMajor<float>(
-      stdev->template mutable_data<float>(), left, 1);
-  auto output_map = EigenMatrixMapRowMajor<float>(
-      output->template mutable_data<float>(), left, right);
-
-  auto sqr = [](float f) { return f * f; };
-  auto add_ep = [this](float f) { return f + epsilon_; };
-  auto fsqrt = [](float f) { return std::sqrt(f); };
-  // Calculate row-wise statistics
-  mean_map = input_map.rowwise().mean();
-  stdev_map =
-      (input_map.unaryExpr(sqr).rowwise().mean() - mean_map.unaryExpr(sqr))
-          .unaryExpr(add_ep)
-          .unaryExpr(fsqrt);
-  output_map = (input_map - mean_map.replicate(1, right))
-                   .cwiseQuotient(stdev_map.replicate(1, right));
-
-  return true;
+template <typename T>
+void LayerNormOp<CPUContext>::LayerNormForward(
+    const int M,
+    const int N,
+    const T* X,
+    const T* scale,
+    const T* bias,
+    T* Y) {
+  EigenArrayMap<T>(Y, N, M) =
+      (ConstEigenArrayMap<T>(X, N, M).rowwise() *
+       ConstEigenVectorArrayMap<T>(scale, M).transpose())
+          .rowwise() +
+      ConstEigenVectorArrayMap<T>(bias, M).transpose();
 }
 
 REGISTER_CPU_OPERATOR(LayerNorm, LayerNormOp<CPUContext>);
 
 template <>
+template <typename T>
+void LayerNormGradientOp<CPUContext>::ComputeInternalGradients(
+    const int M,
+    const int N,
+    const T* dY,
+    const T* X,
+    T* ds,
+    T* db) {
+  ConstEigenArrayMap<T> dY_arr(dY, N, M);
+  EigenVectorArrayMap<T>(ds, M) =
+      (dY_arr * ConstEigenArrayMap<T>(X, N, M)).colwise().sum();
+  EigenVectorArrayMap<T>(db, M) = dY_arr.colwise().sum();
+}
+
 template <>
-bool LayerNormGradientOp<CPUContext>::DoRunWithType<float>() {
-  const auto& dout = Input(0);
-  const auto& norm_outputs = Input(1);
-  const auto& means = Input(2);
-  const auto& stdev = Input(3);
-  const auto& norm_inputs = Input(4);
-  auto* ginput = Output(0);
+template <typename T>
+void LayerNormGradientOp<CPUContext>::ComputeFusedParams(
+    const int M,
+    const int N,
+    const T* mean,
+    const T* sig,
+    const T* ds,
+    const T* db,
+    T* dY_scale,
+    T* X_scale,
+    T* bias) {
+  const T scale = T(1) / static_cast<T>(N);
+  ConstEigenVectorArrayMap<T> mean_arr(mean, M);
+  ConstEigenVectorArrayMap<T> ds_arr(ds, M);
+  ConstEigenVectorArrayMap<T> db_arr(db, M);
+  EigenVectorArrayMap<T> rsig_arr(dY_scale, M);
+  EigenVectorArrayMap<T> X_scale_arr(X_scale, M);
+  rsig_arr = ConstEigenVectorArrayMap<T>(sig, M).inverse();
+  X_scale_arr = (db_arr * mean_arr - ds_arr) * rsig_arr.cube() * scale;
+  EigenVectorArrayMap<T>(bias, M) =
+      -X_scale_arr * mean_arr - db_arr * rsig_arr * scale;
+}
 
-  const auto canonical_axis = norm_inputs.canonical_axis_index(axis_);
-  const int left = norm_inputs.size_to_dim(canonical_axis);
-  const int right = norm_inputs.size_from_dim(canonical_axis);
-
-  ginput->ResizeLike(norm_inputs);
-
-  auto dout_map = ConstEigenMatrixMapRowMajor<float>(
-      dout.template data<float>(), left, right);
-  auto means_map =
-      ConstEigenMatrixMapRowMajor<float>(means.template data<float>(), left, 1);
-  auto stdev_map =
-      ConstEigenMatrixMapRowMajor<float>(stdev.template data<float>(), left, 1);
-  auto norm_inputs_map = ConstEigenMatrixMapRowMajor<float>(
-      norm_inputs.template data<float>(), left, right);
-  auto ginput_map = EigenMatrixMapRowMajor<float>(
-      ginput->template mutable_data<float>(), left, right);
-
-  // Helper functors
-  auto sqr = [](float f) { return f * f; };
-  auto recip = [](float f) { return 1.0f / f; };
-  auto neg_recip = [](float f) { return -1.0f / f; };
-
-  // Gradients - output block
-  // -1 / (stdev + epsilon)^2 * \sum_j^D x_ij - mean * dout
-  // First part: -1 / (stdev + epsilon)^2
-  auto dstdev_end_0 = stdev_map.unaryExpr(sqr).unaryExpr(neg_recip);
-  // Second part: \sum_j^D x_ij - mean * dout
-  auto dstdev_end_1 = (norm_inputs_map - means_map.replicate(1, right))
-                          .cwiseProduct(dout_map)
-                          .rowwise()
-                          .sum();
-  auto dstdev_end = dstdev_end_0.cwiseProduct(dstdev_end_1);
-  // \sum_j^D -dout * 1/(std+epsilon)
-  auto dmean_end = stdev_map.unaryExpr(neg_recip)
-                       .replicate(1, right)
-                       .cwiseProduct(dout_map)
-                       .rowwise()
-                       .sum();
-  // 1.0 / (stdev + epsilon) * dout
-  auto dx_end =
-      stdev_map.unaryExpr(recip).replicate(1, right).cwiseProduct(dout_map);
-
-  // Gradients - standard deviation block
-  // -1.0*(mean / stdev) * dstdev_end
-  auto dmean_stdev = stdev_map.unaryExpr(neg_recip)
-                         .cwiseProduct(means_map)
-                         .cwiseProduct(dstdev_end);
-  // (mean / (D*stdev)) * dstdev
-  auto dx_stdev = (1.0f / right) *
-      norm_inputs_map.cwiseQuotient(stdev_map.replicate(1, right))
-          .cwiseProduct(dstdev_end.replicate(1, right));
-
-  // Gradients - mean block
-  auto dmean = dmean_end + dmean_stdev;
-  auto dx_mean = (1.0f / right) * dmean.replicate(1, right);
-
-  ginput_map = dx_end + dx_stdev + dx_mean;
-
-  return true;
+template <>
+template <typename T>
+void LayerNormGradientOp<CPUContext>::LayerNormBackward(
+    const int M,
+    const int N,
+    const T* dY_scale,
+    const T* dY,
+    const T* X_scale,
+    const T* X,
+    const T* bias,
+    T* dX) {
+  EigenArrayMap<T>(dX, N, M) =
+      (ConstEigenArrayMap<T>(dY, N, M).rowwise() *
+           ConstEigenVectorArrayMap<T>(dY_scale, M).transpose() +
+       ConstEigenArrayMap<T>(X, N, M).rowwise() *
+           ConstEigenVectorArrayMap<T>(X_scale, M).transpose())
+          .rowwise() +
+      ConstEigenVectorArrayMap<T>(bias, M).transpose();
 }
 
 OPERATOR_SCHEMA(LayerNormGradient).NumInputs(5).NumOutputs(1);
@@ -139,16 +107,16 @@ namespace {
 
 class GetLayerNormGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
+  std::vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         "LayerNormGradient",
         "",
-        vector<string>{GO(0), O(0), O(1), O(2), I(0)},
-        vector<string>{GI(0)});
+        std::vector<std::string>{GO(0), O(0), O(1), O(2), I(0)},
+        std::vector<std::string>{GI(0)});
   }
 };
 
-}  // namespace
+} // namespace
 
 REGISTER_GRADIENT(LayerNorm, GetLayerNormGradient);
 
@@ -157,7 +125,7 @@ OPERATOR_SCHEMA(LayerNorm)
     .NumOutputs(3)
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
-      vector<TensorShape> out(3);
+      std::vector<TensorShape> out(3);
       auto input_dims_long = GetDimsVector(in[0]);
       std::vector<int> input_dims(
           input_dims_long.begin(), input_dims_long.end());

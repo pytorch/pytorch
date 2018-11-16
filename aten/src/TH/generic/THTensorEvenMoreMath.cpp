@@ -12,9 +12,9 @@ void THTensor_(fill)(THTensor *r_, scalar_t value)
     TH_TENSOR_APPLY(scalar_t, r_,
       if (r__stride == 1) {
         THVector_(fill)(r__data, value, r__size);
-	r__i = r__size;
-	r__data += r__stride * r__size;
-	break;
+        r__i = r__size;
+        r__data += r__stride * r__size;
+        break;
       } else {
         *r__data = value;
       }
@@ -181,7 +181,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
     tensor_data = tensor->data<scalar_t>();
     src_data = src->data<scalar_t>();
     auto src_size0 = THTensor_sizeLegacyNoScalars(src, 0);
-    ptrdiff_t rowsize = src_size0 == 0 ? 1: THTensor_(nElement)(src) / src_size0;
+    ptrdiff_t rowsize = src_size0 == 0 ? 1 : THTensor_(nElement)(src) / src_size0;
 
     // check that the indices are within range
     int64_t max = src_size0 - 1 + TH_INDEX_BASE;
@@ -192,14 +192,18 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
       }
     }
 
-    if (src->dim() <= 1) {
-      #pragma omp parallel for if(numel > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-      for (i=0; i<numel; i++)
-        tensor_data[i] = src_data[index_data[i] - TH_INDEX_BASE];
-    } else {
-      #pragma omp parallel for if(numel*rowsize > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-      for (i=0; i<numel; i++)
-        memcpy(tensor_data + i*rowsize, src_data + (index_data[i] - TH_INDEX_BASE)*rowsize, rowsize*sizeof(scalar_t));
+    // When src is empty, tensor_data maybe nullptr, and the memcpy will trigger
+    // ubsan. So we skip copying at all when every slice to copy is empty.
+    if (rowsize > 0) {
+      if (src->dim() <= 1) {
+        #pragma omp parallel for if(numel > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+        for (i=0; i<numel; i++)
+          tensor_data[i] = src_data[index_data[i] - TH_INDEX_BASE];
+      } else {
+        #pragma omp parallel for if(numel*rowsize > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+        for (i=0; i<numel; i++)
+          memcpy(tensor_data + i*rowsize, src_data + (index_data[i] - TH_INDEX_BASE)*rowsize, rowsize*sizeof(scalar_t));
+      }
     }
   }
   else if (src->dim() <= 1)

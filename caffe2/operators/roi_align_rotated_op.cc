@@ -286,7 +286,7 @@ bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
   auto& R = Input(1); // RoIs
   auto* Y = Output(0); // RoI pooled data
 
-  if (R.size() == 0) {
+  if (R.numel() == 0) {
     // Handle empty rois
     if (order_ == StorageOrder::NCHW) {
       Y->Resize(0, X.dim32(1), pooled_height_, pooled_width_);
@@ -298,7 +298,7 @@ bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
     return true;
   }
 
-  CAFFE_ENFORCE_EQ(R.ndim(), 2);
+  CAFFE_ENFORCE_EQ(R.dim(), 2);
   // Each element of R is [batch_id center_x center_y width height angle].
   // If R has 6 columns, the first column is the index, otherwise 0.
   CAFFE_ENFORCE(R.dim32(1) == 5 || R.dim32(1) == 6);
@@ -307,7 +307,7 @@ bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
 
   if (order_ == StorageOrder::NCHW) {
     Y->Resize(R.dim32(0), X.dim32(1), pooled_height_, pooled_width_);
-    int output_size = Y->size();
+    int output_size = Y->numel();
     ROIAlignRotatedForward<float>(
         output_size,
         X.data<float>(),
@@ -324,7 +324,7 @@ bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
         order_);
   } else if (order_ == StorageOrder::NHWC) {
     Y->Resize(R.dim32(0), pooled_height_, pooled_width_, X.dim32(3));
-    int output_size = Y->size();
+    int output_size = Y->numel();
     ROIAlignRotatedForward<float>(
         output_size,
         X.data<float>(),

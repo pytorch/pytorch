@@ -62,9 +62,9 @@ void THCTensor_(cat)(THCState *state, THCTensor *result,
   THCTensor_(catArray)(state, result, inputs, 2, dimension);
 }
 
-void THCTensor_(check_shape_except_dim)(THCState *state, 
+void THCTensor_(check_shape_except_dim)(THCState *state,
     THCTensor *first, THCTensor *second, int dimension);
-inline void THCTensor_(check_shape_except_dim)(THCState *state, 
+inline void THCTensor_(check_shape_except_dim)(THCState *state,
     THCTensor *first, THCTensor *second, int dimension)
 {
   int first_dims = first->dim();
@@ -116,9 +116,9 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 
   THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
   THArgCheck(dimension >= 0, 4, "invalid dimension %d", dimension);
-  
+
   std::vector<int64_t> size(nDims);
-  
+
   // Compute size of the result in the cat dimension
   int64_t cat_dim_size = 0;
   for (int i = 0; i < numInputs; i++) {

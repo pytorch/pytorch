@@ -301,10 +301,19 @@ C10_DECLARE_REGISTRY(
     const OperatorDef&,
     const vector<GradientWrapper>&);
 
+#ifdef CAFFE2_NO_GRADIENT_OPS
+
+#define REGISTER_GRADIENT(name, ...) /* No gradients. */
+#define REGISTER_GRADIENT_STR(str_name, ...) /* No gradients. */
+
+#else
+
 #define REGISTER_GRADIENT(name, ...) \
   C10_REGISTER_CLASS(GradientRegistry, name, __VA_ARGS__)
 #define REGISTER_GRADIENT_STR(str_name, ...) \
   C10_REGISTER_TYPED_CLASS(GradientRegistry, str_name, __VA_ARGS__)
+
+#endif
 
 // NO_GRADIENT means that the operator does not need any gradient computation.
 #define NO_GRADIENT(name) REGISTER_GRADIENT(name, NoGradient)

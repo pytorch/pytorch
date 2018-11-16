@@ -51,18 +51,18 @@ class SpatialBNOp : public Operator<Context> {
     const auto& bias = Input(BIAS);
     auto* Y = Output(OUTPUT);
 
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     CAFFE_ENFORCE_GE(ndim, 3);
     const int N = X.dim32(0);
     const int C =
         (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1));
-    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
     const int HxW =
         std::accumulate(
             X_dims.cbegin() + 1, X_dims.cend(), 1, std::multiplies<int>()) /
         C;
-    CAFFE_ENFORCE_EQ(scale.size(), C);
-    CAFFE_ENFORCE_EQ(bias.size(), C);
+    CAFFE_ENFORCE_EQ(scale.numel(), C);
+    CAFFE_ENFORCE_EQ(bias.numel(), C);
 
     Y->ResizeLike(X);
     const T* X_data = X.template data<T>();
@@ -79,8 +79,8 @@ class SpatialBNOp : public Operator<Context> {
       }
       const auto& mean = Input(EST_MEAN);
       const auto& var = Input(EST_VAR);
-      CAFFE_ENFORCE_EQ(mean.size(), C);
-      CAFFE_ENFORCE_EQ(var.size(), C);
+      CAFFE_ENFORCE_EQ(mean.numel(), C);
+      CAFFE_ENFORCE_EQ(var.numel(), C);
       ComputeFusedParam<T>(
           C,
           scale_data,
@@ -109,12 +109,12 @@ class SpatialBNOp : public Operator<Context> {
       T* saved_rstd_data = saved_rstd->template mutable_data<T>();
       auto* running_mean = Output(RUNNING_MEAN);
       auto* running_var = Output(RUNNING_VAR);
-      if (running_mean->size() != C) {
+      if (running_mean->numel() != C) {
         running_mean->Resize(C);
         math::Set<T, Context>(
             C, T(0), running_mean->template mutable_data<T>(), &context_);
       }
-      if (running_var->size() != C) {
+      if (running_var->numel() != C) {
         running_var->Resize(C);
         math::Set<T, Context>(
             C, T(0), running_var->template mutable_data<T>(), &context_);
@@ -129,8 +129,8 @@ class SpatialBNOp : public Operator<Context> {
       if (num_batches_ > 1) {
         const auto& batch_mean_sum = Input(BATCH_MEAN_SUM);
         const auto& batch_var_sum = Input(BATCH_VAR_SUM);
-        CAFFE_ENFORCE_EQ(batch_mean_sum.size(), C);
-        CAFFE_ENFORCE_EQ(batch_var_sum.size(), C);
+        CAFFE_ENFORCE_EQ(batch_mean_sum.numel(), C);
+        CAFFE_ENFORCE_EQ(batch_var_sum.numel(), C);
         ComputeBatchMoments<T>(
             N,
             C,
@@ -302,19 +302,19 @@ class SpatialBNGradientOp : public Operator<Context> {
     const auto& scale = Input(SCALE);
     const auto& mean = Input(SAVED_MEAN);
     const auto& rstd = Input(SAVED_INV_STD);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     CAFFE_ENFORCE_GE(ndim, 3);
     const int N = X.dim32(0);
     const int C =
         (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1));
-    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
     const int HxW =
         std::accumulate(
             X_dims.cbegin() + 1, X_dims.cend(), 1, std::multiplies<int>()) /
         C;
-    CAFFE_ENFORCE_EQ(scale.size(), C);
-    CAFFE_ENFORCE_EQ(mean.size(), C);
-    CAFFE_ENFORCE_EQ(rstd.size(), C);
+    CAFFE_ENFORCE_EQ(scale.numel(), C);
+    CAFFE_ENFORCE_EQ(mean.numel(), C);
+    CAFFE_ENFORCE_EQ(rstd.numel(), C);
     auto* dX = Output(INPUT_GRAD);
     auto* dscale = Output(SCALE_GRAD);
     auto* dbias = Output(BIAS_GRAD);

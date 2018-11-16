@@ -29,11 +29,11 @@ class SumElementsOp : public Operator<Context> {
     T* data = sum->template mutable_data<T>();
 
     math::Sum<T, Context>(
-        X.size(), X.template data<T>(), data, &context_, &scratch_);
-    if (average_ && X.size() > 0) {
+        X.numel(), X.template data<T>(), data, &context_, &scratch_);
+    if (average_ && X.numel() > 0) {
       math::Scale<float, T, Context>(
           1,
-          static_cast<T>(1.) / X.size(),
+          static_cast<T>(1.) / X.numel(),
           sum->template data<T>(),
           data,
           &context_);
@@ -61,7 +61,7 @@ class SumElementsIntOp : public Operator<Context> {
     sum->Resize(vector<int64_t>());
     T* data = sum->template mutable_data<T>();
     math::Sum<T, Context>(
-        X.size(), X.template data<T>(), data, &context_, &scratch_);
+        X.numel(), X.template data<T>(), data, &context_, &scratch_);
     return true;
   }
 
@@ -107,15 +107,15 @@ class SumSqrElementsOp : public Operator<Context> {
     auto* sum = Output(0);
     sum->Resize(vector<int64_t>());
     math::SumSqr<T, Context>(
-        X.size(),
+        X.numel(),
         X.template data<T>(),
         sum->template mutable_data<T>(),
         &context_,
         &scratch_);
-    if (average && X.size() > 0) {
+    if (average && X.numel() > 0) {
       math::Scale<float, T, Context>(
           1,
-          float(1.) / X.size(),
+          float(1.) / X.numel(),
           sum->template data<T>(),
           sum->template mutable_data<T>(),
           &context_);
@@ -135,7 +135,7 @@ class MaxReductionOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& X = Input(0);
-    CAFFE_ENFORCE_EQ(X.ndim(), 3);
+    CAFFE_ENFORCE_EQ(X.dim(), 3);
 
     const int batch_size = X.dim32(0);
     const int M = X.dim32(1);

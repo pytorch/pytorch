@@ -2,6 +2,8 @@
 
 #include <array>
 #include <cstdint>
+#include <c10/macros/Macros.h>
+#include <ATen/cuda/Array.h>
 #include <THC/THCIntegerDivider.cuh>
 
 /// OffsetCalculator calculates the offset in bytes of a linear index for NARGS
@@ -12,13 +14,7 @@ struct OffsetCalculator {
   static constexpr int MAX_DIMS = 25;
 
   // The offset for each argument (in bytes). Wrapper around fixed-size array.
-  struct offsets_t {
-    __host__ __device__ uint32_t& operator[](int idx) {
-      return values[idx];
-    }
-    uint32_t values[NARGS];
-  };
-
+  using offset_type = at::cuda::Array<uint32_t, NARGS>;
 
   OffsetCalculator(int dims, const int64_t* sizes, const int64_t* const* strides) : dims(dims) {
     for (int i = 0; i < MAX_DIMS; ++i) {
@@ -33,8 +29,8 @@ struct OffsetCalculator {
     }
   }
 
-  __host__ __device__ offsets_t get(uint32_t linear_idx) const {
-    offsets_t offsets;
+  C10_HOST_DEVICE offset_type get(uint32_t linear_idx) const {
+    offset_type offsets;
     #pragma unroll
     for (int arg = 0; arg < NARGS; arg++) {
       offsets[arg] = 0;

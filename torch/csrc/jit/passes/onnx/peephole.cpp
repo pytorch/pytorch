@@ -488,17 +488,47 @@ static void eraseListConstruct(Block* block) {
     for (auto b : n->blocks()) {
       eraseListConstruct(b);
     }
-
     std::vector<std::tuple<size_t, std::vector<Value*>>> replacements;
 
     size_t i = 0;
     for (auto* input : n->inputs()) {
       if (input->node()->kind() == prim::ListConstruct) {
         auto* lc_node = input->node();
-        replacements.push_back(std::make_tuple(
-            i,
-            std::vector<Value*>(
-                lc_node->inputs().begin(), lc_node->inputs().end())));
+        TypePtr elem = lc_node->output()->type()->cast<ListType>()->getElementType();
+        if (elem->cast<IntType>()) {
+          // ListConstruct Int[] output case, we need to transfrom to ONNX Concat to ensure
+          // the output is a single tensor(dynamic) type in order to be consumed as inputs
+          std::vector<Value*> unsqueezed;
+          Graph *g = block->owningGraph();
+          for (auto* input: lc_node->inputs()) {
+            Node* unsqueezed_node = g->create(onnx::Unsqueeze, 1);
+            unsqueezed_node->insertBefore(lc_node);
+            unsqueezed_node->addInput(input);
+            unsqueezed_node->is_(attr::axes, {0});
+            unsqueezed.emplace_back(unsqueezed_node->output());
+          }
+          Node* concat_node = g->create(onnx::Concat, 1);
+          concat_node->i_(attr::axis, 0);
+          for(auto v: unsqueezed) {
+            concat_node->addInput(v);
+          }
+          concat_node->insertBefore(lc_node);
+
+          // make concat node output as new input, then ListConstruct should become dead
+          replacements.push_back(std::make_tuple(
+                i,
+                std::vector<Value*>({concat_node->output()})
+                ));
+
+        } else {
+          // Tensor lists are used mostly for inputs to cat/stack. They are already handled
+          // in those symbolics, and should become dead afterwards.
+          replacements.push_back(std::make_tuple(
+              i,
+              std::vector<Value*>(
+                  lc_node->inputs().begin(), lc_node->inputs().end())));
+        }
+
       }
       i++;
     }

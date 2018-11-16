@@ -3,6 +3,7 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
+#include <TH/THGenerator.hpp>
 
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
 {
@@ -650,6 +651,7 @@ void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
 
 void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
 {
+  std::lock_guard<std::mutex> lock(_generator->mutex);
   scalar_t *r__data;
   int64_t r__stride_0;
   int64_t i;
@@ -1944,9 +1946,9 @@ void THTensor_(norm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, i
   dim[dimension] = 1;
   THTensor_(resize)(r_, dim, {});
 
-  #define DIM_REDUCE(reduce, transform) \
+  #define DIM_REDUCE(reduce, transform, init) \
     TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,      \
-                         accreal sum = 0;                   \
+                         accreal sum = init;                \
                          int64_t i;                         \
                          for(i = 0; i < t_size; i++) {      \
                            (reduce);                        \
@@ -1955,22 +1957,25 @@ void THTensor_(norm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, i
 
   if(value == 0) {
     DIM_REDUCE(sum += t_data[i*t_stride] != 0.0,
-               *r__data = sum);
+               *r__data = sum, 0);
   } else if (value == 1) {
     DIM_REDUCE(sum += TH_MATH_NAME(fabs)(t_data[i*t_stride]),
-               *r__data = sum);
+               *r__data = sum, 0);
   } else if (value == 2) {
     DIM_REDUCE(sum += t_data[i*t_stride] * t_data[i*t_stride],
-               *r__data = TH_MATH_NAME(sqrt)(sum));
+               *r__data = TH_MATH_NAME(sqrt)(sum), 0);
   } else if (value == 3) {
     DIM_REDUCE(sum += TH_MATH_NAME(fabs)(t_data[i*t_stride] * t_data[i*t_stride] * t_data[i*t_stride]),
-               *r__data = TH_MATH_NAME(pow)(sum, 1.0/3));
+               *r__data = TH_MATH_NAME(pow)(sum, 1.0/3), 0);
   } else if (value == INFINITY) {
     DIM_REDUCE(sum = THMax(sum, TH_MATH_NAME(fabs)(t_data[i*t_stride])),
-	       *r__data = sum);
+	       *r__data = sum, 0);
+  } else if (value == -INFINITY) {
+    DIM_REDUCE(sum = THMin(sum, TH_MATH_NAME(fabs)(t_data[i*t_stride])),
+	       *r__data = sum, INFINITY);
   } else {
     DIM_REDUCE(sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(t_data[i*t_stride]), value),
-               *r__data = TH_MATH_NAME(pow)(sum, 1.0/value));
+               *r__data = TH_MATH_NAME(pow)(sum, 1.0/value), 0);
   }
 
   if (!keepdim) {
@@ -1996,6 +2001,10 @@ accreal THTensor_(normall)(THTensor *tensor, scalar_t value)
     return TH_MATH_NAME(pow)(sum, 1.0/3);
   } else if(value == INFINITY) {
     TH_TENSOR_APPLY(scalar_t, tensor, sum = THMax(sum, TH_MATH_NAME(fabs)(*tensor_data)););
+    return sum;
+  } else if(value == -INFINITY) {
+    sum = INFINITY;
+    TH_TENSOR_APPLY(scalar_t, tensor, sum = THMin(sum, TH_MATH_NAME(fabs)(*tensor_data)););
     return sum;
   } else {
     TH_TENSOR_APPLY(scalar_t, tensor, sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(*tensor_data), value););
@@ -2058,11 +2067,29 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
 
 accreal THTensor_(dist)(THTensor *tensor, THTensor *src, scalar_t value)
 {
-  scalar_t sum = 0;
-  TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                   sum += TH_MATH_NAME(pow)(
-                     TH_MATH_NAME(fabs)(*tensor_data - *src_data), value););
-  return TH_MATH_NAME(pow)(sum, 1.0/value);
+  scalar_t sum;
+  if (value == INFINITY) {
+    sum = -1.0;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum = THMax(sum, TH_MATH_NAME(fabs)(*tensor_data - *src_data)););
+    return sum;
+  } else if (value == -INFINITY) {
+    sum = INFINITY;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum = THMin(sum, TH_MATH_NAME(fabs)(*tensor_data - *src_data)););
+    return sum;
+  } else if (value == 0.0) {
+    sum = 0.0;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum += (*tensor_data - *src_data != 0.0););
+    return sum;
+  } else {
+    sum = 0.0;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum += TH_MATH_NAME(pow)(
+                       TH_MATH_NAME(fabs)(*tensor_data - *src_data), value););
+    return TH_MATH_NAME(pow)(sum, 1.0/value);
+  }
 }
 
 accreal THTensor_(meanall)(THTensor *tensor)

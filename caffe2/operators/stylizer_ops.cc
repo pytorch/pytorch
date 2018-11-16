@@ -2,7 +2,7 @@
 #include "caffe2/utils/cpu_neon.h"
 #include "caffe2/utils/math.h"
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
@@ -96,12 +96,12 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
 #endif
     }
     const auto& noise = noiseBlob->template Get<TensorCPU>();
-    CAFFE_ENFORCE(noise.size() >= defaultNoiseSize);
+    CAFFE_ENFORCE(noise.numel() >= defaultNoiseSize);
 
-    CAFFE_ENFORCE(X.ndim() == 4);
+    CAFFE_ENFORCE(X.dim() == 4);
     const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
     // Assume BGR or BGRA
-    CAFFE_ENFORCE(mean.size() == kOutputChannels);
+    CAFFE_ENFORCE(mean.numel() == kOutputChannels);
 
     CAFFE_ENFORCE(C == kInputChannels);
     Y->Resize(N, kOutputChannels, H, W);
@@ -414,10 +414,10 @@ class BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp
     const auto& X = Input(0);
     const auto& mean = Input(1);
     auto* Y = Output(0);
-    CAFFE_ENFORCE(X.ndim() == 4);
+    CAFFE_ENFORCE(X.dim() == 4);
     const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
     // Assume BGR or BGRA
-    CAFFE_ENFORCE(mean.size() == kInputChannels);
+    CAFFE_ENFORCE(mean.numel() == kInputChannels);
     CAFFE_ENFORCE(C == kInputChannels);
     // RGB
     Y->Resize(N, H, W, kOutputChannels);
@@ -586,7 +586,7 @@ OPERATOR_SCHEMA(BRGNCHWCToPackedInt8BGRAStylizerDeprocess)
     .NumInputs(2)
     .NumOutputs(1);
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(
     BRGNCHWCToPackedInt8BGRAStylizerDeprocess,
     IDEEPFallbackOp<BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp, SkipIndices<0>>);

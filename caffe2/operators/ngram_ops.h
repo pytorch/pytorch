@@ -46,13 +46,13 @@ class NGramFromCategoricalOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& floats = Input(0);
-    auto N = floats.dim(0);
+    auto N = floats.size(0);
     auto D = floats.size_from_dim(1);
     const F* floats_data = floats.template data<F>();
     auto* output = Output(0);
     output->Resize(N);
     auto* output_data = output->template mutable_data<T>();
-    math::Set<T, Context>(output->size(), 0, output_data, &context_);
+    math::Set<T, Context>(output->numel(), 0, output_data, &context_);
 
     CAFFE_ENFORCE_GT(D, max_col_id_);
     for (int i = 0; i < N; i++) {

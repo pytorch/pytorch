@@ -271,7 +271,7 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
   auto& R = Input(1); // RoIs
   auto* Y = Output(0); // RoI pooled data
 
-  if (R.size() == 0) {
+  if (R.numel() == 0) {
     // Handle empty rois
     if (order_ == StorageOrder::NCHW) {
       Y->Resize(0, X.dim32(1), pooled_height_, pooled_width_);
@@ -283,7 +283,7 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
     return true;
   }
 
-  CAFFE_ENFORCE_EQ(R.ndim(), 2);
+  CAFFE_ENFORCE_EQ(R.dim(), 2);
   // if R has 5 columns, the first column is the index, otherwise 0
   CAFFE_ENFORCE(R.dim32(1) == 4 || R.dim32(1) == 5);
 
@@ -291,7 +291,7 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
 
   if (order_ == StorageOrder::NCHW) {
     Y->Resize(R.dim32(0), X.dim32(1), pooled_height_, pooled_width_);
-    int output_size = Y->size();
+    int output_size = Y->numel();
     ROIAlignForward<float>(
         output_size,
         X.data<float>(),
@@ -308,7 +308,7 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
         order_);
   } else if (order_ == StorageOrder::NHWC) {
     Y->Resize(R.dim32(0), pooled_height_, pooled_width_, X.dim32(3));
-    int output_size = Y->size();
+    int output_size = Y->numel();
     ROIAlignForward<float>(
         output_size,
         X.data<float>(),

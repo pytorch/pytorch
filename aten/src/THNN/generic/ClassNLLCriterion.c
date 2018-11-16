@@ -99,7 +99,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     }
   }
 
-  if (reduction == Reduction::ElementwiseMean && total_weight_data[0]) {
+  if (reduction == Reduction::Mean && total_weight_data[0]) {
     output_data[0] /= total_weight_data[0];
   }
 
@@ -183,7 +183,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
       THAssert(cur_target >= 0 && cur_target < n_classes);
 
       gradInput_data[cur_target] =
-        (reduction != Reduction::ElementwiseMean && weights) ? -weights_data[cur_target] : -1;
+        (reduction != Reduction::Mean && weights) ? -weights_data[cur_target] : -1;
       gradInput_data[cur_target] *= gradOutput_value;
     }
 
@@ -203,7 +203,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         gradInput_data[i * n_target + cur_target] =
           -(weights ? weights_data[cur_target] : 1.0f) * gradOutput_value;
 
-        if (reduction == Reduction::ElementwiseMean && *total_weight_data) {
+        if (reduction == Reduction::Mean && *total_weight_data) {
           gradInput_data[i * n_target + cur_target] /= *total_weight_data;
         }
       }

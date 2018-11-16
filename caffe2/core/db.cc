@@ -186,8 +186,8 @@ void DBReaderSerializer::Serialize(
   BlobProto blob_proto;
   blob_proto.set_name(name);
   blob_proto.set_type("DBReader");
-  blob_proto.set_content(proto.SerializeAsString());
-  acceptor(name, blob_proto.SerializeAsString());
+  blob_proto.set_content(SerializeAsString_EnforceCheck(proto));
+  acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
 }
 
 void DBReaderDeserializer::Deserialize(const BlobProto& proto, Blob* blob) {

@@ -2,7 +2,6 @@
 
 #include "ATen/Allocator.h"
 #include "ATen/CPUGeneral.h"
-#include "ATen/CUDAGuard.h"
 #include "ATen/Context.h"
 #include "ATen/Device.h"
 #include "ATen/DeviceGuard.h"
@@ -10,7 +9,6 @@
 #include "ATen/Dispatch.h"
 #include "ATen/Formatting.h"
 #include "ATen/Functions.h"
-#include "ATen/OptionsGuard.h"
 #include "ATen/ScalarOps.h"
 #include "ATen/Tensor.h"
 #include "ATen/TensorGeometry.h"

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "torch/csrc/utils/functional.h"
+#include "torch/csrc/utils/memory.h"
 
 namespace torch { namespace jit { namespace detail {
 
@@ -187,7 +188,7 @@ size_t DynamicDAG<T>::debugNumVertices() const {
 
 template <typename T>
 Vertex<T>* DynamicDAG<T>::newVertex(T datum) {
-  vertices_.emplace_back(new Vertex<T>(vertices_.size(), datum));
+  vertices_.push_back(torch::make_unique<Vertex<T>>(vertices_.size(), datum));
   return vertices_.back().get();
 }
 
@@ -332,7 +333,7 @@ void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
   // Search for vertices that are reachable from consumer that have a now incorrect
   // topological ordering.
   if (dfsSearch(DFSDirection::forward, consumer, producer,
-                /*upper_bound=*/producer->ord, deltaF)) {
+                /*bound=*/producer->ord, deltaF)) {
     // Path found! This means there's a cycle.
     AT_ERROR("Cycle detected while trying to add edge.");
   }
@@ -340,7 +341,7 @@ void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
   // Search for vertices that can reach producer that have a now incorrect
   // topological ordering
   JIT_ASSERT(!dfsSearch(DFSDirection::backward, producer, consumer,
-                        /*lower_bound=*/consumer->ord, deltaB));
+                        /*bound=*/consumer->ord, deltaB));
 
   // Reorder the vertices that are reachable from consumer to occur BEFORE
   // the vertices that can reach producer.

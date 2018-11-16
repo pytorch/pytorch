@@ -19,17 +19,17 @@ TEST(MathTest, GemmNoTransNoTrans) {
   Tensor X(std::vector<int>{5, 10}, CPU);
   Tensor W(std::vector<int>{10, 6}, CPU);
   Tensor Y(std::vector<int>{5, 6}, CPU);
-  EXPECT_EQ(X.size(), 50);
-  EXPECT_EQ(W.size(), 60);
+  EXPECT_EQ(X.numel(), 50);
+  EXPECT_EQ(W.numel(), 60);
   math::Set<float, CPUContext>(
-      X.size(), 1, X.mutable_data<float>(), &cpu_context);
+      X.numel(), 1, X.mutable_data<float>(), &cpu_context);
   math::Set<float, CPUContext>(
-      W.size(), 1, W.mutable_data<float>(), &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < X.size(); ++i) {
+      W.numel(), 1, W.mutable_data<float>(), &cpu_context);
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < X.numel(); ++i) {
     CHECK_EQ(X.data<float>()[i], 1);
   }
-  for (int i = 0; i < W.size(); ++i) {
+  for (int i = 0; i < W.numel(); ++i) {
     CHECK_EQ(W.data<float>()[i], 1);
   }
 
@@ -48,8 +48,8 @@ TEST(MathTest, GemmNoTransNoTrans) {
       kZero,
       Y.mutable_data<float>(),
       &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 10) << i;
   }
   // Test Accumulate
@@ -65,8 +65,8 @@ TEST(MathTest, GemmNoTransNoTrans) {
       kPointFive,
       Y.mutable_data<float>(),
       &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 15) << i;
   }
   // Test Accumulate
@@ -82,8 +82,8 @@ TEST(MathTest, GemmNoTransNoTrans) {
       kOne,
       Y.mutable_data<float>(),
       &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 20) << i;
   }
 }
@@ -94,17 +94,17 @@ TEST(MathTest, GemmNoTransTrans) {
   Tensor X(std::vector<int>{5, 10}, CPU);
   Tensor W(std::vector<int>{6, 10}, CPU);
   Tensor Y(std::vector<int>{5, 6}, CPU);
-  EXPECT_EQ(X.size(), 50);
-  EXPECT_EQ(W.size(), 60);
+  EXPECT_EQ(X.numel(), 50);
+  EXPECT_EQ(W.numel(), 60);
   math::Set<float, CPUContext>(
-      X.size(), 1, X.mutable_data<float>(), &cpu_context);
+      X.numel(), 1, X.mutable_data<float>(), &cpu_context);
   math::Set<float, CPUContext>(
-      W.size(), 1, W.mutable_data<float>(), &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < X.size(); ++i) {
+      W.numel(), 1, W.mutable_data<float>(), &cpu_context);
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < X.numel(); ++i) {
     CHECK_EQ(X.data<float>()[i], 1);
   }
-  for (int i = 0; i < W.size(); ++i) {
+  for (int i = 0; i < W.numel(); ++i) {
     CHECK_EQ(W.data<float>()[i], 1);
   }
 
@@ -123,8 +123,8 @@ TEST(MathTest, GemmNoTransTrans) {
       kZero,
       Y.mutable_data<float>(),
       &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 10) << i;
   }
   // Test Accumulate
@@ -140,8 +140,8 @@ TEST(MathTest, GemmNoTransTrans) {
       kPointFive,
       Y.mutable_data<float>(),
       &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 15) << i;
   }
   math::Gemm<float, CPUContext>(
@@ -156,8 +156,8 @@ TEST(MathTest, GemmNoTransTrans) {
       kOne,
       Y.mutable_data<float>(),
       &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 20) << i;
   }
 }
@@ -175,9 +175,9 @@ class GemmBatchedTest
     W_.Resize(std::vector<int64_t>{3, 6, 10});
     Y_.Resize(std::vector<int64_t>{3, 5, 6});
     math::Set<float, CPUContext>(
-        X_.size(), 1, X_.mutable_data<float>(), cpu_context_.get());
+        X_.numel(), 1, X_.mutable_data<float>(), cpu_context_.get());
     math::Set<float, CPUContext>(
-        W_.size(), 1, W_.mutable_data<float>(), cpu_context_.get());
+        W_.numel(), 1, W_.mutable_data<float>(), cpu_context_.get());
     trans_X_ = std::get<0>(GetParam());
     trans_W_ = std::get<1>(GetParam());
   }
@@ -236,7 +236,7 @@ class GemmBatchedTest
   }
 
   void VerifyOutput(const float value) const {
-    for (int i = 0; i < Y_.size(); ++i) {
+    for (int i = 0; i < Y_.numel(); ++i) {
       EXPECT_FLOAT_EQ(value, Y_.template data<float>()[i]);
     }
   }
@@ -281,17 +281,17 @@ TEST(MathTest, GemvNoTrans) {
   Tensor A(std::vector<int>{5, 10}, CPU);
   Tensor X(std::vector<int>{10}, CPU);
   Tensor Y(std::vector<int>{5}, CPU);
-  EXPECT_EQ(A.size(), 50);
-  EXPECT_EQ(X.size(), 10);
+  EXPECT_EQ(A.numel(), 50);
+  EXPECT_EQ(X.numel(), 10);
   math::Set<float, CPUContext>(
-      A.size(), 1, A.mutable_data<float>(), &cpu_context);
+      A.numel(), 1, A.mutable_data<float>(), &cpu_context);
   math::Set<float, CPUContext>(
-      X.size(), 1, X.mutable_data<float>(), &cpu_context);
-  EXPECT_EQ(Y.size(), 5);
-  for (int i = 0; i < A.size(); ++i) {
+      X.numel(), 1, X.mutable_data<float>(), &cpu_context);
+  EXPECT_EQ(Y.numel(), 5);
+  for (int i = 0; i < A.numel(); ++i) {
     CHECK_EQ(A.data<float>()[i], 1);
   }
-  for (int i = 0; i < X.size(); ++i) {
+  for (int i = 0; i < X.numel(); ++i) {
     CHECK_EQ(X.data<float>()[i], 1);
   }
 
@@ -308,7 +308,7 @@ TEST(MathTest, GemvNoTrans) {
       kZero,
       Y.mutable_data<float>(),
       &cpu_context);
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 10) << i;
   }
   // Test Accumulate
@@ -322,7 +322,7 @@ TEST(MathTest, GemvNoTrans) {
       kPointFive,
       Y.mutable_data<float>(),
       &cpu_context);
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 15) << i;
   }
   // Test Accumulate
@@ -336,7 +336,7 @@ TEST(MathTest, GemvNoTrans) {
       kOne,
       Y.mutable_data<float>(),
       &cpu_context);
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 20) << i;
   }
 }
@@ -347,17 +347,17 @@ TEST(MathTest, GemvTrans) {
   Tensor A(std::vector<int>{6, 10}, CPU);
   Tensor X(std::vector<int>{6}, CPU);
   Tensor Y(std::vector<int>{10}, CPU);
-  EXPECT_EQ(A.size(), 60);
-  EXPECT_EQ(X.size(), 6);
+  EXPECT_EQ(A.numel(), 60);
+  EXPECT_EQ(X.numel(), 6);
   math::Set<float, CPUContext>(
-      A.size(), 1, A.mutable_data<float>(), &cpu_context);
+      A.numel(), 1, A.mutable_data<float>(), &cpu_context);
   math::Set<float, CPUContext>(
-      X.size(), 1, X.mutable_data<float>(), &cpu_context);
-  EXPECT_EQ(Y.size(), 10);
-  for (int i = 0; i < A.size(); ++i) {
+      X.numel(), 1, X.mutable_data<float>(), &cpu_context);
+  EXPECT_EQ(Y.numel(), 10);
+  for (int i = 0; i < A.numel(); ++i) {
     CHECK_EQ(A.data<float>()[i], 1);
   }
-  for (int i = 0; i < X.size(); ++i) {
+  for (int i = 0; i < X.numel(); ++i) {
     CHECK_EQ(X.data<float>()[i], 1);
   }
 
@@ -374,7 +374,7 @@ TEST(MathTest, GemvTrans) {
       kZero,
       Y.mutable_data<float>(),
       &cpu_context);
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 6) << i;
   }
   // Test Accumulate
@@ -388,7 +388,7 @@ TEST(MathTest, GemvTrans) {
       kPointFive,
       Y.mutable_data<float>(),
       &cpu_context);
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 9) << i;
   }
   // Test Accumulate
@@ -402,7 +402,7 @@ TEST(MathTest, GemvTrans) {
       kOne,
       Y.mutable_data<float>(),
       &cpu_context);
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 12) << i;
   }
 }
@@ -442,7 +442,7 @@ class ReduceTensorTest : public testing::Test {
     }
     X_.Resize(X_dims);
     Y_.Resize(Y_dims);
-    ASSERT_EQ(X_data.size(), X_.size());
+    ASSERT_EQ(X_data.size(), X_.numel());
     cpu_context_->CopyFromCPU<float>(
         X_data.size(), X_data.data(), X_.mutable_data<float>());
     reduce_func(
@@ -454,8 +454,8 @@ class ReduceTensorTest : public testing::Test {
         X_.data<float>(),
         Y_.mutable_data<float>(),
         cpu_context_.get());
-    ASSERT_EQ(Y_data.size(), Y_.size());
-    for (int i = 0; i < Y_.size(); ++i) {
+    ASSERT_EQ(Y_data.size(), Y_.numel());
+    for (int i = 0; i < Y_.numel(); ++i) {
       EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
     }
   }
@@ -679,7 +679,7 @@ class BroadcastTest : public testing::Test {
       const std::vector<float>& Y_data) {
     X_.Resize(X_dims);
     Y_.Resize(Y_dims);
-    ASSERT_EQ(X_data.size(), X_.size());
+    ASSERT_EQ(X_data.size(), X_.numel());
     cpu_context_->CopyFromCPU<float>(
         X_data.size(), X_data.data(), X_.mutable_data<float>());
     math::Broadcast<float, CPUContext>(
@@ -691,7 +691,7 @@ class BroadcastTest : public testing::Test {
         X_.data<float>(),
         Y_.mutable_data<float>(),
         cpu_context_.get());
-    ASSERT_EQ(Y_data.size(), Y_.size());
+    ASSERT_EQ(Y_data.size(), Y_.numel());
     for (int i = 0; i < Y_data.size(); ++i) {
       EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
     }
@@ -736,7 +736,7 @@ class MomentsTest : public testing::Test {
     X_.Resize(X_dims);
     mean_.Resize(Y_dims);
     variance_.Resize(Y_dims);
-    ASSERT_EQ(X_data.size(), X_.size());
+    ASSERT_EQ(X_data.size(), X_.numel());
     cpu_context_->CopyFromCPU<float>(
         X_data.size(), X_data.data(), X_.mutable_data<float>());
     math::Moments<float, CPUContext>(
@@ -748,11 +748,11 @@ class MomentsTest : public testing::Test {
         mean_.mutable_data<float>(),
         variance_.mutable_data<float>(),
         cpu_context_.get());
-    ASSERT_EQ(mean_data.size(), mean_.size());
+    ASSERT_EQ(mean_data.size(), mean_.numel());
     for (int i = 0; i < mean_data.size(); ++i) {
       EXPECT_FLOAT_EQ(mean_data[i], mean_.data<float>()[i]);
     }
-    ASSERT_EQ(variance_data.size(), variance_.size());
+    ASSERT_EQ(variance_data.size(), variance_.numel());
     for (int i = 0; i < variance_data.size(); ++i) {
       EXPECT_NEAR(variance_data[i], variance_.data<float>()[i], kEps);
     }
@@ -829,7 +829,7 @@ class TransposeTest : public testing::Test {
     }
     X_.Resize(X_dims);
     Y_.Resize(Y_dims);
-    ASSERT_EQ(X_data.size(), X_.size());
+    ASSERT_EQ(X_data.size(), X_.numel());
     cpu_context_->CopyFromCPU<float>(
         X_data.size(), X_data.data(), X_.mutable_data<float>());
     math::Transpose<float, CPUContext>(
@@ -839,8 +839,8 @@ class TransposeTest : public testing::Test {
         X_.data<float>(),
         Y_.mutable_data<float>(),
         cpu_context_.get());
-    ASSERT_EQ(Y_data.size(), Y_.size());
-    for (int i = 0; i < Y_.size(); ++i) {
+    ASSERT_EQ(Y_data.size(), Y_.numel());
+    for (int i = 0; i < Y_.numel(); ++i) {
       EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
     }
   }

@@ -38,9 +38,14 @@ std::string getPythonInterpreterStackTrace() {
 std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     py::function func,
     Stack trace_inputs,
+    py::function var_name_lookup_fn,
     c10::optional<size_t> num_real_inputs) {
   size_t num_func_inputs = num_real_inputs.value_or(trace_inputs.size());
   auto enter_info = tracer::enter(std::move(trace_inputs));
+  getTracingState()->lookup_var_name_fn = [var_name_lookup_fn](const Variable& var) -> std::string {
+    AutoGIL ag;
+    return py::cast<std::string>(var_name_lookup_fn(var));
+  };
   try {
 
     py::tuple py_inputs(num_func_inputs);
@@ -153,6 +158,14 @@ void initPythonTracerBindings(PyObject* module) {
   });
   m.def("_set_value_trace", [](const Variable& var, Value* value) {
     return setValueTrace(var, value);
+  });
+  m.def("_tracer_set_get_unique_name_fn", [](py::function func) {
+    auto tracing_state = getTracingState();
+    JIT_ASSERT(tracing_state);
+    tracing_state->lookup_var_name_fn = [func](const Variable& var) -> std::string {
+      AutoGIL ag;
+      return py::cast<std::string>(func(var));
+    };
   });
 }
 

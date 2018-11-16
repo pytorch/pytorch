@@ -3,7 +3,6 @@
 
 #include "THCGeneral.h"
 
-THC_API THAllocator* getTHCudaHostAllocator(void);
 // IPC doesn't support (re)allocation
 
 #ifdef __cplusplus

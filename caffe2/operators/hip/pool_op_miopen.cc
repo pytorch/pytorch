@@ -23,11 +23,11 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
  public:
   MIOPENPoolOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<HIPContext>(operator_def, ws),
+        poolWsSize_(0),
+        poolWs_(nullptr),
         miopen_wrapper_(&context_),
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
-        poolWs_(nullptr),
-        poolWsSize_(0)
+        beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0))
 
   {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&bottom_desc_));
@@ -139,11 +139,11 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
  public:
   MIOPENPoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<HIPContext>(operator_def, ws),
+        poolWsSize_(0),
+        poolWs_(nullptr),
         miopen_wrapper_(&context_),
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
         beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
-        poolWs_(nullptr),
-        poolWsSize_(0),
         bwdPoolScratch_(nullptr) {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&bottom_desc_));
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&top_desc_));
