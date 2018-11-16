@@ -1216,7 +1216,7 @@ Operation interpolate_op(const Node* n) {
 // interpolate takes in float & float[] for scale factor
 // upsample takes in int & int[], so convert the ints to floats before
 // passing on to the interpolate op
-IValue convert_int_or_int_list_to_double(IValue int_ivalue) {
+IValue convert_scale_factor_to_double(IValue int_ivalue) {
   IValue scale_factor_double;
   if (int_ivalue.isInt()) {
     scale_factor_double = static_cast<double>(int_ivalue.toInt());
@@ -1224,6 +1224,10 @@ IValue convert_int_or_int_list_to_double(IValue int_ivalue) {
     auto int_list = int_ivalue.toIntListRef();
     std::vector<double> double_vec(int_list.begin(), int_list.end());
     scale_factor_double = double_vec;
+  } else {
+    std::stringstream ss;
+    ss << "Expecting int or int list arg for scale factor, got" << int_ivalue;
+    throw std::runtime_error(ss.str());
   }
   return scale_factor_double;
 }
@@ -1234,7 +1238,7 @@ Operation upsample_nearest_op(const Node* n) {
     IValue size;
     IValue scale_factor_int;
     pop(stack, input, size, scale_factor_int);
-    IValue scale_factor_double = convert_int_or_int_list_to_double(scale_factor_int);
+    IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
     at::Tensor res = interpolate(input, size, scale_factor_double, "nearest", c10::nullopt);
     push(stack, res);
     return 0;
@@ -1249,7 +1253,7 @@ Operation upsample_op(const Node* n) {
     std::string mode;
     IValue align_corners;
     pop(stack, input, size, scale_factor_int, mode, align_corners);
-    IValue scale_factor_double = convert_int_or_int_list_to_double(scale_factor_int);
+    IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
     at::Tensor res = interpolate(input, size, scale_factor_double, mode, align_corners.toOptional<bool>());
     push(stack, res);
     return 0;
@@ -1262,7 +1266,7 @@ Operation upsample_bilinear_op(const Node* n) {
     IValue size;
     IValue scale_factor_int;
     pop(stack, input, size, scale_factor_int);
-    IValue scale_factor_double = convert_int_or_int_list_to_double(scale_factor_int);
+    IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
     at::Tensor res = interpolate(input, size, scale_factor_double, "bilinear", true);
     push(stack, res);
     return 0;

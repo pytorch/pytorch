@@ -116,9 +116,9 @@ class Upsample(Module):
     """
     __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name']
 
-    def __init__(self, size=None, scale_factor=None, mode='nearest', align_corners=None, name='Upsample'):
+    def __init__(self, size=None, scale_factor=None, mode='nearest', align_corners=None):
         super(Upsample, self).__init__()
-        self.name = name
+        self.name = type(self).__name__
         self.size = size
         self.scale_factor = scale_factor
         self.mode = mode
@@ -180,7 +180,7 @@ class UpsamplingNearest2d(Upsample):
                   [ 3.,  3.,  4.,  4.]]]])
     """
     def __init__(self, size=None, scale_factor=None):
-        super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest', name="UpsamplingNearest2d")
+        super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
 
 
 @weak_module
@@ -226,4 +226,4 @@ class UpsamplingBilinear2d(Upsample):
                   [ 3.0000,  3.3333,  3.6667,  4.0000]]]])
     """
     def __init__(self, size=None, scale_factor=None):
-        super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True, name="UpsamplingBilinear2d")
+        super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)
