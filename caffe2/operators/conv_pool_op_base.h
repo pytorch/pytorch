@@ -430,6 +430,11 @@ class ConvPoolOpBase : public Operator<Context> {
       kernel_w = W.dims(4);
       in_channels = W.dims(1);
       out_channels = W.dims(0);
+    } else if (X.dims_size() == 3) {
+      // TODO(T36817818): This inference function needs a case for 1-d
+      // convolution. Until then, we are disabling it with the following early
+      // return
+      return OpSchema::Cost();
     } else {
       // 2D convolution
       CAFFE_ENFORCE_EQ(X.dims_size(), 4, "Conv2D should have 4D input tensor");

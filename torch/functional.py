@@ -343,7 +343,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     the frequency that :math:`0 \leq \omega < \text{n\_fft}`. When
     :attr:`onesided` is the default value ``True``,
 
-    * :attr:`input` must be either a 1-D time sequenceor 2-D a batch of time
+    * :attr:`input` must be either a 1-D time sequence or a 2-D batch of time
       sequences.
 
     * If :attr:`hop_length` is ``None`` (default), it is treated as equal to

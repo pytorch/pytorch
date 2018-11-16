@@ -258,6 +258,7 @@ _(aten, copy_sparse_to_sparse) \
 _(aten, cos) \
 _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
+_(aten, cosine_similarity) \
 _(aten, cross) \
 _(aten, ctc_loss) \
 _(aten, cudnn_affine_grid_generator) \

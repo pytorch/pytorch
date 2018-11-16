@@ -193,10 +193,11 @@ IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 IS_PPC = (platform.machine() == 'ppc64le')
+IS_ARM = (platform.machine() == 'aarch64')
 
 BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
-# ppc64le does not support MKLDNN
-if IS_PPC:
+# ppc64le and aarch64 do not support MKLDNN
+if IS_PPC or IS_ARM:
     USE_MKLDNN = check_env_flag('USE_MKLDNN', 'OFF')
 else:
     USE_MKLDNN = check_env_flag('USE_MKLDNN', 'ON')
@@ -1213,7 +1214,7 @@ if __name__ == '__main__':
                 'lib/include/c10/*.h',
                 'lib/include/c10/macros/*.h',
                 'lib/include/c10/util/*.h',
-                'lib/include/c10/detail/*.h',
+                'lib/include/c10/impl/*.h',
                 'lib/include/caffe2/core/*.h',
                 'lib/include/caffe2/proto/*.h',
                 'lib/include/torch/*.h',
