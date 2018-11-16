@@ -41,8 +41,8 @@ class GLReduce : public GLFilter {
                  input_bindings(compute_norm_),
                  {/* no uniform_blocks_bindings */},
                  {/* no attributes */},
-                 {{"COMPUTE_INV_STDEV", caffe2::to_string((int)compute_inv_stdev_)},
-                  {"COMPUTE_NORM", caffe2::to_string((int)compute_norm_)}}),
+                 {{"COMPUTE_INV_STDEV", c10::to_string((int)compute_inv_stdev_)},
+                  {"COMPUTE_NORM", c10::to_string((int)compute_norm_)}}),
         compute_inv_stdev(compute_inv_stdev_),
         compute_norm(compute_norm_) {}
 
@@ -219,7 +219,7 @@ class GLScale : public GLFilter {
                  input_bindings(_prelu_scale != nullptr),
                  {/* no uniform blocks */},
                  {/* no attributes */},
-                 {{"FUSE_PRELU", caffe2::to_string(_prelu_scale != nullptr)}}),
+                 {{"FUSE_PRELU", c10::to_string(_prelu_scale != nullptr)}}),
         channels(_channels),
         scale(_scale),
         bias(_bias),

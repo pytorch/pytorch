@@ -21,7 +21,7 @@ void NetObserverReporterPrint::report(
       // for Net_delay perf
       caffe2_perf.push_back(
           {{"type", "NET"},
-           {"value", caffe2::to_string(p.second.latency * 1000)},
+           {"value", c10::to_string(p.second.latency * 1000)},
            {"unit", "us"},
            {"metric", "latency"}});
     } else if (p.first != "NET_DELAY") {
@@ -31,12 +31,12 @@ void NetObserverReporterPrint::report(
 
       caffe2_perf.push_back(
           {{"type", p.first},
-           {"value", caffe2::to_string(p.second.latency * 1000)},
+           {"value", c10::to_string(p.second.latency * 1000)},
            {"unit", "us"},
            {"metric", "latency"}});
       if (p.second.flops > 0) {
         caffe2_perf.push_back({{"type", p.first},
-                               {"value", caffe2::to_string(p.second.flops)},
+                               {"value", c10::to_string(p.second.flops)},
                                {"unit", "flop"},
                                {"metric", "flops"}});
       }

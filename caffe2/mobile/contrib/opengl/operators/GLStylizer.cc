@@ -25,7 +25,7 @@ class GLStylizer : public GLFilter {
                  std::vector<binding*>({BINDING(inputData), BINDING(mean), BINDING(noise_std), BINDING(outputSize)}),
                  {/* no uniform blocks */},
                  {/* no attributes */},
-                 {{"DEPROCESS", caffe2::to_string(_deprocess)}, {"RGBAINPUT", caffe2::to_string(input_format)}}),
+                 {{"DEPROCESS", c10::to_string(_deprocess)}, {"RGBAINPUT", c10::to_string(input_format)}}),
         deprocess(_deprocess) {}
 
   template <typename T1, typename T2>

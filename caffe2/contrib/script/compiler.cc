@@ -216,7 +216,7 @@ struct DefCompiler {
     }
   }
   std::string fresh(std::string prefix = "$t") {
-    return std::string(prefix) + caffe2::to_string(next_fresh++);
+    return std::string(prefix) + c10::to_string(next_fresh++);
   }
   const char* operatorName(int kind, int ninputs) {
     switch (kind) {
@@ -252,7 +252,7 @@ struct DefCompiler {
       case TK_NOT:
         return "Not";
       default:
-        throw std::runtime_error("unknown kind " + caffe2::to_string(kind));
+        throw std::runtime_error("unknown kind " + c10::to_string(kind));
     }
   }
   void fillArg(Argument* arg, const Attribute& attr) {
@@ -598,7 +598,7 @@ struct DefCompiler {
         return TensorProto_DataType_BOOL;
       default:
         throw std::runtime_error(
-            "expected type token: " + caffe2::to_string(type));
+            "expected type token: " + c10::to_string(type));
     }
   }
 

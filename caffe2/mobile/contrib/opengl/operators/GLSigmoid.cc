@@ -22,8 +22,8 @@ class GLSigmoid : public GLFilter {
                  {BINDING(outputSize), BINDING(inputData)},
                  {/* no uniform blocks */},
                  {/* no attributes */},
-                 {{"SIGMOID", caffe2::to_string(opType == Sigmoid)},
-                  {"TANH", caffe2::to_string(opType == Tanh)}}) {}
+                 {{"SIGMOID", c10::to_string(opType == Sigmoid)},
+                  {"TANH", c10::to_string(opType == Tanh)}}) {}
 
   template <typename T>
   void sigmoid(const GLImageVector<T>& input_images, const GLImageVector<T>& output_images);

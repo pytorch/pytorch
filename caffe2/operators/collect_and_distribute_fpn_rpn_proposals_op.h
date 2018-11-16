@@ -65,15 +65,15 @@ class CollectAndDistributeFpnRpnProposalsOp final : public Operator<Context> {
     CAFFE_ENFORCE_GE(
         roi_max_level_,
         roi_min_level_,
-        "roi_max_level " + caffe2::to_string(roi_max_level_) +
+        "roi_max_level " + c10::to_string(roi_max_level_) +
             " must be greater than or equal to roi_min_level " +
-            caffe2::to_string(roi_min_level_) + ".");
+            c10::to_string(roi_min_level_) + ".");
     CAFFE_ENFORCE_GE(
         rpn_max_level_,
         rpn_min_level_,
-        "rpn_max_level " + caffe2::to_string(rpn_max_level_) +
+        "rpn_max_level " + c10::to_string(rpn_max_level_) +
             " must be greater than or equal to rpn_min_level " +
-            caffe2::to_string(rpn_min_level_) + ".");
+            c10::to_string(rpn_min_level_) + ".");
   }
 
   ~CollectAndDistributeFpnRpnProposalsOp() {}

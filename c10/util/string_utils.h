@@ -5,7 +5,7 @@
 
 using std::string;
 
-namespace caffe2 {
+namespace c10 {
 
 // to_string, stoi and stod implementation for Android related stuff.
 // Note(jiayq): Do not use the CAFFE2_TESTONLY_FORCE_STD_STRING_TEST macro

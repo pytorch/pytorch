@@ -11,7 +11,7 @@ OpSchema::Cost CostInferenceForSparseLengths(
       inputs.size(),
       min_num_of_inputs,
       def.type() + " requires at least " +
-          caffe2::to_string(min_num_of_inputs));
+          c10::to_string(min_num_of_inputs));
 
   const TensorShape data = inputs[0];
   const TensorShape indices = inputs[1 + use_weight];

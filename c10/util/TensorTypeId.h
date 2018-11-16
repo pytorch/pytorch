@@ -5,7 +5,7 @@
 #include "c10/util/IdWrapper.h"
 #include "c10/macros/Macros.h"
 
-namespace at {
+namespace c10 {
 
 namespace details {
 using _tensorTypeId_underlyingType = uint8_t;
@@ -33,9 +33,9 @@ class C10_API TensorTypeId final
   friend C10_API std::ostream& operator<<(std::ostream&, TensorTypeId);
 };
 
-C10_API std::ostream& operator<<(std::ostream&, at::TensorTypeId);
+C10_API std::ostream& operator<<(std::ostream&, c10::TensorTypeId);
 
-} // namespace at
+} // namespace c10
 
-C10_DEFINE_HASH_FOR_IDWRAPPER(at::TensorTypeId)
+C10_DEFINE_HASH_FOR_IDWRAPPER(c10::TensorTypeId)
 

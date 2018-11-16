@@ -1,10 +1,12 @@
 #include "c10/util/TensorTypeId.h"
 #include "c10/util/string_utils.h"
 
-namespace at {
+namespace c10 {
 
-std::ostream& operator<<(std::ostream& str, at::TensorTypeId rhs) {
-  return str << caffe2::to_string(rhs.underlyingId());
+std::ostream& operator<<(std::ostream& str, c10::TensorTypeId rhs) {
+  return str << c10::to_string(rhs.underlyingId());
 }
 
-} // namespace at
+} // namespace c10
+
+

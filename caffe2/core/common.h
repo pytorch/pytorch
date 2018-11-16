@@ -32,7 +32,7 @@
 #include "c10/util/string_utils.h"
 
 namespace caffe2 {
-
+  
 // Note(Yangqing): NVCC does not play well with unordered_map on some platforms,
 // forcing us to use std::map instead of unordered_map. This may affect speed
 // in some cases, but in most of the computation code we do not access map very
