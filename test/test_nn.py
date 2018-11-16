@@ -143,6 +143,13 @@ class PackedSequenceTest(TestCase):
         unpacked, _ = rnn_utils.pad_packed_sequence(packed)
         self.assertEqual(unpacked.type(), cuda_type_str)
 
+    def test_wrong_order(self):
+        # https://github.com/pytorch/pytorch/issues/13324
+        a = torch.ones(25, 300)
+        b = torch.ones(22, 300)
+        b_a = rnn_utils.pad_sequence([b, a])
+        self.assertRaises(RuntimeError, lambda: rnn_utils.pack_padded_sequence(b_a, [22, 25]))
+
     def test_total_length(self):
         padded, lengths = self._padded_sequence(torch.FloatTensor)
         max_length = max(lengths)
@@ -1175,6 +1182,9 @@ class TestNN(NNTestCase):
         modules[2] = nn.Conv2d(5, 3, 2)
         module_list[2] = modules[2]
         check()
+        modules[-1] = nn.Conv2d(5, 2, 1)
+        module_list[-1] = modules[-1]
+        check()
         idx = torch.tensor(2, dtype=torch.int32)
         modules[2] = nn.Conv2d(5, 3, 2)
         module_list[idx] = modules[2]
@@ -1327,6 +1337,9 @@ class TestNN(NNTestCase):
         check()
         parameters[2] = make_param()
         param_list[2] = parameters[2]
+        check()
+        parameters[-1] = make_param()
+        param_list[-1] = parameters[-1]
         check()
         idx = torch.tensor(2, dtype=torch.int32)
         parameters[2] = make_param()

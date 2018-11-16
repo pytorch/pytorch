@@ -557,7 +557,7 @@ Caffe2Ops Caffe2Backend::CreatePadPool(
       bool pads_flag = false;
       str += "[";
       for (const auto& i : pads) {
-        str += caffe2::to_string(i) + ",";
+        str += c10::to_string(i) + ",";
         pads_flag = pads_flag || i > 0;
       }
       str += "]";

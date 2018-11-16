@@ -34,7 +34,7 @@ class ONNXWhileOp final : public Operator<Context> {
         body_net_def_.set_name("loop_net");
       } else {
         ++counter;
-        body_net_def_.set_name("loop_net." + caffe2::to_string(counter));
+        body_net_def_.set_name("loop_net." + c10::to_string(counter));
       }
     }
   }

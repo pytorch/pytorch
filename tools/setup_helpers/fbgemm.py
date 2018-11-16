@@ -5,7 +5,7 @@ USE_FBGEMM = False
 if check_env_flag('NO_FBGEMM'):
     USE_FBGEMM = False
 else:
-    #Enable FBGEMM if explicitly enabled
+    # Enable FBGEMM if explicitly enabled
     if check_env_flag('USE_FBGEMM'):
         USE_FBGEMM = True
     else:
