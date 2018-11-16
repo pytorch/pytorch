@@ -147,8 +147,13 @@ def test_cpp_extensions(executable, test_module, test_directory, options):
     except RuntimeError:
         print(CPP_EXTENSIONS_ERROR)
         return 1
+    cpp_extensions_test_dir = os.path.join(test_directory, 'cpp_extensions')
     return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
-                        os.path.join(test_directory, 'cpp_extensions'))
+                        cwd=cpp_extensions_test_dir)
+    if return_code != 0:
+        return return_code
+    return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
+                        cwd=os.path.join(cpp_extensions_test_dir, 'no_python_abi_suffix_test'))
     if return_code != 0:
         return return_code
 

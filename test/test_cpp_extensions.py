@@ -402,6 +402,20 @@ class TestCppExtension(common.TestCase):
             is_python_module=False)
         self.assertEqual(torch.ops.test.func(torch.eye(5)), torch.eye(5))
 
+    def test_no_python_abi_suffix_sets_the_correct_library_name(self):
+        # For this test, run_test.py will call `python setup.py install` in the
+        # cpp_extensions/no_python_abi_suffix_test folder, where the
+        # `BuildExtension` class has a `no_python_abi_suffix` option set to
+        # `True`. This *should* mean that on Python 3, the produced shared
+        # library does not have an ABI suffix like
+        # "cpython-37m-x86_64-linux-gnu" before the library suffix, e.g. "so".
+        # On Python 2 there is no ABI suffix anyway.
+        ext = {"win32": "dll", "linux": "so", "darwin": "dylib"}[sys.platform]
+        root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "install")
+        matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith(ext)]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0], "{}.{}".format("no_python_abi_suffix_test", ext))
+
 
 if __name__ == '__main__':
     common.run_tests()

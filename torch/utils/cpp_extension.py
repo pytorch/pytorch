@@ -206,6 +206,22 @@ class BuildExtension(build_ext):
     the C++ and CUDA compiler during mixed compilation.
     '''
 
+    @classmethod
+    def with_options(cls, **options):
+        '''
+        Returns an alternative constructor that extends any original keyword
+        arguments to the original constructor with the given options.
+        '''
+        def init_with_options(*args, **kwargs):
+            kwargs = kwargs.copy()
+            kwargs.update(options)
+            return cls(*args, **kwargs)
+        return init_with_options
+
+    def __init__(self, *args, **kwargs):
+        super(BuildExtension, self).__init__(*args, **kwargs)
+        self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
+
     def build_extensions(self):
         self._check_abi()
         for extension in self.extensions:
@@ -261,9 +277,7 @@ class BuildExtension(build_ext):
             extra_postargs = None
 
             def spawn(cmd):
-                orig_cmd = cmd
                 # Using regex to match src, obj and include files
-
                 src_regex = re.compile('/T(p|c)(.*)')
                 src_list = [
                     m.group(2) for m in (src_regex.match(elem) for elem in cmd)
@@ -322,6 +336,23 @@ class BuildExtension(build_ext):
 
         build_ext.build_extensions(self)
 
+    def get_ext_filename(self, ext_name):
+        # Get the original shared library name. For Python 3, this name will be
+        # suffixed with "<SOABI>.so", where <SOABI> will be something like
+        # cpython-37m-x86_64-linux-gnu. On Python 2, there is no such ABI name.
+        # The final extension, .so, would be .lib/.dll on Windows of course.
+        ext_filename = super(BuildExtension, self).get_ext_filename(ext_name)
+        # If `no_python_abi_suffix` is `True`, we omit the Python 3 ABI
+        # component. This makes building shared libraries with setuptools that
+        # aren't Python modules nicer.
+        if self.no_python_abi_suffix and sys.version_info >= (3, 0):
+            # The parts will be e.g. ["my_extension", "cpython-37m-x86_64-linux-gnu", "so"].
+            ext_filename_parts = ext_filename.split('.')
+            # Omit the second to last element.
+            without_abi = ext_filename_parts[:-2] + ext_filename_parts[-1:]
+            ext_filename = '.'.join(without_abi)
+        return ext_filename
+
     def _check_abi(self):
         # On some platforms, like Windows, compiler_cxx is not available.
         if hasattr(self.compiler, 'compiler_cxx'):
@@ -359,7 +390,6 @@ class BuildExtension(build_ext):
         # non-C++11 symbols
         if _is_binary_build():
             self._add_compile_flag(extension, '-D_GLIBCXX_USE_CXX11_ABI=0')
-
 
 def CppExtension(name, sources, *args, **kwargs):
     '''
