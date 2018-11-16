@@ -16,27 +16,6 @@ cudaDeviceProp* getDeviceProperties(int64_t device) {
   return THCState_getDeviceProperties(at::globalContext().getTHCState(), (int)device);
 }
 
-/* Streams */
-CUDAStream getStreamFromPool(
-  const bool isHighPriority
-, int64_t device) {
-  return CUDAStream(detail::CUDAStream_getStreamFromPool(isHighPriority, device));
-}
-
-CUDAStream getDefaultCUDAStream(int64_t device) {
-  return CUDAStream(detail::CUDAStream_getDefaultStream(device));
-}
-CUDAStream getCurrentCUDAStream(int64_t device) {
-  return CUDAStream(detail::CUDAStream_getCurrentStream(device));
-}
-
-void setCurrentCUDAStream(CUDAStream stream) {
-  detail::CUDAStream_setStream(stream.internals());
-}
-void uncheckedSetCurrentCUDAStream(CUDAStream stream) {
-  detail::CUDAStream_uncheckedSetStream(stream.internals());
-}
-
 Allocator* getCUDADeviceAllocator() {
   return at::globalContext().getTHCState()->cudaDeviceAllocator;
 }
