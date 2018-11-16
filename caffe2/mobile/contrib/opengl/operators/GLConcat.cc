@@ -19,18 +19,24 @@ class GLConcat : public GLFilter {
   binding* input_tile_x;
 
   GLConcat(tile_descriptor output_tile_geometries, bool tiling = false)
-      : GLFilter("GLConcat",
-                 vertex_shader,
-                 fragment_shader,
-                 std::vector<binding*>(
-                     {BINDING(outputSize), BINDING(inputData), BINDING(inputTileRange), BINDING(input_tile_x)}),
-                 {/* no uniform blocks */},
-                 {/* no attributes */},
-                 {{"TILING", caffe2::to_string(tiling)},
-                  {"OUTPUT_TILES", caffe2::to_string(output_tile_geometries.tiles)},
-                  {"OUTPUT_TILE_X", caffe2::to_string(output_tile_geometries.tile_dims.x)},
-                  {"OUTPUT_TILE_WIDTH", caffe2::to_string(output_tile_geometries.tile_size.x)},
-                  {"OUTPUT_TILE_HEIGHT", caffe2::to_string(output_tile_geometries.tile_size.y)}}),
+      : GLFilter(
+            "GLConcat",
+            vertex_shader,
+            fragment_shader,
+            std::vector<binding*>({BINDING(outputSize),
+                                   BINDING(inputData),
+                                   BINDING(inputTileRange),
+                                   BINDING(input_tile_x)}),
+            {/* no uniform blocks */},
+            {/* no attributes */},
+            {{"TILING", c10::to_string(tiling)},
+             {"OUTPUT_TILES", c10::to_string(output_tile_geometries.tiles)},
+             {"OUTPUT_TILE_X",
+              c10::to_string(output_tile_geometries.tile_dims.x)},
+             {"OUTPUT_TILE_WIDTH",
+              c10::to_string(output_tile_geometries.tile_size.x)},
+             {"OUTPUT_TILE_HEIGHT",
+              c10::to_string(output_tile_geometries.tile_size.y)}}),
         tiling_(tiling) {}
 
   template <typename T>

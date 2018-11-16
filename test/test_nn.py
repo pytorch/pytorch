@@ -143,6 +143,13 @@ class PackedSequenceTest(TestCase):
         unpacked, _ = rnn_utils.pad_packed_sequence(packed)
         self.assertEqual(unpacked.type(), cuda_type_str)
 
+    def test_wrong_order(self):
+        # https://github.com/pytorch/pytorch/issues/13324
+        a = torch.ones(25, 300)
+        b = torch.ones(22, 300)
+        b_a = rnn_utils.pad_sequence([b, a])
+        self.assertRaises(RuntimeError, lambda: rnn_utils.pack_padded_sequence(b_a, [22, 25]))
+
     def test_total_length(self):
         padded, lengths = self._padded_sequence(torch.FloatTensor)
         max_length = max(lengths)
