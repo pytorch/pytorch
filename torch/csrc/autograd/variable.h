@@ -186,6 +186,9 @@ struct TORCH_API Variable : public at::Tensor {
   /// Returns a copy of this `Variable` that is detached from its autograd graph
   /// and has a blank version. This method is OK to call if the `Variable` is a
   /// view.
+  /// NOTE: This will set `allow_size_or_storage_change_` to false, because changing
+  /// size or storage of a detached Variable will not update the original Variable
+  /// in the near future when VariableImpl and TensorImpl are merged.
   Variable detach() const;
 
   /// Like `detach()`, but removes this `Variable` in-place. This method may
@@ -625,7 +628,9 @@ inline std::shared_ptr<Function> Variable::grad_accumulator() const {
 }
 
 inline Variable Variable::detach() const {
-  return make_variable_view(*this, get()->data_, /*is_differentiable=*/false);
+  auto var = make_variable_view(*this, get()->data_, /*is_differentiable=*/false);
+  var.data().unsafeGetTensorImpl()->set_allow_size_or_storage_change(false);
+  return var;
 }
 
 inline void Variable::detach_() {
