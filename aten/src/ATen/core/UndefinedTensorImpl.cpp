@@ -35,6 +35,10 @@ int64_t UndefinedTensorImpl::storage_offset() const {
 IntList UndefinedTensorImpl::strides() const {
   AT_ERROR("strides() called on undefined Tensor");
 }
+
+bool UndefinedTensorImpl::defined() const {
+  return false;
+}
 UndefinedTensorImpl UndefinedTensorImpl::_singleton;
 
 }
