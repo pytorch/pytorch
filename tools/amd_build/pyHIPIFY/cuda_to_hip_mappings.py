@@ -2258,15 +2258,17 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
 # because a regex for CUDA will also match a filename like CUDAGuard.h,
 # but the HIPIFY script doesn't presently move the file and so the substitution
 # will be invalid.  Instead, we specifically list out every identifier
-# from c10/cuda which may be used externally, and do substitutions this
+# and file from c10/cuda which may be used externally, and do substitutions this
 # way.
 #
 # NB: if you want a transformation to ONLY apply to the c10/ directory,
 # put it as API_CAFFE2
 C10_MAPPINGS = collections.OrderedDict([
     ("cuda::compat::", ("hip::compat::", API_C10)),
-    ("c10/cuda/CUDA", ("c10/hip/HIP", API_C10)),
-    ("c10/cuda/impl/CUDA", ("c10/hip/impl/HIP", API_C10)),
+    ("c10/cuda/CUDAException.h", ("c10/hip/HIPException.h", API_C10)),
+    ("c10/cuda/CUDAMacros.h", ("c10/hip/HIPMacros.h", API_C10)),
+    ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
+    ("c10/cuda/CUDAFunctions.h", ("c10/hip/HIPFunctions.h", API_C10)),
     ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
     ("c10::cuda", ("c10::hip", API_C10)),
     # This substitution is not permissible, because there's another copy of this
