@@ -2008,7 +2008,8 @@ along the specified dimension :attr:`dim` must be unique.
 
 Args:
     dim (int): the axis along which to index
-    index (LongTensor): the indices of elements to scatter
+    index (LongTensor): the indices of elements to scatter, can be either empty or
+      the same size of `src`
     src (Tensor or float): the source element(s) to scatter
 
 Example::
