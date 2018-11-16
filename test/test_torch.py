@@ -9417,11 +9417,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     def test_allow_size_or_storage_change(self):
         def do_test(t):
             a = torch.tensor([[1], [2]])
-            with self.assertRaisesRegex(RuntimeError, "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()"):
+            with self.assertRaisesRegex(RuntimeError,
+                                        "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()"):
                 t.resize_((2, 1))
-            with self.assertRaisesRegex(RuntimeError, "set_storage is not allowed on Tensor created from .data or .detach()"):
+            with self.assertRaisesRegex(RuntimeError,
+                                        "set_storage is not allowed on Tensor created from .data or .detach()"):
                 t.set_()
-            with self.assertRaisesRegex(RuntimeError, "set_storage_offset is not allowed on Tensor created from .data or .detach()"):
+            with self.assertRaisesRegex(RuntimeError,
+                                        "set_storage_offset is not allowed on Tensor created from .data or .detach()"):
                 t.set_(t.storage(), 0, t.size(), list(t.stride()))
 
         do_test(torch.tensor([[1, 2]]).data)
