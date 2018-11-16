@@ -1,3 +1,5 @@
+from __future__ import division
+
 import torch
 from .module import Module
 from torch.nn.parameter import Parameter
