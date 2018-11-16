@@ -10,6 +10,11 @@
 #include <vector>
 #include <array>
 
+namespace at {
+namespace cuda {
+
+namespace detail {
+
 // Internal implementation is entirely hidden
 // Note: CUDAStreamInternals doubles for a THCStream
 struct CUDAStreamInternals {
@@ -23,11 +28,6 @@ struct CUDAStreamInternals {
   int32_t stream_id = -1;
   cudaStream_t stream = nullptr;
 };
-
-namespace at {
-namespace cuda {
-
-namespace detail {
 
 // Global stream state and constants
 static int64_t num_gpus = -1;
@@ -300,12 +300,12 @@ int64_t CUDAStream_device(const CUDAStreamInternals* ptr) {
 
 } // namespace detail
 
-CUDAStream::CUDAStream(const CUDAStreamInternals* ptr)
+CUDAStream::CUDAStream(const detail::CUDAStreamInternals* ptr)
   : stream_(c10::Device(DeviceType::CUDA, detail::CUDAStream_device(ptr)), detail::CUDAStream_getStreamId(ptr)) {
 }
 
 // See Note [StreamId assignment]
-CUDAStreamInternals* CUDAStream::internals() const {
+detail::CUDAStreamInternals* CUDAStream::internals() const {
   c10::DeviceIndex device_index = stream_.device_index();
   detail::StreamIdType st = detail::streamIdType(stream_.id());
   size_t si = detail::streamIdIndex(stream_.id());

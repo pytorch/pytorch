@@ -51,12 +51,12 @@
 * overlap the performance critical streams.
 */
 
-struct CUDAStreamInternals;
-
 namespace at {
 namespace cuda {
 
 namespace detail {
+
+struct CUDAStreamInternals;
 
 // Pointer-based API (for internal use, backwards compatibility with C-based API)
 AT_CUDA_API CUDAStreamInternals* CUDAStream_getDefaultStream(int64_t device = -1);
@@ -81,7 +81,7 @@ struct AT_CUDA_API CUDAStream {
 
   enum Unchecked { UNCHECKED };
 
-  explicit CUDAStream(const CUDAStreamInternals*);
+  explicit CUDAStream(const detail::CUDAStreamInternals*);
 
   explicit CUDAStream(Stream stream) : stream_(stream) {
     AT_CHECK(stream_.device_type() == DeviceType::CUDA);
@@ -97,7 +97,7 @@ struct AT_CUDA_API CUDAStream {
   int64_t device_index() const { return stream_.device_index(); }
   Device device() const { return Device(DeviceType::CUDA, device_index()); }
   cudaStream_t stream() const { return detail::CUDAStream_stream(internals()); }
-  CUDAStreamInternals* internals() const;
+  detail::CUDAStreamInternals* internals() const;
 
   Stream unwrap() const { return stream_; }
 
