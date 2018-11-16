@@ -222,29 +222,34 @@ void initJITBindings(PyObject *module) {
           py::init([](py::function func,
                       py::tuple inputs,
                       py::function var_name_lookup_fn,
-                      bool optimize) {
-              auto graph = tracer::createGraphByTracing(func, toStack(inputs), var_name_lookup_fn);
-              return GraphExecutor(graph, optimize);
+                      bool optimize,
+                      bool try_outplace) {
+            auto graph = tracer::createGraphByTracing(
+                func, toStack(inputs), var_name_lookup_fn, try_outplace);
+            return GraphExecutor(graph, optimize);
           }),
           py::arg("func"),
           py::arg("inputs"),
           py::arg("var_name_lookup_fn"),
-          py::arg("optimize") = true)
+          py::arg("optimize") = true,
+          py::arg("try_outplace") = false)
       .def(
           py::init([](std::shared_ptr<Graph> graph, bool optimize) {
             return GraphExecutor(std::move(graph), optimize);
           }),
           py::arg("graph"),
           py::arg("optimize") = true)
-      .def("graph_for", [](GraphExecutor& ge, py::args args) {
-        return ge.graphFor(evilDeprecatedBadCreateStackDoNotUse(args, ge.graph()->inputs()));
-      })
-      .def_property_readonly("graph", [](GraphExecutor& ge) {
-        return ge.graph();
-      })
-      .def("get_debug_state", [](GraphExecutor& ge) {
-        return ge.getDebugState();
-      })
+      .def(
+          "graph_for",
+          [](GraphExecutor& ge, py::args args) {
+            return ge.graphFor(evilDeprecatedBadCreateStackDoNotUse(
+                args, ge.graph()->inputs()));
+          })
+      .def_property_readonly(
+          "graph", [](GraphExecutor& ge) { return ge.graph(); })
+      .def(
+          "get_debug_state",
+          [](GraphExecutor& ge) { return ge.getDebugState(); })
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
         const auto & graph = ge.graph();
         auto stack = evilDeprecatedBadCreateStackDoNotUse(args, graph->inputs());

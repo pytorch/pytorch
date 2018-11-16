@@ -39,6 +39,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     py::function func,
     Stack trace_inputs,
     py::function var_name_lookup_fn,
+    bool try_outplace,
     c10::optional<size_t> num_real_inputs) {
   size_t num_func_inputs = num_real_inputs.value_or(trace_inputs.size());
   auto enter_info = tracer::enter(std::move(trace_inputs));
@@ -46,6 +47,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     AutoGIL ag;
     return py::cast<std::string>(var_name_lookup_fn(var));
   };
+  getTracingState()->try_outplace = try_outplace;
   try {
 
     py::tuple py_inputs(num_func_inputs);
@@ -166,6 +168,11 @@ void initPythonTracerBindings(PyObject* module) {
       AutoGIL ag;
       return py::cast<std::string>(func(var));
     };
+  });
+  m.def("_tracer_set_try_outplace", [](bool try_outplace) {
+    auto tracing_state = getTracingState();
+    JIT_ASSERT(tracing_state);
+    tracing_state->try_outplace = try_outplace;
   });
 }
 
