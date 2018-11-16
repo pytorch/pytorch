@@ -114,7 +114,7 @@ template<typename scalar_t>
 static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("gesv: LAPACK library not found in compilation");
-#endif
+#else
   auto A_data = A.data<scalar_t>();
   auto b_data = b.data<scalar_t>();
   auto A_mat_stride = matrixStride(A);
@@ -136,6 +136,7 @@ static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
       return;
     }
   }
+#endif
 }
 
 std::tuple<Tensor, Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) {
@@ -176,7 +177,7 @@ template <typename scalar_t>
 static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("inverse: LAPACK library not found in compilation");
-#endif
+#else
   auto self_data = self.data<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
 
@@ -211,6 +212,7 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
       return;
     }
   }
+#endif
 }
 
 Tensor _inverse_helper_cpu(const Tensor& self) {
@@ -248,7 +250,7 @@ template<typename scalar_t>
 static void apply_potrs(Tensor& b, Tensor& A, bool upper, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("potrs: LAPACK library not found in compilation");
-#endif
+#else
   char uplo = upper ? 'U' : 'L';
 
   auto A_data = A.data<scalar_t>();
@@ -270,6 +272,7 @@ static void apply_potrs(Tensor& b, Tensor& A, bool upper, std::vector<int64_t>& 
       return;
     }
   }
+#endif
 }
 
 Tensor _potrs_helper_cpu(const Tensor& self, const Tensor& A, bool upper) {
@@ -307,8 +310,7 @@ template<typename scalar_t>
 static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("cholesky: LAPACK library not found in compilation");
-#endif
-
+#else
   char uplo = upper ? 'U' : 'L';
 
   auto self_data = self.data<scalar_t>();
@@ -326,6 +328,7 @@ static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos
       return;
     }
   }
+#endif
 }
 
 Tensor _cholesky_helper_cpu(const Tensor& self, bool upper) {
@@ -347,8 +350,15 @@ Tensor cholesky(const Tensor &self, bool upper) {
   }
   squareCheckInputs(self);
 
-  // TODO: Once triu, tril is implemented for batched tensors, this
-  // can be simplified.
+  // TODO: (#14071) Once `triu`, `tril` is implemented for batched tensors,
+  // this can be simplified. Currently, we are zero-ing out values in the
+  // batch of matrices by using a mask and the `where` function.
+  // The simplification with batched `triu` and `tril` would be this:
+  // if (upper) {
+  //   return raw_cholesky_output.triu();
+  // } else {
+  //   return raw_cholesky_output.tril();
+  // }
   auto raw_cholesky_output = at::_cholesky_helper(self, upper);
   int64_t n = self.size(-1);
   auto indices = at::ones({n, n}, self.options().dtype(at::kByte));
