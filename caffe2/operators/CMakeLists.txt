@@ -23,15 +23,15 @@ set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
 file(GLOB tmp *_test.cc)
 exclude(Caffe2_GPU_SRCS "${Caffe2_GPU_SRCS}" ${tmp})
 
+# ------[ general HIP
+file(GLOB tmp hip/*.cc)
+set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${tmp})
 # ------[ HIP sources
-file(GLOB_RECURSE tmp *_hip.cc)
+file(GLOB tmp hip/*.hip)
 set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${tmp})
-# ------[ HIP device sources
-file(GLOB_RECURSE tmp *_hipdev.cc)
-set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${tmp})
-# ---[ MIOPEN files
-file(GLOB_RECURSE tmp *_miopen.cc)
-set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${tmp})
+# exclude test files
+file(GLOB tmp hip/*_test.cc)
+exclude(Caffe2_HIP_SRCS "${Caffe2_HIP_SRCS}" ${tmp})
 
 # ---[ CPU files.
 file(GLOB tmp *.cc)
@@ -58,10 +58,7 @@ file(GLOB tmp *_gpu_test.cc)
 set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} ${tmp})
 
 # ---[ HIP test files
-file(GLOB_RECURSE tmp *_hip_test.cc)
-set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS} ${tmp})
-# ---[ MIOPEN test files
-file(GLOB_RECURSE tmp *_miopen_test.cc)
+file(GLOB tmp hip/*_test.cc)
 set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS} ${tmp})
 
 # ---[ CPU test files
