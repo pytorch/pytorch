@@ -10,8 +10,8 @@ struct LayerNorm final {
   static constexpr const char* name = "LayerNorm";
 
   struct Cache final {
-    Tensor scale = Tensor{CPU};
-    Tensor bias = Tensor{CPU};
+    Tensor scale = empty({}, CPU);
+    Tensor bias = empty({}, CPU);
   };
 
   using Signature = void(
