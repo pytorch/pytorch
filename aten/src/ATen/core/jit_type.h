@@ -170,7 +170,11 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 // Subtype hierarchy for Optional:
 // 1. Optional[T] isSubtypeOf Optional[R] iff T isSubtypeOf R
 // 2. T isSubtypeOf Optional[R] if T isSubtypeOf R
-// 3. NoneType isSubtypeOf any Optional Type
+// Note: NoneType is NOT a subtype of any optional.
+// instead NoneType is convertable in schema matching to any Optional[T]
+// it is handled this way because it is not possible to match None to Optional[T]
+// and extract T. Intead, we always create an instance of the prim::None instruction
+// with a particular type: v: Optional[int] = prim::None()
 struct CAFFE2_API OptionalType: public Type {
   static OptionalTypePtr create(TypePtr element) {
     return OptionalTypePtr(new OptionalType(std::move(element))); // NOLINT(modernize-make-shared)
@@ -527,7 +531,7 @@ struct CAFFE2_API ListType : public SingleElementType<TypeKind::ListType, ListTy
   static ListTypePtr ofFloats();
   static ListTypePtr ofBools();
 private:
-  using SingleElementType::SingleElementType;
+ ListType(TypePtr elem) : SingleElementType(elem) {}
 };
 
 struct FutureType;
@@ -679,6 +683,11 @@ struct CAFFE2_API NumberType : public Type {
   std::string str() const override {
     return "Scalar"; // match what PythonArgParser says for clarity
   }
+  std::string python_str() const override {
+    return "number"; // technically not a valid python type, but
+                     // we need to use it when parsing back in annotations
+                     // for implicit conversions
+  }
   static const TypeKind Kind = TypeKind::NumberType;
   // global singleton
   static NumberTypePtr get();
@@ -758,6 +767,9 @@ struct CAFFE2_API BoolType : public Type {
     return "bool";
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
+    if(auto rhs_ = rhs->cast<OptionalType>()) {
+      return this->isSubtypeOf(rhs_->getElementType());
+    }
     return *this == *rhs || rhs->kind() == TypeKind::BoolType;
   }
   static const TypeKind Kind = TypeKind::BoolType;
@@ -781,6 +793,9 @@ struct CAFFE2_API StringType : public Type {
   }
   std::string str() const override {
     return "string";
+  }
+  std::string python_str() const override {
+    return "str";
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
     if(auto rhs_ = rhs->cast<OptionalType>()) {
@@ -809,8 +824,7 @@ struct CAFFE2_API NoneType : public Type {
   }
 
   bool isSubtypeOf(const TypePtr rhs) const override {
-    return rhs->kind() == TypeKind::NoneType ||
-           rhs->kind() == TypeKind::OptionalType;
+    return rhs->kind() == TypeKind::NoneType;
   }
 
   std::string str() const override {
@@ -936,17 +950,15 @@ template<> inline TypePtr getTypePtr<std::vector<int64_t>>() { return ListType::
 
 CAFFE2_API TypePtr inferTypeFrom(const IValue& value);
 
-struct CAFFE2_API TypeMatchError : public std::exception {
-  TypeMatchError(std::string msg_)
-  : msg_(std::move(msg_)) {}
-  const char * what() const noexcept override {
-    return msg_.c_str();
-  }
-private:
-  std::string msg_;
-};
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
-CAFFE2_API TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv & type_env);
+struct MatchTypeReturn {
+  c10::optional<TypePtr> type; // nullopt if there is no match
+  std::string errMsg; // is there is no match, this contains the reason
+};
+
+CAFFE2_API MatchTypeReturn
+matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
+
 CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 
 } // namespace c10

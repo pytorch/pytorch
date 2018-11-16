@@ -54,7 +54,11 @@ void addInputs(Node *n, const char * name, const c10::optional<at::Scalar>& valu
   if(value) {
     detail::genericAddInput(n, *value);
   } else {
-    detail::genericAddInput(n, IValue());
+    Graph * g = n->owningGraph();
+    Value* none =
+        g->insertNode(g->createNone(NumberType::get()))
+            ->output();
+    n->addInput(none);
   }
 }
 void addInputs(Node *n, const char * name, const std::string& value) { detail::genericAddInput(n, value); }
