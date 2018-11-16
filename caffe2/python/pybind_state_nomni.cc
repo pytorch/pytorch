@@ -328,6 +328,7 @@ void addNomnigraphMethods(pybind11::module& m) {
           "tensor", getTensor, py::return_value_policy::reference)
       .def("getInputs", getInputs, py::return_value_policy::reference)
       .def("getOutputs", getOutputs, py::return_value_policy::reference)
+      .def("hasProducer", [](NNGraph::NodeRef n) { return nn::hasProducer(n); })
       .def("getProducer", getProducer, py::return_value_policy::reference)
       .def("getConsumers", getConsumers, py::return_value_policy::reference)
       .def_property_readonly(
