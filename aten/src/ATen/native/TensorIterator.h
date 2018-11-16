@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <ATen/core/SmallVector.h>
+#include <c10/util/SmallVector.h>
 #include <ATen/core/Range.h>
 #include <ATen/detail/ScalarTypeConversions.h>
 #include <bitset>

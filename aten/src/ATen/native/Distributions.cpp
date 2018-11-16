@@ -18,7 +18,7 @@
 #include <assert.h>
 #include <cpuinfo.h>
 
-#include "TH/THRandom.h"
+#include <TH/THRandom.h>
 #include "TH/THGenerator.hpp"
 #include "TH/THMath.h"
 

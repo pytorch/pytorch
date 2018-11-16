@@ -69,7 +69,7 @@ def _file_rendezvous_handler(url):
 
     rank = int(query["rank"])
     world_size = int(query["world_size"])
-    store = FileStore(path)
+    store = FileStore(path, world_size)
     yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it

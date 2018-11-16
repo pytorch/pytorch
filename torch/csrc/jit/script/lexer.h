@@ -27,6 +27,7 @@ namespace script {
 #define TC_FORALL_TOKEN_KINDS(_)                 \
   _(TK_EOF, "eof", "")                           \
   _(TK_WHITESPACE, "whitespace", "")             \
+  _(TK_WHITESPACE_EOF, "whitespace_eof", "")     \
   _(TK_NUMBER, "number", "")                     \
   _(TK_NEWLINE, "newline", "")                   \
   _(TK_INDENT, "indent", "")                     \
@@ -60,6 +61,7 @@ namespace script {
   _(TK_EQ, "eq", "==")                           \
   _(TK_LE, "le", "<=")                           \
   _(TK_GE, "ge", ">=")                           \
+  _(TK_FLOOR_DIV, "floordiv", "//")              \
   _(TK_IF_EXPR, "if", "")                        \
   _(TK_TRUE, "True", "True")                     \
   _(TK_FALSE, "False", "False")                  \
@@ -94,7 +96,7 @@ namespace script {
   _(TK_PASS, "pass", "pass")
 
 
-static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!";
+static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
@@ -209,6 +211,8 @@ struct SharedParserData {
       }
       //handle escaped characters. advances past escaped quotation marks,
       //escaped newlines and escaped backslashes
+      //multi-char escapes like \x1A are handled fine here because the
+      //remainder of the escape are valid string characters anyway
       if (str[end] == '\\') {
         end++;
       }
@@ -269,6 +273,17 @@ struct SharedParserData {
             str, pos + 1, continuation, !continuation, kind, start, len);
       }
     }
+    // we handle white space before EOF because in the case we have something like
+    // the following where we need to generate the dedent token
+    // if foo:
+    //   ...
+    // else:
+    //   pass
+    if (whitespace_token) {
+      *kind = pos == str.size() ? TK_WHITESPACE_EOF : TK_WHITESPACE;
+      *len = pos - *start;
+      return true;
+    }
     if (pos == str.size()) {
       *kind = TK_EOF;
       *start = pos;
@@ -276,11 +291,6 @@ struct SharedParserData {
       return true;
     }
     // invariant: the next token is not whitespace or newline
-    if (whitespace_token) {
-      *kind = TK_WHITESPACE;
-      *len = pos - *start;
-      return true;
-    }
     *start = pos;
     // check for a valid number
     if (isNumber(str, pos, len)) {
@@ -442,8 +452,16 @@ struct Lexer {
       case '}':
         nesting--;
         break;
-      case TK_WHITESPACE: {
-        int depth = r.range.size();
+      case TK_WHITESPACE:
+      case TK_WHITESPACE_EOF: {
+        int depth =
+            r.kind == TK_WHITESPACE_EOF ? indent_stack.front() : r.range.size();
+        // note: TK_WHITESPACE_EOF is whitespace right before the EOF token
+        // just like we allow the code to be indented to a particular initial
+        // indent level, we allow the final indent to be anything and set
+        // it back to the initial indent level. This allows the code to be
+        // put into string literals inside code without worrying about final
+        // whitespace
         if (depth > indent_stack.back()) {
           indent_stack.push_back(depth);
           r.kind = TK_INDENT;
@@ -455,20 +473,12 @@ struct Lexer {
             indent_stack.pop_back();
             next_tokens.emplace_back(TK_DEDENT, r.range);
             if (indent_stack.size() == 0) {
-              reportError("invalid ident level", r);
+              reportError("invalid indent level " + std::to_string(depth), r);
             }
           }
           return; // We've already queued the tokens
         }
       } break;
-      case TK_EOF:
-        if (indent_stack.size() > 1) {
-          next_tokens.emplace_back(TK_NEWLINE, r.range);
-          next_tokens.emplace_back(TK_DEDENT, r.range);
-          indent_stack.pop_back();
-          return;
-        }
-        break;
       default:
         break;
     }

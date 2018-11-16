@@ -30,7 +30,7 @@ file(GLOB tmp *.cc)
 # TODO: when we move to explicit file list, this would not be needed.
 file(GLOB tmp_cudnn *_cudnn.cc)
 exclude(tmp "${tmp}" ${tmp_cudnn})
-set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} $<TARGET_OBJECTS:dispatch> ${tmp})
+set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${tmp})
 # exclude test files and gpu files
 file(GLOB tmp *_test.cc)
 exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${tmp})

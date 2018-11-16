@@ -48,7 +48,7 @@ ConvDNNLowPOp<T, ReluFused>::ConvDNNLowPOp(
   }
 
   if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {
-    BaseType::CreateSharedInt32Buffer_();
+    this->CreateSharedInt32Buffer_();
   }
 
   quantize_groupwise_ =
@@ -99,7 +99,7 @@ bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3FastPath_() {
       is_same<T, uint8_t>::value && X.template IsType<T>() &&
       OperatorBase::debug_def().engine() != "DNNLOWP_ACC16" &&
       group_ == X.dim32(X.dim() - 1) && group_ % 8 == 0 &&
-      BaseType::kernel_.size() == 2 && kernel_h() == 3 && kernel_w() == 3 &&
+      this->kernel_.size() == 2 && kernel_h() == 3 && kernel_w() == 3 &&
       stride_h() == stride_w() && (stride_h() == 1 || stride_h() == 2) &&
       pad_t() == 1 && pad_b() == 1 && pad_l() == 1 && pad_r() == 1 &&
       !dequantize_output_ && GetCpuId().avx2() && !quantize_groupwise_;
@@ -112,15 +112,14 @@ bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3x3FastPath_() {
       is_same<T, uint8_t>::value && X.template IsType<T>() &&
       OperatorBase::debug_def().engine() != "DNNLOWP_ACC16" &&
       group_ == X.dim32(X.dim() - 1) && group_ % 8 == 0 &&
-      BaseType::kernel_.size() == 3 && BaseType::kernel_[0] == 3 &&
-      BaseType::kernel_[1] == 3 && BaseType::kernel_[2] == 3 &&
-      BaseType::stride_[0] == BaseType::stride_[1] &&
-      BaseType::stride_[0] == BaseType::stride_[2] &&
-      (BaseType::stride_[0] == 1 || BaseType::stride_[0] == 2) &&
-      BaseType::pads_[0] == 1 && BaseType::pads_[1] == 1 &&
-      BaseType::pads_[2] == 1 && BaseType::pads_[3] == 1 &&
-      BaseType::pads_[4] == 1 && BaseType::pads_[5] == 1 &&
-      !dequantize_output_ && GetCpuId().avx2() && !quantize_groupwise_;
+      this->kernel_.size() == 3 && this->kernel_[0] == 3 &&
+      this->kernel_[1] == 3 && this->kernel_[2] == 3 &&
+      this->stride_[0] == this->stride_[1] &&
+      this->stride_[0] == this->stride_[2] &&
+      (this->stride_[0] == 1 || this->stride_[0] == 2) && this->pads_[0] == 1 &&
+      this->pads_[1] == 1 && this->pads_[2] == 1 && this->pads_[3] == 1 &&
+      this->pads_[4] == 1 && this->pads_[5] == 1 && !dequantize_output_ &&
+      GetCpuId().avx2() && !quantize_groupwise_;
   return ret;
 }
 
@@ -141,7 +140,7 @@ int ConvDNNLowPOp<T, ReluFused>::KernelDim_() {
   }
 
   int kernel_dims_size = 1;
-  for (int i = 0; i < BaseType::kernel_.size(); ++i) {
+  for (int i = 0; i < this->kernel_.size(); ++i) {
     CAFFE_ENFORCE_EQ(filter.dim32(i + filter_offset), kernel_[i]);
     kernel_dims_size *= kernel_[i];
   }
@@ -164,8 +163,8 @@ bool ConvDNNLowPOp<T, ReluFused>::NoIm2ColNHWC_() {
     return false;
   }
 
-  for (auto i = 0; i < BaseType::kernel_.size(); ++i) {
-    if (Y->dim32(i + 1) != X.dim32(i + 1) || BaseType::stride_[i] != 1 ||
+  for (auto i = 0; i < this->kernel_.size(); ++i) {
+    if (Y->dim32(i + 1) != X.dim32(i + 1) || this->stride_[i] != 1 ||
         pads_[2 * i] != 0 || pads_[2 * i + 1] != 0) {
       return false;
     }
@@ -395,18 +394,18 @@ template <typename T, bool ReluFused>
 bool ConvDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
   using namespace dnnlowp;
 
-  if (!BaseType::arguments_parsed_) {
+  if (!this->arguments_parsed_) {
     ParseDNNLowPOperatorArguments(
         this, &dequantize_output_, &measure_quantization_error_, &followed_by_);
 
     if (ReluFused) {
       // It's actually fused with Relu not followed by but setting this to make
       // sure quantization error is correctly measured in
-      // BaseType::MeasureQuantizationError_
+      // this->MeasureQuantizationError_
       followed_by_ = "Relu";
       AdjustOutputTensorQuantizationParamsWithFollowedBy(this, followed_by_);
     }
-    BaseType::arguments_parsed_ = true;
+    this->arguments_parsed_ = true;
   }
 
   // Choose quantization for X
@@ -570,7 +569,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
       buffer_shape.end(), output_dims.begin(), output_dims.end());
   buffer_shape.insert(buffer_shape.begin(), dnnlowp_get_max_threads());
 
-  if (BaseType::kernel_.size() != 2) {
+  if (this->kernel_.size() != 2) {
     SetDeviceTensor(img_shape, &img_shape_device_);
     SetDeviceTensor(buffer_shape, &col_buffer_shape_device_);
   }
@@ -611,7 +610,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
       for (int image_id = 0; image_id < N; ++image_id) {
         int tid = dnnlowp_get_thread_num();
         for (int group_id = 0; group_id < group_; ++group_id) {
-          if (BaseType::kernel_.size() == 2) {
+          if (this->kernel_.size() == 2) {
             math::Im2ColNCHW<InType>(
                 C / group_,
                 input_dims[0],
@@ -632,7 +631,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
                 X.IsType<T>() ? in_qparams_[INPUT].zero_point : 0);
           } else {
             math::Im2ColNdNCHW<InType>(
-                BaseType::kernel_.size(),
+                this->kernel_.size(),
                 C * X_HxW,
                 col_buffer_size,
                 img_shape.data(),
@@ -705,14 +704,14 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
     }; // f2
 
     if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {
-      BaseType::RunWithSharedInt32Buffer_(f2);
+      this->RunWithSharedInt32Buffer_(f2);
     } else {
       f2(&Y_int32_);
     }
   }; // f
 
-  if (FLAGS_caffe2_force_shared_col_buffer || BaseType::shared_buffer_) {
-    runWithSharedBuffer<CPUContext>(BaseType::ws_, f);
+  if (FLAGS_caffe2_force_shared_col_buffer || this->shared_buffer_) {
+    runWithSharedBuffer<CPUContext>(this->ws_, f);
   } else {
     f(&col_buffer_);
   }
@@ -964,21 +963,21 @@ const InType* ConvDNNLowPOp<T, ReluFused>::Im2ColNHWC_(Tensor* col_buffer) {
 #pragma omp parallel for if (N > 1)
 #endif
   for (int image_id = 0; image_id < N; ++image_id) {
-    if (BaseType::kernel_.size() <= 2) {
+    if (this->kernel_.size() <= 2) {
       math::Im2ColNHWC<InType>(
           C,
           X.dim32(1),
-          BaseType::kernel_.size() == 2 ? X.dim32(2) : 1,
+          this->kernel_.size() == 2 ? X.dim32(2) : 1,
           kernel_h(),
-          BaseType::kernel_.size() == 2 ? kernel_w() : 1,
+          this->kernel_.size() == 2 ? kernel_w() : 1,
           dilation_h(),
-          BaseType::kernel_.size() == 2 ? dilation_w() : 1,
+          this->kernel_.size() == 2 ? dilation_w() : 1,
           pad_t(),
-          BaseType::kernel_.size() == 2 ? pad_l() : 1,
-          pad_b(),
-          BaseType::kernel_.size() == 2 ? pad_r() : 1,
+          this->kernel_.size() == 2 ? pad_l() : 0,
+          this->kernel_.size() == 2 ? pad_b() : pad_l(),
+          this->kernel_.size() == 2 ? pad_r() : 0,
           stride_h(),
-          BaseType::kernel_.size() == 2 ? stride_w() : 1,
+          this->kernel_.size() == 2 ? stride_w() : 1,
           Xdata + image_id * input_offset,
           col_buffer_data + image_id * group_ * kernel_dim * Y_HxW,
           &context_,
@@ -990,21 +989,21 @@ const InType* ConvDNNLowPOp<T, ReluFused>::Im2ColNHWC_(Tensor* col_buffer) {
           X.dim32(1), // num_frames
           X.dim32(2), // H
           X.dim32(3), // W
-          BaseType::kernel_[0],
-          BaseType::kernel_[1],
-          BaseType::kernel_[2],
-          BaseType::dilation_[0],
-          BaseType::dilation_[1],
-          BaseType::dilation_[2],
-          BaseType::pads_[0],
-          BaseType::pads_[1],
-          BaseType::pads_[2],
-          BaseType::pads_[3],
-          BaseType::pads_[4],
-          BaseType::pads_[5],
-          BaseType::stride_[0],
-          BaseType::stride_[1],
-          BaseType::stride_[2],
+          this->kernel_[0],
+          this->kernel_[1],
+          this->kernel_[2],
+          this->dilation_[0],
+          this->dilation_[1],
+          this->dilation_[2],
+          this->pads_[0],
+          this->pads_[1],
+          this->pads_[2],
+          this->pads_[3],
+          this->pads_[4],
+          this->pads_[5],
+          this->stride_[0],
+          this->stride_[1],
+          this->stride_[2],
           Xdata + image_id * input_offset,
           col_buffer_data + image_id * group_ * kernel_dim * Y_HxW,
           &context_,
@@ -1098,9 +1097,9 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
         X.dim32(2),
         X.dim32(3),
         C,
-        BaseType::stride_[0],
-        BaseType::stride_[1],
-        BaseType::stride_[2],
+        this->stride_[0],
+        this->stride_[1],
+        this->stride_[2],
         in_qparams_[INPUT].zero_point,
         reinterpret_cast<const uint8_t*>(Xdata),
         FilterQuantizationParams(0).zero_point,
@@ -1321,7 +1320,7 @@ template <typename T, bool ReluFused>
 template <typename InType>
 bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
   CAFFE_ENFORCE_LE(
-      BaseType::kernel_.size(),
+      this->kernel_.size(),
       3,
       "Only 1-3d convolutions are supported for NHWC storage type");
 
@@ -1451,15 +1450,15 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
       }
     }; // f2
 
-    if (FLAGS_caffe2_force_shared_col_buffer || BaseType::shared_buffer_) {
-      runWithSharedBuffer<CPUContext>(BaseType::ws_, f2);
+    if (FLAGS_caffe2_force_shared_col_buffer || this->shared_buffer_) {
+      runWithSharedBuffer<CPUContext>(this->ws_, f2);
     } else {
       f2(&col_buffer_);
     }
   }; // f
 
   if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {
-    BaseType::RunWithSharedInt32Buffer_(f);
+    this->RunWithSharedInt32Buffer_(f);
   } else {
     f(&Y_int32_);
   }

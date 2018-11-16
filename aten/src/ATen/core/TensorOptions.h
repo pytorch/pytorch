@@ -15,14 +15,6 @@
 #include <utility>
 
 namespace at {
-
-// Forward declaration from OptionsGuard.h
-//
-// Hopefully the out-of-line function call is not costing us too much: all this
-// function does is return a memory address, so it shouldn't be costing
-// us too much optimizer juice.
-CAFFE2_API const DefaultTensorOptions& getDefaultTensorOptions();
-
 /// A class to encapsulate construction axes of an Tensor.  TensorOptions was
 /// designed to support the Python style API for specifying construction options
 /// on factory functions, e.g.,
@@ -480,7 +472,7 @@ inline TensorOptions requires_grad(bool requires_grad = true) {
   return TensorOptions().requires_grad(requires_grad);
 }
 
-std::ostream& operator<<(
+CAFFE2_API std::ostream& operator<<(
     std::ostream& stream,
     const TensorOptions& options);
 

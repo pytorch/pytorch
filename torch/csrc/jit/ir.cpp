@@ -6,7 +6,7 @@
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/passes/pretty_print.h"
+#include "torch/csrc/jit/passes/python_print.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -188,12 +188,12 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
 }
 
 std::ostream& Graph::prettyPrint(std::ostream & out) {
-  PrettyPrint(out, *this);
+  PythonPrint(out, *this);
   return out;
 }
 
 void Graph::dumpPretty() {
-  PrettyPrint(std::cout, *this);
+  PythonPrint(std::cout, *this);
 }
 
 static void checkSameDevice(const Node* node) {
@@ -867,9 +867,32 @@ bool Node::isBefore(const Node * n) const {
 }
 
 bool Node::isAfter(const Node * n) const {
-  JIT_ASSERT(this->owningBlock() == n->owningBlock());
+  JIT_ASSERT(this->owningGraph() == n->owningGraph());
 
-  return this->topo_position_ > n->topo_position_;
+  if (this->owningBlock() == n->owningBlock()) {
+    return this->topo_position_ > n->topo_position_;
+  }
+
+  // These nodes don't share a common block. Traverse the blockchains upward
+  // until we find the first common block.
+  auto lhs = this;
+  while (lhs) {
+    JIT_ASSERT(lhs->owningBlock());
+
+    auto rhs = n;
+    while (rhs) {
+      JIT_ASSERT(rhs->owningBlock());
+
+      if (lhs->owningBlock() == rhs->owningBlock()) {
+        return lhs->isAfter(rhs);
+      }
+      rhs = rhs->owningBlock()->owningNode();
+    }
+
+    lhs = lhs->owningBlock()->owningNode();
+  }
+  // should never reach here, since both nodes are ultimately in the same graph
+  JIT_ASSERT(false);
 }
 
 Node* Node::insertBefore(Node * n) {
@@ -1160,8 +1183,19 @@ inline const SourceRange& fakeRange() {
   return range;
 }
 
-Value* Graph::insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs) {
-  return script::emitBuiltinCall(fakeRange(), *this, opname, c10::nullopt, args, kwargs, /*required=*/true);
+Value* Graph::insert(
+    Symbol opname,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    c10::optional<SourceRange> range) {
+  return script::emitBuiltinCall(
+      range.value_or(fakeRange()),
+      *this,
+      opname,
+      c10::nullopt,
+      args,
+      kwargs,
+      /*required=*/true);
 }
 
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
@@ -1181,6 +1215,12 @@ Node* Graph::create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs) 
 
 Node* Graph::createUndefined() {
   return create(prim::Undefined);
+}
+
+Node* Graph::createNone(TypePtr typ) {
+  Node * n = create(prim::None);
+  n->output()->setType(OptionalType::create(typ));
+  return n;
 }
 
 Node * Graph::createNoneGenerator() {

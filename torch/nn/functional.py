@@ -410,6 +410,7 @@ def _unpool_output_size(input, kernel_size, stride, padding, output_size):
     return output_size
 
 
+@torch._jit_internal.weak_script
 def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
     r"""Computes a partial inverse of :class:`MaxPool1d`.
@@ -465,6 +466,7 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
 
 
 def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
+    # type: (Tensor, int, int, Optional[List[int]], bool) -> Tensor
     r"""Applies a 1D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
@@ -713,7 +715,9 @@ In-place version of :func:`~relu`.
 """)
 
 
+@torch._jit_internal.weak_script
 def glu(input, dim=-1):
+    # type: (Tensor, int) -> Tensor
     r"""
     glu(input, dim=-1) -> Tensor
 
@@ -952,16 +956,21 @@ softplus(input, beta=1, threshold=20) -> Tensor
 """)
 
 
+@torch._jit_internal.weak_script
 def _get_softmax_dim(name, ndim, stacklevel):
-    warnings.warn("Implicit dimension choice for " + name + " has been deprecated. "
-                  "Change the call to include dim=X as an argument.", stacklevel=stacklevel)
+    # type: (str, int, int) -> int
+    warnings.warn("Implicit dimension choice for {} has been deprecated. "
+                  "Change the call to include dim=X as an argument.".format(name), stacklevel=stacklevel)
     if ndim == 0 or ndim == 1 or ndim == 3:
-        return 0
+        ret = 0
     else:
-        return 1
+        ret = 1
+    return ret
 
 
+@torch._jit_internal.weak_script
 def softmin(input, dim=None, _stacklevel=3, dtype=None):
+    # type: (Tensor, Optional[int], int, Optional[int]) -> Tensor
     r"""Applies a softmin function.
 
     Note that :math:`\text{Softmin}(x) = \text{Softmax}(-x)`. See softmax definition for mathematical formula.
@@ -978,13 +987,19 @@ def softmin(input, dim=None, _stacklevel=3, dtype=None):
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
-    if dtype is None:
-        return (-input).softmax(dim)
     else:
-        return (-input).softmax(dim, dtype=dtype)
+        dim = torch.jit._unwrap_optional(dim)
+    if dtype is None:
+        ret = (-input).softmax(dim)
+    else:
+        dtype = torch.jit._unwrap_optional(dtype)
+        ret = (-input).softmax(dim, dtype=dtype)
+    return ret
 
 
+@torch._jit_internal.weak_script
 def softmax(input, dim=None, _stacklevel=3, dtype=None):
+    # type: (Tensor, Optional[int], int, Optional[int]) -> Tensor
     r"""Applies a softmax function.
 
     Softmax is defined as:
@@ -1012,13 +1027,18 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
     """
     if dim is None:
         dim = _get_softmax_dim('softmax', input.dim(), _stacklevel)
-    if dtype is None:
-        return input.softmax(dim)
     else:
-        return input.softmax(dim, dtype=dtype)
+        dim = torch.jit._unwrap_optional(dim)
+    if dtype is None:
+        ret = input.softmax(dim)
+    else:
+        dtype = torch.jit._unwrap_optional(dtype)
+        ret = input.softmax(dim, dtype=dtype)
+    return ret
 
 
 def _sample_gumbel(shape, eps=1e-10, out=None):
+    # type: (Tensor, float, Optional[Tensor]) -> Tensor
     """
     Sample from Gumbel(0, 1)
 
@@ -1026,11 +1046,15 @@ def _sample_gumbel(shape, eps=1e-10, out=None):
     https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
     (MIT license)
     """
-    U = out.resize_(shape).uniform_() if out is not None else torch.rand(shape)
+    if out is None:
+        U = torch.rand(shape)
+    else:
+        U = torch.jit._unwrap_optional(out).resize_(shape).uniform_()
     return - torch.log(eps - torch.log(U + eps))
 
 
 def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
+    # type: (Tensor, float, float) -> Tensor
     """
     Draw a sample from the Gumbel-Softmax distribution
 
@@ -1045,6 +1069,7 @@ def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
 
 
 def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
+    # type: (Tensor, float, bool, float) -> Tensor
     r"""
     Sample from the Gumbel-Softmax distribution and optionally discretize.
 
@@ -1086,7 +1111,9 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
     return y
 
 
+@torch._jit_internal.weak_script
 def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
+    # type: (Tensor, Optional[int], int, Optional[int]) -> Tensor
     r"""Applies a softmax followed by a logarithm.
 
     While mathematically equivalent to log(softmax(x)), doing these two
@@ -1104,10 +1131,14 @@ def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
     """
     if dim is None:
         dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
-    if dtype is None:
-        return input.log_softmax(dim)
     else:
-        return input.log_softmax(dim, dtype=dtype)
+        dim = torch.jit._unwrap_optional(dim)
+    if dtype is None:
+        ret = input.log_softmax(dim)
+    else:
+        _dtype = torch.jit._unwrap_optional(dtype)
+        ret = input.log_softmax(dim, dtype=_dtype)
+    return ret
 
 
 softshrink = _add_docstr(torch._C._nn.softshrink, r"""
@@ -1144,7 +1175,9 @@ def sigmoid(input):
     return input.sigmoid()
 
 
+@torch._jit_internal.weak_script
 def linear(input, weight, bias=None):
+    # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
     r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
@@ -1158,12 +1191,13 @@ def linear(input, weight, bias=None):
     """
     if input.dim() == 2 and bias is not None:
         # fused op is marginally faster
-        return torch.addmm(bias, input, weight.t())
-
-    output = input.matmul(weight.t())
-    if bias is not None:
-        output += bias
-    return output
+        ret = torch.addmm(torch.jit._unwrap_optional(bias), input, weight.t())
+    else:
+        output = input.matmul(weight.t())
+        if bias is not None:
+            output += torch.jit._unwrap_optional(bias)
+        ret = output
+    return ret
 
 
 @torch._jit_internal.weak_script
@@ -1398,6 +1432,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 
 def instance_norm(input, running_mean=None, running_var=None, weight=None,
                   bias=None, use_input_stats=True, momentum=0.1, eps=1e-5):
+    # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor  # noqa
     r"""Applies Instance Normalization for each channel in each data sample in a
     batch.
 
@@ -1428,7 +1463,9 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
                             torch.backends.cudnn.enabled)
 
 
-def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
+@torch._jit_internal.weak_script
+def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1.):
+    # type: (Tensor, int, float, float, float) -> Tensor
     r"""Applies local response normalization over an input signal composed of
     several input planes, where channels occupy the second dimension.
     Applies normalization across channels.
@@ -1498,6 +1535,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
 
 def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
              reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], int, Optional[bool], str) -> Tensor
     r"""The negative log likelihood loss.
 
     See :class:`~torch.nn.NLLLoss` for details.
@@ -1549,9 +1587,9 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         raise ValueError('Expected input batch_size ({}) to match target batch_size ({}).'
                          .format(input.size(0), target.size(0)))
     if dim == 2:
-        return torch._C._nn.nll_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
+        ret = torch._C._nn.nll_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
     elif dim == 4:
-        return torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
+        ret = torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
     elif dim == 3 or dim > 4:
         n = input.size(0)
         c = input.size(1)
@@ -1561,14 +1599,20 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
                 out_size, target.size()))
         input = input.contiguous().view(n, c, 1, -1)
         target = target.contiguous().view(n, 1, -1)
+        reduction_enum = _Reduction.get_enum(reduction)
         if reduction is not 'none':
-            return torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
-        out = torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
-        return out.view(out_size)
+            ret = torch._C._nn.nll_loss2d(
+                input, target, weight, reduction_enum, ignore_index)
+        else:
+            out = torch._C._nn.nll_loss2d(
+                input, target, weight, reduction_enum, ignore_index)
+            ret = out.view(out_size)
+    return ret
 
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=None, eps=1e-8,
                      reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, bool, bool, Optional[bool], float, Optional[bool], str) -> Tensor
     r"""Poisson negative log likelihood loss.
 
     See :class:`~torch.nn.PoissonNLLLoss` for details.
@@ -1611,13 +1655,17 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
         mask = target > 1
         loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
     if reduction is 'none':
-        return loss
+        ret = loss
     if reduction is 'mean':
-        return torch.mean(loss)
-    return torch.sum(loss)
+        ret = torch.mean(loss)
+    else:
+        ret = torch.sum(loss)
+    return ret
 
 
+@torch._jit_internal.weak_script
 def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""The `Kullback-Leibler divergence`_ Loss.
 
     See :class:`~torch.nn.KLDivLoss` for details.
@@ -1642,14 +1690,15 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             specifying either of those two args will override :attr:`reduction`. Default: 'mean'
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch.kl_div(input, target, reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
+    return torch.kl_div(input, target, reduction_enum)
 
 
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
                   reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], int, Optional[bool], str) -> Tensor
     r"""This criterion combines `log_softmax` and `nll_loss` in a single
     function.
 
@@ -1697,6 +1746,7 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
 
 def binary_cross_entropy(input, target, weight=None, size_average=None,
                          reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
     r"""Function that measures the Binary Cross Entropy
     between the target and the output.
 
@@ -1731,9 +1781,9 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         >>> loss.backward()
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                       "Please ensure they have the same size.".format(target.size(), input.size()))
@@ -1745,11 +1795,13 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 
-    return torch._C._nn.binary_cross_entropy(input, target, weight, reduction)
+    return torch._C._nn.binary_cross_entropy(
+        input, target, weight, reduction_enum)
 
 
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=None,
                                      reduce=None, reduction='mean', pos_weight=None):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str, Optional[Tensor]) -> Tensor
     r"""Function that measures Binary Cross Entropy between target and output
     logits.
 
@@ -1786,14 +1838,14 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
          >>> loss.backward()
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
 
     if not (target.size() == input.size()):
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
 
-    return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction)
+    return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
 
 def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
@@ -1826,6 +1878,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
 
 
 def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     Function that takes the mean element-wise absolute value difference.
@@ -1905,6 +1958,7 @@ def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='m
 
 def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
                                 reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
     r"""multilabel_soft_margin_loss(input, target, weight=None, size_average=None) -> Tensor
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
@@ -1915,18 +1969,20 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
     loss = -(target * logsigmoid(input) + (1 - target) * logsigmoid(-input))
 
     if weight is not None:
-        loss = loss * weight
+        loss = loss * torch.jit._unwrap_optional(weight)
 
     loss = loss.sum(dim=1) / input.size(1)  # only return N loss values
 
     if reduction == 'none':
-        return loss
+        ret = loss
     elif reduction == 'mean':
-        return loss.mean()
+        ret = loss.mean()
     elif reduction == 'sum':
-        return loss.sum()
+        ret = loss.sum()
     else:
+        ret = input
         raise ValueError(reduction + " is not valid")
+    return ret
 
 
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
@@ -1942,23 +1998,27 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
     return torch.cosine_embedding_loss(input1, input2, target, margin, reduction)
 
 
+@torch._jit_internal.weak_script
 def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
                       reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, int, int, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
     r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
                           reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     if p != 1 and p != 2:
         raise ValueError('only p == 1 and p == 2 supported')
-    if weight is not None and weight.dim() != 1:
-        raise ValueError('weight must be one-dimensional')
+    if weight is not None:
+        weight = torch.jit._unwrap_optional(weight)
+        if weight.dim() != 1:
+            raise ValueError('weight must be one-dimensional')
 
-    return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, reduction)
+    return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, reduction_enum)
 
 
 pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
@@ -2192,7 +2252,9 @@ GRID_SAMPLE_PADDING_MODES = {
 }
 
 
+@torch._jit_internal.weak_script
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
+    # type: (Tensor, Tensor, str, str) -> Tensor
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     ``output`` using :attr:`input` values and pixel locations from :attr:`grid`.
 
@@ -2247,15 +2309,27 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
         output (Tensor): output Tensor
 
     """
-    if mode not in GRID_SAMPLE_INTERPOLATION_MODES:
+    if mode != 'bilinear' and mode != 'nearest':
         raise ValueError("nn.functional.grid_sample(): expected mode to be "
                          "'bilinear' or 'nearest', but got: '{}'".format(mode))
-    if padding_mode not in GRID_SAMPLE_PADDING_MODES:
+    if padding_mode != 'zeros' and padding_mode != 'border' and padding_mode != 'reflection':
         raise ValueError("nn.functional.grid_sample(): expected padding_mode "
                          "to be 'zeros', 'border', or 'reflection', "
                          "but got: '{}'".format(padding_mode))
-    return torch.grid_sampler(input, grid, GRID_SAMPLE_INTERPOLATION_MODES[mode],
-                              GRID_SAMPLE_PADDING_MODES[padding_mode])
+
+    if mode == 'bilinear':
+        mode_enum = 0
+    else:
+        mode_enum = 1
+
+    if padding_mode == 'zeros':
+        padding_mode_enum = 0
+    elif padding_mode == 'border':
+        padding_mode_enum = 1
+    else:
+        padding_mode_enum = 2
+
+    return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum)
 
 
 def affine_grid(theta, size):
@@ -2274,7 +2348,9 @@ def affine_grid(theta, size):
     return vision.affine_grid_generator(theta, size)
 
 
+@torch._jit_internal.weak_script
 def pad(input, pad, mode='constant', value=0):
+    # type: (Tensor, List[int], str, float) -> Tensor
     r"""Pads tensor.
 
     Pading size:
@@ -2323,32 +2399,46 @@ def pad(input, pad, mode='constant', value=0):
     assert len(pad) % 2 == 0, 'Padding length must be divisible by 2'
     assert len(pad) // 2 <= input.dim(), 'Padding length too large'
     if mode == 'constant':
-        return _VF.constant_pad_nd(input, pad, value)
+        ret = _VF.constant_pad_nd(input, pad, value)
     else:
         assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
         if input.dim() == 3:
             assert len(pad) == 2, '3D tensors expect 2 values for padding'
             if mode == 'reflect':
-                return torch._C._nn.reflection_pad1d(input, pad)
+                ret = torch._C._nn.reflection_pad1d(input, pad)
             elif mode == 'replicate':
-                return torch._C._nn.replication_pad1d(input, pad)
+                ret = torch._C._nn.replication_pad1d(input, pad)
+            else:
+                ret = input  # TODO: remove this when jit raise supports control flow
+                raise NotImplementedError
+
         elif input.dim() == 4:
             assert len(pad) == 4, '4D tensors expect 4 values for padding'
             if mode == 'reflect':
-                return torch._C._nn.reflection_pad2d(input, pad)
+                ret = torch._C._nn.reflection_pad2d(input, pad)
             elif mode == 'replicate':
-                return torch._C._nn.replication_pad2d(input, pad)
+                ret = torch._C._nn.replication_pad2d(input, pad)
+            else:
+                ret = input  # TODO: remove this when jit raise supports control flow
+                raise NotImplementedError
+
         elif input.dim() == 5:
             assert len(pad) == 6, '5D tensors expect 6 values for padding'
             if mode == 'reflect':
+                ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
             elif mode == 'replicate':
-                return torch._C._nn.replication_pad3d(input, pad)
+                ret = torch._C._nn.replication_pad3d(input, pad)
+            else:
+                ret = input  # TODO: remove this when jit raise supports control flow
+                raise NotImplementedError
         else:
+            ret = input  # TODO: remove this when jit raise supports control flow
             raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
-
+    return ret
 
 # distance
+
 
 @torch._jit_internal.weak_script
 def pairwise_distance(x1, x2, p=2., eps=1e-6, keepdim=False):
@@ -2383,34 +2473,32 @@ Args:
 """)
 
 
-def cosine_similarity(x1, x2, dim=1, eps=1e-8):
-    r"""Returns cosine similarity between x1 and x2, computed along dim.
+cosine_similarity = _add_docstr(torch.cosine_similarity, r"""
+cosine_similarity(x1, x2, dim=1, eps=1e-8) -> Tensor
 
-    .. math ::
-        \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
+Returns cosine similarity between x1 and x2, computed along dim.
 
-    Args:
-        x1 (Tensor): First input.
-        x2 (Tensor): Second input (of size matching x1).
-        dim (int, optional): Dimension of vectors. Default: 1
-        eps (float, optional): Small value to avoid division by zero.
-            Default: 1e-8
+.. math ::
+    \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
 
-    Shape:
-        - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
-        - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
+Args:
+    x1 (Tensor): First input.
+    x2 (Tensor): Second input (of size matching x1).
+    dim (int, optional): Dimension of vectors. Default: 1
+    eps (float, optional): Small value to avoid division by zero.
+        Default: 1e-8
 
-    Example::
+Shape:
+    - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
+    - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
 
-        >>> input1 = torch.randn(100, 128)
-        >>> input2 = torch.randn(100, 128)
-        >>> output = F.cosine_similarity(input1, input2)
-        >>> print(output)
-    """
-    w12 = torch.sum(x1 * x2, dim)
-    w1 = torch.norm(x1, 2, dim)
-    w2 = torch.norm(x2, 2, dim)
-    return w12 / (w1 * w2).clamp(min=eps)
+Example::
+
+    >>> input1 = torch.randn(100, 128)
+    >>> input2 = torch.randn(100, 128)
+    >>> output = F.cosine_similarity(input1, input2)
+    >>> print(output)
+""")
 
 
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False, size_average=None,
@@ -2427,6 +2515,7 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
 
 
 def normalize(input, p=2, dim=1, eps=1e-12, out=None):
+    # type: (Tensor, float, int, float, Optional[Tensor]) -> Tensor
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.
 
     For a tensor :attr:`input` of sizes :math:`(n_0, ..., n_{dim}, ..., n_k)`, each
@@ -2447,10 +2536,11 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
     """
     if out is None:
         denom = input.norm(p, dim, True).clamp(min=eps).expand_as(input)
-        return input / denom
+        ret = input / denom
     else:
         denom = input.norm(p, dim, True).clamp_(min=eps).expand_as(input)
-        return torch.div(input, denom, out=out)
+        ret = torch.div(input, denom, out=torch.jit._unwrap_optional(out))
+    return ret
 
 
 def assert_int_or_pair(arg, arg_name, message):
