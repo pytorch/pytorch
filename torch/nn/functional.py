@@ -1022,6 +1022,15 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     .. note::
       This function is here for legacy reasons, may be removed from nn.Functional in the future.
 
+    .. note::
+      The main trick for `hard` is to do  `y_hard - y_soft.detach() + y_soft`
+
+      It achieves two things:
+      - makes the output value exactly one-hot 
+      (since we add then subtract y_soft value)
+      - makes the gradient equal to y_soft gradient 
+      (since we strip all other gradients)
+
     Examples::
         >>> logits = torch.randn(20, 32)
         >>> # Sample soft categorical using reparametrization trick:
