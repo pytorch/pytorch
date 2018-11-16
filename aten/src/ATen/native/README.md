@@ -81,6 +81,21 @@ signature.
 - `*` is a special sentinel argument, which doesn't translate into an actual
   argument, but indicates that in the Python bindings, any subsequent arguments
   must be specified as keyword arguments (and cannot be provided positionally).
+- `?` is trailing question mark that annotate an argument to be an optional type, grep for
+  `optional` to find some example usages. In general, most functions will not need to use
+  this, but there are some cases that we want to use optional for the different types:
+    - You want to pass in a `None` to a ATen function/method from Python, and handles the
+      None type in the C++ side. For example, `clamp(Tensor self, Scalar? min=None, Scalar? max=None)`
+      can take `None` for its `min` and `max` parameter, and do dispatch to different
+      backend if one of the parameters is `None`. Optional type can accept a `None` type
+      (`nullopt` in C++) from Python and use the [C++ Optional class](https://en.cppreference.com/w/cpp/utility/optional) to interact with the parameters.
+    - You want a default value which is fine in Python but would cause ambiguity in C++.
+      For example, `norm(Tensor self, Scalar p=2, int64_t dim, bool keepdim=false)` would
+      cause ambiguity in C++ since it default args must be adjacent and `p` could not
+      have a default value when `dim` does not. Therefore, we need to make `p` as a
+      optional Scalar, and make `p=2` when `p` is not passed in (nullopt).
+    - You want a value to default to the same value as another argument (this cannot be
+      expressed in C++ default arguments).
 
 Functions with no tensor inputs are called *factory functions*, and
 are handled specially by code generation.  If your function is behaving
@@ -163,29 +178,6 @@ to unconditionally dispatch to a native function whose name is different than
 the name in the public ATen API, but this is generally frowned upon (just name
 them the same thing!)
 
-### `python_default_init`
-
-```
-python_default_init:
-  argument_name: initializing_expression
-```
-
-A map from argument names to default initializing expressions written in C++. Such default
-expressions will only be used in Python API (in the C++ API, these arguments are
-mandatory).
-
-There are a few situations where you might like to use this functionality:
-
-- You want a default value which is fine in Python but would cause ambiguity in C++.
-  For example, `norm(Tensor self, real p=2, int64_t dim=1)` would cause ambiguity
-  with long tensors in C++. Therefore, we need to make `p=2` a python only default
-  initialization value.
-
-- You want a value to default to the same value as another argument (this cannot
-  be expressed in C++ default arguments).
-
-If you grep for `python_default_init`, you can find examples of this being used;
-in general, most functions will not need to use this.
 
 ## Writing an implementation in C++
 
@@ -290,7 +282,7 @@ Tensor& s_add_(Tensor& self, const Tensor& other) {
 
 By default, `Tensor` arguments to ATen functions are always defined, unless
 you explicitly specified that an undefined tensor was permissible by writing
-`Tensor?` or `Tensor x={}`.
+`Tensor?` or `Tensor? x={}`, the latter one is needed when you have to assign a default value in C++ (e.g. in the middle of other parameters with default values).
 
 The rules for returning undefined Tensors are a bit more subtle, but there
 is only one case you have to remember:

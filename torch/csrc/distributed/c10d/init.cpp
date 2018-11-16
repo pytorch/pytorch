@@ -29,6 +29,8 @@ namespace c10d {
 
 namespace {
 
+constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
+
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
@@ -121,7 +123,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)
-      .def(py::init<const std::string&>());
+      .def(py::init<const std::string&, int>());
 
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
       .def(py::init<const std::string&, int, bool>());
@@ -355,18 +357,23 @@ They are used in specifying strategies for reduction collectives, e.g.,
                       int size,
                       std::chrono::milliseconds timeout) {
             ::c10d::ProcessGroupGloo::Options options;
-
-            // By default, use the hostname to resolve the network address to
-            // use. Note: if the hostname does not resolve to an address (e.g.
-            // because of misconfigured /etc/hosts file), this will not work.
-            std::array<char, HOST_NAME_MAX> hostname;
-            auto rv = gethostname(hostname.data(), hostname.size());
-            if (rv != 0) {
-              throw std::system_error(errno, std::system_category());
-            }
-
             ::gloo::transport::tcp::attr attr;
-            attr.hostname = hostname.data();
+            // First step, check "GLOO_SOCKET_IFNAME" environmental variable
+            // that can be set by the user
+            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV);
+            if (ifnameEnv) {
+              attr.iface = std::string(ifnameEnv);
+            } else {
+              // Use the hostname to resolve the network address to
+              // use. Note: if the hostname does not resolve to an address (e.g.
+              // because of misconfigured /etc/hosts file), this will not work.
+              std::array<char, HOST_NAME_MAX> hostname;
+              auto rv = gethostname(hostname.data(), hostname.size());
+              if (rv != 0) {
+                throw std::system_error(errno, std::system_category());
+              }
+              attr.hostname = hostname.data();
+            }
             options.devices.push_back(
                 ::gloo::transport::tcp::CreateDevice(attr));
             options.timeout = timeout;

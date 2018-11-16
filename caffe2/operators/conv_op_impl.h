@@ -540,7 +540,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   T* dbias_data = nullptr;
   if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<T>());
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
+    dbias->Resize(M);
     if (bias_multiplier_.numel() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
@@ -743,7 +744,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 
   T* dbias_data = nullptr;
   if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<T>());
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
+    dbias->Resize(M);
     dbias_data = dbias->template mutable_data<T>();
     math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
     if (bias_multiplier_.numel() != output_image_size) {

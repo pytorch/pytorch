@@ -60,7 +60,8 @@ class PackRNNSequenceOpBase : public Operator<Context> {
     shape.insert(
         shape.end(), values.sizes().begin() + dim_offset, values.sizes().end());
 
-    auto* output = Output(OUTPUTVALUE, shape, at::dtype<ValT>());
+    auto* output = Output(OUTPUTVALUE);
+    output->Resize(shape);
 
     auto output_data = output->template mutable_data<ValT>();
     // initialize output_data with zero, as it is the default value for padding
