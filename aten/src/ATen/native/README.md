@@ -23,7 +23,7 @@ Every native function must have an entry in
 `native_functions.yaml`.  The format can be summarized as:
 
 ```
-- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> ReturnType
+- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
   variants: function, method
   dispatch:
     CPU: func_cpu
@@ -35,7 +35,7 @@ Each component is described in more detail below:
 ### `func`
 
 ```
-- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> ReturnType
+- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
 ```
 
 The `func` entry is a string describing the name of the function and its type
@@ -87,20 +87,6 @@ are handled specially by code generation.  If your function is behaving
 differently than another example, check first and see if one is a
 factory while another is not.
 
-**Return types.** These types are permissible as ReturnType:
-
-- `Tensor` and `TensorList`, which translate into the C++ types `Tensor` and `std::vector<Tensor>`,
-  respectively (unless the operation is in-place, in which case the return type
-  is `Tensor&`.
-- A tuple of any number of `Tensor`, e.g., `(Tensor, Tensor)`, translating into
-  the C++ `std::tuple<Tensor, Tensor>`.
-
-If you need a type that is not listed in this list, it may be possible to extend ATen's
-code generation to support it.  ATen's philosophy on types to support is that it supports
-only simple, universal types, as well as a handful of fundamental Tensor structures
-(e.g., `Tensor` and `Generator*`), because these types can be easily ported to any language
-bound to ATen (in practice, C++ and Python.)
-
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
 change (e.g., you will probably need to update `tools/autograd/derivatives.yaml` at
@@ -125,6 +111,37 @@ Here are the supported default values:
 * Empty initializer lists (e.g., `{}`) for `Tensor` (this implicitly changes
   a `Tensor` argument to accept undefined tensors).
 * `nullptr` for pointer types (e.g., `Generator*`)
+
+**Returns.** The following are permissible on Return:
+
+Non-tuple return:
+```
+ReturnType [retarg0]
+```
+
+Tuple return:
+```
+(ReturnType [retarg0], ReturnType [retarg1], ...)
+```
+
+The following are permissible on ReturnType:
+- `Tensor` and `TensorList`, which translate into the C++ types `Tensor` and `std::vector<Tensor>`,
+  respectively (unless the operation is in-place, in which case the return type
+  is `Tensor&`.
+- A tuple of any number of `Tensor`, e.g., `(Tensor, Tensor)`, translating into
+  the C++ `std::tuple<Tensor, Tensor>`.
+
+If you need a type that is not listed in this list, it may be possible to extend ATen's
+code generation to support it.  ATen's philosophy on types to support is that it supports
+only simple, universal types, as well as a handful of fundamental Tensor structures
+(e.g., `Tensor` and `Generator*`), because these types can be easily ported to any language
+bound to ATen (in practice, C++ and Python.)
+
+Return also supports specifying (optional) return argument names; these are useful for writing
+derivatives in terms of return arguments in `tools/autograd/derivatives.yaml`.
+
+Note that argument type modifiers such as defaults and optional are not currently supported on Return.
+
 
 The declarations also support the following attributes:
 
