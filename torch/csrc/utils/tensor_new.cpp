@@ -85,23 +85,6 @@ Tensor new_with_tensor(const Type& type, Tensor other) {
   return other.slice();
 }
 
-Tensor new_with_type_conversion(const Type& type, Tensor other, int32_t device_index) {
-  return dispatch_type_conversion(other, type, device_index, false);
-}
-
-Tensor new_with_tensor_copy(const Type& type, Tensor other, int32_t device_index) {
-  maybe_initialize_cuda(type);
-  AutoNoGIL no_gil;
-  // TODO: It would be better if new_with_tensor_copy took an at::Device
-  // to begin with, but then we need to fix the situation with
-  // dispatch_type_conversion bleggg
-  at::OptionalDeviceGuard device_guard;
-  if (type.is_cuda()) {
-    device_guard.reset_device(at::Device(at::kCUDA, device_index));
-  }
-  return type.copy(other);
-}
-
 std::vector<int64_t> compute_sizes(PyObject* seq) {
   std::vector<int64_t> sizes;
   THPObjectPtr handle;
@@ -206,34 +189,27 @@ Tensor internal_new_from_data(
     bool copy_variables,
     bool copy_numpy,
     bool type_inference) {
-  int32_t device_index = -1;
-  if (device_opt.has_value()) {
-    device_index = device_opt->index();
-  }
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
 
   if (THPVariable_Check(data)) {
     auto var = reinterpret_cast<THPVariable*>(data)->cdata;
-    auto type_inference_device_type = device_opt.has_value() ? device_opt->type()
-                                                             : torch::getDeviceType(var.type());
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
-    const auto& type_inference_type = torch::getVariableType(var.type().scalarType(),
-                                                     *torch::getLayout(type.backend()),
-                                                     type_inference_device_type);
-    const auto& type_to_use = type_inference ? type_inference_type : type;
-    return copy_variables ? new_with_tensor_copy(type_to_use, var, device_index)
-                          : new_with_type_conversion(type_to_use, var, device_index);
+    const auto& scalar_type = type_inference ? var.type().scalarType() : type.scalarType();
+    auto device = device_opt.has_value() ? *device_opt : var.device();
+    AutoNoGIL no_gil;
+    return var.to(device, scalar_type, /*blocking=*/false, /*copy=*/copy_variables);
   }
 
 #ifdef USE_NUMPY
   if (PyArray_Check(data)) {
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
     const auto& type_to_use = type_inference ? type.toScalarType(tensor.type().scalarType()) : type;
-    return copy_numpy ? new_with_tensor_copy(type_to_use, tensor, device_index) :
-                        new_with_type_conversion(type_to_use, tensor, device_index);
+    AutoNoGIL no_gil;
+    auto device = device_opt.has_value() ? *device_opt : tensor.device();
+    return tensor.to(device, type_to_use.scalarType(), /*blocking=*/false, /*copy=*/copy_numpy);
   }
 #endif
 
@@ -244,7 +220,9 @@ Tensor internal_new_from_data(
       (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
       scalarType, tensor.type().elementSizeInBytes(), data);
   const auto& type_to_use = type_inference ? type.toScalarType(scalarType) : type;
-  return new_with_type_conversion(type_to_use, tensor, device_index);
+  auto device = device_opt.has_value() ? *device_opt : at::Device(torch::getDeviceType(type));
+  AutoNoGIL no_gil;
+  return tensor.to(device, type_to_use.scalarType(), /*blocking=*/false, /*copy=*/false);
 }
 
 Tensor new_from_data_copy(
