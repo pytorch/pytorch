@@ -524,7 +524,7 @@ def load(name,
          build_directory=None,
          verbose=False,
          with_cuda=None,
-         is_python_module=False):
+         is_python_module=True):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT).
 
@@ -619,7 +619,7 @@ def load_inline(name,
                 build_directory=None,
                 verbose=False,
                 with_cuda=None,
-                is_python_module=False):
+                is_python_module=True):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
