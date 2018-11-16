@@ -46,7 +46,7 @@ static inline Tensor roll_common(const Tensor& self, IntList shifts, IntList dim
   auto tail_shifts = shifts.slice(1);
   auto tail_dims = dims.slice(1);
   auto first_dim_rolled = roll(self, shifts[0], dims[0]);
-  return roll(first_dim_rolled, tail_shifts, tail_dims);
+  return at::roll(first_dim_rolled, tail_shifts, tail_dims);
 }
 
 }}  // namespace at::native

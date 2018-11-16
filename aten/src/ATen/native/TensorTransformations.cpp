@@ -74,7 +74,7 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
 }
 
 Tensor roll_cpu(const Tensor& self, IntList shifts, IntList dims) {
-  if ( dims.size() != 1) {
+  if (dims.size() != 1 || shifts.size() != 1) {
     return roll_common(self, shifts, dims);
   }
   // avoid a div zero error below.

@@ -7432,9 +7432,14 @@ class _TestTorchMixin(object):
             self.assertEqual(expected, data.roll(1, dims=None), "roll with no dims should flatten and roll.")
 
             # test roll over multiple dimensions
-            expected = torch.tensor([[8, 5, 6, 7], [4, 1, 2, 3]], device=device)
-            double_rolled = data.roll(shifts=(1, 1), dims=(0, 1))
+            expected = torch.tensor([[7, 8, 5, 6], [3, 4, 1, 2]], device=device)
+            double_rolled = data.roll(shifts=(2, -1), dims=(1, 0))
             self.assertEqual(double_rolled, expected, "should be able to roll over two dimensions")
+
+            # shifts/dims should align
+            self.assertRaisesRegex(RuntimeError, "align" , lambda: data.roll(shifts=(1, 2), dims=(1)))
+            self.assertRaisesRegex(RuntimeError, "align" , lambda: data.roll(shifts=(1), dims=(1, 2)))
+            self.assertRaisesRegex(RuntimeError, "align" , lambda: data.roll(shifts=(), dims=1))
 
     def test_reversed(self):
         val = torch.arange(0, 10)

@@ -150,7 +150,7 @@ void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
 
 // Roll a tensor along a dimension
 Tensor roll_cuda(const Tensor& self, IntList shifts, IntList dims) {
-  if ( dims.size() != 1) {
+  if (dims.size() != 1 || shifts.size() != 1) {
     return roll_common(self, shifts, dims);
   }
 
