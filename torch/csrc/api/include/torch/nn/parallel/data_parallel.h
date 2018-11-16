@@ -10,6 +10,7 @@
 #include <torch/csrc/utils/functional.h>
 
 #include <ATen/Device.h>
+#include <ATen/OptionsGuard.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/TensorOptions.h>
 #include <c10/util/Exception.h>
@@ -96,9 +97,9 @@ std::vector<Tensor> parallel_apply(
           int64_t index, int64_t stop) {
         for (; index < stop; ++index) {
           try {
+            torch::OptionsGuard options_guard(
+                devices ? (*devices)[index] : inputs[index].device());
             auto output = modules[index]->forward(inputs[index]);
-            output =
-                output.to(devices ? (*devices)[index] : inputs[index].device());
             std::lock_guard<std::mutex> lock(mutex);
             outputs[index] = output;
           } catch (...) {
@@ -150,7 +151,7 @@ Tensor data_parallel(
   }
 
   if (devices->size() == 1) {
-    module->to(*output_device);
+    OptionsGuard guard(devices->front());
     return module->forward(std::move(input)).to(*output_device);
   }
 
