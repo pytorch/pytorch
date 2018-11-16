@@ -247,8 +247,8 @@ template <typename Op,
           typename Offset>
 struct ApplyOp1<Op, scalar, IndexType, ADims, 0, Offset> {
 __device__ __forceinline__
-static void apply(detail::TensorInfo<scalar, IndexType> &a, int n,
-                  const Op &op, IndexType linearIndex, Offset offset) {
+static void apply(detail::TensorInfo<scalar, IndexType> &a, const Op &op,
+                  int n, IndexType linearIndex, Offset offset) {
   op(a.data[offset]);
 }
 };
@@ -635,7 +635,7 @@ inline dim3 getApplyBlock() {
 
 template <typename scalar, int step, typename Op>
 inline bool CUDA_tensor_apply1(at::Tensor a,
-                               Op op,
+                               const Op op,
                                TensorArgType aType = TensorArgType::ReadWrite) {
   checkBackend("CUDA_tensor_apply1", {a}, Backend::CUDA);
   auto dim = a.dim();
