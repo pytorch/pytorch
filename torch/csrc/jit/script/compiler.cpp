@@ -563,10 +563,6 @@ Value* tryMatchArgument(
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
   if(!value->type()->isSubtypeOf(concrete_type)) {
-    if (concrete_type->str() == "int[]?" && arg.name() == "size") {
-      std::cout << "hi";
-    }
-
     err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name() << "' but found "
           << value->type()->str() << "\n"
           << named_value.locOr(loc);
