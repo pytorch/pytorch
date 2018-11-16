@@ -2996,6 +2996,10 @@ class _TestTorchMixin(object):
             self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf'), device=device))
             self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('nan'), device=device))
 
+            self.assertRaisesRegex(
+                RuntimeError, "overflow",
+                lambda: torch.arange(1.175494351e-38, 3.402823466e+38, device=device))
+
     def test_arange_inference(self):
         saved_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.float32)

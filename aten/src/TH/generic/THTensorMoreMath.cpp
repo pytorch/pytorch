@@ -644,6 +644,8 @@ void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
 
   size = (ptrdiff_t) ceil((double)(xmax - xmin) / step);
 
+  AT_CHECK(size >= 0, "invalid size, possible overflow?");
+
   if (THTensor_(nElement)(r_) != size) {
     THTensor_(resize1d)(r_, size);
   }

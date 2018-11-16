@@ -466,6 +466,7 @@ void THCTensor_(arange)(THCState* state, THCTensor *r_, accreal xmin, accreal xm
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
               , 2, "upper bound and larger bound inconsistent with step sign");
   ptrdiff_t size = (ptrdiff_t) ceil(ScalarConvert<accreal, double>::to(xmax - xmin) / step);
+  AT_CHECK(size >= 0, "invalid size, possible overflow?");
   if (THCTensor_(nElement)(state, r_) != size) THCTensor_(resize1d)(state, r_, size);
   THCTensor *r = THCTensor_(newContiguous)(state, r_);
   LinspaceOp<scalar_t,accreal> linspace_method(xmin, step);
