@@ -29,6 +29,9 @@ struct WelfordData {
   __host__ __device__ WelfordData() {
   }
 
+  // stripping initialization from default constructor to avoid dynamic
+  // initialization warning thrown from using this data structure in CUDA kernel
+  // as static shared memory.
   __host__ __device__ void reset() {
     mean_ = T(0);
     m_2_n_ = T(0);

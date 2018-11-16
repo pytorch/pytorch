@@ -159,7 +159,7 @@ __global__ void kernelReduceNoncontigDim_shared
 
   __shared__ int isLastBlockDone;
   __shared__ AccT local_reduce[THC_NONCONTIG_REDUCE_BLOCK_SIZE];
-  AccT* shmem = &(local_reduce)[threadIdx.x + threadIdx.y*blockDim.x];
+  AccT* shmem = &local_reduce[threadIdx.x + threadIdx.y*blockDim.x];
 
   // This kernel is intended for the latency-bound case, so we want to launch enough blocks
   // to cover the entire output.  This means we don't need grid-stride loops.
