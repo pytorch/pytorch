@@ -67,14 +67,14 @@ DataRandomFiller::DataRandomFiller(
     const auto& op_types = input_types[i];
     CAFFE_ENFORCE(
         op_dims.size() == op.input_size(),
-        op.name() + " has " + caffe2::to_string(op.input_size()) +
+        op.name() + " has " + c10::to_string(op.input_size()) +
             " inputs; while the input dimension size is " +
-            caffe2::to_string(op_dims.size()));
+            c10::to_string(op_dims.size()));
     CAFFE_ENFORCE(
         op_types.size() == op.input_size(),
-        op.name() + " has " + caffe2::to_string(op.input_size()) +
+        op.name() + " has " + c10::to_string(op.input_size()) +
             " inputs; while the input type size is " +
-            caffe2::to_string(op_types.size()));
+            c10::to_string(op_types.size()));
 
     for (size_t j = 0; j < op.input_size(); ++j) {
       inputs_[op.input(j)] =
