@@ -1026,9 +1026,9 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
       The main trick for `hard` is to do  `y_hard - y_soft.detach() + y_soft`
 
       It achieves two things:
-      - makes the output value exactly one-hot 
+      - makes the output value exactly one-hot
       (since we add then subtract y_soft value)
-      - makes the gradient equal to y_soft gradient 
+      - makes the gradient equal to y_soft gradient
       (since we strip all other gradients)
 
     Examples::
