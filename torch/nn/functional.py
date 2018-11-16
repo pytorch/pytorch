@@ -451,7 +451,9 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
     return torch._C._nn.max_unpool3d(input, indices, output_size, stride, padding)
 
 
+@torch._jit_internal.weak_script
 def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
+    # type: (Tensor, float, int, Optional[BroadcastingList1[int]], bool) -> Tensor
     r"""Applies a 2D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
@@ -459,19 +461,30 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     See :class:`~torch.nn.LPPool2d` for details.
     """
     kw, kh = utils._pair(kernel_size)
-    out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+    if stride is not None:
+        stride = torch.jit._unwrap_optional(stride)
+        out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+    else:
+        out = avg_pool2d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
+
     return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1. / norm_type)
 
 
+@torch._jit_internal.weak_script
 def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
-    # type: (Tensor, int, int, Optional[List[int]], bool) -> Tensor
+    # type: (Tensor, float, int, Optional[BroadcastingList1[int]], bool) -> Tensor
     r"""Applies a 1D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
-    out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+    if stride is not None:
+        stride = torch.jit._unwrap_optional(stride)
+        out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+    else:
+        out = avg_pool1d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
+
     return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1. / norm_type)
 
 
@@ -1035,8 +1048,9 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
     return ret
 
 
+@torch._jit_internal.weak_script
 def _sample_gumbel(shape, eps=1e-10, out=None):
-    # type: (Tensor, float, Optional[Tensor]) -> Tensor
+    # type: (List[int], float, Optional[Tensor]) -> Tensor
     """
     Sample from Gumbel(0, 1)
 
@@ -1051,6 +1065,7 @@ def _sample_gumbel(shape, eps=1e-10, out=None):
     return - torch.log(eps - torch.log(U + eps))
 
 
+@torch._jit_internal.weak_script
 def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
     # type: (Tensor, float, float) -> Tensor
     """
@@ -1061,12 +1076,13 @@ def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
     (MIT license)
     """
     dims = logits.dim()
-    gumbel_noise = _sample_gumbel(logits.size(), eps=eps, out=logits.data.new())
+    gumbel_noise = _sample_gumbel(logits.size(), eps=eps, out=logits.detach())
     y = logits + gumbel_noise
     return softmax(y / tau, dims - 1)
 
 
-def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
+@torch._jit_internal.weak_script
+def gumbel_softmax(logits, tau=1., hard=False, eps=1e-10):
     # type: (Tensor, float, bool, float) -> Tensor
     r"""
     Sample from the Gumbel-Softmax distribution and optionally discretize.
@@ -1097,7 +1113,7 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
         _, k = y_soft.max(-1)
         # this bit is based on
         # https://discuss.pytorch.org/t/stop-gradients-for-st-gumbel-softmax/530/5
-        y_hard = logits.new_zeros(*shape).scatter_(-1, k.view(-1, 1), 1.0)
+        y_hard = torch.zeros(shape, dtype=logits.dtype, device=logits.device).scatter_(-1, k.view(-1, 1), 1.0)
         # this cool bit of code achieves two things:
         # - makes the output value exactly one-hot (since we add then
         #   subtract y_soft value)
