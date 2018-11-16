@@ -23,7 +23,7 @@ struct TORCH_API ArgSpec {
     at::TensorList inputs
   , const int _device)
   : descs_{fmap<TensorDesc>(inputs)}
-  , hash_code_{torch::get_hash(_device, inputs.size(), descs_)} 
+  , hash_code_{torch::get_hash(_device, inputs.size(), descs_)}
   , device_{_device}
   { }
 
@@ -53,7 +53,7 @@ private:
 };
 
 } // namespace fuser
-} // namespace jit 
+} // namespace jit
 } // namespace torch
 
 #endif // USE_CUDA_FUSER || USE_CPU_FUSER

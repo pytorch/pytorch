@@ -294,7 +294,7 @@ struct CAFFE2_API TensorType : public DynamicType {
   }
 
   at::ScalarType scalarType() const { return scalar_type_; }
-  int device() const { return device_; }
+  at::Device device() const { return device_; }
   int dim() const { return dim_; }
   bool requires_grad() const override { return requires_grad_; }
 
@@ -342,11 +342,11 @@ struct CAFFE2_API TensorType : public DynamicType {
 protected:
   TensorType(const at::Tensor& tensor, TypeKind kind=TypeKind::TensorType)
     : TensorType(tensor.type().scalarType(),
-                 tensor.is_cuda() ? tensor.get_device() : -1,
+                 tensor.device(),
                  tensor.dim(),
                  tensor.is_variable() && tensor.requires_grad(),
                  kind) {}
-  TensorType(at::ScalarType scalar_type, int device, int dim, bool requires_grad=true, TypeKind kind=TypeKind::TensorType)
+  TensorType(at::ScalarType scalar_type, at::Device device, int dim, bool requires_grad=true, TypeKind kind=TypeKind::TensorType)
     : DynamicType(kind)
     , scalar_type_(scalar_type)
     , requires_grad_(at::isFloatingType(scalar_type) && requires_grad)
@@ -355,7 +355,7 @@ protected:
 
   at::ScalarType scalar_type_;
   bool requires_grad_;
-  int device_;
+  at::Device device_;
   int dim_;
 };
 
@@ -369,10 +369,10 @@ struct CAFFE2_API CompleteTensorType : public TensorType {
   }
 
   // overloaded create variadic template argument as it could not distinguish initializer list
-  static CompleteTensorTypePtr create(at::ScalarType scalar_type, int device, at::IntList sizes) {
+  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntList sizes) {
     return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes)); // NOLINT(modernize-make-shared)
   }
-  static CompleteTensorTypePtr create(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides) {
+  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntList sizes, at::IntList strides) {
     return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes, strides)); // NOLINT(modernize-make-shared)
   }
 
@@ -442,9 +442,9 @@ private:
     : TensorType(tensor, TypeKind::CompleteTensorType)
     , sizes_(tensor.sizes().vec())
     , strides_(tensor.strides().vec()) {}
-  CompleteTensorType(at::ScalarType scalar_type, int device, at::IntList sizes, bool requires_grad=true)
+  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntList sizes, bool requires_grad=true)
     : CompleteTensorType(scalar_type, device, sizes, CompleteTensorType::contiguousStridesOf(sizes), requires_grad) {}
-  CompleteTensorType(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides, bool requires_grad=true)
+  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntList sizes, at::IntList strides, bool requires_grad=true)
     : TensorType(scalar_type, device, sizes.size(), requires_grad, TypeKind::CompleteTensorType)
     , sizes_(sizes.vec())
     , strides_(strides.vec()) {}
@@ -892,17 +892,17 @@ inline TypePtr unshapedType(const TypePtr& type) {
 inline TypePtr CompleteTensorType::fromNumberType(TypePtr typ) {
   AT_ASSERT(typ->isSubtypeOf(NumberType::get()));
   if (typ->isSubtypeOf(IntType::get())) {
-    return CompleteTensorType::create(at::kLong, -1, {});
+    return CompleteTensorType::create(at::kLong, at::kCPU, {});
   } else if (typ->isSubtypeOf(FloatType::get())) {
-    return CompleteTensorType::create(at::kFloat, -1, {});
+    return CompleteTensorType::create(at::kFloat, at::kCPU, {});
   } else if (typ->isSubtypeOf(BoolType::get())) {
-    return CompleteTensorType::create(at::kLong, -1, {});
+    return CompleteTensorType::create(at::kLong, at::kCPU, {});
   }
   AT_ERROR("unknown number type", typ->str());
 }
 
 inline TypePtr CompleteTensorType::fromBoolType() {
-  return CompleteTensorType::create(at::kLong, -1, {});
+  return CompleteTensorType::create(at::kLong, at::kCPU, {});
 }
 
 // Attempt to find the correct supertype of t1 and t2. If none is found then
