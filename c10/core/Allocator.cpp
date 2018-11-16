@@ -1,6 +1,6 @@
-#include <ATen/core/Allocator.h>
+#include <c10/core/Allocator.h>
 
-namespace at {
+namespace c10 {
 
 static void deleteInefficientStdFunctionContext(void* ptr) {
   delete static_cast<InefficientStdFunctionContext*>(ptr);
@@ -16,11 +16,11 @@ at::DataPtr InefficientStdFunctionContext::makeDataPtr(
           device};
 }
 
-} // namespace at
+} // namespace c10
 
 namespace caffe2 {
 
-CAFFE2_API at::Allocator* allocator_array[static_cast<int>(
+C10_API at::Allocator* allocator_array[static_cast<int>(
     at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 
 void SetAllocator(at::DeviceType t, at::Allocator* alloc) {
