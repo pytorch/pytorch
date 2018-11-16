@@ -386,6 +386,11 @@ void addNomnigraphMethods(pybind11::module& m) {
   nnsubgraph.def(py::init<>())
       .def("__len__", [](NNSubgraph& s) { return s.getNodes().size(); })
       .def(
+          "__repr__",
+          [](NNSubgraph* g) {
+            return nom::converters::convertToDotString<NNGraph>(*g, NNPrinter);
+          })
+      .def(
           "addNode",
           [](NNSubgraph* sg, NNGraph::NodeRef node) { sg->addNode(node); })
       .def(

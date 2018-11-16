@@ -96,12 +96,18 @@ class TestBindings(test_util.TestCase):
         dfg.createEdge(op, w)
         dfg.createEdge(x, op)
 
+        # Dot generation
+        assert(str(dfg).startswith("digraph G"))
+
         # subgraph
         sg = ng.NNSubgraph()
         sg.addNode(x)
         sg.addNode(op)
         sg.induceEdges()
         assert len(sg) == 2
+
+        # subgraph dot generation
+        assert(str(sg).startswith("digraph G"))
 
     @given(size=st.sampled_from([10, 50]))
     def test_edges_complex(self, size):
@@ -158,6 +164,8 @@ class TestBindings(test_util.TestCase):
         for match in nn.match(mg):
             assert len(match) == 1
             count += 1
+            # Dot generation of subgraph
+            assert(str(match).startswith("digraph G"))
         assert count == 1
 
     def test_match_graph_node_strict(self):
