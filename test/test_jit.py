@@ -9120,7 +9120,7 @@ EXCLUDE_SCRIPT = {
     'test_nn_binary_cross_entropy',
     'test_nn_binary_cross_entropy_size_average',
     'test_nn_cross_entropy',
-    'test_nn_binary_cross_entropy_with_logits',
+    # 'test_nn_binary_cross_entropy_with_logits',
     'test_nn_interpolate',
     'test_nn_fold',
     'test_nn_max_unpool1d',
