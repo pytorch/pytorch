@@ -73,7 +73,6 @@ if(NOT BUILD_ATEN_ONLY)
   add_subdirectory(predictor)
   add_subdirectory(core/nomnigraph)
   add_subdirectory(core/nomscheduler)
-  add_subdirectory(core/dispatch)
   add_subdirectory(serialize)
   if (USE_NVRTC)
     add_subdirectory(cuda_rtc)
@@ -464,7 +463,7 @@ if (BUILD_PYTHON)
   # Python site-packages
   # Get canonical directory for python site packages (relative to install
   # location).  It varies from system to system.
-  # We should pin the path separator to the forward slash on Windows. 
+  # We should pin the path separator to the forward slash on Windows.
   # More details can be seen at
   # https://github.com/pytorch/pytorch/tree/master/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
   pycmd(PYTHON_SITE_PACKAGES "
