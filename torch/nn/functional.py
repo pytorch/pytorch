@@ -1046,9 +1046,10 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     if eps != 1e-10:
         warnings.warn("`eps` parameter is deprecated.", DeprecationWarning)
 
-    y_soft = logits.new(logits.shape)
-    y_soft = (logits - y_soft.exponential_().log()) / tau  # Gumbel noise
-    y_soft = y_soft.softmax(dim)  # Gumbel softmax noise
+    uniforms = clamp_probs(torch.rand(logits.shape, dtype=logits.dtype, device=logits.device))
+    gumbels = -((-(uniforms.log())).log())  # -log(~Exp(1)) = ~Gumbel(0,1)
+    gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
+    y_soft = gumbels.softmax(dim)
 
     if hard:
         # Straight through.
