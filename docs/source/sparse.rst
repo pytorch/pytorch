@@ -101,7 +101,6 @@ An empty sparse tensor can be constructed by specifying its size:
 
     .. method:: add
     .. method:: add_
-    .. automethod:: addmm
     .. method:: clone
     .. method:: dim
     .. method:: div
@@ -130,3 +129,8 @@ An empty sparse tensor can be constructed by specifying its size:
     .. method:: _indices
     .. method:: _values
     .. method:: _nnz
+
+Functions
+=============
+
+.. autofunction:: torch.sparse.addmm

@@ -1960,7 +1960,6 @@
     CUDA: s_addmm_sparse_dense_cuda_
 
 - func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  variants: function
 
 - func: addmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
