@@ -27,6 +27,7 @@ struct ${Type} final : public ${DenseBackend}TypeDefault {
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) override;
+  ${type_derived_method_declarations}
 };
 
 } // namespace at
