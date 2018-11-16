@@ -6,6 +6,7 @@ import unittest
 import torch
 import torch.utils.cpp_extension
 import torch.backends.cudnn
+
 try:
     import torch_test_cpp_extension.cpp as cpp_extension
 except ImportError:
@@ -387,17 +388,19 @@ class TestCppExtension(common.TestCase):
         self.assertIn('bn.weight', p)
         self.assertIn('bn.bias', p)
 
-    def test_returns_shared_library_path_when_return_library_path_is_true(self):
-        library_path = torch.utils.cpp_extension.load_inline(
-            name="return_library_path",
-            cpp_sources="void foo() { }",
-            functions="foo",
+    def test_returns_shared_library_path_when_is_python_module_is_true(self):
+        source = '''
+        #include <torch/script.h>
+        torch::Tensor func(torch::Tensor x) { return x; }
+        static torch::jit::RegisterOperators r("test::func", &func);
+        '''
+        torch.utils.cpp_extension.load_inline(
+            name="is_python_module",
+            cpp_sources=source,
+            functions="func",
             verbose=True,
-            return_library_path=True)
-
-        self.assertTrue(os.path.exists(library_path))
-        extensions = {'linux': '.so', 'darwin': '.dylib', 'win32': '.dll'}
-        self.assertTrue(os.path.splitext(library_path), extensions[sys.platform])
+            is_python_module=False)
+        self.assertEqual(torch.ops.test.func(torch.eye(5)), torch.eye(5))
 
 
 if __name__ == '__main__':
