@@ -126,10 +126,14 @@ bool AsyncNetBase::handleRunError() {
     }
   }
   if (first_exc_task_id >= 0) {
+    LOG(ERROR) << "Rethrowing exception from the run of '" << Name() << "'";
     event(first_exc_task_id).RethrowException();
   }
 #endif // CAFFE2_USE_EXCEPTION_PTR
 
+  if (!success_) {
+    LOG(ERROR) << "Error encountered in the run of '" << Name() << "'";
+  }
   return success_;
 }
 
