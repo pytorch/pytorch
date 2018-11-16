@@ -25,6 +25,10 @@ SKIP_PYTHON_BINDINGS = [
     'index',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
+    # <NN functions>, which should be bound once we have namespaces
+    '_thnn_',
+    'binary_cross_entropy.*', 'mse_loss.*', 'l1_loss.*',
+    # </NN functions>
     'arange.*', 'range.*', '_gesv.*', '_getri.*', '_inverse.*', '_potrs.*',
     'slice', 'randint(_out)?',
     '_local_scalar', '_local_scalar_dense',

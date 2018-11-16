@@ -1,12 +1,12 @@
 # Loss functions
 
-- name: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean)
+- name: _thnn_binary_cross_entropy(Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean)
   cname: BCECriterion
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
+- name: _thnn_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: AbsCriterion
   scalar_check:
     output: 'false'
