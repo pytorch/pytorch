@@ -96,31 +96,6 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
       }
     }
 
-    bool fp32_fallback_to_nchw = ShouldFp32FallbackToNCHW(debug_def());
-    std::vector<float> temp;
-    if (fp32_fallback_to_nchw) {
-      temp.resize(OutputTensorCPU_(0)->numel());
-      int ndim = float_tensor->dim();
-      CAFFE_ENFORCE_GE(ndim, 3);
-      const int N = float_tensor->dim32(0), C = float_tensor->dim32(1);
-      int image_size = 1;
-      for (auto i = 2; i < ndim; ++i) {
-        image_size *= float_tensor->dim32(i);
-      }
-      std::array<int, 2> dims = {C, image_size};
-      std::array<int, 2> axes = {1, 0};
-      for (int n = 0; n < N; ++n) {
-        math::Transpose(
-            2,
-            dims.data(),
-            axes.data(),
-            ref + n * image_size * C,
-            temp.data() + n * image_size * C,
-            &context_);
-      }
-      ref = temp.data();
-    }
-
     dnnlowp::MeasureQuantizationError(
         actual, ref, OutputTensorCPU_(0)->numel(), &quantization_error_stats_);
   }

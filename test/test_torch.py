@@ -1024,7 +1024,6 @@ class _TestTorchMixin(object):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, '{} with out= kwarg'.format(fn_name))
 
-    @skipIfRocm
     def test_dim_reduction(self):
         self._test_dim_reduction(self, lambda t: t)
 
@@ -3457,7 +3456,6 @@ class _TestTorchMixin(object):
                 seen.add(ixx[k][j])
             self.assertEqual(len(seen), size)
 
-    @skipIfRocm
     def test_sort(self):
         SIZE = 4
         x = torch.rand(SIZE, SIZE)
@@ -3583,7 +3581,6 @@ class _TestTorchMixin(object):
         self.assertRaises(TypeError, lambda: q.topk(4, True))
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    @skipIfRocm
     def test_topk_noncontiguous_gpu(self):
         t = torch.randn(20, device="cuda")[::2]
         top1, idx1 = t.topk(5)
@@ -3591,7 +3588,6 @@ class _TestTorchMixin(object):
         self.assertEqual(top1, top2)
         self.assertEqual(idx1, idx2)
 
-    @skipIfRocm
     def test_kthvalue(self):
         SIZE = 50
         x = torch.rand(SIZE, SIZE, SIZE)
@@ -3636,7 +3632,6 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.kthvalue(y, 3)[0], 3, 0)
         self.assertEqual(torch.kthvalue(y, 2)[0], 1, 0)
 
-    @skipIfRocm
     def test_median(self):
         for size in (155, 156):
             x = torch.rand(size, size)
@@ -3672,7 +3667,6 @@ class _TestTorchMixin(object):
             # input unchanged
             self.assertEqual(x, x0, 0)
 
-    @skipIfRocm
     def test_mode(self):
         x = torch.arange(1., SIZE * SIZE + 1).clone().resize_(SIZE, SIZE)
         x[:2] = 1
@@ -4003,7 +3997,6 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.cuda.HalfTensor(10).is_signed(), True)
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_gesv(self):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
@@ -4134,7 +4127,6 @@ class _TestTorchMixin(object):
         self._test_gesv_batched_dims(self, lambda t: t)
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_qr(self):
 
         # Since the QR decomposition is unique only up to the signs of the rows of
@@ -4317,12 +4309,10 @@ class _TestTorchMixin(object):
         self.assertEqual(res1, tb, 0)
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_trtrs(self):
         self._test_trtrs(self, lambda t: t)
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_gels(self):
         def _test_underdetermined(a, b, expectedNorm):
             m = a.size()[0]
@@ -4438,7 +4428,6 @@ class _TestTorchMixin(object):
         self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, 1e-8)
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_eig(self):
         a = torch.Tensor(((1.96, 0.00, 0.00, 0.00, 0.00),
                           (-6.49, 3.80, 0.00, 0.00, 0.00),
@@ -4520,7 +4509,6 @@ class _TestTorchMixin(object):
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_symeig(self):
         self._test_symeig(self, lambda x: x)
 
@@ -5497,7 +5485,6 @@ class _TestTorchMixin(object):
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_pstrf(self):
         def checkPsdCholesky(a, uplo, inplace):
             if inplace:
@@ -8291,7 +8278,6 @@ class _TestTorchMixin(object):
             t2.fill_(rnum)
             self.assertEqual(t1, t2, 0)
 
-    @skipIfRocm
     def test_print(self):
         default_type = torch.Tensor().type()
         for t in torch._tensor_classes:

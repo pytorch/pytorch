@@ -58,7 +58,7 @@ namespace nn {
 /// are registered separately via `register_buffer`. These methods are part of
 /// the protected API of `Module` and are typically invoked from within a
 /// concrete `Module`s constructor.
-class Module : public std::enable_shared_from_this<Module> {
+class TORCH_API Module : public std::enable_shared_from_this<Module> {
  public:
   using ModuleApplyFunction = std::function<void(Module&)>;
   using ConstModuleApplyFunction = std::function<void(const Module&)>;

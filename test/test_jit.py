@@ -219,6 +219,32 @@ class JitTestCase(TestCase):
         if not JitTestCase._restored_warnings:
             torch.jit.TracerWarning.ignore_lib_warnings()
             JitTestCase._restored_warnings = True
+        if os.environ.get('TORCH_JIT_TEST_PRETTY_PRINT', False):
+            torch._C._jit_set_emit_module_hook(self.emitModuleHook)
+
+    def tearDown(self):
+        # needs to be cleared because python might be unloaded before
+        # the callback gets destucted
+        torch._C._jit_set_emit_module_hook(None)
+
+    def emitModuleHook(self, module):
+        # disable the hook while we parse code, otherwise we will re-enter the hook
+        torch._C._jit_set_emit_module_hook(None)
+        for name in module._method_names():
+            graph = module._get_method(name).graph
+            try:
+                pp, constant_table = graph.python_print()
+            except RuntimeError as e:
+                if "could not export python function" not in str(e):
+                    raise
+                else:
+                    continue
+
+            pp = "op_version_set = 0\n{}".format(pp)
+            sm = torch.jit.ScriptModule()
+            torch._C._jit_import_method(sm, pp, constant_table)
+
+        torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def getExportImportCopy(self, m):
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
@@ -1452,6 +1478,27 @@ class TestJit(JitTestCase):
     def test_ge_unoptimized(self):
         self.run_ge_tests(False, False)
 
+    def _test_proper_fused_abs(self, device='cpu'):
+
+        @torch.jit.script
+        def func(x):
+            return x.abs() * 2
+
+        a = torch.randn(5, device=device)
+        self.assertEqual(func(a), a.abs() * 2)
+        self.assertAllFused(func.graph_for(a))
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_proper_fused_abs_cpu(self):
+        self._test_proper_fused_abs()
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @skipIfRocm
+    def test_proper_fused_abs_cuda(self):
+        self._test_proper_fused_abs(device="cuda")
+
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_ge_optimized(self):
@@ -2049,12 +2096,45 @@ class TestJit(JitTestCase):
         def python_op_name_test(y):
             return python_fn(y)
 
+        @torch.jit.script
+        def empty_int_list_test(y):
+            x = torch.jit.annotate(List[int], [])
+            return x[0]
+
+        @torch.jit.script
+        def empty_float_list_test(y):
+            return [1.0, 2.0, 3.0]
+
+        @torch.jit.script
+        def print_weird_test(y):
+            print("hi\016")
+
         self.assertExpected(if_test.graph.pretty_print(), "if_test")
         self.assertExpected(if_one.graph.pretty_print(), "if_one")
         self.assertExpected(while_test.graph.pretty_print(), "while_test")
         self.assertExpected(while_if_test.graph.pretty_print(), "while_if_test")
         self.assertExpected(loop_use_test.graph.pretty_print(), "loop_use_test")
         self.assertExpected(python_op_name_test.graph.pretty_print(), "python_op_name_test")
+        self.assertExpected(empty_int_list_test.graph.pretty_print(), "empty_int_list_test")
+        self.assertExpected(empty_float_list_test.graph.pretty_print(), "empty_float_list_test")
+        self.assertExpected(print_weird_test.graph.pretty_print(), "print_weird_test")
+
+    def test_cu_escaped_number(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(a):
+                print("hi\016")
+        ''')
+        self.assertExpected(cu.foo.graph.pretty_print())
+
+    def test_import_method(self):
+        @torch.jit.script
+        def foo(x, y):
+            return 2 * x + y
+
+        r = foo.graph.pretty_print()
+        mod = torch.jit.ScriptModule()
+        torch._C._jit_import_method(mod, "op_version_set = 0\n{}".format(r), [])
+        self.assertExpected(mod.script.graph.pretty_print())
 
     def test_function_default_values(self):
         outer_var = torch.tensor(20)
@@ -2809,10 +2889,9 @@ class TestScript(JitTestCase):
 
         self.checkScript(bar, ())
 
-        with self.assertRaisesRegex(RuntimeError, "expected"):
-            @torch.jit.script
-            def baz(a):
-                return torch.jit.annotate(int, a)
+        def baz(a):
+            return torch.jit.annotate(float, a)
+        self.checkScript(baz, (torch.rand(()),))
 
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
@@ -4464,12 +4543,34 @@ a")
                 # Replace this with another unsupported op when/if it gets supported
                 return x << y
 
+    def test_bitwise_ops(self):
+
+        def int_test():
+            return 2 & 3, 2 ^ 3, 2 | 3
+
+        self.checkScript(int_test, ())
+
+        def bool_test(x, y):
+            # type: (bool, bool) -> Tuple[bool, bool, bool]
+            return x & y, x ^ y, x | y
+
+        self.checkScript(bool_test, (True, False))
+        self.checkScript(bool_test, (True, True))
+
+        def tensor_test(x, y):
+            return x & y, x ^ y, x | y
+
+        x = torch.tensor(2)
+        y = torch.tensor(3)
+
+        self.checkScript(tensor_test, (x, y))
+
     def test_number_math(self):
         template = dedent('''
         def func():
             return {scalar1} {op} {scalar2}
         ''')
-        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=']
+        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=', '//']
         scalars = ['7', '2', '3', '-3', '3.14', '0.125', '-0.5', '2.0', '-2.0']
         scalar_pairs = [(scalar1, scalar2) for scalar1 in scalars for scalar2 in scalars]
         for scalar1, scalar2 in scalar_pairs:
@@ -7366,7 +7467,7 @@ a")
         def test_test():
             return torch.jit._unwrap_optional(1)
 
-        with self.assertRaisesRegex(RuntimeError, "is actually of type None"):
+        with self.assertRaisesRegex(RuntimeError, "cannot match an Optional\\[T\\] to None"):
             @torch.jit.script
             def test_no_type():
                 # type: () -> int
@@ -8234,12 +8335,14 @@ a")
             def __init__(self, in_features, out_features):
                 super(Weak, self).__init__()
                 self.weight = torch.nn.Parameter(torch.ones(out_features, in_features))
+                self.bias = torch.nn.Parameter(torch.ones(out_features))
                 self.register_buffer("buffer", torch.ones(out_features))
                 self.submodule = Submodule()
 
             @torch._jit_internal.weak_script_method
             def forward(self, x):
-                return F.linear(x, self.weight) + self.buffer + self.submodule(x)
+                return F.linear(x, self.weight, self.bias) \
+                    + self.buffer + self.submodule(x)
 
         class Strong(torch.jit.ScriptModule):
             def __init__(self, weak):
@@ -9015,25 +9118,23 @@ EXCLUDE_SCRIPT = {
     'test_nn_affine_grid',
 
     # unknown builtin op
-    'test_nn_softmin',
-    'test_nn_local_response_norm',
-    'test_nn_poisson_nll_loss',
+    'test_nn_binary_cross_entropy',
+    'test_nn_binary_cross_entropy_size_average',
     'test_nn_cross_entropy',
     'test_nn_binary_cross_entropy_with_logits',
-    'test_nn_multilabel_soft_margin_loss',
-    'test_nn_pixel_shuffle',
     'test_nn_interpolate',
-    'test_nn_pad',
-    'test_nn_cosine_similarity',
-    'test_nn_normalize',
     'test_nn_fold',
-    'test_nn_linear',
     'test_nn_max_unpool1d',
     'test_nn_lp_pool1d',
     'test_nn_lp_pool2d',
-    'test_nn_instance_norm',
-    'test_nn_grid_sample',
     'test_nn_gumbel_softmax',
+    'test_nn_poisson_nll_loss',
+    'test_nn_poisson_nll_loss_full',
+
+    # undefined tensors as constants
+    'test_nn_instance_norm',
+    'test_nn_normalize',
+    'test_nn_multilabel_soft_margin_loss',
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
@@ -9548,6 +9649,7 @@ S = 5
 #     module name,
 #     constructor arguments,
 #     args (tuple represents shape of a tensor arg),
+#     use_as_constant (should the submodule be listed in __constants__?)
 # )
 nn_module_tests = [
     ('AlphaDropout', (), ((S,),)),
@@ -9565,6 +9667,7 @@ nn_module_tests = [
     ('Tanh', (), ((S,),)),
     ('Tanhshrink', (), ((S,),)),
     ('Threshold', (2., 2.), ((S,),)),
+    ('Sequential', (torch.nn.Sigmoid(), torch.nn.Threshold(1., 2.)), ((S,),), True),
 ]
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
@@ -9654,6 +9757,7 @@ nn_functional_tests = [
     ('local_response_norm', (S, S, S), (2, ),),
     ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]), None, None),),
     ('poisson_nll_loss', (S, 2), ((S, 2),),),
+    ('poisson_nll_loss', (S, 2), ((S, 2), True, True), 'full'),
     ('kl_div', F.log_softmax(torch.randn(S, 10), 1), (F.softmax(torch.randn(S, 10), 1),),),
     ('cross_entropy', (3, S), (torch.randint(S, (3,), dtype=torch.int64),),),
     ('binary_cross_entropy_with_logits', (3,), (torch.empty(3).random_(2), ),),
@@ -9683,6 +9787,9 @@ nn_functional_tests = [
                                    1, 1, non_differentiable(torch.randn(S))),),
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)), \
                                                            non_differentiable(torch.randn(3, 2))),),
+    ('binary_cross_entropy', torch.randn(3, 2).sigmoid(),
+        (non_differentiable(torch.rand(3, 2)),
+         non_differentiable(torch.randn(3, 2)), True), 'size_average'),
     ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), \
      (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
       torch.randint(1, S, (S,), dtype=torch.long))),
@@ -9697,6 +9804,7 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'multi_margin_loss',
     'binary_cross_entropy',
     'ctc_loss',
+    'grid_sample',
 ])
 
 
@@ -9832,7 +9940,8 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
     post_add_test(test_name, skipTestIf, do_test)
 
 
-def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
+def add_nn_module_test(module_name, constructor_args, call_args,
+                       use_as_constant=False, skipTestIf=()):
     def do_test(self):
         nn_module = getattr(torch.nn, module_name)
 
@@ -9846,8 +9955,14 @@ def add_nn_module_test(module_name, constructor_args, call_args, skipTestIf=()):
             call = "self.submodule({})".format(call_args_str)
             script = script_method_template.format(method_args, call)
 
+            submodule_constants = []
+            if use_as_constant:
+                submodule_constants = ['submodule']
+
             # Create module to use the script method
             class TheModule(torch.jit.ScriptModule):
+                __constants__ = submodule_constants
+
                 def __init__(self):
                     super(TheModule, self).__init__()
                     self.submodule = nn_module(*constructor_args)

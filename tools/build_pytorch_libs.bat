@@ -8,12 +8,11 @@ set BASE_DIR=%cd:\=/%
 set TORCH_LIB_DIR=%cd:\=/%/torch/lib
 set INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install
 set THIRD_PARTY_DIR=%cd:\=/%/third_party
-set BASIC_C_FLAGS= /I%INSTALL_DIR%/include /I%INSTALL_DIR%/include/TH /I%INSTALL_DIR%/include/THC /I%INSTALL_DIR%/include/THS /I%INSTALLDIR%/include/THCS /I%INSTALLDIR%/include/THPP /I%INSTALLDIR%/include/THNN /I%INSTALLDIR%/include/THCUNN
-set BASIC_CUDA_FLAGS= -I%INSTALL_DIR%/include -I%INSTALL_DIR%/include/TH -I%INSTALL_DIR%/include/THC -I%INSTALL_DIR%/include/THS -I%INSTALLDIR%/include/THCS -I%INSTALLDIR%/include/THPP -I%INSTALLDIR%/include/THNN -I%INSTALLDIR%/include/THCUNN
+set BASIC_C_FLAGS=
+set BASIC_CUDA_FLAGS=
 set LDFLAGS=/LIBPATH:%INSTALL_DIR%/lib
 :: set TORCH_CUDA_ARCH_LIST=6.1
 
-set CWRAP_FILES=%BASE_DIR%/torch/lib/ATen/Declarations.cwrap;%BASE_DIR%/torch/lib/ATen/Local.cwrap;%BASE_DIR%/torch/lib/THNN/generic/THNN.h;%BASE_DIR%/torch/lib/THCUNN/generic/THCUNN.h;%BASE_DIR%/torch/lib/ATen/nn.yaml
 set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
 set LINK_FLAGS=/DEBUG:FULL
 : End cmake variables
@@ -28,8 +27,6 @@ set /a USE_NNPACK=0
 set /a USE_QNNPACK=0
 set /a USE_GLOO_IBVERBS=0
 set /a USE_MKLDNN=0
-
-set /a NO_NNPACK=1
 
 set _BUILD_ARGS=
 
@@ -56,7 +53,6 @@ if "%1"=="--use-rocm" (
 
 if "%1"=="--use-nnpack" (
   set /a USE_NNPACK=1
-  set /a NO_NNPACK=0
   goto :process_args_processed
 )
 
@@ -124,8 +120,8 @@ FOR %%a IN (%_BUILD_ARGS%) DO (
   echo ^|  Building %%a
   echo ^|
   echo --------------------------------------------------------------------------------
-  
-  IF "%%a"=="caffe2" ( 
+
+  IF "%%a"=="caffe2" (
     call:build_caffe2 %%a
   ) ELSE (
     IF "%%a"=="libshm_windows" (
@@ -163,36 +159,19 @@ goto:eof
   if not exist build mkdir build\%~1
   pushd build\%~1
   cmake ../../%~1 %CMAKE_GENERATOR_COMMAND% ^
-                  -DCMAKE_MODULE_PATH=%BASE_DIR%/cmake/FindCUDA ^
-                  -DTorch_FOUND="1" ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DCMAKE_C_FLAGS="%C_FLAGS%" ^
                   -DCMAKE_SHARED_LINKER_FLAGS="%LINK_FLAGS%" ^
                   -DCMAKE_CXX_FLAGS="%C_FLAGS% %CPP_FLAGS%" ^
                   -DCUDA_NVCC_FLAGS="%BASIC_CUDA_FLAGS%" ^
-                  -Dcwrap_files="%CWRAP_FILES%" ^
-                  -DTH_INCLUDE_PATH="%INSTALL_DIR%/include" ^
-                  -DTH_LIB_PATH="%INSTALL_DIR%/lib" ^
-                  -DTH_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
-                  -DTHS_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
-                  -DTHC_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
-                  -DTHCS_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
-                  -DC10_LIBRARIES="%INSTALL_DIR%/lib/c10.lib" ^
-                  -DCAFFE2_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
-                  -DTHNN_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
-                  -DTHCUNN_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
-                  -DTH_SO_VERSION=1 ^
-                  -DTHC_SO_VERSION=1 ^
-                  -DTHNN_SO_VERSION=1 ^
-                  -DTHCUNN_SO_VERSION=1 ^
                   -DUSE_CUDA=%USE_CUDA% ^
                   -DBUILD_EXAMPLES=OFF ^
                   -DBUILD_TEST=%BUILD_TEST% ^
-                  -DNO_NNPACK=%NO_NNPACK% ^
+                  -DUSE_NNPACK=%USE_NNPACK% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
-  
+
   %MAKE_COMMAND%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
@@ -230,7 +209,6 @@ goto:eof
                   -DPYTHON_LIBRARY="%PYTORCH_PYTHON_LIBRARY%" ^
                   -DBUILD_TORCH="%BUILD_TORCH%" ^
                   -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
-                  -DNO_API=ON ^
                   -DBUILD_SHARED_LIBS="%BUILD_SHARED_LIBS%" ^
                   -DBUILD_PYTHON=%BUILD_PYTHON% ^
                   -DBUILD_BINARY=%BUILD_BINARY% ^
@@ -264,11 +242,11 @@ goto:eof
                   -DUSE_ROCM=%USE_ROCM%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
-  
+
   %MAKE_COMMAND%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
-  
+
   popd
   @endlocal
 

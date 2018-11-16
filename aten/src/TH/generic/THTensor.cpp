@@ -226,6 +226,11 @@ void THTensor_(resizeAs)(THTensor *self, THTensor *src)
     THTensor_(resizeNd)(self, src->dim(), THTensor_getSizePtr(src), NULL);
 }
 
+void THTensor_(resize0d)(THTensor *tensor)
+{
+  THTensor_(resizeNd)(tensor, 0, {}, nullptr);
+}
+
 void THTensor_(resize1d)(THTensor *tensor, int64_t size0)
 {
   int64_t size[1] = {size0};
@@ -588,6 +593,18 @@ void THTensor_(setStorageNd)(THTensor *self, THStorage *storage, ptrdiff_t stora
 void THTensor_(resizeNd)(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
   return THTensor_resizeNd(self, nDimension, size, stride);
+}
+
+void THTensor_(set0d)(THTensor *tensor, scalar_t value)
+{
+  THArgCheck(THTensor_nDimension(tensor) == 0, 1, "tensor must have no dimensions");
+  THStorage_(set)(THTensor_getStoragePtr(tensor), tensor->storage_offset(), value);
+}
+
+scalar_t THTensor_(get0d)(const THTensor *tensor)
+{
+  THArgCheck(THTensor_nDimension(tensor) == 0, 1, "tensor must have no dimensions");
+  return THStorage_(get)(THTensor_getStoragePtr(tensor), tensor->storage_offset());
 }
 
 void THTensor_(set1d)(THTensor *tensor, int64_t x0, scalar_t value)
