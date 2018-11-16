@@ -40,7 +40,11 @@ file(GLOB tmp *.cc)
 file(GLOB tmp_cudnn *_cudnn.cc)
 exclude(tmp "${tmp}" ${tmp_cudnn})
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${tmp})
-file(GLOB_RECURSE tmp experimental/c10/*.cc)
+
+if (BUILD_C10_EXPERIMENTAL_OPS)
+    file(GLOB_RECURSE tmp experimental/c10/*.cc)
+endif()
+
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${tmp})
 # exclude test files and gpu files
 file(GLOB tmp *_test.cc)

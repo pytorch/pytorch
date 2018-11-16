@@ -324,7 +324,7 @@ bool HSoftmaxSearchOp<float, CPUContext>::extractNodes(
     info.emplace_back(std::make_pair(n.name(), node.scores(i++)));
   }
   for (const int n : node.word_ids()) {
-    info.emplace_back(std::make_pair(caffe2::to_string(n), node.scores(i++)));
+    info.emplace_back(std::make_pair(c10::to_string(n), node.scores(i++)));
   }
 
   for (const auto& n : node.children()) {
