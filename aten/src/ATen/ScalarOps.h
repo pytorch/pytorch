@@ -3,6 +3,7 @@
 #include <c10/core/Scalar.h>
 #include "ATen/Tensor.h"
 
+// This is in the c10 namespace because we use ADL to find the functions in it.
 namespace c10 {
 
 // FIXME: this should be (and was) Scalar::toTensor, but there is currently no way
