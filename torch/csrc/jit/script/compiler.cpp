@@ -823,8 +823,8 @@ inline bool isSupportedListElementType(TypePtr type) {
       type->isSubtypeOf(NumberType::get());
 }
 
-static FunctionSchema extractSchemaFromDef(const Def &def, bool is_method);
 TypePtr parseTypeFromExpr(Expr expr);
+c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr);
 
 struct to_ir {
   to_ir(
@@ -836,32 +836,194 @@ struct to_ir {
       , graph(method.graph())
       , def(def)
       , resolver(std::move(resolver_))
+      , self(self)
       , environment_stack(nullptr) {
     JIT_ASSERT(resolver);
     pushFrame(graph->block());
 
-    auto schema = extractSchemaFromDef(def, bool(self));
-
-    std::vector<Argument> arguments, returns; // for schema
-    // inputs
-    auto it = def.decl().params().begin();
-    auto end = def.decl().params().end();
     // Type annotations exclude explicitly typing the "self" parameter, so in the
     // case that this is a method with self we expect one fewer parameter annotation
     // than the number of parameters this Def takes.
     if (self && def.decl().params().size() == 0) {
       throw ErrorReport(def.decl().params().range()) << "methods must have a self argument";
     }
+
+    auto schema = extractSchemaFromDef(def);
+    std::vector<Argument> arguments = emitFormalArguments(self, schema);
+    // body
+    auto stmts = def.statements();
+    auto stmts_begin = stmts.begin();
+    auto stmts_end = stmts.end();
+    c10::optional<Return> return_stmt;
+    if (stmts_begin != stmts_end && (*std::prev(stmts_end)).kind() == TK_RETURN) {
+      --stmts_end;
+      return_stmt = Return(*stmts_end);
+    }
+    emitStatements(stmts_begin, stmts_end);
+    std::vector<Argument> returns = emitReturn(return_stmt, schema);
+
+    method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
+    // remove any uses of tuples that we inserted that are not needed
+    LowerSimpleTuples(graph);
+    ConstantPooling(graph);
+  }
+
+private:
+  Method& method;
+  std::shared_ptr<Graph> graph;
+  Def def;
+  Resolver resolver;
+  SugaredValuePtr self;
+  std::unordered_map<int64_t, Value*> integral_constants;
+  std::unordered_map<double, Value*> fp_constants;
+
+  // Singly-linked list of environments. This top element contains a member
+  // `next` that points to the most immediate enclosing scope's value.
+  std::shared_ptr<Environment> environment_stack;
+
+  void pushFrame(Block * b) {
+    environment_stack = std::make_shared<Environment>(method, resolver, b, environment_stack);
+  }
+  std::shared_ptr<Environment> popFrame() {
+    auto old_frame = environment_stack;
+    environment_stack = environment_stack->next;
+    return old_frame;
+  }
+
+  std::vector<IValue> evaluateDefaults(const SourceRange& r, const std::vector<Expr>& default_types, const std::vector<Expr>& default_exprs) {
+    std::vector<IValue> default_values;
+    if (default_exprs.size() > 0) {
+      // To evaluate the default expressions, we create a graph with no inputs,
+      // and whose returns are the default values we need.
+      // We then run constant prop on this graph and check the results are constant.
+      // This approach avoids having to have separate handling of default arguments
+      // from standard expressions by piecing together existing machinery for
+      // graph generation, constant propgation, and constant extraction.
+      auto tuple_type = Subscript::create(
+          r,
+          Var::create(r, Ident::create(r, "Tuple")),
+          List<Expr>::create(r, default_types));
+      auto blank_decl =
+          Decl::create(r, List<Param>::create(r, {}), Maybe<Expr>::create(r, tuple_type));
+
+      auto tuple_expr = TupleLiteral::create(r, List<Expr>::create(r, default_exprs));
+      auto ret = Return::create(r, List<Expr>::create(r, { tuple_expr }));
+      auto def = Def::create(
+          r,
+          Ident::create(r, "defaults"),
+          blank_decl,
+          List<Stmt>::create(r, {ret}));
+      auto m = std::make_shared<Module>();
+      defineMethodsInModule(m, {def}, {resolver}, nullptr);
+      m->get_method("defaults").run(default_values);
+    }
+    return default_values;
+  }
+
+  std::vector<Argument> parseArgsFromDecl(Decl decl) {
+    auto params_begin = decl.params().begin();
+    auto params_end = decl.params().end();
+    if (self)
+      ++params_begin;
+    std::vector<Argument> retval;
+
+    std::vector<Expr> default_types;
+    std::vector<Expr> default_exprs;
+    // gather any non-empty default arguments
+    for (auto it = params_begin; it != params_end; ++it) {
+      auto param = *it;
+      auto def = param.defaultValue();
+      if (def.present()) {
+        default_types.emplace_back(param.type());
+        default_exprs.emplace_back(def.get());
+      }
+    }
+    auto default_values = evaluateDefaults(decl.range(), default_types, default_exprs);
+
+    auto defaults_it = default_values.begin();
+    for (auto it = params_begin; it != params_end; ++it) {
+      auto decl_arg = *it;
+
+      TypePtr type;
+      c10::optional<int32_t> N;
+
+      //BroadcastList list can only appear at the argument level
+      if (auto maybe_broad_list = handleBroadcastList(decl_arg.type())) {
+        type = maybe_broad_list->first;
+        N = maybe_broad_list->second;
+      } else {
+        type = parseTypeFromExpr(decl_arg.type());
+        N = c10::nullopt;
+      }
+      c10::optional<IValue> default_value = c10::nullopt;
+      if (decl_arg.defaultValue().present()) {
+        default_value = *defaults_it++;
+      }
+      auto arg = Argument(
+          decl_arg.ident().name(),
+          type,
+          N,
+          default_value,
+          /*kwarg_only =*/false);
+      retval.push_back(arg);
+    }
+    return retval;
+  }
+
+  std::vector<Argument> parseReturnsFromDecl(Decl decl) {
+    JIT_ASSERT(decl.return_type().present());
+    if (handleBroadcastList(decl.return_type().get()))
+      throw ErrorReport(decl.return_type().range()) << "Broadcastable lists cannot appear as a return type";
+    auto parsed_type = parseTypeFromExpr(decl.return_type().get());
+    if (auto tuple_type = parsed_type->cast<TupleType>()) {
+      // Flatten a single return type of type Tuple into its constituent types
+      std::vector<Argument> retval;
+      for (auto type_ptr : tuple_type->elements()) {
+        retval.emplace_back(
+            "",
+            type_ptr,
+            /*N =*/c10::nullopt,
+            /*default_value =*/c10::nullopt,
+            /*kwarg_only =*/false);
+      }
+      return retval;
+    } else {
+      return {Argument(
+          "",
+          parsed_type,
+          /*N =*/c10::nullopt,
+          /*default_value =*/c10::nullopt,
+          /*kwarg_only =*/false)};
+    }
+  }
+  FunctionSchema extractSchemaFromDef(const Def &def) {
+      auto name = def.name().name();
+      std::vector<Argument> args = parseArgsFromDecl(def.decl());
+      std::vector<Argument> returns;
+      bool is_varret;
+      if (def.decl().return_type().present()) {
+        returns = parseReturnsFromDecl(def.decl());
+        is_varret = false;
+      } else {
+        is_varret = true;
+      }
+      return FunctionSchema(name, args, returns, false, is_varret);
+  }
+
+  std::vector<Argument> emitFormalArguments(SugaredValuePtr self, const FunctionSchema& schema) {
+    std::vector<Argument> arguments; // for schema
+    // inputs
+    auto it = def.decl().params().begin();
+    auto end = def.decl().params().end();
     auto expected_annotation_size = self ? def.decl().params().size() - 1 : def.decl().params().size();
     if (schema.arguments().size() != expected_annotation_size) {
       throw ErrorReport(def.decl().params().range()) << "Number of type annotations for"
-        << " function parameters (" << arguments.size() << ")"
+        << " function parameters (" << schema.arguments().size() << ")"
         << " does not match the number of parameters on the function ("
         << expected_annotation_size << ")!";
     }
     if(self) {
-      if(it == end)
-        throw ErrorReport(def.decl().params().range()) << "methods must have a self argument";
+      JIT_ASSERT(it != end);
       environment_stack->setSugaredVar(def.range(), (*it).ident().name(), self);
       ++it;
     }
@@ -879,21 +1041,13 @@ struct to_ir {
       arguments.push_back(schema.arguments().at(arg_annotation_idx++));
       new_input->setType(arguments.back().type());
     }
-    // body
-    auto stmts = def.statements();
-    auto stmts_begin = stmts.begin();
-    auto stmts_end = stmts.end();
-    bool has_return = false;
-    if (stmts_begin != stmts_end && (*std::prev(stmts_end)).kind() == TK_RETURN) {
-      --stmts_end;
-      has_return = true;
-    }
-
-    emitStatements(stmts_begin, stmts_end);
-
+    return arguments;
+  }
+  std::vector<Argument> emitReturn(c10::optional<Return> return_stmt_, const FunctionSchema& schema) {
     // outputs
-    if (has_return) {
-      auto return_stmt = Return(*stmts_end);
+    std::vector<Argument> returns;
+    if (return_stmt_) {
+      auto return_stmt = *return_stmt_;
       auto results = getValues(return_stmt.values(), true);
       // a single return value that is a tuple expands in place:
       // return a
@@ -932,31 +1086,7 @@ struct to_ir {
                           << (schema.returns().size() > 1 ? "s" : "")
                           << " but found no return statement";
     }
-    method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
-    // remove any uses of tuples that we inserted that are not needed
-    LowerSimpleTuples(graph);
-    ConstantPooling(graph);
-  }
-
-private:
-  Method& method;
-  std::shared_ptr<Graph> graph;
-  Def def;
-  Resolver resolver;
-  std::unordered_map<int64_t, Value*> integral_constants;
-  std::unordered_map<double, Value*> fp_constants;
-
-  // Singly-linked list of environments. This top element contains a member
-  // `next` that points to the most immediate enclosing scope's value.
-  std::shared_ptr<Environment> environment_stack;
-
-  void pushFrame(Block * b) {
-    environment_stack = std::make_shared<Environment>(method, resolver, b, environment_stack);
-  }
-  std::shared_ptr<Environment> popFrame() {
-    auto old_frame = environment_stack;
-    environment_stack = environment_stack->next;
-    return old_frame;
+    return returns;
   }
   void emitStatements(const List<Stmt>& statements) {
     return emitStatements(statements.begin(), statements.end());
@@ -2603,76 +2733,6 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
 
   auto len_v = constant.asIntegral();
   return std::pair<TypePtr, int32_t>(list_ptr, len_v);
-}
-
-std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
-  std::vector<Argument> retval;
-  size_t i = is_method ? 1 : 0;
-  for (; i < decl.params().size(); ++i) {
-    auto decl_arg = decl.params()[i];
-
-    TypePtr type;
-    c10::optional<int32_t> N;
-
-    //BroadcastList list can only appear at the argument level
-    if (auto maybe_broad_list = handleBroadcastList(decl_arg.type())) {
-      type = maybe_broad_list->first;
-      N = maybe_broad_list->second;
-    } else {
-      type = parseTypeFromExpr(decl_arg.type());
-      N = c10::nullopt;
-    }
-
-    auto arg = Argument(
-        decl_arg.ident().name(),
-        type,
-        N,
-        /*default_value =*/c10::nullopt,
-        /*kwarg_only =*/false);
-    retval.push_back(arg);
-  }
-  return retval;
-}
-
-std::vector<Argument> parseReturnsFromDecl(Decl decl) {
-  JIT_ASSERT(decl.return_type().present());
-  if (handleBroadcastList(decl.return_type().get()))
-    throw ErrorReport(decl.return_type().range()) << "Broadcastable lists cannot appear as a return type";
-  auto parsed_type = parseTypeFromExpr(decl.return_type().get());
-  if (auto tuple_type = parsed_type->cast<TupleType>()) {
-    // Flatten a single return type of type Tuple into its constituent types
-    std::vector<Argument> retval;
-    for (auto type_ptr : tuple_type->elements()) {
-      retval.emplace_back(
-          "",
-          type_ptr,
-          /*N =*/c10::nullopt,
-          /*default_value =*/c10::nullopt,
-          /*kwarg_only =*/false);
-    }
-    return retval;
-  } else {
-    return {Argument(
-        "",
-        parsed_type,
-        /*N =*/c10::nullopt,
-        /*default_value =*/c10::nullopt,
-        /*kwarg_only =*/false)};
-  }
-}
-
-FunctionSchema extractSchemaFromDef(const Def &def, bool is_method) {
-    auto name = def.name().name();
-    std::vector<Argument> args = parseArgsFromDecl(def.decl(), is_method);
-    std::vector<Argument> returns;
-    bool is_varret;
-    if (def.decl().return_type().present()) {
-      returns = parseReturnsFromDecl(def.decl());
-      is_varret = false;
-    } else {
-      is_varret = true;
-    }
-    return FunctionSchema(name, args, returns, false, is_varret);
 }
 
 void defineMethodsInModule(std::shared_ptr<Module> m, const std::string& source, Resolver resolver, SugaredValuePtr self) {

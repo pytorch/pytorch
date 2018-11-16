@@ -2,8 +2,11 @@
 #include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/generic_if.h"
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/ir_views.h"
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/jit/script/error_report.h"
+#include "torch/csrc/jit/script/module.h"
+
 
 namespace torch {
 namespace jit {
@@ -65,7 +68,7 @@ struct PythonPrintPass {
   std::vector<at::Tensor> tensor_constants;
   // When printing this node, is it safe to write it inline (i.e. without
   // assigning a temporary variable
-  std::unordered_set<const Node*> output_inline_;
+  std::unordered_set<Node*> output_inline_;
 
   // when we print this, should we error if the resulting output would
   // not be able to be reparsed?
@@ -79,7 +82,7 @@ struct PythonPrintPass {
 
   // for fork,
   // subgraphs get added to the worklist, and will be printed later
-  std::vector<std::pair<const Graph*, std::string>> worklist;
+  std::vector<std::function<void(void)>> worklist;
 
   // scanValue, scanNode, scanBlock:
   // decide if it is safe to omit the output of a temporary variable,
@@ -100,7 +103,7 @@ struct PythonPrintPass {
   // The inductive step is that the right-most input should be produced by the node
   // immediatly before the current node if it is in tree order.
 
-  bool isConstantLike(const Node* n) {
+  bool isConstantLike(Node* n) {
     switch(n->kind()) {
       case prim::Constant:
       case prim::NoneGenerator:
@@ -112,8 +115,8 @@ struct PythonPrintPass {
     }
   }
 
-  bool canInline(const Value* v) {
-    const Node* n = v->node();
+  bool canInline(Value* v) {
+    Node* n = v->node();
     // there must be only 1 values, otherwise we need an assignment to handle the multiple outout values
     if (n->outputs().size() != 1)
       return false;
@@ -138,8 +141,8 @@ struct PythonPrintPass {
 
   // block_point is the current node in the reverse linear scan of the emitted nodes
   // v is the current value in the tree traversal that may match with block_point's output.
-  const Node* scanValue(const Node* block_point, const Value* v) {
-    const Node* n = v->node();
+  Node* scanValue(Node* block_point, Value* v) {
+    Node* n = v->node();
     JIT_ASSERT(isConstantLike(n) || output_inline_.count(n) == 0);
 
     if (n == block_point && canInline(v)) { // the node must be at the expected point of the typical tree traversal
@@ -153,14 +156,14 @@ struct PythonPrintPass {
     }
     return block_point;
   }
-  const Node* previousNonConstant(const Node* n) {
+  Node* previousNonConstant(Node* n) {
     do {
       n = n->prev();
     } while(isConstantLike(n));
     return n;
   }
 
-  const Node* scanNode(const Node* n) {
+  Node* scanNode(Node* n) {
     // don't bother to scan nodes we have already determined to be inline
     if(output_inline_.count(n)) {
       return n;
@@ -168,7 +171,7 @@ struct PythonPrintPass {
     for(auto b : n->blocks()) {
       scanBlock(b);
     }
-    const Node* block_point = previousNonConstant(n);
+    Node* block_point = previousNonConstant(n);
     for(auto it = n->inputs().rbegin(),
              end = n->inputs().rend(); it != end; ++it) {
       block_point = scanValue(block_point, *it);
@@ -176,7 +179,7 @@ struct PythonPrintPass {
     return block_point;
   }
 
-  void scanBlock(const Block* b) {
+  void scanBlock(Block* b) {
     scanNode(b->return_node());
     for(auto node : b->nodes().reverse()) {
       scanNode(node);
@@ -193,12 +196,13 @@ struct PythonPrintPass {
         return i;
       }
     }
+    JIT_ASSERT(t.is_variable());
     tensor_constants.emplace_back(std::move(t));
     return tensor_constants.size() - 1;
   }
 
-  std::unordered_set<const Node*> seen_constants;
-  void buildConstantList(const Node* n, std::vector<const Node*>& constants) {
+  std::unordered_set<Node*> seen_constants;
+  void buildConstantList(Node* n, std::vector<Node*>& constants) {
     for(auto input : n->inputs()) {
       if (isConstantLike(input->node()) && seen_constants.count(input->node()) == 0) {
         constants.push_back(input->node());
@@ -209,7 +213,7 @@ struct PythonPrintPass {
       buildConstantList(b, constants);
     }
   }
-  void buildConstantList(const Block* b, std::vector<const Node*>& constants) {
+  void buildConstantList(Block* b, std::vector<Node*>& constants) {
     for(auto n : b->nodes())
       buildConstantList(n, constants);
     buildConstantList(b->return_node(), constants);
@@ -253,24 +257,24 @@ struct PythonPrintPass {
   }
   // if we have to assign 'v' a name, what should it be?
   // use the uniqueName if it was set, otherwise generate a name.
-  std::string genUniqueNameFor(const Value* v) {
+  std::string genUniqueNameFor(Value* v) {
     return genName(
         v->hasUniqueName() ? makeValidIdentifier(v->uniqueName()) : "_");
   }
 
   // map from Value to how it should be printed at each use
-  std::unordered_map<const Value*, std::string> value_names_;
+  std::unordered_map<Value*, std::string> value_names_;
 
-  std::string useOf(const Value* v) const {
+  std::string useOf(Value* v) const {
     return value_names_.at(v);
   }
-  void assignValue(const Value* v, const std::string& s) {
+  void assignValue(Value* v, const std::string& s) {
     value_names_[v] = s;
   }
-  void assignValue(const Value* v, const Value* w) {
+  void assignValue(Value* v, Value* w) {
     assignValue(v, useOf(w));
   }
-  void assignValuesToTheirUniqueNames(at::ArrayRef<const Value*> values) {
+  void assignValuesToTheirUniqueNames(at::ArrayRef<Value*> values) {
     for(auto v : values) {
       assignValue(v, genUniqueNameFor(v));
     }
@@ -309,10 +313,10 @@ struct PythonPrintPass {
     }
   }
 
-  void printValueList(std::ostream& stmt, at::ArrayRef<const Value*> list, const char* begin = "", const char* end = "") {
+  void printValueList(std::ostream& stmt, at::ArrayRef<Value*> list, const char* begin = "", const char* end = "") {
     stmt << begin;
     auto delimiter = "";
-    for (const auto* value : list) {
+    for (auto* value : list) {
       stmt << delimiter;
       stmt << useOf(value);
       delimiter = ", ";
@@ -321,8 +325,8 @@ struct PythonPrintPass {
   }
 
   void printAssignment(
-      at::ArrayRef<const Value*> lhs,
-      at::ArrayRef<const Value*> rhs) {
+      at::ArrayRef<Value*> lhs,
+      at::ArrayRef<Value*> rhs) {
     if(lhs.size() > 0) {
       indent();
       printValueList(out, lhs);
@@ -332,41 +336,36 @@ struct PythonPrintPass {
     }
   }
 
-  void printIf(
-      const Node* node) {
-    assignValuesToTheirUniqueNames(node->outputs());
-    auto cond = node->inputs()[0];
-    const auto if_block = node->blocks()[0];
-    const auto else_block = node->blocks()[1];
-    indent() << "if " << useOf(cond) << ":\n";
+  void printIf(IfStmt stmt) {
+    assignValuesToTheirUniqueNames(stmt.outputs());
+    indent() << "if " << useOf(stmt.cond()) << ":\n";
     {
       auto guard = WithIndented();
       // Print node contents
-      printBlock(if_block, node->outputs().size() > 0);
-      printAssignment(node->outputs(), if_block->outputs());
+      printBlock(stmt.thenBlock(), stmt.outputs().size() > 0);
+      printAssignment(stmt.outputs(), stmt.thenOutputs());
     }
     indent() << "else:\n";
     {
       auto guard = WithIndented();
-      printBlock(else_block, node->outputs().size() > 0);
-      printAssignment(node->outputs(), else_block->outputs());
+      printBlock(stmt.elseBlock(), stmt.outputs().size() > 0);
+      printAssignment(stmt.outputs(), stmt.elseOutputs());
     }
   }
 
   // our way of encoding loops makes them difficult to turn back into python syntax.
   // we have to check properties of the condition and trip count inputs to
   // figure out which one it initially was
-  static bool shouldEmitAsForLoop(const Node* node) {
-      const auto body_block = node->blocks()[0];
-      auto trip_count = toIValue(node->inputs().at(0));
-      auto cond_input = toIValue(node->inputs().at(1));
-      auto cond_next = toIValue(body_block->outputs().at(0));
+  static bool shouldEmitAsForLoop(LoopStmt stmt) {
+      auto trip_count = toIValue(stmt.maxTripCount());
+      auto cond_input = toIValue(stmt.inputCond());
+      auto cond_next = toIValue(stmt.nextCond());
 
       bool condition_is_always_true = cond_input && cond_input->toBool() && cond_next &&
         cond_next->toBool();
       bool trip_count_is_specified = !trip_count || // trip is not a constant
           trip_count->toInt() != std::numeric_limits<int64_t>::max() || // it is a constant but not the default one
-          body_block->inputs().at(0)->uses().size() > 0; // it is actually being used in the body.
+          stmt.currentTripCount()->uses().size() > 0; // it is actually being used in the body.
 
       if (condition_is_always_true) {
         // if the trip count was not specified this was a user-written while True:
@@ -374,7 +373,7 @@ struct PythonPrintPass {
       } else {
         // this must be a while loop, but check that there isn't _also_ a trip count
         if (trip_count_is_specified) {
-          throw script::ErrorReport(node->getSourceLocation())
+          throw script::ErrorReport(stmt.node()->getSourceLocation())
               << "loop cannot be printed as python because it has gone through an optimization "
               << "that combined while and for loops. File a bug.";
         }
@@ -382,41 +381,39 @@ struct PythonPrintPass {
       }
   }
 
-  void printLoop(const Node* node) {
+  void printLoop(LoopStmt stmt) {
 
     // Loop carried dependencies are handled by assigning their initial
     // values to the node->outputs() before the loop,
     // and assign node->outputs() to the new values at the end of each trip.
 
 
-    bool emit_as_for_loop = shouldEmitAsForLoop(node);
-    const auto body_block = node->blocks()[0];
+    bool emit_as_for_loop = shouldEmitAsForLoop(stmt);
 
-    assignValuesToTheirUniqueNames(node->outputs());
+    assignValuesToTheirUniqueNames(stmt.carriedOutputs());
     // Add aliases for loop-carried dependencies
     zipWith(
-        body_block->inputs().slice(1), // Start at 1 to ignore trip count
-        node->outputs(),
-        [&](const Value* block_input, const Value* node_output) {
+        stmt.bodyCarriedInputs(), // Start at 1 to ignore trip count
+        stmt.carriedOutputs(),
+        [&](Value* block_input, Value* node_output) {
           assignValue(block_input, node_output);
         });
 
     // Print initial assignments of loop node outputs = loop node inputs
-    printAssignment(node->outputs(), node->inputs().slice(2));
+    printAssignment(stmt.carriedOutputs(), stmt.carriedInputs());
 
-    auto trip_count_in_block = body_block->inputs().at(0);
-    assignValuesToTheirUniqueNames(trip_count_in_block);
+    assignValuesToTheirUniqueNames(stmt.currentTripCount());
     // Loop header
     if (emit_as_for_loop) {
       indent();
-      out << "for " << useOf(trip_count_in_block) << " in range("
-          << useOf(node->inputs().at(0)) << "):\n";
+      out << "for " << useOf(stmt.currentTripCount()) << " in range("
+          << useOf(stmt.maxTripCount()) << "):\n";
     } else {
       // note: trip_count_in_block is unused because this is a while loop,
       // so we reuse the Value* as a stand-in for the loop condition
-      printAssignment(trip_count_in_block, node->inputs().at(1));
+      printAssignment(stmt.currentTripCount(), stmt.inputCond());
       indent();
-      out << "while " << useOf(trip_count_in_block) << ":\n";
+      out << "while " << useOf(stmt.currentTripCount()) << ":\n";
     }
     // Loop body
     {
@@ -425,14 +422,14 @@ struct PythonPrintPass {
       // skip the assignment to the new condition in for loops because
       // the condition is always True
       size_t offset = emit_as_for_loop ? 1 : 0;
-
-      ArrayRef<const Value*> loop_carried_block_inputs = body_block->inputs().slice(offset);
+      auto body_block = stmt.bodyBlock();
+      ArrayRef<Value*> loop_carried_block_inputs = body_block->inputs().slice(offset);
       printBlock(body_block, loop_carried_block_inputs.size() > 0);
       printAssignment(loop_carried_block_inputs, body_block->outputs().slice(offset));
     }
   }
 
-  void printNode(const Node* node, bool print_const) {
+  void printNode(Node* node, bool print_const) {
     if (!print_const && isConstantLike(node))
       return;
     switch (node->kind()) {
@@ -445,10 +442,10 @@ struct PythonPrintPass {
         }
         break;
       case prim::Loop:
-        printLoop(node);
+        printLoop(LoopStmt(node));
         break;
       case prim::If:
-        printIf(node);
+        printIf(IfStmt(node));
         break;
       case prim::TupleUnpack:
       case prim::ListUnpack:
@@ -555,8 +552,32 @@ struct PythonPrintPass {
     stmt << "\"";
   }
 
+  void printConstant(std::ostream& stmt, IValue v) {
+    if(v.isTensor()) {
+      stmt << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
+    } else if(v.isString()) {
+      printQuotedString(stmt, v.toStringRef());
+    } else if(v.isTensorList()) {
+      stmt << "[";
+      const char* delim = "";
+      for(auto t : v.toTensorListRef()) {
+        stmt << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
+        delim = ", ";
+      }
+      stmt << "]";
+    } else if(v.isBoolList()) {
+      printMaybeAnnotatedConstantList(stmt, "bool", v.toBoolListRef().size(), v);
+    } else if(v.isIntList()) {
+      printMaybeAnnotatedConstantList(stmt, "int", v.toIntListRef().size(), v);
+    } else if(v.isDoubleList()) {
+      printMaybeAnnotatedConstantList(stmt, "float", v.toDoubleListRef().size(), v);
+    } else {
+      stmt << v;
+    }
+  }
+
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
-  void printRHS(std::ostream& stmt, const Node* node) {
+  void printRHS(std::ostream& stmt, Node* node) {
     switch(node->kind()) {
       case PythonOp::Kind: {
         auto value = static_cast<const PythonOp*>(node);
@@ -572,27 +593,7 @@ struct PythonPrintPass {
       } break;
       case prim::Constant: {
         IValue v = toIValue(node->output()).value();
-        if(v.isTensor()) {
-          stmt << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
-        } else if(v.isString()) {
-          printQuotedString(stmt, v.toStringRef());
-        } else if(v.isTensorList()) {
-          stmt << "[";
-          const char* delim = "";
-          for(auto t : v.toTensorListRef()) {
-            stmt << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
-            delim = ", ";
-          }
-          stmt << "]";
-        } else if(v.isBoolList()) {
-          printMaybeAnnotatedConstantList(stmt, "bool", v.toBoolListRef().size(), v);
-        } else if(v.isIntList()) {
-          printMaybeAnnotatedConstantList(stmt, "int", v.toIntListRef().size(), v);
-        } else if(v.isDoubleList()) {
-          printMaybeAnnotatedConstantList(stmt, "float", v.toDoubleListRef().size(), v);
-        } else {
-          stmt << v;
-        }
+        printConstant(stmt, v);
       } break;
       case prim::NoneGenerator:
       case prim::Undefined:
@@ -685,10 +686,12 @@ struct PythonPrintPass {
         // the subgraph gets emitted as another function
         auto name = genMethodName("__forked_function");
         std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
-        worklist.emplace_back(graph.get(), name);
+        worklist.emplace_back([graph, name, this] {
+          printOneFunction(*graph, name);
+        });
         // and we put a call to fork which invokes that function.
         stmt << "fork(self." << name;
-        for(const Value* v : node->inputs()) {
+        for(Value* v : node->inputs()) {
           stmt << ", " << useOf(v);
         }
         stmt << ")";
@@ -713,7 +716,7 @@ struct PythonPrintPass {
     }
   }
 
-  std::ostream& printBlock(const Block* root, bool block_has_other_statements) {
+  std::ostream& printBlock(Block* root, bool block_has_other_statements) {
     // pythons weird 'pass' syntax creates a bunch of places where we have to check
     // if this block would be empty. But not everything in a block is a node.
     // Sometimes if, loop, and return statements will follow this block
@@ -723,33 +726,52 @@ struct PythonPrintPass {
       indent();
       out << "pass\n";
     }
-    for (const auto* node : root->nodes()) {
+    for (auto* node : root->nodes()) {
       printNode(node, /*print_const=*/false);
     }
     return out;
   }
 
-  void printOneFunction(const Graph& graph, const std::string& name) {
+  void printDefaultValue(std::ostream& stmt, IValue value) {
+    if (value.isTensor() && !value.toTensor().defined()) {
+      // XXX - because undefined tensors are not stored as None, we need special handling.
+      // otherwise they get printed as CONSTANTS.c0 and then cannot be recreated because
+      // constant nodes cannot have an undefined value in them.
+      // The right solution is to make None of type Tensor actually be an IValue None.
+      stmt << "None";
+      return;
+    }
+    printConstant(stmt, value);
+  }
+  void printOneFunction(Graph& graph, const std::string& name, const std::vector<c10::optional<IValue>> defaults = {}) {
     used_names_.clear(); // each graph can reuse local names
 
     // we always print constants at the top of the function, in the order
     // in which they are used.
-    std::vector<const Node*> constants;
+    std::vector<Node*> constants;
     buildConstantList(graph.block(), constants);
 
     // current graph is used to de-dup names within a single graph
     scanBlock(graph.block());
     assignValuesToTheirUniqueNames(graph.inputs());
     out << "def " << name << "(self";
-    for(auto input : graph.inputs()) {
+    auto defaults_offset = defaults.begin();
+    for (auto input : graph.inputs()) {
       out << ",\n    " << useOf(input) << ": " << input->type()->python_str();
+      if (defaults_offset != defaults.end()) {
+        const c10::optional<IValue>& def = *defaults_offset++;
+        if (def) {
+          out << "=";
+          printDefaultValue(out, *def);
+        }
+      }
     }
     out << ") -> " << resultType(graph)->python_str() << ":\n";
     {
       auto guard = WithIndented();
       // Print initial constant table (most are just inlined into their use,
       // but some like long strings do get emitted)
-      for (const Node* n : constants) {
+      for (Node* n : constants) {
         printNode(n, /*print_const=*/true);
       }
       // Print body
@@ -776,20 +798,33 @@ struct PythonPrintPass {
     }
   }
 
-  void printFunction(const Graph& graph, const std::string& name) {
-    printOneFunction(graph, name);
+  void printFunction(Graph& graph, const std::string& name, const std::vector<c10::optional<IValue>>& defaults = {}) {
+    printOneFunction(graph, name, defaults);
     while(!worklist.empty()) {
       out << "\n\n";
       auto work = worklist.back();
       worklist.pop_back();
-      printOneFunction(*work.first, work.second);
+      work();
     }
+  }
+  void printMethod(script::Method& method) {
+    const std::string& name = method.name();
+    Graph& graph = *method.graph();
+    auto defaults = fmap(method.getSchema().arguments(), [](const Argument& arg) {
+      return arg.default_value();
+    });
+    printFunction(graph, name, defaults);
   }
 };
 
-TORCH_API std::vector<at::Tensor> PythonPrint(std::ostream& out, const Graph& graph, bool enforce_importable) {
+TORCH_API std::vector<at::Tensor> PythonPrint(std::ostream& out, Graph& graph, bool enforce_importable) {
   PythonPrintPass pp(out, enforce_importable);
-  pp.printFunction(graph, "script");
+  pp.printFunction(graph, "graph");
+  return pp.tensor_constants;
+}
+TORCH_API std::vector<at::Tensor> PythonPrint(std::ostream& out, script::Method& method, bool enforce_importable) {
+  PythonPrintPass pp(out, enforce_importable);
+  pp.printMethod(method);
   return pp.tensor_constants;
 }
 
