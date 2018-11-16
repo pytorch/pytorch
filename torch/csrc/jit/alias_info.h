@@ -4,5 +4,5 @@ namespace torch { namespace jit {
 
 using ::c10::AliasInfo;
 
-} // namespace jit
-} // namespace torch
+}} // namespace torch::jit
+
