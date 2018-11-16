@@ -38,10 +38,12 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toTensor();
     case IValue::Tag::Double: {
       double d = v.toDouble();
-      int64_t i = int64_t(d);
       int c = std::fpclassify(d);
-      if ((c == FP_NORMAL || c == FP_ZERO) && double(i) == d) {
-        return out << i << ".";
+      if (c == FP_NORMAL || c == FP_ZERO) {
+        int64_t i = int64_t(d);
+        if (double(i) == d) {
+          return out << i << ".";
+        }
       }
       auto orig_prec = out.precision();
       return out
