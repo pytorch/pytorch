@@ -194,7 +194,7 @@ Tensor internal_new_from_data(
   }
 
   if (THPVariable_Check(data)) {
-    auto var = reinterpret_cast<THPVariable*>(data)->cdata;
+    auto var = autograd::make_variable(reinterpret_cast<THPVariable*>(data)->cdata.data(), /*requires_grad=*/false);
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
     const auto& scalar_type = type_inference ? var.type().scalarType() : type.scalarType();
