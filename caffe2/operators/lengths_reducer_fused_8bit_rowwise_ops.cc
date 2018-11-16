@@ -42,7 +42,11 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(SparseLengthsWeightedSumFused8BitRowwise)
     .NumInputs(4)
     .NumOutputs(1)
-    .DisallowInputFillers() // TODO: Enable the fillers
+    .WeightedValueKeyLengthInputFillers(
+        SparseLengthsFused8BitRowwiseOp<CPUContext, true>::DATA,
+        SparseLengthsFused8BitRowwiseOp<CPUContext, true>::INDICES,
+        SparseLengthsFused8BitRowwiseOp<CPUContext, true>::LENGTHS,
+        SparseLengthsFused8BitRowwiseOp<CPUContext, true>::WEIGHTS)
     .SetDoc(R"DOC(
 Performs the same operation as SparseLengthsWeightedSum,
 but operating on 8-bit rowwise quantized matrices with fused storage
