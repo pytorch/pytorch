@@ -168,10 +168,10 @@ class MapToKeyValueOp final : public Operator<Context> {
     using key_type = typename MAP_T::key_type;
     using mapped_type = typename MAP_T::mapped_type;
     auto& map_data = this->template Input<MAP_T>(MAP);
-
-    auto* key_output = Output(KEYS, {map_data.size()}, at::dtype<key_type>());
-    auto* value_output =
-        Output(VALUES, {map_data.size()}, at::dtype<mapped_type>());
+    auto* key_output = Output(KEYS);
+    auto* value_output = Output(VALUES);
+    key_output->Resize(map_data.size());
+    value_output->Resize(map_data.size());
     auto* key_data = key_output->template mutable_data<key_type>();
     auto* value_data = value_output->template mutable_data<mapped_type>();
 

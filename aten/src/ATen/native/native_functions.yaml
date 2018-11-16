@@ -680,10 +680,13 @@
     CUDA: resize_cuda_
 
 - func: empty_out(Tensor result, IntList size) -> Tensor
+  device_guard: False
 
 - func: empty_like(Tensor self) -> Tensor
+  device_guard: False
 
 - func: empty_like(Tensor self, *, TensorOptions options) -> Tensor
+  device_guard: False
 
 - func: empty_strided(IntList size, IntList stride, *, TensorOptions options={}) -> Tensor
 
@@ -1256,6 +1259,9 @@
 
 - func: _pdist_backward(Tensor grad, Tensor self, double p, Tensor pdist) -> Tensor
 
+- func: cosine_similarity(Tensor x1, Tensor x2, int64_t dim=1, double eps=1e-8) -> Tensor
+  variants: function
+
 - func: permute(Tensor self, IntList dims) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
@@ -1662,9 +1668,11 @@
 - func: prod_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
 
 - func: t(Tensor self) -> Tensor
+  device_guard: False
   variants: function, method
 
 - func: t_(Tensor self) -> Tensor
+  device_guard: False
   variants: method
 
 - func: tan(Tensor self) -> Tensor

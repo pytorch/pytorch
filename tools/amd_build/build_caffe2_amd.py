@@ -23,6 +23,7 @@ includes = [
     "caffe2/core/*",
     "caffe2/db/*",
     "caffe2/utils/*",
+    "c10/cuda/*",
 ]
 
 ignores = [
@@ -54,5 +55,4 @@ hipify_python.hipify(
     ignores=ignores,
     hipify_caffe2=True,
     add_static_casts_option=True,
-    hip_suffix=args.hip_suffix,
-    extensions_to_hip_suffix=['.cc', '.cu'])
+    hip_suffix=args.hip_suffix)

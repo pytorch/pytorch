@@ -51,8 +51,8 @@ class RecurrentNetworkBlobFetcherOp final : public Operator<Context> {
       }
     }
 
-    auto* output =
-        Output(0, {blob_names_vector.size()}, at::dtype<std::string>());
+    auto* output = Output(0);
+    output->Resize(blob_names_vector.size());
     std::copy(
         blob_names_vector.begin(),
         blob_names_vector.end(),
