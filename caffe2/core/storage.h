@@ -20,8 +20,8 @@
 #include <c10/Device.h>
 #include <c10/DeviceType.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/Storage.h>
-#include <ATen/core/StorageImpl.h>
+#include <c10/core/Storage.h>
+#include <c10/core/StorageImpl.h>
 
 namespace caffe2 {
 
