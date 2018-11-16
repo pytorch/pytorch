@@ -707,6 +707,20 @@ class TestInferDevice(test_util.TestCase):
             outputs=["fc_1"]
         )
 
+    def test_infer_device_adam(self):
+        in_options = [self.cuda_option] * 6
+        in_options[5] = self.cpu_option
+        out_options = [self.cuda_option] * 4
+        self._test_op(
+            "Adam",
+            in_options,
+            out_options,
+            op_option=self.cuda_option,
+            inputs=["param", "moment_1", "moment_2", "grad", "lr", "iter"],
+            outputs=["output_param", "output_moment_1", "output_moment_2",
+                "output_grad"]
+        )
+
     def test_infer_device_cross_device(self):
         self._test_op("CopyGPUToCPU", self.cuda_option, self.cpu_option)
         self._test_op("CopyCPUToGPU", self.cpu_option, self.cuda_option)

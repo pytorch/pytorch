@@ -271,7 +271,7 @@ std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
 /// \brief Ingest a caffe2 protobuf model and output an NNModule.
 /// \param net The caffe2 protobuf NetDef
 repr::NNModule convertToNNModule(
-    caffe2::NetDef& net,
+    const caffe2::NetDef& net,
     bool strict,
     std::vector<repr::NNGraph::NodeRef>* opNodeVec) {
   repr::NNModule module;
@@ -295,7 +295,7 @@ repr::NNModule convertToNNModule(
   /// flow operations such as if and while.
   auto bbNode = cfg.createNamedFunction("main");
 
-  for (auto &op : *net.mutable_op()) {
+  for (const auto& op : net.op()) {
     auto opNode = dfg.createNode(); // Create an empty node for the operator.
     // First calculate in-edges (data dependencies).
     for (const auto &input : op.input()) {

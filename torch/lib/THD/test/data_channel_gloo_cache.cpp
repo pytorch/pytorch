@@ -1,4 +1,4 @@
-#include "../base/data_channels/DataChannelGloo.hpp"
+#include <THD/base/data_channels/DataChannelGloo.hpp>
 #include "TestUtils.hpp"
 
 #include <THPP/tensors/THTensor.hpp>
