@@ -473,7 +473,7 @@ class ScriptModuleDeserializer final {
     }
     auto type = at::typeMetaToScalarType(
         caffe2::DataTypeToTypeMeta(tensor_proto.data_type()));
-    uint64_t record_id = caffe2::stoull(external_data.record_id());
+    uint64_t record_id = c10::stoull(external_data.record_id());
     AT_ASSERT(record_id != 0);
     auto storage_it = storageMap_.find(record_id);
     if (storage_it == storageMap_.end()) {

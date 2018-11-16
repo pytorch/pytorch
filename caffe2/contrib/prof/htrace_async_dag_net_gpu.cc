@@ -39,7 +39,7 @@ class HTraceAsyncDAGNet : public AsyncDAGNet {
     htrace::Scope run_scope(
         htrace_tracer_,
         htrace_root_scope_.GetSpanId(),
-        "run-scope-" + caffe2::to_string(run_count_++));
+        "run-scope-" + c10::to_string(run_count_++));
     return AsyncDAGNet::DoRunAsync();
   }
 

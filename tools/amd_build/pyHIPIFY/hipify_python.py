@@ -242,8 +242,7 @@ def preprocess(
         all_files,
         show_detailed=False,
         show_progress=True,
-        hipify_caffe2=False,
-        hip_suffix='cc'):
+        hipify_caffe2=False):
     """
     Call preprocessor on selected files.
 
@@ -259,15 +258,14 @@ def preprocess(
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
-        preprocessor(output_directory, filepath, stats, hipify_caffe2, hip_suffix)
+        preprocessor(output_directory, filepath, stats, hipify_caffe2)
         # Show what happened
         if show_progress:
             print(
                 filepath, "->",
                 get_hip_file_path(
                     filepath,
-                    hipify_caffe2=hipify_caffe2,
-                    hip_suffix=hip_suffix))
+                    hipify_caffe2=hipify_caffe2))
             finished_count += 1
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
@@ -710,7 +708,7 @@ def disable_function(input_string, function, replace_style):
     return output_string
 
 
-def get_hip_file_path(filepath, hipify_caffe2, hip_suffix):
+def get_hip_file_path(filepath, hipify_caffe2):
     """
     Returns the new name of the hipified file
     """
@@ -744,13 +742,10 @@ def get_hip_file_path(filepath, hipify_caffe2, hip_suffix):
     #
     #   - If the file name contains "CUDA", replace it with "HIP", AND
     #
-    #   - If the file name contains "gpu", replace it with "hip".
-    #
     # If NONE of the above occurred, then append "_hip" to the end of
     # the filename (before the extension).
     #
-    # Furthermore, ALWAYS replace '.cu' with '.cc', to appease the hcc
-    # compiler.
+    # Furthermore, ALWAYS replace '.cu' with '.hip'.
     #
     # This isn't set in stone; we might adjust this to support other
     # naming conventions.
@@ -760,20 +755,15 @@ def get_hip_file_path(filepath, hipify_caffe2, hip_suffix):
     # currently support this file extension.
 
     if ext == '.cu':
-        ext = '.' + hip_suffix
+        ext = '.hip'
 
     orig_dirpath = dirpath
-    orig_root = root
 
     dirpath = dirpath.replace('cuda', 'hip')
-    root = root.replace('gpu', 'hip')
     root = root.replace('CUDA', 'HIP')
 
     if dirpath == orig_dirpath:
         dirpath = os.path.join(dirpath, 'hip')
-
-    if root == orig_root:
-        root += "_hip"
 
     return os.path.join(dirpath, root + ext)
 
@@ -786,13 +776,13 @@ def is_caffe2_gpu_file(filepath):
     return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
 
-def preprocessor(output_directory, filepath, stats, hipify_caffe2, hip_suffix):
+def preprocessor(output_directory, filepath, stats, hipify_caffe2):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
     with open(fin_path, 'r') as fin:
         output_source = fin.read()
 
-    fout_path = os.path.join(output_directory, get_hip_file_path(filepath, hipify_caffe2, hip_suffix))
+    fout_path = os.path.join(output_directory, get_hip_file_path(filepath, hipify_caffe2))
     if not os.path.exists(os.path.dirname(fout_path)):
         os.makedirs(os.path.dirname(fout_path))
 
@@ -1257,8 +1247,7 @@ def main():
         add_static_casts_option=args.add_static_casts,
         hipify_caffe2=args.hipify_caffe2,
         ignores=args.ignores,
-        show_progress=args.show_progress,
-        hip_suffix=args.hip_suffix)
+        show_progress=args.show_progress)
 
 
 def hipify(
@@ -1272,7 +1261,6 @@ def hipify(
     hipify_caffe2=False,
     ignores=(),
     show_progress=True,
-    hip_suffix='cc',
 ):
     if project_directory == "":
         project_directory = os.getcwd()
@@ -1389,8 +1377,7 @@ def hipify(
         all_files,
         show_detailed=show_detailed,
         show_progress=show_progress,
-        hipify_caffe2=hipify_caffe2,
-        hip_suffix=hip_suffix)
+        hipify_caffe2=hipify_caffe2)
 
     # Extract all of the kernel parameter and template type information.
     if add_static_casts_option:
@@ -1409,8 +1396,7 @@ def hipify(
                     output_directory,
                     get_hip_file_path(
                         filepath,
-                        hipify_caffe2=hipify_caffe2,
-                        hip_suffix=hip_suffix)),
+                        hipify_caffe2=hipify_caffe2)),
                 KernelTemplateParams)
 
 

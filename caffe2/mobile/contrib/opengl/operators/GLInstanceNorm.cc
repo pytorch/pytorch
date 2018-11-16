@@ -35,14 +35,15 @@ class GLReduce : public GLFilter {
   }
 
   GLReduce(bool compute_inv_stdev_ = false, bool compute_norm_ = false)
-      : GLFilter("GLReduce",
-                 vertex_shader,
-                 fragment_shader,
-                 input_bindings(compute_norm_),
-                 {/* no uniform_blocks_bindings */},
-                 {/* no attributes */},
-                 {{"COMPUTE_INV_STDEV", caffe2::to_string((int)compute_inv_stdev_)},
-                  {"COMPUTE_NORM", caffe2::to_string((int)compute_norm_)}}),
+      : GLFilter(
+            "GLReduce",
+            vertex_shader,
+            fragment_shader,
+            input_bindings(compute_norm_),
+            {/* no uniform_blocks_bindings */},
+            {/* no attributes */},
+            {{"COMPUTE_INV_STDEV", c10::to_string((int)compute_inv_stdev_)},
+             {"COMPUTE_NORM", c10::to_string((int)compute_norm_)}}),
         compute_inv_stdev(compute_inv_stdev_),
         compute_norm(compute_norm_) {}
 
@@ -208,18 +209,20 @@ class GLScale : public GLFilter {
     return bindings;
   }
 
-  GLScale(const int _channels,
-          const float* _scale,
-          const float* _bias,
-          const float* _prelu_scale = nullptr,
-          const int _prelu_size = 0)
-      : GLFilter("GLScale",
-                 vertex_shader,
-                 fragment_shader,
-                 input_bindings(_prelu_scale != nullptr),
-                 {/* no uniform blocks */},
-                 {/* no attributes */},
-                 {{"FUSE_PRELU", caffe2::to_string(_prelu_scale != nullptr)}}),
+  GLScale(
+      const int _channels,
+      const float* _scale,
+      const float* _bias,
+      const float* _prelu_scale = nullptr,
+      const int _prelu_size = 0)
+      : GLFilter(
+            "GLScale",
+            vertex_shader,
+            fragment_shader,
+            input_bindings(_prelu_scale != nullptr),
+            {/* no uniform blocks */},
+            {/* no attributes */},
+            {{"FUSE_PRELU", c10::to_string(_prelu_scale != nullptr)}}),
         channels(_channels),
         scale(_scale),
         bias(_bias),
