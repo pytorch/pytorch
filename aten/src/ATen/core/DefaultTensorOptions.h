@@ -11,6 +11,8 @@ struct TensorOptions;
 
 /// Like TensorOptions, but all fields are guaranteed to be filled.
 struct DefaultTensorOptions {
+  DefaultTensorOptions() = default;
+
   caffe2::TypeMeta dtype() const noexcept { return dtype_; }
   Device device()          const noexcept { return device_; }
   Layout layout()          const noexcept { return layout_; }
@@ -28,8 +30,8 @@ struct DefaultTensorOptions {
   bool is_variable_       = false;                           // 8-bit
 };
 
-// TODO: Even better would be <= sizeof(int64_t)
-static_assert(sizeof(DefaultTensorOptions) <= sizeof(int64_t) * 2,
-              "DefaultTensorOptions must fit in 128 bits");
-
+inline const DefaultTensorOptions& getDefaultTensorOptions() {
+  static const auto options = DefaultTensorOptions();
+  return options;
+}
 } // namespace at

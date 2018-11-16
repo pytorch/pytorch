@@ -134,7 +134,7 @@ TEST_F(ParallelTest, ParallelApply_MultiCUDA) {
 TEST_F(ParallelTest, ParallelApplyWithDifferentOutputDevice_MultiCUDA) {
   struct M : torch::nn::Module {
     torch::Tensor forward(torch::Tensor input) {
-      return torch::ones({5}, torch::dtype(torch::kInt32));
+      return torch::ones(5, torch::kInt32);
     }
   };
 
@@ -176,12 +176,9 @@ TEST_F(
   struct M : torch::nn::Cloneable<M> {
     void reset() override {}
     torch::Tensor forward(torch::Tensor input) {
-      // Intermediate tensors should be on the replica's current device.
-      intermediate_tensor = torch::rand(5);
       // The returned tensor should be on the output device.
       return torch::ones(3);
     }
-    torch::Tensor intermediate_tensor;
   };
   auto m = std::make_shared<M>();
   auto input = torch::ones({10, 3});
@@ -202,9 +199,6 @@ TEST_F(
         input,
         /*devices=*/std::vector<torch::Device>{torch::Device(torch::kCUDA, 0)},
         /*output_device=*/torch::Device(torch::kCUDA, 1));
-    ASSERT_TRUE(m->intermediate_tensor.defined());
-    ASSERT_TRUE(m->intermediate_tensor.device().is_cuda());
-    ASSERT_EQ(m->intermediate_tensor.device().index(), 0);
     ASSERT_TRUE(output.defined());
     ASSERT_TRUE(output.device().is_cuda());
     ASSERT_EQ(output.device().index(), 1);
@@ -215,7 +209,7 @@ TEST_F(ParallelTest, DataParallelUsesAllAvailableCUDADevices_CUDA) {
   struct M : torch::nn::Cloneable<M> {
     void reset() override {}
     torch::Tensor forward(torch::Tensor input) {
-      return torch::tensor(torch::getDefaultTensorOptions().device().index());
+      return torch::tensor(input.device().index());
     }
   };
 
