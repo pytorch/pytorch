@@ -245,6 +245,46 @@ void VariableType::backward(
 void VariableType::set_data(Tensor & self, Tensor new_data) const {
   as_variable_ref(self).set_data(new_data);
 }
+Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
+  jit::Node* node = nullptr;
+  if(torch::jit::tracer::isTracing()) {
+    auto& graph = jit::tracer::getTracingState()->graph;
+    // if you have no views of self, then an in place copy is equivalent to
+    // making sure we expand src to the same size as self
+    node = graph->create(jit::aten::expand_as, /*num_outputs=*/0);
+    jit::tracer::addInputs(node, "src", src);
+    jit::tracer::addInputs(node, "self", self);
+    graph->appendNode(node);
+    jit::tracer::ensureUnique("copy_ (possibly due to an assignment)", self);
+  }
+  // TODO: once copy is exposed in Declarations.yaml we may be able to bind
+  // it automatically
+  auto& self_ = unpack(self, "self", 0);
+  auto& src_ = unpack(src, "src", 1);
+  check_inplace(self);
+  std::shared_ptr<CopyBackwards> grad_fn;
+  auto requires_grad = compute_requires_grad(self, src);
+  requires_grad &= isFloatingPoint(self.type().scalarType());
+  if (requires_grad) {
+    grad_fn = std::make_shared<CopyBackwards>();
+    grad_fn->set_next_edges(collect_next_edges(self, src));
+    grad_fn->src_type = &src.type();
+    grad_fn->src_device = src.device();
+  }
+  if (self.is_sparse() && src.is_sparse()) baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
+  else if (!self.is_sparse() && !src.is_sparse()) baseType->s_copy_(self_, src_, non_blocking);
+  else AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ", self.type(), " and src type = ", src.type());
+  increment_version(self);
+  rebase_history(as_variable_ref( self ), std::move(grad_fn));
+  if(torch::jit::tracer::isTracing()) {
+    jit::tracer::addOutput(node, self);
+  }
+  return self;
+}
+
+Tensor VariableType::_s_copy_from(const Tensor & self, const Tensor & dst, bool non_blocking) const {
+  AT_ERROR("copy_from does not support automatic differentiation; use copy_ instead");
+}
 
 Tensor & VariableType::resize_(Tensor & self, IntList size) const {
   auto& self_ = unpack(self, "self", 0);
