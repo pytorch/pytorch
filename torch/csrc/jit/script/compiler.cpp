@@ -487,14 +487,6 @@ Value* tryConvertToType(
     TypePtr concrete_type,
     Value* value,
     bool allow_conversions) {
-  // Allow homogeneous tuples to be casted implicitly to lists of appropriate
-  // types
-  if (convertibleToList(value->type(), unwrapOptional(concrete_type)) &&
-      value->type()->kind() == TypeKind::TupleType) {
-    auto unpacked = createTupleUnpack(value);
-    auto elem_type = unwrapOptional(concrete_type)->expect<ListType>()->getElementType();
-    value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
-  }
 
   if (value->type()->isSubtypeOf(NoneType::get()) && !concrete_type->isSubtypeOf(NoneType::get())){
     if (concrete_type->isSubtypeOf(GeneratorType::get())) {
@@ -505,6 +497,20 @@ Value* tryConvertToType(
     } else if (auto optional_type = concrete_type->cast<OptionalType>()) {
       value = graph.insertNode(graph.createNone(optional_type->getElementType()))->output();
     }
+  }
+
+  //if the target type is an optional, allow the same matching logic to apply
+  if (auto opt_concrete_type = concrete_type->cast<OptionalType>()) {
+    concrete_type = opt_concrete_type->getElementType();
+  }
+
+  // Allow homogeneous tuples to be casted implicitly to lists of appropriate
+  // types
+  if (convertibleToList(value->type(), unwrapOptional(concrete_type)) &&
+      value->type()->kind() == TypeKind::TupleType) {
+    auto unpacked = createTupleUnpack(value);
+    auto elem_type = unwrapOptional(concrete_type)->expect<ListType>()->getElementType();
+    value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
   //implicit conversions
@@ -557,6 +563,10 @@ Value* tryMatchArgument(
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
   if(!value->type()->isSubtypeOf(concrete_type)) {
+    if (concrete_type->str() == "int[]?" && arg.name() == "size") {
+      std::cout << "hi";
+    }
+
     err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name() << "' but found "
           << value->type()->str() << "\n"
           << named_value.locOr(loc);

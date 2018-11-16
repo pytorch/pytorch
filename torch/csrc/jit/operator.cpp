@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/passes/python_print.h"
 #include "torch/csrc/jit/script/error_report.h"
+#include "torch/csrc/jit/script/parser.h"
 
 namespace torch { namespace jit {
 
@@ -225,6 +226,10 @@ struct SchemaParser {
       case TK_NONE:
         L.next();
         return IValue();
+      case TK_STRINGLITERAL: {
+        Parser str_parser(L.next().text());
+        return str_parser.parseStringLiteral().text();
+      }
       case TK_IDENT: {
         auto tok = L.next();
         auto text = tok.text();
@@ -293,6 +298,7 @@ struct SchemaParser {
       case TypeKind::GeneratorType: {
         return parseTensorDefault(range);
       }  break;
+      case TypeKind::StringType:
       case TypeKind::OptionalType:
       case TypeKind::NumberType:
       case TypeKind::IntType:
