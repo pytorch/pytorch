@@ -12,7 +12,7 @@
     output: 'false'
     grad_input: 'false'
 
-- name: mse_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
+- name: _thnn_mse_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: MSECriterion
   scalar_check:
     output: 'false'

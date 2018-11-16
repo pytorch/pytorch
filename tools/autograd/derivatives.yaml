@@ -886,7 +886,7 @@
 - name: l1_loss_forward(Tensor self, Tensor target, int64_t reduction)
   self: l1_loss_backward(grad, self, target, reduction)
 
-- name: mse_loss_forward(Tensor self, Tensor target, int64_t reduction)
+- name: mse_loss(Tensor self, Tensor target, int64_t reduction)
   self: mse_loss_backward(grad, self, target, reduction)
 
 - name: multi_margin_loss_forward(Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int64_t reduction)
