@@ -2039,8 +2039,6 @@ class TestJit(JitTestCase):
         example_outputs = traced(torch.rand([2]))
 
         f = io.BytesIO()
-        print(torch.onnx._export_to_pretty_string(traced, (torch.rand([2]),), f,
-                                                                example_outputs=example_outputs))
         self.assertExpected(torch.onnx._export_to_pretty_string(traced, (torch.rand([2]),), f,
                                                                 example_outputs=example_outputs))
 
