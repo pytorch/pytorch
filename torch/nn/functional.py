@@ -1446,7 +1446,9 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
     )
 
 
+@torch._jit_internal.weak_script
 def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
+    # type: (Tensor, List[int], Optional[Tensor], Optional[Tensor], float) -> Tensor
     r"""Applies Layer Normalization for last certain number of dimensions.
 
     See :class:`~torch.nn.LayerNorm` for details.
@@ -1455,7 +1457,9 @@ def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
                             torch.backends.cudnn.enabled)
 
 
+@torch._jit_internal.weak_script
 def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
+    # type: (Tensor, int, Optional[Tensor], Optional[Tensor], float) -> Tensor
     r"""Applies Group Normalization for last certain number of dimensions.
 
     See :class:`~torch.nn.GroupNorm` for details.
@@ -1920,41 +1924,47 @@ def margin_ranking_loss(input1, input2, target, margin=0, size_average=None,
     return torch.margin_ranking_loss(input1, input2, target, margin, reduction)
 
 
+@torch._jit_internal.weak_script
 def hinge_embedding_loss(input, target, margin=1.0, size_average=None,
                          reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, float, Optional[bool], Optional[bool], str) -> Tensor
     r"""hinge_embedding_loss(input, target, margin=1.0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
     """  # noqa
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch.hinge_embedding_loss(input, target, margin, reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
+    return torch.hinge_embedding_loss(input, target, margin, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelMarginLoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch._C._nn.multilabel_margin_loss(input, target, reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
+    return torch._C._nn.multilabel_margin_loss(input, target, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch._C._nn.soft_margin_loss(input, target, reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
+    return torch._C._nn.soft_margin_loss(input, target, reduction_enum)
 
 
 @torch._jit_internal.weak_script

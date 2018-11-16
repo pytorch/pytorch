@@ -9109,7 +9109,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_batch_norm',
 
     # aten op has additional cudnn argument
-    'test_nn_group_norm',
     'test_nn_nll_loss',
     'test_nn_unfold',
     'test_nn_max_unpool2d',
