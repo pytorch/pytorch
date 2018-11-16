@@ -201,67 +201,105 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   return c10::nullopt;
 }
 
-TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
-  if(!formal->hasFreeVariables())
-    return formal;
+MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
+  MatchTypeReturn ret;
+  if(!formal->hasFreeVariables()) {
+    ret.type = formal;
+    return ret;
+  }
+
   if(auto vt = formal->cast<VarType>()) {
     auto it = type_env.find(vt->name());
     if(it == type_env.end()) {
       type_env[vt->name()] = actual;
-      return actual;
+      ret.type = actual;
+      return ret;
     } else if(auto unified = unifyTypes(it->second, actual)) {
       type_env[vt->name()] = *unified;
-      return *unified;
+      ret.type = *unified;
+      return ret;
     }
     std::stringstream ss;
     ss << "type variable '" << vt->name() <<"' previously matched to type " <<
       it->second->str() << " is matched to type " << actual->str();
-    throw TypeMatchError(ss.str());
+    ret.errMsg = ss.str();
+    return ret;
   } else if(auto lt_formal = formal->cast<ListType>()) {
     if(auto lt_actual = actual->cast<ListType>()) {
-      return ListType::create(matchTypeVariables(lt_formal->getElementType(), lt_actual->getElementType(), type_env));
+      const auto innerType = matchTypeVariables(
+          lt_formal->getElementType(),
+          lt_actual->getElementType(),
+          type_env);
+      if (!innerType.type) {
+        // propagate the errMsg onward
+        return innerType;
+      }
+      ret.type = ListType::create(*innerType.type);
+      return ret;
     } else {
       std::stringstream ss;
       ss << "cannot match a list to " << actual->str();
-      throw TypeMatchError(ss.str());
+      ret.errMsg = ss.str();
+      return ret;
     }
   } else if(auto tp_formal = formal->cast<TupleType>()) {
     if(auto tp_actual = actual->cast<TupleType>()) {
       if(tp_formal->elements().size() != tp_actual->elements().size()) {
-        std::stringstream ss;
-        throw TypeMatchError("cannot match tuples of mismatched size");
+        ret.errMsg = "cannot match tuples of mismatched size";
+        return ret;
       }
       std::vector<TypePtr> elements;
       for(size_t i = 0; i < tp_formal->elements().size(); ++i) {
-        TypePtr result = matchTypeVariables(
+        const auto result = matchTypeVariables(
             tp_formal->elements()[i],
             tp_actual->elements()[i],
             type_env);
-        elements.push_back(result);
+        if (!result.type) {
+          return result;
+        }
+        elements.push_back(*result.type);
       }
-      return TupleType::create(std::move(elements));
+      ret.type = TupleType::create(std::move(elements));
+      return ret;
     } else {
       std::stringstream ss;
       ss << "cannot match a tuple to " << actual->str();
-      throw TypeMatchError(ss.str());
+      ret.errMsg = ss.str();
+      return ret;
     }
   } else if (auto lt_formal = formal->cast<FutureType>()) {
     if (auto lt_actual = actual->cast<FutureType>()) {
-      return FutureType::create(matchTypeVariables(
-          lt_formal->getElementType(), lt_actual->getElementType(), type_env));
+      const auto innerType = matchTypeVariables(
+          lt_formal->getElementType(), lt_actual->getElementType(), type_env);
+      if (!innerType.type) {
+        return innerType;
+      }
+      ret.type = FutureType::create(*innerType.type);
+      return ret;
     } else {
       std::stringstream ss;
       ss << "cannot match a future to " << actual->str();
-      throw TypeMatchError(ss.str());
+      ret.errMsg = ss.str();
+      return ret;
     }
   } else if (auto opt_formal = formal->cast<OptionalType>()) {
     if (auto opt_actual = actual->cast<OptionalType>()) {
-      return OptionalType::create(matchTypeVariables(
-          opt_formal->getElementType(), opt_actual->getElementType(), type_env));
-    } else {
+      const auto optionedType = matchTypeVariables(
+          opt_formal->getElementType(), opt_actual->getElementType(), type_env);
+      if (!optionedType.type) {
+        return optionedType;
+      }
+      ret.type = OptionalType::create(*optionedType.type);
+      return ret;
+    } else if (!actual->isSubtypeOf(NoneType::get())) {
       // If the actual type is a non-optional, allow matching to the formal if
-      // its element type matches the actual
+      // its element type matches the actual.
+      // Don't match None because it is already an optional (but one of
+      // unknown type).
       return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
+    } else {
+      ret.errMsg = "cannot match an Optional[T] to None, because there is no way to determine T from None.";
+      return ret;
     }
   }
 

@@ -244,11 +244,8 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
 template <class Context>
 bool ConcatOp<Context>::RunOnDevice() {
   auto* output = Output(0);
-
-  // We can override default options(Context::GetDeviceType())
-  // by explictly passing in device type we want
-  Tensor* split = Output(
-      1, std::vector<int64_t>(1, InputSize()), at::dtype<int>().device(CPU));
+  Tensor* split = this->template Output<Tensor>(1, CPU);
+  split->Resize(vector<int64_t>(1, InputSize()));
   int* axis_data = split->template mutable_data<int>();
   auto& input_zero = Input(0);
   int adj_size = input_zero.dim() + (add_axis_ ? 1 : 0);

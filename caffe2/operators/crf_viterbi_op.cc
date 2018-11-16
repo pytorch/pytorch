@@ -78,6 +78,7 @@ class ViterbiPathOp : public Operator<CPUContext> {
   bool RunOnDevice() override {
     auto& predictions = Input(0);
     auto& transitions = Input(1);
+    auto* viterbiPath = Output(0);
 
     CAFFE_ENFORCE(
         predictions.dim() == 2 && transitions.dim() == 2,
@@ -89,7 +90,7 @@ class ViterbiPathOp : public Operator<CPUContext> {
 
     auto seqLen = predictions.dim32(0);
 
-    auto* viterbiPath = Output(0, {seqLen}, at::dtype<int32_t>());
+    viterbiPath->Resize(seqLen);
     auto block_size = predictions.numel() / predictions.size(0);
     auto block_bytesize =
         predictions.size_from_dim(1) * predictions.dtype().itemsize();
