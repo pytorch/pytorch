@@ -593,6 +593,7 @@ Tensor _sparse_addmm(
   Scalar beta,
   Scalar alpha
 ) {
+  AT_CHECK(sparse.is_coalesced(), "_sparse_addmm doesn't support uncoalesced SparseTensor");
   return at::s_native_addmm(t, sparse, dense, beta, alpha);
 }
 

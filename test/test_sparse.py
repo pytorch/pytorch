@@ -774,13 +774,21 @@ class TestSparse(TestCase):
     @skipIfRocm
     def test_sparse_addmm(self):
         def test_shape(m, n, p, nnz):
-            D1 = torch.randn(n, p).requires_grad_(True)
-            D2 = torch.randn(m, p).requires_grad_(True)
+            D1 = torch.randn(n, p, device=self.device).requires_grad_(True)
+            D2 = torch.randn(m, p, device=self.device).requires_grad_(True)
             S = self._gen_sparse(2, nnz, [n, m])[0]
+            S_dense = S.to_dense().requires_grad_(True)
             S.requires_grad_(True)
-            y = torch.sparse.addmm(D1, S, D2).sum()
+            self.assertEqual(torch.sparse.addmm(D1, S, D2), torch.addmm(D1, S_dense, D2))
+            y1 = torch.sparse.addmm(D1, S, D2).sum()
+            y2 = torch.addmm(D1, S_dense, D2).sum()
+            y1.backward()
+            y2.backward()
+            mask = (S_dense == 0)
+            self.assertEqual(S.grad.to_dense(), S_dense.grad.masked_fill_(mask, 0))
 
-        test_shape(7, 5, 3, 20)
+        if not self.is_uncoalesced:
+            test_shape(7, 8, 9, 20)
 
     @skipIfRocm
     def test_dsmm(self):
