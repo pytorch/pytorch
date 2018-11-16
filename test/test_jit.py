@@ -3671,6 +3671,13 @@ a")
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
             self.checkScript(reassign_nested, (), optimize=False)
 
+        def list_ctor(x):
+            y = list([1, 2, 3])
+            z = list(x.size())
+            return
+
+        self.checkScript(reassign, (), optimize=False)
+
     def test_list_gather(self):
         def index():
             a = [1, 2, 3]
@@ -4996,6 +5003,24 @@ a")
                     self.i = (3, 4, {})
 
         f = Foo()
+
+    def test_script_module_param_buffer_mutation(self):
+        # TODO: add param mutation test case after JIT support it
+        class ModuleBufferMutate(torch.jit.ScriptModule):
+            __constants__ = ['training']
+
+            def __init__(self):
+                super(ModuleBufferMutate, self).__init__(False)
+                self.register_buffer('running_var', torch.tensor(0, dtype=torch.long))
+
+            @torch.jit.script_method
+            def forward(self):
+                if self.training:
+                    self.running_var += 1
+                return self.running_var
+
+        m = ModuleBufferMutate()
+        self.assertEqual(m(), 1)
 
     def test_script_module_for(self):
         class M(torch.jit.ScriptModule):
