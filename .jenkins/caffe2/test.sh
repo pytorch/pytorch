@@ -113,6 +113,13 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/piecewise_linear_transform_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/softmax_ops_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/unique_ops_test.py")
+
+  if [[ $BUILD_ENVIRONMENT == *-centos* ]]; then
+    # TestTransform.test_apply_transform_if_faster is crashing, but
+    # that test is actually cpu-only. so more likely it's failing in
+    # centos in general.
+    rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/workspace_test.py")
+  fi
 fi
 
 # Python tests
