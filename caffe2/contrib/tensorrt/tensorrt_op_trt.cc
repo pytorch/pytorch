@@ -15,7 +15,7 @@ namespace {
 // Otherwise, return the product of CHW dimensions
 int64_t CheckDims(
     const nvinfer1::Dims& nv_dims,
-    const at::ArrayRef<int64_t>& c2_dims) {
+    at::ArrayRef<int64_t> c2_dims) {
   if (nv_dims.nbDims + 1 != c2_dims.size()) {
     CAFFE_THROW(
         "Mismatched dimensions between TRT input (",
