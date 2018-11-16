@@ -3671,13 +3671,6 @@ a")
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
             self.checkScript(reassign_nested, (), optimize=False)
 
-        def list_ctor(x):
-            y = list([1, 2, 3])
-            z = list(x.size())
-            return
-
-        self.checkScript(reassign, (), optimize=False)
-
     def test_list_gather(self):
         def index():
             a = [1, 2, 3]

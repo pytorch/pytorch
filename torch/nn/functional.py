@@ -1421,7 +1421,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     :class:`~torch.nn.BatchNorm3d` for details.
     """
     if training:
-        size = list(input.size())
+        size = input.size()
         # XXX: JIT script does not support the reduce from functools, and mul op is a
         # builtin, which cannot be used as a value to a func yet, so rewrite this size
         # check to a simple equivalent for loop
