@@ -46,11 +46,11 @@ class DataLoader {
         this->worker_thread(std::move(dataset));
       });
     }
-    if (options_.workers == 0 || options_.chunk_loading) {
+    if (options_.workers == 0 || options_.chunk_loading == true) {
       main_thread_dataset_ = torch::make_unique<Dataset>(std::move(dataset));
     }
   }
-  
+
   virtual ~DataLoader() {
     join();
   }

@@ -28,7 +28,14 @@ template <
     typename ExampleSampler = samplers::RandomSampler>
 class ChunkDataSet : public BatchDataset<Self, Batch, BatchRequest> {
  public:
-  ~ChunkDataSet() {
+
+  using SelfType = Self;
+  using BatchType = Batch;
+  using BatchRequestType = BatchRequest;
+  using ChunkSamplerType = ChunkSampler;
+  using ExampleSamplerType = ExampleSampler;
+
+  virtual ~ChunkDataSet() {
     // stop prefetching chunks.
   }
 
@@ -42,6 +49,9 @@ class ChunkDataSet : public BatchDataset<Self, Batch, BatchRequest> {
   /// Returns the example sampler for this dataset.  
   virtual ExampleSampler get_example_sampler() = 0;
 
+  /// returns the number of chunks available in this dataset.
+  virtual size_t get_chunk_count() = 0;
+
   /// Default get_batch method of BatchDataSet. This method will handle the
   /// chunk loading and creating of Example batches. The implemenation is
   /// dataset agnostic and does not need overriding in different chunk data
@@ -54,6 +64,11 @@ class ChunkDataSet : public BatchDataset<Self, Batch, BatchRequest> {
   /// This will clear any internal state and starts the internal prefetching
   /// mechanism for the chunk dataset. It simply starts a mini dataloader.
   void reset() override {}
+
+  /// size is not used for chunk dataset.
+  optional<size_t> size() const override {
+    return torch::nullopt;
+  }
 
  private:
   std::shared_ptr<samplers::ThreadSafeSampler<ChunkSampler>> chunk_sampler_;
