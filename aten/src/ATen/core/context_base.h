@@ -7,7 +7,7 @@
 #include <unordered_map>
 
 #include <ATen/core/ATenGeneral.h>
-#include <ATen/core/Allocator.h>
+#include <c10/core/Allocator.h>
 #include <c10/util/typeid.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
