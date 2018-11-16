@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TENSOR_TYPE_ID_H_
+#define TENSOR_TYPE_ID_H_
 
 #include <iostream>
 #include <string>
@@ -38,4 +39,7 @@ C10_API std::ostream& operator<<(std::ostream&, c10::TensorTypeId);
 } // namespace c10
 
 C10_DEFINE_HASH_FOR_IDWRAPPER(c10::TensorTypeId)
+
+
+#endif // TENSOR_TYPE_ID_H_
 

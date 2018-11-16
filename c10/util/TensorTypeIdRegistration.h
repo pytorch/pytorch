@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TENSOR_TYPE_ID_REGISTRATION_H_
+#define TENSOR_TYPE_ID_REGISTRATION_H_
 
 /**
  * To register your own tensor types, do in a header file:
@@ -107,4 +108,6 @@ C10_DECLARE_TENSOR_TYPE(IDEEPTensorId); // Caffe2 only
 C10_DECLARE_TENSOR_TYPE(HIPTensorId); // Caffe2 only
 
 } // namespace c10
+
+#endif // TENSOR_TYPE_ID_REGISTRATION_H_
 
