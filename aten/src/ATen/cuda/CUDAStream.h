@@ -56,8 +56,6 @@ struct CUDAStreamInternals;
 namespace at {
 namespace cuda {
 
-struct CUDAEvent;
-
 namespace detail {
 
 // Pointer-based API (for internal use, backwards compatibility with C-based API)
