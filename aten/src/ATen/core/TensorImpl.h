@@ -888,6 +888,13 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_variable() const { return is_variable_; };
 
   /**
+   * True if a tensor is defined.
+   */
+  virtual bool defined() const {
+    return true;
+  }
+
+  /**
    * Set whether a tensor allows size or storage changes.
    */
   virtual void set_allow_size_or_storage_change(bool value) {
