@@ -699,6 +699,37 @@ Operation listEq(const Node* node) {
   };
 }
 
+template <typename T>
+Operation listNe(const Node* node) {
+  return [=](Stack& stack) {
+    T a;
+    T b;
+    pop(stack, a, b);
+    push(stack, a->elements() == b->elements() ? true : false);
+    return 0;
+  };
+}
+
+inline bool tensor_list_equal(Shared<TensorList> a, Shared<TensorList> b) {
+  if (a->elements().size() != b->elements().size()) {
+    return false;
+  }
+
+  for (size_t i = 0; i < a->elements().size(); ++i) {
+    const auto& a_element = a->elements()[i];
+    const auto& b_element = b->elements()[i];
+    // This preserves Python's semantics, which uses eq() to compare two
+    // elements, then passes the result to bool().
+    // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
+    const auto cmp_result = a_element.eq(b_element);
+    if (!cmp_result.is_nonzero()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
 Operation listEq<Shared<TensorList>>(const Node* node) {
@@ -706,25 +737,19 @@ Operation listEq<Shared<TensorList>>(const Node* node) {
     Shared<TensorList> a;
     Shared<TensorList> b;
     pop(stack, a, b);
-    if (a->elements().size() != b->elements().size()) {
-      push(stack, false);
-      return 0;
-    }
+    push(stack, tensor_list_equal(a, b));
+    return 0;
+  };
+}
 
-    for (size_t i = 0; i < a->elements().size(); ++i) {
-      const auto& a_element = a->elements()[i];
-      const auto& b_element = b->elements()[i];
-      // This preserves Python's semantics, which uses eq() to compare two
-      // elements, then passes the result to bool().
-      // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
-      const auto cmp_result = a_element.eq(b_element);
-      if (!cmp_result.is_nonzero()) {
-        push(stack, false);
-        return 0;
-      }
-    }
-
-    push(stack, true);
+// Specialization for at::Tensor, since it doesn't define operator==
+template <>
+Operation listNe<Shared<TensorList>>(const Node* node) {
+  return [=](Stack& stack) {
+    Shared<TensorList> a;
+    Shared<TensorList> b;
+    pop(stack, a, b);
+    push(stack, !tensor_list_equal(a, b));
     return 0;
   };
 }
@@ -869,6 +894,10 @@ Operator(                                                                      \
     Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntList>>),
     Operator("aten::eq(float[] a, float[] b) -> bool", listEq<Shared<DoubleList>>),
     Operator("aten::eq(Tensor[] a, Tensor[] b) -> bool", listEq<Shared<TensorList>>),
+    Operator("aten::ne(int[] a, int[] b) -> bool", listNe<Shared<IntList>>),
+    Operator("aten::ne(float[] a, float[] b) -> bool", listNe<Shared<DoubleList>>),
+    Operator("aten::ne(Tensor[] a, Tensor[] b) -> bool", listNe<Shared<TensorList>>),
+
 
 #define CREATE_COPY_OP(other_type, c_type)                              \
   Operator(                                                             \
