@@ -2265,7 +2265,8 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
 # put it as API_CAFFE2
 C10_MAPPINGS = collections.OrderedDict([
     ("cuda::compat::", ("hip::compat::", API_C10)),
-    ("c10/cuda/", ("c10/hip/", API_C10)),
+    ("c10/cuda/CUDA", ("c10/hip/HIP", API_C10)),
+    ("c10/cuda/impl/CUDA", ("c10/hip/impl/HIP", API_C10)),
     ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
     ("c10::cuda", ("c10::hip", API_C10)),
     # This substitution is not permissible, because there's another copy of this

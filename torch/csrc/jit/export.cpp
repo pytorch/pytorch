@@ -585,12 +585,15 @@ void MethodEncoder::EncodeTypeInfo(
   } else if (kind == TypeKind::VarType) {
     type_proto->set_denotation("TypeVar:" + type->expect<VarType>()->name());
   } else if (kind == TypeKind::OptionalType) {
-    auto elem_kind = type->expect<OptionalType>()->getElementType()->kind();
-    auto elem_denotation = getBaseTypeDenotation(elem_kind);
-    if (!elem_denotation) {
-      throw std::runtime_error("unexpected type kind on optional element");
-    }
-    type_proto->set_denotation("OptionalType:" + *elem_denotation);
+    type_proto->set_denotation("OptionalType");
+    OptionalTypePtr node_type = type->cast<OptionalType>();
+
+    // Generate a name for and encode each subtype in the value_info field of the GraphProto.
+    std::string name = "#" + std::to_string(type_counter_++);
+    shape_proto->add_dim();
+    shape_proto->mutable_dim(0)->set_dim_param(name);
+    onnx::ValueInfoProto* subtype_proto = graph_proto->add_value_info();
+    EncodeTypeInfo(graph_proto, subtype_proto, node_type->getElementType(), name);
   } else {
     auto denotation = getBaseTypeDenotation(kind);
     if (!denotation) {

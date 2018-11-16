@@ -80,6 +80,7 @@ set_property(TARGET c10d PROPERTY CXX_STANDARD 11)
 target_compile_options(c10d PUBLIC
   -Wall
   -Wextra
+  -Werror
   -Wno-unused-parameter
   -Wno-missing-field-initializers
   -Wno-write-strings

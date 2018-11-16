@@ -459,13 +459,13 @@ bool Operator::matches(const Node* node) const {
 
   TypeEnv type_env;
   for(size_t i = 0; i < formals.size(); ++i) {
-    try {
-      TypePtr formal = matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
-      // mismatched input type
-      if (!actuals[i]->type()->isSubtypeOf(formal)) {
-        return false;
-      }
-    } catch(TypeMatchError& err) {
+    const MatchTypeReturn matched_type =
+        matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
+    if (!matched_type.type) {
+      return false;
+    }
+    TypePtr formal = *matched_type.type;
+    if (!actuals[i]->type()->isSubtypeOf(formal)) {
       return false;
     }
   }
@@ -508,6 +508,7 @@ const Operator& getOperatorFor(const Node* node) {
   for(auto & candidate : candidates) {
     er << "  " << candidate->schema() << "\n";
   }
+  er << *node->owningGraph() << "\n";
   throw er;
 }
 
