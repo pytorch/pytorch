@@ -124,7 +124,7 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
         // Copy into the new format, contiguous, on the source device
         src_contig = at::empty_like(dst, src.options().dtype(dst.dtype()));
 
-        CopyOp<dst_T, src_T>::apply(dst, src);
+        CopyOp<dst_T, src_T>::apply(src_contig, src);
       }
 
       // Make sure the dst is contiguous
@@ -218,7 +218,7 @@ void _copy__cuda(Tensor& dst, const Tensor& src) {
       if (std::is_same<dst_T, scalar_t>::value) {
         copy_to_cpu(dst, src);
       }
-      // Do a dtype converting copy on the same device, then copy to CPU
+      // Copy to CPU as the same dtype, then do a dtype converting copy
       Tensor srcf = at::empty_like(src, dst.options().dtype(src.dtype()));
       copy_to_cpu(srcf, src);
       _copy_(dst, srcf);
