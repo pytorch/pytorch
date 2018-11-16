@@ -31,9 +31,13 @@ class LayerNormOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    auto* mean = Output(1);
-    auto* sig = Output(2);
-    runLayerNorm<T>(X, Y, mean, sig, axis_, epsilon_, &scale_, &bias_, &context_);
+    const int canonical_axis = X.canonical_axis_index(axis_);
+    std::vector<int64_t> moments_dims(
+        X.dims().cbegin(), X.dims().cbegin() + canonical_axis);
+    moments_dims.push_back(1);
+    auto* mean = Output(1, moments_dims, at::dtype<T>());
+    auto* sig = Output(2, moments_dims, at::dtype<T>());
+    runLayerNorm<T>(X, Y, mean, sig, canonical_axis, epsilon_, &scale_, &bias_, &context_);
     return true;
   }
 
@@ -43,22 +47,16 @@ class LayerNormOp final : public Operator<Context> {
     Tensor* Y,
     Tensor* mean,
     Tensor* sig,
-    int axis,
+    int canonical_axis,
     float epsilon,
     Tensor* scale_buffer,
     Tensor* bias_buffer,
     Context* context
   ) {
     CAFFE_ENFORCE_GE(X.dim(), 2, "LayerNorm requires input dim >= 2.");
-    const int canonical_axis = X.canonical_axis_index(axis);
     const int M = X.size_to_dim(canonical_axis);
     const int N = X.size_from_dim(canonical_axis);
     Y->ResizeLike(X);
-    std::vector<int> moments_dims(
-        X.dims().cbegin(), X.dims().cbegin() + canonical_axis);
-    moments_dims.push_back(1);
-    mean->Resize(moments_dims);
-    sig->Resize(moments_dims);
     scale_buffer->Resize(M);
     bias_buffer->Resize(M);
 
@@ -70,9 +68,9 @@ class LayerNormOp final : public Operator<Context> {
     T* bias_data = bias_buffer->template mutable_data<T>();
 
     const std::array<int, 2> dims = {M, N};
-    const int axis_ = 1;
+    const int axis = 1;
     math::Moments<T, Context>(
-        2, dims.data(), 1, &axis_, X_data, mean_data, sig_data, context);
+        2, dims.data(), 1, &axis, X_data, mean_data, sig_data, context);
     ComputeStdDevAndFusedParams<T>(
         M, mean_data, sig_data, sig_data, scale_data, bias_data, epsilon, context);
     LayerNormForward<T>(M, N, X_data, scale_data, bias_data, Y_data, context);
