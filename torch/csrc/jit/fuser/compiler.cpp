@@ -172,12 +172,12 @@ std::shared_ptr<FusedKernel> compileKernel(
       , input_desc
       , output_desc
       , use_cuda);
-
+  
   std::shared_ptr<FusedKernel> fused_kernel;
   if (use_cuda) {
     #if USE_CUDA_FUSER
       fused_kernel = std::make_shared<cuda::FusedKernelCUDA>(
-        device
+        device.index()
       , name
       , code
       , input_desc
