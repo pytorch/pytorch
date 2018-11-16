@@ -11,7 +11,7 @@ from ..._jit_internal import weak_module, weak_script_method
 @weak_module
 class _BatchNorm(Module):
     _version = 2
-    __constants__ = ['training', 'track_running_stats', 'momentum']
+    __constants__ = ['training', 'track_running_stats', 'momentum', 'eps']
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
@@ -163,6 +163,7 @@ class BatchNorm1d(_BatchNorm):
                              .format(input.dim()))
 
 
+@weak_module
 class BatchNorm2d(_BatchNorm):
     r"""Applies Batch Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
@@ -235,6 +236,7 @@ class BatchNorm2d(_BatchNorm):
                              .format(input.dim()))
 
 
+@weak_module
 class BatchNorm3d(_BatchNorm):
     r"""Applies Batch Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper

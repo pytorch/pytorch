@@ -4,8 +4,6 @@ from __future__ import division
 import warnings
 import math
 import types
-from operator import mul
-from functools import reduce
 
 import torch
 from torch._C import _infer_size, _add_docstr
@@ -1424,8 +1422,21 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     """
     if training:
         size = list(input.size())
-        if reduce(mul, size[2:], size[0]) == 1:
+        # XXX: JIT script does not support the reduce from functools, and mul op is a
+        # builtin, which cannot be used as a value to a func yet, so rewrite this size
+        # check to a simple equivalent for loop
+        #
+        # TODO: make use of reduce like below when JIT is ready with the missing features:
+        # from operator import mul
+        # from functools import reduce
+        #
+        #   if reduce(mul, size[2:], size[0]) == 1
+        size_prods = size[0]
+        for i in range(len(size) - 2):
+            size_prods *= size[i + 2]
+        if size_prods == 1:
             raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+
     return torch.batch_norm(
         input, weight, bias, running_mean, running_var,
         training, momentum, eps, torch.backends.cudnn.enabled
