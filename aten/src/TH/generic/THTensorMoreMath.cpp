@@ -31,7 +31,7 @@ void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t a
     if (beta != 0.0) {
       at::Tensor result_wrap = THTensor_wrap(result);
       at::Tensor t_wrap = THTensor_wrap(t);
-      at::_copy_same_type_(result_wrap, t_wrap);
+      at::s_copy_(result_wrap, t_wrap);
     }
   }
 
@@ -116,7 +116,7 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       THTensor *t0 = THTensor_(newSelect)(t, dimension, 0);
       at::Tensor values__wrap = THTensor_wrap(values_);
       at::Tensor t0_wrap = THTensor_wrap(t0);
-      at::_copy_same_type_(values__wrap, t0_wrap);
+      at::s_copy_(values__wrap, t0_wrap);
       c10::raw::intrusive_ptr::decref(t0);
     } else {
       THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
@@ -199,7 +199,7 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       THTensor *t0 = THTensor_(newSelect)(t, dimension, 0);
       at::Tensor values__wrap = THTensor_wrap(values_);
       at::Tensor t0_wrap = THTensor_wrap(t0);
-      at::_copy_same_type_(values__wrap, t0_wrap);
+      at::s_copy_(values__wrap, t0_wrap);
       c10::raw::intrusive_ptr::decref(t0);
     } else {
       THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
@@ -899,7 +899,7 @@ void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimensio
   THTensor_(resizeAs)(rt_, t);
   at::Tensor rt__wrap = THTensor_wrap(rt_);
   at::Tensor t_wrap = THTensor_wrap(t);
-  at::_copy_same_type_(rt__wrap, t_wrap);
+  at::s_copy_(rt__wrap, t_wrap);
   THLongTensor_resize(ri_, t->sizes(), {});
 
   if(descendingOrder)
@@ -1415,7 +1415,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
         THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
         at::Tensor nt__wrap = THTensor_wrap(nt);
         at::Tensor inputs_wrap = THTensor_wrap(inputs[j]);
-        at::_copy_same_type_(nt__wrap, inputs_wrap);
+        at::s_copy_(nt__wrap, inputs_wrap);
         c10::raw::intrusive_ptr::decref(nt);
         offset += dimSize;
       }
@@ -2071,7 +2071,7 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
     {
       at::Tensor rowR_wrap = THTensor_wrap(rowR);
       at::Tensor rowS_wrap = THTensor_wrap(rowS);
-      at::_copy_same_type_(rowR_wrap, rowS_wrap);
+      at::s_copy_(rowR_wrap, rowS_wrap);
     }
   }
 

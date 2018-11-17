@@ -196,7 +196,7 @@ void copy_to_cpu(Tensor& dst, const Tensor& src) {
         cudaMemcpyDeviceToHost,
         stream));
     AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-    _copy_same_type_(dst, dst_contig);
+    s_copy_(dst, dst_contig);
   });
 }
 

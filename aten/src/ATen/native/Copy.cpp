@@ -8,52 +8,81 @@
 
 namespace {
 
-template <typename self_T, typename src_T>
-void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
-  at::CPU_tensor_apply2<self_T, src_T>(
-      self, src, [](self_T& self_val, const src_T& src_val) {
-        self_val = static_cast<self_T>(
-            static_cast<at::native::inter_copy_type_t<self_T>>(src_val));
+template <typename dst_T, typename src_T>
+void copy_pointwise_(at::Tensor& dst, const at::Tensor& src) {
+#ifdef _OPENMP
+  if (at::in_parallel_region()) {
+    at::CPU_tensor_parallel_apply2<dst_T, src_T>(
+        dst, src, [](dst_T& dst_val, const src_T& src_val) {
+          dst_val = static_cast<dst_T>(
+              static_cast<at::native::inter_copy_type_t<dst_T>>(src_val));
+        });
+    return;
+  }
+#endif
+  at::CPU_tensor_apply2<dst_T, src_T>(
+      dst, src, [](dst_T& dst_val, const src_T& src_val) {
+        dst_val = static_cast<dst_T>(
+            static_cast<at::native::inter_copy_type_t<dst_T>>(src_val));
       });
 }
 
-template <typename self_T>
-void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
-  AT_CHECK(self.numel() == src.numel(), "sizes do not match");
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
-      src.type(), "_copy__cpu", [&]() { _copy__cpu<self_T, scalar_t>(self, src); });
+template <typename dst_T>
+void copy_pointwise_(at::Tensor& dst, const at::Tensor& src) {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_pointwise", [&]() {
+    copy_pointwise_<dst_T, scalar_t>(dst, src);
+  });
+}
+
+void copy_pointwise_(at::Tensor& dst, const at::Tensor& src) {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(dst.type(), "copy_pointwise", [&]() {
+    copy_pointwise_<scalar_t>(dst, src);
+  });
+}
+
+template <typename dst_T, typename src_T>
+void copy_vectorize_(at::Tensor& dst, const at::Tensor& src) {
+  dst_T* dst_ptr = dst.data<dst_T>();
+  src_T* src_ptr = src.data<src_T>();
+
+  auto sample = [&](int64_t begin, int64_t end) {
+    int64_t len = end - begin;
+    dst_T* dst_seg = dst_ptr + begin;
+    src_T* src_seg = src_ptr + begin;
+    at::vec256::convert<src_T, dst_T>(src_seg, dst_seg, len);
+  };
+
+  at::parallel_for(0, dst.numel(), /* grain_size= */ 800, sample);
+}
+
+template <typename dst_T>
+void copy_vectorize_(at::Tensor& dst, const at::Tensor& src) {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_vectorize", [&]() {
+    copy_vectorize_<dst_T, scalar_t>(dst, src);
+  });
+}
+
+void copy_vectorize_(at::Tensor& dst, const at::Tensor& src) {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(dst.type(), "copy_vectorize", [&]() {
+    copy_vectorize_<scalar_t>(dst, src);
+  });
 }
 
 bool copy_transpose_valid(const at::Tensor& self, const at::Tensor& src) {
   const int MIN_SZ = 60 * 60;
-  return self.is_contiguous() && src.numel() != 0 && src.dim() == 2 &&
-      src.stride(0) == 1 && src.stride(1) == src.size(0) &&
-      self.numel() >= MIN_SZ;
-}
-
-} // namespace
-
-namespace at {
-namespace native {
-
-Tensor& _s_copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
-  if (src.is_cuda()) {
-    _s_copy_from(src, self, non_blocking);
-    return self;
-  }
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
-      self.type(), "_copy__cpu", [&]() { ::_copy__cpu<scalar_t>(self, src); });
-  return self;
+  return self.type() == src.type() && self.is_contiguous() &&
+      src.numel() != 0 && src.dim() == 2 && src.stride(0) == 1 &&
+      src.stride(1) == src.size(0) && self.numel() >= MIN_SZ;
 }
 
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's tricker
-void _copy_same_type_transpose_(Tensor& self, const Tensor& src) {
+void copy_same_type_transpose_(at::Tensor& self, const at::Tensor& src) {
   const int64_t BLOCK_SZ = 60;
-  Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
+  at::Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(
-      self.type(), "_copy_same_type_transpose_", [&]() {
+      self.type(), "copy_same_type_transpose_", [&]() {
         scalar_t* sp = src.data<scalar_t>();
         scalar_t* rp = self.data<scalar_t>();
         scalar_t* bp = buf.data<scalar_t>();
@@ -94,57 +123,31 @@ void _copy_same_type_transpose_(Tensor& self, const Tensor& src) {
       });
 }
 
-void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
+} // namespace
+
+namespace at {
+namespace native {
+
+Tensor& _s_copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
+  if (src.is_cuda()) {
+    _s_copy_from(src, self, non_blocking);
+    return self;
+  }
+
   if (self.is_same(src)) {
-    return;
+    return self;
   }
 
-  bool serial_path = false;
-  if (self.numel() == src.numel()) {
-    if (self.is_contiguous() && src.is_contiguous()) {
-      AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy_same_type_", [&]() {
-        scalar_t* self_ptr = self.data<scalar_t>();
-        scalar_t* src_ptr = src.data<scalar_t>();
+  AT_CHECK(self.numel() == src.numel(), "sizes do not match");
 
-        auto sample = [&](int64_t begin, int64_t end) {
-          int64_t len = end - begin;
-          scalar_t* self_seg = self_ptr + begin;
-          scalar_t* src_seg = src_ptr + begin;
-          at::vec256::convert<scalar_t, scalar_t>(src_seg, self_seg, len);
-        };
-
-        parallel_for(0, self.numel(), /* grain_size= */ 800, sample);
-      });
-    } else if (copy_transpose_valid(self, src)) {
-      _copy_same_type_transpose_(self, src);
-    } else {
-#ifdef _OPENMP
-      if (in_parallel_region()) {
-        AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy_same_type_", [&]() {
-          at::CPU_tensor_parallel_apply2<scalar_t, scalar_t>(
-              self, src, [](scalar_t& self_val, const scalar_t& src_val) {
-                self_val = src_val;
-              });
-        });
-      } else {
-        serial_path = true;
-      }
-#else
-      serial_path = true;
-#endif
-    }
+  if (self.is_contiguous() && src.is_contiguous()) {
+    copy_vectorize_(self, src);
+  } else if (copy_transpose_valid(self, src)) {
+    copy_same_type_transpose_(self, src);
   } else {
-    serial_path = true;
+    copy_pointwise_(self, src);
   }
-
-  if (serial_path) {
-    AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy_same_type_", [&]() {
-      at::CPU_tensor_apply2<scalar_t, scalar_t>(
-          self, src, [](scalar_t& self_val, const scalar_t& src_val) {
-            self_val = src_val;
-          });
-    });
-  }
+  return self;
 }
 
 } // namespace native

@@ -221,7 +221,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
       THTensor_(select)(sSlice, src, dim, index_data[i] - TH_INDEX_BASE);
       at::Tensor tSlice_wrap = THTensor_wrap(tSlice);
       at::Tensor sSlice_wrap = THTensor_wrap(sSlice);
-      at::_copy_same_type_(tSlice_wrap, sSlice_wrap);
+      at::s_copy_(tSlice_wrap, sSlice_wrap);
       c10::raw::intrusive_ptr::decref(tSlice);
       c10::raw::intrusive_ptr::decref(sSlice);
     }
@@ -254,7 +254,7 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
       THTensor_(select)(sSlice, src, dim, i);
       at::Tensor tSlice_wrap = THTensor_wrap(tSlice);
       at::Tensor sSlice_wrap = THTensor_wrap(sSlice);
-      at::_copy_same_type_(tSlice_wrap, sSlice_wrap);
+      at::s_copy_(tSlice_wrap, sSlice_wrap);
     }
 
     c10::raw::intrusive_ptr::decref(tSlice);
