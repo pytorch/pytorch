@@ -2518,17 +2518,19 @@ Example::
 """)
 
 
+@torch._jit_internal.weak_script
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False, size_average=None,
                         reduce=None, reduction="mean"):
+    # type: (Tensor, Tensor, Tensor, float, float, float, bool, Optional[bool], Optional[bool], str) -> Tensor
     r"""
     See :class:`~torch.nn.TripletMarginLoss` for details
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     return torch.triplet_margin_loss(anchor, positive, negative, margin, p, eps,
-                                     swap, reduction)
+                                     swap, reduction_enum)
 
 
 @torch._jit_internal.weak_script
