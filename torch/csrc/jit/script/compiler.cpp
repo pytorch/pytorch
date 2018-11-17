@@ -1427,6 +1427,20 @@ private:
     }
   }
 
+  // This will be called when there is a class param or module buffer
+  // mutation which make the LHS of the expr be a select expression
+  //
+  // Example like:
+  // class A(Module):
+  //  def __init__():
+  //    self.register_buffer("running_var", torch.zeros(1))
+  //
+  //  def forward():
+  //    self.num_batches += 1
+  //
+  // In this case we will only consider the scenario that the module
+  // buffer type is a tensor, and we emit the corresponding tensor
+  // in place op, and throw error for other unsupported types
   void emitAugAssignmentToSelectVar(const AugAssign& stmt) {
     const auto lhs = Select(stmt.lhs());
     const auto lhsSugaredVar = environment_stack->getSugaredVar(Var(lhs.value()).name());
