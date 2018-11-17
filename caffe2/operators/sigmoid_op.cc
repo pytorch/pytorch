@@ -20,37 +20,12 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         SigmoidFunctor<CPUContext>>);
 
-namespace {
-// Since the actual flops of the non-linear operator depends on the
-// implementation, we use the number of non-linear operations as the proxy for
-// the analytical flops for non-linear operator
-OpSchema::Cost CostInferenceForSigmoid(
-    const OperatorDef& def,
-    const vector<TensorShape>& in) {
-  CAFFE_ENFORCE_EQ(in.size(), 1, "Sigmoid requires one input");
-  struct OpSchema::Cost c;
-  ArgumentHelper helper(def);
-
-  const uint64_t input_size =
-      size_to_dim_(in[0].dims().size(), GetDimsVector(in[0]));
-
-  const auto& X = in[0];
-  c.flops = input_size;
-  c.bytes_read = input_size * sizeof(X.data_type());
-  c.bytes_written = input_size * sizeof(X.data_type());
-  c.params_bytes = 0;
-  return c;
-}
-} // namespace
-
-using namespace std::placeholders;
 // Input: X, output: Y
 OPERATOR_SCHEMA(Sigmoid)
     .NumInputs(1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .IdenticalTypeAndShape()
-    .CostInferenceFunction(std::bind(CostInferenceForSigmoid, _1, _2))
     .SetDoc(R"DOC(
 Apply the Sigmoid function element-wise to the input tensor. This is often used
 as a non-linear activation function in a neural network. The sigmoid function is

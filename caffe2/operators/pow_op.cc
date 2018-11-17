@@ -80,36 +80,11 @@ REGISTER_CPU_OPERATOR(
         EigenPowFunctor,
         SameTypeAsInput>)
 
-namespace {
-// Since the actual flops of the non-linear operator depends on the
-// implementation, we use the number of non-linear operations as the proxy for
-// the analytical flops for non-linear operator
-OpSchema::Cost CostInferenceForPow(
-    const OperatorDef& def,
-    const vector<TensorShape>& in) {
-  CAFFE_ENFORCE_EQ(in.size(), 2, "Pow requires two input");
-  struct OpSchema::Cost c;
-  ArgumentHelper helper(def);
-
-  const uint64_t input_size =
-      size_to_dim_(in[0].dims().size(), GetDimsVector(in[0]));
-
-  const auto& X = in[0];
-  c.flops = input_size;
-  c.bytes_read = input_size * sizeof(X.data_type());
-  c.bytes_written = input_size * sizeof(X.data_type());
-  c.params_bytes = 0;
-  return c;
-}
-} // namespace
-
-using namespace std::placeholders;
 OPERATOR_SCHEMA(Pow)
     .NumInputs(1, 2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}, {1, 0}})
     .IdenticalTypeAndShapeOfInput(0)
-    .CostInferenceFunction(std::bind(CostInferenceForPow, _1, _2))
     .SetDoc(R"DOC(
 The *Pow* op takes an input data tensor $X$ and an exponent parameter *exponent*, which can be a scalar or another tensor. As output, it produces a single output data tensor $Y$, where the function $f(x) = x^{exponent}$ has been applied to $X$ elementwise.
 
@@ -162,14 +137,9 @@ Y:  [ 1.  4.  9. 16. 25. 36.]
 
 )DOC")
     .Input(0, "X", "Input data blob to be operated on.")
-    .Input(
-        1,
-        "exponent",
-        "Exponent blob containing the exponent(s) for calculation. Do not use if setting exponent via argument.")
+    .Input(1, "exponent", "Exponent blob containing the exponent(s) for calculation. Do not use if setting exponent via argument.")
     .Output(0, "Y", "Output data blob with the same shape as the input.")
-    .Arg(
-        "exponent",
-        "The exponent of the power function. Do not use if setting exponent via input.")
+    .Arg("exponent", "The exponent of the power function. Do not use if setting exponent via input.")
     .Arg("axis", "*(type: int; default: -1)*")
     .Arg("broadcast", "*(type: bool; default: False)*");
 
