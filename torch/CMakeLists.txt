@@ -155,6 +155,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/import_method.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
@@ -194,6 +195,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
   ${TORCH_SRC_DIR}/csrc/torch.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
