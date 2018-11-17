@@ -127,8 +127,9 @@ def canonical(graph):
     return str(torch._C._jit_pass_canonicalize(graph))
 
 
-def get_lstm_inputs(device, training=False):
-    input = torch.randn(3, 10, dtype=torch.float, device=device, requires_grad=training)
+def get_lstm_inputs(device, training=False, seq_length=None):
+    input_shape = (3, 10) if seq_length is None else (seq_length, 3, 10)
+    input = torch.randn(*input_shape, dtype=torch.float, device=device, requires_grad=training)
     hx = torch.randn(3, 20, dtype=torch.float, device=device, requires_grad=training)
     cx = torch.randn(3, 20, dtype=torch.float, device=device, requires_grad=training)
     module = nn.LSTMCell(10, 20).to(device, torch.float)  # Just to allocate weights with correct sizes
@@ -174,19 +175,19 @@ def get_execution_plan(graph_executor_state):
     return execution_plans[0]
 
 
-def get_grad_executor(plan_state):
-    if len(list(plan_state.graph.nodes())) != 1:
+def get_grad_executor(plan_state, diff_graph_idx=None):
+    if diff_graph_idx is None and len(list(plan_state.graph.nodes())) != 1:
         raise RuntimeError("Can't get a grad_executor for a non-differentiable graph")
     grad_executors = list(plan_state.code.grad_executors())
-    return grad_executors[0]
+    return grad_executors[diff_graph_idx or 0]
 
 
-def backward_graph(script_module):
+def backward_graph(script_module, diff_graph_idx=None):
     if not isinstance(script_module, torch.jit.ScriptModule):
         raise RuntimeError('Expected ScriptModule')
     ge_state = script_module.get_debug_state()
     fwd_plan = get_execution_plan(ge_state)
-    grad_executor = get_grad_executor(fwd_plan)
+    grad_executor = get_grad_executor(fwd_plan, diff_graph_idx=diff_graph_idx)
     bwd_plan = get_execution_plan(grad_executor.get_debug_state())
     # Running JIT passes requires that we own the graph (with a shared_ptr).
     # The debug state struct does not own its graph so we make a copy of it.
@@ -6642,6 +6643,22 @@ a")
         self.run_pass('remove_inplace_ops', graph)
         self.run_pass('erase_number_types', graph)
         self.assertExpectedGraph(graph)
+
+    def test_mm_batching(self):
+        lstm_cell = torch.jit.script(LSTMCellS)
+
+        @torch.jit.script
+        def lstm(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
+            for i in range(x.size(0)):
+                hx, cx = lstm_cell(x[i], hx, cx, w_ih, w_hh, b_ih, b_hh)
+            return hx
+
+        inputs = get_lstm_inputs('cuda', training=True, seq_length=10)
+        lstm(*inputs).sum().backward()
+        fw_graph = lstm.graph_for(*inputs)
+        bw_graph = backward_graph(lstm, diff_graph_idx=0)
+        self.assertTrue('prim::MMBatchSide' in str(fw_graph))
+        self.assertTrue('prim::MMTreeReduce' in str(bw_graph))
 
     def test_loop_unrolling(self):
         def fn(x):

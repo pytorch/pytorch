@@ -267,7 +267,7 @@ bool shape_is_fast_for_side(const at::Tensor& other_side_input) {
 
 RegisterOperators mm_batch_side_reg({
   Operator(
-    Symbol::prim("MMBatchSide"),
+    prim::MMBatchSide,
     [](const Node* node) {
       size_t num_other_side_inputs = node->inputs().size() - 1;
       Side single_side = static_cast<Side>(node->i(Symbol::attr("side")));
@@ -348,10 +348,14 @@ void BatchMMSide(Block * block, const AliasDb& alias_db) {
   static constexpr size_t how_many_is_many = 8;
   const auto batch_side = [&](std::vector<Node*>& mms, Side side) {
     JIT_ASSERT(!mms.empty());
+    for (int64_t i = static_cast<int64_t>(mms.size()) - 2; i >= 0; --i) {
+      bool move_ok = mms[i]->moveBeforeTopologicallyValid(mms[i + 1]);
+      JIT_ASSERT(move_ok);
+    }
     WithInsertPoint insert_guard { mms[0] };
     Graph* graph = mms[0]->owningGraph();
-    Node* batch_mm = graph->create(Symbol::prim("MMBatchSide"),
-                                    /*inputs=*/{}, /*num_outputs=*/mms.size());
+    Node* batch_mm = graph->create(prim::MMBatchSide,
+                                   /*inputs=*/{}, /*num_outputs=*/mms.size());
     graph->insertNode(batch_mm);
     batch_mm->i_(Symbol::attr("side"), static_cast<int>(side));
     Value* const_side = mms[0]->inputs().at(side == Side::LHS ? 0 : 1);
