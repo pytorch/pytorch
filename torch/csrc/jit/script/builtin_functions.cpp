@@ -71,7 +71,7 @@ private:
   void loadSource(const std::string& source) {
     auto module = std::make_shared<script::Module>();
     defineMethodsInModule(
-        *module, source, script::nativeResolver, /*self=*/nullptr);
+        module, source, script::nativeResolver, /*self=*/nullptr);
     modules.push_back(module);
     for (auto& method : module->get_methods()) {
       builtins_by_name[Symbol::fromQualString("aten::" + method.key())].push_back(

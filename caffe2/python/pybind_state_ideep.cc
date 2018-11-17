@@ -176,7 +176,8 @@ public:
         DeviceOption cpu_option(option);
         cpu_option.set_device_type(DeviceTypeProto::PROTO_CPU);
         TensorFeeder<CPUContext> cpu_tensor_feeder;
-        blob->Reset<Tensor>(new Tensor(cpu_tensor_feeder.FeedTensor(cpu_option, original_array)));
+        cpu_tensor_feeder.FeedTensor(
+            cpu_option, original_array, BlobGetMutableTensor(blob, CPU));
       }
     } catch (ideep::error &e) {
       LOG(ERROR) << "IDEEP error: " << e.message;

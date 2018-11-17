@@ -8,8 +8,52 @@
 namespace torch {
 namespace jit {
 
+  // some names are valid identifiers but off limits because
+  // they are keywords or namespaces used in the output
+  const static std::unordered_set<std::string> reserved_names = {
+    // identifiers in the environment while parsing
+    "aten",
+    "prim",
+    "CONSTANTS",
+    "fork",
+    "attribute",
+    // the python keywords
+    "False",
+    "None",
+    "True",
+    "and",
+    "as",
+    "assert",
+    "break",
+    "class",
+    "continue",
+    "def",
+    "del",
+    "elif",
+    "else",
+    "except",
+    "finally",
+    "for",
+    "from",
+    "global",
+    "if",
+    "import",
+    "in",
+    "is",
+    "lambda",
+    "nonlocal",
+    "not",
+    "or",
+    "pass",
+    "raise",
+    "return",
+    "try",
+    "while",
+    "with",
+    "yield",
+  };
 
-class PythonPrintPass {
+struct PythonPrintPass {
   std::ostream& out;
 
   // constants are written to this table, and given then named CONSTANTS.cN
@@ -26,6 +70,9 @@ class PythonPrintPass {
 
   // what valid identifiers are in use for the current function
   std::unordered_set<std::string> used_names_;
+
+  // used method names
+  std::unordered_set<std::string> used_method_names_;
 
   // for fork,
   // subgraphs get added to the worklist, and will be printed later
@@ -100,58 +147,24 @@ class PythonPrintPass {
   // get a new name unique across calls to uniqueName() and
   // anything we have used.
   size_t next_id = 0;
-  std::string genName(const std::string& candidate) {
-    // some names are valid identifiers but off limits because
-    // they are keywords or namespaces used in the output
-    const static std::unordered_set<std::string> reserved_names = {
-      // identifiers in the environment while parsing
-      "aten",
-      "prim",
-      "CONSTANTS",
-      "fork",
-      "attribute",
-      // the python keywords
-      "False",
-      "None",
-      "True",
-      "and",
-      "as",
-      "assert",
-      "break",
-      "class",
-      "continue",
-      "def",
-      "del",
-      "elif",
-      "else",
-      "except",
-      "finally",
-      "for",
-      "from",
-      "global",
-      "if",
-      "import",
-      "in",
-      "is",
-      "lambda",
-      "nonlocal",
-      "not",
-      "or",
-      "pass",
-      "raise",
-      "return",
-      "try",
-      "while",
-      "with",
-      "yield",
-    };
 
+  std::string genNameImpl(const std::string& candidate, std::unordered_set<std::string>& used) {
     std::string name = candidate;
-    while(used_names_.count(name) || reserved_names.count(name)) {
+    while(used.count(name) || reserved_names.count(name)) {
       name = candidate + std::to_string(next_id++);
     }
-    used_names_.insert(name);
+    used.insert(name);
     return name;
+  }
+  std::string genName(const std::string& candidate) {
+    return genNameImpl(candidate, used_names_);
+  }
+
+  // methods self.foo are in a different namespace than
+  // global identifiers, so they have a different procedure for finding a
+  // uniquename
+  std::string genMethodName(const std::string& candidate) {
+    return genNameImpl(candidate, used_method_names_);
   }
 
   // unique names might not be valid identifiers,
@@ -259,13 +272,13 @@ class PythonPrintPass {
     {
       auto guard = WithIndented();
       // Print node contents
-      printBlock(if_block);
+      printBlock(if_block, node->outputs().size() > 0);
       printAssignment(node->outputs(), if_block->outputs());
     }
     indent() << "else:\n";
     {
       auto guard = WithIndented();
-      printBlock(else_block);
+      printBlock(else_block, node->outputs().size() > 0);
       printAssignment(node->outputs(), else_block->outputs());
     }
   }
@@ -338,12 +351,14 @@ class PythonPrintPass {
     // Loop body
     {
       ResourceGuard indent = WithIndented();
-      printBlock(body_block);
       // Update block outputs to block inputs for next loop iteration
       // skip the assignment to the new condition in for loops because
       // the condition is always True
       size_t offset = emit_as_for_loop ? 1 : 0;
-      printAssignment(body_block->inputs().slice(offset), body_block->outputs().slice(offset));
+
+      ArrayRef<const Value*> loop_carried_block_inputs = body_block->inputs().slice(offset);
+      printBlock(body_block, loop_carried_block_inputs.size() > 0);
+      printAssignment(loop_carried_block_inputs, body_block->outputs().slice(offset));
     }
   }
 
@@ -404,13 +419,13 @@ class PythonPrintPass {
     return tensor_constants.size() - 1;
   }
 
-  void printMaybeAnnoatatedConstantList(
+  void printMaybeAnnotatedConstantList(
       std::ostream& stmt,
       const char* the_type,
       size_t list_size,
       IValue the_list) {
     if(list_size == 0) {
-      stmt << "annotate(" << the_type << ", [])";
+      stmt << "annotate(List[" << the_type << "], [])";
     } else {
       stmt << the_list;
     }
@@ -504,19 +519,66 @@ class PythonPrintPass {
           }
           stmt << "]";
         } else if(v.isBoolList()) {
-          printMaybeAnnoatatedConstantList(stmt, "bool", v.toBoolListRef().size(), v);
+          printMaybeAnnotatedConstantList(stmt, "bool", v.toBoolListRef().size(), v);
         } else if(v.isIntList()) {
-          printMaybeAnnoatatedConstantList(stmt, "int", v.toIntListRef().size(), v);
+          printMaybeAnnotatedConstantList(stmt, "int", v.toIntListRef().size(), v);
         } else if(v.isDoubleList()) {
-          printMaybeAnnoatatedConstantList(stmt, "float", v.toDoubleListRef().size(), v);
+          printMaybeAnnotatedConstantList(stmt, "float", v.toDoubleListRef().size(), v);
         } else {
           stmt << v;
         }
       } break;
-      case prim::None:
       case prim::NoneGenerator:
-      case prim::Undefined: {
-        stmt << "None";
+      case prim::Undefined:
+      case prim::None: {
+        if (node->output()->type()->isSubtypeOf(NoneType::get())) {
+          stmt << "None";
+          break;
+        }
+        // XXX - we'd like to just print None in these circumstances
+        // but implicit conversions from None to Tensor/Generator
+        // are not always considered. E.g. if they are being put into a list.
+        // Fixing this depends on removing specializations for Optional[Tensor]
+        // an Optional[Generator] and universally using None.
+
+        // XXX - when None has an Optional[T] type, we must ensure that type
+        // can be recovered on parsing. It cannot be recovered if it will be
+        // matched to schema with free variables. If it is used only in places where
+        // there is schema and the scheme has no free variables, then we can
+        // recover it without annotation. Otherwise, we annotate None with the right
+        // optional type
+        const auto& uses = node->output()->uses();
+        bool all_usable_schema =
+            std::all_of(uses.begin(), uses.end(), [](const Use& u) {
+              if (auto schema = u.user->maybeSchema()) {
+                if (u.offset >= schema->arguments().size()) {
+                  return false;
+                }
+                return !schema->arguments()
+                    .at(u.offset)
+                    .type()
+                    ->hasFreeVariables();
+              }
+              return false;
+            });
+
+        if (all_usable_schema) {
+          stmt << "None";
+        } else {
+          stmt << "annotate(" << node->output()->type()->python_str() << ", None)";
+        }
+      } break;
+      case prim::TensorToNum: {
+        if (node->output()->type()->isSubtypeOf(IntType::get())) {
+          printValueList(stmt, node->inputs(), "int(", ")");
+        } else {
+          JIT_ASSERT(node->output()->type()->isSubtypeOf(FloatType::get()));
+          printValueList(stmt, node->inputs(), "float(", ")");
+        }
+      } break;
+      case prim::ImplicitTensorToNum: {
+        stmt << "annotate(" << node->output()->type()->python_str() << ", "
+             << useOf(node->input()) << ")";
       } break;
       case prim::FloatToInt: {
         printValueList(stmt, node->inputs(), "int(", ")");
@@ -555,7 +617,7 @@ class PythonPrintPass {
       } break;
       case prim::fork: {
         // the subgraph gets emitted as another function
-        auto name = genName("__forked_function");
+        auto name = genMethodName("__forked_function");
         std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
         worklist.emplace_back(graph.get(), name);
         // and we put a call to fork which invokes that function.
@@ -585,8 +647,16 @@ class PythonPrintPass {
     }
   }
 
-  std::ostream& printBlock(
-      const Block* root) {
+  std::ostream& printBlock(const Block* root, bool block_has_other_statements) {
+    // pythons weird 'pass' syntax creates a bunch of places where we have to check
+    // if this block would be empty. But not everything in a block is a node.
+    // Sometimes if, loop, and return statements will follow this block
+    // and block_has_other_statements == true.
+    if (!block_has_other_statements &&
+        root->nodes().begin() == root->nodes().end()) {
+      indent();
+      out << "pass\n";
+    }
     for (const auto* node : root->nodes()) {
       printNode(node);
     }
@@ -606,7 +676,8 @@ class PythonPrintPass {
     {
       auto guard = WithIndented();
       // Print body
-      printBlock(graph.block());
+      printBlock(
+          graph.block(), graph.block()->return_node()->inputs().size() > 0);
       printNode(graph.block()->return_node());
     }
   }
@@ -614,7 +685,7 @@ class PythonPrintPass {
  public:
   PythonPrintPass(
       std::ostream& out_,
-      bool enforce_importable = false)
+      bool enforce_importable)
       : out(out_), enforce_importable_(enforce_importable) {}
 
   // TODO: we should consider forcing functions to return a single value
@@ -639,9 +710,10 @@ class PythonPrintPass {
   }
 };
 
-TORCH_API std::ostream& PythonPrint(std::ostream& out, const Graph& graph) {
-  PythonPrintPass(out).printFunction(graph, "script");
-  return out;
+TORCH_API std::vector<at::Tensor> PythonPrint(std::ostream& out, const Graph& graph, bool enforce_importable) {
+  PythonPrintPass pp(out, enforce_importable);
+  pp.printFunction(graph, "script");
+  return pp.tensor_constants;
 }
 
 TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
