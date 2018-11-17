@@ -138,7 +138,6 @@ public:
   }
   bool isNone() const {
     return type()->kind() == TypeKind::NoneType;
-
   }
   size_t unique() const {
     return unique_;
@@ -836,6 +835,8 @@ public:
   TORCH_API Node * create(NodeKind kind, size_t num_outputs=1);
   TORCH_API Node * create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs=1);
 
+
+  TORCH_API Node* createNone(TypePtr typ); // value of None with type Optional[typ]
   TORCH_API Node* createUndefined();
   TORCH_API Node* createNoneGenerator();
   TORCH_API Node* createFusionGroup();
