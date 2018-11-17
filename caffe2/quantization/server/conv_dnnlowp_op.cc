@@ -825,7 +825,6 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNHWC_(
     T* Ydata = Y->template mutable_data<T>();
 
     using namespace fbgemm;
-#ifdef __AVX2__
     if (is_same<T, uint8_t>::value && GetCpuId().avx2()) {
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -845,9 +844,13 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNHWC_(
           int32_t B_zero_point = FilterQuantizationParams(group_id).zero_point;
           float C_multiplier = RequantizationParams(group_id).real_multiplier;
 
-          DoNothing<> doNothingObj{};
-          ReQuantizeOutput<ReluFused> requantizationObj(
-              doNothingObj,
+          requantize_u8acc32_ref(
+              1,
+              M / group_,
+              M,
+              Y_int32 + i * M + group_id * (M / group_),
+              reinterpret_cast<uint8_t*>(
+                  Ydata + i * M + group_id * (M / group_)),
               C_multiplier,
               C_zero_point,
               A_zero_point,
@@ -855,21 +858,11 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNHWC_(
               &row_offset,
               column_offsets_.data() + group_id * (M / group_),
               b_quantized_data_ ? b_quantized_data_ + group_id * (M / group_)
-                                : nullptr);
-
-          block_type_t block{0, 1, 0, M / group_};
-          requantizationObj.template f<inst_set_t::avx2>(
-              reinterpret_cast<uint8_t*>(
-                  Ydata + i * M + group_id * (M / group_)),
-              Y_int32 + i * M + group_id * (M / group_),
-              block,
-              M,
-              M);
+                                : nullptr,
+              ReluFused);
         } // for each group
       } // for each row i
-    } else
-#endif // __AVX2__
-    {
+    } else {
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
