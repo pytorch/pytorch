@@ -191,7 +191,11 @@ def check_compiler_abi_compatibility(compiler):
     return False
 
 
-class BuildExtension(build_ext):
+# See below for why we inherit BuildExtension from object.
+# https://stackoverflow.com/questions/1713038/super-fails-with-error-typeerror-argument-1-must-be-type-not-classobj-when
+
+
+class BuildExtension(build_ext, object):
     '''
     A custom :mod:`setuptools` build extension .
 
@@ -390,6 +394,7 @@ class BuildExtension(build_ext):
         # non-C++11 symbols
         if _is_binary_build():
             self._add_compile_flag(extension, '-D_GLIBCXX_USE_CXX11_ABI=0')
+
 
 def CppExtension(name, sources, *args, **kwargs):
     '''
