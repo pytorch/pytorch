@@ -899,11 +899,11 @@ const auto cf_examples = R"JIT(
     return a
 )JIT";
 void testControlFlow() {
-  script::Module cu;
+  auto cu = std::make_shared<script::Module>();
   script::defineMethodsInModule(
       cu, cf_examples, script::nativeResolver, nullptr);
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
-    auto graph = cu.get_method(name).graph();
+    auto graph = cu->get_method(name).graph();
     Code code(graph);
     InterpreterState interp(code);
     interp.run(stack);
