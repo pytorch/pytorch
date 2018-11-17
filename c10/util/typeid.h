@@ -605,6 +605,6 @@ CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(25, detail::_guard_long_unique<long>)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(
     26,
     detail::_guard_long_unique<std::vector<long>>)
-
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(27, _CaffeHighestPreallocatedTypeId)
+// 27 is TensorImplPtr see tensor.h
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(28, _CaffeHighestPreallocatedTypeId)
 } // namespace caffe2

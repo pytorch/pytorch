@@ -32,8 +32,16 @@ class CAFFE2_API Tensor final {
     return impl_.defined();
   }
 
+  Tensor(TensorImplPtr ptr) {
+    impl_ = ptr;
+  }
+
   TensorImpl* unsafeGetTensorImpl() const {
     return impl_.get();
+  }
+
+  TensorImplPtr getTensorImpl() {
+    return impl_;
   }
 
   /**
@@ -449,6 +457,9 @@ CAFFE2_API void ReinitializeAndCopyFrom(
     BaseContext* context = nullptr);
 
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
+
+using TensorImplPtr = c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>;
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(27, TensorImplPtr)
 
 using TensorCPU = Tensor;
 

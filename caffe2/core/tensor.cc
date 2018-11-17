@@ -5,6 +5,8 @@
 namespace caffe2 {
 
 CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(12, Tensor);
+using TensorImplPtr = c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>;
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(27, TensorImplPtr);
 
 TensorPrinter::TensorPrinter(
     const std::string& tensor_name,
