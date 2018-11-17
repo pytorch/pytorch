@@ -39,14 +39,15 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int64_t i = int64_t(d);
-      if (std::isnormal(d) && double(i) == d) {
+      int c = std::fpclassify(d);
+      if ((c == FP_NORMAL || c == FP_ZERO) && double(i) == d) {
         return out << i << ".";
       }
       return out << v.toDouble();
     } case IValue::Tag::Int:
       return out << v.toInt();
     case IValue::Tag::Bool:
-      return out << v.toBool();
+      return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple:
       return printList(out, v.toTuple(), "(", ")");
     case IValue::Tag::IntList:
