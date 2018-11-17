@@ -125,19 +125,37 @@ set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
 
 # ---[ QNNPACK
 if(USE_QNNPACK)
-  if (NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin)$"))
-    message(WARNING
-      "Target platform \"${CMAKE_SYSTEM_NAME}\" is not supported in QNNPACK. "
-      "Supported platforms are Android, iOS, Linux, and macOS. "
-      "Turn this warning off by USE_QNNPACK=OFF.")
-    set(USE_QNNPACK OFF)
-  endif()
-  if (NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64)$"))
-    message(WARNING
-      "Target architecture \"${CMAKE_SYSTEM_PROCESSOR}\" is not supported in QNNPACK. "
-      "Supported platforms are x86, x86-64, ARM, and ARM64. "
-      "Turn this warning off by USE_QNNPACK=OFF.")
-    set(USE_QNNPACK OFF)
+  if (IOS)
+    list(LENGTH IOS_ARCH IOS_ARCH_COUNT)
+    if (IOS_ARCH_COUNT GREATER 1)
+      message(WARNING
+        "Multi-architecture (${IOS_ARCH}) builds are not supported in QNNPACK. "
+        "Specify a single architecture in IOS_ARCH and re-configure, or "
+        "turn this warning off by USE_QNNPACK=OFF.")
+      set(USE_QNNPACK OFF)
+    endif()
+    if (NOT IOS_ARCH MATCHES "^(i386|x86_64|armv7.*|arm64.*)$")
+      message(WARNING
+        "Target architecture \"${IOS_ARCH}\" is not supported in QNNPACK. "
+        "Supported architectures are x86, x86-64, ARM, and ARM64. "
+        "Turn this warning off by USE_QNNPACK=OFF.")
+      set(USE_QNNPACK OFF)
+    endif()
+  else()
+    if (NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin)$"))
+      message(WARNING
+        "Target platform \"${CMAKE_SYSTEM_NAME}\" is not supported in QNNPACK. "
+        "Supported platforms are Android, iOS, Linux, and macOS. "
+        "Turn this warning off by USE_QNNPACK=OFF.")
+      set(USE_QNNPACK OFF)
+    endif()
+    if (NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64)$"))
+      message(WARNING
+        "Target architecture \"${CMAKE_SYSTEM_PROCESSOR}\" is not supported in QNNPACK. "
+        "Supported architectures are x86, x86-64, ARM, and ARM64. "
+        "Turn this warning off by USE_QNNPACK=OFF.")
+      set(USE_QNNPACK OFF)
+    endif()
   endif()
   if (USE_QNNPACK)
     set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
