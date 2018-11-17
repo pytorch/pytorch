@@ -1,0 +1,4 @@
+def script(self,
+    x: Tensor,
+    y: Tensor) -> Tensor:
+  return aten.add(aten.mul(x, 2), y, alpha=1)
