@@ -34,7 +34,6 @@ setup_ci_environment: &setup_ci_environment
     sudo apt-get -qq update
     sudo apt-get -qq remove linux-image-generic linux-headers-generic linux-generic
     sudo apt-get -qq install \
-      apt \
       linux-headers-$(uname -r) \
       linux-image-generic \
       moreutils \

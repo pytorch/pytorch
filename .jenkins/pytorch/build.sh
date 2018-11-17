@@ -1,12 +1,5 @@
 #!/bin/bash
 
-# Required environment variable: $BUILD_ENVIRONMENT
-# (This is set by default in the Docker images we build, so you don't
-# need to set it yourself.
-
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-
 # For distributed, four environmental configs:
 # (1) build with only NCCL
 # (2) build with NCCL and MPI
@@ -29,6 +22,13 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == "pytorch-linux-xenial-py3-clang5-asan" ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" $*
 fi
+
+# Required environment variable: $BUILD_ENVIRONMENT
+# (This is set by default in the Docker images we build, so you don't
+# need to set it yourself.
+
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Python version:"
 python --version
