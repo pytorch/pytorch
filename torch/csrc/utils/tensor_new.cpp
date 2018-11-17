@@ -201,7 +201,7 @@ Tensor internal_new_from_data(
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
     const auto& scalar_type = type_inference ? var.type().scalarType() : type.scalarType();
-    auto device = device_opt.has_value() ? *device_opt : var.device();
+    auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(torch::getDeviceType(type)));
     AutoNoGIL no_gil;
     return var.to(device, scalar_type, /*blocking=*/false, /*copy=*/copy_variables);
   }
@@ -209,23 +209,22 @@ Tensor internal_new_from_data(
 #ifdef USE_NUMPY
   if (PyArray_Check(data)) {
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
-    const auto& type_to_use = type_inference ? type.toScalarType(tensor.type().scalarType()) : type;
+    const auto& scalar_type = type_inference ? tensor.type().scalarType() : type.scalarType();
+    auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
     AutoNoGIL no_gil;
-    auto device = device_opt.has_value() ? *device_opt : tensor.device();
-    return tensor.to(device, type_to_use.scalarType(), /*blocking=*/false, /*copy=*/copy_numpy);
+    return tensor.to(device, scalar_type, /*blocking=*/false, /*copy=*/copy_numpy);
   }
 #endif
 
   auto sizes = compute_sizes(data);
-  ScalarType scalarType = type_inference ? infer_scalar_type(data) : type.scalarType();
-  auto tensor = autograd::make_variable(at::empty(sizes, at::initialTensorOptions().dtype(scalarType)), /*requires_grad=*/false);
+  ScalarType scalar_type = type_inference ? infer_scalar_type(data) : type.scalarType();
+  auto tensor = autograd::make_variable(at::empty(sizes, at::initialTensorOptions().dtype(scalar_type)), /*requires_grad=*/false);
   recursive_store(
       (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
-      scalarType, tensor.type().elementSizeInBytes(), data);
-  const auto& type_to_use = type_inference ? type.toScalarType(scalarType) : type;
+      scalar_type, tensor.type().elementSizeInBytes(), data);
   auto device = device_opt.has_value() ? *device_opt : at::Device(torch::getDeviceType(type));
   AutoNoGIL no_gil;
-  return tensor.to(device, type_to_use.scalarType(), /*blocking=*/false, /*copy=*/false);
+  return tensor.to(device, scalar_type, /*blocking=*/false, /*copy=*/false);
 }
 
 Tensor new_from_data_copy(
