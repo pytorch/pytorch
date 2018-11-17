@@ -9,6 +9,7 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/script/builtin_functions.h"
+#include "torch/csrc/jit/hooks_for_testing.h"
 
 #include "torch/csrc/jit/constants.h"
 
@@ -433,6 +434,45 @@ inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
   return false;
 }
 
+// applies implict conversion from value trying to turn it into type concrete_type
+// it succeeds if the return_value->isSubclassOf(concrete_type)
+Value* tryConvertToType(
+    const SourceRange& loc,
+    Graph& graph,
+    TypePtr concrete_type,
+    Value* value,
+    bool convert_tensors_to_nums) {
+  // Allow homogeneous tuples to be casted implicitly to lists of appropriate
+  // types
+  if (convertibleToList(value->type(), concrete_type) &&
+      value->type()->kind() == TypeKind::TupleType) {
+    auto unpacked = createTupleUnpack(value);
+    auto elem_type = concrete_type->expect<ListType>()->getElementType();
+    value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
+  }
+
+  if (value->type()->isSubtypeOf(NoneType::get()) && !concrete_type->isSubtypeOf(NoneType::get())){
+    if (concrete_type->isSubtypeOf(GeneratorType::get())) {
+      value = graph.insertNode(graph.createNoneGenerator())->output();
+    } else if (concrete_type->isSubtypeOf(OptionalType::ofTensor())) {
+      // create undefined tensor when None pass to a optional[tensor] formal arg
+      value = graph.insertNode(graph.createUndefined())->output();
+    } else if (auto optional_type = concrete_type->cast<OptionalType>()) {
+      value = graph.insertNode(graph.createNone(optional_type->getElementType()))->output();
+    }
+  }
+
+  //implicit conversion of tensors to scalars
+  if(convert_tensors_to_nums && concrete_type->isSubtypeOf(NumberType::get())
+      && value->type()->isSubtypeOf(DynamicType::get())) {
+      auto n = graph.createImplicitTensorToNum(concrete_type, value);
+      value = graph.insertNode(n)
+        ->setSourceLocation(std::make_shared<SourceRange>(loc))
+        ->output();
+  }
+  return value;
+}
+
 Value* tryMatchArgument(
     const Argument& arg,
     Graph& graph,
@@ -462,32 +502,7 @@ Value* tryMatchArgument(
   }
   const auto concrete_type = *matched_type.type;
 
-  // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
-  if (convertibleToList(value->type(), concrete_type) &&
-      value->type()->kind() == TypeKind::TupleType) {
-    auto unpacked = createTupleUnpack(value);
-    auto elem_type = concrete_type->expect<ListType>()->getElementType();
-    value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
-  }
-
-  if (value->type()->isSubtypeOf(NoneType::get()) && !concrete_type->isSubtypeOf(NoneType::get())){
-    if (concrete_type->isSubtypeOf(GeneratorType::get())) {
-      value = graph.insertNode(graph.createNoneGenerator())->output();
-    }
-    if (concrete_type->isSubtypeOf(OptionalType::ofTensor())) {
-      // create undefined tensor when None pass to a optional[tensor] formal arg
-      value = graph.insertNode(graph.createUndefined())->output();
-    }
-  }
-
-  //implicit conversion of tensors to scalars
-  if(convert_tensors_to_nums && concrete_type->isSubtypeOf(NumberType::get())
-      && value->type()->isSubtypeOf(DynamicType::get())) {
-      auto n = graph.createImplicitTensorToNum(concrete_type, value);
-      value = graph.insertNode(n)
-        ->setSourceLocation(std::make_shared<SourceRange>(loc))
-        ->output();
-  }
+  value = tryConvertToType(loc, graph, concrete_type, value, convert_tensors_to_nums);
 
   if(!value->type()->isSubtypeOf(concrete_type)) {
     err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name() << "' but found "
@@ -726,7 +741,6 @@ Value* emitBuiltinCall(
           attributes,
           failure_messages,
           convert_tensors_to_nums);
-
       if (matched_schema) {
         return emitBuiltinNode(*matched_schema, loc, graph, name);
       }
@@ -866,11 +880,11 @@ struct to_ir {
       }
       auto range = return_stmt.range();
       size_t return_type_idx = 0;
-      for (auto& r : results) {
-        graph->registerOutput(r);
+      for (auto r : results) {
         TypePtr type = DynamicType::get();
         if (!schema.is_varret()) {
           type = schema.returns().at(return_type_idx).type();
+          r = tryConvertToType(range, *graph, type, r, /*convert_tensors_to_nums=*/false);
           if (!r->type()->isSubtypeOf(type)) {
             throw ErrorReport(return_stmt.range()) << "Return value at position "
               << return_type_idx << " was annotated as having type " << type->str()
@@ -878,6 +892,7 @@ struct to_ir {
           }
           return_type_idx++;
         }
+        graph->registerOutput(r);
         returns.emplace_back("", type);
       }
     } else if (schema.returns().size() > 0) {
@@ -1771,7 +1786,12 @@ private:
         throw ErrorReport(loc) << "attribute takes no keyword arguments";
       }
       TypePtr type = parseTypeFromExpr(apply.inputs()[0]);
-      Value* expr = emitExpr(apply.inputs()[1], type);
+      Value* expr = tryConvertToType(
+          apply.range(),
+          *graph,
+          type,
+          emitExpr(apply.inputs()[1], type),
+          /*convert_tensors_to_nums=*/true);
       if (!expr->type()->isSubtypeOf(type)) {
         throw ErrorReport(apply.inputs())
             << "expected an expression of type " << type->python_str()
@@ -2340,7 +2360,7 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   return outputs;
 }
 
-void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
+void defineMethodsInModule(std::shared_ptr<Module> m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
   JIT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
@@ -2368,13 +2388,14 @@ void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, cons
       JIT_ASSERT(resolver);
       to_ir(def, resolver, self,  method);
     };
-    Method& method = m.create_method(name, creator);
+    Method& method = m->create_method(name, creator);
     function_table[name] = &method;
     methods.push_back(&method);
   }
   for(Method* method : methods) {
     method->ensure_defined();
   }
+  didFinishEmitModule(m);
 }
 
 const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
@@ -2384,6 +2405,9 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
     {"float", FloatType::get()},
     {"bool", BoolType::get()},
     {"str", StringType::get()},
+    // technically this is not a python type but we need it when
+    // parsing serialized methods that use implicit converions to Scalar
+    {"number", NumberType::get()},
   };
   return map;
 }
@@ -2570,7 +2594,7 @@ FunctionSchema extractSchemaFromDef(const Def &def, bool is_method) {
     return FunctionSchema(name, args, returns, false, is_varret);
 }
 
-void defineMethodsInModule(Module & m, const std::string& source, Resolver resolver, SugaredValuePtr self) {
+void defineMethodsInModule(std::shared_ptr<Module> m, const std::string& source, Resolver resolver, SugaredValuePtr self) {
   Parser p(source);
   std::vector<Def> definitions;
   std::vector<Resolver> resolvers;

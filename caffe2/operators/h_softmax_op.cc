@@ -72,8 +72,6 @@ bool HSoftmaxOp<float, CPUContext>::RunOnDevice() {
   const auto& W = Input(1);
   const auto& b = Input(2);
   auto& label = Input(3);
-  auto* Y = Output(0);
-  auto* intermediate_output = Output(1);
 
   // Batch size
   int M = X.dim() > 1 ? X.dim32(0) : 1;
@@ -85,14 +83,14 @@ bool HSoftmaxOp<float, CPUContext>::RunOnDevice() {
   // Sum of output dimensions of all hierarchy nodes
   int N = W.dim32(0);
   CAFFE_ENFORCE_EQ(N, b.dim32(0));
-  Y->Resize(M);
+  auto* Y = Output(0, {M}, at::dtype<float>());
   auto* Ydata = Y->template mutable_data<float>();
   math::Set<float, CPUContext>(M, 0.f, Ydata, &context_);
   const auto* labeldata = label.data<int>();
 
   auto hierarchy = getHierarchyForLabels(M, labeldata, hierarchy_all_map_);
   int int_output_size = getIntermediateOutputSize(labeldata, M, hierarchy);
-  intermediate_output->Resize(int_output_size);
+  auto* intermediate_output = Output(1, {int_output_size}, at::dtype<float>());
   float* int_output_data = intermediate_output->template mutable_data<float>();
   int int_output_offset = 0;
 
@@ -341,8 +339,7 @@ bool HSoftmaxSearchOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   const auto& W = Input(1);
   const auto& b = Input(2);
-  auto* Y_names = Output(0);
-  auto* Y_scores = Output(1);
+
   // Batch size
   int M = X.dim() > 1 ? X.dim32(0) : 1;
   // Input feature dimension
@@ -353,8 +350,8 @@ bool HSoftmaxSearchOp<float, CPUContext>::RunOnDevice() {
   // Sum of output dimensions of all hierarchy nodes
   int N = W.dim32(0);
   CAFFE_ENFORCE(N == b.dim32(0), "mismatch between Weight and Bias.");
-  Y_names->Resize(M, top_n_);
-  Y_scores->Resize(M, top_n_);
+  auto* Y_names = Output(0, {M, top_n_}, at::dtype<string>());
+  auto* Y_scores = Output(1, {M, top_n_}, at::dtype<float>());
 
   if (bias_multiplier_.numel() != M) {
     bias_multiplier_.Resize(M);
@@ -418,10 +415,10 @@ bool HSoftmaxSearchOp<float, CPUContext>::RunOnDevice() {
 template <typename T, class Context>
 bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
   const auto& Y = Input(0);
-  auto treeOutput = Output(0);
+
   CAFFE_ENFORCE_EQ(Y.dim(), 1, "Input labels must be a vector.");
   const auto y_data = Y.template data<T>();
-  treeOutput->Resize(1);
+  auto treeOutput = Output(0, {1}, at::dtype<string>());
   std::vector<int> labelCounts;
   labelCounts.resize(num_classes_, 0);
   for (int i = 0; i < Y.dim32(0); ++i) {
