@@ -12,6 +12,8 @@
 #include "torch/csrc/jit/passes/to_batch.h"
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/script/parser.h"
+#include "torch/csrc/jit/import_method.h"
+#include "torch/csrc/jit/hooks_for_testing.h"
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -433,7 +435,7 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb, bool has_self) {
             auto self = has_self ? std::make_shared<ModuleValue>(m) : nullptr;
-            return defineMethodsInModule(*m, script, pythonResolver(rcb), self);
+            return defineMethodsInModule(m, script, pythonResolver(rcb), self);
           })
       .def("_create_methods", [](std::shared_ptr<Module> m,
           const std::vector<Def>& defs,
@@ -444,7 +446,7 @@ void initJitScriptBindings(PyObject* module) {
           resolvers.push_back(pythonResolver(callback));
         }
         defineMethodsInModule(
-          *m,
+          m,
           defs,
           resolvers,
           std::make_shared<ModuleValue>(m));
@@ -524,7 +526,7 @@ void initJitScriptBindings(PyObject* module) {
          self.create_method(name, std::move(graph), {});
       })
       .def("_create_method_from_trace", [](
-        Module& self,
+        std::shared_ptr<Module> self,
         const std::string& name,
         py::function func,
         py::tuple input_tuple,
@@ -532,13 +534,14 @@ void initJitScriptBindings(PyObject* module) {
           // prereq: Module's buffers and parameters are unique
           // this was ensured in python before calling this function
           std::vector<at::Tensor*> parameters;
-          gatherParametersAndBuffers(parameters, self);
+          gatherParametersAndBuffers(parameters, *self);
           Stack inputs = toStack(input_tuple);
           for(at::Tensor* param : parameters) {
             inputs.emplace_back(*param);
           }
           auto graph = tracer::createGraphByTracing(func, inputs, var_lookup_fn, input_tuple.size());
-          self.create_method(name, std::move(graph), std::move(parameters));
+          self->create_method(name, std::move(graph), std::move(parameters));
+          didFinishEmitModule(self);
       })
       .def("graph_for", [](py::args args, py::kwargs kwargs) {
         // [pybind11 varargs] note: old version of pybind11 have a bug that leaks memory
@@ -604,7 +607,7 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("_jit_script_compile", [](std::shared_ptr<Module> mod, const Def &def, ResolutionCallback rcb, FunctionDefaults defaults) {
     auto def_f = def.withName("forward");
-    defineMethodsInModule(*mod, {def_f}, {pythonResolver(rcb)}, nullptr);
+    defineMethodsInModule(mod, {def_f}, {pythonResolver(rcb)}, nullptr);
     auto& method = mod->get_method("forward");
     method.setSchema(getSchemaWithNameAndDefaults(
         def.range(), method.getSchema(), def.name().name(), defaults));
@@ -624,6 +627,8 @@ void initJitScriptBindings(PyObject* module) {
     std::istringstream in(buffer);
     import_ir_module(module_lookup, in);
   });
+  m.def("_jit_import_method", import_method);
+  m.def("_jit_set_emit_module_hook", setEmitModuleHook);
 }
 
 } // namespace script

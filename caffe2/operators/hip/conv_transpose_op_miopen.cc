@@ -11,14 +11,15 @@ class MIOPENConvTransposeOpBase : public ConvTransposeUnpoolBase<HIPContext> {
   MIOPENConvTransposeOpBase(const OperatorDef& operator_def, Workspace* ws)
       : ConvTransposeUnpoolBase<HIPContext>(operator_def, ws),
         miopen_wrapper_(&context_),
+        miopen_state_(
+            OperatorBase::GetSingleArgument<size_t>("miopen_state", 0)),
         miopen_ws_nbytes_limit_(OperatorBase::GetSingleArgument<size_t>(
             "ws_nbytes_limit",
             kCONV_MIOPEN_WORKSPACE_LIMIT_BYTES)),
-        miopen_state_(OperatorBase::GetSingleArgument<size_t>("miopen_state", 0)),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
         exhaustive_search_(
-            OperatorBase::GetSingleArgument<bool>("exhaustive_search", false)) {
+            OperatorBase::GetSingleArgument<bool>("exhaustive_search", false)),
+        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
+        beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)) {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&bottom_desc_));
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&bias_desc_));
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&weight_desc_));
@@ -104,12 +105,12 @@ class MIOPENConvTransposeGradientOp final : public MIOPENConvTransposeOpBase {
             OperatorBase::GetSingleArgument<bool>("bestAlgoFound", false)),
         bestWeightAlgoFound_(
             OperatorBase::GetSingleArgument<bool>("bestAlgoFound", false)),
-        bwdWeightWs_(nullptr),
-        bwdWeightWsSize_(0),
-        bwdDataWs_(nullptr),
-        bwdDataWsSize_(0),
         bwdWeiAlgo_(miopenConvolutionBwdWeightsAlgoGEMM),
-        bwdDataAlgo_(miopenConvolutionBwdDataAlgoGEMM) {
+        bwdDataAlgo_(miopenConvolutionBwdDataAlgoGEMM),
+        bwdWeightWsSize_(0),
+        bwdDataWsSize_(0),
+        bwdWeightWs_(nullptr),
+        bwdDataWs_(nullptr) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");
