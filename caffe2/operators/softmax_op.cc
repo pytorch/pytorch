@@ -82,35 +82,10 @@ REGISTER_CPU_GRADIENT_OPERATOR(
     SoftmaxGradient,
     SoftmaxGradientOp<float, CPUContext>);
 
-namespace {
-// Since the actual flops of the non-linear operator depends on the
-// implementation, we use the number of non-linear operations as the proxy for
-// the analytical flops for non-linear operator
-OpSchema::Cost CostInferenceForSoftmax(
-    const OperatorDef& def,
-    const vector<TensorShape>& in) {
-  CAFFE_ENFORCE_EQ(in.size(), 1, "Softmax requires one input");
-  struct OpSchema::Cost c;
-  ArgumentHelper helper(def);
-
-  const uint64_t input_size =
-      size_to_dim_(in[0].dims().size(), GetDimsVector(in[0]));
-
-  const auto& X = in[0];
-  c.flops = input_size;
-  c.bytes_read = input_size * sizeof(X.data_type());
-  c.bytes_written = input_size * sizeof(X.data_type());
-  c.params_bytes = 0;
-  return c;
-}
-} // namespace
-
-using namespace std::placeholders;
 OPERATOR_SCHEMA(Softmax)
     .NumInputs(1)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
-    .CostInferenceFunction(std::bind(CostInferenceForSoftmax, _1, _2))
     .SetDoc(R"DOC(
 
 Applies the Softmax function to an n-dimensional input Tensor rescaling them so
