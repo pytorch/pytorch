@@ -3712,7 +3712,7 @@ The shape of the tensor is defined by the variable argument :attr:`size`.
 
 .. note:
     With the global dtype default (`torch.float32`), this function returns
-    a tensor with dtype `torch.float32`, NOT an integer dtype.
+    a tensor with dtype `torch.int64`.
 
 Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
@@ -3727,17 +3727,17 @@ Args:
 Example::
 
     >>> torch.randint(3, 5, (3,))
-    tensor([ 4.,  3.,  4.])
+    tensor([4, 3, 4])
 
 
-    >>> torch.randint(10, (2,2))
-    tensor([[ 0.,  2.],
-            [ 5.,  5.]])
+    >>> torch.randint(10, (2, 2))
+    tensor([[0, 2],
+            [5, 5]])
 
 
-    >>> torch.randint(3, 10, (2,2))
-    tensor([[ 4.,  5.],
-            [ 6.,  7.]])
+    >>> torch.randint(3, 10, (2, 2))
+    tensor([[4, 5],
+            [6, 7]])
 
 
 """.format(**factory_common_args))
@@ -3752,7 +3752,7 @@ random integers generated uniformly between :attr:`low` (inclusive) and
 
 .. note:
     With the global dtype default (`torch.float32`), this function returns
-    a tensor with dtype `torch.float32`, NOT an integer dtype.
+    a tensor with dtype `torch.int64`.
 
 Args:
     {input}
@@ -3832,7 +3832,7 @@ Args:
 Example::
 
     >>> torch.randperm(4)
-    tensor([ 2,  1,  0,  3])
+    tensor([2, 1, 0, 3])
 """.format(**factory_common_args))
 
 add_docstr(torch.tensor,
