@@ -1721,9 +1721,7 @@ void Caffe2Backend::BuildTensorFillingOp(
     auto* strings = c2_values->mutable_strings();
     strings->CopyFrom(onnx_tensor.string_data());
   } else {
-    CAFFE_THROW(
-        "unrecognized tensor type: ",
-        TensorProto::DataType_Name(onnx_tensor.data_type()));
+    CAFFE_THROW("unrecognized tensor type: ", onnx_tensor.data_type());
   }
 
   auto* c2_shape = c2_op->add_arg();
