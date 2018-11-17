@@ -69,7 +69,7 @@ RegisterOperators reg({
         if(type->isSubtypeOf(DynamicType::get())) {
           auto t = autograd::make_variable(node->t(attr::value));
           return [t](Stack& stack) {
-            stack.push_back(t);
+            push(stack, t);
             return 0;
           };
         } else if (type->isSubtypeOf(BoolType::get())) {
