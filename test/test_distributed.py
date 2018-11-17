@@ -961,11 +961,14 @@ class _DistTestBase(object):
         self._test_all_gather_helper(group, group_id, rank)
 
     # BARRIER
-    def _test_barrier_helper(self, group, group_id, rank):
+    def _test_barrier_helper(
+            self, group, group_id, rank, cuda=False, rank_to_GPU=None):
         WAIT_TIME = 0.3  # seconds
 
         for dest in group:
             expected_time = torch.DoubleTensor(1).fill_(0.0)
+            if cuda:
+                expected_time = expected_time.cuda(rank_to_GPU[rank][0])
             if dest == rank:
                 expected_time.fill_(time.time() + WAIT_TIME)
                 dist.broadcast(expected_time, dest, group_id)
@@ -978,18 +981,41 @@ class _DistTestBase(object):
 
         self._barrier()
 
-    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support barrier")
+    @skip_if_no_gpu
+    @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
+    def test_barrier_cuda(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        self._test_barrier_helper(group, group_id, rank, True, rank_to_GPU)
+
+    @skip_if_small_worldsize
+    @skip_if_no_gpu
+    @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
+    def test_barrier_group_cuda(self):
+        group, group_id, rank = self._init_group_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        self._test_barrier_helper(group, group_id, rank, True, rank_to_GPU)
+
+    @skip_if_small_worldsize
+    @skip_if_no_gpu
+    @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
+    def test_barrier_full_group_cuda(self):
+        group, group_id, rank = self._init_full_group_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        self._test_barrier_helper(group, group_id, rank, True, rank_to_GPU)
+
+    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support CPU barrier")
     def test_barrier(self):
         group, group_id, rank = self._init_global_test()
         self._test_barrier_helper(group, group_id, rank)
 
     @skip_if_small_worldsize
-    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support barrier")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support CPU barrier")
     def test_barrier_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_barrier_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support barrier")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support CPU barrier")
     def test_barrier_full_group(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_barrier_helper(group, group_id, rank)
