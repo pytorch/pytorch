@@ -6,10 +6,6 @@
 
 #include <c10/util/intrusive_ptr.h>
 
-namespace at {
-struct Type;
-}
-
 namespace c10 {
 
 struct C10_API StorageImpl : public c10::intrusive_ptr_target {
@@ -97,8 +93,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   size_t itemsize() const {
     return data_type_.itemsize();
   }
-
-  at::Type& type();
 
   size_t capacity() const {
     return numel_ * itemsize();
