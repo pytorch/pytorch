@@ -48,7 +48,7 @@ class AliasDb {
   void dump() const;
 
  private:
-  bool isMutableType(const Value* v);
+  bool shouldAnnotate(const Value* v) const;
 
   void analyze(std::shared_ptr<Graph> graph);
   void analyze(Block* block);
@@ -61,12 +61,14 @@ class AliasDb {
   void analyzeExtractor(Node* node);
   void analyzeChunk(Node* node);
 
-  Symbol getFreshAlias();
-  void giveAlias(const Value* value, AliasInfo alias);
-  void giveAlias(const Value* value, Symbol alias);
+  Symbol getFreshAlias() const;
+  void addAlias(const Value* value, AliasInfo alias);
+  void addAlias(const Value* value, Symbol alias);
+  void addAlias(const Value* value, const Value* from);
+  void giveFreshAlias(const Value* value);
 
   std::shared_ptr<Graph> graph_;
-  Symbol latestSymbol_ = Symbol::fromQualString("alias::0");
+  mutable Symbol latestSymbol_ = Symbol::fromQualString("alias::0");
   std::unordered_map<const Value*, AliasInfo> valueToAlias_;
   std::unordered_map<Symbol, std::unordered_set<Node*>> aliasToWrites_;
 };

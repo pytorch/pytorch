@@ -1,5 +1,7 @@
 #include "alias_analysis.h"
 
+#include "torch/csrc/jit/script/error_report.h"
+
 namespace torch {
 namespace jit {
 bool AliasDb::hasWildcard(const Node* n) const {
@@ -102,23 +104,28 @@ void AliasDb::analyze(std::shared_ptr<Graph> graph) {
 
   for (auto input : graph->inputs()) {
     if (input->type()->isSubtypeOf(DynamicType::get())) {
-      giveAlias(input, tensorAlias);
+      addAlias(input, tensorAlias);
     } else if (input->type()->kind() == TypeKind::ListType) {
-      const auto containedType = input->type()->containedTypes().at(0);
+      auto containedType = input->type()->containedTypes().at(0);
+      // All tensor subtypes may alias to each other, so we should consider all
+      // lists of them to alias to each other.
+      if (containedType->isSubtypeOf(DynamicType::get())) {
+        containedType = DynamicType::get();
+      }
       if (listTypeAliases.count(containedType->kind()) == 0) {
         listTypeAliases[containedType->kind()] = getFreshAlias();
       }
 
-      giveAlias(input, listTypeAliases.at(containedType->kind()));
+      addAlias(input, listTypeAliases.at(containedType->kind()));
     } else if (input->type()->kind() == TypeKind::TupleType) {
       auto tupleType = input->type()->cast<TupleType>();
       if (tupleTypeAliases.count(tupleType) == 0) {
         tupleTypeAliases[tupleType] = getFreshAlias();
       }
-      giveAlias(input, tupleTypeAliases.at(tupleType));
+      addAlias(input, tupleTypeAliases.at(tupleType));
 
     } else {
-      JIT_ASSERT(!isMutableType(input));
+      JIT_ASSERT(!shouldAnnotate(input));
     }
   }
 
@@ -169,15 +176,20 @@ void AliasDb::analyze(Node* node) {
     const auto hasMutableOutputs = std::any_of(
         node->outputs().cbegin(),
         node->outputs().cend(),
-        [this](const Value* output) { return isMutableType(output); });
+        [this](const Value* output) { return shouldAnnotate(output); });
 
     // We don't have alias info for this node. Either schematize it, or
     // add it an analyze* method for it.
-    JIT_ASSERT(!hasMutableOutputs);
+    if (hasMutableOutputs) {
+      throw script::ErrorReport(node->getSourceLocation())
+          << "Alias information not found for node. File a bug report.\n"
+          << "Node: " << *node << "\n";
+    }
   }
 
   // Bind formal alias annotation to actual alias sets
   std::unordered_map<Symbol, AliasInfo> formalToActual;
+  formalToActual[AliasInfo::wildcardSet()] = AliasInfo::createWildcard();
   for (size_t i = 0; i < schema.arguments().size(); i++) {
     const auto& formal = schema.arguments()[i].alias_info();
     const auto& actualValue = node->inputs().at(i);
@@ -214,29 +226,27 @@ void AliasDb::analyze(Node* node) {
   // Use the formal-actual mapping to give aliases to the outputs
   for (size_t i = 0; i < schema.returns().size(); i++) {
     const auto actual = node->outputs().at(i);
-    if (!isMutableType(actual)) {
-      continue;
-    }
-
     const auto& formal = schema.returns()[i].alias_info();
     if (!formal) {
       // This is a fresh tensor
-      giveAlias(actual, getFreshAlias());
+      giveFreshAlias(actual);
       continue;
     }
 
     // We don't support composite types for alias analysis yet.
     JIT_ASSERT(formal->containedTypes().size() == 0);
 
-    if (formal->isWildcard()) {
-      giveAlias(actual, AliasInfo::createWildcard());
-      continue;
-    }
-
     const auto& formalAlias = formal->set();
     auto outputAlias = formalToActual.at(formalAlias);
 
-    giveAlias(actual, outputAlias);
+    // Record writes
+    for (const auto& alias : outputAlias.sets()) {
+      if (formal->isWrite()) {
+        aliasToWrites_[alias].insert(node);
+      }
+    }
+
+    addAlias(actual, outputAlias);
   }
 }
 
@@ -250,7 +260,7 @@ void AliasDb::analyzeIf(Node* node) {
 
   for (size_t i = 0; i < node->outputs().size(); i++) {
     const auto nodeOutput = node->outputs()[i];
-    if (!isMutableType(nodeOutput)) {
+    if (!shouldAnnotate(nodeOutput)) {
       continue;
     }
 
@@ -262,50 +272,57 @@ void AliasDb::analyzeIf(Node* node) {
     // this case.
     if (valueToAlias_.count(trueOutput) == 0) {
       JIT_ASSERT(valueToAlias_.count(falseOutput) != 0);
-      giveAlias(trueOutput, AliasInfo());
+      addAlias(trueOutput, AliasInfo());
     } else if (valueToAlias_.count(falseOutput) == 0) {
       JIT_ASSERT(valueToAlias_.count(trueOutput) != 0);
-      giveAlias(falseOutput, AliasInfo());
+      addAlias(falseOutput, AliasInfo());
     }
 
-    AliasInfo aliasInfo;
-    aliasInfo.unionWith(valueToAlias_.at(trueOutput));
-    aliasInfo.unionWith(valueToAlias_.at(falseOutput));
-    valueToAlias_[nodeOutput] = aliasInfo;
+    addAlias(nodeOutput, trueOutput);
+    addAlias(nodeOutput, falseOutput);
   }
 }
 
 void AliasDb::analyzeLoop(Node* node) {
-  // For loops, we need to copy alias information from the node
-  // input/outputs to the body block input/outputs
   const auto bodyBlock = node->blocks().at(0);
-
-  // 1. Copy alias info from node input to block input
   const auto loopCarriedInputs = node->inputs().slice(2); // skip max, cond
   const auto blockInputs = bodyBlock->inputs().slice(1); // skip trip
-
-  JIT_ASSERT(loopCarriedInputs.size() == blockInputs.size());
-  for (size_t i = 0; i < blockInputs.size(); i++) {
-    const auto blockInput = blockInputs[i];
-    if (!isMutableType(blockInput)) {
-      continue;
-    }
-    const auto loopInput = loopCarriedInputs[i];
-    valueToAlias_[blockInput] = valueToAlias_.at(loopInput);
-  }
-
-  // 2. Populate block output alias info by analyzing the body
-  analyze(bodyBlock);
-
-  // 3. Copy the alias info from the block output to the node output
   const auto blockOutputs = bodyBlock->outputs().slice(1); // skip trip
-  for (size_t i = 0; i < node->outputs().size(); i++) {
-    const auto nodeOutput = node->outputs()[i];
-    if (!isMutableType(nodeOutput)) {
-      continue;
+  JIT_ASSERT(loopCarriedInputs.size() == blockInputs.size());
+  JIT_ASSERT(blockOutputs.size() == node->outputs().size());
+
+  // Run alias analysis on the loop body, iterating until the block output
+  // alias info converges.
+  auto notConverged = true;
+  while (notConverged) {
+    // Copy node input aliases to block input
+    for (size_t i = 0; i < loopCarriedInputs.size(); i++) {
+      addAlias(blockInputs[i], loopCarriedInputs[i]);
     }
-    const auto blockOutput = blockOutputs.at(i);
-    valueToAlias_[nodeOutput] = valueToAlias_.at(blockOutput);
+
+    // Populate block output alias info by analyzing the body
+    analyze(bodyBlock);
+
+    // Copy the alias info from the block output to the node output
+    for (size_t i = 0; i < node->outputs().size(); i++) {
+      addAlias(node->outputs()[i], blockOutputs[i]);
+    }
+
+    // Merge alias info from block outputs to the node inputs.
+    notConverged = false;
+    for (size_t i = 0; i < blockOutputs.size(); i++) {
+      const auto input = loopCarriedInputs[i];
+      const auto output = blockOutputs[i];
+
+      // Check whether or not this would change anything
+      if (valueToAlias_.count(input) != 0) {
+        JIT_ASSERT(valueToAlias_.count(output) != 0)
+        if (!valueToAlias_[output].isSubsetOf(valueToAlias_[output])) {
+          notConverged = true;
+        }
+      }
+      addAlias(input, output);
+    }
   }
 }
 
@@ -313,39 +330,29 @@ void AliasDb::analyzeSubgraph(Node* node) {
   const auto subgraphBlock = node->g(attr::Subgraph)->block();
   for (size_t i = 0; i < node->inputs().size(); i++) {
     const auto nodeInput = node->inputs()[i];
-    if (!isMutableType(nodeInput)) {
-      continue;
-    }
     const auto blockInput = subgraphBlock->inputs().at(i);
-    valueToAlias_[blockInput] = valueToAlias_.at(nodeInput);
+    addAlias(blockInput, nodeInput);
   }
 
   analyze(subgraphBlock);
 
   for (size_t i = 0; i < node->outputs().size(); i++) {
     const auto nodeOutput = node->outputs()[i];
-    if (!isMutableType(nodeOutput)) {
-      continue;
-    }
     const auto blockOutput = subgraphBlock->outputs().at(i);
-    valueToAlias_[nodeOutput] = valueToAlias_.at(blockOutput);
+    addAlias(nodeOutput, blockOutput);
   }
 }
 
 // For nodes that generate a fresh value from nothing
 void AliasDb::analyzeCreator(Node* node) {
-  if (isMutableType(node->output())) {
-    giveAlias(node->output(), getFreshAlias());
-  }
+  giveFreshAlias(node->output());
 }
 
 // For nodes that extract values from a composite type. Right now, this just
 // gives up and creates wildcards for everything.
 void AliasDb::analyzeExtractor(Node* node) {
   for (const auto output : node->outputs()) {
-    if (isMutableType(output)) {
-      giveAlias(output, AliasInfo::createWildcard());
-    }
+    addAlias(output, AliasInfo::createWildcard());
   }
 }
 
@@ -353,31 +360,69 @@ void AliasDb::analyzeExtractor(Node* node) {
 void AliasDb::analyzeChunk(Node* node) {
   auto alias = valueToAlias_.at(node->input());
   for (auto output : node->outputs()) {
-    giveAlias(output, alias);
+    addAlias(output, alias);
   }
 }
 
-bool AliasDb::isMutableType(const Value* v) {
+// We only need to annotate values that either are mutable or could contain
+// mutable types.
+bool AliasDb::shouldAnnotate(const Value* v) const {
   return v->type()->isSubtypeOf(DynamicType::get()) ||
       v->type()->kind() == TypeKind::ListType ||
       v->type()->kind() == TypeKind::TupleType;
 }
 
-Symbol AliasDb::getFreshAlias() {
+Symbol AliasDb::getFreshAlias() const {
   auto num = std::stoll(latestSymbol_.toUnqualString());
-  latestSymbol_ = Symbol::fromDomainAndUnqualString(
-      "org.pytorch.alias", std::to_string(++num));
+  latestSymbol_ = Symbol::fromQualString("alias::" + std::to_string(++num));
   return latestSymbol_;
 }
 
-void AliasDb::giveAlias(const Value* value, AliasInfo alias) {
-  valueToAlias_.insert({value, std::move(alias)});
+// Give this alias to the value. If the value already has alias info, union
+// with this alias
+void AliasDb::addAlias(const Value* value, AliasInfo alias) {
+  if (!shouldAnnotate(value)) {
+    return;
+  }
+  if (valueToAlias_.count(value) != 0) {
+    valueToAlias_[value].unionWith(alias);
+  } else {
+    valueToAlias_.insert({value, std::move(alias)});
+  }
 }
 
-void AliasDb::giveAlias(const Value* value, Symbol alias) {
-  AliasInfo aliasInfo;
-  aliasInfo.addSet(std::move(alias));
-  valueToAlias_.insert({value, std::move(aliasInfo)});
+// Give this alias to the value. If the value already has alias info, union
+// with this alias
+void AliasDb::addAlias(const Value* value, Symbol alias) {
+  if (!shouldAnnotate(value)) {
+    return;
+  }
+  if (valueToAlias_.count(value) != 0) {
+    valueToAlias_[value].addSet(alias);
+  } else {
+    AliasInfo aliasInfo;
+    aliasInfo.addSet(std::move(alias));
+    valueToAlias_.insert({value, std::move(aliasInfo)});
+  }
+}
+
+// Union the alias info of `value` with `from`
+void AliasDb::addAlias(const Value* value, const Value* from) {
+  if (!shouldAnnotate(value)) {
+    JIT_ASSERT(!shouldAnnotate(from));
+    return;
+  }
+  addAlias(value, valueToAlias_.at(from));
+}
+
+void AliasDb::giveFreshAlias(const Value* value) {
+  if (valueToAlias_.count(value) != 0) {
+    // Inside a loop, we may have given a fresh alias to this value already, so
+    // skip
+    return;
+  }
+  addAlias(value, getFreshAlias());
+
 }
 } // namespace jit
 } // namespace torch
