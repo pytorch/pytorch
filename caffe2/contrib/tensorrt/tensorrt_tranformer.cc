@@ -4,8 +4,9 @@
 #include <unordered_set>
 
 #include <NvInfer.h>
-#include <google/protobuf/text_format.h>
 #include <onnx2trt.hpp>
+
+#include "onnx/proto_utils.h"
 
 #include "caffe2/contrib/tensorrt/trt_utils.h"
 #include "caffe2/core/context_gpu.h"
@@ -42,9 +43,7 @@ std::unordered_map<std::string, TensorShape> InferShapes(
 
 void DumpModel(const ::ONNX_NAMESPACE::ModelProto& model, const std::string& fname) {
   std::ofstream ff(fname);
-  std::string body;
-  ::google::protobuf::TextFormat::PrintToString(model.graph(), &body);
-  ff << body << std::endl;
+  ff << ONNX_NAMESPACE::ProtoDebugString(model) << std::endl;
   ff.close();
 }
 
