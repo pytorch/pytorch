@@ -405,45 +405,42 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
 
     } else if (node->matches("aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)")) {
       auto graph = node->owningGraph();
-
-      auto convNode = graph->create(aten::thnn_conv2d_backward, 3);
-      convNode->addInput(grads.at(0).value());
-      convNode->addInput(inputs.at(0));
-      convNode->addInput(inputs.at(1));
-      convNode->addInput(node->namedInput(attr::kernel_size));
-      convNode->addInput(node->namedInput(attr::stride));
-      convNode->addInput(node->namedInput(attr::padding));
-      convNode->addInput(outputs.at(1));
-      convNode->addInput(outputs.at(2));
-      convNode->addInput(graph->insertConstant(std::vector<bool>{true, true, true}));
-      graph->insertNode(convNode);
-      auto outputs = convNode->outputs();
-      JIT_ASSERT(outputs.size() == size_t(3));
-
-      return {outputs[0], outputs[1], nullptr, outputs[2], nullptr, nullptr};
+      auto backward_value = graph->insert(aten::thnn_conv2d_backward, {
+	grads.at(0).value(),
+	inputs.at(0).value(),
+	inputs.at(1).value(),
+	node->namedInput(attr::kernel_size),
+	node->namedInput(attr::stride),
+	node->namedInput(attr::padding),
+	outputs.at(1).value(),
+	outputs.at(2).value(),
+	graph->insertConstant(std::vector<bool>{true, true, true})
+      });
+      // graph->insert returns a tuple automatically if multiple outputs are returned. So unpack them again.
+      Node* tuple_unpack_node = graph->insertNode(graph->createTupleUnpack(backward_value));
+      auto tuple_outputs = tuple_unpack_node->outputs();
+      JIT_ASSERT(tuple_outputs.size() == size_t(3));
+      return {tuple_outputs[0], tuple_outputs[1], nullptr, tuple_outputs[2], nullptr, nullptr};
 
     } else if (node->matches("aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)")) {
       auto graph = node->owningGraph();
-      auto bnNode = graph->create(aten::native_batch_norm_backward, 3);
-      auto grad_out = grads.at(0);
-      bnNode->addInput(grad_out);
-      bnNode->addInput(inputs.at(0));
-      bnNode->addInput(inputs.at(1));
-      bnNode->addInput(inputs.at(3));
-      bnNode->addInput(inputs.at(4));
-      bnNode->addInput(outputs.at(1));
-      bnNode->addInput(outputs.at(2));
-      bnNode->addInput(inputs.at(5));
-      bnNode->addInput(inputs.at(7));
-      bnNode->addInput(graph->insertConstant(std::vector<bool>{true, true, true}));
-      graph->insertNode(bnNode);
-      auto outputs = fmap<SymbolicVariable>(bnNode->outputs());
-      outputs.emplace_back();
-      outputs.emplace_back();
-      outputs.emplace_back();
-      outputs.emplace_back();
-      outputs.emplace_back();
-      return outputs;
+      auto backward_value = graph->insert(aten::native_batch_norm_backward, {
+	grads.at(0).value(),
+	inputs.at(0).value(),
+	inputs.at(1).value(),
+	inputs.at(3).value(),
+	inputs.at(4).value(),
+	outputs.at(1).value(),
+	outputs.at(2).value(),
+	inputs.at(5).value(),
+	inputs.at(7).value(),
+	graph->insertConstant(std::vector<bool>{true, true, true})
+      });
+      // graph->insert returns a tuple automatically if multiple outputs are returned. So unpack them again.
+      Node* tuple_unpack_node = graph->insertNode(graph->createTupleUnpack(backward_value));
+      auto tuple_outputs = tuple_unpack_node->outputs();
+      JIT_ASSERT(tuple_outputs.size() == size_t(3));
+      return {tuple_outputs[0], tuple_outputs[1], tuple_outputs[2], nullptr, nullptr, nullptr, nullptr, nullptr};
 
     } else if (node->matches("aten::log_softmax(Tensor self, int dim) -> Tensor")) {
       JIT_ASSERT(grads.size() == 1);
