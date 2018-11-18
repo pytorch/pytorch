@@ -743,9 +743,9 @@ class DataLoader(object):
         pin_memory (bool, optional): If ``True``, the data loader will copy tensors
             into CUDA pinned memory before returning them.
         pin_fn (callable, optional):  If the default pinning logic sees a batch that is a custom class,
-            (or whose elements are a custom class) that it does not recognize, it will return that batch 
+            (or whose elements are a custom class) that it does not recognize, it will return that batch
             (or those elements) without pinning them.  pin_fn gives control of memory pinning
-            to the user, to tell the dataloader how to pin the memory for custom classes. 
+            to the user, to tell the dataloader how to pin the memory for custom classes.
             It should acccept a batch, and return that batch with its memory pinned.
             If pin_memory is False (or not supplied), pin_fn is ignored.
         drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
