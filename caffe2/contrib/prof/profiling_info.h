@@ -16,22 +16,22 @@ class ProfilingInfo {
   using OperatorMapType = std::unordered_map<int, ProfilingOperatorAnnotation>;
   // Generates a fresh data structure to be initialized. Use Init() or Restore()
   // below to initialize the data structure.
-  ProfilingInfo() {}
+  ProfilingInfo() = default;
   // Generates 0-initialized stats for node and blob profiles from a given
   // NetDef. Use this to start profiling.
-  bool Init(const NetDef& netDef);
+  CAFFE2_API bool Init(const NetDef& netDef);
   // Uses ProfDAGProtos for existing profile, and NetDef for graph definition,
   // and restores the state. Returns whether profile and net_def were
   // consistent. This is defined over the "indices" of operators and outputs:
   // the indices within the net_def should exist with the profile, and the names
   // should match. Errors are handled with best effort: matching state is
   // populated.
-  bool Restore(const NetDef& netDef, const ProfDAGProtos& profile);
+  CAFFE2_API bool Restore(const NetDef& netDef, const ProfDAGProtos& profile);
   // Appends ProfDAGProtos from the internal representation representing each
   // operator and blob in the graph as separate entities. Returns false if
   // NetDef is inconsistent with the original. It uses the old format when
   // oldFormat is set, which looks like: net__opidx__optype.
-  bool GetOperatorAndDataStats(
+  CAFFE2_API bool GetOperatorAndDataStats(
       const NetDef& net_def,
       bool oldFormat,
       ProfDAGProtos* serialized) const;
@@ -39,8 +39,9 @@ class ProfilingInfo {
   // false if NetDef is inconsistent with the original. This function is only
   // used for oldFormat because the information is redundant. The user of the
   // library can iterate over the map and recreate if needed.
-  bool GetOperatorTypeStats(const NetDef& net_def, ProfDAGProtos* serialized)
-      const;
+  CAFFE2_API bool GetOperatorTypeStats(
+      const NetDef& net_def,
+      ProfDAGProtos* serialized) const;
 
   // Accessors.
   const BlobMapType& getBlobMap() {

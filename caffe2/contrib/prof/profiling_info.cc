@@ -5,7 +5,7 @@ namespace caffe2 {
 namespace contrib {
 namespace prof {
 
-bool ProfilingInfo::Init(const NetDef& netDef) {
+CAFFE2_API bool ProfilingInfo::Init(const NetDef& netDef) {
   bool success = true;
   int opIdx = 0;
   name_ = netDef.name();
@@ -28,7 +28,7 @@ bool ProfilingInfo::Init(const NetDef& netDef) {
   return success;
 }
 
-bool ProfilingInfo::Restore(
+CAFFE2_API bool ProfilingInfo::Restore(
     const NetDef& netDef,
     const ProfDAGProtos& profile) {
   if (netDef.name() != profile.net_name()) {
@@ -56,7 +56,7 @@ bool ProfilingInfo::Restore(
   return success;
 }
 
-bool ProfilingInfo::GetOperatorAndDataStats(
+CAFFE2_API bool ProfilingInfo::GetOperatorAndDataStats(
     const NetDef& netDef,
     bool oldFormat,
     ProfDAGProtos* serialized) const {
@@ -98,7 +98,7 @@ bool ProfilingInfo::GetOperatorAndDataStats(
   return success;
 }
 
-bool ProfilingInfo::GetOperatorTypeStats(
+CAFFE2_API bool ProfilingInfo::GetOperatorTypeStats(
     const NetDef& netDef,
     ProfDAGProtos* serialized) const {
   bool success = true;
