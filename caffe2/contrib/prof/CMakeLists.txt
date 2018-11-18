@@ -2,6 +2,7 @@ if (USE_PROF)
   set(Caffe2_CONTRIB_PROF_CPU_SRCS
       "${CMAKE_CURRENT_SOURCE_DIR}/prof_dag_net.cc"
       "${CMAKE_CURRENT_SOURCE_DIR}/prof_dag_stats_op.cc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/profiling_info.cc"
   )
   set(Caffe2_CONTRIB_PROF_GPU_SRCS
       "${CMAKE_CURRENT_SOURCE_DIR}/cuda_profile_ops.cc"
