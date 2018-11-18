@@ -887,14 +887,15 @@ def pin_wrapper(batch):
 
 class TestCustomPinFn(TestCase):
     def setUp(self):
-        inps = torch.arange(10*5, dtype=torch.float32).view(10,5)
-        tgts = torch.arange(10*5, dtype=torch.float32).view(10,5)
+        inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+        tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         self.dataset = TensorDataset(inps, tgts)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @skipIfRocm
     def test_custom_pin_fn(self):
-        loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_wrapper, pin_memory=True, pin_fn=pin_wrapper)
+        loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_wrapper,
+                            pin_memory=True, pin_fn=pin_wrapper)
         for batch_ndx, sample in enumerate(loader):
             self.assertTrue(sample.inp.is_pinned())
             self.assertTrue(sample.tgt.is_pinned())
@@ -902,7 +903,8 @@ class TestCustomPinFn(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @skipIfRocm
     def test_custom_pin_fn_worker(self):
-        loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_wrapper, pin_memory=True, pin_fn=pin_wrapper, num_workers=1)
+        loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_wrapper,
+                            pin_memory=True, pin_fn=pin_wrapper, num_workers=1)
         for batch_ndx, sample in enumerate(loader):
             self.assertTrue(sample.inp.is_pinned())
             self.assertTrue(sample.tgt.is_pinned())
