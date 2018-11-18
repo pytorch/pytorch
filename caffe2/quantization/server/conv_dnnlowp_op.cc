@@ -30,6 +30,8 @@ C10_DEFINE_bool(
     "Dump quantized input and weight tensors used in Conv and FC operators "
     "during the first iteration");
 
+DECLARE_bool(caffe2_dnnlowp_force_slow_path);
+
 namespace caffe2 {
 
 using namespace std;
@@ -273,7 +275,8 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
 
   bool packW = ConvPoolOpBase<CPUContext>::order_ == StorageOrder::NHWC &&
       OperatorBase::debug_def().engine() != "DNNLOWP_ACC16" &&
-      is_same<T, uint8_t>::value && GetCpuId().avx2();
+      is_same<T, uint8_t>::value && GetCpuId().avx2() &&
+      !FLAGS_caffe2_dnnlowp_force_slow_path;
 
   bool depthwise_3x3_fast_path = false, depthwise_3x3x3_fast_path = false;
   if (TakeDepthWise3x3FastPath_()) {
@@ -371,6 +374,8 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
           OperatorBase::debug_def().engine() == "DNNLOWP_ACC16" ||
           depthwise_3x3_fast_path) {
         reason = "";
+      } else if (FLAGS_caffe2_dnnlowp_force_slow_path) {
+        reason = "slow path enforced";
       } else {
         assert(false);
       }
