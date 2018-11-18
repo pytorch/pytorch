@@ -5346,8 +5346,6 @@ class _TestTorchMixin(object):
             A = cast(random_symmetric_pd_matrix(n, *batch_dims))
             cholesky_exp = torch.stack([m.cholesky(upper=upper) for m in A.reshape(-1, n, n)])
             cholesky_exp = cholesky_exp.reshape_as(A)
-            print(torch.cholesky(A, upper=upper))
-            print(cholesky_exp)
             self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper))
 
         for upper, batchsize in product([True, False], [(3,), (3, 4), (2, 3, 4)]):
