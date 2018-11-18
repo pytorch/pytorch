@@ -31,12 +31,19 @@ class LayerNormOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
+    auto* mean = Output(1);
+    auto* sig = Output(2);
     const int canonical_axis = X.canonical_axis_index(axis_);
     std::vector<int64_t> moments_dims(
         X.dims().cbegin(), X.dims().cbegin() + canonical_axis);
     moments_dims.push_back(1);
-    auto* mean = Output(1, moments_dims, at::dtype<T>());
-    auto* sig = Output(2, moments_dims, at::dtype<T>());
+    mean->Resize(moments_dims);
+    sig->Resize(moments_dims);
+    mean->template mutable_data<T>();
+    sig->template mutable_data<T>();
+    // TODO: change back
+    //auto* mean = Output(1, moments_dims, at::dtype<T>());
+    //auto* sig = Output(2, moments_dims, at::dtype<T>());
     runLayerNorm<T>(X, Y, mean, sig, canonical_axis, epsilon_, &scale_, &bias_, &context_);
     return true;
   }
@@ -59,6 +66,12 @@ class LayerNormOp final : public Operator<Context> {
     Y->ResizeLike(X);
     scale_buffer->Resize(M);
     bias_buffer->Resize(M);
+=======
+    mean->Resize(moments_dims);
+    sig->Resize(moments_dims);
+    scale_.Resize(M);
+    bias_.Resize(M);
+>>>>>>> source: 54e7edd2d6c9 revert - jerryzh: Back out "[reland][codemod][ca...
 
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
