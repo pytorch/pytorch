@@ -316,6 +316,10 @@ struct Module {
     optimize = o;
   }
 
+  bool is_optimized() const {
+    return optimize; 
+  }
+
   IValue forward(std::vector<IValue> inputs) {
     return get_method("forward")(inputs);
   }
