@@ -494,6 +494,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'method_formals': List[str],
     'method_prefix_derived': str,
     'mode': str,
+    'python_module': str,
     'name': str,
     'native_actuals': List[str],
     'native_type_method_dispatch': str,
@@ -524,6 +525,7 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('arguments', List[AtFormal]),
     ('method_of', List[str]),
     ('mode', str),
+    ('python_module', str),
     ('buffers', Optional[List[str]]),
     ('returns', List[ReturnType]),
     ('inplace', bool),
@@ -924,6 +926,7 @@ def create_generic(top_env, declarations):
             arguments=formals,
             method_of=method_of,
             mode=mode,
+            python_module=option.get('python_module', ''),
             buffers=buffer_names,
             returns=option['returns'],
             inplace=option['inplace'],
@@ -1026,6 +1029,10 @@ def create_generic(top_env, declarations):
 
     def process_native(option, output_options):
         # type: (FunctionOption, List[OutputDeclaration]) -> None
+        assert option['python_module'] == '' or option['python_module'] == 'nn', \
+            "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
+                option['python_module'], option['name'])
+
         formals = native_get_formals(option)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
@@ -1170,6 +1177,7 @@ def create_generic(top_env, declarations):
             arguments=formals,
             method_of=method_of,
             mode=option['mode'],
+            python_module=option['python_module'],
             buffers=None,
             returns=option['returns'],
             inplace=option['inplace'],
