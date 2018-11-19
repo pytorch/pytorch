@@ -37,7 +37,7 @@ static std::atomic<size_t> next_kernel_id{0};
 
 size_t nCompiledKernels() { return next_kernel_id.load(); }
 
-// If the given node is used once by a chunk node, returns that node. 
+// If the given node is used once by a chunk node, returns that node.
 // Returns nullptr otherwise.
 static const Node* usedInFusedChunk(const Value* input) {
   const auto uses = input->uses();
@@ -109,7 +109,7 @@ static void setInputBroadcastGroups(KernelSpec& spec) {
 // using logical properties of how each works. In particular, tensors
 // are always expandable to the outputs of pointwise operations they
 // or their descendants are involved in, which means that in a DAG of
-// pointwise operations all tensors are expandable to the (single) output. 
+// pointwise operations all tensors are expandable to the (single) output.
 // Note: The logic is slightly complicated by concatenation and chunking.
 static void upfrontCompilation(KernelSpec& spec) {
   setInputBroadcastGroups(spec);
@@ -121,12 +121,12 @@ int64_t registerFusion(const Node* fusion_group) {
   auto graph = fusion_group->g(attr::Subgraph)->copy();
   EraseShapeInformation(*graph);
   const auto key = store(graph);
-  
+
   if (canFuseOnCPU() || canFuseOnGPU()) {
     const auto maybe_spec = retrieve(key);
     JIT_ASSERT(maybe_spec);
     upfrontCompilation(**maybe_spec);
-  }  
+  }
 
   return key;
 }
@@ -135,7 +135,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   const KernelSpec& spec
 , const ArgSpec& arg_spec
 , const std::vector<int64_t>& map_size
-, const int device) {
+, const at::Device device) {
   const std::vector<TensorDesc>& input_desc = arg_spec.descs();
 
   // Note: this assumes fused kernels only operate on floating point values
@@ -160,12 +160,12 @@ std::shared_ptr<FusedKernel> compileKernel(
   }
 
   const std::string name = "kernel_" + std::to_string(next_kernel_id++);
-  const bool use_cuda = (device >= 0);
+  const bool use_cuda = device.is_cuda();
   std::string code;
   std::vector<PartitionDesc> chunk_desc;
   std::vector<PartitionDesc> concat_desc;
   bool has_random;
-  std::tie(code, chunk_desc, concat_desc, has_random) 
+  std::tie(code, chunk_desc, concat_desc, has_random)
     = generateKernel(
         name
       , *(spec.graph())
@@ -174,10 +174,10 @@ std::shared_ptr<FusedKernel> compileKernel(
       , use_cuda);
 
   std::shared_ptr<FusedKernel> fused_kernel;
-  if (device != kCPUDevice) {
+  if (use_cuda) {
     #if USE_CUDA_FUSER
       fused_kernel = std::make_shared<cuda::FusedKernelCUDA>(
-        device
+        device.index()
       , name
       , code
       , input_desc

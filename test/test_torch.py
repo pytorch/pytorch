@@ -6477,6 +6477,11 @@ class _TestTorchMixin(object):
             with self.assertRaises(RuntimeError):
                 getattr(base.clone(), method)(dim, idx, src)
 
+        # test for empty index, should be a no-op
+        idx = cast(torch.LongTensor())
+        actual = getattr(base.clone(), method)(dim, idx, src)
+        self.assertEqual(actual, base, 0)
+
     def test_scatter(self):
         self._test_scatter_base(self, lambda t: t, 'scatter_')
 

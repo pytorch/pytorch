@@ -167,6 +167,7 @@ def run(paths):
                 declaration['device_guard'] = func.get('device_guard', True)
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
+                declaration['python_module'] = func.get('python_module', '')
                 declaration['aten_sparse'] = has_sparse_dispatches(
                     declaration['type_method_definition_dispatch'])
                 declarations.append(declaration)

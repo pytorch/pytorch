@@ -618,10 +618,6 @@ void MethodEncoder::EncodeMethod(
   model_proto.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
   auto* node_proto = model_proto.mutable_graph()->add_node();
   node_proto->set_name(prefix + method.name());
-  if (method.is_optimized()) {
-    // mark that this method was optimized
-    node_proto->set_domain("optimized");
-  }
 
   // We store the schema string in the docstring.
   node_proto->set_doc_string(getExportableSchemaStringForMethod(method));
@@ -920,6 +916,7 @@ class ScriptModuleSerializer final {
       const std::string& name,
       torch::ModuleDef* module_def) {
     module_def->set_name(name);
+    module_def->set_optimize(module.is_optimized());
     for (const auto& elem : module.get_parameters()) {
       torch::ParameterDef* param_def = module_def->add_parameters();
       convertParameter(elem.value(), param_def);
