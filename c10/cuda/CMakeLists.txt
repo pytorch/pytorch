@@ -15,14 +15,14 @@ configure_file(
 # Note: if you want to add ANY dependency to the c10 library, make sure you
 # check with the core PyTorch developers as the dependendency will be
 # transitively passed on to all libraries dependent on PyTorch.
-file(GLOB C10_CUDA_SRCS
-        *.cpp
-        *.cu
-        impl/*.cpp
-        impl/*.cu
-        )
-file(GLOB_RECURSE C10_CUDA_ALL_TEST_FILES test/*.cpp)
-file(GLOB_RECURSE C10_CUDA_HEADERS *.h)
+set(C10_CUDA_SRCS
+    impl/CUDATest.cpp
+)
+set(C10_CUDA_HEADERS
+    CUDAMacros.h
+    CUDAMathCompat.h
+    impl/CUDATest.h
+)
 set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
 torch_cuda_based_add_library(c10_cuda ${C10_CUDA_SRCS} ${C10_CUDA_HEADERS})
 set(CUDA_LINK_LIBRARIES_KEYWORD)
@@ -51,8 +51,6 @@ add_subdirectory(test)
 # to deal with the cmake deployment need. Inside the Caffe2Targets set, the
 # individual libraries like libc10.so and libcaffe2.so are still self-contained.
 install(TARGETS c10_cuda EXPORT Caffe2Targets DESTINATION lib)
-install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-        DESTINATION include
-        FILES_MATCHING PATTERN "*.h")
+install(FILES ${C10_CUDA_HEADERS} DESTINATION include)
 install(FILES ${CMAKE_BINARY_DIR}/c10/cuda/impl/cuda_cmake_macros.h
   DESTINATION include/c10/cuda/impl)
