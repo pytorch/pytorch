@@ -18,7 +18,7 @@
     output: 'false'
     grad_input: 'false'
 
-- name: multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor? weight={}, int64_t reduction=Reduction::Mean)
+- name: _thnn_multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor? weight={}, int64_t reduction=Reduction::Mean)
   cname: MultiMarginCriterion
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0 || (reduction == Reduction::None && self_->dim() == 1)
@@ -44,13 +44,13 @@
     output: reduction != Reduction::None || self_->dim() == 0
     total_weight: 'true'
 
-- name: smooth_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
+- name: _thnn_smooth_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: SmoothL1Criterion
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: soft_margin_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
+- name: _thnn_soft_margin_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: SoftMarginCriterion
   scalar_check:
     output: 'false'
@@ -58,14 +58,14 @@
 
 # Activation functions
 
-- name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1)
+- name: _thnn_elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1)
   cname: ELU
   has_inplace: True
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: glu(Tensor self, int64_t dim=-1)
+- name: _thnn_glu(Tensor self, int64_t dim=-1)
   cname: GatedLinear
   wrap_dim:
     dim: self
@@ -73,14 +73,14 @@
     output: 'false'
     grad_input: 'false'
 
-- name: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1)
+- name: _thnn_hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1)
   cname: HardTanh
   has_inplace: True
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: leaky_relu(Tensor self, Scalar negative_slope=0.01)
+- name: _thnn_leaky_relu(Tensor self, Scalar negative_slope=0.01)
   cname: LeakyReLU
   has_inplace: True
   scalar_check:
@@ -97,20 +97,20 @@
 
 # NOTE: we treat noise as an input (it's really a buffer) because the codegen
 # can't handle in-place functions that have buffers
-- name: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr)
+- name: _thnn_rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr)
   cname: RReLU
   has_inplace: True
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: softplus(Tensor self, Scalar beta=1, Scalar threshold=20)
+- name: _thnn_softplus(Tensor self, Scalar beta=1, Scalar threshold=20)
   cname: SoftPlus
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: softshrink(Tensor self, Scalar lambd=0.5)
+- name: _thnn_softshrink(Tensor self, Scalar lambd=0.5)
   cname: SoftShrink
   scalar_check:
     output: 'false'
@@ -118,31 +118,31 @@
 
 # Pooling
 
-- name: adaptive_avg_pool2d(Tensor self, IntList[2] output_size)
+- name: _thnn_adaptive_avg_pool2d(Tensor self, IntList[2] output_size)
   cname: SpatialAdaptiveAveragePooling
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: adaptive_avg_pool3d(Tensor self, IntList[3] output_size)
+- name: _thnn_adaptive_avg_pool3d(Tensor self, IntList[3] output_size)
   cname: VolumetricAdaptiveAveragePooling
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: adaptive_max_pool2d(Tensor self, IntList[2] output_size)
+- name: _thnn_adaptive_max_pool2d(Tensor self, IntList[2] output_size)
   cname: SpatialAdaptiveMaxPooling
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: adaptive_max_pool3d(Tensor self, IntList[3] output_size)
+- name: _thnn_adaptive_max_pool3d(Tensor self, IntList[3] output_size)
   cname: VolumetricAdaptiveMaxPooling
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: avg_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false, bool count_include_pad=true)
+- name: _thnn_avg_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false, bool count_include_pad=true)
   cname: SpatialAveragePooling
   default_init:
     stride: kernel_size
@@ -150,7 +150,7 @@
     output: 'false'
     grad_input: 'false'
 
-- name: avg_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, bool ceil_mode=false, bool count_include_pad=true)
+- name: _thnn_avg_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, bool ceil_mode=false, bool count_include_pad=true)
   cname: VolumetricAveragePooling
   default_init:
     stride: kernel_size
@@ -158,7 +158,7 @@
     output: 'false'
     grad_input: 'false'
 
-- name: fractional_max_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] output_size, Tensor random_samples)
+- name: _thnn_fractional_max_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] output_size, Tensor random_samples)
   cname: SpatialFractionalMaxPooling
   scalar_check:
     grad_input: 'false'
@@ -166,7 +166,7 @@
     output: 'false'
     grad_input: 'false'
 
-- name: max_pool2d_with_indices(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
+- name: _thnn_max_pool2d_with_indices(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
   cname: SpatialDilatedMaxPooling
   default_init:
     stride: kernel_size
@@ -174,7 +174,7 @@
     output: 'false'
     grad_input: 'false'
 
-- name: max_pool3d_with_indices(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[3] dilation=1, bool ceil_mode=false)
+- name: _thnn_max_pool3d_with_indices(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[3] dilation=1, bool ceil_mode=false)
   cname: VolumetricDilatedMaxPooling
   default_init:
     stride: kernel_size
@@ -182,13 +182,13 @@
     output: 'false'
     grad_input: 'false'
 
-- name: max_unpool2d(Tensor self, LongTensor indices, IntList[2] output_size)
+- name: _thnn_max_unpool2d(Tensor self, LongTensor indices, IntList[2] output_size)
   cname: SpatialMaxUnpooling
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: max_unpool3d(Tensor self, LongTensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding)
+- name: _thnn_max_unpool3d(Tensor self, LongTensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding)
   cname: VolumetricMaxUnpooling
   scalar_check:
     output: 'false'
@@ -196,31 +196,31 @@
 
 # Padding
 
-- name: reflection_pad1d(Tensor self, IntList[2] padding)
+- name: _thnn_reflection_pad1d(Tensor self, IntList[2] padding)
   cname: TemporalReflectionPadding
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: reflection_pad2d(Tensor self, IntList[4] padding)
+- name: _thnn_reflection_pad2d(Tensor self, IntList[4] padding)
   cname: SpatialReflectionPadding
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: replication_pad1d(Tensor self, IntList[2] padding)
+- name: _thnn_replication_pad1d(Tensor self, IntList[2] padding)
   cname: TemporalReplicationPadding
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: replication_pad2d(Tensor self, IntList[4] padding)
+- name: _thnn_replication_pad2d(Tensor self, IntList[4] padding)
   cname: SpatialReplicationPadding
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: replication_pad3d(Tensor self, IntList[6] padding)
+- name: _thnn_replication_pad3d(Tensor self, IntList[6] padding)
   cname: VolumetricReplicationPadding
   scalar_check:
     output: 'false'
