@@ -1038,6 +1038,7 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
 
 
 def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
+    # type: (Tensor, float, bool, float, int) -> Tensor
     r"""
     Samples from the `Gumbel-Softmax distribution`_ and optionally discretizes.
 
