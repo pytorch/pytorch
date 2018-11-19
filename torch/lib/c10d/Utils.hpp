@@ -292,10 +292,10 @@ using SizeType = uint64_t;
 #define SYSCHECK(expr)                                        \
   {                                                           \
     errno = 0;                                                \
-    while (errno != EINTR) {
+    while (errno != EINTR) {                                  \
       auto ___output = (expr);                                \
       (void)___output;                                        \
-    }
+    }                                                         \
     if (errno != 0)                                           \
       throw std::system_error(errno, std::system_category()); \
   }
