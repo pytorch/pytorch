@@ -10,7 +10,8 @@ namespace at { namespace cuda {
 
 // TODO: Implement this generically in c10.  You'll need some way to get
 // the number of GPUs from the GuardImpl, in that case.
-struct CUDAMultiStreamGuard {
+class CUDAMultiStreamGuard final {
+public:
   /// Calls `set_stream` on each of the streams in the list.
   /// This may be useful if you need to set different streams
   /// for different devices.
