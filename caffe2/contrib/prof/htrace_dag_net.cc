@@ -43,7 +43,7 @@ class HTraceDAGNet : public DAGNetBase {
     htrace::Scope run_scope(
         htrace_tracer_,
         htrace_root_scope_.GetSpanId(),
-        "run-scope-" + caffe2::to_string(run_count_++));
+        "run-scope-" + c10::to_string(run_count_++));
     return DAGNetBase::DoRunAsync();
   }
 
@@ -64,8 +64,7 @@ class HTraceDAGNet : public DAGNetBase {
       htrace::Scope operator_scope(
           htrace_tracer_,
           worker_scope->GetSpanId(),
-          "#" + caffe2::to_string(idx) + " (" + print_name + ", " + op_type +
-              ")");
+          "#" + c10::to_string(idx) + " (" + print_name + ", " + op_type + ")");
       success &= operator_nodes_[idx].operator_->Run();
     }
     return success;
