@@ -1,7 +1,7 @@
-#include "ATen/cuda/CUDAStream.h"
-#include "ATen/cuda/CUDAGuard.h"
-#include "c10/cuda/CUDAFunctions.h"
-#include "c10/util/Exception.h"
+#include <ATen/cuda/CUDAStream.h>
+#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/Exception.h>
 
 #include <mutex>
 #include <atomic>
@@ -13,7 +13,7 @@
 namespace at {
 namespace cuda {
 
-namespace detail {
+namespace impl {
 
 // Internal implementation is entirely hidden
 // Note: CUDAStreamInternals doubles for a THCStream
@@ -298,26 +298,26 @@ int64_t CUDAStream_device(const CUDAStreamInternals* ptr) {
   return ptr->device;
 }
 
-} // namespace detail
+} // namespace impl
 
-CUDAStream::CUDAStream(const detail::CUDAStreamInternals* ptr)
-  : stream_(c10::Device(DeviceType::CUDA, detail::CUDAStream_device(ptr)), detail::CUDAStream_getStreamId(ptr)) {
+CUDAStream::CUDAStream(const impl::CUDAStreamInternals* ptr)
+  : stream_(c10::Device(DeviceType::CUDA, impl::CUDAStream_device(ptr)), impl::CUDAStream_getStreamId(ptr)) {
 }
 
 // See Note [StreamId assignment]
-detail::CUDAStreamInternals* CUDAStream::internals() const {
+impl::CUDAStreamInternals* CUDAStream::internals() const {
   c10::DeviceIndex device_index = stream_.device_index();
-  detail::StreamIdType st = detail::streamIdType(stream_.id());
-  size_t si = detail::streamIdIndex(stream_.id());
+  impl::StreamIdType st = impl::streamIdType(stream_.id());
+  size_t si = impl::streamIdIndex(stream_.id());
   switch (st) {
-    case detail::StreamIdType::DEFAULT:
+    case impl::StreamIdType::DEFAULT:
       AT_ASSERTM(si == 0, "Unrecognized stream ", stream_,
                           " (I think this should be the default stream, but I got a non-zero index ", si, ")");
-      return &detail::default_streams[device_index];
-    case detail::StreamIdType::LOW:
-      return &detail::low_priority_streams[device_index][si];
-    case detail::StreamIdType::HIGH:
-      return &detail::high_priority_streams[device_index][si];
+      return &impl::default_streams[device_index];
+    case impl::StreamIdType::LOW:
+      return &impl::low_priority_streams[device_index][si];
+    case impl::StreamIdType::HIGH:
+      return &impl::high_priority_streams[device_index][si];
     default:
       AT_ASSERTM(0, "Unrecognized stream ", stream_, " (I didn't recognize the stream type, ", st, ")");
   }

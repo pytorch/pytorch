@@ -15,9 +15,11 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 using namespace torch::data; // NOLINT
@@ -537,6 +539,53 @@ TEST(DataTest, DataShuttlePopResultTimesOut) {
   torch::data::detail::DataShuttle<int, int> shuttle;
   shuttle.push_job(1);
   ASSERT_THROWS_WITH(shuttle.pop_result(10 * kMillisecond), "Timeout");
+}
+
+struct UncopyableDataset : datasets::Dataset<UncopyableDataset, int> {
+  UncopyableDataset(const std::string& /* unused */)
+      : mutex(torch::make_unique<std::mutex>()) {}
+
+  UncopyableDataset(UncopyableDataset&&) = default;
+  UncopyableDataset& operator=(UncopyableDataset&&) = default;
+
+  UncopyableDataset(const UncopyableDataset&) = delete;
+  UncopyableDataset& operator=(const UncopyableDataset&) = delete;
+
+  int get(size_t index) override {
+    {
+      std::lock_guard<std::mutex> guard(*mutex);
+      thread_ids.insert(std::this_thread::get_id());
+    }
+    return 1 + index;
+  }
+  torch::optional<size_t> size() const override {
+    return 100;
+  }
+
+  std::unique_ptr<std::mutex> mutex;
+  std::unordered_set<std::thread::id> thread_ids;
+};
+
+TEST(DataTest, SharedBatchDatasetReallyIsShared) {
+  auto shared_dataset =
+      torch::data::datasets::make_shared_dataset<UncopyableDataset>(
+          "uncopyable");
+  auto data_loader = torch::data::make_data_loader(
+      shared_dataset, torch::data::DataLoaderOptions().workers(3));
+
+  for (auto batch : *data_loader) {
+    /* exhaust */
+  }
+
+  ASSERT_EQ(shared_dataset->thread_ids.size(), 3);
+}
+
+TEST(DataTest, SharedBatchDatasetDoesNotIncurCopyWhenPassedDatasetObject) {
+  // This will not compile if a copy is made.
+  auto shared_dataset =
+      torch::data::datasets::make_shared_dataset<UncopyableDataset>(
+          UncopyableDataset("uncopyable"));
+  ASSERT_EQ(shared_dataset.size().value(), 100);
 }
 
 struct TestIndex : public torch::data::samplers::CustomBatchRequest {

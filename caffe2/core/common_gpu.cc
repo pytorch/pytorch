@@ -194,7 +194,7 @@ void DeviceQuery(const int device) {
      << std::endl;
   ss << "Total registers per block:     " << prop.regsPerBlock << std::endl;
   ss << "Warp size:                     " << prop.warpSize << std::endl;
-#ifndef __HIPCC__
+#ifndef __HIP_PLATFORM_HCC__
   ss << "Maximum memory pitch:          " << prop.memPitch << std::endl;
 #endif
   ss << "Maximum threads per block:     " << prop.maxThreadsPerBlock
@@ -207,14 +207,14 @@ void DeviceQuery(const int device) {
      << prop.maxGridSize[2] << std::endl;
   ss << "Clock rate:                    " << prop.clockRate << std::endl;
   ss << "Total constant memory:         " << prop.totalConstMem << std::endl;
-#ifndef __HIPCC__
+#ifndef __HIP_PLATFORM_HCC__
   ss << "Texture alignment:             " << prop.textureAlignment << std::endl;
   ss << "Concurrent copy and execution: "
      << (prop.deviceOverlap ? "Yes" : "No") << std::endl;
 #endif
   ss << "Number of multiprocessors:     " << prop.multiProcessorCount
      << std::endl;
-#ifndef __HIPCC__
+#ifndef __HIP_PLATFORM_HCC__
   ss << "Kernel execution timeout:      "
      << (prop.kernelExecTimeoutEnabled ? "Yes" : "No") << std::endl;
 #endif
@@ -266,7 +266,7 @@ const char* cublasGetErrorString(cublasStatus_t error) {
     return "CUBLAS_STATUS_INVALID_VALUE";
   case CUBLAS_STATUS_ARCH_MISMATCH:
     return "CUBLAS_STATUS_ARCH_MISMATCH";
-#ifndef __HIPCC__
+#ifndef __HIP_PLATFORM_HCC__
   case CUBLAS_STATUS_MAPPING_ERROR:
     return "CUBLAS_STATUS_MAPPING_ERROR";
   case CUBLAS_STATUS_EXECUTION_FAILED:
@@ -282,7 +282,7 @@ const char* cublasGetErrorString(cublasStatus_t error) {
     return "CUBLAS_STATUS_LICENSE_ERROR";
 #endif  // CUDA_VERSION >= 6050
 #endif  // CUDA_VERSION >= 6000
-#ifdef __HIPCC__
+#ifdef __HIP_PLATFORM_HCC__
   case rocblas_status_invalid_size:
     return "rocblas_status_invalid_size";
 #endif
@@ -319,7 +319,7 @@ const char* curandGetErrorString(curandStatus_t error) {
     return "CURAND_STATUS_ARCH_MISMATCH";
   case CURAND_STATUS_INTERNAL_ERROR:
     return "CURAND_STATUS_INTERNAL_ERROR";
-#ifdef __HIPCC__
+#ifdef __HIP_PLATFORM_HCC__
   case HIPRAND_STATUS_NOT_IMPLEMENTED:
     return "HIPRAND_STATUS_NOT_IMPLEMENTED";
 #endif

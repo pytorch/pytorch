@@ -7,10 +7,10 @@
 //
 // The naming convention used here matches the naming convention of torch.cuda
 
-#include "cuda_runtime_api.h"
+#include <cuda_runtime_api.h>
 
-#include "c10/macros/Macros.h"
-#include "c10/Device.h"
+#include <c10/macros/Macros.h>
+#include <c10/Device.h>
 
 namespace c10 {
 namespace cuda {

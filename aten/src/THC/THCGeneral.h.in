@@ -50,10 +50,10 @@
 
 struct THCRNGState;  /* Random number generator state. */
 #ifdef __cplusplus
-typedef at::cuda::detail::CUDAStreamInternals THCStream;
+typedef at::cuda::impl::CUDAStreamInternals THCStream;
 #else
-typdef struct at_cuda_detail_CUDAStreamInternals at_cuda_detail_CUDAStreamInternals;
-typedef at_cuda_detail_CUDAStreamInternals THCStream;
+typdef struct at_cuda_impl_CUDAStreamInternals at_cuda_impl_CUDAStreamInternals;
+typedef at_cuda_impl_CUDAStreamInternals THCStream;
 #endif
 typedef struct THCState THCState;
 struct THCState;
