@@ -15,7 +15,7 @@ struct ChunkOutput {
 static c10::optional<std::vector<ChunkOutput>> getChunkOutputs(Node* chunk) {
   std::vector<ChunkOutput> outputs;
   for (auto list_use : chunk->output()->uses()) {
-    if (list_use.user->matches("aten::select(Tensor[] a, int b) -> Tensor", attr::b)) {
+    if (list_use.user->matches("aten::select(Tensor[] list, int idx) -> Tensor", attr::b)) {
       outputs.emplace_back(list_use.user->output(),
                             list_use.user->get<int64_t>(attr::b).value());
     } else if (list_use.user->kind() == prim::ListUnpack) {

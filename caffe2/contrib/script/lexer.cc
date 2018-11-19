@@ -14,7 +14,7 @@ std::string kindToString(int kind) {
     TC_FORALL_TOKEN_KINDS(DEFINE_CASE)
 #undef DEFINE_CASE
     default:
-      throw std::runtime_error("unknown kind: " + caffe2::to_string(kind));
+      throw std::runtime_error("unknown kind: " + c10::to_string(kind));
   }
 }
 

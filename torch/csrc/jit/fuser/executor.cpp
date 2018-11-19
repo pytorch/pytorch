@@ -165,7 +165,7 @@ static void compressContiguous(
 // Output pointers are stored in outputs (to be put on the stack later).
 void launchFusion(
   const FusedKernel& fusion
-, const int device
+, const at::Device device
 , const at::ArrayRef<at::Tensor>& inputs
 , std::vector<at::Tensor>& outputs) {
   // Fails if fusion and given inputs disagree
@@ -299,10 +299,10 @@ bool runFusion(
 
   // Determines device to dispatch to. If there's a device mismatch in the inputs,
   // we use the fallback (which should give a nice error message).
-  int32_t device = inputs.at(0).device().index();
+  at::Device device = inputs.at(0).device();
   at::ScalarType dtype = inputs[0].type().scalarType();
   for (const auto& t : at::TensorList(inputs).slice(1)) {
-    if (t.device().index() != device) {
+    if (t.device() != device) {
       return false;
     }
     if (t.type().scalarType() != dtype) {
@@ -315,8 +315,8 @@ bool runFusion(
   if (dtype != at::kFloat && dtype != at::kHalf) return false;
 
   // Attempts to run fallback if device fusion is disabled
-  if (device != kCPUDevice && !canFuseOnGPU()) return false;
-  if (device == kCPUDevice && !canFuseOnCPU()) return false;
+  if (device.is_cuda() && !canFuseOnGPU()) return false;
+  if (device.is_cpu() && !canFuseOnCPU()) return false;
 
   // Validates sizes and expands inputs as needed
   auto maybe_map_size = canRunKernel(spec, inputs);
@@ -326,7 +326,7 @@ bool runFusion(
   expandArgs(spec, inputs, *maybe_map_size);
 
   // Retrieves the kernel, compiling (and caching) if necessary
-  ArgSpec arg_spec{inputs, device};
+  ArgSpec arg_spec{inputs, device.index()};
   auto maybe_kernel = spec.findKernel(arg_spec);
   if (!maybe_kernel) {
     const auto kernel = compileKernel(spec, arg_spec, *maybe_map_size, device);
