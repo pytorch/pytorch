@@ -107,12 +107,15 @@ C10_API std::ostream& operator<<(
 namespace std {
 template <>
 struct hash<c10::Device> {
-  size_t operator()(c10::Device device) const noexcept {
-    size_t hash_val = static_cast<size_t>(device.index() + 1);
-    if (device.is_cuda()) {
-      hash_val += 2;
-    }
-    return hash_val;
+  size_t operator()(c10::Device d) const noexcept {
+    // Are you here because this static assert failed?  Make sure you ensure
+    // that the bitmasking code below is updated accordingly!
+    static_assert(sizeof(c10::DeviceType) == 2, "DeviceType is not 16-bit");
+    static_assert(sizeof(c10::DeviceIndex) == 2, "DeviceIndex is not 16-bit");
+    uint32_t bits =
+        static_cast<uint32_t>(d.type()) << 16
+      | static_cast<uint32_t>(d.index());
+    return std::hash<uint32_t>{}(bits);
   }
 };
 } // namespace std

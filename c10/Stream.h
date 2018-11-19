@@ -79,6 +79,25 @@ C10_API std::ostream& operator<<(std::ostream& stream, const Stream& s);
 
 } // namespace c10
 
+namespace std {
+  template <>
+  struct hash<c10::Stream> {
+    size_t operator()(c10::Stream s) const {
+      // Are you here because this static assert failed?  Make sure you ensure
+      // that the bitmasking code below is updated accordingly!
+      static_assert(sizeof(c10::DeviceType) == 2, "DeviceType is not 16-bit");
+      static_assert(sizeof(c10::DeviceIndex) == 2, "DeviceIndex is not 16-bit");
+      static_assert(sizeof(c10::StreamId) == 4, "DeviceIndex is not 32-bit");
+      // Concat these together into a 64-bit integer
+      uint64_t bits =
+          static_cast<uint64_t>(s.device_type()) << 48
+        | static_cast<uint64_t>(s.device_index()) << 32
+        | static_cast<uint64_t>(s.id());
+      return std::hash<uint64_t>{}(bits);
+    }
+  };
+} // namespace std
+
 namespace at {
   using c10::StreamId;
   using c10::Stream;
