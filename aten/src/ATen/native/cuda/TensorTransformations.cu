@@ -141,7 +141,7 @@ void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
   // index into the source data to find appropriate value.
   int64_t source_idx = 0;
   if( roll_dim_idx >= (size - start) ) {
-    source_idx = linear_index - (shift * stride);
+    source_idx = linear_index - ((size - start) * stride);
   } else {
     source_idx = linear_index + (start * stride);
   }

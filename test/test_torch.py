@@ -7404,6 +7404,10 @@ class _TestTorchMixin(object):
             expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device)
             self.assertEqual(single_roll, expected, "{} did not equal expected result".format(single_roll))
 
+            roll_backwards = numbers.roll(-2, 0)
+            expected = torch.tensor([3, 4, 5, 6, 7, 8, 1, 2], device=device)
+            self.assertEqual(roll_backwards, expected, "{} did not equal expected result".format(roll_backwards))
+
             data = numbers.view(2, 2, 2)
             rolled = data.roll(1, 0)
             expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], device=device).view(2, 2, 2)
@@ -7434,12 +7438,13 @@ class _TestTorchMixin(object):
             # test roll over multiple dimensions
             expected = torch.tensor([[7, 8, 5, 6], [3, 4, 1, 2]], device=device)
             double_rolled = data.roll(shifts=(2, -1), dims=(1, 0))
-            self.assertEqual(double_rolled, expected, "should be able to roll over two dimensions")
+            self.assertEqual(double_rolled, expected,
+                             "should be able to roll over two dimensions, got {}".format(double_rolled))
 
             # shifts/dims should align
-            self.assertRaisesRegex(RuntimeError, "align" , lambda: data.roll(shifts=(1, 2), dims=(1)))
-            self.assertRaisesRegex(RuntimeError, "align" , lambda: data.roll(shifts=(1), dims=(1, 2)))
-            self.assertRaisesRegex(RuntimeError, "align" , lambda: data.roll(shifts=(), dims=1))
+            self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(1, 2), dims=(1)))
+            self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(1), dims=(1, 2)))
+            self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(), dims=1))
 
     def test_reversed(self):
         val = torch.arange(0, 10)
