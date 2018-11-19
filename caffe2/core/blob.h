@@ -33,7 +33,9 @@ BlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
   if (blob->IsType<Tensor>()) {
     Tensor* tensor = blob->GetMutable<Tensor>();
     if (*tensor) {
-      if (tensor->GetDevice() == options.device()) {
+      // We only compare device_type if the index is not set since there are Tensors
+      // TODO: remove the extra check when all the Tensors are properly initialized
+      if (tensor->GetDevice() == options.device() || (!tensor->GetDevice().has_index() && tensor->GetDeviceType() == options.device().type())) {
         if (tensor->sizes() != dims) {
           // Resize when the dims doesn't match
           tensor->Resize(dims);

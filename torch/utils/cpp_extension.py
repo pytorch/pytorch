@@ -171,11 +171,11 @@ def check_compiler_abi_compatibility(compiler):
         if sys.platform == 'linux':
             minimum_required_version = MINIMUM_GCC_VERSION
             version = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
-            version = version.split('.')
+            version = version.decode().strip().split('.')
         else:
             minimum_required_version = MINIMUM_MSVC_VERSION
             compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
-            match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info)
+            match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode().strip())
             version = (0, 0, 0) if match is None else match.groups()
     except Exception:
         _, error, _ = sys.exc_info()
@@ -399,6 +399,7 @@ def CppExtension(name, sources, *args, **kwargs):
         libraries.append('c10')
         libraries.append('caffe2')
         libraries.append('torch')
+        libraries.append('torch_python')
         libraries.append('_C')
         kwargs['libraries'] = libraries
 
@@ -444,6 +445,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
         libraries.append('c10')
         libraries.append('caffe2')
         libraries.append('torch')
+        libraries.append('torch_python')
         libraries.append('caffe2_gpu')
         libraries.append('_C')
     kwargs['libraries'] = libraries
@@ -839,6 +841,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         extra_ldflags.append('c10.lib')
         extra_ldflags.append('caffe2.lib')
         extra_ldflags.append('torch.lib')
+        extra_ldflags.append('torch_python.lib')
         if with_cuda:
             extra_ldflags.append('caffe2_gpu.lib')
         extra_ldflags.append('_C.lib')

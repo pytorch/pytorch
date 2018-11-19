@@ -50,6 +50,13 @@ void magmaPotrsBatched(
   AT_ERROR("potrs only takes float or double Tensors");
 }
 
+template<class scalar_t>
+void magmaCholeskyBatched(
+    magma_uplo_t uplo, magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
+    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
+  AT_ERROR("cholesky only takes float or double Tensors");
+}
+
 template<>
 void magmaGesvBatched<double>(
     magma_int_t n, magma_int_t nrhs, double** dA_array, magma_int_t ldda,
@@ -110,6 +117,20 @@ void magmaPotrsBatched<float>(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, float** dA_array, magma_int_t ldda,
     float** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
     info = magma_spotrs_batched(uplo, n, nrhs, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
+}
+
+template<>
+void magmaCholeskyBatched<double>(
+    magma_uplo_t uplo, magma_int_t n, double** dA_array, magma_int_t ldda,
+    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
+    magma_dpotrf_batched(uplo, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
+}
+
+template<>
+void magmaCholeskyBatched<float>(
+    magma_uplo_t uplo, magma_int_t n, float** dA_array, magma_int_t ldda,
+    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
+    magma_spotrf_batched(uplo, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
 }
 #endif
 
@@ -295,6 +316,64 @@ Tensor _potrs_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
   });
   AT_CHECK(info == 0, "MAGMA potrs : invalid argument: ", -info);
   return self_working_copy;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos) {
+#ifndef USE_MAGMA
+AT_ERROR("cholesky: MAGMA library not found in "
+    "compilation. Please rebuild with MAGMA.");
+#else
+  magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
+
+  auto self_data = self.data<scalar_t>();
+  auto self_mat_stride = matrixStride(self);
+
+  magma_int_t batch_size = magma_int_cast(batchCount(self), "batchCount");
+  magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
+
+  magma_int_t* info_array;
+  scalar_t** self_array;
+
+  ALLOCATE_ARRAY(info_array, magma_int_t, batch_size, self);
+  ALLOCATE_ARRAY(self_array, scalar_t*, batch_size, self);
+
+  // Set up the created arrays
+  for (int64_t i = 0; i < batch_size; i++) {
+    self_array[i] = &self_data[i * self_mat_stride];
+  }
+
+  MAGMAQueue magma_queue(self.get_device());
+  magmaCholeskyBatched<scalar_t>(
+    uplo, n, self_array, n, info_array,
+    batch_size, magma_queue);
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    infos[i] = info_array[i];
+  }
+#endif
+}
+
+Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+  Tensor self_working_copy;
+  if (upper) {
+    self_working_copy = cloneBatchedColumnMajor(self.transpose(-1, -2));
+  } else {
+    self_working_copy = cloneBatchedColumnMajor(self);
+  }
+
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "cholesky", [&]{
+    apply_cholesky<scalar_t>(self_working_copy, false, infos);
+  });
+  batchCheckErrors(infos, "cholesky");
+  if (upper) {
+    return self_working_copy.transpose(-1, -2);
+  } else {
+    return self_working_copy;
+  }
 }
 
 }}  // namespace at::native
