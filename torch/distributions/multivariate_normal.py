@@ -20,15 +20,6 @@ def _batch_mv(bmat, bvec):
     return torch.matmul(bmat, bvec.unsqueeze(-1)).squeeze(-1)
 
 
-def _batch_potrf_lower(bmat):
-    r"""
-    Applies a Cholesky decomposition to all matrices in a batch of arbitrary shape.
-    """
-    n = bmat.size(-1)
-    cholesky_ = torch.stack([m.cholesky(upper=False) for m in bmat.reshape(-1, n, n)])
-    return cholesky_.reshape(bmat.shape)
-
-
 def _batch_diag(bmat):
     r"""
     Returns the diagonals of a batch of square matrices.
@@ -137,7 +128,7 @@ class MultivariateNormal(Distribution):
         else:
             if precision_matrix is not None:
                 self.covariance_matrix = torch.inverse(precision_matrix).expand_as(loc_)
-            self._unbroadcasted_scale_tril = _batch_potrf_lower(self.covariance_matrix)
+            self._unbroadcasted_scale_tril = torch.cholesky(self.covariance_matrix)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(MultivariateNormal, _instance)

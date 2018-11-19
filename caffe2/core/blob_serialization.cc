@@ -394,6 +394,14 @@ static std::vector<int64_t> DimsFromTensorProto(const TensorProto& proto) {
   return dims;
 }
 
+static int64_t NumelFromTensorProto(const TensorProto& proto) {
+  int64_t numel = 1;
+  for (const int64_t d : proto.dims()) {
+    numel *= d;
+  }
+  return numel;
+}
+
 // Local helper function to get data type from Tensor proto
 static TypeMeta GetDataType(const TensorProto& tensor_proto) {
   TypeMeta dtype;
@@ -408,22 +416,38 @@ static TypeMeta GetDataType(const TensorProto& tensor_proto) {
 }
 
 // Local helper function to get TensorOptions from Tensor proto
+// Assumes TensorProto is not empty
 static at::TensorOptions TensorOptionsFromProto(const TensorProto& tensor_proto) {
   return at::dtype(GetDataType(tensor_proto)).device(OptionToDevice(tensor_proto.device_detail()));
 }
 
-Tensor EmptyTensorFromProto(const TensorProto& proto) {
-    return caffe2::empty(DimsFromTensorProto(proto), TensorOptionsFromProto(proto));
+Tensor EmptyTensorFromProto(const TensorProto& tensor_proto) {
+  if (NumelFromTensorProto(tensor_proto) > 0) {
+    return caffe2::empty(DimsFromTensorProto(tensor_proto), TensorOptionsFromProto(tensor_proto));
+  } else {
+    // TODO: remove after empty Tensor serialization is forbidden
+    VLOG(1) << "Deseriralizing an empty Tensor.";
+    return caffe2::empty({0}, at::dtype<float>().device(CPU));
+  }
 }
 
 void TensorDeserializer::Deserialize(const BlobProto& blob_proto, Blob* blob) {
   auto tensor_proto = blob_proto.tensor();
-  Deserialize(
-      tensor_proto,
-      BlobGetMutableTensor(
-          blob,
-          DimsFromTensorProto(tensor_proto),
-          TensorOptionsFromProto(tensor_proto)));
+  if (NumelFromTensorProto(tensor_proto) > 0) {
+    Deserialize(
+        tensor_proto,
+        BlobGetMutableTensor(
+            blob,
+            DimsFromTensorProto(tensor_proto),
+            TensorOptionsFromProto(tensor_proto)));
+  } else {
+    // TODO: remove after empty Tensor serialization is forbidden
+    VLOG(1) << "Deseriralizing an empty Tensor.";
+    BlobGetMutableTensor(
+        blob,
+        {0},
+        at::dtype<float>().device(CPU));
+  }
 }
 
 void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
@@ -581,6 +605,12 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
       // Note: we intentially do not provide "default:" so if any new data types
   }
   context->FinishDeviceComputation();
+}
+
+Tensor TensorDeserializer::Deserialize(const TensorProto& proto) {
+  auto tensor = EmptyTensorFromProto(proto);
+  Deserialize(proto, &tensor);
+  return tensor;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

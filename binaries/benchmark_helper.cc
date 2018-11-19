@@ -141,7 +141,7 @@ void loadInput(
         vector<string> input_dims_str = caffe2::split(',', input_dims_list[i]);
         vector<int> input_dims;
         for (const string& s : input_dims_str) {
-          input_dims.push_back(caffe2::stoi(s));
+          input_dims.push_back(c10::stoi(s));
         }
         caffe2::Blob* blob = workspace->GetBlob(input_names[i]);
         if (blob == nullptr) {
@@ -211,20 +211,30 @@ void fillInputBlob(
     }
     caffe2::TensorProto* tensor_proto =
         tensor_kv.second.mutable_protos(iteration % protos_size);
-    BlobSetTensor(blob, EmptyTensorFromProto(*tensor_proto));
     if (tensor_proto->data_type() == caffe2::TensorProto::STRING) {
-      caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
+      vector<int64_t> dims;
+      for (const int64_t d : tensor_proto->dims()) {
+        dims.push_back(d);
+      }
+
+      caffe2::TensorCPU* tensor = BlobGetMutableTensor(
+          blob, dims, at::dtype<string>().device(caffe2::CPU));
       int total_size = tensor_proto->string_data_size();
       for (size_t i = 0; i < total_size; i++) {
         (tensor->mutable_data<string>())[i] = tensor_proto->string_data(i);
       }
     } else if (tensor_proto->data_type() == caffe2::TensorProto::FLOAT) {
-      serializer.Deserialize(
-          *tensor_proto, BlobGetMutableTensor(blob, caffe2::DeviceType::CPU));
-    } else {
-      // todo: for other types
-      CAFFE_THROW("data type not supported yet: ", tensor_proto->data_type());
+      vector<int64_t> dims;
+      for (const int64_t d : tensor_proto->dims()) {
+        dims.push_back(d);
+      }
+      // int total_size = tensor_proto->float_data_size();
+      caffe2::TensorCPU* tensor =
+          new caffe2::TensorCPU(dims, caffe2::DeviceType::CPU);
+      serializer.Deserialize(*tensor_proto, tensor);
+      blob->Reset(tensor);
     }
+    // todo: for other types
   }
 }
 

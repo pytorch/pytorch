@@ -136,6 +136,13 @@ class CAFFE2_API TensorDeserializer : public BlobDeserializerBase {
    * Precondition: Tensor must be initialized
    */
   void Deserialize(const TensorProto& proto, Tensor* tensor);
+
+  /* Deserialize the proto and return a new Tensor
+   * This is a utility function that combines EmptyTensorFromProto and
+   * Deserialize(const TensorProto&, Tensor*);
+   */
+  Tensor Deserialize(const TensorProto& proto);
+
 };
 
 ////////////////////////////////////////////////////////////////////////////////
