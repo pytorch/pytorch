@@ -21,6 +21,7 @@ set(C10_CUDA_SRCS
 set(C10_CUDA_HEADERS
     CUDAMacros.h
     CUDAMathCompat.h
+    CUDAException.h
     impl/CUDATest.h
 )
 set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)

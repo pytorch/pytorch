@@ -384,6 +384,7 @@ if(USE_ROCM)
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   target_compile_options(caffe2_hip PRIVATE ${HIP_CXX_FLAGS})
   target_link_libraries(caffe2_hip PUBLIC caffe2)
+  target_link_libraries(caffe2_hip PUBLIC c10_hip)
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
