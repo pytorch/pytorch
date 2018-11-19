@@ -90,7 +90,7 @@ void DumpModel(
     const ::ONNX_NAMESPACE::ModelProto& model,
     const std::string& fname) {
   std::ofstream ff(fname);
-  ff << ONNX_NAMESPACE::ProtoDebugString(model) << std::endl;
+  ff << ::ONNX_NAMESPACE::ProtoDebugString(model) << std::endl;
   ff.close();
 }
 
