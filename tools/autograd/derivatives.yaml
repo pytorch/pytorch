@@ -863,7 +863,7 @@
 - name: constant_pad_nd(Tensor self, IntList pad, Scalar value)
   self: constant_pad_nd_backward(grad, pad)
 
-- name: binary_cross_entropy_forward(Tensor self, Tensor target, Tensor weight, int64_t reduction)
+- name: binary_cross_entropy(Tensor self, Tensor target, Tensor weight, int64_t reduction)
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)
 
 - name: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor weight, Tensor pos_weight, int64_t reduction)
@@ -883,10 +883,10 @@
   self: kl_div_backward(grad, self, target, reduction)
   target: kl_div_target_backward(grad, self, target, reduction)
 
-- name: l1_loss_forward(Tensor self, Tensor target, int64_t reduction)
+- name: l1_loss(Tensor self, Tensor target, int64_t reduction)
   self: l1_loss_backward(grad, self, target, reduction)
 
-- name: mse_loss_forward(Tensor self, Tensor target, int64_t reduction)
+- name: mse_loss(Tensor self, Tensor target, int64_t reduction)
   self: mse_loss_backward(grad, self, target, reduction)
 
 - name: multi_margin_loss_forward(Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int64_t reduction)
