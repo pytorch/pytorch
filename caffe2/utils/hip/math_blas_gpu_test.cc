@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "caffe2/core/blob.h"
 #include "caffe2/core/context.h"
-#include "caffe2/core/hip/context_hip.h"
+#include "caffe2/core/hip/context_gpu.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/operators/utility_ops.h"
 #include "caffe2/proto/caffe2_pb.h"
