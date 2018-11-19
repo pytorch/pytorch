@@ -19,13 +19,18 @@ class GLStylizer : public GLFilter {
 
  public:
   GLStylizer(bool _deprocess = false, InputFormat input_format = BGRA)
-      : GLFilter(_deprocess ? "GLDeStylizer" : "GLStylizer",
-                 vertex_shader,
-                 fragment_shader,
-                 std::vector<binding*>({BINDING(inputData), BINDING(mean), BINDING(noise_std), BINDING(outputSize)}),
-                 {/* no uniform blocks */},
-                 {/* no attributes */},
-                 {{"DEPROCESS", caffe2::to_string(_deprocess)}, {"RGBAINPUT", caffe2::to_string(input_format)}}),
+      : GLFilter(
+            _deprocess ? "GLDeStylizer" : "GLStylizer",
+            vertex_shader,
+            fragment_shader,
+            std::vector<binding*>({BINDING(inputData),
+                                   BINDING(mean),
+                                   BINDING(noise_std),
+                                   BINDING(outputSize)}),
+            {/* no uniform blocks */},
+            {/* no attributes */},
+            {{"DEPROCESS", c10::to_string(_deprocess)},
+             {"RGBAINPUT", c10::to_string(input_format)}}),
         deprocess(_deprocess) {}
 
   template <typename T1, typename T2>
