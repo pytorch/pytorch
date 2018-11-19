@@ -76,47 +76,42 @@ class GLConvolution : public GLFilter {
                 _output_tile_batch_size,
                 _prelu_scale != nullptr),
             {/* no attributes */},
-            {{"KERNEL_SIZE_X", caffe2::to_string(_geometry.kernel_size.x)},
-             {"KERNEL_SIZE_Y", caffe2::to_string(_geometry.kernel_size.y)},
-             {"INPUT_BATCH_SIZE", caffe2::to_string(_input_batch_size)},
-             {"OUTPUT_BATCH_SIZE", caffe2::to_string(_output_batch_size)},
-             {"INPUT_TILES", caffe2::to_string(_input_tiles)},
-             {"OUTPUT_TILES", caffe2::to_string(_output_tiles)},
-             {"INPUT_TILE_WIDTH",
-              caffe2::to_string(_geometry.input_tile_size.x)},
-             {"INPUT_TILE_HEIGHT",
-              caffe2::to_string(_geometry.input_tile_size.y)},
+            {{"KERNEL_SIZE_X", c10::to_string(_geometry.kernel_size.x)},
+             {"KERNEL_SIZE_Y", c10::to_string(_geometry.kernel_size.y)},
+             {"INPUT_BATCH_SIZE", c10::to_string(_input_batch_size)},
+             {"OUTPUT_BATCH_SIZE", c10::to_string(_output_batch_size)},
+             {"INPUT_TILES", c10::to_string(_input_tiles)},
+             {"OUTPUT_TILES", c10::to_string(_output_tiles)},
+             {"INPUT_TILE_WIDTH", c10::to_string(_geometry.input_tile_size.x)},
+             {"INPUT_TILE_HEIGHT", c10::to_string(_geometry.input_tile_size.y)},
              {"OUTPUT_TILE_WIDTH",
-              caffe2::to_string(_geometry.output_tile_size.x)},
+              c10::to_string(_geometry.output_tile_size.x)},
              {"OUTPUT_TILE_HEIGHT",
-              caffe2::to_string(_geometry.output_tile_size.y)},
-             {"INPUT_TILE_X",
-              caffe2::to_string(_geometry.input_tile_grid_size.x)},
+              c10::to_string(_geometry.output_tile_size.y)},
+             {"INPUT_TILE_X", c10::to_string(_geometry.input_tile_grid_size.x)},
              {"OUTPUT_TILE_X",
-              caffe2::to_string(_geometry.output_tile_grid_size.x)},
-             {"INPUT_TILE_CHUNK_SIZE",
-              caffe2::to_string(_input_tile_chunk_size)},
+              c10::to_string(_geometry.output_tile_grid_size.x)},
+             {"INPUT_TILE_CHUNK_SIZE", c10::to_string(_input_tile_chunk_size)},
              {"OUTPUT_TILE_CHUNK_SIZE",
-              caffe2::to_string(_output_tile_chunk_size)},
+              c10::to_string(_output_tile_chunk_size)},
              {"OUTPUT_TILE_BATCH_SIZE",
-              caffe2::to_string(_output_tile_batch_size)},
-             {"TILED_CONVOLUTION", caffe2::to_string(_tiling)},
+              c10::to_string(_output_tile_batch_size)},
+             {"TILED_CONVOLUTION", c10::to_string(_tiling)},
              {"INPUT_PADDING_X",
-              caffe2::to_string(
+              c10::to_string(
                   _geometry.transposed
                       ? _geometry.kernel_size.x - 1 - _geometry.input_padding.x
                       : _geometry.input_padding.x)},
              {"INPUT_PADDING_Y",
-              caffe2::to_string(
+              c10::to_string(
                   _geometry.transposed
                       ? _geometry.kernel_size.y - 1 - _geometry.input_padding.y
                       : _geometry.input_padding.y)},
-             {"INPUT_STRIDE_X", caffe2::to_string(_geometry.input_stride.x)},
-             {"INPUT_STRIDE_Y", caffe2::to_string(_geometry.input_stride.y)},
-             {"TRANSPOSED_CONVOLUTION",
-              caffe2::to_string(_geometry.transposed)},
+             {"INPUT_STRIDE_X", c10::to_string(_geometry.input_stride.x)},
+             {"INPUT_STRIDE_Y", c10::to_string(_geometry.input_stride.y)},
+             {"TRANSPOSED_CONVOLUTION", c10::to_string(_geometry.transposed)},
              {"BOUNDS_CHECK_MODE",
-              caffe2::to_string(bounds_check_mode(_tiling, _geometry))}}),
+              c10::to_string(bounds_check_mode(_tiling, _geometry))}}),
         kernel(_kernel),
         bias(_bias),
         prelu_scale(_prelu_scale),
@@ -176,14 +171,13 @@ class GLConvolution : public GLFilter {
 
     for (int i = 0; i < input_batch_size; i++) {
       bindings.push_back(
-          inputData[i] =
-              new binding{"inputData[" + caffe2::to_string(i) + "]"});
+          inputData[i] = new binding{"inputData[" + c10::to_string(i) + "]"});
     }
 
     for (int i = 0; i < output_batch_size; i++) {
       bindings.push_back(
           previousData[i] =
-              new binding{"previousData[" + caffe2::to_string(i) + "]"});
+              new binding{"previousData[" + c10::to_string(i) + "]"});
     }
 
     return bindings;
@@ -203,7 +197,7 @@ class GLConvolution : public GLFilter {
          i++) {
       bindings.push_back(
           kernel_block[i] =
-              new binding{"Kernel_block[" + caffe2::to_string(i) + "]"});
+              new binding{"Kernel_block[" + c10::to_string(i) + "]"});
     }
 
     return bindings;

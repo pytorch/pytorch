@@ -2,6 +2,7 @@
 
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/CUDAGuard.h"
+#include "ATen/cuda/CUDAMultiStreamGuard.h"
 #include "ATen/cuda/CUDAEvent.h"
 
 #include "cuda_runtime.h"

@@ -147,19 +147,19 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& A = Input(0);
     const auto& B = Input(1);
-    auto* C = Output(0);
+
     const T* A_data = A.template data<T>();
     const T* B_data = B.template data<T>();
     std::vector<int> A_dims;
     std::vector<int> B_dims;
+    std::vector<int64_t> C_dims;
 
     if (legacy_broadcast_) {
-      CAFFE_ENFORCE_NE(
-          C,
-          &B,
+      CAFFE_ENFORCE(
+          !IsInputOutputAlias(1, 0),
           "In-place is allowed only with the first tensor when "
           "legacy-broadcasting");
-      C->ResizeLike(A);
+      C_dims = A.dims().vec();
       if (B.numel() == 1) {
         A_dims = {static_cast<int>(A.numel())};
         B_dims = {1};
@@ -176,17 +176,21 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
           A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
       std::copy(
           B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
-      const std::vector<int> C_dims =
+      // TODO: change the types to vector<int64_t>
+      auto C_dims_int =
           elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
               A_dims, B_dims);
-      if (C == &A) {
-        CAFFE_ENFORCE_EQ(C_dims, A_dims);
-      } else if (C == &B) {
-        CAFFE_ENFORCE_EQ(C_dims, B_dims);
-      } else {
-        C->Resize(C_dims);
+      std::copy(
+          C_dims_int.cbegin(), C_dims_int.cend(), std::back_inserter(C_dims));
+      if (IsInputOutputAlias(0, 0)) {
+        CAFFE_ENFORCE_EQ(C_dims_int, A_dims);
+      } else if (IsInputOutputAlias(1, 0)) {
+        CAFFE_ENFORCE_EQ(C_dims_int, B_dims);
       }
     }
+
+    auto* C = Output(
+        0, C_dims, at::dtype<typename OutputTypeMap::template type<T>>());
     auto* C_data =
         C->template mutable_data<typename OutputTypeMap::template type<T>>();
     return functor_.Forward(A_dims, B_dims, A_data, B_data, C_data, &context_);
