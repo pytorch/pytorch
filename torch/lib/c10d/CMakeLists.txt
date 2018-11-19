@@ -80,7 +80,6 @@ set_property(TARGET c10d PROPERTY CXX_STANDARD 11)
 target_compile_options(c10d PUBLIC
   -Wall
   -Wextra
-  -Werror
   -Wno-unused-parameter
   -Wno-missing-field-initializers
   -Wno-write-strings
@@ -128,10 +127,6 @@ endif()
 if(MPI_FOUND)
   target_include_directories(c10d PUBLIC ${MPI_INCLUDE_PATH})
   copy_header(ProcessGroupMPI.hpp)
-  file(WRITE ${CMAKE_BINARY_DIR}/include/c10d/mpi_include_path "")
-  foreach(MPI_INC ${MPI_INCLUDE_PATH})
-    file(APPEND ${CMAKE_BINARY_DIR}/include/c10d/mpi_include_path ${MPI_INC}\n)
-  endforeach()
 endif()
 
 target_link_libraries(c10d PUBLIC ${C10D_LIBS})

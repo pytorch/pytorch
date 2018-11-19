@@ -70,8 +70,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
 
   int64_t* out_vec = nullptr;
   if (OutputSize() == 2) {
-    auto* indicesOut = Output(1);
-    indicesOut->Resize(numOutputs);
+    auto* indicesOut = Output(1, {numOutputs}, at::dtype<int64_t>());
     out_vec = indicesOut->template mutable_data<int64_t>();
   }
 
