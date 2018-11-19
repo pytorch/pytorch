@@ -39,8 +39,7 @@ class MergeIdListsOp : public Operator<Context> {
       M += values.numel();
     }
 
-    auto* out_values = Output(1);
-    out_values->Resize(M);
+    auto* out_values = Output(1, {M}, at::dtype<T>());
 
     T* out_values_data = out_values->template mutable_data<T>();
     auto pos = 0;
