@@ -32,7 +32,7 @@ ignores = [
     '**/hip/**',
 ]
 
-file_extensions = ['.cc', '.cu', '.h', '.cuh']
+file_extensions = ['.cc', '.cu', '.h', '.cuh', '.in']
 
 hipify_python.hipify(
     project_directory=proj_dir,
