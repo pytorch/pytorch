@@ -1224,10 +1224,30 @@
     CPU: batch_norm_cpu
     CUDA: batch_norm_cuda
 
+- func: batch_norm_stats(Tensor input, double eps) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: batch_norm_stats_cuda
+
+- func: batch_norm_elemt(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor invstd, double eps) -> Tensor
+  dispatch:
+    CUDA: batch_norm_elemt_cuda
+
+- func: batch_norm_update_stats(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, double momentum, double eps, int64_t count) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: batch_norm_update_stats_cuda
+
 - func: native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, double eps, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: batch_norm_backward_cpu
     CUDA: batch_norm_backward_cuda
+
+- func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: batch_norm_backward_reduce_cuda
+
+- func: batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor mean_dy, Tensor mean_dy_xmu) -> Tensor
+  dispatch:
+    CUDA: batch_norm_backward_elemt_cuda
 
 - func: ones(IntList size, TensorOptions options={}) -> Tensor
 
