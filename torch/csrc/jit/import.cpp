@@ -210,7 +210,7 @@ TypePtr MethodDecoder::buildType(const onnx::TypeProto& type_proto) {
     return DynamicType::get();
   } else if (kind == "TensorType") {
     auto dims = shape_proto.dim_size();
-    return TensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), -1, dims);
+    return TensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), at::kCPU, dims);
   } else if (kind == "CompleteTensorType") {
     // first half of the dims are sizes and the second half are strides
     auto total = shape_proto.dim_size();
@@ -221,7 +221,7 @@ TypePtr MethodDecoder::buildType(const onnx::TypeProto& type_proto) {
     for (int i = total / 2; i < total; i++) {
       strides.push_back(shape_proto.dim(i).dim_value());
     }
-    return CompleteTensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), -1, sizes, strides);
+    return CompleteTensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), at::kCPU, sizes, strides);
   } else if (kind == "TupleType") {
     std::vector<TypePtr> elems;
     for (auto &subkind : shape_proto.dim()) {
