@@ -498,7 +498,7 @@ class Operator : public OperatorBase {
   inline Tensor* Output(int idx, at::IntList dims, at::TensorOptions options) {
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::OutputTensor(
-          idx, dims, at::TensorOptions(options).device(context_.device()));
+          idx, dims, options.device(context_.device()));
     }
     return OperatorBase::OutputTensor(idx, dims, options);
   }

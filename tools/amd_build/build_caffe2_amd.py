@@ -26,7 +26,6 @@ includes = [
 ]
 
 ignores = [
-    "caffe2/operators/depthwise_3x3_conv_op.cu",
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
     "caffe2/operators/pool_op_cudnn.cu",
     '**/hip/**',
