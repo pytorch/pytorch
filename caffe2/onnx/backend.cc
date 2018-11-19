@@ -568,7 +568,7 @@ Caffe2Ops Caffe2Backend::CreatePadPool(
       bool pads_flag = false;
       str += "[";
       for (const auto& i : pads) {
-        str += caffe2::to_string(i) + ",";
+        str += c10::to_string(i) + ",";
         pads_flag = pads_flag || i > 0;
       }
       str += "]";
@@ -1742,9 +1742,7 @@ void Caffe2Backend::BuildTensorFillingOp(
     auto* strings = c2_values->mutable_strings();
     strings->CopyFrom(onnx_tensor.string_data());
   } else {
-    CAFFE_THROW(
-        "unrecognized tensor type: ",
-        TensorProto::DataType_Name(onnx_tensor.data_type()));
+    CAFFE_THROW("unrecognized tensor type: ", onnx_tensor.data_type());
   }
 
   auto* c2_shape = c2_op->add_arg();

@@ -45,6 +45,7 @@
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
+#include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
@@ -446,6 +447,39 @@ void run(InterpreterState & interp, const std::vector<at::Tensor> & inputs, std:
   }
 }
 
+std::pair<tensor_list, tensor_list> runGradient(
+    Gradient& grad_spec,
+    tensor_list& tensors_in,
+    tensor_list& tensor_grads_in) {
+  tensor_list tensors_out, tensor_grads_out;
+  Code f_code{grad_spec.f}, df_code{grad_spec.df};
+  InterpreterState f_interpreter{f_code}, df_interpreter{df_code};
+
+  run(f_interpreter, tensors_in, tensors_out);
+
+  tensor_list df_inputs;
+  df_inputs.insert(
+      df_inputs.end(), tensor_grads_in.begin(), tensor_grads_in.end());
+  for (auto offset : grad_spec.df_input_captured_inputs)
+    df_inputs.push_back(tensors_in[offset]);
+  for (auto offset : grad_spec.df_input_captured_outputs)
+    df_inputs.push_back(tensors_out[offset]);
+  run(df_interpreter, df_inputs, tensor_grads_out);
+
+  // Outputs of f needs to be sliced
+  tensors_out.erase(
+      tensors_out.begin() + grad_spec.f_real_outputs, tensors_out.end());
+  return std::make_pair(tensors_out, tensor_grads_out);
+}
+
+void assertAllClose(const tensor_list& a, const tensor_list& b) {
+  ASSERT_EQ(a.size(), b.size());
+  for (size_t i = 0; i < a.size(); ++i) {
+    ASSERT_TRUE(a[i].is_same_size(b[i]));
+    ASSERT_TRUE(a[i].allclose(b[i]));
+  }
+}
+
 void testInterp() {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -469,6 +503,187 @@ void testInterp() {
   // std::cout << almostEqual(outputs[0],hx) << "\n";
   ASSERT_TRUE(exactlyEqual(outputs[0], hx));
   ASSERT_TRUE(exactlyEqual(outputs[1], cx));
+}
+
+void testTHNNConv() {
+  std::vector<int64_t> input_size = {4, 3, 15, 17}; // B x C x H x W
+  std::vector<int64_t> kernel_size = {3, 5};
+  std::vector<int64_t> stride = {1, 2};
+  std::vector<int64_t> padding = {2, 1};
+  constexpr int out_channels = 5;
+
+  // make inputs
+  at::Tensor input = torch::randn(input_size);
+  at::Tensor weight = torch::randn({out_channels, input_size[1], kernel_size[0], kernel_size[1]});
+  at::Tensor bias = torch::randn({out_channels});
+
+  // run forward eagerly
+  at::Tensor output, finput, fgradinput;
+  std::tie(output, finput, fgradinput) = at::thnn_conv2d_forward(input, weight, kernel_size,
+								 bias, stride, padding);
+
+  // make grad_outputs
+  at::Tensor grad_output = torch::randn_like(output);
+  at::Tensor grad_finput = torch::zeros_like(finput);
+  at::Tensor grad_fgradinput = torch::zeros_like(fgradinput);
+
+  // run backward eagerly
+  at::Tensor grad_input, grad_weight, grad_bias;
+  std::tie(grad_input, grad_weight, grad_bias) = at::thnn_conv2d_backward(grad_output, input, weight,
+									  kernel_size, stride, padding,
+									  finput, fgradinput, {true, true, true});
+
+  // make JIT graph
+  auto graph = std::make_shared<Graph>();
+  auto ksz_val = graph->insertConstant(IValue(kernel_size));
+  auto kst_val = graph->insertConstant(IValue(stride));
+  auto pad_val = graph->insertConstant(IValue(padding));
+
+  auto inputg = graph->addInput("self");
+  auto weightg = graph->addInput("weight");
+  auto biasg = graph->addInput("bias");
+
+  Value* conv = graph->insert(aten::thnn_conv2d_forward, {inputg, weightg, ksz_val, biasg, kst_val, pad_val});
+  auto outputs = conv->node()->outputs();
+  for (auto output : outputs) {
+    graph->registerOutput(output);
+  }
+  LowerAllTuples(graph);
+  graph->lint();
+
+  // differentiate JIT graph
+  EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
+  ConstantPropagation(graph);
+  auto grad_spec = differentiate(graph);
+  LowerGradOf(*grad_spec.df);
+
+  // prepare JIT inputs / gradients
+  tensor_list tensors_in;
+  tensors_in.push_back(input);
+  tensors_in.push_back(weight);
+  tensors_in.push_back(bias);
+
+  tensor_list tensor_grads_in;
+  tensor_grads_in.push_back(grad_output);
+  tensor_grads_in.push_back(grad_finput);
+  tensor_grads_in.push_back(grad_fgradinput);
+
+  // Get outputs from the interpreter
+  tensor_list tensors_out, tensor_grads_out;
+  std::tie(tensors_out, tensor_grads_out) =
+    runGradient(grad_spec, tensors_in, tensor_grads_in);
+
+  // prepare expected structs
+  tensor_list expected_tensors_out, expected_tensor_grads_out;
+  expected_tensors_out.push_back(output);
+  expected_tensors_out.push_back(finput);
+  expected_tensors_out.push_back(fgradinput);
+  expected_tensor_grads_out.push_back(grad_input);
+  expected_tensor_grads_out.push_back(grad_weight);
+  expected_tensor_grads_out.push_back(grad_bias);
+
+  // Compare results
+  assertAllClose(tensors_out, expected_tensors_out);
+  assertAllClose(tensor_grads_out, expected_tensor_grads_out);
+}
+
+void testATenNativeBatchNorm() {
+  // aten::native_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+  std::vector<int64_t> input_size = {4, 3, 15, 17}; // B x C x H x W
+  bool training = true;
+  float momentum = 0.9;
+  float eps = 1e-5;
+
+  // make inputs
+  at::Tensor input = torch::randn(input_size);
+  at::Tensor weight = torch::randn({input_size[1]});
+  at::Tensor bias = torch::randn({input_size[1]});
+  at::Tensor running_mean = torch::randn({input_size[1]});
+  at::Tensor running_var = torch::randn({input_size[1]});
+
+  // running_mean and running_var are changed in-place, so clone and send them
+  at::Tensor running_mean_eager = running_mean.clone();
+  at::Tensor running_var_eager = running_var.clone();
+  at::Tensor running_mean_jit = running_mean.clone();
+  at::Tensor running_var_jit = running_var.clone();
+
+  // run forward eagerly
+  at::Tensor output, savemean, saveinvstd;
+  std::tie(output, savemean, saveinvstd) = at::native_batch_norm(input, weight, bias, running_mean_eager, running_var_eager, training, momentum, eps);
+
+  // make grad_outputs
+  at::Tensor grad_output = torch::randn_like(output);
+  at::Tensor grad_savemean = torch::zeros_like(savemean);
+  at::Tensor grad_saveinvstd = torch::zeros_like(saveinvstd);
+
+  // run backward eagerly
+  at::Tensor grad_input, grad_weight, grad_bias;
+  // aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor weight, Tensor running_mean, Tensor running_var, Tensor save_mean, Tensor save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  std::tie(grad_input, grad_weight, grad_bias) = at::native_batch_norm_backward(grad_output, input, weight,
+										running_mean_eager, running_var_eager,
+										savemean, saveinvstd, training, eps, {true, true, true});
+
+  // make JIT graph
+  auto graph = std::make_shared<Graph>();
+  auto training_val = graph->insertConstant(IValue(training));
+  auto momentum_val = graph->insertConstant(IValue(momentum));
+  auto eps_val = graph->insertConstant(IValue(eps));
+
+  auto inputg = graph->addInput("self");
+  auto weightg = graph->addInput("weight");
+  auto biasg = graph->addInput("bias");
+  auto running_meang = graph->addInput("running_mean");
+  auto running_varg = graph->addInput("running_var");
+
+  Value* bn = graph->insert(aten::native_batch_norm, {inputg, weightg, biasg, running_meang, running_varg, training_val, momentum_val, eps_val});
+  auto outputs = bn->node()->outputs();
+  for (auto output : outputs) {
+    graph->registerOutput(output);
+  }
+  LowerAllTuples(graph);
+  graph->lint();
+
+  // differentiate JIT graph
+  EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
+  ConstantPropagation(graph);
+  auto grad_spec = differentiate(graph);
+  LowerGradOf(*grad_spec.df);
+
+  // prepare JIT inputs / gradients
+  tensor_list tensors_in;
+  tensors_in.push_back(input);
+  tensors_in.push_back(weight);
+  tensors_in.push_back(bias);
+  tensors_in.push_back(running_mean_jit);
+  tensors_in.push_back(running_var_jit);
+
+  tensor_list tensor_grads_in;
+  tensor_grads_in.push_back(grad_output);
+  tensor_grads_in.push_back(grad_savemean);
+  tensor_grads_in.push_back(grad_saveinvstd);
+
+  // Get outputs from the interpreter
+  tensor_list tensors_out, tensor_grads_out;
+  std::tie(tensors_out, tensor_grads_out) =
+    runGradient(grad_spec, tensors_in, tensor_grads_in);
+
+  // prepare expected structs
+  tensor_list expected_tensors_out, expected_tensor_grads_out;
+  expected_tensors_out.push_back(output);
+  expected_tensors_out.push_back(savemean);
+  expected_tensors_out.push_back(saveinvstd);
+  expected_tensors_out.push_back(running_mean_eager);
+  expected_tensors_out.push_back(running_var_eager);
+  expected_tensor_grads_out.push_back(grad_input);
+  expected_tensor_grads_out.push_back(grad_weight);
+  expected_tensor_grads_out.push_back(grad_bias);
+
+  tensors_out.push_back(running_mean_jit);
+  tensors_out.push_back(running_var_jit);
+
+  // Compare results
+  assertAllClose(tensors_out, expected_tensors_out);
+  assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
 using var_meta_type = std::vector<int64_t>;
@@ -527,39 +742,6 @@ variable_list grad(
       true,
       false,
       fmap(inputs, get_edge));
-}
-
-void assertAllClose(const tensor_list& a, const tensor_list& b) {
-  ASSERT_EQ(a.size(), b.size());
-  for (size_t i = 0; i < a.size(); ++i) {
-    ASSERT_TRUE(a[i].is_same_size(b[i]));
-    ASSERT_TRUE(a[i].allclose(b[i]));
-  }
-}
-
-std::pair<tensor_list, tensor_list> runGradient(
-    Gradient& grad_spec,
-    tensor_list& tensors_in,
-    tensor_list& tensor_grads_in) {
-  tensor_list tensors_out, tensor_grads_out;
-  Code f_code{grad_spec.f}, df_code{grad_spec.df};
-  InterpreterState f_interpreter{f_code}, df_interpreter{df_code};
-
-  run(f_interpreter, tensors_in, tensors_out);
-
-  tensor_list df_inputs;
-  df_inputs.insert(
-      df_inputs.end(), tensor_grads_in.begin(), tensor_grads_in.end());
-  for (auto offset : grad_spec.df_input_captured_inputs)
-    df_inputs.push_back(tensors_in[offset]);
-  for (auto offset : grad_spec.df_input_captured_outputs)
-    df_inputs.push_back(tensors_out[offset]);
-  run(df_interpreter, df_inputs, tensor_grads_out);
-
-  // Outputs of f needs to be sliced
-  tensors_out.erase(
-      tensors_out.begin() + grad_spec.f_real_outputs, tensors_out.end());
-  return std::make_pair(tensors_out, tensor_grads_out);
 }
 
 void testADFormulas() {
@@ -643,7 +825,7 @@ std::string toString(std::shared_ptr<Graph>& graph) {
 void testDifferentiate(std::ostream& out = std::cout) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = CompleteTensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
+  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -899,11 +1081,11 @@ const auto cf_examples = R"JIT(
     return a
 )JIT";
 void testControlFlow() {
-  script::Module cu;
+  auto cu = std::make_shared<script::Module>();
   script::defineMethodsInModule(
       cu, cf_examples, script::nativeResolver, nullptr);
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
-    auto graph = cu.get_method(name).graph();
+    auto graph = cu->get_method(name).graph();
     Code code(graph);
     InterpreterState interp(code);
     interp.run(stack);
@@ -1203,8 +1385,30 @@ void testSchemaParser() {
                                           ->getElementType()));
 
   // test tensor with annotated alias sets
-  parseSchema("at::what(Tensor(t) foo) -> (Tensor(t))");
+  parseSchema("at::what(Tensor(a) foo) -> (Tensor(a))");
 
+  {
+    const auto s = parseSchema(
+        "at::what(Tensor(b|c)[](a!) list, Tensor(c) element)"
+        " -> (Tensor(b|c)[](a!))");
+
+    // The list itself is annotated with `a`
+    const auto& aliasInfo = *s.arguments().at(0).alias_info();
+    ASSERT_TRUE(
+        aliasInfo.sets() ==
+        std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+    ASSERT_TRUE(aliasInfo.isWrite());
+
+    // Check the contained types
+    ASSERT_TRUE(!aliasInfo.containedTypes().empty());
+    const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
+    const auto expected = std::unordered_set<Symbol>{
+        Symbol::fromQualString("alias::b"),
+        Symbol::fromQualString("alias::c"),
+    };
+    ASSERT_TRUE(containedAliasInfo.sets() == expected);
+    ASSERT_FALSE(containedAliasInfo.isWrite());
+  }
 }
 
 void testTopologicalIndex() {

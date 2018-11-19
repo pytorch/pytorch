@@ -1,8 +1,8 @@
-#include <ATen/core/TensorTypeIdRegistration.h>
+#include <c10/util/TensorTypeIdRegistration.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 
-namespace at {
+namespace c10 {
 
 TensorTypeIds::TensorTypeIds() : creator_(), registry_() {}
 
@@ -13,8 +13,7 @@ TensorTypeIds& TensorTypeIds::singleton() {
 
 TensorTypeIdCreator::TensorTypeIdCreator() : last_id_(0) {}
 
-at::TensorTypeId TensorTypeIdCreator::create() {
-
+c10::TensorTypeId TensorTypeIdCreator::create() {
   auto id = TensorTypeId(++last_id_);
 
   if (last_id_ == 0) { // overflow happened!
@@ -31,23 +30,23 @@ at::TensorTypeId TensorTypeIdCreator::create() {
 
 TensorTypeIdRegistry::TensorTypeIdRegistry() : registeredTypeIds_(), mutex_() {}
 
-void TensorTypeIdRegistry::registerId(at::TensorTypeId id) {
+void TensorTypeIdRegistry::registerId(c10::TensorTypeId id) {
   std::lock_guard<std::mutex> lock(mutex_);
   registeredTypeIds_.emplace(id);
 }
 
-void TensorTypeIdRegistry::deregisterId(at::TensorTypeId id) {
+void TensorTypeIdRegistry::deregisterId(c10::TensorTypeId id) {
   std::lock_guard<std::mutex> lock(mutex_);
   registeredTypeIds_.erase(id);
 }
 
-at::TensorTypeId TensorTypeIds::createAndRegister() {
-  at::TensorTypeId id = creator_.create();
+c10::TensorTypeId TensorTypeIds::createAndRegister() {
+  c10::TensorTypeId id = creator_.create();
   registry_.registerId(id);
   return id;
 }
 
-void TensorTypeIds::deregister(at::TensorTypeId id) {
+void TensorTypeIds::deregister(c10::TensorTypeId id) {
   registry_.deregisterId(id);
 }
 
@@ -58,15 +57,15 @@ TensorTypeIdRegistrar::~TensorTypeIdRegistrar() {
   TensorTypeIds::singleton().deregister(id_);
 }
 
-AT_DEFINE_TENSOR_TYPE(UndefinedTensorId);
-AT_DEFINE_TENSOR_TYPE(CPUTensorId);
-AT_DEFINE_TENSOR_TYPE(CUDATensorId);
-AT_DEFINE_TENSOR_TYPE(SparseCPUTensorId);
-AT_DEFINE_TENSOR_TYPE(SparseCUDATensorId);
-AT_DEFINE_TENSOR_TYPE(MKLDNNTensorId); // Caffe2 only
-AT_DEFINE_TENSOR_TYPE(OpenGLTensorId); // Caffe2 only
-AT_DEFINE_TENSOR_TYPE(OpenCLTensorId); // Caffe2 only
-AT_DEFINE_TENSOR_TYPE(IDEEPTensorId); // Caffe2 only
-AT_DEFINE_TENSOR_TYPE(HIPTensorId); // Caffe2 only
+C10_DEFINE_TENSOR_TYPE(UndefinedTensorId);
+C10_DEFINE_TENSOR_TYPE(CPUTensorId);
+C10_DEFINE_TENSOR_TYPE(CUDATensorId);
+C10_DEFINE_TENSOR_TYPE(SparseCPUTensorId);
+C10_DEFINE_TENSOR_TYPE(SparseCUDATensorId);
+C10_DEFINE_TENSOR_TYPE(MKLDNNTensorId); // Caffe2 only
+C10_DEFINE_TENSOR_TYPE(OpenGLTensorId); // Caffe2 only
+C10_DEFINE_TENSOR_TYPE(OpenCLTensorId); // Caffe2 only
+C10_DEFINE_TENSOR_TYPE(IDEEPTensorId); // Caffe2 only
+C10_DEFINE_TENSOR_TYPE(HIPTensorId); // Caffe2 only
 
-} // namespace at
+} // namespace c10

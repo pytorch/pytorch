@@ -984,10 +984,10 @@ class ScriptModuleSerializer final {
       } else {
         record_id = writer_.writeRecord(tensor.storage().data(), record_size);
       }
-      external_data->set_record_id(caffe2::to_string(record_id));
+      external_data->set_record_id(c10::to_string(record_id));
       storageMap_[key] = record_id;
     } else {
-      external_data->set_record_id(caffe2::to_string(it->second));
+      external_data->set_record_id(c10::to_string(it->second));
     }
     // TODO handle device case, set the device_detail and load to CUDA device
   }

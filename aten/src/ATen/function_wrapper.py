@@ -1026,9 +1026,6 @@ def create_generic(top_env, declarations):
 
     def process_native(option, output_options):
         # type: (FunctionOption, List[OutputDeclaration]) -> None
-        option['inplace'] = re.search(
-            '(^__i|[^_]_$)', option['api_name']) is not None
-
         formals = native_get_formals(option)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
