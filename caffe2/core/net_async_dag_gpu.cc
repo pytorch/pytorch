@@ -111,7 +111,7 @@ int AsyncDAGNet::stream(const DeviceOption& device_option) {
   int stream_id = 0;
   if (device_option.device_type() == PROTO_CUDA) {
     int gpu_id = device_option.device_id();
-    CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + caffe2::to_string(gpu_id));
+    CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + c10::to_string(gpu_id));
     if ((unsigned)gpu_id >= stream_counters_.size()) {
       stream_counters_.resize(gpu_id + 1, 0);
     }

@@ -2321,37 +2321,42 @@ CAFFE2_RAND_UNIFORM_INT(uint64_t);
 // to between a and b.
 // The algorithm is non-trivial given the adjustment would be different towards
 // each value.
-#define CAFFE2_RAND_FIXED_SUM(T)                                        \
-  template <>                                                           \
-  C10_EXPORT void RandFixedSum<T, CPUContext>(                          \
-      const size_t n,                                                   \
-      const T a,                                                        \
-      const T b,                                                        \
-      const T sum,                                                      \
-      T* r,                                                             \
-      CPUContext* context) {                                            \
-    CAFFE_ENFORCE_GE(a, 0);                                             \
-    CAFFE_ENFORCE_GE(sum / (double)n, a);                               \
-    CAFFE_ENFORCE_LE(sum / (double)n, b);                               \
-    T current_sum = 0;                                                  \
-    for (size_t i = 0; i < n - 1; ++i) {                                \
-      auto remaining_numbers = n - 1 - i;                               \
-      double mean = (sum - current_sum) / remaining_numbers;            \
-      double stdev = std::min(mean - a, b - mean);                      \
-      std::normal_distribution<double> distribution{mean, stdev / 4.0}; \
-      T value = distribution(context->RandGenerator());                 \
-      auto remaining_sum = sum - current_sum - value;                   \
-      if (value < a || remaining_sum > b * remaining_numbers) {         \
-        value = a;                                                      \
-      } else if (value > b || remaining_sum < a * remaining_numbers) {  \
-        value = b;                                                      \
-      }                                                                 \
-      r[i] = value;                                                     \
-      CAFFE_ENFORCE(a <= value && value <= b);                          \
-      current_sum += value;                                             \
-    }                                                                   \
-    r[n - 1] = sum - current_sum;                                       \
-    CAFFE_ENFORCE(a <= r[n - 1] && r[n - 1] <= b);                      \
+#define CAFFE2_RAND_FIXED_SUM(T)                                          \
+  template <>                                                             \
+  C10_EXPORT void RandFixedSum<T, CPUContext>(                            \
+      const size_t n,                                                     \
+      const T a,                                                          \
+      const T b,                                                          \
+      const T sum,                                                        \
+      T* r,                                                               \
+      CPUContext* context) {                                              \
+    CAFFE_ENFORCE_GE(a, 0);                                               \
+    CAFFE_ENFORCE_GE(sum / (double)n, a);                                 \
+    CAFFE_ENFORCE_LE(sum / (double)n, b);                                 \
+    T current_sum = 0;                                                    \
+    T remaining_sum = sum;                                                \
+    for (size_t i = 0; i < n; ++i) {                                      \
+      auto remaining_numbers = n - 1 - i;                                 \
+      double mean = (sum - current_sum) / (remaining_numbers + 1);        \
+      double stdev = std::min(mean - a, b - mean);                        \
+      std::normal_distribution<double> distribution{mean, stdev / 4.0};   \
+      T value, remaining_sum_test;                                        \
+      do {                                                                \
+        value = distribution(context->RandGenerator());                   \
+        remaining_sum_test = remaining_sum - value;                       \
+      } while (value < a || remaining_sum_test < a * remaining_numbers || \
+               value > b || remaining_sum_test > b * remaining_numbers);  \
+      r[i] = value;                                                       \
+      CAFFE_ENFORCE(a <= value && value <= b);                            \
+      current_sum += value;                                               \
+      remaining_sum -= value;                                             \
+      CAFFE_ENFORCE_GE(remaining_sum, a* remaining_numbers);              \
+      CAFFE_ENFORCE_LE(remaining_sum, b* remaining_numbers);              \
+    }                                                                     \
+    r[n - 1] += remaining_sum;                                            \
+    current_sum += remaining_sum;                                         \
+    CAFFE_ENFORCE(a <= r[n - 1] && r[n - 1] <= b);                        \
+    CAFFE_ENFORCE_EQ(current_sum, sum);                                   \
   }
 CAFFE2_RAND_FIXED_SUM(float);
 CAFFE2_RAND_FIXED_SUM(double);

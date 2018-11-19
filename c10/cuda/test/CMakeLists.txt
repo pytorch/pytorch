@@ -1,6 +1,8 @@
 # ---[ Test binaries.
 
-file(GLOB_RECURSE C10_CUDA_ALL_TEST_FILES *.cpp)
+set(C10_CUDA_ALL_TEST_FILES
+    impl/CUDATest.cpp
+)
 if (BUILD_TEST)
   foreach(test_src ${C10_CUDA_ALL_TEST_FILES})
     get_filename_component(test_file_name ${test_src} NAME_WE)
