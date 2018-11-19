@@ -351,8 +351,6 @@ MethodDecoder::MethodDecoder(
       member_inputs.push_back(it->second);
     }
     auto graph = buildGraph(node_proto.attribute(0).g());
-    // has_domain field has a string iff the method was optimized
-    parent_module->set_optimized(node_proto.has_domain());
     parent_module->create_method(name, graph, member_inputs);
     // We store the schema in the docstring so we can parse the schema and
     // assign it to the method.
@@ -437,6 +435,7 @@ class ScriptModuleDeserializer final {
   void convertModule(
       const torch::ModuleDef& module_def,
       script::Module* module) {
+    module->set_optimized(module_def.optimize());
     for (int i = 0; i < module_def.methods_size(); ++i) {
       const torch::MethodDef& method_def = module_def.methods(i);
       // TODO read unhacked torch script, right now it's serialized onnx proto
