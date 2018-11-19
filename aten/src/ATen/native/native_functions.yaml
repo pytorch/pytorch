@@ -2761,6 +2761,12 @@
 - func: cholesky(Tensor self, bool upper=false) -> Tensor
   variants: method, function
 
+- func: _cholesky_helper(Tensor self, bool upper) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _cholesky_helper_cpu
+    CUDA: _cholesky_helper_cuda
+
 - func: potrs_out(Tensor result, Tensor self, Tensor input2, bool upper=true) -> Tensor
 
 - func: potrs(Tensor self, Tensor input2, bool upper=true) -> Tensor
