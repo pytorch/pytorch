@@ -220,7 +220,7 @@ template <typename SIndex>
 void sparse_adagrad(
     int num_rows,
     int block_size,
-    int param_size,
+    size_t param_size,
     const float* w,
     const float* g,
     const float* h,
@@ -237,7 +237,7 @@ template <>
 void sparse_adagrad(
     int num_rows,
     int block_size,
-    int param_size,
+    size_t param_size,
     const float* w,
     const float* g,
     const float* h,
@@ -283,7 +283,7 @@ template <>
 void sparse_adagrad(
     int num_rows,
     int block_size,
-    int param_size,
+    size_t param_size,
     const float* w,
     const float* g,
     const float* h,

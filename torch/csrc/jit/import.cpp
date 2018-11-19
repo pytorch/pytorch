@@ -50,7 +50,7 @@ class MethodDecoder {
 
   void buildIntermediateValue(Value* value, const std::string& name);
 
-  at::ScalarType onnxTypeToATenType(onnx::TensorProto_DataType tensor_proto);
+  at::ScalarType onnxTypeToATenType(int32_t tensor_proto);
 
   at::Tensor buildTensor(const onnx::TensorProto& tensor_proto);
 
@@ -70,8 +70,7 @@ class MethodDecoder {
   std::unordered_map<std::string, const onnx::TypeProto*> value_type_map_;
 };
 
-at::ScalarType MethodDecoder::onnxTypeToATenType(
-    onnx::TensorProto_DataType onnx_type) {
+at::ScalarType MethodDecoder::onnxTypeToATenType(int32_t onnx_type) {
   switch(onnx_type) {
     case onnx::TensorProto_DataType_UINT8:
       return at::kByte;
@@ -211,7 +210,7 @@ TypePtr MethodDecoder::buildType(const onnx::TypeProto& type_proto) {
     return DynamicType::get();
   } else if (kind == "TensorType") {
     auto dims = shape_proto.dim_size();
-    return TensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), -1, dims);
+    return TensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), at::kCPU, dims);
   } else if (kind == "CompleteTensorType") {
     // first half of the dims are sizes and the second half are strides
     auto total = shape_proto.dim_size();
@@ -222,7 +221,7 @@ TypePtr MethodDecoder::buildType(const onnx::TypeProto& type_proto) {
     for (int i = total / 2; i < total; i++) {
       strides.push_back(shape_proto.dim(i).dim_value());
     }
-    return CompleteTensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), -1, sizes, strides);
+    return CompleteTensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), at::kCPU, sizes, strides);
   } else if (kind == "TupleType") {
     std::vector<TypePtr> elems;
     for (auto &subkind : shape_proto.dim()) {
@@ -352,8 +351,6 @@ MethodDecoder::MethodDecoder(
       member_inputs.push_back(it->second);
     }
     auto graph = buildGraph(node_proto.attribute(0).g());
-    // has_domain field has a string iff the method was optimized
-    parent_module->set_optimized(node_proto.has_domain());
     parent_module->create_method(name, graph, member_inputs);
     // We store the schema in the docstring so we can parse the schema and
     // assign it to the method.
@@ -438,6 +435,7 @@ class ScriptModuleDeserializer final {
   void convertModule(
       const torch::ModuleDef& module_def,
       script::Module* module) {
+    module->set_optimized(module_def.optimize());
     for (int i = 0; i < module_def.methods_size(); ++i) {
       const torch::MethodDef& method_def = module_def.methods(i);
       // TODO read unhacked torch script, right now it's serialized onnx proto
@@ -473,7 +471,7 @@ class ScriptModuleDeserializer final {
     }
     auto type = at::typeMetaToScalarType(
         caffe2::DataTypeToTypeMeta(tensor_proto.data_type()));
-    uint64_t record_id = caffe2::stoull(external_data.record_id());
+    uint64_t record_id = c10::stoull(external_data.record_id());
     AT_ASSERT(record_id != 0);
     auto storage_it = storageMap_.find(record_id);
     if (storage_it == storageMap_.end()) {

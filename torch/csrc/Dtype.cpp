@@ -10,13 +10,13 @@
 
 PyObject * THPDtype_New(at::ScalarType scalar_type, const std::string& name)
 {
+  AT_ASSERT(name.length() < DTYPE_NAME_LEN);
   auto type = (PyTypeObject*)&THPDtypeType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self) throw python_error();
   auto self_ = reinterpret_cast<THPDtype*>(self.get());
   self_->scalar_type = scalar_type;
-  std::strncpy (self_->name, name.c_str(), DTYPE_NAME_LEN);
-  self_->name[DTYPE_NAME_LEN] = '\0';
+  std::strncpy(self_->name, name.c_str(), DTYPE_NAME_LEN);
   return self.release();
 }
 
