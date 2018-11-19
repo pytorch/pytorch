@@ -27,7 +27,7 @@ TORCH_API std::shared_ptr<FusedKernel> compileKernel(
   const KernelSpec& spec
 , const ArgSpec& arg_spec
 , const std::vector<int64_t>& map_size
-, const int device);
+, const at::Device device);
 
 TORCH_API size_t nCompiledKernels();
 
