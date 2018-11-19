@@ -184,7 +184,7 @@ goto:eof
 :build_caffe2
   @setlocal
   : Note [Backslash munging on Windows]
-  : In CMake, Windows native backslashes are not well handled. 
+  : In CMake, Windows native backslashes are not well handled.
   : It will cause a warning as the following
   :   CMake Warning (dev) at cmake (source_group):
   :    Syntax error in cmake code at cmake
@@ -193,7 +193,7 @@ goto:eof
   :    Invalid escape sequence \i
   : which is said to become an error in the future.
   : As an alternative, we should use forward slashes instead.
-  : Here those paths should be escaped before passing to CMake. 
+  : Here those paths should be escaped before passing to CMake.
   set NVTOOLEXT_HOME=%NVTOOLEXT_HOME:\=/%
   set CUDNN_INCLUDE_DIR=%CUDNN_INCLUDE_DIR:\=/%
   set CUDNN_LIB_DIR=%CUDNN_LIB_DIR:\=/%
@@ -220,6 +220,7 @@ goto:eof
                   -DUSE_DISTRIBUTED=%USE_DISTRIBUTED% ^
                   -DUSE_FBGEMM=%USE_FBGEMM% ^
                   -DUSE_NUMPY=%USE_NUMPY% ^
+                  -DNUMPY_INCLUDE_DIR=%NUMPY_INCLUDE_DIR% ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
                   -DUSE_LEVELDB=%USE_LEVELDB% ^
                   -DUSE_LMDB=%USE_LMDB% ^

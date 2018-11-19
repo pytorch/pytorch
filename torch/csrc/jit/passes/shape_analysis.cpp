@@ -51,8 +51,8 @@ IValue representativeValue(Value* v) {
     return *iv;
   }
   if (CompleteTensorTypePtr type = type_->cast<CompleteTensorType>()) {
-    auto backend = type->device() == -1 ? at::Backend::CPU : at::Backend::CUDA;
-    at::DeviceGuard device_guard(jitDeviceIndexToDevice(type->device()));
+    auto backend = type->device().is_cpu() ? at::Backend::CPU : at::Backend::CUDA;
+    at::DeviceGuard device_guard(type->device());
     auto& attype = at::getNonVariableType(backend, type->scalarType());
     auto t = at::empty_strided(type->sizes(), type->strides(), attype.options()).zero_();
     return autograd::make_variable(t, /*requires_grad=*/false);
@@ -314,10 +314,10 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       return; // correct num type is already set
     case prim::NumToTensor: {
       if (node->input()->type()->isSubtypeOf(IntType::get())) {
-        node->output()->setType(TensorType::create(at::kLong, -1, 0));
+        node->output()->setType(TensorType::create(at::kLong, at::kCPU, 0));
       } else {
         JIT_ASSERT(node->input()->type()->isSubtypeOf(FloatType::get()));
-        node->output()->setType(TensorType::create(at::kDouble, -1, 0));
+        node->output()->setType(TensorType::create(at::kDouble, at::kCPU, 0));
       }
       return;
     }
@@ -825,19 +825,10 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     return {};
   }};
 
-  static const auto get_device_int =
-      [](c10::optional<at::Device> dev) -> c10::optional<int> {
-    if (!dev)
-      return {};
-    if (dev->is_cpu()) {
-      return {-1};
-    }
-    return dev->has_index() ? c10::optional<int>{dev->index()} : c10::nullopt;
-  };
   static const auto factory_with_ndim = [](Node * node, int dim) -> type_vec_t{
     auto maybe_layout = node->get<at::Layout>(attr::layout);
     if (!maybe_layout || maybe_layout != at::kStrided) return {};
-    auto maybe_device = get_device_int(node->get<at::Device>(attr::device));
+    auto maybe_device = node->get<at::Device>(attr::device);
     if (!maybe_device) return {};
     auto maybe_scalar_type = node->get<at::ScalarType>(attr::dtype);
     if (!maybe_scalar_type) return {};
@@ -1308,7 +1299,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     std::vector<int64_t> dim_vec = {(int64_t)tensor_types.at(0)->sizes().size()};
     at::IntList dims(dim_vec);
     node->output()->setType(
-        CompleteTensorType::create(at::kLong, -1, dims));
+        CompleteTensorType::create(at::kLong, at::kCPU, dims));
     return true;
   } else if (node->kind() == onnx::Reshape) {
     setUnshapedType(node);

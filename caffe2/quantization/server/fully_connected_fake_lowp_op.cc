@@ -20,6 +20,9 @@
 
 namespace caffe2 {
 
+// NOTE: make sure explicitly instantiate the corresponding template classes
+// in fully_connected_fake_lowp_op_avx2.cc !
+
 // IEEE FP16
 REGISTER_CPU_OPERATOR_WITH_ENGINE(FC, FAKE_FP16,
   FullyConnectedFakeLowpFPOp<fp32_to_fp16, CPUContext>);

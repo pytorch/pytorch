@@ -9,7 +9,7 @@ from hypothesis import assume
 # The error bound is derived based on assumption that there's no input
 # quantization error.
 def check_quantized_results_close(
-        outputs, ref=None, symmetric=False, atol_scale=0.51):
+        outputs, ref=None, symmetric=False, atol_scale=0.53):
     if ref is None:
         ref = outputs[0][0]
     ref_min = min(np.min(ref), 0)
