@@ -23,12 +23,11 @@ template <typename T, class Context>
 bool PairWiseLossOp<T, Context>::RunOnDevice() {
   auto& X = Input(XVALUE);
   auto& label = Input(LABEL);
-  auto* Y = Output(YVALUE);
 
   int N = X.dim() > 0 ? X.dim32(0) : 0;
   if (N == 0) {
-    Y->Resize(0);
-    Y->template mutable_data<T>();
+    // Set correct data type for output
+    Output(YVALUE, {0}, at::dtype<T>());
     return true;
   }
 
@@ -49,7 +48,7 @@ bool PairWiseLossOp<T, Context>::RunOnDevice() {
   }
 
   // a total of len_size sessions
-  Y->Resize(len_size);
+  auto* Y = Output(YVALUE, {len_size}, at::dtype<T>());
   auto* Ydata = Y->template mutable_data<T>();
 
   int D = X.numel() / N;
