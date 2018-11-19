@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 from __future__ import absolute_import, division, print_function
-import argparse
 import os
 import sys
 
@@ -35,18 +34,6 @@ ignores = [
 
 file_extensions = ['.cc', '.cu', '.h', '.cuh', '.in']
 
-parser = argparse.ArgumentParser(
-    description="The Script to Hipify Caffe2")
-
-parser.add_argument(
-    '--hip-suffix',
-    type=str,
-    default='cc',
-    help="The suffix for the hipified files",
-    required=False)
-
-args = parser.parse_args()
-
 hipify_python.hipify(
     project_directory=proj_dir,
     output_directory=proj_dir,
@@ -54,5 +41,4 @@ hipify_python.hipify(
     extensions=file_extensions,
     ignores=ignores,
     hipify_caffe2=True,
-    add_static_casts_option=True,
-    hip_suffix=args.hip_suffix)
+    add_static_casts_option=True)
