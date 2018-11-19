@@ -1012,7 +1012,7 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
       tau: non-negative scalar temperature
       hard: if ``True``, the returned samples will be discretized as one-hot vectors,
             but will be differentiated as if it is the soft sample in autograd
-      dim (int): A dimension along which softmax will be computed.  Default: -1.
+      dim (int): A dimension along which softmax will be computed. Default: -1.
 
     Returns:
       Sampled tensor of same shape as `logits` from the Gumbel-Softmax distribution.
