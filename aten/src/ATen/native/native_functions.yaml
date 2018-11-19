@@ -2983,10 +2983,10 @@
 
 ## NN wrappers
 
-- func: binary_cross_entropy_out(Tensor output, Tensor self, Tensor target, Tensor weight={}, int64_t reduction=Reduction::Mean) -> Tensor
+- func: binary_cross_entropy_out(Tensor output, Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean) -> Tensor
   python_module: nn
 
-- func: binary_cross_entropy(Tensor self, Tensor target, Tensor weight={}, int64_t reduction=Reduction::Mean) -> Tensor
+- func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean) -> Tensor
   python_module: nn
 
 - func: binary_cross_entropy_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, Tensor weight, int64_t reduction) -> Tensor
