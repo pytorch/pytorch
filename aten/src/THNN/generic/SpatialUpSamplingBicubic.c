@@ -33,7 +33,7 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
     THTensor *output,
     int output_height,
     int output_width,
-    bool align_corners){
+    bool align_corners) {
 
   const int nbatch = THTensor_(size)(input, 0);
   const int channels = THTensor_(size)(input, 1);
@@ -114,7 +114,7 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
         }
 
         // Interpolate in the y direction using x interpolations
-        odata[output_y * output_width + output_x] = cubic_interp1d<scalar_t>(
+        out[output_y * output_width + output_x] = cubic_interp1d<scalar_t>(
           coefficients[0],
           coefficients[1],
           coefficients[2],
