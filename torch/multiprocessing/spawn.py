@@ -18,8 +18,20 @@ def _wrap(fn, i, args, error_queue):
         sys.exit(1)
 
 
+def _python_version_check():
+    if sys.version_info < (3, 4):
+        raise RuntimeError("Requires python 3.4 or higher to use "
+                           "torch.multiprocessing.spawn and "
+                           "torch.multiprocessing.SpawnContext helper "
+                           "to launch multiple processes. If you are using "
+                           "this for distributed training and have a lower "
+                           "version of python, please use "
+                           "torch.distributed.launch instead.")
+
+
 class SpawnContext:
     def __init__(self, processes, error_queues):
+        _python_version_check()
         self.error_queues = error_queues
         self.processes = processes
         self.sentinels = {
@@ -119,6 +131,7 @@ def spawn(fn, args=(), nprocs=1, join=True):
         :class:`~SpawnContext` if ``join`` is ``False``
 
     """
+    _python_version_check()
     mp = multiprocessing.get_context('spawn')
     error_queues = []
     processes = []

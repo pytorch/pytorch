@@ -814,8 +814,8 @@ void testOpenGLConcat(int N, std::vector<int> Cs, int H, int W, bool tiling = fa
             << "H: " << H << ", W: " << W;
   Workspace ws;
   for (int i = 0; i < Cs.size(); i++) {
-    auto* t = BlobGetMutableTensor(
-        ws.CreateBlob("X_cpu" + caffe2::to_string(i)), CPU);
+    auto* t =
+        BlobGetMutableTensor(ws.CreateBlob("X_cpu" + c10::to_string(i)), CPU);
     t->Resize(N, Cs[i], H, W);
     CPUContext ctx0;
     // Too noisy.
@@ -826,8 +826,8 @@ void testOpenGLConcat(int N, std::vector<int> Cs, int H, int W, bool tiling = fa
   for (int i = 0; i < Cs.size(); i++) {
     auto& op = *(netdef.add_op());
     op.set_type("CopyToOpenGL");
-    op.add_input("X_cpu" + caffe2::to_string(i));
-    op.add_output("X_gl" + caffe2::to_string(i));
+    op.add_input("X_cpu" + c10::to_string(i));
+    op.add_output("X_gl" + c10::to_string(i));
     if (tiling) {
       int tile_x = 1, tile_y = 1;
       computeOutputTiles(Cs[i], tile_x, tile_y);
@@ -849,7 +849,7 @@ void testOpenGLConcat(int N, std::vector<int> Cs, int H, int W, bool tiling = fa
     auto& op = *(netdef.add_op());
     op.set_type("OpenGLConcat");
     for (int i = 0; i < Cs.size(); i++) {
-      op.add_input("X_gl" + caffe2::to_string(i));
+      op.add_input("X_gl" + c10::to_string(i));
     }
     {
       auto& arg = *(op.add_arg());
@@ -871,7 +871,7 @@ void testOpenGLConcat(int N, std::vector<int> Cs, int H, int W, bool tiling = fa
     auto& op = *(netdef.add_op());
     op.set_type("Concat");
     for (int i = 0; i < Cs.size(); i++) {
-      op.add_input("X_cpu" + caffe2::to_string(i));
+      op.add_input("X_cpu" + c10::to_string(i));
     }
     auto& arg = *(op.add_arg());
     arg.set_name("order");
