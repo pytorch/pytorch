@@ -2095,7 +2095,8 @@ class TestNN(NNTestCase):
         self.assertEqual(input.grad, inputf.grad.to(dtype), prec=0)
 
     def _test_gumbel_softmax_st_shapes(self, cuda, dtype, shape, dim, count_expected):
-        logits = torch.randn(shape, dtype=dtype)
+        logits = torch.randn(shape, dtype=torch.float)
+        logits = logits.to(dtype)
         if cuda:
             logits = logits.cuda()
 
@@ -2141,6 +2142,9 @@ class TestNN(NNTestCase):
 
     @repeat_test_for_types(NO_HALF_TENSORTYPES)
     def test_gumbel_softmax(self, dtype=torch.float):
+        """
+        NO_HALF_TENSORTYPES because most half-ops doesnt work on cpu.
+        """
         self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5], dim=0, count_expected=1)
         self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5], dim=-1, count_expected=1)
         self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5, 4], dim=1, count_expected=5)
@@ -2150,7 +2154,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @skipIfRocm
     def test_gumbel_softmax_cuda(self, dtype=torch.float):
         self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5], dim=0, count_expected=1)
         self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5], dim=-1, count_expected=1)
