@@ -50,7 +50,7 @@ class MethodDecoder {
 
   void buildIntermediateValue(Value* value, const std::string& name);
 
-  at::ScalarType onnxTypeToATenType(onnx::TensorProto_DataType tensor_proto);
+  at::ScalarType onnxTypeToATenType(int32_t tensor_proto);
 
   at::Tensor buildTensor(const onnx::TensorProto& tensor_proto);
 
@@ -70,8 +70,7 @@ class MethodDecoder {
   std::unordered_map<std::string, const onnx::TypeProto*> value_type_map_;
 };
 
-at::ScalarType MethodDecoder::onnxTypeToATenType(
-    onnx::TensorProto_DataType onnx_type) {
+at::ScalarType MethodDecoder::onnxTypeToATenType(int32_t onnx_type) {
   switch(onnx_type) {
     case onnx::TensorProto_DataType_UINT8:
       return at::kByte;
@@ -473,7 +472,7 @@ class ScriptModuleDeserializer final {
     }
     auto type = at::typeMetaToScalarType(
         caffe2::DataTypeToTypeMeta(tensor_proto.data_type()));
-    uint64_t record_id = caffe2::stoull(external_data.record_id());
+    uint64_t record_id = c10::stoull(external_data.record_id());
     AT_ASSERT(record_id != 0);
     auto storage_it = storageMap_.find(record_id);
     if (storage_it == storageMap_.end()) {

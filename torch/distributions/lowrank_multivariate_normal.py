@@ -4,7 +4,7 @@ import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.multivariate_normal import (_batch_diag, _batch_mahalanobis, _batch_mv,
-                                                     _batch_potrf_lower, _batch_trtrs_lower)
+                                                     _batch_trtrs_lower)
 from torch.distributions.utils import _standard_normal, lazy_property
 
 
@@ -27,7 +27,7 @@ def _batch_capacitance_tril(W, D):
     Wt_Dinv = W.transpose(-1, -2) / D.unsqueeze(-2)
     K = torch.matmul(Wt_Dinv, W).contiguous()
     K.view(-1, m * m)[:, ::m + 1] += 1  # add identity matrix to K
-    return _batch_potrf_lower(K)
+    return torch.cholesky(K)
 
 
 def _batch_lowrank_logdet(W, D, capacitance_tril):
@@ -150,7 +150,7 @@ class LowRankMultivariateNormal(Distribution):
         Dinvsqrt_W = self.cov_factor / cov_diag_sqrt_unsqueeze
         K = torch.matmul(Dinvsqrt_W, Dinvsqrt_W.transpose(-1, -2)).contiguous()
         K.view(-1, n * n)[:, ::n + 1] += 1  # add identity matrix to K
-        return cov_diag_sqrt_unsqueeze * _batch_potrf_lower(K)
+        return cov_diag_sqrt_unsqueeze * torch.cholesky(K)
 
     @lazy_property
     def covariance_matrix(self):

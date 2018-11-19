@@ -52,7 +52,7 @@
 namespace at {
 namespace cuda {
 
-namespace detail {
+namespace impl {
 
 struct CUDAStreamInternals;
 
@@ -71,7 +71,7 @@ AT_CUDA_API void CUDAStream_uncheckedSetStream(CUDAStreamInternals* internals);
 AT_CUDA_API cudaStream_t CUDAStream_stream(const CUDAStreamInternals*);
 AT_CUDA_API int64_t CUDAStream_device(const CUDAStreamInternals*);
 
-} // namespace detail
+} // namespace impl
 
 // RAII for a CUDA stream
 // Allows use as a cudaStream_t, copying, moving, and metadata access.
@@ -79,7 +79,7 @@ struct AT_CUDA_API CUDAStream {
 
   enum Unchecked { UNCHECKED };
 
-  explicit CUDAStream(const detail::CUDAStreamInternals*);
+  explicit CUDAStream(const impl::CUDAStreamInternals*);
 
   explicit CUDAStream(Stream stream) : stream_(stream) {
     AT_CHECK(stream_.device_type() == DeviceType::CUDA);
@@ -94,8 +94,8 @@ struct AT_CUDA_API CUDAStream {
   // Getters
   int64_t device_index() const { return stream_.device_index(); }
   Device device() const { return Device(DeviceType::CUDA, device_index()); }
-  cudaStream_t stream() const { return detail::CUDAStream_stream(internals()); }
-  detail::CUDAStreamInternals* internals() const;
+  cudaStream_t stream() const { return impl::CUDAStream_stream(internals()); }
+  impl::CUDAStreamInternals* internals() const;
 
   Stream unwrap() const { return stream_; }
 
