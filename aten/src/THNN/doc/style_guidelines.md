@@ -36,7 +36,7 @@ e.g.
 void THNN_(ClassNLLCriterion_updateOutput)(
           THNNState* state,
           THTensor *input,
-          THLongTensor *target,
+          THTensor *target,
           THTensor *output,
           THTensor *weights,
           THTensor *total_weight,

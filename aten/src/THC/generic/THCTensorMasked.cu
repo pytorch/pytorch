@@ -20,7 +20,7 @@ void THCTensor_(maskedFill)(THCState* state,
 }
 
 void THCTensor_(maskedFillByte)(THCState* state,
-                                THCTensor *tensor, THByteTensor *mask, scalar_t value)
+                                THCTensor *tensor, THTensor *mask, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
@@ -96,7 +96,7 @@ void THCTensor_(maskedCopy)(THCState* state,
 }
 
 void THCTensor_(maskedCopyByte)(THCState* state,
-                                THCTensor *tensor, THByteTensor *mask, THCTensor *src) {
+                                THCTensor *tensor, THTensor *mask, THCTensor *src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
   THCudaByteTensor_copyByte(state, maskCuda, mask);
@@ -167,7 +167,7 @@ void THCTensor_(maskedSelect)(THCState* state,
 
 // FIXME: remove now that we have THCudaByteTensor?
 void THCTensor_(maskedSelectByte)(THCState* state,
-                                  THCTensor *tensor, THCTensor *src, THByteTensor *mask)
+                                  THCTensor *tensor, THCTensor *src, THTensor *mask)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});

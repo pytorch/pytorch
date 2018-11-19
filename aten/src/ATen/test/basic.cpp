@@ -4,9 +4,9 @@
 #include "ATen/core/Reduction.h"
 
 // for TH compat test only...
-struct THFloatTensor;
-extern "C" THFloatTensor * THFloatTensor_newWithSize2d(size_t a, size_t b);
-extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
+struct THTensor;
+extern "C" THTensor * THFloatTensor_newWithSize2d(size_t a, size_t b);
+extern "C" void THFloatTensor_fill(THTensor *, float v);
 
 #include <iostream>
 #include <chrono>
@@ -206,7 +206,7 @@ void TestZeroDim(Type& type) {
 
 void TestTensorFromTH() {
   int a = 4;
-  THFloatTensor* t = THFloatTensor_newWithSize2d(a, a);
+  THTensor* t = THFloatTensor_newWithSize2d(a, a);
   THFloatTensor_fill(t, a);
   Tensor tt = CPU(kFloat).unsafeTensorFromTH(t, false);
   ASSERT_NO_THROW(tt);

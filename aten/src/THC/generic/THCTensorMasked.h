@@ -10,7 +10,7 @@ THC_API void THCTensor_(maskedFill)(THCState *state,
 // FIXME: remove now that we have THCudaByteTensor?
 THC_API void THCTensor_(maskedFillByte)(THCState *state,
                                         THCTensor *tensor,
-                                        THByteTensor *mask,
+                                        THTensor *mask,
                                         scalar_t value);
 
 THC_API void THCTensor_(maskedCopy)(THCState *state,
@@ -21,7 +21,7 @@ THC_API void THCTensor_(maskedCopy)(THCState *state,
 // FIXME: remove now that we have THCudaByteTensor?
 THC_API void THCTensor_(maskedCopyByte)(THCState *state,
                                         THCTensor *tensor,
-                                        THByteTensor *mask,
+                                        THTensor *mask,
                                         THCTensor *src);
 
 THC_API void THCTensor_(maskedSelect)(THCState *state,
@@ -33,6 +33,6 @@ THC_API void THCTensor_(maskedSelect)(THCState *state,
 THC_API void THCTensor_(maskedSelectByte)(THCState *state,
                                           THCTensor *tensor,
                                           THCTensor *src,
-                                          THByteTensor *mask);
+                                          THTensor *mask);
 
 #endif

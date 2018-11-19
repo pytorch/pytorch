@@ -44,7 +44,7 @@ __host__ void createGeneratorState(THCGenerator* gen, uint64_t seed)
   gen->state.philox_seed_offset = 0;
 }
 
-__host__ void THCRandom_getRNGState(THCState* state, THByteTensor *rng_state)
+__host__ void THCRandom_getRNGState(THCState* state, THTensor *rng_state)
 {
   THCGenerator* gen = THCRandom_getGenerator(state);
   std::lock_guard<std::mutex> lock(gen->mutex);
@@ -68,7 +68,7 @@ __global__ void set_rngstate_kernel(curandStateMtgp32 *state, mtgp32_kernel_para
   state[threadIdx.x].k = kernel;
 }
 
-__host__ void THCRandom_setRNGState(THCState* state, THByteTensor *rng_state)
+__host__ void THCRandom_setRNGState(THCState* state, THTensor *rng_state)
 {
   THCGenerator* gen = THCRandom_getGenerator(state);
   std::lock_guard<std::mutex> lock(gen->mutex);

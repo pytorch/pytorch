@@ -21,7 +21,7 @@
 #define THNN_INDEXLINEAR_SIGN(a) ( ( (a) < 0 )  ?  -1   : ( (a) > 0 ) )
 #endif
 
-static bool THNN_(checkKeysValues)(THLongTensor* keys, THTensor* values)
+static bool THNN_(checkKeysValues)(THTensor* keys, THTensor* values)
 {
   return THLongTensor_size(keys, 0) == THTensor_(nElement)(values)
                 && THTensor_(nDimensionLegacyAll)(values) == 1
@@ -30,11 +30,11 @@ static bool THNN_(checkKeysValues)(THLongTensor* keys, THTensor* values)
 
 void THNN_(IndexLinear_updateOutput)(
           THNNState *state,
-          THLongTensor *keys,
+          THTensor *keys,
           int64_t keysOffset,
           THTensor *values,
-          THLongTensor *sizes,
-          THLongTensor *cumSumSizes,
+          THTensor *sizes,
+          THTensor *cumSumSizes,
           THTensor *output,
           THTensor *weight,
           THTensor *bias,
@@ -241,8 +241,8 @@ void THNN_(IndexLinear_updateParameters)(
           THTensor *gradBias,
           THTensor *weight,
           THTensor *bias,
-          THLongTensor *runningKeys,
-          THLongTensor *cumSumSizes,
+          THTensor *runningKeys,
+          THTensor *cumSumSizes,
           int64_t keysOffset,
           accreal weightDecay_,
           accreal learningRate_)
@@ -381,11 +381,11 @@ void THNN_(IndexLinear_updateParameters)(
 
 void THNN_(IndexLinear_accUpdateGradParameters)(
           THNNState *state,
-          THLongTensor *keys,
+          THTensor *keys,
           int64_t keysOffset,
           THTensor *values,
-          THLongTensor *sizes,
-          THLongTensor *cumSumSizes,
+          THTensor *sizes,
+          THTensor *cumSumSizes,
           THTensor *gradOutput,
           THTensor *weight,
           THTensor *bias,
@@ -580,11 +580,11 @@ void THNN_(IndexLinear_accUpdateGradParameters)(
 
 void THNN_(IndexLinear_accGradParameters)(
           THNNState *state,
-          THLongTensor *keys,
+          THTensor *keys,
           int64_t keysOffset,
           THTensor *values,
-          THLongTensor *sizes,
-          THLongTensor *cumSumSizes,
+          THTensor *sizes,
+          THTensor *cumSumSizes,
           THTensor *gradOutput,
           THTensor *gradWeight,
           THTensor *gradBias,
@@ -605,7 +605,7 @@ void THNN_(IndexLinear_accGradParameters)(
   int64_t* sizesData = THLongTensor_data(sizes);
 
   /* COmpute the cumulative sizes */
-  THLongTensor* cumSizes = THLongTensor_new();
+  THTensor* cumSizes = THLongTensor_new();
   THLongTensor_cumsum(cumSizes, sizes, 0);
   int64_t* cumSizesData = THLongTensor_data(cumSizes);
 

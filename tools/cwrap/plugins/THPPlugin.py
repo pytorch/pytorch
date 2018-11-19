@@ -8,10 +8,10 @@ from collections import OrderedDict
 class THPPlugin(CWrapPlugin):
 
     TYPE_UNPACK = {
-        'THFloatTensor*': Template('((THPFloatTensor*)$arg)->cdata'),
-        'THDoubleTensor*': Template('((THPDoubleTensor*)$arg)->cdata'),
-        'THLongTensor*': Template('((THPLongTensor*)$arg)->cdata'),
-        'THIntTensor*': Template('((THPIntTensor*)$arg)->cdata'),
+        'THTensor*': Template('((THPFloatTensor*)$arg)->cdata'),
+        'THTensor*': Template('((THPDoubleTensor*)$arg)->cdata'),
+        'THTensor*': Template('((THPLongTensor*)$arg)->cdata'),
+        'THTensor*': Template('((THPIntTensor*)$arg)->cdata'),
         'THTensor*': Template('((THPTensor*)$arg)->cdata'),
         'THBoolTensor*': Template('((THPBoolTensor*)$arg)->cdata'),
         'THIndexTensor*': Template('((THPIndexTensor*)$arg)->cdata'),
@@ -47,10 +47,10 @@ class THPPlugin(CWrapPlugin):
     }
 
     TYPE_CHECK = {
-        'THDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THPDoubleTensorClass'),
-        'THFloatTensor*': Template('(PyObject*)Py_TYPE($arg) == THPFloatTensorClass'),
-        'THLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THPLongTensorClass'),
-        'THIntTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIntTensorClass'),
+        'THTensor*': Template('(PyObject*)Py_TYPE($arg) == THPDoubleTensorClass'),
+        'THTensor*': Template('(PyObject*)Py_TYPE($arg) == THPFloatTensorClass'),
+        'THTensor*': Template('(PyObject*)Py_TYPE($arg) == THPLongTensorClass'),
+        'THTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIntTensorClass'),
         'THTensor*': Template('(PyObject*)Py_TYPE($arg) == THPTensorClass'),
         'THBoolTensor*': Template('(PyObject*)Py_TYPE($arg) == THPBoolTensorClass'),
         'THIndexTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIndexTensorClass'),
@@ -91,7 +91,7 @@ class THPPlugin(CWrapPlugin):
         'THTensor*': Template('return THPTensor_(New)($result);'),
         'THSTensor*': Template('return THSPTensor_(New)($result);'),
         'THIndexTensor*': Template('return THPIndexTensor_(New)($result);'),
-        'THLongTensor*': Template('return THPLongTensor_New($result);'),
+        'THTensor*': Template('return THPLongTensor_New($result);'),
         'THLongStorage*': Template('return THPLongStorage_New($result);'),
         'THCudaIntTensor*': Template('return THCPIntTensor_New($result);'),
         'THCudaLongTensor*': Template('return THCPLongTensor_New($result);'),
@@ -158,8 +158,8 @@ ${cpu}
 
     ALLOCATE_TYPE = {
         'THTensor*': _allocate('', ALLOCATE_TMPL),
-        'THLongTensor*': _allocate('Long', ALLOCATE_TMPL),
-        'THIntTensor*': _allocate('Int', ALLOCATE_TMPL),
+        'THTensor*': _allocate('Long', ALLOCATE_TMPL),
+        'THTensor*': _allocate('Int', ALLOCATE_TMPL),
         'THBoolTensor*': _allocate('Byte', ALLOCATE_TMPL, ALLOCATE_CUDA),
         'THIndexTensor*': _allocate('Long', ALLOCATE_TMPL, ALLOCATE_CUDA),
         'THIntegerTensor*': _allocate('Int', ALLOCATE_TMPL, ALLOCATE_CUDA),
@@ -173,13 +173,13 @@ ${cpu}
         'THStorage*': '" THPStorageStr "',
         'THGenerator*': 'torch.Generator',
         'THLongStorage*': '" THPModuleStr "LongStorage',
-        'THLongTensor*': '" THPModuleStr "LongTensor',
-        'THIntTensor*': '" THPModuleStr "IntTensor',
+        'THTensor*': '" THPModuleStr "LongTensor',
+        'THTensor*': '" THPModuleStr "IntTensor',
         'THBoolTensor*': '" THPModuleStr "ByteTensor',
         'THIndexTensor*': '" THPModuleStr "LongTensor',
         'THIntegerTensor*': '" THPModuleStr "IntTensor',
-        'THFloatTensor*': '" THPModuleStr "FloatTensor',
-        'THDoubleTensor*': '" THPModuleStr "DoubleTensor',
+        'THTensor*': '" THPModuleStr "FloatTensor',
+        'THTensor*': '" THPModuleStr "DoubleTensor',
         'THCudaTensor*': 'torch.cuda.FloatTensor',
         'THCudaDoubleTensor*': 'torch.cuda.DoubleTensor',
         'THCudaIntTensor*': 'torch.cuda.IntTensor',
@@ -431,7 +431,7 @@ ${cpu}
             return " || ".join(defineds)
 
         for declaration in declarations:
-            # Disable all methods for THHalfTensor, unless cpu_half is True
+            # Disable all methods for THTensor, unless cpu_half is True
 
             dfstr = backends_types_to_defined_if_string(declaration)
             if len(dfstr) > 0:

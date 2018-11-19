@@ -59,7 +59,7 @@ void THNN_(SparseLinear_updateOutput)(
 
   int64_t nnz = THTensor_(size)(input, 0);
 
-  THLongTensor * csr = THLongTensor_newWithSize1d(batchSize+1);
+  THTensor * csr = THLongTensor_newWithSize1d(batchSize+1);
   THLongTensor_zero(csr);
 
   weight = THTensor_(newContiguous)(weight);
@@ -193,7 +193,7 @@ void THNN_(SparseLinear_accGradParameters)(
 
   int64_t nnz = THTensor_(size)(input, 0);
 
-  THLongTensor* csc = THLongTensor_newWithSize1d(inDim+1);
+  THTensor* csc = THLongTensor_newWithSize1d(inDim+1);
   THLongTensor_zero(csc);
   weight = THTensor_(newContiguous)(weight);
 
@@ -359,7 +359,7 @@ void THNN_(SparseLinear_updateParameters)(
   THTensor_(resize1d)(offsets, cnt);
 
   THTensor* uniqueOffsets = THTensor_(new)();
-  THLongTensor* ri = THLongTensor_new();
+  THTensor* ri = THLongTensor_new();
   THTensor_(sort)(uniqueOffsets, ri, offsets, 0, 0);
   THLongTensor_free(ri);
   c10::raw::intrusive_ptr::decref(offsets);
@@ -435,7 +435,7 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
   THTensor_(resize1d)(offsets, cnt);
 
   THTensor* uniqueOffsets = THTensor_(new)();
-  THLongTensor* ri = THLongTensor_new();
+  THTensor* ri = THLongTensor_new();
   THTensor_(sort)(uniqueOffsets, ri, offsets, 0, 0);
   THLongTensor_free(ri);
   c10::raw::intrusive_ptr::decref(offsets);

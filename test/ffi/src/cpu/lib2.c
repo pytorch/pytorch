@@ -1,6 +1,6 @@
 #include <TH/TH.h>
 
-void bad_func(THFloatTensor *tensor, int a, float b)
+void bad_func(THTensor *tensor, int a, float b)
 {
   THFloatTensor_mul(tensor, tensor, a);
   THFloatTensor_add(tensor, tensor, b);

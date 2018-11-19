@@ -29,8 +29,8 @@ COMMON_TRANSFORMS = {
 }
 COMMON_CPU_TRANSFORMS = {
     'THNNState*': 'void*',
-    'THIndexTensor*': 'THLongTensor*',
-    'THIntegerTensor*': 'THIntTensor*',
+    'THIndexTensor*': 'THTensor*',
+    'THIntegerTensor*': 'THTensor*',
 }
 COMMON_GPU_TRANSFORMS = {
     'THCState*': 'void*',
@@ -39,12 +39,12 @@ COMMON_GPU_TRANSFORMS = {
 
 TYPE_TRANSFORMS = {
     'Float': {
-        'THTensor*': 'THFloatTensor*',
+        'THTensor*': 'THTensor*',
         'real': 'float',
         'accreal': 'double',
     },
     'Double': {
-        'THTensor*': 'THDoubleTensor*',
+        'THTensor*': 'THTensor*',
         'real': 'double',
         'accreal': 'double',
     },

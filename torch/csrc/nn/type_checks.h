@@ -52,20 +52,20 @@ static inline bool THNN_IntTensor_Check(PyObject* obj) {
   return torch::nn::check_type(obj, at::TypeID::CPUInt);
 }
 
-static inline THFloatTensor* THNN_FloatTensor_Unpack(PyObject* obj) {
-  return torch::nn::unpack<THFloatTensor>(obj);
+static inline THTensor* THNN_FloatTensor_Unpack(PyObject* obj) {
+  return torch::nn::unpack<THTensor>(obj);
 }
 
-static inline THDoubleTensor* THNN_DoubleTensor_Unpack(PyObject* obj) {
-  return torch::nn::unpack<THDoubleTensor>(obj);
+static inline THTensor* THNN_DoubleTensor_Unpack(PyObject* obj) {
+  return torch::nn::unpack<THTensor>(obj);
 }
 
-static inline THLongTensor* THNN_LongTensor_Unpack(PyObject* obj) {
-  return torch::nn::unpack<THLongTensor>(obj);
+static inline THTensor* THNN_LongTensor_Unpack(PyObject* obj) {
+  return torch::nn::unpack<THTensor>(obj);
 }
 
-static inline THIntTensor* THNN_IntTensor_Unpack(PyObject* obj) {
-  return torch::nn::unpack<THIntTensor>(obj);
+static inline THTensor* THNN_IntTensor_Unpack(PyObject* obj) {
+  return torch::nn::unpack<THTensor>(obj);
 }
 
 #ifdef USE_CUDA

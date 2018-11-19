@@ -133,12 +133,12 @@ void THTensor_(logNormal)(THTensor *self, THGenerator *_generator, double mean, 
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)THRandom_logNormal(_generator, mean, stdv););
 }
 
-void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor *q)
+void THTensor_(multinomialAliasSetup)(THTensor *probs, THTensor *J, THTensor *q)
 {
   int64_t inputsize = THTensor_(nElement)(probs);
   int64_t i = 0;
-  THLongTensor *smaller = THLongTensor_newWithSize1d(inputsize);
-  THLongTensor *larger = THLongTensor_newWithSize1d(inputsize);
+  THTensor *smaller = THLongTensor_newWithSize1d(inputsize);
+  THTensor *larger = THLongTensor_newWithSize1d(inputsize);
   int64_t small_c = 0;
   int64_t large_c = 0;
   THLongTensor_resize1d(J, inputsize);
@@ -220,7 +220,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   THLongTensor_free(smaller);
   THLongTensor_free(larger);
 }
-void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator, THLongTensor *J, THTensor *q)
+void THTensor_(multinomialAliasDraw)(THTensor *self, THGenerator *_generator, THTensor *J, THTensor *q)
 {
   std::lock_guard<std::mutex> lock(_generator->mutex);
   int64_t K = THLongTensor_nElement(J);
@@ -244,13 +244,13 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator
       THLongTensor_fastSet1d(self, i, sample_idx-1L);
     }
 }
-void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement)
+void THTensor_(multinomial)(THTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement)
 {
   std::lock_guard<std::mutex> lock(_generator->mutex);
   int64_t start_dim = THTensor_(nDimensionLegacyAll)(prob_dist);
   int64_t n_dist;
   int64_t n_categories;
-  THDoubleTensor* cum_dist;
+  THTensor* cum_dist;
   int64_t i,j,k;
 
   if (start_dim == 1)

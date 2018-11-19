@@ -27,7 +27,7 @@ void THTensor_(zero)(THTensor *r_)
   THTensor_(fill)(r_, 0);
 }
 
-void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
+void THTensor_(maskedFill)(THTensor *tensor, THTensor *mask, scalar_t value)
 {
 #ifdef _OPENMP
   int64_t tensor_size = THTensor_(nElement)(tensor);
@@ -55,7 +55,7 @@ void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
     });
 }
 
-void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
+void THTensor_(maskedCopy)(THTensor *tensor, THTensor *mask, THTensor* src )
 {
   THTensor *srct = THTensor_(newContiguous)(src);
   scalar_t *src_data = srct->data<scalar_t>();
@@ -90,7 +90,7 @@ void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
   c10::raw::intrusive_ptr::decref(srct);
 }
 
-void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
+void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THTensor *mask)
 {
   ptrdiff_t numel = THByteTensor_sumall(mask);
   scalar_t *tensor_data;
@@ -115,7 +115,7 @@ void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask
 }
 
 // Finds non-zero elements of a tensor and returns their subscripts
-void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
+void THTensor_(nonzero)(THTensor *subscript, THTensor *tensor)
 {
   ptrdiff_t numel = 0;
   int64_t *subscript_data;
@@ -154,7 +154,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
                   ++i;);
 }
 
-void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
+void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THTensor *index)
 {
   ptrdiff_t i, numel;
   THTensor *tSlice, *sSlice;
@@ -228,7 +228,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   THLongTensor_free(index);
 }
 
-void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
+void THTensor_(indexCopy)(THTensor *tensor, int dim, THTensor *index, THTensor *src)
 {
   ptrdiff_t i, numel;
   THTensor *tSlice, *sSlice;
@@ -286,7 +286,7 @@ static inline int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t nu
   return linearIndex < 0 ? linearIndex + numel : linearIndex;
 }
 
-void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
+void THTensor_(take)(THTensor *r_, THTensor *src, THTensor *index)
 {
   THTensor_(resizeNd)(r_, index->dim(), THTensor_getSizePtr(index), NULL);
   THTensor* dst = THTensor_(newContiguous)(r_);
@@ -329,7 +329,7 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
   THTensor_(freeCopyTo)(dst, r_);
 }
 
-void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int accumulate)
+void THTensor_(put)(THTensor *tensor, THTensor *index, THTensor *src, int accumulate)
 {
   THArgCheck(THLongTensor_nElement(index) == THTensor_(nElement)(src), 3,
     "src should have the same number of elements as index");
@@ -355,7 +355,7 @@ void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int ac
   THLongTensor_free(index);
 }
 
-void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
+void THTensor_(indexAdd)(THTensor *tensor, int dim, THTensor *index, THTensor *src)
 {
   ptrdiff_t i, numel;
   THTensor *tSlice, *sSlice;
@@ -396,7 +396,7 @@ void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTenso
   THLongTensor_free(index);
 }
 
-void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
+void THTensor_(indexFill)(THTensor *tensor, int dim, THTensor *index, scalar_t val)
 {
   ptrdiff_t i, numel;
   THTensor *tSlice;
@@ -426,7 +426,7 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
   THLongTensor_free(index);
 }
 
-void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
+void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THTensor *index)
 {
   int64_t elems_per_row, i, idx;
 
@@ -453,7 +453,7 @@ void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *i
                        })
 }
 
-void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
+void THTensor_(scatter)(THTensor *tensor, int dim, THTensor *index, THTensor *src)
 {
   int64_t elems_per_row, i, idx;
   int index_ndim_legacy_all = THTensor_nDimensionLegacyAll(index);
@@ -485,7 +485,7 @@ void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor
                        })
 }
 
-void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
+void THTensor_(scatterAdd)(THTensor *tensor, int dim, THTensor *index, THTensor *src)
 {
   int64_t elems_per_row, i, idx;
   int index_ndim_legacy_all = THTensor_nDimensionLegacyAll(index);
@@ -517,7 +517,7 @@ void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTen
                        })
 }
 
-void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
+void THTensor_(scatterFill)(THTensor *tensor, int dim, THTensor *index, scalar_t val)
 {
   int64_t elems_per_row, i, idx;
   int index_ndim_legacy_all = THLongTensor_nDimensionLegacyAll(index);

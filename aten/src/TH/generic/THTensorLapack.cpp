@@ -124,7 +124,7 @@ void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   }
 
   int n, nrhs, lda, ldb, info;
-  THIntTensor *ipiv;
+  THTensor *ipiv;
   THTensor *ra__;  // working version of A matrix to be passed into lapack GELS
   THTensor *rb__;  // working version of B matrix to be passed into lapack GELS
 
@@ -422,7 +422,7 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   int k, m, n, lda, ldu, ldvt, lwork, info;
   THTensor *work;
   scalar_t wkopt;
-  THIntTensor *iwork;
+  THTensor *iwork;
 
   THTensor *ra__ = NULL;
   THTensor *ru__ = NULL;
@@ -545,7 +545,7 @@ void THTensor_(getri)(THTensor *ra_, THTensor *a)
 
   int m, n, lda, info, lwork;
   scalar_t wkopt;
-  THIntTensor *ipiv;
+  THTensor *ipiv;
   THTensor *work;
   THTensor *ra__ = NULL;
 
@@ -759,7 +759,7 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a, const char *uplo)
  * `tol`    - double; user defined tolerance, or < 0 for automatic choice.
               The algorithm terminates when the pivot <= tol.
  */
-void THTensor_(pstrf)(THTensor *ra_, THIntTensor *rpiv_, THTensor *a, const char *uplo, scalar_t tol) {
+void THTensor_(pstrf)(THTensor *ra_, THTensor *rpiv_, THTensor *a, const char *uplo, scalar_t tol) {
   THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 1, "A should be 2 dimensional");
   THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
 
@@ -998,7 +998,7 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, co
   c10::raw::intrusive_ptr::decref(work);
 }
 
-void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinfo_, int pivot, THTensor *a)
+void THTensor_(btrifact)(THTensor *ra_, THTensor *rpivots_, THTensor *rinfo_, int pivot, THTensor *a)
 {
   AT_CHECK(THTensor_(nDimension)(a) == 3, "expected 3D tensor, got size: ", a->sizes());
   if (!pivot) {
@@ -1034,7 +1034,7 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
 
   THTensor *ai = THTensor_(new)();
   THTensor *rai = THTensor_(new)();
-  THIntTensor *rpivoti = THIntTensor_new();
+  THTensor *rpivoti = THIntTensor_new();
 
   int info = 0;
   int *info_ptr = &info;
@@ -1073,7 +1073,7 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
   }
 }
 
-void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor *pivots)
+void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THTensor *pivots)
 {
   AT_CHECK(!atf->is_empty() && THTensor_(nDimensionLegacyNoScalars)(atf) == 3, "expected non-empty 3D tensor, got size: ",
            atf->sizes());
@@ -1141,7 +1141,7 @@ void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor
 
   THTensor *ai = THTensor_(new)();
   THTensor *rbi = THTensor_(new)();
-  THIntTensor *pivoti = THIntTensor_new();
+  THTensor *pivoti = THIntTensor_new();
 
   if (!THIntTensor_isContiguous(pivots)) {
       THError("Error: rpivots_ is not contiguous.");

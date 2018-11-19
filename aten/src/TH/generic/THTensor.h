@@ -15,17 +15,6 @@ typedef struct at_Tensor_Impl at_Tensor_Impl;
 #define THTensor at_Tensor_Impl
 #endif
 
-// These used to be distinct types; for some measure of backwards compatibility and documentation
-// alias these to the single THTensor type.
-#define THFloatTensor THTensor
-#define THDoubleTensor THTensor
-#define THHalfTensor THTensor
-#define THByteTensor THTensor
-#define THCharTensor THTensor
-#define THShortTensor THTensor
-#define THIntTensor THTensor
-#define THLongTensor THTensor
-
 /**** access methods ****/
 TH_API THStorage* THTensor_(storage)(const THTensor *self);
 TH_API ptrdiff_t THTensor_(storageOffset)(const THTensor *self);

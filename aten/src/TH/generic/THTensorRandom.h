@@ -17,9 +17,9 @@ TH_API void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, TH
 TH_API void THTensor_(exponential)(THTensor *self, THGenerator *_generator, double lambda);
 TH_API void THTensor_(cauchy)(THTensor *self, THGenerator *_generator, double median, double sigma);
 TH_API void THTensor_(logNormal)(THTensor *self, THGenerator *_generator, double mean, double stdv);
-TH_API void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement);
-TH_API void THTensor_(multinomialAliasSetup)(THTensor *prob_dist, THLongTensor *J, THTensor *q);
-TH_API void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator, THLongTensor *J, THTensor *q);
+TH_API void THTensor_(multinomial)(THTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement);
+TH_API void THTensor_(multinomialAliasSetup)(THTensor *prob_dist, THTensor *J, THTensor *q);
+TH_API void THTensor_(multinomialAliasDraw)(THTensor *self, THGenerator *_generator, THTensor *J, THTensor *q);
 #endif
 
 #if defined(TH_REAL_IS_BYTE)

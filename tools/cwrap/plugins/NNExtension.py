@@ -30,10 +30,10 @@ $METHODS
 class NNExtension(CWrapPlugin):
 
     TYPE_UNPACK = {
-        'THFloatTensor*': Template('THNN_FloatTensor_Unpack($arg)'),
-        'THDoubleTensor*': Template('THNN_DoubleTensor_Unpack($arg)'),
-        'THLongTensor*': Template('THNN_LongTensor_Unpack($arg)'),
-        'THIntTensor*': Template('THNN_IntTensor_Unpack($arg)'),
+        'THTensor*': Template('THNN_FloatTensor_Unpack($arg)'),
+        'THTensor*': Template('THNN_DoubleTensor_Unpack($arg)'),
+        'THTensor*': Template('THNN_LongTensor_Unpack($arg)'),
+        'THTensor*': Template('THNN_IntTensor_Unpack($arg)'),
         'THCudaHalfTensor*': Template('THNN_CudaHalfTensor_Unpack($arg)'),
         'THCudaTensor*': Template('THNN_CudaFloatTensor_Unpack($arg)'),
         'THCudaDoubleTensor*': Template('THNN_CudaDoubleTensor_Unpack($arg)'),
@@ -50,10 +50,10 @@ class NNExtension(CWrapPlugin):
     }
 
     TYPE_CHECK = {
-        'THFloatTensor*': Template('THNN_FloatTensor_Check($arg)'),
-        'THDoubleTensor*': Template('THNN_DoubleTensor_Check($arg)'),
-        'THLongTensor*': Template('THNN_LongTensor_Check($arg)'),
-        'THIntTensor*': Template('THNN_IntTensor_Check($arg)'),
+        'THTensor*': Template('THNN_FloatTensor_Check($arg)'),
+        'THTensor*': Template('THNN_DoubleTensor_Check($arg)'),
+        'THTensor*': Template('THNN_LongTensor_Check($arg)'),
+        'THTensor*': Template('THNN_IntTensor_Check($arg)'),
         'THCudaHalfTensor*': Template('THNN_CudaHalfTensor_Check($arg)'),
         'THCudaTensor*': Template('THNN_CudaFloatTensor_Check($arg)'),
         'THCudaDoubleTensor*': Template('THNN_CudaDoubleTensor_Check($arg)'),
@@ -89,12 +89,12 @@ PyObject * $name(PyObject *_unused, PyObject *args)
         'THCudaTensor*': 'torch.cuda.FloatTensor',
         'THCudaDoubleTensor*': 'torch.cuda.DoubleTensor',
         'THCudaLongTensor*': 'torch.cuda.LongTensor',
-        'THDoubleTensor*': 'torch.DoubleTensor',
-        'THFloatTensor*': 'torch.FloatTensor',
+        'THTensor*': 'torch.DoubleTensor',
+        'THTensor*': 'torch.FloatTensor',
         'THBoolTensor*': 'torch.ByteTensor',
-        'THLongTensor*': 'torch.LongTensor',
+        'THTensor*': 'torch.LongTensor',
         'THIndexTensor*': 'torch.LongTensor',
-        'THIntTensor*': 'torch.IntTensor',
+        'THTensor*': 'torch.IntTensor',
         'THLongStorage*': 'torch.LongStorage',
         'long': 'int',
         'int64_t': 'int',

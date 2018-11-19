@@ -9,10 +9,10 @@
 
 #define THNN_(NAME) TH_CONCAT_3(THNN_, Real, NAME)
 
-#define THIndexTensor THLongTensor
+#define THIndexTensor THTensor
 #define THIndexTensor_(NAME) THLongTensor_ ## NAME
 
-#define THIntegerTensor THIntTensor
+#define THIntegerTensor THTensor
 #define THIntegerTensor_(NAME) THIntTensor_ ## NAME
 
 typedef int64_t THIndex_t;
