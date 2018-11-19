@@ -135,5 +135,5 @@ namespace std {
     size_t operator()(at::cuda::CUDAStream s) const noexcept {
       return std::hash<c10::Stream>{}(s.unwrap());
     }
-  }
+  };
 } // namespace std
