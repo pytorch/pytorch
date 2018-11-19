@@ -1591,7 +1591,8 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         ret = torch._C._nn.nll_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
     elif dim == 4:
         ret = torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
-    elif dim == 3 or dim > 4:
+    else:
+        # dim == 3 or dim > 4
         n = input.size(0)
         c = input.size(1)
         out_size = (n,) + input.size()[2:]
@@ -1608,8 +1609,6 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
             out = torch._C._nn.nll_loss2d(
                 input, target, weight, reduction_enum, ignore_index)
             ret = out.view(out_size)
-    else:
-        ret = input  # TODO: remove when jit supports control flow analysis
     return ret
 
 
