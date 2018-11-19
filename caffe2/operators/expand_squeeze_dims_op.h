@@ -73,7 +73,7 @@ class SqueezeOp : public Operator<Context> {
     output->CopyFrom(input, &context_);
 
     CAFFE_ENFORCE_GT(
-        input.ndim(),
+        input.dim(),
         dims_.back(),
         "Input needs at least ",
         (dims_.back() + 1),

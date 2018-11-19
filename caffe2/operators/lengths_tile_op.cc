@@ -8,9 +8,9 @@ bool LengthsTileOp<CPUContext>::RunOnDevice() {
   auto& lengths = Input(LENGTHS);
   auto* output = Output(0);
 
-  CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTHS must be 1-D");
-  CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
-  CAFFE_ENFORCE_EQ(lengths.numel(), data.dim(0));
+  CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTHS must be 1-D");
+  CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
+  CAFFE_ENFORCE_EQ(lengths.numel(), data.size(0));
 
   // Context::CopyFrom and math::Sum need the same context to avoid race
   // conditions
@@ -28,9 +28,9 @@ bool LengthsTileOp<CPUContext>::RunOnDevice() {
   shape[0] = total_length;
   output->Resize(shape);
 
-  auto block_bytesize = data.size_from_dim(1) * data.meta().itemsize();
+  auto block_bytesize = data.size_from_dim(1) * data.dtype().itemsize();
   auto src = static_cast<const char*>(data.raw_data());
-  auto out = static_cast<char*>(output->raw_mutable_data(data.meta()));
+  auto out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
 
   for (int64_t i = 0; i < lengths_size; ++i) {
     auto length = lengths_data[i];

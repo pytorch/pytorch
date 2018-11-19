@@ -31,6 +31,7 @@ CAFFE2_API int DeviceId(const DeviceOption& option);
 CAFFE2_API bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs);
 
 CAFFE2_API bool IsCPUDeviceType(int device_type);
+CAFFE2_API bool IsGPUDeviceType(int device_type);
 
 // Common interfaces that reads file contents into a string.
 CAFFE2_API bool ReadStringFromFile(const char* filename, string* str);

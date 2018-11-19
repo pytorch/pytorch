@@ -15,37 +15,37 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   const int box_dim = rotated_ ? 5 : 4;
 
   // tscores: (num_boxes, num_classes), 0 for background
-  if (tscores.ndim() == 4) {
-    CAFFE_ENFORCE_EQ(tscores.dim(2), 1, tscores.dim(2));
-    CAFFE_ENFORCE_EQ(tscores.dim(3), 1, tscores.dim(3));
+  if (tscores.dim() == 4) {
+    CAFFE_ENFORCE_EQ(tscores.size(2), 1, tscores.size(2));
+    CAFFE_ENFORCE_EQ(tscores.size(3), 1, tscores.size(3));
   } else {
-    CAFFE_ENFORCE_EQ(tscores.ndim(), 2, tscores.ndim());
+    CAFFE_ENFORCE_EQ(tscores.dim(), 2, tscores.dim());
   }
-  CAFFE_ENFORCE(tscores.template IsType<float>(), tscores.meta().name());
+  CAFFE_ENFORCE(tscores.template IsType<float>(), tscores.dtype().name());
   // tboxes: (num_boxes, num_classes * box_dim)
-  if (tboxes.ndim() == 4) {
-    CAFFE_ENFORCE_EQ(tboxes.dim(2), 1, tboxes.dim(2));
-    CAFFE_ENFORCE_EQ(tboxes.dim(3), 1, tboxes.dim(3));
+  if (tboxes.dim() == 4) {
+    CAFFE_ENFORCE_EQ(tboxes.size(2), 1, tboxes.size(2));
+    CAFFE_ENFORCE_EQ(tboxes.size(3), 1, tboxes.size(3));
   } else {
-    CAFFE_ENFORCE_EQ(tboxes.ndim(), 2, tboxes.ndim());
+    CAFFE_ENFORCE_EQ(tboxes.dim(), 2, tboxes.dim());
   }
-  CAFFE_ENFORCE(tboxes.template IsType<float>(), tboxes.meta().name());
+  CAFFE_ENFORCE(tboxes.template IsType<float>(), tboxes.dtype().name());
 
-  int N = tscores.dim(0);
-  int num_classes = tscores.dim(1);
+  int N = tscores.size(0);
+  int num_classes = tscores.size(1);
 
-  CAFFE_ENFORCE_EQ(N, tboxes.dim(0));
-  CAFFE_ENFORCE_EQ(num_classes * box_dim, tboxes.dim(1));
+  CAFFE_ENFORCE_EQ(N, tboxes.size(0));
+  CAFFE_ENFORCE_EQ(num_classes * box_dim, tboxes.size(1));
 
   int batch_size = 1;
-  vector<float> batch_splits_default(1, tscores.dim(0));
+  vector<float> batch_splits_default(1, tscores.size(0));
   const float* batch_splits_data = batch_splits_default.data();
   if (InputSize() > 2) {
     // tscores and tboxes have items from multiple images in a batch. Get the
     // corresponding batch splits from input.
     const auto& tbatch_splits = Input(2);
-    CAFFE_ENFORCE_EQ(tbatch_splits.ndim(), 1);
-    batch_size = tbatch_splits.dim(0);
+    CAFFE_ENFORCE_EQ(tbatch_splits.dim(), 1);
+    batch_size = tbatch_splits.size(0);
     batch_splits_data = tbatch_splits.data<float>();
   }
   Eigen::Map<const EArrXf> batch_splits(batch_splits_data, batch_size);
@@ -69,16 +69,16 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   for (int b = 0; b < batch_splits.size(); ++b) {
     int num_boxes = batch_splits(b);
     Eigen::Map<const ERArrXXf> scores(
-        tscores.data<float>() + offset * tscores.dim(1),
+        tscores.data<float>() + offset * tscores.size(1),
         num_boxes,
-        tscores.dim(1));
+        tscores.size(1));
     Eigen::Map<const ERArrXXf> boxes(
-        tboxes.data<float>() + offset * tboxes.dim(1),
+        tboxes.data<float>() + offset * tboxes.size(1),
         num_boxes,
-        tboxes.dim(1));
+        tboxes.size(1));
 
     // To store updated scores if SoftNMS is used
-    ERArrXXf soft_nms_scores(num_boxes, tscores.dim(1));
+    ERArrXXf soft_nms_scores(num_boxes, tscores.size(1));
     vector<vector<int>> keeps(num_classes);
 
     // Perform nms to each class
@@ -169,7 +169,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
     total_keep_per_batch[b] = total_keep_count;
 
     // Write results
-    int cur_start_idx = out_scores->dim(0);
+    int cur_start_idx = out_scores->size(0);
     out_scores->Extend(total_keep_count, 50, &context_);
     out_boxes->Extend(total_keep_count, 50, &context_);
     out_classes->Extend(total_keep_count, 50, &context_);

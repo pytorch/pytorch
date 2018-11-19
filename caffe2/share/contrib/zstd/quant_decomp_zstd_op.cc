@@ -29,7 +29,7 @@ uint8_t* GetMutableData(int type_index, TensorCPU* tensor) {
   CAFFE_ENFORCE_EQ(
       gTypeMapper.count(type_index),
       1,
-      "Invalid type index " + caffe2::to_string(type_index) + ".");
+      "Invalid type index " + c10::to_string(type_index) + ".");
   return gTypeMapper.at(type_index)(tensor);
 }
 
@@ -92,11 +92,11 @@ bool QuantDecompZstdOp::RunOnDevice() {
       op_compressed.template IsType<uint8_t>() ||
           // array with one string
           op_compressed.template IsType<std::string>(),
-      op_compressed.meta().name());
+      op_compressed.dtype().name());
 
   // op_compressed: compressed data, 1d
   if (op_compressed.template IsType<uint8_t>()) {
-    CAFFE_ENFORCE_EQ(op_compressed.ndim(), 1, op_compressed.ndim());
+    CAFFE_ENFORCE_EQ(op_compressed.dim(), 1, op_compressed.dim());
   } else {
     // string type has 0 dimension
     CAFFE_ENFORCE_EQ(op_compressed.numel(), 1, op_compressed.numel());

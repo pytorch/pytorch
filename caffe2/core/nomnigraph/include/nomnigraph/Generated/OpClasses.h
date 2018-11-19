@@ -745,36 +745,3 @@ class Export : public NeuralNetOperator {
 
  private:
 };
-
-class GatherRanges : public NeuralNetOperator {
- public:
-  GatherRanges() : NeuralNetOperator(NNKind::GatherRanges) {}
-
-  ~GatherRanges() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(GatherRanges);
-
- private:
-};
-
-class Slice : public NeuralNetOperator {
- public:
-  Slice() : NeuralNetOperator(NNKind::Slice) {}
-
-  ~Slice() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Slice);
-
- private:
-};
-
-class MergeIdLists : public NeuralNetOperator {
- public:
-  MergeIdLists() : NeuralNetOperator(NNKind::MergeIdLists) {}
-
-  ~MergeIdLists() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(MergeIdLists);
-
- private:
-};

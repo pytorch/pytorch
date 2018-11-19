@@ -31,17 +31,17 @@ class LengthsSplitOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     const auto& L = Input(0);
-    CAFFE_ENFORCE_EQ(L.ndim(), 1, "Input `LENGTHS` should be a 1D vector.");
+    CAFFE_ENFORCE_EQ(L.dim(), 1, "Input `LENGTHS` should be a 1D vector.");
 
     if (InputSize() > 1) {
       // We potentially have n_split specified as inputs as well
       CAFFE_ENFORCE(
-          Input(1).ndim() == 1 && Input(1).numel() == 1,
+          Input(1).dim() == 1 && Input(1).numel() == 1,
           "Input `n_split` should be a vector of size 1.");
 
       const auto& input1 = Input(1);
       context_.template CopyItems<Context, CPUContext>(
-          input1.meta(), 1, input1.raw_data(), &n_split_);
+          input1.dtype(), 1, input1.raw_data(), &n_split_);
     }
 
     CAFFE_ENFORCE(

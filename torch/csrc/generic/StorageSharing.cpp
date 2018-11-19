@@ -1,6 +1,7 @@
 #ifdef USE_CUDA
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <ATen/cuda/CUDAGuard.h>
 #endif
 
 #include <random>
@@ -262,7 +263,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   size_t storage_size = (size_t)THPUtils_unpackLong(_size);
 
   int64_t device = THPUtils_unpackLong(_device);
-  at::DeviceGuard device_guard(device);
+  at::cuda::CUDAGuard device_guard(device);
 
   char *buffer;
   Py_ssize_t handle_size;

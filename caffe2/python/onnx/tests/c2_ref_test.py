@@ -8,6 +8,7 @@ from __future__ import unicode_literals
 
 import json
 import os
+import six
 import unittest
 
 from caffe2.python import core
@@ -24,12 +25,12 @@ import caffe2.python.onnx.backend as c2
 import numpy as np
 from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
 
-from caffe2.python.onnx.tests.test_utils import TestCase
+from caffe2.python.onnx.tests.test_utils import DownloadingTestCase
 
 import caffe2.python._import_c_extension as C
 
 
-class TestCaffe2Basic(TestCase):
+class TestCaffe2Basic(DownloadingTestCase):
     def test_dummy_name(self):
         g = C.DummyName()
         n1 = g.new_dummy_name()
@@ -43,9 +44,9 @@ class TestCaffe2Basic(TestCase):
         b2.convert_node(node_def.SerializeToString())
 
         bad_node_def = make_node("Add", inputs=["X", "Y"], outputs=["Z"], foo=42, bar=56)
-        with self.assertRaisesRegexp(
-                RuntimeError,
-                "Don't know how to map unexpected argument (foo|bar)"):
+        with six.assertRaisesRegex(self,
+                                   RuntimeError,
+                                   "Don't know how to map unexpected argument (foo|bar)"):
             b2.convert_node(bad_node_def.SerializeToString())
 
     def test_relu_graph(self):
@@ -488,6 +489,36 @@ class TestCaffe2Basic(TestCase):
             np.testing.assert_almost_equal(output[0], vals)
             np.testing.assert_almost_equal(ws.FetchBlob(op.output[0]), vals)
 
+    def test_concat(self):
+        I0 = np.random.randn(20, 4).astype(np.float32)
+        I1 = np.random.randn(20, 4).astype(np.float32)
+        for i in range(2):
+            predict_net = caffe2_pb2.NetDef()
+            predict_net.name = 'test-concat-net'
+            predict_net.external_input[:] = ['I0', 'I1']
+            predict_net.external_output[:] = ['Y', 'output_dim']
+            predict_net.op.extend([
+                core.CreateOperator(
+                    'Concat',
+                    inputs=['I0', 'I1'],
+                    outputs=['Y', 'output_dim'],
+                    axis=1,
+                    add_axis=(1 if i == 0 else 0),
+                ),
+            ])
+            ws, c2_outputs = c2_native_run_net(
+                init_net=None,
+                predict_net=predict_net,
+                inputs=[I0, I1])
+            onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+                predict_net=predict_net,
+                value_info={
+                    'I0': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[I0.dtype], I0.shape),
+                    'I1': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[I1.dtype], I1.shape),
+                })
+            onnx_outputs = c2.run_model(onnx_model, inputs=[I0, I1])
+            self.assertSameOutputs(c2_outputs, onnx_outputs)
+
     def test_slice(self):
         X = np.random.randn(1, 2, 3).astype(np.float32)
         starts = np.array([0, 1, 0], dtype=np.int32)
@@ -550,7 +581,7 @@ class TestCaffe2Basic(TestCase):
             self.assertSameOutputs(c2_outputs, onnx_outputs)
 
 
-class TestCaffe2End2End(TestCase):
+class TestCaffe2End2End(DownloadingTestCase):
     def _model_dir(self, model):
         caffe2_home = os.path.expanduser(os.getenv('CAFFE2_HOME', '~/.caffe2'))
         models_dir = os.getenv('ONNX_MODELS', os.path.join(caffe2_home, 'models'))
@@ -582,35 +613,14 @@ class TestCaffe2End2End(TestCase):
         _, c2_outputs = c2_native_run_net(c2_init_net, c2_predict_net, inputs)
         del _
 
-        model = c2_onnx.caffe2_net_to_onnx_model(
-            predict_net=c2_predict_net,
-            init_net=c2_init_net,
-            value_info=json.load(open(os.path.join(model_dir, 'value_info.json'))))
+        with open(os.path.join(model_dir, 'value_info.json'), 'r') as value_info_conf:
+            model = c2_onnx.caffe2_net_to_onnx_model(
+                predict_net=c2_predict_net,
+                init_net=c2_init_net,
+                value_info=json.load(value_info_conf))
         c2_ir = c2.prepare(model)
         onnx_outputs = c2_ir.run(inputs)
         self.assertSameOutputs(c2_outputs, onnx_outputs, decimal=decimal)
-
-    def _download(self, model):
-        model_dir = self._model_dir(model)
-        assert not os.path.exists(model_dir)
-        os.makedirs(model_dir)
-        for f in ['predict_net.pb', 'init_net.pb', 'value_info.json']:
-            url = getURLFromName(model, f)
-            dest = os.path.join(model_dir, f)
-            try:
-                try:
-                    downloadFromURLToFile(url, dest,
-                                          show_progress=False)
-                except TypeError:
-                    # show_progress not supported prior to
-                    # Caffe2 78c014e752a374d905ecfb465d44fa16e02a28f1
-                    # (Sep 17, 2017)
-                    downloadFromURLToFile(url, dest)
-            except Exception as e:
-                print("Abort: {reason}".format(reason=e))
-                print("Cleaning up...")
-                deleteDirectory(model_dir)
-                exit(1)
 
     def test_alexnet(self):
         self._test_net('bvlc_alexnet', decimal=4)

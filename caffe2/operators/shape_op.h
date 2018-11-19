@@ -20,7 +20,7 @@ class ShapeOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& data = Input(DATA);
     auto* output = Output(0);
-    int numDims = data.ndim();
+    int numDims = data.dim();
     int numAxes = axes_.size();
     if (numAxes == 0) {
       output->Resize(numDims);

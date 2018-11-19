@@ -458,7 +458,7 @@ class TestIf(test_util.TestCase):
 
         init_net = init_nb.get()[0]
         ITER = init_net.ConstantFill(
-            [], "ITER", shape=[1], value=0, dtype=core.DataType.INT32)
+            [], "ITER", shape=[1], value=0, dtype=core.DataType.INT64)
         train_net.Iter(ITER, ITER)
         LR = train_net.LearningRate(ITER, "LR", base_lr=-0.1,
                                         policy="step", stepsize=20, gamma=0.9)

@@ -6,6 +6,11 @@ namespace torch { namespace jit {
 static void EraseNumberTypesOnBlock(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {
+    for (auto inp : it->inputs()) {
+      if (inp->type()->isSubtypeOf(NumberType::get())) {
+        inp->setType(DynamicType::get());
+      }
+    }
     for (auto sub : it->blocks()) {
       EraseNumberTypesOnBlock(sub);
     }

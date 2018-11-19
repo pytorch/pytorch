@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 namespace torch {
 namespace data {

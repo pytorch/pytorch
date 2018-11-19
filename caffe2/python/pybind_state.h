@@ -121,27 +121,27 @@ class TensorFetcher : public BlobFetcherBase {
 #ifdef USE_NUMPY
     FetchedBlob result;
     CAFFE_ENFORCE_GE(tensor.numel(), 0, "Trying to fetch uninitialized tensor");
-    const int numpy_type = CaffeToNumpyType(tensor.meta());
+    const int numpy_type = CaffeToNumpyType(tensor.dtype());
     CAFFE_ENFORCE(
         numpy_type != -1,
         "This tensor's data type is not supported: ",
-        tensor.meta().name(),
+        tensor.dtype().name(),
         ".");
     std::vector<npy_intp> npy_dims;
     for (const auto dim : tensor.sizes()) {
       npy_dims.push_back(dim);
     }
-    result.copied = force_copy || NeedsCopy(&tensor, tensor.meta());
+    result.copied = force_copy || NeedsCopy(&tensor, tensor.dtype());
     void* outPtr;
     if (result.copied) {
       result.obj = py::reinterpret_steal<py::object>(
-          PyArray_SimpleNew(tensor.ndim(), npy_dims.data(), numpy_type));
+          PyArray_SimpleNew(tensor.dim(), npy_dims.data(), numpy_type));
       outPtr = static_cast<void*>(
           PyArray_DATA(reinterpret_cast<PyArrayObject*>(result.obj.ptr())));
     } else {
       outPtr = const_cast<Tensor&>(tensor).raw_mutable_data();
       result.obj = py::reinterpret_steal<py::object>(PyArray_SimpleNewFromData(
-          tensor.ndim(), npy_dims.data(), numpy_type, outPtr));
+          tensor.dim(), npy_dims.data(), numpy_type, outPtr));
     }
 
     if (numpy_type == NPY_OBJECT) {

@@ -16,8 +16,8 @@ void spaceToBatch(
     int block_size,
     Tensor* output,
     Context* /*context*/) {
-  CAFFE_ENFORCE(input.ndim() == 4);
-  CAFFE_ENFORCE(output->ndim() == 4);
+  CAFFE_ENFORCE(input.dim() == 4);
+  CAFFE_ENFORCE(output->dim() == 4);
 
   const int output_batch = output->dim32(0);
   const int output_depth = output->dim32(1);
@@ -66,8 +66,8 @@ void batchToSpace(
     int block_size,
     Tensor* output,
     Context* /*context*/) {
-  CAFFE_ENFORCE(input.ndim() == 4);
-  CAFFE_ENFORCE(output->ndim() == 4);
+  CAFFE_ENFORCE(input.dim() == 4);
+  CAFFE_ENFORCE(output->dim() == 4);
 
   const int output_batch = output->dim32(0);
   const int output_depth = output->dim32(1);

@@ -50,7 +50,7 @@ Tensor _weight_norm
   auto v = v_in.contiguous();
   auto g = g_in.contiguous();
 
-  bool can_use_fused = v.type().is_cuda() && (dim == 0 || dim == v.dim() - 1);
+  bool can_use_fused = v.is_cuda() && (dim == 0 || dim == v.dim() - 1);
 
   if (can_use_fused) {
     // weight_norm does not have a derivative defined for it, so this will route back through

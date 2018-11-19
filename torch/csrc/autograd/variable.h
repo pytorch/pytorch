@@ -303,7 +303,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 
   int64_t dim() const override;
   const at::Storage& storage() const override;
-  int64_t storage_offset() const override;
+  void* slow_data() const override;
 
   std::shared_ptr<Function> get_grad_accumulator();
   virtual std::shared_ptr<Function>& get_grad_fn() {
@@ -319,7 +319,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   /// variables.
   void set_requires_grad(bool requires_grad) override {
     AT_CHECK(
-        !requires_grad || at::isFloatingType(type().scalarType()),
+        !requires_grad || at::isFloatingType(at::typeMetaToScalarType(dtype())),
         "Only Tensors of floating point dtype can require gradients");
     requires_grad_ = requires_grad;
   }
@@ -375,6 +375,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   // get_grad_accumulator.
   std::mutex mutex_;
 
+  int64_t storage_offset() const override;
  private:
   int64_t get_device_slow() const override;
 };

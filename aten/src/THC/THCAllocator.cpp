@@ -1,27 +1,5 @@
 #include "THCAllocator.h"
 
-static void THCudaHostDeleter(void* ptr) {
-  THCudaCheck(cudaFreeHost(ptr));
-}
-
-struct THCudaHostAllocator : public at::Allocator {
-  at::DataPtr allocate(size_t size) const override {
-    void* ptr = nullptr;
-    if (size != 0) {
-      THCudaCheck(cudaMallocHost(&ptr, size));
-    }
-    return {ptr, ptr, &THCudaHostDeleter, at::DeviceType::CPU};
-  }
-  at::DeleterFnPtr raw_deleter() const override {
-    return &THCudaHostDeleter;
-  }
-};
-
-static THCudaHostAllocator th_cuda_host_allocator;
-at::Allocator* getTHCudaHostAllocator() {
-  return &th_cuda_host_allocator;
-}
-
 THCIpcDeleter::~THCIpcDeleter() {
   int prev_device;
   THCudaCheck(cudaGetDevice(&prev_device));
@@ -41,3 +19,6 @@ at::DataPtr THCIpcDeleter::makeDataPtr(void* data, int device) {
   auto* context = new THCIpcDeleter(data, device);
   return {data, context, &deleteTHCIpcDeleter, at::Device(at::DeviceType::CUDA, cur_device)};
 }
+
+THCIpcDeleter::THCIpcDeleter(void* data, int device)
+    : data_(data), device_(device) {}

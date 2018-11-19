@@ -34,6 +34,11 @@ if sys.version_info < (3, 3):
     from .pool import Pool
 
 
+"""Add helper function to spawn N processes and wait for completion of any of
+them. This depends `mp.get_context` which was added in Python 3.4."""
+from .spawn import spawn, SpawnContext
+
+
 if sys.platform == 'darwin' or sys.platform == 'win32':
     _sharing_strategy = 'file_system'
     _all_sharing_strategies = {'file_system'}

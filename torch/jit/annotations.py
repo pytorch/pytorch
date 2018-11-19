@@ -39,6 +39,18 @@ except ImportError:
         return isinstance(ann, TupleInstance)
 
 
+# allows BroadcastingList instance to be subscriptable
+class BroadcastingListCls(object):
+    def __getitem__(self, types):
+        return
+
+# mypy doesn't support parameters on types, so we have to explicitly type each
+# list size
+BroadcastingList1 = BroadcastingListCls()
+for i in range(2, 7):
+    globals()["BroadcastingList{}".format(i)] = BroadcastingList1
+
+
 class Module(object):
     def __init__(self, name, members):
         self.name = name

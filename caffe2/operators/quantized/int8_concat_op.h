@@ -47,13 +47,13 @@ class Int8ConcatOp final : public Operator<CPUContext> {
     }
     for (auto i = 1; i < InputSize(); ++i) {
       const auto& Xi = Inputs()[i]->template Get<Int8TensorCPU>();
-      CHECK_EQ(Xi.t.ndim(), Y_dims.size());
+      CHECK_EQ(Xi.t.dim(), Y_dims.size());
       for (auto j = 0; j < Y_dims.size(); ++j) {
         if (j != axis_) {
-          CHECK_EQ(Xi.t.dim(j), Y_dims[j]);
+          CHECK_EQ(Xi.t.size(j), Y_dims[j]);
         }
       }
-      Y_dims[axis_] += Xi.t.dim(axis_);
+      Y_dims[axis_] += Xi.t.size(axis_);
     }
     Y->t.Resize(Y_dims);
     int before = X0.t.size_to_dim(axis_);
@@ -63,7 +63,7 @@ class Int8ConcatOp final : public Operator<CPUContext> {
     for (auto i = 0; i < InputSize(); ++i) {
       const auto& Xi = Inputs()[i]->template Get<Int8TensorCPU>();
       // Copy the NxHxWxC input slice to NxHxWx[C_offset:C_offset + C].
-      const auto Ci = Xi.t.dim(axis_);
+      const auto Ci = Xi.t.size(axis_);
       math::CopyMatrix<CPUContext>(
           Xi.t.itemsize(),
           before,
@@ -73,7 +73,7 @@ class Int8ConcatOp final : public Operator<CPUContext> {
           Y->t.template mutable_data<uint8_t>() + C_offset,
           C_total * after,
           &context_,
-          Xi.t.meta().copy());
+          Xi.t.dtype().copy());
       C_offset += Ci * after * Xi.t.itemsize();
     }
     return true;

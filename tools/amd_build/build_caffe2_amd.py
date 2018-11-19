@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 
+from __future__ import absolute_import, division, print_function
 import os
 import sys
-import subprocess
+
+from pyHIPIFY import hipify_python
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)))
@@ -19,32 +21,24 @@ includes = [
     "caffe2/**/*_test*",
     "caffe2/core/*",
     "caffe2/db/*",
+    "caffe2/utils/*",
+    "c10/cuda/*",
 ]
 
 ignores = [
     "caffe2/operators/depthwise_3x3_conv_op.cu",
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
-    "caffe2/operators/top_k.cu",
-    "caffe2/operators/top_k_radix_selection.cuh",
-    "caffe2/operators/top_k_heap_selection.cuh",
     "caffe2/operators/pool_op_cudnn.cu",
-    "caffe2/operators/roi_align_op_gpu_test.cc",
     '**/hip/**',
 ]
 
 file_extensions = ['.cc', '.cu', '.h', '.cuh']
 
-# Execute the Hipify Script.
-args = [
-    "--project-directory", proj_dir,
-    "--output-directory", proj_dir,
-    "--includes"] + includes + \
-    ["--extensions"] + file_extensions + \
-    ["--ignores"] + ignores + \
-    ["--hipify_caffe2", "True"] + \
-    ["--add-static-casts", "True"]
-
-subprocess.check_call([
-    sys.executable,
-    os.path.join(amd_build_dir, "pyHIPIFY", "hipify-python.py"),
-] + args)
+hipify_python.hipify(
+    project_directory=proj_dir,
+    output_directory=proj_dir,
+    includes=includes,
+    extensions=file_extensions,
+    ignores=ignores,
+    hipify_caffe2=True,
+    add_static_casts_option=True)

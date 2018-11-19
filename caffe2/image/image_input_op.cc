@@ -2,6 +2,13 @@
 
 namespace caffe2 {
 
+template <>
+bool ImageInputOp<CPUContext>::ApplyTransformOnGPU(
+    const std::vector<std::int64_t>&,
+    const c10::Device&) {
+  return false;
+}
+
 REGISTER_CPU_OPERATOR(ImageInput, ImageInputOp<CPUContext>);
 
 OPERATOR_SCHEMA(ImageInput)

@@ -180,7 +180,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
 
   if (InputSize() == 3) {
     auto& bias = Input(BIAS);
-    CAFFE_ENFORCE_EQ(bias.ndim(), 1);
+    CAFFE_ENFORCE_EQ(bias.dim(), 1);
     CAFFE_ENFORCE_EQ(bias.dim32(0), C);
   }
 
@@ -369,8 +369,8 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
   auto* dfilter = Output(FILTER_GRAD);
-  CAFFE_ENFORCE_EQ(X.ndim(), 4);
-  CAFFE_ENFORCE_EQ(filter.ndim(), 4);
+  CAFFE_ENFORCE_EQ(X.dim(), 4);
+  CAFFE_ENFORCE_EQ(filter.dim(), 4);
   int C = 0;
   switch (order_) {
     case StorageOrder::NHWC:

@@ -96,6 +96,19 @@ class TestBindings(test_util.TestCase):
         dfg.createEdge(op, w)
         dfg.createEdge(x, op)
 
+        # Dot generation
+        assert(str(dfg).startswith("digraph G"))
+
+        # subgraph
+        sg = ng.NNSubgraph()
+        sg.addNode(x)
+        sg.addNode(op)
+        sg.induceEdges()
+        assert len(sg) == 2
+
+        # subgraph dot generation
+        assert(str(sg).startswith("digraph G"))
+
     @given(size=st.sampled_from([10, 50]))
     def test_edges_complex(self, size):
         random.seed(1337)
@@ -121,10 +134,12 @@ class TestBindings(test_util.TestCase):
         nn = ng.NNModule(net)
         fc = nn.controlFlow[0]
         relu = nn.controlFlow[1]
+        assert not fc.inputs[0].hasProducer()
         assert fc.inputs[0].name == "X"
         assert fc.inputs[1].name == "W"
         assert relu.outputs[0].name == "Z"
         assert relu.inputs[0].name == "Y"
+        assert relu.inputs[0].hasProducer()
         assert relu.inputs[0].producer.name == "FC"
         assert fc.outputs[0].consumers[0].name == "Relu"
 
@@ -149,6 +164,8 @@ class TestBindings(test_util.TestCase):
         for match in nn.match(mg):
             assert len(match) == 1
             count += 1
+            # Dot generation of subgraph
+            assert(str(match).startswith("digraph G"))
         assert count == 1
 
     def test_match_graph_node_strict(self):
@@ -237,6 +254,21 @@ class TestBindings(test_util.TestCase):
         n2 = g.createNode("hello2")
         e = g.createEdge(n1, n2)
         ng.render(g)
+
+    def test_createUniqueDataNode(self):
+        net = core.Net("name")
+        nn = ng.NNModule(net)
+        n1 = nn.createUniqueDataNode("a")
+        self.assertEqual(n1.name[0], "a")
+        n2 = nn.dataFlow.createNode(ng.Operator("test1"))
+        nn.createEdge(n1, n2)
+        n3 = nn.createUniqueDataNode("a")
+        nn.createEdge(n2, n3)
+        self.assertEqual(n3.name[0], "a")
+        self.assertNotEqual(n1.name, n3.name)
+        n1 = nn.createUniqueDataNode("b")
+        n2 = nn.createUniqueDataNode("b")
+        self.assertNotEqual(n1.name, n2.name)
 
     def test_convertToProto(self):
         net = core.Net("name")

@@ -14,12 +14,10 @@
     (option))
   (list
     (assign
-      (list (variable (ident q)))
-      (=)
+      (variable (ident q))
       (None))
     (assign
-      (list (variable (ident q)))
-      (=)
+      (variable (ident q))
       (-
         (+
           (variable (ident x))
@@ -31,14 +29,12 @@
           (list)
           (list))))
     (expression statement
-      (list
-        (apply
-          (variable (ident print))
-          (list (variable (ident q)))
-          (list))))
+      (apply
+        (variable (ident print))
+        (list (variable (ident q)))
+        (list)))
     (assign
-      (list (variable (ident w)))
-      (=)
+      (variable (ident w))
       (unary minus
         (variable (ident z))))
     (if
@@ -49,8 +45,7 @@
         (variable (ident z)))
       (list
         (assign
-          (list (variable (ident m)))
-          (=)
+          (variable (ident m))
           (if
             (not (variable (ident z)))
             (variable (ident x))
@@ -66,8 +61,10 @@
           (variable (ident z))))
       (list
         (assign
-          (list (variable (ident q)))
-          (=)
+          (variable (ident q))
           (variable (ident x)))))
+    (assert
+      (eq (const 1) (const 1))
+      (option (string_literal hello)))
     (return
       (list (variable (ident x))))))

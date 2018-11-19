@@ -122,14 +122,30 @@ void initTreeViewBindings(PyObject *module) {
 
 
   py::class_<Assign, Stmt>(m, "Assign")
-    .def(py::init([](std::vector<Expr> lhs, std::string kind_str, const Expr& rhs) {
-      auto r = lhs.at(0).range();
-      auto kind = AssignKind(Compound::create(stringToKind(kind_str), r, {}));
-      return Assign::create(r, List<Expr>::create(r, std::move(lhs)), kind, rhs);
+    .def(py::init([](const Expr& lhs, const Expr& rhs) {
+      return Assign::create(lhs.range(), lhs, rhs);
+    }));
+  py::class_<AugAssign, Stmt>(m, "AugAssign")
+    .def(py::init([](const Expr& lhs, std::string kind_str, const Expr& rhs) {
+      auto r = lhs.range();
+      auto kind = AugAssignKind(Compound::create(stringToKind(kind_str), r, {}));
+      return AugAssign::create(r, lhs, kind, rhs);
     }));
   py::class_<Return, Stmt>(m, "Return")
     .def(py::init([](const SourceRange& range, std::vector<Expr> values) {
       return Return::create(range, wrap_list(range, std::move(values)));
+    }));
+  py::class_<Raise, Stmt>(m, "Raise")
+    .def(py::init([](const SourceRange& range, Expr *expr) {
+      return Raise::create(range, wrap_maybe(range, expr));
+    }));
+  py::class_<Assert, Stmt>(m, "Assert")
+    .def(py::init([](const SourceRange& range, const Expr& test, Expr *msg) {
+      return Assert::create(range, test, wrap_maybe(range, msg));
+    }));
+  py::class_<Pass, Stmt>(m, "Pass")
+    .def(py::init([](const SourceRange& range) {
+      return Pass::create(range);
     }));
   py::class_<If, Stmt>(m, "If")
     .def(py::init([](const SourceRange& range, const Expr& cond, std::vector<Stmt> true_branch, std::vector<Stmt> false_branch) {
@@ -152,9 +168,8 @@ void initTreeViewBindings(PyObject *module) {
         wrap_list(range, std::move(body)));
   }));
   py::class_<ExprStmt, Stmt>(m, "ExprStmt")
-    .def(py::init([](std::vector<Expr>& exprs) {
-      auto r = exprs[0].range();
-      return ExprStmt::create(r, wrap_list(r, std::move(exprs)));
+    .def(py::init([](const Expr& expr) {
+      return ExprStmt::create(expr.range(), expr);
     }));
 
   py::class_<Var, Expr>(m, "Var")

@@ -12,7 +12,6 @@ import numpy as np
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python.test_util import IN_CIRCLECI_FLAKY_ENV
 from caffe2.python.operator_test.adagrad_test_helper import (
     ref_adagrad, adagrad_sparse_test_helper
 )
@@ -165,7 +164,6 @@ class TestAdagrad(serial.SerializedTestCase):
 
     # Suppress filter_too_much health check.
     # Likely caused by `assume` call falling through too often.
-    @unittest.skipIf(IN_CIRCLECI_FLAKY_ENV, "FIXME: flaky test in CircleCI")
     @settings(suppress_health_check=[HealthCheck.filter_too_much])
     @given(inputs=hu.tensors(n=2),
            lr=st.floats(min_value=0.01, max_value=0.99,

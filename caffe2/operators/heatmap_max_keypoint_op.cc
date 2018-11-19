@@ -27,7 +27,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
   const auto& bboxes_in = Input(1);
   auto* keypoints_out = Output(0);
 
-  CAFFE_ENFORCE_EQ(heatmaps_in.ndim(), 4);
+  CAFFE_ENFORCE_EQ(heatmaps_in.dim(), 4);
   const int N = heatmaps_in.dim32(0);
   CAFFE_ENFORCE_EQ(heatmaps_in.dim32(0), N);
   const int keypoint_count = heatmaps_in.dim32(1);
@@ -35,7 +35,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_GE(heatmap_size, 2); // at least 2x2 for approx
   CAFFE_ENFORCE_EQ(heatmaps_in.dim32(2), heatmaps_in.dim32(3));
 
-  CAFFE_ENFORCE_EQ(bboxes_in.ndim(), 2);
+  CAFFE_ENFORCE_EQ(bboxes_in.dim(), 2);
   CAFFE_ENFORCE_EQ(bboxes_in.dim32(0), N);
   CAFFE_ENFORCE_GE(bboxes_in.dim32(1), 4);
 

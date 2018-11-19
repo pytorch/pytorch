@@ -1,7 +1,6 @@
 SET(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
 ${CMAKE_CURRENT_SOURCE_DIR}/AbsCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Abs.cu
-${CMAKE_CURRENT_SOURCE_DIR}/BatchNormalization.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/BCECriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/ClassNLLCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Col2Im.cu
@@ -58,7 +57,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/TemporalReplicationPadding.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalRowConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalUpSamplingLinear.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalUpSamplingNearest.cu
-${CMAKE_CURRENT_SOURCE_DIR}/Threshold.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAdaptiveAveragePooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAdaptiveMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAveragePooling.cu

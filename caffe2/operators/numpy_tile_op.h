@@ -24,10 +24,10 @@ class NumpyTileOp : public Operator<Context> {
 
     // Check that the `repeats` tensor has the correct rank, has a number of
     // elements equal to the number of axes of `input`.
-    CAFFE_ENFORCE_EQ(repeats.ndim(), 1, "repeats input must be a 1-d tensor");
+    CAFFE_ENFORCE_EQ(repeats.dim(), 1, "repeats input must be a 1-d tensor");
     CAFFE_ENFORCE_EQ(
         repeats.numel(),
-        input.ndim(),
+        input.dim(),
         "repeats input have the same"
         " number of elements as `inputs` has dimensions.");
     const int64_t *repeats_data = repeats.template data<int64_t>();
@@ -63,11 +63,10 @@ class NumpyTileOp : public Operator<Context> {
        * proceed to the next row, until the end. outer_dim = 3, inner_dim = 10.
        */
       const char* src_data = static_cast<const char*>(src->raw_data());
-      char* dst_data =
-          static_cast<char*>(dst->raw_mutable_data(src->meta()));
+      char* dst_data = static_cast<char*>(dst->raw_mutable_data(src->dtype()));
 
       DoTile(
-          src->meta(),
+          src->dtype(),
           src->itemsize(),
           outer_dim,
           inner_dim,
@@ -75,10 +74,10 @@ class NumpyTileOp : public Operator<Context> {
           src_data,
           dst_data);
 
-        output_dims[i] *= repeats_data[i];
-        dst->Reshape(output_dims);
+      output_dims[i] *= repeats_data[i];
+      dst->Reshape(output_dims);
 
-        std::swap(src, dst);
+      std::swap(src, dst);
     }
 
     // NB: because we have the swap at the end of the above loop, our real

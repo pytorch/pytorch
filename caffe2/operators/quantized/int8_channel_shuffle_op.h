@@ -73,7 +73,7 @@ void Int8ChannelShuffle(
     size_t K,
     size_t G,
     uint8_t* Y_data,
-    C2GEMMContext* gemm_context) {
+    ThreadPool* threadPool) {
   auto divRoundUp = [](size_t n, size_t d) { return (n + d - 1) / d; };
   constexpr size_t kTileSizeG = 4;
   constexpr size_t kTileSizeK = 8;
@@ -111,7 +111,7 @@ void Int8ChannelShuffle(
       }
     }
   };
-  gemm_context->threadPool()->run(f, B);
+  threadPool->run(f, B);
 }
 
 } // namespace
@@ -120,7 +120,7 @@ class Int8ChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
  public:
   Int8ChannelShuffleOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws),
-        gemm_context_(ws->GetThreadPool()) {
+        ws_(ws) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NHWC,
         "Int8ChannelShuffleOp only supports NHWC order");
@@ -150,12 +150,12 @@ class Int8ChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
         K,
         G,
         Y->t.mutable_data<uint8_t>(),
-        &gemm_context_);
+        ws_->GetThreadPool());
     return true;
   }
 
  private:
-  C2GEMMContext gemm_context_;
+  Workspace* ws_;
 };
 
 } // namespace int8

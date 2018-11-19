@@ -10,6 +10,7 @@
 
 C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
 C10_DECLARE_bool(caffe2_cpu_allocator_do_zero_fill);
+C10_DECLARE_bool(caffe2_cpu_allocator_do_junk_fill);
 
 namespace caffe2 {
 
@@ -43,6 +44,11 @@ class CAFFE2_API MemoryAllocationReporter {
   size_t allocated_;
 };
 
+// Fill the data memory region of num bytes with a particular garbage pattern.
+// The garbage value is chosen to be NaN if interpreted as floating point value,
+// or a very large integer.
+CAFFE2_API void memset_junk(void* data, size_t num);
+
 struct CAFFE2_API DefaultCPUAllocator final : at::Allocator {
   DefaultCPUAllocator() {}
   ~DefaultCPUAllocator() override {}
@@ -58,8 +64,14 @@ struct CAFFE2_API DefaultCPUAllocator final : at::Allocator {
     CAFFE_ENFORCE(data);
     // move data to a thread's NUMA node
     NUMAMove(data, nbytes, GetCurrentNUMANode());
+    CHECK(
+        !FLAGS_caffe2_cpu_allocator_do_zero_fill ||
+        !FLAGS_caffe2_cpu_allocator_do_junk_fill)
+        << "Cannot request both zero-fill and junk-fill at the same time";
     if (FLAGS_caffe2_cpu_allocator_do_zero_fill) {
       memset(data, 0, nbytes);
+    } else if (FLAGS_caffe2_cpu_allocator_do_junk_fill) {
+      memset_junk(data, nbytes);
     }
     if (FLAGS_caffe2_report_cpu_memory_usage) {
       reporter_.New(data, nbytes);

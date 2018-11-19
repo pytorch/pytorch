@@ -79,14 +79,14 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
   template <typename TInd>
   bool DoRunWithType() {
     auto& sparse_indices = Input(INDICES);
-    CAFFE_ENFORCE_EQ(sparse_indices.ndim(), 1);
+    CAFFE_ENFORCE_EQ(sparse_indices.dim(), 1);
     auto& sparse_values = Input(VALUES);
-    CAFFE_ENFORCE_GE(sparse_values.ndim(), 1);
-    CAFFE_ENFORCE_EQ(sparse_indices.numel(), sparse_values.dim(0));
+    CAFFE_ENFORCE_GE(sparse_values.dim(), 1);
+    CAFFE_ENFORCE_EQ(sparse_indices.numel(), sparse_values.size(0));
     auto& default_value = Input(DEFAULT);
-    CAFFE_ENFORCE_EQ(default_value.ndim() + 1, sparse_values.ndim());
+    CAFFE_ENFORCE_EQ(default_value.dim() + 1, sparse_values.dim());
     CAFFE_ENFORCE_EQ(default_value.numel(), sparse_values.size_from_dim(1));
-    CAFFE_ENFORCE(sparse_values.meta() == default_value.meta());
+    CAFFE_ENFORCE(sparse_values.dtype() == default_value.dtype());
 
     const TInd* sparse_indices_vec = sparse_indices.template data<TInd>();
     const char* sparse_values_vec =
@@ -108,7 +108,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     vector<int64_t> shape;
     if (InputSize() == 4) {
       auto& lengths = Input(LENGTHS);
-      CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
+      CAFFE_ENFORCE_EQ(lengths.dim(), 1);
       lengths_vec = lengths.template data<int32_t>();
       rows = lengths.dim32(0);
     }
@@ -132,10 +132,10 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     // init
     // TODO: consider unrolling CopyItems to make elemental types copy faster
     char* output_data =
-        static_cast<char*>(output->raw_mutable_data(sparse_values.meta()));
+        static_cast<char*>(output->raw_mutable_data(sparse_values.dtype()));
     for (int i = 0; i < cols * rows; i++) {
       context_.CopyItemsSameDevice(
-          default_value.meta(),
+          default_value.dtype(),
           block_size,
           default_val,
           output_data + i * block_nbytes);
@@ -162,7 +162,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
         int idx = this->getFeatureIdx(sparse_index);
         if (idx != -1) {
           context_.CopyItemsSameDevice(
-              sparse_values.meta(),
+              sparse_values.dtype(),
               block_size,
               sparse_values_vec + (offset + c) * block_nbytes,
               output_data + (r * cols + idx) * block_nbytes);
@@ -203,7 +203,7 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
   template <typename TInd>
   bool DoRunWithType() {
     auto& sparse_indices = Input(INDICES);
-    CAFFE_ENFORCE_EQ(sparse_indices.ndim(), 1);
+    CAFFE_ENFORCE_EQ(sparse_indices.dim(), 1);
     auto& gradient_output = Input(GOUTPUT);
 
     int64_t block_size = gradient_output.size_from_dim(1);
@@ -222,12 +222,12 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
       auto& lengths = Input(LENGTHS);
       lengths_vec = lengths.template data<int32_t>();
       rows = lengths.dim32(0);
-      CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
-      CAFFE_ENFORCE_GE(gradient_output.ndim(), 2);
-      CAFFE_ENFORCE_EQ(gradient_output.dim(0), rows);
-      CAFFE_ENFORCE_EQ(gradient_output.dim(1), cols);
-      block_nbytes /= gradient_output.dim(1);
-      block_size /= gradient_output.dim(1);
+      CAFFE_ENFORCE_EQ(lengths.dim(), 1);
+      CAFFE_ENFORCE_GE(gradient_output.dim(), 2);
+      CAFFE_ENFORCE_EQ(gradient_output.size(0), rows);
+      CAFFE_ENFORCE_EQ(gradient_output.size(1), cols);
+      block_nbytes /= gradient_output.size(1);
+      block_size /= gradient_output.size(1);
       iter_offset += 1;
     }
     if (rows == -1) {
@@ -235,8 +235,8 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
       // mask.size() * feature_dim
       rows = 1;
       lengths_vec = &default_length;
-      CAFFE_ENFORCE_GE(gradient_output.ndim(), 1);
-      CAFFE_ENFORCE_EQ(gradient_output.dim(0), cols);
+      CAFFE_ENFORCE_GE(gradient_output.dim(), 1);
+      CAFFE_ENFORCE_EQ(gradient_output.size(0), cols);
     }
     shape.push_back(default_length);
     // insert feature_dim
@@ -251,7 +251,8 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
         static_cast<const char*>(gradient_output.raw_data());
 
     char* output_data =
-        static_cast<char*>(output->raw_mutable_data(gradient_output.meta()));
+        static_cast<char*>(output->raw_mutable_data(gradient_output.dtype()));
+    memset(output_data, 0, output->nbytes());
     math::Set<char, Context>(
         default_length * gradient_output.itemsize(), 0, output_data, &context_);
 
@@ -266,7 +267,7 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
         if (idx != -1 && !gradient_used[idx]) {
           gradient_used[idx] = true;
           context_.CopyItemsSameDevice(
-              gradient_output.meta(),
+              gradient_output.dtype(),
               block_size,
               gradient_output_vec + (r * cols + idx) * block_nbytes,
               output_data + (offset + c) * block_nbytes);

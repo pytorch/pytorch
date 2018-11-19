@@ -25,7 +25,7 @@ class Int8ResizeNearestOp final : public Operator<CPUContext> {
     const auto& X = Inputs()[0]->template Get<Int8TensorCPU>();
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(4, X.t.ndim());
+    CAFFE_ENFORCE_EQ(4, X.t.dim());
     const int N = X.t.dim32(0);
     const int IH = X.t.dim32(1);
     const int IW = X.t.dim32(2);

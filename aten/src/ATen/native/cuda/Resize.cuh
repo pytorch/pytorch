@@ -3,6 +3,8 @@
 #include "ATen/ATen.h"
 #include "THC/THCTensor.hpp"
 
+#include "ATen/cuda/CUDAGuard.h"
+
 namespace at { namespace native {
 
 // These functions are called by native::resize_ as well as (legacy) THC resize.
@@ -27,22 +29,24 @@ inline TensorImpl* resize_impl_cuda_(
     TensorImpl* self,
     IntList size,
     c10::optional<IntList> stride,
-    bool device_guard=true) {
+    bool device_guard = true) {
   if (self->sizes() == size && (!stride || self->strides() == stride)) {
     return self;
   }
 
   // NB: We don't need to hold the device guard when calling from TH
-  c10::optional<DeviceGuard> guard;
+  cuda::OptionalCUDAGuard guard;
   if (device_guard) {
-    guard = DeviceGuard(self->storage().device().index());
+    guard.set_index(self->storage().device().index());
   }
 
-  size_t storage_size = 1;
+  int64_t storage_size = 1;
   if (stride) {
     self->set_sizes_and_strides(size, *stride);
     // NB: storage size can be different from numel.
     for (size_t dim = 0; dim < size.size(); ++dim) {
+      // FIXME: Don't rely on storage_size being negative because this
+      // may not be true for some edge cases.
       storage_size += (size[dim] - 1) * stride.value()[dim];
     }
   } else {

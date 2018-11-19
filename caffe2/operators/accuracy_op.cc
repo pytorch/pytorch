@@ -7,10 +7,10 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
   auto& label = Input(LABEL);
   auto* Y = Output(0);
-  CAFFE_ENFORCE_EQ(X.ndim(), 2);
+  CAFFE_ENFORCE_EQ(X.dim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
-  CAFFE_ENFORCE_EQ(label.ndim(), 1);
+  CAFFE_ENFORCE_EQ(label.dim(), 1);
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
   Y->Resize(vector<int64_t>());
   const auto* Xdata = X.data<float>();

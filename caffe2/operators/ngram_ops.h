@@ -46,7 +46,7 @@ class NGramFromCategoricalOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& floats = Input(0);
-    auto N = floats.dim(0);
+    auto N = floats.size(0);
     auto D = floats.size_from_dim(1);
     const F* floats_data = floats.template data<F>();
     auto* output = Output(0);

@@ -1,5 +1,5 @@
 #include "caffe2/core/context.h"
-#include "caffe2/core/dispatch/KernelRegistration.h"
+#include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/experimental/c10/schemas/fc.h"
 #include "caffe2/utils/conversions.h"
@@ -22,7 +22,7 @@ void fc_op_cpu_impl(
     BaseContext* context) {
   constexpr bool TransposeWeight = true;
 
-  CAFFE_ENFORCE(b.ndim() == 1, b.ndim());
+  CAFFE_ENFORCE(b.dim() == 1, b.dim());
   // batch size
   const auto canonical_axis = X.canonical_axis_index(axis);
   const auto M = X.size_to_dim(canonical_axis);

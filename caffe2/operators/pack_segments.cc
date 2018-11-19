@@ -21,14 +21,14 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
     presence_mask = Output(1);
   }
 
-  CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
-  CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
+  CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTH should be 1-D");
 
   // Find the length of the longest sequence.
   const T* l = lengths.template data<T>();
   T max_length = 0;
   int64_t total_length = 0;
-  for (T i = 0; i < lengths.dim(0); ++i) {
+  for (T i = 0; i < lengths.size(0); ++i) {
     max_length = std::max(max_length, l[i]);
     total_length += l[i];
   }
@@ -43,12 +43,12 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
 
   // Total lengths must be the same as data.dims(0)
   CAFFE_ENFORCE_EQ(
-      data.dim(0),
+      data.size(0),
       total_length,
       " PackSegments requires that the sum of the lengths ",
       total_length,
       " is equal to the first data dimension ",
-      data.dim(0));
+      data.size(0));
 
   auto shape =
       data.sizes().vec(); // Shape of output is batch_size x max_len x ...
@@ -57,7 +57,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   output->Resize(shape);
 
   // create output tensor
-  auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
+  auto* out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
 
   bool* presence_mask_data = nullptr;
   if (return_presence_mask_) {
@@ -67,7 +67,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
     presence_mask_data = presence_mask->template mutable_data<bool>();
   }
 
-  if (!data.dim(0)) {
+  if (!data.size(0)) {
     // Return empty output (with the proper shape)
     return true;
   }
@@ -88,9 +88,9 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   auto block_bytesize = data.itemsize() * block_size;
   const auto* d = static_cast<const char*>(data.raw_data());
   int64_t start = 0;
-  for (int64_t i = 0; i < lengths.dim(0); ++i) {
+  for (int64_t i = 0; i < lengths.size(0); ++i) {
     context_.CopyItemsSameDevice(
-        data.meta(),
+        data.dtype(),
         l[i] * block_size,
         d + block_bytesize * start,
         out + block_bytesize * max_length * i);
@@ -118,38 +118,38 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& lengths = Input(LENGTHS);
   auto* output = Output(0);
 
-  CAFFE_ENFORCE_GE(data.ndim(), 2, "DATA should be at least 2-D");
-  CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
+  CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTH should be 1-D");
   if (max_length_ != -1) {
     CAFFE_ENFORCE_EQ(
         max_length_,
-        data.dim(1),
+        data.size(1),
         "max_length should be equal to the second dimension of the packed segments");
   }
   const T* l = lengths.template data<T>();
 
-  int64_t total_l = std::accumulate(l, l + lengths.dim(0), (int64_t)0);
+  int64_t total_l = std::accumulate(l, l + lengths.size(0), (int64_t)0);
 
   auto shape = data.sizes().vec();
   CAFFE_ENFORCE_EQ(
-      shape[0], lengths.dim(0), "LENGTH should match DATA in dimension 0");
+      shape[0], lengths.size(0), "LENGTH should match DATA in dimension 0");
   shape.erase(shape.begin());
   shape[0] = total_l;
   output->Resize(shape);
   // create output tensor
-  auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
-  if (!(data.dim(0) && data.dim(1))) {
+  auto* out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
+  if (!(data.size(0) && data.size(1))) {
     return true;
   }
   auto block_size = data.size_from_dim(2);
   auto block_bytesize = data.itemsize() * block_size;
   const auto* d = static_cast<const char*>(data.raw_data());
   int64_t start = 0;
-  for (int64_t i = 0; i < lengths.dim(0); ++i) {
+  for (int64_t i = 0; i < lengths.size(0); ++i) {
     context_.CopyItemsSameDevice(
-        data.meta(),
+        data.dtype(),
         l[i] * block_size,
-        d + block_bytesize * data.dim(1) * i,
+        d + block_bytesize * data.size(1) * i,
         out + block_bytesize * start);
     start += l[i];
   }

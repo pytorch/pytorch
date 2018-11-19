@@ -34,6 +34,10 @@ function(copy_header file)
   configure_file(${file} ${CMAKE_BINARY_DIR}/include/c10d/${file} COPYONLY)
 endfunction()
 
+if(USE_NCCL)
+  option(USE_C10D_NCCL "USE C10D NCCL" ON)
+endif()
+
 if(MPI_FOUND)
   option(USE_C10D_MPI "USE C10D MPI" ON)
 endif()
@@ -50,7 +54,6 @@ set(C10D_SRCS
   )
 
 if(C10D_USE_CUDA)
-  list(APPEND C10D_SRCS CUDAUtils.cpp)
   set(C10D_LIBS
     caffe2_gpu
     )
@@ -107,10 +110,6 @@ target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 # For torch/csrc/utils/hash.h and torch/csrc/utils/functional.h
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
 
-if(C10D_USE_CUDA)
-  copy_header(CUDAUtils.hpp)
-endif()
-
 copy_header(FileStore.hpp)
 copy_header(PrefixStore.hpp)
 copy_header(ProcessGroup.hpp)
@@ -128,10 +127,6 @@ endif()
 if(MPI_FOUND)
   target_include_directories(c10d PUBLIC ${MPI_INCLUDE_PATH})
   copy_header(ProcessGroupMPI.hpp)
-  file(WRITE ${CMAKE_BINARY_DIR}/include/c10d/mpi_include_path "")
-  foreach(MPI_INC ${MPI_INCLUDE_PATH})
-    file(APPEND ${CMAKE_BINARY_DIR}/include/c10d/mpi_include_path ${MPI_INC}\n)
-  endforeach()
 endif()
 
 target_link_libraries(c10d PUBLIC ${C10D_LIBS})
@@ -142,7 +137,7 @@ install(TARGETS c10d
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib)
 
-option(BUILD_EXAMPLES "Build examples" ON)
+option(BUILD_EXAMPLES "Build examples" OFF)
 if(BUILD_EXAMPLES)
   add_subdirectory(example)
 endif()

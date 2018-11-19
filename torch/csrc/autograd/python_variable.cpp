@@ -247,7 +247,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
 
   THPUtils_assertRet(-1, grad.type() == var.type() || gradIsSparse,
       "assigned grad has data of a different type");
-  if (var.type().is_cuda()) {
+  if (var.is_cuda()) {
     THPUtils_assertRet(-1, grad.get_device() == var.get_device(),
         "assigned grad has data located on a different device");
   }

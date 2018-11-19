@@ -1,6 +1,8 @@
 #pragma once
 #include <ATen/ATen.h>
+#include <atomic>
 #include <cstddef>
+#include <exception>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -36,6 +38,14 @@ inline int get_thread_num() {
 #endif
 }
 
+inline bool in_parallel_region() {
+#ifdef _OPENMP
+  return omp_in_parallel();
+#else
+  return false;
+#endif
+}
+
 template <class F>
 inline void parallel_for(
     const int64_t begin,
@@ -43,14 +53,26 @@ inline void parallel_for(
     const int64_t grain_size,
     const F& f) {
 #ifdef _OPENMP
+  std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
+  std::exception_ptr eptr;
 #pragma omp parallel if (!omp_in_parallel() && ((end - begin) >= grain_size))
   {
     int64_t num_threads = omp_get_num_threads();
     int64_t tid = omp_get_thread_num();
     int64_t chunk_size = divup((end - begin), num_threads);
     int64_t begin_tid = begin + tid * chunk_size;
-    if (begin_tid < end)
-      f(begin_tid, std::min(end, chunk_size + begin_tid));
+    if (begin_tid < end) {
+      try {
+        f(begin_tid, std::min(end, chunk_size + begin_tid));
+      } catch (...) {
+        if (!err_flag.test_and_set()) {
+          eptr = std::current_exception();
+        }
+      }
+    }
+  }
+  if (eptr) {
+    std::rethrow_exception(eptr);
   }
 #else
   if (begin < end) {

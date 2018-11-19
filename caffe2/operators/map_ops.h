@@ -139,7 +139,7 @@ class KeyValueToMapOp final : public Operator<Context> {
   bool DoRunWithOtherType2() {
     CAFFE_THROW(
         "KeyValueToMap is not implemented on value tensor of type ",
-        Input(VALUES).meta().name(),
+        Input(VALUES).dtype().name(),
         "Consider adding it a type in the list DispatchHelper");
   }
 

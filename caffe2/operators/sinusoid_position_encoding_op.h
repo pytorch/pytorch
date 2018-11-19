@@ -36,7 +36,7 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
     auto& positions = Input(0);
     auto* output = Output(0);
 
-    CAFFE_ENFORCE_EQ(positions.ndim(), 2, "POSITIONS should be a 2-D tensor");
+    CAFFE_ENFORCE_EQ(positions.dim(), 2, "POSITIONS should be a 2-D tensor");
 
     auto shape = positions.sizes().vec();
     shape.push_back(embedding_size_);

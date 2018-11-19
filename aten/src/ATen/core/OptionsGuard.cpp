@@ -7,7 +7,7 @@ namespace at {
 // In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
 // thread_local is not supported.  In that case, we don't provide
 // an OptionsGuard; and force you to pass around options manually.
-#if !AT_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+#if !C10_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
 DefaultTensorOptions& mutateDefaultTensorOptions() {
   static thread_local c10::optional<DefaultTensorOptions> options;

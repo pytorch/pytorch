@@ -205,7 +205,7 @@ void NCCL<T>::AllReduce(const NCCLExecution& ex) {
   return runNCCL<T>(
       ex,
       [](const NCCLElement& ctx) {
-        ctx.dst->Resize(ctx.src->dims());
+        ctx.dst->Resize(ctx.src->sizes());
         ctx.dst->template mutable_data<T>();
       },
       [](const NCCLElement& ctx, ncclComm_t comm, cudaStream_t stream) {
@@ -225,7 +225,7 @@ void NCCL<T>::Broadcast(const NCCLExecution& ex) {
   return runNCCL<T>(
       ex,
       [](const NCCLElement& ctx) {
-        ctx.dst->Resize(ctx.src->dims());
+        ctx.dst->Resize(ctx.src->sizes());
         ctx.dst->template mutable_data<T>();
       },
       [&ex](const NCCLElement& ctx, ncclComm_t comm, cudaStream_t stream) {
@@ -245,7 +245,7 @@ void NCCL<T>::Reduce(const NCCLExecution& ex) {
       ex,
       [](const NCCLElement& ctx) {
         if (ctx.dst) {
-          ctx.dst->Resize(ctx.src->dims());
+          ctx.dst->Resize(ctx.src->sizes());
           ctx.dst->template mutable_data<T>();
         }
       },
@@ -270,9 +270,9 @@ void NCCL<T>::AllGather(const NCCLExecution& ex) {
       [n](const NCCLElement& ctx) {
         CAFFE_ENFORCE_NE(ctx.src, ctx.dst);
         std::vector<int64_t> dims;
-        dims.reserve(ctx.src->ndim() + 1);
+        dims.reserve(ctx.src->dim() + 1);
         dims.push_back(n);
-        for (auto d : ctx.src->dims()) {
+        for (auto d : ctx.src->sizes()) {
           dims.push_back(d);
         }
         ctx.dst->Resize(dims);
@@ -306,7 +306,7 @@ void NCCL<T>::ReduceScatter(const NCCLExecution& ex) {
       ex,
       [](const NCCLElement& ctx) {
         CAFFE_ENFORCE_NE(ctx.src, ctx.dst);
-        const auto& srcDims = ctx.src->dims();
+        const auto& srcDims = ctx.src->sizes();
         std::vector<int64_t> dstDims(srcDims.begin() + 1, srcDims.end());
         ctx.dst->Resize(dstDims);
         ctx.dst->template mutable_data<T>();

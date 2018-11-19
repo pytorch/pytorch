@@ -7,7 +7,6 @@ from caffe2.python import brew, core
 from caffe2.python.model_helper import ModelHelper
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python.test_util import IN_CIRCLECI_FLAKY_ENV
 import caffe2.python.serialized_test.serialized_test_util as serial
 import numpy as np
 import os
@@ -15,7 +14,6 @@ import unittest
 
 
 class TestLayerNormOp(serial.SerializedTestCase):
-    @unittest.skipIf(IN_CIRCLECI_FLAKY_ENV, "FIXME: flaky test in CircleCI")
     @serial.given(X=hu.tensors(n=1), **hu.gcs)
     def test_layer_norm_grad_op(self, X, gc, dc):
         X = X[0]
@@ -87,7 +85,6 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0],
         )
 
-    @unittest.skipIf(IN_CIRCLECI_FLAKY_ENV, "FIXME: flaky test in CircleCI")
     @given(X=hu.tensors(n=1), **hu.gcs)
     def test_layer_norm_op(self, X, gc, dc):
         X = X[0]

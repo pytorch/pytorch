@@ -186,8 +186,8 @@ TEST(MPITest, TestMPIAllgather) {
   }
   auto& X_gathered = ws.GetBlob("X_gathered")->Get<TensorCPU>();
   EXPECT_EQ(X_gathered.numel(), 20 * size);
-  EXPECT_EQ(X_gathered.dim(0), 2 * size);
-  EXPECT_EQ(X_gathered.dim(1), 10);
+  EXPECT_EQ(X_gathered.size(0), 2 * size);
+  EXPECT_EQ(X_gathered.size(1), 10);
   for (int i = 0; i < X_gathered.numel(); ++i) {
     EXPECT_EQ(X_gathered.data<float>()[i], i / 20);
   }

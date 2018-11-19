@@ -16,7 +16,7 @@ struct IODescriptor {
     VariableMetadata(const autograd::Variable& var)
       : sizes(var.sizes().vec())
       , type(var.type().scalarType())
-      , device(var.type().is_cuda() ? var.get_device() : -1)
+      , device(var.is_cuda() ? var.get_device() : -1)
       , requires_grad(var.requires_grad()) {}
 
     bool operator==(const VariableMetadata& o) const {

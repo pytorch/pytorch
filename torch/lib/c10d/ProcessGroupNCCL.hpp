@@ -3,15 +3,12 @@
 #include <mutex>
 #include <unordered_map>
 
-#include <c10d/CUDAUtils.hpp>
 #include <c10d/NCCLUtils.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 
 #include <ATen/cuda/CUDAContext.h>
-
-// forward declaration
-struct THCState;
+#include <ATen/cuda/CUDAEvent.h>
 
 namespace c10d {
 
@@ -23,10 +20,10 @@ namespace c10d {
 //
 // All NCCL functions provided by this class are asynchronous functions. More
 // specifically, each NCCL call is scheduled on a separate CUDA stream that is
-// different from the current THC CUDA stream. This is for the purpose of
+// different from the current CUDA stream. This is for the purpose of
 // achieving potentially concurrency and better performance. As a result,
 // it is the callers' responsibilty to make sure that the CUDA stream their
-// code works on (the THC stream) needs to wait for the NCCL operation from
+// code works on needs to wait for the NCCL operation from
 // this class.
 //
 // This can be done by calling:
@@ -51,12 +48,12 @@ namespace c10d {
 //   std::shared_ptr<WorkNCCL> work = pg.allreduce(tensors);
 //
 //   // At this point, NCCL kernel has already by queued successfully
-//   // Now, let THC stream wait for the NCCL to finish, this function is
+//   // Now, let current stream wait for the NCCL to finish, this function is
 //   // async operation as well
 //
 //   work->wait()
 //
-//   // Now continue on other work in the THC stream.
+//   // Now continue on other work in the current stream.
 class ProcessGroupNCCL : public ProcessGroup {
  public:
   class WorkNCCL : public ProcessGroup::Work {
@@ -70,7 +67,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Non-blocking operation.
     bool isCompleted() override;
 
-    // Let current THC stream wait on the completing of the NCCL work
+    // Let current stream wait on the completing of the NCCL work
     // always return true and will throw if there are exceptions
     // Non-blocking operation
     bool wait() override;
@@ -93,7 +90,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     std::vector<at::Device> devices_;
 
     // The CUDA events tracking this work item on multiple CUDA devices
-    std::vector<CUDAEvent> cudaEvents_;
+    std::vector<at::cuda::CUDAEvent> cudaEvents_;
 
     friend class ProcessGroupNCCL;
   };
@@ -195,10 +192,7 @@ class ProcessGroupNCCL : public ProcessGroup {
       ncclStreams_;
 
   // The CUDA events used to sync NCCL streams
-  std::unordered_map<std::string, std::vector<CUDAEvent>> ncclEvents_;
-
-  // Store copy of pointer to THCState retrieved from ::at::globalContext().
-  THCState* thcState_;
+  std::unordered_map<std::string, std::vector<at::cuda::CUDAEvent>> ncclEvents_;
 
   // ID of this process group
   std::string processGroupID_;

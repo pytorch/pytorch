@@ -581,7 +581,8 @@ namespace {
 #else
       cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
       const int64_t bsize = tensors.mini_batch;
-      if (prop->major == 7 && rnn.datatype == CUDNN_DATA_HALF && !tensors.is_input_packed()) {
+      //excluding Turing from using persistent rnn.
+      if (prop->major == 7 && prop->minor != 5 && rnn.datatype == CUDNN_DATA_HALF && !tensors.is_input_packed()) {
           if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && rnn.num_directions() == 1 &&
                   rnn.hidden_size % 128 == 0 && tensors.input_size % 128 == 0){
               //technically, batch size should be multiple of 8, but there are quite a few multiple-of-8 batchsizes that give bad perf,
