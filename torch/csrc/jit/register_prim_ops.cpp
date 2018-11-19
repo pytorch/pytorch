@@ -705,7 +705,7 @@ Operation listNe(const Node* node) {
     T a;
     T b;
     pop(stack, a, b);
-    push(stack, a->elements() == b->elements() ? true : false);
+    push(stack, !(a->elements() == b->elements()));
     return 0;
   };
 }
