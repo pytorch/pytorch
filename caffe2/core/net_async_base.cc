@@ -126,10 +126,14 @@ bool AsyncNetBase::handleRunError() {
     }
   }
   if (first_exc_task_id >= 0) {
+    LOG(ERROR) << "Rethrowing exception from the run of '" << Name() << "'";
     event(first_exc_task_id).RethrowException();
   }
 #endif // CAFFE2_USE_EXCEPTION_PTR
 
+  if (!success_) {
+    LOG(ERROR) << "Error encountered in the run of '" << Name() << "'";
+  }
   return success_;
 }
 
@@ -178,10 +182,10 @@ TaskThreadPoolBase* AsyncNetBase::pool(const DeviceOption& device_option) {
     auto gpu_id = device_option.device_id();
     CAFFE_ENFORCE(
         gpu_id >= 0 && gpu_id < FLAGS_caffe2_net_async_max_gpus,
-        "Invalid GPU id: " + caffe2::to_string(gpu_id));
+        "Invalid GPU id: " + c10::to_string(gpu_id));
     return poolGetter(gpu_pools_, device_type, gpu_id, num_workers_);
   } else {
-    CAFFE_THROW("Unsupported device type " + caffe2::to_string(device_type));
+    CAFFE_THROW("Unsupported device type " + c10::to_string(device_type));
   }
 }
 
@@ -190,7 +194,7 @@ int AsyncNetBase::stream(int task_id) {
   int stream_id = 0;
   if (IsGPUDeviceType(device_option.device_type())) {
     int gpu_id = device_option.device_id();
-    CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + caffe2::to_string(gpu_id));
+    CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + c10::to_string(gpu_id));
     if ((unsigned)gpu_id >= getStreamCounters().size()) {
       getStreamCounters().resize(gpu_id + 1, 0);
     }

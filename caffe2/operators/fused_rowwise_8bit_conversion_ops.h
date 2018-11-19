@@ -34,6 +34,7 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
     CAFFE_ENFORCE(IS_LITTLE_ENDIAN, "Unsupported endianness");
 
     const auto& input = Input(DATA_FLOAT);
+    auto* output = Output(DATA_FUSED_SCALE_BIAS_INT8);
 
     const auto input_rows = input.size(0);
     const auto input_columns = input.size(1);
@@ -47,8 +48,7 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
     // | number_of_columns |  4B   |  4B  |
     const std::vector<int64_t> output_dimensions = {input_rows,
                                                     input_columns + 8};
-    auto* output = Output(
-        DATA_FUSED_SCALE_BIAS_INT8, output_dimensions, at::dtype<uint8_t>());
+    output->Resize(output_dimensions);
 
     const auto* input_data = input.template data<T>();
     auto* output_data = output->template mutable_data<uint8_t>();
@@ -107,6 +107,7 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
     CAFFE_ENFORCE(IS_LITTLE_ENDIAN, "Unsupported endianness");
 
     const auto& input = Input(DATA_FUSED_SCALE_BIAS_INT8);
+    auto* output = Output(DATA_FLOAT);
 
     const auto input_rows = input.size(0);
     const auto input_columns = input.size(1);
@@ -116,7 +117,7 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
     // input_columns is the number of values in the original row.
     const std::vector<int64_t> output_dimensions = {input_rows,
                                                     input_columns - 8};
-    auto* output = Output(DATA_FLOAT, output_dimensions, at::dtype<T>());
+    output->Resize(output_dimensions);
     const auto output_columns = output->size(1);
 
     const auto* input_data = input.template data<uint8_t>();
