@@ -20,8 +20,9 @@ struct ModuleAccessorValue : public script::SugaredValue {
       return std::make_shared<script::SimpleValue>(m.get_or_add_parameter(v->slot()));
     } else if(script::Method* m = module->find_method(field)) {
       return std::make_shared<script::MethodValue>(module, *m);
+    } else {
+      throw script::ErrorReport(loc) << "unknown attr: " << field;
     }
-    return script::SugaredValue::attr(loc, m, field);
   }
 private:
   std::shared_ptr<script::Module> module;
@@ -80,7 +81,7 @@ static size_t parseVersionNumber(script::Lexer& L) {
    return size_t(version.asIntegral());
 }
 
-void import_method(const std::shared_ptr<script::Module>& mod, const std::string& src, const std::vector<at::Tensor>& constant_table) {
+void import_methods(const std::shared_ptr<script::Module>& mod, const std::string& src, const std::vector<at::Tensor>& constant_table) {
   script::Parser p(src);
 
   size_t version = parseVersionNumber(p.lexer());
