@@ -176,7 +176,7 @@ TEST(TestStream, CUDAGuardTest) {
 TEST(TestStream, StreamPoolTest) {
   std::vector<at::cuda::CUDAStream> streams{};
   for (int i = 0; i < 200; ++i) {
-    streams.emplace_back(at::cuda::detail::CUDAStream_getStreamFromPool());
+    streams.emplace_back(at::cuda::impl::CUDAStream_getStreamFromPool());
   }
 
   std::unordered_set<cudaStream_t> stream_set{};
