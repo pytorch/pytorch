@@ -133,7 +133,7 @@ namespace std {
   template <>
   struct hash<at::cuda::CUDAStream> {
     size_t operator()(at::cuda::CUDAStream s) const noexcept {
-      return std::hash<Stream>{}(s.unwrap());
+      return std::hash<c10::Stream>{}(s.unwrap());
     }
   }
 } // namespace std
