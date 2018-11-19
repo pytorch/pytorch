@@ -58,7 +58,7 @@ class FillerOp : public Operator<Context> {
         // Shape input must be in CPU context
         auto& input = this->template Input<Tensor>(0, CPU);
         CAFFE_ENFORCE_EQ(
-            input.ndim(),
+            input.dim(),
             1,
             "When input_as_shape is true, the input must be a 1D tensor of "
             "data type int64_t");
@@ -364,21 +364,21 @@ class DiagonalFillOp final : public FillerOp<Context> {
 
  private:
   void VerifyOutputShape(Tensor* output) {
-    CAFFE_ENFORCE(output->ndim() >= 2, "Input shape must be >= 2D");
+    CAFFE_ENFORCE(output->dim() >= 2, "Input shape must be >= 2D");
   }
 
   int64_t GetStepSize(Tensor* output) {
     int64_t step;
-    if (output->ndim() == 2) {
-      step = output->dim(1) + 1;
+    if (output->dim() == 2) {
+      step = output->size(1) + 1;
     } else {
-      int64_t prev_i = output->dim(0);
+      int64_t prev_i = output->size(0);
       for (auto i : output->sizes()) {
         if (i != prev_i) {
           CAFFE_THROW("All dimensions of input must be of equal length");
         }
       }
-      vector<int64_t> cumprod(output->ndim());
+      vector<int64_t> cumprod(output->dim());
       auto dims = output->sizes();
       std::partial_sum(
           dims.begin(),
@@ -486,7 +486,7 @@ class LengthsRangeFillOp : public Operator<Context> {
     auto* output = Output(0);
     auto* input_data = input.template data<int32_t>();
 
-    CAFFE_ENFORCE_EQ(input.ndim(), 1, "Input must be a vector.");
+    CAFFE_ENFORCE_EQ(input.dim(), 1, "Input must be a vector.");
 
     auto len_sum = std::accumulate(input_data, input_data + input.numel(), 0);
 

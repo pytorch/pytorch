@@ -34,7 +34,7 @@ class SparseToDenseOp final : public Operator<Context> {
     }
     if (InputSize() == 3) {
       auto& data_to_infer_dim = Input(DATA_TO_INFER_DIM);
-      CAFFE_ENFORCE_GE(data_to_infer_dim.ndim(), 1);
+      CAFFE_ENFORCE_GE(data_to_infer_dim.dim(), 1);
       return data_to_infer_dim.dim32(0);
     }
     if (sparse_indices_len <= 0) {
@@ -65,10 +65,10 @@ class SparseToDenseOp final : public Operator<Context> {
   template <typename TInd, typename TData>
   bool DoRunWithType2() {
     auto& sparse_indices = Input(INDICES);
-    CAFFE_ENFORCE_EQ(sparse_indices.ndim(), 1);
+    CAFFE_ENFORCE_EQ(sparse_indices.dim(), 1);
     auto& sparse_values = Input(VALUES);
-    CAFFE_ENFORCE_GE(sparse_values.ndim(), 1);
-    CAFFE_ENFORCE_EQ(sparse_indices.numel(), sparse_values.dim(0));
+    CAFFE_ENFORCE_GE(sparse_values.dim(), 1);
+    CAFFE_ENFORCE_EQ(sparse_indices.numel(), sparse_values.size(0));
 
     const TInd* sparse_indices_vec = sparse_indices.template data<TInd>();
     const int32_t sparse_indices_len = sparse_indices.dim32(0);
@@ -106,7 +106,7 @@ class SparseToDenseOp final : public Operator<Context> {
   bool DoRunWithOtherType2() {
     CAFFE_THROW(
         "SparseToDense is not implemented on tensor of type ",
-        Input(VALUES).meta().name(),
+        Input(VALUES).dtype().name(),
         "Consider adding it a type in the list DispatchHelper or implementing "
         "a generic version (which won't work for duplicated indices though)");
   }

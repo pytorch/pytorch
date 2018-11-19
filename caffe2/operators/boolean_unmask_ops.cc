@@ -8,7 +8,7 @@ template <>
 bool BooleanUnmaskOp<CPUContext>::RunOnDevice() {
   int maskSize = Input(0).numel();
   int numMasks = InputSize() / 2;
-  auto& valueMeta = Input(1).meta();
+  auto& valueMeta = Input(1).dtype();
 
   auto* valuesOut = Output(0);
   valuesOut->Resize(maskSize);
@@ -19,12 +19,12 @@ bool BooleanUnmaskOp<CPUContext>::RunOnDevice() {
     bool maskFound = false;
     for (int maskIndex = 0; maskIndex < numMasks; ++maskIndex) {
       auto& mask = Input(maskIndex * 2);
-      CAFFE_ENFORCE_EQ(mask.ndim(), 1);
+      CAFFE_ENFORCE_EQ(mask.dim(), 1);
       CAFFE_ENFORCE_EQ(mask.numel(), maskSize);
       const auto* maskPtr = mask.template data<bool>();
 
       auto& values = Input(maskIndex * 2 + 1);
-      CAFFE_ENFORCE_EQ(values.ndim(), 1);
+      CAFFE_ENFORCE_EQ(values.dim(), 1);
       const auto* valuesPtr = (char*)values.raw_data();
 
       if (maskPtr[maskOffset]) {

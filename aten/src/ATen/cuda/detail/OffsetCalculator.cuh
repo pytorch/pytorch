@@ -2,7 +2,7 @@
 
 #include <array>
 #include <cstdint>
-#include <ATen/core/Macros.h>
+#include <c10/macros/Macros.h>
 #include <ATen/cuda/Array.h>
 #include <THC/THCIntegerDivider.cuh>
 
@@ -29,7 +29,7 @@ struct OffsetCalculator {
     }
   }
 
-  AT_HOST_DEVICE offset_type get(uint32_t linear_idx) const {
+  C10_HOST_DEVICE offset_type get(uint32_t linear_idx) const {
     offset_type offsets;
     #pragma unroll
     for (int arg = 0; arg < NARGS; arg++) {

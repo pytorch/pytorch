@@ -1,6 +1,6 @@
 // @generated from test/cpp/api/optim_baseline.py
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <vector>
 

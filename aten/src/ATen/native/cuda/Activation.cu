@@ -3,6 +3,8 @@
 #include "ATen/Dispatch.h"
 #include "ATen/cuda/CUDAApplyUtils.cuh"
 #include "ATen/cuda/detail/IndexUtils.cuh"
+#include "ATen/native/Activation.h"
+#include "ATen/native/cuda/Loops.cuh"
 
 
 namespace at { namespace native {
@@ -275,5 +277,20 @@ Tensor hardshrink_backward_cuda(const Tensor & grad, const Tensor & self, Scalar
   });
   return out_tensor;
 }
+
+template <typename scalar_t>
+void threshold_kernel_impl(TensorIterator& iter, scalar_t threshold, scalar_t value) {
+  gpu_binary_kernel(iter, [=]GPU_LAMBDA(scalar_t x, scalar_t other) -> scalar_t {
+    return x <= threshold ? value : other;
+  });
+}
+
+static void threshold_kernel(TensorIterator& iter, Scalar threshold, Scalar value) {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(iter.type(), "threshold", [&] {
+    threshold_kernel_impl<scalar_t>(iter, threshold.to<scalar_t>(), value.to<scalar_t>());
+  });
+}
+
+REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
 
 }}  // namespace at::native

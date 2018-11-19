@@ -43,6 +43,7 @@ fi
 
 # Options for building only a subset of the libraries
 USE_CUDA=0
+USE_FBGEMM=0
 USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
@@ -57,6 +58,9 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-cuda)
           USE_CUDA=1
+          ;;
+      --use-fbgemm)
+          USE_FBGEMM=1
           ;;
       --use-rocm)
           USE_ROCM=1
@@ -141,11 +145,6 @@ if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
     GLOO_FLAGS+=" -DUSE_IBVERBS=1"
     THD_FLAGS="-DUSE_GLOO_IBVERBS=1"
 fi
-CWRAP_FILES="\
-$BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
-$BASE_DIR/torch/lib/THNN/generic/THNN.h;\
-$BASE_DIR/torch/lib/THCUNN/generic/THCUNN.h;\
-$BASE_DIR/torch/lib/ATen/nn.yaml"
 CUDA_NVCC_FLAGS=$C_FLAGS
 if [[ -z "$CUDA_DEVICE_DEBUG" ]]; then
   CUDA_DEVICE_DEBUG=0
@@ -212,7 +211,9 @@ function build_caffe2() {
 		       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
 		       -DUSE_CUDA=$USE_CUDA \
 		       -DUSE_DISTRIBUTED=$USE_DISTRIBUTED \
+		       -DUSE_FBGEMM=$USE_FBGEMM \
 		       -DUSE_NUMPY=$USE_NUMPY \
+		       -DNUMPY_INCLUDE_DIR=$NUMPY_INCLUDE_DIR \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \
 		       -DUSE_NNPACK=$USE_NNPACK \
@@ -244,6 +245,21 @@ function build_caffe2() {
   fi
 
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
+  if ls build.ninja 2>&1 >/dev/null; then
+      # in cmake, .cu compilation involves generating certain intermediates
+      # such as .cu.o and .cu.depend, and these intermediates finally get compiled
+      # into the final .so.
+      # Ninja updates build.ninja's timestamp after all dependent files have been built,
+      # and re-kicks cmake on incremental builds if any of the dependent files
+      # have a timestamp newer than build.ninja's timestamp.
+      # There is a cmake bug with the Ninja backend, where the .cu.depend files
+      # are still compiling by the time the build.ninja timestamp is updated,
+      # so the .cu.depend file's newer timestamp is screwing with ninja's incremental
+      # build detector.
+      # This line works around that bug by manually updating the build.ninja timestamp
+      # after the entire build is finished.
+      touch build.ninja
+  fi
 
   # Install Python proto files
   if [[ "$BUILD_PYTHON" == 'ON' ]]; then

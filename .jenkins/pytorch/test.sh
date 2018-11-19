@@ -25,15 +25,16 @@ if [ -n "${IN_CIRCLECI}" ]; then
   fi
 fi
 
-# JIT C++ extensions require ninja.
-git clone https://github.com/ninja-build/ninja --quiet
-pushd ninja
-python ./configure.py --bootstrap
-export PATH="$PWD:$PATH"
-popd
+# --user breaks ppc64le builds and these packages are already in ppc64le docker
+if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
+  # JIT C++ extensions require ninja.
+  pip install -q ninja --user
+  # ninja is installed in /var/lib/jenkins/.local/bin
+  export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
-# TODO: move this to Docker
-pip install -q hypothesis
+  # TODO: move this to Docker
+  pip install -q hypothesis --user
+fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
@@ -144,7 +145,7 @@ test_libtorch() {
      else
        "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
      fi
-     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+     python tools/download_mnist.py --quiet -d mnist
      OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
   fi
 }

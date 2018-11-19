@@ -63,6 +63,14 @@ C10_DEFINE_int(
     sleep_before_run,
     0,
     "The seconds to sleep before starting the benchmarking.");
+C10_DEFINE_int(
+    sleep_between_iteration,
+    0,
+    "The seconds to sleep between the individual iterations.");
+C10_DEFINE_int(
+    sleep_between_net_and_operator,
+    0,
+    "The seconds to sleep between net and operator runs.");
 C10_DEFINE_bool(
     text_output,
     false,
@@ -90,6 +98,8 @@ int main(int argc, char** argv) {
       FLAGS_output_folder,
       FLAGS_run_individual,
       FLAGS_sleep_before_run,
+      FLAGS_sleep_between_iteration,
+      FLAGS_sleep_between_net_and_operator,
       FLAGS_text_output,
       FLAGS_warmup,
       FLAGS_wipe_cache);

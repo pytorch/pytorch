@@ -1,4 +1,4 @@
-#include "caffe2/core/dispatch/KernelRegistration.h"
+#include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/flatten.h"
 #include "caffe2/utils/math.h"
 
@@ -17,10 +17,10 @@ void flatten_op_cpu_impl(
       input.sizes().size(), axis, "The rank of the tensor must be >= axis.");
   output->Resize(input.size_to_dim(axis), input.size_from_dim(axis));
   context->CopyItemsSameDevice(
-      input.meta(),
+      input.dtype(),
       input.numel(),
       input.raw_data(),
-      output->raw_mutable_data(input.meta()));
+      output->raw_mutable_data(input.dtype()));
 }
 } // namespace
 } // namespace caffe2

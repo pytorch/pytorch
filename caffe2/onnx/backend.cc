@@ -557,7 +557,7 @@ Caffe2Ops Caffe2Backend::CreatePadPool(
       bool pads_flag = false;
       str += "[";
       for (const auto& i : pads) {
-        str += caffe2::to_string(i) + ",";
+        str += c10::to_string(i) + ",";
         pads_flag = pads_flag || i > 0;
       }
       str += "]";
@@ -1215,7 +1215,8 @@ Caffe2Ops Caffe2Backend::CreateUpsample(
     const ConversionContext& ctx) {
   auto& attributes = onnx_node->attributes;
   attributes.remove("mode");
-  if (ctx.opset_version() >= 7) {
+
+  if (ctx.opset_version() >= 7 && ctx.opset_version() < 9) {
     const auto& scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
     if (scales.size() != 4) {
       CAFFE_THROW("The scales argument should have size 4");
@@ -1232,6 +1233,37 @@ Caffe2Ops Caffe2Backend::CreateUpsample(
     c2_width->set_name("width_scale");
     c2_width->set_f(scales.Get(3));
     return c2_op;
+  } else if (ctx.opset_version() >= 9) {
+    const auto& node = onnx_node->node;
+    if (node.input_size() != 2) {
+      CAFFE_THROW("Expects 2 input in upsample after onnx version 9");
+    }
+    Caffe2Ops ret;
+
+    // Slice the input {1, 1, height, width} -> {height, width}
+    auto* c2_op = ret.ops.Add();
+    auto sliced_input = dummy_->NewDummyName();
+    caffe2::Argument arg_starts, arg_ends;
+    arg_starts.set_name("starts");
+    arg_starts.add_ints(2);
+    arg_ends.set_name("ends");
+    arg_ends.add_ints(-1);
+    BuildOperator(
+        c2_op,
+        "Slice",
+        {node.input(1)},
+        {sliced_input},
+        {arg_starts, arg_ends});
+
+    // Upsample
+    c2_op = ret.ops.Add();
+    BuildOperator(
+        c2_op,
+        "ResizeNearest",
+        {node.input(0), sliced_input},
+        {node.output(0)},
+        {});
+    return ret;
   }
   return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
 }
@@ -1689,9 +1721,7 @@ void Caffe2Backend::BuildTensorFillingOp(
     auto* strings = c2_values->mutable_strings();
     strings->CopyFrom(onnx_tensor.string_data());
   } else {
-    CAFFE_THROW(
-        "unrecognized tensor type: ",
-        TensorProto::DataType_Name(onnx_tensor.data_type()));
+    CAFFE_THROW("unrecognized tensor type: ", onnx_tensor.data_type());
   }
 
   auto* c2_shape = c2_op->add_arg();

@@ -18,6 +18,19 @@ void sum_kernel_impl(TensorIterator& iter) {
   });
 }
 
+#ifdef __HIPCC__
+template <>
+void sum_kernel_impl<int16_t, int16_t>(TensorIterator& iter) {
+  // There is a Register Coalescing bug in LLVM causing the hcc
+  // compiler segfaults:
+  // https://bugs.llvm.org/show_bug.cgi?id=39602
+  // To work around it, use int32 as the accumulate type.
+  gpu_reduce_kernel<int16_t>(iter, []GPU_LAMBDA(int32_t a, int32_t b) -> int32_t {
+    return a + b;
+  });
+}
+#endif
+
 template <typename scalar_t, typename acc_t=scalar_t>
 void prod_kernel_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t>(iter, []GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {

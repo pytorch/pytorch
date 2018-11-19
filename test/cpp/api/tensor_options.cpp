@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <ATen/Context.h>
 #include <ATen/Functions.h>

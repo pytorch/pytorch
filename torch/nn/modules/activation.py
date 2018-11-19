@@ -7,6 +7,7 @@ from .. import functional as F
 from ..._jit_internal import weak_module, weak_script_method
 
 
+@torch._jit_internal.weak_module
 class Threshold(Module):
     __constants__ = ['threshold', 'value', 'inplace']
 
@@ -45,6 +46,7 @@ class Threshold(Module):
         self.inplace = inplace
         # TODO: check in THNN (if inplace == True, then assert value <= threshold)
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
@@ -124,6 +126,7 @@ class RReLU(Module):
     .. _`Empirical Evaluation of Rectified Activations in Convolutional Network`:
         https://arxiv.org/abs/1505.00853
     """
+    __constants__ = ['lower', 'upper', 'inplace', 'training']
 
     def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
         super(RReLU, self).__init__()
@@ -131,6 +134,7 @@ class RReLU(Module):
         self.upper = upper
         self.inplace = inplace
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 

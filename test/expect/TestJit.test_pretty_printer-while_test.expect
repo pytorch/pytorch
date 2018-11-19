@@ -1,13 +1,10 @@
-def script(a1, i1):
-  t4 = aten::lt(i1, 3)
-  t5 = prim::TensorToBool(t4)
-  a = a1
-  i = i1
-  t6 = t5
-  while t6:
-    i2 = aten::add(i, 1, 1)
-    t13 = aten::lt(i2, 3)
-    t6 = prim::TensorToBool(t13)
-    a = aten::mul(a, a)
-    i = i2
+def script(self,
+    a_1: Tensor,
+    i_1: Tensor) -> Tensor:
+  a, i = a_1, i_1
+  t = bool(aten.lt(i_1, 3))
+  while t:
+    a_2 = aten.mul_(a, a)
+    i_2 = aten.add_(i, 1, 1)
+    t, a, i = bool(aten.lt(i_2, 3)), a_2, i_2
   return a

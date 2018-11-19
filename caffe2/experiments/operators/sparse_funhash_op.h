@@ -56,13 +56,13 @@ class SparseFunHashOp : public Operator<Context> {
     int64_t num_alpha = 1;
     if (adaptive_) {
       const auto& alpha = Input(4);
-      num_alpha = alpha.dim(0);
+      num_alpha = alpha.size(0);
     }
 
     const auto* seg_data = seg.template data<int>();
 
-    int64_t num_weight = weight.dim(0);
-    int64_t num_nz_ent = seg.dim(0);
+    int64_t num_weight = weight.size(0);
+    int64_t num_nz_ent = seg.size(0);
 
     int64_t n_segments = num_segments_;
     if (num_segments_ == -1) {
@@ -163,7 +163,7 @@ class SparseFunHashGradientOp : public Operator<Context> {
 
     if (adaptive_) {
       const auto& alpha = Input(5);
-      num_alpha = alpha.dim(0);
+      num_alpha = alpha.size(0);
       auto* grad_alpha = Output(2);
       grad_alpha->ResizeLike(alpha);
       grad_alpha_data = grad_alpha->template mutable_data<T>();
@@ -172,8 +172,8 @@ class SparseFunHashGradientOp : public Operator<Context> {
 
     const auto* seg_data = seg.template data<int>();
 
-    int64_t num_weight = weight.dim(0);
-    int64_t num_nz_ent = seg.dim(0);
+    int64_t num_weight = weight.size(0);
+    int64_t num_nz_ent = seg.size(0);
 
     int64_t grad_weight_size = num_nz_ent * num_outputs_ * num_alpha;
     auto* grad_weight_val = Output(0);

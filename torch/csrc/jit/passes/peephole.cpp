@@ -21,12 +21,12 @@ namespace torch { namespace jit {
 // we would see redundant Gemm ops with sub-optimal inputs. This flag is exposed
 // so that ONNX export can pass `true` to get the fused behavior, but normal
 // JIT peephole optimization is left alone.
-void PeepholeOptimize(Block * block, bool addmm_fusion_enabled) {
+void PeepholeOptimizeImpl(Block * block, bool addmm_fusion_enabled) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto* node = *it;
 
     for (Block * sub_block : node->blocks()) {
-      PeepholeOptimize(sub_block, addmm_fusion_enabled);
+      PeepholeOptimizeImpl(sub_block, addmm_fusion_enabled);
     }
 
     // XXX: remember that if you want to simplify an expression by combining multiple nodes
@@ -129,10 +129,14 @@ void PeepholeOptimize(Block * block, bool addmm_fusion_enabled) {
   }
 }
 
-void PeepholeOptimize(std::shared_ptr<Graph>& graph, bool addmm_fusion_enabled) {
-  PeepholeOptimize(graph->block(), addmm_fusion_enabled);
+void PeepholeOptimize(Block* block, bool addmm_fusion_enabled) {
+  PeepholeOptimizeImpl(block, addmm_fusion_enabled);
   // Eliminate dead code created by any peephole passes we've just done
-  EliminateDeadCode(graph->block());
+  EliminateDeadCode(block);
+}
+
+void PeepholeOptimize(const std::shared_ptr<Graph>& graph, bool addmm_fusion_enabled) {
+  PeepholeOptimize(graph->block(), addmm_fusion_enabled);
 }
 
 }}

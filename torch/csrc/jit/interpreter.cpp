@@ -12,6 +12,7 @@
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/variable_tensor_functions.h"
+#include "torch/csrc/jit/script/jit_exception.h"
 
 #include <exception>
 #include <iostream>
@@ -288,6 +289,7 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
 struct PreprocessGraph {
   PreprocessGraph(Graph & g)
   : graph(g.copy()) {
+    n_outputs = graph->outputs().size();
     desugarTripCounts(graph->block());
     flattenIO(*graph);
     dropUnused(graph->block());
@@ -299,7 +301,8 @@ struct PreprocessGraph {
   std::shared_ptr<Graph> graph;
   // for each input, should we move rather than copy the inputs
   std::unordered_map<Node*, std::vector<uint8_t>> move_flags;
-
+  // Record number of outputs before flattenIO()
+  size_t n_outputs;
 };
 
 // Sometimes we want to pass things that are not tensors.  Instead of
@@ -313,17 +316,17 @@ public:
   ContainerTensor()
   : TensorImpl(at::UndefinedTensorId(), caffe2::TypeMeta(), nullptr, /* is_variable */ false) {}
 
-  virtual ~ContainerTensor() = default;
-  virtual at::IntList sizes() const override {
+  ~ContainerTensor() override = default;
+  at::IntList sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
-  virtual at::IntList strides() const override {
+  at::IntList strides() const override {
     throw std::runtime_error("strides() on ContainerTensor");
   }
-  virtual int64_t dim() const override {
+  int64_t dim() const override {
     throw std::runtime_error("dim() on ContainerTensor");
   }
-  virtual const at::Storage& storage() const override {
+  const at::Storage& storage() const override {
     throw std::runtime_error("storage() on ContainerTensor");
   }
 };
@@ -347,6 +350,7 @@ struct UseList {
 };
 
 // one instruction plus meta-data
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Instruction {
   Operation callback;
   UseList inputs;
@@ -361,7 +365,7 @@ int relativeJump(int from_inst, int to_inst) {
 }
 
 struct CodeImpl {
-  CodeImpl(std::shared_ptr<Graph>& graph_)
+  CodeImpl(const std::shared_ptr<Graph>& graph_)
       : preprocess(*graph_) {
     graph = preprocess.graph;
     insertNodesFromBlock(graph->block());
@@ -636,42 +640,109 @@ struct CodeImpl {
 };
 
 // InterpreterState state that and used to compute a Code
-struct InterpreterStateImpl {
+struct InterpreterStateImpl : c10::intrusive_ptr_target {
   InterpreterStateImpl(const Code & code)
   : function(code.pImpl),
     int_data(function->int_data.data()),
     bool_data(function->bool_data),
     registers(function->register_size) {
   }
-  void run(Stack & stack) {
-    // std::cout << *function->graph << "\n";
-    // function->dump(std::cout);
-    size_t pc = current_pc;
+
+ private:
+  c10::intrusive_ptr<InterpreterStateImpl> intrusive_from_this() {
+    c10::raw::intrusive_ptr::incref(this);
+    return c10::intrusive_ptr<InterpreterStateImpl>::reclaim(this);
+  }
+
+  bool runImpl(Stack& stack) {
     auto & instructions = function->instructions;
     size_t last = instructions.size();
-    while(pc < last) {
+
+    while (pc < last) {
         // std::cout << "executing " << pc << ": ";
         // function->dumpInstruction(std::cout, pc);
         // std::cout << "\n";
+        auto & inst = instructions[pc];
         try {
-          auto & inst = instructions[pc];
           loadTensorsFromRegisters(inst.inputs, stack);
           size_t new_pc = pc + 1 + inst.callback(stack);
-          for(int i = inst.outputs.size - 1; i >= 0; i--) {
-            int reg = get(inst.outputs,i);
+          for (int i = inst.outputs.size - 1; i >= 0; --i) {
+            int reg = get(inst.outputs, i);
             registers[reg] = pop(stack);
             // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
           }
           pc = new_pc;
+        } catch (Suspend& e) {
+          // wait() expects a single input
+          JIT_ASSERT(inst.inputs.values.size == 1);
+
+          getOrCreateFuture();
+
+          InterpreterState state(intrusive_from_this());
+          e.future->addCallback([state](){
+            c10::global_work_queue.schedule(InterpreterContinuation(state, Stack()));
+          });
+
+          if (get(inst.inputs.free_flags, 0)) {
+            // make sure the register is not freed once we are waked up
+            registers[get(inst.inputs.values, 0)] = e.future;
+          }
+          return true;
         } catch(std::exception & e) {
-          if(!instructions[pc].debug_location)
-            throw; // rethrow original exception
-          // throw a new exception with enhanced debugging information
-          instructions[pc].debug_location->wrapAndRethrowException(e, "operation failed in interpreter");
+          if (!instructions[pc].debug_location) {
+            throw;
+          }
+          auto msg = instructions[pc].debug_location->wrapException(e, "operation failed in interpreter");
+          if (dynamic_cast<JITException *>(&e)) {
+            throw JITException(msg);
+          } else {
+            throw std::runtime_error(msg);
+          }
         }
     }
-    current_pc = pc;
+    if (future) {
+      auto num_outputs = function->preprocess.n_outputs;
+      if (num_outputs == 1) {
+        future->markCompleted(stack.back());
+      } else {
+        future->markCompleted(
+            Tuple::create(jit::last(stack, num_outputs).vec()));
+      }
+    }
+
+    return false;
   }
+
+ public:
+  c10::intrusive_ptr<Future> getOrCreateFuture() {
+    if (!future) {
+      future = c10::make_intrusive<Future>();
+    }
+    return future;
+  }
+
+  c10::intrusive_ptr<Future> runAsync(Stack& stack) {
+    getOrCreateFuture();
+    runImpl(stack);
+    return future;
+  }
+
+  void run(Stack& stack) {
+    if (runImpl(stack)) {
+      future->wait();
+
+      auto num_outputs = function->preprocess.n_outputs;
+      if (num_outputs == 1) {
+        push(stack, future->value());
+      } else {
+        auto tuple = future->value().toTuple();
+        for (const auto& value : tuple->elements()) {
+          push(stack, value);
+        }
+      }
+    }
+  }
+
   int get(const ListHandle<int> & list, int i) {
     return int_data[list.start + i];
   };
@@ -690,12 +761,10 @@ struct InterpreterStateImpl {
 
     }
   }
-  // note: it may seem unnecessary to keep the current_pc inside InterpreterState
-  // since InterpreterState::run completes the function. However, in the
-  // future we will end up with interpreters that can suspend (e.g. for asynchrony)
-  // so we keep this design in place eventhough we removed the 'staging'
-  // that it was originally used for.
-  size_t current_pc = 0;
+
+  // pc is critical for the interperter to pick up the progress from suspend
+  size_t pc = 0;
+  c10::intrusive_ptr<Future> future;
   std::shared_ptr<CodeImpl> function; // keep function alive
   // these are just copies of function to prevent indirections in interpreter
   int * int_data;
@@ -724,7 +793,7 @@ std::ostream & operator<<(std::ostream & out, const Code & code) {
   return out;
 }
 
-Code::Code(std::shared_ptr<Graph>& graph)
+Code::Code(const std::shared_ptr<Graph>& graph)
     : pImpl(new CodeImpl(graph)) {}
 Code::~Code() = default;
 
@@ -733,17 +802,21 @@ const std::vector<GraphExecutor*>& Code::grad_executors() {
 }
 
 InterpreterState::InterpreterState(const Code & code)
-  : pImpl(new InterpreterStateImpl(code)) {}
+  : pImpl(c10::make_intrusive<InterpreterStateImpl>(code)) {}
 InterpreterState::~InterpreterState() = default;
 
-void InterpreterState::run(Stack & stack) {
-  return pImpl->run(stack);
+void InterpreterState::run(Stack& stack) {
+  static_cast<InterpreterStateImpl*>(pImpl.get())->run(stack);
 }
 
-InterpreterState InterpreterState::clone() const {
-  return InterpreterState(new InterpreterStateImpl(*pImpl));
+c10::intrusive_ptr<Future> InterpreterState::runAsync(Stack& stack) {
+  return static_cast<InterpreterStateImpl*>(pImpl.get())->runAsync(stack);
 }
 
-InterpreterState::InterpreterState(InterpreterStateImpl * pImpl) : pImpl(pImpl) {}
+c10::intrusive_ptr<Future> InterpreterState::getFuture() {
+  return static_cast<InterpreterStateImpl*>(pImpl.get())->getOrCreateFuture();
+}
 
+InterpreterState::InterpreterState(c10::intrusive_ptr<c10::intrusive_ptr_target> pImpl_)
+    : pImpl(std::move(pImpl_)) {}
 }}

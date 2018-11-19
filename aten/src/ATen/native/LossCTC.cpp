@@ -353,7 +353,7 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntList input_le
   } else {
     res = std::get<0>(at::_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK));
   }
-  if (reduction == Reduction::ElementwiseMean) {
+  if (reduction == Reduction::Mean) {
     auto target_lengths_t = at::tensor(target_lengths, res.options().device(at::Device(at::Device::Type::CPU)).dtype(kLong)).toType(res.type());
     return (res / target_lengths_t).mean();
   } else if (reduction == Reduction::Sum) {

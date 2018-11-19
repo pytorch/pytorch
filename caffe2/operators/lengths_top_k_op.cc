@@ -71,7 +71,7 @@ bool LengthsTopKGradientOp<T, Context>::RunOnDevice() {
   auto& input_len = Input(LENGTH_IN);
   int N = input_len.numel();
   auto& input_indices = Input(INDICES_IN);
-  CAFFE_ENFORCE_GE(input_indices.ndim(), 2, "input dim must be >= 2");
+  CAFFE_ENFORCE_GE(input_indices.dim(), 2, "input dim must be >= 2");
   CAFFE_ENFORCE_EQ(
       input_indices.numel(), N * k_, "input_indices shape is not correct");
   auto& input_topk = Input(DER_TOPK_IN);

@@ -36,10 +36,10 @@ class EnsureCPUOutputOp : public Operator<Context> {
     auto& input = this->template Input<Tensor>(0, InputContext::GetDeviceType());
     output->ResizeLike(input);
     context_.CopyItemsToCPU(
-        input.meta(),
+        input.dtype(),
         input.numel(),
         input.raw_data(),
-        output->raw_mutable_data(input.meta()));
+        output->raw_mutable_data(input.dtype()));
     context_.FinishDeviceComputation();
     return true;
   }

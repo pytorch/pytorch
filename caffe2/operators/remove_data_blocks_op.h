@@ -29,12 +29,12 @@ class RemoveDataBlocksOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& data = Input(DATA);
     const auto& indices = Input(INDICES);
-    CAFFE_ENFORCE(data.ndim() > 0, "DATA should be at leat 1-D.");
-    CAFFE_ENFORCE(indices.ndim() == 1, "INDICES should be 1-D.");
+    CAFFE_ENFORCE(data.dim() > 0, "DATA should be at leat 1-D.");
+    CAFFE_ENFORCE(indices.dim() == 1, "INDICES should be 1-D.");
 
     const auto outer_size = data.sizes()[0];
     const auto block_size = data.size_from_dim(1);
-    const auto block_size_bytes = block_size * data.meta().itemsize();
+    const auto block_size_bytes = block_size * data.dtype().itemsize();
     auto indices_size = indices.sizes()[0];
     const char* data_ptr = (char*)data.raw_data();
     const auto* ind_ptr = indices.template data<T>();
@@ -56,7 +56,7 @@ class RemoveDataBlocksOp final : public Operator<Context> {
     auto shape = data.sizes().vec();
     shape[0] -= indices_size;
     output->Resize(shape);
-    char* out_ptr = (char*)output->raw_mutable_data(data.meta());
+    char* out_ptr = (char*)output->raw_mutable_data(data.dtype());
 
     ind_vec.insert(ind_vec.begin(), -1);
     int64_t ind_vec_size = ind_vec.size();
@@ -66,7 +66,7 @@ class RemoveDataBlocksOp final : public Operator<Context> {
           (i == ind_vec_size - 1) ? outer_size : ind_vec[i + 1];
       auto num_items = interval_end - interval_start;
       context_.CopyItemsSameDevice(
-          data.meta(),
+          data.dtype(),
           num_items * block_size,
           data_ptr + block_size_bytes * interval_start,
           out_ptr);

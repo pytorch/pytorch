@@ -7,8 +7,9 @@
 #include <ATen/core/ScalarType.h>
 #include <ATen/core/ScalarTypeUtils.h>
 
-#include "c10/util/Optional.h"
-#include "c10/util/C++17.h"
+#include <c10/util/Optional.h>
+#include <c10/util/C++17.h>
+#include <c10/macros/Macros.h>
 
 #include <cstddef>
 #include <iosfwd>
@@ -480,7 +481,7 @@ inline TensorOptions requires_grad(bool requires_grad = true) {
   return TensorOptions().requires_grad(requires_grad);
 }
 
-std::ostream& operator<<(
+CAFFE2_API std::ostream& operator<<(
     std::ostream& stream,
     const TensorOptions& options);
 

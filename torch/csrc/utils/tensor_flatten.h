@@ -37,7 +37,33 @@ struct TensorGroup {
   }
 };
 
-std::vector<TensorGroup> take_tensors(at::TensorList tensors, size_t size_limit);
+// Helper function that takes a list of tensors and splits them into tensor
+// groups by the size limit and outputs these tensor groups. If the input
+// tensors are of different tensor types, they will be split into different
+// groups as well.
+//
+// Two options of splitting provided to the user,
+//
+// Imagine the size_limit is 256 and the list of input tensors are:
+// tensor_a(fp16 - 128 bytes),
+// tensor_b(fp32 - 256 bytes),
+// tensor_c(fp16 - 128 bytes),
+//
+// when fine_grained == false:
+// The function will read the list of tensors sequentially and accumulate
+// enough tensors for each data type until the size_limit, therefore:
+// it will output: {{tensor_a, tensor_c}, {tensor_b}}
+//
+// when fine_grained == true:
+// The function will read the list of tensors sequentially and  accumulate
+// enough tensors for all data types until the size_limit, and then split
+// the accumulated tensors into different groups by data types, therefore:
+// it will output: {{tensor_a}, {tensor_b}, {tensor_c}}
+std::vector<TensorGroup> take_tensors(
+    at::TensorList tensors,
+    size_t size_limit,
+    bool fine_grained = false);
+
 void reorder_tensors_like(std::vector<at::Tensor>& tensors, at::TensorList order);
 
 std::pair<at::Tensor, at::Tensor> flatten_sparse_tensors(at::TensorList tensors);

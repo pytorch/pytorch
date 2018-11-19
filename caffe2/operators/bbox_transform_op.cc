@@ -95,15 +95,15 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
 
   const int box_dim = rotated_ ? 5 : 4;
   const int N = roi_in.dim32(0);
-  CAFFE_ENFORCE_EQ(roi_in.ndim(), 2);
+  CAFFE_ENFORCE_EQ(roi_in.dim(), 2);
   CAFFE_ENFORCE(roi_in.dim32(1) == box_dim || roi_in.dim32(1) == box_dim + 1);
 
-  CAFFE_ENFORCE_EQ(delta_in.ndim(), 2);
+  CAFFE_ENFORCE_EQ(delta_in.dim(), 2);
   CAFFE_ENFORCE_EQ(delta_in.dim32(0), N);
   CAFFE_ENFORCE_EQ(delta_in.dim32(1) % box_dim, 0);
   const int num_classes = delta_in.dim32(1) / box_dim;
 
-  CAFFE_ENFORCE_EQ(iminfo_in.ndim(), 2);
+  CAFFE_ENFORCE_EQ(iminfo_in.dim(), 2);
   CAFFE_ENFORCE_EQ(iminfo_in.dim32(1), 3);
   const int batch_size = iminfo_in.dim32(0);
 
@@ -130,7 +130,7 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
 
   CAFFE_ENFORCE_EQ(iminfo_in.sizes(), (at::IntList{batch_size, 3}));
   Eigen::Map<const ERArrXXf> iminfo(
-      iminfo_in.data<float>(), iminfo_in.dim(0), iminfo_in.dim(1));
+      iminfo_in.data<float>(), iminfo_in.size(0), iminfo_in.size(1));
 
   box_out->ResizeLike(delta_in);
   Eigen::Map<ERArrXXf> new_boxes(

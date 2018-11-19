@@ -33,12 +33,12 @@ TORCH_API Value* insertConstant(
 
 // attempt to convert a (possibly constant) Value* into an intepreter value
 // (IValue). returns c10::nullopt if the Value* was not constant
-TORCH_API c10::optional<IValue> toIValue(Value* v);
+TORCH_API c10::optional<IValue> toIValue(const Value* v);
 
 // if a value is a constant then try to turn into type T using the
 // same rules as the interpreter
 template <typename T>
-c10::optional<T> constant_as(Value* v) {
+c10::optional<T> constant_as(const Value* v) {
   if(auto ivalue = toIValue(v)) {
     return ivalue->to<T>();
   }

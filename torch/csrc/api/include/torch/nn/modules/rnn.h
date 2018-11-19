@@ -3,7 +3,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/modules/dropout.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -17,7 +17,7 @@ namespace torch {
 namespace nn {
 
 /// The output of a single invocation of an RNN module's `forward()` method.
-struct RNNOutput {
+struct TORCH_API RNNOutput {
   /// The result of applying the specific RNN algorithm
   /// to the input tensor and input state.
   Tensor output;
@@ -29,7 +29,7 @@ struct RNNOutput {
 namespace detail {
 
 /// Common options for LSTM and GRU modules.
-struct RNNOptionsBase {
+struct TORCH_API RNNOptionsBase {
   RNNOptionsBase(int64_t input_size, int64_t hidden_size);
   virtual ~RNNOptionsBase() = default;
   /// The number of features of a single sample in the input sequence `x`.
@@ -97,7 +97,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   std::vector<Tensor> b_hh;
 
  protected:
-  /// The function signature of `at::rnn_relu`, `at::rnn_tanh` and `at::gru`.
+  /// The function signature of `rnn_relu`, `rnn_tanh` and `gru`.
   using RNNFunctionSignature = std::tuple<Tensor, Tensor>(
       /*input=*/const Tensor&,
       /*state=*/const Tensor&,
@@ -136,10 +136,10 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-enum class RNNActivation { ReLU, Tanh };
+enum class RNNActivation : uint32_t TORCH_API { ReLU, Tanh };
 
 /// Options for RNN modules.
-struct RNNOptions {
+struct TORCH_API RNNOptions {
   RNNOptions(int64_t input_size, int64_t hidden_size);
 
   /// Sets the activation after linear operations to `tanh`.
@@ -171,7 +171,7 @@ struct RNNOptions {
 /// A multi-layer Elman RNN module with Tanh or ReLU activation.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.RNN to learn about the
 /// exact behavior of this module.
-class RNNImpl : public detail::RNNImplBase<RNNImpl> {
+class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
  public:
   RNNImpl(int64_t input_size, int64_t hidden_size)
       : RNNImpl(RNNOptions(input_size, hidden_size)) {}
@@ -199,7 +199,7 @@ using LSTMOptions = detail::RNNOptionsBase;
 /// A multi-layer long-short-term-memory (LSTM) module.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM to learn about the
 /// exact behavior of this module.
-class LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
+class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
  public:
   LSTMImpl(int64_t input_size, int64_t hidden_size)
       : LSTMImpl(LSTMOptions(input_size, hidden_size)) {}
@@ -225,7 +225,7 @@ using GRUOptions = detail::RNNOptionsBase;
 /// A multi-layer gated recurrent unit (GRU) module.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.GRU to learn about the
 /// exact behavior of this module.
-class GRUImpl : public detail::RNNImplBase<GRUImpl> {
+class TORCH_API GRUImpl : public detail::RNNImplBase<GRUImpl> {
  public:
   GRUImpl(int64_t input_size, int64_t hidden_size)
       : GRUImpl(GRUOptions(input_size, hidden_size)) {}

@@ -180,7 +180,7 @@ AT_ERROR("${api_name} only supports a 0-dimensional ${check_name} tensor, but go
 """)
 
 SPARSE_CHECK = CodeTemplate("""\
-if(${check_name}.type().is_sparse()) {
+if(${check_name}.is_sparse()) {
     return static_cast<const TypeExtendedInterface*>(this)->${api_name}(${sparse_actuals});
 }""")
 
@@ -545,7 +545,7 @@ def device_guard(option, formals, is_factory_method, dispatch_options):
             tensor_arguments = [f for f in formals if f['dynamic_type'] in {'Tensor', 'TensorList'}]
             if tensor_arguments:
                 tensor_argument = tensor_arguments[0]['name']
-                return 'const DeviceGuard device_guard({});'.format(tensor_argument)
+                return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(tensor_argument)
     return '// DeviceGuard omitted'
 
 
@@ -831,6 +831,8 @@ def create_generic(top_env, declarations):
         broadcast_arg = get_broadcast_argument(option)
         # "s_" for "same size".
         option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
+        if option['mode'] == 'TH':
+            option['device_guard'] = False
         option['device_guard_declaration'] = device_guard(option, formals, False, False)
 
         env = nested_dict(option, top_env)
@@ -1024,9 +1026,6 @@ def create_generic(top_env, declarations):
 
     def process_native(option, output_options):
         # type: (FunctionOption, List[OutputDeclaration]) -> None
-        option['inplace'] = re.search(
-            '(^__i|[^_]_$)', option['api_name']) is not None
-
         formals = native_get_formals(option)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]

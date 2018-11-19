@@ -90,6 +90,9 @@ class NNModule(object):
     def deleteSubgraph(self, subgraph):
         self._NNModule.deleteSubgraph(subgraph)
 
+    def createUniqueDataNode(self, prefix="_unique"):
+        return self._NNModule.createUniqueDataNode(prefix)
+
     def convertToCaffe2Proto(self, old_proto=None):
         if not old_proto:
             old_proto = caffe2_pb2.NetDef()

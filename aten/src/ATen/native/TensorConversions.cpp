@@ -10,6 +10,7 @@ namespace native {
 // comparing against the current device object in Tensor.
 // This always **copies** but this is intended because (1) we shouldn't modify
 // input argument, and (2) Device is small anyways.
+// NB: This ONLY works for CUDA device
 static inline Device ensure_has_index(const Device &device) {
   if (!device.is_cuda() || device.has_index()) {
     return device;

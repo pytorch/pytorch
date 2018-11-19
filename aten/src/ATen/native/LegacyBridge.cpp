@@ -72,12 +72,12 @@ Tensor& zero_(Tensor& self) {
 // the first function, and then do an is_sparse() test on the second argument
 // to direct ourselves to the correct argument.
 //
-// We are in neither of those worlds.  Instead, we have a th_addmm function
+// We are in neither of those worlds.  Instead, we have a _th_addmm function
 // which has legacy implementations in the single dispatch world, BUT our
 // actual addmm function needs to call s_native_addmm if the function *would have*
 // utilized a sparse kernel that is natively implemented.
 //
-// th_addmm is "good old single dispatch" which internally handles the is_sparse()
+// _th_addmm is "good old single dispatch" which internally handles the is_sparse()
 // test and also handles broadcasting.  s_native_addmm works asymmetrically:
 // it doesn't handle broadcasting at all, and it ASSUMES that the relevant
 // argument is a sparse tensor.  Why the asymmetry?  It turns out it is not
@@ -107,7 +107,7 @@ Tensor& addmm_out(Tensor& result, const Tensor& self, const Tensor& mat1, const 
     std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
     return s_native_addmm_out(result, b_self, mat1, mat2, beta, alpha);
   } else {
-    return th_addmm_out(result, self, mat1, mat2, beta, alpha);
+    return _th_addmm_out(result, self, mat1, mat2, beta, alpha);
   }
 }
 
@@ -119,7 +119,7 @@ Tensor addmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar 
     std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
     return s_native_addmm(b_self, mat1, mat2, beta, alpha);
   } else {
-    return th_addmm(self, mat1, mat2, beta, alpha);
+    return _th_addmm(self, mat1, mat2, beta, alpha);
   }
 }
 
@@ -130,7 +130,7 @@ Tensor& addmm_(Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta
     // inplace is not broadcasting
     return s_native_addmm_(self, mat1, mat2, beta, alpha);
   } else {
-    return th_addmm_(self, mat1, mat2, beta, alpha);
+    return _th_addmm_(self, mat1, mat2, beta, alpha);
   }
 }
 

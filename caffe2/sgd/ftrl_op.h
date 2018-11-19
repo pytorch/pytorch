@@ -60,7 +60,7 @@ class SparseFtrlOp final : public Operator<CPUContext> {
       DoRun<int64_t>();
     } else {
       LOG(FATAL) << "Unsupported type of INDICES in SparseFtrlOp: "
-                      << indices.meta().name();
+                 << indices.dtype().name();
     }
     return true;
   }

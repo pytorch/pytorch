@@ -17,12 +17,7 @@ class BatchMatMulOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         trans_a_(this->template GetSingleArgument<int>("trans_a", 0)),
         trans_b_(this->template GetSingleArgument<int>("trans_b", 0)),
-        broadcast_(this->template GetSingleArgument<int>("broadcast", 0)),
-        use_scratch_(this->template GetSingleArgument<int>("use_scratch", 0)) {
-    if (use_scratch_) {
-      scratch_ = std::make_shared<Tensor>(Context::GetDeviceType());
-    }
-  }
+        broadcast_(this->template GetSingleArgument<int>("broadcast", 0)) {}
 
   ~BatchMatMulOp() {}
 
@@ -36,9 +31,9 @@ class BatchMatMulOp final : public Operator<Context> {
     const auto& B = Input(1);
     auto* Y = Output(0);
 
-    auto ndims_A = A.ndim();
+    auto ndims_A = A.dim();
     auto dims_A = A.sizes().vec();
-    auto ndims_B = B.ndim();
+    auto ndims_B = B.dim();
     auto dims_B = B.sizes().vec();
 
     auto noBroadcastErrorMsg = [](size_t dim1, size_t dim2) {
@@ -280,9 +275,6 @@ class BatchMatMulOp final : public Operator<Context> {
   bool trans_a_;
   bool trans_b_;
   bool broadcast_;
-
-  bool use_scratch_;
-  std::shared_ptr<Tensor> scratch_;
 };
 
 } // namespace caffe2

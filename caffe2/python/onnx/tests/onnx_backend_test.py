@@ -45,7 +45,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
 
 # Quick patch to unbreak master CI, is working on the debugging.
 backend_test.exclude('(test_cast_.*'
-                     '|test_upsample_nearest.*'
+                     '|test_compress_.*'
                      '|test_Conv1d_.*cuda'
                      '|test_Conv3d_groups_cuda'
                      '|test_rnn_seq_length'

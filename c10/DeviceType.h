@@ -20,8 +20,9 @@ enum class DeviceType : int16_t {
   OPENCL = 4, // OpenCL
   IDEEP = 5, // IDEEP.
   HIP = 6, // AMD HIP
+  FPGA = 7, // FPGA
   // Change the following number if you add more devices in the code.
-  COMPILE_TIME_MAX_DEVICE_TYPES = 7,
+  COMPILE_TIME_MAX_DEVICE_TYPES = 8,
   ONLY_FOR_TEST = 20901, // This device type is only for test.
 };
 

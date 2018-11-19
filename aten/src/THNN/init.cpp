@@ -127,9 +127,6 @@
 #include "generic/Tanh.c"
 #include "THGenerateFloatTypes.h"
 
-#include "generic/Threshold.c"
-#include "THGenerateFloatTypes.h"
-
 #include "generic/TemporalRowConvolution.c"
 #include "THGenerateFloatTypes.h"
 
@@ -140,9 +137,6 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/FeatureLPPooling.c"
-#include "THGenerateFloatTypes.h"
-
-#include "generic/BatchNormalization.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/unfold.c"

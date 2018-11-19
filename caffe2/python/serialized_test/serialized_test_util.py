@@ -7,6 +7,7 @@ import argparse
 from caffe2.proto import caffe2_pb2
 from caffe2.python import gradient_checker
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python.serialized_test import coverage
 import hypothesis as hy
 import inspect
 import numpy as np
@@ -164,7 +165,8 @@ class SerializedTestCase(hu.HypothesisTestCase):
 
             op_proto = parse_proto(loaded_op)
             device_type = loaded['device_type']
-            device_option = caffe2_pb2.DeviceOption(device_type=int(device_type))
+            device_option = caffe2_pb2.DeviceOption(
+                device_type=int(device_type))
 
             outputs = hu.runOpOnInput(device_option, op_proto, loaded_inputs)
             grad_ops = _getGradientOrNone(op_proto)
@@ -190,13 +192,19 @@ class SerializedTestCase(hu.HypothesisTestCase):
             gradient_operator,
             op,
             device_option,
+            atol=1e-7,
+            rtol=1e-7,
     ):
         if self.should_serialize:
             if getattr(_output_context, 'should_generate_output', False):
                 self.serialize_test(
                     inputs, outputs, gradient_operator, op, device_option)
+                if not getattr(_output_context, 'disable_gen_coverage', False):
+                    coverage.gen_serialized_test_coverage(
+                        self.get_output_dir(), TOP_DIR)
             else:
-                self.compare_test(inputs, outputs, gradient_operator)
+                self.compare_test(
+                    inputs, outputs, gradient_operator, atol, rtol)
 
     def assertReferenceChecks(
         self,
@@ -225,12 +233,17 @@ class SerializedTestCase(hu.HypothesisTestCase):
         )
         if not getattr(_output_context, 'disable_serialized_check', False):
             grad_ops = _getGradientOrNone(op)
+            rtol = threshold
+            if atol is None:
+                atol = threshold
             self.assertSerializedOperatorChecks(
                 inputs,
                 outs,
                 grad_ops,
                 op,
                 device_option,
+                atol,
+                rtol,
             )
 
 
@@ -245,12 +258,17 @@ def testWithArgs():
     parser.add_argument(
         '-D', '--disable-serialized_check', action='store_true', dest='disable',
         help='disable checking serialized tests')
+    parser.add_argument(
+        '-C', '--disable-gen-coverage', action='store_true',
+        dest='disable_coverage',
+        help='disable generating coverage markdown file')
     parser.add_argument('unittest_args', nargs='*')
     args = parser.parse_args()
     sys.argv[1:] = args.unittest_args
     _output_context.__setattr__('should_generate_output', args.generate)
     _output_context.__setattr__('output_dir', args.output)
     _output_context.__setattr__('disable_serialized_check', args.disable)
+    _output_context.__setattr__('disable_gen_coverage', args.disable_coverage)
 
     import unittest
     unittest.main()

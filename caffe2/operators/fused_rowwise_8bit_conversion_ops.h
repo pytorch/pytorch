@@ -36,9 +36,9 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
     const auto& input = Input(DATA_FLOAT);
     auto* output = Output(DATA_FUSED_SCALE_BIAS_INT8);
 
-    const auto input_rows = input.dim(0);
-    const auto input_columns = input.dim(1);
-    CAFFE_ENFORCE_EQ(input.ndim(), 2, "Expect input to be a matrix");
+    const auto input_rows = input.size(0);
+    const auto input_columns = input.size(1);
+    CAFFE_ENFORCE_EQ(input.dim(), 2, "Expect input to be a matrix");
 
     // The "fused" representation stores the scale and bias with the row-wise
     // quantized data in one tensor. Since we quantize with 8 bits (1 byte) and
@@ -52,7 +52,7 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
 
     const auto* input_data = input.template data<T>();
     auto* output_data = output->template mutable_data<uint8_t>();
-    const auto output_columns = output->dim(1);
+    const auto output_columns = output->size(1);
 
     float epsilon;
     if (std::is_same<T, float>::value) {
@@ -109,16 +109,16 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
     const auto& input = Input(DATA_FUSED_SCALE_BIAS_INT8);
     auto* output = Output(DATA_FLOAT);
 
-    const auto input_rows = input.dim(0);
-    const auto input_columns = input.dim(1);
-    CAFFE_ENFORCE_EQ(input.ndim(), 2, "Expect input to be a matrix");
+    const auto input_rows = input.size(0);
+    const auto input_columns = input.size(1);
+    CAFFE_ENFORCE_EQ(input.dim(), 2, "Expect input to be a matrix");
 
     // The last 8 bytes per row are the scale and the bias. The rest of
     // input_columns is the number of values in the original row.
     const std::vector<int64_t> output_dimensions = {input_rows,
                                                     input_columns - 8};
     output->Resize(output_dimensions);
-    const auto output_columns = output->dim(1);
+    const auto output_columns = output->size(1);
 
     const auto* input_data = input.template data<uint8_t>();
     T* output_data = output->template mutable_data<T>();

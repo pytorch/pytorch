@@ -27,14 +27,14 @@ class PackRNNSequenceOpBase : public Operator<Context> {
     // if Forward is true, and vice versa
     int dim_offset = Forward ? 1 : 2;
     auto& values = Input(0);
-    CAFFE_ENFORCE_GT(values.ndim(), dim_offset);
+    CAFFE_ENFORCE_GT(values.dim(), dim_offset);
 
     // block_size is the size for each individual feature
     int64_t block_size = values.size_from_dim(dim_offset);
     auto values_vec = values.template data<ValT>();
 
     auto& lengths = Input(LENGTHS);
-    CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
+    CAFFE_ENFORCE_EQ(lengths.dim(), 1);
     const auto cols = lengths.numel();
     const int32_t* lengths_vec = lengths.template data<int32_t>();
     // the total number of rows is defined as the max number from lengths
@@ -74,7 +74,7 @@ class PackRNNSequenceOpBase : public Operator<Context> {
         auto input_offset = Forward ? (offset + r) : (r * cols + c);
         auto output_offset = Forward ? (r * cols + c) : (offset + r);
         context_.CopyItemsSameDevice(
-            values.meta(),
+            values.dtype(),
             block_size,
             values_vec + input_offset * block_size,
             output_data + output_offset * block_size);

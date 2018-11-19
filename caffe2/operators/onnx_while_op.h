@@ -34,7 +34,7 @@ class ONNXWhileOp final : public Operator<Context> {
         body_net_def_.set_name("loop_net");
       } else {
         ++counter;
-        body_net_def_.set_name("loop_net." + caffe2::to_string(counter));
+        body_net_def_.set_name("loop_net." + c10::to_string(counter));
       }
     }
   }
@@ -179,7 +179,7 @@ class ONNXWhileOp final : public Operator<Context> {
             }
 
             const void* src_data = scan_output.raw_data();
-            auto& sot_meta = scan_output_target->meta();
+            auto& sot_meta = scan_output_target->dtype();
             void* dst_data =
                 (char*)scan_output_target->raw_mutable_data(sot_meta) +
                 timestep_size * scan_output.itemsize() * itr;

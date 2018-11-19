@@ -135,6 +135,24 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return BlobGetMutableTensor(outputs_.at(idx), dims, options);
   }
 
+  // Get output Tensor of the operator and CopyFrom the given Tensor
+  Tensor* OutputTensorCopyFrom(
+      int idx,
+      at::TensorOptions options,
+      const Tensor& src,
+      BaseContext* context = nullptr) {
+    Tensor* t = Output<Tensor>(idx, options.device().type());
+    // TODO:
+    // We plan to use the following:
+    // Tensor* t = OutputTensor(idx, src.sizes(), src.options()+options);
+    // that is overwrite options of src Tensor
+    CAFFE_ENFORCE(
+        !t->dtype_initialized() || t->dtype() == src.dtype(),
+        "We don't allow a change of data type in OutputTensor");
+    t->CopyFrom(src, context);
+    return t;
+  }
+
   template <typename T>
   inline T* Output(int idx, T* allocated) {
     outputs_.at(idx)->Reset(allocated);
@@ -758,7 +776,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Tensor& tensor) {                           \
-      return call<Op>(op, tensor.meta());                                      \
+      return call<Op>(op, tensor.dtype());                                     \
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Blob& blob) {                               \
@@ -774,7 +792,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Tensor& tensor) {                           \
-      return call<Op>(op, tensor.meta());                                      \
+      return call<Op>(op, tensor.dtype());                                     \
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Blob& blob) {                               \
@@ -792,7 +810,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Tensor& tensor) {                           \
-      return call<Op>(op, tensor.meta());                                      \
+      return call<Op>(op, tensor.dtype());                                     \
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Blob& blob) {                               \

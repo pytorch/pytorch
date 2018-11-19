@@ -33,54 +33,77 @@ class LayerNormOp final : public Operator<Context> {
     auto* Y = Output(0);
     auto* mean = Output(1);
     auto* sig = Output(2);
-    CAFFE_ENFORCE_GE(X.ndim(), 2, "LayerNorm requires input dim >= 2.");
     const int canonical_axis = X.canonical_axis_index(axis_);
-    const int M = X.size_to_dim(canonical_axis);
-    const int N = X.size_from_dim(canonical_axis);
-    Y->ResizeLike(X);
-    std::vector<int> moments_dims(
+    std::vector<int64_t> moments_dims(
         X.dims().cbegin(), X.dims().cbegin() + canonical_axis);
     moments_dims.push_back(1);
     mean->Resize(moments_dims);
     sig->Resize(moments_dims);
-    scale_.Resize(M);
-    bias_.Resize(M);
+    mean->template mutable_data<T>();
+    sig->template mutable_data<T>();
+    // TODO: change back
+    //auto* mean = Output(1, moments_dims, at::dtype<T>());
+    //auto* sig = Output(2, moments_dims, at::dtype<T>());
+    runLayerNorm<T>(X, Y, mean, sig, canonical_axis, epsilon_, &scale_, &bias_, &context_);
+    return true;
+  }
+
+  template<typename T>
+  static void runLayerNorm(
+    const Tensor& X,
+    Tensor* Y,
+    Tensor* mean,
+    Tensor* sig,
+    int canonical_axis,
+    float epsilon,
+    Tensor* scale_buffer,
+    Tensor* bias_buffer,
+    Context* context
+  ) {
+    CAFFE_ENFORCE_GE(X.dim(), 2, "LayerNorm requires input dim >= 2.");
+    const int M = X.size_to_dim(canonical_axis);
+    const int N = X.size_from_dim(canonical_axis);
+    Y->ResizeLike(X);
+    scale_buffer->Resize(M);
+    bias_buffer->Resize(M);
 
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
     T* mean_data = mean->template mutable_data<T>();
     T* sig_data = sig->template mutable_data<T>();
-    T* scale_data = scale_.template mutable_data<T>();
-    T* bias_data = bias_.template mutable_data<T>();
+    T* scale_data = scale_buffer->template mutable_data<T>();
+    T* bias_data = bias_buffer->template mutable_data<T>();
 
     const std::array<int, 2> dims = {M, N};
     const int axis = 1;
     math::Moments<T, Context>(
-        2, dims.data(), 1, &axis, X_data, mean_data, sig_data, &context_);
+        2, dims.data(), 1, &axis, X_data, mean_data, sig_data, context);
     ComputeStdDevAndFusedParams<T>(
-        M, mean_data, sig_data, sig_data, scale_data, bias_data);
-    LayerNormForward<T>(M, N, X_data, scale_data, bias_data, Y_data);
-    return true;
+        M, mean_data, sig_data, sig_data, scale_data, bias_data, epsilon, context);
+    LayerNormForward<T>(M, N, X_data, scale_data, bias_data, Y_data, context);
   }
 
  private:
   template <typename T>
-  void ComputeStdDevAndFusedParams(
+  static void ComputeStdDevAndFusedParams(
       const int N,
       const T* mean,
       const T* var,
       T* stddev,
       T* scale,
-      T* bias);
+      T* bias,
+      float epsilon,
+      Context* context);
 
   template <typename T>
-  void LayerNormForward(
+  static void LayerNormForward(
       const int M,
       const int N,
       const T* X,
       const T* scale,
       const T* bias,
-      T* Y);
+      T* Y,
+      Context* context);
 
   const int axis_;
   const float epsilon_;

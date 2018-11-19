@@ -92,9 +92,12 @@ Tensor new_with_type_conversion(const Type& type, Tensor other, int32_t device_i
 Tensor new_with_tensor_copy(const Type& type, Tensor other, int32_t device_index) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  at::DeviceGuard device_guard;
+  // TODO: It would be better if new_with_tensor_copy took an at::Device
+  // to begin with, but then we need to fix the situation with
+  // dispatch_type_conversion bleggg
+  at::OptionalDeviceGuard device_guard;
   if (type.is_cuda()) {
-    device_guard.set_index(device_index);
+    device_guard.reset_device(at::Device(at::kCUDA, device_index));
   }
   return type.copy(other);
 }
@@ -290,12 +293,12 @@ Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwa
   } else if (r.idx == 2) {
     auto deviceOptional = r.deviceOptional(2);
     check_legacy_ctor_device(type, deviceOptional);
-    at::DeviceGuard device_guard(deviceOptional);
+    at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
     auto deviceOptional = r.deviceOptional(3);
     check_legacy_ctor_device(type, deviceOptional);
-    at::DeviceGuard device_guard(deviceOptional);
+    at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
@@ -324,7 +327,7 @@ Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObject* kwar
   if (r.idx == 0) {
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(type, deviceOptional);
-    at::DeviceGuard device_guard(deviceOptional);
+    at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, type.options());
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
@@ -334,14 +337,14 @@ Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObject* kwar
     // have a device (we should infer it).
     auto deviceOptional = r.deviceOptional(2);
     check_legacy_ctor_device(type, deviceOptional);
-    at::DeviceGuard device_guard(deviceOptional);
+    at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
     // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
     // have a device (we should infer it).
     auto deviceOptional = r.deviceOptional(3);
     check_legacy_ctor_device(type, deviceOptional);
-    at::DeviceGuard device_guard(deviceOptional);
+    at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
@@ -384,7 +387,7 @@ Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   if (r.idx == 0) {
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(type, deviceOptional);
-    at::DeviceGuard device_guard(deviceOptional);
+    at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, type.options());
   } else if (r.idx == 1) {
     return new_with_storage(type, r.storage(0));
@@ -430,7 +433,7 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
   if (r.idx == 0) {
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(type, deviceOptional);
-    at::DeviceGuard device_guard(deviceOptional);
+    at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, type.options());
   } else if (r.idx == 1) {
     return new_with_storage(type, r.storage(0));

@@ -5,6 +5,7 @@
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/anomaly_mode.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/utils/memory.h"
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -29,6 +30,7 @@
 #ifdef USE_CUDA
 #include <cuda.h>
 #include <THC/THC.h>
+#include <ATen/cuda/CUDAGuard.h>
 #endif
 
 namespace torch { namespace autograd {
@@ -200,9 +202,21 @@ Engine::Engine() = default;
 // This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
 
+// TODO: Engine is not written in a way that it can deal with anything that's
+// not CUDA.
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-  at::DeviceGuard guard(device);
+#ifdef USE_CUDA
+  // NB: We MUST NOT construct the guard for device -1,
+  // as in some settings we compile with USE_CUDA, but
+  // have lazy stubs for CUDA functionality (so actually
+  // attempting to setup a guard(-1) will cause an
+  // error, because it will still query cudaGetDevice).
+  at::cuda::OptionalCUDAGuard guard;
+  if (device != -1) {
+    guard.set_index(device);
+  }
+#endif
   worker_device = device;
   thread_main(nullptr);
 }
@@ -406,7 +420,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     AutoGradMode grad_mode(false);
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
-      at::DeviceGuard guard(output);
+      at::OptionalDeviceGuard guard(device_of(output));
       if (output.defined() && output.ne(output).any().item<uint8_t>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";
@@ -629,7 +643,7 @@ void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) 
     Function *output = output_edge.function.get();
     auto & info = exec_info[output];
     if (!info.captures)
-      info.captures.reset(new std::vector<ExecInfo::Capture>());
+      info.captures = make_unique<std::vector<ExecInfo::Capture>>();
     info.captures->emplace_back(output_edge.input_nr, output_idx++);
   }
   captured_vars.resize(output_idx);

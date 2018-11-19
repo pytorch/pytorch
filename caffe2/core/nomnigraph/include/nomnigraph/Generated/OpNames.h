@@ -82,12 +82,3 @@ case NNKind::Declare:
 
 case NNKind::Export:
   return "Export";
-
-case NNKind::GatherRanges:
-  return "GatherRanges";
-
-case NNKind::Slice:
-  return "Slice";
-
-case NNKind::MergeIdLists:
-  return "MergeIdLists";

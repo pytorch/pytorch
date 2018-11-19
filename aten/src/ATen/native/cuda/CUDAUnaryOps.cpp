@@ -49,10 +49,10 @@ Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
 
 #define IMPLEMENT_UNARY_OP_PREQUEL(op)                           \
   Tensor& _##op##__cuda(Tensor& self) {                          \
-    return at::_##op##_out(self, self);                          \
+    return at::_th_##op##_out(self, self);                       \
   }                                                              \
   Tensor& _##op##_out_cuda(Tensor& result, const Tensor& self) { \
-    return at::_##op##_out(result, self);                        \
+    return at::_th_##op##_out(result, self);                     \
   }
 
 

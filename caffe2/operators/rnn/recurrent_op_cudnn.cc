@@ -60,10 +60,10 @@ void RecurrentBaseOp<T>::initialize(
     Tensor* hiddenOutput,
     Tensor* cellOutput) {
   static_assert(sizeof(T) == 4, ""); // workaround clang bug
-  CAFFE_ENFORCE_GE(input.ndim(), 3);
-  const int seqLength = input.dim(0);
-  const int batchSize = input.dim(1);
-  const int inputDim = input.dim(2);
+  CAFFE_ENFORCE_GE(input.dim(), 3);
+  const int seqLength = input.size(0);
+  const int batchSize = input.size(1);
+  const int inputDim = input.size(2);
   const int hiddenSize = OperatorBase::GetSingleArgument<int>("hidden_size", 0);
   CAFFE_ENFORCE_GT(hiddenSize, 0);
   const auto bidirectional =
