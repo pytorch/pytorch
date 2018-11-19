@@ -85,7 +85,7 @@ template <typename SIndex>
 void sparse_adagrad(
     int num_rows, // number of rows reading
     int block_size, // number of parameters per rows
-    int param_size, // total number of parameters
+    std::size_t param_size, // total number of parameters
     const float* w, // input parameters
     const float* g, // input gradients
     const float* h, // input momentums
@@ -100,7 +100,7 @@ void sparse_adagrad(
   void sparse_adagrad_##SIndex##__##ISA(                                 \
       int num_rows,                                                      \
       int block_size,                                                    \
-      int param_size,                                                    \
+      std::size_t param_size,                                            \
       const float* w,                                                    \
       const float* g,                                                    \
       const float* h,                                                    \
@@ -135,7 +135,7 @@ void sparse_adagrad(
       } else {                                                           \
         const int prefdist_T0 = 16;                                      \
         int i_pref = (i < num_rows - prefdist_T0) ? i + prefdist_T0 : i; \
-        uint64_t idx_pref = indices[i_pref];                             \
+        auto idx_pref = indices[i_pref];                                 \
                                                                          \
         adagrad_update_prefetch__##ISA(                                  \
             block_size,                                                  \

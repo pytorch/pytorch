@@ -150,8 +150,11 @@ ProcessGroupMPI::AsyncWork::AsyncWork(
 
 ProcessGroupMPI::AsyncWork::~AsyncWork() {
   if (request_ != MPI_REQUEST_NULL) {
-    throw std::runtime_error(
-        "Attempted destruction of AsyncWork before work has completed");
+    std::cerr
+        << "Attempted destruction of AsyncWork before work has completed, "
+        << "terminating the program."
+        << std::endl;
+    std::terminate();
   }
 }
 
