@@ -72,11 +72,10 @@ class DNNLowPOp : public Operator<CPUContext> {
 
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
-  DNNLowPOp(const OperatorDef& operator_def, Workspace *ws)
-    : Operator<CPUContext>(operator_def, ws),
-      in_qparams_(InputSize()),
-      qfactory_(dnnlowp::GetQuantizationFactoryOf(this)) {
-
+  DNNLowPOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        in_qparams_(InputSize()),
+        qfactory_(dnnlowp::GetQuantizationFactoryOf(this)) {
 #ifdef _OPENMP
     if (FLAGS_caffe2_omp_num_threads > 0) {
       omp_set_num_threads(FLAGS_caffe2_omp_num_threads);
@@ -119,7 +118,7 @@ class DNNLowPOp : public Operator<CPUContext> {
       return;
     }
 
-    const float *actual = nullptr;
+    const float* actual = nullptr;
     vector<float> actual_temp;
     if (OutputTensorCPU_(0)->template IsType<float>()) {
       actual = OutputTensorCPU_(0)->template data<float>();
@@ -133,7 +132,7 @@ class DNNLowPOp : public Operator<CPUContext> {
       actual = actual_temp.data();
     }
 
-    float *ref = Fp32Op_()->Get()->Output(0)->template mutable_data<float>();
+    float* ref = Fp32Op_()->Get()->Output(0)->template mutable_data<float>();
     if (followed_by_ == "Relu") {
       for (int i = 0; i < Output(0)->numel(); ++i) {
         ref[i] = std::max(0.f, ref[i]);
@@ -217,8 +216,8 @@ class DNNLowPOp : public Operator<CPUContext> {
   std::unique_ptr<dnnlowp::QuantizationFactory> qfactory_;
 
   std::vector<T> out_temp_;
-    // Buffer to store quantized output temporarily
-    // when we output dequantized values.
+  // Buffer to store quantized output temporarily
+  // when we output dequantized values.
 
   dnnlowp::QuantizationErrorStats quantization_error_stats_;
 
