@@ -43,7 +43,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
   using namespace std;
   using namespace dnnlowp;
 
-  BaseType::ParseDNNLowPOperatorArguments_();
+  this->ParseDNNLowPOperatorArguments_();
 
   if ((!GetCpuId().avx2() || FLAGS_dnnlowp_enforce_default_caffe2_operators) &&
       dequantize_output_) {

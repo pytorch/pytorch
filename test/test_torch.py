@@ -1024,7 +1024,6 @@ class _TestTorchMixin(object):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, '{} with out= kwarg'.format(fn_name))
 
-    @skipIfRocm
     def test_dim_reduction(self):
         self._test_dim_reduction(self, lambda t: t)
 
@@ -3457,7 +3456,6 @@ class _TestTorchMixin(object):
                 seen.add(ixx[k][j])
             self.assertEqual(len(seen), size)
 
-    @skipIfRocm
     def test_sort(self):
         SIZE = 4
         x = torch.rand(SIZE, SIZE)
@@ -3583,7 +3581,6 @@ class _TestTorchMixin(object):
         self.assertRaises(TypeError, lambda: q.topk(4, True))
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    @skipIfRocm
     def test_topk_noncontiguous_gpu(self):
         t = torch.randn(20, device="cuda")[::2]
         top1, idx1 = t.topk(5)
@@ -3591,7 +3588,6 @@ class _TestTorchMixin(object):
         self.assertEqual(top1, top2)
         self.assertEqual(idx1, idx2)
 
-    @skipIfRocm
     def test_kthvalue(self):
         SIZE = 50
         x = torch.rand(SIZE, SIZE, SIZE)
@@ -3636,7 +3632,6 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.kthvalue(y, 3)[0], 3, 0)
         self.assertEqual(torch.kthvalue(y, 2)[0], 1, 0)
 
-    @skipIfRocm
     def test_median(self):
         for size in (155, 156):
             x = torch.rand(size, size)
@@ -3672,7 +3667,6 @@ class _TestTorchMixin(object):
             # input unchanged
             self.assertEqual(x, x0, 0)
 
-    @skipIfRocm
     def test_mode(self):
         x = torch.arange(1., SIZE * SIZE + 1).clone().resize_(SIZE, SIZE)
         x[:2] = 1
@@ -4003,7 +3997,6 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.cuda.HalfTensor(10).is_signed(), True)
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_gesv(self):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
@@ -4134,7 +4127,6 @@ class _TestTorchMixin(object):
         self._test_gesv_batched_dims(self, lambda t: t)
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_qr(self):
 
         # Since the QR decomposition is unique only up to the signs of the rows of
@@ -4317,12 +4309,10 @@ class _TestTorchMixin(object):
         self.assertEqual(res1, tb, 0)
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_trtrs(self):
         self._test_trtrs(self, lambda t: t)
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_gels(self):
         def _test_underdetermined(a, b, expectedNorm):
             m = a.size()[0]
@@ -4438,7 +4428,6 @@ class _TestTorchMixin(object):
         self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, 1e-8)
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_eig(self):
         a = torch.Tensor(((1.96, 0.00, 0.00, 0.00, 0.00),
                           (-6.49, 3.80, 0.00, 0.00, 0.00),
@@ -4520,7 +4509,6 @@ class _TestTorchMixin(object):
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_symeig(self):
         self._test_symeig(self, lambda x: x)
 
@@ -5326,9 +5314,9 @@ class _TestTorchMixin(object):
         self.assertEqual(x, y)
         torch.set_rng_state(rng_state)
 
-    @skipIfNoLapack
-    def test_cholesky(self):
-        x = torch.rand(10, 10) + 1e-1
+    @staticmethod
+    def _test_cholesky(self, cast):
+        x = cast(torch.rand(10, 10) + 1e-1)
         A = torch.mm(x, x.t())
 
         # default Case
@@ -5345,6 +5333,27 @@ class _TestTorchMixin(object):
         L = torch.cholesky(A, False)
         B = torch.mm(L, L.t())
         self.assertEqual(A, B, 1e-14, 'cholesky (lower) did not allow rebuilding the original matrix')
+
+    @skipIfNoLapack
+    def test_cholesky(self):
+        self._test_cholesky(self, lambda t: t)
+
+    @staticmethod
+    def _test_cholesky_batched(self, cast):
+        from common_utils import random_symmetric_pd_matrix
+
+        def cholesky_test_helper(n, batch_dims, cast, upper):
+            A = cast(random_symmetric_pd_matrix(n, *batch_dims))
+            cholesky_exp = torch.stack([m.cholesky(upper=upper) for m in A.reshape(-1, n, n)])
+            cholesky_exp = cholesky_exp.reshape_as(A)
+            self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper))
+
+        for upper, batchsize in product([True, False], [(3,), (3, 4), (2, 3, 4)]):
+            cholesky_test_helper(3, batchsize, cast, upper)
+
+    @skipIfNoLapack
+    def test_cholesky_batched(self):
+        self._test_cholesky_batched(self, lambda t: t)
 
     @staticmethod
     def _test_potrs(self, cast):
@@ -5379,15 +5388,9 @@ class _TestTorchMixin(object):
     def _test_potrs_batched(self, cast):
         from common_utils import random_symmetric_pd_matrix
 
-        # TODO: This function should be replaced after batch potrf is ready
-        def get_cholesky(bmat, upper):
-            n = bmat.size(-1)
-            cholesky = torch.stack([m.cholesky(upper) for m in bmat.reshape(-1, n, n)])
-            return cholesky.reshape_as(bmat)
-
         def potrs_test_helper(A_dims, b_dims, cast, upper):
             A = cast(random_symmetric_pd_matrix(*A_dims))
-            L = get_cholesky(A, upper)
+            L = torch.cholesky(A, upper)
             b = cast(torch.randn(*b_dims))
             return A, L, b
 
@@ -5425,7 +5428,7 @@ class _TestTorchMixin(object):
             A = cast(A).permute(0, 2, 1)
             b = cast(b).permute(2, 1, 0)
             assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
-            L = get_cholesky(A, upper)
+            L = torch.cholesky(A, upper)
             x = torch.potrs(b, L, upper=upper)
             self.assertEqual(x, cast(x_exp))
 
@@ -5441,18 +5444,12 @@ class _TestTorchMixin(object):
         from numpy.linalg import solve
         from common_utils import random_symmetric_pd_matrix
 
-        # TODO: This function should be replaced after batch potrf is ready
-        def get_cholesky(bmat, upper):
-            n = bmat.size(-1)
-            cholesky = torch.stack([m.cholesky(upper) for m in bmat.reshape(-1, n, n)])
-            return cholesky.reshape_as(bmat)
-
         def run_test(A_dims, b_dims, cast, upper):
             A = random_symmetric_pd_matrix(*A_dims)
             b = torch.randn(*b_dims)
             x_exp = torch.Tensor(solve(A.numpy(), b.numpy()))
             A, b = cast(A), cast(b)
-            L = get_cholesky(A, upper)
+            L = torch.cholesky(A, upper)
             x = torch.potrs(b, L, upper=upper)
             self.assertEqual(x, cast(x_exp))
 
@@ -5497,7 +5494,6 @@ class _TestTorchMixin(object):
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_pstrf(self):
         def checkPsdCholesky(a, uplo, inplace):
             if inplace:
@@ -6480,6 +6476,11 @@ class _TestTorchMixin(object):
             idx[0][0][0] = 34
             with self.assertRaises(RuntimeError):
                 getattr(base.clone(), method)(dim, idx, src)
+
+        # test for empty index, should be a no-op
+        idx = cast(torch.LongTensor())
+        actual = getattr(base.clone(), method)(dim, idx, src)
+        self.assertEqual(actual, base, 0)
 
     def test_scatter(self):
         self._test_scatter_base(self, lambda t: t, 'scatter_')
@@ -8286,7 +8287,6 @@ class _TestTorchMixin(object):
             t2.fill_(rnum)
             self.assertEqual(t1, t2, 0)
 
-    @skipIfRocm
     def test_print(self):
         default_type = torch.Tensor().type()
         for t in torch._tensor_classes:

@@ -204,7 +204,7 @@ InitMethod::Config initFile(
 
   size_t lines = waitForData(fd, file, world_size);
 
-  port_type master_port;
+  port_type master_port = -1;
   std::vector<std::string> master_addrs;
   std::vector<int> ranks;
   std::tie(master_port, master_addrs, ranks) =

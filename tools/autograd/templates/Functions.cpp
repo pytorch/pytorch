@@ -157,7 +157,7 @@ Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepd
     if (dims.size()==1) {
       return grad.unsqueeze(dims[0]).expand(sizes);
     } else {
-      auto dims_to_unsqueeze = dim_list_to_bitset(dims, sizes.size());
+      auto dims_to_unsqueeze = at::dim_list_to_bitset(dims, sizes.size());
       Tensor res = grad;
       for (size_t i = 0; i < sizes.size(); i++){
         if (dims_to_unsqueeze[i]) {
@@ -642,27 +642,35 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntList
 Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   // cf. Iain Murray (2016); arXiv 1602.07527
   if (upper) {
-    L = L.t();
-    grad = grad.t();
+    grad = grad.transpose(-1, -2);
+  } else {
+    L = L.transpose(-1, -2);
   }
 
-  auto phi = [](const Tensor & A) -> Tensor {
-    auto B = A.tril();
-    B = B - 0.5 * at::diag(at::diag(B));
+  auto batch_tril = [](const Tensor & A) -> Tensor {
+    int64_t n = A.size(-1);
+    auto indices = at::ones({n, n}, A.options().dtype(at::kByte));
+    indices = indices.triu(1).expand_as(A);
+    return at::where(indices, at::zeros({}, A.options()), A);
+  };
+
+  auto phi = [&batch_tril](const Tensor & A) -> Tensor {
+    auto B = A.dim() == 2 ? A.tril() : batch_tril(A);
+    B = B - 0.5 * at::diag_embed(B.diagonal(0, -1, -2), 0, -2, -1);
     return B;
   };
 
   // make sure not to double-count variation, since
   // only half of output matrix is unique
-  auto Lbar = grad.tril();
+  auto Lbar = grad.dim() == 2 ? grad.tril() : batch_tril(grad);
 
-  auto P = phi(at::mm(L.t(), Lbar));
+  auto P = phi(at::matmul(L, Lbar));
   Tensor S;
-  std::tie(S, std::ignore) = at::gesv(P + P.t(), L.t());
-  std::tie(S, std::ignore) = at::gesv(S.t(), L.t());
+  std::tie(S, std::ignore) = at::gesv(P + P.transpose(-1, -2), L);
+  std::tie(S, std::ignore) = at::gesv(S.transpose(-1, -2), L);
   S = phi(S);
   if (upper) {
-    S = S.t();
+    S = S.transpose(-1, -2);
   }
   return S;
 }

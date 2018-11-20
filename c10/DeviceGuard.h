@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/detail/InlineDeviceGuard.h>
+#include <c10/impl/InlineDeviceGuard.h>
 
 namespace c10 {
 
@@ -25,7 +25,7 @@ public:
   explicit DeviceGuard(Device device) : guard_(device) {}
 
   /// This constructor is for testing only.
-  explicit DeviceGuard(Device device, const detail::DeviceGuardImplInterface* impl) : guard_(device, impl) {}
+  explicit DeviceGuard(Device device, const impl::DeviceGuardImplInterface* impl) : guard_(device, impl) {}
 
   /// Copy is disallowed
   DeviceGuard(const DeviceGuard&) = delete;
@@ -48,7 +48,7 @@ public:
   }
 
   /// This method is for testing only.
-  void reset_device(at::Device device, const detail::DeviceGuardImplInterface* impl) {
+  void reset_device(at::Device device, const impl::DeviceGuardImplInterface* impl) {
     guard_.reset_device(device, impl);
   }
 
@@ -70,7 +70,7 @@ public:
   }
 
 private:
-  detail::InlineDeviceGuard<detail::VirtualGuardImpl> guard_;
+  impl::InlineDeviceGuard<impl::VirtualGuardImpl> guard_;
 };
 
 /**
@@ -129,7 +129,7 @@ public:
   explicit OptionalDeviceGuard(optional<Device> device) : guard_(device) {}
 
   /// Constructor for testing only.
-  explicit OptionalDeviceGuard(Device device, const detail::DeviceGuardImplInterface* impl) : guard_(device, impl) {}
+  explicit OptionalDeviceGuard(Device device, const impl::DeviceGuardImplInterface* impl) : guard_(device, impl) {}
 
   /// Copy is disallowed
   OptionalDeviceGuard(const OptionalDeviceGuard&) = delete;
@@ -149,7 +149,7 @@ public:
   }
 
   /// For testing only
-  void reset_device(at::Device device, const detail::DeviceGuardImplInterface* impl) {
+  void reset_device(at::Device device, const impl::DeviceGuardImplInterface* impl) {
     guard_.reset_device(device, impl);
   }
 
@@ -165,15 +165,15 @@ public:
   }
 
 private:
-  detail::InlineOptionalDeviceGuard<detail::VirtualGuardImpl> guard_;
+  impl::InlineOptionalDeviceGuard<impl::VirtualGuardImpl> guard_;
 };
 
 // Note [Whither the DeviceGuard boilerplate]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Design note: in principle, we could avoid these wrappers using:
 //
-// using DeviceGuard = detail::InlineDeviceGuard<detail::VirtualGuardImpl>;
-// using OptionalDeviceGuard = detail::InlineOptionalDeviceGuard<detail::VirtualGuardImpl>;
+// using DeviceGuard = impl::InlineDeviceGuard<impl::VirtualGuardImpl>;
+// using OptionalDeviceGuard = impl::InlineOptionalDeviceGuard<impl::VirtualGuardImpl>;
 //
 // But the error messages are worse, and our users can't just look at the
 // header file to find out what's going on.  Furthermore, for specializations

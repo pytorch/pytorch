@@ -1654,7 +1654,7 @@ void addGlobalMethods(py::module& m) {
             &pred_net,
             external_inputs,
             tensor_shapes,
-            {});
+            std::unordered_set<int>());
         std::string pred_net_str2;
         pred_net.SerializeToString(&pred_net_str2);
         return py::bytes(pred_net_str2);

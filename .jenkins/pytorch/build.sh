@@ -11,7 +11,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
   sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
   # TODO: move this to Docker
   sudo apt-get -qq update
   sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
@@ -43,27 +43,32 @@ cmake --version
 pip install -q -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  # This is necessary in order to cross compile (or else we'll have missing GPU device).
-  export HCC_AMDGPU_TARGET=gfx900
 
-  # These environment variables are not set on CI when we were running as the Jenkins user.
-  # The HIP Utility scripts require these environment variables to be set in order to run without error.
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
+  # ROCm CI is using Caffe2 docker images, which needs these wrapper
+  # scripts to correctly use sccache.
+  if [ -n "${SCCACHE_BUCKET}" ]; then
+    mkdir -p ./sccache
 
-  # This environment variable enabled HCC Optimizations that speed up the linking stage.
-  # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
-  export KMTHINLTO=1
+    SCCACHE="$(which sccache)"
+    if [ -z "${SCCACHE}" ]; then
+      echo "Unable to find sccache..."
+      exit 1
+    fi
 
-  # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
-  sudo apt-get -qq install libc++1
-  sudo apt-get -qq install libc++abi1
+    # Setup wrapper scripts
+    for compiler in cc c++ gcc g++ x86_64-linux-gnu-gcc; do
+      (
+        echo "#!/bin/sh"
+        echo "exec $SCCACHE $(which $compiler) \"\$@\""
+      ) > "./sccache/$compiler"
+      chmod +x "./sccache/$compiler"
+    done
 
-  # When hcc runs out of memory, it silently exits without stopping
-  # the build process, leaving undefined symbols in the shared lib
-  # which will cause undefined symbol errors when later running
-  # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
-  export MAX_JOBS=4
+    export CACHE_WRAPPER_DIR="$PWD/sccache"
+
+    # CMake must find these wrapper scripts
+    export PATH="$CACHE_WRAPPER_DIR:$PATH"
+  fi
 
   python tools/amd_build/build_pytorch_amd.py
   python tools/amd_build/build_caffe2_amd.py

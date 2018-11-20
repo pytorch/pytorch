@@ -50,6 +50,10 @@ C10_DEFINE_int32(
   dnnlowp_copy_to_32bit_frequency, 32,
   "When outlier-aware quantization is used, this option specifies how often "
   "we spill 16-bit accumulated numbers to 32-bit during the first pass");
+DEFINE_bool(
+    caffe2_dnnlowp_force_slow_path,
+    false,
+    "When true, use slow path in quantization");
 
 namespace dnnlowp {
 
@@ -327,7 +331,8 @@ void Quantize(
   bool avx2_support = cpuid.avx2();
   bool fma_support = cpuid.fma();
   if (avx2_support && fma_support && qparams.precision == 8 &&
-      std::is_same<T, uint8_t>::value) {
+      std::is_same<T, uint8_t>::value &&
+      !FLAGS_caffe2_dnnlowp_force_slow_path) {
     // fast path
     constexpr int VLEN = 8;
     std::size_t i = 0;
@@ -350,7 +355,16 @@ void Quantize(
     for (; i < len; ++i) {
       float transformed = qparams.zero_point + src[i] / qparams.scale;
       float clipped = std::min(std::max(transformed, 0.f), 255.f);
-      dst[i] = round(clipped);
+      // Not exactly the same behavior as the vectorized code.
+      // The vectorized code above always rounds to even in halfway cases
+      // (https://software.intel.com/en-us/node/523819), but std::nearbyint
+      // does the same only when the current rounding mode is FE_TONEAREST.
+      // However, in practice, this should not be a problem because most cases
+      // use the default rounding mode FE_TONEAREST.
+      // Note that we cannot implement the same behavior as the vectorized code
+      // using std::round because it does rounding away from zero in halfway
+      // cases.
+      dst[i] = nearbyint(clipped);
     }
   } else
 #endif
@@ -588,7 +602,7 @@ TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams_(
   } else if (initial_zero_point > qmax) {
     nudged_zero_point = qmax;
   } else {
-    nudged_zero_point = static_cast<int32_t>(round(initial_zero_point));
+    nudged_zero_point = nearbyint(initial_zero_point);
   }
 
   TensorQuantizationParams result;
@@ -667,9 +681,8 @@ void QuantizationFactory::ChooseRequantizationMultiplier_(
   }
   // Now that the real multiplier is in [1/2, 1), we convert it
   // into a fixed-point number.
-  int64_t q = static_cast<int64_t>(
-      round(
-        real_multiplier * (1ll << (requantization_multiplier_precision_ - 1))));
+  int64_t q = nearbyint(
+      real_multiplier * (1ll << (requantization_multiplier_precision_ - 1)));
   assert(q <= (1ll << (requantization_multiplier_precision_ - 1)));
   // Handle the special case when the real multiplier was so close to 1
   // that its fixed-point approximation was undistinguishable from 1.

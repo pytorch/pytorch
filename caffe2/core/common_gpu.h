@@ -25,7 +25,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 
-#include "c10/cuda/math_compat.h"
+#include "c10/cuda/CUDAMathCompat.h"
 
 // Defines CAFFE2_CUDA_EXPORT and CAFFE2_CUDA_IMPORT. On Windows, this
 // corresponds to different declarations (dllexport and dllimport). On
@@ -282,7 +282,7 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
 // CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
 // kernels. This is not supported by Apple platforms so we special case it.
 // See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
-#if defined(__APPLE__) || defined(__HIPCC__)
+#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
 #define CUDA_KERNEL_ASSERT(...)
 #else // __APPLE__
 #define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)

@@ -53,7 +53,6 @@
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
 namespace c10 {} // namespace c10
-namespace c10 { namespace detail {} }
 
 // Since C10 is the core library for caffe2 (and aten), we will simply reroute
 // all abstractions defined in c10 to be available in caffe2 as well.
@@ -61,7 +60,6 @@ namespace c10 { namespace detail {} }
 // c10 namespace where possible.
 namespace caffe2 {using namespace c10;}
 namespace at {using namespace c10;}
-namespace at { namespace detail { using namespace c10::detail; }}
 
 // C10_NORETURN
 #if defined(_MSC_VER)
@@ -124,5 +122,12 @@ namespace at { namespace detail { using namespace c10::detail; }}
 #else
 #define C10_MOBILE 0
 #endif // ANDROID / IOS / MACOS
+
+// Portably determine if a type T is trivially copyable or not.
+#if __GNUG__ && __GNUC__ < 5
+#define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
+#else
+#define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
+#endif
 
 #endif // C10_MACROS_MACROS_H_
