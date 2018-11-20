@@ -260,6 +260,80 @@ struct ModuleValue : public SugaredValue {
   std::shared_ptr<Module> module;
 };
 
+
+struct BooleanDispatchValue : public SugaredValue {
+  BooleanDispatchValue(py::dict dispatched_fn) {
+    if_true_ = dispatched_fn["if_true"];
+    if_false_ = dispatched_fn["if_false"];
+    index_ = py::cast<size_t>(dispatched_fn["index"]);
+    default_value_ = py::cast<size_t>(dispatched_fn["default"]);
+    arg_name_ = py::str(dispatched_fn["arg_name"]);
+  }
+
+  virtual std::string kind() const override {
+    return "boolean dispatch";
+  }
+
+  std::vector<NamedValue> removeIndex(
+      at::ArrayRef<NamedValue> arr,
+      size_t index) {
+    auto sliced = arr.vec();
+    sliced.erase(sliced.begin() + index);
+    return sliced;
+  }
+
+  virtual std::shared_ptr<SugaredValue> call(
+      SourceRange loc,
+      Method& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    c10::optional<bool> result;
+    Graph& graph = *(caller.graph());
+
+    std::vector<NamedValue> new_inputs = inputs.vec();
+    std::vector<NamedValue> new_attributes = attributes.vec();;
+
+    if (index_ < inputs.size()) {
+      // Dispatch flag is in arg list
+      result = constant_as<bool>(inputs.at(index_).value(graph));
+
+      // Slice out index of dispatch flag
+      new_inputs = removeIndex(inputs, index_);
+      n_binders -= 1;
+    } else if (auto i = findInputWithName(arg_name_, attributes)) {
+      // Dispatch flag is in kwargs
+      result = constant_as<bool>(attributes[*i].value(graph));
+
+      // Slice out index of dispatch flag
+      new_attributes = removeIndex(attributes, *i);
+      n_binders -= 1;
+    } else {
+      // Didn't find dispatch flag, so use default value
+      result = default_value_;
+    }
+
+    if (!result) {
+      throw ErrorReport(loc) << "value for boolean dispatch was not constant";
+    }
+
+    std::shared_ptr<SugaredValue> value;
+    if (*result) {
+      value = toSugaredValue(if_true_, caller, loc);
+    } else {
+      value = toSugaredValue(if_false_, caller, loc);
+    }
+    return value->call(loc, caller, new_inputs, new_attributes, n_binders);
+  }
+
+ private:
+  py::object if_true_, if_false_;
+  size_t index_;
+  bool default_value_;
+  std::string arg_name_;
+};
+
+
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Method& m,
@@ -335,6 +409,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto mod = py::cast<std::shared_ptr<Module>>(compiled_fn);
       return std::make_shared<ModuleValue>(mod);
     }
+  }
+
+  py::object dispatched_fn =
+      py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
+  if (!dispatched_fn.is_none()) {
+    return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
   return std::make_shared<PythonValue>(obj);
 }
