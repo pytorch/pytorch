@@ -10,7 +10,14 @@ set INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install
 set THIRD_PARTY_DIR=%cd:\=/%/third_party
 set BASIC_C_FLAGS=
 set BASIC_CUDA_FLAGS=
-set LDFLAGS=/LIBPATH:%INSTALL_DIR%/lib
+
+IF NOT DEFINED CMAKE_INSTALL_PREFIX (
+  set "CMAKE_INSTALL_PREFIX=%INSTALL_DIR%"
+) ELSE (
+  set "CMAKE_INSTALL_PREFIX=%CMAKE_INSTALL_PREFIX:\=/%"
+)
+
+set LDFLAGS=/LIBPATH:%CMAKE_INSTALL_PREFIX%/lib
 :: set TORCH_CUDA_ARCH_LIST=6.1
 
 set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
@@ -99,6 +106,12 @@ IF NOT DEFINED BUILD_SHARED_LIBS (
   set BUILD_SHARED_LIBS=ON
 )
 
+IF NOT DEFINED CMAKE_INSTALL_PREFIX (
+  set "CMAKE_INSTALL_PREFIX=%INSTALL_DIR%"
+) ELSE (
+  set "CMAKE_INSTALL_PREFIX=%CMAKE_INSTALL_PREFIX:\=/%"
+)
+
 IF "%CMAKE_GENERATOR%"=="" (
   set CMAKE_GENERATOR_COMMAND=
   set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=Release
@@ -140,11 +153,11 @@ FOR %%a IN (%_BUILD_ARGS%) DO (
 : Copy Artifacts
 cd torch\lib
 
-copy /Y tmp_install\lib\* .
-IF EXIST ".\tmp_install\bin" (
-  copy /Y tmp_install\bin\* .
+copy /Y "%CMAKE_INSTALL_PREFIX%\lib\*" .
+IF EXIST "%CMAKE_INSTALL_PREFIX%\bin" (
+  copy /Y "%CMAKE_INSTALL_PREFIX%\bin\*" .
 )
-xcopy /Y /E tmp_install\include\*.* include\*.*
+xcopy /Y /E "%CMAKE_INSTALL_PREFIX%\include\*.*" include\*.*
 xcopy /Y ..\..\aten\src\THNN\generic\THNN.h  .
 xcopy /Y ..\..\aten\src\THCUNN\generic\THCUNN.h .
 
@@ -159,7 +172,7 @@ goto:eof
   if not exist build mkdir build\%~1
   pushd build\%~1
   cmake ../../%~1 %CMAKE_GENERATOR_COMMAND% ^
-                  -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
+                  -DCMAKE_INSTALL_PREFIX="%CMAKE_INSTALL_PREFIX%" ^
                   -DCMAKE_C_FLAGS="%C_FLAGS%" ^
                   -DCMAKE_SHARED_LINKER_FLAGS="%LINK_FLAGS%" ^
                   -DCMAKE_CXX_FLAGS="%C_FLAGS% %CPP_FLAGS%" ^
@@ -194,11 +207,12 @@ goto:eof
   : which is said to become an error in the future.
   : As an alternative, we should use forward slashes instead.
   : Here those paths should be escaped before passing to CMake.
-  set NVTOOLEXT_HOME=%NVTOOLEXT_HOME:\=/%
-  set CUDNN_INCLUDE_DIR=%CUDNN_INCLUDE_DIR:\=/%
-  set CUDNN_LIB_DIR=%CUDNN_LIB_DIR:\=/%
-  set CUDNN_LIBRARY=%CUDNN_LIBRARY:\=/%
-  set PYTORCH_PYTHON_LIBRARY=%PYTORCH_PYTHON_LIBRARY:\=/%
+  if not "%NVTOOLEXT_HOME%" == "" set NVTOOLEXT_HOME=%NVTOOLEXT_HOME:\=/%
+  if not "%CUDNN_INCLUDE_DIR%" == "" set CUDNN_INCLUDE_DIR=%CUDNN_INCLUDE_DIR:\=/%
+  if not "%CUDNN_LIB_DIR%" == "" set CUDNN_LIB_DIR=%CUDNN_LIB_DIR:\=/%
+  if not "%CUDNN_LIBRARY%" == "" set CUDNN_LIBRARY=%CUDNN_LIBRARY:\=/%
+  if not "%PYTORCH_PYTHON_LIBRARY%" == "" set PYTORCH_PYTHON_LIBRARY=%PYTORCH_PYTHON_LIBRARY:\=/%
+  if not "%NUMPY_INCLUDE_DIR%" == "" set NUMPY_INCLUDE_DIR=%NUMPY_INCLUDE_DIR:\=/%
 
   IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
   if not exist build mkdir build
@@ -235,7 +249,7 @@ goto:eof
                   -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^
                   -DUSE_MKLDNN=%USE_MKLDNN% ^
                   -DATEN_NO_CONTRIB=1 ^
-                  -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
+                  -DCMAKE_INSTALL_PREFIX="%CMAKE_INSTALL_PREFIX%" ^
                   -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
                   -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
