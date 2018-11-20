@@ -30,7 +30,7 @@ C10_DEFINE_bool(
     "Dump quantized input and weight tensors used in Conv and FC operators "
     "during the first iteration");
 
-DECLARE_bool(caffe2_dnnlowp_force_slow_path);
+C10_DECLARE_bool(caffe2_dnnlowp_force_slow_path);
 
 namespace caffe2 {
 

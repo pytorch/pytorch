@@ -50,7 +50,7 @@ C10_DEFINE_int32(
   dnnlowp_copy_to_32bit_frequency, 32,
   "When outlier-aware quantization is used, this option specifies how often "
   "we spill 16-bit accumulated numbers to 32-bit during the first pass");
-DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_dnnlowp_force_slow_path,
     false,
     "When true, use slow path in quantization");
