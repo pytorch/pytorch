@@ -8714,6 +8714,48 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
+        constructor_args=(12, None, 'bicubic', False),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_2d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=((4, 6), None, 'bicubic', False),
+        input_size=(1, 2, 2, 3),
+        desc='bicubic_tuple_2d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, 4, 'bicubic', False),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_scale_2d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, (2, 2), 'bicubic', False),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_scale_tuple_shared_2d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, (2, 1), 'bicubic', False),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_scale_tuple_skewed_2d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=((4, 6), None, 'bicubic', True),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_tuple_2d_align_corners',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, (2, 1), 'bicubic', True),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_scale_tuple_skewed_2d_align_corners',
+    ),
+    dict(
+        module_name='Upsample',
         constructor_args=(12, None, 'nearest'),
         input_size=(1, 2, 4, 4, 4),
         desc='nearest_3d',
