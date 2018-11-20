@@ -252,18 +252,17 @@ bool LSTMUnitDNNLowPOp<T>::RunOnDevice() {
 
   // Quantize H_prev if needed
   vector<T> H_prev_temp;
-  const T* H_prev = QuantizeInputIfNeeded(
-      this, HIDDEN_T_M_1, H_in_qparams_, H_prev_temp, qfactory_.get());
+  const T* H_prev =
+      QuantizeInputIfNeeded(this, HIDDEN_T_M_1, H_in_qparams_, H_prev_temp);
 
   // Quantize C_prev if needed
   vector<T> C_prev_temp;
-  const T* C_prev = QuantizeInputIfNeeded(
-      this, CELL_T_M_1, C_in_qparams_, C_prev_temp, qfactory_.get());
+  const T* C_prev =
+      QuantizeInputIfNeeded(this, CELL_T_M_1, C_in_qparams_, C_prev_temp);
 
   // Quantize X if needed
   vector<T> X_temp;
-  const T* X = QuantizeInputIfNeeded(
-      this, GATES, G_in_qparams_, X_temp, qfactory_.get());
+  const T* X = QuantizeInputIfNeeded(this, GATES, G_in_qparams_, X_temp);
   // first 3D input to sigmoid, last D input to tanh
 
   const size_t TIMESTEP = SEQ_LENGTHS + 1;

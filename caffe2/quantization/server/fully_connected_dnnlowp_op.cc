@@ -137,8 +137,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
       if (VLOG_IS_ON(3)) {
         t_begin = chrono::system_clock::now();
       }
-      Xdata = QuantizeInputIfNeeded<T>(
-          this, 0, in_qparams_[0], X_temp, qfactory_.get());
+      Xdata = QuantizeInputIfNeeded<T>(this, 0, in_qparams_[0], X_temp);
       if (VLOG_IS_ON(3)) {
         t_end = chrono::system_clock::now();
         double dt = chrono::duration<double>(t_end - t_begin).count();
@@ -271,8 +270,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
     if (VLOG_IS_ON(3)) {
       t_begin = chrono::system_clock::now();
     }
-    Xdata = QuantizeInputIfNeeded<T>(
-        this, 0, in_qparams_[0], X_temp, qfactory_.get());
+    Xdata = QuantizeInputIfNeeded<T>(this, 0, in_qparams_[0], X_temp);
     if (VLOG_IS_ON(3)) {
       t_end = chrono::system_clock::now();
       double dt = chrono::duration<double>(t_end - t_begin).count();
