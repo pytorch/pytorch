@@ -4,7 +4,7 @@ import unittest
 from copy import deepcopy
 from itertools import product
 from operator import mul
-
+from functools import reduce
 
 import torch
 import torch.cuda
