@@ -811,7 +811,7 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
         elif isinstance(arg, torch.Tensor):
             if arg.dtype == torch.float:
                 arg = arg.double()
-            v = maybe_non_contig(arg).detach()
+            v = maybe_non_contig(arg).detach().clone()
             v.requires_grad = requires_grad and v.is_floating_point()
             return v
         elif callable(arg):
