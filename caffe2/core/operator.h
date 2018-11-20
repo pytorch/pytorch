@@ -506,7 +506,7 @@ class Operator : public OperatorBase {
   Tensor XOutput(int idx, at::IntList dims, at::TensorOptions options) {
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::XOutputTensor(
-          idx, dims, at::TensorOptions(options).device(context_.device()));
+          idx, dims, options.device(context_.device()));
     }
     return OperatorBase::XOutputTensor(idx, dims, options);
   }
@@ -514,7 +514,7 @@ class Operator : public OperatorBase {
   Tensor* Output(int idx, at::IntList dims, at::TensorOptions options) {
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::OutputTensor(
-          idx, dims, at::TensorOptions(options).device(context_.device()));
+          idx, dims, options.device(context_.device()));
     }
     return OperatorBase::OutputTensor(idx, dims, options);
   }

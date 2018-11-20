@@ -48,7 +48,7 @@ XBlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
       || (*tensor_impl_ptr).get()->GetDevice() != options.device()) {
     VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<TensorImplPtr>()
             << " dims: " << dims  << " options: " << options;
-    return Tensor(*blob->Reset<TensorImplPtr>(new TensorImplPtr(caffe2::empty(dims, options).getTensorImpl())));
+    return Tensor(*blob->Reset<TensorImplPtr>(new TensorImplPtr(caffe2::empty(dims, options).getIntrusivePtr())));
   } else {
     auto& tensor_impl = *tensor_impl_ptr;
     if (tensor_impl->sizes() != dims) {

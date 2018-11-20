@@ -32,15 +32,17 @@ class CAFFE2_API Tensor final {
     return impl_.defined();
   }
 
-  Tensor(TensorImplPtr ptr) {
-    impl_ = ptr;
+  Tensor(TensorImplPtr ptr) : impl_(std::move(ptr)){
+    if (impl_.get() == nullptr) {
+      throw std::runtime_error("TensorBaseImpl with nullptr not supported");
+    }
   }
 
   TensorImpl* unsafeGetTensorImpl() const {
     return impl_.get();
   }
 
-  TensorImplPtr getTensorImpl() {
+  const TensorImplPtr& getIntrusivePtr() const {
     return impl_;
   }
 
