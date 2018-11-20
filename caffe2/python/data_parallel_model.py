@@ -1025,8 +1025,8 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
         )
         return
 
-    if model._device_type == caffe2_pb2.CUDA:
-        p2p_access_pattern = workspace.GetCudaPeerAccessPattern()
+    if model._device_type == workspace.GpuDeviceType:
+        p2p_access_pattern = workspace.GetGpuPeerAccessPattern()
     else:
         p2p_access_pattern = None
 
