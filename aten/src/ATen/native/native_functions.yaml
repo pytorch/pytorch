@@ -1089,20 +1089,20 @@
 - func: mean(Tensor self) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+- func: mean(Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+- func: mean(Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+- func: mean(Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: mean_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+- func: mean_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
 
-- func: mean_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+- func: mean_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
 
-- func: mean_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+- func: mean_out(Tensor result, Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
 
 - func: median(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
   variants: function, method

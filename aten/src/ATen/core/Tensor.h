@@ -381,9 +381,9 @@ public:
   Tensor max_values(int64_t dim, bool keepdim=false) const;
   Tensor mean(ScalarType dtype) const;
   Tensor mean() const;
-  Tensor mean(int64_t dim, bool keepdim, ScalarType dtype) const;
-  Tensor mean(int64_t dim, bool keepdim=false) const;
-  Tensor mean(int64_t dim, ScalarType dtype) const;
+  Tensor mean(IntList dim, bool keepdim, ScalarType dtype) const;
+  Tensor mean(IntList dim, bool keepdim=false) const;
+  Tensor mean(IntList dim, ScalarType dtype) const;
   std::tuple<Tensor,Tensor> median(int64_t dim, bool keepdim=false) const;
   std::tuple<Tensor,Tensor> min(int64_t dim, bool keepdim=false) const;
   Tensor min_values(int64_t dim, bool keepdim=false) const;

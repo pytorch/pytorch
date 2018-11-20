@@ -76,9 +76,16 @@ Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
   }
 }
 
-int64_t _safe_size(IntList sizes, int64_t dim) {
-  dim = at::maybe_wrap_dim(dim, sizes.size());
-  return sizes.size() != 0 ? sizes[dim] : 1;
+int64_t _safe_size(IntList sizes, IntList dim) {
+  int64_t size = 1;
+  if (sizes.size() == 0) {
+    return 1;
+  }
+  for (auto d : dim) {
+    d = at::maybe_wrap_dim(d, sizes.size());
+    size *= sizes[d];
+  }
+  return size;
 }
 
 Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_, const Tensor & norm) {
