@@ -2285,9 +2285,13 @@ C10_MAPPINGS = collections.OrderedDict([
     ("cuda::CUDAStream", ("hip::HIPStream", API_C10)),
     ("CUDAStream", ("HIPStream", API_C10)),
     ("cuda::getStreamFromPool", ("hip::getStreamFromPool", API_C10)),
+    ("getStreamFromPool", ("getStreamFromPool", API_C10)),
     ("cuda::getDefaultCUDAStream", ("hip::getDefaultHIPStream", API_C10)),
+    ("getDefaultCUDAStream", ("getDefaultHIPStream", API_C10)),
     ("cuda::getCurrentCUDAStream", ("hip::getCurrentHIPStream", API_C10)),
+    ("getCurrentCUDAStream", ("getCurrentHIPStream", API_C10)),
     ("cuda::setCurrentCUDAStream", ("hip::setCurrentHIPStream", API_C10)),
+    ("setCurrentCUDAStream", ("setCurrentHIPStream", API_C10)),
 ])
 
 # NB: C10 mappings are more specific than Caffe2 mappings, so run them
