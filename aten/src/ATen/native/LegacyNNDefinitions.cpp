@@ -68,6 +68,29 @@ Tensor multi_margin_loss_backward(const Tensor & grad_output, const Tensor & sel
                                   Scalar p, Scalar margin, const Tensor & weight, int64_t reduction) {
   return at::_thnn_multi_margin_loss_backward(grad_output, self, target, p, margin, weight, reduction);
 }
+Tensor & multilabel_margin_loss_out(Tensor & output, const Tensor & self, const Tensor & target, int64_t reduction) {
+  return at::_thnn_multilabel_margin_loss_out(output, self, target, reduction);
+}
+
+Tensor multilabel_margin_loss(const Tensor & self, const Tensor & target, int64_t reduction) {
+  return at::_thnn_multilabel_margin_loss(self, target, reduction);
+}
+
+std::tuple<Tensor &,Tensor &> multilabel_margin_loss_forward_out(Tensor & output, Tensor & is_target, const Tensor & self, const Tensor & target, int64_t reduction) {
+  return at::_thnn_multilabel_margin_loss_forward_out(output, is_target, self, target, reduction);
+}
+
+std::tuple<Tensor,Tensor> multilabel_margin_loss_forward(const Tensor & self, const Tensor & target, int64_t reduction) {
+  return at::_thnn_multilabel_margin_loss_forward(self, target, reduction);
+}
+
+Tensor & multilabel_margin_loss_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & target, int64_t reduction, const Tensor & is_target) {
+  return at::_thnn_multilabel_margin_loss_backward_out(grad_input, grad_output, self, target, reduction, is_target);
+}
+
+Tensor multilabel_margin_loss_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, int64_t reduction, const Tensor & is_target) {
+  return at::_thnn_multilabel_margin_loss_backward(grad_output, self, target, reduction, is_target);
+}
 
 Tensor & smooth_l1_loss_out(Tensor & output, const Tensor & self, const Tensor & target, int64_t reduction) {
   return at::_thnn_smooth_l1_loss_out(output, self, target, reduction);

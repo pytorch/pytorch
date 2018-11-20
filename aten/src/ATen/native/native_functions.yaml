@@ -3031,6 +3031,24 @@
 - func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int64_t reduction) -> Tensor
   python_module: nn
 
+- func: multilabel_margin_loss_out(Tensor output, Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: multilabel_margin_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: multilabel_margin_loss_forward_out(Tensor output, Tensor is_target, Tensor self, Tensor target, int64_t reduction) -> (Tensor, Tensor)
+  python_module: nn
+
+- func: multilabel_margin_loss_forward(Tensor self, Tensor target, int64_t reduction) -> (Tensor output, Tensor is_target)
+  python_module: nn
+
+- func: multilabel_margin_loss_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, int64_t reduction, Tensor is_target) -> Tensor
+  python_module: nn
+
+- func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction, Tensor is_target) -> Tensor
+  python_module: nn
+
 - func: smooth_l1_loss_out(Tensor output, Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
   python_module: nn
 
