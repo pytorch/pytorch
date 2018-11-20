@@ -9,7 +9,7 @@ namespace caffe2 {
  * We'll encounter saturation but this will be faster in Intel CPUs
  */
 class FullyConnectedDNNLowPAcc16Op final
-  : public FullyConnectedDNNLowPOp<std::uint8_t> {
+    : public FullyConnectedDNNLowPOp<std::uint8_t> {
  public:
   FullyConnectedDNNLowPAcc16Op(const OperatorDef& operator_def, Workspace* ws);
   bool RunOnDevice() override;
@@ -17,11 +17,11 @@ class FullyConnectedDNNLowPAcc16Op final
   USE_OPERATOR_FUNCTIONS(CPUContext);
   using BaseType = FullyConnectedDNNLowPOp<std::uint8_t>;
 
-  using BaseType::InputTensorCPU_;
-  using BaseType::OutputTensorCPU_;
   using BaseType::dequantize_output_;
   using BaseType::in_qparams_;
+  using BaseType::InputTensorCPU_;
   using BaseType::out_qparams_;
+  using BaseType::OutputTensorCPU_;
   using BaseType::W_quantized_;
 
  private:
