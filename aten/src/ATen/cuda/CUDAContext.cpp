@@ -20,21 +20,21 @@ cudaDeviceProp* getDeviceProperties(int64_t device) {
 CUDAStream getStreamFromPool(
   const bool isHighPriority
 , int64_t device) {
-  return CUDAStream(detail::CUDAStream_getStreamFromPool(isHighPriority, device));
+  return CUDAStream(impl::CUDAStream_getStreamFromPool(isHighPriority, device));
 }
 
 CUDAStream getDefaultCUDAStream(int64_t device) {
-  return CUDAStream(detail::CUDAStream_getDefaultStream(device));
+  return CUDAStream(impl::CUDAStream_getDefaultStream(device));
 }
 CUDAStream getCurrentCUDAStream(int64_t device) {
-  return CUDAStream(detail::CUDAStream_getCurrentStream(device));
+  return CUDAStream(impl::CUDAStream_getCurrentStream(device));
 }
 
 void setCurrentCUDAStream(CUDAStream stream) {
-  detail::CUDAStream_setStream(stream.internals());
+  impl::CUDAStream_setStream(stream.internals());
 }
 void uncheckedSetCurrentCUDAStream(CUDAStream stream) {
-  detail::CUDAStream_uncheckedSetStream(stream.internals());
+  impl::CUDAStream_uncheckedSetStream(stream.internals());
 }
 
 Allocator* getCUDADeviceAllocator() {
