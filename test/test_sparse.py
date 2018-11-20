@@ -1842,7 +1842,7 @@ class TestSparse(TestCase):
                     RuntimeError,
                     "set_indices_and_values_unsafe is not allowed on Tensor created from .data or .detach()"):
                 a = self.SparseTensor(torch.tensor([[0, 1, 1], [2, 0, 2]]), torch.tensor([3., 4., 5.])).data
-                a.add_(b)
+                a.add_(a)
 
         do_test(self.SparseTensor(3, 0).data)
         do_test(self.SparseTensor(3, 0).detach())
