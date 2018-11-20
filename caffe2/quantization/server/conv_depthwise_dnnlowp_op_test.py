@@ -15,6 +15,7 @@ from dnnlowp_test_utils import (
 )
 from hypothesis import given
 
+
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
 
 
@@ -70,9 +71,17 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         outputs = []
 
         if relu:
-            op_engine_list = [("Conv", ""), ("ConvRelu", "DNNLOWP"), ("Int8ConvRelu", "DNNLOWP")]
+            op_engine_list = [
+                ("Conv", ""),
+                ("ConvRelu", "DNNLOWP"),
+                ("Int8ConvRelu", "DNNLOWP"),
+            ]
         else:
-            op_engine_list = [("Conv", ""), ("Conv", "DNNLOWP"), ("Int8Conv", "DNNLOWP")]
+            op_engine_list = [
+                ("Conv", ""),
+                ("Conv", "DNNLOWP"),
+                ("Int8Conv", "DNNLOWP"),
+            ]
 
         for op_type, engine in op_engine_list:
             net = core.Net("test_net")
