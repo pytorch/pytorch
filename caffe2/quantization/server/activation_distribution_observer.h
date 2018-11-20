@@ -1,5 +1,4 @@
-#ifndef CAFFE2_ACTIVATION_DISTRIBUTION_OBSERVER_H
-#define CAFFE2_ACTIVATION_DISTRIBUTION_OBSERVER_H
+#pragma once
 
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator.h"
@@ -147,5 +146,3 @@ class RegisterQuantizationParamsWithHistogramNetObserver final
 };
 
 } // namespace caffe2
-
-#endif // CAFFE2_ACTIVATION_DISTRIBUTION_OBSERVER_H

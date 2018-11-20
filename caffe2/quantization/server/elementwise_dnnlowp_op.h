@@ -1,5 +1,4 @@
-#ifndef CAFFE2_OPERATORS_ELEMENTWISE_DNNLOWP_OP_H_
-#define CAFFE2_OPERATORS_ELEMENTWISE_DNNLOWP_OP_H_
+#pragma once
 
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/operators/elementwise_ops.h"
@@ -136,5 +135,3 @@ class BinaryElementwiseDNNLowPOp : public DNNLowPOp<T, FP32_OP> {
     }                                                                        \
   };
 } // namespace caffe2
-
-#endif // CAFFE2_OPERATORS_ELEMENTWISE_DNNLOWP_OP_H_
