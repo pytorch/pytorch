@@ -9,6 +9,7 @@ import pickle
 from copy import deepcopy
 from itertools import repeat, product
 from functools import wraps, reduce
+from operator import mul
 from collections import OrderedDict
 import hashlib
 import os
