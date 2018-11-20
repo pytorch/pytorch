@@ -42,7 +42,7 @@ class CopyOpsTest(unittest.TestCase):
 
     @unittest.skipIf(workspace.NumGpuDevices() < 1, "Need at least 1 GPU.")
     def test_copy_gradient_gpu(self):
-        self.run_test_copy_gradient(core.DeviceOption(workspace.GpuDeviceType(), 0))
+        self.run_test_copy_gradient(core.DeviceOption(workspace.GpuDeviceType, 0))
 
     @unittest.skipIf(workspace.NumGpuDevices() < 2, "Need at least 2 GPU.")
     def test_copy_gradient_multiple_gpus(self):
@@ -51,10 +51,10 @@ class CopyOpsTest(unittest.TestCase):
         with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU, 0)):
             x_cpu = model.net.AddExternalInputs("x_cpu")
 
-        with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType(), 0)):
+        with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, 0)):
             x_gpu_1 = model.CopyCPUToGPU(x_cpu, "x_gpu_1")
 
-        with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType(), 1)):
+        with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, 1)):
             x_gpu_2 = model.Copy(x_gpu_1, "x_gpu_2")
             loss = model.AveragedLoss(x_gpu_2, "loss")
             gradient_map = model.AddGradientOperators([loss])
@@ -80,11 +80,11 @@ class CopyOpsTest(unittest.TestCase):
 
         self.assertEqual(
             get_op_with_output(model, "x_gpu_2_grad").device_option,
-            core.DeviceOption(cworkspace.GpuDeviceType(), 1),
+            core.DeviceOption(cworkspace.GpuDeviceType, 1),
         )
         self.assertEqual(
             get_op_with_output(model, "x_cpu_grad").device_option,
-            core.DeviceOption(workspace.GpuDeviceType(), 0),
+            core.DeviceOption(workspace.GpuDeviceType, 0),
         )
 
     @unittest.skipIf(workspace.NumGpuDevices() < 1, "Need at least 1 GPU.")
@@ -93,7 +93,7 @@ class CopyOpsTest(unittest.TestCase):
         v = model.param_init_net.UniformFill([], ["v"], shape=[16, 4])
         indices = model.param_init_net.UniformFill([], ["v"], shape=[16, 4])
         cpu_opt = core.DeviceOption(caffe2_pb2.CPU, 0)
-        gpu_opt = core.DeviceOption(workspace.GpuDeviceType(), 0)
+        gpu_opt = core.DeviceOption(workspace.GpuDeviceType, 0)
 
         with core.DeviceScope(gpu_opt):
             vcpu = model.CopyGPUToCPU(v, "vcpu")
@@ -118,7 +118,7 @@ class CopyOpsTest(unittest.TestCase):
 
         batch = 32
         cpu_opt = core.DeviceOption(caffe2_pb2.CPU, 0)
-        gpu_opt = core.DeviceOption(workspace.GpuDeviceType(), 0)
+        gpu_opt = core.DeviceOption(workspace.GpuDeviceType, 0)
 
         with core.NameScope("cpu"):
             with core.DeviceScope(cpu_opt):

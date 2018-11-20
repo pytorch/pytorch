@@ -2110,7 +2110,7 @@ class Net(object):
     def RunAllOnGPU(self, gpu_id=0, use_cudnn=False):
         """A convenient function to run everything on the GPU."""
         device_option = caffe2_pb2.DeviceOption()
-        device_option.device_type = workspace.GpuDeviceType()
+        device_option.device_type = workspace.GpuDeviceType
         device_option.device_id = gpu_id
         self._net.device_option.CopyFrom(device_option)
         if use_cudnn:
@@ -2280,7 +2280,7 @@ def remap_input(op, blob_name_remapping):
 
 def copy_func_between_devices(src, dst):
     CPU = caffe2_pb2.CPU
-    GPU = workspace.GpuDeviceType()
+    GPU = workspace.GpuDeviceType
 
     if src.device_type == CPU and dst.device_type == CPU:
         return None

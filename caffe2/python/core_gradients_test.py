@@ -94,7 +94,7 @@ class TestGradientCalculation(test_util.TestCase):
 
     @given(device_option=st.sampled_from([
         None,
-        core.DeviceOption(workspace.GpuDeviceType(), 1)]))
+        core.DeviceOption(workspace.GpuDeviceType, 1)]))
     def testDirect(self, device_option):
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
@@ -279,7 +279,7 @@ class TestGradientCalculation(test_util.TestCase):
 
     @given(device_option=st.sampled_from([
         None,
-        core.DeviceOption(workspace.GpuDeviceType(), 1)]))
+        core.DeviceOption(workspace.GpuDeviceType, 1)]))
     def testMultiUseInput(self, device_option):
         """Test gradient for the following case:
 

@@ -25,7 +25,7 @@ import unittest
 
 if (workspace.has_gpu_support or workspace.has_hip_support) and workspace.NumGpuDevices() > 0:
     gpu_device_option = caffe2_pb2.DeviceOption()
-    gpu_device_option.device_type = workspace.GpuDeviceType()
+    gpu_device_option.device_type = workspace.GpuDeviceType
     cpu_device_option = caffe2_pb2.DeviceOption()
     gpu_device_checker = device_checker.DeviceChecker(
         0.01, [gpu_device_option]
