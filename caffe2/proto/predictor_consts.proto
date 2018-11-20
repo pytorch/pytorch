@@ -27,4 +27,5 @@ message PredictorConsts {
   optional string TRAIN_INIT_PLAN_TYPE = 11
       [ default = "TRAIN_INIT_PLAN_TYPE" ];
   optional string TRAIN_PLAN_TYPE = 12 [ default = "TRAIN_PLAN_TYPE" ];
+  optional string PREDICT_NET_TYPE_FULL_PREDICTOR = 13 [ default = "PREDICT_NET_TYPE_FULL_PREDICTOR" ];
 }
