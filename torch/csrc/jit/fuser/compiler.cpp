@@ -147,24 +147,32 @@ std::shared_ptr<FusedKernel> compileKernel(
 , const at::Device device) {
   const std::vector<TensorDesc>& input_desc = arg_spec.descs();
 
-  // Note: this assumes fused kernels only operate on floating point values
+  auto graph = spec.graph()->copy();
+
   c10::optional<at::ScalarType> scalar_type;
-  for (const auto& desc : input_desc) {
-    if (isFloatingType(desc.scalar_type)) {
+  for (size_t i = 0; i < input_desc.size(); i++) {
+    const auto& desc = input_desc[i];
+    // prefer floating, but take integers if it's the only one
+    // (to care for where)
+    if ((!scalar_type.has_value()) ||
+	 (isFloatingType(desc.scalar_type) && ! isFloatingType(*scalar_type))) {
       scalar_type = desc.scalar_type;
-      break;
     }
+    graph->inputs()[i]->setType(TensorType::create(desc.scalar_type, device, desc.nDim())); // TODO: nDim is bad, as it is collapsed
   }
   JIT_ASSERT(scalar_type);
 
+  PropagateInputShapes(*graph);
+
   // Creates output descriptions
   std::vector<TensorDesc> output_desc;
-  for (const Value* output : (spec.graph())->outputs()) {
+  for (const Value* output : graph->outputs()) {
     std::vector<int64_t> sizes = map_size;
     if (output->node()->kind() == prim::FusedConcat) {
       sizes.at(output->node()->i(attr::dim)) *= output->node()->inputs().size();
     }
-    auto type = CompleteTensorType::create(*scalar_type, device, sizes);
+    auto scalar_type = graph->outputs()[0]->type()->cast<c10::TensorType const>()->scalarType();
+    auto type = CompleteTensorType::create(scalar_type, device, sizes);
     output_desc.emplace_back(std::move(type));
   }
 
@@ -177,7 +185,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   std::tie(code, chunk_desc, concat_desc, has_random)
     = generateKernel(
         name
-      , *(spec.graph())
+      , *graph
       , input_desc
       , output_desc
       , use_cuda);

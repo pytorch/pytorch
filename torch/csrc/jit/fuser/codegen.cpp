@@ -42,6 +42,10 @@ static std::string scalarValue(const int64_t v) {
   return std::to_string(v);
 }
 
+static std::string scalarValue(const bool v) {
+  return std::to_string(v);
+}
+
 // Note: The NAN, NEG_INFINITY and POS_INFINITY strings map to device-specific
 // implementations of these special values. These macros are found in the 
 // resource strings for each device.
@@ -77,10 +81,24 @@ static const char* scalarTypeName(const at::ScalarType type) {
   }
 }
 
+static std::string variableType(const std::shared_ptr<c10::Type> t) {
+  if (t->kind() == TypeKind::IntType) {
+    return "int";
+  } else if (t->kind() == TypeKind::FloatType) {
+    return "float";
+  } else if (t->kind() == TypeKind::TensorType) {
+    auto const tt = t->cast<TensorType>();
+    return scalarTypeName(tt->scalarType());
+  }
+  // TODO: we might also error out if we think the above should cover everything
+  return "auto";
+}
+
 // Writes "simple mappable" ops
 static std::string encodeRHS(const Node* n) {
   static std::unordered_map<NodeKind, std::string> simple_map_ops = {
     // unary
+    {aten::_cast_Float, "static_cast<float>(${0})"},
     {aten::abs, "fabs(${0})"},
     {aten::sigmoid, "1.f / (1.f + expf(-${0}))"},
     {aten::relu, "${0} < 0 ? 0.f : ${0} "},
@@ -148,6 +166,9 @@ static std::string encodeRHS(const Node* n) {
     // and when the input is NaN, the output is, too
     {aten::clamp, "(${0}<${1}?${1}:(${0}>${2}?${2}:${0}))"},
 
+    //where
+    {aten::where, "(${0} ? ${1} : ${2})"},
+
     // simple derivatives
     {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
     {aten::_tanh_backward,    "${0} * (1.f - ${1} * ${1})"},
@@ -157,6 +178,8 @@ static std::string encodeRHS(const Node* n) {
     const auto val = toIValue(n->output()).value();
     if (val.isDouble()) {
       return scalarValue(val.toDouble());
+    } else if (val.isBool()) {
+      return scalarValue(val.toBool());
     } else {
       JIT_ASSERT(val.isInt());
       return scalarValue(val.toInt());
@@ -308,9 +331,9 @@ generateKernel(
     } else {
       env.s("access", format("t${formal}.data[t${formal}_offset]", env));
     }
+    env.s("lhs_type", scalarTypeName(input.second.scalar_type));
 
-    //TODO: actual type propagation rather than relying on auto..
-    body << format("auto ${node} = ${access};\n", env);
+    body << format("${lhs_type} ${node} = ${access};\n", env);
   }
 
   bool has_random = false;
@@ -327,7 +350,8 @@ generateKernel(
     }
     env.s("node", valueName(n->output()));
     env.s("rhs", encodeRHS(n));
-    body << format("auto ${node} = ${rhs};\n",env);
+    env.s("lhs_type", variableType(n->output()->type()));
+    body << format("${lhs_type} ${node} = ${rhs};\n",env);
   }
 
   // Generates writes to output tensors

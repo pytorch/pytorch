@@ -395,12 +395,12 @@ static c10::optional<size_t> determineListSize(Value* list) {
 }
 
 bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
-  static const auto broadcast = [](std::vector<TensorTypePtr>& tensor_types) -> TensorTypePtr {
+  static const auto broadcast = [](std::vector<TensorTypePtr>& tensor_types, size_t arg_for_type) -> TensorTypePtr {
     if (tensor_types.size() == 1) {
       return tensor_types[0];
     }
     JIT_ASSERT(!tensor_types.empty());
-    auto any_type = tensor_types[0];
+    auto any_type = tensor_types[arg_for_type];
     auto max_dims = any_type->dim();
     for (auto & type : tensor_types) {
       max_dims = std::max(max_dims, type->dim());
@@ -582,7 +582,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value) -> Tensor",
   }, [](Node * node) -> type_vec_t {
     if (auto maybe_tensor_types = gatherTensorTypes<TensorType>(node)) {
-      return {broadcast(*maybe_tensor_types)};
+      return {broadcast(*maybe_tensor_types, (node->kind() == aten::where ? 1 : 0))};
     }
     return {};
   }};
@@ -634,7 +634,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::ne(Tensor self, Scalar other) -> Tensor",
   }, [](Node * node) -> type_vec_t {
     if (auto maybe_tensor_types = gatherTensorTypes<TensorType>(node)) {
-      return {broadcast(*maybe_tensor_types)->toScalarType(at::kByte)};
+      return {broadcast(*maybe_tensor_types, 0)->toScalarType(at::kByte)};
     }
     return {};
   }};
@@ -1073,7 +1073,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
         return tensor_types.at(1);
       } else {
         // Batched matrix multiply (possibly with squeeze + unsqueeze if one argument is 1D)
-        auto type = broadcast(tensor_types);
+        auto type = broadcast(tensor_types, 0);
         if (tensor_types.at(0)->dim() == 1 || tensor_types.at(1)->dim() == 1) {
           type = type->withDim(type->dim() - 1);
         }
