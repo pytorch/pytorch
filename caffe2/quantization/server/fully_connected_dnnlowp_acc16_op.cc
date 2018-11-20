@@ -40,8 +40,8 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
 
   // Quantize X
   vector<uint8_t> X_temp;
-  const uint8_t* Xdata = QuantizeInputIfNeeded<uint8_t>(
-      this, 0, in_qparams_[0], X_temp, qfactory_.get());
+  const uint8_t* Xdata =
+      QuantizeInputIfNeeded<uint8_t>(this, 0, in_qparams_[0], X_temp);
 
   // Pack W if needed
   if (!Wq_acc16_packed_ || !is_weight_constant_) {

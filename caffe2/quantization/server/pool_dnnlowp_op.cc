@@ -92,8 +92,7 @@ class AveragePoolDnnLowPOp final
 
     // Quantize input if needed
     vector<T> X_temp;
-    const T* Xdata =
-        QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp, qfactory_.get());
+    const T* Xdata = QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp);
 
     GetOutputQuantizationParams_();
 
@@ -231,8 +230,7 @@ class AveragePoolDnnLowPOp final
 
     // Quantize input if needed
     vector<T> X_temp;
-    const T* Xdata =
-        QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp, qfactory_.get());
+    const T* Xdata = QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp);
 
     GetOutputQuantizationParams_();
 
@@ -393,8 +391,7 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
 
     // Quantize input if needed
     vector<T> X_temp;
-    const T* Xdata =
-        QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp, qfactory_.get());
+    const T* Xdata = QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp);
 
     auto& X = InputTensorCPU_(0);
     auto* Y = OutputTensorCPU_(0);
@@ -540,8 +537,7 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
 
     // Quantize input if needed
     vector<T> X_temp;
-    const T* Xdata =
-        QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp, qfactory_.get());
+    const T* Xdata = QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp);
 
     auto& X = InputTensorCPU_(0);
     auto* Y = OutputTensorCPU_(0);

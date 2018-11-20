@@ -596,7 +596,7 @@ bool GroupNormDNNLowPOp<T>::RunOnDeviceWithOrderNCHW() {
   Y->ResizeLike(X);
   std::vector<T> X_temp;
   const T* X_data = dnnlowp::QuantizeInputIfNeeded<T>(
-      this, INPUT, in_qparams_[INPUT], X_temp, qfactory_.get());
+      this, INPUT, in_qparams_[INPUT], X_temp);
 
   if (dequantize_output_) {
     float* Y_data = Y->template mutable_data<float>();
@@ -664,7 +664,8 @@ bool GroupNormDNNLowPOp<T>::RunOnDeviceWithOrderNHWC() {
   Y->ResizeLike(X);
   std::vector<T> X_temp;
   const T* X_data = dnnlowp::QuantizeInputIfNeeded<T>(
-      this, INPUT, in_qparams_[INPUT], X_temp, qfactory_.get());
+      this, INPUT, in_qparams_[INPUT], X_temp);
+
   if (dequantize_output_) {
     float* Y_data = Y->template mutable_data<float>();
     mu_dequantized_.resize(N * G);
