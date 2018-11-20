@@ -4997,6 +4997,24 @@ a")
 
         f = Foo()
 
+    def test_script_module_param_buffer_mutation(self):
+        # TODO: add param mutation test case after JIT support it
+        class ModuleBufferMutate(torch.jit.ScriptModule):
+            __constants__ = ['training']
+
+            def __init__(self):
+                super(ModuleBufferMutate, self).__init__(False)
+                self.register_buffer('running_var', torch.tensor(0, dtype=torch.long))
+
+            @torch.jit.script_method
+            def forward(self):
+                if self.training:
+                    self.running_var += 1
+                return self.running_var
+
+        m = ModuleBufferMutate()
+        self.assertEqual(m(), 1)
+
     def test_script_module_for(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['b']
@@ -9653,6 +9671,9 @@ S = 5
 # )
 nn_module_tests = [
     ('AlphaDropout', (), ((S,),)),
+    ('BatchNorm1d', (10,), ((S, 10),)),
+    ('BatchNorm2d', (10,), ((S, 10, S, S),)),
+    ('BatchNorm3d', (10,), ((S, 10, S, S, S),)),
     ('Dropout', (), ((S,),)),
     ('Dropout2d', (), ((S, S),)),
     ('Dropout3d', (), ((S, S, S),)),
@@ -9947,7 +9968,7 @@ def add_nn_module_test(module_name, constructor_args, call_args,
 
         # Construct a script module that passes arguments through
         # to self.submodule
-        def create_module(*args, **kwargs):
+        def create_script_module(*args, **kwargs):
             formals, tensors, actuals = get_script_args(args)
 
             method_args = ', '.join(['self'] + actuals)
@@ -9972,15 +9993,20 @@ def add_nn_module_test(module_name, constructor_args, call_args,
 
             # Check there are no Python ops by exporting
             self.assertExportImportModule(module, tensors)
-            create_module.last_graph = module.graph
+            create_script_module.last_graph = module.graph
+            return module(*args)
+
+        # Construct a normal nn module to stay consistent with create_script_module
+        # and make use of a single global rng_state in module initialization
+        def create_nn_module(*args, **kwargs):
+            module = nn_module(*constructor_args)
             return module(*args)
 
         # Check against Python module as reference
         args_variable, kwargs_variable = create_input(call_args)
         f_args_variable = deepcopy(unpack_variables(args_variable))
-        reference = nn_module(*constructor_args)
 
-        check_against_reference(self, create_module, reference, f_args_variable)
+        check_against_reference(self, create_script_module, create_nn_module, f_args_variable)
 
     test_name = 'test_nn_{}'.format(module_name)
     post_add_test(test_name, skipTestIf, do_test)
