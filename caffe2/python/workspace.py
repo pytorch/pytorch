@@ -45,6 +45,9 @@ has_gpu_support = C.has_gpu_support
 has_hip_support = C.has_hip_support
 if has_gpu_support:
     NumCudaDevices = C.num_cuda_devices
+    # This is a duplicate of NumCudaDevices. Remove
+    # NumCudaDevices once replaced everywhere in the code
+    NumGpuDevices = C.num_cuda_device
     GetCUDAVersion = C.get_cuda_version
     GetCuDNNVersion = C.get_cudnn_version
 
@@ -57,6 +60,18 @@ else:
     GetCUDAVersion = lambda: 0 # noqa
     GetCuDNNVersion = lambda: 0 # noqa
     GetCudaPeerAccessPattern = lambda: np.array([]) # noqa
+
+if has_hip_support:
+    NumGpuDevices = C.num_hip_devices
+
+    def GetHipPeerAccessPattern():
+        return np.asarray(C.get_hip_peer_access_pattern())
+    GetDeviceProperties = C.get_device_properties
+else:
+    GetHipPeerAccessPattern = lambda: np.array([]) # noqa
+
+if not has_gpu_support and not has_hip_support:
+    NumGpuDevices = lambda: 0 # noqa
     GetDeviceProperties = lambda x: None # noqa
 
 IsNUMAEnabled = C.is_numa_enabled
@@ -82,6 +97,12 @@ def _GetFreeFlaskPort():
         # rather than 24x7 service.
         return port
 
+def GpuDeviceType():
+    """ Returns GPU device type - CUDA/HIP"""
+    if has_hip_support:
+        return caffe2_pb2.HIP
+    else
+        return caffe2_pb2.CUDA
 
 def StartMint(root_folder=None, port=None):
     """Start a mint instance.
