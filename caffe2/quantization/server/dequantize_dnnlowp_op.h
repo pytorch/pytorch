@@ -10,7 +10,7 @@ template <typename T>
 class DequantizeDNNLowPOp final : public Operator<CPUContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
-  DequantizeDNNLowPOp(const OperatorDef& operator_def, Workspace *ws);
+  DequantizeDNNLowPOp(const OperatorDef& operator_def, Workspace* ws);
 
   bool RunOnDevice() override;
 

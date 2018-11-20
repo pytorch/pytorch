@@ -1,6 +1,6 @@
 #include "fully_connected_rowwise_dnnlowp_op.h"
-#include <chrono>
 #include <fbgemm/src/RefImplementations.h>
+#include <chrono>
 
 namespace caffe2 {
 
@@ -15,7 +15,6 @@ FullyConnectedRowWiseDNNLowPOp<T>::FullyConnectedRowWiseDNNLowPOp(
       axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
       is_weight_constant_(
           OperatorBase::GetSingleArgument<bool>("constant_weight", true)) {
-
   using namespace dnnlowp;
   LOG(INFO) << "Using Rowwise Quantization!";
   if (!is_weight_constant_) {
@@ -88,8 +87,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::RunOnDevice() {
     // fast path using fbgemm
     using namespace fbgemm;
     int row_offset_size_per_thread = M;
-    int x_pack_buf_size_per_thread =
-        PackAMatrix<uint8_t>::packedBufferSize();
+    int x_pack_buf_size_per_thread = PackAMatrix<uint8_t>::packedBufferSize();
     row_offsets_.resize(row_offset_size_per_thread);
     X_pack_buf_.resize(x_pack_buf_size_per_thread);
 
@@ -125,11 +123,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::RunOnDevice() {
     }
 
     row_offsets_u8acc32_ref(
-        M,
-        K,
-        K,
-        reinterpret_cast<const uint8_t*>(Xdata),
-        row_offsets_.data());
+        M, K, K, reinterpret_cast<const uint8_t*>(Xdata), row_offsets_.data());
 
     // Requantization
     // TODO: implement row-wise requantization output pipeline
@@ -234,10 +228,10 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::RunOnDevice() {
     double ops = 2. * M * N * K;
     dt = chrono::duration<double>(t_end - t_very_begin).count();
     double gops = ops / dt / 1e9;
-    VLOG(3) << "@PERF this=" << this <<
-               " output=" << OperatorBase::debug_def().output(0) << " " <<
-               M << "x" << N << "x" << K << ": " <<
-               dt * 1e3 << " ms " << gops << " gops";
+    VLOG(3) << "@PERF this=" << this
+            << " output=" << OperatorBase::debug_def().output(0) << " " << M
+            << "x" << N << "x" << K << ": " << dt * 1e3 << " ms " << gops
+            << " gops";
   }
 
   return true;
@@ -263,9 +257,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::GetQuantizationParameters_() {
         W_quantized_.resize(W.size());
         for (int i = 0; i < N; ++i) {
           rowwise_qparams_[i] = qfactory_->ChooseQuantizationParams(
-              W.template data<float>() + K * i,
-              K,
-              true /*weight*/);
+              W.template data<float>() + K * i, K, true /*weight*/);
           rowwise_qparams_[i].zero_point -=
               (1 << (qfactory_->GetWeightPrecision() - 1));
           Quantize<T_signed>(
@@ -328,15 +320,15 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::GetQuantizationParameters_() {
     vector<T_signed>().swap(W_quantized_);
   }
   if (!is_weight_constant_ || b_quantized_.empty()) {
-      // Quantize bias
-      b_quantized_.resize(N);
-      const auto& b = InputTensorCPU_(2);
-      const float* b_data = b.template data<float>();
-      for (int j = 0; j < N; ++j) {
-        b_quantized_[j] = Quantize<int32_t>(
-            b_data[j], 0, in_qparams_[0].scale * rowwise_qparams_[j].scale, 32);
-      }
+    // Quantize bias
+    b_quantized_.resize(N);
+    const auto& b = InputTensorCPU_(2);
+    const float* b_data = b.template data<float>();
+    for (int j = 0; j < N; ++j) {
+      b_quantized_[j] = Quantize<int32_t>(
+          b_data[j], 0, in_qparams_[0].scale * rowwise_qparams_[j].scale, 32);
     }
+  }
   if (!dequantize_output_) {
     GetOutputQuantizationParams_();
 
