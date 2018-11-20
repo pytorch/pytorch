@@ -411,8 +411,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
     if (A.template IsType<T>() || !dequantize_output_) {
       // Only when input and output are float, we don't need input to be
       // quantized.
-      A_quantized = QuantizeInputIfNeeded<T>(
-          this, 0, in_qparams_[0], A_temp, qfactory_.get());
+      A_quantized = QuantizeInputIfNeeded<T>(this, 0, in_qparams_[0], A_temp);
     }
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
@@ -603,10 +602,10 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
   } else {
     // slow path
     // Quantize inputs
-    const T* A_quantized = QuantizeInputIfNeeded<T>(
-        this, 0, in_qparams_[0], A_temp, qfactory_.get());
-    const T* B_quantized = QuantizeInputIfNeeded<T>(
-        this, 1, B_qparams_[0], B_temp, qfactory_.get());
+    const T* A_quantized =
+        QuantizeInputIfNeeded<T>(this, 0, in_qparams_[0], A_temp);
+    const T* B_quantized =
+        QuantizeInputIfNeeded<T>(this, 1, B_qparams_[0], B_temp);
 
     T* Y_quantized = GetQuantizedOutputData_();
     Y_int32_.resize(Y->numel());

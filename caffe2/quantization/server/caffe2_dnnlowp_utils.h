@@ -60,16 +60,14 @@ const T* QuantizeInputIfNeeded(
     caffe2::OperatorBase* op,
     int input_index,
     const TensorQuantizationParams& qparams,
-    std::vector<T>& temp,
-    const QuantizationFactory* qfactory);
+    std::vector<T>& temp);
 
 template <typename T>
 const T* RowWiseQuantizeInputIfNeeded(
     caffe2::OperatorBase* op,
     int input_index,
     const std::vector<TensorQuantizationParams>& qparams,
-    std::vector<T>& temp,
-    const QuantizationFactory* qfactory);
+    std::vector<T>& temp);
 
 struct QuantizationErrorStats {
   float sum_sq{0}, sum_err_sq{0};

@@ -69,8 +69,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::RunOnDevice() {
   if (VLOG_IS_ON(3)) {
     t_begin = chrono::system_clock::now();
   }
-  const T* Xdata = QuantizeInputIfNeeded<T>(
-      this, 0, in_qparams_[0], X_temp, qfactory_.get());
+  const T* Xdata = QuantizeInputIfNeeded<T>(this, 0, in_qparams_[0], X_temp);
   if (VLOG_IS_ON(3)) {
     t_end = chrono::system_clock::now();
     double dt = chrono::duration<double>(t_end - t_begin).count();

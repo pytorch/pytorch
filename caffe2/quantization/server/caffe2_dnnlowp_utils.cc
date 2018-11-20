@@ -134,8 +134,7 @@ const T* QuantizeInputIfNeeded(
     OperatorBase* op,
     int input_index,
     const TensorQuantizationParams& qparams,
-    vector<T>& temp,
-    const QuantizationFactory* qfactory) {
+    vector<T>& temp) {
   if (op->InputIsType<int8::Int8TensorCPU>(input_index)) {
     // Already quantized
     return op->Input<int8::Int8TensorCPU>(input_index).t.data<T>();
@@ -153,8 +152,7 @@ const T* RowWiseQuantizeInputIfNeeded(
     OperatorBase* op,
     int input_index,
     const std::vector<TensorQuantizationParams>& qparams,
-    vector<T>& temp,
-    const QuantizationFactory* qfactory) {
+    vector<T>& temp) {
   if (op->InputIsType<int8::Int8TensorCPU>(input_index)) {
     // Already quantized
     return op->Input<int8::Int8TensorCPU>(input_index).t.data<T>();
@@ -181,43 +179,37 @@ template const uint8_t* QuantizeInputIfNeeded<uint8_t>(
     OperatorBase* op,
     int input_index,
     const TensorQuantizationParams& qparams,
-    vector<uint8_t>& temp,
-    const QuantizationFactory* qfactory);
+    vector<uint8_t>& temp);
 
 template const int8_t* QuantizeInputIfNeeded<int8_t>(
     OperatorBase* op,
     int input_index,
     const TensorQuantizationParams& qparams,
-    vector<int8_t>& temp,
-    const QuantizationFactory* qfactory);
+    vector<int8_t>& temp);
 
 template const uint16_t* QuantizeInputIfNeeded<uint16_t>(
     OperatorBase* op,
     int input_index,
     const TensorQuantizationParams& qparams,
-    vector<uint16_t>& temp,
-    const QuantizationFactory* qfactory);
+    vector<uint16_t>& temp);
 
 template const int16_t* QuantizeInputIfNeeded<int16_t>(
     OperatorBase* op,
     int input_index,
     const TensorQuantizationParams& qparams,
-    vector<int16_t>& temp,
-    const QuantizationFactory* qfactory);
+    vector<int16_t>& temp);
 
 template const uint8_t* RowWiseQuantizeInputIfNeeded<uint8_t>(
     OperatorBase* op,
     int input_index,
     const std::vector<TensorQuantizationParams>& qparams,
-    vector<uint8_t>& temp,
-    const QuantizationFactory* qfactory);
+    vector<uint8_t>& temp);
 
 template const uint16_t* RowWiseQuantizeInputIfNeeded<uint16_t>(
     OperatorBase* op,
     int input_index,
     const std::vector<TensorQuantizationParams>& qparams,
-    vector<uint16_t>& temp,
-    const QuantizationFactory* qfactory);
+    vector<uint16_t>& temp);
 
 void MeasureQuantizationError(
     const float* actual,
