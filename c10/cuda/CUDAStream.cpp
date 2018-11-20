@@ -1,5 +1,5 @@
-#include <ATen/cuda/CUDAStream.h>
-#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/Exception.h>
 
@@ -10,7 +10,7 @@
 #include <vector>
 #include <array>
 
-namespace at {
+namespace c10 {
 namespace cuda {
 
 namespace {
@@ -193,7 +193,7 @@ static void initGlobalStreamState() {
 static void initDeviceStreamState(DeviceIndex device_index) {
   // Switches to the requested device so streams are properly associated
   // with it.
-  at::cuda::CUDAGuard device_guard{device_index};
+  CUDAGuard device_guard{device_index};
 
   for (auto i = decltype(kStreamsPerPool){0}; i < kStreamsPerPool; ++i) {
     auto& lowpri_stream = low_priority_streams[device_index][i];

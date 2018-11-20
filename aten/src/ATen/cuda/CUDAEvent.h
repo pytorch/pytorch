@@ -2,8 +2,8 @@
 
 #include "ATen/cuda/ATenCUDAGeneral.h"
 #include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/CUDAStream.h"
-#include "ATen/cuda/CUDAGuard.h"
+#include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGuard.h>
 #include "ATen/cuda/Exceptions.h"
 #include "c10/util/Exception.h"
 

@@ -45,8 +45,6 @@ INPUT                  = ../../../torch/csrc/api/include \
                          ../../../aten/src/ATen/core/Half.h \
                          ../../../aten/src/ATen/core/ScalarType.h \
                          ../../../aten/src/ATen/core/Tensor.h \
-                         ../../../aten/src/ATen/cuda/CUDAGuard.h \
-                         ../../../aten/src/ATen/cuda/CUDAStream.h \
                          ../../../aten/src/ATen/cuda/CUDAContext.h \
                          ../../../aten/src/ATen/cudnn/Descriptors.h \
                          ../../../aten/src/ATen/cudnn/Handles.h \
@@ -58,6 +56,8 @@ INPUT                  = ../../../torch/csrc/api/include \
                          ../../../c10/util/ArrayRef.h \
                          ../../../c10/Device.h \
                          ../../../c10/DeviceType.h \
+                         ../../../c10/cuda/CUDAGuard.h \
+                         ../../../c10/cuda/CUDAStream.h \
                          ../../../build/aten/src/ATen/Functions.h
 # Don't include .cpp files!
 FILE_PATTERNS          = *.h
