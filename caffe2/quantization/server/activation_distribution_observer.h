@@ -6,24 +6,24 @@
 #include "caffe2/quantization/server/dnnlowp.h"
 #include "caffe2/quantization/server/dynamic_histogram.h"
 
-#include <vector>
-#include <set>
 #include <memory>
+#include <set>
+#include <vector>
 
 namespace caffe2 {
 
 class OutputMinMaxObserver final : public ObserverBase<OperatorBase> {
  public:
-  explicit OutputMinMaxObserver(OperatorBase *op);
+  explicit OutputMinMaxObserver(OperatorBase* op);
   ~OutputMinMaxObserver();
 
   struct TensorInfo {
-    TensorInfo(const std::string& name) :
-      min(std::numeric_limits<float>::max()),
-      max(std::numeric_limits<float>::lowest()),
-      total_min(std::numeric_limits<float>::max()),
-      total_max(std::numeric_limits<float>::lowest()),
-      name(name) {}
+    explicit TensorInfo(const std::string& name)
+        : min(std::numeric_limits<float>::max()),
+          max(std::numeric_limits<float>::lowest()),
+          total_min(std::numeric_limits<float>::max()),
+          total_max(std::numeric_limits<float>::lowest()),
+          name(name) {}
 
     void Update(float cur_min, float cur_max) {
       min = std::min(min, cur_min);
@@ -46,7 +46,9 @@ class OutputMinMaxObserver final : public ObserverBase<OperatorBase> {
   // OutputMinMaxNetObserver and the information shared via shared_ptr to be
   // prepared for the case when OutputMinMaxObserver is destroyed before
   // OutputMinMaxNetObserver
-  std::shared_ptr<OperatorInfo> GetInfo() { return info_; }
+  std::shared_ptr<OperatorInfo> GetInfo() {
+    return info_;
+  }
 
  private:
   void Stop() override;
@@ -60,18 +62,21 @@ class OutputMinMaxNetObserver final : public NetObserver {
   /// @params dump_freq Print out only once in destructor if -1.
   //                    Otherwise, print out every dum_freq invocations
   explicit OutputMinMaxNetObserver(
-    NetBase* subject, const std::string& out_file_name, int dump_freq = -1);
+      NetBase* subject,
+      const std::string& out_file_name,
+      int dump_freq = -1);
   ~OutputMinMaxNetObserver();
 
  private:
   void Stop() override;
   void DumpAndReset_(
-    const std::string& out_file_name, bool print_total_min_max = false);
+      const std::string& out_file_name,
+      bool print_total_min_max = false);
 
   int dump_freq_, cnt_;
   const std::string out_file_name_;
   std::vector<std::shared_ptr<OutputMinMaxObserver::OperatorInfo>>
-    min_max_infos_;
+      min_max_infos_;
 };
 
 /**
@@ -85,7 +90,7 @@ class HistogramObserver final : public ObserverBase<OperatorBase> {
     OutputMinMaxObserver::OperatorInfo min_max_info;
   };
 
-  explicit HistogramObserver(OperatorBase *op, std::shared_ptr<Info> info);
+  explicit HistogramObserver(OperatorBase* op, std::shared_ptr<Info> info);
 
  private:
   void Stop() override;
@@ -97,14 +102,17 @@ class HistogramObserver final : public ObserverBase<OperatorBase> {
 class HistogramNetObserver final : public NetObserver {
  public:
   explicit HistogramNetObserver(
-    NetBase* subject, const std::string& out_file_name, int nbins,
-    int dump_freq = -1);
+      NetBase* subject,
+      const std::string& out_file_name,
+      int nbins,
+      int dump_freq = -1);
   ~HistogramNetObserver();
 
  private:
   void Stop() override;
   void DumpAndReset_(
-    const std::string& out_file_name, bool print_total_min_max = false);
+      const std::string& out_file_name,
+      bool print_total_min_max = false);
 
   int dump_freq_, cnt_;
   const std::string out_file_name_;
@@ -129,7 +137,7 @@ class RegisterQuantizationParamsNetObserver final : public NetObserver {
  * collected from OutputMinMaxObserver
  */
 class RegisterQuantizationParamsWithHistogramNetObserver final
-  : public NetObserver {
+    : public NetObserver {
  public:
   explicit RegisterQuantizationParamsWithHistogramNetObserver(
       NetBase* subject,

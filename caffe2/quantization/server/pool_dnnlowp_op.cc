@@ -88,12 +88,12 @@ class AveragePoolDnnLowPOp final
     this->ParseDNNLowPOperatorArguments_();
 
     in_qparams_[0] =
-      GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+        GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
 
     // Quantize input if needed
     vector<T> X_temp;
-    const T* Xdata = QuantizeInputIfNeeded(
-      this, 0, in_qparams_[0], X_temp, qfactory_.get());
+    const T* Xdata =
+        QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp, qfactory_.get());
 
     GetOutputQuantizationParams_();
 
@@ -125,10 +125,9 @@ class AveragePoolDnnLowPOp final
 #endif
         for (int n = 0; n < X.dim32(0); ++n) {
           for (int c = 0; c < channels; ++c) {
-            const T *Xdata_temp =
-              Xdata + height * width * (c + channels * n);
-            T *Ydata_temp =
-              Ydata + pooled_height * pooled_width * (c + channels * n);
+            const T* Xdata_temp = Xdata + height * width * (c + channels * n);
+            T* Ydata_temp =
+                Ydata + pooled_height * pooled_width * (c + channels * n);
             for (int ph = 0; ph < pooled_height; ++ph) {
               int hstart = ph * stride_h() - pad_t();
               int hend = min(hstart + kernel_h(), height);
@@ -166,8 +165,8 @@ class AveragePoolDnnLowPOp final
 #endif
         for (int n = 0; n < X.dim32(0); ++n) {
           for (int c = 0; c < channels; ++c) {
-            const T *Xdata_temp =
-              Xdata + height * width * depth * (c + channels * n);
+            const T* Xdata_temp =
+                Xdata + height * width * depth * (c + channels * n);
             T* Ydata_temp = Ydata +
                 pooled_height * pooled_width * pooled_depth *
                     (c + channels * n);
@@ -228,12 +227,12 @@ class AveragePoolDnnLowPOp final
     this->ParseDNNLowPOperatorArguments_();
 
     in_qparams_[0] =
-      GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+        GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
 
     // Quantize input if needed
     vector<T> X_temp;
-    const T* Xdata = QuantizeInputIfNeeded(
-      this, 0, in_qparams_[0], X_temp, qfactory_.get());
+    const T* Xdata =
+        QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp, qfactory_.get());
 
     GetOutputQuantizationParams_();
 
@@ -264,8 +263,7 @@ class AveragePoolDnnLowPOp final
 #endif
         for (int n = 0; n < X.dim32(0); ++n) {
           const T* Xdata_temp = Xdata + n * height * width * channels;
-          T* Ydata_temp =
-              Ydata + n * pooled_height * pooled_width * channels;
+          T* Ydata_temp = Ydata + n * pooled_height * pooled_width * channels;
           for (int ph = 0; ph < pooled_height; ++ph) {
             int hstart = ph * stride_h() - pad_t();
             int hend = min(hstart + kernel_h(), height);
@@ -337,10 +335,10 @@ class AveragePoolDnnLowPOp final
                     }
                   }
                   Ydata_temp[pool_idx] = std::min<int32_t>(
-                    std::max<int32_t>(
-                        nearbyint(Yh * multiplier + out_qparams_.zero_point),
-                        minimum),
-                    maximum);
+                      std::max<int32_t>(
+                          nearbyint(Yh * multiplier + out_qparams_.zero_point),
+                          minimum),
+                      maximum);
                 } // channel
               } // depth
             } // width
@@ -387,7 +385,7 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
     this->ParseDNNLowPOperatorArguments_();
 
     in_qparams_[0] =
-      GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+        GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
     // Even if there is a pre-chosen quantization parameters for the output,
     // it is ignored because maxpool output quantization should be same as the
     // input.
@@ -395,8 +393,8 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
 
     // Quantize input if needed
     vector<T> X_temp;
-    const T* Xdata = QuantizeInputIfNeeded(
-      this, 0, in_qparams_[0], X_temp, qfactory_.get());
+    const T* Xdata =
+        QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp, qfactory_.get());
 
     auto& X = InputTensorCPU_(0);
     auto* Y = OutputTensorCPU_(0);
@@ -441,10 +439,9 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
         for (int n = 0; n < X.dim32(0); ++n) {
           for (int c = 0; c < channels; ++c) {
             // Do offset.
-            const T *Xdata_temp =
-              Xdata + height * width * (c + channels * n);
-            T *Ydata_temp =
-              Ydata + pooled_height * pooled_width * (c + channels * n);
+            const T* Xdata_temp = Xdata + height * width * (c + channels * n);
+            T* Ydata_temp =
+                Ydata + pooled_height * pooled_width * (c + channels * n);
             for (int ph = 0; ph < pooled_height; ++ph) {
               int hstart = ph * stride_h() - pad_t();
               int hend = min(hstart + kernel_h(), height);
@@ -461,8 +458,7 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
                     MaxPool<T>::process(Xdata_temp[input_index], Yh);
                   }
                 }
-                MaxPool<T>::finalize(
-                    (hend - hstart) * (wend - wstart), Yh);
+                MaxPool<T>::finalize((hend - hstart) * (wend - wstart), Yh);
                 Ydata_temp[pool_index] = Yh;
               }
             }
@@ -476,11 +472,11 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
         for (int n = 0; n < X.dim32(0); ++n) {
           for (int c = 0; c < channels; ++c) {
             // Do offset.
-            const T *Xdata_temp =
-              Xdata + height * width * depth * (c + channels * n);
-            T *Ydata_temp =
-              Ydata +
-              pooled_height * pooled_width * pooled_depth * (c + channels * n);
+            const T* Xdata_temp =
+                Xdata + height * width * depth * (c + channels * n);
+            T* Ydata_temp = Ydata +
+                pooled_height * pooled_width * pooled_depth *
+                    (c + channels * n);
             for (int ph = 0; ph < pooled_height; ++ph) {
               int hstart = ph * stride_h() - pad_t();
               int hend = min(hstart + kernel_h(), height);
@@ -500,7 +496,7 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
                     for (int w = wstart; w < wend; ++w) {
                       for (int d = dstart; d < dend; ++d) {
                         const int input_index =
-                          h * width * depth + w * depth + d;
+                            h * width * depth + w * depth + d;
                         MaxPool<T>::process(Xdata_temp[input_index], Yh);
                       }
                     }
@@ -530,13 +526,13 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
   }
 
   bool RunOnDeviceWithOrderNHWC() override {
-    //max pooling
+    // max pooling
     using namespace dnnlowp;
 
     this->ParseDNNLowPOperatorArguments_();
 
     in_qparams_[0] =
-      GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+        GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
     // Even if there is a pre-chosen quantization parameters for the output,
     // it is ignored because maxpool output quantization should be same as the
     // input.
@@ -544,8 +540,8 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
 
     // Quantize input if needed
     vector<T> X_temp;
-    const T* Xdata = QuantizeInputIfNeeded(
-      this, 0, in_qparams_[0], X_temp, qfactory_.get());
+    const T* Xdata =
+        QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp, qfactory_.get());
 
     auto& X = InputTensorCPU_(0);
     auto* Y = OutputTensorCPU_(0);
@@ -642,16 +638,14 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
                 for (int c = 0; c < channels; ++c) {
                   T Yh = MaxPool<T>::initialize();
                   const int pool_idx =
-                      ((ph * pooled_width + pw)
-                      * pooled_depth + pd)
-                      * channels + c;
+                      ((ph * pooled_width + pw) * pooled_depth + pd) *
+                          channels +
+                      c;
                   for (int h = hstart; h < hend; ++h) {
                     for (int w = wstart; w < wend; ++w) {
                       for (int d = dstart; d < dend; ++d) {
                         const int input_idx =
-                            ((h * width + w)
-                            * depth + d)
-                            * channels + c;
+                            ((h * width + w) * depth + d) * channels + c;
                         MaxPool<T>::process(Xdata_temp[input_idx], Yh);
                       }
                     }
@@ -681,20 +675,29 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
 }; // class MaxPoolDnnLowPOp
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    AveragePool, DNNLOWP, AveragePoolDnnLowPOp<uint8_t>);
-REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    MaxPool, DNNLOWP, MaxPoolDnnLowPOp<uint8_t>);
+    AveragePool,
+    DNNLOWP,
+    AveragePoolDnnLowPOp<uint8_t>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(MaxPool, DNNLOWP, MaxPoolDnnLowPOp<uint8_t>);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    AveragePool, DNNLOWP_16, AveragePoolDnnLowPOp<uint16_t>);
+    AveragePool,
+    DNNLOWP_16,
+    AveragePoolDnnLowPOp<uint16_t>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    MaxPool, DNNLOWP_16, MaxPoolDnnLowPOp<uint16_t>);
+    MaxPool,
+    DNNLOWP_16,
+    MaxPoolDnnLowPOp<uint16_t>);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    Int8AveragePool, DNNLOWP, AveragePoolDnnLowPOp<uint8_t>);
+    Int8AveragePool,
+    DNNLOWP,
+    AveragePoolDnnLowPOp<uint8_t>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    Int8MaxPool, DNNLOWP, MaxPoolDnnLowPOp<uint8_t>);
+    Int8MaxPool,
+    DNNLOWP,
+    MaxPoolDnnLowPOp<uint8_t>);
 
-}
+} // namespace
 
 } // namespace caffe2
