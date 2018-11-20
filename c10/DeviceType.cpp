@@ -40,9 +40,11 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
 // https://stackoverflow.com/questions/18195312/what-happens-if-you-static-cast-invalid-value-to-enum-class)
 // as long as you cast from the same underlying type, it is always valid to cast
 // into an enum class (even if the value would be invalid by the enum.)  Thus,
-// we're allowed to cast from the integer to DeviceType and then do a switch.
-bool isValidDeviceType(int16_t d) {
-  switch (static_cast<DeviceType>(d)) {
+// the caller is allowed to cast a possibly invalid int16_t to DeviceType and
+// then pass it to this function.  (I considered making this function take an
+// int16_t directly, but that just seemed weird.)
+bool isValidDeviceType(DeviceType d) {
+  switch (d) {
     case DeviceType::CPU:
     case DeviceType::CUDA:
     case DeviceType::OPENGL:
