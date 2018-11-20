@@ -3414,3 +3414,15 @@
 
 - func: upsample_nearest3d_backward(Tensor grad_output, IntList[3] output_size, IntList[5] input_size) -> Tensor
   python_module: nn
+
+- func: sigmoid_backward_out(Tensor grad_input, Tensor grad_output, Tensor output) -> Tensor
+  python_module: nn
+
+- func: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
+  python_module: nn
+
+- func: tanh_backward_out(Tensor grad_input, Tensor grad_output, Tensor output) -> Tensor
+  python_module: nn
+
+- func: tanh_backward(Tensor grad_output, Tensor output) -> Tensor
+  python_module: nn

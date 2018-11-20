@@ -583,4 +583,20 @@ Tensor upsample_nearest3d_backward(const Tensor & grad_output, IntList output_si
   return at::_thnn_upsample_nearest3d_backward(grad_output, output_size, input_size);
 }
 
+Tensor & sigmoid_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & output) {
+  return at::_thnn_sigmoid_backward_out(grad_input, grad_output, output);
+}
+
+Tensor sigmoid_backward(const Tensor & grad_output, const Tensor & output) {
+  return at::_thnn_sigmoid_backward(grad_output, output);
+}
+
+Tensor & tanh_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & output) {
+  return at::_thnn_tanh_backward_out(grad_input, grad_output, output);
+}
+
+Tensor tanh_backward(const Tensor & grad_output, const Tensor & output) {
+  return at::_thnn_tanh_backward(grad_output, output);
+}
+
 }} // namespace at::native

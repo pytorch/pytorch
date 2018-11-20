@@ -668,7 +668,7 @@
   self: select_backward(grad, self.sizes(), dim, index)
 
 - name: sigmoid(Tensor self)
-  self: _sigmoid_backward(grad, result)
+  self: sigmoid_backward(grad, result)
 
 - name: sign(Tensor self)
   self: zeros_like(grad)
@@ -769,7 +769,7 @@
   self: grad * (1 + result.pow(2))
 
 - name: tanh(Tensor self)
-  self: _tanh_backward(grad, result)
+  self: tanh_backward(grad, result)
 
 - name: topk(Tensor self, int64_t k, int64_t dim, bool largest, bool sorted)
   self: index_select_backward(grad, dim, result1, self.sizes(), true)
@@ -1234,12 +1234,12 @@
 - name: upsample_nearest3d_backward(Tensor grad_output, IntList output_size, IntList input_size)
   grad_output: upsample_nearest3d(grad, output_size)
 
-- name: _sigmoid_backward(Tensor grad_output, Tensor output)
-  grad_output: _sigmoid_backward(grad, output)
+- name: sigmoid_backward(Tensor grad_output, Tensor output)
+  grad_output: sigmoid_backward(grad, output)
   output: grad * grad_output * (-2 * output + 1)
 
-- name: _tanh_backward(Tensor grad_output, Tensor output)
-  grad_output: _tanh_backward(grad, output)
+- name: tanh_backward(Tensor grad_output, Tensor output)
+  grad_output: tanh_backward(grad, output)
   output: -2 * output * grad * grad_output
 
 # cudnn
