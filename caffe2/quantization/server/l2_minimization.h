@@ -4,10 +4,10 @@
 #include "quantization_error_minimization.h"
 
 #include <algorithm>
-#include <limits>
 #include <cassert>
-#include <iostream>
 #include <cmath>
+#include <iostream>
+#include <limits>
 
 namespace dnnlowp {
 
@@ -16,7 +16,7 @@ namespace dnnlowp {
  */
 class L2ErrorMinimization : public NormMinimization {
  public:
-  L2ErrorMinimization() : NormMinimization(L2) { };
+  L2ErrorMinimization() : NormMinimization(L2){};
 };
 
 float L2MinimizationKernelAVX2(

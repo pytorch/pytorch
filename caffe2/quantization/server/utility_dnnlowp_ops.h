@@ -29,7 +29,7 @@ class GatherDNNLowPOp final : public GatherOp<CPUContext> {
   static_assert(std::is_integral<T>::value, "Integral required.");
 
  public:
-  GatherDNNLowPOp(const OperatorDef& operator_def, Workspace *ws);
+  GatherDNNLowPOp(const OperatorDef& operator_def, Workspace* ws);
   ~GatherDNNLowPOp();
   bool RunOnDevice() override;
 
@@ -39,8 +39,7 @@ class GatherDNNLowPOp final : public GatherOp<CPUContext> {
     // TODO: implement prefetching if it starts mattering (TF does it)
     auto& data = OperatorBase::Input<int8::Int8TensorCPU>(DATA).t;
     auto& indices = Input(INDICES);
-    auto* output =
-        &Outputs()[0]->template GetMutable<int8::Int8TensorCPU>()->t;
+    auto* output = &Outputs()[0]->template GetMutable<int8::Int8TensorCPU>()->t;
 
     CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
     auto shape = indices.sizes().vec();
