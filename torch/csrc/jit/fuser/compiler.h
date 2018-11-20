@@ -31,6 +31,8 @@ TORCH_API std::shared_ptr<FusedKernel> compileKernel(
 
 TORCH_API size_t nCompiledKernels();
 
+TORCH_API int debugFuser();
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch
