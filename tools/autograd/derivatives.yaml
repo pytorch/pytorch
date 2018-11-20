@@ -987,22 +987,22 @@
 - name: replication_pad3d(Tensor self, IntList padding)
   self: replication_pad3d_backward(grad, self, padding)
 
-- name: upsample_linear1d_forward(Tensor self, IntList output_size, bool align_corners)
+- name: upsample_linear1d(Tensor self, IntList output_size, bool align_corners)
   self: upsample_linear1d_backward(grad, output_size, self.sizes(), align_corners)
 
-- name: upsample_bilinear2d_forward(Tensor self, IntList output_size, bool align_corners)
+- name: upsample_bilinear2d(Tensor self, IntList output_size, bool align_corners)
   self: upsample_bilinear2d_backward(grad, output_size, self.sizes(), align_corners)
 
-- name: upsample_trilinear3d_forward(Tensor self, IntList output_size, bool align_corners)
+- name: upsample_trilinear3d(Tensor self, IntList output_size, bool align_corners)
   self: upsample_trilinear3d_backward(grad, output_size, self.sizes(), align_corners)
 
-- name: upsample_nearest1d_forward(Tensor self, IntList output_size)
+- name: upsample_nearest1d(Tensor self, IntList output_size)
   self: upsample_nearest1d_backward(grad, output_size, self.sizes())
 
-- name: upsample_nearest2d_forward(Tensor self, IntList output_size)
+- name: upsample_nearest2d(Tensor self, IntList output_size)
   self: upsample_nearest2d_backward(grad, output_size, self.sizes())
 
-- name: upsample_nearest3d_forward(Tensor self, IntList output_size)
+- name: upsample_nearest3d(Tensor self, IntList output_size)
   self: upsample_nearest3d_backward(grad, output_size, self.sizes())
 
 - name: adaptive_avg_pool2d(Tensor self, IntList output_size)

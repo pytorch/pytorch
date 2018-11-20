@@ -487,4 +487,100 @@ Tensor replication_pad3d_backward(const Tensor & grad_output, const Tensor & sel
   return at::_thnn_replication_pad3d_backward(grad_output, self, padding);
 }
 
+Tensor & upsample_linear1d_out(Tensor & output, const Tensor & self, IntList output_size, bool align_corners) {
+  return at::_thnn_upsample_linear1d_out(output, self, output_size, align_corners);
+}
+
+Tensor upsample_linear1d(const Tensor & self, IntList output_size, bool align_corners) {
+  return at::_thnn_upsample_linear1d(self, output_size, align_corners);
+}
+
+Tensor & upsample_linear1d_backward_out(Tensor & grad_input, const Tensor & grad_output, IntList output_size, IntList input_size, bool align_corners) {
+  return at::_thnn_upsample_linear1d_backward_out(grad_input, grad_output, output_size, input_size, align_corners);
+}
+
+Tensor upsample_linear1d_backward(const Tensor & grad_output, IntList output_size, IntList input_size, bool align_corners) {
+  return at::_thnn_upsample_linear1d_backward(grad_output, output_size, input_size, align_corners);
+}
+
+Tensor & upsample_bilinear2d_out(Tensor & output, const Tensor & self, IntList output_size, bool align_corners) {
+  return at::_thnn_upsample_bilinear2d_out(output, self, output_size, align_corners);
+}
+
+Tensor upsample_bilinear2d(const Tensor & self, IntList output_size, bool align_corners) {
+  return at::_thnn_upsample_bilinear2d(self, output_size, align_corners);
+}
+
+Tensor & upsample_bilinear2d_backward_out(Tensor & grad_input, const Tensor & grad_output, IntList output_size, IntList input_size, bool align_corners) {
+  return at::_thnn_upsample_bilinear2d_backward_out(grad_input, grad_output, output_size, input_size, align_corners);
+}
+
+Tensor upsample_bilinear2d_backward(const Tensor & grad_output, IntList output_size, IntList input_size, bool align_corners) {
+  return at::_thnn_upsample_bilinear2d_backward(grad_output, output_size, input_size, align_corners);
+}
+
+Tensor & upsample_trilinear3d_out(Tensor & output, const Tensor & self, IntList output_size, bool align_corners) {
+  return at::_thnn_upsample_trilinear3d_out(output, self, output_size, align_corners);
+}
+
+Tensor upsample_trilinear3d(const Tensor & self, IntList output_size, bool align_corners) {
+  return at::_thnn_upsample_trilinear3d(self, output_size, align_corners);
+}
+
+Tensor & upsample_trilinear3d_backward_out(Tensor & grad_input, const Tensor & grad_output, IntList output_size, IntList input_size, bool align_corners) {
+  return at::_thnn_upsample_trilinear3d_backward_out(grad_input, grad_output, output_size, input_size, align_corners);
+}
+
+Tensor upsample_trilinear3d_backward(const Tensor & grad_output, IntList output_size, IntList input_size, bool align_corners) {
+  return at::_thnn_upsample_trilinear3d_backward(grad_output, output_size, input_size, align_corners);
+}
+
+Tensor & upsample_nearest1d_out(Tensor & output, const Tensor & self, IntList output_size) {
+  return at::_thnn_upsample_nearest1d_out(output, self, output_size);
+}
+
+Tensor upsample_nearest1d(const Tensor & self, IntList output_size) {
+  return at::_thnn_upsample_nearest1d(self, output_size);
+}
+
+Tensor & upsample_nearest1d_backward_out(Tensor & grad_input, const Tensor & grad_output, IntList output_size, IntList input_size) {
+  return at::_thnn_upsample_nearest1d_backward_out(grad_input, grad_output, output_size, input_size);
+}
+
+Tensor upsample_nearest1d_backward(const Tensor & grad_output, IntList output_size, IntList input_size) {
+  return at::_thnn_upsample_nearest1d_backward(grad_output, output_size, input_size);
+}
+
+Tensor & upsample_nearest2d_out(Tensor & output, const Tensor & self, IntList output_size) {
+  return at::_thnn_upsample_nearest2d_out(output, self, output_size);
+}
+
+Tensor upsample_nearest2d(const Tensor & self, IntList output_size) {
+  return at::_thnn_upsample_nearest2d(self, output_size);
+}
+
+Tensor & upsample_nearest2d_backward_out(Tensor & grad_input, const Tensor & grad_output, IntList output_size, IntList input_size) {
+  return at::_thnn_upsample_nearest2d_backward_out(grad_input, grad_output, output_size, input_size);
+}
+
+Tensor upsample_nearest2d_backward(const Tensor & grad_output, IntList output_size, IntList input_size) {
+  return at::_thnn_upsample_nearest2d_backward(grad_output, output_size, input_size);
+}
+
+Tensor & upsample_nearest3d_out(Tensor & output, const Tensor & self, IntList output_size) {
+  return at::_thnn_upsample_nearest3d_out(output, self, output_size);
+}
+
+Tensor upsample_nearest3d(const Tensor & self, IntList output_size) {
+  return at::_thnn_upsample_nearest3d(self, output_size);
+}
+
+Tensor & upsample_nearest3d_backward_out(Tensor & grad_input, const Tensor & grad_output, IntList output_size, IntList input_size) {
+  return at::_thnn_upsample_nearest3d_backward_out(grad_input, grad_output, output_size, input_size);
+}
+
+Tensor upsample_nearest3d_backward(const Tensor & grad_output, IntList output_size, IntList input_size) {
+  return at::_thnn_upsample_nearest3d_backward(grad_output, output_size, input_size);
+}
+
 }} // namespace at::native
