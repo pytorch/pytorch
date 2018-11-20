@@ -767,9 +767,10 @@ def preprocessor(filepath, stats, hipify_caffe2, hip_suffix, extensions_to_hip_s
                 if cuda_type in output_source:
                     if hipify_caffe2:
                         pattern = r'({0})'.format(re.escape(cuda_type))
+                        output_source = re.sub(pattern, hip_type, output_source)
                     else:
-                        pattern = r'(\b{0}\b)'.format(re.escape(cuda_type))
-                    output_source = re.sub(pattern, hip_type, output_source)
+                        pattern = r'(\W){0}(\W)'.format(re.escape(cuda_type))
+                        output_source = re.sub(pattern, r'\1{0}\2'.format(hip_type), output_source)
 
         # Perform Kernel Launch Replacements
         output_source = processKernelLaunches(output_source, stats)
