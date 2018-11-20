@@ -22,9 +22,10 @@ using namespace dnnlowp;
 
 template <typename T>
 ElementwiseLinearDNNLowPOp<T>::ElementwiseLinearDNNLowPOp(
-    const OperatorDef& operator_def, Workspace* ws)
-  : BaseType(operator_def, ws),
-    axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {}
+    const OperatorDef& operator_def,
+    Workspace* ws)
+    : BaseType(operator_def, ws),
+      axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {}
 
 template <typename T>
 bool ElementwiseLinearDNNLowPOp<T>::RunOnDevice() {
@@ -50,31 +51,33 @@ bool ElementwiseLinearDNNLowPOp<T>::RunOnDevice() {
 
   // Quantize X
   vector<T> X_temp;
-  const T *X_quantized =
-    QuantizeInputIfNeeded<T>(this, 0, in_qparams_[0], X_temp, qfactory_.get());
+  const T* X_quantized = QuantizeInputIfNeeded<T>(
+      this, 0, in_qparams_[0], X_temp, qfactory_.get());
 
   // Quantize b
   vector<int32_t> b_quantized(b.numel());
-  const float *b_data = b.template data<float>();
+  const float* b_data = b.template data<float>();
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
   for (int i = 0; i < b.numel(); ++i) {
     b_quantized[i] = Quantize<int32_t>(
-      b_data[i], 0, in_qparams_[0].scale * in_qparams_[1].scale,
-      32, true /* signed */);
+        b_data[i],
+        0,
+        in_qparams_[0].scale * in_qparams_[1].scale,
+        32,
+        true /* signed */);
   }
 
-  T *Y_quantized = GetQuantizedOutputData_();
+  T* Y_quantized = GetQuantizedOutputData_();
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
   for (int n = 0; n < N; ++n) {
     for (int d = 0; d < D; ++d) {
-      int32_t raw =
-        (X_quantized[n * D + d] - in_qparams_[0].zero_point) *
-        (a_quantized_[d] - in_qparams_[1].zero_point) +
-        b_quantized[d];
+      int32_t raw = (X_quantized[n * D + d] - in_qparams_[0].zero_point) *
+              (a_quantized_[d] - in_qparams_[1].zero_point) +
+          b_quantized[d];
       Y_quantized[n * D + d] = Requantize<T>(raw, requantization_params_);
     }
   }
@@ -108,16 +111,20 @@ bool ElementwiseLinearDNNLowPOp<T>::GetQuantizationParameters_() {
   GetOutputQuantizationParams_();
 
   float real_multiplier =
-    in_qparams_[0].scale * in_qparams_[1].scale / out_qparams_.scale;
+      in_qparams_[0].scale * in_qparams_[1].scale / out_qparams_.scale;
   requantization_params_ =
-    qfactory_->ChooseRequantizationMultiplier(real_multiplier, out_qparams_);
+      qfactory_->ChooseRequantizationMultiplier(real_multiplier, out_qparams_);
 
   return true;
 }
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  ElementwiseLinear, DNNLOWP, ElementwiseLinearDNNLowPOp<uint8_t>);
+    ElementwiseLinear,
+    DNNLOWP,
+    ElementwiseLinearDNNLowPOp<uint8_t>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  Int8ElementwiseLinear, DNNLOWP, ElementwiseLinearDNNLowPOp<uint8_t>);
+    Int8ElementwiseLinear,
+    DNNLOWP,
+    ElementwiseLinearDNNLowPOp<uint8_t>);
 
-}  // namespace caffe2
+} // namespace caffe2
