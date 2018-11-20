@@ -41,17 +41,24 @@ class DownloadingTestCase(TestCase):
         for f in ['predict_net.pb', 'init_net.pb', 'value_info.json']:
             url = getURLFromName(model, f)
             dest = os.path.join(model_dir, f)
-            try:
+            retry_num = 3
+            for count in range(retry_num): # try twice
                 try:
-                    downloadFromURLToFile(url, dest,
-                                          show_progress=False)
-                except TypeError:
-                    # show_progress not supported prior to
-                    # Caffe2 78c014e752a374d905ecfb465d44fa16e02a28f1
-                    # (Sep 17, 2017)
-                    downloadFromURLToFile(url, dest)
-            except Exception as e:
-                print("Abort: {reason}".format(reason=e))
-                print("Cleaning up...")
-                deleteDirectory(model_dir)
-                raise AssertionError("Test model downloading failed")
+                    try:
+                        downloadFromURLToFile(url, dest,
+                                              show_progress=False)
+                    except TypeError:
+                        # show_progress not supported prior to
+                        # Caffe2 78c014e752a374d905ecfb465d44fa16e02a28f1
+                        # (Sep 17, 2017)
+                        downloadFromURLToFile(url, dest)
+                    break
+                except Exception as e:
+                    if count == retry_num - 1:
+                        print("Abort: {reason}".format(reason=e))
+                        print("Cleaning up...")
+                        deleteDirectory(model_dir)
+                        self.skipTest("skip the test since model downloading failed");
+                    else:
+                        print("Downloading failed: {reason}".format(reason=e))
+                        print("Retrying...")
