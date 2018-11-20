@@ -74,8 +74,7 @@ bool ReluDNNLowPOp<T>::RunOnDevice() {
 
   // Quantize input if needed
   std::vector<T> X_temp, Y_temp;
-  const T* X_data =
-      QuantizeInputIfNeeded(this, 0, in_qparams, X_temp, qfactory_.get());
+  const T* X_data = QuantizeInputIfNeeded(this, 0, in_qparams, X_temp);
 
   T* Y_data = nullptr;
   if (X.template IsType<T>()) {

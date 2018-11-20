@@ -30,7 +30,7 @@ C10_DEFINE_bool(
     "Dump quantized input and weight tensors used in Conv and FC operators "
     "during the first iteration");
 
-DECLARE_bool(caffe2_dnnlowp_force_slow_path);
+C10_DECLARE_bool(caffe2_dnnlowp_force_slow_path);
 
 namespace caffe2 {
 
@@ -474,7 +474,7 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNCHW_(
   // See batch_matmul_dnnlowp_op.cc to why we compute column_offsets,
   // row_offset, and const_offset in this way.
   int tid = dnnlowp_get_thread_num();
-  int32_t *column_offsets = column_offsets_.data() + tid * Y_HxW;
+  int32_t* column_offsets = column_offsets_.data() + tid * Y_HxW;
 
   const dnnlowp::TensorQuantizationParams& filter_qparams =
       FilterQuantizationParams(group_id);
@@ -608,7 +608,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
     auto f2 = [&](vector<int32_t>* Y_int32) {
       Y_int32->resize(M * Y_HxW * dnnlowp_get_max_threads());
 
-    // Im2Col, followed by gemm.
+      // Im2Col, followed by gemm.
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
@@ -785,7 +785,10 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNHWC_(
       int32_t Y_int32_max = numeric_limits<int32_t>::min();
 
 #ifdef _OPENMP
-#pragma omp parallel for reduction(min:Y_int32_min), reduction(max:Y_int32_max)
+#pragma omp parallel for reduction(min             \
+                                   : Y_int32_min), \
+    reduction(max                                  \
+              : Y_int32_max)
 #endif
       for (int i = 0; i < N * Y_HxW; ++i) {
         for (int group_id = 0; group_id < group_; ++group_id) {

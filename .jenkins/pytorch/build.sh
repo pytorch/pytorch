@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Required environment variable: $BUILD_ENVIRONMENT
+# (This is set by default in the Docker images we build, so you don't
+# need to set it yourself.
+
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
 # For distributed, four environmental configs:
 # (1) build with only NCCL
 # (2) build with NCCL and MPI
@@ -14,7 +21,11 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
   # TODO: move this to Docker
   sudo apt-get -qq update
-  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
+  if [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
+    sudo apt-get -qq install openmpi-bin libopenmpi-dev
+  else
+    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
+  fi
   sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
   sudo mkdir -p /var/run/sshd
 fi
@@ -22,13 +33,6 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == "pytorch-linux-xenial-py3-clang5-asan" ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" $*
 fi
-
-# Required environment variable: $BUILD_ENVIRONMENT
-# (This is set by default in the Docker images we build, so you don't
-# need to set it yourself.
-
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Python version:"
 python --version
@@ -43,11 +47,32 @@ cmake --version
 pip install -q -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  # When hcc runs out of memory, it silently exits without stopping
-  # the build process, leaving undefined symbols in the shared lib
-  # which will cause undefined symbol errors when later running
-  # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
-  export MAX_JOBS=4
+
+  # ROCm CI is using Caffe2 docker images, which needs these wrapper
+  # scripts to correctly use sccache.
+  if [ -n "${SCCACHE_BUCKET}" ]; then
+    mkdir -p ./sccache
+
+    SCCACHE="$(which sccache)"
+    if [ -z "${SCCACHE}" ]; then
+      echo "Unable to find sccache..."
+      exit 1
+    fi
+
+    # Setup wrapper scripts
+    for compiler in cc c++ gcc g++ x86_64-linux-gnu-gcc; do
+      (
+        echo "#!/bin/sh"
+        echo "exec $SCCACHE $(which $compiler) \"\$@\""
+      ) > "./sccache/$compiler"
+      chmod +x "./sccache/$compiler"
+    done
+
+    export CACHE_WRAPPER_DIR="$PWD/sccache"
+
+    # CMake must find these wrapper scripts
+    export PATH="$CACHE_WRAPPER_DIR:$PATH"
+  fi
 
   python tools/amd_build/build_pytorch_amd.py
   python tools/amd_build/build_caffe2_amd.py

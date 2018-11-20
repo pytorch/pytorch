@@ -437,17 +437,15 @@ class MethodEncoder : public EncoderBase {
  public:
   MethodEncoder(
       const script::Method& method,
-      std::string* torch_script,
       std::unordered_map<const void*, uint64_t>* storage_map,
       std::unordered_map<at::Tensor*, std::string>* parameter_map,
       PyTorchStreamWriter* writer);
 
- private:
-  void EncodeMethod(
-      std::string* torch_script,
+  std::string EncodeMethod(
       const script::Method& method,
       const std::string prefix);
 
+ private:
   void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
@@ -478,7 +476,6 @@ class MethodEncoder : public EncoderBase {
 
 MethodEncoder::MethodEncoder(
     const script::Method& method,
-    std::string* torch_script,
     std::unordered_map<const void*, uint64_t>* storage_map,
     std::unordered_map<at::Tensor*, std::string>* parameter_map,
     PyTorchStreamWriter* writer)
@@ -486,9 +483,6 @@ MethodEncoder::MethodEncoder(
   storage_dedup_map_ = storage_map;
   parameter_map_ = parameter_map;
   stream_writer_ = writer;
-  // we already keep the tree structure in the top level module,
-  // so pass "" as prefix
-  EncodeMethod(torch_script, method, "");
 }
 
 void MethodEncoder::EncodeIntermediateValueInfo(
@@ -610,18 +604,13 @@ void MethodEncoder::EncodeValueInfo(
   EncodeTypeInfo(graph_proto, v, n->type(), n->uniqueName());
 }
 
-void MethodEncoder::EncodeMethod(
-    std::string* torch_script,
+std::string MethodEncoder::EncodeMethod(
     const script::Method& method,
     const std::string prefix) {
   onnx::ModelProto model_proto;
   model_proto.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
   auto* node_proto = model_proto.mutable_graph()->add_node();
   node_proto->set_name(prefix + method.name());
-  if (method.is_optimized()) {
-    // mark that this method was optimized
-    node_proto->set_domain("optimized");
-  }
 
   // We store the schema string in the docstring.
   node_proto->set_doc_string(getExportableSchemaStringForMethod(method));
@@ -645,7 +634,9 @@ void MethodEncoder::EncodeMethod(
     }
   }
   EncodeBlock(attr_proto->mutable_g(), method.graph()->block(), {});
-  AT_ASSERT(model_proto.SerializeToString(torch_script));
+  std::string torch_script;
+  AT_ASSERT(model_proto.SerializeToString(&torch_script));
+  return torch_script;
 }
 
 void MethodEncoder::EncodeTensor(
@@ -920,6 +911,7 @@ class ScriptModuleSerializer final {
       const std::string& name,
       torch::ModuleDef* module_def) {
     module_def->set_name(name);
+    module_def->set_optimize(module.is_optimized());
     for (const auto& elem : module.get_parameters()) {
       torch::ParameterDef* param_def = module_def->add_parameters();
       convertParameter(elem.value(), param_def);
@@ -992,10 +984,12 @@ class ScriptModuleSerializer final {
     // TODO handle device case, set the device_detail and load to CUDA device
   }
   void convertMethod(script::Method& method, torch::MethodDef* method_def) {
-    std::string torch_script;
     // TODO encode the real torch script instead of ModelProto
     MethodEncoder encoder(
-        method, &torch_script, &storageMap_, &parameterMap_, &writer_);
+        method, &storageMap_, &parameterMap_, &writer_);
+    // we already keep the tree structure in the top level module,
+    // so pass "" as prefix
+    std::string torch_script = encoder.EncodeMethod(method, "");
     method_def->set_onnx_proto(torch_script);
   }
   std::unordered_map<const void*, uint64_t>

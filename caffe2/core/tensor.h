@@ -64,6 +64,11 @@ class CAFFE2_API Tensor final {
     Resize(dims);
   }
 
+  // we want to preserve index information
+  explicit Tensor(at::IntList dims, at::Device device): Tensor(device) {
+    Resize(dims);
+  }
+
   explicit Tensor(const vector<int>& dims, DeviceType type)
       : Tensor(type) {
     Resize(dims);

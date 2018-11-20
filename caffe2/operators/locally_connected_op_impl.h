@@ -432,10 +432,13 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     dX_data = dX->template mutable_data<T>();
   }
   if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    std::vector<int> dbias_dims = output_image_dims;
+    std::vector<int64_t> dbias_dims;
+    std::copy(
+        output_image_dims.cbegin(),
+        output_image_dims.cend(),
+        std::back_inserter(dbias_dims));
     dbias_dims.push_back(shape.M);
-    dbias->Resize(dbias_dims);
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD, dbias_dims, at::dtype<T>());
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
         shape.N, &bias_multiplier_);
     dbias_data = dbias->template mutable_data<T>();
@@ -518,10 +521,13 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     dX_data = dX->template mutable_data<T>();
   }
   if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    std::vector<int> dbias_dims = output_image_dims;
+    std::vector<int64_t> dbias_dims;
+    std::copy(
+        output_image_dims.cbegin(),
+        output_image_dims.cend(),
+        std::back_inserter(dbias_dims));
     dbias_dims.push_back(shape.M);
-    dbias->Resize(dbias_dims);
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD, dbias_dims, at::dtype<T>());
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
         shape.N, &bias_multiplier_);
     dbias_data = dbias->template mutable_data<T>();

@@ -170,6 +170,7 @@ def gen_py_variable_methods(out, declarations, template_path):
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
+                declaration.get('python_module') != 'nn' and
                 'Tensor' in declaration['method_of'])
 
     py_variable_methods = group_declarations_by_name(declarations, should_bind)
@@ -186,7 +187,7 @@ def gen_py_nn_functions(out, declarations, template_path):
 
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
-                declaration['mode'] == 'NN')
+                (declaration['mode'] == 'NN' or declaration.get('python_module') == 'nn'))
 
     py_nn_functions = group_declarations_by_name(declarations, should_bind)
 
@@ -203,6 +204,7 @@ def gen_py_torch_functions(out, declarations, template_path):
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
+                declaration.get('python_module') != 'nn' and
                 'namespace' in declaration['method_of'])
 
     py_torch_functions = group_declarations_by_name(declarations, should_bind)
