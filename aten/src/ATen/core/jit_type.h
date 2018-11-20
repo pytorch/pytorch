@@ -752,9 +752,6 @@ struct CAFFE2_API BoolType : public Type {
   std::string str() const override {
     return "bool";
   }
-  std::string python_str() const override {
-    return "bool";
-  }
   bool isSubtypeOf(const TypePtr rhs) const override {
     if(auto rhs_ = rhs->cast<OptionalType>()) {
       return this->isSubtypeOf(rhs_->getElementType());
@@ -815,9 +812,6 @@ struct CAFFE2_API NoneType : public Type {
     return rhs->kind() == TypeKind::NoneType;
   }
   std::string str() const override {
-    return "None";
-  }
-  std::string python_str() const override {
     return "None";
   }
   static const TypeKind Kind = TypeKind::NoneType;
