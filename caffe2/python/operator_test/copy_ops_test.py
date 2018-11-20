@@ -80,7 +80,7 @@ class CopyOpsTest(unittest.TestCase):
 
         self.assertEqual(
             get_op_with_output(model, "x_gpu_2_grad").device_option,
-            core.DeviceOption(cworkspace.GpuDeviceType, 1),
+            core.DeviceOption(workspace.GpuDeviceType, 1),
         )
         self.assertEqual(
             get_op_with_output(model, "x_cpu_grad").device_option,
