@@ -11,7 +11,7 @@ install_ubuntu() {
     apt-get install libc++1
     apt-get install libc++abi1
 
-    DEB_ROCM_REPO=http://http://repo.radeon.com/rocm/apt/debian
+    DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/debian
     # Add rocm repository
     wget -qO - $DEB_ROCM_REPO/rocm.gpg.key | apt-key add -
     echo "deb [arch=amd64] $DEB_ROCM_REPO xenial main" > /etc/apt/sources.list.d/rocm.list
@@ -56,7 +56,7 @@ install_centos() {
 
   echo "[ROCm]" > /etc/yum.repos.d/rocm.repo
   echo "name=ROCm" >> /etc/yum.repos.d/rocm.repo
-  echo "baseurl=http://http://repo.radeon.com/rocm/yum/rpm/" >> /etc/yum.repos.d/rocm.repo
+  echo "baseurl=http://repo.radeon.com/rocm/yum/rpm/" >> /etc/yum.repos.d/rocm.repo
   echo "enabled=1" >> /etc/yum.repos.d/rocm.repo
   echo "gpgcheck=0" >> /etc/yum.repos.d/rocm.repo
 
