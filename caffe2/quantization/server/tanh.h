@@ -1,5 +1,4 @@
-#ifndef DNNLOWP_TANH_H
-#define DNNLOWP_TANH_H
+#pragma once
 
 #include "dnnlowp.h"
 
@@ -60,5 +59,3 @@ class Tanh {
 }; // class TanhApproximation
 
 } // namespace dnnlowp
-
-#endif
