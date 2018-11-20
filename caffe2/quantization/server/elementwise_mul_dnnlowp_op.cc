@@ -38,10 +38,10 @@ class MulDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, MulFp32Op> {
 
     // Quantize inputs if needed
     vector<T> A_temp, B_temp;
-    const T* A_quantized = QuantizeInputIfNeeded<T>(
-        this, 0, in_qparams_[0], A_temp, qfactory_.get());
-    const T* B_quantized = QuantizeInputIfNeeded<T>(
-        this, 1, in_qparams_[1], B_temp, qfactory_.get());
+    const T* A_quantized =
+        QuantizeInputIfNeeded<T>(this, 0, in_qparams_[0], A_temp);
+    const T* B_quantized =
+        QuantizeInputIfNeeded<T>(this, 1, in_qparams_[1], B_temp);
 
     T* C_quantized = GetQuantizedOutputData_();
 

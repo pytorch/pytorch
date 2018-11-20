@@ -10,26 +10,25 @@ namespace caffe2 {
  * We'll encounter saturation but this will be faster in Intel CPUs
  */
 template <bool ReluFused = false>
-class ConvDNNLowPAcc16Op final
-  : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
+class ConvDNNLowPAcc16Op final : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
-  ConvDNNLowPAcc16Op(const OperatorDef& operator_def, Workspace *ws);
+  ConvDNNLowPAcc16Op(const OperatorDef& operator_def, Workspace* ws);
 
   using BaseType = ConvDNNLowPOp<std::uint8_t, ReluFused>;
-  using BaseType::InputTensorCPU_;
-  using BaseType::OutputTensorCPU_;
+  using BaseType::BIAS;
   using BaseType::col_buffer_;
   using BaseType::dequantize_output_;
+  using BaseType::FILTER;
   using BaseType::in_qparams_;
+  using BaseType::INPUT;
+  using BaseType::InputTensorCPU_;
   using BaseType::out_qparams_;
+  using BaseType::OutputTensorCPU_;
   using BaseType::row_offsets_;
   using BaseType::W_quantized_;
   using BaseType::X_pack_buf_;
   using BaseType::Y_int32_;
-  using BaseType::FILTER;
-  using BaseType::INPUT;
-  using BaseType::BIAS;
 
  private:
   bool RunOnDeviceWithOrderNCHW() override;
@@ -37,8 +36,10 @@ class ConvDNNLowPAcc16Op final
 
   bool GetQuantizationParameters_() override;
 
-  template <typename InType> bool RunOnDeviceWithOrderNCHWAndType_();
-  template <typename InType> bool RunOnDeviceWithOrderNHWCAndType_();
+  template <typename InType>
+  bool RunOnDeviceWithOrderNCHWAndType_();
+  template <typename InType>
+  bool RunOnDeviceWithOrderNHWCAndType_();
 
   void ConvOutlier_(
       const std::uint8_t* col_buffer,

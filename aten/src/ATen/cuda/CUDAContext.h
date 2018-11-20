@@ -4,6 +4,7 @@
 #include "ATen/Context.h"
 #include "ATen/cuda/CUDAStream.h"
 #include "ATen/cuda/Exceptions.h"
+#include "c10/cuda/CUDAFunctions.h"
 
 #include <cstdint>
 
@@ -36,38 +37,15 @@ manage their own state. There is only a single CUDA context/state.
 */
 
 /* Device info */
-CAFFE2_API int64_t getNumGPUs();
-
-CAFFE2_API int64_t current_device();
-
-CAFFE2_API void set_device(int64_t device);
+inline int64_t getNumGPUs() {
+    return c10::cuda::device_count();
+}
 
 CAFFE2_API cudaDeviceProp* getCurrentDeviceProperties();
 
 CAFFE2_API int warp_size();
 
 CAFFE2_API cudaDeviceProp* getDeviceProperties(int64_t device);
-
-/* Streams */
-
-/**
- * Get a new stream from the CUDA stream pool.  You can think of this
- * as "creating" a new stream, but no such creation actually happens;
- * instead, streams are preallocated from the pool and returned in a
- * round-robin fashion.
- *
- * You can request a stream from the high priority pool by setting
- * isHighPriority to true, or a stream for a specific device by setting device
- * (defaulting to the current CUDA stream.)
- */
-CAFFE2_API CUDAStream
-getStreamFromPool(const bool isHighPriority = false, int64_t device = -1);
-
-CAFFE2_API CUDAStream getDefaultCUDAStream(int64_t device = -1);
-CAFFE2_API CUDAStream getCurrentCUDAStream(int64_t device = -1);
-
-CAFFE2_API void setCurrentCUDAStream(CUDAStream stream);
-CAFFE2_API void uncheckedSetCurrentCUDAStream(CUDAStream stream);
 
 CAFFE2_API Allocator* getCUDADeviceAllocator();
 

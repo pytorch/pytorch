@@ -246,11 +246,15 @@ struct Parser {
   }
 
   c10::optional<char> parseOctal(const std::string& str, size_t pos) {
+    //\xxx where x are 0-7
     if (pos + 3 >= str.size())
       return c10::nullopt;
     size_t c = 0;
-    for(size_t i = 0, b = 64; i < 3; ++i, b /= 8) {
-      c += b * (str[pos + i] - '0');
+    for(size_t i = 1, b = 64; i < 4; ++i, b /= 8) {
+      int d = str[pos + i];
+      if (d < '0' || d > '7')
+        return c10::nullopt;
+      c += b * (d - '0');
     }
     if(c >= 256)
       return c10::nullopt;
@@ -285,12 +289,15 @@ struct Parser {
         case 'v':
           c = '\v';
           break;
+        case 't':
+          c = '\t';
+          break;
         case 'h':
           throw ErrorReport(range)
               << "unsupported hex specifier";
         default:
           // \0NN
-          if (auto v = parseOctal(str, pos)) {
+          if (auto v = parseOctal(str, pos + 1)) {
             to_erase = 4;
             c = *v;
           } else {
@@ -518,15 +525,13 @@ struct Parser {
 
   TreeRef parseStatements(bool expect_indent=true) {
     auto r = L.cur().range;
-    if (expect_indent)
+    if (expect_indent) {
       L.expect(TK_INDENT);
-    TreeList stmts;
-    for (size_t i=0; ; ++i) {
-      auto stmt = parseStmt();
-      stmts.push_back(stmt);
-      if (L.nextIf(TK_DEDENT))
-        break;
     }
+    TreeList stmts;
+    do {
+      stmts.push_back(parseStmt());
+    } while(!L.nextIf(TK_DEDENT));
     return c(TK_LIST, r, std::move(stmts));
   }
   Decl parseDecl() {

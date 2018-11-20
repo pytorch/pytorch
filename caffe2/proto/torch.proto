@@ -56,6 +56,10 @@ message ModuleDef {
   // from the main method.
 
   optional string name = 6;
+
+  // whether apply the optimizations to this module, only applicable to
+  // script modules
+  optional bool optimize = 7;
 }
 
 enum ProtoVersion {
