@@ -14,9 +14,9 @@ class UnaryElementwiseWithArgsDNNLowPOp : public Operator<CPUContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
   UnaryElementwiseWithArgsDNNLowPOp(
-    const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws), functor_() {
-  }
+      const OperatorDef& operator_def,
+      Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws), functor_() {}
 
   bool RunOnDevice() override {
     if (!arguments_parsed_) {
@@ -49,12 +49,11 @@ class BinaryElementwiseDNNLowPOp : public DNNLowPOp<T, FP32_OP> {
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
   BinaryElementwiseDNNLowPOp(const OperatorDef& operator_def, Workspace* ws)
-    : DNNLowPOp<T, FP32_OP>(operator_def, ws),
-      OP_SINGLE_ARG(bool, "broadcast", enable_broadcast_, 0),
-      OP_SINGLE_ARG(int, "axis", axis_, -1),
-      OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
-      OP_SINGLE_ARG(string, "order", order_, "NCHW") {
-
+      : DNNLowPOp<T, FP32_OP>(operator_def, ws),
+        OP_SINGLE_ARG(bool, "broadcast", enable_broadcast_, 0),
+        OP_SINGLE_ARG(int, "axis", axis_, -1),
+        OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
+        OP_SINGLE_ARG(string, "order", order_, "NCHW") {
     // Figure out the correct axis to use.
     if (enable_broadcast_) {
       if (axis_ != -1) {

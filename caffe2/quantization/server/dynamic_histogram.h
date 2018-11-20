@@ -17,10 +17,10 @@ namespace dnnlowp {
  */
 class Histogram {
  public:
-  Histogram(int nbins, float min, float max) :
-    min_(min), max_(max), histogram_(nbins) {}
-  Histogram(float min, float max, const std::vector<uint64_t>& bins) :
-    min_(min), max_(max), histogram_(bins) {}
+  Histogram(int nbins, float min, float max)
+      : min_(min), max_(max), histogram_(nbins) {}
+  Histogram(float min, float max, const std::vector<uint64_t>& bins)
+      : min_(min), max_(max), histogram_(bins) {}
 
   void Add(float f, uint64_t cnt = 1);
   /**
@@ -31,8 +31,12 @@ class Histogram {
    */
   void Add(const float* f, int len);
 
-  float Min() const { return min_; }
-  float Max() const { return max_; }
+  float Min() const {
+    return min_;
+  }
+  float Max() const {
+    return max_;
+  }
 
   /**
    * Reduce per-thread histogram. Need to call this before GetHistogram when
@@ -40,7 +44,7 @@ class Histogram {
    */
   void Finalize();
 
-  const std::vector<uint64_t> *GetHistogram() const {
+  const std::vector<uint64_t>* GetHistogram() const {
     return &histogram_;
   }
 
@@ -61,7 +65,7 @@ class DynamicHistogram {
 
   /// Indicate we're not dynamically adjusting histogram bins any more and
   /// return the current static histogram.
-  const Histogram *Finalize();
+  const Histogram* Finalize();
 
  private:
   /// Dynamic histogram is implemented by the series of static histograms

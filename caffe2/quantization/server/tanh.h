@@ -38,7 +38,7 @@ class Tanh {
 
   float GetPassRegionEndDequantized() const {
     return Dequantize<T>(
-      (uint8_t)(x_pq_index_ + in_qparams_.zero_point), in_qparams_);
+        (uint8_t)(x_pq_index_ + in_qparams_.zero_point), in_qparams_);
   }
 
   float GetSaturationRegionBegin() const {

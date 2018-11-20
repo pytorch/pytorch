@@ -11,8 +11,9 @@ namespace dnnlowp {
 class KLDivergenceMinimization final : public QuantizationErrorMinimization {
  public:
   TensorQuantizationParams ChooseQuantizationParams(
-    const Histogram& hist, bool preserve_sparsity = false, int precision = 8)
-    override;
+      const Histogram& hist,
+      bool preserve_sparsity = false,
+      int precision = 8) override;
 };
 
 } // namespace dnnlowp
