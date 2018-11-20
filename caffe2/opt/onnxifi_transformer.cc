@@ -3,7 +3,7 @@
 #include <iostream>
 #include <unordered_set>
 
-#include <google/protobuf/text_format.h>
+#include "onnx/proto_utils.h"
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
@@ -90,9 +90,7 @@ void DumpModel(
     const ::ONNX_NAMESPACE::ModelProto& model,
     const std::string& fname) {
   std::ofstream ff(fname);
-  std::string body;
-  ::google::protobuf::TextFormat::PrintToString(model.graph(), &body);
-  ff << body << std::endl;
+  ff << ::ONNX_NAMESPACE::ProtoDebugString(model) << std::endl;
   ff.close();
 }
 

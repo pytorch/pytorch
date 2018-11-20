@@ -174,8 +174,8 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
   // equivalent to python code
   //   outputs[0].reshape(rois.shape)
   //   outputs[0].data[...] = rois
-  auto* rois_out = Output(0);
-  rois_out->Resize(rois.rows(), rois.cols());
+
+  auto* rois_out = Output(0, {rois.rows(), rois.cols()}, at::dtype<float>());
   Eigen::Map<ERArrXXf> rois_out_mat(
       rois_out->template mutable_data<float>(), rois.rows(), rois.cols());
   rois_out_mat = rois;
@@ -201,8 +201,11 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
     utils::RowsWhereRoILevelEquals(rois, lvls, lvl, &blob_roi_level, &idx_lvl);
 
     // Output blob_roi_level
-    auto* roi_out = Output(i + 1);
-    roi_out->Resize(blob_roi_level.rows(), blob_roi_level.cols());
+
+    auto* roi_out = Output(
+        i + 1,
+        {blob_roi_level.rows(), blob_roi_level.cols()},
+        at::dtype<float>());
     Eigen::Map<ERArrXXf> roi_out_mat(
         roi_out->template mutable_data<float>(),
         blob_roi_level.rows(),
@@ -214,8 +217,9 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
     rois_idx_restore.tail(idx_lvl.size()) = idx_lvl;
   }
   utils::ArgSort(rois_idx_restore);
-  auto* rois_idx_restore_out = Output(OutputSize() - 1);
-  rois_idx_restore_out->Resize(rois_idx_restore.size());
+
+  auto* rois_idx_restore_out =
+      Output(OutputSize() - 1, {rois_idx_restore.size()}, at::dtype<int>());
   Eigen::Map<EArrXi> rois_idx_restore_out_mat(
       rois_idx_restore_out->template mutable_data<int>(),
       rois_idx_restore.size());

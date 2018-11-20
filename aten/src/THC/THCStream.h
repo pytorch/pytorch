@@ -8,7 +8,6 @@
 *
 * Stream usage should be done through ATen/cuda/CUDAContext.h.
 */
-typedef struct CUDAStreamInternals THCStream;
 
 // Stream creation
 THC_API THCStream* THCStream_defaultStream(int device);

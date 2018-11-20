@@ -468,18 +468,12 @@
 
 - func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::Mean) -> Tensor
 
-- func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
-  return:
-    - type: Tensor
-      name: grid
+- func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor grid
   dispatch:
     CUDA: cudnn_affine_grid_generator_forward
 
 # TODO: Why do I have to call this grad?!
-- func: cudnn_affine_grid_generator_backward(Tensor grad, int64_t N, int64_t C, int64_t H, int64_t W)
-  return:
-    - type: Tensor
-      name: grad_theta
+- func: cudnn_affine_grid_generator_backward(Tensor grad, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor grad_theta
   dispatch:
     CUDA: cudnn_affine_grid_generator_backward
 
@@ -535,19 +529,11 @@
     CUDA: cudnn_convolution_transpose_backward_weight
 
 # NB: input is special cased in a way I don't quite understand
-- func: cudnn_grid_sampler(Tensor self, Tensor grid)
-  return:
-    - type: Tensor
-      name: output
+- func: cudnn_grid_sampler(Tensor self, Tensor grid) -> Tensor output
   dispatch:
     CUDA: cudnn_grid_sampler_forward
 
-- func: cudnn_grid_sampler_backward(Tensor self, Tensor grid, Tensor grad_output)
-  return:
-    - type: Tensor
-      name: grad_self
-    - type: Tensor
-      name: grad_grid
+- func: cudnn_grid_sampler_backward(Tensor self, Tensor grid, Tensor grad_output) -> (Tensor grad_self, Tensor grad_grid)
   dispatch:
     CUDA: cudnn_grid_sampler_backward
 
@@ -889,10 +875,10 @@
 - func: _cufft_get_plan_cache_max_size() -> int64_t
   device_guard: false
 
-- func: _cufft_set_plan_cache_max_size(int64_t max_size)
+- func: _cufft_set_plan_cache_max_size(int64_t max_size) -> void
   device_guard: false
 
-- func: _cufft_clear_plan_cache()
+- func: _cufft_clear_plan_cache() -> void
   device_guard: false
 
 - func: index(Tensor self, TensorList indices) -> Tensor
@@ -2994,3 +2980,41 @@
 - func: _dirichlet_grad_out(Tensor output, Tensor x, Tensor alpha, Tensor total) -> Tensor
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
+
+## NN wrappers
+
+- func: binary_cross_entropy_out(Tensor output, Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: binary_cross_entropy_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, Tensor weight, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor weight, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: mse_loss_out(Tensor output, Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: mse_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: mse_loss_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: l1_loss_out(Tensor output, Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: l1_loss_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor
+  python_module: nn
