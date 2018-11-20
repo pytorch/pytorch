@@ -11,7 +11,7 @@ install_ubuntu() {
     apt-get install libc++1
     apt-get install libc++abi1
 
-    DEB_ROCM_REPO=http://repo.radeon.com/rocm/misc/facebook/apt/.apt_1.9.white_rabbit/debian
+    DEB_ROCM_REPO=http://http://repo.radeon.com/rocm/apt/debian
     # Add rocm repository
     wget -qO - $DEB_ROCM_REPO/rocm.gpg.key | apt-key add -
     echo "deb [arch=amd64] $DEB_ROCM_REPO xenial main" > /etc/apt/sources.list.d/rocm.list
@@ -31,15 +31,6 @@ install_ubuntu() {
                    hipsparse \
                    rocrand \
                    hip-thrust
-
-    pushd /tmp
-    wget https://github.com/scchan/hcc/releases/download/19-host_linker_relative_path_rocdl/rocm19wb_20181109.tgz
-    tar -xzf rocm19wb_20181109.tgz
-    pushd rocm19wb_20181109/deb
-    apt install -y ./hcc-1.2.18445-Linux.deb ./hip_base-1.5.18435.deb ./hip_hcc-1.5.18435.deb ./hip_doc-1.5.18435.deb ./hip_samples-1.5.18435.deb
-    popd
-    rm -rf rocm19wb_20181109.tgz rocm19wb_20181109
-    popd
 
     # HIP has a bug that drops DEBUG symbols in generated MakeFiles.
     # https://github.com/ROCm-Developer-Tools/HIP/pull/588
@@ -65,7 +56,7 @@ install_centos() {
 
   echo "[ROCm]" > /etc/yum.repos.d/rocm.repo
   echo "name=ROCm" >> /etc/yum.repos.d/rocm.repo
-  echo "baseurl=http://repo.radeon.com/rocm/misc/facebook/yum/.yum_1.9.white_rabbit/" >> /etc/yum.repos.d/rocm.repo
+  echo "baseurl=http://http://repo.radeon.com/rocm/yum/rpm/" >> /etc/yum.repos.d/rocm.repo
   echo "enabled=1" >> /etc/yum.repos.d/rocm.repo
   echo "gpgcheck=0" >> /etc/yum.repos.d/rocm.repo
 
@@ -85,15 +76,6 @@ install_centos() {
                    hipsparse \
                    rocrand
 
-
-  pushd /tmp
-  wget https://github.com/scchan/hcc/releases/download/19-host_linker_relative_path_rocdl/rocm19wb_20181109.tgz
-  tar -xzf rocm19wb_20181109.tgz
-  pushd rocm19wb_20181109/rpm
-  rpm -i --replacefiles hcc-1.2.18445-Linux.rpm hip_base-1.5.18435.rpm hip_hcc-1.5.18435.rpm hip_doc-1.5.18435.rpm hip_samples-1.5.18435.rpm
-  popd
-  rm -rf rocm19wb_20181109.tgz rocm19wb_20181109
-  popd
 
   # Cleanup
   yum clean all
