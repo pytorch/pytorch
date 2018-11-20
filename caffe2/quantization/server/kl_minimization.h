@@ -1,5 +1,4 @@
-#ifndef DNNLOWP_KL_MINIMIZATION_H
-#define DNNLOWP_KL_MINIMIZATION_H
+#pragma once
 
 #include "quantization_error_minimization.h"
 
@@ -17,5 +16,3 @@ class KLDivergenceMinimization final : public QuantizationErrorMinimization {
 };
 
 } // namespace dnnlowp
-
-#endif // DNNLOWP_KL_MINIMIZATION_H
