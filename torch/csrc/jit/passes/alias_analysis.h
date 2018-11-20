@@ -48,8 +48,6 @@ class AliasDb {
   void dump() const;
 
  private:
-  bool shouldAnnotate(const Value* v) const;
-
   void analyze(std::shared_ptr<Graph> graph);
   void analyze(Block* block);
   void analyze(Node* node);
@@ -65,6 +63,7 @@ class AliasDb {
   void addAlias(const Value* value, AliasInfo alias);
   void addAlias(const Value* value, Symbol alias);
   void addAlias(const Value* value, const Value* from);
+  void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
   void giveFreshAlias(const Value* value);
 
   std::shared_ptr<Graph> graph_;
