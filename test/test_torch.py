@@ -927,6 +927,7 @@ class _TestTorchMixin(object):
             self.assertEqual(x.mean().item(), 16.0 / 6)
             self.assertEqual(x.mean(0), torch.FloatTensor([2.0, 2.5, 7.0 / 2]))
             self.assertEqual(x.mean(1), torch.FloatTensor([2.0 / 3, 14.0 / 3]))
+            self.assertEqual(x.mean(), x.mean((0,1)))
 
         for dtype in types:
             x = cast(torch.tensor(example, dtype=dtype))
@@ -1923,6 +1924,13 @@ class _TestTorchMixin(object):
         check_sum_all(torch.randn(200000))
         check_sum_all(torch.randn(2000, 2)[:, 0])
 
+    def _assert_matches_numpy(self, t, n):
+        self.assertEqual(n.shape, t.shape)
+        if t.dtype == torch.float:
+            self.assertTrue(np.allclose(n, t.numpy(), rtol=1e-03, atol=1e-05))
+        else:
+            self.assertTrue(np.allclose(n, t.numpy()))
+
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_sum_dim(self):
         def check_sum_dim(tensors_dict, dim):
@@ -1932,11 +1940,7 @@ class _TestTorchMixin(object):
                 for tensor in tensors:
                     expected = tensor.numpy().sum(dim)
                     actual = tensor.sum(dim)
-                    self.assertEqual(expected.shape, actual.shape)
-                    if actual.dtype == torch.float:
-                        self.assertTrue(np.allclose(expected, actual.numpy(), rtol=1e-03, atol=1e-05))
-                    else:
-                        self.assertTrue(np.allclose(expected, actual.numpy()))
+                    self._assert_matches_numpy(actual, expected)
 
         float_types = [torch.double, torch.float]
         int_types = [torch.int64, torch.int32, torch.int16]
@@ -1951,6 +1955,29 @@ class _TestTorchMixin(object):
         check_sum_dim(self._make_tensors((50, 50, 50)), 2)
         check_sum_dim(self._make_tensors((50, 50, 50)), (1, 2))
         check_sum_dim(self._make_tensors((50, 50, 50)), (1, -1))
+
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_mean_dim(self):
+        def check_mean_dim(tensors_dict, dim):
+            for category, tensors in tensors_dict.items():
+                if category == "slice":
+                    dim = 0
+                for tensor in tensors:
+                    expected = tensor.numpy().mean(dim)
+                    actual = tensor.mean(dim)
+                    self._assert_matches_numpy(actual, expected)
+
+        check_mean_dim(self._make_tensors((5, 400000), use_integral=False), 1)
+        check_mean_dim(self._make_tensors((3, 5, 7), use_integral=False), 0)
+        check_mean_dim(self._make_tensors((3, 5, 7), use_integral=False), 1)
+        check_mean_dim(self._make_tensors((3, 5, 7), use_integral=False), 2)
+        check_mean_dim(self._make_tensors((100000, ), use_integral=False), -1)
+        check_mean_dim(self._make_tensors((50, 50, 50), use_integral=False), 0)
+        check_mean_dim(self._make_tensors((50, 50, 50), use_integral=False), 1)
+        check_mean_dim(self._make_tensors((50, 50, 50), use_integral=False), 2)
+        check_mean_dim(self._make_tensors((50, 50, 50), use_integral=False), (1, 2))
+        check_mean_dim(self._make_tensors((50, 50, 50), use_integral=False), (1, -1))
+
 
     def test_sum_out(self):
         x = torch.rand(100, 100)
