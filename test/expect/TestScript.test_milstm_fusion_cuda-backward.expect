@@ -27,17 +27,16 @@ graph(%0 : Float(*, *)
       %outgate : Float(*, *)
       %27 : Float(*, *)) {
   %28 : Float(*, *) = prim::FusionGroup_0(%ingate, %forgetgate, %cellgate, %outgate, %12, %1, %27, %0)
-  %29 : Float(*, *) = aten::mul(%28, %Uz)
-  %30 : Float(*, *) = aten::mul(%28, %Wx)
-  %31 : Float(*, *) = prim::FusionGroup_1(%28, %22, %13)
-  %32 : Float(*, *), %33 : Float(*, *) = prim::FusionGroup_2(%Wx, %15, %28, %Uz, %14)
+  %29 : Float(*, *) = aten::mul(%28, %Wx)
+  %30 : Float(*, *) = prim::FusionGroup_1(%28, %22, %13)
+  %31 : Float(*, *), %32 : Float(*, *), %33 : Float(*, *) = prim::FusionGroup_2(%Wx, %15, %28, %14, %Uz)
   %34 : Float(*, *) = aten::t(%16)
-  %35 : Float(*, *) = aten::mm(%34, %31)
+  %35 : Float(*, *) = aten::mm(%34, %30)
   %36 : Float(*, *) = aten::t(%35)
   %37 : Float(*, *) = aten::t(%17)
-  %38 : Float(*, *) = aten::mm(%37, %33)
+  %38 : Float(*, *) = aten::mm(%37, %32)
   %39 : Float(*, *) = aten::t(%38)
-  return (%28, %29, %30, %32, %36, %39);
+  return (%28, %33, %29, %31, %36, %39);
 }
 with prim::FusionGroup_0 = graph(%0 : Float(*, *)
       %1 : Float(*, *)
