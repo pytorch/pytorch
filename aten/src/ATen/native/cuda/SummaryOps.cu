@@ -32,7 +32,9 @@ __global__ void kernelHistogram1D(
     detail::TensorInfo<output_t, IndexType> a, /* output */
     detail::TensorInfo<output_t, IndexType> p, /* partial output */
     detail::TensorInfo<input_t, IndexType> b, /* input */
-    int binsize,
+    scalar_t minvalue,
+    scalar_t maxvalue,
+    scalar_t binsize,
     IndexType totalElements,
     Op getOp) {
   extern __shared__ unsigned char my_smem[];
@@ -51,9 +53,12 @@ __global__ void kernelHistogram1D(
       // Convert `linearIndex` into an offset of `b`
       const IndexType bOffset =
           detail::IndexToOffset<input_t, IndexType, BDims>::get(linearIndex, b);
-      // Use value at `b` as an offset of `smem`
-      const IndexType pOffset = b.data[bOffset] / binsize;
-      atomicAdd(&smem[pOffset], getOp(linearIndex));
+      const auto bVal = b.data[bOffset];
+      if (bval >= minvalue && bval <= maxvalue) {
+        // Use value at `b` as an offset of `smem`
+        const IndexType pOffset = (int)((bVal - minvalue) / binsize);
+        atomicAdd(&smem[pOffset], getOp(linearIndex));
+      }
     }
     __syncthreads();
     // NOTE: atomically update output bin count.
@@ -75,11 +80,13 @@ __global__ void kernelHistogram1D(
       const IndexType bOffset =
           detail::IndexToOffset<input_t, IndexType, BDims>::get(linearIndex, b);
       const auto bVal = b.data[bOffset];
-      // Use value at `b` as an offset of `p`
-      const IndexType pIdx = p.strides[0] * blockIdx.x + bVal / binsize;
-      const IndexType pOffset =
-          detail::IndexToOffset<output_t, IndexType, PDims>::get(pIdx, p);
-      atomicAdd(&p.data[pOffset], getOp(linearIndex));
+      if (bval >= minvalue && bval <= maxvalue) {
+        // Use value at `b` as an offset of `p`
+        const IndexType pIdx = p.strides[0] * blockIdx.x + (int)((bVal - minvalue) / binsize);
+        const IndexType pOffset =
+            detail::IndexToOffset<output_t, IndexType, PDims>::get(pIdx, p);
+        atomicAdd(&p.data[pOffset], getOp(linearIndex));
+      }
     }
     __syncthreads();
     // NOTE: atomically update output bin count.
@@ -103,11 +110,13 @@ __global__ void kernelHistogram1D(
       const IndexType bOffset =
           detail::IndexToOffset<input_t, IndexType, BDims>::get(linearIndex, b);
       const auto bVal = b.data[bOffset];
-      // Use value at `b` as an offset of `a`
-      const IndexType aIdx = bVal / binsize;
-      const IndexType aOffset =
-          detail::IndexToOffset<output_t, IndexType, ADims>::get(aIdx, a);
-      atomicAdd(&a.data[aOffset], getOp(linearIndex));
+      if (bval >= minvalue && bval <= maxvalue) {
+        // Use value at `b` as an offset of `a`
+        const IndexType aIdx = (int)((bVal - minvalue) / binsize);
+        const IndexType aOffset =
+            detail::IndexToOffset<output_t, IndexType, ADims>::get(aIdx, a);
+        atomicAdd(&a.data[aOffset], getOp(linearIndex));
+      }
     }
   }
 }
@@ -118,7 +127,7 @@ __global__ void kernelHistogram1D(
          block,                                                            \
          (MEMORY_TYPE == CUDAHistogramMemoryType::SHARED) ? sharedMem : 0, \
          getCurrentCUDAStream()>>>(                    \
-          aInfo, pInfo, bInfo, binsize, totalElements, WEIGHTS_OP);        \
+          aInfo, pInfo, bInfo, minvalue, maxvalue, binsize, totalElements, WEIGHTS_OP);        \
   AT_ASSERTM(cudaGetLastError() == cudaSuccess, "kernelHistogram1D failed");
 
 #define HANDLE_SWITCH_CASE(mType, getOp)                        \
@@ -167,6 +176,8 @@ bool CUDA_tensor_histogram(
     at::Tensor b, /* input */
     at::Tensor c, /* weights(optional) */
     int64_t nbins,
+    scalar_t min,
+    scalar_t max,
     int binsize,
     TensorArgType aType = TensorArgType::ReadWrite,
     TensorArgType bType = TensorArgType::ReadOnly,
@@ -176,6 +187,22 @@ bool CUDA_tensor_histogram(
     checkBackend("CUDA_tensor_histogram", {c}, Backend::CUDA);
   }
   auto totalElements = b.size(0);
+  scalar_t minvalue;
+  scalar_t maxvalue;
+  if (binsize == 0) { // hist_cuda
+    if (min == max) {
+      minvalue = b.min().cpu().data<input_t>();
+      maxvalue = b.max().cpu().data<input_t>();
+    }
+    if (minvalue == maxvalue) {
+      minvalue = minvalue - 1;
+      maxvalue = maxvalue + 1;
+    }
+    binsize = (maxvalue - minvalue) / nbins;
+  } else { // bincount, binsize is always 1
+    minvalue = 0;
+    maxvalue = b.max().cpu().data<input_t>();
+  }
 
   const dim3 block = getApplyBlock();
   dim3 grid;
@@ -265,11 +292,11 @@ Tensor _bincount_cuda_template(
   if (has_weights) {
     output = native::zeros({nbins}, weights.options());
     auto ret = cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
-        output, self, weights, nbins, 1);
+        output, self, weights, nbins, 0, 0, 1);
   } else {
     output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
     auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
-        output, self, weights, nbins, 1);
+        output, self, weights, nbins, 0, 0, 1);
   }
   return output;
 }
@@ -287,6 +314,17 @@ Tensor _bincount_cuda(
     return _bincount_cuda_template<scalar_t, double>(
         self, weights.toType(CUDA(kDouble)), minlength);
   });
+}
+
+Tensor _hist_cuda(
+    const Tensor& self,
+    int64_t nbins,
+    scalar_t min,
+    scalar_t max) {
+  Tensor output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
+  auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
+      output, self, torch.tensor([]), nbins, min, max, 0); // FIXME can weights be optional or null?
+  return output;
 }
 
 } // namespace native
