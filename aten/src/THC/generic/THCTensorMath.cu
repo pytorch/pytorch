@@ -461,12 +461,16 @@ void THCTensor_(range)(THCState *state, THCTensor *r_, accreal xmin, accreal xma
 void THCTensor_(arange)(THCState* state, THCTensor *r_, accreal xmin, accreal xmax, accreal step) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(std::isfinite((double)xmin) && std::isfinite((double)xmax)
+  THArgCheck(std::isfinite(static_cast<double>(xmin)) &&
+              std::isfinite(static_cast<double>(xmax))
               , 1, "unsupported range: ", xmin, " -> ", xmax);
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
               , 2, "upper bound and larger bound inconsistent with step sign");
-  ptrdiff_t size = (ptrdiff_t) ceil(ScalarConvert<accreal, double>::to(xmax - xmin) / step);
-  AT_CHECK(size >= 0, "invalid size, possible overflow?");
+  double size_d = ceil(ScalarConvert<accreal, double>::to(xmax - xmin) / step);
+  THArgCheck(size_d >= 0 && size_d <= (double)__PTRDIFF_MAX__
+              , 1, "invalid size, possible overflow?");
+  ptrdiff_t size = static_cast<ptrdiff_t>(size_d);
+
   if (THCTensor_(nElement)(state, r_) != size) THCTensor_(resize1d)(state, r_, size);
   THCTensor *r = THCTensor_(newContiguous)(state, r_);
   LinspaceOp<scalar_t,accreal> linspace_method(xmin, step);
