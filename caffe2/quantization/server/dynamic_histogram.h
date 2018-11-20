@@ -1,5 +1,4 @@
-#ifndef DYNAMIC_HISTOGRAM_H
-#define DYNAMIC_HISTOGRAM_H
+#pragma once
 
 #include <memory>
 #include <vector>
@@ -83,5 +82,3 @@ class DynamicHistogram {
 }; // class DynamicHistogram
 
 } // namespace dnnlowp
-
-#endif // DYNAMIC_HISTOGRAM_H

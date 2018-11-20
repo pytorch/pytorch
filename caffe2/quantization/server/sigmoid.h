@@ -1,5 +1,4 @@
-#ifndef DNNLOWP_SIGMOID_H
-#define DNNLOWP_SIGMOID_H
+#pragma once
 
 #include "tanh.h"
 
@@ -32,5 +31,3 @@ class Sigmoid {
 }; // class Sigmoid
 
 } // namespace dnnlowp
-
-#endif // DNNLOWP_SIGMOID_H

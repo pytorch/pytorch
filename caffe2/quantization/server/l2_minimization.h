@@ -1,5 +1,4 @@
-#ifndef DNNLOWP_L2_MINIMIZATION_H
-#define DNNLOWP_L2_MINIMIZATION_H
+#pragma once
 
 #include "quantization_error_minimization.h"
 
@@ -28,5 +27,3 @@ float L2MinimizationKernelAVX2(
     int start_bin);
 
 } // namespace dnnlowp
-
-#endif // DNNLOWP_L2_MINIMIZATION_H

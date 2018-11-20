@@ -1,5 +1,4 @@
-#ifndef CAFFE2_OPERATORS_DEQUANTIZE_DNNLOWP_OP_H
-#define CAFFE2_OPERATORS_DEQUANTIZE_DNNLOWP_OP_H
+#pragma once
 
 #include "caffe2/core/operator.h"
 #include "caffe2/quantization/server/dnnlowp.h"
@@ -19,5 +18,3 @@ class DequantizeDNNLowPOp final : public Operator<CPUContext> {
 }; // class DequantizeDNNLowPOp
 
 } // namespace caffe2
-
-#endif // CAFFE2_OPERATORS_DEQUANTIZE_DNNLOWP_OP_H
