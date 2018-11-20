@@ -323,5 +323,27 @@ impl::CUDAStreamInternals* CUDAStream::internals() const {
   }
 }
 
+/* Streams */
+CUDAStream getStreamFromPool(
+  const bool isHighPriority
+, int64_t device) {
+  return CUDAStream(impl::CUDAStream_getStreamFromPool(isHighPriority, device));
+}
+
+CUDAStream getDefaultCUDAStream(int64_t device) {
+  return CUDAStream(impl::CUDAStream_getDefaultStream(device));
+}
+CUDAStream getCurrentCUDAStream(int64_t device) {
+  return CUDAStream(impl::CUDAStream_getCurrentStream(device));
+}
+
+void setCurrentCUDAStream(CUDAStream stream) {
+  impl::CUDAStream_setStream(stream.internals());
+}
+void uncheckedSetCurrentCUDAStream(CUDAStream stream) {
+  impl::CUDAStream_uncheckedSetStream(stream.internals());
+}
+
+
 } // namespace cuda
 } // namespace at

@@ -13,8 +13,6 @@
 * A CUDAStream interface. See CUDAStream.cpp for implementation details.
 *
 * Includes the CUDAStream convenience class and a pointer-based stream API.
-*
-* The ATen/cuda/CUDAContext interface should be preferred when working with streams.
 */
 
 /*
@@ -107,6 +105,26 @@ struct AT_CUDA_API CUDAStream {
 private:
   Stream stream_;
 };
+
+/**
+ * Get a new stream from the CUDA stream pool.  You can think of this
+ * as "creating" a new stream, but no such creation actually happens;
+ * instead, streams are preallocated from the pool and returned in a
+ * round-robin fashion.
+ *
+ * You can request a stream from the high priority pool by setting
+ * isHighPriority to true, or a stream for a specific device by setting device
+ * (defaulting to the current CUDA stream.)
+ */
+CAFFE2_API CUDAStream
+getStreamFromPool(const bool isHighPriority = false, int64_t device = -1);
+
+CAFFE2_API CUDAStream getDefaultCUDAStream(int64_t device = -1);
+CAFFE2_API CUDAStream getCurrentCUDAStream(int64_t device = -1);
+
+CAFFE2_API void setCurrentCUDAStream(CUDAStream stream);
+CAFFE2_API void uncheckedSetCurrentCUDAStream(CUDAStream stream);
+
 
 } // namespace cuda
 } // namespace at
