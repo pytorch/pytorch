@@ -1,5 +1,4 @@
-#ifndef CAFFE2_OPERATORS_CONV_RELU_OP_H_
-#define CAFFE2_OPERATORS_CONV_RELU_OP_H_
+#pragma once
 
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_pool_op_base.h"
@@ -34,5 +33,3 @@ class ConvReluOp final : public ConvPoolOpBase<Context> {
 }; // class ConvReluOp
 
 } // namespace caffe2
-
-#endif // CAFFE2_OPERATORS_CONV_RELU_OP_H_

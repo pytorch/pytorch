@@ -1,5 +1,4 @@
-#ifndef DEEPLEARNING_QUANTIZATION_CAFFE2_RESIZE_NEAREST_DNNLOWP_OP_H_
-#define DEEPLEARNING_QUANTIZATION_CAFFE2_RESIZE_NEAREST_DNNLOWP_OP_H_
+#pragma once
 
 #include "caffe2/operators/resize_op.h"
 #include "caffe2/quantization/server/dnnlowp_op.h"
@@ -35,5 +34,3 @@ class ResizeNearestDNNLowPOp final : public DNNLowPOp<T, ResizeNearestFP32Op> {
 };
 
 } // namespace caffe2
-
-#endif // DEEPLEARNING_QUANTIZATION_CAFFE2_RESIZE_NEAREST_DNNLOWP_OP_H_

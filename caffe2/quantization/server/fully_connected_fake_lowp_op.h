@@ -14,8 +14,7 @@
  * limitations under the License.
  */
 
-#ifndef CAFFE2_OPERATORS_FULLY_CONNECTED_FP16_OP_H_
-#define CAFFE2_OPERATORS_FULLY_CONNECTED_FP16_OP_H_
+#pragma once
 
 #include <immintrin.h>
 #include "caffe2/core/context.h"
@@ -136,5 +135,3 @@ class FullyConnectedGradientFakeLowpFPOp : public Operator<Context> {
 };
 
 } // namespace caffe2
-
-#endif // CAFFE2_OPERATORS_FULLY_CONNECTED_FP16_OP_H_
