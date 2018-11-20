@@ -57,6 +57,7 @@ class Threshold(Module):
         )
 
 
+@torch._jit_internal.weak_module
 class ReLU(Threshold):
     r"""Applies the rectified linear unit function element-wise
     :math:`\text{ReLU}(x)= \max(0, x)`
@@ -143,6 +144,7 @@ class RReLU(Module):
         return 'lower={}, upper={}{}'.format(self.lower, self.upper, inplace_str)
 
 
+@torch._jit_internal.weak_module
 class Hardtanh(Module):
     r"""Applies the HardTanh function element-wise
 
@@ -194,6 +196,7 @@ class Hardtanh(Module):
         self.inplace = inplace
         assert self.max_val > self.min_val
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
@@ -204,6 +207,7 @@ class Hardtanh(Module):
         )
 
 
+@torch._jit_internal.weak_module
 class ReLU6(Hardtanh):
     r"""Applies the element-wise function:
 
@@ -288,6 +292,7 @@ class Tanh(Module):
         return torch.tanh(input)
 
 
+@torch._jit_internal.weak_module
 class ELU(Module):
     r"""Applies the element-wise function:
 
@@ -317,6 +322,7 @@ class ELU(Module):
         self.alpha = alpha
         self.inplace = inplace
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.elu(input, self.alpha, self.inplace)
 
@@ -325,6 +331,7 @@ class ELU(Module):
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
+@torch._jit_internal.weak_module
 class CELU(Module):
     r"""Applies the element-wise function:
 
@@ -359,6 +366,7 @@ class CELU(Module):
         self.alpha = alpha
         self.inplace = inplace
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.celu(input, self.alpha, self.inplace)
 
@@ -367,6 +375,7 @@ class CELU(Module):
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
+@torch._jit_internal.weak_module
 class SELU(Module):
     r"""Applied element-wise, as:
 
@@ -401,6 +410,7 @@ class SELU(Module):
         super(SELU, self).__init__()
         self.inplace = inplace
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.selu(input, self.inplace)
 
@@ -409,6 +419,7 @@ class SELU(Module):
         return inplace_str
 
 
+@torch._jit_internal.weak_module
 class GLU(Module):
     r"""Applies the gated linear unit function
     :math:`{GLU}(a, b)= a \otimes \sigma(b)` where :math:`a` is the first half
@@ -433,6 +444,7 @@ class GLU(Module):
         super(GLU, self).__init__()
         self.dim = dim
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.glu(input, self.dim)
 
@@ -482,6 +494,7 @@ class Hardshrink(Module):
         return '{}'.format(self.lambd)
 
 
+@torch._jit_internal.weak_module
 class LeakyReLU(Module):
     r"""Applies the element-wise function:
 
@@ -521,6 +534,7 @@ class LeakyReLU(Module):
         self.negative_slope = negative_slope
         self.inplace = inplace
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
@@ -529,6 +543,7 @@ class LeakyReLU(Module):
         return 'negative_slope={}{}'.format(self.negative_slope, inplace_str)
 
 
+@torch._jit_internal.weak_module
 class LogSigmoid(Module):
     r"""Applies the element-wise function:
 
@@ -548,10 +563,12 @@ class LogSigmoid(Module):
         >>> output = m(input)
     """
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.logsigmoid(input)
 
 
+@torch._jit_internal.weak_module
 class Softplus(Module):
     r"""Applies the element-wise function:
 
@@ -587,6 +604,7 @@ class Softplus(Module):
         self.beta = beta
         self.threshold = threshold
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.softplus(input, self.beta, self.threshold)
 
@@ -753,6 +771,7 @@ class Tanhshrink(Module):
         return F.tanhshrink(input)
 
 
+@torch._jit_internal.weak_module
 class Softmin(Module):
     r"""Applies the Softmin function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
@@ -784,10 +803,12 @@ class Softmin(Module):
         super(Softmin, self).__init__()
         self.dim = dim
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.softmin(input, self.dim, _stacklevel=5)
 
 
+@torch._jit_internal.weak_module
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
@@ -831,10 +852,12 @@ class Softmax(Module):
         if not hasattr(self, 'dim'):
             self.dim = None
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.softmax(input, self.dim, _stacklevel=5)
 
 
+@torch._jit_internal.weak_module
 class Softmax2d(Module):
     r"""Applies SoftMax over features to each spatial location.
 
@@ -857,11 +880,13 @@ class Softmax2d(Module):
         >>> output = m(input)
     """
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
         return F.softmax(input, 1, _stacklevel=5)
 
 
+@torch._jit_internal.weak_module
 class LogSoftmax(Module):
     r"""Applies the :math:`\log(\text{Softmax}(x))` function to an n-dimensional
     input Tensor. The LogSoftmax formulation can be simplified as:
@@ -897,5 +922,6 @@ class LogSoftmax(Module):
         if not hasattr(self, 'dim'):
             self.dim = None
 
+    @torch._jit_internal.weak_script_method
     def forward(self, input):
         return F.log_softmax(input, self.dim, _stacklevel=5)

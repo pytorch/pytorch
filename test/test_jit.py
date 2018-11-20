@@ -11,8 +11,10 @@ from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2
-from common_utils import (TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN,
-                          skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE)
+from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
+    skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
+    freeze_rng_state
+from common_nn import module_tests, new_module_tests
 from textwrap import dedent
 import os
 import io
@@ -36,6 +38,7 @@ from torch.jit import BatchTensor
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future
 from test_module.no_future_div import div_int_nofuture, div_float_nofuture
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -407,9 +410,8 @@ class JitTestCase(TestCase):
 
     def runAndSaveRNG(self, func, inputs, kwargs=None):
         kwargs = kwargs if kwargs else {}
-        initial_rng_state = torch.get_rng_state()
-        results = func(*inputs, **kwargs)
-        torch.set_rng_state(initial_rng_state)
+        with freeze_rng_state():
+            results = func(*inputs, **kwargs)
         return results
 
 
@@ -9652,21 +9654,6 @@ S = 5
 #     use_as_constant (should the submodule be listed in __constants__?)
 # )
 nn_module_tests = [
-    ('AlphaDropout', (), ((S,),)),
-    ('Dropout', (), ((S,),)),
-    ('Dropout2d', (), ((S, S),)),
-    ('Dropout3d', (), ((S, S, S),)),
-    ('FeatureAlphaDropout', (), ((S, S),)),
-    ('Hardshrink', (), ((S,),)),
-    ('PReLU', (), ((S,),)),
-    ('PairwiseDistance', (), ((S, S), (S, S))),
-    ('RReLU', (), ((S,),)),
-    ('Sigmoid', (), ((S,),)),
-    ('Softshrink', (), ((S,),)),
-    ('Softsign', (), ((S,),)),
-    ('Tanh', (), ((S,),)),
-    ('Tanhshrink', (), ((S,),)),
-    ('Threshold', (2., 2.), ((S,),)),
     ('Sequential', (torch.nn.Sigmoid(), torch.nn.Threshold(1., 2.)), ((S,),), True),
 ]
 
@@ -9940,10 +9927,24 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
     post_add_test(test_name, skipTestIf, do_test)
 
 
-def add_nn_module_test(module_name, constructor_args, call_args,
-                       use_as_constant=False, skipTestIf=()):
+def add_nn_module_test(*args, **kwargs):
+    if 'module_name' in kwargs:
+        name = kwargs['module_name']
+    else:
+        name = kwargs['fullname']
+
+    class_name = name.split("_")[0]
+    module = getattr(torch.nn, class_name, None)
+    if module is None or torch._jit_internal._weak_types.get(module) is None:
+        return
+
     def do_test(self):
-        nn_module = getattr(torch.nn, module_name)
+        if 'constructor' in kwargs:
+            nn_module = kwargs['constructor']
+            constructor_args = []
+        else:
+            nn_module = getattr(torch.nn, name)
+            constructor_args = kwargs['constructor_args']
 
         # Construct a script module that passes arguments through
         # to self.submodule
@@ -9956,7 +9957,7 @@ def add_nn_module_test(module_name, constructor_args, call_args,
             script = script_method_template.format(method_args, call)
 
             submodule_constants = []
-            if use_as_constant:
+            if 'is_constant' in kwargs and kwargs['is_constant']:
                 submodule_constants = ['submodule']
 
             # Create module to use the script method
@@ -9976,14 +9977,17 @@ def add_nn_module_test(module_name, constructor_args, call_args,
             return module(*args)
 
         # Check against Python module as reference
-        args_variable, kwargs_variable = create_input(call_args)
+        args_variable, kwargs_variable = create_input((kwargs['input_size'],))
         f_args_variable = deepcopy(unpack_variables(args_variable))
         reference = nn_module(*constructor_args)
 
         check_against_reference(self, create_module, reference, f_args_variable)
 
-    test_name = 'test_nn_{}'.format(module_name)
-    post_add_test(test_name, skipTestIf, do_test)
+    test_name = name
+    if 'desc' in kwargs:
+        test_name = "{}_{}".format(test_name, kwargs['desc'])
+    test_name = 'test_nn_{}'.format(test_name)
+    post_add_test(test_name, (), do_test)
 
 
 def post_add_test(test_name, skipTestIf, do_test):
@@ -10147,8 +10151,9 @@ for test in autograd_method_tests:
 for test in nn_functional_tests:
     add_nn_functional_test(*test)
 
-for test in nn_module_tests:
-    add_nn_module_test(*test)
+for test in module_tests + new_module_tests:
+    add_nn_module_test(**test)
+print("DONE ADDING")
 
 if __name__ == '__main__':
     run_tests()
