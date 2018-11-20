@@ -51,8 +51,8 @@ bool ElementwiseLinearDNNLowPOp<T>::RunOnDevice() {
 
   // Quantize X
   vector<T> X_temp;
-  const T* X_quantized = QuantizeInputIfNeeded<T>(
-      this, 0, in_qparams_[0], X_temp, qfactory_.get());
+  const T* X_quantized =
+      QuantizeInputIfNeeded<T>(this, 0, in_qparams_[0], X_temp);
 
   // Quantize b
   vector<int32_t> b_quantized(b.numel());
