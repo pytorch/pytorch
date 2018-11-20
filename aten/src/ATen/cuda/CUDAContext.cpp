@@ -4,22 +4,6 @@
 namespace at { namespace cuda {
 
 /* Device info */
-int64_t getNumGPUs() {
-  int count;
-  AT_CUDA_CHECK(cudaGetDeviceCount(&count));
-  return count;
-}
-
-int64_t current_device() {
-  int cur_device;
-  AT_CUDA_CHECK(cudaGetDevice(&cur_device));
-  return cur_device;
-}
-
-void set_device(int64_t device) {
-  AT_CUDA_CHECK(cudaSetDevice((int)device));
-}
-
 int warp_size() {
   return getCurrentDeviceProperties()->warpSize;
 }

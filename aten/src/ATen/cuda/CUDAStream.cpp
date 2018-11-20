@@ -1,9 +1,7 @@
-#include "ATen/cuda/CUDAStream.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/CUDAEvent.h"
-#include "ATen/cuda/CUDAGuard.h"
-#include "ATen/cuda/Exceptions.h"
-#include "c10/util/Exception.h"
+#include <ATen/cuda/CUDAStream.h>
+#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/Exception.h>
 
 #include <mutex>
 #include <atomic>
@@ -116,8 +114,8 @@ StreamId makeStreamId(StreamIdType st, size_t si) {
   return (static_cast<StreamId>(st) << kStreamsPerPoolBits) | static_cast<StreamId>(si);
 }
 
-template <typename T>
-static bool pointer_within(const T* ptr, ArrayRef<T> arr) {
+template <typename T, typename A>
+static bool pointer_within(const T* ptr, const A& arr) {
   return std::greater_equal<const T*>()(ptr, arr.data()) && std::less<const T*>()(ptr, arr.data() + arr.size());
 }
 
@@ -162,7 +160,7 @@ static thread_local CUDAStreamInternals** current_streams = nullptr;
 // streams.
 // Warning: this function must only be called once!
 static void initGlobalStreamState() {
-  num_gpus = getNumGPUs();
+  num_gpus = device_count();
 
   // Resizes deques and vectors
   default_streams.resize(num_gpus);
@@ -195,19 +193,19 @@ static void initDeviceStreamState(const int64_t device) {
     hipri_stream.device = device;
 
     #ifndef __HIP_PLATFORM_HCC__
-      AT_CUDA_CHECK(cudaStreamCreateWithPriority(
+      C10_CUDA_CHECK(cudaStreamCreateWithPriority(
         &lowpri_stream.stream
       , kDefaultFlags
       , kLowPriority));
-      AT_CUDA_CHECK(cudaStreamCreateWithPriority(
+      C10_CUDA_CHECK(cudaStreamCreateWithPriority(
         &hipri_stream.stream
       , kDefaultFlags
       , kHighPriority));
     #else
-      AT_CUDA_CHECK(cudaStreamCreateWithFlags(
+      C10_CUDA_CHECK(cudaStreamCreateWithFlags(
         &lowpri_stream.stream
       , kDefaultFlags));
-      AT_CUDA_CHECK(cudaStreamCreateWithFlags(
+      C10_CUDA_CHECK(cudaStreamCreateWithFlags(
         &hipri_stream.stream
       , kDefaultFlags));
     #endif // __HIP_PLATFORM_HCC__
@@ -300,19 +298,10 @@ int64_t CUDAStream_device(const CUDAStreamInternals* ptr) {
   return ptr->device;
 }
 
-void CUDAStream_synchronize_with(const CUDAStreamInternals* ptr, const CUDAEvent& event) {
-    if (event.isCreated())
-      AT_CUDA_CHECK(cudaStreamWaitEvent(ptr->stream, event, 0));
-}
-
 } // namespace detail
 
 CUDAStream::CUDAStream(const CUDAStreamInternals* ptr)
   : stream_(c10::Device(DeviceType::CUDA, detail::CUDAStream_device(ptr)), detail::CUDAStream_getStreamId(ptr)) {
-}
-
-void CUDAStream::synchronize_with(const CUDAEvent& event) const {
-    detail::CUDAStream_synchronize_with(internals(), event);
 }
 
 // See Note [StreamId assignment]

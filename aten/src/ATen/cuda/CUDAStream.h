@@ -56,8 +56,6 @@ struct CUDAStreamInternals;
 namespace at {
 namespace cuda {
 
-struct CUDAEvent;
-
 namespace detail {
 
 // Pointer-based API (for internal use, backwards compatibility with C-based API)
@@ -103,7 +101,8 @@ struct AT_CUDA_API CUDAStream {
 
   Stream unwrap() const { return stream_; }
 
-  void synchronize_with(const CUDAEvent& event) const;
+  // Deleted for now; use CUDAEvent::block instead
+  // void synchronize_with(const CUDAEvent& event) const;
 
 private:
   Stream stream_;
