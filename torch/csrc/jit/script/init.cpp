@@ -264,7 +264,7 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
   BooleanDispatchValue(py::dict dispatched_fn)
       : dispatched_fn_(std::move(dispatched_fn)) {}
 
-  virtual std::string kind() const override {
+  std::string kind() const override {
     return "boolean dispatch";
   }
 
@@ -276,7 +276,7 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
     return sliced;
   }
 
-  virtual std::shared_ptr<SugaredValue> call(
+  std::shared_ptr<SugaredValue> call(
       SourceRange loc,
       Method& caller,
       at::ArrayRef<NamedValue> inputs,
@@ -320,7 +320,6 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
       value = toSugaredValue(dispatched_fn_["if_false"], caller, loc);
     }
     return value->call(loc, caller, new_inputs, new_attributes, n_binders);
-    return nullptr;
   }
 
  private:
