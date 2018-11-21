@@ -29,5 +29,5 @@ graph(%cond : Dynamic) {
        = prim::Print(%d, %e, %d, %5, %y.4, %5)
       -> (%c.1, %y.4)
     }
-  return (%a, %3, %c, %5);
+  return (%a, %3, %c, %5, %y);
 }
