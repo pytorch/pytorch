@@ -436,8 +436,8 @@ static inline bool isIntOrFloatUsedAsList(
   if (v_type != FloatType::get() && v_type != IntType::get())
     return false;
   auto arg_type = arg.type();
-  //if (arg_type->cast<OptionalType>())
-    //arg_type = arg_type->cast<OptionalType>()->getElementType();
+  if (arg_type->cast<OptionalType>())
+    arg_type = arg_type->cast<OptionalType>()->getElementType();
   auto list_type = arg_type->cast<ListType>();
   return list_type && list_type->getElementType() == v_type && arg.N();
 }
@@ -2531,6 +2531,27 @@ c10::optional<std::string> parseBaseTypeName(Expr expr) {
   return at::nullopt;
 }
 
+TypePtr parseTypeFromExpr(Expr expr) {
+  if (expr.kind() == TK_SUBSCRIPT) {
+    auto subscript = Subscript(expr);
+    auto value_name = parseBaseTypeName(subscript.value());
+    if (!value_name) {
+      throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
+    }
+    if (!subscript_to_type_fns().count(*value_name)) {
+      throw ErrorReport(subscript.range()) << "Unknown type constructor " << *value_name;
+    }
+    return subscript_to_type_fns().at(*value_name)(subscript);
+  } else if (auto name = parseBaseTypeName(expr)) {
+    auto itr = ident_to_type_lut().find(*name);
+    if (itr != ident_to_type_lut().end()) {
+      return itr->second;
+    }
+    throw ErrorReport(expr) << "Unknown type name " << *name;
+  }
+  throw ErrorReport(expr.range()) << "Expression of type " << kindToString(expr.kind())
+                                  << " cannot be used in a type expression";
+}
 
 c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
   if (expr.kind() != TK_SUBSCRIPT)
@@ -2539,16 +2560,24 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
   if (subscript.value().kind() != TK_VAR)
     return c10::nullopt;
   auto var = Var(subscript.value());
+  auto subscript_exprs = subscript.subscript_exprs();
+
+  if (subscript_exprs.size() != 1)
+    throw ErrorReport(subscript.subscript_exprs().range())
+      << "BroadcastingList/Optional[BroadcastingList] must be subscripted with a type";
+
+  // handle the case where the BroadcastingList is wrapped in a Optional type
+  if(var.name().name() == "Optional") {
+    auto broadcast_list = handleBroadcastList(subscript_exprs[0]);
+    TypePtr opt_type = OptionalType::create(broadcast_list->first);
+    return std::pair<TypePtr, int32_t>(opt_type, broadcast_list->second);
+  }
 
   if (var.name().name().find("BroadcastingList") != 0) {
     return c10::nullopt;
   }
 
-  if (subscript.subscript_exprs().size() != 1)
-    throw ErrorReport(subscript.subscript_exprs().range())
-      << "BroadcastingList must be subscripted with a type";
-
-  auto typ = subscript.subscript_exprs()[0];
+  auto typ = subscript_exprs[0];
   auto len = var.name().name().substr(strlen("BroadcastingList"));
 
   if (typ.kind() != TK_VAR)
@@ -2571,28 +2600,6 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
 
   auto len_v = constant.asIntegral();
   return std::pair<TypePtr, int32_t>(list_ptr, len_v);
-}
-
-TypePtr parseTypeFromExpr(Expr expr) {
-  if (expr.kind() == TK_SUBSCRIPT) {
-    auto subscript = Subscript(expr);
-    auto value_name = parseBaseTypeName(subscript.value());
-    if (!value_name) {
-      throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
-    }
-    if (!subscript_to_type_fns().count(*value_name)) {
-      throw ErrorReport(subscript.range()) << "Unknown type constructor " << *value_name;
-    }
-    return subscript_to_type_fns().at(*value_name)(subscript);
-  } else if (auto name = parseBaseTypeName(expr)) {
-    auto itr = ident_to_type_lut().find(*name);
-    if (itr != ident_to_type_lut().end()) {
-      return itr->second;
-    }
-    throw ErrorReport(expr) << "Unknown type name " << *name;
-  }
-  throw ErrorReport(expr.range()) << "Expression of type " << kindToString(expr.kind())
-                                  << " cannot be used in a type expression";
 }
 
 std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
