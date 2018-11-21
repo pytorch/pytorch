@@ -131,7 +131,7 @@ CAFFE2_API void uncheckedSetCurrentCUDAStream(CUDAStream stream);
 
 namespace std {
   template <>
-  struct hash<at::cuda::CUDAStream> final {
+  struct hash<at::cuda::CUDAStream> {
     size_t operator()(at::cuda::CUDAStream s) const noexcept {
       return std::hash<c10::Stream>{}(s.unwrap());
     }
