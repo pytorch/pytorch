@@ -260,7 +260,7 @@ struct ModuleValue : public SugaredValue {
   std::shared_ptr<Module> module;
 };
 
-struct BooleanDispatchValue : public SugaredValue {
+struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
   BooleanDispatchValue(py::dict dispatched_fn)
       : dispatched_fn_(std::move(dispatched_fn)) {}
 
