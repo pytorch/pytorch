@@ -45,7 +45,7 @@ struct Edge {
 // See http://en.cppreference.com/w/cpp/utility/hash for more information.
 namespace std {
 template <>
-struct hash<torch::autograd::Edge> {
+struct hash<torch::autograd::Edge> final {
   // These type aliases are required by the standard.
   using argument_type = torch::autograd::Edge;
   using return_type = size_t;

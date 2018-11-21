@@ -1059,7 +1059,7 @@ constexpr optional<X&> make_optional(std::reference_wrapper<X> v) {
 
 namespace std {
 template <typename T>
-struct hash<c10::optional<T>> {
+struct hash<c10::optional<T>> final {
   typedef typename hash<T>::result_type result_type;
   typedef c10::optional<T> argument_type;
 
@@ -1069,7 +1069,7 @@ struct hash<c10::optional<T>> {
 };
 
 template <typename T>
-struct hash<c10::optional<T&>> {
+struct hash<c10::optional<T&>> final {
   typedef typename hash<T>::result_type result_type;
   typedef c10::optional<T&> argument_type;
 

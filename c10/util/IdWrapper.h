@@ -69,7 +69,7 @@ class C10_API IdWrapper {
 #define C10_DEFINE_HASH_FOR_IDWRAPPER(ClassName)\
   namespace std {                               \
   template <>                                   \
-  struct hash<ClassName> {                      \
+  struct hash<ClassName> final {                \
     size_t operator()(ClassName x) const {      \
       return hash_value(x);                     \
     }                                           \

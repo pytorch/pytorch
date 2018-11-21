@@ -33,7 +33,7 @@ inline std::ostream& operator<<(std::ostream& stream, const TensorParameterDispa
 
 namespace std {
   template<>
-  struct hash<c10::details::TensorParameterDispatchKey> {
+  struct hash<c10::details::TensorParameterDispatchKey> final {
     // TODO constexpr hashing
     size_t operator()(const c10::details::TensorParameterDispatchKey& obj) const {
       return std::hash<c10::DeviceTypeId>()(obj.deviceTypeId) ^ std::hash<c10::LayoutId>()(obj.layoutId) ^ std::hash<caffe2::TypeIdentifier>()(obj.dataType);
@@ -83,7 +83,7 @@ inline std::ostream& operator<<(std::ostream& stream, const DispatchKey<num_disp
 
 namespace std {
   template<size_t num_dispatch_args>
-  struct hash<c10::DispatchKey<num_dispatch_args>> {
+  struct hash<c10::DispatchKey<num_dispatch_args>> final {
     // TODO constexpr hashing
     size_t operator()(const c10::DispatchKey<num_dispatch_args>& obj) const {
       size_t hash_value = 0;

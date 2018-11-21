@@ -16,7 +16,7 @@ struct Device {
 }}
 
 namespace std {
-template <> struct hash<caffe2::onnx::DeviceType> {
+template <> struct hash<caffe2::onnx::DeviceType> final {
   std::size_t operator()(const caffe2::onnx::DeviceType &k) const {
     return std::hash<int>()(static_cast<int>(k));
   }

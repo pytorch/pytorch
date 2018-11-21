@@ -27,7 +27,7 @@ inline std::ostream& operator<<(std::ostream& stream, DeviceTypeId device_type_i
 
 namespace std {
 
-template <> struct hash<c10::DeviceTypeId> {
+template <> struct hash<c10::DeviceTypeId> final {
     size_t operator()(c10::DeviceTypeId v) const {
         return std::hash<uint8_t>()(static_cast<uint8_t>(v));
     }

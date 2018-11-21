@@ -353,13 +353,13 @@ inline void setInputTypes(Graph& g, const ArgumentSpec& spec) {
 
 namespace std {
   template<>
-  struct hash<torch::jit::ArgumentSpec> {
+  struct hash<torch::jit::ArgumentSpec> final {
     size_t operator()(const torch::jit::ArgumentSpec & spec) const {
       return spec.hashCode();
     }
   };
   template<>
-  struct hash<torch::jit::CompleteArgumentSpec> {
+  struct hash<torch::jit::CompleteArgumentSpec> final {
     size_t operator()(const torch::jit::CompleteArgumentSpec & spec) const {
       return spec.hashCode();
     }

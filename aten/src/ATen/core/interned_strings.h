@@ -279,7 +279,7 @@ inline bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
 // make symbol behave like an integer in hash tables
 namespace std {
 template <>
-struct hash<c10::Symbol> {
+struct hash<c10::Symbol> final {
   size_t operator()(c10::Symbol s) const {
     return std::hash<uint32_t>()(static_cast<uint32_t>(s));
   }

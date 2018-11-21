@@ -741,13 +741,13 @@ namespace std {
 // To allow intrusive_ptr and weak_intrusive_ptr inside std::unordered_map or
 // std::unordered_set, we need std::hash
 template <class TTarget, class NullType>
-struct hash<c10::intrusive_ptr<TTarget, NullType>> {
+struct hash<c10::intrusive_ptr<TTarget, NullType>> final {
   size_t operator()(const c10::intrusive_ptr<TTarget, NullType>& x) const {
     return std::hash<TTarget*>()(x.get());
   }
 };
 template <class TTarget, class NullType>
-struct hash<c10::weak_intrusive_ptr<TTarget, NullType>> {
+struct hash<c10::weak_intrusive_ptr<TTarget, NullType>> final {
   size_t operator()(const c10::weak_intrusive_ptr<TTarget, NullType>& x) const {
     return std::hash<TTarget*>()(x._unsafe_get_target());
   }

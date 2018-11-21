@@ -334,7 +334,7 @@ bool inline operator==(const DeviceOption& dl, const DeviceOption& dr) {
 
 namespace std {
 template <>
-struct hash<caffe2::DeviceOption> {
+struct hash<caffe2::DeviceOption> final {
   typedef caffe2::DeviceOption argument_type;
   typedef std::size_t result_type;
   result_type operator()(argument_type const& device_option) const {
