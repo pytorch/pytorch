@@ -9139,7 +9139,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_binary_cross_entropy',
     'test_nn_binary_cross_entropy_size_average',
     'test_nn_cross_entropy',
-    'test_nn_binary_cross_entropy_with_logits',
     'test_nn_interpolate',
     'test_nn_fold',
     'test_nn_max_unpool1d',
@@ -9148,11 +9147,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_gumbel_softmax',
     'test_nn_poisson_nll_loss',
     'test_nn_poisson_nll_loss_full',
-
-    # undefined tensors as constants
-    'test_nn_instance_norm',
-    'test_nn_normalize',
-    'test_nn_multilabel_soft_margin_loss',
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
