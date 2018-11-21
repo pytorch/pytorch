@@ -836,7 +836,6 @@ Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum, ScalarType dt
 }
 
 Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum) {
-  // doesn't support empty input, because grad-of-input in backward will be dense
   AT_CHECK(input._nnz() > 0, "_sparse_sum: sparse tensor input._nnz() == 0, please call torch.sparse.sum(input) instead.")
 
   const int64_t input_dim = input.dim();
