@@ -260,15 +260,9 @@ struct ModuleValue : public SugaredValue {
   std::shared_ptr<Module> module;
 };
 
-
 struct BooleanDispatchValue : public SugaredValue {
-  BooleanDispatchValue(py::dict dispatched_fn) {
-    if_true_ = dispatched_fn["if_true"];
-    if_false_ = dispatched_fn["if_false"];
-    index_ = py::cast<size_t>(dispatched_fn["index"]);
-    default_value_ = py::cast<size_t>(dispatched_fn["default"]);
-    arg_name_ = py::str(dispatched_fn["arg_name"]);
-  }
+  BooleanDispatchValue(py::dict dispatched_fn)
+      : dispatched_fn_(std::move(dispatched_fn)) {}
 
   virtual std::string kind() const override {
     return "boolean dispatch";
@@ -292,16 +286,18 @@ struct BooleanDispatchValue : public SugaredValue {
     Graph& graph = *(caller.graph());
 
     std::vector<NamedValue> new_inputs = inputs.vec();
-    std::vector<NamedValue> new_attributes = attributes.vec();;
+    std::vector<NamedValue> new_attributes = attributes.vec();
+    auto index = py::cast<size_t>(dispatched_fn_["index"]);
+    auto arg_name = py::str(dispatched_fn_["arg_name"]);
 
-    if (index_ < inputs.size()) {
+    if (index < inputs.size()) {
       // Dispatch flag is in arg list
-      result = constant_as<bool>(inputs.at(index_).value(graph));
+      result = constant_as<bool>(inputs.at(index).value(graph));
 
       // Slice out index of dispatch flag
-      new_inputs = removeIndex(inputs, index_);
+      new_inputs = removeIndex(inputs, index);
       n_binders -= 1;
-    } else if (auto i = findInputWithName(arg_name_, attributes)) {
+    } else if (auto i = findInputWithName(arg_name, attributes)) {
       // Dispatch flag is in kwargs
       result = constant_as<bool>(attributes[*i].value(graph));
 
@@ -310,7 +306,7 @@ struct BooleanDispatchValue : public SugaredValue {
       n_binders -= 1;
     } else {
       // Didn't find dispatch flag, so use default value
-      result = default_value_;
+      result = py::cast<bool>(dispatched_fn_["default"]);
     }
 
     if (!result) {
@@ -319,20 +315,17 @@ struct BooleanDispatchValue : public SugaredValue {
 
     std::shared_ptr<SugaredValue> value;
     if (*result) {
-      value = toSugaredValue(if_true_, caller, loc);
+      value = toSugaredValue(dispatched_fn_["if_true"], caller, loc);
     } else {
-      value = toSugaredValue(if_false_, caller, loc);
+      value = toSugaredValue(dispatched_fn_["if_false"], caller, loc);
     }
     return value->call(loc, caller, new_inputs, new_attributes, n_binders);
+    return nullptr;
   }
 
  private:
-  py::object if_true_, if_false_;
-  size_t index_;
-  bool default_value_;
-  std::string arg_name_;
+  py::dict dispatched_fn_;
 };
-
 
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
