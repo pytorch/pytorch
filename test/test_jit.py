@@ -24,6 +24,9 @@ import numpy as np
 import tempfile
 import shutil
 import warnings
+import math
+import types
+
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
@@ -219,32 +222,43 @@ class JitTestCase(TestCase):
         if not JitTestCase._restored_warnings:
             torch.jit.TracerWarning.ignore_lib_warnings()
             JitTestCase._restored_warnings = True
-        if os.environ.get('TORCH_JIT_TEST_PRETTY_PRINT', False):
-            torch._C._jit_set_emit_module_hook(self.emitModuleHook)
+        torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def tearDown(self):
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         torch._C._jit_set_emit_module_hook(None)
 
+    @contextmanager
+    def disableModuleHook(self):
+        torch._C._jit_set_emit_module_hook(None)
+        yield None
+        torch._C._jit_set_emit_module_hook(self.emitModuleHook)
+
     def emitModuleHook(self, module):
         # disable the hook while we parse code, otherwise we will re-enter the hook
-        torch._C._jit_set_emit_module_hook(None)
-        for name in module._method_names():
-            graph = module._get_method(name).graph
-            try:
-                pp, constant_table = graph.python_print()
-            except RuntimeError as e:
-                if "could not export python function" not in str(e):
-                    raise
-                else:
-                    continue
+        with self.disableModuleHook():
+            for name in module._method_names():
+                graph = module._get_method(name).graph
+                try:
+                    pp, constant_table = graph.python_print()
+                except RuntimeError as e:
+                    if "could not export python function" not in str(e):
+                        raise
+                    else:
+                        continue
 
-            pp = "op_version_set = 0\n{}".format(pp)
-            sm = torch.jit.ScriptModule()
-            torch._C._jit_import_method(sm, pp, constant_table)
+                ppv = "op_version_set = 0\n{}".format(pp)
+                sm = torch.jit.ScriptModule()
+                torch._C._jit_import_method(sm, ppv, constant_table)
 
-        torch._C._jit_set_emit_module_hook(self.emitModuleHook)
+                pp2, _ = sm.script.graph.python_print()
+                if pp != pp2:
+                    print(graph)
+                    print(pp)
+                    print(sm.script.graph)
+                    print(pp2)
+                    self.assertMultiLineEqual(pp, pp2)
 
     def getExportImportCopy(self, m):
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
@@ -2874,6 +2888,27 @@ class TestScript(JitTestCase):
 
         return ge
 
+    def test_annoying_doubles(self):
+        mod = types.ModuleType("temp")
+        mod.inf = float("inf")
+        mod.ninf = float("-inf")
+        mod.nan = float("nan")
+
+        with self.disableModuleHook():
+            @torch.jit.script
+            def foo():
+                return math.pi, 0.1, mod.inf, mod.ninf, 2.225073858507201e-308, mod.nan
+
+            pp, table = foo.graph.python_print()
+            ppv = "op_version_set = 0\n{}".format(pp)
+            sm = torch.jit.ScriptModule()
+            torch._C._jit_import_method(sm, ppv, table)
+            r = foo()
+            r2 = sm.script()
+            # use precise assert, we are checking floating point details
+            self.assertTrue(r[:-1] == r2[:-1])
+            self.assertTrue(math.isnan(r[-1]) and math.isnan(r2[-1]))
+
     def test_type_annotate(self):
 
         def foo(a):
@@ -3433,7 +3468,7 @@ a")
                     y = torch.rand(1)
                 print(d, e, f, x, y, z)
             b = b - a
-            return a, b, c, x
+            return a, b, c, x, y
 
         self.checkScript(func, torch.tensor([1]))
         graph = torch.jit.script(func).graph
@@ -4996,6 +5031,24 @@ a")
                     self.i = (3, 4, {})
 
         f = Foo()
+
+    def test_script_module_param_buffer_mutation(self):
+        # TODO: add param mutation test case after JIT support it
+        class ModuleBufferMutate(torch.jit.ScriptModule):
+            __constants__ = ['training']
+
+            def __init__(self):
+                super(ModuleBufferMutate, self).__init__(False)
+                self.register_buffer('running_var', torch.tensor(0, dtype=torch.long))
+
+            @torch.jit.script_method
+            def forward(self):
+                if self.training:
+                    self.running_var += 1
+                return self.running_var
+
+        m = ModuleBufferMutate()
+        self.assertEqual(m(), 1)
 
     def test_script_module_for(self):
         class M(torch.jit.ScriptModule):
@@ -9121,7 +9174,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_binary_cross_entropy',
     'test_nn_binary_cross_entropy_size_average',
     'test_nn_cross_entropy',
-    'test_nn_binary_cross_entropy_with_logits',
     'test_nn_interpolate',
     'test_nn_fold',
     'test_nn_max_unpool1d',
@@ -9130,11 +9182,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_gumbel_softmax',
     'test_nn_poisson_nll_loss',
     'test_nn_poisson_nll_loss_full',
-
-    # undefined tensors as constants
-    'test_nn_instance_norm',
-    'test_nn_normalize',
-    'test_nn_multilabel_soft_margin_loss',
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
@@ -9653,6 +9700,9 @@ S = 5
 # )
 nn_module_tests = [
     ('AlphaDropout', (), ((S,),)),
+    ('BatchNorm1d', (10,), ((S, 10),)),
+    ('BatchNorm2d', (10,), ((S, 10, S, S),)),
+    ('BatchNorm3d', (10,), ((S, 10, S, S, S),)),
     ('Dropout', (), ((S,),)),
     ('Dropout2d', (), ((S, S),)),
     ('Dropout3d', (), ((S, S, S),)),
@@ -9947,7 +9997,7 @@ def add_nn_module_test(module_name, constructor_args, call_args,
 
         # Construct a script module that passes arguments through
         # to self.submodule
-        def create_module(*args, **kwargs):
+        def create_script_module(*args, **kwargs):
             formals, tensors, actuals = get_script_args(args)
 
             method_args = ', '.join(['self'] + actuals)
@@ -9972,15 +10022,20 @@ def add_nn_module_test(module_name, constructor_args, call_args,
 
             # Check there are no Python ops by exporting
             self.assertExportImportModule(module, tensors)
-            create_module.last_graph = module.graph
+            create_script_module.last_graph = module.graph
+            return module(*args)
+
+        # Construct a normal nn module to stay consistent with create_script_module
+        # and make use of a single global rng_state in module initialization
+        def create_nn_module(*args, **kwargs):
+            module = nn_module(*constructor_args)
             return module(*args)
 
         # Check against Python module as reference
         args_variable, kwargs_variable = create_input(call_args)
         f_args_variable = deepcopy(unpack_variables(args_variable))
-        reference = nn_module(*constructor_args)
 
-        check_against_reference(self, create_module, reference, f_args_variable)
+        check_against_reference(self, create_script_module, create_nn_module, f_args_variable)
 
     test_name = 'test_nn_{}'.format(module_name)
     post_add_test(test_name, skipTestIf, do_test)

@@ -634,7 +634,7 @@ struct Const : public Expr {
     return std::stoll(subtree(0)->stringValue());
   }
   double asFloatingPoint() const {
-    return std::stod(subtree(0)->stringValue());
+    return SharedParserData::strtod_c(subtree(0)->stringValue().c_str(), nullptr);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();
