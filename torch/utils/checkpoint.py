@@ -39,7 +39,13 @@ class CheckpointFunction(torch.autograd.Function):
             # rng states for those devices as well...but I see no easy way to
             # handle such cases.
             ctx.fwd_cpu_rng_state = torch.get_rng_state()
-            ctx.fwd_cuda_rng_state = torch.cuda.get_rng_state()
+            # Don't eagerly initialize the cuda context by accident.
+            # (If the user intends that the context is initialized later, within their
+            # run_function, we SHOULD actually stash the cuda state here.  Unfortunately,
+            # we have no way to anticipate this will happen before we run the function.)
+            if torch.cuda._initialized:
+                ctx.had_cuda_in_fwd = True
+                ctx.fwd_cuda_rng_state = torch.cuda.get_rng_state()
         ctx.save_for_backward(*args)
         with torch.no_grad():
             outputs = run_function(*args)
@@ -51,20 +57,23 @@ class CheckpointFunction(torch.autograd.Function):
             raise RuntimeError("Checkpointing is not compatible with .grad(), please use .backward() if possible")
         inputs = ctx.saved_tensors
         if ctx.preserve_rng_state:
-            # Stash the surrounding rng state
+            # Stash the surrounding rng state, and mimic the state that was
+            # present at this time during forward.  If cuda was not initialized
+            # at this time during the original forward, we assume that the imminent
+            # forward-segment-within-backward will not alter the cuda rng state.
             current_cpu_rng_state = torch.get_rng_state()
-            current_cuda_rng_state = torch.cuda.get_rng_state()
-            # Mimic the rng state that was present at this time during forward.
-            # Again, mimic both cpu and cuda rng states unconditionally.
             torch.set_rng_state(ctx.fwd_cpu_rng_state)
-            torch.cuda.set_rng_state(ctx.fwd_cuda_rng_state)
+            if ctx.had_cuda_in_fwd:
+                current_cuda_rng_state = torch.cuda.get_rng_state()
+                torch.cuda.set_rng_state(ctx.fwd_cuda_rng_state)
         detached_inputs = detach_variable(inputs)
         with torch.enable_grad():
             outputs = ctx.run_function(*detached_inputs)
         if ctx.preserve_rng_state:
             # Restore the surrounding rng state
             torch.set_rng_state(current_cpu_rng_state)
-            torch.cuda.set_rng_state(current_cuda_rng_state)
+            if ctx.had_cuda_in_fwd:
+                torch.cuda.set_rng_state(current_cuda_rng_state)
 
         if isinstance(outputs, torch.Tensor):
             outputs = (outputs,)
@@ -109,7 +118,7 @@ def checkpoint(function, *args, preserve_rng_state=False):
         each checkpointed segment during backward.  This can result in running
         states like the RNG state used for dropout to be advanced more than
         they would be without checkpointing, which can cause checkpoints that
-        include dropout invocations to lose end-to-end bitwise accuracy as
+        include dropout invocations to have non-deterministic output
         compared to non-checkpointed passes.  Use ``preserve_rng_state`` if
         bitwise accuracy is desired.
 
