@@ -255,7 +255,7 @@ CUDAStreamInternals* CUDAStream_internals(CUDAStream s) {
   size_t si = streamIdIndex(s.unwrap().id());
   switch (st) {
     case StreamIdType::DEFAULT:
-      AT_ASSERTM(si == 0, "Unrecognized stream ", s,
+      AT_ASSERTM(si == 0, "Unrecognized stream ", s.unwrap(),
                           " (I think this should be the default stream, but I got a non-zero index ", si, ")");
       return &default_streams[device_index];
     case StreamIdType::LOW:
@@ -263,7 +263,7 @@ CUDAStreamInternals* CUDAStream_internals(CUDAStream s) {
     case StreamIdType::HIGH:
       return &high_priority_streams[device_index][si];
     default:
-      AT_ASSERTM(0, "Unrecognized stream ", s, " (I didn't recognize the stream type, ", st, ")");
+      AT_ASSERTM(0, "Unrecognized stream ", s.unwrap(), " (I didn't recognize the stream type, ", st, ")");
   }
 }
 
