@@ -2434,10 +2434,8 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
                         HIP = caffe2_pb2.HIP
                         if device_option.device_type == CPU:
                             suffix = '_cpu'
-                        elif device_option.device_type == CUDA:
-                            suffix = '_cuda_' + str(device_option.device_id)
-                        elif device_option.device_type == HIP:
-                            suffix = '_hip_' + str(device_option.device_id) 
+                        elif device_option.device_type in {CUDA, HIP}:
+                            suffix = '_gpu_' + str(device_option.device_id)
                         else:
                             raise RuntimeError(
                                 "Unknown device type: {}".
