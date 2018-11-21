@@ -106,7 +106,7 @@ C10_API std::ostream& operator<<(
 
 namespace std {
 template <>
-struct hash<c10::Device> {
+struct hash<c10::Device> final {
   size_t operator()(c10::Device d) const noexcept {
     // Are you here because this static assert failed?  Make sure you ensure
     // that the bitmasking code below is updated accordingly!
