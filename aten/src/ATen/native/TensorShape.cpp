@@ -71,13 +71,13 @@ static void check_cat_sparse_dims(Tensor const &t,
   int64_t sparse_dim,
   int64_t dense_dim) {
     AT_CHECK(t.is_sparse(),
-            "Concatenating dense tensor at position ", pos, " with sparse tensor(s) not supported.");
+            "Concatenating sparse tensors, but a dense tensor was found at position ", pos, ".");
     AT_CHECK(sizes_match_except(sizes, t.sizes(), wrapped),
-            "Concatenating tensor at position ", pos, " of sizes ", t.sizes(), " with tensor of sizes ", sizes,
-            " along dimension ", dim, " not supported.");
+            "All tensors must have the same shape: ", sizes, " (except in the concatenating dimension),"
+            " but found shape: ", t.sizes(), " at position ", pos, ".");
     AT_CHECK(t.sparse_dim() == sparse_dim && t.dense_dim() == dense_dim,
-            "Tensor at position ", pos, " has dimension: sparse ", t.sparse_dim(), ", dense ", t.dense_dim(),
-            ". Concatenating with tensor of dimensions ", sparse_dim, ", ", dense_dim, " not supported.");
+            "All tensors must have the same sparse_dim and dense_dim: ", sparse_dim, ", ", dense_dim,
+            ", but tensor at position ", pos, " has ", t.sparse_dim(), ", ", t.dense_dim(), ".");
 }
 
 static Tensor cat_sparse(TensorList tensors, int64_t dim) {
@@ -95,8 +95,8 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
       indices.push_back(t._indices());
       values.push_back(t._values());
     }
-    Tensor idxs = native::cat(indices, 1);
-    Tensor vals = native::cat(values, 0);
+    Tensor idxs = at::cat(indices, 1);
+    Tensor vals = at::cat(values, 0);
 
     // We now need to move the indices of each
     // input tensor up along `dim` by an appropriate amount.
