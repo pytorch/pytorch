@@ -43,6 +43,7 @@ class CheckpointFunction(torch.autograd.Function):
             # (If the user intends that the context is initialized later, within their
             # run_function, we SHOULD actually stash the cuda state here.  Unfortunately,
             # we have no way to anticipate this will happen before we run the function.)
+            ctx.had_cuda_in_fwd = False
             if torch.cuda._initialized:
                 ctx.had_cuda_in_fwd = True
                 ctx.fwd_cuda_rng_state = torch.cuda.get_rng_state()
