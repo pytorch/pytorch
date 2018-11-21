@@ -612,11 +612,11 @@ struct GraphFuser {
       bchunk = promoteChunkToBroadcastingChunk(chunk);
     }
     size_t nchunks = bchunk->i(attr::chunks);
-    WithInsertPoint guard(bchunk);
+    WithInsertPoint guard(bchunk->next());
 
     std::vector<Value*> producer_chunk_outputs;
     for (size_t i = 0; i < nchunks; i++) {
-      producer_chunk_outputs.push_back(bchunk->output(4 * producer_index + i));
+      producer_chunk_outputs.push_back(bchunk->output(nchunks * producer_index + i));
     }
 
     // Add each of op's operands to the bchunk node.
@@ -629,6 +629,20 @@ struct GraphFuser {
       // the concat only through tensor arguments (and all other args can be safely ignored).
       if (!input->type()->isSubtypeOf(DynamicType::get()))
         continue;
+
+      // if 'input' is already an input to the bchunk, reuse it.
+      auto bchunk_inputs = bchunk->inputs();
+      auto it = std::find(bchunk_inputs.begin(), bchunk_inputs.end(), input);
+      if (it != bchunk_inputs.end()) {
+        chunked_inputs.emplace_back();
+        auto input_index = std::distance(bchunk_inputs.begin(), it);
+        for (size_t chunk = 0; chunk < nchunks; ++chunk) {
+          chunked_inputs.back().push_back(
+              bchunk->outputs().at(nchunks * input_index + chunk));
+        }
+        continue;
+      }
+
       // NB: I decided not to use cloneFrom here, because if we make cloneFrom
       // copy selects one day, it is definitely not what you want here (selects
       // have different types).
@@ -638,9 +652,9 @@ struct GraphFuser {
       bchunk->addInput(input);
       chunked_inputs.emplace_back(); // alas, to not be C++17
       for (auto chunk_sel : producer_chunk_outputs) {
-          Value * input_chunk_sel = bchunk->addOutput();
-          input_chunk_sel->setType(chunk_sel->type());
-          chunked_inputs.back().push_back(input_chunk_sel);
+        Value * input_chunk_sel = bchunk->addOutput();
+        input_chunk_sel->setType(chunk_sel->type());
+        chunked_inputs.back().push_back(input_chunk_sel);
       }
     }
 
@@ -712,18 +726,18 @@ struct GraphFuser {
         continue;
       }
       auto * bchunk = node;
-      size_t nchunks = bchunk->i(attr::chunks);
-      WithInsertPoint guard(bchunk);
-
       insertExplicitBroadcast(bchunk);
+
+      auto * graph = block->owningGraph();
+      size_t nchunks = bchunk->i(attr::chunks);
+      WithInsertPoint guard(bchunk->next());
 
       // Split the bchunk into bchunks.inputs().size() number of chunk nodes.
       for (size_t input_offset = 0; input_offset < bchunk->inputs().size(); input_offset++) {
         auto* input = bchunk->inputs().at(input_offset);
 
-        Node * new_chunk = block->owningGraph()->create(prim::ConstantChunk, input, 0);
+        Node * new_chunk = graph->insertNode(graph->create(prim::ConstantChunk, input, 0));
         new_chunk->copyAttributes(*bchunk);
-        new_chunk->insertAfter(bchunk);
         for (size_t output_offset = 0; output_offset < nchunks; output_offset++) {
           auto new_output = new_chunk->addOutput();
           auto old_output = bchunk->outputs().at(input_offset * nchunks + output_offset);
