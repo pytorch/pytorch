@@ -241,7 +241,6 @@ def prerecord_trace(declaration, try_outplace):
         else:
             trace_input_spec.append(('result', 'result'))
 
-
     local['add_trace_inputs'] = \
         '\n'.join(ADD_TRACE_INPUT.substitute(name=name, input=value) for name, value in trace_input_spec)
 
