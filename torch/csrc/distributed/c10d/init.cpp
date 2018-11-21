@@ -226,8 +226,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
           .def(
               "allgather",
               &::c10d::ProcessGroup::allgather,
-              py::arg("output"),
-              py::arg("input"),
+              py::arg("output_tensors"),
+              py::arg("input_tensors"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
               py::call_guard<py::gil_scoped_release>())
 
@@ -241,15 +241,15 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 return pg.allgather(
                     outputs, inputs, ::c10d::AllgatherOptions());
               },
-              py::arg("output"),
-              py::arg("input"),
+              py::arg("output_tensors"),
+              py::arg("input_tensor"),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
               "gather",
               &::c10d::ProcessGroup::gather,
-              py::arg("output"),
-              py::arg("input"),
+              py::arg("output_tensors"),
+              py::arg("input_tensors"),
               py::arg("opts") = ::c10d::GatherOptions(),
               py::call_guard<py::gil_scoped_release>())
 
@@ -265,16 +265,16 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 std::vector<at::Tensor> inputs = {input};
                 return pg.gather(outputs, inputs, opts);
               },
-              py::arg("output"),
-              py::arg("input"),
+              py::arg("output_tensors"),
+              py::arg("input_tensor"),
               py::arg("root"),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
               "scatter",
               &::c10d::ProcessGroup::scatter,
-              py::arg("output"),
-              py::arg("input"),
+              py::arg("output_tensors"),
+              py::arg("input_tensors"),
               py::arg("opts") = ::c10d::ScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
 
@@ -290,8 +290,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 std::vector<at::Tensor> outputs = {output};
                 return pg.scatter(outputs, inputs, opts);
               },
-              py::arg("output"),
-              py::arg("input"),
+              py::arg("output_tensor"),
+              py::arg("input_tensors"),
               py::arg("root"),
               py::call_guard<py::gil_scoped_release>())
 
