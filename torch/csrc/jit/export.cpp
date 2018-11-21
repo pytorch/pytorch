@@ -88,8 +88,11 @@ void validateBlock(Block *b, onnx_torch::OperatorExportTypes operator_export_typ
             "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
             getNodeStackTraceString(node));
       }
-      bool is_aten_enabled = operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK || operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
-      if (!node->kind().is_onnx() && !is_aten_enabled && node->kind() != prim::Undefined) {
+      bool is_aten_enabled = operator_export_type ==
+              onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
+          operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
+      if (!node->kind().is_onnx() && !is_aten_enabled &&
+          node->kind() != prim::Undefined) {
         FAIL_EXPORT(
             "Couldn't export operator " + node->kind().toDisplayString() + "\n\nDefined at:\n" +
             getNodeStackTraceString(node));
