@@ -831,24 +831,13 @@ Tensor _sparse_sum(const SparseTensor& input, ScalarType dtype) {
   return input.coalesce().values().sum(dtype);
 }
 
-Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum) {
-  return at::_sparse_sum(input, dims_to_sum, false);
-}
-
 Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum, ScalarType dtype) {
-  return at::_sparse_sum(input.to(dtype), dims_to_sum, false);
+  return at::_sparse_sum(input.to(dtype), dims_to_sum);
 }
 
-Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum, bool keepdim, ScalarType dtype) {
-  return at::_sparse_sum(input.to(dtype), dims_to_sum, keepdim);
-}
-
-Tensor _sparse_sum(const SparseTensor& _input, IntList dims_to_sum, bool keepdim) {
-  // AT_CHECK(input.is_coalesced(), "_sparse_sum: sparse_sum doesn't support uncoalesced SparseTensor");
-  auto input = _input.coalesce();
-  if (input._nnz() == 0) {
-    return input._values().sum();
-  }
+Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum) {
+  // doesn't support empty input, because grad-of-input in backward will be dense
+  AT_CHECK(input._nnz() > 0, "_sparse_sum: sparse tensor input._nnz() == 0, please call torch.sparse.sum(input) instead.")
 
   const int64_t input_dim = input.dim();
   auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
@@ -878,7 +867,7 @@ Tensor _sparse_sum(const SparseTensor& _input, IntList dims_to_sum, bool keepdim
   // new values
   Tensor new_values;
   if (sum_dense_dim) {
-    new_values = values.sum(dense_dims_to_sum_v, keepdim);
+    new_values = values.sum(dense_dims_to_sum_v);
   }
   else {
     new_values = values.clone();
@@ -887,11 +876,6 @@ Tensor _sparse_sum(const SparseTensor& _input, IntList dims_to_sum, bool keepdim
   if (sum_all_sparse_dim) {
     // return a dense tensor if sum over all sparse dims
     new_values = new_values.sum(0);
-    if (keepdim) {
-      for (int64_t i = 0; i < sparse_dim; i++) {
-        new_values = new_values.unsqueeze(0);
-      }
-    }
     return new_values;
   }
   else { // !sum_all_sparse_dim
@@ -901,19 +885,11 @@ Tensor _sparse_sum(const SparseTensor& _input, IntList dims_to_sum, bool keepdim
       new_indices = indices.clone();
     }
     else {
-      if (keepdim) {
-        new_indices = at::zeros_like(indices);
-        for (int64_t d = 0; d < sparse_dim; d++) {
-          if (!dims_to_sum_b[d]) new_indices[d].copy_(indices[d]);
-        }
-      }
-      else {
-        new_indices = at::empty({sparse_dim - sparse_dims_to_sum_size, input._nnz()}, indices.options());
-        for (int64_t i = 0; i < dims_to_keep_v.size(); i++) {
-          int64_t d = dims_to_keep_v[i];
-          if (d < sparse_dim) new_indices[i].copy_(indices[d]);
-          else break;
-        }
+      new_indices = at::empty({sparse_dim - sparse_dims_to_sum_size, input._nnz()}, indices.options());
+      for (int64_t i = 0; i < dims_to_keep_v.size(); i++) {
+        int64_t d = dims_to_keep_v[i];
+        if (d < sparse_dim) new_indices[i].copy_(indices[d]);
+        else break;
       }
     }
 
@@ -921,19 +897,12 @@ Tensor _sparse_sum(const SparseTensor& _input, IntList dims_to_sum, bool keepdim
     int64_t new_sparse_dim = new_indices.size(0);
     int64_t new_dense_dim = new_values.dim() - 1; // exclude nnz dim
     std::vector<int64_t> new_sizes;
-    if (keepdim) {
-      new_sizes = sizes.vec();
-      for (auto d : dims_to_sum) new_sizes[d] = 1;
-    }
-    else {
-      for (auto d : dims_to_keep_v) new_sizes.emplace_back(sizes[d]);
-      if (sum_all_sparse_dim) new_sizes.emplace(new_sizes.begin(), 1);
-    }
+    for (auto d : dims_to_keep_v) new_sizes.emplace_back(sizes[d]);
+    if (sum_all_sparse_dim) new_sizes.emplace(new_sizes.begin(), 1);
 
     // use coalesce() to do sum reduction
     SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(new_sparse_dim, new_dense_dim, new_sizes, new_indices, new_values, input.options());
-    if (sparse_dims_to_sum_size > 0) new_sparse = new_sparse.coalesce();
-    else new_sparse._coalesced_(true);
+    new_sparse = new_sparse.coalesce();
     return new_sparse;
   }
 
@@ -974,18 +943,21 @@ Tensor _sparse_sum(const SparseTensor& _input, IntList dims_to_sum, bool keepdim
 //                       [1, 4, 4, 0, 1, 3, 2, 4]]
 // input_grad.values =   [2, 0, 0, 1, 2, 4, 0, 0]
 //
-// Edge cases:
+// Note that we allow input to be uncoalesced in the forward,
+// we have to coalesce input at the backward, because grad-of-input
+// take the same indices as input, if input is not coalesced, then
+// coalescing grad-of-input may add up grad values for a duplicate indices,
+// and hence generates a wrong grad-of-input.
+//
+// Other edge cases:
 // - assign zero values to input gradients if cannot find matched indices at grad
 // - grad.values might have zeros
 // --------------------------------------------------------------------
-Tensor _sparse_sum_backward_cpu(const Tensor& grad, const SparseTensor& input, IntList dims_to_sum, bool keepdim) {
-  AT_CHECK(!grad.is_cuda(), "_sparse_sum_backward_cpu: expected 'grad' to be CPU tensor, but got CUDA tensor");
-  AT_CHECK(!input.is_cuda(), "_sparse_sum_backward_cpu: expected 'input' to be CPU tensor, but got CUDA tensor");
+Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_, IntList dims_to_sum) {
+  AT_CHECK(!grad_.is_cuda(), "_sparse_sum_backward_cpu: expected 'grad_' to be CPU tensor, but got CUDA tensor");
+  AT_CHECK(!input_.is_cuda(), "_sparse_sum_backward_cpu: expected 'input_' to be CPU tensor, but got CUDA tensor");
 
-  if (input._nnz() == 0) {
-    return input.to(grad.type());
-  }
-
+  auto input = input_.coalesce();
   const int64_t input_dim = input.dim();
   auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
   auto dims_to_sum_v = dims_to_sum.vec();
@@ -1016,13 +988,8 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad, const SparseTensor& input, I
   const bool sum_sparse_dim = (sparse_dims_to_sum_size > 0);
 
   if (sum_all_sparse_dim) {
-    AT_CHECK(!grad.is_sparse(), "_sparse_sum_backward_cpu: expected grad Tensor to be dense since all sparse dims are summed");
-    auto grad_input_values = grad;
-    if (keepdim) {
-      for (int64_t i = dims_to_sum_v.size()-1; i >= 0; i--) {
-        grad_input_values = grad_input_values.squeeze(dims_to_sum_v[i]);
-      }
-    }
+    AT_CHECK(!grad_.is_sparse(), "_sparse_sum_backward_cpu: expected grad_ Tensor to be dense since all sparse dims are summed");
+    auto grad_input_values = grad_;
     auto expand_size = input_values.sizes().vec();
     if (sum_dense_dim) {
       auto dense_expand_size = std::vector<int64_t>(expand_size);
@@ -1032,11 +999,11 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad, const SparseTensor& input, I
       grad_input_values = grad_input_values.expand(dense_expand_size);
     }
     grad_input_values = grad_input_values.expand(expand_size).clone();
-    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(), grad_input_values, input.options().dtype(grad.dtype())); // convert to grad dtype
+    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(), grad_input_values, input.options().dtype(grad_.dtype())); // convert to grad dtype
   }
   else {
-    AT_CHECK(grad.is_sparse(), "_sparse_sum_backward_cpu: expected grad Tensor to be sparse, but got dense");
-    AT_CHECK(grad.is_coalesced(), "_sparse_sum_backward_cpu: expected grad Tensor to be coalesced, but got uncoalesced");
+    AT_CHECK(grad_.is_sparse(), "_sparse_sum_backward_cpu: expected grad_ Tensor to be sparse, but got dense");
+    auto grad = grad_.coalesce();
     LongTensor grad_indices = grad._indices();
     Tensor grad_values = grad._values();
     const int64_t grad_sparse_dim = grad.sparse_dim();
@@ -1046,9 +1013,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad, const SparseTensor& input, I
     if (sum_dense_dim) {
       auto expand_size = input_values.sizes().vec();
       if (sum_sparse_dim) expand_size[0] = grad_values.size(0);
-      if (!keepdim) {
-        for (auto d : dense_dims_to_sum_v) grad_values_expand = grad_values_expand.unsqueeze(d);
-      }
+      for (auto d : dense_dims_to_sum_v) grad_values_expand = grad_values_expand.unsqueeze(d);
       grad_values_expand = grad_values_expand.expand(expand_size).clone();
     }
 
@@ -1058,14 +1023,8 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad, const SparseTensor& input, I
       grad_input_values = at::zeros_like(input_values, grad_values.options());
 
       // get flatten indices for grad and input
-      std::vector<int64_t> grad_sparse_dim_to_keep_v;
-      if (keepdim) {
-        grad_sparse_dim_to_keep_v = sparse_dims_to_keep_v;
-      }
-      else {
-        grad_sparse_dim_to_keep_v = std::vector<int64_t>(grad_sparse_dim);
-        std::iota(grad_sparse_dim_to_keep_v.begin(), grad_sparse_dim_to_keep_v.end(), 0);
-      }
+      auto grad_sparse_dim_to_keep_v = std::vector<int64_t>(grad_sparse_dim);
+      std::iota(grad_sparse_dim_to_keep_v.begin(), grad_sparse_dim_to_keep_v.end(), 0);
 
       auto grad_indices_1D = flatten_indices_by_dims(grad_indices, grad.sizes(), grad_sparse_dim_to_keep_v); // flatten indices on all sparse_dim of grad, output indices is coalesced and sorted
       auto grad_indices_1D_accessor = grad_indices_1D.accessor<int64_t, 1>();

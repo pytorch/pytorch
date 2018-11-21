@@ -1858,11 +1858,7 @@
 
 - func: _sparse_sum(Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
 
-- func: _sparse_sum(Tensor self, IntList[1] dim, bool keepdim) -> Tensor
-
-- func: _sparse_sum(Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-
-- func: _sparse_sum_backward(Tensor grad, Tensor self, IntList dim, bool keepdim) -> Tensor
+- func: _sparse_sum_backward(Tensor grad, Tensor self, IntList dim) -> Tensor
   dispatch:
       SparseCPU: _sparse_sum_backward_cpu
       SparseCUDA: _sparse_sum_backward_cuda

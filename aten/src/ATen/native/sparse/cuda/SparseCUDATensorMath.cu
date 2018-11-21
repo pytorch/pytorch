@@ -514,14 +514,11 @@ __global__ void _sparse_sum_backward_cuda_kernel(
   }
 }
 
-Tensor _sparse_sum_backward_cuda(const Tensor& grad, const SparseTensor& input, IntList dims_to_sum, bool keepdim) {
-  AT_CHECK(grad.is_cuda(), "_sparse_sum_backward_cuda: expected 'grad' to be CUDA tensor, but got CPU tensor");
-  AT_CHECK(input.is_cuda(), "_sparse_sum_backward_cuda: expected 'input' to be CUDA tensor, but got CPU tensor");
+Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_, IntList dims_to_sum) {
+  AT_CHECK(grad_.is_cuda(), "_sparse_sum_backward_cuda: expected 'grad_' to be CUDA tensor, but got CPU tensor");
+  AT_CHECK(input_.is_cuda(), "_sparse_sum_backward_cuda: expected 'input_' to be CUDA tensor, but got CPU tensor");
 
-  if (input._nnz() == 0) {
-    return input.to(grad.type());
-  }
-
+  auto input = input_.coalesce();
   const int64_t input_dim = input.dim();
   auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
   auto dims_to_sum_v = dims_to_sum.vec();
@@ -552,13 +549,8 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad, const SparseTensor& input, 
   const bool sum_sparse_dim = (sparse_dims_to_sum_size > 0);
 
   if (sum_all_sparse_dim) {
-    AT_CHECK(!grad.is_sparse(), "_sparse_sum_backward_cuda: expected grad Tensor to be dense since all sparse dims are summed");
-    auto grad_input_values = grad;
-    if (keepdim) {
-      for (int64_t i = dims_to_sum_v.size()-1; i >= 0; i--) {
-        grad_input_values = grad_input_values.squeeze(dims_to_sum_v[i]);
-      }
-    }
+    AT_CHECK(!grad_.is_sparse(), "_sparse_sum_backward_cuda: expected grad Tensor to be dense since all sparse dims are summed");
+    auto grad_input_values = grad_;
     auto expand_size = input_values.sizes().vec();
     if (sum_dense_dim) {
       auto dense_expand_size = std::vector<int64_t>(expand_size);
@@ -567,11 +559,11 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad, const SparseTensor& input, 
       grad_input_values = grad_input_values.expand(dense_expand_size);
     }
     grad_input_values = grad_input_values.expand(expand_size).clone();
-    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(), grad_input_values,  input.options().dtype(grad.dtype())); // convert to grad dtype
+    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(), grad_input_values,  input.options().dtype(grad_.dtype())); // convert to grad dtype
   }
   else {
-    AT_CHECK(grad.is_sparse(), "_sparse_sum_backward_cuda: expected grad Tensor to be sparse, but got dense");
-    AT_CHECK(grad.is_coalesced(), "_sparse_sum_backward_cuda: expected grad Tensor to be coalesced, but got uncoalesced");
+    AT_CHECK(grad_.is_sparse(), "_sparse_sum_backward_cuda: expected grad_ Tensor to be sparse, but got dense");
+    auto grad = grad_.coalesce();
     LongTensor grad_indices = grad._indices();
     Tensor grad_values = grad._values();
     const int64_t grad_sparse_dim = grad.sparse_dim();
@@ -581,9 +573,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad, const SparseTensor& input, 
     if (sum_dense_dim) {
       auto expand_size = input_values.sizes().vec();
       if (sum_sparse_dim) expand_size[0] = grad_values.size(0); // update nnz
-      if (!keepdim) {
-        for (auto d : dense_dims_to_sum_v) grad_values_expand = grad_values_expand.unsqueeze(d);
-      }
+      for (auto d : dense_dims_to_sum_v) grad_values_expand = grad_values_expand.unsqueeze(d);
       grad_values_expand = grad_values_expand.expand(expand_size).clone();
     }
 
@@ -603,14 +593,8 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad, const SparseTensor& input, 
       AT_ASSERT(grad_input_values.is_cuda());
 
       // get 1D indices
-      std::vector<int64_t> grad_sparse_dim_to_keep_v;
-      if (keepdim) {
-        grad_sparse_dim_to_keep_v = sparse_dims_to_keep_v;
-      }
-      else {
-        grad_sparse_dim_to_keep_v = std::vector<int64_t>(grad_sparse_dim);
-        std::iota(grad_sparse_dim_to_keep_v.begin(), grad_sparse_dim_to_keep_v.end(), 0);
-      }
+      auto grad_sparse_dim_to_keep_v = std::vector<int64_t>(grad_sparse_dim);
+      std::iota(grad_sparse_dim_to_keep_v.begin(), grad_sparse_dim_to_keep_v.end(), 0);
 
       auto grad_indices_1D = flatten_indices_by_dims(grad_indices, grad.sizes(), grad_sparse_dim_to_keep_v); // flatten indices on all sparse_dim of grad, output indices is coalesced and sorted
       auto input_indices_1D = flatten_indices_by_dims(input_indices, input_sizes, sparse_dims_to_keep_v);
