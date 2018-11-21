@@ -48,9 +48,9 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
 
   input = THTensor_(newContiguous)(input);
   THTensor_(resize4d)(output,
-		      THTensor_(size)(input, 0),
-		      THTensor_(size)(input, 1),
-		      output_height, output_width);
+          THTensor_(size)(input, 0),
+          THTensor_(size)(input, 1),
+          output_height, output_width);
   THTensor_(zero)(output);
   scalar_t *idata = input->data<scalar_t>();
   scalar_t *odata = output->data<scalar_t>();
@@ -95,7 +95,7 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
       int input_y = real_y;
       const scalar_t t_y = real_y - input_y;
 
-      for (int c = 0; c < channels; c++) {
+      for (int c = 0; c < channels * nbatch; c++) {
         scalar_t coefficients[4];
 
         // Interpolate 4 times in the x direction
