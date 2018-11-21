@@ -126,7 +126,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
     // If we use the work to do barrier, we should block here
     if (!barrierTensors_.empty()) {
       at::cuda::CUDAGuard gpuGuard(devices_[i]);
-      AT_CUDA_CHECK(cudaStreamSynchronize(currentStream.stream()));
+      AT_CUDA_CHECK(cudaDeviceSynchronize());
     }
   }
 }
