@@ -3,6 +3,7 @@
 #include "caffe2/opt/fusion.h"
 
 #ifdef CAFFE2_USE_MKLDNN
+#include <cpuinfo.h>
 #include "caffe2/ideep/ideep_utils.h"
 #endif
 
@@ -273,6 +274,7 @@ void fuseConvBNAndAffChForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
 }
 
 void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
+  CAFFE_ENFORCE(cpuinfo_initialize(), "failed to initialize cpuinfo");
   // Assume the order of nodes from getMutableNodes conforms to
   // the original topo order of operators
   auto allNodes = nn->dataFlow.getMutableNodes();
@@ -333,8 +335,13 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
     }
 
     auto conv = repr::nn::get<repr::Conv>(convNode);
-    if (!shouldFuseConv(*conv)) {
+    if (!isOnIdeepDevice(*conv)) {
       LOG(WARNING) << "Not a IDEEP operator";
+      continue;
+    }
+
+    if (conv->getGroup() > 1 && !cpuinfo_has_x86_avx512f()) {
+      LOG(WARNING) << "Not support conv sum fusion with grouped filter";
       continue;
     }
 
