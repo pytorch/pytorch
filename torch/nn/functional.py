@@ -1076,7 +1076,7 @@ def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
     (MIT license)
     """
     dims = logits.dim()
-    gumbel_noise = _sample_gumbel(logits.size(), eps=eps, out=logits.detach())
+    gumbel_noise = _sample_gumbel(logits.size(), eps=eps, out=torch.empty_like(logits))
     y = logits + gumbel_noise
     return softmax(y / tau, dims - 1)
 
